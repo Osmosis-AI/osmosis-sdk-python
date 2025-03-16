@@ -5,21 +5,18 @@ This module provides monkey patching for the OpenAI Python client.
 """
 
 import functools
-import json
-import sys
 import inspect
+import sys
 from typing import Any, Callable, Dict, Optional, TypeVar, cast
 
-from osmosis_wrap.utils import _get_output_stream, _print_json
+from osmosis_wrap.utils import _send_to_hoover
 
-# Flag to control whether printing is enabled
+# Flag to control whether sending to Hoover is enabled
 enabled = True
-# Flag to control printing of messages
-print_messages = True
 
 def wrap_openai() -> None:
     """
-    Monkey patch OpenAI's client to print all prompts and responses.
+    Monkey patch OpenAI's client to send all prompts and responses to Hoover.
     
     This function should be called before creating any OpenAI client instances.
     """
@@ -48,15 +45,14 @@ def _wrap_openai_v1() -> None:
     if not hasattr(original_chat_create, "_osmosis_wrapped"):
         @functools.wraps(original_chat_create)
         def wrapped_chat_create(self, *args, **kwargs):
-            if enabled:
-                print("\n=== OPENAI CHAT REQUEST ===", file=_get_output_stream())
-                _print_json(kwargs)
-                
             response = original_chat_create(self, *args, **kwargs)
             
-            if enabled and print_messages:
-                print("\n=== OPENAI CHAT RESPONSE ===", file=_get_output_stream())
-                _print_json(response.model_dump())
+            if enabled:
+                _send_to_hoover(
+                    query=kwargs,
+                    response=response.model_dump() if hasattr(response, 'model_dump') else response,
+                    status=200
+                )
                 
             return response
         
@@ -68,15 +64,14 @@ def _wrap_openai_v1() -> None:
     if not hasattr(original_completions_create, "_osmosis_wrapped"):
         @functools.wraps(original_completions_create)
         def wrapped_completions_create(self, *args, **kwargs):
-            if enabled:
-                print("\n=== OPENAI COMPLETIONS REQUEST ===", file=_get_output_stream())
-                _print_json(kwargs)
-                
             response = original_completions_create(self, *args, **kwargs)
             
-            if enabled and print_messages:
-                print("\n=== OPENAI COMPLETIONS RESPONSE ===", file=_get_output_stream())
-                _print_json(response.model_dump())
+            if enabled:
+                _send_to_hoover(
+                    query=kwargs,
+                    response=response.model_dump() if hasattr(response, 'model_dump') else response,
+                    status=200
+                )
                 
             return response
         
@@ -94,27 +89,21 @@ def _wrap_openai_v1() -> None:
                 
                 @functools.wraps(original_method)
                 async def wrapped_async_method(self, *args, **kwargs):
-                    method_name = original_method.__name__
-                    
-                    if enabled:
-                        print(f"\n=== OPENAI ASYNC {method_name.upper()} REQUEST ===", file=_get_output_stream())
-                        _print_json(kwargs)
-                        
                     response = await original_method(self, *args, **kwargs)
                     
-                    if enabled and print_messages:
-                        print(f"\n=== OPENAI ASYNC {method_name.upper()} RESPONSE ===", file=_get_output_stream())
-                        try:
-                            _print_json(response.model_dump())
-                        except AttributeError:
-                            _print_json(response)
+                    if enabled:
+                        _send_to_hoover(
+                            query=kwargs,
+                            response=response.model_dump() if hasattr(response, 'model_dump') else response,
+                            status=200
+                        )
                         
                     return response
                 
                 wrapped_async_method._osmosis_wrapped = True
                 setattr(module.Completions, name, wrapped_async_method)
     
-    print("OpenAI v1 client has been wrapped by osmosis-wrap.", file=_get_output_stream())
+    print("OpenAI v1 client has been wrapped by osmosis-wrap.", file=sys.stderr)
 
 def _wrap_openai_legacy() -> None:
     """Monkey patch the legacy OpenAI client."""
@@ -125,15 +114,14 @@ def _wrap_openai_legacy() -> None:
     if not hasattr(original_completion_create, "_osmosis_wrapped"):
         @functools.wraps(original_completion_create)
         def wrapped_completion_create(*args, **kwargs):
-            if enabled:
-                print("\n=== OPENAI COMPLETION REQUEST ===", file=_get_output_stream())
-                _print_json(kwargs)
-                
             response = original_completion_create(*args, **kwargs)
             
-            if enabled and print_messages:
-                print("\n=== OPENAI COMPLETION RESPONSE ===", file=_get_output_stream())
-                _print_json(response)
+            if enabled:
+                _send_to_hoover(
+                    query=kwargs,
+                    response=response,
+                    status=200
+                )
                 
             return response
         
@@ -146,15 +134,14 @@ def _wrap_openai_legacy() -> None:
         if not hasattr(original_chat_create, "_osmosis_wrapped"):
             @functools.wraps(original_chat_create)
             def wrapped_chat_create(*args, **kwargs):
-                if enabled:
-                    print("\n=== OPENAI CHAT COMPLETION REQUEST ===", file=_get_output_stream())
-                    _print_json(kwargs)
-                    
                 response = original_chat_create(*args, **kwargs)
                 
-                if enabled and print_messages:
-                    print("\n=== OPENAI CHAT COMPLETION RESPONSE ===", file=_get_output_stream())
-                    _print_json(response)
+                if enabled:
+                    _send_to_hoover(
+                        query=kwargs,
+                        response=response,
+                        status=200
+                    )
                     
                 return response
             
@@ -171,21 +158,18 @@ def _wrap_openai_legacy() -> None:
             if not hasattr(original_acreate, "_osmosis_wrapped"):
                 @functools.wraps(original_acreate)
                 async def wrapped_acreate(*args, **kwargs):
-                    obj_name = obj.__name__
-                    
-                    if enabled:
-                        print(f"\n=== OPENAI ASYNC {obj_name.upper()} REQUEST ===", file=_get_output_stream())
-                        _print_json(kwargs)
-                        
                     response = await original_acreate(*args, **kwargs)
                     
-                    if enabled and print_messages:
-                        print(f"\n=== OPENAI ASYNC {obj_name.upper()} RESPONSE ===", file=_get_output_stream())
-                        _print_json(response)
+                    if enabled:
+                        _send_to_hoover(
+                            query=kwargs,
+                            response=response,
+                            status=200
+                        )
                         
                     return response
                 
                 wrapped_acreate._osmosis_wrapped = True
                 obj.acreate = wrapped_acreate
     
-    print("OpenAI legacy client has been wrapped by osmosis-wrap.", file=_get_output_stream()) 
+    print("OpenAI legacy client has been wrapped by osmosis-wrap.", file=sys.stderr) 

@@ -5,21 +5,18 @@ This module provides monkey patching for the Anthropic Python client.
 """
 
 import functools
-import json
-import sys
 import inspect
+import sys
 from typing import Any, Callable, Dict, Optional, TypeVar, cast
 
-from osmosis_wrap.utils import _get_output_stream, _print_json
+from osmosis_wrap.utils import _send_to_hoover
 
-# Flag to control whether printing is enabled
+# Flag to control whether sending to Hoover is enabled
 enabled = True
-# Flag to control printing of messages
-print_messages = True
 
 def wrap_anthropic() -> None:
     """
-    Monkey patch Anthropic's client to print all prompts and responses.
+    Monkey patch Anthropic's client to send all prompts and responses to Hoover.
     
     This function should be called before creating any Anthropic client instances.
     """
@@ -37,15 +34,14 @@ def wrap_anthropic() -> None:
     if original_create and not hasattr(original_create, "_osmosis_wrapped"):
         @functools.wraps(original_create)
         def wrapped_messages(self, *args, **kwargs):
-            if enabled:
-                print("\n=== ANTHROPIC REQUEST ===", file=_get_output_stream())
-                _print_json(kwargs)
-                
             response = original_create(self, *args, **kwargs)
             
-            if enabled and print_messages:
-                print("\n=== ANTHROPIC RESPONSE ===", file=_get_output_stream())
-                _print_json(response)
+            if enabled:
+                _send_to_hoover(
+                    query=kwargs,
+                    response=response.model_dump() if hasattr(response, 'model_dump') else response,
+                    status=200
+                )
                 
             return response
         
@@ -56,15 +52,14 @@ def wrap_anthropic() -> None:
     if original_complete and not hasattr(original_complete, "_osmosis_wrapped"):
         @functools.wraps(original_complete)
         def wrapped_completions(self, *args, **kwargs):
-            if enabled:
-                print("\n=== ANTHROPIC COMPLETIONS REQUEST ===", file=_get_output_stream())
-                _print_json(kwargs)
-                
             response = original_complete(self, *args, **kwargs)
             
-            if enabled and print_messages:
-                print("\n=== ANTHROPIC COMPLETIONS RESPONSE ===", file=_get_output_stream())
-                _print_json(response)
+            if enabled:
+                _send_to_hoover(
+                    query=kwargs,
+                    response=response.model_dump() if hasattr(response, 'model_dump') else response,
+                    status=200
+                )
                 
             return response
         
@@ -81,21 +76,18 @@ def wrap_anthropic() -> None:
             
             @functools.wraps(original_method)
             async def wrapped_async_method(self, *args, **kwargs):
-                method_name = original_method.__name__
-                
-                if enabled:
-                    print(f"\n=== ANTHROPIC ASYNC {method_name.upper()} REQUEST ===", file=_get_output_stream())
-                    _print_json(kwargs)
-                    
                 response = await original_method(self, *args, **kwargs)
                 
-                if enabled and print_messages:
-                    print(f"\n=== ANTHROPIC ASYNC {method_name.upper()} RESPONSE ===", file=_get_output_stream())
-                    _print_json(response)
+                if enabled:
+                    _send_to_hoover(
+                        query=kwargs,
+                        response=response.model_dump() if hasattr(response, 'model_dump') else response,
+                        status=200
+                    )
                     
                 return response
             
             wrapped_async_method._osmosis_wrapped = True
             setattr(anthropic.Client, name, wrapped_async_method)
 
-    print("Anthropic client has been wrapped by osmosis-wrap.", file=_get_output_stream()) 
+    print("Anthropic client has been wrapped by osmosis-wrap.", file=sys.stderr) 
