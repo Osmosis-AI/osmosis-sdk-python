@@ -1,0 +1,62 @@
+name: Run Tests
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.8', '3.9', '3.10']
+
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python ${{ matrix.python-version }}
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ matrix.python-version }}
+        cache: 'pip'
+        
+    - name: Get pip cache dir
+      id: pip-cache
+      run: echo "dir=$(pip cache dir)" >> $GITHUB_OUTPUT
+        
+    - name: Cache pip dependencies
+      uses: actions/cache@v3
+      with:
+        path: ${{ steps.pip-cache.outputs.dir }}
+        key: ${{ runner.os }}-pip-${{ matrix.python-version }}-${{ hashFiles('**/setup.py') }}
+        restore-keys: |
+          ${{ runner.os }}-pip-${{ matrix.python-version }}-
+          ${{ runner.os }}-pip-
+    
+    - name: Cache pytest
+      uses: actions/cache@v3
+      with:
+        path: .pytest_cache
+        key: ${{ runner.os }}-pytest-${{ matrix.python-version }}
+        
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install pytest || { echo 'Failed to install pytest'; exit 1; }
+        
+    - name: Install package and dependencies 
+      run: |
+        # Install all the specific packages that tests depend on
+        pip install requests anthropic openai langchain langchain-core langchain-openai langchain-anthropic || { echo 'Failed to install dependencies'; exit 1; }
+        
+        # Then install the package in editable mode
+        pip install -e ".[all]" || { echo 'Failed to install package'; exit 1; }
+        
+    - name: List installed packages
+      run: pip list
+        
+    - name: Run tests
+      run: |
+        pytest test.py -v 
