@@ -60,7 +60,8 @@ import osmosis_wrap
 osmosis_wrap.init("your-hoover-api-key")
 
 # Or load from environment variable
-from osmosis_wrap.utils import get_api_key
+from generic_util import get_api_key
+
 hoover_api_key = get_api_key("hoover")
 osmosis_wrap.init(hoover_api_key)
 ```

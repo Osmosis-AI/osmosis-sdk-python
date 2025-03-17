@@ -35,6 +35,10 @@ init = utils.init
 wrap_anthropic = anthropic.wrap_anthropic
 wrap_openai = openai.wrap_openai
 
+# Export disable and enable functions
+disable_hoover = utils.disable_hoover
+enable_hoover = utils.enable_hoover
+
 # Automatically apply patches when the module is imported
 wrap_anthropic()
 wrap_openai() 

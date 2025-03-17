@@ -38,6 +38,14 @@ def init(api_key: str) -> None:
     hoover_api_key = api_key
     _initialized = True
 
+def disable_hoover() -> None:
+    global enabled
+    enabled = False
+
+def enable_hoover() -> None:
+    global enabled
+    enabled = True
+
 def send_to_hoover(query: Dict[str, Any], response: Dict[str, Any], status: int = 200) -> None:
     """
     Send query and response data to the Hoover API.
@@ -48,9 +56,10 @@ def send_to_hoover(query: Dict[str, Any], response: Dict[str, Any], status: int 
         status: The HTTP status code (default: 200)
     """
     if not enabled or not hoover_api_key:
-        if not _initialized:
-            print("Warning: Osmosis Wrap not initialized. Call osmosis_wrap.init(api_key) first.", file=sys.stderr)
         return
+
+    if not _initialized:
+            print("Warning: Osmosis Wrap not initialized. Call osmosis_wrap.init(api_key) first.", file=sys.stderr)
 
     try:
         data = {
@@ -84,16 +93,3 @@ def send_to_hoover(query: Dict[str, Any], response: Dict[str, Any], status: int 
     
     except Exception as e:
         print(f"Warning: Failed to send data to Hoover API: {str(e)}", file=sys.stderr)
-
-def get_api_key(provider: str) -> Optional[str]:
-    """
-    Get API key for a specific provider from environment variables.
-    
-    Args:
-        provider: The name of the provider (e.g., 'anthropic', 'openai', 'hoover')
-        
-    Returns:
-        The API key for the specified provider, or None if not found.
-    """
-    key_name = f"{provider.upper()}_API_KEY"
-    return os.environ.get(key_name) 

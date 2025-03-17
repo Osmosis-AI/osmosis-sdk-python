@@ -7,8 +7,7 @@ prompts and responses to the Hoover API when using various LLM APIs.
 
 # Import osmosis_wrap before importing any LLM libraries
 import osmosis_wrap
-from osmosis_wrap.utils import get_api_key
-
+from generic_util import get_api_key
 # Initialize osmosis_wrap with your Hoover API key
 hoover_api_key = get_api_key("hoover")
 if not hoover_api_key:
@@ -34,7 +33,7 @@ try:
     # Make an API call - the prompt and response will be logged to Hoover
     response = client.messages.create(
         model="claude-3-haiku-20240307",
-        max_tokens=1000,
+        max_tokens=150,
         messages=[
             {"role": "user", "content": "Explain what monkey patching is in Python in one sentence."}
         ]
@@ -75,9 +74,9 @@ try:
 except ImportError:
     print("OpenAI library not installed. Run 'pip install openai' to use this example.")
 
-# Example of disabling logging for specific calls
-print("\nDisabling Hoover logging for the next API call:")
-osmosis_wrap.enabled = False
+# Example of disabling hoover for specific calls
+print("\nDisabling Hoover for the next API call:")
+osmosis_wrap.disable_hoover()
 
 # Try with any available client
 try:
@@ -87,7 +86,7 @@ try:
     
     response = client.messages.create(
         model="claude-3-haiku-20240307",
-        max_tokens=1000,
+        max_tokens=150,
         messages=[{"role": "user", "content": "This request won't be logged."}]
     )
 except ImportError:
@@ -104,7 +103,7 @@ except ImportError:
     except ImportError:
         print("Neither OpenAI nor Anthropic libraries are installed.")
 
-# Re-enable logging
-osmosis_wrap.enabled = True
+# Re-enable hoover
+osmosis_wrap.enable_hoover()
 
-print("\nHoover logging is now re-enabled for future API calls.") 
+print("\nHoover is now re-enabled for future API calls.") 

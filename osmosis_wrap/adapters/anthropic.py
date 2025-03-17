@@ -8,6 +8,7 @@ import functools
 import sys
 
 from osmosis_wrap.utils import send_to_hoover, enabled
+from osmosis_wrap import utils
 
 def wrap_anthropic() -> None:
     """
@@ -32,7 +33,7 @@ def wrap_anthropic() -> None:
         def wrapped_messages_create(self, *args, **kwargs):
             response = original_messages_create(self, *args, **kwargs)
             
-            if enabled:
+            if utils.enabled:
                 send_to_hoover(
                     query=kwargs,
                     response=response.model_dump() if hasattr(response, 'model_dump') else response,
@@ -52,7 +53,7 @@ def wrap_anthropic() -> None:
             async def wrapped_acreate(self, *args, **kwargs):
                 response = await original_acreate(self, *args, **kwargs)
                 
-                if enabled:
+                if utils.enabled:
                     send_to_hoover(
                         query=kwargs,
                         response=response.model_dump() if hasattr(response, 'model_dump') else response,
@@ -75,7 +76,7 @@ def wrap_anthropic() -> None:
             def wrapped_completions_create(self, *args, **kwargs):
                 response = original_completions_create(self, *args, **kwargs)
                 
-                if enabled:
+                if utils.enabled:
                     send_to_hoover(
                         query=kwargs,
                         response=response.model_dump() if hasattr(response, 'model_dump') else response,
@@ -95,7 +96,7 @@ def wrap_anthropic() -> None:
                     async def wrapped_completions_acreate(self, *args, **kwargs):
                         response = await original_completions_acreate(self, *args, **kwargs)
                         
-                        if enabled:
+                        if utils.enabled:
                             send_to_hoover(
                                 query=kwargs,
                                 response=response.model_dump() if hasattr(response, 'model_dump') else response,

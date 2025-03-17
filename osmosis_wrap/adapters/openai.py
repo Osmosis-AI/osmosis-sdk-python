@@ -8,7 +8,8 @@ import functools
 import inspect
 import sys
 
-from osmosis_wrap.utils import send_to_hoover, enabled
+from osmosis_wrap import utils
+from osmosis_wrap.utils import send_to_hoover
 
 def wrap_openai() -> None:
     """
@@ -43,7 +44,7 @@ def _wrap_openai_v1() -> None:
         def wrapped_chat_create(self, *args, **kwargs):
             response = original_chat_create(self, *args, **kwargs)
             
-            if enabled:
+            if utils.enabled:
                 send_to_hoover(
                     query=kwargs,
                     response=response.model_dump() if hasattr(response, 'model_dump') else response,
@@ -62,7 +63,7 @@ def _wrap_openai_v1() -> None:
         def wrapped_completions_create(self, *args, **kwargs):
             response = original_completions_create(self, *args, **kwargs)
             
-            if enabled:
+            if utils.enabled:
                 send_to_hoover(
                     query=kwargs,
                     response=response.model_dump() if hasattr(response, 'model_dump') else response,
@@ -87,7 +88,7 @@ def _wrap_openai_v1() -> None:
                 async def wrapped_async_method(self, *args, **kwargs):
                     response = await original_method(self, *args, **kwargs)
                     
-                    if enabled:
+                    if utils.enabled:
                         send_to_hoover(
                             query=kwargs,
                             response=response.model_dump() if hasattr(response, 'model_dump') else response,
@@ -112,7 +113,7 @@ def _wrap_openai_legacy() -> None:
         def wrapped_completion_create(*args, **kwargs):
             response = original_completion_create(*args, **kwargs)
             
-            if enabled:
+            if utils.enabled:
                 send_to_hoover(
                     query=kwargs,
                     response=response,
@@ -132,7 +133,7 @@ def _wrap_openai_legacy() -> None:
             def wrapped_chat_create(*args, **kwargs):
                 response = original_chat_create(*args, **kwargs)
                 
-                if enabled:
+                if utils.enabled:
                     send_to_hoover(
                         query=kwargs,
                         response=response,
@@ -156,7 +157,7 @@ def _wrap_openai_legacy() -> None:
                 async def wrapped_acreate(*args, **kwargs):
                     response = await original_acreate(*args, **kwargs)
                     
-                    if enabled:
+                    if utils.enabled:
                         send_to_hoover(
                             query=kwargs,
                             response=response,
