@@ -19,6 +19,10 @@ except ImportError:
 
 # Global configuration
 enabled = True
+use_stderr = True  # Added missing configuration
+pretty_print = True  # Controls whether to format output nicely
+print_messages = True  # Controls whether to print messages at all
+indent = 2  # Number of spaces to use for indentation in pretty print
 hoover_api_key = None  # Will be set by init()
 hoover_api_url = "https://ha2udfkbnh.execute-api.us-west-2.amazonaws.com/store-usage"
 _initialized = False
