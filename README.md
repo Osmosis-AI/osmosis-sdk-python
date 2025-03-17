@@ -77,7 +77,7 @@ client = Anthropic(api_key="your-api-key")  # Or use environment variable
 
 # All API calls will now be logged to Hoover
 response = client.messages.create(
-    model="claude-3-opus-20240229",
+    model="claude-3-haiku-20240307",
     max_tokens=1000,
     messages=[
         {"role": "user", "content": "Hello, Claude!"}
@@ -95,7 +95,7 @@ client = OpenAI(api_key="your-api-key")  # Or use environment variable
 
 # All API calls will now be logged to Hoover
 response = client.chat.completions.create(
-    model="gpt-4",
+    model="gpt-4o-mini",
     max_tokens=150,
     messages=[
         {"role": "user", "content": "Hello, GPT!"}

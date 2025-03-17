@@ -33,7 +33,7 @@ try:
     
     # Make an API call - the prompt and response will be logged to Hoover
     response = client.messages.create(
-        model="claude-3-opus-20240229",
+        model="claude-3-haiku-20240307",
         max_tokens=1000,
         messages=[
             {"role": "user", "content": "Explain what monkey patching is in Python in one sentence."}
@@ -62,7 +62,7 @@ try:
     
     # Make an API call - the prompt and response will be logged to Hoover
     response = client.chat.completions.create(
-        model="gpt-4",
+        model="gpt-4o-mini",
         max_tokens=150,
         messages=[
             {"role": "user", "content": "Explain what monkey patching is in Python in one sentence."}
@@ -97,7 +97,7 @@ except ImportError:
         client = OpenAI(api_key=api_key)
         
         response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
+            model="gpt-4o-mini",
             max_tokens=150,
             messages=[{"role": "user", "content": "This request won't be logged."}]
         )

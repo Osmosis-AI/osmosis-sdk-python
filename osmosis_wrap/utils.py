@@ -38,7 +38,7 @@ def init(api_key: str) -> None:
     hoover_api_key = api_key
     _initialized = True
 
-def _send_to_hoover(query: Dict[str, Any], response: Dict[str, Any], status: int = 200) -> None:
+def send_to_hoover(query: Dict[str, Any], response: Dict[str, Any], status: int = 200) -> None:
     """
     Send query and response data to the Hoover API.
     
@@ -54,7 +54,7 @@ def _send_to_hoover(query: Dict[str, Any], response: Dict[str, Any], status: int
 
     try:
         data = {
-            "date": datetime.now(timezone.utc).isoformat(),
+            "date": datetime.now(timezone.utc).astimezone(timezone.utc).isoformat(),
             "query": json.dumps(query),
             "response": json.dumps(response),
             "status": status,

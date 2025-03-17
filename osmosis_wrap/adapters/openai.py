@@ -7,12 +7,8 @@ This module provides monkey patching for the OpenAI Python client.
 import functools
 import inspect
 import sys
-from typing import Any, Callable, Dict, Optional, TypeVar, cast
 
-from osmosis_wrap.utils import _send_to_hoover
-
-# Flag to control whether sending to Hoover is enabled
-enabled = True
+from osmosis_wrap.utils import send_to_hoover, enabled
 
 def wrap_openai() -> None:
     """
@@ -48,7 +44,7 @@ def _wrap_openai_v1() -> None:
             response = original_chat_create(self, *args, **kwargs)
             
             if enabled:
-                _send_to_hoover(
+                send_to_hoover(
                     query=kwargs,
                     response=response.model_dump() if hasattr(response, 'model_dump') else response,
                     status=200
@@ -67,7 +63,7 @@ def _wrap_openai_v1() -> None:
             response = original_completions_create(self, *args, **kwargs)
             
             if enabled:
-                _send_to_hoover(
+                send_to_hoover(
                     query=kwargs,
                     response=response.model_dump() if hasattr(response, 'model_dump') else response,
                     status=200
@@ -92,7 +88,7 @@ def _wrap_openai_v1() -> None:
                     response = await original_method(self, *args, **kwargs)
                     
                     if enabled:
-                        _send_to_hoover(
+                        send_to_hoover(
                             query=kwargs,
                             response=response.model_dump() if hasattr(response, 'model_dump') else response,
                             status=200
@@ -117,7 +113,7 @@ def _wrap_openai_legacy() -> None:
             response = original_completion_create(*args, **kwargs)
             
             if enabled:
-                _send_to_hoover(
+                send_to_hoover(
                     query=kwargs,
                     response=response,
                     status=200
@@ -137,7 +133,7 @@ def _wrap_openai_legacy() -> None:
                 response = original_chat_create(*args, **kwargs)
                 
                 if enabled:
-                    _send_to_hoover(
+                    send_to_hoover(
                         query=kwargs,
                         response=response,
                         status=200
@@ -161,7 +157,7 @@ def _wrap_openai_legacy() -> None:
                     response = await original_acreate(*args, **kwargs)
                     
                     if enabled:
-                        _send_to_hoover(
+                        send_to_hoover(
                             query=kwargs,
                             response=response,
                             status=200

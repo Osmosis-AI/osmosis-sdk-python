@@ -5,14 +5,9 @@ This module provides monkey patching for the Anthropic Python client.
 """
 
 import functools
-import inspect
 import sys
-from typing import Any, Callable, Dict, Optional, TypeVar, cast
 
-from osmosis_wrap.utils import _send_to_hoover
-
-# Flag to control whether sending to Hoover is enabled
-enabled = True
+from osmosis_wrap.utils import send_to_hoover, enabled
 
 def wrap_anthropic() -> None:
     """
@@ -25,19 +20,20 @@ def wrap_anthropic() -> None:
     except ImportError:
         print("Error: anthropic package is not installed.", file=sys.stderr)
         return
+    
+    # Get the resources.messages module and class
+    messages_module = anthropic.resources.messages
+    messages_class = messages_module.Messages
 
-    # Store original methods
-    original_create = getattr(anthropic.Client, "messages", None)
-    original_complete = getattr(anthropic.Client, "completions", None)
-
-    # Monkey patch the messages method
-    if original_create and not hasattr(original_create, "_osmosis_wrapped"):
-        @functools.wraps(original_create)
-        def wrapped_messages(self, *args, **kwargs):
-            response = original_create(self, *args, **kwargs)
+    # Patch the Messages.create method
+    original_messages_create = messages_class.create
+    if not hasattr(original_messages_create, "_osmosis_wrapped"):
+        @functools.wraps(original_messages_create)
+        def wrapped_messages_create(self, *args, **kwargs):
+            response = original_messages_create(self, *args, **kwargs)
             
             if enabled:
-                _send_to_hoover(
+                send_to_hoover(
                     query=kwargs,
                     response=response.model_dump() if hasattr(response, 'model_dump') else response,
                     status=200
@@ -45,41 +41,19 @@ def wrap_anthropic() -> None:
                 
             return response
         
-        wrapped_messages._osmosis_wrapped = True
-        setattr(anthropic.Client, "messages", wrapped_messages)
-        
-    # Monkey patch the completions method if it exists
-    if original_complete and not hasattr(original_complete, "_osmosis_wrapped"):
-        @functools.wraps(original_complete)
-        def wrapped_completions(self, *args, **kwargs):
-            response = original_complete(self, *args, **kwargs)
-            
-            if enabled:
-                _send_to_hoover(
-                    query=kwargs,
-                    response=response.model_dump() if hasattr(response, 'model_dump') else response,
-                    status=200
-                )
-                
-            return response
-        
-        wrapped_completions._osmosis_wrapped = True
-        setattr(anthropic.Client, "completions", wrapped_completions)
-
-    # For newer Anthropic client versions, we need to patch the async methods too
-    for name, method in inspect.getmembers(anthropic.Client):
-        if (name.startswith("a") and (name.endswith("messages") or name.endswith("completions")) 
-            and inspect.iscoroutinefunction(method) 
-            and not hasattr(method, "_osmosis_wrapped")):
-            
-            original_method = method
-            
-            @functools.wraps(original_method)
-            async def wrapped_async_method(self, *args, **kwargs):
-                response = await original_method(self, *args, **kwargs)
+        wrapped_messages_create._osmosis_wrapped = True
+        messages_class.create = wrapped_messages_create
+    
+    # Patch the async create method if it exists
+    if hasattr(messages_class, "acreate"):
+        original_acreate = messages_class.acreate
+        if not hasattr(original_acreate, "_osmosis_wrapped"):
+            @functools.wraps(original_acreate)
+            async def wrapped_acreate(self, *args, **kwargs):
+                response = await original_acreate(self, *args, **kwargs)
                 
                 if enabled:
-                    _send_to_hoover(
+                    send_to_hoover(
                         query=kwargs,
                         response=response.model_dump() if hasattr(response, 'model_dump') else response,
                         status=200
@@ -87,7 +61,53 @@ def wrap_anthropic() -> None:
                     
                 return response
             
-            wrapped_async_method._osmosis_wrapped = True
-            setattr(anthropic.Client, name, wrapped_async_method)
+            wrapped_acreate._osmosis_wrapped = True
+            messages_class.acreate = wrapped_acreate
+
+    # Check if Completions exists and wrap it if it does
+    try:
+        completions_module = anthropic.resources.completions
+        completions_class = completions_module.Completions
+        
+        original_completions_create = completions_class.create
+        if not hasattr(original_completions_create, "_osmosis_wrapped"):
+            @functools.wraps(original_completions_create)
+            def wrapped_completions_create(self, *args, **kwargs):
+                response = original_completions_create(self, *args, **kwargs)
+                
+                if enabled:
+                    send_to_hoover(
+                        query=kwargs,
+                        response=response.model_dump() if hasattr(response, 'model_dump') else response,
+                        status=200
+                    )
+                    
+                return response
+            
+            wrapped_completions_create._osmosis_wrapped = True
+            completions_class.create = wrapped_completions_create
+            
+            # Patch the async create method if it exists
+            if hasattr(completions_class, "acreate"):
+                original_completions_acreate = completions_class.acreate
+                if not hasattr(original_completions_acreate, "_osmosis_wrapped"):
+                    @functools.wraps(original_completions_acreate)
+                    async def wrapped_completions_acreate(self, *args, **kwargs):
+                        response = await original_completions_acreate(self, *args, **kwargs)
+                        
+                        if enabled:
+                            send_to_hoover(
+                                query=kwargs,
+                                response=response.model_dump() if hasattr(response, 'model_dump') else response,
+                                status=200
+                            )
+                            
+                        return response
+                    
+                    wrapped_completions_acreate._osmosis_wrapped = True
+                    completions_class.acreate = wrapped_completions_acreate
+    except (ImportError, AttributeError):
+        # Completions module may not exist in this version
+        pass
 
     print("Anthropic client has been wrapped by osmosis-wrap.", file=sys.stderr) 
