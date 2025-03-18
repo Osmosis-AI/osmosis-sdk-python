@@ -188,6 +188,367 @@ def test_anthropic_async_wrapping(setup_osmosis):
             # Restore the original acreate method
             anthropic.resources.messages.Messages.acreate = original_acreate
 
+# Test Anthropic tool use functionality
+@pytest.mark.skipif(
+    pytest.importorskip("anthropic", reason="anthropic package not installed") is None,
+    reason="Anthropic package not installed"
+)
+def test_anthropic_tool_use(setup_osmosis):
+    mock_send_to_hoover = setup_osmosis
+    mock_send_to_hoover.reset_mock()  # Start with a clean mock
+    
+    # Import Anthropic module first
+    import anthropic
+    from anthropic import Anthropic
+    
+    # Define a sample tool
+    sample_tools = [
+        {
+            "name": "get_weather",
+            "description": "Get the current weather in a given location",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "location": {
+                        "type": "string",
+                        "description": "The city and state, e.g. San Francisco, CA",
+                    }
+                },
+                "required": ["location"],
+            }
+        }
+    ]
+    
+    # Create a mock response with tool use
+    mock_response = MagicMock()
+    
+    # Mock the tool_use content in response
+    tool_call = {
+        "type": "tool_use",
+        "id": "tu_01",
+        "name": "get_weather",
+        "input": {"location": "San Francisco, CA"}
+    }
+    
+    # Create a content item for tool use
+    tool_use_content = MagicMock()
+    tool_use_content.type = "tool_use"
+    tool_use_content.text = None
+    tool_use_content.tool_use = tool_call
+    
+    # Set up the response
+    mock_response.content = [tool_use_content]
+    mock_response.model_dump = MagicMock(return_value={
+        "content": [{"type": "tool_use", "tool_use": tool_call}]
+    })
+    
+    # Store the original create method to restore it later
+    original_create = anthropic.resources.messages.Messages.create
+    
+    try:
+        # Temporarily replace the create method before wrapping occurs
+        def mock_unwrapped_create(*args, **kwargs):
+            return mock_response
+        
+        # Replace with our mock
+        anthropic.resources.messages.Messages.create = mock_unwrapped_create
+        
+        # Force the wrapping to occur
+        from osmosis_wrap.adapters.anthropic import wrap_anthropic
+        wrap_anthropic()
+        
+        # Create a client and make a call with tools
+        client = Anthropic(api_key=mock_get_api_key("anthropic"))
+        response = client.messages.create(
+            model="claude-3-opus-20240229",
+            max_tokens=150,
+            tools=sample_tools,
+            messages=[
+                {"role": "user", "content": "What's the weather in San Francisco?"}
+            ]
+        )
+        
+        # Verify the response contains tool use
+        assert response.content[0].type == "tool_use"
+        assert response.content[0].tool_use["name"] == "get_weather"
+        
+        # Verify hoover was called
+        mock_send_to_hoover.assert_called_once()
+        
+        # Verify the arguments include tools parameter
+        assert "query" in mock_send_to_hoover.call_args[1]
+        assert "tools" in mock_send_to_hoover.call_args[1]["query"]
+        assert mock_send_to_hoover.call_args[1]["query"]["model"] == "claude-3-opus-20240229"
+        assert mock_send_to_hoover.call_args[1]["query"]["tools"] == sample_tools
+    finally:
+        # Restore the original create method
+        anthropic.resources.messages.Messages.create = original_create
+
+# Test Anthropic tool use with tool response
+@pytest.mark.skipif(
+    pytest.importorskip("anthropic", reason="anthropic package not installed") is None,
+    reason="Anthropic package not installed"
+)
+def test_anthropic_tool_response(setup_osmosis):
+    mock_send_to_hoover = setup_osmosis
+    mock_send_to_hoover.reset_mock()  # Start with a clean mock
+    
+    # Import Anthropic module first
+    import anthropic
+    from anthropic import Anthropic
+    
+    # Define a sample tool
+    sample_tools = [
+        {
+            "name": "get_weather",
+            "description": "Get the current weather in a given location",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "location": {
+                        "type": "string",
+                        "description": "The city and state, e.g. San Francisco, CA",
+                    }
+                },
+                "required": ["location"],
+            }
+        }
+    ]
+    
+    # Mock a two-turn conversation
+    # First turn: model requests weather data
+    first_response = MagicMock()
+    tool_call = {
+        "type": "tool_use",
+        "id": "tu_01",
+        "name": "get_weather",
+        "input": {"location": "San Francisco, CA"}
+    }
+    tool_use_content = MagicMock()
+    tool_use_content.type = "tool_use"
+    tool_use_content.text = None
+    tool_use_content.tool_use = tool_call
+    first_response.content = [tool_use_content]
+    first_response.model_dump = MagicMock(return_value={
+        "content": [{"type": "tool_use", "tool_use": tool_call}]
+    })
+    
+    # Second turn: model responds to tool output
+    second_response = MagicMock()
+    text_content = MagicMock()
+    text_content.type = "text"
+    text_content.text = "The weather in San Francisco is currently 65°F and sunny."
+    second_response.content = [text_content]
+    second_response.model_dump = MagicMock(return_value={
+        "content": [{"type": "text", "text": "The weather in San Francisco is currently 65°F and sunny."}]
+    })
+    
+    # Store the original create method to restore it later
+    original_create = anthropic.resources.messages.Messages.create
+    
+    try:
+        # Create a mock with two different responses
+        mock_create_calls = 0
+        def mock_unwrapped_create(*args, **kwargs):
+            nonlocal mock_create_calls
+            if mock_create_calls == 0:
+                mock_create_calls += 1
+                return first_response
+            else:
+                return second_response
+        
+        # Replace with our mock
+        anthropic.resources.messages.Messages.create = mock_unwrapped_create
+        
+        # Force the wrapping to occur
+        from osmosis_wrap.adapters.anthropic import wrap_anthropic
+        wrap_anthropic()
+        
+        # Create a client and make the first call with tools
+        client = Anthropic(api_key=mock_get_api_key("anthropic"))
+        first_call = client.messages.create(
+            model="claude-3-opus-20240229",
+            max_tokens=150,
+            tools=sample_tools,
+            messages=[
+                {"role": "user", "content": "What's the weather in San Francisco?"}
+            ]
+        )
+        
+        # Verify the first response contains tool use
+        assert first_call.content[0].type == "tool_use"
+        
+        # Now make a second call with tool response
+        tool_response = {
+            "type": "tool_response",
+            "tool_call_id": "tu_01",
+            "content": {
+                "temperature": 65,
+                "condition": "sunny",
+                "humidity": 70
+            }
+        }
+        
+        second_call = client.messages.create(
+            model="claude-3-opus-20240229",
+            max_tokens=150,
+            messages=[
+                {"role": "user", "content": "What's the weather in San Francisco?"},
+                {"role": "assistant", "content": [{"type": "tool_use", "tool_use": tool_call}]},
+                {"role": "user", "content": [tool_response]}
+            ]
+        )
+        
+        # Verify the second response is text
+        assert second_call.content[0].type == "text"
+        
+        # Verify hoover was called twice
+        assert mock_send_to_hoover.call_count == 2
+        
+        # Verify the second call includes the tool response
+        second_call_args = mock_send_to_hoover.call_args_list[1][1]
+        assert "query" in second_call_args
+        assert "messages" in second_call_args["query"]
+        
+        # Check if tool response is in the messages
+        found_tool_response = False
+        for message in second_call_args["query"]["messages"]:
+            if message["role"] == "user" and isinstance(message["content"], list):
+                for content in message["content"]:
+                    if content.get("type") == "tool_response":
+                        found_tool_response = True
+                        break
+        
+        assert found_tool_response, "Tool response was not captured in the hoover log"
+    finally:
+        # Restore the original create method
+        anthropic.resources.messages.Messages.create = original_create
+
+# Test Anthropic async tool use functionality
+@pytest.mark.skipif(
+    pytest.importorskip("anthropic", reason="anthropic package not installed") is None,
+    reason="Anthropic package not installed"
+)
+def test_anthropic_async_tool_use(setup_osmosis):
+    mock_send_to_hoover = setup_osmosis
+    mock_send_to_hoover.reset_mock()  # Start with a clean mock
+    
+    # Import required modules
+    import anthropic
+    import asyncio
+    
+    # Define a sample tool
+    sample_tools = [
+        {
+            "name": "search_products",
+            "description": "Search for products in an online store",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "The search query",
+                    },
+                    "category": {
+                        "type": "string",
+                        "description": "Product category (optional)",
+                    }
+                },
+                "required": ["query"],
+            }
+        }
+    ]
+    
+    # Create a mock response with tool use
+    mock_response = MagicMock()
+    
+    # Mock the tool_use content in response
+    tool_call = {
+        "type": "tool_use",
+        "id": "tu_02",
+        "name": "search_products",
+        "input": {"query": "headphones", "category": "electronics"}
+    }
+    
+    # Create a content item for tool use
+    tool_use_content = MagicMock()
+    tool_use_content.type = "tool_use"
+    tool_use_content.text = None
+    tool_use_content.tool_use = tool_call
+    
+    # Set up the response
+    mock_response.content = [tool_use_content]
+    mock_response.model_dump = MagicMock(return_value={
+        "content": [{"type": "tool_use", "tool_use": tool_call}]
+    })
+    
+    # Define a mock async create method
+    async def mock_unwrapped_acreate(*args, **kwargs):
+        return mock_response
+    
+    # Set up our test environment - add acreate if it doesn't exist
+    had_acreate = hasattr(anthropic.resources.messages.Messages, "acreate")
+    original_acreate = None
+    
+    try:
+        if not had_acreate:
+            print("Adding mock acreate method to Anthropic Messages class for testing")
+            # Store original create method for reference
+            original_create = anthropic.resources.messages.Messages.create
+            # Add our mock acreate method
+            anthropic.resources.messages.Messages.acreate = mock_unwrapped_acreate
+        else:
+            # Store the original acreate method to restore it later
+            original_acreate = anthropic.resources.messages.Messages.acreate
+            # Replace with our predictable mock
+            anthropic.resources.messages.Messages.acreate = mock_unwrapped_acreate
+        
+        # Force the wrapping to occur
+        from osmosis_wrap.adapters.anthropic import wrap_anthropic
+        wrap_anthropic()
+        
+        # Define an async test function
+        async def run_async_test():
+            # Create a client with the wrapped methods
+            client = anthropic.Anthropic(api_key=mock_get_api_key("anthropic"))
+            
+            # Make an async call with tools
+            response = await client.messages.acreate(
+                model="claude-3-opus-20240229",
+                max_tokens=150,
+                tools=sample_tools,
+                messages=[
+                    {"role": "user", "content": "Find me some wireless headphones"}
+                ]
+            )
+            return response
+        
+        # Run the async function
+        response = asyncio.run(run_async_test())
+        
+        # Verify the response
+        assert response.content[0].type == "tool_use"
+        assert response.content[0].tool_use["name"] == "search_products"
+        assert response.content[0].tool_use["input"]["query"] == "headphones"
+        
+        # Verify hoover was called
+        mock_send_to_hoover.assert_called_once()
+        
+        # Verify the arguments include tools parameter
+        assert "query" in mock_send_to_hoover.call_args[1]
+        assert "tools" in mock_send_to_hoover.call_args[1]["query"]
+        assert mock_send_to_hoover.call_args[1]["query"]["model"] == "claude-3-opus-20240229"
+    
+    finally:
+        # Restore the original methods
+        if not had_acreate:
+            # Remove our added acreate method
+            if hasattr(anthropic.resources.messages.Messages, "acreate"):
+                delattr(anthropic.resources.messages.Messages, "acreate")
+        elif original_acreate is not None:
+            # Restore the original acreate method
+            anthropic.resources.messages.Messages.acreate = original_acreate
+
 # Test OpenAI v1 client wrapping
 @pytest.mark.skipif(
     pytest.importorskip("openai", reason="openai package not installed") is None,
@@ -688,6 +1049,178 @@ def test_openai_async_support(setup_osmosis):
     finally:
         # Reset mock
         mock_send_to_hoover.reset_mock()
+
+# Test Anthropic async tool use with tool responses
+@pytest.mark.skipif(
+    pytest.importorskip("anthropic", reason="anthropic package not installed") is None,
+    reason="Anthropic package not installed"
+)
+def test_anthropic_async_tool_response(setup_osmosis):
+    mock_send_to_hoover = setup_osmosis
+    mock_send_to_hoover.reset_mock()  # Start with a clean mock
+    
+    # Import required modules
+    import anthropic
+    import asyncio
+    
+    # Define a sample tool
+    sample_tools = [
+        {
+            "name": "search_products",
+            "description": "Search for products in an online store",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "The search query",
+                    },
+                    "category": {
+                        "type": "string",
+                        "description": "Product category (optional)",
+                    }
+                },
+                "required": ["query"],
+            }
+        }
+    ]
+    
+    # Mock a two-turn conversation for async
+    # First turn: model requests product search
+    first_response = MagicMock()
+    tool_call = {
+        "type": "tool_use",
+        "id": "tu_03",
+        "name": "search_products",
+        "input": {"query": "wireless headphones", "category": "electronics"}
+    }
+    tool_use_content = MagicMock()
+    tool_use_content.type = "tool_use"
+    tool_use_content.text = None
+    tool_use_content.tool_use = tool_call
+    first_response.content = [tool_use_content]
+    first_response.model_dump = MagicMock(return_value={
+        "content": [{"type": "tool_use", "tool_use": tool_call}]
+    })
+    
+    # Second turn: model responds to search results
+    second_response = MagicMock()
+    text_content = MagicMock()
+    text_content.type = "text"
+    text_content.text = "I found several wireless headphones in the electronics category. The top options are Sony WH-1000XM5, Apple AirPods Pro, and Bose QuietComfort."
+    second_response.content = [text_content]
+    second_response.model_dump = MagicMock(return_value={
+        "content": [{"type": "text", "text": "I found several wireless headphones in the electronics category. The top options are Sony WH-1000XM5, Apple AirPods Pro, and Bose QuietComfort."}]
+    })
+    
+    # Track calls to mock different responses
+    acreate_calls = 0
+    async def mock_acreate(*args, **kwargs):
+        nonlocal acreate_calls
+        if acreate_calls == 0:
+            acreate_calls += 1
+            return first_response
+        else:
+            return second_response
+    
+    # Set up our test environment
+    had_acreate = hasattr(anthropic.resources.messages.Messages, "acreate")
+    original_acreate = None
+    
+    try:
+        if not had_acreate:
+            print("Adding mock acreate method to Anthropic Messages class for testing")
+            # Add our mock acreate method
+            anthropic.resources.messages.Messages.acreate = mock_acreate
+        else:
+            # Store the original acreate method to restore it later
+            original_acreate = anthropic.resources.messages.Messages.acreate
+            # Replace with our mock
+            anthropic.resources.messages.Messages.acreate = mock_acreate
+        
+        # Force the wrapping to occur
+        from osmosis_wrap.adapters.anthropic import wrap_anthropic
+        wrap_anthropic()
+        
+        # Define an async test function
+        async def run_async_test():
+            # Create a client with the wrapped methods
+            client = anthropic.Anthropic(api_key=mock_get_api_key("anthropic"))
+            
+            # Make the first async call with tools
+            first_call = await client.messages.acreate(
+                model="claude-3-opus-20240229",
+                max_tokens=150,
+                tools=sample_tools,
+                messages=[
+                    {"role": "user", "content": "Find me some wireless headphones"}
+                ]
+            )
+            
+            # Verify the first response contains tool use
+            assert first_call.content[0].type == "tool_use"
+            
+            # Create a tool response
+            tool_response = {
+                "type": "tool_response",
+                "tool_call_id": "tu_03",
+                "content": {
+                    "results": [
+                        {"name": "Sony WH-1000XM5", "price": "$399.99", "rating": 4.8},
+                        {"name": "Apple AirPods Pro", "price": "$249.99", "rating": 4.7},
+                        {"name": "Bose QuietComfort", "price": "$349.99", "rating": 4.6}
+                    ]
+                }
+            }
+            
+            # Make the second async call with tool response
+            second_call = await client.messages.acreate(
+                model="claude-3-opus-20240229",
+                max_tokens=150,
+                messages=[
+                    {"role": "user", "content": "Find me some wireless headphones"},
+                    {"role": "assistant", "content": [{"type": "tool_use", "tool_use": tool_call}]},
+                    {"role": "user", "content": [tool_response]}
+                ]
+            )
+            
+            return first_call, second_call
+        
+        # Run the async function
+        first_call, second_call = asyncio.run(run_async_test())
+        
+        # Verify responses
+        assert first_call.content[0].type == "tool_use"
+        assert second_call.content[0].type == "text"
+        
+        # Verify hoover was called twice
+        assert mock_send_to_hoover.call_count == 2
+        
+        # Verify the second call includes the tool response
+        second_call_args = mock_send_to_hoover.call_args_list[1][1]
+        assert "query" in second_call_args
+        assert "messages" in second_call_args["query"]
+        
+        # Check if tool response is in the messages
+        found_tool_response = False
+        for message in second_call_args["query"]["messages"]:
+            if message["role"] == "user" and isinstance(message["content"], list):
+                for content in message["content"]:
+                    if content.get("type") == "tool_response":
+                        found_tool_response = True
+                        break
+        
+        assert found_tool_response, "Tool response was not captured in the hoover log"
+    
+    finally:
+        # Restore the original methods
+        if not had_acreate:
+            # Remove our added acreate method
+            if hasattr(anthropic.resources.messages.Messages, "acreate"):
+                delattr(anthropic.resources.messages.Messages, "acreate")
+        elif original_acreate is not None:
+            # Restore the original acreate method
+            anthropic.resources.messages.Messages.acreate = original_acreate
 
 if __name__ == "__main__":
     pytest.main(["-xvs", __file__]) 

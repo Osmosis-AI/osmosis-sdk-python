@@ -15,6 +15,13 @@ def wrap_anthropic() -> None:
     Monkey patch Anthropic's client to send all prompts and responses to Hoover.
     
     This function should be called before creating any Anthropic client instances.
+    
+    Features supported:
+    - Basic message completions
+    - Async message completions
+    - Tool use (function calling)
+    - Tool responses
+    - Streaming (if available)
     """
     try:
         import anthropic
@@ -39,6 +46,22 @@ def wrap_anthropic() -> None:
         def wrapped_messages_create(self, *args, **kwargs):
             print(f"Wrapped create called with args: {args}, kwargs: {kwargs}", file=sys.stderr)
             try:
+                # Check if the call includes tool use parameters
+                has_tools = "tools" in kwargs
+                if has_tools:
+                    print(f"Tool use detected with {len(kwargs['tools'])} tools", file=sys.stderr)
+                
+                # Check if this is a tool response message
+                has_tool_response = False
+                if "messages" in kwargs:
+                    for message in kwargs["messages"]:
+                        if message.get("role") == "user" and isinstance(message.get("content"), list):
+                            for content_item in message["content"]:
+                                if isinstance(content_item, dict) and content_item.get("type") == "tool_response":
+                                    has_tool_response = True
+                                    print("Tool response detected in messages", file=sys.stderr)
+                                    break
+                
                 response = original_messages_create(self, *args, **kwargs)
                 
                 if utils.enabled:
@@ -74,6 +97,22 @@ def wrap_anthropic() -> None:
             async def wrapped_acreate(self, *args, **kwargs):
                 print(f"Wrapped async create called with args: {args}, kwargs: {kwargs}", file=sys.stderr)
                 try:
+                    # Check if the async call includes tool use parameters
+                    has_tools = "tools" in kwargs
+                    if has_tools:
+                        print(f"Async tool use detected with {len(kwargs['tools'])} tools", file=sys.stderr)
+                    
+                    # Check if this is a tool response message
+                    has_tool_response = False
+                    if "messages" in kwargs:
+                        for message in kwargs["messages"]:
+                            if message.get("role") == "user" and isinstance(message.get("content"), list):
+                                for content_item in message["content"]:
+                                    if isinstance(content_item, dict) and content_item.get("type") == "tool_response":
+                                        has_tool_response = True
+                                        print("Async tool response detected in messages", file=sys.stderr)
+                                        break
+                    
                     response = await original_acreate(self, *args, **kwargs)
                     
                     if utils.enabled:
