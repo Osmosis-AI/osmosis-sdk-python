@@ -7,7 +7,7 @@ This module provides monkey patching for the Anthropic Python client.
 import functools
 import sys
 
-from osmosis_wrap.utils import send_to_hoover, enabled
+from osmosis_wrap.utils import send_to_hoover
 from osmosis_wrap import utils
 
 def wrap_anthropic() -> None:
@@ -52,20 +52,18 @@ def wrap_anthropic() -> None:
                     print(f"Tool use detected with {len(kwargs['tools'])} tools", file=sys.stderr)
                 
                 # Check if this is a tool response message
-                has_tool_response = False
                 if "messages" in kwargs:
                     for message in kwargs["messages"]:
                         if message.get("role") == "user" and isinstance(message.get("content"), list):
                             for content_item in message["content"]:
                                 if isinstance(content_item, dict) and content_item.get("type") == "tool_response":
-                                    has_tool_response = True
                                     print("Tool response detected in messages", file=sys.stderr)
                                     break
                 
                 response = original_messages_create(self, *args, **kwargs)
                 
                 if utils.enabled:
-                    print("Sending to Hoover (success)", file=sys.stderr)
+                    print("Sending success to Hoover (success)", file=sys.stderr)
                     send_to_hoover(
                         query=kwargs,
                         response=response.model_dump() if hasattr(response, 'model_dump') else response,
@@ -76,13 +74,13 @@ def wrap_anthropic() -> None:
             except Exception as e:
                 print(f"Error in wrapped create: {e}", file=sys.stderr)
                 if utils.enabled:
-                    print("Sending to Hoover (error)", file=sys.stderr)
                     error_response = {"error": str(e)}
                     send_to_hoover(
                         query=kwargs,
                         response=error_response,
                         status=400
                     )
+                    print("Sending error to Hoover (success)", file=sys.stderr)
                 raise  # Re-raise the exception
         
         wrapped_messages_create._osmosis_wrapped = True
@@ -165,14 +163,11 @@ def wrap_anthropic() -> None:
                     if has_tools:
                         print(f"Async tool use detected with {len(kwargs['tools'])} tools", file=sys.stderr)
                     
-                    # Check if this is a tool response message
-                    has_tool_response = False
                     if "messages" in kwargs:
                         for message in kwargs["messages"]:
                             if message.get("role") == "user" and isinstance(message.get("content"), list):
                                 for content_item in message["content"]:
                                     if isinstance(content_item, dict) and content_item.get("type") == "tool_response":
-                                        has_tool_response = True
                                         print("Async tool response detected in messages", file=sys.stderr)
                                         break
                     
