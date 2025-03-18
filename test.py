@@ -260,7 +260,7 @@ def test_anthropic_tool_use(setup_osmosis):
         # Create a client and make a call with tools
         client = Anthropic(api_key=mock_get_api_key("anthropic"))
         response = client.messages.create(
-            model="claude-3-opus-20240229",
+            model="claude-3-haiku-20240307",
             max_tokens=150,
             tools=sample_tools,
             messages=[
@@ -278,7 +278,7 @@ def test_anthropic_tool_use(setup_osmosis):
         # Verify the arguments include tools parameter
         assert "query" in mock_send_to_hoover.call_args[1]
         assert "tools" in mock_send_to_hoover.call_args[1]["query"]
-        assert mock_send_to_hoover.call_args[1]["query"]["model"] == "claude-3-opus-20240229"
+        assert mock_send_to_hoover.call_args[1]["query"]["model"] == "claude-3-haiku-20240307"
         assert mock_send_to_hoover.call_args[1]["query"]["tools"] == sample_tools
     finally:
         # Restore the original create method
@@ -367,7 +367,7 @@ def test_anthropic_tool_response(setup_osmosis):
         # Create a client and make the first call with tools
         client = Anthropic(api_key=mock_get_api_key("anthropic"))
         first_call = client.messages.create(
-            model="claude-3-opus-20240229",
+            model="claude-3-haiku-20240307",
             max_tokens=150,
             tools=sample_tools,
             messages=[
@@ -390,7 +390,7 @@ def test_anthropic_tool_response(setup_osmosis):
         }
         
         second_call = client.messages.create(
-            model="claude-3-opus-20240229",
+            model="claude-3-haiku-20240307",
             max_tokens=150,
             messages=[
                 {"role": "user", "content": "What's the weather in San Francisco?"},
@@ -514,7 +514,7 @@ def test_anthropic_async_tool_use(setup_osmosis):
             
             # Make an async call with tools
             response = await client.messages.acreate(
-                model="claude-3-opus-20240229",
+                model="claude-3-haiku-20240307",
                 max_tokens=150,
                 tools=sample_tools,
                 messages=[
@@ -537,7 +537,7 @@ def test_anthropic_async_tool_use(setup_osmosis):
         # Verify the arguments include tools parameter
         assert "query" in mock_send_to_hoover.call_args[1]
         assert "tools" in mock_send_to_hoover.call_args[1]["query"]
-        assert mock_send_to_hoover.call_args[1]["query"]["model"] == "claude-3-opus-20240229"
+        assert mock_send_to_hoover.call_args[1]["query"]["model"] == "claude-3-haiku-20240307"
     
     finally:
         # Restore the original methods
@@ -1149,7 +1149,7 @@ def test_anthropic_async_tool_response(setup_osmosis):
             
             # Make the first async call with tools
             first_call = await client.messages.acreate(
-                model="claude-3-opus-20240229",
+                model="claude-3-haiku-20240307",
                 max_tokens=150,
                 tools=sample_tools,
                 messages=[
@@ -1175,7 +1175,7 @@ def test_anthropic_async_tool_response(setup_osmosis):
             
             # Make the second async call with tool response
             second_call = await client.messages.acreate(
-                model="claude-3-opus-20240229",
+                model="claude-3-haiku-20240307",
                 max_tokens=150,
                 messages=[
                     {"role": "user", "content": "Find me some wireless headphones"},

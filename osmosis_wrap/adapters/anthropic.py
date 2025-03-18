@@ -89,7 +89,70 @@ def wrap_anthropic() -> None:
         messages_class.create = wrapped_messages_create
         print("Successfully wrapped Messages.create method", file=sys.stderr)
     
-    # Patch the async create method if it exists
+    # Directly wrap the AsyncAnthropic client
+    try:
+        # Get the AsyncAnthropic class
+        AsyncAnthropicClass = anthropic.AsyncAnthropic
+        print(f"Found AsyncAnthropic class: {AsyncAnthropicClass}", file=sys.stderr)
+        
+        # Store the original __init__ to keep track of created instances
+        original_async_init = AsyncAnthropicClass.__init__
+        
+        if not hasattr(original_async_init, "_osmosis_wrapped"):
+            @functools.wraps(original_async_init)
+            def wrapped_async_init(self, *args, **kwargs):
+                # Call the original init
+                result = original_async_init(self, *args, **kwargs)
+                
+                print("Wrapping new AsyncAnthropic instance's messages.create method", file=sys.stderr)
+                
+                # Get the messages client from this instance
+                async_messages = self.messages
+                
+                # Store and patch the create method if not already wrapped
+                if hasattr(async_messages, "create") and not hasattr(async_messages.create, "_osmosis_wrapped"):
+                    original_async_messages_create = async_messages.create
+                    
+                    @functools.wraps(original_async_messages_create)
+                    async def wrapped_async_messages_create(*args, **kwargs):
+                        print(f"AsyncAnthropic.messages.create called with args: {args}, kwargs: {kwargs}", file=sys.stderr)
+                        try:
+                            response = await original_async_messages_create(*args, **kwargs)
+                            
+                            if utils.enabled:
+                                print("Sending AsyncAnthropic response to Hoover (success)", file=sys.stderr)
+                                send_to_hoover(
+                                    query=kwargs,
+                                    response=response.model_dump() if hasattr(response, 'model_dump') else response,
+                                    status=200
+                                )
+                            
+                            return response
+                        except Exception as e:
+                            print(f"Error in wrapped AsyncAnthropic.messages.create: {e}", file=sys.stderr)
+                            if utils.enabled:
+                                print("Sending AsyncAnthropic error to Hoover", file=sys.stderr)
+                                error_response = {"error": str(e)}
+                                send_to_hoover(
+                                    query=kwargs,
+                                    response=error_response,
+                                    status=400
+                                )
+                            raise  # Re-raise the exception
+                    
+                    wrapped_async_messages_create._osmosis_wrapped = True
+                    async_messages.create = wrapped_async_messages_create
+                    print("Successfully wrapped AsyncAnthropic.messages.create method", file=sys.stderr)
+                
+                return result
+            
+            wrapped_async_init._osmosis_wrapped = True
+            AsyncAnthropicClass.__init__ = wrapped_async_init
+            print("Successfully wrapped AsyncAnthropic.__init__ to patch message methods on new instances", file=sys.stderr)
+    except (ImportError, AttributeError) as e:
+        print(f"AsyncAnthropic class not found or has unexpected structure: {e}", file=sys.stderr)
+    
+    # For compatibility, still try to patch the old-style acreate method if it exists
     if hasattr(messages_class, "acreate"):
         original_acreate = messages_class.acreate
         if not hasattr(original_acreate, "_osmosis_wrapped"):

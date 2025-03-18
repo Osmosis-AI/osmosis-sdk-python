@@ -81,16 +81,44 @@ def _wrap_openai_v2() -> None:
                 if not hasattr(original_chat_create, "_osmosis_wrapped"):
                     @functools.wraps(original_chat_create)
                     def wrapped_chat_create(*args, **kwargs):
-                        response = original_chat_create(*args, **kwargs)
+                        # Check if streaming is enabled
+                        is_streaming = kwargs.get('stream', False)
                         
-                        if utils.enabled:
-                            send_to_hoover(
-                                query=kwargs,
-                                response=response.model_dump() if hasattr(response, 'model_dump') else response,
-                                status=200
-                            )
+                        if is_streaming:
+                            # For streaming, we need to wrap the iterator
+                            stream = original_chat_create(*args, **kwargs)
                             
-                        return response
+                            if utils.enabled:
+                                # Create a new wrapped iterator that sends data to Hoover
+                                def wrapped_stream():
+                                    chunks = []
+                                    for chunk in stream:
+                                        chunks.append(chunk.model_dump() if hasattr(chunk, 'model_dump') else chunk)
+                                        yield chunk
+                                    
+                                    # After collecting all chunks, send them to Hoover
+                                    if utils.enabled:
+                                        send_to_hoover(
+                                            query=kwargs,
+                                            response={"streaming_chunks": chunks},
+                                            status=200
+                                        )
+                                
+                                return wrapped_stream()
+                            else:
+                                return stream
+                        else:
+                            # For non-streaming, handle normally
+                            response = original_chat_create(*args, **kwargs)
+                            
+                            if utils.enabled:
+                                send_to_hoover(
+                                    query=kwargs,
+                                    response=response.model_dump() if hasattr(response, 'model_dump') else response,
+                                    status=200
+                                )
+                                
+                            return response
                     
                     wrapped_chat_create._osmosis_wrapped = True
                     self.chat.completions.create = wrapped_chat_create
@@ -100,16 +128,44 @@ def _wrap_openai_v2() -> None:
                 if not hasattr(original_completions_create, "_osmosis_wrapped"):
                     @functools.wraps(original_completions_create)
                     def wrapped_completions_create(*args, **kwargs):
-                        response = original_completions_create(*args, **kwargs)
+                        # Check if streaming is enabled
+                        is_streaming = kwargs.get('stream', False)
                         
-                        if utils.enabled:
-                            send_to_hoover(
-                                query=kwargs,
-                                response=response.model_dump() if hasattr(response, 'model_dump') else response,
-                                status=200
-                            )
+                        if is_streaming:
+                            # For streaming, we need to wrap the iterator
+                            stream = original_completions_create(*args, **kwargs)
                             
-                        return response
+                            if utils.enabled:
+                                # Create a new wrapped iterator that sends data to Hoover
+                                def wrapped_stream():
+                                    chunks = []
+                                    for chunk in stream:
+                                        chunks.append(chunk.model_dump() if hasattr(chunk, 'model_dump') else chunk)
+                                        yield chunk
+                                    
+                                    # After collecting all chunks, send them to Hoover
+                                    if utils.enabled:
+                                        send_to_hoover(
+                                            query=kwargs,
+                                            response={"streaming_chunks": chunks},
+                                            status=200
+                                        )
+                                
+                                return wrapped_stream()
+                            else:
+                                return stream
+                        else:
+                            # For non-streaming, handle normally
+                            response = original_completions_create(*args, **kwargs)
+                            
+                            if utils.enabled:
+                                send_to_hoover(
+                                    query=kwargs,
+                                    response=response.model_dump() if hasattr(response, 'model_dump') else response,
+                                    status=200
+                                )
+                                
+                            return response
                     
                     wrapped_completions_create._osmosis_wrapped = True
                     self.completions.create = wrapped_completions_create
@@ -122,16 +178,44 @@ def _wrap_openai_v2() -> None:
                     if not hasattr(original_achat_create, "_osmosis_wrapped"):
                         @functools.wraps(original_achat_create)
                         async def wrapped_achat_create(*args, **kwargs):
-                            response = await original_achat_create(*args, **kwargs)
+                            # Check if streaming is enabled
+                            is_streaming = kwargs.get('stream', False)
                             
-                            if utils.enabled:
-                                send_to_hoover(
-                                    query=kwargs,
-                                    response=response.model_dump() if hasattr(response, 'model_dump') else response,
-                                    status=200
-                                )
+                            if is_streaming:
+                                # For streaming, we need to wrap the async iterator
+                                stream = await original_achat_create(*args, **kwargs)
                                 
-                            return response
+                                if utils.enabled:
+                                    # Create a new wrapped async iterator that sends data to Hoover
+                                    async def wrapped_stream():
+                                        chunks = []
+                                        async for chunk in stream:
+                                            chunks.append(chunk.model_dump() if hasattr(chunk, 'model_dump') else chunk)
+                                            yield chunk
+                                        
+                                        # After collecting all chunks, send them to Hoover
+                                        if utils.enabled:
+                                            send_to_hoover(
+                                                query=kwargs,
+                                                response={"streaming_chunks": chunks},
+                                                status=200
+                                            )
+                                    
+                                    return wrapped_stream()
+                                else:
+                                    return stream
+                            else:
+                                # For non-streaming, handle normally
+                                response = await original_achat_create(*args, **kwargs)
+                                
+                                if utils.enabled:
+                                    send_to_hoover(
+                                        query=kwargs,
+                                        response=response.model_dump() if hasattr(response, 'model_dump') else response,
+                                        status=200
+                                    )
+                                    
+                                return response
                         
                         wrapped_achat_create._osmosis_wrapped = True
                         self.chat.completions.acreate = wrapped_achat_create
@@ -144,16 +228,44 @@ def _wrap_openai_v2() -> None:
                     if not hasattr(original_acompletions_create, "_osmosis_wrapped"):
                         @functools.wraps(original_acompletions_create)
                         async def wrapped_acompletions_create(*args, **kwargs):
-                            response = await original_acompletions_create(*args, **kwargs)
+                            # Check if streaming is enabled
+                            is_streaming = kwargs.get('stream', False)
                             
-                            if utils.enabled:
-                                send_to_hoover(
-                                    query=kwargs,
-                                    response=response.model_dump() if hasattr(response, 'model_dump') else response,
-                                    status=200
-                                )
+                            if is_streaming:
+                                # For streaming, we need to wrap the async iterator
+                                stream = await original_acompletions_create(*args, **kwargs)
                                 
-                            return response
+                                if utils.enabled:
+                                    # Create a new wrapped async iterator that sends data to Hoover
+                                    async def wrapped_stream():
+                                        chunks = []
+                                        async for chunk in stream:
+                                            chunks.append(chunk.model_dump() if hasattr(chunk, 'model_dump') else chunk)
+                                            yield chunk
+                                        
+                                        # After collecting all chunks, send them to Hoover
+                                        if utils.enabled:
+                                            send_to_hoover(
+                                                query=kwargs,
+                                                response={"streaming_chunks": chunks},
+                                                status=200
+                                            )
+                                    
+                                    return wrapped_stream()
+                                else:
+                                    return stream
+                            else:
+                                # For non-streaming, handle normally
+                                response = await original_acompletions_create(*args, **kwargs)
+                                
+                                if utils.enabled:
+                                    send_to_hoover(
+                                        query=kwargs,
+                                        response=response.model_dump() if hasattr(response, 'model_dump') else response,
+                                        status=200
+                                    )
+                                    
+                                return response
                         
                         wrapped_acompletions_create._osmosis_wrapped = True
                         self.completions.acreate = wrapped_acompletions_create
@@ -257,16 +369,44 @@ def _wrap_openai_v1() -> None:
     if not hasattr(original_chat_create, "_osmosis_wrapped"):
         @functools.wraps(original_chat_create)
         def wrapped_chat_create(self, *args, **kwargs):
-            response = original_chat_create(self, *args, **kwargs)
+            # Check if streaming is enabled
+            is_streaming = kwargs.get('stream', False)
             
-            if utils.enabled:
-                send_to_hoover(
-                    query=kwargs,
-                    response=response.model_dump() if hasattr(response, 'model_dump') else response,
-                    status=200
-                )
+            if is_streaming:
+                # For streaming, we need to wrap the iterator
+                stream = original_chat_create(self, *args, **kwargs)
                 
-            return response
+                if utils.enabled:
+                    # Create a new wrapped iterator that sends data to Hoover
+                    def wrapped_stream():
+                        chunks = []
+                        for chunk in stream:
+                            chunks.append(chunk.model_dump() if hasattr(chunk, 'model_dump') else chunk)
+                            yield chunk
+                        
+                        # After collecting all chunks, send them to Hoover
+                        if utils.enabled:
+                            send_to_hoover(
+                                query=kwargs,
+                                response={"streaming_chunks": chunks},
+                                status=200
+                            )
+                    
+                    return wrapped_stream()
+                else:
+                    return stream
+            else:
+                # For non-streaming, handle normally
+                response = original_chat_create(self, *args, **kwargs)
+                
+                if utils.enabled:
+                    send_to_hoover(
+                        query=kwargs,
+                        response=response.model_dump() if hasattr(response, 'model_dump') else response,
+                        status=200
+                    )
+                    
+                return response
         
         wrapped_chat_create._osmosis_wrapped = True
         completions.Completions.create = wrapped_chat_create
@@ -276,16 +416,44 @@ def _wrap_openai_v1() -> None:
     if not hasattr(original_completions_create, "_osmosis_wrapped"):
         @functools.wraps(original_completions_create)
         def wrapped_completions_create(self, *args, **kwargs):
-            response = original_completions_create(self, *args, **kwargs)
+            # Check if streaming is enabled
+            is_streaming = kwargs.get('stream', False)
             
-            if utils.enabled:
-                send_to_hoover(
-                    query=kwargs,
-                    response=response.model_dump() if hasattr(response, 'model_dump') else response,
-                    status=200
-                )
+            if is_streaming:
+                # For streaming, we need to wrap the iterator
+                stream = original_completions_create(self, *args, **kwargs)
                 
-            return response
+                if utils.enabled:
+                    # Create a new wrapped iterator that sends data to Hoover
+                    def wrapped_stream():
+                        chunks = []
+                        for chunk in stream:
+                            chunks.append(chunk.model_dump() if hasattr(chunk, 'model_dump') else chunk)
+                            yield chunk
+                        
+                        # After collecting all chunks, send them to Hoover
+                        if utils.enabled:
+                            send_to_hoover(
+                                query=kwargs,
+                                response={"streaming_chunks": chunks},
+                                status=200
+                            )
+                    
+                    return wrapped_stream()
+                else:
+                    return stream
+            else:
+                # For non-streaming, handle normally
+                response = original_completions_create(self, *args, **kwargs)
+                
+                if utils.enabled:
+                    send_to_hoover(
+                        query=kwargs,
+                        response=response.model_dump() if hasattr(response, 'model_dump') else response,
+                        status=200
+                    )
+                    
+                return response
         
         wrapped_completions_create._osmosis_wrapped = True
         text_completions.Completions.create = wrapped_completions_create
@@ -302,16 +470,44 @@ def _wrap_openai_v1() -> None:
                 
                 @functools.wraps(original_method)
                 async def wrapped_async_method(self, *args, **kwargs):
-                    response = await original_method(self, *args, **kwargs)
+                    # Check if streaming is enabled
+                    is_streaming = kwargs.get('stream', False)
                     
-                    if utils.enabled:
-                        send_to_hoover(
-                            query=kwargs,
-                            response=response.model_dump() if hasattr(response, 'model_dump') else response,
-                            status=200
-                        )
+                    if is_streaming:
+                        # For streaming, we need to wrap the async iterator
+                        stream = await original_method(self, *args, **kwargs)
                         
-                    return response
+                        if utils.enabled:
+                            # Create a new wrapped async iterator that sends data to Hoover
+                            async def wrapped_stream():
+                                chunks = []
+                                async for chunk in stream:
+                                    chunks.append(chunk.model_dump() if hasattr(chunk, 'model_dump') else chunk)
+                                    yield chunk
+                                
+                                # After collecting all chunks, send them to Hoover
+                                if utils.enabled:
+                                    send_to_hoover(
+                                        query=kwargs,
+                                        response={"streaming_chunks": chunks},
+                                        status=200
+                                    )
+                            
+                            return wrapped_stream()
+                        else:
+                            return stream
+                    else:
+                        # For non-streaming, handle normally
+                        response = await original_method(self, *args, **kwargs)
+                        
+                        if utils.enabled:
+                            send_to_hoover(
+                                query=kwargs,
+                                response=response.model_dump() if hasattr(response, 'model_dump') else response,
+                                status=200
+                            )
+                            
+                        return response
                 
                 wrapped_async_method._osmosis_wrapped = True
                 setattr(module.Completions, name, wrapped_async_method)
@@ -341,16 +537,45 @@ def _wrap_openai_v1() -> None:
                     @functools.wraps(original_achat_create)
                     async def wrapped_achat_create(*args, **kwargs):
                         print(f"AsyncOpenAI v1 wrapped create called", file=sys.stderr)
-                        response = await original_achat_create(*args, **kwargs)
                         
-                        if utils.enabled:
-                            send_to_hoover(
-                                query=kwargs,
-                                response=response.model_dump() if hasattr(response, 'model_dump') else response,
-                                status=200
-                            )
+                        # Check if streaming is enabled
+                        is_streaming = kwargs.get('stream', False)
+                        
+                        if is_streaming:
+                            # For streaming, we need to wrap the async iterator
+                            stream = await original_achat_create(*args, **kwargs)
                             
-                        return response
+                            if utils.enabled:
+                                # Create a new wrapped async iterator that sends data to Hoover
+                                async def wrapped_stream():
+                                    chunks = []
+                                    async for chunk in stream:
+                                        chunks.append(chunk.model_dump() if hasattr(chunk, 'model_dump') else chunk)
+                                        yield chunk
+                                    
+                                    # After collecting all chunks, send them to Hoover
+                                    if utils.enabled:
+                                        send_to_hoover(
+                                            query=kwargs,
+                                            response={"streaming_chunks": chunks},
+                                            status=200
+                                        )
+                                
+                                return wrapped_stream()
+                            else:
+                                return stream
+                        else:
+                            # For non-streaming, handle normally
+                            response = await original_achat_create(*args, **kwargs)
+                            
+                            if utils.enabled:
+                                send_to_hoover(
+                                    query=kwargs,
+                                    response=response.model_dump() if hasattr(response, 'model_dump') else response,
+                                    status=200
+                                )
+                                
+                            return response
                     
                     wrapped_achat_create._osmosis_wrapped = True
                     self.chat.completions.create = wrapped_achat_create
@@ -360,16 +585,44 @@ def _wrap_openai_v1() -> None:
                 if not hasattr(original_acompletions_create, "_osmosis_wrapped"):
                     @functools.wraps(original_acompletions_create)
                     async def wrapped_acompletions_create(*args, **kwargs):
-                        response = await original_acompletions_create(*args, **kwargs)
+                        # Check if streaming is enabled
+                        is_streaming = kwargs.get('stream', False)
                         
-                        if utils.enabled:
-                            send_to_hoover(
-                                query=kwargs,
-                                response=response.model_dump() if hasattr(response, 'model_dump') else response,
-                                status=200
-                            )
+                        if is_streaming:
+                            # For streaming, we need to wrap the async iterator
+                            stream = await original_acompletions_create(*args, **kwargs)
                             
-                        return response
+                            if utils.enabled:
+                                # Create a new wrapped async iterator that sends data to Hoover
+                                async def wrapped_stream():
+                                    chunks = []
+                                    async for chunk in stream:
+                                        chunks.append(chunk.model_dump() if hasattr(chunk, 'model_dump') else chunk)
+                                        yield chunk
+                                    
+                                    # After collecting all chunks, send them to Hoover
+                                    if utils.enabled:
+                                        send_to_hoover(
+                                            query=kwargs,
+                                            response={"streaming_chunks": chunks},
+                                            status=200
+                                        )
+                                
+                                return wrapped_stream()
+                            else:
+                                return stream
+                        else:
+                            # For non-streaming, handle normally
+                            response = await original_acompletions_create(*args, **kwargs)
+                            
+                            if utils.enabled:
+                                send_to_hoover(
+                                    query=kwargs,
+                                    response=response.model_dump() if hasattr(response, 'model_dump') else response,
+                                    status=200
+                                )
+                                
+                            return response
                     
                     wrapped_acompletions_create._osmosis_wrapped = True
                     self.completions.create = wrapped_acompletions_create
@@ -388,16 +641,44 @@ def _wrap_openai_legacy() -> None:
     if not hasattr(original_completion_create, "_osmosis_wrapped"):
         @functools.wraps(original_completion_create)
         def wrapped_completion_create(*args, **kwargs):
-            response = original_completion_create(*args, **kwargs)
+            # Check if streaming is enabled
+            is_streaming = kwargs.get('stream', False)
             
-            if utils.enabled:
-                send_to_hoover(
-                    query=kwargs,
-                    response=response,
-                    status=200
-                )
+            if is_streaming:
+                # For streaming, we need to wrap the iterator
+                stream = original_completion_create(*args, **kwargs)
                 
-            return response
+                if utils.enabled:
+                    # Create a new wrapped iterator that sends data to Hoover
+                    def wrapped_stream():
+                        chunks = []
+                        for chunk in stream:
+                            chunks.append(chunk)
+                            yield chunk
+                        
+                        # After collecting all chunks, send them to Hoover
+                        if utils.enabled:
+                            send_to_hoover(
+                                query=kwargs,
+                                response={"streaming_chunks": chunks},
+                                status=200
+                            )
+                    
+                    return wrapped_stream()
+                else:
+                    return stream
+            else:
+                # For non-streaming, handle normally
+                response = original_completion_create(*args, **kwargs)
+                
+                if utils.enabled:
+                    send_to_hoover(
+                        query=kwargs,
+                        response=response,
+                        status=200
+                    )
+                    
+                return response
         
         wrapped_completion_create._osmosis_wrapped = True
         openai.Completion.create = wrapped_completion_create
@@ -408,16 +689,44 @@ def _wrap_openai_legacy() -> None:
         if not hasattr(original_chat_create, "_osmosis_wrapped"):
             @functools.wraps(original_chat_create)
             def wrapped_chat_create(*args, **kwargs):
-                response = original_chat_create(*args, **kwargs)
+                # Check if streaming is enabled
+                is_streaming = kwargs.get('stream', False)
                 
-                if utils.enabled:
-                    send_to_hoover(
-                        query=kwargs,
-                        response=response,
-                        status=200
-                    )
+                if is_streaming:
+                    # For streaming, we need to wrap the iterator
+                    stream = original_chat_create(*args, **kwargs)
                     
-                return response
+                    if utils.enabled:
+                        # Create a new wrapped iterator that sends data to Hoover
+                        def wrapped_stream():
+                            chunks = []
+                            for chunk in stream:
+                                chunks.append(chunk)
+                                yield chunk
+                            
+                            # After collecting all chunks, send them to Hoover
+                            if utils.enabled:
+                                send_to_hoover(
+                                    query=kwargs,
+                                    response={"streaming_chunks": chunks},
+                                    status=200
+                                )
+                        
+                        return wrapped_stream()
+                    else:
+                        return stream
+                else:
+                    # For non-streaming, handle normally
+                    response = original_chat_create(*args, **kwargs)
+                    
+                    if utils.enabled:
+                        send_to_hoover(
+                            query=kwargs,
+                            response=response,
+                            status=200
+                        )
+                        
+                    return response
             
             wrapped_chat_create._osmosis_wrapped = True
             openai.ChatCompletion.create = wrapped_chat_create
@@ -432,16 +741,44 @@ def _wrap_openai_legacy() -> None:
             if not hasattr(original_acreate, "_osmosis_wrapped"):
                 @functools.wraps(original_acreate)
                 async def wrapped_acreate(*args, **kwargs):
-                    response = await original_acreate(*args, **kwargs)
+                    # Check if streaming is enabled
+                    is_streaming = kwargs.get('stream', False)
                     
-                    if utils.enabled:
-                        send_to_hoover(
-                            query=kwargs,
-                            response=response,
-                            status=200
-                        )
+                    if is_streaming:
+                        # For streaming, we need to wrap the async iterator
+                        stream = await original_acreate(*args, **kwargs)
                         
-                    return response
+                        if utils.enabled:
+                            # Create a new wrapped async iterator that sends data to Hoover
+                            async def wrapped_stream():
+                                chunks = []
+                                async for chunk in stream:
+                                    chunks.append(chunk)
+                                    yield chunk
+                                
+                                # After collecting all chunks, send them to Hoover
+                                if utils.enabled:
+                                    send_to_hoover(
+                                        query=kwargs,
+                                        response={"streaming_chunks": chunks},
+                                        status=200
+                                    )
+                            
+                            return wrapped_stream()
+                        else:
+                            return stream
+                    else:
+                        # For non-streaming, handle normally
+                        response = await original_acreate(*args, **kwargs)
+                        
+                        if utils.enabled:
+                            send_to_hoover(
+                                query=kwargs,
+                                response=response,
+                                status=200
+                            )
+                            
+                        return response
                 
                 wrapped_acreate._osmosis_wrapped = True
                 obj.acreate = wrapped_acreate

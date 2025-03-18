@@ -61,9 +61,8 @@ import osmosis_wrap
 osmosis_wrap.init("your-hoover-api-key")
 
 # Or load from environment variable
-from generic_util import get_api_key
 
-hoover_api_key = get_api_key("hoover")
+hoover_api_key = os.environ.get("HOOVER_API_KEY")
 osmosis_wrap.init(hoover_api_key)
 ```
 
@@ -171,14 +170,13 @@ The library can automatically use API keys from environment variables:
 
 ```python
 import osmosis_wrap
-from osmosis_wrap.utils import get_api_key
 
 # Initialize with Hoover API key from environment
-hoover_api_key = get_api_key("hoover")
+hoover_api_key = os.environ.get("HOOVER_API_KEY")
 osmosis_wrap.init(hoover_api_key)
 
 # Get LLM API key from environment
-api_key = get_api_key("anthropic")
+api_key = os.environ.get("ANTHROPIC_API_KEY")
 client = Anthropic(api_key=api_key)
 ```
 

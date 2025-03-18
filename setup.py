@@ -7,11 +7,11 @@ setup(
     name="osmosis-wrap",
     version="0.1.0",
     author="Osmosis AI",
-    author_email="your.email@example.com",
+    author_email="jake@gulp.ai",
     description="Monkey patches LLM client libraries to print all prompts and responses",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/your-username/osmosis-wrap",
+    url="https://github.com/Gulp-AI/osmosis-wrap",
     packages=find_packages(),
     classifiers=[
         "Programming Language :: Python :: 3",
