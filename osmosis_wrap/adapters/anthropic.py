@@ -22,28 +22,49 @@ def wrap_anthropic() -> None:
         print("Error: anthropic package is not installed.", file=sys.stderr)
         return
     
+    print(f"Wrapping Anthropic client, package version: {anthropic.__version__}", file=sys.stderr)
+    
     # Get the resources.messages module and class
     messages_module = anthropic.resources.messages
     messages_class = messages_module.Messages
+    
+    print(f"Found Anthropic messages class: {messages_class}", file=sys.stderr)
 
     # Patch the Messages.create method
     original_messages_create = messages_class.create
+    print(f"Original create method: {original_messages_create}", file=sys.stderr)
+    
     if not hasattr(original_messages_create, "_osmosis_wrapped"):
         @functools.wraps(original_messages_create)
         def wrapped_messages_create(self, *args, **kwargs):
-            response = original_messages_create(self, *args, **kwargs)
-            
-            if utils.enabled:
-                send_to_hoover(
-                    query=kwargs,
-                    response=response.model_dump() if hasattr(response, 'model_dump') else response,
-                    status=200
-                )
+            print(f"Wrapped create called with args: {args}, kwargs: {kwargs}", file=sys.stderr)
+            try:
+                response = original_messages_create(self, *args, **kwargs)
                 
-            return response
+                if utils.enabled:
+                    print("Sending to Hoover (success)", file=sys.stderr)
+                    send_to_hoover(
+                        query=kwargs,
+                        response=response.model_dump() if hasattr(response, 'model_dump') else response,
+                        status=200
+                    )
+                    
+                return response
+            except Exception as e:
+                print(f"Error in wrapped create: {e}", file=sys.stderr)
+                if utils.enabled:
+                    print("Sending to Hoover (error)", file=sys.stderr)
+                    error_response = {"error": str(e)}
+                    send_to_hoover(
+                        query=kwargs,
+                        response=error_response,
+                        status=400
+                    )
+                raise  # Re-raise the exception
         
         wrapped_messages_create._osmosis_wrapped = True
         messages_class.create = wrapped_messages_create
+        print("Successfully wrapped Messages.create method", file=sys.stderr)
     
     # Patch the async create method if it exists
     if hasattr(messages_class, "acreate"):
