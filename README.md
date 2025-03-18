@@ -6,6 +6,7 @@ A Python library that monkey patches LLM client libraries to send all prompts an
 
 - **Anthropic**: Logs all Claude API requests and responses (both sync and async clients)
 - **OpenAI**: Logs all OpenAI API requests and responses (supports v1 and v2 API versions, both sync and async clients)
+- **LangChain**: Currently supports prompt template logging (LLM and ChatModel support varies by LangChain version)
 
 ## Installation
 
@@ -138,6 +139,30 @@ async def call_openai_async():
 
 # All async API calls will be logged to Hoover as well
 asyncio.run(call_openai_async())
+```
+
+### LangChain Example
+
+```python
+from langchain_core.prompts import PromptTemplate
+
+# Use LangChain prompt templates as usual
+template = PromptTemplate(
+    input_variables=["topic"],
+    template="Write a short paragraph about {topic}."
+)
+
+# Formatting the prompt will be logged to Hoover
+formatted_prompt = template.format(topic="artificial intelligence")
+print(f"Formatted prompt: {formatted_prompt}")
+
+# Multiple prompt templates are also captured
+template2 = PromptTemplate(
+    input_variables=["name", "profession"],
+    template="My name is {name} and I work as a {profession}."
+)
+formatted_prompt2 = template2.format(name="Alice", profession="data scientist")
+print(f"Formatted prompt 2: {formatted_prompt2}")
 ```
 
 ### Using Environment Variables

@@ -25,6 +25,7 @@ setup(
     extras_require={
         "anthropic": ["anthropic>=0.5.0"],
         "openai": ["openai>=0.27.0"],
-        "all": ["anthropic>=0.5.0", "openai>=0.27.0"],
+        "langchain": ["langchain>=0.0.200"],
+        "all": ["anthropic>=0.5.0", "openai>=0.27.0", "langchain>=0.0.200"],
     },
 ) 

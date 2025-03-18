@@ -20,10 +20,18 @@ To use this library:
    from openai import OpenAI, AsyncOpenAI
    openai_client = OpenAI()
    async_openai_client = AsyncOpenAI()
+   
+   # With LangChain:
+   from langchain.llms import OpenAI as LangChainOpenAI
+   from langchain.chat_models import ChatOpenAI
+   
+   llm = LangChainOpenAI()
+   chat_model = ChatOpenAI()
 
 Currently supported adapters:
 - Anthropic (both sync and async clients)
 - OpenAI (both sync and async clients, v1 and v2 API versions)
+- LangChain (LLMs, Chat Models, and Prompt Templates)
 """
 
 from . import utils
@@ -49,4 +57,18 @@ enable_hoover = utils.enable_hoover
 
 # Automatically apply patches when the module is imported
 wrap_anthropic()
-wrap_openai() 
+wrap_openai()
+
+# Conditionally load and apply LangChain wrapper
+try:
+    from .adapters import langchain
+    wrap_langchain = langchain.wrap_langchain
+    # Apply the wrapper, but don't fail if it doesn't work
+    try:
+        wrap_langchain()
+    except Exception as e:
+        print(f"Warning: Failed to wrap LangChain: {str(e)}")
+except ImportError:
+    # LangChain not installed or not compatible
+    def wrap_langchain():
+        print("LangChain support not available. Install LangChain to use this feature.") 
