@@ -49,13 +49,31 @@ def _wrap_openai_v2() -> None:
         # Get the OpenAI class
         from openai import OpenAI
         
-        # Store the original __init__ method
+        # Debug: Print all available OpenAI modules
+        print(f"OpenAI modules: {dir(openai)}", file=sys.stderr)
+        
+        # Try to import AsyncOpenAI
+        try:
+            from openai import AsyncOpenAI
+            print(f"Successfully imported AsyncOpenAI", file=sys.stderr)
+            has_async_client = True
+        except ImportError:
+            print(f"Failed to import AsyncOpenAI", file=sys.stderr)
+            has_async_client = False
+        
+        # Store the original __init__ method for OpenAI
         original_init = OpenAI.__init__
         
         @functools.wraps(original_init)
         def wrapped_init(self, *args, **kwargs):
             # Call the original __init__
             original_init(self, *args, **kwargs)
+            
+            # Debug: Print client structure
+            if hasattr(self, 'chat') and hasattr(self.chat, 'completions'):
+                print(f"Client chat completions methods: {dir(self.chat.completions)}", file=sys.stderr)
+                if hasattr(self.chat.completions, 'create'):
+                    print(f"create is a coro: {inspect.iscoroutinefunction(self.chat.completions.create)}", file=sys.stderr)
             
             # Now wrap the client's chat.completions.create and completions.create methods
             if hasattr(self, 'chat') and hasattr(self.chat, 'completions'):
@@ -99,6 +117,7 @@ def _wrap_openai_v2() -> None:
             # Wrap async methods
             if hasattr(self, 'chat') and hasattr(self.chat, 'completions'):
                 if hasattr(self.chat.completions, 'acreate'):
+                    print(f"Found acreate in chat.completions", file=sys.stderr)
                     original_achat_create = self.chat.completions.acreate
                     if not hasattr(original_achat_create, "_osmosis_wrapped"):
                         @functools.wraps(original_achat_create)
@@ -116,6 +135,8 @@ def _wrap_openai_v2() -> None:
                         
                         wrapped_achat_create._osmosis_wrapped = True
                         self.chat.completions.acreate = wrapped_achat_create
+                else:
+                    print(f"acreate not found in chat.completions", file=sys.stderr)
             
             if hasattr(self, 'completions'):
                 if hasattr(self.completions, 'acreate'):
@@ -140,6 +161,67 @@ def _wrap_openai_v2() -> None:
         wrapped_init._osmosis_wrapped = True
         OpenAI.__init__ = wrapped_init
         
+        # Also wrap AsyncOpenAI if it exists
+        if has_async_client:
+            print(f"Wrapping AsyncOpenAI __init__", file=sys.stderr)
+            original_async_init = AsyncOpenAI.__init__
+            
+            @functools.wraps(original_async_init)
+            def wrapped_async_init(self, *args, **kwargs):
+                # Call the original __init__
+                original_async_init(self, *args, **kwargs)
+                
+                # Debug: Print AsyncOpenAI client structure
+                print(f"AsyncOpenAI client structure:", file=sys.stderr)
+                if hasattr(self, 'chat') and hasattr(self.chat, 'completions'):
+                    print(f"AsyncOpenAI chat completions methods: {dir(self.chat.completions)}", file=sys.stderr)
+                    if hasattr(self.chat.completions, 'create'):
+                        print(f"create is a coro: {inspect.iscoroutinefunction(self.chat.completions.create)}", file=sys.stderr)
+                
+                # Wrap the async client's methods
+                if hasattr(self, 'chat') and hasattr(self.chat, 'completions'):
+                    original_achat_create = self.chat.completions.create
+                    if not hasattr(original_achat_create, "_osmosis_wrapped"):
+                        print(f"Wrapping AsyncOpenAI chat.completions.create", file=sys.stderr)
+                        @functools.wraps(original_achat_create)
+                        async def wrapped_achat_create(*args, **kwargs):
+                            print(f"AsyncOpenAI wrapped create called", file=sys.stderr)
+                            response = await original_achat_create(*args, **kwargs)
+                            
+                            if utils.enabled:
+                                send_to_hoover(
+                                    query=kwargs,
+                                    response=response.model_dump() if hasattr(response, 'model_dump') else response,
+                                    status=200
+                                )
+                                
+                            return response
+                        
+                        wrapped_achat_create._osmosis_wrapped = True
+                        self.chat.completions.create = wrapped_achat_create
+                
+                if hasattr(self, 'completions'):
+                    original_acompletions_create = self.completions.create
+                    if not hasattr(original_acompletions_create, "_osmosis_wrapped"):
+                        @functools.wraps(original_acompletions_create)
+                        async def wrapped_acompletions_create(*args, **kwargs):
+                            response = await original_acompletions_create(*args, **kwargs)
+                            
+                            if utils.enabled:
+                                send_to_hoover(
+                                    query=kwargs,
+                                    response=response.model_dump() if hasattr(response, 'model_dump') else response,
+                                    status=200
+                                )
+                                
+                            return response
+                        
+                        wrapped_acompletions_create._osmosis_wrapped = True
+                        self.completions.create = wrapped_acompletions_create
+            
+            wrapped_async_init._osmosis_wrapped = True
+            AsyncOpenAI.__init__ = wrapped_async_init
+        
         print("OpenAI v2 client has been wrapped by osmosis-wrap.", file=sys.stderr)
     except (ImportError, AttributeError) as e:
         print(f"Failed to wrap OpenAI v2 client: {e}", file=sys.stderr)
@@ -149,6 +231,26 @@ def _wrap_openai_v1() -> None:
     from openai import OpenAI
     from openai.resources.chat import completions
     from openai.resources import completions as text_completions
+    
+    # Print package structure to debug
+    print(f"OpenAI package structure in v1 wrapper:", file=sys.stderr)
+    try:
+        import openai
+        print(f"OpenAI modules: {dir(openai)}", file=sys.stderr)
+    except Exception as e:
+        print(f"Error inspecting openai module: {e}", file=sys.stderr)
+    
+    # Try to import AsyncOpenAI
+    try:
+        from openai import AsyncOpenAI
+        print(f"Successfully imported AsyncOpenAI in v1 wrapper", file=sys.stderr)
+        has_async_client = True
+    except ImportError:
+        print(f"Failed to import AsyncOpenAI in v1 wrapper", file=sys.stderr)
+        has_async_client = False
+    
+    # Print available methods in completions module
+    print(f"Available methods in completions: {dir(completions.Completions)}", file=sys.stderr)
     
     # Patch the chat completions create method
     original_chat_create = completions.Completions.create
@@ -195,6 +297,7 @@ def _wrap_openai_v1() -> None:
                 and inspect.iscoroutinefunction(method) 
                 and not hasattr(method, "_osmosis_wrapped")):
                 
+                print(f"Found async method {name} in {module.__name__}", file=sys.stderr)
                 original_method = method
                 
                 @functools.wraps(original_method)
@@ -212,6 +315,67 @@ def _wrap_openai_v1() -> None:
                 
                 wrapped_async_method._osmosis_wrapped = True
                 setattr(module.Completions, name, wrapped_async_method)
+    
+    # Explicitly wrap AsyncOpenAI if it exists
+    if has_async_client:
+        print(f"Wrapping AsyncOpenAI __init__ in v1 wrapper", file=sys.stderr)
+        original_async_init = AsyncOpenAI.__init__
+        
+        @functools.wraps(original_async_init)
+        def wrapped_async_init(self, *args, **kwargs):
+            # Call the original __init__
+            original_async_init(self, *args, **kwargs)
+            
+            # Debug: Print AsyncOpenAI client structure
+            print(f"AsyncOpenAI client structure in v1:", file=sys.stderr)
+            if hasattr(self, 'chat') and hasattr(self.chat, 'completions'):
+                print(f"AsyncOpenAI chat completions methods: {dir(self.chat.completions)}", file=sys.stderr)
+                if hasattr(self.chat.completions, 'create'):
+                    print(f"create is a coro: {inspect.iscoroutinefunction(self.chat.completions.create)}", file=sys.stderr)
+            
+            # Now wrap the async client's methods
+            if hasattr(self, 'chat') and hasattr(self.chat, 'completions'):
+                original_achat_create = self.chat.completions.create
+                if not hasattr(original_achat_create, "_osmosis_wrapped"):
+                    print(f"Wrapping AsyncOpenAI chat.completions.create in v1", file=sys.stderr)
+                    @functools.wraps(original_achat_create)
+                    async def wrapped_achat_create(*args, **kwargs):
+                        print(f"AsyncOpenAI v1 wrapped create called", file=sys.stderr)
+                        response = await original_achat_create(*args, **kwargs)
+                        
+                        if utils.enabled:
+                            send_to_hoover(
+                                query=kwargs,
+                                response=response.model_dump() if hasattr(response, 'model_dump') else response,
+                                status=200
+                            )
+                            
+                        return response
+                    
+                    wrapped_achat_create._osmosis_wrapped = True
+                    self.chat.completions.create = wrapped_achat_create
+            
+            if hasattr(self, 'completions'):
+                original_acompletions_create = self.completions.create
+                if not hasattr(original_acompletions_create, "_osmosis_wrapped"):
+                    @functools.wraps(original_acompletions_create)
+                    async def wrapped_acompletions_create(*args, **kwargs):
+                        response = await original_acompletions_create(*args, **kwargs)
+                        
+                        if utils.enabled:
+                            send_to_hoover(
+                                query=kwargs,
+                                response=response.model_dump() if hasattr(response, 'model_dump') else response,
+                                status=200
+                            )
+                            
+                        return response
+                    
+                    wrapped_acompletions_create._osmosis_wrapped = True
+                    self.completions.create = wrapped_acompletions_create
+        
+        wrapped_async_init._osmosis_wrapped = True
+        AsyncOpenAI.__init__ = wrapped_async_init
     
     print("OpenAI v1 client has been wrapped by osmosis-wrap.", file=sys.stderr)
 

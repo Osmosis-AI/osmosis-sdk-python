@@ -4,8 +4,8 @@ A Python library that monkey patches LLM client libraries to send all prompts an
 
 ## Supported Libraries
 
-- **Anthropic**: Logs all Claude API requests and responses
-- **OpenAI**: Logs all OpenAI API requests and responses (supports both v1 and legacy clients)
+- **Anthropic**: Logs all Claude API requests and responses (both sync and async clients)
+- **OpenAI**: Logs all OpenAI API requests and responses (supports v1 and v2 API versions, both sync and async clients)
 
 ## Installation
 
@@ -84,6 +84,24 @@ response = client.messages.create(
         {"role": "user", "content": "Hello, Claude!"}
     ]
 )
+
+# Async client is also supported
+from anthropic import AsyncAnthropic
+import asyncio
+
+async def call_claude_async():
+    async_client = AsyncAnthropic(api_key="your-api-key")
+    response = await async_client.messages.create(
+        model="claude-3-haiku-20240307",
+        max_tokens=1000,
+        messages=[
+            {"role": "user", "content": "Hello, async Claude!"}
+        ]
+    )
+    return response
+
+# All async API calls will be logged to Hoover as well
+asyncio.run(call_claude_async())
 ```
 
 ### OpenAI Example
@@ -102,6 +120,24 @@ response = client.chat.completions.create(
         {"role": "user", "content": "Hello, GPT!"}
     ]
 )
+
+# Async client is also supported
+from openai import AsyncOpenAI
+import asyncio
+
+async def call_openai_async():
+    async_client = AsyncOpenAI(api_key="your-api-key")
+    response = await async_client.chat.completions.create(
+        model="gpt-4o-mini",
+        max_tokens=150,
+        messages=[
+            {"role": "user", "content": "Hello, async GPT!"}
+        ]
+    )
+    return response
+
+# All async API calls will be logged to Hoover as well
+asyncio.run(call_openai_async())
 ```
 
 ### Using Environment Variables

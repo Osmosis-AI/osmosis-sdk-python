@@ -12,10 +12,18 @@ To use this library:
 2. Import and use your LLM clients as usual:
    from anthropic import Anthropic
    client = Anthropic()
+   
+   # Or with async clients:
+   from anthropic import AsyncAnthropic
+   async_client = AsyncAnthropic()
+   
+   from openai import OpenAI, AsyncOpenAI
+   openai_client = OpenAI()
+   async_openai_client = AsyncOpenAI()
 
 Currently supported adapters:
-- Anthropic
-- OpenAI
+- Anthropic (both sync and async clients)
+- OpenAI (both sync and async clients, v1 and v2 API versions)
 """
 
 from . import utils

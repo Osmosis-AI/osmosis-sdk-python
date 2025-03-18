@@ -72,19 +72,36 @@ def wrap_anthropic() -> None:
         if not hasattr(original_acreate, "_osmosis_wrapped"):
             @functools.wraps(original_acreate)
             async def wrapped_acreate(self, *args, **kwargs):
-                response = await original_acreate(self, *args, **kwargs)
-                
-                if utils.enabled:
-                    send_to_hoover(
-                        query=kwargs,
-                        response=response.model_dump() if hasattr(response, 'model_dump') else response,
-                        status=200
-                    )
+                print(f"Wrapped async create called with args: {args}, kwargs: {kwargs}", file=sys.stderr)
+                try:
+                    response = await original_acreate(self, *args, **kwargs)
                     
-                return response
+                    if utils.enabled:
+                        print("Sending async response to Hoover (success)", file=sys.stderr)
+                        send_to_hoover(
+                            query=kwargs,
+                            response=response.model_dump() if hasattr(response, 'model_dump') else response,
+                            status=200
+                        )
+                        
+                    return response
+                except Exception as e:
+                    print(f"Error in wrapped async create: {e}", file=sys.stderr)
+                    if utils.enabled:
+                        print("Sending async error to Hoover", file=sys.stderr)
+                        error_response = {"error": str(e)}
+                        send_to_hoover(
+                            query=kwargs,
+                            response=error_response,
+                            status=400
+                        )
+                    raise  # Re-raise the exception
             
             wrapped_acreate._osmosis_wrapped = True
             messages_class.acreate = wrapped_acreate
+            print("Successfully wrapped Messages.acreate method", file=sys.stderr)
+    else:
+        print("No async acreate method found in Messages class", file=sys.stderr)
 
     # Check if Completions exists and wrap it if it does
     try:
@@ -115,21 +132,42 @@ def wrap_anthropic() -> None:
                 if not hasattr(original_completions_acreate, "_osmosis_wrapped"):
                     @functools.wraps(original_completions_acreate)
                     async def wrapped_completions_acreate(self, *args, **kwargs):
-                        response = await original_completions_acreate(self, *args, **kwargs)
-                        
-                        if utils.enabled:
-                            send_to_hoover(
-                                query=kwargs,
-                                response=response.model_dump() if hasattr(response, 'model_dump') else response,
-                                status=200
-                            )
+                        print(f"Wrapped Completions async create called with args: {args}, kwargs: {kwargs}", file=sys.stderr)
+                        try:
+                            response = await original_completions_acreate(self, *args, **kwargs)
                             
-                        return response
+                            if utils.enabled:
+                                print("Sending Completions async response to Hoover (success)", file=sys.stderr)
+                                send_to_hoover(
+                                    query=kwargs,
+                                    response=response.model_dump() if hasattr(response, 'model_dump') else response,
+                                    status=200
+                                )
+                                
+                            return response
+                        except Exception as e:
+                            print(f"Error in wrapped Completions async create: {e}", file=sys.stderr)
+                            if utils.enabled:
+                                print("Sending Completions async error to Hoover", file=sys.stderr)
+                                error_response = {"error": str(e)}
+                                send_to_hoover(
+                                    query=kwargs,
+                                    response=error_response,
+                                    status=400
+                                )
+                            raise  # Re-raise the exception
                     
                     wrapped_completions_acreate._osmosis_wrapped = True
                     completions_class.acreate = wrapped_completions_acreate
-    except (ImportError, AttributeError):
+                    print("Successfully wrapped Completions.acreate method", file=sys.stderr)
+                else:
+                    print("Completions.acreate already wrapped", file=sys.stderr)
+            else:
+                print("No async acreate method found in Completions class", file=sys.stderr)
+        else:
+            print("Completions.create already wrapped", file=sys.stderr)
+    except (ImportError, AttributeError) as e:
         # Completions module may not exist in this version
-        pass
+        print(f"Completions module not found or has an unexpected structure: {e}", file=sys.stderr)
 
     print("Anthropic client has been wrapped by osmosis-wrap.", file=sys.stderr) 
