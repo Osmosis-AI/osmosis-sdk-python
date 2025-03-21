@@ -1,0 +1,18 @@
+include LICENSE
+include README.md
+include pyproject.toml
+include requirements.txt
+include pytest.ini
+include .env.sample
+include setup_env.sh
+include setup_env.bat
+
+recursive-exclude __pycache__ *
+recursive-exclude *.py[cod] *
+recursive-exclude venv *
+recursive-exclude .pytest_cache *
+recursive-exclude .git *
+recursive-exclude .github *
+recursive-exclude osmosis_wrap.egg-info *
+
+prune examples 
