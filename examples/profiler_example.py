@@ -131,7 +131,7 @@ def test_openai():
     def run_openai_with():
         import osmosisai
         osmosisai.init(os.environ.get("OSMOSIS_API_KEY"))
-        osmosisai.print_messages = False
+        osmosisai.log_destination = "none"
         
         from openai import OpenAI
         client = OpenAI(api_key=api_key)
@@ -180,7 +180,7 @@ def test_anthropic():
     def run_anthropic_with():
         import osmosisai
         osmosisai.init(os.environ.get("OSMOSIS_API_KEY"))
-        osmosisai.print_messages = False
+        osmosisai.log_destination = "none"
         
         from anthropic import Anthropic
         client = Anthropic(api_key=api_key)
@@ -232,7 +232,7 @@ def test_langchain_openai():
         try:
             import osmosisai
             osmosisai.init(os.environ.get("OSMOSIS_API_KEY"))
-            osmosisai.print_messages = False
+            osmosisai.log_destination = "none"
             
             from osmosisai.adapters.langchain_openai import wrap_langchain_openai
             wrap_langchain_openai()
@@ -288,7 +288,7 @@ def test_langchain_anthropic():
         try:
             import osmosisai
             osmosisai.init(os.environ.get("OSMOSIS_API_KEY"))
-            osmosisai.print_messages = False
+            osmosisai.log_destination = "none"
             
             from osmosisai.adapters.langchain_anthropic import wrap_langchain_anthropic
             wrap_langchain_anthropic()

@@ -5,7 +5,6 @@ This module provides monkey patching for the langchain-openai package.
 """
 
 import functools
-import sys
 
 from osmosisai import utils
 from osmosisai.utils import send_to_osmosis

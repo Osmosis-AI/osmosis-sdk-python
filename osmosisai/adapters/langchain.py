@@ -5,7 +5,6 @@ This module provides monkey patching for the LangChain Python library.
 """
 
 import functools
-import sys
 
 from osmosisai import utils
 from osmosisai.utils import send_to_osmosis

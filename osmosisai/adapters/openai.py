@@ -6,7 +6,6 @@ This module provides monkey patching for the OpenAI Python client.
 
 import functools
 import inspect
-import sys
 
 from osmosisai import utils
 from osmosisai.utils import send_to_osmosis

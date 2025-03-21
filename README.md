@@ -12,7 +12,7 @@ A Python library that monkey patches LLM client libraries to send all prompts an
 
 ## Installation
 
-[pypi](https://pypi.org/project/osmosisai/0.1.3/)
+[pypi](https://pypi.org/project/osmosisai/0.1.4/)
 
 ```bash
 # Basic installation with minimal dependencies

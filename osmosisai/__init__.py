@@ -13,7 +13,7 @@ Currently supported adapters:
 # Use lazy imports to avoid importing modules during setup
 def _import_modules():
     global utils, logger, reconfigure_logger
-    global enabled, print_messages
+    global enabled, log_destination
     global init, disable_osmosis, enable_osmosis
     
     from . import utils
@@ -21,7 +21,7 @@ def _import_modules():
     
     # Re-export configuration flags for easy access
     enabled = utils.enabled
-    print_messages = utils.print_messages
+    log_destination = utils.log_destination
     
     # Re-export initialization function
     init = utils.init

@@ -17,7 +17,7 @@ osmosis_api_key = os.environ.get("OSMOSIS_API_KEY")
 osmosisai.init(osmosis_api_key)
 
 # Print messages to console for demonstration
-osmosisai.print_messages = True
+osmosisai.log_destination = "stdout"
 
 print("Anthropic Async Tool Use Integration Example\n")
 

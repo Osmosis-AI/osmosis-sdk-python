@@ -17,7 +17,7 @@ osmosis_api_key = os.getenv("OSMOSIS_API_KEY")
 osmosisai.init(osmosis_api_key)
 
 # Set to True to print messages to console
-osmosisai.print_messages = True
+osmosisai.log_destination = "stdout"
 
 # Import the specific langchain adapters
 from osmosisai.adapters.langchain_anthropic import wrap_langchain_anthropic

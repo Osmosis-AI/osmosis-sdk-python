@@ -7,15 +7,44 @@ from datetime import datetime, timezone
 from typing import Any, Dict
 import xxhash
 # Import constants
-from .consts import osmosis_api_url
-# Import logger
-from .logger import logger
+from .consts import osmosis_api_url, log_destination as default_log_destination
 
 # Global configuration
 enabled = True
-print_messages = True  # Controls whether to print messages at all
+_log_destination = default_log_destination  # Controls where to log messages
 osmosis_api_key = None  # Will be set by init()
 _initialized = False
+
+# Module-level variable for setting log destination
+class LogDestination:
+    def __get__(self, obj, objtype=None):
+        return get_log_destination()
+    
+    def __set__(self, obj, value):
+        set_log_destination(value)
+
+log_destination = LogDestination()
+
+def get_log_destination() -> str:
+    """Get the current log destination"""
+    return _log_destination
+
+def set_log_destination(destination: str) -> None:
+    """
+    Set the log destination and reconfigure logger
+    
+    Args:
+        destination: Where logs should go ("none", "stdout", "stderr", or "file")
+    """
+    global _log_destination
+    _log_destination = destination
+    # Import here to avoid circular import
+    from .logger import reconfigure_logger
+    # Reconfigure the logger when log destination changes
+    reconfigure_logger()
+
+# Import logger after defining log_destination
+from .logger import logger
 
 def init(api_key: str) -> None:
     """

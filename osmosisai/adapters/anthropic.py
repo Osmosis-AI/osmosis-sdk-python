@@ -5,7 +5,6 @@ This module provides monkey patching for the Anthropic Python client.
 """
 
 import functools
-import sys
 
 from osmosisai.utils import send_to_osmosis
 from osmosisai import utils

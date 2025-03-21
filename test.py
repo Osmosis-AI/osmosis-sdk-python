@@ -1251,7 +1251,7 @@ def test_langchain_llm_wrapping(setup_osmosis):
     
     # Enable logging
     utils.enabled = True
-    utils.print_messages = True
+    utils.log_destination = "stdout"
 
     # Create a mock LLM response
     mock_response = "Mocked LangChain LLM Response"
@@ -1356,7 +1356,7 @@ def test_langchain_chat_model_wrapping(setup_osmosis):
     
     # Enable logging
     utils.enabled = True
-    utils.print_messages = True
+    utils.log_destination = "stdout"
     
     # Create a mock response
     mock_response = "Mocked LangChain Chat Response"
@@ -1570,7 +1570,7 @@ def test_langchain_async_llm_wrapping(setup_osmosis):
     
     # Enable logging
     utils.enabled = True
-    utils.print_messages = True
+    utils.log_destination = "stdout"
     
     # Create a mock response
     mock_response = "Mocked LangChain Async LLM Response"
@@ -1672,7 +1672,7 @@ def test_langchain_anthropic_wrapping(setup_osmosis):
     
     # Enable logging
     utils.enabled = True
-    utils.print_messages = True
+    utils.log_destination = "stdout"
     
     try:
         # Try to import ChatAnthropic
@@ -1789,7 +1789,7 @@ def test_langchain_openai_wrapping(setup_osmosis):
     
     # Enable logging
     utils.enabled = True
-    utils.print_messages = True
+    utils.log_destination = "stdout"
     
     # Test both OpenAI (LLM) and ChatOpenAI
     openai_original_call = None
@@ -1959,7 +1959,7 @@ def test_langchain_azure_openai_wrapping(setup_osmosis):
     
     # Enable logging
     utils.enabled = True
-    utils.print_messages = True
+    utils.log_destination = "stdout"
     
     # Test both AzureOpenAI and AzureChatOpenAI
     azure_openai_original_call = None
