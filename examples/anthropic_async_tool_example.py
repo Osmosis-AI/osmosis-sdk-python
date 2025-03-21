@@ -12,9 +12,9 @@ load_dotenv()
 # Import and initialize osmosis_wrap first
 import osmosis_wrap
 
-# Initialize with Hoover API key
-hoover_api_key = os.environ.get("HOOVER_API_KEY")
-osmosis_wrap.init(hoover_api_key)
+# Initialize with OSMOSIS API key
+osmosis_api_key = os.environ.get("OSMOSIS_API_KEY")
+osmosis_wrap.init(osmosis_api_key)
 
 # Print messages to console for demonstration
 osmosis_wrap.print_messages = True

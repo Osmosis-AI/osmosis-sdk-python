@@ -8,12 +8,12 @@ import functools
 import sys
 
 from osmosis_wrap import utils
-from osmosis_wrap.utils import send_to_hoover
+from osmosis_wrap.utils import send_to_osmosis
 from osmosis_wrap.logger import logger
 
 def wrap_langchain_openai() -> None:
     """
-    Monkey patch langchain-openai's models to send all prompts and responses to Hoover.
+    Monkey patch langchain-openai's models to send all prompts and responses to OSMOSIS.
     
     This function should be called before using any langchain-openai models.
     """
@@ -29,7 +29,7 @@ def wrap_langchain_openai() -> None:
     logger.info("langchain-openai has been wrapped by osmosis-wrap.")
 
 def _patch_openai_chat_models() -> None:
-    """Patch langchain-openai chat model classes to send data to Hoover."""
+    """Patch langchain-openai chat model classes to send data to OSMOSIS."""
     try:
         # Try to import ChatOpenAI class
         try:
@@ -70,7 +70,7 @@ def _patch_openai_chat_models() -> None:
                     # Get the response
                     response = original_generate(self, messages, stop=stop, run_manager=run_manager, **kwargs)
                     
-                    # Send to Hoover if enabled
+                    # Send to OSMOSIS if enabled
                     if utils.enabled:
                         # Create payload
                         model_name = getattr(self, model_attr, "unknown_model")
@@ -82,7 +82,7 @@ def _patch_openai_chat_models() -> None:
                             "kwargs": {"stop": stop, **kwargs}
                         }
                         
-                        send_to_hoover(
+                        send_to_osmosis(
                             query={"type": "langchain_openai_generate", "messages": [str(msg) for msg in messages], "model": model_name},
                             response=payload,
                             status=200
@@ -108,7 +108,7 @@ def _patch_openai_chat_models() -> None:
                     # Get the response
                     response = await original_agenerate(self, messages, stop=stop, run_manager=run_manager, **kwargs)
                     
-                    # Send to Hoover if enabled
+                    # Send to OSMOSIS if enabled
                     if utils.enabled:
                         # Create payload
                         model_name = getattr(self, model_attr, "unknown_model")
@@ -120,7 +120,7 @@ def _patch_openai_chat_models() -> None:
                             "kwargs": {"stop": stop, **kwargs}
                         }
                         
-                        send_to_hoover(
+                        send_to_osmosis(
                             query={"type": "langchain_openai_agenerate", "messages": [str(msg) for msg in messages], "model": model_name},
                             response=payload,
                             status=200
@@ -147,7 +147,7 @@ def _patch_openai_chat_models() -> None:
                         # Get the response
                         response = original_call(self, messages, stop=stop, run_manager=run_manager, **kwargs)
                         
-                        # Send to Hoover if enabled
+                        # Send to OSMOSIS if enabled
                         if utils.enabled:
                             # Create payload
                             model_name = getattr(self, model_attr, "unknown_model")
@@ -159,7 +159,7 @@ def _patch_openai_chat_models() -> None:
                                 "kwargs": {"stop": stop, **kwargs}
                             }
                             
-                            send_to_hoover(
+                            send_to_osmosis(
                                 query={"type": "langchain_openai_call", "messages": [str(msg) for msg in messages], "model": model_name},
                                 response=payload,
                                 status=200
@@ -172,7 +172,7 @@ def _patch_openai_chat_models() -> None:
                         # Try calling without run_manager (older versions)
                         response = original_call(self, messages, stop=stop, **kwargs)
                         
-                        # Send to Hoover if enabled
+                        # Send to OSMOSIS if enabled
                         if utils.enabled:
                             model_name = getattr(self, model_attr, "unknown_model")
                             payload = {
@@ -183,7 +183,7 @@ def _patch_openai_chat_models() -> None:
                                 "kwargs": {"stop": stop, **kwargs}
                             }
                             
-                            send_to_hoover(
+                            send_to_osmosis(
                                 query={"type": "langchain_openai_call_fallback", "messages": [str(msg) for msg in messages], "model": model_name},
                                 response=payload,
                                 status=200
@@ -210,7 +210,7 @@ def _patch_openai_chat_models() -> None:
                         # Get the response
                         response = await original_acall(self, messages, stop=stop, run_manager=run_manager, **kwargs)
                         
-                        # Send to Hoover if enabled
+                        # Send to OSMOSIS if enabled
                         if utils.enabled:
                             # Create payload
                             model_name = getattr(self, model_attr, "unknown_model")
@@ -222,7 +222,7 @@ def _patch_openai_chat_models() -> None:
                                 "kwargs": {"stop": stop, **kwargs}
                             }
                             
-                            send_to_hoover(
+                            send_to_osmosis(
                                 query={"type": "langchain_openai_acall", "messages": [str(msg) for msg in messages], "model": model_name},
                                 response=payload,
                                 status=200
@@ -235,7 +235,7 @@ def _patch_openai_chat_models() -> None:
                         # Try calling without run_manager (older versions)
                         response = await original_acall(self, messages, stop=stop, **kwargs)
                         
-                        # Send to Hoover if enabled
+                        # Send to OSMOSIS if enabled
                         if utils.enabled:
                             model_name = getattr(self, model_attr, "unknown_model")
                             payload = {
@@ -246,7 +246,7 @@ def _patch_openai_chat_models() -> None:
                                 "kwargs": {"stop": stop, **kwargs}
                             }
                             
-                            send_to_hoover(
+                            send_to_osmosis(
                                 query={"type": "langchain_openai_acall_fallback", "messages": [str(msg) for msg in messages], "model": model_name},
                                 response=payload,
                                 status=200
@@ -266,7 +266,7 @@ def _patch_openai_chat_models() -> None:
         logger.error(f"Failed to patch langchain-openai chat model classes: {e}")
 
 def _patch_openai_llm_models() -> None:
-    """Patch langchain-openai LLM classes to send data to Hoover."""
+    """Patch langchain-openai LLM classes to send data to OSMOSIS."""
     try:
         # Try to import OpenAI class 
         try:
@@ -291,7 +291,7 @@ def _patch_openai_llm_models() -> None:
                     # Get the response
                     response = original_call(self, prompt, stop=stop, run_manager=run_manager, **kwargs)
                     
-                    # Send to Hoover if enabled
+                    # Send to OSMOSIS if enabled
                     if utils.enabled:
                         # Create payload
                         payload = {
@@ -302,7 +302,7 @@ def _patch_openai_llm_models() -> None:
                             "kwargs": {"stop": stop, **kwargs}
                         }
                         
-                        send_to_hoover(
+                        send_to_osmosis(
                             query={"type": "langchain_openai_llm_call", "prompt": prompt, "model": self.model_name},
                             response=payload,
                             status=200
@@ -325,7 +325,7 @@ def _patch_openai_llm_models() -> None:
                     # Get the response
                     response = await original_acall(self, prompt, stop=stop, run_manager=run_manager, **kwargs)
                     
-                    # Send to Hoover if enabled
+                    # Send to OSMOSIS if enabled
                     if utils.enabled:
                         # Create payload
                         payload = {
@@ -336,7 +336,7 @@ def _patch_openai_llm_models() -> None:
                             "kwargs": {"stop": stop, **kwargs}
                         }
                         
-                        send_to_hoover(
+                        send_to_osmosis(
                             query={"type": "langchain_openai_llm_acall", "prompt": prompt, "model": self.model_name},
                             response=payload,
                             status=200
@@ -364,7 +364,7 @@ def _patch_openai_llm_models() -> None:
                         # Get the response
                         response = original_call(self, prompt, stop=stop, run_manager=run_manager, **kwargs)
                         
-                        # Send to Hoover if enabled
+                        # Send to OSMOSIS if enabled
                         if utils.enabled:
                             # Create payload
                             payload = {
@@ -375,7 +375,7 @@ def _patch_openai_llm_models() -> None:
                                 "kwargs": {"stop": stop, **kwargs}
                             }
                             
-                            send_to_hoover(
+                            send_to_osmosis(
                                 query={"type": "langchain_azure_openai_llm_call", "prompt": prompt, "model": self.deployment_name},
                                 response=payload,
                                 status=200
@@ -398,7 +398,7 @@ def _patch_openai_llm_models() -> None:
                         # Get the response
                         response = await original_acall(self, prompt, stop=stop, run_manager=run_manager, **kwargs)
                         
-                        # Send to Hoover if enabled
+                        # Send to OSMOSIS if enabled
                         if utils.enabled:
                             # Create payload
                             payload = {
@@ -409,7 +409,7 @@ def _patch_openai_llm_models() -> None:
                                 "kwargs": {"stop": stop, **kwargs}
                             }
                             
-                            send_to_hoover(
+                            send_to_osmosis(
                                 query={"type": "langchain_azure_openai_llm_acall", "prompt": prompt, "model": self.deployment_name},
                                 response=payload,
                                 status=200
@@ -439,7 +439,7 @@ def _patch_openai_llm_models() -> None:
                         # Get the response
                         response = original_generate(self, messages, stop=stop, run_manager=run_manager, **kwargs)
                         
-                        # Send to Hoover if enabled
+                        # Send to OSMOSIS if enabled
                         if utils.enabled:
                             # Create payload
                             payload = {
@@ -450,7 +450,7 @@ def _patch_openai_llm_models() -> None:
                                 "kwargs": {"stop": stop, **kwargs}
                             }
                             
-                            send_to_hoover(
+                            send_to_osmosis(
                                 query={"type": "langchain_azure_chat_openai", "messages": [str(msg) for msg in messages], "model": self.deployment_name},
                                 response=payload,
                                 status=200

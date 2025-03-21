@@ -8,12 +8,12 @@ import functools
 import sys
 
 from osmosis_wrap import utils
-from osmosis_wrap.utils import send_to_hoover
+from osmosis_wrap.utils import send_to_osmosis
 from osmosis_wrap.logger import logger
 
 def wrap_langchain() -> None:
     """
-    Monkey patch LangChain's components to send all prompts and responses to Hoover.
+    Monkey patch LangChain's components to send all prompts and responses to OSMOSIS.
     
     This function should be called before using any LangChain components.
     """
@@ -35,7 +35,7 @@ def wrap_langchain() -> None:
     logger.info("LangChain has been wrapped by osmosis-wrap.")
 
 def _patch_langchain_llms() -> None:
-    """Patch LangChain LLM classes to send data to Hoover."""
+    """Patch LangChain LLM classes to send data to OSMOSIS."""
     try:
         # Try to import LangChain LLM base classes
         # First try langchain_core (newer versions)
@@ -75,7 +75,7 @@ def _patch_langchain_llms() -> None:
                     # Get the response
                     response = original_call(self, prompt, *args, **kwargs)
                     
-                    # Send to Hoover if enabled
+                    # Send to OSMOSIS if enabled
                     if utils.enabled:
                         # Try to get model name
                         model_name = "unknown_model"
@@ -91,7 +91,7 @@ def _patch_langchain_llms() -> None:
                             "kwargs": kwargs
                         }
                         
-                        send_to_hoover(
+                        send_to_osmosis(
                             query={"type": "langchain_llm", "prompt": prompt, "model": model_name},
                             response=payload,
                             status=200
@@ -117,7 +117,7 @@ def _patch_langchain_llms() -> None:
                     # Call original
                     response = original_invoke(self, prompt, *args, **kwargs)
                     
-                    # Send to Hoover if enabled
+                    # Send to OSMOSIS if enabled
                     if utils.enabled:
                         # Try to get model name
                         model_name = "unknown_model"
@@ -133,7 +133,7 @@ def _patch_langchain_llms() -> None:
                             "kwargs": kwargs
                         }
                         
-                        send_to_hoover(
+                        send_to_osmosis(
                             query={"type": "langchain_llm_invoke", "prompt": prompt, "model": model_name},
                             response=payload,
                             status=200
@@ -159,7 +159,7 @@ def _patch_langchain_llms() -> None:
                     # Get the response
                     response = original_generate(self, prompts, *args, **kwargs)
                     
-                    # Send to Hoover if enabled
+                    # Send to OSMOSIS if enabled
                     if utils.enabled:
                         # Try to get model name
                         model_name = "unknown_model"
@@ -175,7 +175,7 @@ def _patch_langchain_llms() -> None:
                             "kwargs": kwargs
                         }
                         
-                        send_to_hoover(
+                        send_to_osmosis(
                             query={"type": "langchain_llm_generate", "prompts": prompts, "model": model_name},
                             response=payload, 
                             status=200
@@ -203,7 +203,7 @@ def _patch_langchain_llms() -> None:
                         # Get the response
                         response = original_call_method(self, prompt, stop=stop, run_manager=run_manager, **kwargs)
                         
-                        # Send to Hoover if enabled
+                        # Send to OSMOSIS if enabled
                         if utils.enabled:
                             # Try to get model name
                             model_name = "unknown_model"
@@ -219,7 +219,7 @@ def _patch_langchain_llms() -> None:
                                 "kwargs": {"stop": stop, **kwargs}
                             }
                             
-                            send_to_hoover(
+                            send_to_osmosis(
                                 query={"type": "langchain_llm_call", "prompt": prompt, "model": model_name},
                                 response=payload,
                                 status=200
@@ -232,7 +232,7 @@ def _patch_langchain_llms() -> None:
                         # Try calling without run_manager (older versions)
                         response = original_call_method(self, prompt, stop=stop, **kwargs)
                         
-                        # Send to Hoover if enabled
+                        # Send to OSMOSIS if enabled
                         if utils.enabled:
                             model_name = getattr(self, "model_name", "unknown_model")
                             payload = {
@@ -243,7 +243,7 @@ def _patch_langchain_llms() -> None:
                                 "kwargs": {"stop": stop, **kwargs}
                             }
                             
-                            send_to_hoover(
+                            send_to_osmosis(
                                 query={"type": "langchain_llm_call_fallback", "prompt": prompt, "model": model_name},
                                 response=payload,
                                 status=200
@@ -263,7 +263,7 @@ def _patch_langchain_llms() -> None:
         logger.error(f"Failed to patch LangChain LLM classes: {e}")
 
 def _patch_langchain_chat_models() -> None:
-    """Patch LangChain Chat model classes to send data to Hoover."""
+    """Patch LangChain Chat model classes to send data to OSMOSIS."""
     try:
         # Try to import BaseChatModel from different possible locations
         # First try langchain_core (newer versions)
@@ -295,7 +295,7 @@ def _patch_langchain_chat_models() -> None:
                     # Get the response
                     response = original_generate(self, messages, stop=stop, **kwargs)
                     
-                    # Send to Hoover if enabled
+                    # Send to OSMOSIS if enabled
                     if utils.enabled:
                         # Try to get model name
                         model_name = "unknown_model"
@@ -311,7 +311,7 @@ def _patch_langchain_chat_models() -> None:
                             "kwargs": {"stop": stop, **kwargs}
                         }
                         
-                        send_to_hoover(
+                        send_to_osmosis(
                             query={"type": "langchain_chat_generate", "messages": [str(msg) for msg in messages], "model": model_name},
                             response=payload,
                             status=200
@@ -334,7 +334,7 @@ def _patch_langchain_chat_models() -> None:
                     # Get the response
                     response = await original_agenerate(self, messages, stop=stop, **kwargs)
                     
-                    # Send to Hoover if enabled
+                    # Send to OSMOSIS if enabled
                     if utils.enabled:
                         # Try to get model name
                         model_name = "unknown_model"
@@ -350,7 +350,7 @@ def _patch_langchain_chat_models() -> None:
                             "kwargs": {"stop": stop, **kwargs}
                         }
                         
-                        send_to_hoover(
+                        send_to_osmosis(
                             query={"type": "langchain_chat_agenerate", "messages": [str(msg) for msg in messages], "model": model_name},
                             response=payload,
                             status=200
@@ -373,7 +373,7 @@ def _patch_langchain_chat_models() -> None:
                     # Call original
                     response = original_invoke(self, messages, *args, **kwargs)
                     
-                    # Send to Hoover if enabled
+                    # Send to OSMOSIS if enabled
                     if utils.enabled:
                         # Try to get model name
                         model_name = "unknown_model"
@@ -389,7 +389,7 @@ def _patch_langchain_chat_models() -> None:
                             "kwargs": kwargs
                         }
                         
-                        send_to_hoover(
+                        send_to_osmosis(
                             query={"type": "langchain_chat_invoke", "messages": [str(msg) for msg in messages], "model": model_name},
                             response=payload,
                             status=200
@@ -412,7 +412,7 @@ def _patch_langchain_chat_models() -> None:
                     # Call original
                     response = await original_ainvoke(self, messages, *args, **kwargs)
                     
-                    # Send to Hoover if enabled
+                    # Send to OSMOSIS if enabled
                     if utils.enabled:
                         # Try to get model name
                         model_name = "unknown_model"
@@ -428,7 +428,7 @@ def _patch_langchain_chat_models() -> None:
                             "kwargs": kwargs
                         }
                         
-                        send_to_hoover(
+                        send_to_osmosis(
                             query={"type": "langchain_chat_ainvoke", "messages": [str(msg) for msg in messages], "model": model_name},
                             response=payload,
                             status=200
@@ -452,7 +452,7 @@ def _patch_langchain_chat_models() -> None:
                     # Get the response
                     response = original_call_method(self, messages, stop=stop, **kwargs)
                     
-                    # Send to Hoover if enabled
+                    # Send to OSMOSIS if enabled
                     if utils.enabled:
                         # Try to get model name
                         model_name = "unknown_model"
@@ -468,7 +468,7 @@ def _patch_langchain_chat_models() -> None:
                             "kwargs": {"stop": stop, **kwargs}
                         }
                         
-                        send_to_hoover(
+                        send_to_osmosis(
                             query={"type": "langchain_chat_call", "messages": [str(msg) for msg in messages], "model": model_name},
                             response=payload,
                             status=200
@@ -485,7 +485,7 @@ def _patch_langchain_chat_models() -> None:
         logger.error(f"Failed to patch LangChain Chat model classes: {e}")
 
 def _patch_langchain_prompts() -> None:
-    """Patch LangChain prompt templates to send data to Hoover."""
+    """Patch LangChain prompt templates to send data to OSMOSIS."""
     try:
         # Try to import BasePromptTemplate from different possible locations
         try:
@@ -522,7 +522,7 @@ def _patch_langchain_prompts() -> None:
                 # Call the original format method
                 formatted_prompt = original_format(self, **kwargs)
                 
-                # Send to Hoover if enabled
+                # Send to OSMOSIS if enabled
                 if utils.enabled:
                     # Create payload
                     payload = {
@@ -534,7 +534,7 @@ def _patch_langchain_prompts() -> None:
                         "formatted_prompt": formatted_prompt
                     }
                     
-                    send_to_hoover(
+                    send_to_osmosis(
                         query={"type": "langchain_prompt", "template": getattr(self, "template", str(self))},
                         response=payload,
                         status=200

@@ -2,7 +2,7 @@
 
 # Osmosis Wrap
 
-A Python library that monkey patches LLM client libraries to send all prompts and responses to the Hoover API for logging and monitoring.
+A Python library that monkey patches LLM client libraries to send all prompts and responses to the OSMOSIS API for logging and monitoring.
 
 ## Supported Libraries
 
@@ -47,7 +47,7 @@ pip install -r requirements.txt
 
 ## Environment Setup
 
-Osmosis Wrap requires a Hoover API key to log LLM usage. Create a `.env` file in your project directory:
+Osmosis Wrap requires a OSMOSIS API key to log LLM usage. Create a `.env` file in your project directory:
 
 ```bash
 # Copy the sample .env file
@@ -60,7 +60,7 @@ Edit the `.env` file to add your API keys:
 
 ```
 # Required for logging
-HOOVER_API_KEY=your_hoover_api_key_here
+OSMOSIS_API_KEY=your_osmosis_api_key_here
 
 # Optional: Only needed if you're using these services
 ANTHROPIC_API_KEY=your_anthropic_key_here
@@ -69,28 +69,28 @@ OPENAI_API_KEY=your_openai_key_here
 
 ## Usage
 
-First, import and initialize Osmosis Wrap with your Hoover API key:
+First, import and initialize Osmosis Wrap with your OSMOSIS API key:
 
 ```python
 import os
 import osmosis_wrap
 
-# Initialize with your Hoover API key
-osmosis_wrap.init("your-hoover-api-key")
+# Initialize with your OSMOSIS API key
+osmosis_wrap.init("your-osmosis-api-key")
 
 # Or load from environment variable
-hoover_api_key = os.environ.get("HOOVER_API_KEY")
-osmosis_wrap.init(hoover_api_key)
+osmosis_api_key = os.environ.get("OSMOSIS_API_KEY")
+osmosis_wrap.init(osmosis_api_key)
 ```
 
-Once you import `osmosis_wrap` and initialize it, the library automatically patches the supported LLM clients. You can then use your LLM clients normally, and all API calls will be logged to Hoover:
+Once you import `osmosis_wrap` and initialize it, the library automatically patches the supported LLM clients. You can then use your LLM clients normally, and all API calls will be logged to OSMOSIS:
 
 ### Anthropic Example
 
 ```python
 # Import osmosis_wrap first and initialize it
 import osmosis_wrap
-osmosis_wrap.init(os.environ.get("HOOVER_API_KEY"))
+osmosis_wrap.init(os.environ.get("OSMOSIS_API_KEY"))
 
 # Then import and use Anthropic as normal
 from anthropic import Anthropic
@@ -98,7 +98,7 @@ from anthropic import Anthropic
 # Create and use the Anthropic client as usual - it's already patched
 client = Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
 
-# All API calls will now be logged to Hoover automatically
+# All API calls will now be logged to OSMOSIS automatically
 response = client.messages.create(
     model="claude-3-haiku-20240307",
     max_tokens=1000,
@@ -122,7 +122,7 @@ async def call_claude_async():
     )
     return response
 
-# All async API calls will be logged to Hoover as well
+# All async API calls will be logged to OSMOSIS as well
 asyncio.run(call_claude_async())
 ```
 
@@ -131,7 +131,7 @@ asyncio.run(call_claude_async())
 ```python
 # Import osmosis_wrap first and initialize it
 import osmosis_wrap
-osmosis_wrap.init(os.environ.get("HOOVER_API_KEY"))
+osmosis_wrap.init(os.environ.get("OSMOSIS_API_KEY"))
 
 # Then import and use OpenAI as normal
 from openai import OpenAI
@@ -139,7 +139,7 @@ from openai import OpenAI
 # Create and use the OpenAI client as usual - it's already patched
 client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
-# All API calls will now be logged to Hoover automatically
+# All API calls will now be logged to OSMOSIS automatically
 response = client.chat.completions.create(
     model="gpt-4o-mini",
     max_tokens=150,
@@ -163,7 +163,7 @@ async def call_openai_async():
     )
     return response
 
-# All async API calls will be logged to Hoover as well
+# All async API calls will be logged to OSMOSIS as well
 asyncio.run(call_openai_async())
 ```
 
@@ -172,7 +172,7 @@ asyncio.run(call_openai_async())
 ```python
 # Import osmosis_wrap first and initialize it
 import osmosis_wrap
-osmosis_wrap.init(os.environ.get("HOOVER_API_KEY"))
+osmosis_wrap.init(os.environ.get("OSMOSIS_API_KEY"))
 
 # Then use LangChain as normal
 from langchain_core.prompts import PromptTemplate
@@ -183,7 +183,7 @@ template = PromptTemplate(
     template="Write a short paragraph about {topic}."
 )
 
-# Formatting the prompt will be logged to Hoover automatically
+# Formatting the prompt will be logged to OSMOSIS automatically
 formatted_prompt = template.format(topic="artificial intelligence")
 print(f"Formatted prompt: {formatted_prompt}")
 
@@ -203,15 +203,15 @@ You can configure the behavior of the library by modifying the following variabl
 ```python
 import osmosis_wrap
 
-# Disable logging to Hoover (default: True)
+# Disable logging to OSMOSIS (default: True)
 osmosis_wrap.enabled = False
 ```
 
 ## How it Works
 
-This library uses monkey patching to override the LLM clients' methods that make API calls. When you import the `osmosis_wrap` module, it automatically patches the supported LLM client libraries. When methods are called on these clients, the library intercepts the calls and sends the request parameters and response data to the Hoover API for logging and monitoring.
+This library uses monkey patching to override the LLM clients' methods that make API calls. When you import the `osmosis_wrap` module, it automatically patches the supported LLM client libraries. When methods are called on these clients, the library intercepts the calls and sends the request parameters and response data to the OSMOSIS API for logging and monitoring.
 
-The data sent to Hoover includes:
+The data sent to OSMOSIS includes:
 - Timestamp (UTC)
 - Request parameters
 - Response data

@@ -8,12 +8,12 @@ import functools
 import sys
 
 from osmosis_wrap import utils
-from osmosis_wrap.utils import send_to_hoover
+from osmosis_wrap.utils import send_to_osmosis
 from osmosis_wrap.logger import logger
 
 def wrap_langchain_anthropic() -> None:
     """
-    Monkey patch langchain-anthropic's models to send all prompts and responses to Hoover.
+    Monkey patch langchain-anthropic's models to send all prompts and responses to OSMOSIS.
     
     This function should be called before using any langchain-anthropic models.
     """
@@ -28,7 +28,7 @@ def wrap_langchain_anthropic() -> None:
     logger.info("langchain-anthropic has been wrapped by osmosis-wrap.")
 
 def _patch_anthropic_chat_models() -> None:
-    """Patch langchain-anthropic chat model classes to send data to Hoover."""
+    """Patch langchain-anthropic chat model classes to send data to OSMOSIS."""
     try:
         # Try to import ChatAnthropic class
         try:
@@ -69,7 +69,7 @@ def _patch_anthropic_chat_models() -> None:
                     # Get the response
                     response = original_generate(self, messages, stop=stop, run_manager=run_manager, **kwargs)
                     
-                    # Send to Hoover if enabled
+                    # Send to OSMOSIS if enabled
                     if utils.enabled:
                         # Create payload
                         model_name = getattr(self, model_attr, "unknown_model")
@@ -81,7 +81,7 @@ def _patch_anthropic_chat_models() -> None:
                             "kwargs": {"stop": stop, **kwargs}
                         }
                         
-                        send_to_hoover(
+                        send_to_osmosis(
                             query={"type": "langchain_anthropic_generate", "messages": [str(msg) for msg in messages], "model": model_name},
                             response=payload,
                             status=200
@@ -107,7 +107,7 @@ def _patch_anthropic_chat_models() -> None:
                     # Get the response
                     response = await original_agenerate(self, messages, stop=stop, run_manager=run_manager, **kwargs)
                     
-                    # Send to Hoover if enabled
+                    # Send to OSMOSIS if enabled
                     if utils.enabled:
                         # Create payload
                         model_name = getattr(self, model_attr, "unknown_model")
@@ -119,7 +119,7 @@ def _patch_anthropic_chat_models() -> None:
                             "kwargs": {"stop": stop, **kwargs}
                         }
                         
-                        send_to_hoover(
+                        send_to_osmosis(
                             query={"type": "langchain_anthropic_agenerate", "messages": [str(msg) for msg in messages], "model": model_name},
                             response=payload,
                             status=200
@@ -146,7 +146,7 @@ def _patch_anthropic_chat_models() -> None:
                         # Get the response
                         response = original_call(self, messages, stop=stop, run_manager=run_manager, **kwargs)
                         
-                        # Send to Hoover if enabled
+                        # Send to OSMOSIS if enabled
                         if utils.enabled:
                             # Create payload
                             model_name = getattr(self, model_attr, "unknown_model")
@@ -158,7 +158,7 @@ def _patch_anthropic_chat_models() -> None:
                                 "kwargs": {"stop": stop, **kwargs}
                             }
                             
-                            send_to_hoover(
+                            send_to_osmosis(
                                 query={"type": "langchain_anthropic_call", "messages": [str(msg) for msg in messages], "model": model_name},
                                 response=payload,
                                 status=200
@@ -171,7 +171,7 @@ def _patch_anthropic_chat_models() -> None:
                         # Try calling without run_manager (older versions)
                         response = original_call(self, messages, stop=stop, **kwargs)
                         
-                        # Send to Hoover if enabled
+                        # Send to OSMOSIS if enabled
                         if utils.enabled:
                             model_name = getattr(self, model_attr, "unknown_model")
                             payload = {
@@ -182,7 +182,7 @@ def _patch_anthropic_chat_models() -> None:
                                 "kwargs": {"stop": stop, **kwargs}
                             }
                             
-                            send_to_hoover(
+                            send_to_osmosis(
                                 query={"type": "langchain_anthropic_call_fallback", "messages": [str(msg) for msg in messages], "model": model_name},
                                 response=payload,
                                 status=200
@@ -209,7 +209,7 @@ def _patch_anthropic_chat_models() -> None:
                         # Get the response
                         response = await original_acall(self, messages, stop=stop, run_manager=run_manager, **kwargs)
                         
-                        # Send to Hoover if enabled
+                        # Send to OSMOSIS if enabled
                         if utils.enabled:
                             # Create payload
                             model_name = getattr(self, model_attr, "unknown_model")
@@ -221,7 +221,7 @@ def _patch_anthropic_chat_models() -> None:
                                 "kwargs": {"stop": stop, **kwargs}
                             }
                             
-                            send_to_hoover(
+                            send_to_osmosis(
                                 query={"type": "langchain_anthropic_acall", "messages": [str(msg) for msg in messages], "model": model_name},
                                 response=payload,
                                 status=200
@@ -234,7 +234,7 @@ def _patch_anthropic_chat_models() -> None:
                         # Try calling without run_manager (older versions)
                         response = await original_acall(self, messages, stop=stop, **kwargs)
                         
-                        # Send to Hoover if enabled
+                        # Send to OSMOSIS if enabled
                         if utils.enabled:
                             model_name = getattr(self, model_attr, "unknown_model")
                             payload = {
@@ -245,7 +245,7 @@ def _patch_anthropic_chat_models() -> None:
                                 "kwargs": {"stop": stop, **kwargs}
                             }
                             
-                            send_to_hoover(
+                            send_to_osmosis(
                                 query={"type": "langchain_anthropic_acall_fallback", "messages": [str(msg) for msg in messages], "model": model_name},
                                 response=payload,
                                 status=200

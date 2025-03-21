@@ -20,7 +20,7 @@ Edit the `.env` file to add your API keys:
 
 ```
 # Required for logging
-HOOVER_API_KEY=your_hoover_api_key_here
+OSMOSIS_API_KEY=your_osmosis_api_key_here
 
 # Optional: Only needed if you're using these services
 ANTHROPIC_API_KEY=your_anthropic_key_here
@@ -42,7 +42,7 @@ This example:
 - Makes API calls to Anthropic Claude (if available)
 - Makes API calls to OpenAI GPT (if available)
 - Demonstrates LangChain integration (if available)
-- Shows how to toggle Hoover logging on and off
+- Shows how to toggle OSMOSIS logging on and off
 
 ### Performance Profiler
 
@@ -96,4 +96,4 @@ If you encounter errors:
    # For LangChain
    pip install langchain-core
    ```
-3. **Hoover Connectivity**: Ensure your Hoover API key is valid and the service is accessible 
+3. **OSMOSIS Connectivity**: Ensure your OSMOSIS API key is valid and the service is accessible 

@@ -130,7 +130,7 @@ def test_openai():
     
     def run_openai_with():
         import osmosis_wrap
-        osmosis_wrap.init(os.environ.get("HOOVER_API_KEY"))
+        osmosis_wrap.init(os.environ.get("OSMOSIS_API_KEY"))
         osmosis_wrap.print_messages = False
         
         from openai import OpenAI
@@ -179,7 +179,7 @@ def test_anthropic():
     
     def run_anthropic_with():
         import osmosis_wrap
-        osmosis_wrap.init(os.environ.get("HOOVER_API_KEY"))
+        osmosis_wrap.init(os.environ.get("OSMOSIS_API_KEY"))
         osmosis_wrap.print_messages = False
         
         from anthropic import Anthropic
@@ -231,7 +231,7 @@ def test_langchain_openai():
     def run_langchain_openai_with():
         try:
             import osmosis_wrap
-            osmosis_wrap.init(os.environ.get("HOOVER_API_KEY"))
+            osmosis_wrap.init(os.environ.get("OSMOSIS_API_KEY"))
             osmosis_wrap.print_messages = False
             
             from osmosis_wrap.adapters.langchain_openai import wrap_langchain_openai
@@ -287,7 +287,7 @@ def test_langchain_anthropic():
     def run_langchain_anthropic_with():
         try:
             import osmosis_wrap
-            osmosis_wrap.init(os.environ.get("HOOVER_API_KEY"))
+            osmosis_wrap.init(os.environ.get("OSMOSIS_API_KEY"))
             osmosis_wrap.print_messages = False
             
             from osmosis_wrap.adapters.langchain_anthropic import wrap_langchain_anthropic

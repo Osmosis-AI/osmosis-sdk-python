@@ -22,34 +22,34 @@ def setup_osmosis():
     import osmosis_wrap
     
     # Create a mock first
-    mock_send_to_hoover = MagicMock()
+    mock_send_to_osmosis = MagicMock()
     
     # Initialize with a test API key
-    osmosis_wrap.init("test-hoover-api-key")
+    osmosis_wrap.init("test-osmosis-api-key")
     
-    # Patch all possible references to send_to_hoover
-    original_send_to_hoover = osmosis_wrap.utils.send_to_hoover
+    # Patch all possible references to send_to_osmosis
+    original_send_to_osmosis = osmosis_wrap.utils.send_to_osmosis
     
     # Replace the function with our mock
-    osmosis_wrap.utils.send_to_hoover = mock_send_to_hoover
+    osmosis_wrap.utils.send_to_osmosis = mock_send_to_osmosis
     
     # Also patch it in the adapters
     try:
         import osmosis_wrap.adapters.anthropic
-        osmosis_wrap.adapters.anthropic.send_to_hoover = mock_send_to_hoover
+        osmosis_wrap.adapters.anthropic.send_to_osmosis = mock_send_to_osmosis
     except ImportError:
         pass
     
     try:
         import osmosis_wrap.adapters.openai
-        osmosis_wrap.adapters.openai.send_to_hoover = mock_send_to_hoover
+        osmosis_wrap.adapters.openai.send_to_osmosis = mock_send_to_osmosis
     except ImportError:
         pass
     
-    yield mock_send_to_hoover
+    yield mock_send_to_osmosis
     
     # Restore the original after the test
-    osmosis_wrap.utils.send_to_hoover = original_send_to_hoover
+    osmosis_wrap.utils.send_to_osmosis = original_send_to_osmosis
 
 # Test Anthropic client wrapping
 @pytest.mark.skipif(
@@ -57,8 +57,8 @@ def setup_osmosis():
     reason="Anthropic package not installed"
 )
 def test_anthropic_wrapping(setup_osmosis):
-    mock_send_to_hoover = setup_osmosis
-    mock_send_to_hoover.reset_mock()  # Start with a clean mock
+    mock_send_to_osmosis = setup_osmosis
+    mock_send_to_osmosis.reset_mock()  # Start with a clean mock
     
     # Import Anthropic module first
     import anthropic
@@ -97,13 +97,13 @@ def test_anthropic_wrapping(setup_osmosis):
         # Verify the response
         assert response.content[0].text == "Mocked Anthropic Response"
         
-        # Verify hoover was called
-        mock_send_to_hoover.assert_called_once()
+        # Verify osmosis was called
+        mock_send_to_osmosis.assert_called_once()
         
         # Verify the arguments
-        assert "query" in mock_send_to_hoover.call_args[1]
-        assert mock_send_to_hoover.call_args[1]["query"]["model"] == "claude-3-haiku-20240307"
-        assert mock_send_to_hoover.call_args[1]["status"] == 200
+        assert "query" in mock_send_to_osmosis.call_args[1]
+        assert mock_send_to_osmosis.call_args[1]["query"]["model"] == "claude-3-haiku-20240307"
+        assert mock_send_to_osmosis.call_args[1]["status"] == 200
     finally:
         # Restore the original create method
         anthropic.resources.messages.Messages.create = original_create
@@ -114,8 +114,8 @@ def test_anthropic_wrapping(setup_osmosis):
     reason="Anthropic package not installed"
 )
 def test_anthropic_async_wrapping(setup_osmosis):
-    mock_send_to_hoover = setup_osmosis
-    mock_send_to_hoover.reset_mock()  # Start with a clean mock
+    mock_send_to_osmosis = setup_osmosis
+    mock_send_to_osmosis.reset_mock()  # Start with a clean mock
     
     # Import required modules
     import anthropic
@@ -170,13 +170,13 @@ def test_anthropic_async_wrapping(setup_osmosis):
         # Verify the response
         assert response.content[0].text == "Mocked Async Anthropic Response"
         
-        # Verify hoover was called
-        mock_send_to_hoover.assert_called_once()
+        # Verify osmosis was called
+        mock_send_to_osmosis.assert_called_once()
         
         # Verify the arguments
-        assert "query" in mock_send_to_hoover.call_args[1]
-        assert mock_send_to_hoover.call_args[1]["query"]["model"] == "claude-3-haiku-20240307"
-        assert mock_send_to_hoover.call_args[1]["status"] == 200
+        assert "query" in mock_send_to_osmosis.call_args[1]
+        assert mock_send_to_osmosis.call_args[1]["query"]["model"] == "claude-3-haiku-20240307"
+        assert mock_send_to_osmosis.call_args[1]["status"] == 200
     
     finally:
         # Restore the original methods
@@ -194,8 +194,8 @@ def test_anthropic_async_wrapping(setup_osmosis):
     reason="Anthropic package not installed"
 )
 def test_anthropic_tool_use(setup_osmosis):
-    mock_send_to_hoover = setup_osmosis
-    mock_send_to_hoover.reset_mock()  # Start with a clean mock
+    mock_send_to_osmosis = setup_osmosis
+    mock_send_to_osmosis.reset_mock()  # Start with a clean mock
     
     # Import Anthropic module first
     import anthropic
@@ -272,14 +272,14 @@ def test_anthropic_tool_use(setup_osmosis):
         assert response.content[0].type == "tool_use"
         assert response.content[0].tool_use["name"] == "get_weather"
         
-        # Verify hoover was called
-        mock_send_to_hoover.assert_called_once()
+        # Verify osmosis was called
+        mock_send_to_osmosis.assert_called_once()
         
         # Verify the arguments include tools parameter
-        assert "query" in mock_send_to_hoover.call_args[1]
-        assert "tools" in mock_send_to_hoover.call_args[1]["query"]
-        assert mock_send_to_hoover.call_args[1]["query"]["model"] == "claude-3-haiku-20240307"
-        assert mock_send_to_hoover.call_args[1]["query"]["tools"] == sample_tools
+        assert "query" in mock_send_to_osmosis.call_args[1]
+        assert "tools" in mock_send_to_osmosis.call_args[1]["query"]
+        assert mock_send_to_osmosis.call_args[1]["query"]["model"] == "claude-3-haiku-20240307"
+        assert mock_send_to_osmosis.call_args[1]["query"]["tools"] == sample_tools
     finally:
         # Restore the original create method
         anthropic.resources.messages.Messages.create = original_create
@@ -290,8 +290,8 @@ def test_anthropic_tool_use(setup_osmosis):
     reason="Anthropic package not installed"
 )
 def test_anthropic_tool_response(setup_osmosis):
-    mock_send_to_hoover = setup_osmosis
-    mock_send_to_hoover.reset_mock()  # Start with a clean mock
+    mock_send_to_osmosis = setup_osmosis
+    mock_send_to_osmosis.reset_mock()  # Start with a clean mock
     
     # Import Anthropic module first
     import anthropic
@@ -402,11 +402,11 @@ def test_anthropic_tool_response(setup_osmosis):
         # Verify the second response is text
         assert second_call.content[0].type == "text"
         
-        # Verify hoover was called twice
-        assert mock_send_to_hoover.call_count == 2
+        # Verify osmosis was called twice
+        assert mock_send_to_osmosis.call_count == 2
         
         # Verify the second call includes the tool response
-        second_call_args = mock_send_to_hoover.call_args_list[1][1]
+        second_call_args = mock_send_to_osmosis.call_args_list[1][1]
         assert "query" in second_call_args
         assert "messages" in second_call_args["query"]
         
@@ -419,7 +419,7 @@ def test_anthropic_tool_response(setup_osmosis):
                         found_tool_response = True
                         break
         
-        assert found_tool_response, "Tool response was not captured in the hoover log"
+        assert found_tool_response, "Tool response was not captured in the osmosis log"
     finally:
         # Restore the original create method
         anthropic.resources.messages.Messages.create = original_create
@@ -430,8 +430,8 @@ def test_anthropic_tool_response(setup_osmosis):
     reason="Anthropic package not installed"
 )
 def test_anthropic_async_tool_use(setup_osmosis):
-    mock_send_to_hoover = setup_osmosis
-    mock_send_to_hoover.reset_mock()  # Start with a clean mock
+    mock_send_to_osmosis = setup_osmosis
+    mock_send_to_osmosis.reset_mock()  # Start with a clean mock
     
     # Import required modules
     import anthropic
@@ -531,13 +531,13 @@ def test_anthropic_async_tool_use(setup_osmosis):
         assert response.content[0].tool_use["name"] == "search_products"
         assert response.content[0].tool_use["input"]["query"] == "headphones"
         
-        # Verify hoover was called
-        mock_send_to_hoover.assert_called_once()
+        # Verify osmosis was called
+        mock_send_to_osmosis.assert_called_once()
         
         # Verify the arguments include tools parameter
-        assert "query" in mock_send_to_hoover.call_args[1]
-        assert "tools" in mock_send_to_hoover.call_args[1]["query"]
-        assert mock_send_to_hoover.call_args[1]["query"]["model"] == "claude-3-haiku-20240307"
+        assert "query" in mock_send_to_osmosis.call_args[1]
+        assert "tools" in mock_send_to_osmosis.call_args[1]["query"]
+        assert mock_send_to_osmosis.call_args[1]["query"]["model"] == "claude-3-haiku-20240307"
     
     finally:
         # Restore the original methods
@@ -555,8 +555,8 @@ def test_anthropic_async_tool_use(setup_osmosis):
     reason="OpenAI package not installed"
 )
 def test_openai_v1_wrapping(setup_osmosis):
-    mock_send_to_hoover = setup_osmosis
-    mock_send_to_hoover.reset_mock()  # Reset call count
+    mock_send_to_osmosis = setup_osmosis
+    mock_send_to_osmosis.reset_mock()  # Reset call count
     
     # Import OpenAI module first
     import openai
@@ -599,11 +599,11 @@ def test_openai_v1_wrapping(setup_osmosis):
         # Verify response is properly returned
         assert response.choices[0].message.content == "Mocked OpenAI Response"
         
-        # Verify hoover was called
-        mock_send_to_hoover.assert_called_once()
+        # Verify osmosis was called
+        mock_send_to_osmosis.assert_called_once()
         # Check that the query argument was passed
-        assert "query" in mock_send_to_hoover.call_args[1]
-        assert mock_send_to_hoover.call_args[1]["query"]["model"] == "gpt-4o-mini"
+        assert "query" in mock_send_to_osmosis.call_args[1]
+        assert mock_send_to_osmosis.call_args[1]["query"]["model"] == "gpt-4o-mini"
     finally:
         # Restore original methods
         if 'original_chat_create' in locals():
@@ -615,8 +615,8 @@ def test_openai_v1_wrapping(setup_osmosis):
     reason="OpenAI package not installed"
 )
 def test_openai_v1_async_wrapping(setup_osmosis):
-    mock_send_to_hoover = setup_osmosis
-    mock_send_to_hoover.reset_mock()  # Reset call count
+    mock_send_to_osmosis = setup_osmosis
+    mock_send_to_osmosis.reset_mock()  # Reset call count
     
     # Import OpenAI module first
     import openai
@@ -646,15 +646,15 @@ def test_openai_v1_async_wrapping(setup_osmosis):
         
         # Create a simple async function that simulates an async API call
         async def simulate_async_call():
-            # Directly call the send_to_hoover function as would happen in the wrapper
-            from osmosis_wrap.utils import send_to_hoover
+            # Directly call the send_to_osmosis function as would happen in the wrapper
+            from osmosis_wrap.utils import send_to_osmosis
             query_params = {
                 "model": "gpt-4o-mini", 
                 "max_tokens": 150,
                 "messages": [{"role": "user", "content": "Test async prompt"}]
             }
             
-            send_to_hoover(
+            send_to_osmosis(
                 query=query_params,
                 response=mock_response.model_dump(),
                 status=200
@@ -667,12 +667,12 @@ def test_openai_v1_async_wrapping(setup_osmosis):
         # Verify response
         assert response.choices[0].message.content == "Mocked Async OpenAI Response"
         
-        # Verify hoover was called
-        mock_send_to_hoover.assert_called_once()
+        # Verify osmosis was called
+        mock_send_to_osmosis.assert_called_once()
         
         # Verify arguments
-        assert "query" in mock_send_to_hoover.call_args[1]
-        assert mock_send_to_hoover.call_args[1]["query"]["model"] == "gpt-4o-mini"
+        assert "query" in mock_send_to_osmosis.call_args[1]
+        assert mock_send_to_osmosis.call_args[1]["query"]["model"] == "gpt-4o-mini"
         
         # Verify that the async methods in the module Completions class were properly wrapped
         from openai.resources.chat import completions
@@ -682,7 +682,7 @@ def test_openai_v1_async_wrapping(setup_osmosis):
     
     finally:
         # Reset mock
-        mock_send_to_hoover.reset_mock()
+        mock_send_to_osmosis.reset_mock()
         
         # Restore the original version
         if original_version is not None:
@@ -694,8 +694,8 @@ def test_openai_v1_async_wrapping(setup_osmosis):
     reason="OpenAI package not installed"
 )
 def test_openai_v2_wrapping(setup_osmosis):
-    mock_send_to_hoover = setup_osmosis
-    mock_send_to_hoover.reset_mock()  # Reset call count
+    mock_send_to_osmosis = setup_osmosis
+    mock_send_to_osmosis.reset_mock()  # Reset call count
     
     # Import OpenAI module first
     import openai
@@ -762,15 +762,15 @@ def test_openai_v2_wrapping(setup_osmosis):
             # Verify that the response is as expected
             assert response.choices[0].message.content == "Mocked OpenAI v2 Response"
             
-            # Verify hoover was called
-            mock_send_to_hoover.assert_called_once()
+            # Verify osmosis was called
+            mock_send_to_osmosis.assert_called_once()
             
             # Verify the arguments
-            assert "query" in mock_send_to_hoover.call_args[1]
-            assert mock_send_to_hoover.call_args[1]["query"]["model"] == "gpt-4o-mini"
+            assert "query" in mock_send_to_osmosis.call_args[1]
+            assert mock_send_to_osmosis.call_args[1]["query"]["model"] == "gpt-4o-mini"
             
             # Reset the mock for streaming test
-            mock_send_to_hoover.reset_mock()
+            mock_send_to_osmosis.reset_mock()
             
             # Now test streaming API calls
             stream = client.chat.completions.create(
@@ -789,12 +789,12 @@ def test_openai_v2_wrapping(setup_osmosis):
             # Verify we got the expected streaming content
             assert streamed_content == "Part 1 Part 2 Part 3"
             
-            # Verify hoover was called for streaming request
-            mock_send_to_hoover.assert_called_once()
+            # Verify osmosis was called for streaming request
+            mock_send_to_osmosis.assert_called_once()
             
             # Verify the stream parameter was captured
-            assert "query" in mock_send_to_hoover.call_args[1]
-            assert mock_send_to_hoover.call_args[1]["query"]["stream"] is True
+            assert "query" in mock_send_to_osmosis.call_args[1]
+            assert mock_send_to_osmosis.call_args[1]["query"]["stream"] is True
     
     finally:
         # Restore the original version
@@ -807,8 +807,8 @@ def test_openai_v2_wrapping(setup_osmosis):
     reason="OpenAI package not installed"
 )
 def test_openai_v2_async_wrapping(setup_osmosis):
-    mock_send_to_hoover = setup_osmosis
-    mock_send_to_hoover.reset_mock()  # Reset call count
+    mock_send_to_osmosis = setup_osmosis
+    mock_send_to_osmosis.reset_mock()  # Reset call count
     
     # Import OpenAI module first
     import openai
@@ -861,8 +861,8 @@ def test_openai_v2_async_wrapping(setup_osmosis):
         
         # Create a simple async function that simulates an async API call
         async def simulate_async_call(stream=False):
-            # Directly call the send_to_hoover function as would happen in the wrapper
-            from osmosis_wrap.utils import send_to_hoover
+            # Directly call the send_to_osmosis function as would happen in the wrapper
+            from osmosis_wrap.utils import send_to_osmosis
             query_params = {
                 "model": "gpt-4o-mini", 
                 "max_tokens": 150,
@@ -871,14 +871,14 @@ def test_openai_v2_async_wrapping(setup_osmosis):
             }
             
             if stream:
-                send_to_hoover(
+                send_to_osmosis(
                     query=query_params,
                     response={"chunks": "streaming content"},
                     status=200
                 )
                 return MockAsyncStreamResponse(mock_stream_chunks)
             else:
-                send_to_hoover(
+                send_to_osmosis(
                     query=query_params,
                     response=mock_response.model_dump(),
                     status=200
@@ -891,16 +891,16 @@ def test_openai_v2_async_wrapping(setup_osmosis):
         # Verify response
         assert response.choices[0].message.content == "Mocked Async OpenAI v2 Response"
         
-        # Verify hoover was called
-        mock_send_to_hoover.assert_called_once()
+        # Verify osmosis was called
+        mock_send_to_osmosis.assert_called_once()
         
         # Verify arguments
-        assert "query" in mock_send_to_hoover.call_args[1]
-        assert mock_send_to_hoover.call_args[1]["query"]["model"] == "gpt-4o-mini"
-        assert mock_send_to_hoover.call_args[1]["query"]["stream"] is False
+        assert "query" in mock_send_to_osmosis.call_args[1]
+        assert mock_send_to_osmosis.call_args[1]["query"]["model"] == "gpt-4o-mini"
+        assert mock_send_to_osmosis.call_args[1]["query"]["stream"] is False
         
         # Reset mock for streaming test
-        mock_send_to_hoover.reset_mock()
+        mock_send_to_osmosis.reset_mock()
         
         # Run the streaming test
         stream_response = asyncio.run(simulate_async_call(stream=True))
@@ -919,12 +919,12 @@ def test_openai_v2_async_wrapping(setup_osmosis):
         # Verify streamed content
         assert streamed_content == "Async Part 1 Async Part 2 Async Part 3"
         
-        # Verify hoover was called for streaming
-        mock_send_to_hoover.assert_called_once()
+        # Verify osmosis was called for streaming
+        mock_send_to_osmosis.assert_called_once()
         
         # Verify the stream parameter was captured
-        assert "query" in mock_send_to_hoover.call_args[1]
-        assert mock_send_to_hoover.call_args[1]["query"]["stream"] is True
+        assert "query" in mock_send_to_osmosis.call_args[1]
+        assert mock_send_to_osmosis.call_args[1]["query"]["stream"] is True
         
         # For v2, verify that AsyncOpenAI.__init__ has been wrapped
         assert hasattr(AsyncOpenAI.__init__, "_osmosis_wrapped"), "AsyncOpenAI.__init__ was not wrapped"
@@ -934,15 +934,15 @@ def test_openai_v2_async_wrapping(setup_osmosis):
         if original_version is not None:
             openai.version.__version__ = original_version
         # Reset mock
-        mock_send_to_hoover.reset_mock()
+        mock_send_to_osmosis.reset_mock()
 
-# Test disabling hoover
-def test_disable_hoover(setup_osmosis):
-    mock_send_to_hoover = setup_osmosis
-    mock_send_to_hoover.reset_mock()  # Reset call count
+# Test disabling osmosis
+def test_disable_osmosis(setup_osmosis):
+    mock_send_to_osmosis = setup_osmosis
+    mock_send_to_osmosis.reset_mock()  # Reset call count
     
     # Test disabling and enabling
-    osmosis_wrap.disable_hoover()
+    osmosis_wrap.disable_osmosis()
     assert not osmosis_wrap.utils.enabled
     
     # Make a mocked call with Anthropic
@@ -976,11 +976,11 @@ def test_disable_hoover(setup_osmosis):
                     messages=[{"role": "user", "content": "This request won't be logged."}]
                 )
     
-    # Verify hoover was not called
-    assert not mock_send_to_hoover.called
+    # Verify osmosis was not called
+    assert not mock_send_to_osmosis.called
     
     # Re-enable and test
-    osmosis_wrap.enable_hoover()
+    osmosis_wrap.enable_osmosis()
     assert osmosis_wrap.utils.enabled
 
 @pytest.mark.skipif(
@@ -989,8 +989,8 @@ def test_disable_hoover(setup_osmosis):
 )
 def test_openai_async_support(setup_osmosis):
     """Test that osmosis_wrap supports async OpenAI clients by directly checking the adapter code."""
-    mock_send_to_hoover = setup_osmosis
-    mock_send_to_hoover.reset_mock()  # Reset call count
+    mock_send_to_osmosis = setup_osmosis
+    mock_send_to_osmosis.reset_mock()  # Reset call count
     
     # Import OpenAI module first
     import openai
@@ -1026,8 +1026,8 @@ def test_openai_async_support(setup_osmosis):
         # Create a simple mock test
         async def mock_send_async():
             # Simulate an async OpenAI call
-            from osmosis_wrap.utils import send_to_hoover
-            send_to_hoover(
+            from osmosis_wrap.utils import send_to_osmosis
+            send_to_osmosis(
                 query={"model": "gpt-4o-mini", "max_tokens": 150},
                 response={"content": "Mocked async response"},
                 status=200
@@ -1037,18 +1037,18 @@ def test_openai_async_support(setup_osmosis):
         # Run the async function
         result = asyncio.run(mock_send_async())
         
-        # Verify the result and that hoover was called
+        # Verify the result and that osmosis was called
         assert result == "Success"
-        mock_send_to_hoover.assert_called_once()
+        mock_send_to_osmosis.assert_called_once()
         
         # Verify the arguments
-        assert "query" in mock_send_to_hoover.call_args[1]
-        assert mock_send_to_hoover.call_args[1]["query"]["model"] == "gpt-4o-mini"
-        assert mock_send_to_hoover.call_args[1]["status"] == 200
+        assert "query" in mock_send_to_osmosis.call_args[1]
+        assert mock_send_to_osmosis.call_args[1]["query"]["model"] == "gpt-4o-mini"
+        assert mock_send_to_osmosis.call_args[1]["status"] == 200
     
     finally:
         # Reset mock
-        mock_send_to_hoover.reset_mock()
+        mock_send_to_osmosis.reset_mock()
 
 # Test Anthropic async tool use with tool responses
 @pytest.mark.skipif(
@@ -1056,8 +1056,8 @@ def test_openai_async_support(setup_osmosis):
     reason="Anthropic package not installed"
 )
 def test_anthropic_async_tool_response(setup_osmosis):
-    mock_send_to_hoover = setup_osmosis
-    mock_send_to_hoover.reset_mock()  # Start with a clean mock
+    mock_send_to_osmosis = setup_osmosis
+    mock_send_to_osmosis.reset_mock()  # Start with a clean mock
     
     # Import required modules
     import anthropic
@@ -1193,11 +1193,11 @@ def test_anthropic_async_tool_response(setup_osmosis):
         assert first_call.content[0].type == "tool_use"
         assert second_call.content[0].type == "text"
         
-        # Verify hoover was called twice
-        assert mock_send_to_hoover.call_count == 2
+        # Verify osmosis was called twice
+        assert mock_send_to_osmosis.call_count == 2
         
         # Verify the second call includes the tool response
-        second_call_args = mock_send_to_hoover.call_args_list[1][1]
+        second_call_args = mock_send_to_osmosis.call_args_list[1][1]
         assert "query" in second_call_args
         assert "messages" in second_call_args["query"]
         
@@ -1210,7 +1210,7 @@ def test_anthropic_async_tool_response(setup_osmosis):
                         found_tool_response = True
                         break
         
-        assert found_tool_response, "Tool response was not captured in the hoover log"
+        assert found_tool_response, "Tool response was not captured in the osmosis log"
     
     finally:
         # Restore the original methods
@@ -1228,8 +1228,8 @@ def test_anthropic_async_tool_response(setup_osmosis):
     reason="LangChain package not installed"
 )
 def test_langchain_llm_wrapping(setup_osmosis):
-    mock_send_to_hoover = setup_osmosis
-    mock_send_to_hoover.reset_mock()  # Start with a clean mock
+    mock_send_to_osmosis = setup_osmosis
+    mock_send_to_osmosis.reset_mock()  # Start with a clean mock
 
     # Import LangChain module first
     import langchain
@@ -1237,17 +1237,17 @@ def test_langchain_llm_wrapping(setup_osmosis):
     # Import utils from osmosis_wrap
     from osmosis_wrap import utils
     
-    # Capture send_to_hoover calls for verification
-    original_send_to_hoover = utils.send_to_hoover
+    # Capture send_to_osmosis calls for verification
+    original_send_to_osmosis = utils.send_to_osmosis
     calls = []
     
-    def tracking_send_to_hoover(*args, **kwargs):
-        print(f"Tracking send_to_hoover called with args: {args}")
+    def tracking_send_to_osmosis(*args, **kwargs):
+        print(f"Tracking send_to_osmosis called with args: {args}")
         calls.append((args, kwargs))
-        return original_send_to_hoover(*args, **kwargs)
+        return original_send_to_osmosis(*args, **kwargs)
     
-    # Replace send_to_hoover with our tracking version
-    utils.send_to_hoover = tracking_send_to_hoover
+    # Replace send_to_osmosis with our tracking version
+    utils.send_to_osmosis = tracking_send_to_osmosis
     
     # Enable logging
     utils.enabled = True
@@ -1282,7 +1282,7 @@ def test_langchain_llm_wrapping(setup_osmosis):
         wrap_langchain()
         
         # Test a custom version that bypasses LangChain's mocking issue
-        # Just send directly to hoover instead of relying on mocks
+        # Just send directly to osmosis instead of relying on mocks
         test_prompt = "Test LangChain prompt"
         model_name = "mock-llm-model"
         
@@ -1302,9 +1302,9 @@ def test_langchain_llm_wrapping(setup_osmosis):
             "provider": "langchain"
         }
         
-        # Directly call send_to_hoover as the adapter would do
-        print("Directly calling send_to_hoover as the adapter would...")
-        utils.send_to_hoover(query_data, response_data)
+        # Directly call send_to_osmosis as the adapter would do
+        print("Directly calling send_to_osmosis as the adapter would...")
+        utils.send_to_osmosis(query_data, response_data)
         
         # Verify the tracking captured the call
         print(f"Number of tracking calls: {len(calls)}")
@@ -1312,7 +1312,7 @@ def test_langchain_llm_wrapping(setup_osmosis):
             print(f"Call {i}: {call}")
         
         # Verify our tracking function was called
-        assert len(calls) > 0, "send_to_hoover was not called"
+        assert len(calls) > 0, "send_to_osmosis was not called"
         
         # Verify the data
         first_call = calls[0]
@@ -1325,7 +1325,7 @@ def test_langchain_llm_wrapping(setup_osmosis):
     
     finally:
         # Restore the original function
-        utils.send_to_hoover = original_send_to_hoover
+        utils.send_to_osmosis = original_send_to_osmosis
 
 # Test LangChain Chat Model wrapping
 @pytest.mark.skipif(
@@ -1333,8 +1333,8 @@ def test_langchain_llm_wrapping(setup_osmosis):
     reason="LangChain package not installed"
 )
 def test_langchain_chat_model_wrapping(setup_osmosis):
-    mock_send_to_hoover = setup_osmosis
-    mock_send_to_hoover.reset_mock()  # Start with a clean mock
+    mock_send_to_osmosis = setup_osmosis
+    mock_send_to_osmosis.reset_mock()  # Start with a clean mock
     
     # Import LangChain module first
     import langchain
@@ -1342,17 +1342,17 @@ def test_langchain_chat_model_wrapping(setup_osmosis):
     # Import utils from osmosis_wrap
     from osmosis_wrap import utils
     
-    # Capture send_to_hoover calls for verification
-    original_send_to_hoover = utils.send_to_hoover
+    # Capture send_to_osmosis calls for verification
+    original_send_to_osmosis = utils.send_to_osmosis
     calls = []
     
-    def tracking_send_to_hoover(*args, **kwargs):
-        print(f"Tracking send_to_hoover called with args: {args}")
+    def tracking_send_to_osmosis(*args, **kwargs):
+        print(f"Tracking send_to_osmosis called with args: {args}")
         calls.append((args, kwargs))
-        return original_send_to_hoover(*args, **kwargs)
+        return original_send_to_osmosis(*args, **kwargs)
     
-    # Replace send_to_hoover with our tracking version
-    utils.send_to_hoover = tracking_send_to_hoover
+    # Replace send_to_osmosis with our tracking version
+    utils.send_to_osmosis = tracking_send_to_osmosis
     
     # Enable logging
     utils.enabled = True
@@ -1408,9 +1408,9 @@ def test_langchain_chat_model_wrapping(setup_osmosis):
             "provider": "langchain"
         }
         
-        # Directly call send_to_hoover as the adapter would do
-        print("Directly calling send_to_hoover as the adapter would...")
-        utils.send_to_hoover(query_data, response_data)
+        # Directly call send_to_osmosis as the adapter would do
+        print("Directly calling send_to_osmosis as the adapter would...")
+        utils.send_to_osmosis(query_data, response_data)
         
         # Verify the tracking captured the call
         print(f"Number of tracking calls: {len(calls)}")
@@ -1418,7 +1418,7 @@ def test_langchain_chat_model_wrapping(setup_osmosis):
             print(f"Call {i}: {call}")
         
         # Verify our tracking function was called
-        assert len(calls) > 0, "send_to_hoover was not called"
+        assert len(calls) > 0, "send_to_osmosis was not called"
         
         # Verify the data
         first_call = calls[0]
@@ -1431,7 +1431,7 @@ def test_langchain_chat_model_wrapping(setup_osmosis):
         
     finally:
         # Restore the original function
-        utils.send_to_hoover = original_send_to_hoover
+        utils.send_to_osmosis = original_send_to_osmosis
 
 # Test LangChain Prompt Template wrapping
 @pytest.mark.skipif(
@@ -1439,8 +1439,8 @@ def test_langchain_chat_model_wrapping(setup_osmosis):
     reason="LangChain package not installed"
 )
 def test_langchain_prompt_template_wrapping(setup_osmosis):
-    mock_send_to_hoover = setup_osmosis
-    mock_send_to_hoover.reset_mock()  # Start with a clean mock
+    mock_send_to_osmosis = setup_osmosis
+    mock_send_to_osmosis.reset_mock()  # Start with a clean mock
     
     # Try importing directly from langchain_core first (modern versions)
     try:
@@ -1501,7 +1501,7 @@ def test_langchain_prompt_template_wrapping(setup_osmosis):
         print(f"Mock called with args: {args}, kwargs: {kwargs}")
         return None
     
-    mock_send_to_hoover.side_effect = debug_side_effect
+    mock_send_to_osmosis.side_effect = debug_side_effect
     
     # Create a prompt template
     template = PromptTemplate(
@@ -1518,20 +1518,20 @@ def test_langchain_prompt_template_wrapping(setup_osmosis):
     assert formatted_prompt == "What is the capital of Japan?"
     
     # Check mock call count directly
-    print(f"Mock call count: {mock_send_to_hoover.call_count}")
-    print(f"Mock call args: {mock_send_to_hoover.call_args_list}")
+    print(f"Mock call count: {mock_send_to_osmosis.call_count}")
+    print(f"Mock call args: {mock_send_to_osmosis.call_args_list}")
     
     # Allow the test to pass with a warning if the patching doesn't work
-    if mock_send_to_hoover.call_count == 0:
+    if mock_send_to_osmosis.call_count == 0:
         print("WARNING: LangChain patching not working, but test passing with warning")
         # Still pass the test
         return
     
-    # Verify hoover was called
-    mock_send_to_hoover.assert_called_once()
+    # Verify osmosis was called
+    mock_send_to_osmosis.assert_called_once()
     
     # Verify the arguments
-    call_args = mock_send_to_hoover.call_args[1]
+    call_args = mock_send_to_osmosis.call_args[1]
     assert "query" in call_args
     assert "response" in call_args
     assert call_args["query"]["provider"] == "langchain"
@@ -1547,8 +1547,8 @@ def test_langchain_prompt_template_wrapping(setup_osmosis):
     reason="LangChain package not installed"
 )
 def test_langchain_async_llm_wrapping(setup_osmosis):
-    mock_send_to_hoover = setup_osmosis
-    mock_send_to_hoover.reset_mock()  # Start with a clean mock
+    mock_send_to_osmosis = setup_osmosis
+    mock_send_to_osmosis.reset_mock()  # Start with a clean mock
     
     # Import LangChain module first
     import langchain
@@ -1556,17 +1556,17 @@ def test_langchain_async_llm_wrapping(setup_osmosis):
     # Import utils from osmosis_wrap
     from osmosis_wrap import utils
     
-    # Capture send_to_hoover calls for verification
-    original_send_to_hoover = utils.send_to_hoover
+    # Capture send_to_osmosis calls for verification
+    original_send_to_osmosis = utils.send_to_osmosis
     calls = []
     
-    def tracking_send_to_hoover(*args, **kwargs):
-        print(f"Tracking send_to_hoover called with args: {args}")
+    def tracking_send_to_osmosis(*args, **kwargs):
+        print(f"Tracking send_to_osmosis called with args: {args}")
         calls.append((args, kwargs))
-        return original_send_to_hoover(*args, **kwargs)
+        return original_send_to_osmosis(*args, **kwargs)
     
-    # Replace send_to_hoover with our tracking version
-    utils.send_to_hoover = tracking_send_to_hoover
+    # Replace send_to_osmosis with our tracking version
+    utils.send_to_osmosis = tracking_send_to_osmosis
     
     # Enable logging
     utils.enabled = True
@@ -1601,7 +1601,7 @@ def test_langchain_async_llm_wrapping(setup_osmosis):
         wrap_langchain()
         
         # Test a custom version that bypasses LangChain's mocking issue
-        # Just send directly to hoover instead of relying on mocks
+        # Just send directly to osmosis instead of relying on mocks
         test_prompt = "Test Async LangChain prompt"
         model_name = "mock-async-llm-model"
         
@@ -1621,9 +1621,9 @@ def test_langchain_async_llm_wrapping(setup_osmosis):
             "provider": "langchain"
         }
         
-        # Directly call send_to_hoover as the adapter would do
-        print("Directly calling send_to_hoover as the adapter would...")
-        utils.send_to_hoover(query_data, response_data)
+        # Directly call send_to_osmosis as the adapter would do
+        print("Directly calling send_to_osmosis as the adapter would...")
+        utils.send_to_osmosis(query_data, response_data)
         
         # Verify the tracking captured the call
         print(f"Number of tracking calls: {len(calls)}")
@@ -1631,7 +1631,7 @@ def test_langchain_async_llm_wrapping(setup_osmosis):
             print(f"Call {i}: {call}")
         
         # Verify our tracking function was called
-        assert len(calls) > 0, "send_to_hoover was not called"
+        assert len(calls) > 0, "send_to_osmosis was not called"
         
         # Verify the data
         first_call = calls[0]
@@ -1644,7 +1644,7 @@ def test_langchain_async_llm_wrapping(setup_osmosis):
         
     finally:
         # Restore the original function
-        utils.send_to_hoover = original_send_to_hoover
+        utils.send_to_osmosis = original_send_to_osmosis
 
 # Test LangChain Anthropic wrapping
 @pytest.mark.skipif(
@@ -1652,23 +1652,23 @@ def test_langchain_async_llm_wrapping(setup_osmosis):
     reason="LangChain-Anthropic package not installed"
 )
 def test_langchain_anthropic_wrapping(setup_osmosis):
-    mock_send_to_hoover = setup_osmosis
-    mock_send_to_hoover.reset_mock()  # Start with a clean mock
+    mock_send_to_osmosis = setup_osmosis
+    mock_send_to_osmosis.reset_mock()  # Start with a clean mock
     
     # Import utils from osmosis_wrap
     from osmosis_wrap import utils
     
-    # Capture send_to_hoover calls for verification
-    original_send_to_hoover = utils.send_to_hoover
+    # Capture send_to_osmosis calls for verification
+    original_send_to_osmosis = utils.send_to_osmosis
     calls = []
     
-    def tracking_send_to_hoover(*args, **kwargs):
-        print(f"Tracking send_to_hoover called with args: {args}")
+    def tracking_send_to_osmosis(*args, **kwargs):
+        print(f"Tracking send_to_osmosis called with args: {args}")
         calls.append((args, kwargs))
-        return original_send_to_hoover(*args, **kwargs)
+        return original_send_to_osmosis(*args, **kwargs)
     
-    # Replace send_to_hoover with our tracking version
-    utils.send_to_hoover = tracking_send_to_hoover
+    # Replace send_to_osmosis with our tracking version
+    utils.send_to_osmosis = tracking_send_to_osmosis
     
     # Enable logging
     utils.enabled = True
@@ -1732,9 +1732,9 @@ def test_langchain_anthropic_wrapping(setup_osmosis):
             "kwargs": {"stop": None}
         }
         
-        # Directly call send_to_hoover as the adapter would do
-        print("Directly calling send_to_hoover as the adapter would...")
-        utils.send_to_hoover(query=query_data, response=response_data, status=200)
+        # Directly call send_to_osmosis as the adapter would do
+        print("Directly calling send_to_osmosis as the adapter would...")
+        utils.send_to_osmosis(query=query_data, response=response_data, status=200)
         
         # Verify the tracking captured the call
         print(f"Number of tracking calls: {len(calls)}")
@@ -1742,7 +1742,7 @@ def test_langchain_anthropic_wrapping(setup_osmosis):
             print(f"Call {i}: {call}")
         
         # Verify our tracking function was called
-        assert len(calls) > 0, "send_to_hoover was not called"
+        assert len(calls) > 0, "send_to_osmosis was not called"
         
         # Verify the data
         first_call = calls[0]
@@ -1761,7 +1761,7 @@ def test_langchain_anthropic_wrapping(setup_osmosis):
             ChatAnthropic._generate = original_generate
         
         # Restore the original function
-        utils.send_to_hoover = original_send_to_hoover
+        utils.send_to_osmosis = original_send_to_osmosis
 
 # Test LangChain OpenAI wrapping
 @pytest.mark.skipif(
@@ -1769,23 +1769,23 @@ def test_langchain_anthropic_wrapping(setup_osmosis):
     reason="LangChain-OpenAI package not installed"
 )
 def test_langchain_openai_wrapping(setup_osmosis):
-    mock_send_to_hoover = setup_osmosis
-    mock_send_to_hoover.reset_mock()  # Start with a clean mock
+    mock_send_to_osmosis = setup_osmosis
+    mock_send_to_osmosis.reset_mock()  # Start with a clean mock
     
     # Import utils from osmosis_wrap
     from osmosis_wrap import utils
     
-    # Capture send_to_hoover calls for verification
-    original_send_to_hoover = utils.send_to_hoover
+    # Capture send_to_osmosis calls for verification
+    original_send_to_osmosis = utils.send_to_osmosis
     calls = []
     
-    def tracking_send_to_hoover(*args, **kwargs):
-        print(f"Tracking send_to_hoover called with args: {args}")
+    def tracking_send_to_osmosis(*args, **kwargs):
+        print(f"Tracking send_to_osmosis called with args: {args}")
         calls.append((args, kwargs))
-        return original_send_to_hoover(*args, **kwargs)
+        return original_send_to_osmosis(*args, **kwargs)
     
-    # Replace send_to_hoover with our tracking version
-    utils.send_to_hoover = tracking_send_to_hoover
+    # Replace send_to_osmosis with our tracking version
+    utils.send_to_osmosis = tracking_send_to_osmosis
     
     # Enable logging
     utils.enabled = True
@@ -1859,9 +1859,9 @@ def test_langchain_openai_wrapping(setup_osmosis):
             "kwargs": {"stop": None}
         }
         
-        # Directly call send_to_hoover for OpenAI LLM
-        print("Calling send_to_hoover for OpenAI LLM...")
-        utils.send_to_hoover(query=query_data_llm, response=response_data_llm, status=200)
+        # Directly call send_to_osmosis for OpenAI LLM
+        print("Calling send_to_osmosis for OpenAI LLM...")
+        utils.send_to_osmosis(query=query_data_llm, response=response_data_llm, status=200)
         
         # TEST PART 2: ChatOpenAI
         # Create mock messages for ChatOpenAI
@@ -1889,9 +1889,9 @@ def test_langchain_openai_wrapping(setup_osmosis):
             "kwargs": {"stop": None}
         }
         
-        # Directly call send_to_hoover for ChatOpenAI
-        print("Calling send_to_hoover for ChatOpenAI...")
-        utils.send_to_hoover(query=query_data_chat, response=response_data_chat, status=200)
+        # Directly call send_to_osmosis for ChatOpenAI
+        print("Calling send_to_osmosis for ChatOpenAI...")
+        utils.send_to_osmosis(query=query_data_chat, response=response_data_chat, status=200)
         
         # Verify the tracking captured the calls
         print(f"Number of tracking calls: {len(calls)}")
@@ -1899,7 +1899,7 @@ def test_langchain_openai_wrapping(setup_osmosis):
             print(f"Call {i}: {call}")
         
         # Verify our tracking function was called twice
-        assert len(calls) == 2, "send_to_hoover was not called twice"
+        assert len(calls) == 2, "send_to_osmosis was not called twice"
         
         # Verify the data for OpenAI LLM
         first_call = calls[0]
@@ -1931,7 +1931,7 @@ def test_langchain_openai_wrapping(setup_osmosis):
             ChatOpenAI._generate = chat_openai_original_generate
         
         # Restore the original function
-        utils.send_to_hoover = original_send_to_hoover
+        utils.send_to_osmosis = original_send_to_osmosis
 
 # Test LangChain models with Azure variants
 @pytest.mark.skipif(
@@ -1939,23 +1939,23 @@ def test_langchain_openai_wrapping(setup_osmosis):
     reason="LangChain-OpenAI package not installed"
 )
 def test_langchain_azure_openai_wrapping(setup_osmosis):
-    mock_send_to_hoover = setup_osmosis
-    mock_send_to_hoover.reset_mock()  # Start with a clean mock
+    mock_send_to_osmosis = setup_osmosis
+    mock_send_to_osmosis.reset_mock()  # Start with a clean mock
     
     # Import utils from osmosis_wrap
     from osmosis_wrap import utils
     
-    # Capture send_to_hoover calls for verification
-    original_send_to_hoover = utils.send_to_hoover
+    # Capture send_to_osmosis calls for verification
+    original_send_to_osmosis = utils.send_to_osmosis
     calls = []
     
-    def tracking_send_to_hoover(*args, **kwargs):
-        print(f"Tracking send_to_hoover called with args: {args}")
+    def tracking_send_to_osmosis(*args, **kwargs):
+        print(f"Tracking send_to_osmosis called with args: {args}")
         calls.append((args, kwargs))
-        return original_send_to_hoover(*args, **kwargs)
+        return original_send_to_osmosis(*args, **kwargs)
     
-    # Replace send_to_hoover with our tracking version
-    utils.send_to_hoover = tracking_send_to_hoover
+    # Replace send_to_osmosis with our tracking version
+    utils.send_to_osmosis = tracking_send_to_osmosis
     
     # Enable logging
     utils.enabled = True
@@ -2029,9 +2029,9 @@ def test_langchain_azure_openai_wrapping(setup_osmosis):
             "kwargs": {"stop": None}
         }
         
-        # Directly call send_to_hoover for AzureOpenAI LLM
-        print("Calling send_to_hoover for AzureOpenAI LLM...")
-        utils.send_to_hoover(query=query_data_azure_llm, response=response_data_azure_llm, status=200)
+        # Directly call send_to_osmosis for AzureOpenAI LLM
+        print("Calling send_to_osmosis for AzureOpenAI LLM...")
+        utils.send_to_osmosis(query=query_data_azure_llm, response=response_data_azure_llm, status=200)
         
         # TEST PART 2: AzureChatOpenAI
         # Create mock messages for AzureChatOpenAI
@@ -2059,9 +2059,9 @@ def test_langchain_azure_openai_wrapping(setup_osmosis):
             "kwargs": {"stop": None}
         }
         
-        # Directly call send_to_hoover for AzureChatOpenAI
-        print("Calling send_to_hoover for AzureChatOpenAI...")
-        utils.send_to_hoover(query=query_data_azure_chat, response=response_data_azure_chat, status=200)
+        # Directly call send_to_osmosis for AzureChatOpenAI
+        print("Calling send_to_osmosis for AzureChatOpenAI...")
+        utils.send_to_osmosis(query=query_data_azure_chat, response=response_data_azure_chat, status=200)
         
         # Verify the tracking captured the calls
         print(f"Number of tracking calls: {len(calls)}")
@@ -2069,7 +2069,7 @@ def test_langchain_azure_openai_wrapping(setup_osmosis):
             print(f"Call {i}: {call}")
         
         # Verify our tracking function was called twice
-        assert len(calls) == 2, "send_to_hoover was not called twice"
+        assert len(calls) == 2, "send_to_osmosis was not called twice"
         
         # Verify the data for AzureOpenAI LLM
         first_call = calls[0]
@@ -2101,7 +2101,7 @@ def test_langchain_azure_openai_wrapping(setup_osmosis):
             AzureChatOpenAI._generate = azure_chat_openai_original_generate
         
         # Restore the original function
-        utils.send_to_hoover = original_send_to_hoover
+        utils.send_to_osmosis = original_send_to_osmosis
 
 if __name__ == "__main__":
     pytest.main(["-xvs", __file__]) 

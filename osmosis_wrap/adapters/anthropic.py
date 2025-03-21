@@ -7,13 +7,13 @@ This module provides monkey patching for the Anthropic Python client.
 import functools
 import sys
 
-from osmosis_wrap.utils import send_to_hoover
+from osmosis_wrap.utils import send_to_osmosis
 from osmosis_wrap import utils
 from osmosis_wrap.logger import logger
 
 def wrap_anthropic() -> None:
     """
-    Monkey patch Anthropic's client to send all prompts and responses to Hoover.
+    Monkey patch Anthropic's client to send all prompts and responses to OSMOSIS.
     
     This function should be called before creating any Anthropic client instances.
     
@@ -82,8 +82,8 @@ def _wrap_anthropic_v1(anthropic_module):
                     response = original_messages_create(self, *args, **kwargs)
                     
                     if utils.enabled:
-                        logger.debug("Sending success to Hoover (success)")
-                        send_to_hoover(
+                        logger.debug("Sending success to OSMOSIS (success)")
+                        send_to_osmosis(
                             query=kwargs,
                             response=response.model_dump() if hasattr(response, 'model_dump') else response,
                             status=200
@@ -94,12 +94,12 @@ def _wrap_anthropic_v1(anthropic_module):
                     logger.error(f"Error in wrapped create: {e}")
                     if utils.enabled:
                         error_response = {"error": str(e)}
-                        send_to_hoover(
+                        send_to_osmosis(
                             query=kwargs,
                             response=error_response,
                             status=400
                         )
-                        logger.debug("Sending error to Hoover (success)")
+                        logger.debug("Sending error to OSMOSIS (success)")
                     raise  # Re-raise the exception
             
             wrapped_messages_create._osmosis_wrapped = True
@@ -137,8 +137,8 @@ def _wrap_anthropic_v1(anthropic_module):
                                 response = await original_async_messages_create(*args, **kwargs)
                                 
                                 if utils.enabled:
-                                    logger.debug("Sending AsyncAnthropic response to Hoover (success)")
-                                    send_to_hoover(
+                                    logger.debug("Sending AsyncAnthropic response to OSMOSIS (success)")
+                                    send_to_osmosis(
                                         query=kwargs,
                                         response=response.model_dump() if hasattr(response, 'model_dump') else response,
                                         status=200
@@ -148,9 +148,9 @@ def _wrap_anthropic_v1(anthropic_module):
                             except Exception as e:
                                 logger.error(f"Error in wrapped AsyncAnthropic.messages.create: {e}")
                                 if utils.enabled:
-                                    logger.debug("Sending AsyncAnthropic error to Hoover")
+                                    logger.debug("Sending AsyncAnthropic error to OSMOSIS")
                                     error_response = {"error": str(e)}
-                                    send_to_hoover(
+                                    send_to_osmosis(
                                         query=kwargs,
                                         response=error_response,
                                         status=400
@@ -193,8 +193,8 @@ def _wrap_anthropic_v1(anthropic_module):
                         response = await original_acreate(self, *args, **kwargs)
                         
                         if utils.enabled:
-                            logger.debug("Sending async response to Hoover (success)")
-                            send_to_hoover(
+                            logger.debug("Sending async response to OSMOSIS (success)")
+                            send_to_osmosis(
                                 query=kwargs,
                                 response=response.model_dump() if hasattr(response, 'model_dump') else response,
                                 status=200
@@ -204,9 +204,9 @@ def _wrap_anthropic_v1(anthropic_module):
                     except Exception as e:
                         logger.error(f"Error in wrapped async create: {e}")
                         if utils.enabled:
-                            logger.debug("Sending async error to Hoover")
+                            logger.debug("Sending async error to OSMOSIS")
                             error_response = {"error": str(e)}
-                            send_to_hoover(
+                            send_to_osmosis(
                                 query=kwargs,
                                 response=error_response,
                                 status=400
@@ -231,7 +231,7 @@ def _wrap_anthropic_v1(anthropic_module):
                     response = original_completions_create(self, *args, **kwargs)
                     
                     if utils.enabled:
-                        send_to_hoover(
+                        send_to_osmosis(
                             query=kwargs,
                             response=response.model_dump() if hasattr(response, 'model_dump') else response,
                             status=200
@@ -253,8 +253,8 @@ def _wrap_anthropic_v1(anthropic_module):
                                 response = await original_completions_acreate(self, *args, **kwargs)
                                 
                                 if utils.enabled:
-                                    logger.debug("Sending Completions async response to Hoover (success)")
-                                    send_to_hoover(
+                                    logger.debug("Sending Completions async response to OSMOSIS (success)")
+                                    send_to_osmosis(
                                         query=kwargs,
                                         response=response.model_dump() if hasattr(response, 'model_dump') else response,
                                         status=200
@@ -264,9 +264,9 @@ def _wrap_anthropic_v1(anthropic_module):
                             except Exception as e:
                                 logger.error(f"Error in wrapped Completions async create: {e}")
                                 if utils.enabled:
-                                    logger.debug("Sending Completions async error to Hoover")
+                                    logger.debug("Sending Completions async error to OSMOSIS")
                                     error_response = {"error": str(e)}
-                                    send_to_hoover(
+                                    send_to_osmosis(
                                         query=kwargs,
                                         response=error_response,
                                         status=400
@@ -307,8 +307,8 @@ def _wrap_anthropic_v0(anthropic_module):
                         response = original_complete(self, *args, **kwargs)
                         
                         if utils.enabled:
-                            logger.debug("Sending success to Hoover (success)")
-                            send_to_hoover(
+                            logger.debug("Sending success to OSMOSIS (success)")
+                            send_to_osmosis(
                                 query=kwargs,
                                 response=response,
                                 status=200
@@ -319,12 +319,12 @@ def _wrap_anthropic_v0(anthropic_module):
                         logger.error(f"Error in wrapped complete: {e}")
                         if utils.enabled:
                             error_response = {"error": str(e)}
-                            send_to_hoover(
+                            send_to_osmosis(
                                 query=kwargs,
                                 response=error_response,
                                 status=400
                             )
-                            logger.debug("Sending error to Hoover (success)")
+                            logger.debug("Sending error to OSMOSIS (success)")
                         raise  # Re-raise the exception
                 
                 wrapped_complete._osmosis_wrapped = True
@@ -346,8 +346,8 @@ def _wrap_anthropic_v0(anthropic_module):
                             response = original_messages_create(self, *args, **kwargs)
                             
                             if utils.enabled:
-                                logger.debug("Sending success to Hoover (success)")
-                                send_to_hoover(
+                                logger.debug("Sending success to OSMOSIS (success)")
+                                send_to_osmosis(
                                     query=kwargs,
                                     response=response,
                                     status=200
@@ -358,12 +358,12 @@ def _wrap_anthropic_v0(anthropic_module):
                             logger.error(f"Error in wrapped messages.create: {e}")
                             if utils.enabled:
                                 error_response = {"error": str(e)}
-                                send_to_hoover(
+                                send_to_osmosis(
                                     query=kwargs,
                                     response=error_response,
                                     status=400
                                 )
-                                logger.debug("Sending error to Hoover (success)")
+                                logger.debug("Sending error to OSMOSIS (success)")
                             raise  # Re-raise the exception
                     
                     wrapped_messages_create._osmosis_wrapped = True
@@ -390,8 +390,8 @@ def _wrap_anthropic_v0(anthropic_module):
                                 response = original_instance_complete(*args, **kwargs)
                                 
                                 if utils.enabled:
-                                    logger.debug("Sending success to Hoover (success)")
-                                    send_to_hoover(
+                                    logger.debug("Sending success to OSMOSIS (success)")
+                                    send_to_osmosis(
                                         query=kwargs,
                                         response=response,
                                         status=200
@@ -402,7 +402,7 @@ def _wrap_anthropic_v0(anthropic_module):
                                 logger.error(f"Error in wrapped instance complete: {e}")
                                 if utils.enabled:
                                     error_response = {"error": str(e)}
-                                    send_to_hoover(
+                                    send_to_osmosis(
                                         query=kwargs,
                                         response=error_response,
                                         status=400

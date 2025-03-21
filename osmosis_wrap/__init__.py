@@ -2,7 +2,7 @@
 osmosis-wrap: A library for monkey patching LLM APIs to print all prompts and responses.
 
 This module patches various LLM client libraries to send all prompts and responses
-to the Hoover API for logging and monitoring.
+to the OSMOSIS API for logging and monitoring.
 
 Currently supported adapters:
 - Anthropic (both sync and async clients)
@@ -13,24 +13,22 @@ Currently supported adapters:
 # Use lazy imports to avoid importing modules during setup
 def _import_modules():
     global utils, logger, reconfigure_logger
-    global enabled, use_stderr, pretty_print, print_messages
-    global init, disable_hoover, enable_hoover
+    global enabled, print_messages
+    global init, disable_osmosis, enable_osmosis
     
     from . import utils
     from .logger import logger, reconfigure_logger
     
     # Re-export configuration flags for easy access
     enabled = utils.enabled
-    use_stderr = utils.use_stderr
-    pretty_print = utils.pretty_print
     print_messages = utils.print_messages
     
     # Re-export initialization function
     init = utils.init
     
     # Export disable and enable functions
-    disable_hoover = utils.disable_hoover
-    enable_hoover = utils.enable_hoover
+    disable_osmosis = utils.disable_osmosis
+    enable_osmosis = utils.enable_osmosis
     
     # Initialize wrappers as None
     global wrap_anthropic, wrap_openai, wrap_langchain

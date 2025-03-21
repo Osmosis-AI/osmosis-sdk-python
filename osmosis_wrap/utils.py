@@ -5,49 +5,47 @@ Utility functions for Osmosis Wrap adapters
 import json
 from datetime import datetime, timezone
 from typing import Any, Dict
-
+import xxhash
 # Import constants
-from .consts import hoover_api_url
+from .consts import osmosis_api_url
 # Import logger
 from .logger import logger
 
 # Global configuration
 enabled = True
-use_stderr = True  # Added missing configuration
-pretty_print = True  # Controls whether to format output nicely
 print_messages = True  # Controls whether to print messages at all
-hoover_api_key = None  # Will be set by init()
+osmosis_api_key = None  # Will be set by init()
 _initialized = False
 
 def init(api_key: str) -> None:
     """
-    Initialize Osmosis Wrap with the Hoover API key.
+    Initialize Osmosis Wrap with the OSMOSIS API key.
     
     Args:
-        api_key: The Hoover API key for logging LLM usage
+        api_key: The OSMOSIS API key for logging LLM usage
     """
-    global hoover_api_key, _initialized
-    hoover_api_key = api_key
+    global osmosis_api_key, _initialized
+    osmosis_api_key = api_key
     _initialized = True
 
-def disable_hoover() -> None:
+def disable_osmosis() -> None:
     global enabled
     enabled = False
 
-def enable_hoover() -> None:
+def enable_osmosis() -> None:
     global enabled
     enabled = True
 
-def send_to_hoover(query: Dict[str, Any], response: Dict[str, Any], status: int = 200) -> None:
+def send_to_osmosis(query: Dict[str, Any], response: Dict[str, Any], status: int = 200) -> None:
     """
-    Send query and response data to the Hoover API using AWS Firehose.
+    Send query and response data to the OSMOSIS API using AWS Firehose.
     
     Args:
         query: The query/request data
         response: The response data
         status: The HTTP status code (default: 200)
     """
-    if not enabled or not hoover_api_key:
+    if not enabled or not osmosis_api_key:
         return
 
     if not _initialized:
@@ -61,13 +59,13 @@ def send_to_hoover(query: Dict[str, Any], response: Dict[str, Any], status: int 
         # Create headers
         headers = {
             "Content-Type": "application/json",
-            "x-api-key": hoover_api_key
+            "x-api-key": osmosis_api_key
         }
             
         # Prepare main data payload
         data = {
-            "owner": hoover_api_key[:10],
-            "date": datetime.now(timezone.utc).isoformat(),
+            "owner": xxhash.xxh64(osmosis_api_key).hexdigest(),
+            "date": int(datetime.now(timezone.utc).timestamp()),
             "query": query,
             "response": response,
             "status": status
@@ -75,15 +73,15 @@ def send_to_hoover(query: Dict[str, Any], response: Dict[str, Any], status: int 
         
         # Send main data payload
         response_data = requests.post(
-            f"{hoover_api_url}/data",
+            f"{osmosis_api_url}/data",
             headers=headers,
             data=json.dumps(data).replace('\n', '') + '\n'
         )
         
         if response_data.status_code != 200:
-            logger.warning(f"Hoover API returned status {response_data.status_code} for data")
+            logger.warning(f"OSMOSIS API returned status {response_data.status_code} for data")
     
     except ImportError:
         logger.warning("Requests library not installed. Please install it with 'pip install requests'.")
     except Exception as e:
-        logger.warning(f"Failed to send data to Hoover API: {str(e)}")
+        logger.warning(f"Failed to send data to OSMOSIS API: {str(e)}")
