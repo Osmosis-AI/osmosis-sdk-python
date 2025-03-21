@@ -12,6 +12,8 @@ A Python library that monkey patches LLM client libraries to send all prompts an
 
 ## Installation
 
+[pypi](https://pypi.org/project/osmosis-wrap/)
+
 ```bash
 pip install osmosis-wrap
 ```
