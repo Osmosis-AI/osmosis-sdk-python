@@ -44,6 +44,20 @@ This example:
 - Demonstrates LangChain integration (if available)
 - Shows how to toggle Hoover logging on and off
 
+### Performance Profiler
+
+`profiler_example.py` measures and compares the execution times for different integrations with and without osmosis-wrap:
+
+```bash
+python examples/profiler_example.py
+```
+
+This example:
+- Tests OpenAI, Anthropic, LangChain-OpenAI, and LangChain-Anthropic
+- Runs each integration with and without osmosis-wrap
+- Calculates performance differences and provides a detailed comparison
+- Helps identify any overhead introduced by osmosis-wrap
+
 ### Individual Provider Examples
 
 Each example demonstrates osmosis-wrap with a specific provider:

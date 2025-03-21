@@ -59,9 +59,13 @@ def _patch_langchain_llms() -> None:
                         logger.warning("Could not find BaseLLM class in any expected location.")
                         return
         
-        logger.info("Calling wrap_langchain()...")
+        logger.info("Starting to wrap LangChain LLM methods...")
         
-        # Patch the _call method
+        # Get all available methods to understand which API we're working with
+        llm_methods = [method for method in dir(BaseLLM) if not method.startswith('_') or method in ['_call', '__call__']]
+        logger.info(f"Found the following methods on BaseLLM: {llm_methods}")
+        
+        # Patch the _call method if it exists
         if hasattr(BaseLLM, "_call"):
             original_call = BaseLLM._call
             
@@ -97,10 +101,11 @@ def _patch_langchain_llms() -> None:
                 
                 wrapped_call._osmosis_wrapped = True
                 BaseLLM._call = wrapped_call
+                logger.info("Successfully wrapped BaseLLM._call method")
             else:
                 logger.info("LangChain BaseLLM._call already wrapped.")
         else:
-            logger.warning("LangChain BaseLLM does not have a _call method.")
+            logger.info("LangChain BaseLLM does not have a _call method, skipping.")
         
         # Also patch invoke method if it exists
         if hasattr(BaseLLM, "invoke"):
@@ -138,10 +143,13 @@ def _patch_langchain_llms() -> None:
                 
                 wrapped_invoke._osmosis_wrapped = True
                 BaseLLM.invoke = wrapped_invoke
+                logger.info("Successfully wrapped BaseLLM.invoke method")
             else:
                 logger.info("LangChain BaseLLM.invoke already wrapped.")
+        else:
+            logger.info("LangChain BaseLLM does not have an invoke method, skipping.")
         
-        # Patch the generate method
+        # Patch the generate method if it exists
         if hasattr(BaseLLM, "generate"):
             original_generate = BaseLLM.generate
             
@@ -177,48 +185,79 @@ def _patch_langchain_llms() -> None:
                 
                 wrapped_generate._osmosis_wrapped = True
                 BaseLLM.generate = wrapped_generate
+                logger.info("Successfully wrapped BaseLLM.generate method")
             else:
                 logger.info("LangChain BaseLLM.generate already wrapped.")
+        else:
+            logger.info("LangChain BaseLLM does not have a generate method, skipping.")
         
         # For modern LangChain, patch __call__ which could be the Model.__call__ method
-        if hasattr(BaseLLM, "__call__"):
+        if hasattr(BaseLLM, "__call__") and callable(getattr(BaseLLM, "__call__")):
             # Get the method, not the descriptor
             original_call_method = BaseLLM.__call__
             
             if not hasattr(original_call_method, "_osmosis_wrapped"):
                 @functools.wraps(original_call_method)
                 def wrapped_call_method(self, prompt, stop=None, run_manager=None, **kwargs):
-                    # Get the response
-                    response = original_call_method(self, prompt, stop=stop, run_manager=run_manager, **kwargs)
-                    
-                    # Send to Hoover if enabled
-                    if utils.enabled:
-                        # Try to get model name
-                        model_name = "unknown_model"
-                        if hasattr(self, "model_name"):
-                            model_name = self.model_name
+                    try:
+                        # Get the response
+                        response = original_call_method(self, prompt, stop=stop, run_manager=run_manager, **kwargs)
                         
-                        # Create payload
-                        payload = {
-                            "llm_type": self.__class__.__name__,
-                            "model_name": model_name,
-                            "prompt": prompt, 
-                            "response": response,
-                            "kwargs": {"stop": stop, **kwargs}
-                        }
+                        # Send to Hoover if enabled
+                        if utils.enabled:
+                            # Try to get model name
+                            model_name = "unknown_model"
+                            if hasattr(self, "model_name"):
+                                model_name = self.model_name
+                            
+                            # Create payload
+                            payload = {
+                                "llm_type": self.__class__.__name__,
+                                "model_name": model_name,
+                                "prompt": prompt, 
+                                "response": response,
+                                "kwargs": {"stop": stop, **kwargs}
+                            }
+                            
+                            send_to_hoover(
+                                query={"type": "langchain_llm_call", "prompt": prompt, "model": model_name},
+                                response=payload,
+                                status=200
+                            )
                         
-                        send_to_hoover(
-                            query={"type": "langchain_llm_call", "prompt": prompt, "model": model_name},
-                            response=payload,
-                            status=200
-                        )
-                    
-                    return response
+                        return response
+                    except TypeError as e:
+                        # Handle parameter mismatch gracefully
+                        logger.warning(f"TypeError in wrapped __call__: {e}, trying without run_manager")
+                        # Try calling without run_manager (older versions)
+                        response = original_call_method(self, prompt, stop=stop, **kwargs)
+                        
+                        # Send to Hoover if enabled
+                        if utils.enabled:
+                            model_name = getattr(self, "model_name", "unknown_model")
+                            payload = {
+                                "llm_type": self.__class__.__name__,
+                                "model_name": model_name,
+                                "prompt": prompt, 
+                                "response": response,
+                                "kwargs": {"stop": stop, **kwargs}
+                            }
+                            
+                            send_to_hoover(
+                                query={"type": "langchain_llm_call_fallback", "prompt": prompt, "model": model_name},
+                                response=payload,
+                                status=200
+                            )
+                        
+                        return response
                 
                 wrapped_call_method._osmosis_wrapped = True
                 BaseLLM.__call__ = wrapped_call_method
+                logger.info("Successfully wrapped BaseLLM.__call__ method")
             else:
                 logger.info("LangChain BaseLLM.__call__ already wrapped.")
+        else:
+            logger.info("LangChain BaseLLM does not have a callable __call__ method, skipping.")
         
     except Exception as e:
         logger.error(f"Failed to patch LangChain LLM classes: {e}")

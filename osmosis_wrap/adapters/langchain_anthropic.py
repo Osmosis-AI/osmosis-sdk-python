@@ -43,6 +43,22 @@ def _patch_anthropic_chat_models() -> None:
                 logger.warning("Could not find ChatAnthropic class in any expected location.")
                 return
         
+        # Log available methods on ChatAnthropic for debugging
+        chat_methods = [method for method in dir(ChatAnthropic) if not method.startswith('__') or method in ['_generate', '_agenerate', '_call', '_acall']]
+        logger.info(f"Found the following methods on ChatAnthropic: {chat_methods}")
+        
+        # Try to get the model attribute name - could be model or model_name
+        model_attr = None
+        for attr in ['model', 'model_name']:
+            if hasattr(ChatAnthropic, attr):
+                model_attr = attr
+                logger.info(f"ChatAnthropic uses '{attr}' attribute for model name")
+                break
+        
+        if not model_attr:
+            model_attr = 'model'  # Default to 'model' if we can't determine it
+            logger.info(f"Could not determine model attribute name, defaulting to '{model_attr}'")
+        
         # Patch the _generate method if it exists
         if hasattr(ChatAnthropic, "_generate"):
             original_generate = ChatAnthropic._generate
@@ -56,16 +72,17 @@ def _patch_anthropic_chat_models() -> None:
                     # Send to Hoover if enabled
                     if utils.enabled:
                         # Create payload
+                        model_name = getattr(self, model_attr, "unknown_model")
                         payload = {
                             "model_type": "ChatAnthropic",
-                            "model_name": self.model,
+                            "model_name": model_name,
                             "messages": [str(msg) for msg in messages],  # Convert to strings for serialization
                             "response": str(response),  # Convert to string since it may not be serializable
                             "kwargs": {"stop": stop, **kwargs}
                         }
                         
                         send_to_hoover(
-                            query={"type": "langchain_anthropic_generate", "messages": [str(msg) for msg in messages], "model": self.model},
+                            query={"type": "langchain_anthropic_generate", "messages": [str(msg) for msg in messages], "model": model_name},
                             response=payload,
                             status=200
                         )
@@ -74,8 +91,11 @@ def _patch_anthropic_chat_models() -> None:
                 
                 wrapped_generate._osmosis_wrapped = True
                 ChatAnthropic._generate = wrapped_generate
+                logger.info("Successfully wrapped ChatAnthropic._generate method")
             else:
                 logger.info("ChatAnthropic._generate already wrapped.")
+        else:
+            logger.info("ChatAnthropic does not have a _generate method, skipping.")
         
         # Patch the _agenerate method if it exists
         if hasattr(ChatAnthropic, "_agenerate"):
@@ -90,16 +110,17 @@ def _patch_anthropic_chat_models() -> None:
                     # Send to Hoover if enabled
                     if utils.enabled:
                         # Create payload
+                        model_name = getattr(self, model_attr, "unknown_model")
                         payload = {
                             "model_type": "ChatAnthropic",
-                            "model_name": self.model,
+                            "model_name": model_name,
                             "messages": [str(msg) for msg in messages],  # Convert to strings for serialization
                             "response": str(response),  # Convert to string since it may not be serializable
                             "kwargs": {"stop": stop, **kwargs}
                         }
                         
                         send_to_hoover(
-                            query={"type": "langchain_anthropic_agenerate", "messages": [str(msg) for msg in messages], "model": self.model},
+                            query={"type": "langchain_anthropic_agenerate", "messages": [str(msg) for msg in messages], "model": model_name},
                             response=payload,
                             status=200
                         )
@@ -108,8 +129,11 @@ def _patch_anthropic_chat_models() -> None:
                 
                 wrapped_agenerate._osmosis_wrapped = True
                 ChatAnthropic._agenerate = wrapped_agenerate
+                logger.info("Successfully wrapped ChatAnthropic._agenerate method")
             else:
                 logger.info("ChatAnthropic._agenerate already wrapped.")
+        else:
+            logger.info("ChatAnthropic does not have a _agenerate method, skipping.")
         
         # Patch _call method if it exists (used in newer versions)
         if hasattr(ChatAnthropic, "_call"):
@@ -118,32 +142,61 @@ def _patch_anthropic_chat_models() -> None:
             if not hasattr(original_call, "_osmosis_wrapped"):
                 @functools.wraps(original_call)
                 def wrapped_call(self, messages, stop=None, run_manager=None, **kwargs):
-                    # Get the response
-                    response = original_call(self, messages, stop=stop, run_manager=run_manager, **kwargs)
-                    
-                    # Send to Hoover if enabled
-                    if utils.enabled:
-                        # Create payload
-                        payload = {
-                            "model_type": "ChatAnthropic",
-                            "model_name": self.model,
-                            "messages": [str(msg) for msg in messages],  # Convert to strings for serialization
-                            "response": str(response),
-                            "kwargs": {"stop": stop, **kwargs}
-                        }
+                    try:
+                        # Get the response
+                        response = original_call(self, messages, stop=stop, run_manager=run_manager, **kwargs)
                         
-                        send_to_hoover(
-                            query={"type": "langchain_anthropic_call", "messages": [str(msg) for msg in messages], "model": self.model},
-                            response=payload,
-                            status=200
-                        )
-                    
-                    return response
+                        # Send to Hoover if enabled
+                        if utils.enabled:
+                            # Create payload
+                            model_name = getattr(self, model_attr, "unknown_model")
+                            payload = {
+                                "model_type": "ChatAnthropic",
+                                "model_name": model_name,
+                                "messages": [str(msg) for msg in messages],  # Convert to strings for serialization
+                                "response": str(response),
+                                "kwargs": {"stop": stop, **kwargs}
+                            }
+                            
+                            send_to_hoover(
+                                query={"type": "langchain_anthropic_call", "messages": [str(msg) for msg in messages], "model": model_name},
+                                response=payload,
+                                status=200
+                            )
+                        
+                        return response
+                    except TypeError as e:
+                        # Handle parameter mismatch gracefully
+                        logger.warning(f"TypeError in wrapped _call: {e}, trying without run_manager")
+                        # Try calling without run_manager (older versions)
+                        response = original_call(self, messages, stop=stop, **kwargs)
+                        
+                        # Send to Hoover if enabled
+                        if utils.enabled:
+                            model_name = getattr(self, model_attr, "unknown_model")
+                            payload = {
+                                "model_type": "ChatAnthropic",
+                                "model_name": model_name,
+                                "messages": [str(msg) for msg in messages],
+                                "response": str(response),
+                                "kwargs": {"stop": stop, **kwargs}
+                            }
+                            
+                            send_to_hoover(
+                                query={"type": "langchain_anthropic_call_fallback", "messages": [str(msg) for msg in messages], "model": model_name},
+                                response=payload,
+                                status=200
+                            )
+                        
+                        return response
                 
                 wrapped_call._osmosis_wrapped = True
                 ChatAnthropic._call = wrapped_call
+                logger.info("Successfully wrapped ChatAnthropic._call method")
             else:
                 logger.info("ChatAnthropic._call already wrapped.")
+        else:
+            logger.info("ChatAnthropic does not have a _call method, skipping.")
         
         # Patch _acall method if it exists
         if hasattr(ChatAnthropic, "_acall"):
@@ -152,32 +205,61 @@ def _patch_anthropic_chat_models() -> None:
             if not hasattr(original_acall, "_osmosis_wrapped"):
                 @functools.wraps(original_acall)
                 async def wrapped_acall(self, messages, stop=None, run_manager=None, **kwargs):
-                    # Get the response
-                    response = await original_acall(self, messages, stop=stop, run_manager=run_manager, **kwargs)
-                    
-                    # Send to Hoover if enabled
-                    if utils.enabled:
-                        # Create payload
-                        payload = {
-                            "model_type": "ChatAnthropic",
-                            "model_name": self.model,
-                            "messages": [str(msg) for msg in messages],  # Convert to strings for serialization
-                            "response": str(response),
-                            "kwargs": {"stop": stop, **kwargs}
-                        }
+                    try:
+                        # Get the response
+                        response = await original_acall(self, messages, stop=stop, run_manager=run_manager, **kwargs)
                         
-                        send_to_hoover(
-                            query={"type": "langchain_anthropic_acall", "messages": [str(msg) for msg in messages], "model": self.model},
-                            response=payload,
-                            status=200
-                        )
-                    
-                    return response
+                        # Send to Hoover if enabled
+                        if utils.enabled:
+                            # Create payload
+                            model_name = getattr(self, model_attr, "unknown_model")
+                            payload = {
+                                "model_type": "ChatAnthropic",
+                                "model_name": model_name,
+                                "messages": [str(msg) for msg in messages],  # Convert to strings for serialization
+                                "response": str(response),
+                                "kwargs": {"stop": stop, **kwargs}
+                            }
+                            
+                            send_to_hoover(
+                                query={"type": "langchain_anthropic_acall", "messages": [str(msg) for msg in messages], "model": model_name},
+                                response=payload,
+                                status=200
+                            )
+                        
+                        return response
+                    except TypeError as e:
+                        # Handle parameter mismatch gracefully
+                        logger.warning(f"TypeError in wrapped _acall: {e}, trying without run_manager")
+                        # Try calling without run_manager (older versions)
+                        response = await original_acall(self, messages, stop=stop, **kwargs)
+                        
+                        # Send to Hoover if enabled
+                        if utils.enabled:
+                            model_name = getattr(self, model_attr, "unknown_model")
+                            payload = {
+                                "model_type": "ChatAnthropic",
+                                "model_name": model_name, 
+                                "messages": [str(msg) for msg in messages],
+                                "response": str(response),
+                                "kwargs": {"stop": stop, **kwargs}
+                            }
+                            
+                            send_to_hoover(
+                                query={"type": "langchain_anthropic_acall_fallback", "messages": [str(msg) for msg in messages], "model": model_name},
+                                response=payload,
+                                status=200
+                            )
+                        
+                        return response
                 
                 wrapped_acall._osmosis_wrapped = True
                 ChatAnthropic._acall = wrapped_acall
+                logger.info("Successfully wrapped ChatAnthropic._acall method")
             else:
                 logger.info("ChatAnthropic._acall already wrapped.")
+        else:
+            logger.info("ChatAnthropic does not have a _acall method, skipping.")
                 
     except Exception as e:
         logger.error(f"Failed to patch langchain-anthropic chat model classes: {e}") 

@@ -44,6 +44,22 @@ def _patch_openai_chat_models() -> None:
                 logger.warning("Could not find ChatOpenAI class in any expected location.")
                 return
         
+        # Log available methods on ChatOpenAI for debugging
+        chat_methods = [method for method in dir(ChatOpenAI) if not method.startswith('__') or method in ['_generate', '_agenerate', '_call', '_acall']]
+        logger.info(f"Found the following methods on ChatOpenAI: {chat_methods}")
+        
+        # Try to get the model attribute name - should be model_name but might differ
+        model_attr = None
+        for attr in ['model_name', 'model']:
+            if hasattr(ChatOpenAI, attr):
+                model_attr = attr
+                logger.info(f"ChatOpenAI uses '{attr}' attribute for model name")
+                break
+        
+        if not model_attr:
+            model_attr = 'model_name'  # Default to 'model_name' if we can't determine it
+            logger.info(f"Could not determine model attribute name, defaulting to '{model_attr}'")
+        
         # Patch the _generate method if it exists
         if hasattr(ChatOpenAI, "_generate"):
             original_generate = ChatOpenAI._generate
@@ -57,16 +73,17 @@ def _patch_openai_chat_models() -> None:
                     # Send to Hoover if enabled
                     if utils.enabled:
                         # Create payload
+                        model_name = getattr(self, model_attr, "unknown_model")
                         payload = {
                             "model_type": "ChatOpenAI",
-                            "model_name": self.model_name,
+                            "model_name": model_name,
                             "messages": [str(msg) for msg in messages],  # Convert to strings for serialization
                             "response": str(response),  # Convert to string since it may not be serializable
                             "kwargs": {"stop": stop, **kwargs}
                         }
                         
                         send_to_hoover(
-                            query={"type": "langchain_openai_generate", "messages": [str(msg) for msg in messages], "model": self.model_name},
+                            query={"type": "langchain_openai_generate", "messages": [str(msg) for msg in messages], "model": model_name},
                             response=payload,
                             status=200
                         )
@@ -75,8 +92,11 @@ def _patch_openai_chat_models() -> None:
                 
                 wrapped_generate._osmosis_wrapped = True
                 ChatOpenAI._generate = wrapped_generate
+                logger.info("Successfully wrapped ChatOpenAI._generate method")
             else:
                 logger.info("ChatOpenAI._generate already wrapped.")
+        else:
+            logger.info("ChatOpenAI does not have a _generate method, skipping.")
         
         # Patch the _agenerate method if it exists
         if hasattr(ChatOpenAI, "_agenerate"):
@@ -91,16 +111,17 @@ def _patch_openai_chat_models() -> None:
                     # Send to Hoover if enabled
                     if utils.enabled:
                         # Create payload
+                        model_name = getattr(self, model_attr, "unknown_model")
                         payload = {
                             "model_type": "ChatOpenAI",
-                            "model_name": self.model_name,
+                            "model_name": model_name,
                             "messages": [str(msg) for msg in messages],  # Convert to strings for serialization
                             "response": str(response),  # Convert to string since it may not be serializable
                             "kwargs": {"stop": stop, **kwargs}
                         }
                         
                         send_to_hoover(
-                            query={"type": "langchain_openai_agenerate", "messages": [str(msg) for msg in messages], "model": self.model_name},
+                            query={"type": "langchain_openai_agenerate", "messages": [str(msg) for msg in messages], "model": model_name},
                             response=payload,
                             status=200
                         )
@@ -109,8 +130,11 @@ def _patch_openai_chat_models() -> None:
                 
                 wrapped_agenerate._osmosis_wrapped = True
                 ChatOpenAI._agenerate = wrapped_agenerate
+                logger.info("Successfully wrapped ChatOpenAI._agenerate method")
             else:
                 logger.info("ChatOpenAI._agenerate already wrapped.")
+        else:
+            logger.info("ChatOpenAI does not have a _agenerate method, skipping.")
         
         # Patch _call method if it exists (used in newer versions)
         if hasattr(ChatOpenAI, "_call"):
@@ -119,32 +143,61 @@ def _patch_openai_chat_models() -> None:
             if not hasattr(original_call, "_osmosis_wrapped"):
                 @functools.wraps(original_call)
                 def wrapped_call(self, messages, stop=None, run_manager=None, **kwargs):
-                    # Get the response
-                    response = original_call(self, messages, stop=stop, run_manager=run_manager, **kwargs)
-                    
-                    # Send to Hoover if enabled
-                    if utils.enabled:
-                        # Create payload
-                        payload = {
-                            "model_type": "ChatOpenAI",
-                            "model_name": self.model_name,
-                            "messages": [str(msg) for msg in messages],  # Convert to strings for serialization
-                            "response": str(response),
-                            "kwargs": {"stop": stop, **kwargs}
-                        }
+                    try:
+                        # Get the response
+                        response = original_call(self, messages, stop=stop, run_manager=run_manager, **kwargs)
                         
-                        send_to_hoover(
-                            query={"type": "langchain_openai_call", "messages": [str(msg) for msg in messages], "model": self.model_name},
-                            response=payload,
-                            status=200
-                        )
-                    
-                    return response
+                        # Send to Hoover if enabled
+                        if utils.enabled:
+                            # Create payload
+                            model_name = getattr(self, model_attr, "unknown_model")
+                            payload = {
+                                "model_type": "ChatOpenAI",
+                                "model_name": model_name,
+                                "messages": [str(msg) for msg in messages],  # Convert to strings for serialization
+                                "response": str(response),
+                                "kwargs": {"stop": stop, **kwargs}
+                            }
+                            
+                            send_to_hoover(
+                                query={"type": "langchain_openai_call", "messages": [str(msg) for msg in messages], "model": model_name},
+                                response=payload,
+                                status=200
+                            )
+                        
+                        return response
+                    except TypeError as e:
+                        # Handle parameter mismatch gracefully
+                        logger.warning(f"TypeError in wrapped _call: {e}, trying without run_manager")
+                        # Try calling without run_manager (older versions)
+                        response = original_call(self, messages, stop=stop, **kwargs)
+                        
+                        # Send to Hoover if enabled
+                        if utils.enabled:
+                            model_name = getattr(self, model_attr, "unknown_model")
+                            payload = {
+                                "model_type": "ChatOpenAI",
+                                "model_name": model_name,
+                                "messages": [str(msg) for msg in messages],
+                                "response": str(response),
+                                "kwargs": {"stop": stop, **kwargs}
+                            }
+                            
+                            send_to_hoover(
+                                query={"type": "langchain_openai_call_fallback", "messages": [str(msg) for msg in messages], "model": model_name},
+                                response=payload,
+                                status=200
+                            )
+                        
+                        return response
                 
                 wrapped_call._osmosis_wrapped = True
                 ChatOpenAI._call = wrapped_call
+                logger.info("Successfully wrapped ChatOpenAI._call method")
             else:
                 logger.info("ChatOpenAI._call already wrapped.")
+        else:
+            logger.info("ChatOpenAI does not have a _call method, skipping.")
         
         # Patch _acall method if it exists
         if hasattr(ChatOpenAI, "_acall"):
@@ -153,32 +206,61 @@ def _patch_openai_chat_models() -> None:
             if not hasattr(original_acall, "_osmosis_wrapped"):
                 @functools.wraps(original_acall)
                 async def wrapped_acall(self, messages, stop=None, run_manager=None, **kwargs):
-                    # Get the response
-                    response = await original_acall(self, messages, stop=stop, run_manager=run_manager, **kwargs)
-                    
-                    # Send to Hoover if enabled
-                    if utils.enabled:
-                        # Create payload
-                        payload = {
-                            "model_type": "ChatOpenAI",
-                            "model_name": self.model_name,
-                            "messages": [str(msg) for msg in messages],  # Convert to strings for serialization
-                            "response": str(response),
-                            "kwargs": {"stop": stop, **kwargs}
-                        }
+                    try:
+                        # Get the response
+                        response = await original_acall(self, messages, stop=stop, run_manager=run_manager, **kwargs)
                         
-                        send_to_hoover(
-                            query={"type": "langchain_openai_acall", "messages": [str(msg) for msg in messages], "model": self.model_name},
-                            response=payload,
-                            status=200
-                        )
-                    
-                    return response
+                        # Send to Hoover if enabled
+                        if utils.enabled:
+                            # Create payload
+                            model_name = getattr(self, model_attr, "unknown_model")
+                            payload = {
+                                "model_type": "ChatOpenAI",
+                                "model_name": model_name,
+                                "messages": [str(msg) for msg in messages],  # Convert to strings for serialization
+                                "response": str(response),
+                                "kwargs": {"stop": stop, **kwargs}
+                            }
+                            
+                            send_to_hoover(
+                                query={"type": "langchain_openai_acall", "messages": [str(msg) for msg in messages], "model": model_name},
+                                response=payload,
+                                status=200
+                            )
+                        
+                        return response
+                    except TypeError as e:
+                        # Handle parameter mismatch gracefully
+                        logger.warning(f"TypeError in wrapped _acall: {e}, trying without run_manager")
+                        # Try calling without run_manager (older versions)
+                        response = await original_acall(self, messages, stop=stop, **kwargs)
+                        
+                        # Send to Hoover if enabled
+                        if utils.enabled:
+                            model_name = getattr(self, model_attr, "unknown_model")
+                            payload = {
+                                "model_type": "ChatOpenAI",
+                                "model_name": model_name,
+                                "messages": [str(msg) for msg in messages],
+                                "response": str(response),
+                                "kwargs": {"stop": stop, **kwargs}
+                            }
+                            
+                            send_to_hoover(
+                                query={"type": "langchain_openai_acall_fallback", "messages": [str(msg) for msg in messages], "model": model_name},
+                                response=payload,
+                                status=200
+                            )
+                        
+                        return response
                 
                 wrapped_acall._osmosis_wrapped = True
                 ChatOpenAI._acall = wrapped_acall
+                logger.info("Successfully wrapped ChatOpenAI._acall method")
             else:
                 logger.info("ChatOpenAI._acall already wrapped.")
+        else:
+            logger.info("ChatOpenAI does not have a _acall method, skipping.")
                 
     except Exception as e:
         logger.error(f"Failed to patch langchain-openai chat model classes: {e}")
