@@ -3,7 +3,7 @@ requires = ["setuptools>=42", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "osmosis-wrap"
+name = "osmosis-ai"
 version = "0.1.3"
 description = "Monkey patches LLM client libraries to print all prompts and responses"
 readme = "README.md"
@@ -24,8 +24,8 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/Gulp-AI/osmosis-wrap"
-Issues = "https://github.com/Gulp-AI/osmosis-wrap/issues"
+Homepage = "https://github.com/Gulp-AI/osmosis-ai"
+Issues = "https://github.com/Gulp-AI/osmosis-ai/issues"
 
 [project.optional-dependencies]
 anthropic = ["anthropic>=0.5.0"]
