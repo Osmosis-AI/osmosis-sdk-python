@@ -3,9 +3,8 @@ Utility functions for Osmosis Wrap adapters
 """
 
 import json
-import sys
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import Any, Dict
 
 # Import constants
 from .consts import hoover_api_url

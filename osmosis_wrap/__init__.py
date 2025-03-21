@@ -4,38 +4,11 @@ osmosis-wrap: A library for monkey patching LLM APIs to print all prompts and re
 This module patches various LLM client libraries to send all prompts and responses
 to the Hoover API for logging and monitoring.
 
-To use this library:
-
-1. Initialize with your Hoover API key:
-   osmosis_wrap.init("your-hoover-api-key")
-
-2. Import and use your LLM clients as usual:
-   from anthropic import Anthropic
-   client = Anthropic()
-   
-   # Or with async clients:
-   from anthropic import AsyncAnthropic
-   async_client = AsyncAnthropic()
-   
-   from openai import OpenAI, AsyncOpenAI
-   openai_client = OpenAI()
-   async_openai_client = AsyncOpenAI()
-   
-   # With LangChain:
-   from langchain.llms import OpenAI as LangChainOpenAI
-   from langchain.chat_models import ChatOpenAI
-   
-   llm = LangChainOpenAI()
-   chat_model = ChatOpenAI()
-
 Currently supported adapters:
 - Anthropic (both sync and async clients)
 - OpenAI (both sync and async clients, v1 and v2 API versions)
 - LangChain (LLMs, Chat Models, and Prompt Templates)
 """
-
-# Import consts directly to avoid cyclic imports
-from .consts import package_name, package_version, indent
 
 # Use lazy imports to avoid importing modules during setup
 def _import_modules():

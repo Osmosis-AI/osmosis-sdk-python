@@ -56,31 +56,36 @@ OPENAI_API_KEY=your_openai_key_here
 
 ## Usage
 
-First, initialize Osmosis Wrap with your Hoover API key:
+First, import and initialize Osmosis Wrap with your Hoover API key:
 
 ```python
+import os
 import osmosis_wrap
 
 # Initialize with your Hoover API key
 osmosis_wrap.init("your-hoover-api-key")
 
 # Or load from environment variable
-
 hoover_api_key = os.environ.get("HOOVER_API_KEY")
 osmosis_wrap.init(hoover_api_key)
 ```
 
-Then use your LLM clients as usual:
+Once you import `osmosis_wrap` and initialize it, the library automatically patches the supported LLM clients. You can then use your LLM clients normally, and all API calls will be logged to Hoover:
 
 ### Anthropic Example
 
 ```python
+# Import osmosis_wrap first and initialize it
+import osmosis_wrap
+osmosis_wrap.init(os.environ.get("HOOVER_API_KEY"))
+
+# Then import and use Anthropic as normal
 from anthropic import Anthropic
 
-# Create and use the Anthropic client as usual
-client = Anthropic(api_key="your-api-key")  # Or use environment variable
+# Create and use the Anthropic client as usual - it's already patched
+client = Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
 
-# All API calls will now be logged to Hoover
+# All API calls will now be logged to Hoover automatically
 response = client.messages.create(
     model="claude-3-haiku-20240307",
     max_tokens=1000,
@@ -89,12 +94,12 @@ response = client.messages.create(
     ]
 )
 
-# Async client is also supported
+# Async client is also supported and automatically patched
 from anthropic import AsyncAnthropic
 import asyncio
 
 async def call_claude_async():
-    async_client = AsyncAnthropic(api_key="your-api-key")
+    async_client = AsyncAnthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
     response = await async_client.messages.create(
         model="claude-3-haiku-20240307",
         max_tokens=1000,
@@ -111,12 +116,17 @@ asyncio.run(call_claude_async())
 ### OpenAI Example
 
 ```python
+# Import osmosis_wrap first and initialize it
+import osmosis_wrap
+osmosis_wrap.init(os.environ.get("HOOVER_API_KEY"))
+
+# Then import and use OpenAI as normal
 from openai import OpenAI
 
-# Create and use the OpenAI client as usual
-client = OpenAI(api_key="your-api-key")  # Or use environment variable
+# Create and use the OpenAI client as usual - it's already patched
+client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
 
-# All API calls will now be logged to Hoover
+# All API calls will now be logged to Hoover automatically
 response = client.chat.completions.create(
     model="gpt-4o-mini",
     max_tokens=150,
@@ -125,12 +135,12 @@ response = client.chat.completions.create(
     ]
 )
 
-# Async client is also supported
+# Async client is also supported and automatically patched
 from openai import AsyncOpenAI
 import asyncio
 
 async def call_openai_async():
-    async_client = AsyncOpenAI(api_key="your-api-key")
+    async_client = AsyncOpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
     response = await async_client.chat.completions.create(
         model="gpt-4o-mini",
         max_tokens=150,
@@ -147,6 +157,11 @@ asyncio.run(call_openai_async())
 ### LangChain Example
 
 ```python
+# Import osmosis_wrap first and initialize it
+import osmosis_wrap
+osmosis_wrap.init(os.environ.get("HOOVER_API_KEY"))
+
+# Then use LangChain as normal
 from langchain_core.prompts import PromptTemplate
 
 # Use LangChain prompt templates as usual
@@ -155,7 +170,7 @@ template = PromptTemplate(
     template="Write a short paragraph about {topic}."
 )
 
-# Formatting the prompt will be logged to Hoover
+# Formatting the prompt will be logged to Hoover automatically
 formatted_prompt = template.format(topic="artificial intelligence")
 print(f"Formatted prompt: {formatted_prompt}")
 
@@ -166,22 +181,6 @@ template2 = PromptTemplate(
 )
 formatted_prompt2 = template2.format(name="Alice", profession="data scientist")
 print(f"Formatted prompt 2: {formatted_prompt2}")
-```
-
-### Using Environment Variables
-
-The library can automatically use API keys from environment variables:
-
-```python
-import osmosis_wrap
-
-# Initialize with Hoover API key from environment
-hoover_api_key = os.environ.get("HOOVER_API_KEY")
-osmosis_wrap.init(hoover_api_key)
-
-# Get LLM API key from environment
-api_key = os.environ.get("ANTHROPIC_API_KEY")
-client = Anthropic(api_key=api_key)
 ```
 
 ## Configuration
@@ -197,7 +196,7 @@ osmosis_wrap.enabled = False
 
 ## How it Works
 
-This library uses monkey patching to override the LLM clients' methods that make API calls. When these methods are called, the library sends the request parameters and response data to the Hoover API for logging and monitoring.
+This library uses monkey patching to override the LLM clients' methods that make API calls. When you import the `osmosis_wrap` module, it automatically patches the supported LLM client libraries. When methods are called on these clients, the library intercepts the calls and sends the request parameters and response data to the Hoover API for logging and monitoring.
 
 The data sent to Hoover includes:
 - Timestamp (UTC)
