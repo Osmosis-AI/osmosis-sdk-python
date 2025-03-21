@@ -2,6 +2,8 @@
 Adapters package for Osmosis Wrap
 
 This package contains various adapters for different LLM providers.
+Each adapter is conditionally imported based on installed dependencies.
 """
 
-__all__ = ['anthropic', 'openai', 'langchain', 'langchain_anthropic', 'langchain_openai'] 
+# Don't include adapters in __all__ as they're imported conditionally
+__all__ = [] 

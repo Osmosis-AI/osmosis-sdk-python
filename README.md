@@ -15,7 +15,20 @@ A Python library that monkey patches LLM client libraries to send all prompts an
 [pypi](https://pypi.org/project/osmosis-wrap/)
 
 ```bash
+# Basic installation with minimal dependencies
 pip install osmosis-wrap
+
+# Install with specific provider support
+pip install "osmosis-wrap[openai]"     # Only OpenAI support
+pip install "osmosis-wrap[anthropic]"  # Only Anthropic support
+
+# Install with LangChain support
+pip install "osmosis-wrap[langchain]"         # Base LangChain support
+pip install "osmosis-wrap[langchain-openai]"  # LangChain + OpenAI support
+pip install "osmosis-wrap[langchain-anthropic]" # LangChain + Anthropic support
+
+# Install with all dependencies
+pip install "osmosis-wrap[all]"
 ```
 
 Or install from source:
