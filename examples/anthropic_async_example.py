@@ -9,19 +9,19 @@ from dotenv import load_dotenv
 # Load environment variables from .env file
 load_dotenv()
 
-# Import and initialize osmosis_wrap first
-import osmosis_wrap
+# Import and initialize osmosisai first
+import osmosisai
 
 # Initialize with OSMOSIS API key
 osmosis_api_key = os.environ.get("OSMOSIS_API_KEY")
-osmosis_wrap.init(osmosis_api_key)
+osmosisai.init(osmosis_api_key)
 
 # Print messages to console for demonstration
-osmosis_wrap.print_messages = True
+osmosisai.print_messages = True
 
 print("Anthropic Integration Example\n")
 
-# Import Anthropic AFTER osmosis_wrap initialization
+# Import Anthropic AFTER osmosisai initialization
 from anthropic import AsyncAnthropic
 
 async def call_claude_async():
@@ -52,7 +52,7 @@ def main():
     try:
         # Run the async example
         asyncio.run(call_claude_async())
-        print("\nAll interactions above have been logged via osmosis_wrap!")
+        print("\nAll interactions above have been logged via osmosisai!")
     except Exception as e:
         print(f"Error in main: {str(e)}")
         import traceback

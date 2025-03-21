@@ -1,5 +1,5 @@
 """
-Langchain-OpenAI adapter for Osmosis Wrap
+Langchain-OpenAI adapter for Osmosis AI
 
 This module provides monkey patching for the langchain-openai package.
 """
@@ -7,9 +7,9 @@ This module provides monkey patching for the langchain-openai package.
 import functools
 import sys
 
-from osmosis_wrap import utils
-from osmosis_wrap.utils import send_to_osmosis
-from osmosis_wrap.logger import logger
+from osmosisai import utils
+from osmosisai.utils import send_to_osmosis
+from osmosisai.logger import logger
 
 def wrap_langchain_openai() -> None:
     """
@@ -64,7 +64,7 @@ def _patch_openai_chat_models() -> None:
         if hasattr(ChatOpenAI, "_generate"):
             original_generate = ChatOpenAI._generate
             
-            if not hasattr(original_generate, "_osmosis_wrapped"):
+            if not hasattr(original_generate, "_osmosisaiped"):
                 @functools.wraps(original_generate)
                 def wrapped_generate(self, messages, stop=None, run_manager=None, **kwargs):
                     # Get the response
@@ -90,7 +90,7 @@ def _patch_openai_chat_models() -> None:
                     
                     return response
                 
-                wrapped_generate._osmosis_wrapped = True
+                wrapped_generate._osmosisaiped = True
                 ChatOpenAI._generate = wrapped_generate
                 logger.info("Successfully wrapped ChatOpenAI._generate method")
             else:
@@ -102,7 +102,7 @@ def _patch_openai_chat_models() -> None:
         if hasattr(ChatOpenAI, "_agenerate"):
             original_agenerate = ChatOpenAI._agenerate
             
-            if not hasattr(original_agenerate, "_osmosis_wrapped"):
+            if not hasattr(original_agenerate, "_osmosisaiped"):
                 @functools.wraps(original_agenerate)
                 async def wrapped_agenerate(self, messages, stop=None, run_manager=None, **kwargs):
                     # Get the response
@@ -128,7 +128,7 @@ def _patch_openai_chat_models() -> None:
                     
                     return response
                 
-                wrapped_agenerate._osmosis_wrapped = True
+                wrapped_agenerate._osmosisaiped = True
                 ChatOpenAI._agenerate = wrapped_agenerate
                 logger.info("Successfully wrapped ChatOpenAI._agenerate method")
             else:
@@ -140,7 +140,7 @@ def _patch_openai_chat_models() -> None:
         if hasattr(ChatOpenAI, "_call"):
             original_call = ChatOpenAI._call
             
-            if not hasattr(original_call, "_osmosis_wrapped"):
+            if not hasattr(original_call, "_osmosisaiped"):
                 @functools.wraps(original_call)
                 def wrapped_call(self, messages, stop=None, run_manager=None, **kwargs):
                     try:
@@ -191,7 +191,7 @@ def _patch_openai_chat_models() -> None:
                         
                         return response
                 
-                wrapped_call._osmosis_wrapped = True
+                wrapped_call._osmosisaiped = True
                 ChatOpenAI._call = wrapped_call
                 logger.info("Successfully wrapped ChatOpenAI._call method")
             else:
@@ -203,7 +203,7 @@ def _patch_openai_chat_models() -> None:
         if hasattr(ChatOpenAI, "_acall"):
             original_acall = ChatOpenAI._acall
             
-            if not hasattr(original_acall, "_osmosis_wrapped"):
+            if not hasattr(original_acall, "_osmosisaiped"):
                 @functools.wraps(original_acall)
                 async def wrapped_acall(self, messages, stop=None, run_manager=None, **kwargs):
                     try:
@@ -254,7 +254,7 @@ def _patch_openai_chat_models() -> None:
                         
                         return response
                 
-                wrapped_acall._osmosis_wrapped = True
+                wrapped_acall._osmosisaiped = True
                 ChatOpenAI._acall = wrapped_acall
                 logger.info("Successfully wrapped ChatOpenAI._acall method")
             else:
@@ -285,7 +285,7 @@ def _patch_openai_llm_models() -> None:
         if hasattr(OpenAI, "_call"):
             original_call = OpenAI._call
             
-            if not hasattr(original_call, "_osmosis_wrapped"):
+            if not hasattr(original_call, "_osmosisaiped"):
                 @functools.wraps(original_call)
                 def wrapped_call(self, prompt, stop=None, run_manager=None, **kwargs):
                     # Get the response
@@ -310,7 +310,7 @@ def _patch_openai_llm_models() -> None:
                     
                     return response
                 
-                wrapped_call._osmosis_wrapped = True
+                wrapped_call._osmosisaiped = True
                 OpenAI._call = wrapped_call
             else:
                 logger.info("OpenAI._call already wrapped.")
@@ -319,7 +319,7 @@ def _patch_openai_llm_models() -> None:
         if hasattr(OpenAI, "_acall"):
             original_acall = OpenAI._acall
             
-            if not hasattr(original_acall, "_osmosis_wrapped"):
+            if not hasattr(original_acall, "_osmosisaiped"):
                 @functools.wraps(original_acall)
                 async def wrapped_acall(self, prompt, stop=None, run_manager=None, **kwargs):
                     # Get the response
@@ -344,7 +344,7 @@ def _patch_openai_llm_models() -> None:
                     
                     return response
                 
-                wrapped_acall._osmosis_wrapped = True
+                wrapped_acall._osmosisaiped = True
                 OpenAI._acall = wrapped_acall
             else:
                 logger.info("OpenAI._acall already wrapped.")
@@ -358,7 +358,7 @@ def _patch_openai_llm_models() -> None:
             if hasattr(AzureOpenAI, "_call"):
                 original_call = AzureOpenAI._call
                 
-                if not hasattr(original_call, "_osmosis_wrapped"):
+                if not hasattr(original_call, "_osmosisaiped"):
                     @functools.wraps(original_call)
                     def wrapped_call(self, prompt, stop=None, run_manager=None, **kwargs):
                         # Get the response
@@ -383,7 +383,7 @@ def _patch_openai_llm_models() -> None:
                         
                         return response
                     
-                    wrapped_call._osmosis_wrapped = True
+                    wrapped_call._osmosisaiped = True
                     AzureOpenAI._call = wrapped_call
                 else:
                     logger.info("AzureOpenAI._call already wrapped.")
@@ -392,7 +392,7 @@ def _patch_openai_llm_models() -> None:
             if hasattr(AzureOpenAI, "_acall"):
                 original_acall = AzureOpenAI._acall
                 
-                if not hasattr(original_acall, "_osmosis_wrapped"):
+                if not hasattr(original_acall, "_osmosisaiped"):
                     @functools.wraps(original_acall)
                     async def wrapped_acall(self, prompt, stop=None, run_manager=None, **kwargs):
                         # Get the response
@@ -417,7 +417,7 @@ def _patch_openai_llm_models() -> None:
                         
                         return response
                     
-                    wrapped_acall._osmosis_wrapped = True
+                    wrapped_acall._osmosisaiped = True
                     AzureOpenAI._acall = wrapped_acall
                 else:
                     logger.info("AzureOpenAI._acall already wrapped.")
@@ -433,7 +433,7 @@ def _patch_openai_llm_models() -> None:
             if hasattr(AzureChatOpenAI, "_generate"):
                 original_generate = AzureChatOpenAI._generate
                 
-                if not hasattr(original_generate, "_osmosis_wrapped"):
+                if not hasattr(original_generate, "_osmosisaiped"):
                     @functools.wraps(original_generate)
                     def wrapped_generate(self, messages, stop=None, run_manager=None, **kwargs):
                         # Get the response
@@ -458,7 +458,7 @@ def _patch_openai_llm_models() -> None:
                         
                         return response
                     
-                    wrapped_generate._osmosis_wrapped = True
+                    wrapped_generate._osmosisaiped = True
                     AzureChatOpenAI._generate = wrapped_generate
                 else:
                     logger.info("AzureChatOpenAI._generate already wrapped.")

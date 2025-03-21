@@ -13,6 +13,6 @@ recursive-exclude venv *
 recursive-exclude .pytest_cache *
 recursive-exclude .git *
 recursive-exclude .github *
-recursive-exclude osmosis_wrap.egg-info *
+recursive-exclude osmosisai.egg-info *
 
 prune examples 

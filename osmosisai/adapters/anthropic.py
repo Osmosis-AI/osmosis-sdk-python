@@ -1,5 +1,5 @@
 """
-Anthropic adapter for Osmosis Wrap
+Anthropic adapter for Osmosis AI
 
 This module provides monkey patching for the Anthropic Python client.
 """
@@ -7,9 +7,9 @@ This module provides monkey patching for the Anthropic Python client.
 import functools
 import sys
 
-from osmosis_wrap.utils import send_to_osmosis
-from osmosis_wrap import utils
-from osmosis_wrap.logger import logger
+from osmosisai.utils import send_to_osmosis
+from osmosisai import utils
+from osmosisai.logger import logger
 
 def wrap_anthropic() -> None:
     """
@@ -60,7 +60,7 @@ def _wrap_anthropic_v1(anthropic_module):
         original_messages_create = messages_class.create
         logger.info(f"Original create method: {original_messages_create}")
         
-        if not hasattr(original_messages_create, "_osmosis_wrapped"):
+        if not hasattr(original_messages_create, "_osmosisaiped"):
             @functools.wraps(original_messages_create)
             def wrapped_messages_create(self, *args, **kwargs):
                 logger.debug(f"Wrapped create called with args: {args}, kwargs: {kwargs}")
@@ -102,7 +102,7 @@ def _wrap_anthropic_v1(anthropic_module):
                         logger.debug("Sending error to OSMOSIS (success)")
                     raise  # Re-raise the exception
             
-            wrapped_messages_create._osmosis_wrapped = True
+            wrapped_messages_create._osmosisaiped = True
             messages_class.create = wrapped_messages_create
             logger.info("Successfully wrapped Messages.create method")
         
@@ -115,7 +115,7 @@ def _wrap_anthropic_v1(anthropic_module):
             # Store the original __init__ to keep track of created instances
             original_async_init = AsyncAnthropicClass.__init__
             
-            if not hasattr(original_async_init, "_osmosis_wrapped"):
+            if not hasattr(original_async_init, "_osmosisaiped"):
                 @functools.wraps(original_async_init)
                 def wrapped_async_init(self, *args, **kwargs):
                     # Call the original init
@@ -127,7 +127,7 @@ def _wrap_anthropic_v1(anthropic_module):
                     async_messages = self.messages
                     
                     # Store and patch the create method if not already wrapped
-                    if hasattr(async_messages, "create") and not hasattr(async_messages.create, "_osmosis_wrapped"):
+                    if hasattr(async_messages, "create") and not hasattr(async_messages.create, "_osmosisaiped"):
                         original_async_messages_create = async_messages.create
                         
                         @functools.wraps(original_async_messages_create)
@@ -157,13 +157,13 @@ def _wrap_anthropic_v1(anthropic_module):
                                     )
                                 raise  # Re-raise the exception
                         
-                        wrapped_async_messages_create._osmosis_wrapped = True
+                        wrapped_async_messages_create._osmosisaiped = True
                         async_messages.create = wrapped_async_messages_create
                         logger.info("Successfully wrapped AsyncAnthropic.messages.create method")
                     
                     return result
                 
-                wrapped_async_init._osmosis_wrapped = True
+                wrapped_async_init._osmosisaiped = True
                 AsyncAnthropicClass.__init__ = wrapped_async_init
                 logger.info("Successfully wrapped AsyncAnthropic.__init__ to patch message methods on new instances")
         except (ImportError, AttributeError) as e:
@@ -172,7 +172,7 @@ def _wrap_anthropic_v1(anthropic_module):
         # For compatibility, still try to patch the old-style acreate method if it exists
         if hasattr(messages_class, "acreate"):
             original_acreate = messages_class.acreate
-            if not hasattr(original_acreate, "_osmosis_wrapped"):
+            if not hasattr(original_acreate, "_osmosisaiped"):
                 @functools.wraps(original_acreate)
                 async def wrapped_acreate(self, *args, **kwargs):
                     logger.debug(f"Wrapped async create called with args: {args}, kwargs: {kwargs}")
@@ -213,7 +213,7 @@ def _wrap_anthropic_v1(anthropic_module):
                             )
                         raise  # Re-raise the exception
                 
-                wrapped_acreate._osmosis_wrapped = True
+                wrapped_acreate._osmosisaiped = True
                 messages_class.acreate = wrapped_acreate
                 logger.info("Successfully wrapped Messages.acreate method")
         else:
@@ -225,7 +225,7 @@ def _wrap_anthropic_v1(anthropic_module):
             completions_class = completions_module.Completions
             
             original_completions_create = completions_class.create
-            if not hasattr(original_completions_create, "_osmosis_wrapped"):
+            if not hasattr(original_completions_create, "_osmosisaiped"):
                 @functools.wraps(original_completions_create)
                 def wrapped_completions_create(self, *args, **kwargs):
                     response = original_completions_create(self, *args, **kwargs)
@@ -239,13 +239,13 @@ def _wrap_anthropic_v1(anthropic_module):
                         
                     return response
                 
-                wrapped_completions_create._osmosis_wrapped = True
+                wrapped_completions_create._osmosisaiped = True
                 completions_class.create = wrapped_completions_create
                 
                 # Patch the async create method if it exists
                 if hasattr(completions_class, "acreate"):
                     original_completions_acreate = completions_class.acreate
-                    if not hasattr(original_completions_acreate, "_osmosis_wrapped"):
+                    if not hasattr(original_completions_acreate, "_osmosisaiped"):
                         @functools.wraps(original_completions_acreate)
                         async def wrapped_completions_acreate(self, *args, **kwargs):
                             logger.debug(f"Wrapped Completions async create called with args: {args}, kwargs: {kwargs}")
@@ -273,7 +273,7 @@ def _wrap_anthropic_v1(anthropic_module):
                                     )
                                 raise  # Re-raise the exception
                         
-                        wrapped_completions_acreate._osmosis_wrapped = True
+                        wrapped_completions_acreate._osmosisaiped = True
                         completions_class.acreate = wrapped_completions_acreate
                         logger.info("Successfully wrapped Completions.acreate method")
                     else:
@@ -299,7 +299,7 @@ def _wrap_anthropic_v0(anthropic_module):
         if hasattr(AnthropicClass, "complete"):
             original_complete = AnthropicClass.complete
             
-            if not hasattr(original_complete, "_osmosis_wrapped"):
+            if not hasattr(original_complete, "_osmosisaiped"):
                 @functools.wraps(original_complete)
                 def wrapped_complete(self, *args, **kwargs):
                     logger.debug(f"Wrapped complete called with args: {args}, kwargs: {kwargs}")
@@ -327,7 +327,7 @@ def _wrap_anthropic_v0(anthropic_module):
                             logger.debug("Sending error to OSMOSIS (success)")
                         raise  # Re-raise the exception
                 
-                wrapped_complete._osmosis_wrapped = True
+                wrapped_complete._osmosisaiped = True
                 AnthropicClass.complete = wrapped_complete
                 logger.info("Successfully wrapped Anthropic.complete method")
         
@@ -338,7 +338,7 @@ def _wrap_anthropic_v0(anthropic_module):
             if hasattr(AnthropicClass.messages, "create"):
                 original_messages_create = AnthropicClass.messages.create
                 
-                if not hasattr(original_messages_create, "_osmosis_wrapped"):
+                if not hasattr(original_messages_create, "_osmosisaiped"):
                     @functools.wraps(original_messages_create)
                     def wrapped_messages_create(self, *args, **kwargs):
                         logger.debug(f"Wrapped messages.create called with args: {args}, kwargs: {kwargs}")
@@ -366,21 +366,21 @@ def _wrap_anthropic_v0(anthropic_module):
                                 logger.debug("Sending error to OSMOSIS (success)")
                             raise  # Re-raise the exception
                     
-                    wrapped_messages_create._osmosis_wrapped = True
+                    wrapped_messages_create._osmosisaiped = True
                     AnthropicClass.messages.create = wrapped_messages_create
                     logger.info("Successfully wrapped Anthropic.messages.create method")
             
             # Also try to patch instance methods by monkeypatching the __init__
             original_init = AnthropicClass.__init__
             
-            if not hasattr(original_init, "_osmosis_wrapped"):
+            if not hasattr(original_init, "_osmosisaiped"):
                 @functools.wraps(original_init)
                 def wrapped_init(self, *args, **kwargs):
                     # Call the original init
                     result = original_init(self, *args, **kwargs)
                     
                     # Wrap the instance methods if they exist
-                    if hasattr(self, "complete") and not hasattr(self.complete, "_osmosis_wrapped"):
+                    if hasattr(self, "complete") and not hasattr(self.complete, "_osmosisaiped"):
                         original_instance_complete = self.complete
                         
                         @functools.wraps(original_instance_complete)
@@ -409,12 +409,12 @@ def _wrap_anthropic_v0(anthropic_module):
                                     )
                                 raise
                         
-                        wrapped_instance_complete._osmosis_wrapped = True
+                        wrapped_instance_complete._osmosisaiped = True
                         self.complete = wrapped_instance_complete
                     
                     return result
                 
-                wrapped_init._osmosis_wrapped = True
+                wrapped_init._osmosisaiped = True
                 AnthropicClass.__init__ = wrapped_init
                 logger.info("Successfully wrapped Anthropic.__init__ to patch instance methods")
         

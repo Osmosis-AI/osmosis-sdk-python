@@ -1,5 +1,5 @@
 """
-Langchain adapter for Osmosis Wrap
+Langchain adapter for Osmosis AI
 
 This module provides monkey patching for the LangChain Python library.
 """
@@ -7,9 +7,9 @@ This module provides monkey patching for the LangChain Python library.
 import functools
 import sys
 
-from osmosis_wrap import utils
-from osmosis_wrap.utils import send_to_osmosis
-from osmosis_wrap.logger import logger
+from osmosisai import utils
+from osmosisai.utils import send_to_osmosis
+from osmosisai.logger import logger
 
 def wrap_langchain() -> None:
     """
@@ -69,7 +69,7 @@ def _patch_langchain_llms() -> None:
         if hasattr(BaseLLM, "_call"):
             original_call = BaseLLM._call
             
-            if not hasattr(original_call, "_osmosis_wrapped"):
+            if not hasattr(original_call, "_osmosisaiped"):
                 @functools.wraps(original_call)
                 def wrapped_call(self, prompt, *args, **kwargs):
                     # Get the response
@@ -99,7 +99,7 @@ def _patch_langchain_llms() -> None:
                     
                     return response
                 
-                wrapped_call._osmosis_wrapped = True
+                wrapped_call._osmosisaiped = True
                 BaseLLM._call = wrapped_call
                 logger.info("Successfully wrapped BaseLLM._call method")
             else:
@@ -111,7 +111,7 @@ def _patch_langchain_llms() -> None:
         if hasattr(BaseLLM, "invoke"):
             original_invoke = BaseLLM.invoke
             
-            if not hasattr(original_invoke, "_osmosis_wrapped"):
+            if not hasattr(original_invoke, "_osmosisaiped"):
                 @functools.wraps(original_invoke)
                 def wrapped_invoke(self, prompt, *args, **kwargs):
                     # Call original
@@ -141,7 +141,7 @@ def _patch_langchain_llms() -> None:
                     
                     return response
                 
-                wrapped_invoke._osmosis_wrapped = True
+                wrapped_invoke._osmosisaiped = True
                 BaseLLM.invoke = wrapped_invoke
                 logger.info("Successfully wrapped BaseLLM.invoke method")
             else:
@@ -153,7 +153,7 @@ def _patch_langchain_llms() -> None:
         if hasattr(BaseLLM, "generate"):
             original_generate = BaseLLM.generate
             
-            if not hasattr(original_generate, "_osmosis_wrapped"):
+            if not hasattr(original_generate, "_osmosisaiped"):
                 @functools.wraps(original_generate)
                 def wrapped_generate(self, prompts, *args, **kwargs):
                     # Get the response
@@ -183,7 +183,7 @@ def _patch_langchain_llms() -> None:
                     
                     return response
                 
-                wrapped_generate._osmosis_wrapped = True
+                wrapped_generate._osmosisaiped = True
                 BaseLLM.generate = wrapped_generate
                 logger.info("Successfully wrapped BaseLLM.generate method")
             else:
@@ -196,7 +196,7 @@ def _patch_langchain_llms() -> None:
             # Get the method, not the descriptor
             original_call_method = BaseLLM.__call__
             
-            if not hasattr(original_call_method, "_osmosis_wrapped"):
+            if not hasattr(original_call_method, "_osmosisaiped"):
                 @functools.wraps(original_call_method)
                 def wrapped_call_method(self, prompt, stop=None, run_manager=None, **kwargs):
                     try:
@@ -251,7 +251,7 @@ def _patch_langchain_llms() -> None:
                         
                         return response
                 
-                wrapped_call_method._osmosis_wrapped = True
+                wrapped_call_method._osmosisaiped = True
                 BaseLLM.__call__ = wrapped_call_method
                 logger.info("Successfully wrapped BaseLLM.__call__ method")
             else:
@@ -289,7 +289,7 @@ def _patch_langchain_chat_models() -> None:
         if hasattr(BaseChatModel, "generate"):
             original_generate = BaseChatModel.generate
             
-            if not hasattr(original_generate, "_osmosis_wrapped"):
+            if not hasattr(original_generate, "_osmosisaiped"):
                 @functools.wraps(original_generate)
                 def wrapped_generate(self, messages, stop=None, **kwargs):
                     # Get the response
@@ -319,7 +319,7 @@ def _patch_langchain_chat_models() -> None:
                     
                     return response
                 
-                wrapped_generate._osmosis_wrapped = True
+                wrapped_generate._osmosisaiped = True
                 BaseChatModel.generate = wrapped_generate
             else:
                 logger.info("LangChain BaseChatModel.generate already wrapped.")
@@ -328,7 +328,7 @@ def _patch_langchain_chat_models() -> None:
         if hasattr(BaseChatModel, "agenerate"):
             original_agenerate = BaseChatModel.agenerate
             
-            if not hasattr(original_agenerate, "_osmosis_wrapped"):
+            if not hasattr(original_agenerate, "_osmosisaiped"):
                 @functools.wraps(original_agenerate)
                 async def wrapped_agenerate(self, messages, stop=None, **kwargs):
                     # Get the response
@@ -358,7 +358,7 @@ def _patch_langchain_chat_models() -> None:
                     
                     return response
                 
-                wrapped_agenerate._osmosis_wrapped = True
+                wrapped_agenerate._osmosisaiped = True
                 BaseChatModel.agenerate = wrapped_agenerate
             else:
                 logger.info("LangChain BaseChatModel.agenerate already wrapped.")
@@ -367,7 +367,7 @@ def _patch_langchain_chat_models() -> None:
         if hasattr(BaseChatModel, "invoke"):
             original_invoke = BaseChatModel.invoke
             
-            if not hasattr(original_invoke, "_osmosis_wrapped"):
+            if not hasattr(original_invoke, "_osmosisaiped"):
                 @functools.wraps(original_invoke)
                 def wrapped_invoke(self, messages, *args, **kwargs):
                     # Call original
@@ -397,7 +397,7 @@ def _patch_langchain_chat_models() -> None:
                     
                     return response
                 
-                wrapped_invoke._osmosis_wrapped = True
+                wrapped_invoke._osmosisaiped = True
                 BaseChatModel.invoke = wrapped_invoke
             else:
                 logger.info("LangChain BaseChatModel.invoke already wrapped.")
@@ -406,7 +406,7 @@ def _patch_langchain_chat_models() -> None:
         if hasattr(BaseChatModel, "ainvoke"):
             original_ainvoke = BaseChatModel.ainvoke
             
-            if not hasattr(original_ainvoke, "_osmosis_wrapped"):
+            if not hasattr(original_ainvoke, "_osmosisaiped"):
                 @functools.wraps(original_ainvoke)
                 async def wrapped_ainvoke(self, messages, *args, **kwargs):
                     # Call original
@@ -436,7 +436,7 @@ def _patch_langchain_chat_models() -> None:
                     
                     return response
                 
-                wrapped_ainvoke._osmosis_wrapped = True
+                wrapped_ainvoke._osmosisaiped = True
                 BaseChatModel.ainvoke = wrapped_ainvoke
             else:
                 logger.info("LangChain BaseChatModel.ainvoke already wrapped.")
@@ -446,7 +446,7 @@ def _patch_langchain_chat_models() -> None:
             # Get the method, not the descriptor
             original_call_method = BaseChatModel.__call__
             
-            if not hasattr(original_call_method, "_osmosis_wrapped"):
+            if not hasattr(original_call_method, "_osmosisaiped"):
                 @functools.wraps(original_call_method)
                 def wrapped_call_method(self, messages, stop=None, **kwargs):
                     # Get the response
@@ -476,7 +476,7 @@ def _patch_langchain_chat_models() -> None:
                     
                     return response
                 
-                wrapped_call_method._osmosis_wrapped = True
+                wrapped_call_method._osmosisaiped = True
                 BaseChatModel.__call__ = wrapped_call_method
             else:
                 logger.info("LangChain BaseChatModel.__call__ already wrapped.")
@@ -514,7 +514,7 @@ def _patch_langchain_prompts() -> None:
         logger.debug(f"Original format method: {original_format}")
         
         # Only patch if not already patched
-        if not hasattr(original_format, "_osmosis_wrapped"):
+        if not hasattr(original_format, "_osmosisaiped"):
             logger.info("Calling wrap_langchain()...")
             
             @functools.wraps(original_format)
@@ -543,7 +543,7 @@ def _patch_langchain_prompts() -> None:
                 return formatted_prompt
             
             # Mark the method as wrapped to avoid double wrapping
-            wrapped_format._osmosis_wrapped = True
+            wrapped_format._osmosisaiped = True
             BasePromptTemplate.format = wrapped_format
         else:
             logger.info("LangChain BasePromptTemplate.format already wrapped.")

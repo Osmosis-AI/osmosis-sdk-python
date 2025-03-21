@@ -1,6 +1,6 @@
-[![Run Tests](https://github.com/Gulp-AI/osmosis-wrap/actions/workflows/test.yml/badge.svg)](https://github.com/Gulp-AI/osmosis-wrap/actions/workflows/test.yml)
+[![Run Tests](https://github.com/Gulp-AI/osmosisai/actions/workflows/test.yml/badge.svg)](https://github.com/Gulp-AI/osmosisai/actions/workflows/test.yml)
 
-# Osmosis Wrap
+# Osmosis AI
 
 A Python library that monkey patches LLM client libraries to send all prompts and responses to the OSMOSIS API for logging and monitoring.
 
@@ -12,30 +12,30 @@ A Python library that monkey patches LLM client libraries to send all prompts an
 
 ## Installation
 
-[pypi](https://pypi.org/project/osmosis-wrap/)
+[pypi](https://pypi.org/project/osmosisai/0.1.3/)
 
 ```bash
 # Basic installation with minimal dependencies
-pip install osmosis-wrap
+pip install osmosisai
 
 # Install with specific provider support
-pip install "osmosis-wrap[openai]"     # Only OpenAI support
-pip install "osmosis-wrap[anthropic]"  # Only Anthropic support
+pip install "osmosisai[openai]"     # Only OpenAI support
+pip install "osmosisai[anthropic]"  # Only Anthropic support
 
 # Install with LangChain support
-pip install "osmosis-wrap[langchain]"         # Base LangChain support
-pip install "osmosis-wrap[langchain-openai]"  # LangChain + OpenAI support
-pip install "osmosis-wrap[langchain-anthropic]" # LangChain + Anthropic support
+pip install "osmosisai[langchain]"         # Base LangChain support
+pip install "osmosisai[langchain-openai]"  # LangChain + OpenAI support
+pip install "osmosisai[langchain-anthropic]" # LangChain + Anthropic support
 
 # Install with all dependencies
-pip install "osmosis-wrap[all]"
+pip install "osmosisai[all]"
 ```
 
 Or install from source:
 
 ```bash
-git clone https://github.com/your-username/osmosis-wrap.git
-cd osmosis-wrap
+git clone https://github.com/your-username/osmosisai.git
+cd osmosisai
 pip install -e .
 ```
 
@@ -47,7 +47,7 @@ pip install -r requirements.txt
 
 ## Environment Setup
 
-Osmosis Wrap requires a OSMOSIS API key to log LLM usage. Create a `.env` file in your project directory:
+Osmosis AI requires a OSMOSIS API key to log LLM usage. Create a `.env` file in your project directory:
 
 ```bash
 # Copy the sample .env file
@@ -69,28 +69,28 @@ OPENAI_API_KEY=your_openai_key_here
 
 ## Usage
 
-First, import and initialize Osmosis Wrap with your OSMOSIS API key:
+First, import and initialize Osmosis AI with your OSMOSIS API key:
 
 ```python
 import os
-import osmosis_wrap
+import osmosisai
 
 # Initialize with your OSMOSIS API key
-osmosis_wrap.init("your-osmosis-api-key")
+osmosisai.init("your-osmosis-api-key")
 
 # Or load from environment variable
 osmosis_api_key = os.environ.get("OSMOSIS_API_KEY")
-osmosis_wrap.init(osmosis_api_key)
+osmosisai.init(osmosis_api_key)
 ```
 
-Once you import `osmosis_wrap` and initialize it, the library automatically patches the supported LLM clients. You can then use your LLM clients normally, and all API calls will be logged to OSMOSIS:
+Once you import `osmosisai` and initialize it, the library automatically patches the supported LLM clients. You can then use your LLM clients normally, and all API calls will be logged to OSMOSIS:
 
 ### Anthropic Example
 
 ```python
-# Import osmosis_wrap first and initialize it
-import osmosis_wrap
-osmosis_wrap.init(os.environ.get("OSMOSIS_API_KEY"))
+# Import osmosisai first and initialize it
+import osmosisai
+osmosisai.init(os.environ.get("OSMOSIS_API_KEY"))
 
 # Then import and use Anthropic as normal
 from anthropic import Anthropic
@@ -129,9 +129,9 @@ asyncio.run(call_claude_async())
 ### OpenAI Example
 
 ```python
-# Import osmosis_wrap first and initialize it
-import osmosis_wrap
-osmosis_wrap.init(os.environ.get("OSMOSIS_API_KEY"))
+# Import osmosisai first and initialize it
+import osmosisai
+osmosisai.init(os.environ.get("OSMOSIS_API_KEY"))
 
 # Then import and use OpenAI as normal
 from openai import OpenAI
@@ -170,9 +170,9 @@ asyncio.run(call_openai_async())
 ### LangChain Example
 
 ```python
-# Import osmosis_wrap first and initialize it
-import osmosis_wrap
-osmosis_wrap.init(os.environ.get("OSMOSIS_API_KEY"))
+# Import osmosisai first and initialize it
+import osmosisai
+osmosisai.init(os.environ.get("OSMOSIS_API_KEY"))
 
 # Then use LangChain as normal
 from langchain_core.prompts import PromptTemplate
@@ -201,15 +201,15 @@ print(f"Formatted prompt 2: {formatted_prompt2}")
 You can configure the behavior of the library by modifying the following variables:
 
 ```python
-import osmosis_wrap
+import osmosisai
 
 # Disable logging to OSMOSIS (default: True)
-osmosis_wrap.enabled = False
+osmosisai.enabled = False
 ```
 
 ## How it Works
 
-This library uses monkey patching to override the LLM clients' methods that make API calls. When you import the `osmosis_wrap` module, it automatically patches the supported LLM client libraries. When methods are called on these clients, the library intercepts the calls and sends the request parameters and response data to the OSMOSIS API for logging and monitoring.
+This library uses monkey patching to override the LLM clients' methods that make API calls. When you import the `osmosisai` module, it automatically patches the supported LLM client libraries. When methods are called on these clients, the library intercepts the calls and sends the request parameters and response data to the OSMOSIS API for logging and monitoring.
 
 The data sent to OSMOSIS includes:
 - Timestamp (UTC)

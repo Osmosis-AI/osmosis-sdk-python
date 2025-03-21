@@ -1,5 +1,5 @@
 """
-osmosis-wrap: A library for monkey patching LLM APIs to print all prompts and responses.
+osmosisai: A library for monkey patching LLM APIs to print all prompts and responses.
 
 This module patches various LLM client libraries to send all prompts and responses
 to the OSMOSIS API for logging and monitoring.

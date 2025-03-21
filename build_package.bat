@@ -2,7 +2,7 @@
 REM Script to build and upload the package to PyPI
 
 REM Clean previous builds
-rmdir /s /q dist build osmosis_wrap.egg-info
+rmdir /s /q dist build osmosisai.egg-info
 
 REM Install build dependencies if not already installed
 pip install --upgrade build twine

@@ -1,5 +1,5 @@
 """
-Logging utilities for Osmosis Wrap
+Logging utilities for Osmosis AI
 """
 
 import sys
@@ -9,7 +9,7 @@ from typing import Optional
 from .consts import log_destination
 
 # Create logger
-logger = logging.getLogger('osmosis_wrap')
+logger = logging.getLogger('osmosisai')
 logger.setLevel(logging.INFO)
 
 # Default configuration - no logging
@@ -35,7 +35,7 @@ def configure_logger() -> None:
         logger.addHandler(handler)
     elif log_destination == "file":
         # Log to a file in the current directory
-        log_file = os.environ.get("OSMOSIS_LOG_FILE", "osmosis_wrap.log")
+        log_file = os.environ.get("OSMOSIS_LOG_FILE", "osmosisai.log")
         handler = logging.FileHandler(log_file)
         logger.addHandler(handler)
     else:

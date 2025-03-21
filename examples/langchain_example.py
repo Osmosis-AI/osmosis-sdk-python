@@ -9,19 +9,19 @@ from dotenv import load_dotenv
 # Load environment variables from .env file
 load_dotenv()
 
-# Import and initialize osmosis_wrap
-import osmosis_wrap
+# Import and initialize osmosisai
+import osmosisai
 
 # Initialize with OSMOSIS API key
 osmosis_api_key = os.getenv("OSMOSIS_API_KEY")
-osmosis_wrap.init(osmosis_api_key)
+osmosisai.init(osmosis_api_key)
 
 # Set to True to print messages to console
-osmosis_wrap.print_messages = True
+osmosisai.print_messages = True
 
 # Import the specific langchain adapters
-from osmosis_wrap.adapters.langchain_anthropic import wrap_langchain_anthropic
-from osmosis_wrap.adapters.langchain_openai import wrap_langchain_openai
+from osmosisai.adapters.langchain_anthropic import wrap_langchain_anthropic
+from osmosisai.adapters.langchain_openai import wrap_langchain_openai
 
 # Initialize the adapters - do this before importing any langchain models
 wrap_langchain_anthropic()
@@ -30,7 +30,7 @@ wrap_langchain_openai()
 print("LangChain-Anthropic and LangChain-OpenAI Integration Example\n")
 
 try:
-    # Import langchain components after osmosis_wrap adapters are initialized
+    # Import langchain components after osmosisai adapters are initialized
     try:
         from langchain_core.prompts import PromptTemplate
         from langchain_core.language_models.llms import LLM
@@ -168,7 +168,7 @@ try:
         else:
             print("Anthropic API key not found. Skipping ChatAnthropic example.")
     
-    print("\nAll interactions above should have been logged via osmosis_wrap!")
+    print("\nAll interactions above should have been logged via osmosisai!")
     print("The langchain-openai and langchain-anthropic adapters have captured model-specific details.")
     
 except Exception as e:

@@ -1,5 +1,5 @@
 """
-Langchain-Anthropic adapter for Osmosis Wrap
+Langchain-Anthropic adapter for Osmosis AI
 
 This module provides monkey patching for the langchain-anthropic package.
 """
@@ -7,9 +7,9 @@ This module provides monkey patching for the langchain-anthropic package.
 import functools
 import sys
 
-from osmosis_wrap import utils
-from osmosis_wrap.utils import send_to_osmosis
-from osmosis_wrap.logger import logger
+from osmosisai import utils
+from osmosisai.utils import send_to_osmosis
+from osmosisai.logger import logger
 
 def wrap_langchain_anthropic() -> None:
     """
@@ -63,7 +63,7 @@ def _patch_anthropic_chat_models() -> None:
         if hasattr(ChatAnthropic, "_generate"):
             original_generate = ChatAnthropic._generate
             
-            if not hasattr(original_generate, "_osmosis_wrapped"):
+            if not hasattr(original_generate, "_osmosisaiped"):
                 @functools.wraps(original_generate)
                 def wrapped_generate(self, messages, stop=None, run_manager=None, **kwargs):
                     # Get the response
@@ -89,7 +89,7 @@ def _patch_anthropic_chat_models() -> None:
                     
                     return response
                 
-                wrapped_generate._osmosis_wrapped = True
+                wrapped_generate._osmosisaiped = True
                 ChatAnthropic._generate = wrapped_generate
                 logger.info("Successfully wrapped ChatAnthropic._generate method")
             else:
@@ -101,7 +101,7 @@ def _patch_anthropic_chat_models() -> None:
         if hasattr(ChatAnthropic, "_agenerate"):
             original_agenerate = ChatAnthropic._agenerate
             
-            if not hasattr(original_agenerate, "_osmosis_wrapped"):
+            if not hasattr(original_agenerate, "_osmosisaiped"):
                 @functools.wraps(original_agenerate)
                 async def wrapped_agenerate(self, messages, stop=None, run_manager=None, **kwargs):
                     # Get the response
@@ -127,7 +127,7 @@ def _patch_anthropic_chat_models() -> None:
                     
                     return response
                 
-                wrapped_agenerate._osmosis_wrapped = True
+                wrapped_agenerate._osmosisaiped = True
                 ChatAnthropic._agenerate = wrapped_agenerate
                 logger.info("Successfully wrapped ChatAnthropic._agenerate method")
             else:
@@ -139,7 +139,7 @@ def _patch_anthropic_chat_models() -> None:
         if hasattr(ChatAnthropic, "_call"):
             original_call = ChatAnthropic._call
             
-            if not hasattr(original_call, "_osmosis_wrapped"):
+            if not hasattr(original_call, "_osmosisaiped"):
                 @functools.wraps(original_call)
                 def wrapped_call(self, messages, stop=None, run_manager=None, **kwargs):
                     try:
@@ -190,7 +190,7 @@ def _patch_anthropic_chat_models() -> None:
                         
                         return response
                 
-                wrapped_call._osmosis_wrapped = True
+                wrapped_call._osmosisaiped = True
                 ChatAnthropic._call = wrapped_call
                 logger.info("Successfully wrapped ChatAnthropic._call method")
             else:
@@ -202,7 +202,7 @@ def _patch_anthropic_chat_models() -> None:
         if hasattr(ChatAnthropic, "_acall"):
             original_acall = ChatAnthropic._acall
             
-            if not hasattr(original_acall, "_osmosis_wrapped"):
+            if not hasattr(original_acall, "_osmosisaiped"):
                 @functools.wraps(original_acall)
                 async def wrapped_acall(self, messages, stop=None, run_manager=None, **kwargs):
                     try:
@@ -253,7 +253,7 @@ def _patch_anthropic_chat_models() -> None:
                         
                         return response
                 
-                wrapped_acall._osmosis_wrapped = True
+                wrapped_acall._osmosisaiped = True
                 ChatAnthropic._acall = wrapped_acall
                 logger.info("Successfully wrapped ChatAnthropic._acall method")
             else:

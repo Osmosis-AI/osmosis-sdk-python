@@ -8,48 +8,48 @@ import os
 import pytest
 from unittest.mock import patch, MagicMock
 
-# Import osmosis_wrap and set up test environment
-import osmosis_wrap
+# Import osmosisai and set up test environment
+import osmosisai
 
 # Mock API key function to avoid environment variable requirements in tests
 def mock_get_api_key(service_name):
     return f"mock-{service_name}-api-key"
 
-# Initialize osmosis_wrap with a test API key
+# Initialize osmosisai with a test API key
 @pytest.fixture(scope="module")
 def setup_osmosis():
-    # Import osmosis_wrap
-    import osmosis_wrap
+    # Import osmosisai
+    import osmosisai
     
     # Create a mock first
     mock_send_to_osmosis = MagicMock()
     
     # Initialize with a test API key
-    osmosis_wrap.init("test-osmosis-api-key")
+    osmosisai.init("test-osmosis-api-key")
     
     # Patch all possible references to send_to_osmosis
-    original_send_to_osmosis = osmosis_wrap.utils.send_to_osmosis
+    original_send_to_osmosis = osmosisai.utils.send_to_osmosis
     
     # Replace the function with our mock
-    osmosis_wrap.utils.send_to_osmosis = mock_send_to_osmosis
+    osmosisai.utils.send_to_osmosis = mock_send_to_osmosis
     
     # Also patch it in the adapters
     try:
-        import osmosis_wrap.adapters.anthropic
-        osmosis_wrap.adapters.anthropic.send_to_osmosis = mock_send_to_osmosis
+        import osmosisai.adapters.anthropic
+        osmosisai.adapters.anthropic.send_to_osmosis = mock_send_to_osmosis
     except ImportError:
         pass
     
     try:
-        import osmosis_wrap.adapters.openai
-        osmosis_wrap.adapters.openai.send_to_osmosis = mock_send_to_osmosis
+        import osmosisai.adapters.openai
+        osmosisai.adapters.openai.send_to_osmosis = mock_send_to_osmosis
     except ImportError:
         pass
     
     yield mock_send_to_osmosis
     
     # Restore the original after the test
-    osmosis_wrap.utils.send_to_osmosis = original_send_to_osmosis
+    osmosisai.utils.send_to_osmosis = original_send_to_osmosis
 
 # Test Anthropic client wrapping
 @pytest.mark.skipif(
@@ -81,7 +81,7 @@ def test_anthropic_wrapping(setup_osmosis):
         anthropic.resources.messages.Messages.create = mock_unwrapped_create
         
         # Force the wrapping to occur
-        from osmosis_wrap.adapters.anthropic import wrap_anthropic
+        from osmosisai.adapters.anthropic import wrap_anthropic
         wrap_anthropic()
         
         # Create a client and make a call
@@ -148,7 +148,7 @@ def test_anthropic_async_wrapping(setup_osmosis):
             anthropic.resources.messages.Messages.acreate = mock_unwrapped_acreate
         
         # Force the wrapping to occur
-        from osmosis_wrap.adapters.anthropic import wrap_anthropic
+        from osmosisai.adapters.anthropic import wrap_anthropic
         wrap_anthropic()
         
         # Define an async test function
@@ -254,7 +254,7 @@ def test_anthropic_tool_use(setup_osmosis):
         anthropic.resources.messages.Messages.create = mock_unwrapped_create
         
         # Force the wrapping to occur
-        from osmosis_wrap.adapters.anthropic import wrap_anthropic
+        from osmosisai.adapters.anthropic import wrap_anthropic
         wrap_anthropic()
         
         # Create a client and make a call with tools
@@ -361,7 +361,7 @@ def test_anthropic_tool_response(setup_osmosis):
         anthropic.resources.messages.Messages.create = mock_unwrapped_create
         
         # Force the wrapping to occur
-        from osmosis_wrap.adapters.anthropic import wrap_anthropic
+        from osmosisai.adapters.anthropic import wrap_anthropic
         wrap_anthropic()
         
         # Create a client and make the first call with tools
@@ -504,7 +504,7 @@ def test_anthropic_async_tool_use(setup_osmosis):
             anthropic.resources.messages.Messages.acreate = mock_unwrapped_acreate
         
         # Force the wrapping to occur
-        from osmosis_wrap.adapters.anthropic import wrap_anthropic
+        from osmosisai.adapters.anthropic import wrap_anthropic
         wrap_anthropic()
         
         # Define an async test function
@@ -583,7 +583,7 @@ def test_openai_v1_wrapping(setup_osmosis):
         chat_completions.Completions.create = mock_chat_create
         
         # Force re-wrapping
-        from osmosis_wrap.adapters.openai import wrap_openai
+        from osmosisai.adapters.openai import wrap_openai
         wrap_openai()
         
         # Create client and make API call
@@ -635,7 +635,7 @@ def test_openai_v1_async_wrapping(setup_osmosis):
             pytest.skip("AsyncOpenAI not available in this OpenAI version")
         
         # Import the OpenAI adapter and apply wrapping
-        from osmosis_wrap.adapters.openai import wrap_openai, _wrap_openai_v1
+        from osmosisai.adapters.openai import wrap_openai, _wrap_openai_v1
         # Apply the v1 wrapper directly
         _wrap_openai_v1()
         
@@ -647,7 +647,7 @@ def test_openai_v1_async_wrapping(setup_osmosis):
         # Create a simple async function that simulates an async API call
         async def simulate_async_call():
             # Directly call the send_to_osmosis function as would happen in the wrapper
-            from osmosis_wrap.utils import send_to_osmosis
+            from osmosisai.utils import send_to_osmosis
             query_params = {
                 "model": "gpt-4o-mini", 
                 "max_tokens": 150,
@@ -678,7 +678,7 @@ def test_openai_v1_async_wrapping(setup_osmosis):
         from openai.resources.chat import completions
         for name, method in inspect.getmembers(completions.Completions):
             if name.startswith("a") and name.endswith("create") and inspect.iscoroutinefunction(method):
-                assert hasattr(method, "_osmosis_wrapped"), f"Async method {name} was not wrapped"
+                assert hasattr(method, "_osmosisaiped"), f"Async method {name} was not wrapped"
     
     finally:
         # Reset mock
@@ -744,7 +744,7 @@ def test_openai_v2_wrapping(setup_osmosis):
         # Save original method references before patching
         with patch.object(openai.resources.chat.completions.Completions, "create", new=mock_completions_create):
             # Force re-wrapping
-            from osmosis_wrap.adapters.openai import wrap_openai
+            from osmosisai.adapters.openai import wrap_openai
             wrap_openai()  # This will apply the v2 wrapping
             
             # Create a client with the wrapped methods
@@ -827,7 +827,7 @@ def test_openai_v2_async_wrapping(setup_osmosis):
             pytest.skip("AsyncOpenAI not available in this OpenAI version")
         
         # Import the OpenAI adapter and apply wrapping
-        from osmosis_wrap.adapters.openai import wrap_openai, _wrap_openai_v2
+        from osmosisai.adapters.openai import wrap_openai, _wrap_openai_v2
         # Apply the v2 wrapper directly
         _wrap_openai_v2()
         
@@ -862,7 +862,7 @@ def test_openai_v2_async_wrapping(setup_osmosis):
         # Create a simple async function that simulates an async API call
         async def simulate_async_call(stream=False):
             # Directly call the send_to_osmosis function as would happen in the wrapper
-            from osmosis_wrap.utils import send_to_osmosis
+            from osmosisai.utils import send_to_osmosis
             query_params = {
                 "model": "gpt-4o-mini", 
                 "max_tokens": 150,
@@ -927,7 +927,7 @@ def test_openai_v2_async_wrapping(setup_osmosis):
         assert mock_send_to_osmosis.call_args[1]["query"]["stream"] is True
         
         # For v2, verify that AsyncOpenAI.__init__ has been wrapped
-        assert hasattr(AsyncOpenAI.__init__, "_osmosis_wrapped"), "AsyncOpenAI.__init__ was not wrapped"
+        assert hasattr(AsyncOpenAI.__init__, "_osmosisaiped"), "AsyncOpenAI.__init__ was not wrapped"
     
     finally:
         # Restore the original version
@@ -942,8 +942,8 @@ def test_disable_osmosis(setup_osmosis):
     mock_send_to_osmosis.reset_mock()  # Reset call count
     
     # Test disabling and enabling
-    osmosis_wrap.disable_osmosis()
-    assert not osmosis_wrap.utils.enabled
+    osmosisai.disable_osmosis()
+    assert not osmosisai.utils.enabled
     
     # Make a mocked call with Anthropic
     with patch("anthropic.Anthropic") as MockAnthropic:
@@ -980,15 +980,15 @@ def test_disable_osmosis(setup_osmosis):
     assert not mock_send_to_osmosis.called
     
     # Re-enable and test
-    osmosis_wrap.enable_osmosis()
-    assert osmosis_wrap.utils.enabled
+    osmosisai.enable_osmosis()
+    assert osmosisai.utils.enabled
 
 @pytest.mark.skipif(
     pytest.importorskip("openai", reason="openai package not installed") is None,
     reason="OpenAI package not installed"
 )
 def test_openai_async_support(setup_osmosis):
-    """Test that osmosis_wrap supports async OpenAI clients by directly checking the adapter code."""
+    """Test that osmosisai supports async OpenAI clients by directly checking the adapter code."""
     mock_send_to_osmosis = setup_osmosis
     mock_send_to_osmosis.reset_mock()  # Reset call count
     
@@ -1005,7 +1005,7 @@ def test_openai_async_support(setup_osmosis):
             pytest.skip("AsyncOpenAI not available in this OpenAI version")
         
         # Import the OpenAI adapter
-        from osmosis_wrap.adapters import openai as openai_adapter
+        from osmosisai.adapters import openai as openai_adapter
         
         # Check for _wrap_openai_v1 and _wrap_openai_v2 functions
         assert hasattr(openai_adapter, "_wrap_openai_v1"), "Missing _wrap_openai_v1 function"
@@ -1026,7 +1026,7 @@ def test_openai_async_support(setup_osmosis):
         # Create a simple mock test
         async def mock_send_async():
             # Simulate an async OpenAI call
-            from osmosis_wrap.utils import send_to_osmosis
+            from osmosisai.utils import send_to_osmosis
             send_to_osmosis(
                 query={"model": "gpt-4o-mini", "max_tokens": 150},
                 response={"content": "Mocked async response"},
@@ -1139,7 +1139,7 @@ def test_anthropic_async_tool_response(setup_osmosis):
             anthropic.resources.messages.Messages.acreate = mock_acreate
         
         # Force the wrapping to occur
-        from osmosis_wrap.adapters.anthropic import wrap_anthropic
+        from osmosisai.adapters.anthropic import wrap_anthropic
         wrap_anthropic()
         
         # Define an async test function
@@ -1234,8 +1234,8 @@ def test_langchain_llm_wrapping(setup_osmosis):
     # Import LangChain module first
     import langchain
     
-    # Import utils from osmosis_wrap
-    from osmosis_wrap import utils
+    # Import utils from osmosisai
+    from osmosisai import utils
     
     # Capture send_to_osmosis calls for verification
     original_send_to_osmosis = utils.send_to_osmosis
@@ -1277,7 +1277,7 @@ def test_langchain_llm_wrapping(setup_osmosis):
                         pytest.skip("Could not find LangChain BaseLLM class")
         
         # Force the wrapping to occur
-        from osmosis_wrap.adapters.langchain import wrap_langchain
+        from osmosisai.adapters.langchain import wrap_langchain
         print("Calling wrap_langchain()...")
         wrap_langchain()
         
@@ -1339,8 +1339,8 @@ def test_langchain_chat_model_wrapping(setup_osmosis):
     # Import LangChain module first
     import langchain
     
-    # Import utils from osmosis_wrap
-    from osmosis_wrap import utils
+    # Import utils from osmosisai
+    from osmosisai import utils
     
     # Capture send_to_osmosis calls for verification
     original_send_to_osmosis = utils.send_to_osmosis
@@ -1379,7 +1379,7 @@ def test_langchain_chat_model_wrapping(setup_osmosis):
                     pytest.skip("Could not find LangChain BaseChatModel class")
         
         # Force the wrapping to occur
-        from osmosis_wrap.adapters.langchain import wrap_langchain
+        from osmosisai.adapters.langchain import wrap_langchain
         print("Calling wrap_langchain()...")
         wrap_langchain()
         
@@ -1481,7 +1481,7 @@ def test_langchain_prompt_template_wrapping(setup_osmosis):
     print(f"Original format method: {original_format}")
     
     # Force the wrapping to occur
-    from osmosis_wrap.adapters.langchain import wrap_langchain, _patch_langchain_prompts
+    from osmosisai.adapters.langchain import wrap_langchain, _patch_langchain_prompts
     print("Calling wrap_langchain()...")
     wrap_langchain()
     
@@ -1553,8 +1553,8 @@ def test_langchain_async_llm_wrapping(setup_osmosis):
     # Import LangChain module first
     import langchain
     
-    # Import utils from osmosis_wrap
-    from osmosis_wrap import utils
+    # Import utils from osmosisai
+    from osmosisai import utils
     
     # Capture send_to_osmosis calls for verification
     original_send_to_osmosis = utils.send_to_osmosis
@@ -1596,7 +1596,7 @@ def test_langchain_async_llm_wrapping(setup_osmosis):
                         pytest.skip("Could not find LangChain BaseLLM class")
         
         # Force the wrapping to occur
-        from osmosis_wrap.adapters.langchain import wrap_langchain
+        from osmosisai.adapters.langchain import wrap_langchain
         print("Calling wrap_langchain()...")
         wrap_langchain()
         
@@ -1655,8 +1655,8 @@ def test_langchain_anthropic_wrapping(setup_osmosis):
     mock_send_to_osmosis = setup_osmosis
     mock_send_to_osmosis.reset_mock()  # Start with a clean mock
     
-    # Import utils from osmosis_wrap
-    from osmosis_wrap import utils
+    # Import utils from osmosisai
+    from osmosisai import utils
     
     # Capture send_to_osmosis calls for verification
     original_send_to_osmosis = utils.send_to_osmosis
@@ -1701,7 +1701,7 @@ def test_langchain_anthropic_wrapping(setup_osmosis):
             ChatAnthropic._generate = mock_generate
         
         # Force the wrapping to occur
-        from osmosis_wrap.adapters.langchain_anthropic import wrap_langchain_anthropic
+        from osmosisai.adapters.langchain_anthropic import wrap_langchain_anthropic
         print("Calling wrap_langchain_anthropic()...")
         wrap_langchain_anthropic()
         
@@ -1772,8 +1772,8 @@ def test_langchain_openai_wrapping(setup_osmosis):
     mock_send_to_osmosis = setup_osmosis
     mock_send_to_osmosis.reset_mock()  # Start with a clean mock
     
-    # Import utils from osmosis_wrap
-    from osmosis_wrap import utils
+    # Import utils from osmosisai
+    from osmosisai import utils
     
     # Capture send_to_osmosis calls for verification
     original_send_to_osmosis = utils.send_to_osmosis
@@ -1834,7 +1834,7 @@ def test_langchain_openai_wrapping(setup_osmosis):
             ChatOpenAI._generate = mock_generate
         
         # Force the wrapping to occur
-        from osmosis_wrap.adapters.langchain_openai import wrap_langchain_openai
+        from osmosisai.adapters.langchain_openai import wrap_langchain_openai
         print("Calling wrap_langchain_openai()...")
         wrap_langchain_openai()
         
@@ -1942,8 +1942,8 @@ def test_langchain_azure_openai_wrapping(setup_osmosis):
     mock_send_to_osmosis = setup_osmosis
     mock_send_to_osmosis.reset_mock()  # Start with a clean mock
     
-    # Import utils from osmosis_wrap
-    from osmosis_wrap import utils
+    # Import utils from osmosisai
+    from osmosisai import utils
     
     # Capture send_to_osmosis calls for verification
     original_send_to_osmosis = utils.send_to_osmosis
@@ -2004,7 +2004,7 @@ def test_langchain_azure_openai_wrapping(setup_osmosis):
             AzureChatOpenAI._generate = mock_azure_generate
         
         # Force the wrapping to occur
-        from osmosis_wrap.adapters.langchain_openai import wrap_langchain_openai
+        from osmosisai.adapters.langchain_openai import wrap_langchain_openai
         print("Calling wrap_langchain_openai() for Azure models...")
         wrap_langchain_openai()
         

@@ -8,15 +8,15 @@ from dotenv import load_dotenv
 # Load environment variables from .env file
 load_dotenv()
 
-# Import and initialize osmosis_wrap
-import osmosis_wrap
+# Import and initialize osmosisai
+import osmosisai
 
 # Initialize with OSMOSIS API key
 osmosis_api_key = os.environ.get("OSMOSIS_API_KEY")
-osmosis_wrap.init(osmosis_api_key)
+osmosisai.init(osmosis_api_key)
 
 # Print messages to console for demonstration
-osmosis_wrap.print_messages = True
+osmosisai.print_messages = True
 
 print("OpenAI Integration Example\n")
 
@@ -46,7 +46,7 @@ try:
     # Run the async example
     asyncio.run(call_openai_async())
     
-    print("\nAll interactions above have been logged via osmosis_wrap!")
+    print("\nAll interactions above have been logged via osmosisai!")
     
 except Exception as e:
     print(f"Error: {str(e)}")

@@ -83,7 +83,7 @@ def compare_times(with_osmosis, without_osmosis):
 def reset_modules():
     """Reset modules to ensure clean testing environment."""
     modules_to_remove = [
-        'osmosis_wrap', 
+        'osmosisai', 
         'openai', 
         'anthropic',
         'langchain_openai',
@@ -129,9 +129,9 @@ def test_openai():
     print("With osmosis-wrap:")
     
     def run_openai_with():
-        import osmosis_wrap
-        osmosis_wrap.init(os.environ.get("OSMOSIS_API_KEY"))
-        osmosis_wrap.print_messages = False
+        import osmosisai
+        osmosisai.init(os.environ.get("OSMOSIS_API_KEY"))
+        osmosisai.print_messages = False
         
         from openai import OpenAI
         client = OpenAI(api_key=api_key)
@@ -178,9 +178,9 @@ def test_anthropic():
     print("With osmosis-wrap:")
     
     def run_anthropic_with():
-        import osmosis_wrap
-        osmosis_wrap.init(os.environ.get("OSMOSIS_API_KEY"))
-        osmosis_wrap.print_messages = False
+        import osmosisai
+        osmosisai.init(os.environ.get("OSMOSIS_API_KEY"))
+        osmosisai.print_messages = False
         
         from anthropic import Anthropic
         client = Anthropic(api_key=api_key)
@@ -230,11 +230,11 @@ def test_langchain_openai():
     
     def run_langchain_openai_with():
         try:
-            import osmosis_wrap
-            osmosis_wrap.init(os.environ.get("OSMOSIS_API_KEY"))
-            osmosis_wrap.print_messages = False
+            import osmosisai
+            osmosisai.init(os.environ.get("OSMOSIS_API_KEY"))
+            osmosisai.print_messages = False
             
-            from osmosis_wrap.adapters.langchain_openai import wrap_langchain_openai
+            from osmosisai.adapters.langchain_openai import wrap_langchain_openai
             wrap_langchain_openai()
             
             from langchain_openai import ChatOpenAI
@@ -286,11 +286,11 @@ def test_langchain_anthropic():
     
     def run_langchain_anthropic_with():
         try:
-            import osmosis_wrap
-            osmosis_wrap.init(os.environ.get("OSMOSIS_API_KEY"))
-            osmosis_wrap.print_messages = False
+            import osmosisai
+            osmosisai.init(os.environ.get("OSMOSIS_API_KEY"))
+            osmosisai.print_messages = False
             
-            from osmosis_wrap.adapters.langchain_anthropic import wrap_langchain_anthropic
+            from osmosisai.adapters.langchain_anthropic import wrap_langchain_anthropic
             wrap_langchain_anthropic()
             
             from langchain_anthropic import ChatAnthropic
