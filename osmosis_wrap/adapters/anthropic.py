@@ -27,7 +27,7 @@ def wrap_anthropic() -> None:
     try:
         import anthropic
     except ImportError:
-        logger.error("anthropic package is not installed.")
+        logger.debug("anthropic package is not installed.")
         return
     
     logger.info(f"Wrapping Anthropic client, package version: {anthropic.__version__}")

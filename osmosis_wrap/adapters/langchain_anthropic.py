@@ -20,7 +20,7 @@ def wrap_langchain_anthropic() -> None:
     try:
         import langchain_anthropic
     except ImportError:
-        logger.error("langchain-anthropic package is not installed.")
+        logger.debug("langchain-anthropic package is not installed.")
         return
     
     _patch_anthropic_chat_models()

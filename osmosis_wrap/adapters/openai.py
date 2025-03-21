@@ -21,7 +21,7 @@ def wrap_openai() -> None:
     try:
         import openai
     except ImportError:
-        logger.error("openai package is not installed.")
+        logger.debug("openai package is not installed.")
         return
 
     # Try to detect which version of the OpenAI client is installed

@@ -20,7 +20,7 @@ def wrap_langchain() -> None:
     try:
         import langchain
     except ImportError:
-        logger.error("langchain package is not installed.")
+        logger.debug("langchain package is not installed.")
         return
     
     # Patch LLM classes

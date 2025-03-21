@@ -20,7 +20,7 @@ def wrap_langchain_openai() -> None:
     try:
         import langchain_openai
     except ImportError:
-        logger.error("langchain-openai package is not installed.")
+        logger.debug("langchain-openai package is not installed.")
         return
     
     _patch_openai_chat_models()
