@@ -1,6 +1,6 @@
 # GitHub Actions Workflows
 
-This directory contains GitHub Actions workflows that automatically run tests for the osmosis-wrap package.
+This directory contains GitHub Actions workflows that automatically run tests for the osmosis-ai package.
 
 ## Workflows
 
@@ -16,7 +16,7 @@ It performs the following steps:
 3. Installs the required dependencies
 4. Runs the pytest tests in test.py
 
-The workflow validates that the osmosis-wrap functionality works correctly with various LLM API clients including:
+The workflow validates that the osmosis-ai functionality works correctly with various LLM API clients including:
 - Anthropic
 - OpenAI
 - LangChain

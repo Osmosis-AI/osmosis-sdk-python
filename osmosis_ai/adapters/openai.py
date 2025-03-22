@@ -1,15 +1,16 @@
 """
-OpenAI adapter for Osmosis AI
+OpenAI adapter for Osmosis Wrap
 
 This module provides monkey patching for the OpenAI Python client.
 """
 
 import functools
 import inspect
+import sys
 
-from osmosisai import utils
-from osmosisai.utils import send_to_osmosis
-from osmosisai.logger import logger
+from osmosis_ai import utils
+from osmosis_ai.utils import send_to_osmosis
+from osmosis_ai.logger import logger
 
 def wrap_openai() -> None:
     """
@@ -30,18 +31,18 @@ def wrap_openai() -> None:
         try:
             import openai.version
             if openai.version.__version__.startswith("2."):
-                _wrap_openai_v2()
+                _ai_openai_v2()
                 return
         except (ImportError, AttributeError):
             pass
         
         # Fall back to v1 client
-        _wrap_openai_v1()
+        _ai_openai_v1()
     except (ImportError, AttributeError):
         # Fall back to legacy client
-        _wrap_openai_legacy()
+        _ai_openai_legacy()
 
-def _wrap_openai_v2() -> None:
+def _ai_openai_v2() -> None:
     """Monkey patch the OpenAI v2 client."""
     import openai
     
@@ -78,7 +79,7 @@ def _wrap_openai_v2() -> None:
             # Now wrap the client's chat.completions.create and completions.create methods
             if hasattr(self, 'chat') and hasattr(self.chat, 'completions'):
                 original_chat_create = self.chat.completions.create
-                if not hasattr(original_chat_create, "_osmosisaiped"):
+                if not hasattr(original_chat_create, "_osmosis_aiped"):
                     @functools.wraps(original_chat_create)
                     def wrapped_chat_create(*args, **kwargs):
                         # Check if streaming is enabled
@@ -120,12 +121,12 @@ def _wrap_openai_v2() -> None:
                                 
                             return response
                     
-                    wrapped_chat_create._osmosisaiped = True
+                    wrapped_chat_create._osmosis_aiped = True
                     self.chat.completions.create = wrapped_chat_create
             
             if hasattr(self, 'completions'):
                 original_completions_create = self.completions.create
-                if not hasattr(original_completions_create, "_osmosisaiped"):
+                if not hasattr(original_completions_create, "_osmosis_aiped"):
                     @functools.wraps(original_completions_create)
                     def wrapped_completions_create(*args, **kwargs):
                         # Check if streaming is enabled
@@ -167,7 +168,7 @@ def _wrap_openai_v2() -> None:
                                 
                             return response
                     
-                    wrapped_completions_create._osmosisaiped = True
+                    wrapped_completions_create._osmosis_aiped = True
                     self.completions.create = wrapped_completions_create
             
             # Wrap async methods
@@ -175,7 +176,7 @@ def _wrap_openai_v2() -> None:
                 if hasattr(self.chat.completions, 'acreate'):
                     logger.debug(f"Found acreate in chat.completions")
                     original_achat_create = self.chat.completions.acreate
-                    if not hasattr(original_achat_create, "_osmosisaiped"):
+                    if not hasattr(original_achat_create, "_osmosis_aiped"):
                         @functools.wraps(original_achat_create)
                         async def wrapped_achat_create(*args, **kwargs):
                             # Check if streaming is enabled
@@ -217,7 +218,7 @@ def _wrap_openai_v2() -> None:
                                     
                                 return response
                         
-                        wrapped_achat_create._osmosisaiped = True
+                        wrapped_achat_create._osmosis_aiped = True
                         self.chat.completions.acreate = wrapped_achat_create
                 else:
                     logger.debug(f"acreate not found in chat.completions")
@@ -225,7 +226,7 @@ def _wrap_openai_v2() -> None:
             if hasattr(self, 'completions'):
                 if hasattr(self.completions, 'acreate'):
                     original_acompletions_create = self.completions.acreate
-                    if not hasattr(original_acompletions_create, "_osmosisaiped"):
+                    if not hasattr(original_acompletions_create, "_osmosis_aiped"):
                         @functools.wraps(original_acompletions_create)
                         async def wrapped_acompletions_create(*args, **kwargs):
                             # Check if streaming is enabled
@@ -267,10 +268,10 @@ def _wrap_openai_v2() -> None:
                                     
                                 return response
                         
-                        wrapped_acompletions_create._osmosisaiped = True
+                        wrapped_acompletions_create._osmosis_aiped = True
                         self.completions.acreate = wrapped_acompletions_create
         
-        wrapped_init._osmosisaiped = True
+        wrapped_init._osmosis_aiped = True
         OpenAI.__init__ = wrapped_init
         
         # Also wrap AsyncOpenAI if it exists
@@ -293,7 +294,7 @@ def _wrap_openai_v2() -> None:
                 # Wrap the async client's methods
                 if hasattr(self, 'chat') and hasattr(self.chat, 'completions'):
                     original_achat_create = self.chat.completions.create
-                    if not hasattr(original_achat_create, "_osmosisaiped"):
+                    if not hasattr(original_achat_create, "_osmosis_aiped"):
                         logger.debug(f"Wrapping AsyncOpenAI chat.completions.create")
                         @functools.wraps(original_achat_create)
                         async def wrapped_achat_create(*args, **kwargs):
@@ -309,12 +310,12 @@ def _wrap_openai_v2() -> None:
                                 
                             return response
                         
-                        wrapped_achat_create._osmosisaiped = True
+                        wrapped_achat_create._osmosis_aiped = True
                         self.chat.completions.create = wrapped_achat_create
                 
                 if hasattr(self, 'completions'):
                     original_acompletions_create = self.completions.create
-                    if not hasattr(original_acompletions_create, "_osmosisaiped"):
+                    if not hasattr(original_acompletions_create, "_osmosis_aiped"):
                         @functools.wraps(original_acompletions_create)
                         async def wrapped_acompletions_create(*args, **kwargs):
                             response = await original_acompletions_create(*args, **kwargs)
@@ -328,17 +329,17 @@ def _wrap_openai_v2() -> None:
                                 
                             return response
                         
-                        wrapped_acompletions_create._osmosisaiped = True
+                        wrapped_acompletions_create._osmosis_aiped = True
                         self.completions.create = wrapped_acompletions_create
             
-            wrapped_async_init._osmosisaiped = True
+            wrapped_async_init._osmosis_aiped = True
             AsyncOpenAI.__init__ = wrapped_async_init
         
-        logger.info("OpenAI v2 client has been wrapped by osmosis-wrap.")
+        logger.info("OpenAI v2 client has been wrapped by osmosis-ai.")
     except (ImportError, AttributeError) as e:
         logger.error(f"Failed to wrap OpenAI v2 client: {e}")
 
-def _wrap_openai_v1() -> None:
+def _ai_openai_v1() -> None:
     """Monkey patch the OpenAI v1 client."""
     from openai import OpenAI
     from openai.resources.chat import completions
@@ -366,7 +367,7 @@ def _wrap_openai_v1() -> None:
     
     # Patch the chat completions create method
     original_chat_create = completions.Completions.create
-    if not hasattr(original_chat_create, "_osmosisaiped"):
+    if not hasattr(original_chat_create, "_osmosis_aiped"):
         @functools.wraps(original_chat_create)
         def wrapped_chat_create(self, *args, **kwargs):
             # Check if streaming is enabled
@@ -408,12 +409,12 @@ def _wrap_openai_v1() -> None:
                     
                 return response
         
-        wrapped_chat_create._osmosisaiped = True
+        wrapped_chat_create._osmosis_aiped = True
         completions.Completions.create = wrapped_chat_create
     
     # Patch the completions create method
     original_completions_create = text_completions.Completions.create
-    if not hasattr(original_completions_create, "_osmosisaiped"):
+    if not hasattr(original_completions_create, "_osmosis_aiped"):
         @functools.wraps(original_completions_create)
         def wrapped_completions_create(self, *args, **kwargs):
             # Check if streaming is enabled
@@ -455,7 +456,7 @@ def _wrap_openai_v1() -> None:
                     
                 return response
         
-        wrapped_completions_create._osmosisaiped = True
+        wrapped_completions_create._osmosis_aiped = True
         text_completions.Completions.create = wrapped_completions_create
     
     # Find and wrap async methods
@@ -463,7 +464,7 @@ def _wrap_openai_v1() -> None:
         for name, method in inspect.getmembers(module.Completions):
             if (name.startswith("a") and name.endswith("create") 
                 and inspect.iscoroutinefunction(method) 
-                and not hasattr(method, "_osmosisaiped")):
+                and not hasattr(method, "_osmosis_aiped")):
                 
                 logger.debug(f"Found async method {name} in {module.__name__}")
                 original_method = method
@@ -509,7 +510,7 @@ def _wrap_openai_v1() -> None:
                             
                         return response
                 
-                wrapped_async_method._osmosisaiped = True
+                wrapped_async_method._osmosis_aiped = True
                 setattr(module.Completions, name, wrapped_async_method)
     
     # Explicitly wrap AsyncOpenAI if it exists
@@ -532,7 +533,7 @@ def _wrap_openai_v1() -> None:
             # Now wrap the async client's methods
             if hasattr(self, 'chat') and hasattr(self.chat, 'completions'):
                 original_achat_create = self.chat.completions.create
-                if not hasattr(original_achat_create, "_osmosisaiped"):
+                if not hasattr(original_achat_create, "_osmosis_aiped"):
                     logger.debug(f"Wrapping AsyncOpenAI chat.completions.create in v1")
                     @functools.wraps(original_achat_create)
                     async def wrapped_achat_create(*args, **kwargs):
@@ -577,12 +578,12 @@ def _wrap_openai_v1() -> None:
                                 
                             return response
                     
-                    wrapped_achat_create._osmosisaiped = True
+                    wrapped_achat_create._osmosis_aiped = True
                     self.chat.completions.create = wrapped_achat_create
             
             if hasattr(self, 'completions'):
                 original_acompletions_create = self.completions.create
-                if not hasattr(original_acompletions_create, "_osmosisaiped"):
+                if not hasattr(original_acompletions_create, "_osmosis_aiped"):
                     @functools.wraps(original_acompletions_create)
                     async def wrapped_acompletions_create(*args, **kwargs):
                         # Check if streaming is enabled
@@ -624,21 +625,21 @@ def _wrap_openai_v1() -> None:
                                 
                             return response
                     
-                    wrapped_acompletions_create._osmosisaiped = True
+                    wrapped_acompletions_create._osmosis_aiped = True
                     self.completions.create = wrapped_acompletions_create
         
-        wrapped_async_init._osmosisaiped = True
+        wrapped_async_init._osmosis_aiped = True
         AsyncOpenAI.__init__ = wrapped_async_init
     
-    logger.info("OpenAI v1 client has been wrapped by osmosis-wrap.")
+    logger.info("OpenAI v1 client has been wrapped by osmosis-ai.")
 
-def _wrap_openai_legacy() -> None:
+def _ai_openai_legacy() -> None:
     """Monkey patch the legacy OpenAI client."""
     import openai
     
     # Patch the Completion.create method
     original_completion_create = openai.Completion.create
-    if not hasattr(original_completion_create, "_osmosisaiped"):
+    if not hasattr(original_completion_create, "_osmosis_aiped"):
         @functools.wraps(original_completion_create)
         def wrapped_completion_create(*args, **kwargs):
             # Check if streaming is enabled
@@ -680,13 +681,13 @@ def _wrap_openai_legacy() -> None:
                     
                 return response
         
-        wrapped_completion_create._osmosisaiped = True
+        wrapped_completion_create._osmosis_aiped = True
         openai.Completion.create = wrapped_completion_create
     
     # Patch the ChatCompletion.create method
     if hasattr(openai, "ChatCompletion"):
         original_chat_create = openai.ChatCompletion.create
-        if not hasattr(original_chat_create, "_osmosisaiped"):
+        if not hasattr(original_chat_create, "_osmosis_aiped"):
             @functools.wraps(original_chat_create)
             def wrapped_chat_create(*args, **kwargs):
                 # Check if streaming is enabled
@@ -728,7 +729,7 @@ def _wrap_openai_legacy() -> None:
                         
                     return response
             
-            wrapped_chat_create._osmosisaiped = True
+            wrapped_chat_create._osmosis_aiped = True
             openai.ChatCompletion.create = wrapped_chat_create
             
     # Patch the async methods if they exist
@@ -738,7 +739,7 @@ def _wrap_openai_legacy() -> None:
             
         if hasattr(obj, "acreate"):
             original_acreate = obj.acreate
-            if not hasattr(original_acreate, "_osmosisaiped"):
+            if not hasattr(original_acreate, "_osmosis_aiped"):
                 @functools.wraps(original_acreate)
                 async def wrapped_acreate(*args, **kwargs):
                     # Check if streaming is enabled
@@ -780,7 +781,7 @@ def _wrap_openai_legacy() -> None:
                             
                         return response
                 
-                wrapped_acreate._osmosisaiped = True
+                wrapped_acreate._osmosis_aiped = True
                 obj.acreate = wrapped_acreate
     
-    logger.info("OpenAI legacy client has been wrapped by osmosis-wrap.") 
+    logger.info("OpenAI legacy client has been wrapped by osmosis-ai.") 

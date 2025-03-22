@@ -1,6 +1,6 @@
 """
 Profiler example that measures performance differences between integrations 
-with and without osmosis-wrap.
+with and without osmosis-ai.
 
 This script measures and compares execution times for:
 - OpenAI
@@ -8,14 +8,13 @@ This script measures and compares execution times for:
 - LangChain-OpenAI
 - LangChain-Anthropic
 
-Each integration is tested both with and without osmosis-wrap enabled.
+Each integration is tested both with and without osmosis-ai enabled.
 """
 
 import os
 import time
 import statistics
 from dotenv import load_dotenv
-import importlib
 import sys
 
 # Load environment variables from .env file
@@ -69,21 +68,21 @@ def time_execution(func, num_runs=3):
     }
 
 def compare_times(with_osmosis, without_osmosis):
-    """Compare times with and without osmosis-wrap."""
+    """Compare times with and without osmosis-ai."""
     diff = without_osmosis["avg"] - with_osmosis["avg"]
     percent = (diff / without_osmosis["avg"]) * 100
     
     if diff > 0:
-        print(f"  {GREEN}Osmosis-wrap is faster by {abs(diff):.4f}s ({abs(percent):.2f}%){RESET}")
+        print(f"  {GREEN}Osmosis-ai is faster by {abs(diff):.4f}s ({abs(percent):.2f}%){RESET}")
     else:
-        print(f"  {RED}Osmosis-wrap is slower by {abs(diff):.4f}s ({abs(percent):.2f}%){RESET}")
+        print(f"  {RED}Osmosis-ai is slower by {abs(diff):.4f}s ({abs(percent):.2f}%){RESET}")
     
     return diff, percent
 
 def reset_modules():
     """Reset modules to ensure clean testing environment."""
     modules_to_remove = [
-        'osmosisai', 
+        'osmosis_ai', 
         'openai', 
         'anthropic',
         'langchain_openai',
@@ -108,9 +107,9 @@ def test_openai():
         print("OpenAI API key not found. Skipping test.")
         return
     
-    # Test without osmosis-wrap
+    # Test without osmosis-ai
     reset_modules()
-    print("Without osmosis-wrap:")
+    print("Without osmosis-ai:")
     
     def run_openai_without():
         from openai import OpenAI
@@ -124,14 +123,14 @@ def test_openai():
     
     without_times = time_execution(run_openai_without, NUM_RUNS)
     
-    # Test with osmosis-wrap
+    # Test with osmosis-ai
     reset_modules()
-    print("With osmosis-wrap:")
+    print("With osmosis-ai:")
     
     def run_openai_with():
-        import osmosisai
-        osmosisai.init(os.environ.get("OSMOSIS_API_KEY"))
-        osmosisai.log_destination = "none"
+        import osmosis_ai
+        osmosis_ai.init(os.environ.get("OSMOSIS_API_KEY"))
+        osmosis_ai.set_log_destination(osmosis_ai.LogDestination.NONE)
         
         from openai import OpenAI
         client = OpenAI(api_key=api_key)
@@ -157,9 +156,9 @@ def test_anthropic():
         print("Anthropic API key not found. Skipping test.")
         return
     
-    # Test without osmosis-wrap
+    # Test without osmosis-ai
     reset_modules()
-    print("Without osmosis-wrap:")
+    print("Without osmosis-ai:")
     
     def run_anthropic_without():
         from anthropic import Anthropic
@@ -173,14 +172,14 @@ def test_anthropic():
     
     without_times = time_execution(run_anthropic_without, NUM_RUNS)
     
-    # Test with osmosis-wrap
+    # Test with osmosis-ai
     reset_modules()
-    print("With osmosis-wrap:")
+    print("With osmosis-ai:")
     
     def run_anthropic_with():
-        import osmosisai
-        osmosisai.init(os.environ.get("OSMOSIS_API_KEY"))
-        osmosisai.log_destination = "none"
+        import osmosis_ai
+        osmosis_ai.init(os.environ.get("OSMOSIS_API_KEY"))
+        osmosis_ai.set_log_destination(osmosis_ai.LogDestination.NONE)
         
         from anthropic import Anthropic
         client = Anthropic(api_key=api_key)
@@ -206,9 +205,9 @@ def test_langchain_openai():
         print("OpenAI API key not found. Skipping test.")
         return
     
-    # Test without osmosis-wrap
+    # Test without osmosis-ai
     reset_modules()
-    print("Without osmosis-wrap:")
+    print("Without osmosis-ai:")
     
     def run_langchain_openai_without():
         try:
@@ -224,17 +223,17 @@ def test_langchain_openai():
     
     without_times = time_execution(run_langchain_openai_without, NUM_RUNS)
     
-    # Test with osmosis-wrap
+    # Test with osmosis-ai
     reset_modules()
-    print("With osmosis-wrap:")
+    print("With osmosis-ai:")
     
     def run_langchain_openai_with():
         try:
-            import osmosisai
-            osmosisai.init(os.environ.get("OSMOSIS_API_KEY"))
-            osmosisai.log_destination = "none"
+            import osmosis_ai
+            osmosis_ai.init(os.environ.get("OSMOSIS_API_KEY"))
+            osmosis_ai.set_log_destination(osmosis_ai.LogDestination.NONE)
             
-            from osmosisai.adapters.langchain_openai import wrap_langchain_openai
+            from osmosis_ai.adapters.langchain_openai import wrap_langchain_openai
             wrap_langchain_openai()
             
             from langchain_openai import ChatOpenAI
@@ -262,9 +261,9 @@ def test_langchain_anthropic():
         print("Anthropic API key not found. Skipping test.")
         return
     
-    # Test without osmosis-wrap
+    # Test without osmosis-ai
     reset_modules()
-    print("Without osmosis-wrap:")
+    print("Without osmosis-ai:")
     
     def run_langchain_anthropic_without():
         try:
@@ -280,17 +279,17 @@ def test_langchain_anthropic():
     
     without_times = time_execution(run_langchain_anthropic_without, NUM_RUNS)
     
-    # Test with osmosis-wrap
+    # Test with osmosis-ai
     reset_modules()
-    print("With osmosis-wrap:")
+    print("With osmosis-ai:")
     
     def run_langchain_anthropic_with():
         try:
-            import osmosisai
-            osmosisai.init(os.environ.get("OSMOSIS_API_KEY"))
-            osmosisai.log_destination = "none"
+            import osmosis_ai
+            osmosis_ai.init(os.environ.get("OSMOSIS_API_KEY"))
+            osmosis_ai.set_log_destination(osmosis_ai.LogDestination.NONE)
             
-            from osmosisai.adapters.langchain_anthropic import wrap_langchain_anthropic
+            from osmosis_ai.adapters.langchain_anthropic import wrap_langchain_anthropic
             wrap_langchain_anthropic()
             
             from langchain_anthropic import ChatAnthropic
@@ -311,8 +310,8 @@ def test_langchain_anthropic():
 
 # Run all tests
 if __name__ == "__main__":
-    print_header("OSMOSIS-WRAP PROFILER")
-    print(f"This script compares execution times for different integrations with and without osmosis-wrap.")
+    print_header("OSMOSIS-ai PROFILER")
+    print(f"This script compares execution times for different integrations with and without osmosis-ai.")
     print(f"Each test will run {NUM_RUNS} times to get an average.")
     
     results = {}
@@ -337,7 +336,7 @@ if __name__ == "__main__":
                 else:
                     performance = f"{RED}SLOWER by {abs(diff):.4f}s ({abs(percent):.2f}%){RESET}"
                 
-                print(f"{BOLD}{integration.upper()}{RESET}: Osmosis-wrap is {performance}")
+                print(f"{BOLD}{integration.upper()}{RESET}: Osmosis-ai is {performance}")
     
     except Exception as e:
         print(f"{RED}Error: {str(e)}{RESET}")

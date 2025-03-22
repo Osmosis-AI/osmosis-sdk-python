@@ -1,5 +1,5 @@
 @echo off
-REM Script to set up a Python virtual environment for osmosis-wrap on Windows
+REM Script to set up a Python virtual environment for osmosis-ai on Windows
 
 echo Creating virtual environment...
 python -m venv venv

@@ -1,5 +1,5 @@
 """
-Example demonstrating how to use osmosis-wrap with Anthropic tool calls using async API
+Example demonstrating how to use osmosis-ai with Anthropic tool calls using async API
 """
 
 import os
@@ -9,19 +9,19 @@ from dotenv import load_dotenv
 # Load environment variables from .env file
 load_dotenv()
 
-# Import and initialize osmosisai first
-import osmosisai
+# Import and initialize osmosis_ai first
+import osmosis_ai
 
 # Initialize with OSMOSIS API key
 osmosis_api_key = os.environ.get("OSMOSIS_API_KEY")
-osmosisai.init(osmosis_api_key)
+osmosis_ai.init(osmosis_api_key)
 
 # Print messages to console for demonstration
-osmosisai.log_destination = "stdout"
+osmosis_ai.set_log_destination(osmosis_ai.LogDestination.STDOUT)
 
 print("Anthropic Async Tool Use Integration Example\n")
 
-# Import Anthropic AFTER osmosisai initialization
+# Import Anthropic AFTER osmosis_ai initialization
 from anthropic import AsyncAnthropic
 
 # Define a tool for weather information
@@ -129,7 +129,7 @@ def main():
     try:
         # Run the async example
         asyncio.run(call_claude_with_tools())
-        print("\nAll interactions above have been logged via osmosisai!")
+        print("\nAll interactions above have been logged via osmosis_ai!")
     except Exception as e:
         print(f"Error in main: {str(e)}")
         import traceback

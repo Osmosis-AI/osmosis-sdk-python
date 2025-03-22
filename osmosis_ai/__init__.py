@@ -1,5 +1,5 @@
 """
-osmosisai: A library for monkey patching LLM APIs to print all prompts and responses.
+osmosis-ai: A library for monkey patching LLM APIs to print all prompts and responses.
 
 This module patches various LLM client libraries to send all prompts and responses
 to the OSMOSIS API for logging and monitoring.
@@ -13,22 +13,21 @@ Currently supported adapters:
 # Use lazy imports to avoid importing modules during setup
 def _import_modules():
     global utils, logger, reconfigure_logger
-    global enabled, log_destination
-    global init, disable_osmosis, enable_osmosis
+    global set_log_destination, log_destination, LogDestination
+    global init, enabled, disable_osmosis, enable_osmosis
     
     from . import utils
-    from .logger import logger, reconfigure_logger
-    
+    from .logger import logger, reconfigure_logger, set_log_destination, log_destination
+    from .consts import LogDestination
     # Re-export configuration flags for easy access
     enabled = utils.enabled
-    log_destination = utils.log_destination
-    
-    # Re-export initialization function
-    init = utils.init
     
     # Export disable and enable functions
     disable_osmosis = utils.disable_osmosis
     enable_osmosis = utils.enable_osmosis
+    
+    # Re-export initialization function
+    init = utils.init
     
     # Initialize wrappers as None
     global wrap_anthropic, wrap_openai, wrap_langchain

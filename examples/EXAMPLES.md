@@ -1,12 +1,12 @@
 # Osmosis Wrap Examples
 
-This directory contains example code demonstrating how to use osmosis-wrap with various LLM libraries.
+This directory contains example code demonstrating how to use osmosis-ai with various LLM libraries.
 
 ## Prerequisites
 
 Before running these examples, make sure you have:
 
-1. Installed osmosis-wrap and its dependencies
+1. Installed osmosis-ai and its dependencies
 2. Set up environment variables for your API keys
 
 ```bash
@@ -31,14 +31,14 @@ OPENAI_API_KEY=your_openai_key_here
 
 ### Comprehensive Example
 
-`combined_example.py` provides a full demonstration of osmosis-wrap with multiple LLM providers:
+`combined_example.py` provides a full demonstration of osmosis-ai with multiple LLM providers:
 
 ```bash
 python examples/combined_example.py
 ```
 
 This example:
-- Initializes osmosis-wrap
+- Initializes osmosis-ai
 - Makes API calls to Anthropic Claude (if available)
 - Makes API calls to OpenAI GPT (if available)
 - Demonstrates LangChain integration (if available)
@@ -46,7 +46,7 @@ This example:
 
 ### Performance Profiler
 
-`profiler_example.py` measures and compares the execution times for different integrations with and without osmosis-wrap:
+`profiler_example.py` measures and compares the execution times for different integrations with and without osmosis-ai:
 
 ```bash
 python examples/profiler_example.py
@@ -54,17 +54,17 @@ python examples/profiler_example.py
 
 This example:
 - Tests OpenAI, Anthropic, LangChain-OpenAI, and LangChain-Anthropic
-- Runs each integration with and without osmosis-wrap
+- Runs each integration with and without osmosis-ai
 - Calculates performance differences and provides a detailed comparison
-- Helps identify any overhead introduced by osmosis-wrap
+- Helps identify any overhead introduced by osmosis-ai
 
 ### Individual Provider Examples
 
-Each example demonstrates osmosis-wrap with a specific provider:
+Each example demonstrates osmosis-ai with a specific provider:
 
-- **Anthropic**: `anthropic_example.py` - Shows how to use osmosis-wrap with the Anthropic Claude API
-- **OpenAI**: `openai_example.py` - Shows how to use osmosis-wrap with the OpenAI API
-- **LangChain**: `langchain_example.py` - Shows how to use osmosis-wrap with LangChain
+- **Anthropic**: `anthropic_example.py` - Shows how to use osmosis-ai with the Anthropic Claude API
+- **OpenAI**: `openai_example.py` - Shows how to use osmosis-ai with the OpenAI API
+- **LangChain**: `langchain_example.py` - Shows how to use osmosis-ai with LangChain
 
 Run any example with:
 
@@ -74,7 +74,7 @@ python examples/[example_file].py
 
 ### Tests
 
-`test_examples.py` contains unit tests for osmosis-wrap functionality. Run with:
+`test_examples.py` contains unit tests for osmosis-ai functionality. Run with:
 
 ```bash
 pytest examples/test_examples.py

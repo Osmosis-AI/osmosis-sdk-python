@@ -1,5 +1,5 @@
 #!/bin/bash
-# Script to set up a Python virtual environment for osmosis-wrap
+# Script to set up a Python virtual environment for osmosis-ai
 
 set -e  # Exit on error
 
