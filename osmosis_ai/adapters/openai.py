@@ -1,5 +1,5 @@
 """
-OpenAI adapter for Osmosis Wrap
+OpenAI adapter for Osmosis
 
 This module provides monkey patching for the OpenAI Python client.
 """

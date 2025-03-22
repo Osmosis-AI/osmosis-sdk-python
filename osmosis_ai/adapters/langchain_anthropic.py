@@ -1,5 +1,5 @@
 """
-Langchain-Anthropic adapter for Osmosis Wrap
+Langchain-Anthropic adapter for Osmosis
 
 This module provides monkey patching for the langchain-anthropic package.
 """

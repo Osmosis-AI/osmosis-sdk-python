@@ -1,6 +1,6 @@
 [![Run Tests](https://github.com/Gulp-AI/osmosis-ai/actions/workflows/test.yml/badge.svg)](https://github.com/Gulp-AI/osmosis-ai/actions/workflows/test.yml)
 
-# Osmosis Wrap
+# Osmosis
 
 A Python library that monkey patches LLM client libraries to send all prompts and responses to the OSMOSIS API for logging and monitoring.
 

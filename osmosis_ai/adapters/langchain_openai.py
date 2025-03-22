@@ -1,5 +1,5 @@
 """
-Langchain-OpenAI adapter for Osmosis Wrap
+Langchain-OpenAI adapter for Osmosis
 
 This module provides monkey patching for the langchain-openai package.
 """

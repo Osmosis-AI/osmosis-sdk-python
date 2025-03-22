@@ -1,5 +1,5 @@
 """
-Adapters package for Osmosis Wrap
+Adapters package for Osmosis
 
 This package contains various adapters for different LLM providers.
 Each adapter is conditionally imported based on installed dependencies.

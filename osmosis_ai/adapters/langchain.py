@@ -1,5 +1,5 @@
 """
-Langchain adapter for Osmosis Wrap
+Langchain adapter for Osmosis
 
 This module provides monkey patching for the LangChain Python library.
 """

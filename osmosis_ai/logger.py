@@ -1,5 +1,5 @@
 """
-Logging utilities for Osmosis Wrap
+Logging utilities for Osmosis
 """
 
 import sys

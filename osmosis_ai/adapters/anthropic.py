@@ -1,5 +1,5 @@
 """
-Anthropic adapter for Osmosis Wrap
+Anthropic adapter for Osmosis
 
 This module provides monkey patching for the Anthropic Python client.
 """
