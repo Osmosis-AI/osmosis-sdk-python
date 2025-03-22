@@ -1,4 +1,4 @@
-# Osmosis Wrap Examples
+# osmosisExamples
 
 This directory contains example code demonstrating how to use osmosis-ai with various LLM libraries.
 

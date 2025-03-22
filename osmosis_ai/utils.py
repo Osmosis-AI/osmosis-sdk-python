@@ -1,5 +1,5 @@
 """
-Utility functions for Osmosis Wrap adapters
+Utility functions for osmosisadapters
 """
 
 import json
@@ -18,7 +18,7 @@ _initialized = False
 
 def init(api_key: str) -> None:
     """
-    Initialize Osmosis Wrap with the OSMOSIS API key.
+    Initialize osmosiswith the OSMOSIS API key.
     
     Args:
         api_key: The OSMOSIS API key for logging LLM usage
@@ -48,7 +48,7 @@ def send_to_osmosis(query: Dict[str, Any], response: Dict[str, Any], status: int
         return
 
     if not _initialized:
-        logger.warning("Osmosis Wrap not initialized. Call osmosis_ai.init(api_key) first.")
+        logger.warning("osmosisnot initialized. Call osmosis_ai.init(api_key) first.")
         return
 
     try:

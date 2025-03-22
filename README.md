@@ -47,7 +47,7 @@ pip install -r requirements.txt
 
 ## Environment Setup
 
-Osmosis Wrap requires a OSMOSIS API key to log LLM usage. Create a `.env` file in your project directory:
+osmosisrequires a OSMOSIS API key to log LLM usage. Create a `.env` file in your project directory:
 
 ```bash
 # Copy the sample .env file
@@ -69,7 +69,7 @@ OPENAI_API_KEY=your_openai_key_here
 
 ## Usage
 
-First, import and initialize Osmosis Wrap with your OSMOSIS API key:
+First, import and initialize osmosiswith your OSMOSIS API key:
 
 ```python
 import os
