@@ -1,4 +1,4 @@
-[![Run Tests](https://github.com/Gulp-AI/osmosis-ai/actions/workflows/test.yml/badge.svg)](https://github.com/Gulp-AI/osmosis-ai/actions/workflows/test.yml)
+[![Run Tests](https://github.com/Gulp-AI/osmosis-sdk-python/actions/workflows/test.yml/badge.svg)](https://github.com/Gulp-AI/osmosis-sdk-python/actions/workflows/test.yml)
 
 # Osmosis
 
@@ -12,7 +12,7 @@ A Python library that monkey patches LLM client libraries to send all prompts an
 
 ## Installation
 
-[pypi](https://pypi.org/project/osmosis-ai/)
+[pypi](https://pypi.org/project/osmosis-sdk-python/)
 
 ```bash
 # Basic installation with minimal dependencies
@@ -34,7 +34,7 @@ pip install "osmosis-ai[all]"
 Or install from source:
 
 ```bash
-git clone https://github.com/your-username/osmosis-ai.git
+git clone https://github.com/your-username/osmosis-sdk-python.git
 cd osmosis-ai
 pip install -e .
 ```

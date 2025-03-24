@@ -24,8 +24,8 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/Gulp-AI/osmosis-ai"
-Issues = "https://github.com/Gulp-AI/osmosis-ai/issues"
+Homepage = "https://github.com/Gulp-AI/osmosis-sdk-python"
+Issues = "https://github.com/Gulp-AI/osmosis-sdk-python/issues"
 
 [project.optional-dependencies]
 anthropic = ["anthropic>=0.5.0"]
