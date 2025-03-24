@@ -2,7 +2,7 @@
 
 # Osmosis
 
-A Python library that monkey patches LLM client libraries to send all prompts and responses to the OSMOSIS API for logging and monitoring.
+A Python library that monkey patches LLM client libraries to send all prompts and responses to the Osmosis API for logging and monitoring.
 
 ## Supported Libraries
 
@@ -12,7 +12,7 @@ A Python library that monkey patches LLM client libraries to send all prompts an
 
 ## Installation
 
-[pypi](https://pypi.org/project/osmosis-sdk-python/)
+[pypi](https://pypi.org/project/osmosis-ai/)
 
 ```bash
 # Basic installation with minimal dependencies
