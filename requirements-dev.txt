@@ -1,4 +1,4 @@
 # Development requirements
-pytest>=8.3.5     # For running tests
-black>=25.1.0     # For code formatting
-isort>=6.0.1     # For import sorting 
+pytest>=8.0.0,<9.0.0     # For running tests
+black>=25.0.0,<26.0.0     # For code formatting
+isort>=5.0.0,<7.0.0     # For import sorting 

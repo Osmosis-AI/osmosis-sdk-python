@@ -1,11 +1,11 @@
 # Core requirements
-python-dotenv>=1.0.1
-requests>=2.32.3
-xxhash>=3.4.1
+python-dotenv>=0.1.0,<2.0.0
+requests>=2.0.0,<3.0.0
+xxhash>=3.0.0,<4.0.0
 
 # LLM provider clients - install the ones you need
-anthropic>=0.49.0  # For Claude API
-openai>=1.27.0   # For OpenAI API
-langchain>=0.3.21  # For LangChain integration
-langchain-openai>=0.3.1  # For LangChain OpenAI integration
-langchain-anthropic>=0.3.3  # For LangChain Anthropic integration
+anthropic>=0.2.2,<0.50.0  # For Claude API
+openai>=1.0.0,<2.0.0   # For OpenAI API
+langchain>=0.3.0,<0.4.0  # For LangChain integration
+langchain-openai>=0.3.0,<0.4.0  # For LangChain OpenAI integration
+langchain-anthropic>=0.3.0,<0.4.0  # For LangChain Anthropic integration
