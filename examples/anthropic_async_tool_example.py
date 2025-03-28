@@ -36,14 +36,15 @@ weather_tool = {
                 "description": "The city and state, e.g., San Francisco, CA",
             },
             "unit": {
-                "type": "string", 
+                "type": "string",
                 "enum": ["celsius", "fahrenheit"],
-                "description": "The unit of temperature to use"
+                "description": "The unit of temperature to use",
             },
         },
         "required": ["location"],
     },
 }
+
 
 # Define the function to be called when the tool is used
 async def handle_tool_use(tool_name, tool_input):
@@ -56,18 +57,19 @@ async def handle_tool_use(tool_name, tool_input):
             "temperature": 72 if unit == "fahrenheit" else 22,
             "condition": "sunny",
             "humidity": "45%",
-            "location": location
+            "location": location,
         }
     return {"error": "Unknown tool"}
+
 
 async def call_claude_with_tools():
     try:
         # Get API key from environment
         api_key = os.environ.get("ANTHROPIC_API_KEY")
-        
+
         # Create the async Anthropic client
         async_client = AsyncAnthropic(api_key=api_key)
-        
+
         # Make a request to Claude with tool use
         print("Making async request to Claude with tool use...")
         response = await async_client.messages.create(
@@ -75,54 +77,65 @@ async def call_claude_with_tools():
             max_tokens=130,
             tools=[weather_tool],
             messages=[
-                {"role": "user", "content": "What's the current weather in San Francisco?"}
-            ]
+                {
+                    "role": "user",
+                    "content": "What's the current weather in San Francisco?",
+                }
+            ],
         )
-        
+
         # Process the response and handle any tool calls
         final_response = response
-        if hasattr(response, 'content') and len(response.content) > 0:
+        if hasattr(response, "content") and len(response.content) > 0:
             for content in response.content:
                 if content.type == "tool_use":
                     # Access properties directly on the content object
                     print(f"\nClaude requested to use tool: {content.name}")
                     print(f"Tool input: {content.input}")
-                    
+
                     # Handle the tool use
                     tool_result = await handle_tool_use(content.name, content.input)
-                    
+
                     # Continue the conversation with the tool result
                     print(f"Tool result: {tool_result}")
-                    
+
                     # Send tool result back to Claude
                     final_response = await async_client.messages.create(
                         model="claude-3-opus-20240229",
                         max_tokens=130,
                         tools=[weather_tool],
                         messages=[
-                            {"role": "user", "content": "What's the current weather in San Francisco?"},
+                            {
+                                "role": "user",
+                                "content": "What's the current weather in San Francisco?",
+                            },
                             {"role": "assistant", "content": [content]},
-                            {"role": "user", "content": [
-                                {
-                                    "type": "tool_result",
-                                    "tool_use_id": content.id,
-                                    "result": tool_result
-                                }
-                            ]}
-                        ]
+                            {
+                                "role": "user",
+                                "content": [
+                                    {
+                                        "type": "tool_result",
+                                        "tool_use_id": content.id,
+                                        "result": tool_result,
+                                    }
+                                ],
+                            },
+                        ],
                     )
-        
+
         # Print the final response
         print("\nFinal response from Claude:")
         for content in final_response.content:
             if content.type == "text":
                 print(content.text)
-        
+
         return final_response
     except Exception as e:
         print(f"Error in async tool call: {str(e)}")
         import traceback
+
         traceback.print_exc()
+
 
 # Main function to run everything
 def main():
@@ -133,8 +146,10 @@ def main():
     except Exception as e:
         print(f"Error in main: {str(e)}")
         import traceback
+
         traceback.print_exc()
+
 
 # Run the program
 if __name__ == "__main__":
-    main() 
+    main()

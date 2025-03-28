@@ -8,7 +8,7 @@ import os
 from .consts import LogDestination, DEFAULT_LOG_DESTINATION
 
 # Create logger
-logger = logging.getLogger('osmosis_ai')
+logger = logging.getLogger("osmosis_ai")
 logger.setLevel(logging.INFO)
 
 # Default configuration - no logging
@@ -18,6 +18,7 @@ logger.propagate = False
 log_destination = DEFAULT_LOG_DESTINATION
 logger.log_destination = log_destination
 
+
 def set_log_destination(destination: LogDestination) -> None:
     """
     Set the log destination for the logger
@@ -26,6 +27,7 @@ def set_log_destination(destination: LogDestination) -> None:
     log_destination = destination
     logger.log_destination = destination
 
+
 def configure_logger() -> None:
     """
     Configure the logger based on the log_destination setting in consts.py
@@ -33,7 +35,7 @@ def configure_logger() -> None:
     # Remove any existing handlers
     for handler in logger.handlers[:]:
         logger.removeHandler(handler)
-    
+
     # Configure based on log_destination
     if log_destination == "none":
         # No logging
@@ -54,18 +56,22 @@ def configure_logger() -> None:
         handler = logging.StreamHandler(sys.stderr)
         logger.addHandler(handler)
         logger.warning(f"Invalid log_destination: {log_destination}, using stderr")
-    
+
     # Set formatter
-    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    formatter = logging.Formatter(
+        "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    )
     for handler in logger.handlers:
         handler.setFormatter(formatter)
 
+
 # Initialize the logger on module import
 configure_logger()
+
 
 # Function to force reconfiguration if log_destination is changed
 def reconfigure_logger() -> None:
     """
     Reconfigure the logger, should be called if log_destination changes
     """
-    configure_logger() 
+    configure_logger()

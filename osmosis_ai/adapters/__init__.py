@@ -6,4 +6,4 @@ Each adapter is conditionally imported based on installed dependencies.
 """
 
 # Don't include adapters in __all__ as they're imported conditionally
-__all__ = [] 
+__all__ = []

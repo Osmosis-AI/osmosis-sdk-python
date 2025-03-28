@@ -23,30 +23,34 @@ print("Anthropic Integration Example\n")
 try:
     # Import Anthropic after osmosis_ai is initialized
     from anthropic import Anthropic
-    
+
     # Get API key from environment
     api_key = os.environ.get("ANTHROPIC_API_KEY")
-    
+
     # Create the Anthropic client
     client = Anthropic(api_key=api_key)
-    
+
     # Make a request to Claude
     print("Making request to Claude...")
     response = client.messages.create(
         model="claude-3-haiku-20240307",
         max_tokens=150,
         messages=[
-            {"role": "user", "content": "Hello, Claude! What are three interesting facts about neural networks?"}
-        ]
+            {
+                "role": "user",
+                "content": "Hello, Claude! What are three interesting facts about neural networks?",
+            }
+        ],
     )
-    
+
     # Print the response
     print("\nResponse from Claude:")
     print(response.content[0].text)
-    
+
     print("\nAll interactions above have been logged via osmosis_ai!")
-    
+
 except Exception as e:
     print(f"Error: {str(e)}")
     import traceback
-    traceback.print_exc() 
+
+    traceback.print_exc()
