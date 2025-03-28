@@ -79,14 +79,14 @@ def send_to_osmosis(
 
         # Send main data payload
         response_data = requests.post(
-            f"{osmosis_api_url}/data",
+            f"{osmosis_api_url}/ingest",
             headers=headers,
             data=json.dumps(data).replace("\n", "") + "\n",
         )
 
         if response_data.status_code != 200:
             logger.warning(
-                f"OSMOSIS API returned status {response_data.status_code} for data"
+                f"OSMOSIS API returned status {response_data.status_code} for data with error: {response_data.text}"
             )
 
     except ImportError:
