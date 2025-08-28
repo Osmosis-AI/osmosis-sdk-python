@@ -4,8 +4,9 @@ Utility functions for osmosisadapters
 
 import json
 from datetime import datetime, timezone
-from typing import Any, Dict
+from typing import Any, Dict, Callable
 import xxhash
+import functools
 
 # Import constants
 from .consts import osmosis_api_url
@@ -95,3 +96,25 @@ def send_to_osmosis(
         )
     except Exception as e:
         logger.warning(f"Failed to send data to OSMOSIS API: {str(e)}")
+
+
+def osmosis_reward(func: Callable) -> Callable:
+    """
+    Decorator for reward functions.
+    
+    Args:
+        func: The reward function to be wrapped
+        
+    Returns:
+        The wrapped function
+        
+    Example:
+        @osmosis_reward
+        def calculate_reward(state, action):
+            return state.score + action.value
+    """
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        return func(*args, **kwargs)
+    
+    return wrapper

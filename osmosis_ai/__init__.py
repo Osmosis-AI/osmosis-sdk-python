@@ -15,7 +15,7 @@ Currently supported adapters:
 def _import_modules():
     global utils, logger, reconfigure_logger
     global set_log_destination, log_destination, LogDestination
-    global init, enabled, disable_osmosis, enable_osmosis
+    global init, enabled, disable_osmosis, enable_osmosis, osmosis_reward
 
     from . import utils
     from .logger import logger, reconfigure_logger, set_log_destination, log_destination
@@ -30,6 +30,9 @@ def _import_modules():
 
     # Re-export initialization function
     init = utils.init
+    
+    # Export the reward decorator
+    osmosis_reward = utils.osmosis_reward
 
     # Initialize wrappers as None
     global wrap_anthropic, wrap_openai, wrap_langchain
