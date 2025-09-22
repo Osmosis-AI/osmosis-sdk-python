@@ -4,11 +4,11 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "osmosis-ai"
-version = "0.1.7"
-description = "Monkey patches LLM client libraries to print all prompts and responses"
+version = "0.1.9"
+description = "Adds reward functionality to LLM client libraries"
 readme = "README.md"
 authors = [
-    {name = "Gulp AI", email = "jake@gulp.ai"}
+    {name = "Osmosis AI", email = "jake@osmosis.ai"}
 ]
 license = {file = "LICENSE"}
 classifiers = [
@@ -17,26 +17,8 @@ classifiers = [
     "Operating System :: OS Independent",
 ]
 requires-python = ">=3.6"
-dependencies = [
-    "python-dotenv>=0.19.0",
-    "requests>=2.25.0",
-    "xxhash>=3.4.1",
-]
+dependencies = []
 
 [project.urls]
-Homepage = "https://github.com/Gulp-AI/osmosis-sdk-python"
-Issues = "https://github.com/Gulp-AI/osmosis-sdk-python/issues"
-
-[project.optional-dependencies]
-anthropic = ["anthropic>=0.5.0"]
-openai = ["openai>=0.27.0"]
-langchain = ["langchain>=0.0.200"]
-langchain-openai = ["langchain>=0.0.200", "langchain-openai>=0.0.200", "openai>=0.27.0"]
-langchain-anthropic = ["langchain>=0.0.200", "langchain-anthropic>=0.0.200", "anthropic>=0.5.0"]
-all = [
-    "anthropic>=0.5.0", 
-    "openai>=0.27.0", 
-    "langchain>=0.0.200",
-    "langchain-openai>=0.0.200",
-    "langchain-anthropic>=0.0.200"
-] 
+Homepage = "https://github.com/Osmosis-AI/osmosis-sdk-python"
+Issues = "https://github.com/Osmosis-AI/osmosis-sdk-python/issues"
