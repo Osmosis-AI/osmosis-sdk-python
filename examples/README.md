@@ -17,7 +17,7 @@ All functions decorated with `@osmosis_reward` must have this exact signature:
 
 ```python
 @osmosis_reward
-def your_function(solution_str: str, ground_truth: str, extra_info: dict = None):
+def your_function(solution_str: str, ground_truth: str, extra_info: dict = None) -> float:
     # Your reward logic here
     return float_score
 ```
@@ -27,6 +27,10 @@ def your_function(solution_str: str, ground_truth: str, extra_info: dict = None)
 - `solution_str: str` - The solution string to evaluate
 - `ground_truth: str` - The correct/expected answer
 - `extra_info: dict = None` - Optional dictionary for additional configuration
+
+### Return Value
+
+- `-> float` - Must return a float value representing the reward score
 
 ### Running Examples
 

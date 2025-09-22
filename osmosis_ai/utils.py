@@ -7,7 +7,7 @@ from typing import Callable
 def osmosis_reward(func: Callable) -> Callable:
     """
     Decorator for reward functions that enforces the signature:
-    (solution_str: str, ground_truth: str, extra_info: dict = None)
+    (solution_str: str, ground_truth: str, extra_info: dict = None) -> float
 
     Args:
         func: The reward function to be wrapped
@@ -16,11 +16,11 @@ def osmosis_reward(func: Callable) -> Callable:
         The wrapped function
 
     Raises:
-        TypeError: If the function doesn't have the required signature
+        TypeError: If the function doesn't have the required signature or doesn't return a float
 
     Example:
         @osmosis_reward
-        def calculate_reward(solution_str: str, ground_truth: str, extra_info: dict = None):
+        def calculate_reward(solution_str: str, ground_truth: str, extra_info: dict = None) -> float:
             return some_calculation(solution_str, ground_truth)
     """
     # Validate function signature
@@ -54,6 +54,9 @@ def osmosis_reward(func: Callable) -> Callable:
 
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
-        return func(*args, **kwargs)
+        result = func(*args, **kwargs)
+        if not isinstance(result, float):
+            raise TypeError(f"Function {func.__name__} must return a float, got {type(result).__name__}")
+        return result
 
     return wrapper

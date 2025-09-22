@@ -21,7 +21,7 @@ pip install -e .
 from osmosis_ai import osmosis_reward
 
 @osmosis_reward
-def simple_reward(solution_str: str, ground_truth: str, extra_info: dict = None):
+def simple_reward(solution_str: str, ground_truth: str, extra_info: dict = None) -> float:
     """Basic exact match reward function."""
     return 1.0 if solution_str.strip() == ground_truth.strip() else 0.0
 
@@ -35,7 +35,7 @@ All functions decorated with `@osmosis_reward` must have exactly this signature:
 
 ```python
 @osmosis_reward
-def your_function(solution_str: str, ground_truth: str, extra_info: dict = None):
+def your_function(solution_str: str, ground_truth: str, extra_info: dict = None) -> float:
     # Your reward logic here
     return float_score
 ```
@@ -46,7 +46,11 @@ def your_function(solution_str: str, ground_truth: str, extra_info: dict = None)
 - **`ground_truth: str`** - The correct/expected answer (required)
 - **`extra_info: dict = None`** - Optional dictionary for additional configuration
 
-The decorator will raise a `TypeError` if the function doesn't match this exact signature.
+### Return Value
+
+- **`-> float`** - Must return a float value representing the reward score
+
+The decorator will raise a `TypeError` if the function doesn't match this exact signature or doesn't return a float.
 
 ## Examples
 
@@ -54,7 +58,7 @@ See the [`examples/`](examples/) directory for complete examples:
 
 ```python
 @osmosis_reward
-def case_insensitive_match(solution_str: str, ground_truth: str, extra_info: dict = None):
+def case_insensitive_match(solution_str: str, ground_truth: str, extra_info: dict = None) -> float:
     """Case-insensitive string matching with partial credit."""
     match = solution_str.lower().strip() == ground_truth.lower().strip()
 
@@ -67,7 +71,7 @@ def case_insensitive_match(solution_str: str, ground_truth: str, extra_info: dic
     return 1.0 if match else 0.0
 
 @osmosis_reward
-def numeric_tolerance(solution_str: str, ground_truth: str, extra_info: dict = None):
+def numeric_tolerance(solution_str: str, ground_truth: str, extra_info: dict = None) -> float:
     """Numeric comparison with configurable tolerance."""
     try:
         solution_num = float(solution_str.strip())

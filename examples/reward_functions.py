@@ -2,7 +2,7 @@
 Reward function examples using the @osmosis_reward decorator.
 
 This file demonstrates correct and incorrect usage of the decorator,
-which enforces the signature: (solution_str: str, ground_truth: str, extra_info: dict = None)
+which enforces the signature: (solution_str: str, ground_truth: str, extra_info: dict = None) -> float
 """
 
 import sys
@@ -15,13 +15,13 @@ from utils import osmosis_reward
 # CORRECT USAGE EXAMPLES
 
 @osmosis_reward
-def simple_exact_match(solution_str: str, ground_truth: str, extra_info: dict = None):
+def simple_exact_match(solution_str: str, ground_truth: str, extra_info: dict = None) -> float:
     """Basic exact match reward function."""
     return 1.0 if solution_str.strip() == ground_truth.strip() else 0.0
 
 
 @osmosis_reward
-def case_insensitive_match(solution_str: str, ground_truth: str, extra_info: dict = None):
+def case_insensitive_match(solution_str: str, ground_truth: str, extra_info: dict = None) -> float:
     """Case-insensitive string matching with optional extra info."""
     match = solution_str.lower().strip() == ground_truth.lower().strip()
 
@@ -37,7 +37,7 @@ def case_insensitive_match(solution_str: str, ground_truth: str, extra_info: dic
 
 
 @osmosis_reward
-def numeric_tolerance(solution_str: str, ground_truth: str, extra_info: dict = None):
+def numeric_tolerance(solution_str: str, ground_truth: str, extra_info: dict = None) -> float:
     """Numeric comparison with tolerance."""
     try:
         solution_num = float(solution_str.strip())
@@ -54,7 +54,7 @@ def numeric_tolerance(solution_str: str, ground_truth: str, extra_info: dict = N
 
 # Only two parameters (extra_info is optional)
 @osmosis_reward
-def minimal_reward(solution_str: str, ground_truth: str):
+def minimal_reward(solution_str: str, ground_truth: str) -> float:
     """Minimal reward function with just required parameters."""
     return float(solution_str == ground_truth)
 
