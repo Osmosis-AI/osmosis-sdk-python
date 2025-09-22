@@ -5,11 +5,7 @@ This file demonstrates correct and incorrect usage of the decorator,
 which enforces the signature: (solution_str: str, ground_truth: str, extra_info: dict = None) -> float
 """
 
-import sys
-import os
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'osmosis_ai'))
-
-from utils import osmosis_reward
+from osmosis_ai import osmosis_reward
 
 
 # CORRECT USAGE EXAMPLES
