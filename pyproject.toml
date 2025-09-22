@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "osmosis-ai"
-version = "0.1.9"
-description = "Adds reward functionality to LLM client libraries"
+version = "0.2.0"
+description = "A Python library for reward function validation with strict type enforcement."
 readme = "README.md"
 authors = [
     {name = "Osmosis AI", email = "jake@osmosis.ai"}
