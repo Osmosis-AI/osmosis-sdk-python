@@ -54,6 +54,7 @@ def osmosis_reward(func: Callable) -> Callable:
 
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
+        kwargs.pop("data_source", None)
         result = func(*args, **kwargs)
         if not isinstance(result, float):
             raise TypeError(f"Function {func.__name__} must return a float, got {type(result).__name__}")
