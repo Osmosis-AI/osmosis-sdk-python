@@ -1,6 +1,6 @@
 # osmosis-ai
 
-A Python library that provides reward functionality for LLM applications with strict type enforcement.
+A Python library that provides reward and rubric validation helpers for LLM applications with strict type enforcement.
 
 ## Installation
 
@@ -18,7 +18,7 @@ pip install -e .
 ## Quick Start
 
 ```python
-from osmosis_ai import osmosis_reward
+from osmosis_ai import osmosis_reward, osmosis_rubric
 
 @osmosis_reward
 def simple_reward(solution_str: str, ground_truth: str, extra_info: dict = None) -> float:
@@ -27,6 +27,51 @@ def simple_reward(solution_str: str, ground_truth: str, extra_info: dict = None)
 
 # Use the reward function
 score = simple_reward("hello world", "hello world")  # Returns 1.0
+```
+
+```python
+@osmosis_rubric
+def simple_rubric(
+    rubric: str,
+    messages: list,
+    ground_truth: str | None = None,
+    system_message: str | None = None,
+    extra_info: dict = None,
+) -> float:
+    """Rubric that checks whether the assistant used the provided fact."""
+    assistant_turn = next((m for m in reversed(messages) if m["role"] == "assistant"), None)
+    if not assistant_turn:
+        return 0.0
+
+    assistant_text = " ".join(
+        block["text"]
+        for block in assistant_turn["content"]
+        if isinstance(block, dict) and block.get("type") == "output_text"
+    )
+
+    if ground_truth and ground_truth.lower() in assistant_text.lower():
+        return 1.0
+    if extra_info and extra_info.get("partial_credit"):
+        return 0.5
+    return 0.0
+
+# Use the rubric function
+rubric_score = simple_rubric(
+    rubric="Assistant must mention the verified capital city.",
+    messages=[
+        {
+            "type": "message",
+            "role": "user",
+            "content": [{"type": "input_text", "text": "What is the capital of France?"}],
+        },
+        {
+            "type": "message",
+            "role": "assistant",
+            "content": [{"type": "output_text", "text": "The capital of France is Paris."}],
+        },
+    ],
+    ground_truth="Paris",
+)
 ```
 
 ## Required Function Signature
@@ -51,6 +96,33 @@ def your_function(solution_str: str, ground_truth: str, extra_info: dict = None)
 - **`-> float`** - Must return a float value representing the reward score
 
 The decorator will raise a `TypeError` if the function doesn't match this exact signature or doesn't return a float.
+
+## Rubric Function Signature
+
+Rubric functions decorated with `@osmosis_rubric` must follow this structure:
+
+```python
+@osmosis_rubric
+def your_rubric(
+    rubric: str,
+    messages: list,
+    ground_truth: str | None = None,
+    system_message: str | None = None,
+    extra_info: dict = None,
+):
+    # Your rubric logic here
+    return float_score
+```
+
+### Parameters
+
+- **`rubric: str`** - Description of the evaluation you are performing (required)
+- **`messages: list`** - Provide a list of structured message dicts. Each dict must include `type`, `role`, and `content`, and `role` must be one of `user`, `system`, `assistant`, or `developer`.
+- **`ground_truth: str | None = None`** - Optional ground truth string the assistant response should align with
+- **`system_message: str | None = None`** - Optional system instruction used to guide the conversation
+- **`extra_info: dict = None`** - Optional dictionary for additional configuration (same behavior as `@osmosis_reward`)
+
+The decorator validates the parameter names, type annotations, and runtime payload for `messages`, raising a `TypeError` or `ValueError` when constraints are not satisfied. It also enforces that the wrapped function returns a `float`.
 
 ## Examples
 
@@ -83,10 +155,13 @@ def numeric_tolerance(solution_str: str, ground_truth: str, extra_info: dict = N
         return 0.0
 ```
 
+- `examples/rubric_functions.py` walks through rubric validation using realistic marketing compliance conversations and scoring logic.
+
 ## Running Examples
 
 ```bash
-python examples/reward_functions.py
+PYTHONPATH=. python examples/reward_functions.py
+PYTHONPATH=. python examples/rubric_functions.py
 ```
 
 ## License

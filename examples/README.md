@@ -36,7 +36,24 @@ def your_function(solution_str: str, ground_truth: str, extra_info: dict = None)
 
 ```bash
 cd examples
-python reward_functions.py
+PYTHONPATH=.. python reward_functions.py
 ```
 
 This will run test cases through all the example reward functions and show their outputs.
+
+## Rubric Functions (`rubric_functions.py`)
+
+Highlights how the `@osmosis_rubric` decorator can be used to validate conversation transcripts for compliance with a rubric:
+
+- Ensures the function signature follows the required ordering (`rubric`, `messages`, optional `ground_truth`, optional `system_message`, optional `extra_info`)
+- Demonstrates checking that the assistant response references an approved marketing claim
+- Shows how to flag forbidden terminology via `extra_info`
+
+### Running the Rubric Example
+
+```bash
+cd examples
+PYTHONPATH=.. python rubric_functions.py
+```
+
+The script prints evaluation results for both a passing and a failing conversation.
