@@ -8,7 +8,7 @@ if TYPE_CHECKING:  # pragma: no cover - typing helpers only
     from google import genai as genai_module  # type: ignore
     from google.genai import types as genai_types_module  # type: ignore
 
-from ..rubric_types import RewardRubricRunResult
+from ..rubric_types import ProviderRequestError, RewardRubricRunResult
 from .base import DEFAULT_REQUEST_TIMEOUT_SECONDS, ProviderRequest, RubricProvider
 from .shared import debug_payload, dump_model, reward_schema_definition, sanitize_json
 
@@ -150,7 +150,11 @@ class GeminiProvider(RubricProvider):
         return DEFAULT_REQUEST_TIMEOUT_SECONDS
 
     def run(self, request: ProviderRequest) -> RewardRubricRunResult:
-        genai, genai_types = _load_google_genai()
+        try:
+            genai, genai_types = _load_google_genai()
+        except RuntimeError as exc:
+            detail = str(exc).strip() or "Google Generative AI SDK is required."
+            raise ProviderRequestError(self.name, request.model, detail) from exc
 
         with _suppress_pydantic_any_warning():
             client = genai.Client(api_key=request.api_key)
@@ -170,12 +174,16 @@ class GeminiProvider(RubricProvider):
         }
         debug_payload(request.req_id, self.name, "request", request_preview, [request.api_key])
 
-        with _suppress_pydantic_any_warning():
-            response = client.models.generate_content(
-                model=_normalize_gemini_model(request.model),
-                contents=combined_prompt,
-                config=config,
-            )
+        try:
+            with _suppress_pydantic_any_warning():
+                response = client.models.generate_content(
+                    model=_normalize_gemini_model(request.model),
+                    contents=combined_prompt,
+                    config=config,
+                )
+        except Exception as err:
+            detail = str(err).strip() or "Gemini request failed."
+            raise ProviderRequestError(self.name, request.model, detail) from err
         raw = dump_model(response)
         debug_payload(request.req_id, self.name, "response", raw, [request.api_key])
 
@@ -196,8 +204,11 @@ class GeminiProvider(RubricProvider):
                                         text = candidate_text
                                         break
         if not isinstance(text, str) or not text.strip():
-            raise RuntimeError("Model response did not include any text content.")
-        score, explanation = sanitize_json(text)
+            raise ProviderRequestError(self.name, request.model, "Model response did not include any text content.")
+        try:
+            score, explanation = sanitize_json(text)
+        except ValueError as err:
+            raise ProviderRequestError(self.name, request.model, str(err)) from err
         bounded = max(request.score_min, min(request.score_max, score))
         return {"score": bounded, "explanation": explanation, "raw": raw}
 

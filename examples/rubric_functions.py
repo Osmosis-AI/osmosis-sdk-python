@@ -25,6 +25,8 @@ from osmosis_ai import (
 )
 
 RUBRIC = "Assistant must mention the verified capital city and stay on topic."
+SCORE_MIN = 0.0
+SCORE_MAX = 1.0
 
 MESSAGES = [
     {
@@ -49,6 +51,8 @@ def _run(provider_name: str, model_info: dict) -> None:
             messages=MESSAGES,
             ground_truth=GROUND_TRUTH,
             model_info=model_info,
+            score_min=SCORE_MIN,
+            score_max=SCORE_MAX,
             return_details=True,
         )
     except MissingAPIKeyError as exc:
@@ -61,7 +65,7 @@ def _run(provider_name: str, model_info: dict) -> None:
         print(f"{provider_name} failed: {exc.detail}")
         return
 
-    print(f"{provider_name} score: {result['score']:.2f}")
+    print(f"{provider_name} score: {result['score']:.2f} (range {SCORE_MIN}-{SCORE_MAX})")
     print(f"{provider_name} explanation: {result['explanation']}")
 
 
@@ -70,7 +74,7 @@ def run_openai_example() -> None:
         "OpenAI",
         {
             "provider": "openai",
-            "model": "gpt-5-mini",
+            "model": "gpt-5",
         },
     )
 

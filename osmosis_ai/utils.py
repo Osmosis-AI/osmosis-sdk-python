@@ -86,11 +86,25 @@ def _is_list_annotation(annotation: Any) -> bool:
     return origin is list
 
 
+def _is_float_annotation(annotation: Any) -> bool:
+    if annotation in {inspect.Parameter.empty, float}:
+        return True
+    if isinstance(annotation, str):
+        return annotation in {"float", "builtins.float"}
+    origin = get_origin(annotation)
+    return origin is float
+
+
+def _is_numeric(value: Any) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+
 def osmosis_rubric(func: Callable) -> Callable:
     """
     Decorator for rubric functions that enforces the signature:
     (rubric: str, messages: list, ground_truth: Optional[str] = None,
-     system_message: Optional[str] = None, extra_info: dict = None) -> float
+     system_message: Optional[str] = None, extra_info: dict = None,
+     score_min: float = 0.0, score_max: float = 1.0) -> float
 
     Args:
         func: The rubric function to be wrapped
@@ -109,6 +123,8 @@ def osmosis_rubric(func: Callable) -> Callable:
             ground_truth: str | None = None,
             system_message: str | None = None,
             extra_info: dict = None,
+            score_min: float = 0.0,
+            score_max: float = 1.0,
         ) -> float:
             return some_evaluation(messages, ground_truth)
     """
@@ -117,8 +133,8 @@ def osmosis_rubric(func: Callable) -> Callable:
     params = list(sig.parameters.values())
 
     # Check parameter count
-    if len(params) < 2 or len(params) > 5:
-        raise TypeError(f"Function {func.__name__} must have between 2 and 5 parameters, got {len(params)}")
+    if len(params) < 2 or len(params) > 7:
+        raise TypeError(f"Function {func.__name__} must have between 2 and 7 parameters, got {len(params)}")
 
     # Check first parameter: rubric: str
     rubric_param = params[0]
@@ -186,6 +202,40 @@ def osmosis_rubric(func: Callable) -> Callable:
         optional_params = optional_params[1:]
 
     if optional_params:
+        score_min_param = optional_params[0]
+        # Check sixth parameter: score_min: float = 0.0
+        if score_min_param.name != "score_min":
+            raise TypeError(f"Sixth parameter must be named 'score_min', got '{score_min_param.name}'")
+        if not _is_float_annotation(score_min_param.annotation):
+            raise TypeError(
+                f"Sixth parameter 'score_min' must be annotated as float, got {score_min_param.annotation}"
+            )
+        if score_min_param.default is inspect.Parameter.empty:
+            raise TypeError("Sixth parameter 'score_min' must have a default value of 0.0")
+        if not _is_numeric(score_min_param.default):
+            raise TypeError("Sixth parameter 'score_min' must default to a numeric value")
+        if float(score_min_param.default) != 0.0:
+            raise TypeError("Sixth parameter 'score_min' must default to 0.0")
+        optional_params = optional_params[1:]
+
+    if optional_params:
+        score_max_param = optional_params[0]
+        # Check seventh parameter: score_max: float = 1.0
+        if score_max_param.name != "score_max":
+            raise TypeError(f"Seventh parameter must be named 'score_max', got '{score_max_param.name}'")
+        if not _is_float_annotation(score_max_param.annotation):
+            raise TypeError(
+                f"Seventh parameter 'score_max' must be annotated as float, got {score_max_param.annotation}"
+            )
+        if score_max_param.default is inspect.Parameter.empty:
+            raise TypeError("Seventh parameter 'score_max' must have a default value of 1.0")
+        if not _is_numeric(score_max_param.default):
+            raise TypeError("Seventh parameter 'score_max' must default to a numeric value")
+        if float(score_max_param.default) != 1.0:
+            raise TypeError("Seventh parameter 'score_max' must default to 1.0")
+        optional_params = optional_params[1:]
+
+    if optional_params:
         unexpected_param = optional_params[0]
         raise TypeError(f"Function {func.__name__} has unexpected parameter '{unexpected_param.name}'")
 
@@ -238,6 +288,31 @@ def osmosis_rubric(func: Callable) -> Callable:
                 )
             if not isinstance(message["content"], list):
                 raise TypeError(f"'messages[{index}]['content']' must be a list")
+
+        score_min_present = "score_min" in bound.arguments
+        score_max_present = "score_max" in bound.arguments
+
+        if score_min_present:
+            score_min_value = bound.arguments["score_min"]
+            if not _is_numeric(score_min_value):
+                raise TypeError(
+                    f"'score_min' must be a numeric type, got {type(score_min_value).__name__}"
+                )
+        else:
+            score_min_value = None
+
+        if score_max_present:
+            score_max_value = bound.arguments["score_max"]
+            if not _is_numeric(score_max_value):
+                raise TypeError(
+                    f"'score_max' must be a numeric type, got {type(score_max_value).__name__}"
+                )
+        else:
+            score_max_value = None
+
+        if score_min_present and score_max_present:
+            if float(score_max_value) <= float(score_min_value):
+                raise ValueError("'score_max' must be greater than 'score_min'")
 
         # Validate return type
         result = func(*args, **kwargs)

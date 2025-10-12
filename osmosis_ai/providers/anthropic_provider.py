@@ -22,8 +22,10 @@ class AnthropicProvider(RubricProvider):
 
     def run(self, request: ProviderRequest) -> RewardRubricRunResult:
         if anthropic is None or APIError is None:
-            raise RuntimeError(
-                "Anthropic SDK is required for provider 'anthropic'. Install it via `pip install anthropic`."
+            raise ProviderRequestError(
+                self.name,
+                request.model,
+                "Anthropic SDK is required. Install it via `pip install anthropic`.",
             )
 
         client = anthropic.Anthropic(api_key=request.api_key)
@@ -66,6 +68,9 @@ class AnthropicProvider(RubricProvider):
                 )
                 raise ModelNotFoundError(self.name, request.model, not_found_detail) from err
             raise ProviderRequestError(self.name, request.model, detail) from err
+        except Exception as err:
+            detail = str(err).strip() or "Unexpected error during Anthropic request."
+            raise ProviderRequestError(self.name, request.model, detail) from err
 
         raw = dump_model(response)
         debug_payload(request.req_id, self.name, "response", raw, [request.api_key])
@@ -80,7 +85,7 @@ class AnthropicProvider(RubricProvider):
                         payload = maybe_input
                     break
         if payload is None:
-            raise RuntimeError("Model response did not include the expected tool output.")
+            raise ProviderRequestError(self.name, request.model, "Model response missing expected tool output.")
         score, explanation = extract_structured_score(payload)
         bounded = max(request.score_min, min(request.score_max, score))
         return {"score": bounded, "explanation": explanation, "raw": raw}

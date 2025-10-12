@@ -22,7 +22,7 @@ from .providers import (
     RubricProvider,
     get_provider,
 )
-from .rubric_types import MissingAPIKeyError, ModelInfo, RewardRubricRunResult
+from .rubric_types import MissingAPIKeyError, ModelInfo, ProviderRequestError, RewardRubricRunResult
 from .utils import ALLOWED_ROLES
 
 DEFAULT_API_KEY_ENV = {
@@ -365,8 +365,8 @@ def evaluate_rubric(
 
     resolved_score_min = float(score_min if score_min is not None else model_info.get("score_min", 0.0))
     resolved_score_max = float(score_max if score_max is not None else model_info.get("score_max", 1.0))
-    if resolved_score_max < resolved_score_min:
-        raise ValueError("'score_max' must be greater than or equal to 'score_min'")
+    if resolved_score_max <= resolved_score_min:
+        raise ValueError("'score_max' must be greater than 'score_min'")
 
     resolved_system_message = _determine_system_message(
         system_message,
@@ -386,22 +386,28 @@ def evaluate_rubric(
         provider_timeout = float(model_timeout) if model_timeout else provider_impl.default_timeout(model)
 
     req_id = _make_req_id()
-    result = _run_reward_rubric(
-        provider_name=provider_name,
-        provider_impl=provider_impl,
-        model=model,
-        api_key=api_key,
-        rubric_prompt=rubric,
-        score_min=resolved_score_min,
-        score_max=resolved_score_max,
-        model_output=assistant_output,
-        original_input=resolved_original_input,
-        ground_truth=ground_truth,
-        extra_info=extra_info,
-        system_prompt=resolved_system_message,
-        timeout=provider_timeout,
-        req_id=req_id,
-    )
+    try:
+        result = _run_reward_rubric(
+            provider_name=provider_name,
+            provider_impl=provider_impl,
+            model=model,
+            api_key=api_key,
+            rubric_prompt=rubric,
+            score_min=resolved_score_min,
+            score_max=resolved_score_max,
+            model_output=assistant_output,
+            original_input=resolved_original_input,
+            ground_truth=ground_truth,
+            extra_info=extra_info,
+            system_prompt=resolved_system_message,
+            timeout=provider_timeout,
+            req_id=req_id,
+        )
+    except ProviderRequestError:
+        raise
+    except Exception as exc:
+        detail = str(exc).strip() or f"{exc.__class__.__name__} encountered while contacting provider."
+        raise ProviderRequestError(provider_name, model, detail) from exc
 
     return result if return_details else result["score"]
 

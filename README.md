@@ -130,6 +130,8 @@ Rubric functions decorated with `@osmosis_rubric` must accept the parameters:
 - `ground_truth: Optional[str] = None`
 - `system_message: Optional[str] = None`
 - `extra_info: dict = None`
+- `score_min: float = 0.0` *(optional lower bound; must default to 0.0 and stay below `score_max`)*
+- `score_max: float = 1.0` *(optional upper bound; must default to 1.0 and stay above `score_min`)*
 
 and must return a `float`. The decorator validates the signature and runtime payload (including message role validation and return type) before delegating to your custom logic.
 

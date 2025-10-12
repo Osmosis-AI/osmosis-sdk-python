@@ -9,7 +9,7 @@ except ImportError:  # pragma: no cover - optional dependency
     BadRequestError = None  # type: ignore[assignment]
     OpenAIError = None  # type: ignore[assignment]
 
-from ..rubric_types import RewardRubricRunResult
+from ..rubric_types import ProviderRequestError, RewardRubricRunResult
 from .base import DEFAULT_REQUEST_TIMEOUT_SECONDS, ProviderRequest, RubricProvider
 from .shared import (
     debug_payload,
@@ -109,9 +109,10 @@ def _call_openai_family(
     force_responses_api: bool = False,
 ) -> RewardRubricRunResult:
     if OpenAI is None or BadRequestError is None or OpenAIError is None:
-        raise RuntimeError(
-            "OpenAI SDK is required for provider "
-            f"'{provider}'. Install it via `pip install openai>=1.0.0`."
+        raise ProviderRequestError(
+            provider,
+            model,
+            "OpenAI SDK is required. Install it via `pip install openai>=1.0.0`.",
         )
     client_kwargs = {"api_key": api_key}
     if base_url:
@@ -148,8 +149,11 @@ def _call_openai_family(
         if not text:
             text = _extract_openai_responses_text(raw_response)
         if not text:
-            raise RuntimeError("Model response did not include any content.")
-        score, explanation = sanitize_json(text)
+            raise ProviderRequestError(provider, model, "Model response did not include any content.")
+        try:
+            score, explanation = sanitize_json(text)
+        except ValueError as err:
+            raise ProviderRequestError(provider, model, str(err)) from err
         bounded = max(score_min, min(score_max, score))
         debug_payload(req_id, provider, "response", raw_response, [api_key])
         return {"score": bounded, "explanation": explanation, "raw": raw_response}
@@ -196,7 +200,8 @@ def _call_openai_family(
                 raw = dump_model(response)
                 text = getattr(response, "output_text", None)
                 return _finalise(raw, text)
-            raise
+            detail = message or "OpenAI SDK raised TypeError during responses.create."
+            raise ProviderRequestError(provider, model, detail) from err
         except BadRequestError as err:
             message = _openai_error_message(err)
             if "response_format" in message.lower() and "json_schema" in message.lower():
@@ -216,11 +221,12 @@ def _call_openai_family(
                         return _finalise(raw, text)
                     except OpenAIError as fallback_err:
                         fallback_message = _openai_error_message(fallback_err)
-                        raise RuntimeError(f"Model request failed. {fallback_message}") from fallback_err
-            raise RuntimeError(f"Model request failed. {message}") from err
+                        detail = f"Model request failed. {fallback_message}"
+                        raise ProviderRequestError(provider, model, detail) from fallback_err
+            raise ProviderRequestError(provider, model, f"Model request failed. {message}") from err
         except OpenAIError as err:
             message = _openai_error_message(err)
-            raise RuntimeError(f"Model request failed. {message}") from err
+            raise ProviderRequestError(provider, model, f"Model request failed. {message}") from err
 
     try:
         completion = client.chat.completions.create(
@@ -256,7 +262,8 @@ def _call_openai_family(
             raw = dump_model(completion)
             text = _extract_openai_responses_text(raw)
             return _finalise(raw, text)
-        raise
+        detail = message or "OpenAI SDK raised TypeError during chat.completions.create."
+        raise ProviderRequestError(provider, model, detail) from err
     except BadRequestError as err:
         message = _openai_error_message(err)
         if "response_format" in message.lower() and "json_schema" in message.lower():
@@ -274,11 +281,12 @@ def _call_openai_family(
                     return _finalise(raw, text)
                 except OpenAIError as fallback_err:
                     fallback_message = _openai_error_message(fallback_err)
-                    raise RuntimeError(f"Model request failed. {fallback_message}") from fallback_err
-        raise RuntimeError(f"Model request failed. {message}") from err
+                    detail = f"Model request failed. {fallback_message}"
+                    raise ProviderRequestError(provider, model, detail) from fallback_err
+        raise ProviderRequestError(provider, model, f"Model request failed. {message}") from err
     except OpenAIError as err:
         message = _openai_error_message(err)
-        raise RuntimeError(f"Model request failed. {message}") from err
+        raise ProviderRequestError(provider, model, f"Model request failed. {message}") from err
 
 
 class OpenAIProvider(RubricProvider):
