@@ -41,19 +41,31 @@ PYTHONPATH=.. python reward_functions.py
 
 This will run test cases through all the example reward functions and show their outputs.
 
-## Rubric Functions (`rubric_functions.py`)
+## Remote Rubric Evaluation (`rubric_functions.py`)
 
-Highlights how the `@osmosis_rubric` decorator can be used to validate conversation transcripts for compliance with a rubric:
+Shows how to call `osmosis_ai.evaluate_rubric` against different hosted judge providers using their official Python SDKs. The example:
 
-- Ensures the function signature follows the required ordering (`rubric`, `messages`, optional `ground_truth`, optional `system_message`, optional `extra_info`)
-- Demonstrates checking that the assistant response references an approved marketing claim
-- Shows how to flag forbidden terminology via `extra_info`
+- Builds a single rubric and conversation transcript.
+- Invokes OpenAI, Anthropic, Google Gemini, and xAI (toggle which providers run inside `__main__`).
+- Prints the numeric score and explanation returned by each provider’s schema-enforced response.
+- Gracefully skips providers whose API keys are not present (`MissingAPIKeyError`) and surfaces known remote failures via `ModelNotFoundError` / `ProviderRequestError`.
+
+The helper uses the new provider registry in `osmosis_ai.providers`; each example call only needs to supply `provider` and `model` because the integrations are registered at import time. To experiment with your own provider implementation, create a subclass of `RubricProvider`, call `register_provider(...)`, and then pass the new provider name in `model_info`. See [`../osmosis_ai/providers/README.md`](../osmosis_ai/providers/README.md) for the detailed checklist.
+
+### Prerequisites
+
+Export the relevant secrets before running:
+
+```bash
+export OPENAI_API_KEY=...
+export ANTHROPIC_API_KEY=...
+export GOOGLE_API_KEY=...
+export XAI_API_KEY=...
+```
 
 ### Running the Rubric Example
 
 ```bash
 cd examples
-PYTHONPATH=.. python rubric_functions.py
+PYTHONPATH=.. python rubric_functions.py  # uncomment providers you want to exercise
 ```
-
-The script prints evaluation results for both a passing and a failing conversation.

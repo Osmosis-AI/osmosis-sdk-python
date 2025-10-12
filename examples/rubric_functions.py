@@ -1,142 +1,114 @@
 """
-Example rubric functions using the @osmosis_rubric decorator.
+Evaluate the same rubric against conversations using different judge providers.
+
+Set the following environment variables before running the examples:
+
+    export OPENAI_API_KEY="..."
+    export ANTHROPIC_API_KEY="..."
+    export GOOGLE_API_KEY="..."
+    export XAI_API_KEY="..."
+
+Uncomment the desired provider in the `__main__` section to trigger a request.
+
+Each helper call uses the provider's official Python SDK with structured JSON outputs
+enforced. Providers are pluggable; see `osmosis_ai/providers/README.md` for instructions
+on registering your own integration and then pass its name in `model_info`.
 """
 
-from osmosis_ai import osmosis_rubric
+from __future__ import annotations
 
+from osmosis_ai import (
+    MissingAPIKeyError,
+    ModelNotFoundError,
+    ProviderRequestError,
+    evaluate_rubric,
+)
 
-def _make_message(role: str, text: str, block_type: str) -> dict:
-    return {
+RUBRIC = "Assistant must mention the verified capital city and stay on topic."
+
+MESSAGES = [
+    {
         "type": "message",
-        "role": role,
-        "content": [{"type": block_type, "text": text}],
-    }
+        "role": "user",
+        "content": [{"type": "input_text", "text": "What is the capital of France?"}],
+    },
+    {
+        "type": "message",
+        "role": "assistant",
+        "content": [{"type": "output_text", "text": "Paris is the capital city of France."}],
+    },
+]
+
+GROUND_TRUTH = "Paris"
 
 
-def _analyze_marketing_claim(
-    rubric: str,
-    messages: list,
-    ground_truth: str | None = None,
-    system_message: str | None = None,
-    extra_info: dict = None,
-) -> dict:
-    """Helper that surfaces issues and scoring for marketing claim compliance."""
-    assistant_turn = next((m for m in reversed(messages) if m["role"] == "assistant"), None)
-    if not assistant_turn:
-        return {
-            "rubric": rubric,
-            "score": 0.0,
-            "issues": ["Conversation did not contain an assistant response."],
-            "assistant_summary": "",
-            "system_message": system_message,
-        }
+def _run(provider_name: str, model_info: dict) -> None:
+    try:
+        result = evaluate_rubric(
+            rubric=RUBRIC,
+            messages=MESSAGES,
+            ground_truth=GROUND_TRUTH,
+            model_info=model_info,
+            return_details=True,
+        )
+    except MissingAPIKeyError as exc:
+        print(f"{provider_name} skipped: {exc}")
+        return
+    except ModelNotFoundError as exc:
+        print(f"{provider_name} skipped: {exc.detail}")
+        return
+    except ProviderRequestError as exc:
+        print(f"{provider_name} failed: {exc.detail}")
+        return
 
-    assistant_text = " ".join(
-        block["text"]
-        for block in assistant_turn["content"]
-        if isinstance(block, dict) and block.get("type") == "output_text"
+    print(f"{provider_name} score: {result['score']:.2f}")
+    print(f"{provider_name} explanation: {result['explanation']}")
+
+
+def run_openai_example() -> None:
+    _run(
+        "OpenAI",
+        {
+            "provider": "openai",
+            "model": "gpt-5-mini",
+        },
     )
 
-    issues = []
-    score = 1.0
 
-    if ground_truth and ground_truth.lower() not in assistant_text.lower():
-        issues.append("Assistant did not cite the approved marketing fact.")
-        score -= 0.5
-
-    if extra_info and "forbidden_terms" in extra_info:
-        forbidden_terms = [term.lower() for term in extra_info["forbidden_terms"]]
-        for term in forbidden_terms:
-            if term and term in assistant_text.lower():
-                issues.append(f"Assistant used forbidden term '{term}'.")
-                score -= 0.25
-
-    return {
-        "rubric": rubric,
-        "score": max(score, 0.0),
-        "issues": issues,
-        "assistant_summary": assistant_text,
-        "system_message": system_message,
-    }
-
-
-@osmosis_rubric
-def marketing_claim_compliance(
-    rubric: str,
-    messages: list,
-    ground_truth: str | None = None,
-    system_message: str | None = None,
-    extra_info: dict = None,
-) -> float:
-    """Check that the assistant cites the approved marketing claim and avoids forbidden terms."""
-    analysis = _analyze_marketing_claim(
-        rubric=rubric,
-        messages=messages,
-        ground_truth=ground_truth,
-        system_message=system_message,
-        extra_info=extra_info,
+def run_anthropic_example() -> None:
+    _run(
+        "Anthropic",
+        {
+            "provider": "anthropic",
+            "model": "claude-3-7-sonnet-20250219",
+        },
     )
-    return analysis["score"]
 
 
-def _format_report(label: str, analysis: dict) -> str:
-    issues = analysis["issues"]
-    summary = analysis["assistant_summary"] or "N/A"
-    lines = [
-        f"{label}",
-        f"  Score: {analysis['score']:.2f}",
-        f"  Assistant summary: {summary}",
-    ]
-    if issues:
-        lines.append("  Issues:")
-        for issue in issues:
-            lines.append(f"    - {issue}")
-    else:
-        lines.append("  Issues: none")
-    return "\n".join(lines)
+def run_gemini_example() -> None:
+    _run(
+        "Gemini",
+        {
+            "provider": "gemini",
+            "model": "gemini-2.5-flash",
+        },
+    )
+
+
+def run_xai_example() -> None:
+    _run(
+        "xAI",
+        {
+            "provider": "xai",
+            "model": "grok-4-fast-non-reasoning",
+        },
+    )
 
 
 if __name__ == "__main__":
-    rubric_description = "Assistant must reference the approved product claim and avoid forbidden terms."
-    system_instruction = "You are a helpful sales assistant for the Osmosis Pro Router."
-    extra = {"forbidden_terms": ["refund", "guarantee"]}
-
-    passing_conversation = [
-        _make_message("system", system_instruction, "input_text"),
-        _make_message("user", "Why should I upgrade to the Osmosis Pro Router?", "input_text"),
-        _make_message(
-            "assistant",
-            "The Osmosis Pro Router delivers certified gigabit speeds and keeps your network secure with automatic updates.",
-            "output_text",
-        ),
-    ]
-
-    failing_conversation = [
-        _make_message("system", system_instruction, "input_text"),
-        _make_message("user", "Can I get a refund if I do not like it?", "input_text"),
-        _make_message(
-            "assistant",
-            "We guarantee you will love it, and refunds might be possible.",
-            "output_text",
-        ),
-    ]
-
-    print("Passing conversation result:")
-    passing_analysis = _analyze_marketing_claim(
-        rubric=rubric_description,
-        messages=passing_conversation,
-        ground_truth="certified gigabit speeds",
-        system_message=system_instruction,
-        extra_info=extra,
-    )
-    print(_format_report("Passing conversation", passing_analysis))
-
-    print("\nFailing conversation result:")
-    failing_analysis = _analyze_marketing_claim(
-        rubric=rubric_description,
-        messages=failing_conversation,
-        ground_truth="certified gigabit speeds",
-        system_message=system_instruction,
-        extra_info=extra,
-    )
-    print(_format_report("Failing conversation", failing_analysis))
+    # Uncomment the provider calls you want to exercise:
+    run_openai_example()
+    run_anthropic_example()
+    run_gemini_example()
+    run_xai_example()
+    pass
