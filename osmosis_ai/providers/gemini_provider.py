@@ -1,0 +1,205 @@
+from __future__ import annotations
+
+from contextlib import contextmanager
+import warnings
+from typing import TYPE_CHECKING, Any, Dict, Iterator, Tuple
+
+if TYPE_CHECKING:  # pragma: no cover - typing helpers only
+    from google import genai as genai_module  # type: ignore
+    from google.genai import types as genai_types_module  # type: ignore
+
+from ..rubric_types import RewardRubricRunResult
+from .base import DEFAULT_REQUEST_TIMEOUT_SECONDS, ProviderRequest, RubricProvider
+from .shared import debug_payload, dump_model, reward_schema_definition, sanitize_json
+
+
+_GENAI_MODULE: Any | None = None
+_GENAI_TYPES_MODULE: Any | None = None
+_PYDANTIC_ANY_WARNING_MESSAGE = r".*<built-in function any> is not a Python type.*"
+
+
+@contextmanager
+def _suppress_pydantic_any_warning() -> Iterator[None]:
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message=_PYDANTIC_ANY_WARNING_MESSAGE,
+            category=UserWarning,
+            module=r"pydantic\._internal\._generate_schema",
+        )
+        yield
+
+
+def _load_google_genai() -> Tuple[Any, Any]:
+    """
+    Lazily import the Google Generative AI SDK so that environments without the optional
+    dependency avoid import-time side effects (like pydantic warnings) unless the Gemini
+    provider is actually used.
+    """
+    global _GENAI_MODULE, _GENAI_TYPES_MODULE
+    if _GENAI_MODULE is not None and _GENAI_TYPES_MODULE is not None:
+        return _GENAI_MODULE, _GENAI_TYPES_MODULE
+
+    try:  # pragma: no cover - optional dependency
+        with _suppress_pydantic_any_warning():
+            from google import genai as genai_mod  # type: ignore
+            from google.genai import types as genai_types_mod  # type: ignore
+    except ImportError as exc:  # pragma: no cover - optional dependency
+        raise RuntimeError(
+            "Google Generative AI SDK is required for provider 'gemini'. "
+            "Install it via `pip install google-genai`."
+        ) from exc
+
+    _GENAI_MODULE = genai_mod
+    _GENAI_TYPES_MODULE = genai_types_mod
+    return _GENAI_MODULE, _GENAI_TYPES_MODULE
+
+
+def _normalize_gemini_model(model_id: str) -> str:
+    import re
+
+    return re.sub(r"^models/", "", model_id, flags=re.IGNORECASE)
+
+
+def _json_schema_to_genai(
+    schema: Dict[str, Any],
+    genai_types: Any,
+) -> "genai_types_module.Schema":  # type: ignore[name-defined]
+
+    type_map = {
+        "object": genai_types.Type.OBJECT,
+        "string": genai_types.Type.STRING,
+        "number": genai_types.Type.NUMBER,
+        "integer": genai_types.Type.INTEGER,
+        "boolean": genai_types.Type.BOOLEAN,
+        "array": genai_types.Type.ARRAY,
+    }
+
+    kwargs: Dict[str, Any] = {}
+    type_value = schema.get("type")
+    if isinstance(type_value, str):
+        mapped = type_map.get(type_value.lower())
+        if mapped is not None:
+            kwargs["type"] = mapped
+
+    required = schema.get("required")
+    if isinstance(required, list):
+        filtered_required = [name for name in required if isinstance(name, str)]
+        if filtered_required:
+            kwargs["required"] = filtered_required
+
+    properties = schema.get("properties")
+    if isinstance(properties, dict):
+        converted_properties = {}
+        for key, value in properties.items():
+            if isinstance(key, str) and isinstance(value, dict):
+                converted_properties[key] = _json_schema_to_genai(value, genai_types)
+        if converted_properties:
+            kwargs["properties"] = converted_properties
+
+    items = schema.get("items")
+    if isinstance(items, dict):
+        kwargs["items"] = _json_schema_to_genai(items, genai_types)
+
+    enum_values = schema.get("enum")
+    if isinstance(enum_values, list):
+        filtered_enum = [str(option) for option in enum_values]
+        if filtered_enum:
+            kwargs["enum"] = filtered_enum
+
+    description = schema.get("description")
+    if isinstance(description, str):
+        kwargs["description"] = description
+
+    minimum = schema.get("minimum")
+    if isinstance(minimum, (int, float)):
+        kwargs["minimum"] = float(minimum)
+
+    maximum = schema.get("maximum")
+    if isinstance(maximum, (int, float)):
+        kwargs["maximum"] = float(maximum)
+
+    min_items = schema.get("min_items")
+    if isinstance(min_items, int):
+        kwargs["min_items"] = min_items
+
+    max_items = schema.get("max_items")
+    if isinstance(max_items, int):
+        kwargs["max_items"] = max_items
+
+    min_length = schema.get("min_length")
+    if isinstance(min_length, int):
+        kwargs["min_length"] = min_length
+
+    max_length = schema.get("max_length")
+    if isinstance(max_length, int):
+        kwargs["max_length"] = max_length
+
+    nullable = schema.get("nullable")
+    if isinstance(nullable, bool):
+        kwargs["nullable"] = nullable
+
+    with _suppress_pydantic_any_warning():
+        return genai_types.Schema(**kwargs)
+
+
+class GeminiProvider(RubricProvider):
+    name = "gemini"
+
+    def default_timeout(self, model: str) -> float:
+        return DEFAULT_REQUEST_TIMEOUT_SECONDS
+
+    def run(self, request: ProviderRequest) -> RewardRubricRunResult:
+        genai, genai_types = _load_google_genai()
+
+        with _suppress_pydantic_any_warning():
+            client = genai.Client(api_key=request.api_key)
+        schema_definition = reward_schema_definition()
+        gemini_schema = _json_schema_to_genai(schema_definition, genai_types)
+        config = genai_types.GenerateContentConfig(
+            response_mime_type="application/json",
+            response_schema=gemini_schema,
+            temperature=0,
+        )
+
+        combined_prompt = f"{request.system_content}\n\n{request.user_content}"
+        request_preview: Dict[str, Any] = {
+            "model": _normalize_gemini_model(request.model),
+            "system_chars": len(request.system_content),
+            "user_chars": len(request.user_content),
+        }
+        debug_payload(request.req_id, self.name, "request", request_preview, [request.api_key])
+
+        with _suppress_pydantic_any_warning():
+            response = client.models.generate_content(
+                model=_normalize_gemini_model(request.model),
+                contents=combined_prompt,
+                config=config,
+            )
+        raw = dump_model(response)
+        debug_payload(request.req_id, self.name, "response", raw, [request.api_key])
+
+        text = getattr(response, "text", None)
+        if not isinstance(text, str) or not text.strip():
+            candidates = raw.get("candidates") if isinstance(raw, dict) else None
+            if isinstance(candidates, list) and candidates:
+                first = candidates[0]
+                if isinstance(first, dict):
+                    content = first.get("content")
+                    if isinstance(content, dict):
+                        parts = content.get("parts")
+                        if isinstance(parts, list):
+                            for part in parts:
+                                if isinstance(part, dict):
+                                    candidate_text = part.get("text")
+                                    if isinstance(candidate_text, str) and candidate_text.strip():
+                                        text = candidate_text
+                                        break
+        if not isinstance(text, str) or not text.strip():
+            raise RuntimeError("Model response did not include any text content.")
+        score, explanation = sanitize_json(text)
+        bounded = max(request.score_min, min(request.score_max, score))
+        return {"score": bounded, "explanation": explanation, "raw": raw}
+
+
+__all__ = ["GeminiProvider"]

@@ -10,6 +10,15 @@ Features:
 - Support for optional configuration parameters
 """
 
+from .rubric_eval import MissingAPIKeyError, evaluate_rubric
+from .rubric_types import ModelNotFoundError, ProviderRequestError
 from .utils import osmosis_reward, osmosis_rubric
 
-__all__ = ["osmosis_reward", "osmosis_rubric"]
+__all__ = [
+    "osmosis_reward",
+    "osmosis_rubric",
+    "evaluate_rubric",
+    "MissingAPIKeyError",
+    "ProviderRequestError",
+    "ModelNotFoundError",
+]
