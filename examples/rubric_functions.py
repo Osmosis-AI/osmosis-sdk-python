@@ -172,7 +172,7 @@ def run_xai_example() -> None:
 if __name__ == "__main__":
     # Uncomment the provider calls you want to exercise:
     run_openai_example()
-    run_anthropic_example()
-    run_gemini_example()
-    run_xai_example()
+    # run_anthropic_example()
+    # run_gemini_example()
+    # run_xai_example()
     pass
