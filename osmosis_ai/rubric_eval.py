@@ -210,14 +210,47 @@ def _collect_text_from_message(message: Dict[str, Any]) -> str:
     if not isinstance(content, list):
         return ""
     texts: List[str] = []
+
+    def _append_text(value: str) -> None:
+        stripped = value.strip()
+        if stripped:
+            texts.append(stripped)
+
+    def _walk(node: Any) -> None:
+        if isinstance(node, str):
+            _append_text(node)
+            return
+
+        if isinstance(node, list):
+            for item in node:
+                _walk(item)
+            return
+
+        if isinstance(node, dict):
+            # Prioritise common OpenAI / tool shapes.
+            for key in ("text", "value"):
+                if key in node:
+                    _walk(node[key])
+            if node.get("type") == "tool_result" and "content" in node:
+                _walk(node["content"])
+            elif "content" in node:
+                _walk(node["content"])
+            # Additional fallbacks (e.g., message wrappers).
+            for key in ("message", "parts", "input_text", "output_text"):
+                if key in node:
+                    _walk(node[key])
+            # Inspect remaining nested structures without re-traversing handled keys.
+            handled = {"text", "value", "content", "message", "parts", "input_text", "output_text"}
+            for key, value in node.items():
+                if key in handled:
+                    continue
+                if isinstance(value, (str, list, dict)):
+                    _walk(value)
+
     for block in content:
-        if isinstance(block, dict):
-            text = block.get("text")
-            if isinstance(text, str):
-                texts.append(text)
-        elif isinstance(block, str):
-            texts.append(block)
-    return " ".join(t for t in (text.strip() for text in texts) if t)
+        _walk(block)
+
+    return " ".join(texts)
 
 
 def _extract_latest_text(messages: List[Dict[str, Any]], role: str) -> Optional[str]:
