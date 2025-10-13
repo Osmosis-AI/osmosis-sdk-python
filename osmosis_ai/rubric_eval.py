@@ -240,12 +240,31 @@ def _collect_text_from_message(message: Dict[str, Any]) -> str:
                 if key in node:
                     _walk(node[key])
             # Inspect remaining nested structures without re-traversing handled keys.
-            handled = {"text", "value", "content", "message", "parts", "input_text", "output_text"}
+            handled = {
+                "text",
+                "value",
+                "content",
+                "message",
+                "parts",
+                "input_text",
+                "output_text",
+                "type",
+                "role",
+                "name",
+                "id",
+                "index",
+                "finish_reason",
+                "reason",
+                "tool_call_id",
+                "metadata",
+            }
             for key, value in node.items():
                 if key in handled:
                     continue
-                if isinstance(value, (str, list, dict)):
+                if isinstance(value, (list, dict)):
                     _walk(value)
+                elif isinstance(value, str) and key.lower() in {"text", "value", "message"}:
+                    _append_text(value)
 
     for block in content:
         _walk(block)

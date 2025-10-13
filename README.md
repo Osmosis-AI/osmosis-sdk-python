@@ -183,6 +183,10 @@ PYTHONPATH=. python examples/reward_functions.py
 PYTHONPATH=. python examples/rubric_functions.py  # Uncomment the provider you need before running
 ```
 
+## Testing
+
+Run `python -m pytest tests/test_rubric_eval.py` to exercise the guards that ensure rubric prompts ignore message metadata (for example `tests/test_rubric_eval.py::test_collect_text_skips_metadata_fields`) while still preserving nested tool output. Add additional tests under `tests/` as you extend the library.
+
 ## License
 
 MIT License - see [LICENSE](LICENSE) file for details.
