@@ -135,6 +135,7 @@ def score_with_hosted_model(
     )
 
     if capture_details:
+        # Treat extra_info as an input/output channel to surface detailed results.
         if extra_info is not None:
             extra_info["result_details"] = result
         return float(result["score"])
