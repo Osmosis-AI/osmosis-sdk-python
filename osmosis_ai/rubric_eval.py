@@ -74,10 +74,10 @@ def _format_extra_info(extra_info: Optional[Dict[str, Any]]) -> Optional[str]:
     if not extra_info:
         return None
     try:
-        return json.dumps(extra_info, ensure_ascii=True, indent=2, sort_keys=True)
+        return json.dumps(extra_info, ensure_ascii=False, indent=2, sort_keys=True)
     except (TypeError, ValueError):
         serialisable = {str(k): str(v) for k, v in extra_info.items()}
-        return json.dumps(serialisable, ensure_ascii=True, indent=2, sort_keys=True)
+        return json.dumps(serialisable, ensure_ascii=False, indent=2, sort_keys=True)
 
 
 def _make_sentinel_label(*parts: str) -> str:
