@@ -66,6 +66,11 @@ def osmosis_reward(func: Callable) -> Callable:
 
 ALLOWED_ROLES = {"user", "system", "assistant", "developer", "tool", "function"}
 
+_UNION_TYPES = {Union}
+_types_union_type = getattr(types, "UnionType", None)
+if _types_union_type is not None:
+    _UNION_TYPES.add(_types_union_type)
+
 
 def _is_str_annotation(annotation: Any) -> bool:
     if annotation is inspect.Parameter.empty:
@@ -101,7 +106,7 @@ def _is_optional_str(annotation: Any) -> bool:
         }:
             return True
     origin = get_origin(annotation)
-    if origin in {Union, types.UnionType}:
+    if origin in _UNION_TYPES:
         args = tuple(arg for arg in get_args(annotation) if arg is not type(None))  # noqa: E721
         return len(args) == 1 and _is_str_annotation(args[0])
     return False
