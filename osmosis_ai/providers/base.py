@@ -5,7 +5,7 @@ from typing import Dict, Tuple
 
 from ..rubric_types import RewardRubricRunResult
 
-DEFAULT_REQUEST_TIMEOUT_SECONDS = 20.0
+DEFAULT_REQUEST_TIMEOUT_SECONDS = 30.0
 
 
 @dataclass(frozen=True)

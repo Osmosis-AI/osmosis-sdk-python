@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+import time
 import warnings
-from typing import TYPE_CHECKING, Any, Dict, Iterator, Tuple
+from typing import TYPE_CHECKING, Any, Dict, Iterator, List, Tuple
 
 if TYPE_CHECKING:  # pragma: no cover - typing helpers only
     from google import genai as genai_module  # type: ignore
@@ -16,6 +17,13 @@ from .shared import dump_model, reward_schema_definition, sanitize_json
 _GENAI_MODULE: Any | None = None
 _GENAI_TYPES_MODULE: Any | None = None
 _PYDANTIC_ANY_WARNING_MESSAGE = r".*<built-in function any> is not a Python type.*"
+
+GEMINI_DEFAULT_TIMEOUT_SECONDS = 60.0
+GEMINI_MIN_TIMEOUT_SECONDS = 5.0
+GEMINI_MAX_TIMEOUT_SECONDS = 180.0
+GEMINI_RETRY_ATTEMPTS = 3
+GEMINI_TIMEOUT_BACKOFF = 1.5
+GEMINI_RETRY_SLEEP_SECONDS = (0.5, 1.0, 2.0)
 
 
 @contextmanager
@@ -143,11 +151,27 @@ def _json_schema_to_genai(
         return genai_types.Schema(**kwargs)
 
 
+def _build_retry_timeouts(requested_timeout: float) -> List[float]:
+    # Keep the first attempt generous, then increase for retries while capping growth.
+    base = max(requested_timeout, GEMINI_MIN_TIMEOUT_SECONDS, GEMINI_DEFAULT_TIMEOUT_SECONDS)
+    timeouts: List[float] = []
+    current = base
+    for _ in range(GEMINI_RETRY_ATTEMPTS):
+        timeouts.append(min(current, GEMINI_MAX_TIMEOUT_SECONDS))
+        current = min(current * GEMINI_TIMEOUT_BACKOFF, GEMINI_MAX_TIMEOUT_SECONDS)
+    return timeouts
+
+
+def _seconds_to_millis(seconds: float) -> int:
+    # Gemini client expects timeout in milliseconds. Clamp to at least 1ms.
+    return max(int(round(seconds * 1000)), 1)
+
+
 class GeminiProvider(RubricProvider):
     name = "gemini"
 
     def default_timeout(self, model: str) -> float:
-        return DEFAULT_REQUEST_TIMEOUT_SECONDS
+        return max(DEFAULT_REQUEST_TIMEOUT_SECONDS, GEMINI_DEFAULT_TIMEOUT_SECONDS)
 
     def run(self, request: ProviderRequest) -> RewardRubricRunResult:
         try:
@@ -156,8 +180,19 @@ class GeminiProvider(RubricProvider):
             detail = str(exc).strip() or "Google Generative AI SDK is required."
             raise ProviderRequestError(self.name, request.model, detail) from exc
 
+        try:
+            requested_timeout = float(request.timeout)
+        except (TypeError, ValueError):
+            requested_timeout = float(DEFAULT_REQUEST_TIMEOUT_SECONDS)
+
+        retry_timeouts = _build_retry_timeouts(requested_timeout)
+        max_timeout = max(retry_timeouts)
+
         with _suppress_pydantic_any_warning():
-            client = genai.Client(api_key=request.api_key)
+            client = genai.Client(
+                api_key=request.api_key,
+                http_options={"timeout": _seconds_to_millis(max_timeout)},
+            )
         schema_definition = reward_schema_definition()
         gemini_schema = _json_schema_to_genai(schema_definition, genai_types)
         config = genai_types.GenerateContentConfig(
@@ -168,16 +203,41 @@ class GeminiProvider(RubricProvider):
 
         combined_prompt = f"{request.system_content}\n\n{request.user_content}"
 
-        try:
-            with _suppress_pydantic_any_warning():
-                response = client.models.generate_content(
-                    model=_normalize_gemini_model(request.model),
-                    contents=combined_prompt,
-                    config=config,
-                )
-        except Exception as err:
-            detail = str(err).strip() or "Gemini request failed."
-            raise ProviderRequestError(self.name, request.model, detail) from err
+        response: Any | None = None
+        last_error: Exception | None = None
+
+        for attempt_index, attempt_timeout in enumerate(retry_timeouts, start=1):
+            try:
+                with _suppress_pydantic_any_warning():
+                    try:
+                        response = client.models.generate_content(
+                            model=_normalize_gemini_model(request.model),
+                            contents=combined_prompt,
+                            config=config,
+                            request_options={"timeout": _seconds_to_millis(attempt_timeout)},
+                        )
+                    except TypeError as err:
+                        # Older SDKs may not accept request_options; retry without it.
+                        if "request_options" not in str(err):
+                            raise
+                        response = client.models.generate_content(
+                            model=_normalize_gemini_model(request.model),
+                            contents=combined_prompt,
+                            config=config,
+                        )
+                break
+            except Exception as err:  # pragma: no cover - network failures depend on runtime
+                last_error = err
+                if attempt_index >= len(retry_timeouts):
+                    detail = str(err).strip() or "Gemini request failed."
+                    raise ProviderRequestError(self.name, request.model, detail) from err
+                sleep_idx = min(attempt_index - 1, len(GEMINI_RETRY_SLEEP_SECONDS) - 1)
+                time.sleep(GEMINI_RETRY_SLEEP_SECONDS[sleep_idx])
+
+        if response is None and last_error is not None:
+            detail = str(last_error).strip() or "Gemini request failed."
+            raise ProviderRequestError(self.name, request.model, detail) from last_error
+
         raw = dump_model(response)
 
         text = getattr(response, "text", None)

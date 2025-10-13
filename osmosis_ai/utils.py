@@ -64,7 +64,7 @@ def osmosis_reward(func: Callable) -> Callable:
     return wrapper
 
 
-ALLOWED_ROLES = {"user", "system", "assistant", "developer"}
+ALLOWED_ROLES = {"user", "system", "assistant", "developer", "tool", "function"}
 
 
 def _is_str_annotation(annotation: Any) -> bool:
