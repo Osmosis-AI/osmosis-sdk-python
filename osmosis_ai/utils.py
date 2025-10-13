@@ -2,7 +2,7 @@
 import functools
 import inspect
 import types
-from typing import Any, Callable, Union, get_args, get_origin
+from typing import Any, Callable, Mapping, Union, get_args, get_origin, get_type_hints
 
 
 def osmosis_reward(func: Callable) -> Callable:
@@ -67,21 +67,58 @@ def osmosis_reward(func: Callable) -> Callable:
 ALLOWED_ROLES = {"user", "system", "assistant", "developer"}
 
 
-def _is_optional_str(annotation: Any) -> bool:
+def _is_str_annotation(annotation: Any) -> bool:
+    if annotation is inspect.Parameter.empty:
+        return False
     if annotation is str:
         return True
+    if isinstance(annotation, str):
+        return annotation in {"str", "builtins.str"}
+    if isinstance(annotation, type):
+        try:
+            return issubclass(annotation, str)
+        except TypeError:
+            return False
+    forward_arg = getattr(annotation, "__forward_arg__", None)
+    if isinstance(forward_arg, str):
+        return forward_arg in {"str", "builtins.str"}
+    return False
+
+
+def _is_optional_str(annotation: Any) -> bool:
+    if _is_str_annotation(annotation):
+        return True
+    if isinstance(annotation, str):
+        normalized = annotation.replace(" ", "")
+        if normalized in {
+            "Optional[str]",
+            "typing.Optional[str]",
+            "Str|None",
+            "str|None",
+            "builtins.str|None",
+            "None|str",
+            "None|builtins.str",
+        }:
+            return True
     origin = get_origin(annotation)
     if origin in {Union, types.UnionType}:
         args = tuple(arg for arg in get_args(annotation) if arg is not type(None))  # noqa: E721
-        return len(args) == 1 and args[0] is str
-    if isinstance(annotation, type):
-        return issubclass(annotation, str)
+        return len(args) == 1 and _is_str_annotation(args[0])
     return False
 
 
 def _is_list_annotation(annotation: Any) -> bool:
     if annotation is list:
         return True
+    if isinstance(annotation, str):
+        normalized = annotation.replace(" ", "")
+        return (
+            normalized in {"list", "builtins.list", "typing.List", "List"}
+            or normalized.startswith("list[")
+            or normalized.startswith("builtins.list[")
+            or normalized.startswith("typing.List[")
+            or normalized.startswith("List[")
+        )
     origin = get_origin(annotation)
     return origin is list
 
@@ -99,12 +136,39 @@ def _is_numeric(value: Any) -> bool:
     return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
+def _is_dict_annotation(annotation: Any) -> bool:
+    if annotation in {dict, Mapping}:
+        return True
+    origin = get_origin(annotation)
+    if origin in {dict, Mapping}:
+        return True
+    if isinstance(annotation, type):
+        try:
+            return issubclass(annotation, dict)
+        except TypeError:
+            return False
+    if isinstance(annotation, str):
+        normalized = annotation.replace(" ", "")
+        return (
+            normalized in {"dict", "builtins.dict", "typing.Mapping", "collections.abc.Mapping", "Mapping"}
+            or normalized.startswith("dict[")
+            or normalized.startswith("builtins.dict[")
+            or normalized.startswith("typing.Dict[")
+            or normalized.startswith("Dict[")
+            or normalized.startswith("typing.Mapping[")
+            or normalized.startswith("Mapping[")
+        )
+    return False
+
+
 def osmosis_rubric(func: Callable) -> Callable:
     """
     Decorator for rubric functions that enforces the signature:
-    (rubric: str, messages: list, ground_truth: Optional[str] = None,
+    (model_info: dict, rubric: str, messages: list, ground_truth: Optional[str] = None,
      system_message: Optional[str] = None, extra_info: dict = None,
      score_min: float = 0.0, score_max: float = 1.0) -> float
+
+    The `model_info` mapping must provide non-empty string entries for both `provider` and `model`.
 
     Args:
         func: The rubric function to be wrapped
@@ -118,6 +182,7 @@ def osmosis_rubric(func: Callable) -> Callable:
     Example:
         @osmosis_rubric
         def evaluate_response(
+            model_info: dict,
             rubric: str,
             messages: list,
             ground_truth: str | None = None,
@@ -126,113 +191,157 @@ def osmosis_rubric(func: Callable) -> Callable:
             score_min: float = 0.0,
             score_max: float = 1.0,
         ) -> float:
-            return some_evaluation(messages, ground_truth)
+            return some_evaluation(model_info, messages, ground_truth)
     """
     # Validate function signature
     sig = inspect.signature(func)
     params = list(sig.parameters.values())
+    try:
+        resolved_annotations = get_type_hints(
+            func,
+            globalns=getattr(func, "__globals__", {}),
+            include_extras=True,
+        )
+    except Exception:  # pragma: no cover - best effort for forward refs
+        resolved_annotations = {}
 
     # Check parameter count
-    if len(params) < 2 or len(params) > 7:
-        raise TypeError(f"Function {func.__name__} must have between 2 and 7 parameters, got {len(params)}")
+    if len(params) < 3 or len(params) > 8:
+        raise TypeError(f"Function {func.__name__} must have between 3 and 8 parameters, got {len(params)}")
 
-    # Check first parameter: rubric: str
-    rubric_param = params[0]
+    # Check first parameter: model_info: dict
+    model_info_param = params[0]
+    if model_info_param.name != "model_info":
+        raise TypeError(f"First parameter must be named 'model_info', got '{model_info_param.name}'")
+    model_info_annotation = resolved_annotations.get(model_info_param.name, model_info_param.annotation)
+    if not _is_dict_annotation(model_info_annotation):
+        raise TypeError(
+            f"First parameter 'model_info' must be annotated as a dict or mapping, got {model_info_annotation}"
+        )
+    if model_info_param.default is not inspect.Parameter.empty:
+        raise TypeError("First parameter 'model_info' cannot have a default value")
+
+    # Check second parameter: rubric: str
+    rubric_param = params[1]
     if rubric_param.name != "rubric":
-        raise TypeError(f"First parameter must be named 'rubric', got '{rubric_param.name}'")
-    if rubric_param.annotation != str:
-        raise TypeError(f"First parameter 'rubric' must be annotated as str, got {rubric_param.annotation}")
+        raise TypeError(f"Second parameter must be named 'rubric', got '{rubric_param.name}'")
+    rubric_annotation = resolved_annotations.get(rubric_param.name, rubric_param.annotation)
+    if not _is_str_annotation(rubric_annotation):
+        raise TypeError(f"Second parameter 'rubric' must be annotated as str, got {rubric_annotation}")
     if rubric_param.default is not inspect.Parameter.empty:
-        raise TypeError("First parameter 'rubric' cannot have a default value")
+        raise TypeError("Second parameter 'rubric' cannot have a default value")
 
-    # Check second parameter: messages: list
-    messages_param = params[1]
+    # Check third parameter: messages: list
+    messages_param = params[2]
     if messages_param.name != "messages":
-        raise TypeError(f"Second parameter must be named 'messages', got '{messages_param.name}'")
-    if messages_param.annotation is inspect.Parameter.empty:
-        raise TypeError("Second parameter 'messages' must be annotated as list")
-    if not _is_list_annotation(messages_param.annotation):
-        raise TypeError(f"Second parameter 'messages' must be annotated as list, got {messages_param.annotation}")
+        raise TypeError(f"Third parameter must be named 'messages', got '{messages_param.name}'")
+    messages_annotation = resolved_annotations.get(messages_param.name, messages_param.annotation)
+    if messages_annotation is inspect.Parameter.empty:
+        raise TypeError("Third parameter 'messages' must be annotated as list")
+    if not _is_list_annotation(messages_annotation):
+        raise TypeError(f"Third parameter 'messages' must be annotated as list, got {messages_annotation}")
     if messages_param.default is not inspect.Parameter.empty:
-        raise TypeError("Second parameter 'messages' cannot have a default value")
+        raise TypeError("Third parameter 'messages' cannot have a default value")
 
-    optional_params = params[2:]
+    optional_params = params[3:]
 
     if optional_params:
         ground_truth_param = optional_params[0]
-        # Check third parameter: ground_truth: Optional[str]
+        # Check fourth parameter: ground_truth: Optional[str]
         if ground_truth_param.name != "ground_truth":
-            raise TypeError(f"Third parameter must be named 'ground_truth', got '{ground_truth_param.name}'")
-        if ground_truth_param.annotation is inspect.Parameter.empty or not _is_optional_str(ground_truth_param.annotation):
+            raise TypeError(f"Fourth parameter must be named 'ground_truth', got '{ground_truth_param.name}'")
+        ground_truth_annotation = resolved_annotations.get(
+            ground_truth_param.name,
+            ground_truth_param.annotation,
+        )
+        if ground_truth_annotation is inspect.Parameter.empty or not _is_optional_str(ground_truth_annotation):
             raise TypeError(
-                "Third parameter 'ground_truth' must be annotated as Optional[str] or str"
+                "Fourth parameter 'ground_truth' must be annotated as Optional[str] or str"
             )
         if ground_truth_param.default is inspect.Parameter.empty:
-            raise TypeError("Third parameter 'ground_truth' must have a default value of None")
+            raise TypeError("Fourth parameter 'ground_truth' must have a default value of None")
         if ground_truth_param.default is not None:
-            raise TypeError("Third parameter 'ground_truth' must default to None")
+            raise TypeError("Fourth parameter 'ground_truth' must default to None")
         optional_params = optional_params[1:]
 
     if optional_params:
         system_message_param = optional_params[0]
-        # Check fourth parameter: system_message: Optional[str]
+        # Check fifth parameter: system_message: Optional[str]
         if system_message_param.name != "system_message":
-            raise TypeError(f"Fourth parameter must be named 'system_message', got '{system_message_param.name}'")
-        if system_message_param.annotation is inspect.Parameter.empty or not _is_optional_str(system_message_param.annotation):
+            raise TypeError(f"Fifth parameter must be named 'system_message', got '{system_message_param.name}'")
+        system_message_annotation = resolved_annotations.get(
+            system_message_param.name,
+            system_message_param.annotation,
+        )
+        if system_message_annotation is inspect.Parameter.empty or not _is_optional_str(system_message_annotation):
             raise TypeError(
-                "Fourth parameter 'system_message' must be annotated as Optional[str] or str"
+                "Fifth parameter 'system_message' must be annotated as Optional[str] or str"
             )
         if system_message_param.default is inspect.Parameter.empty:
-            raise TypeError("Fourth parameter 'system_message' must have a default value of None")
+            raise TypeError("Fifth parameter 'system_message' must have a default value of None")
         if system_message_param.default is not None:
-            raise TypeError("Fourth parameter 'system_message' must default to None")
+            raise TypeError("Fifth parameter 'system_message' must default to None")
         optional_params = optional_params[1:]
 
     if optional_params:
         extra_info_param = optional_params[0]
-        # Check fifth parameter: extra_info: dict = None
+        # Check sixth parameter: extra_info: dict = None
         if extra_info_param.name != "extra_info":
-            raise TypeError(f"Fifth parameter must be named 'extra_info', got '{extra_info_param.name}'")
-        if extra_info_param.annotation != dict:
-            raise TypeError(f"Fifth parameter 'extra_info' must be annotated as dict, got {extra_info_param.annotation}")
+            raise TypeError(f"Sixth parameter must be named 'extra_info', got '{extra_info_param.name}'")
+        extra_info_annotation = resolved_annotations.get(
+            extra_info_param.name,
+            extra_info_param.annotation,
+        )
+        if extra_info_annotation is inspect.Parameter.empty or not _is_dict_annotation(extra_info_annotation):
+            raise TypeError(
+                f"Sixth parameter 'extra_info' must be annotated as dict, got {extra_info_annotation}"
+            )
         if extra_info_param.default is inspect.Parameter.empty:
-            raise TypeError("Fifth parameter 'extra_info' must have a default value of None")
+            raise TypeError("Sixth parameter 'extra_info' must have a default value of None")
         if extra_info_param.default is not None:
-            raise TypeError("Fifth parameter 'extra_info' must default to None")
+            raise TypeError("Sixth parameter 'extra_info' must default to None")
         optional_params = optional_params[1:]
 
     if optional_params:
         score_min_param = optional_params[0]
-        # Check sixth parameter: score_min: float = 0.0
+        # Check seventh parameter: score_min: float = 0.0
         if score_min_param.name != "score_min":
-            raise TypeError(f"Sixth parameter must be named 'score_min', got '{score_min_param.name}'")
-        if not _is_float_annotation(score_min_param.annotation):
+            raise TypeError(f"Seventh parameter must be named 'score_min', got '{score_min_param.name}'")
+        score_min_annotation = resolved_annotations.get(
+            score_min_param.name,
+            score_min_param.annotation,
+        )
+        if not _is_float_annotation(score_min_annotation):
             raise TypeError(
-                f"Sixth parameter 'score_min' must be annotated as float, got {score_min_param.annotation}"
+                f"Seventh parameter 'score_min' must be annotated as float, got {score_min_annotation}"
             )
         if score_min_param.default is inspect.Parameter.empty:
-            raise TypeError("Sixth parameter 'score_min' must have a default value of 0.0")
+            raise TypeError("Seventh parameter 'score_min' must have a default value of 0.0")
         if not _is_numeric(score_min_param.default):
-            raise TypeError("Sixth parameter 'score_min' must default to a numeric value")
+            raise TypeError("Seventh parameter 'score_min' must default to a numeric value")
         if float(score_min_param.default) != 0.0:
-            raise TypeError("Sixth parameter 'score_min' must default to 0.0")
+            raise TypeError("Seventh parameter 'score_min' must default to 0.0")
         optional_params = optional_params[1:]
 
     if optional_params:
         score_max_param = optional_params[0]
-        # Check seventh parameter: score_max: float = 1.0
+        # Check eighth parameter: score_max: float = 1.0
         if score_max_param.name != "score_max":
-            raise TypeError(f"Seventh parameter must be named 'score_max', got '{score_max_param.name}'")
-        if not _is_float_annotation(score_max_param.annotation):
+            raise TypeError(f"Eighth parameter must be named 'score_max', got '{score_max_param.name}'")
+        score_max_annotation = resolved_annotations.get(
+            score_max_param.name,
+            score_max_param.annotation,
+        )
+        if not _is_float_annotation(score_max_annotation):
             raise TypeError(
-                f"Seventh parameter 'score_max' must be annotated as float, got {score_max_param.annotation}"
+                f"Eighth parameter 'score_max' must be annotated as float, got {score_max_annotation}"
             )
         if score_max_param.default is inspect.Parameter.empty:
-            raise TypeError("Seventh parameter 'score_max' must have a default value of 1.0")
+            raise TypeError("Eighth parameter 'score_max' must have a default value of 1.0")
         if not _is_numeric(score_max_param.default):
-            raise TypeError("Seventh parameter 'score_max' must default to a numeric value")
+            raise TypeError("Eighth parameter 'score_max' must default to a numeric value")
         if float(score_max_param.default) != 1.0:
-            raise TypeError("Seventh parameter 'score_max' must default to 1.0")
+            raise TypeError("Eighth parameter 'score_max' must default to 1.0")
         optional_params = optional_params[1:]
 
     if optional_params:
@@ -245,6 +354,23 @@ def osmosis_rubric(func: Callable) -> Callable:
         kwargs.pop("data_source", None)
         bound = sig.bind_partial(*args, **kwargs)
         bound.apply_defaults()
+
+        # Validate model_info argument
+        if "model_info" not in bound.arguments:
+            raise TypeError("'model_info' argument is required")
+        model_info_value = bound.arguments["model_info"]
+        if not isinstance(model_info_value, Mapping):
+            raise TypeError(f"'model_info' must be a mapping, got {type(model_info_value).__name__}")
+        required_model_fields = {"provider", "model"}
+        missing_model_fields = required_model_fields - set(model_info_value.keys())
+        if missing_model_fields:
+            raise ValueError(f"'model_info' is missing required fields: {sorted(missing_model_fields)}")
+        provider_value = model_info_value.get("provider")
+        if not isinstance(provider_value, str) or not provider_value.strip():
+            raise TypeError("'model_info[\"provider\"]' must be a non-empty string")
+        model_value = model_info_value.get("model")
+        if not isinstance(model_value, str) or not model_value.strip():
+            raise TypeError("'model_info[\"model\"]' must be a non-empty string")
 
         # Validate rubric argument
         if "rubric" not in bound.arguments:

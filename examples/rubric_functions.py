@@ -22,6 +22,7 @@ from osmosis_ai import (
     ModelNotFoundError,
     ProviderRequestError,
     evaluate_rubric,
+    osmosis_rubric,
 )
 
 RUBRIC = (
@@ -104,16 +105,54 @@ GROUND_TRUTH = (
 )
 
 
+@osmosis_rubric
+def score_with_hosted_model(
+    model_info: dict,
+    rubric: str,
+    messages: list[dict],
+    ground_truth: str | None = None,
+    system_message: str | None = None,
+    extra_info: dict = None,
+    score_min: float = SCORE_MIN,
+    score_max: float = SCORE_MAX,
+) -> float:
+    """
+    Delegate rubric scoring to a hosted model while keeping @osmosis_rubric validation.
+    """
+    capture_details = bool(extra_info and extra_info.get("capture_details"))
+    prompt_extra = extra_info.get("prompt_extra_info") if extra_info else None
+
+    result = evaluate_rubric(
+        rubric=rubric,
+        messages=messages,
+        model_info=model_info,
+        ground_truth=ground_truth,
+        system_message=system_message,
+        extra_info=prompt_extra,
+        score_min=score_min,
+        score_max=score_max,
+        return_details=capture_details,
+    )
+
+    if capture_details:
+        if extra_info is not None:
+            extra_info["result_details"] = result
+        return float(result["score"])
+
+    return float(result)
+
+
 def _run(provider_name: str, model_info: dict) -> None:
     try:
-        result = evaluate_rubric(
+        context: dict = {"capture_details": True}
+        score = score_with_hosted_model(
+            model_info,
             rubric=RUBRIC,
             messages=MESSAGES,
             ground_truth=GROUND_TRUTH,
-            model_info=model_info,
+            extra_info=context,
             score_min=SCORE_MIN,
             score_max=SCORE_MAX,
-            return_details=True,
         )
     except MissingAPIKeyError as exc:
         print(f"{provider_name} skipped: {exc}")
@@ -125,8 +164,12 @@ def _run(provider_name: str, model_info: dict) -> None:
         print(f"{provider_name} failed: {exc.detail}")
         return
 
-    print(f"{provider_name} score: {result['score']:.2f} (range {SCORE_MIN}-{SCORE_MAX})")
-    print(f"{provider_name} explanation: {result['explanation']}")
+    details = context.get("result_details")
+    explanation = ""
+    if isinstance(details, dict):
+        explanation = details.get("explanation", "")
+    print(f"{provider_name} score: {score:.2f} (range {SCORE_MIN}-{SCORE_MAX})")
+    print(f"{provider_name} explanation: {explanation}")
 
 
 def run_openai_example() -> None:
@@ -172,7 +215,7 @@ def run_xai_example() -> None:
 if __name__ == "__main__":
     # Uncomment the provider calls you want to exercise:
     run_openai_example()
-    # run_anthropic_example()
-    # run_gemini_example()
-    # run_xai_example()
+    run_anthropic_example()
+    run_gemini_example()
+    run_xai_example()
     pass

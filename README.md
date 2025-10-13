@@ -125,6 +125,7 @@ The decorator will raise a `TypeError` if the function doesn't match this exact 
 
 Rubric functions decorated with `@osmosis_rubric` must accept the parameters:
 
+- `model_info: dict`
 - `rubric: str`
 - `messages: list`
 - `ground_truth: Optional[str] = None`
@@ -134,6 +135,8 @@ Rubric functions decorated with `@osmosis_rubric` must accept the parameters:
 - `score_max: float = 1.0` *(optional upper bound; must default to 1.0 and stay above `score_min`)*
 
 and must return a `float`. The decorator validates the signature and runtime payload (including message role validation and return type) before delegating to your custom logic.
+
+> Required fields: `model_info` must contain non-empty `provider` and `model` string entries.
 
 > Annotation quirk: `extra_info` must be annotated as a plain `dict` with a default of `None` to satisfy the validator.
 
