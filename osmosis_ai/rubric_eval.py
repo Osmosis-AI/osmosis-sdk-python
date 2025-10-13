@@ -227,10 +227,14 @@ def _collect_text_from_message(message: Dict[str, Any]) -> str:
             return
 
         if isinstance(node, dict):
-            # Prioritise common OpenAI / tool shapes.
+            # Prioritise common OpenAI / tool shapes, only escalating if a prior key yielded no text.
             for key in ("text", "value"):
-                if key in node:
-                    _walk(node[key])
+                if key not in node:
+                    continue
+                before_count = len(texts)
+                _walk(node[key])
+                if len(texts) > before_count:
+                    break
             if node.get("type") == "tool_result" and "content" in node:
                 _walk(node["content"])
             elif "content" in node:
