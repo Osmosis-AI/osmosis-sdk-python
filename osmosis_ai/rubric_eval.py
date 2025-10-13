@@ -12,8 +12,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import secrets
-import time
 from typing import Any, Dict, List, Optional, Union
 
 from .providers import (
@@ -33,10 +31,6 @@ DEFAULT_API_KEY_ENV = {
 }
 
 REQUEST_TIMEOUT_SECONDS = DEFAULT_REQUEST_TIMEOUT_SECONDS
-
-
-def _make_req_id() -> str:
-    return f"rr-{int(time.time() * 1000):x}-{secrets.token_hex(3)}"
 
 
 def _escape_triple_backticks(text: str) -> str:
@@ -277,7 +271,6 @@ def _run_reward_rubric(
     extra_info: Optional[Dict[str, Any]],
     system_prompt: Optional[str],
     timeout: float,
-    req_id: str,
 ) -> RewardRubricRunResult:
     system_content = _build_system_prompt(score_min, score_max, system_prompt)
     user_content = _build_user_prompt(
@@ -299,7 +292,6 @@ def _run_reward_rubric(
         score_min=score_min,
         score_max=score_max,
         timeout=timeout,
-        req_id=req_id,
     )
     return provider_impl.run(request)
 
@@ -385,7 +377,6 @@ def evaluate_rubric(
         model_timeout = model_info.get("timeout")
         provider_timeout = float(model_timeout) if model_timeout else provider_impl.default_timeout(model)
 
-    req_id = _make_req_id()
     try:
         result = _run_reward_rubric(
             provider_name=provider_name,
@@ -401,7 +392,6 @@ def evaluate_rubric(
             extra_info=extra_info,
             system_prompt=resolved_system_message,
             timeout=provider_timeout,
-            req_id=req_id,
         )
     except ProviderRequestError:
         raise

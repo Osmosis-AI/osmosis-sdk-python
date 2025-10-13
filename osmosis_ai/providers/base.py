@@ -18,7 +18,6 @@ class ProviderRequest:
     score_min: float
     score_max: float
     timeout: float
-    req_id: str
 
 
 class RubricProvider:

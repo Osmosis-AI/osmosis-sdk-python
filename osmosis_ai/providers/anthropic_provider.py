@@ -11,7 +11,7 @@ except ImportError:  # pragma: no cover - optional dependency
 
 from ..rubric_types import ModelNotFoundError, ProviderRequestError, RewardRubricRunResult
 from .base import DEFAULT_REQUEST_TIMEOUT_SECONDS, ProviderRequest, RubricProvider
-from .shared import debug_payload, dump_model, extract_structured_score, reward_schema_definition
+from .shared import dump_model, extract_structured_score, reward_schema_definition
 
 
 class AnthropicProvider(RubricProvider):
@@ -36,14 +36,6 @@ class AnthropicProvider(RubricProvider):
             "description": "Return the reward rubric score and explanation as structured JSON.",
             "input_schema": schema_definition,
         }
-
-        request_preview: Dict[str, Any] = {
-            "model": request.model,
-            "system_chars": len(request.system_content),
-            "user_chars": len(request.user_content),
-            "tool": tool_name,
-        }
-        debug_payload(request.req_id, self.name, "request", request_preview, [request.api_key])
 
         try:
             response = client.messages.create(
@@ -73,7 +65,6 @@ class AnthropicProvider(RubricProvider):
             raise ProviderRequestError(self.name, request.model, detail) from err
 
         raw = dump_model(response)
-        debug_payload(request.req_id, self.name, "response", raw, [request.api_key])
 
         payload: Dict[str, Any] | None = None
         content_blocks = raw.get("content") if isinstance(raw, dict) else None

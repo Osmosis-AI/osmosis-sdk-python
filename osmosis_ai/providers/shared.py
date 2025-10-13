@@ -1,68 +1,8 @@
 from __future__ import annotations
 
 import json
-import os
 import re
-import sys
-from typing import Any, Dict, Iterable, Mapping, Tuple
-
-DEBUG = os.getenv("REWARD_RUBRIC_DEBUG", "").lower() in {"1", "true"}
-LOG_BODIES = os.getenv("REWARD_RUBRIC_LOG_BODIES", "").lower() in {"1", "true"}
-
-
-def mask_token(text: str) -> str:
-    return re.sub(r"(Bearer\s+)[A-Za-z0-9._~+/=-]+", r"\1***", text, flags=re.IGNORECASE)
-
-
-def redact_secrets(text: str, extra_secrets: Iterable[str]) -> str:
-    masked = mask_token(text)
-    for secret in extra_secrets:
-        if not secret:
-            continue
-        masked = re.sub(re.escape(secret), "***", masked)
-    return masked
-
-
-def safe_stringify(value: Any) -> str:
-    try:
-        return json.dumps(value)
-    except TypeError:
-        seen: set[int] = set()
-
-        def _convert(obj: Any) -> Any:
-            obj_id = id(obj)
-            if obj_id in seen:
-                return "[Circular]"
-            if isinstance(obj, dict):
-                seen.add(obj_id)
-                out = {k: _convert(v) for k, v in obj.items()}
-                seen.remove(obj_id)
-                return out
-            if isinstance(obj, list):
-                seen.add(obj_id)
-                out_list = [_convert(v) for v in obj]
-                seen.remove(obj_id)
-                return out_list
-            return obj
-
-        return json.dumps(_convert(value), indent=2)
-
-
-def preview(text: str, limit: int = 50000 if LOG_BODIES else 2000) -> str:
-    return text if len(text) <= limit else f"{text[:limit]}...[+{len(text) - limit} more]"
-
-
-def debug_log(*args: Any) -> None:
-    if DEBUG:
-        print(*args, file=sys.stderr)
-
-
-def debug_payload(req_id: str, provider: str, stage: str, payload: Any, extra_mask: Iterable[str]) -> None:
-    if not DEBUG:
-        return
-    serialised = safe_stringify(payload)
-    redacted = redact_secrets(serialised, extra_mask)
-    debug_log(f"[{req_id}] {provider} {stage}: {preview(redacted)}")
+from typing import Any, Dict, Mapping, Tuple
 
 
 def dump_model(obj: Any) -> Any:
@@ -144,17 +84,9 @@ def sanitize_json(raw: str) -> Tuple[float, str]:
 
 
 __all__ = [
-    "DEBUG",
-    "LOG_BODIES",
-    "debug_log",
-    "debug_payload",
     "dump_model",
     "extract_structured_score",
-    "mask_token",
-    "preview",
-    "redact_secrets",
     "reward_json_schema",
     "reward_schema_definition",
-    "safe_stringify",
     "sanitize_json",
 ]

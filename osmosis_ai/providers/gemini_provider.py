@@ -10,7 +10,7 @@ if TYPE_CHECKING:  # pragma: no cover - typing helpers only
 
 from ..rubric_types import ProviderRequestError, RewardRubricRunResult
 from .base import DEFAULT_REQUEST_TIMEOUT_SECONDS, ProviderRequest, RubricProvider
-from .shared import debug_payload, dump_model, reward_schema_definition, sanitize_json
+from .shared import dump_model, reward_schema_definition, sanitize_json
 
 
 _GENAI_MODULE: Any | None = None
@@ -167,12 +167,6 @@ class GeminiProvider(RubricProvider):
         )
 
         combined_prompt = f"{request.system_content}\n\n{request.user_content}"
-        request_preview: Dict[str, Any] = {
-            "model": _normalize_gemini_model(request.model),
-            "system_chars": len(request.system_content),
-            "user_chars": len(request.user_content),
-        }
-        debug_payload(request.req_id, self.name, "request", request_preview, [request.api_key])
 
         try:
             with _suppress_pydantic_any_warning():
@@ -185,7 +179,6 @@ class GeminiProvider(RubricProvider):
             detail = str(err).strip() or "Gemini request failed."
             raise ProviderRequestError(self.name, request.model, detail) from err
         raw = dump_model(response)
-        debug_payload(request.req_id, self.name, "response", raw, [request.api_key])
 
         text = getattr(response, "text", None)
         if not isinstance(text, str) or not text.strip():
