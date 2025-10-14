@@ -5,9 +5,6 @@ xxhash>=3.0.0,<4.0.0
 
 # LLM provider clients - install the ones you need
 anthropic>=0.36.0,<0.50.0  # For Claude API
-openai>=1.58.1,<2.0.0  # For OpenAI API
-langchain>=0.3.0,<0.4.0  # For LangChain integration
-langchain-openai>=0.3.0,<0.4.0  # For LangChain OpenAI integration
-langchain-anthropic>=0.3.0,<0.4.0  # For LangChain Anthropic integration
+openai>=2.0.0  # For OpenAI API
 google-genai>=0.5.0,<1.0.0  # For Google Gemini SDK
 xai-sdk>=1.2.0

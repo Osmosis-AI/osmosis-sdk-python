@@ -310,7 +310,7 @@ def _call_openai_family(
         raise ProviderRequestError(
             provider,
             model,
-            "OpenAI SDK is required. Install it via `pip install 'openai>=1.58.1,<2.0.0'`.",
+            "OpenAI SDK is required. Install it via `pip install 'openai>=2.0.0'`.",
         )
 
     # --- Client / per-request options ---
