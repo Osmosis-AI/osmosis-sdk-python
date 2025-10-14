@@ -36,7 +36,36 @@ def your_function(solution_str: str, ground_truth: str, extra_info: dict = None)
 
 ```bash
 cd examples
-python reward_functions.py
+PYTHONPATH=.. python reward_functions.py
 ```
 
 This will run test cases through all the example reward functions and show their outputs.
+
+## Remote Rubric Evaluation (`rubric_functions.py`)
+
+Shows how to call `osmosis_ai.evaluate_rubric` against different hosted judge providers using their official Python SDKs. The example:
+
+- Builds a single rubric and conversation transcript.
+- Invokes OpenAI, Anthropic, Google Gemini, and xAI (toggle which providers run inside `__main__`).
+- Prints the numeric score and explanation returned by each provider’s schema-enforced response.
+- Gracefully skips providers whose API keys are not present (`MissingAPIKeyError`) and surfaces known remote failures via `ModelNotFoundError` / `ProviderRequestError`.
+
+The helper uses the new provider registry in `osmosis_ai.providers`; each example call only needs to supply `provider` and `model` because the integrations are registered at import time. To experiment with your own provider implementation, create a subclass of `RubricProvider`, call `register_provider(...)`, and then pass the new provider name in `model_info`. See [`../osmosis_ai/providers/README.md`](../osmosis_ai/providers/README.md) for the detailed checklist.
+
+### Prerequisites
+
+Export the relevant secrets before running:
+
+```bash
+export OPENAI_API_KEY=...
+export ANTHROPIC_API_KEY=...
+export GOOGLE_API_KEY=...
+export XAI_API_KEY=...
+```
+
+### Running the Rubric Example
+
+```bash
+cd examples
+PYTHONPATH=.. python rubric_functions.py  # uncomment providers you want to exercise
+```

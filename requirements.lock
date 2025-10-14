@@ -15,14 +15,9 @@ isort==6.0.1
 jiter==0.9.0
 jsonpatch==1.33
 jsonpointer==3.0.0
-langchain==0.3.21
-langchain-anthropic==0.3.10
-langchain-core==0.3.48
-langchain-openai==0.3.10
-langchain-text-splitters==0.3.7
 langsmith==0.3.18
 mypy-extensions==1.0.0
-openai==1.68.2
+openai==2.0.0
 orjson==3.10.16
 packaging==24.2
 pathspec==0.12.1
