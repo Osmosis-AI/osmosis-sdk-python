@@ -206,74 +206,13 @@ def _build_user_prompt(
 
 
 def _collect_text_from_message(message: Dict[str, Any]) -> str:
+    from .cli_services.shared import collect_text_fragments
+
     content = message.get("content")
     if not isinstance(content, list):
         return ""
-    texts: List[str] = []
-
-    def _append_text(value: str) -> None:
-        stripped = value.strip()
-        if stripped:
-            texts.append(stripped)
-
-    def _walk(node: Any) -> None:
-        if isinstance(node, str):
-            _append_text(node)
-            return
-
-        if isinstance(node, list):
-            for item in node:
-                _walk(item)
-            return
-
-        if isinstance(node, dict):
-            # Prioritise common OpenAI / tool shapes, only escalating if a prior key yielded no text.
-            for key in ("text", "value"):
-                if key not in node:
-                    continue
-                before_count = len(texts)
-                _walk(node[key])
-                if len(texts) > before_count:
-                    break
-            if node.get("type") == "tool_result" and "content" in node:
-                _walk(node["content"])
-            elif "content" in node:
-                _walk(node["content"])
-            # Additional fallbacks (e.g., message wrappers).
-            for key in ("message", "parts", "input_text", "output_text"):
-                if key in node:
-                    _walk(node[key])
-            # Inspect remaining nested structures without re-traversing handled keys.
-            handled = {
-                "text",
-                "value",
-                "content",
-                "message",
-                "parts",
-                "input_text",
-                "output_text",
-                "type",
-                "role",
-                "name",
-                "id",
-                "index",
-                "finish_reason",
-                "reason",
-                "tool_call_id",
-                "metadata",
-            }
-            for key, value in node.items():
-                if key in handled:
-                    continue
-                if isinstance(value, (list, dict)):
-                    _walk(value)
-                elif isinstance(value, str) and key.lower() in {"text", "value", "message"}:
-                    _append_text(value)
-
-    for block in content:
-        _walk(block)
-
-    return " ".join(texts)
+    fragments = collect_text_fragments(content, allow_free_strings=True)
+    return " ".join(fragments)
 
 
 def _extract_latest_text(messages: List[Dict[str, Any]], role: str) -> Optional[str]:

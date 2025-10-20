@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any, Optional, Sequence
 
 from .errors import CLIError
-from .shared import coerce_optional_float
+from .shared import coerce_optional_float, gather_text_fragments
 
 
 @dataclass(frozen=True)
@@ -30,9 +30,9 @@ class ConversationMessage:
     def text_fragments(self) -> list[str]:
         fragments: list[str] = []
         seen: set[int] = set()
-        _gather_text_fragments(self.content, fragments, seen=seen)
+        gather_text_fragments(self.content, fragments, allow_free_strings=True, seen=seen)
         for value in self.metadata.values():
-            _gather_text_fragments(value, fragments, seen=seen)
+            gather_text_fragments(value, fragments, seen=seen)
         return fragments
 
     @classmethod
@@ -227,54 +227,3 @@ def _parse_messages(messages: Any, *, source_label: str) -> tuple[ConversationMe
             )
         normalized.append(ConversationMessage.from_raw(entry, source_label=source_label, index=index))
     return tuple(normalized)
-
-
-def _gather_text_fragments(
-    node: Any,
-    fragments: list[str],
-    *,
-    seen: Optional[set[int]] = None,
-) -> None:
-    if seen is None:
-        seen = set()
-
-    if isinstance(node, str):
-        stripped = node.strip()
-        if stripped:
-            fragments.append(stripped)
-        return
-
-    if isinstance(node, list):
-        for item in node:
-            _gather_text_fragments(item, fragments, seen=seen)
-        return
-
-    if isinstance(node, dict):
-        node_id = id(node)
-        if node_id in seen:
-            return
-        seen.add(node_id)
-
-        prioritized_keys = (
-            "text",
-            "value",
-            "content",
-            "message",
-            "parts",
-            "input_text",
-            "output_text",
-        )
-        handled_keys = set(prioritized_keys)
-        for key in prioritized_keys:
-            if key in node:
-                _gather_text_fragments(node[key], fragments, seen=seen)
-
-        for key, value in node.items():
-            if key in handled_keys:
-                continue
-            if isinstance(value, str):
-                stripped = value.strip()
-                if stripped:
-                    fragments.append(stripped)
-            elif isinstance(value, (list, dict)):
-                _gather_text_fragments(value, fragments, seen=seen)
