@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
+import inspect
 import time
 import warnings
 from typing import TYPE_CHECKING, Any, Dict, Iterator, List, Tuple
@@ -167,6 +168,14 @@ def _seconds_to_millis(seconds: float) -> int:
     return max(int(round(seconds * 1000)), 1)
 
 
+def _supports_request_options(generate_content: Any) -> bool:
+    try:
+        signature = inspect.signature(generate_content)
+    except (TypeError, ValueError):
+        return False
+    return "request_options" in signature.parameters
+
+
 class GeminiProvider(RubricProvider):
     name = "gemini"
 
@@ -188,11 +197,31 @@ class GeminiProvider(RubricProvider):
         retry_timeouts = _build_retry_timeouts(requested_timeout)
         max_timeout = max(retry_timeouts)
 
+        supports_request_options = False
+        shared_client: Any | None = None
+
         with _suppress_pydantic_any_warning():
-            client = genai.Client(
+            probe_client = genai.Client(
                 api_key=request.api_key,
                 http_options={"timeout": _seconds_to_millis(max_timeout)},
             )
+        try:
+            supports_request_options = _supports_request_options(probe_client.models.generate_content)
+        except Exception:
+            try:
+                probe_client.close()
+            except Exception:
+                pass
+            raise
+
+        if supports_request_options:
+            shared_client = probe_client
+        else:
+            try:
+                probe_client.close()
+            except Exception:
+                pass
+
         schema_definition = reward_schema_definition()
         gemini_schema = _json_schema_to_genai(schema_definition, genai_types)
         config = genai_types.GenerateContentConfig(
@@ -206,33 +235,49 @@ class GeminiProvider(RubricProvider):
         response: Any | None = None
         last_error: Exception | None = None
 
-        for attempt_index, attempt_timeout in enumerate(retry_timeouts, start=1):
-            try:
-                with _suppress_pydantic_any_warning():
-                    try:
-                        response = client.models.generate_content(
-                            model=_normalize_gemini_model(request.model),
-                            contents=combined_prompt,
-                            config=config,
-                            request_options={"timeout": _seconds_to_millis(attempt_timeout)},
-                        )
-                    except TypeError as err:
-                        # Older SDKs may not accept request_options; retry without it.
-                        if "request_options" not in str(err):
-                            raise
-                        response = client.models.generate_content(
-                            model=_normalize_gemini_model(request.model),
-                            contents=combined_prompt,
-                            config=config,
-                        )
-                break
-            except Exception as err:  # pragma: no cover - network failures depend on runtime
-                last_error = err
-                if attempt_index >= len(retry_timeouts):
-                    detail = str(err).strip() or "Gemini request failed."
-                    raise ProviderRequestError(self.name, request.model, detail) from err
-                sleep_idx = min(attempt_index - 1, len(GEMINI_RETRY_SLEEP_SECONDS) - 1)
-                time.sleep(GEMINI_RETRY_SLEEP_SECONDS[sleep_idx])
+        try:
+            for attempt_index, attempt_timeout in enumerate(retry_timeouts, start=1):
+                per_attempt_client: Any | None = None
+                http_timeout_ms = _seconds_to_millis(attempt_timeout)
+                try:
+                    call_kwargs = {
+                        "model": _normalize_gemini_model(request.model),
+                        "contents": combined_prompt,
+                        "config": config,
+                    }
+                    if supports_request_options and shared_client is not None:
+                        call_client = shared_client
+                        call_kwargs["request_options"] = {"timeout": http_timeout_ms}
+                    else:
+                        with _suppress_pydantic_any_warning():
+                            per_attempt_client = genai.Client(
+                                api_key=request.api_key,
+                                http_options={"timeout": http_timeout_ms},
+                            )
+                        call_client = per_attempt_client
+
+                    with _suppress_pydantic_any_warning():
+                        response = call_client.models.generate_content(**call_kwargs)
+                    break
+                except Exception as err:  # pragma: no cover - network failures depend on runtime
+                    last_error = err
+                    if attempt_index >= len(retry_timeouts):
+                        detail = str(err).strip() or "Gemini request failed."
+                        raise ProviderRequestError(self.name, request.model, detail) from err
+                    sleep_idx = min(attempt_index - 1, len(GEMINI_RETRY_SLEEP_SECONDS) - 1)
+                    time.sleep(GEMINI_RETRY_SLEEP_SECONDS[sleep_idx])
+                finally:
+                    if per_attempt_client is not None:
+                        try:
+                            per_attempt_client.close()
+                        except Exception:
+                            pass
+        finally:
+            if shared_client is not None:
+                try:
+                    shared_client.close()
+                except Exception:
+                    pass
 
         if response is None and last_error is not None:
             detail = str(last_error).strip() or "Gemini request failed."

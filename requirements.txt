@@ -8,5 +8,5 @@ tqdm>=4.0.0,<5.0.0
 # LLM provider clients - install the ones you need
 anthropic>=0.36.0,<0.50.0  # For Claude API
 openai>=2.0.0  # For OpenAI API
-google-genai>=0.5.0,<1.0.0  # For Google Gemini SDK
+google-genai>=1.0.0  # For Google Gemini SDK
 xai-sdk>=1.2.0
