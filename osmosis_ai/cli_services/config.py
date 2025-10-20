@@ -381,7 +381,7 @@ def _extract_rubric_items(node: Any, context: Optional[str], doc_index: int) -> 
     if isinstance(node, dict):
         if "rubric" in node and isinstance(node["rubric"], str):
             label = context or f"document[{doc_index}]"
-            items.append(ParsedItem(label=label if context else None, payload=node))
+            items.append(ParsedItem(label=label, payload=node))
         else:
             for key, value in node.items():
                 next_context = str(key) if isinstance(key, str) else context
