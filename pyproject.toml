@@ -16,9 +16,24 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
 ]
-requires-python = ">=3.6"
-dependencies = []
+requires-python = ">=3.9"
+dependencies = [
+    "PyYAML>=6.0,<7.0",
+    "python-dotenv>=0.1.0,<2.0.0",
+    "requests>=2.0.0,<3.0.0",
+    "xxhash>=3.0.0,<4.0.0",
+    "anthropic>=0.36.0,<0.50.0",
+    "openai>=2.0.0",
+    "google-genai>=0.5.0,<1.0.0",
+    "xai-sdk>=1.2.0",
+    "tqdm>=4.0.0,<5.0.0",
+]
 
 [project.urls]
 Homepage = "https://github.com/Osmosis-AI/osmosis-sdk-python"
 Issues = "https://github.com/Osmosis-AI/osmosis-sdk-python/issues"
+
+[project.scripts]
+osmosis = "osmosis_ai.cli:main"
+osmosis_ai = "osmosis_ai.cli:main"
+osmosis-ai = "osmosis_ai.cli:main"

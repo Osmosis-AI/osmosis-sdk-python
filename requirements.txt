@@ -1,7 +1,9 @@
 # Core requirements
 python-dotenv>=0.1.0,<2.0.0
+PyYAML>=6.0,<7.0
 requests>=2.0.0,<3.0.0
 xxhash>=3.0.0,<4.0.0
+tqdm>=4.0.0,<5.0.0
 
 # LLM provider clients - install the ones you need
 anthropic>=0.36.0,<0.50.0  # For Claude API

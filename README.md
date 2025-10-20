@@ -8,6 +8,10 @@ A Python library that provides reward and rubric validation helpers for LLM appl
 pip install osmosis-ai
 ```
 
+Requires Python 3.9 or newer.
+
+This installs the Osmosis CLI and pulls in the required provider SDKs (`openai`, `anthropic`, `google-genai`, `xai-sdk`) along with supporting utilities such as `PyYAML`, `python-dotenv`, `requests`, and `xxhash`.
+
 For development:
 ```bash
 git clone https://github.com/Osmosis-AI/osmosis-sdk-python
@@ -175,6 +179,55 @@ def numeric_tolerance(solution_str: str, ground_truth: str, extra_info: dict = N
 
 - `examples/rubric_functions.py` demonstrates `evaluate_rubric` with OpenAI, Anthropic, Gemini, and xAI using the schema-enforced SDK integrations.
 - `examples/reward_functions.py` keeps local reward helpers that showcase the decorator contract without external calls.
+- `examples/rubric_configs.yaml` bundles two rubric definitions, each with its own provider configuration and extra prompt context.
+- `examples/sample_data.jsonl` contains two conversation payloads mapped to those rubrics so you can trial dataset validation.
+
+```yaml
+# examples/rubric_configs.yaml (excerpt)
+version: 1
+rubrics:
+  - id: support_followup
+    model_info:
+      provider: openai
+      model: gpt-5-mini
+      api_key_env: OPENAI_API_KEY
+```
+
+```jsonl
+{"conversation_id": "ticket-001", "rubric_id": "support_followup", "...": "..."}
+{"conversation_id": "ticket-047", "rubric_id": "policy_grounding", "...": "..."}
+```
+
+## CLI Tools
+
+Installing the SDK also provides a lightweight CLI available as `osmosis` (aliases: `osmosis_ai`, `osmosis-ai`) for inspecting rubric YAML files and JSONL test payloads.
+
+Preview a rubric file and print every configuration discovered, including nested entries:
+
+```bash
+osmosis preview --path path/to/rubric.yaml
+```
+
+Preview a dataset of chat transcripts stored as JSONL:
+
+```bash
+osmosis preview --path path/to/data.jsonl
+```
+
+Evaluate a dataset against a hosted rubric configuration and print the returned scores:
+
+```bash
+osmosis eval --rubric support_followup --data examples/sample_data.jsonl
+```
+
+- Supply the dataset with `-d`/`--data path/to/data.jsonl`; the path is resolved relative to the current working directory.
+- Use `--config path/to/rubric_configs.yaml` when the rubric definitions are not located alongside the dataset.
+- Pass `-n`/`--number` to sample the provider multiple times per record; the CLI prints every run along with aggregate statistics (average, variance, standard deviation, and min/max).
+- Provide `--output path/to/dir` to create the directory (if needed) and emit `rubric_eval_result_<unix_timestamp>.json`, or supply a full file path (any extension) to control the filename; each file captures every run, provider payloads, timestamps, and aggregate statistics for downstream analysis.
+- Skip `--output` to collect results under `~/.cache/osmosis/eval_result/<rubric_id>/rubric_eval_result_<identifier>.json`; the CLI writes this JSON whether the evaluation finishes cleanly or hits provider/runtime errors so you can inspect failures later (only a manual Ctrl+C interrupt leaves no file behind).
+- Dataset rows whose `rubric_id` does not match the requested rubric are skipped automatically.
+
+Both commands validate the file, echo a short summary (`Loaded <n> ...`), and pretty-print the parsed records so you can confirm that new rubrics or test fixtures look correct before committing them. Invalid files raise a descriptive error and exit with a non-zero status code.
 
 ## Running Examples
 

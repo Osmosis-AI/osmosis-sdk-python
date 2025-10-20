@@ -386,6 +386,22 @@ def _resolve_api_key(provider: str, model_info: ModelInfo) -> str:
     return api_key
 
 
+def ensure_api_key_available(model_info: ModelInfo) -> None:
+    """
+    Validate that the provider specified in `model_info` has an accessible API key.
+
+    Raises:
+        MissingAPIKeyError: When the lookup fails or the environment variable is unset.
+        TypeError: When `model_info` is missing required fields.
+    """
+    provider_raw = model_info.get("provider")
+    if not isinstance(provider_raw, str) or not provider_raw.strip():
+        raise TypeError("'model_info' must include a 'provider' string")
+
+    provider = provider_raw.strip().lower()
+    _resolve_api_key(provider, model_info)
+
+
 def _run_reward_rubric(
     provider_name: str,
     provider_impl: RubricProvider,
@@ -534,4 +550,10 @@ def evaluate_rubric(
     return result if return_details else result["score"]
 
 
-__all__ = ["evaluate_rubric", "ModelInfo", "RewardRubricRunResult", "MissingAPIKeyError"]
+__all__ = [
+    "evaluate_rubric",
+    "ensure_api_key_available",
+    "ModelInfo",
+    "RewardRubricRunResult",
+    "MissingAPIKeyError",
+]

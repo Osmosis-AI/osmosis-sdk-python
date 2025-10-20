@@ -52,6 +52,10 @@ Shows how to call `osmosis_ai.evaluate_rubric` against different hosted judge pr
 
 The helper uses the new provider registry in `osmosis_ai.providers`; each example call only needs to supply `provider` and `model` because the integrations are registered at import time. To experiment with your own provider implementation, create a subclass of `RubricProvider`, call `register_provider(...)`, and then pass the new provider name in `model_info`. See [`../osmosis_ai/providers/README.md`](../osmosis_ai/providers/README.md) for the detailed checklist.
 
+## Rubric Configs and Dataset
+
+Use `rubric_configs.yaml` for a pair of ready-to-run rubric configurations (OpenAI and Anthropic) and `sample_data.jsonl` for two matching conversation records that exercise those rubrics. They are designed to work with `osmosis preview --path examples/<file>` and can be adapted when building your own evaluation suites.
+
 ### Prerequisites
 
 Export the relevant secrets before running:
