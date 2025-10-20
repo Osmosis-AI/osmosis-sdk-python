@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-from .engine import EvaluationReport, EvaluationRun
+from .engine import EvaluationRecordResult, EvaluationReport, EvaluationRun
 from .errors import CLIError
 from .shared import calculate_stat_deltas
 
@@ -36,7 +36,7 @@ class TextReportFormatter:
             lines.extend(self._format_baseline(report, baseline))
         return lines
 
-    def _format_record(self, record_result) -> list[str]:
+    def _format_record(self, record_result: EvaluationRecordResult) -> list[str]:
         lines: list[str] = [f"[{record_result.conversation_label}]"]
         total_runs = len(record_result.runs)
         for index, run in enumerate(record_result.runs):
