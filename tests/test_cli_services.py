@@ -173,7 +173,7 @@ def test_dataset_loader_supports_original_input_in_extra_info(tmp_path: Path) ->
     assert loaded.extra_info == {"original_input": "Please help me troubleshoot my purifier."}
 
 
-def test_rubric_config_supports_original_input_in_extra_info(tmp_path: Path) -> None:
+def test_rubric_config_rejects_extra_info(tmp_path: Path) -> None:
     config_path = tmp_path / "rubric_configs.yaml"
     config_content = """version: 1
 rubrics:
@@ -183,15 +183,30 @@ rubrics:
       provider: openai
       model: gpt-5-mini
     extra_info:
-      original_input: Why is the purifier blinking red?
+      unexpected: true
 """
     config_path.write_text(config_content, encoding="utf-8")
 
-    suite = load_rubric_suite(config_path)
-    config = suite.get("support_followup")
+    with pytest.raises(CLIError, match="must not include 'extra_info'"):
+        load_rubric_suite(config_path)
 
-    assert config.original_input == "Why is the purifier blinking red?"
-    assert config.extra_info == {"original_input": "Why is the purifier blinking red?"}
+
+def test_rubric_config_rejects_default_extra_info(tmp_path: Path) -> None:
+    config_path = tmp_path / "rubric_configs.yaml"
+    config_content = """version: 1
+default_extra_info:
+  capture_details: true
+rubrics:
+  - id: support_followup
+    rubric: Score responses.
+    model_info:
+      provider: openai
+      model: gpt-5-mini
+"""
+    config_path.write_text(config_content, encoding="utf-8")
+
+    with pytest.raises(CLIError, match="default_extra_info"):
+        load_rubric_suite(config_path)
 
 
 def test_dataset_record_assistant_preview_truncates(tmp_path: Path) -> None:
@@ -246,7 +261,10 @@ def test_rubric_evaluator_enriches_extra_info() -> None:
         ground_truth=None,
         original_input="Please help me troubleshoot my purifier.",
         metadata={"channel": "chat"},
-        extra_info={"capture_details": True},
+        extra_info={
+            "capture_details": True,
+            "prompt_extra_info": {"product": "AirPure"},
+        },
         score_min=None,
         score_max=None,
     )
@@ -258,7 +276,6 @@ def test_rubric_evaluator_enriches_extra_info() -> None:
         score_min=0.0,
         score_max=1.0,
         system_prompt="System override prompt.",
-        extra_info={"prompt_extra_info": {"product": "AirPure"}},
         original_input=None,
         ground_truth="Reference answer.",
         source_label="tests",
@@ -323,7 +340,6 @@ def test_rubric_evaluator_overrides_conflicting_extra_info() -> None:
         score_min=0.0,
         score_max=1.0,
         system_prompt=None,
-        extra_info=None,
         original_input=None,
         ground_truth=None,
         source_label="tests",

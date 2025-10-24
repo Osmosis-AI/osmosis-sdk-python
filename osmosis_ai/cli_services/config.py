@@ -26,7 +26,6 @@ class RubricConfig:
     score_min: Optional[float]
     score_max: Optional[float]
     system_prompt: Optional[str]
-    extra_info: Optional[dict[str, Any]]
     original_input: Optional[str]
     ground_truth: Optional[str]
     source_label: str
@@ -195,6 +194,13 @@ def _build_document_configs(
         parsed_items.append(ParsedItem(label=item.label, payload=payload))
         if not isinstance(payload, dict):
             continue
+        if "extra_info" in payload:
+            message = (
+                f"Rubric entry in '{path}' (document {doc_index + 1}) must not include 'extra_info'."
+            )
+            if strict:
+                raise CLIError(message)
+            continue
 
         rubric_key_raw = payload.get("id")
         if not isinstance(rubric_key_raw, str) or not rubric_key_raw.strip():
@@ -223,14 +229,6 @@ def _build_document_configs(
                 )
             continue
 
-        extra_info_value = payload.get("extra_info", defaults.get("extra_info"))
-        if extra_info_value is not None and not isinstance(extra_info_value, dict):
-            if strict:
-                raise CLIError(
-                    f"'extra_info' for rubric '{rubric_key}' in '{path}' must be a mapping."
-                )
-            continue
-
         try:
             score_min = coerce_optional_float(
                 payload.get("score_min", defaults.get("score_min")),
@@ -252,14 +250,6 @@ def _build_document_configs(
         original_input = payload.get("original_input", defaults.get("original_input"))
         if not isinstance(original_input, str):
             original_input = None
-        if original_input is None:
-            sources = [extra_info_value, defaults.get("extra_info")]
-            for source in sources:
-                if isinstance(source, dict):
-                    nested_original = source.get("original_input")
-                    if isinstance(nested_original, str):
-                        original_input = nested_original
-                        break
 
         ground_truth = payload.get("ground_truth", defaults.get("ground_truth"))
 
@@ -273,7 +263,6 @@ def _build_document_configs(
             score_min=score_min,
             score_max=score_max,
             system_prompt=system_prompt if isinstance(system_prompt, str) else None,
-            extra_info=copy.deepcopy(extra_info_value) if isinstance(extra_info_value, dict) else None,
             original_input=original_input,
             ground_truth=ground_truth if isinstance(ground_truth, str) else None,
             source_label=source_label,
@@ -359,7 +348,6 @@ def _extract_config_defaults(document: Any, path: Path, doc_index: int) -> dict[
     if not isinstance(document, dict):
         return {
             "model_info": None,
-            "extra_info": None,
             "score_min": None,
             "score_max": None,
             "system_prompt": None,
@@ -370,8 +358,11 @@ def _extract_config_defaults(document: Any, path: Path, doc_index: int) -> dict[
     source = f"document[{doc_index}] in {path}"
 
     defaults: dict[str, Any] = {}
+    if "default_extra_info" in document:
+        raise CLIError(
+            f"Rubric config document {doc_index + 1} in {path} must not include 'default_extra_info'; extra_info is no longer supported."
+        )
     defaults["model_info"] = document.get("default_model_info")
-    defaults["extra_info"] = document.get("default_extra_info")
     defaults["score_min"] = coerce_optional_float(
         document.get("default_score_min"), "default_score_min", source
     )

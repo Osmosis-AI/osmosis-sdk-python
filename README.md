@@ -181,7 +181,7 @@ def numeric_tolerance(solution_str: str, ground_truth: str, extra_info: dict = N
 
 - `examples/rubric_functions.py` demonstrates `evaluate_rubric` with OpenAI, Anthropic, Gemini, and xAI using the schema-enforced SDK integrations.
 - `examples/reward_functions.py` keeps local reward helpers that showcase the decorator contract without external calls.
-- `examples/rubric_configs.yaml` bundles two rubric definitions, each with its own provider configuration and extra prompt context.
+- `examples/rubric_configs.yaml` bundles two rubric definitions with provider configuration and scoring bounds.
 - `examples/sample_data.jsonl` contains two rubric-aligned solution strings so you can trial dataset validation.
 
 ```yaml
@@ -228,8 +228,9 @@ osmosis eval --rubric support_followup --data examples/sample_data.jsonl
 - Provide `--output path/to/dir` to create the directory (if needed) and emit `rubric_eval_result_<unix_timestamp>.json`, or supply a full file path (any extension) to control the filename; each file captures every run, provider payloads, timestamps, and aggregate statistics for downstream analysis.
 - Skip `--output` to collect results under `~/.cache/osmosis/eval_result/<rubric_id>/rubric_eval_result_<identifier>.json`; the CLI writes this JSON whether the evaluation finishes cleanly or hits provider/runtime errors so you can inspect failures later (only a manual Ctrl+C interrupt leaves no file behind).
 - Dataset rows whose `rubric_id` does not match the requested rubric are skipped automatically.
-- Each dataset record must provide a non-empty `solution_str`; optional fields such as `original_input`, `ground_truth`, and `extra_info` are merged with the rubric config when present.
-- When delegating to a custom `@osmosis_rubric` function, the CLI enriches `extra_info` with the active `provider`, `model`, `rubric`, score bounds, any configured `system_prompt`, the resolved `original_input`, and any dataset/config extras so the decorator’s required fields are always present.
+- Each dataset record must provide a non-empty `solution_str`; optional fields such as `original_input`, `ground_truth`, and `extra_info` travel with the record and are forwarded to the evaluator when present.
+- When delegating to a custom `@osmosis_rubric` function, the CLI enriches `extra_info` with the active `provider`, `model`, `rubric`, score bounds, any configured `system_prompt`, the resolved `original_input`, and the record’s metadata/extra fields so the decorator’s required entries are always present.
+- Rubric configuration files intentionally reject `extra_info`; provide per-example context through the dataset instead.
 
 Both commands validate the file, echo a short summary (`Loaded <n> ...`), and pretty-print the parsed records so you can confirm that new rubrics or test fixtures look correct before committing them. Invalid files raise a descriptive error and exit with a non-zero status code.
 

@@ -16,11 +16,6 @@ rubrics:
       model: gpt-5-mini
       api_key_env: OPENAI_API_KEY
       timeout: 45
-    extra_info:
-      prompt_extra_info:
-        product_line: AirPure
-        urgency_level: high
-        capture_details: true
 
   - id: policy_grounding
     title: Policy and Knowledge Grounding
@@ -38,9 +33,3 @@ rubrics:
       timeout: 60
     score_min: 0.0
     score_max: 10.0
-    extra_info:
-      prompt_extra_info:
-        policy_link: https://support.example.com/policies/subscriptions
-        disallowed_actions:
-          - Promise refunds without supervisor approval
-          - Offer custom contract terms

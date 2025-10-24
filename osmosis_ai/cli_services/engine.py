@@ -147,7 +147,7 @@ class RubricEvaluator:
                 api_key_env_value = default_env
 
         extra_info_payload = _prepare_extra_info_payload(
-            record.merged_extra_info(config.extra_info),
+            record.merged_extra_info(),
             rubric_text=config.rubric_text,
             provider=provider_value,
             model=model_value,

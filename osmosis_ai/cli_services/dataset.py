@@ -24,10 +24,8 @@ class DatasetRecord:
     score_min: Optional[float]
     score_max: Optional[float]
 
-    def merged_extra_info(self, config_extra: Optional[dict[str, Any]]) -> Optional[dict[str, Any]]:
+    def merged_extra_info(self) -> Optional[dict[str, Any]]:
         merged: dict[str, Any] = {}
-        if isinstance(config_extra, dict):
-            merged.update(copy.deepcopy(config_extra))
         if isinstance(self.extra_info, dict):
             merged.update(copy.deepcopy(self.extra_info))
         if isinstance(self.metadata, dict) and self.metadata:
