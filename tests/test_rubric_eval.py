@@ -38,3 +38,4 @@ def test_build_user_prompt_with_optional_sections() -> None:
 def test_select_text_prefers_first_non_empty() -> None:
     assert _select_text(None, "", "  value ", "fallback") == "value"
     assert _select_text(None, "  ") is None
+

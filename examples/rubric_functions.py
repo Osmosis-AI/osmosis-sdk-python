@@ -63,16 +63,13 @@ def score_with_hosted_model(
     """
     capture_details = bool(extra_info.get("capture_details"))
     prompt_extra = extra_info.get("prompt_extra_info")
-    provider = extra_info["provider"]
-    model = extra_info["model"]
-    rubric = extra_info["rubric"]
+    model_info = extra_info.get("model_info")
+    if not isinstance(model_info, dict):
+        raise TypeError("extra_info must include a 'model_info' mapping")
+
+    rubric = extra_info.get("rubric", RUBRIC)
     score_min = extra_info.get("score_min", SCORE_MIN)
     score_max = extra_info.get("score_max", SCORE_MAX)
-
-    model_info = {"provider": provider, "model": model}
-    model_info_overrides = extra_info.get("model_info_overrides")
-    if isinstance(model_info_overrides, dict):
-        model_info.update(model_info_overrides)
 
     result = evaluate_rubric(
         rubric=rubric,
@@ -101,13 +98,11 @@ def _run(provider_name: str, model_info: dict) -> None:
         if not isinstance(api_key_env, str) or not api_key_env.strip():
             api_key_env = f"{provider_id.upper()}_API_KEY"
         context: dict = {
-            "provider": provider_id,
-            "model": model_info["model"],
+            "model_info": {**model_info, "api_key_env": api_key_env},
             "rubric": RUBRIC,
             "score_min": SCORE_MIN,
             "score_max": SCORE_MAX,
             "capture_details": True,
-            "api_key_env": api_key_env,
         }
         score = score_with_hosted_model(
             solution_str=SOLUTION_STR,

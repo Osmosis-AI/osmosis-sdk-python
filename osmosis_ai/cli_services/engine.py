@@ -40,48 +40,34 @@ def _prepare_extra_info_payload(
 ) -> Optional[dict[str, Any]]:
     payload: dict[str, Any] = copy.deepcopy(base) if isinstance(base, dict) else {}
 
-    if provider is not None:
-        payload["provider"] = provider
-    else:
-        payload.pop("provider", None)
+    # Intentionally avoid propagating provider-specific credentials or connection details
+    # into the downstream prompt payload.
+    _ = provider, model, system_prompt, api_key, api_key_env
 
-    if model is not None:
-        payload["model"] = model
-    else:
-        payload.pop("model", None)
+    for key in (
+        "provider",
+        "model",
+        "model_id",
+        "model_info",
+        "api_key",
+        "api_key_env",
+        "system_prompt",
+        "timeout",
+        "base_url",
+        "api_base",
+    ):
+        payload.pop(key, None)
 
     if rubric_text:
         payload["rubric"] = rubric_text
     else:
         payload.pop("rubric", None)
 
-    if system_prompt is not None:
-        if system_prompt:
-            payload["system_prompt"] = system_prompt
-        else:
-            payload.pop("system_prompt", None)
-
     if original_input is not None:
         if isinstance(original_input, str) and original_input:
             payload["original_input"] = original_input
         else:
             payload.pop("original_input", None)
-
-    if api_key is not None:
-        if api_key:
-            existing = payload.get("api_key")
-            if not isinstance(existing, str) or not existing.strip():
-                payload["api_key"] = api_key
-        else:
-            payload.pop("api_key", None)
-
-    if api_key_env is not None:
-        if api_key_env:
-            existing_env = payload.get("api_key_env")
-            if not isinstance(existing_env, str) or not existing_env.strip():
-                payload["api_key_env"] = api_key_env
-        else:
-            payload.pop("api_key_env", None)
 
     if score_min is not None:
         payload["score_min"] = float(score_min)

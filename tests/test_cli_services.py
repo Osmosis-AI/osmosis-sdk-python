@@ -290,17 +290,18 @@ def test_rubric_evaluator_enriches_extra_info() -> None:
     assert "system_prompt" not in captured
 
     extra_info = captured["extra_info"]
-    assert extra_info["provider"] == "openai"
-    assert extra_info["model"] == "gpt-5-mini"
     assert extra_info["rubric"] == "Score how well the assistant resolves the issue."
-    assert extra_info["system_prompt"] == "System override prompt."
     assert extra_info["score_min"] == pytest.approx(0.0, abs=1e-12)
     assert extra_info["score_max"] == pytest.approx(1.0, abs=1e-12)
-    assert extra_info["api_key"] == "dummy"
     assert extra_info["prompt_extra_info"] == {"product": "AirPure"}
     assert extra_info["capture_details"] is True
     assert extra_info["dataset_metadata"] == {"channel": "chat"}
     assert extra_info["original_input"] == "Please help me troubleshoot my purifier."
+    assert "provider" not in extra_info
+    assert "model" not in extra_info
+    assert "api_key" not in extra_info
+    assert "api_key_env" not in extra_info
+    assert "system_prompt" not in extra_info
 
 
 def test_rubric_evaluator_overrides_conflicting_extra_info() -> None:
@@ -348,11 +349,12 @@ def test_rubric_evaluator_overrides_conflicting_extra_info() -> None:
     evaluator.run(config, record)
 
     extra_info = captured["extra_info"]
-    assert extra_info["provider"] == "openai"
-    assert extra_info["model"] == "gpt-5-mini"
     assert extra_info["rubric"] == "Judge response quality."
     assert extra_info["score_min"] == pytest.approx(0.0, abs=1e-12)
     assert extra_info["score_max"] == pytest.approx(1.0, abs=1e-12)
-    assert extra_info["api_key"] == "dummy"
     assert extra_info["capsule"] == "retain-me"
+    assert "provider" not in extra_info
+    assert "model" not in extra_info
+    assert "api_key" not in extra_info
+    assert "api_key_env" not in extra_info
     assert "system_prompt" not in extra_info
