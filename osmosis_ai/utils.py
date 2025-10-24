@@ -219,7 +219,7 @@ def osmosis_rubric(func: Callable) -> Callable:
     if ground_truth_param.name != "ground_truth":
         raise TypeError(f"Second parameter must be named 'ground_truth', got '{ground_truth_param.name}'")
     ground_truth_annotation = resolved_annotations.get(ground_truth_param.name, ground_truth_param.annotation)
-    if not (_is_str_annotation(ground_truth_annotation) or _is_optional_str(ground_truth_annotation)):
+    if not _is_optional_str(ground_truth_annotation):
         raise TypeError(
             f"Second parameter 'ground_truth' must be annotated as str or Optional[str], got {ground_truth_annotation}"
         )
