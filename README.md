@@ -122,7 +122,7 @@ Rubric functions decorated with `@osmosis_rubric` must match this signature:
 
 ```python
 @osmosis_rubric
-def your_rubric(solution_str: str, ground_truth: str, extra_info: dict) -> float:
+def your_rubric(solution_str: str, ground_truth: str | None, extra_info: dict) -> float:
     # Your rubric logic here
     return float_score
 ```
