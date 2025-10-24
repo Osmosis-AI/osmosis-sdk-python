@@ -9,7 +9,7 @@ def test_build_user_prompt_basic_blocks() -> None:
         candidate_output="The capital of France is Paris.",
         original_input=None,
         ground_truth=None,
-        extra_info=None,
+        metadata=None,
     )
 
     assert "Rubric:" in prompt
@@ -26,16 +26,15 @@ def test_build_user_prompt_with_optional_sections() -> None:
         candidate_output="Thank you for your patience!",
         original_input="Please draft a friendly reply.",
         ground_truth="Thanks for waiting!",
-        extra_info={"notes": "Consider politeness."},
+        metadata={"notes": "Consider politeness."},
     )
 
     assert "<<<BEGIN_ORIGINAL_INPUT>>>" in prompt
     assert "<<<BEGIN_GROUND_TRUTH>>>" in prompt
-    assert "<<<BEGIN_EXTRA_INFO>>>" in prompt
+    assert "<<<BEGIN_METADATA>>>" in prompt
     assert "Consider politeness." in prompt
 
 
 def test_select_text_prefers_first_non_empty() -> None:
     assert _select_text(None, "", "  value ", "fallback") == "value"
     assert _select_text(None, "  ") is None
-

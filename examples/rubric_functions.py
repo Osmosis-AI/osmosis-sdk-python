@@ -62,7 +62,7 @@ def score_with_hosted_model(
     Delegate rubric scoring to a hosted model while keeping @osmosis_rubric validation.
     """
     capture_details = bool(extra_info.get("capture_details"))
-    prompt_extra = extra_info.get("prompt_extra_info")
+    prompt_metadata = extra_info.get("metadata")
     model_info = extra_info.get("model_info")
     if not isinstance(model_info, dict):
         raise TypeError("extra_info must include a 'model_info' mapping")
@@ -76,7 +76,7 @@ def score_with_hosted_model(
         solution_str=solution_str,
         model_info=model_info,
         ground_truth=ground_truth,
-        extra_info=prompt_extra,
+        metadata=prompt_metadata,
         score_min=score_min,
         score_max=score_max,
         return_details=capture_details,

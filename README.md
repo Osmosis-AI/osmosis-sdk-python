@@ -80,7 +80,7 @@ Override the environment variable name with `model_info={"api_key_env": "CUSTOM_
 - `system_prompt` / `original_input` – provide optional context strings that will be quoted in the judging prompt.
 - `timeout` – customise the provider timeout in seconds.
 
-Pass `extra_info={...}` to `evaluate_rubric` when you need structured context quoted in the judge prompt, and set `return_details=True` to receive the full `RewardRubricRunResult` payload (including the provider’s raw response).
+Pass `metadata={...}` to `evaluate_rubric` when you need structured context quoted in the judge prompt, and set `return_details=True` to receive the full `RewardRubricRunResult` payload (including the provider’s raw response).
 
 Remote failures surface as `ProviderRequestError` instances, with `ModelNotFoundError` reserved for missing model identifiers so you can retry with a new snapshot.
 
@@ -146,7 +146,7 @@ Additional keys are passthrough and can be used for custom configuration. If you
 
 > Annotation quirk: `extra_info` must be annotated as `dict` **without** a default value, unlike `@osmosis_reward`.
 
-> Tip: When delegating to `evaluate_rubric`, pass the raw `solution_str` directly and include any extra context inside `extra_info`.
+> Tip: When delegating to `evaluate_rubric`, pass the raw `solution_str` directly and include any extra context inside the `metadata` payload.
 
 ## Examples
 

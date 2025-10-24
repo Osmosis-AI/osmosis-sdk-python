@@ -76,45 +76,23 @@ def _compose_extra_info_context(
             model_info_copy["api_key_env"] = api_key_env
     decorated_payload["model_info"] = model_info_copy
 
-    prompt_payload = copy.deepcopy(decorated_payload)
-    for key in (
-        "provider",
-        "model",
-        "model_id",
-        "model_info",
-        "api_key",
-        "api_key_env",
-        "system_prompt",
-        "timeout",
-        "base_url",
-        "api_base",
-    ):
-        prompt_payload.pop(key, None)
+    prompt_payload: Optional[dict[str, Any]] = None
+    base_metadata = decorated_payload.get("metadata")
+    if isinstance(base_metadata, dict):
+        prompt_payload = copy.deepcopy(base_metadata)
+    elif base_metadata is not None:
+        prompt_payload = dict(base_metadata)
 
-    if rubric_text:
-        prompt_payload["rubric"] = rubric_text
+    dataset_metadata = decorated_payload.get("dataset_metadata")
+    if isinstance(dataset_metadata, dict):
+        if prompt_payload is None:
+            prompt_payload = {}
+        prompt_payload.setdefault("dataset_metadata", copy.deepcopy(dataset_metadata))
+
+    if prompt_payload is not None:
+        decorated_payload["metadata"] = copy.deepcopy(prompt_payload)
     else:
-        prompt_payload.pop("rubric", None)
-
-    if original_input is not None:
-        if isinstance(original_input, str) and original_input:
-            prompt_payload["original_input"] = original_input
-        else:
-            prompt_payload.pop("original_input", None)
-
-    if score_min is not None:
-        prompt_payload["score_min"] = float(score_min)
-    else:
-        prompt_payload.pop("score_min", None)
-
-    if score_max is not None:
-        prompt_payload["score_max"] = float(score_max)
-    else:
-        prompt_payload.pop("score_max", None)
-
-    prompt_payload = prompt_payload or None
-    if prompt_payload is not None and not isinstance(prompt_payload, dict):
-        prompt_payload = dict(prompt_payload)
+        decorated_payload.pop("metadata", None)
 
     return decorated_payload, prompt_payload
 
@@ -178,7 +156,7 @@ class RubricEvaluator:
             else:
                 model_info_payload.pop("system_prompt", None)
 
-            decorated_extra, prompt_extra = _compose_extra_info_context(
+            decorated_extra, prompt_metadata = _compose_extra_info_context(
                 record.merged_extra_info(),
                 rubric_text=config.rubric_text,
                 provider=provider_value,
@@ -206,7 +184,7 @@ class RubricEvaluator:
                     model_info=model_info_payload,
                     ground_truth=ground_truth,
                     original_input=original_input,
-                    extra_info=prompt_extra,
+                    metadata=prompt_metadata,
                     score_min=score_min,
                     score_max=score_max,
                     return_details=True,
