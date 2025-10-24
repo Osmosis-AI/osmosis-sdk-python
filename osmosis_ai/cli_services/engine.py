@@ -6,6 +6,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+import inspect
 from typing import Any, Optional, Sequence
 
 from tqdm import tqdm
@@ -25,7 +26,7 @@ def _normalize_config_str(value: Any) -> Optional[str]:
     return text or None
 
 
-def _prepare_extra_info_payload(
+def _compose_extra_info_context(
     base: Optional[dict[str, Any]],
     *,
     rubric_text: str,
@@ -37,13 +38,45 @@ def _prepare_extra_info_payload(
     api_key_env: Optional[str],
     score_min: Optional[float],
     score_max: Optional[float],
-) -> Optional[dict[str, Any]]:
-    payload: dict[str, Any] = copy.deepcopy(base) if isinstance(base, dict) else {}
+    model_info: dict[str, Any],
+) -> tuple[dict[str, Any], Optional[dict[str, Any]]]:
+    """
+    Build the runtime context passed to rubric functions along with a sanitised
+    copy safe for prompt injection.
+    """
+    base_payload = copy.deepcopy(base) if isinstance(base, dict) else {}
+    decorated_payload = copy.deepcopy(base_payload)
 
-    # Intentionally avoid propagating provider-specific credentials or connection details
-    # into the downstream prompt payload.
-    _ = provider, model, system_prompt, api_key, api_key_env
+    if provider:
+        decorated_payload["provider"] = provider
+    if model:
+        decorated_payload["model"] = model
+    if api_key:
+        decorated_payload["api_key"] = api_key
+        decorated_payload.pop("api_key_env", None)
+    elif api_key_env:
+        decorated_payload["api_key_env"] = api_key_env
+        decorated_payload.pop("api_key", None)
+    if rubric_text:
+        decorated_payload["rubric"] = rubric_text
+    if score_min is not None:
+        decorated_payload["score_min"] = float(score_min)
+    if score_max is not None:
+        decorated_payload["score_max"] = float(score_max)
+    if system_prompt:
+        decorated_payload["system_prompt"] = system_prompt
+    if original_input and isinstance(original_input, str):
+        decorated_payload.setdefault("original_input", original_input)
 
+    model_info_copy = copy.deepcopy(model_info)
+    if isinstance(model_info_copy, dict):
+        if api_key and "api_key" not in model_info_copy:
+            model_info_copy["api_key"] = api_key
+        if api_key_env and "api_key_env" not in model_info_copy:
+            model_info_copy["api_key_env"] = api_key_env
+    decorated_payload["model_info"] = model_info_copy
+
+    prompt_payload = copy.deepcopy(decorated_payload)
     for key in (
         "provider",
         "model",
@@ -56,30 +89,34 @@ def _prepare_extra_info_payload(
         "base_url",
         "api_base",
     ):
-        payload.pop(key, None)
+        prompt_payload.pop(key, None)
 
     if rubric_text:
-        payload["rubric"] = rubric_text
+        prompt_payload["rubric"] = rubric_text
     else:
-        payload.pop("rubric", None)
+        prompt_payload.pop("rubric", None)
 
     if original_input is not None:
         if isinstance(original_input, str) and original_input:
-            payload["original_input"] = original_input
+            prompt_payload["original_input"] = original_input
         else:
-            payload.pop("original_input", None)
+            prompt_payload.pop("original_input", None)
 
     if score_min is not None:
-        payload["score_min"] = float(score_min)
+        prompt_payload["score_min"] = float(score_min)
     else:
-        payload.pop("score_min", None)
+        prompt_payload.pop("score_min", None)
 
     if score_max is not None:
-        payload["score_max"] = float(score_max)
+        prompt_payload["score_max"] = float(score_max)
     else:
-        payload.pop("score_max", None)
+        prompt_payload.pop("score_max", None)
 
-    return payload or None
+    prompt_payload = prompt_payload or None
+    if prompt_payload is not None and not isinstance(prompt_payload, dict):
+        prompt_payload = dict(prompt_payload)
+
+    return decorated_payload, prompt_payload
 
 
 def _merge_system_prompts(
@@ -132,19 +169,6 @@ class RubricEvaluator:
             if default_env:
                 api_key_env_value = default_env
 
-        extra_info_payload = _prepare_extra_info_payload(
-            record.merged_extra_info(),
-            rubric_text=config.rubric_text,
-            provider=provider_value,
-            model=model_value,
-            system_prompt=system_prompt_value,
-            original_input=original_input,
-            api_key=api_key_value,
-            api_key_env=api_key_env_value,
-            score_min=score_min,
-            score_max=score_max,
-        )
-
         try:
             model_info_payload = copy.deepcopy(config.model_info)
             base_system_prompt = _normalize_config_str(model_info_payload.get("system_prompt"))
@@ -154,17 +178,64 @@ class RubricEvaluator:
             else:
                 model_info_payload.pop("system_prompt", None)
 
-            return self._evaluate_fn(
-                rubric=config.rubric_text,
-                solution_str=solution,
-                model_info=model_info_payload,
-                ground_truth=ground_truth,
+            decorated_extra, prompt_extra = _compose_extra_info_context(
+                record.merged_extra_info(),
+                rubric_text=config.rubric_text,
+                provider=provider_value,
+                model=model_value,
+                system_prompt=system_prompt_value,
                 original_input=original_input,
-                extra_info=extra_info_payload,
+                api_key=api_key_value,
+                api_key_env=api_key_env_value,
                 score_min=score_min,
                 score_max=score_max,
-                return_details=True,
+                model_info=model_info_payload,
             )
+
+            signature = inspect.signature(self._evaluate_fn)
+            parameters = signature.parameters
+            accepts_var_kwargs = any(
+                param.kind == inspect.Parameter.VAR_KEYWORD for param in parameters.values()
+            )
+            is_evaluate_rubric_style = accepts_var_kwargs or "rubric" in parameters or "model_info" in parameters
+
+            if is_evaluate_rubric_style:
+                return self._evaluate_fn(
+                    rubric=config.rubric_text,
+                    solution_str=solution,
+                    model_info=model_info_payload,
+                    ground_truth=ground_truth,
+                    original_input=original_input,
+                    extra_info=prompt_extra,
+                    score_min=score_min,
+                    score_max=score_max,
+                    return_details=True,
+                )
+
+            call_args: list[Any] = []
+            call_kwargs: dict[str, Any] = {}
+            for param in parameters.values():
+                if param.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD):
+                    continue
+
+                if param.name == "solution_str":
+                    value = solution
+                elif param.name == "ground_truth":
+                    value = ground_truth
+                elif param.name == "extra_info":
+                    value = decorated_extra
+                else:
+                    continue
+
+                if param.kind in (
+                    inspect.Parameter.POSITIONAL_ONLY,
+                    inspect.Parameter.POSITIONAL_OR_KEYWORD,
+                ):
+                    call_args.append(value)
+                else:
+                    call_kwargs[param.name] = value
+
+            return self._evaluate_fn(*call_args, **call_kwargs)
         except (MissingAPIKeyError, ProviderRequestError, ModelNotFoundError) as exc:
             raise CLIError(str(exc)) from exc
 

@@ -1,9 +1,11 @@
+import copy
 import json
 from pathlib import Path
 from typing import Any
 
 import pytest
 
+from osmosis_ai import osmosis_rubric
 from osmosis_ai.cli_services import CLIError
 from osmosis_ai.cli_services.config import RubricConfig, load_rubric_suite
 from osmosis_ai.cli_services.dataset import DatasetLoader, DatasetRecord
@@ -358,3 +360,64 @@ def test_rubric_evaluator_overrides_conflicting_extra_info() -> None:
     assert "api_key" not in extra_info
     assert "api_key_env" not in extra_info
     assert "system_prompt" not in extra_info
+
+
+def test_rubric_evaluator_passes_required_context_to_decorated_functions() -> None:
+    captured: dict[str, Any] = {}
+
+    @osmosis_rubric
+    def fake_rubric(solution_str: str, ground_truth: str, extra_info: dict) -> float:
+        captured["solution_str"] = solution_str
+        captured["ground_truth"] = ground_truth
+        captured["extra_info"] = copy.deepcopy(extra_info)
+        return 0.5
+
+    evaluator = RubricEvaluator(evaluate_fn=fake_rubric)
+
+    record = DatasetRecord(
+        payload={},
+        rubric_id="support_followup",
+        conversation_id="conv-002",
+        record_id=None,
+        solution_str="Assistant reply",
+        ground_truth=None,
+        original_input="Original request.",
+        metadata={"channel": "chat"},
+        extra_info={"prompt_extra_info": {"product": "AirPure"}, "capture_details": True},
+        score_min=None,
+        score_max=None,
+    )
+
+    config = RubricConfig(
+        rubric_id="support_followup",
+        rubric_text="Judge response quality.",
+        model_info={"provider": "openai", "model": "gpt-5-mini"},
+        score_min=0.0,
+        score_max=1.0,
+        system_prompt="Judge fairly.",
+        original_input=None,
+        ground_truth="Reference answer.",
+        source_label="tests",
+    )
+
+    result = evaluator.run(config, record)
+
+    assert result == 0.5
+    assert captured["solution_str"] == "Assistant reply"
+    assert captured["ground_truth"] == "Reference answer."
+
+    extra_info = captured["extra_info"]
+    assert extra_info["provider"] == "openai"
+    assert extra_info["model"] == "gpt-5-mini"
+    assert extra_info["api_key_env"] == "OPENAI_API_KEY"
+    assert extra_info["rubric"] == "Judge response quality."
+    assert extra_info["score_min"] == pytest.approx(0.0, abs=1e-12)
+    assert extra_info["score_max"] == pytest.approx(1.0, abs=1e-12)
+    assert extra_info["system_prompt"] == "Judge fairly."
+    assert extra_info["original_input"] == "Original request."
+    assert extra_info["model_info"]["provider"] == "openai"
+    assert extra_info["model_info"]["model"] == "gpt-5-mini"
+    assert extra_info["model_info"]["api_key_env"] == "OPENAI_API_KEY"
+    assert extra_info["prompt_extra_info"] == {"product": "AirPure"}
+    assert extra_info["capture_details"] is True
+    assert extra_info["dataset_metadata"] == {"channel": "chat"}

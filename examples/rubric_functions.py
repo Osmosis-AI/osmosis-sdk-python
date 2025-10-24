@@ -94,10 +94,18 @@ def score_with_hosted_model(
 def _run(provider_name: str, model_info: dict) -> None:
     try:
         provider_id = model_info["provider"]
+        model_name = model_info["model"]
         api_key_env = model_info.get("api_key_env")
         if not isinstance(api_key_env, str) or not api_key_env.strip():
-            api_key_env = f"{provider_id.upper()}_API_KEY"
+            provider_env_defaults = {"gemini": "GOOGLE_API_KEY"}
+            provider_key = provider_id.strip().lower()
+            api_key_env = provider_env_defaults.get(provider_key)
+            if not api_key_env:
+                api_key_env = f"{provider_key.upper()}_API_KEY"
         context: dict = {
+            "provider": provider_id,
+            "model": model_name,
+            "api_key_env": api_key_env,
             "model_info": {**model_info, "api_key_env": api_key_env},
             "rubric": RUBRIC,
             "score_min": SCORE_MIN,
