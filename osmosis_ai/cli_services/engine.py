@@ -66,7 +66,7 @@ def _compose_extra_info_context(
     if system_prompt:
         decorated_payload["system_prompt"] = system_prompt
     if original_input and isinstance(original_input, str):
-        decorated_payload.setdefault("original_input", original_input)
+        decorated_payload["original_input"] = original_input
 
     model_info_copy = copy.deepcopy(model_info)
     if isinstance(model_info_copy, dict):
