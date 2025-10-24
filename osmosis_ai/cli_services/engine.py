@@ -338,15 +338,25 @@ class RubricEvaluationEngine:
                     duration_seconds = time.perf_counter() - timer_start
                     completed_at = datetime.now(timezone.utc)
 
-                    if status == "success" and isinstance(result, dict):
-                        raw_payload = result.get("raw")
-                        score_value = _extract_float(result.get("score"))
-                        explanation_value = _normalize_optional_text(result.get("explanation"))
-                        preview_value = self._resolve_preview_text(result, fallback_preview)
-                        if score_value is not None:
-                            scores.append(score_value)
-                            aggregate_scores.append(score_value)
-                            total_successes += 1
+                    if status == "success":
+                        if isinstance(result, dict):
+                            raw_payload = result.get("raw")
+                            score_value = _extract_float(result.get("score"))
+                            explanation_value = _normalize_optional_text(result.get("explanation"))
+                            preview_value = self._resolve_preview_text(result, fallback_preview)
+                            if score_value is not None:
+                                scores.append(score_value)
+                                aggregate_scores.append(score_value)
+                                total_successes += 1
+                        else:
+                            preview_value = fallback_preview
+                            numeric_score = _extract_float(result)
+                            if numeric_score is not None:
+                                score_value = numeric_score
+                                raw_payload = result
+                                scores.append(score_value)
+                                aggregate_scores.append(score_value)
+                                total_successes += 1
                     else:
                         preview_value = fallback_preview
 
