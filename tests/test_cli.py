@@ -86,9 +86,9 @@ def test_eval_command_output_json(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
 
     jsonl_content = (
-        '{"rubric_id": "support_followup", "conversation_id": "conv-001", "messages": '
-        '[{"role": "user", "content": "Help me with my device."}, '
-        '{"role": "assistant", "content": "Sure, let\'s troubleshoot."}]}\n'
+        '{"rubric_id": "support_followup", "conversation_id": "conv-001", '
+        '"original_input": "Help me with my device.", '
+        '"solution_str": "Sure, let\'s troubleshoot."}\n'
     )
     data_path = tmp_path / "records.jsonl"
     data_path.write_text(jsonl_content, encoding="utf-8")
@@ -178,9 +178,9 @@ def test_eval_command_missing_api_key_fails_fast(tmp_path, monkeypatch, capsys):
     config_path.write_text(config_content, encoding="utf-8")
 
     jsonl_content = (
-        '{"rubric_id": "support_followup", "conversation_id": "conv-001", "messages": '
-        '[{"role": "user", "content": "Help me with my device."}, '
-        '{"role": "assistant", "content": "Sure, let\'s troubleshoot."}]}\n'
+        '{"rubric_id": "support_followup", "conversation_id": "conv-001", '
+        '"original_input": "Help me with my device.", '
+        '"solution_str": "Sure, let\'s troubleshoot."}\n'
     )
     data_path = tmp_path / "records.jsonl"
     data_path.write_text(jsonl_content, encoding="utf-8")
@@ -216,9 +216,9 @@ def test_eval_command_with_baseline(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
 
     jsonl_content = (
-        '{"rubric_id": "support_followup", "conversation_id": "conv-001", "messages": '
-        '[{"role": "user", "content": "Help me with my device."}, '
-        '{"role": "assistant", "content": "Sure, let\'s troubleshoot."}]}\n'
+        '{"rubric_id": "support_followup", "conversation_id": "conv-001", '
+        '"original_input": "Help me with my device.", '
+        '"solution_str": "Sure, let\'s troubleshoot."}\n'
     )
     data_path = tmp_path / "records.jsonl"
     data_path.write_text(jsonl_content, encoding="utf-8")
@@ -303,9 +303,9 @@ def test_eval_command_output_json_custom_file_path(tmp_path, monkeypatch, capsys
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
 
     jsonl_content = (
-        '{"rubric_id": "support_followup", "conversation_id": "conv-001", "messages": '
-        '[{"role": "user", "content": "Help me with my device."}, '
-        '{"role": "assistant", "content": "Sure, let\'s troubleshoot."}]}\n'
+        '{"rubric_id": "support_followup", "conversation_id": "conv-001", '
+        '"original_input": "Help me with my device.", '
+        '"solution_str": "Sure, let\'s troubleshoot."}\n'
     )
     data_path = tmp_path / "records.jsonl"
     data_path.write_text(jsonl_content, encoding="utf-8")
@@ -480,10 +480,8 @@ def test_eval_command_output_path_directory_with_suffix(tmp_path, capsys):
     record = {
         "rubric_id": "support_followup",
         "conversation_id": "conv-001",
-        "messages": [
-            {"role": "user", "content": "Hi"},
-            {"role": "assistant", "content": "Hello"},
-        ],
+        "original_input": "Hi",
+        "solution_str": "Hello",
     }
     data_path = tmp_path / "records.jsonl"
     data_path.write_text(json.dumps(record), encoding="utf-8")

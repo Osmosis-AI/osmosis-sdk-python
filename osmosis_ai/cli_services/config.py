@@ -25,7 +25,7 @@ class RubricConfig:
     model_info: dict[str, Any]
     score_min: Optional[float]
     score_max: Optional[float]
-    system_message: Optional[str]
+    system_prompt: Optional[str]
     extra_info: Optional[dict[str, Any]]
     original_input: Optional[str]
     ground_truth: Optional[str]
@@ -247,8 +247,20 @@ def _build_document_configs(
                 raise
             continue
 
-        system_message = payload.get("system_message", defaults.get("system_message"))
+        system_prompt = payload.get("system_prompt", defaults.get("system_prompt"))
+
         original_input = payload.get("original_input", defaults.get("original_input"))
+        if not isinstance(original_input, str):
+            original_input = None
+        if original_input is None:
+            sources = [extra_info_value, defaults.get("extra_info")]
+            for source in sources:
+                if isinstance(source, dict):
+                    nested_original = source.get("original_input")
+                    if isinstance(nested_original, str):
+                        original_input = nested_original
+                        break
+
         ground_truth = payload.get("ground_truth", defaults.get("ground_truth"))
 
         label = item.label or f"document[{doc_index}]"
@@ -260,9 +272,9 @@ def _build_document_configs(
             model_info=copy.deepcopy(model_info),
             score_min=score_min,
             score_max=score_max,
-            system_message=system_message if isinstance(system_message, str) else None,
+            system_prompt=system_prompt if isinstance(system_prompt, str) else None,
             extra_info=copy.deepcopy(extra_info_value) if isinstance(extra_info_value, dict) else None,
-            original_input=original_input if isinstance(original_input, str) else None,
+            original_input=original_input,
             ground_truth=ground_truth if isinstance(ground_truth, str) else None,
             source_label=source_label,
         )
@@ -350,7 +362,7 @@ def _extract_config_defaults(document: Any, path: Path, doc_index: int) -> dict[
             "extra_info": None,
             "score_min": None,
             "score_max": None,
-            "system_message": None,
+            "system_prompt": None,
             "original_input": None,
             "ground_truth": None,
         }
@@ -366,7 +378,7 @@ def _extract_config_defaults(document: Any, path: Path, doc_index: int) -> dict[
     defaults["score_max"] = coerce_optional_float(
         document.get("default_score_max"), "default_score_max", source
     )
-    defaults["system_message"] = document.get("default_system_message")
+    defaults["system_prompt"] = document.get("default_system_prompt")
     defaults["original_input"] = document.get("default_original_input")
     defaults["ground_truth"] = document.get("default_ground_truth")
     return defaults

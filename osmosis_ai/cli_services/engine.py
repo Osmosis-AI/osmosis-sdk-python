@@ -10,12 +10,104 @@ from typing import Any, Optional, Sequence
 
 from tqdm import tqdm
 
-from ..rubric_eval import evaluate_rubric
+from ..rubric_eval import DEFAULT_API_KEY_ENV, evaluate_rubric
 from ..rubric_types import MissingAPIKeyError, ModelNotFoundError, ProviderRequestError
 from .config import RubricConfig
 from .dataset import DatasetRecord
 from .errors import CLIError
 from .shared import calculate_statistics, coerce_optional_float, collapse_preview_text
+
+
+def _normalize_config_str(value: Any) -> Optional[str]:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
+def _prepare_extra_info_payload(
+    base: Optional[dict[str, Any]],
+    *,
+    rubric_text: str,
+    provider: Optional[str],
+    model: Optional[str],
+    system_prompt: Optional[str],
+    original_input: Optional[str],
+    api_key: Optional[str],
+    api_key_env: Optional[str],
+    score_min: Optional[float],
+    score_max: Optional[float],
+) -> Optional[dict[str, Any]]:
+    payload: dict[str, Any] = copy.deepcopy(base) if isinstance(base, dict) else {}
+
+    if provider is not None:
+        payload["provider"] = provider
+    else:
+        payload.pop("provider", None)
+
+    if model is not None:
+        payload["model"] = model
+    else:
+        payload.pop("model", None)
+
+    if rubric_text:
+        payload["rubric"] = rubric_text
+    else:
+        payload.pop("rubric", None)
+
+    if system_prompt is not None:
+        if system_prompt:
+            payload["system_prompt"] = system_prompt
+        else:
+            payload.pop("system_prompt", None)
+
+    if original_input is not None:
+        if isinstance(original_input, str) and original_input:
+            payload["original_input"] = original_input
+        else:
+            payload.pop("original_input", None)
+
+    if api_key is not None:
+        if api_key:
+            existing = payload.get("api_key")
+            if not isinstance(existing, str) or not existing.strip():
+                payload["api_key"] = api_key
+        else:
+            payload.pop("api_key", None)
+
+    if api_key_env is not None:
+        if api_key_env:
+            existing_env = payload.get("api_key_env")
+            if not isinstance(existing_env, str) or not existing_env.strip():
+                payload["api_key_env"] = api_key_env
+        else:
+            payload.pop("api_key_env", None)
+
+    if score_min is not None:
+        payload["score_min"] = float(score_min)
+    else:
+        payload.pop("score_min", None)
+
+    if score_max is not None:
+        payload["score_max"] = float(score_max)
+    else:
+        payload.pop("score_max", None)
+
+    return payload or None
+
+
+def _merge_system_prompts(
+    prepend_prompt: Optional[str],
+    base_prompt: Optional[str],
+) -> Optional[str]:
+    prompts: list[str] = []
+    if prepend_prompt:
+        prompts.append(prepend_prompt)
+    if base_prompt:
+        prompts.append(base_prompt)
+    if not prompts:
+        return None
+    return "\n\n".join(prompts)
 
 
 class RubricEvaluator:
@@ -25,10 +117,10 @@ class RubricEvaluator:
         self._evaluate_fn = evaluate_fn
 
     def run(self, config: RubricConfig, record: DatasetRecord) -> dict[str, Any]:
-        messages = record.message_payloads()
-        if not messages:
+        solution = record.solution_str
+        if not isinstance(solution, str) or not solution.strip():
             label = record.conversation_id or record.rubric_id or "<record>"
-            raise CLIError(f"Record '{label}' must include a non-empty 'messages' list.")
+            raise CLIError(f"Record '{label}' must include a non-empty 'solution_str' string.")
 
         score_min = coerce_optional_float(
             record.score_min if record.score_min is not None else config.score_min,
@@ -41,15 +133,48 @@ class RubricEvaluator:
             f"record '{record.conversation_id or '<record>'}'",
         )
 
+        ground_truth = record.ground_truth if record.ground_truth is not None else config.ground_truth
+        original_input = record.original_input if record.original_input is not None else config.original_input
+
+        provider_value = _normalize_config_str(config.model_info.get("provider"))
+        model_value = _normalize_config_str(config.model_info.get("model"))
+        system_prompt_value = _normalize_config_str(config.system_prompt)
+        api_key_value = _normalize_config_str(config.model_info.get("api_key"))
+        api_key_env_value = _normalize_config_str(config.model_info.get("api_key_env"))
+        if api_key_env_value is None and provider_value:
+            default_env = DEFAULT_API_KEY_ENV.get(provider_value.lower())
+            if default_env:
+                api_key_env_value = default_env
+
+        extra_info_payload = _prepare_extra_info_payload(
+            record.merged_extra_info(config.extra_info),
+            rubric_text=config.rubric_text,
+            provider=provider_value,
+            model=model_value,
+            system_prompt=system_prompt_value,
+            original_input=original_input,
+            api_key=api_key_value,
+            api_key_env=api_key_env_value,
+            score_min=score_min,
+            score_max=score_max,
+        )
+
         try:
+            model_info_payload = copy.deepcopy(config.model_info)
+            base_system_prompt = _normalize_config_str(model_info_payload.get("system_prompt"))
+            combined_system_prompt = _merge_system_prompts(system_prompt_value, base_system_prompt)
+            if combined_system_prompt is not None:
+                model_info_payload["system_prompt"] = combined_system_prompt
+            else:
+                model_info_payload.pop("system_prompt", None)
+
             return self._evaluate_fn(
                 rubric=config.rubric_text,
-                messages=messages,
-                model_info=copy.deepcopy(config.model_info),
-                ground_truth=record.ground_truth if record.ground_truth is not None else config.ground_truth,
-                system_message=record.system_message if record.system_message is not None else config.system_message,
-                original_input=record.original_input if record.original_input is not None else config.original_input,
-                extra_info=record.merged_extra_info(config.extra_info),
+                solution_str=solution,
+                model_info=model_info_payload,
+                ground_truth=ground_truth,
+                original_input=original_input,
+                extra_info=extra_info_payload,
                 score_min=score_min,
                 score_max=score_max,
                 return_details=True,

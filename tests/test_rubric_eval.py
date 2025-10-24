@@ -1,127 +1,40 @@
-from __future__ import annotations
-
-from osmosis_ai.rubric_eval import _collect_text_from_message
+from osmosis_ai.rubric_eval import _build_user_prompt, _select_text
 
 
-def test_collect_text_skips_metadata_fields() -> None:
-    message = {
-        "type": "message",
-        "role": "assistant",
-        "content": [
-            {
-                "type": "output_text",
-                "text": "Hello world",
-                "id": "chunk-1",
-                "finish_reason": "stop",
-            }
-        ],
-    }
-
-    assert _collect_text_from_message(message) == "Hello world"
-
-
-def test_collect_text_includes_nested_tool_results() -> None:
-    message = {
-        "type": "message",
-        "role": "assistant",
-        "content": [
-            {
-                "type": "tool_result",
-                "tool_call_id": "call-123",
-                "content": [
-                    {
-                        "type": "output_text",
-                        "text": {"value": "Primary answer."},
-                    },
-                    {
-                        "type": "text",
-                        "text": " Additional context. ",
-                    },
-                ],
-            }
-        ],
-    }
-
-    assert _collect_text_from_message(message) == "Primary answer. Additional context."
-
-
-def test_collect_text_preserves_order_across_blocks() -> None:
-    message = {
-        "type": "message",
-        "role": "assistant",
-        "content": [
-            {"type": "output_text", "text": "First sentence."},
-            {
-                "type": "output_text",
-                "text": {
-                    "value": "Second sentence.",
-                    "content": [{"type": "text", "text": " (nested)"}],
-                },
-            },
-            {
-                "type": "message",
-                "parts": [
-                    {"type": "text", "text": " Third sentence"},
-                    {"type": "text", "text": " with wrapper."},
-                ],
-            },
-        ],
-    }
-
-    assert (
-        _collect_text_from_message(message)
-        == "First sentence. Second sentence. (nested) Third sentence with wrapper."
+def test_build_user_prompt_basic_blocks() -> None:
+    prompt = _build_user_prompt(
+        rubric_prompt="Score factual accuracy.",
+        score_min=0.0,
+        score_max=1.0,
+        candidate_output="The capital of France is Paris.",
+        original_input=None,
+        ground_truth=None,
+        extra_info=None,
     )
 
-
-def test_collect_text_ignores_metadata_strings() -> None:
-    message = {
-        "type": "message",
-        "role": "assistant",
-        "content": [
-            {
-                "type": "output_text",
-                "text": "Valid content.",
-                "finish_reason": "stop",
-                "role": "assistant",
-                "name": "response",
-                "id": "abc123",
-            },
-            {
-                "type": "tool_result",
-                "content": [
-                    {
-                        "type": "text",
-                        "text": "Follow-up content.",
-                        "reason": "additional",
-                        "tool_call_id": "tool-001",
-                    }
-                ],
-            },
-        ],
-    }
-
-    assert _collect_text_from_message(message) == "Valid content. Follow-up content."
+    assert "Rubric:" in prompt
+    assert "Score range: 0.0 to 1.0." in prompt
+    assert "<<<BEGIN_CANDIDATE_OUTPUT>>>" in prompt
+    assert "The capital of France is Paris." in prompt
 
 
-def test_collect_text_handles_non_string_values_gracefully() -> None:
-    message = {
-        "type": "message",
-        "role": "assistant",
-        "content": [
-            {
-                "type": "output_text",
-                "text": "Lead text",
-                "metadata": {"score": 0.75, "tags": ["info", {"nested": "value"}]},
-            },
-            {
-                "type": "message",
-                "content": [
-                    {"type": "text", "text": " trailing text "},
-                    {"type": "text", "text": 1234},  # type: ignore[arg-type]
-                ],
-            },
-        ],
-    }
+def test_build_user_prompt_with_optional_sections() -> None:
+    prompt = _build_user_prompt(
+        rubric_prompt="Score the tone.",
+        score_min=0.0,
+        score_max=5.0,
+        candidate_output="Thank you for your patience!",
+        original_input="Please draft a friendly reply.",
+        ground_truth="Thanks for waiting!",
+        extra_info={"notes": "Consider politeness."},
+    )
 
-    assert _collect_text_from_message(message) == "Lead text trailing text"
+    assert "<<<BEGIN_ORIGINAL_INPUT>>>" in prompt
+    assert "<<<BEGIN_GROUND_TRUTH>>>" in prompt
+    assert "<<<BEGIN_EXTRA_INFO>>>" in prompt
+    assert "Consider politeness." in prompt
+
+
+def test_select_text_prefers_first_non_empty() -> None:
+    assert _select_text(None, "", "  value ", "fallback") == "value"
+    assert _select_text(None, "  ") is None

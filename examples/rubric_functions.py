@@ -38,66 +38,13 @@ RUBRIC = (
 SCORE_MIN = 0.0
 SCORE_MAX = 1.0
 
-MESSAGES = [
-    {
-        "type": "message",
-        "role": "user",
-        "content": [
-            {
-                "type": "input_text",
-                "text": (
-                    "My AirPure X2 purifier stopped working. The power light keeps blinking "
-                    "and I really need it running before guests arrive tomorrow. Can you help?"
-                ),
-            }
-        ],
-    },
-    {
-        "type": "message",
-        "role": "assistant",
-        "content": [
-            {
-                "type": "output_text",
-                "text": (
-                    "Absolutely—I can help troubleshoot this. To confirm your warranty status, "
-                    "could you share the order number or the phone number used for purchase? "
-                    "Also, is the blinking light red or green, and have you tried any steps like "
-                    "power cycling or checking the filter yet?"
-                ),
-            }
-        ],
-    },
-    {
-        "type": "message",
-        "role": "user",
-        "content": [
-            {
-                "type": "input_text",
-                "text": (
-                    "The order number is 81234-AX2. The power light is a slow red blink. I replaced "
-                    "the filter yesterday but haven't done anything else."
-                ),
-            }
-        ],
-    },
-    {
-        "type": "message",
-        "role": "assistant",
-        "content": [
-            {
-                "type": "output_text",
-                "text": (
-                    "Thanks, that order number shows you are still under warranty. A red slow blink "
-                    "usually means the fan safety cut-off engaged. Please unplug the purifier, remove "
-                    "the base panel, and check if any packing foam or debris is touching the fan blades. "
-                    "If the fan moves freely, plug it back in after five minutes to clear the sensor. "
-                    "If it still blinks, I can schedule a technician tomorrow morning—does that fit your "
-                    "timeline before your guests arrive?"
-                ),
-            }
-        ],
-    },
-]
+SOLUTION_STR = (
+    "Thanks, that order number shows you are still under warranty. A red slow blink usually means "
+    "the fan safety cut-off engaged. Please unplug the purifier, remove the base panel, and check if "
+    "any packing foam or debris is touching the fan blades. If the fan moves freely, plug it back in "
+    "after five minutes to clear the sensor. If it still blinks, I can schedule a technician tomorrow "
+    "morning—does that fit your timeline before your guests arrive?"
+)
 
 GROUND_TRUTH = (
     "The assistant should confirm warranty details, gather diagnostics about the blinking light, "
@@ -107,27 +54,31 @@ GROUND_TRUTH = (
 
 @osmosis_rubric
 def score_with_hosted_model(
-    model_info: dict,
-    rubric: str,
-    messages: list[dict],
-    ground_truth: str | None = None,
-    system_message: str | None = None,
-    extra_info: dict = None,
-    score_min: float = SCORE_MIN,
-    score_max: float = SCORE_MAX,
+    solution_str: str,
+    ground_truth: str,
+    extra_info: dict,
 ) -> float:
     """
     Delegate rubric scoring to a hosted model while keeping @osmosis_rubric validation.
     """
-    capture_details = bool(extra_info and extra_info.get("capture_details"))
-    prompt_extra = extra_info.get("prompt_extra_info") if extra_info else None
+    capture_details = bool(extra_info.get("capture_details"))
+    prompt_extra = extra_info.get("prompt_extra_info")
+    provider = extra_info["provider"]
+    model = extra_info["model"]
+    rubric = extra_info["rubric"]
+    score_min = extra_info.get("score_min", SCORE_MIN)
+    score_max = extra_info.get("score_max", SCORE_MAX)
+
+    model_info = {"provider": provider, "model": model}
+    model_info_overrides = extra_info.get("model_info_overrides")
+    if isinstance(model_info_overrides, dict):
+        model_info.update(model_info_overrides)
 
     result = evaluate_rubric(
         rubric=rubric,
-        messages=messages,
+        solution_str=solution_str,
         model_info=model_info,
         ground_truth=ground_truth,
-        system_message=system_message,
         extra_info=prompt_extra,
         score_min=score_min,
         score_max=score_max,
@@ -145,15 +96,23 @@ def score_with_hosted_model(
 
 def _run(provider_name: str, model_info: dict) -> None:
     try:
-        context: dict = {"capture_details": True}
+        provider_id = model_info["provider"]
+        api_key_env = model_info.get("api_key_env")
+        if not isinstance(api_key_env, str) or not api_key_env.strip():
+            api_key_env = f"{provider_id.upper()}_API_KEY"
+        context: dict = {
+            "provider": provider_id,
+            "model": model_info["model"],
+            "rubric": RUBRIC,
+            "score_min": SCORE_MIN,
+            "score_max": SCORE_MAX,
+            "capture_details": True,
+            "api_key_env": api_key_env,
+        }
         score = score_with_hosted_model(
-            model_info,
-            rubric=RUBRIC,
-            messages=MESSAGES,
+            solution_str=SOLUTION_STR,
             ground_truth=GROUND_TRUTH,
             extra_info=context,
-            score_min=SCORE_MIN,
-            score_max=SCORE_MAX,
         )
     except MissingAPIKeyError as exc:
         print(f"{provider_name} skipped: {exc}")

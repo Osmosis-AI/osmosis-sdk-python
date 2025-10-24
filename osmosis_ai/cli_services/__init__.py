@@ -10,13 +10,7 @@ from .config import (
     load_rubric_suite,
     render_yaml_items,
 )
-from .dataset import (
-    ConversationMessage,
-    DatasetLoader,
-    DatasetRecord,
-    load_jsonl_records,
-    render_json_records,
-)
+from .dataset import DatasetLoader, DatasetRecord, load_jsonl_records, render_json_records
 from .engine import (
     EvaluationRecordResult,
     EvaluationReport,
@@ -40,7 +34,6 @@ __all__ = [
     "BaselineStatistics",
     "CLIError",
     "ConsoleReportRenderer",
-    "ConversationMessage",
     "DatasetLoader",
     "DatasetRecord",
     "EvaluationSession",
