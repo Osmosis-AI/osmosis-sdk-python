@@ -24,6 +24,7 @@ from osmosis_ai import (
     evaluate_rubric,
     osmosis_rubric,
 )
+from osmosis_ai.rubric_eval import DEFAULT_API_KEY_ENV
 
 RUBRIC = (
     "Evaluate the assistant's ability to handle a smart appliance support case. "
@@ -97,11 +98,8 @@ def _run(provider_name: str, model_info: dict) -> None:
         model_name = model_info["model"]
         api_key_env = model_info.get("api_key_env")
         if not isinstance(api_key_env, str) or not api_key_env.strip():
-            provider_env_defaults = {"gemini": "GOOGLE_API_KEY"}
             provider_key = provider_id.strip().lower()
-            api_key_env = provider_env_defaults.get(provider_key)
-            if not api_key_env:
-                api_key_env = f"{provider_key.upper()}_API_KEY"
+            api_key_env = DEFAULT_API_KEY_ENV.get(provider_key)
         context: dict = {
             "provider": provider_id,
             "model": model_name,
