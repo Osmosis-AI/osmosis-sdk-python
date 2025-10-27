@@ -28,10 +28,6 @@ def osmosis_reward(func: Callable) -> Callable:
     sig = inspect.signature(func)
     params = list(sig.parameters.values())
 
-    # Check parameter count
-    if len(params) < 2 or len(params) > 3:
-        raise TypeError(f"Function {func.__name__} must have 2-3 parameters, got {len(params)}")
-
     # Check first parameter: solution_str: str
     if params[0].name != 'solution_str':
         raise TypeError(f"First parameter must be named 'solution_str', got '{params[0].name}'")
