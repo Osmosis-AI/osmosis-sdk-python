@@ -64,9 +64,18 @@ def score_with_hosted_model(
     """
     capture_details = bool(extra_info.get("capture_details"))
     prompt_metadata = extra_info.get("metadata")
-    model_info = extra_info.get("model_info")
-    if not isinstance(model_info, dict):
-        raise TypeError("extra_info must include a 'model_info' mapping")
+    provider = extra_info.get("provider")
+    if not isinstance(provider, str) or not provider.strip():
+        raise TypeError("extra_info must include a 'provider' string")
+
+    model = extra_info.get("model")
+    if not isinstance(model, str) or not model.strip():
+        raise TypeError("extra_info must include a 'model' string")
+
+    model_info = {"provider": provider.strip(), "model": model.strip()}
+    api_key = extra_info.get("api_key")
+    if isinstance(api_key, str) and api_key.strip():
+        model_info["api_key"] = api_key.strip()
 
     rubric = extra_info.get("rubric", RUBRIC)
     score_min = extra_info.get("score_min", SCORE_MIN)
@@ -104,7 +113,6 @@ def _run(provider_name: str, model_info: dict) -> None:
             "provider": provider_id,
             "model": model_name,
             "api_key_env": api_key_env,
-            "model_info": {**model_info, "api_key_env": api_key_env},
             "rubric": RUBRIC,
             "score_min": SCORE_MIN,
             "score_max": SCORE_MAX,
