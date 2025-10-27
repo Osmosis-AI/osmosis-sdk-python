@@ -55,12 +55,23 @@ def test_preview_yaml_multiple_configs(tmp_path, capsys):
 
 
 def test_preview_jsonl(tmp_path, capsys):
-    jsonl_content = '\n'.join(
-        [
-            '{"messages": [{"role": "user", "content": "Hello"}], "metadata": {"id": 1}}',
-            '{"messages": [{"role": "assistant", "content": "Hi there!"}]}',
-        ]
-    )
+    record_one = {
+        "conversation_id": "ticket-001",
+        "rubric_id": "support_followup",
+        "original_input": "My AirPure X2 purifier keeps flashing a red light and refuses to start.",
+        "solution_str": "I'm sorry the purifier is down. Could you share the order number so I can confirm the warranty?",
+        "ground_truth": "Assistant verifies warranty information, gathers diagnostics, and suggests safe troubleshooting steps.",
+        "metadata": {"customer_tier": "gold", "language": "en"},
+    }
+    record_two = {
+        "conversation_id": "ticket-047",
+        "rubric_id": "policy_grounding",
+        "original_input": "Can I switch from Essential to Premium mid-cycle and still keep my existing discounts?",
+        "solution_str": "Absolutely—you can upgrade anytime and the discounts roll over automatically.",
+        "ground_truth": "Assistant cites the subscription policy, clarifies prorated billing, and avoids promising unauthorized discounts.",
+        "metadata": {"policy_version": "2024-05-01"},
+    }
+    jsonl_content = "\n".join([json.dumps(record_one, ensure_ascii=False), json.dumps(record_two, ensure_ascii=False)])
     path = tmp_path / "data.jsonl"
     path.write_text(jsonl_content, encoding="utf-8")
 
@@ -70,7 +81,8 @@ def test_preview_jsonl(tmp_path, capsys):
     assert exit_code == 0
     assert "Loaded 2 JSONL record(s)" in out
     assert "JSONL record #1" in out
-    assert '"Hello"' in out
+    assert '"rubric_id": "support_followup"' in out
+    assert '"ground_truth": "Assistant verifies warranty information, gathers diagnostics, and suggests safe troubleshooting steps."' in out
 
 
 def test_eval_command_output_json(tmp_path, monkeypatch, capsys):
@@ -85,11 +97,15 @@ def test_eval_command_output_json(tmp_path, monkeypatch, capsys):
     config_path.write_text(config_content, encoding="utf-8")
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
 
-    jsonl_content = (
-        '{"rubric_id": "support_followup", "conversation_id": "conv-001", '
-        '"original_input": "Help me with my device.", '
-        '"solution_str": "Sure, let\'s troubleshoot."}\n'
-    )
+    record_payload = {
+        "rubric_id": "support_followup",
+        "conversation_id": "conv-001",
+        "original_input": "Help me with my device.",
+        "solution_str": "Sure, let's troubleshoot.",
+        "ground_truth": "Assistant verifies warranty information, gathers diagnostics, and suggests safe troubleshooting steps.",
+        "metadata": {"language": "en"},
+    }
+    jsonl_content = json.dumps(record_payload, ensure_ascii=False) + "\n"
     data_path = tmp_path / "records.jsonl"
     data_path.write_text(jsonl_content, encoding="utf-8")
 
@@ -155,6 +171,10 @@ def test_eval_command_output_json(tmp_path, monkeypatch, capsys):
     record_payload = payload["records"][0]
     assert record_payload["id"] == "conv-001"
     assert record_payload["conversation_id"] == "conv-001"
+    assert record_payload["input_record"]["ground_truth"] == (
+        "Assistant verifies warranty information, gathers diagnostics, and suggests safe troubleshooting steps."
+    )
+    assert record_payload["input_record"]["metadata"] == {"language": "en"}
     assert len(record_payload["runs"]) == 2
     assert record_payload["runs"][0]["raw"]["call"] == 1
     assert "started_at" in record_payload["runs"][0]
