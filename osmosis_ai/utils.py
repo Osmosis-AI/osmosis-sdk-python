@@ -28,6 +28,9 @@ def osmosis_reward(func: Callable) -> Callable:
     sig = inspect.signature(func)
     params = list(sig.parameters.values())
 
+    if len(params) < 3:
+        raise TypeError(f"Function {func.__name__} must have at least 3 parameters, got {len(params)}")
+
     # Check first parameter: solution_str: str
     if params[0].name != 'solution_str':
         raise TypeError(f"First parameter must be named 'solution_str', got '{params[0].name}'")
@@ -41,7 +44,7 @@ def osmosis_reward(func: Callable) -> Callable:
         raise TypeError(f"Second parameter 'ground_truth' must be annotated as str, got {params[1].annotation}")
 
     # Check third parameter if present: extra_info: dict = None
-    if len(params) == 3:
+    if len(params) >= 3:
         if params[2].name != 'extra_info':
             raise TypeError(f"Third parameter must be named 'extra_info', got '{params[2].name}'")
         if params[2].annotation != dict:
@@ -199,8 +202,8 @@ def osmosis_rubric(func: Callable) -> Callable:
     except Exception:  # pragma: no cover - best effort for forward refs
         resolved_annotations = {}
 
-    if len(params) != 3:
-        raise TypeError(f"Function {func.__name__} must have exactly 3 parameters, got {len(params)}")
+    if len(params) < 3:
+        raise TypeError(f"Function {func.__name__} must have at least 3 parameters, got {len(params)}")
 
     solution_param = params[0]
     if solution_param.name != "solution_str":
