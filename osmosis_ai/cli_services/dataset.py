@@ -7,48 +7,7 @@ from pathlib import Path
 from typing import Any, Optional, Sequence
 
 from .errors import CLIError
-from .shared import coerce_optional_float, gather_text_fragments
-
-
-@dataclass(frozen=True)
-class ConversationMessage:
-    """Normalized conversation message with preserved raw payload fields."""
-
-    role: str
-    content: Any
-    metadata: dict[str, Any]
-
-    def to_payload(self) -> dict[str, Any]:
-        payload: dict[str, Any] = copy.deepcopy(self.metadata)
-        payload["role"] = self.role
-        if self.content is None:
-            payload.pop("content", None)
-        else:
-            payload["content"] = copy.deepcopy(self.content)
-        return payload
-
-    def text_fragments(self) -> list[str]:
-        fragments: list[str] = []
-        seen: set[int] = set()
-        gather_text_fragments(self.content, fragments, allow_free_strings=True, seen=seen)
-        for value in self.metadata.values():
-            gather_text_fragments(value, fragments, seen=seen)
-        return fragments
-
-    @classmethod
-    def from_raw(cls, raw: dict[str, Any], *, source_label: str, index: int) -> "ConversationMessage":
-        role_value = raw.get("role")
-        if not isinstance(role_value, str) or not role_value.strip():
-            raise CLIError(
-                f"Message {index} in {source_label} must include a non-empty string 'role'."
-            )
-        content_value = copy.deepcopy(raw.get("content"))
-        metadata: dict[str, Any] = {}
-        for key, value in raw.items():
-            if key in {"role", "content"}:
-                continue
-            metadata[str(key)] = copy.deepcopy(value)
-        return cls(role=role_value.strip().lower(), content=content_value, metadata=metadata)
+from .shared import coerce_optional_float
 
 
 @dataclass(frozen=True)
@@ -57,23 +16,16 @@ class DatasetRecord:
     rubric_id: str
     conversation_id: Optional[str]
     record_id: Optional[str]
-    messages: tuple[ConversationMessage, ...]
+    solution_str: str
     ground_truth: Optional[str]
-    system_message: Optional[str]
     original_input: Optional[str]
     metadata: Optional[dict[str, Any]]
     extra_info: Optional[dict[str, Any]]
     score_min: Optional[float]
     score_max: Optional[float]
 
-    def message_payloads(self) -> list[dict[str, Any]]:
-        """Return messages as provider-ready payloads."""
-        return [message.to_payload() for message in self.messages]
-
-    def merged_extra_info(self, config_extra: Optional[dict[str, Any]]) -> Optional[dict[str, Any]]:
+    def merged_extra_info(self) -> Optional[dict[str, Any]]:
         merged: dict[str, Any] = {}
-        if isinstance(config_extra, dict):
-            merged.update(copy.deepcopy(config_extra))
         if isinstance(self.extra_info, dict):
             merged.update(copy.deepcopy(self.extra_info))
         if isinstance(self.metadata, dict) and self.metadata:
@@ -81,19 +33,15 @@ class DatasetRecord:
         return merged or None
 
     def assistant_preview(self, *, max_length: int = 140) -> Optional[str]:
-        for message in reversed(self.messages):
-            if message.role != "assistant":
-                continue
-            fragments = message.text_fragments()
-            if not fragments:
-                continue
-            preview = " ".join(" ".join(fragments).split())
-            if not preview:
-                continue
-            if len(preview) > max_length:
-                preview = preview[: max_length - 3].rstrip() + "..."
-            return preview
-        return None
+        text = self.solution_str.strip()
+        if not text:
+            return None
+        preview = " ".join(text.split())
+        if not preview:
+            return None
+        if len(preview) > max_length:
+            preview = preview[: max_length - 3].rstrip() + "..."
+        return preview
 
     def conversation_label(self, fallback_index: int) -> str:
         if isinstance(self.conversation_id, str) and self.conversation_id.strip():
@@ -162,17 +110,29 @@ class DatasetLoader:
         metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else None
         extra_info = payload.get("extra_info") if isinstance(payload.get("extra_info"), dict) else None
         record_label = conversation_id or record_id or rubric_id_str or "<record>"
-        messages = _parse_messages(payload.get("messages"), source_label=record_label)
+        solution_raw = payload.get("solution_str")
+        if not isinstance(solution_raw, str) or not solution_raw.strip():
+            raise CLIError(f"Record '{record_label}' must include a non-empty 'solution_str' string.")
+
+        original_input_raw = payload.get("original_input")
+        if isinstance(original_input_raw, str):
+            original_input = original_input_raw
+        else:
+            original_input = None
+
+        if original_input is None and isinstance(extra_info, dict):
+            extra_original_input = extra_info.get("original_input")
+            if isinstance(extra_original_input, str):
+                original_input = extra_original_input
 
         return DatasetRecord(
             payload=payload,
             rubric_id=rubric_id_str,
             conversation_id=conversation_id,
             record_id=record_id,
-            messages=messages,
+            solution_str=solution_raw,
             ground_truth=payload.get("ground_truth") if isinstance(payload.get("ground_truth"), str) else None,
-            system_message=payload.get("system_message") if isinstance(payload.get("system_message"), str) else None,
-            original_input=payload.get("original_input") if isinstance(payload.get("original_input"), str) else None,
+            original_input=original_input,
             metadata=metadata,
             extra_info=extra_info,
             score_min=score_min,
@@ -213,17 +173,3 @@ def render_json_records(records: Sequence[dict[str, Any]]) -> str:
         segments.append("\n".join(snippet))
 
     return "\n".join(segments)
-
-
-def _parse_messages(messages: Any, *, source_label: str) -> tuple[ConversationMessage, ...]:
-    if not isinstance(messages, list) or not messages:
-        raise CLIError(f"Record '{source_label}' must include a non-empty 'messages' list.")
-
-    normalized: list[ConversationMessage] = []
-    for index, entry in enumerate(messages):
-        if not isinstance(entry, dict):
-            raise CLIError(
-                f"Message {index} in {source_label} must be an object, got {type(entry).__name__}."
-            )
-        normalized.append(ConversationMessage.from_raw(entry, source_label=source_label, index=index))
-    return tuple(normalized)

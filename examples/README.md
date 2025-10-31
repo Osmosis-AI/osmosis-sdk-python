@@ -45,7 +45,7 @@ This will run test cases through all the example reward functions and show their
 
 Shows how to call `osmosis_ai.evaluate_rubric` against different hosted judge providers using their official Python SDKs. The example:
 
-- Builds a single rubric and conversation transcript.
+- Builds a single rubric and candidate response string.
 - Invokes OpenAI, Anthropic, Google Gemini, and xAI (toggle which providers run inside `__main__`).
 - Prints the numeric score and explanation returned by each provider’s schema-enforced response.
 - Gracefully skips providers whose API keys are not present (`MissingAPIKeyError`) and surfaces known remote failures via `ModelNotFoundError` / `ProviderRequestError`.
@@ -54,7 +54,7 @@ The helper uses the new provider registry in `osmosis_ai.providers`; each exampl
 
 ## Rubric Configs and Dataset
 
-Use `rubric_configs.yaml` for a pair of ready-to-run rubric configurations (OpenAI and Anthropic) and `sample_data.jsonl` for two matching conversation records that exercise those rubrics. They are designed to work with `osmosis preview --path examples/<file>` and can be adapted when building your own evaluation suites.
+Use `rubric_configs.yaml` for a pair of ready-to-run rubric configurations (OpenAI and Anthropic) and `sample_data.jsonl` for two matching solution strings that exercise those rubrics. They are designed to work with `osmosis preview --path examples/<file>` and can be adapted when building your own evaluation suites.
 
 ### Prerequisites
 

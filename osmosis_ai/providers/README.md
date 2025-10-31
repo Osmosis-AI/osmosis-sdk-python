@@ -59,7 +59,7 @@ and registers itself with the global provider registry so that
 
    evaluate_rubric(
        rubric="...",
-       messages=[...],
+       solution_str="candidate response to score",
        model_info={"provider": "my-provider", "model": "..."},
    )
    ```
