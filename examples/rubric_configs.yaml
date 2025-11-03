@@ -1,0 +1,35 @@
+version: 1
+default_score_min: 0.0
+default_score_max: 1.0
+rubrics:
+  - id: support_followup
+    title: Support Follow-Up Effectiveness
+    rubric: |-
+      Evaluate how well the assistant guides a customer through troubleshooting
+      after a device failure. Award higher scores when the assistant confirms
+      order or warranty status, asks for the right diagnostics, offers safe
+      next steps the user can perform immediately, and sets clear expectations
+      for follow-up service. Deduct points if the assistant ignores user
+      constraints, skips safety checks, or invents unsupported policies.
+    model_info:
+      provider: openai
+      model: gpt-5-mini
+      api_key_env: OPENAI_API_KEY
+      timeout: 45
+
+  - id: policy_grounding
+    title: Policy and Knowledge Grounding
+    rubric: |-
+      Score the assistant's response for factual accuracy and policy awareness
+      when discussing subscription upgrades. Full credit requires citing the
+      correct upgrade tiers, highlighting billing implications, and warning the
+      user about limitations called out in the supplied policy. Deduct points
+      for hallucinated features, contradictory guidance, or missing critical
+      disclaimers. Base the score entirely on the assistant turn.
+    model_info:
+      provider: anthropic
+      model: claude-sonnet-4-5-20250929
+      api_key_env: ANTHROPIC_API_KEY
+      timeout: 60
+    score_min: 0.0
+    score_max: 10.0

@@ -8,6 +8,10 @@ A Python library that provides reward and rubric validation helpers for LLM appl
 pip install osmosis-ai
 ```
 
+Requires Python 3.9 or newer.
+
+This installs the Osmosis CLI and pulls in the required provider SDKs (`openai`, `anthropic`, `google-genai`, `xai-sdk`) along with supporting utilities such as `PyYAML`, `python-dotenv`, `requests`, and `xxhash`.
+
 For development:
 ```bash
 git clone https://github.com/Osmosis-AI/osmosis-sdk-python
@@ -32,23 +36,12 @@ score = simple_reward("hello world", "hello world")  # Returns 1.0
 ```python
 from osmosis_ai import evaluate_rubric
 
-messages = [
-    {
-        "type": "message",
-        "role": "user",
-        "content": [{"type": "input_text", "text": "What is the capital of France?"}],
-    },
-    {
-        "type": "message",
-        "role": "assistant",
-        "content": [{"type": "output_text", "text": "The capital of France is Paris."}],
-    },
-]
+solution = "The capital of France is Paris."
 
 # Export OPENAI_API_KEY in your shell before running this snippet.
 rubric_score = evaluate_rubric(
     rubric="Assistant must mention the verified capital city.",
-    messages=messages,
+    solution_str=solution,
     model_info={
         "provider": "openai",
         "model": "gpt-5",
@@ -79,13 +72,15 @@ Credentials are resolved from environment variables by default:
 
 Override the environment variable name with `model_info={"api_key_env": "CUSTOM_ENV_NAME"}` when needed, or supply an inline secret with `model_info={"api_key": "sk-..."}` for ephemeral credentials. Missing API keys raise a `MissingAPIKeyError` that explains how to export the secret before trying again.
 
+`api_key` and `api_key_env` are mutually exclusive ways to provide the same credential. When `api_key` is present and non-empty it is used directly, skipping any environment lookup. Otherwise the resolver falls back to `api_key_env` (or the provider default) and pulls the value from your local environment with `os.getenv`.
+
 `model_info` accepts additional rubric-specific knobs:
 
 - `score_min` / `score_max` – change the default `[0.0, 1.0]` scoring bounds.
-- `system_prompt` / `original_input` – override the helper’s transcript inference when those entries are absent.
+- `system_prompt` / `original_input` – provide optional context strings that will be quoted in the judging prompt.
 - `timeout` – customise the provider timeout in seconds.
 
-Pass `extra_info={...}` to `evaluate_rubric` when you need structured context quoted in the judge prompt, and set `return_details=True` to receive the full `RewardRubricRunResult` payload (including the provider’s raw response).
+Pass `metadata={...}` to `evaluate_rubric` when you need structured context quoted in the judge prompt, and set `return_details=True` to receive the full `RewardRubricRunResult` payload (including the provider’s raw response).
 
 Remote failures surface as `ProviderRequestError` instances, with `ModelNotFoundError` reserved for missing model identifiers so you can retry with a new snapshot.
 
@@ -123,24 +118,35 @@ The decorator will raise a `TypeError` if the function doesn't match this exact 
 
 ## Rubric Function Signature
 
-Rubric functions decorated with `@osmosis_rubric` must accept the parameters:
+Rubric functions decorated with `@osmosis_rubric` must match this signature:
 
-- `model_info: dict`
-- `rubric: str`
-- `messages: list`
-- `ground_truth: Optional[str] = None`
-- `system_message: Optional[str] = None`
-- `extra_info: dict = None`
-- `score_min: float = 0.0` *(optional lower bound; must default to 0.0 and stay below `score_max`)*
-- `score_max: float = 1.0` *(optional upper bound; must default to 1.0 and stay above `score_min`)*
+```python
+@osmosis_rubric
+def your_rubric(solution_str: str, ground_truth: str | None, extra_info: dict) -> float:
+    # Your rubric logic here
+    return float_score
+```
 
-and must return a `float`. The decorator validates the signature and runtime payload (including message role validation and return type) before delegating to your custom logic.
+> The runtime forwards `None` for `ground_truth` when no reference answer exists. Annotate the parameter as `Optional[str]` (or handle `None` explicitly) if your rubric logic expects to run in that scenario.
 
-> Required fields: `model_info` must contain non-empty `provider` and `model` string entries.
+### Required `extra_info` fields
 
-> Annotation quirk: `extra_info` must be annotated as a plain `dict` with a default of `None` to satisfy the validator.
+- **`provider`** – Non-empty string identifying the judge provider.
+- **`model`** – Non-empty string naming the provider model to call.
+- **`rubric`** – Natural-language rubric instructions for the judge model.
+- **`api_key` / `api_key_env`** – Supply either the raw key or the environment variable name that exposes it.
 
-> Tip: You can call `evaluate_rubric` from inside a rubric function (or any other orchestrator) to outsource judging to a hosted model while still benefiting from the decorator’s validation.
+### Optional `extra_info` fields
+
+- **`system_prompt`** – Optional string prepended to the provider’s base system prompt when invoking the judge; include it inside `extra_info` rather than as a separate argument.
+- **`score_min` / `score_max`** – Optional numeric overrides for the expected score range.
+- **`model_info_overrides`** – Optional dict merged into the provider configuration passed to the judge.
+
+Additional keys are passthrough and can be used for custom configuration. If you need to extend the provider payload (for example adding `api_key_env`), add a dict under `model_info_overrides` and it will be merged with the required `provider`/`model` pair before invoking `evaluate_rubric`. The decorator enforces the parameter names/annotations, validates the embedded configuration at call time, and ensures the wrapped function returns a `float`.
+
+> Annotation quirk: `extra_info` must be annotated as `dict` **without** a default value, unlike `@osmosis_reward`.
+
+> Tip: When delegating to `evaluate_rubric`, pass the raw `solution_str` directly and include any extra context inside the `metadata` payload.
 
 ## Examples
 
@@ -175,6 +181,58 @@ def numeric_tolerance(solution_str: str, ground_truth: str, extra_info: dict = N
 
 - `examples/rubric_functions.py` demonstrates `evaluate_rubric` with OpenAI, Anthropic, Gemini, and xAI using the schema-enforced SDK integrations.
 - `examples/reward_functions.py` keeps local reward helpers that showcase the decorator contract without external calls.
+- `examples/rubric_configs.yaml` bundles two rubric definitions with provider configuration and scoring bounds.
+- `examples/sample_data.jsonl` contains two rubric-aligned solution strings so you can trial dataset validation.
+
+```yaml
+# examples/rubric_configs.yaml (excerpt)
+version: 1
+rubrics:
+  - id: support_followup
+    model_info:
+      provider: openai
+      model: gpt-5-mini
+      api_key_env: OPENAI_API_KEY
+```
+
+```jsonl
+{"conversation_id": "ticket-001", "rubric_id": "support_followup", "original_input": "...", "solution_str": "..."}
+{"conversation_id": "ticket-047", "rubric_id": "policy_grounding", "original_input": "...", "solution_str": "..."}
+```
+
+## CLI Tools
+
+Installing the SDK also provides a lightweight CLI available as `osmosis` (aliases: `osmosis_ai`, `osmosis-ai`) for inspecting rubric YAML files and JSONL test payloads.
+
+Preview a rubric file and print every configuration discovered, including nested entries:
+
+```bash
+osmosis preview --path path/to/rubric.yaml
+```
+
+Preview a dataset of rubric-scored solutions stored as JSONL:
+
+```bash
+osmosis preview --path path/to/data.jsonl
+```
+
+Evaluate a dataset against a hosted rubric configuration and print the returned scores:
+
+```bash
+osmosis eval --rubric support_followup --data examples/sample_data.jsonl
+```
+
+- Supply the dataset with `-d`/`--data path/to/data.jsonl`; the path is resolved relative to the current working directory.
+- Use `--config path/to/rubric_configs.yaml` when the rubric definitions are not located alongside the dataset.
+- Pass `-n`/`--number` to sample the provider multiple times per record; the CLI prints every run along with aggregate statistics (average, variance, standard deviation, and min/max).
+- Provide `--output path/to/dir` to create the directory (if needed) and emit `rubric_eval_result_<unix_timestamp>.json`, or supply a full file path (any extension) to control the filename; each file captures every run, provider payloads, timestamps, and aggregate statistics for downstream analysis.
+- Skip `--output` to collect results under `~/.cache/osmosis/eval_result/<rubric_id>/rubric_eval_result_<identifier>.json`; the CLI writes this JSON whether the evaluation finishes cleanly or hits provider/runtime errors so you can inspect failures later (only a manual Ctrl+C interrupt leaves no file behind).
+- Dataset rows whose `rubric_id` does not match the requested rubric are skipped automatically.
+- Each dataset record must provide a non-empty `solution_str`; optional fields such as `original_input`, `ground_truth`, and `extra_info` travel with the record and are forwarded to the evaluator when present.
+- When delegating to a custom `@osmosis_rubric` function, the CLI enriches `extra_info` with the active `provider`, `model`, `rubric`, score bounds, any configured `system_prompt`, the resolved `original_input`, and the record’s metadata/extra fields so the decorator’s required entries are always present.
+- Rubric configuration files intentionally reject `extra_info`; provide per-example context through the dataset instead.
+
+Both commands validate the file, echo a short summary (`Loaded <n> ...`), and pretty-print the parsed records so you can confirm that new rubrics or test fixtures look correct before committing them. Invalid files raise a descriptive error and exit with a non-zero status code.
 
 ## Running Examples
 
@@ -185,7 +243,13 @@ PYTHONPATH=. python examples/rubric_functions.py  # Uncomment the provider you n
 
 ## Testing
 
-Run `python -m pytest tests/test_rubric_eval.py` to exercise the guards that ensure rubric prompts ignore message metadata (for example `tests/test_rubric_eval.py::test_collect_text_skips_metadata_fields`) while still preserving nested tool output. Add additional tests under `tests/` as you extend the library.
+Run `python -m pytest` (or any subset under `tests/`) to exercise the updated helpers:
+
+- `tests/test_rubric_eval.py` covers prompt construction for `solution_str` evaluations.
+- `tests/test_cli_services.py` validates dataset parsing, extra-info enrichment, and engine interactions.
+- `tests/test_cli.py` ensures the CLI pathways surface the new fields end to end.
+
+Add additional tests under `tests/` as you extend the library.
 
 ## License
 
