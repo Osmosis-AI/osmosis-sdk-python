@@ -26,6 +26,7 @@ from osmosis_ai import (
 )
 from osmosis_ai.rubric_eval import DEFAULT_API_KEY_ENV
 
+# Rubric for the example
 RUBRIC = (
     "Evaluate the assistant's ability to handle a smart appliance support case. "
     "Award higher scores when the assistant: (1) confirms purchase information to "
@@ -39,6 +40,7 @@ RUBRIC = (
 SCORE_MIN = 0.0
 SCORE_MAX = 1.0
 
+# Data for the example
 SOLUTION_STR = (
     "Thanks, that order number shows you are still under warranty. A red slow blink usually means "
     "the fan safety cut-off engaged. Please unplug the purifier, remove the base panel, and check if "
@@ -52,6 +54,29 @@ GROUND_TRUTH = (
     "suggest safe troubleshooting steps, and offer a timely service appointment."
 )
 
+PROFILE_CATALOG = {
+    "openai": {
+        "provider": "openai",
+        "model": "gpt-5-nano-2025-08-07",
+        "api_key_env": DEFAULT_API_KEY_ENV["openai"],
+    },
+    "anthropic": {
+        "provider": "anthropic",
+        "model": "claude-sonnet-4-5-20250929",
+        "api_key_env": DEFAULT_API_KEY_ENV["anthropic"],
+    },
+    "gemini": {
+        "provider": "gemini",
+        "model": "gemini-2.5-flash",
+        "api_key_env": DEFAULT_API_KEY_ENV["gemini"],
+    },
+    "xai": {
+        "provider": "xai",
+        "model": "grok-4-fast-non-reasoning",
+        "api_key_env": DEFAULT_API_KEY_ENV["xai"],
+    },
+}
+
 
 @osmosis_rubric
 def score_with_hosted_model(
@@ -61,25 +86,21 @@ def score_with_hosted_model(
 ) -> float:
     """
     Delegate rubric scoring to a hosted model while keeping @osmosis_rubric validation.
+
+    Provide provider-specific knobs inside `extra_info["metadata"]`. Toggle `extra_info["capture_details"]`
+    when you want the provider response returned.
     """
-    capture_details = bool(extra_info.get("capture_details"))
-    prompt_metadata = extra_info.get("metadata")
-    provider = extra_info.get("provider")
-    if not isinstance(provider, str) or not provider.strip():
-        raise TypeError("extra_info must include a 'provider' string")
+    metadata = extra_info.get("metadata") if isinstance(extra_info, dict) and isinstance(extra_info.get("metadata"), dict) else None
+    capture_details = bool(extra_info.get("capture_details")) if isinstance(extra_info, dict) else False
+    prompt_metadata = metadata
 
-    model = extra_info.get("model")
-    if not isinstance(model, str) or not model.strip():
-        raise TypeError("extra_info must include a 'model' string")
+    provider_config = _resolve_provider_profile(metadata.get("provider_profile") if metadata else None)
 
-    model_info = {"provider": provider.strip(), "model": model.strip()}
-    api_key = extra_info.get("api_key")
-    if isinstance(api_key, str) and api_key.strip():
-        model_info["api_key"] = api_key.strip()
+    model_info = dict(provider_config["model_info"])
 
-    rubric = extra_info.get("rubric", RUBRIC)
-    score_min = extra_info.get("score_min", SCORE_MIN)
-    score_max = extra_info.get("score_max", SCORE_MAX)
+    rubric = provider_config["rubric"]
+    score_min = provider_config["score_min"]
+    score_max = provider_config["score_max"]
 
     result = evaluate_rubric(
         rubric=rubric,
@@ -93,30 +114,46 @@ def score_with_hosted_model(
     )
 
     if capture_details:
-        # Treat extra_info as an input/output channel to surface detailed results.
-        if extra_info is not None:
-            extra_info["result_details"] = result
+        # Surface the provider response via the metadata channel so callers can inspect it.
+        if metadata is not None:
+            metadata["result_details"] = result
         return float(result["score"])
 
     return float(result)
 
 
-def _run(provider_name: str, model_info: dict) -> None:
+def _normalize_profile_name(profile_name: str | None) -> str:
+    if isinstance(profile_name, str):
+        normalized = profile_name.strip().lower()
+        if normalized:
+            return normalized
+    return "openai"
+
+
+def _resolve_provider_profile(profile_name: str | None) -> dict:
+    profile_key = _normalize_profile_name(profile_name)
+
+    profile = PROFILE_CATALOG.get(profile_key)
+    if profile is None:
+        options = ", ".join(sorted(PROFILE_CATALOG))
+        raise ValueError(f"Unknown provider_profile '{profile_name}'. Supported profiles: {options}")
+
+    return {
+        "model_info": profile,
+        "rubric": RUBRIC,
+        "score_min": SCORE_MIN,
+        "score_max": SCORE_MAX,
+    }
+
+
+def _run(provider_name: str, provider_profile: str) -> None:
     try:
-        provider_id = model_info["provider"]
-        model_name = model_info["model"]
-        api_key_env = model_info.get("api_key_env")
-        if not isinstance(api_key_env, str) or not api_key_env.strip():
-            provider_key = provider_id.strip().lower()
-            api_key_env = DEFAULT_API_KEY_ENV.get(provider_key)
         context: dict = {
-            "provider": provider_id,
-            "model": model_name,
-            "api_key_env": api_key_env,
-            "rubric": RUBRIC,
-            "score_min": SCORE_MIN,
-            "score_max": SCORE_MAX,
             "capture_details": True,
+            "metadata": {
+                "provider_profile": provider_profile,
+                "scenario_label": provider_name,
+            }
         }
         score = score_with_hosted_model(
             solution_str=SOLUTION_STR,
@@ -133,7 +170,8 @@ def _run(provider_name: str, model_info: dict) -> None:
         print(f"{provider_name} failed: {exc.detail}")
         return
 
-    details = context.get("result_details")
+    metadata = context.get("metadata", {})
+    details = metadata.get("result_details")
     explanation = ""
     if isinstance(details, dict):
         explanation = details.get("explanation", "")
@@ -144,40 +182,28 @@ def _run(provider_name: str, model_info: dict) -> None:
 def run_openai_example() -> None:
     _run(
         "OpenAI",
-        {
-            "provider": "openai",
-            "model": "gpt-5-nano-2025-08-07",
-        },
+        "openai",
     )
 
 
 def run_anthropic_example() -> None:
     _run(
         "Anthropic",
-        {
-            "provider": "anthropic",
-            "model": "claude-sonnet-4-5-20250929",
-        },
+        "anthropic",
     )
 
 
 def run_gemini_example() -> None:
     _run(
         "Gemini",
-        {
-            "provider": "gemini",
-            "model": "gemini-2.5-flash",
-        },
+        "gemini",
     )
 
 
 def run_xai_example() -> None:
     _run(
         "xAI",
-        {
-            "provider": "xai",
-            "model": "grok-4-fast-non-reasoning",
-        },
+        "xai",
     )
 
 
