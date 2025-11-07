@@ -4,6 +4,9 @@ import inspect
 import types
 from typing import Any, Callable, Union, get_args, get_origin, get_type_hints
 
+_UNION_TYPE = getattr(types, "UnionType", None)
+_ALLOWED_UNION_ORIGINS = (Union,) + ((_UNION_TYPE,) if _UNION_TYPE is not None else ())
+
 
 def osmosis_reward(func: Callable) -> Callable:
     """
@@ -137,11 +140,7 @@ def osmosis_rubric(func: Callable) -> Callable:
     ground_truth_annotation = resolved_annotations.get(ground_truth_param.name, ground_truth_param.annotation)
     if not _is_str_annotation(ground_truth_annotation):
         union_origin = get_origin(ground_truth_annotation)
-        allowed_union_origins = (Union,)
-        union_type = getattr(types, "UnionType", None)
-        if union_type is not None:
-            allowed_union_origins = allowed_union_origins + (union_type,)
-        if union_origin not in allowed_union_origins:
+        if union_origin not in _ALLOWED_UNION_ORIGINS:
             raise TypeError(
                 f"Second parameter 'ground_truth' must be annotated as str or Optional[str], got {ground_truth_annotation}"
             )
