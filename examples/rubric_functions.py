@@ -63,18 +63,17 @@ def score_with_hosted_model(
 ) -> float:
     """
     Delegate rubric scoring to a hosted model while keeping @osmosis_rubric validation.
+
+    Provide provider-specific knobs inside `extra_info["metadata"]`. Toggle `extra_info["capture_details"]`
+    when you want the provider response returned.
     """
-    metadata = extra_info.get("metadata") if isinstance(extra_info, dict) else None
-    metadata = metadata if isinstance(metadata, dict) else None
-    capture_details = bool(metadata.get("capture_details")) if metadata else False
+    metadata = extra_info.get("metadata") if isinstance(extra_info, dict) and isinstance(extra_info.get("metadata"), dict) else None
+    capture_details = bool(extra_info.get("capture_details")) if isinstance(extra_info, dict) else False
     prompt_metadata = metadata if metadata else None
 
     provider_config = _resolve_provider_profile(metadata.get("provider_profile") if metadata else None)
 
     model_info = dict(provider_config["model_info"])
-    overrides = metadata.get("model_info_overrides") if metadata else None
-    if isinstance(overrides, dict):
-        model_info.update(overrides)
 
     rubric = provider_config["rubric"]
     score_min = provider_config["score_min"]
@@ -88,7 +87,7 @@ def score_with_hosted_model(
         metadata=prompt_metadata,
         score_min=score_min,
         score_max=score_max,
-        return_details=True,
+        return_details=capture_details,
     )
 
     if capture_details:
@@ -150,9 +149,9 @@ def _resolve_provider_profile(profile_name: str | None) -> dict:
 def _run(provider_name: str, provider_profile: str) -> None:
     try:
         context: dict = {
+            "capture_details": True,
             "metadata": {
                 "provider_profile": provider_profile,
-                "capture_details": True,
                 "scenario_label": provider_name,
             }
         }
