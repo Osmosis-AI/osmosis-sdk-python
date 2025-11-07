@@ -170,8 +170,8 @@ def _run(provider_name: str, provider_profile: str) -> None:
         print(f"{provider_name} failed: {exc.detail}")
         return
 
-    metadata = context.get("metadata") if isinstance(context, dict) else None
-    details = metadata.get("result_details") if isinstance(metadata, dict) else None
+    metadata = context.get("metadata", {})
+    details = metadata.get("result_details")
     explanation = ""
     if isinstance(details, dict):
         explanation = details.get("explanation", "")
