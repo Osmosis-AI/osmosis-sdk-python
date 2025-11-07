@@ -61,25 +61,22 @@ def score_with_hosted_model(
 ) -> float:
     """
     Delegate rubric scoring to a hosted model while keeping @osmosis_rubric validation.
+
+    Pass `provider_profile` inside extra_info to choose between the supported presets.
     """
     capture_details = bool(extra_info.get("capture_details"))
     prompt_metadata = extra_info.get("metadata")
-    provider = extra_info.get("provider")
-    if not isinstance(provider, str) or not provider.strip():
-        raise TypeError("extra_info must include a 'provider' string")
 
-    model = extra_info.get("model")
-    if not isinstance(model, str) or not model.strip():
-        raise TypeError("extra_info must include a 'model' string")
+    provider_config = _resolve_provider_profile(extra_info.get("provider_profile"))
 
-    model_info = {"provider": provider.strip(), "model": model.strip()}
-    api_key = extra_info.get("api_key")
-    if isinstance(api_key, str) and api_key.strip():
-        model_info["api_key"] = api_key.strip()
+    model_info = dict(provider_config["model_info"])
+    overrides = extra_info.get("model_info_overrides")
+    if isinstance(overrides, dict):
+        model_info.update(overrides)
 
-    rubric = extra_info.get("rubric", RUBRIC)
-    score_min = extra_info.get("score_min", SCORE_MIN)
-    score_max = extra_info.get("score_max", SCORE_MAX)
+    rubric = provider_config["rubric"]
+    score_min = provider_config["score_min"]
+    score_max = provider_config["score_max"]
 
     result = evaluate_rubric(
         rubric=rubric,
@@ -101,21 +98,57 @@ def score_with_hosted_model(
     return float(result)
 
 
-def _run(provider_name: str, model_info: dict) -> None:
+def _normalize_profile_name(profile_name: str | None) -> str:
+    if isinstance(profile_name, str):
+        normalized = profile_name.strip().lower()
+        if normalized:
+            return normalized
+    return "openai"
+
+
+def _resolve_provider_profile(profile_name: str | None) -> dict:
+    profile_key = _normalize_profile_name(profile_name)
+
+    profile_catalog = {
+        "openai": {
+            "provider": "openai",
+            "model": "gpt-5-nano-2025-08-07",
+            "api_key_env": DEFAULT_API_KEY_ENV["openai"],
+        },
+        "anthropic": {
+            "provider": "anthropic",
+            "model": "claude-sonnet-4-5-20250929",
+            "api_key_env": DEFAULT_API_KEY_ENV["anthropic"],
+        },
+        "gemini": {
+            "provider": "gemini",
+            "model": "gemini-2.5-flash",
+            "api_key_env": DEFAULT_API_KEY_ENV["gemini"],
+        },
+        "xai": {
+            "provider": "xai",
+            "model": "grok-4-fast-non-reasoning",
+            "api_key_env": DEFAULT_API_KEY_ENV["xai"],
+        },
+    }
+
+    profile = profile_catalog.get(profile_key)
+    if profile is None:
+        options = ", ".join(sorted(profile_catalog))
+        raise ValueError(f"Unknown provider_profile '{profile_name}'. Supported profiles: {options}")
+
+    return {
+        "model_info": profile,
+        "rubric": RUBRIC,
+        "score_min": SCORE_MIN,
+        "score_max": SCORE_MAX,
+    }
+
+
+def _run(provider_name: str, provider_profile: str) -> None:
     try:
-        provider_id = model_info["provider"]
-        model_name = model_info["model"]
-        api_key_env = model_info.get("api_key_env")
-        if not isinstance(api_key_env, str) or not api_key_env.strip():
-            provider_key = provider_id.strip().lower()
-            api_key_env = DEFAULT_API_KEY_ENV.get(provider_key)
         context: dict = {
-            "provider": provider_id,
-            "model": model_name,
-            "api_key_env": api_key_env,
-            "rubric": RUBRIC,
-            "score_min": SCORE_MIN,
-            "score_max": SCORE_MAX,
+            "provider_profile": provider_profile,
             "capture_details": True,
         }
         score = score_with_hosted_model(
@@ -144,40 +177,28 @@ def _run(provider_name: str, model_info: dict) -> None:
 def run_openai_example() -> None:
     _run(
         "OpenAI",
-        {
-            "provider": "openai",
-            "model": "gpt-5-nano-2025-08-07",
-        },
+        "openai",
     )
 
 
 def run_anthropic_example() -> None:
     _run(
         "Anthropic",
-        {
-            "provider": "anthropic",
-            "model": "claude-sonnet-4-5-20250929",
-        },
+        "anthropic",
     )
 
 
 def run_gemini_example() -> None:
     _run(
         "Gemini",
-        {
-            "provider": "gemini",
-            "model": "gemini-2.5-flash",
-        },
+        "gemini",
     )
 
 
 def run_xai_example() -> None:
     _run(
         "xAI",
-        {
-            "provider": "xai",
-            "model": "grok-4-fast-non-reasoning",
-        },
+        "xai",
     )
 
 

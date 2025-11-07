@@ -2,7 +2,7 @@
 import functools
 import inspect
 import types
-from typing import Any, Callable, Mapping, Union, get_args, get_origin, get_type_hints
+from typing import Any, Callable, Union, get_args, get_origin, get_type_hints
 
 
 def osmosis_reward(func: Callable) -> Callable:
@@ -62,15 +62,6 @@ def osmosis_reward(func: Callable) -> Callable:
 
     return wrapper
 
-
-ALLOWED_ROLES = {"user", "system", "assistant", "developer", "tool", "function"}
-
-_UNION_TYPES = {Union}
-_types_union_type = getattr(types, "UnionType", None)
-if _types_union_type is not None:
-    _UNION_TYPES.add(_types_union_type)
-
-
 def _is_str_annotation(annotation: Any) -> bool:
     if annotation is inspect.Parameter.empty:
         return False
@@ -89,89 +80,15 @@ def _is_str_annotation(annotation: Any) -> bool:
     return False
 
 
-def _is_optional_str(annotation: Any) -> bool:
-    if _is_str_annotation(annotation):
-        return True
-    if isinstance(annotation, str):
-        normalized = annotation.replace(" ", "")
-        if normalized in {
-            "Optional[str]",
-            "typing.Optional[str]",
-            "Str|None",
-            "str|None",
-            "builtins.str|None",
-            "None|str",
-            "None|builtins.str",
-        }:
-            return True
-    origin = get_origin(annotation)
-    if origin in _UNION_TYPES:
-        args = tuple(arg for arg in get_args(annotation) if arg is not type(None))  # noqa: E721
-        return len(args) == 1 and _is_str_annotation(args[0])
-    return False
-
-
-def _is_list_annotation(annotation: Any) -> bool:
-    if annotation is list:
-        return True
-    if isinstance(annotation, str):
-        normalized = annotation.replace(" ", "")
-        return (
-            normalized in {"list", "builtins.list", "typing.List", "List"}
-            or normalized.startswith("list[")
-            or normalized.startswith("builtins.list[")
-            or normalized.startswith("typing.List[")
-            or normalized.startswith("List[")
-        )
-    origin = get_origin(annotation)
-    return origin is list
-
-
-def _is_float_annotation(annotation: Any) -> bool:
-    if annotation in {inspect.Parameter.empty, float}:
-        return True
-    if isinstance(annotation, str):
-        return annotation in {"float", "builtins.float"}
-    origin = get_origin(annotation)
-    return origin is float
-
-
-def _is_numeric(value: Any) -> bool:
-    return isinstance(value, (int, float)) and not isinstance(value, bool)
-
-
-def _is_dict_annotation(annotation: Any) -> bool:
-    if annotation in {dict, Mapping}:
-        return True
-    origin = get_origin(annotation)
-    if origin in {dict, Mapping}:
-        return True
-    if isinstance(annotation, type):
-        try:
-            return issubclass(annotation, dict)
-        except TypeError:
-            return False
-    if isinstance(annotation, str):
-        normalized = annotation.replace(" ", "")
-        return (
-            normalized in {"dict", "builtins.dict", "typing.Mapping", "collections.abc.Mapping", "Mapping"}
-            or normalized.startswith("dict[")
-            or normalized.startswith("builtins.dict[")
-            or normalized.startswith("typing.Dict[")
-            or normalized.startswith("Dict[")
-            or normalized.startswith("typing.Mapping[")
-            or normalized.startswith("Mapping[")
-        )
-    return False
-
-
 def osmosis_rubric(func: Callable) -> Callable:
     """
     Decorator for rubric functions that enforces the signature:
     (solution_str: str, ground_truth: str, extra_info: dict) -> float
 
-    The `extra_info` mapping must include the current `provider`, `model`, and `rubric`
-    values, and may optionally provide `system_prompt`, `score_min`, and `score_max`.
+    The decorator guarantees the first two parameters are strings (with `ground_truth`
+    optionally accepting `None`), requires an `extra_info` argument to be provided,
+    and ensures the wrapped function returns a float. The contents of `extra_info`
+    are left to the caller and are not inspected or validated by the decorator.
 
     Args:
         func: The rubric function to be wrapped.
@@ -218,23 +135,27 @@ def osmosis_rubric(func: Callable) -> Callable:
     if ground_truth_param.name != "ground_truth":
         raise TypeError(f"Second parameter must be named 'ground_truth', got '{ground_truth_param.name}'")
     ground_truth_annotation = resolved_annotations.get(ground_truth_param.name, ground_truth_param.annotation)
-    if not _is_optional_str(ground_truth_annotation):
-        raise TypeError(
-            f"Second parameter 'ground_truth' must be annotated as str or Optional[str], got {ground_truth_annotation}"
-        )
+    if not _is_str_annotation(ground_truth_annotation):
+        union_origin = get_origin(ground_truth_annotation)
+        allowed_union_origins = (Union,)
+        union_type = getattr(types, "UnionType", None)
+        if union_type is not None:
+            allowed_union_origins = allowed_union_origins + (union_type,)
+        if union_origin not in allowed_union_origins:
+            raise TypeError(
+                f"Second parameter 'ground_truth' must be annotated as str or Optional[str], got {ground_truth_annotation}"
+            )
+        union_args = tuple(arg for arg in get_args(ground_truth_annotation) if arg is not type(None))  # noqa: E721
+        if len(union_args) != 1 or not _is_str_annotation(union_args[0]):
+            raise TypeError(
+                f"Second parameter 'ground_truth' must be annotated as str or Optional[str], got {ground_truth_annotation}"
+            )
     if ground_truth_param.default is not inspect.Parameter.empty:
         raise TypeError("Second parameter 'ground_truth' cannot have a default value")
 
     extra_info_param = params[2]
     if extra_info_param.name != "extra_info":
         raise TypeError(f"Third parameter must be named 'extra_info', got '{extra_info_param.name}'")
-    extra_info_annotation = resolved_annotations.get(extra_info_param.name, extra_info_param.annotation)
-    if not _is_dict_annotation(extra_info_annotation):
-        raise TypeError(
-            f"Third parameter 'extra_info' must be annotated as a dict or mapping, got {extra_info_annotation}"
-        )
-    if extra_info_param.default is not inspect.Parameter.empty:
-        raise TypeError("Third parameter 'extra_info' cannot have a default value")
 
     @functools.wraps(func)
     def wrapper(*args, **kwargs):
@@ -258,54 +179,6 @@ def osmosis_rubric(func: Callable) -> Callable:
 
         if "extra_info" not in bound.arguments:
             raise TypeError("'extra_info' argument is required")
-        extra_info_value = bound.arguments["extra_info"]
-        if not isinstance(extra_info_value, Mapping):
-            raise TypeError(f"'extra_info' must be a mapping, got {type(extra_info_value).__name__}")
-
-        provider_value = extra_info_value.get("provider")
-        if not isinstance(provider_value, str) or not provider_value.strip():
-            raise TypeError("'extra_info[\"provider\"]' must be a non-empty string")
-
-        model_value = extra_info_value.get("model")
-        if not isinstance(model_value, str) or not model_value.strip():
-            raise TypeError("'extra_info[\"model\"]' must be a non-empty string")
-
-        if "rubric" not in extra_info_value:
-            raise TypeError("'extra_info' must include a 'rubric' string")
-        rubric_value = extra_info_value["rubric"]
-        if not isinstance(rubric_value, str):
-            raise TypeError(f"'extra_info[\"rubric\"]' must be a string, got {type(rubric_value).__name__}")
-
-        api_key_value = extra_info_value.get("api_key")
-        api_key_env_value = extra_info_value.get("api_key_env")
-        has_api_key = isinstance(api_key_value, str) and bool(api_key_value.strip())
-        has_api_key_env = isinstance(api_key_env_value, str) and bool(api_key_env_value.strip())
-        if not (has_api_key or has_api_key_env):
-            raise TypeError(
-                "'extra_info' must include either a non-empty 'api_key' or 'api_key_env' string"
-            )
-
-        system_prompt_value = extra_info_value.get("system_prompt")
-        if system_prompt_value is not None and not isinstance(system_prompt_value, str):
-            raise TypeError(
-                f"'extra_info[\"system_prompt\"]' must be a string or None, got {type(system_prompt_value).__name__}"
-            )
-
-        score_min_value = extra_info_value.get("score_min")
-        if score_min_value is not None and not _is_numeric(score_min_value):
-            raise TypeError(
-                f"'extra_info[\"score_min\"]' must be numeric, got {type(score_min_value).__name__}"
-            )
-
-        score_max_value = extra_info_value.get("score_max")
-        if score_max_value is not None and not _is_numeric(score_max_value):
-            raise TypeError(
-                f"'extra_info[\"score_max\"]' must be numeric, got {type(score_max_value).__name__}"
-            )
-
-        if score_min_value is not None and score_max_value is not None:
-            if float(score_max_value) <= float(score_min_value):
-                raise ValueError("'extra_info[\"score_max\"]' must be greater than 'extra_info[\"score_min\"]'")
 
         result = func(*args, **kwargs)
         if not isinstance(result, float):
