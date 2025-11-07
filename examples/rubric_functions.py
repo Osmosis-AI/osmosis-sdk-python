@@ -54,6 +54,29 @@ GROUND_TRUTH = (
     "suggest safe troubleshooting steps, and offer a timely service appointment."
 )
 
+PROFILE_CATALOG = {
+    "openai": {
+        "provider": "openai",
+        "model": "gpt-5-nano-2025-08-07",
+        "api_key_env": DEFAULT_API_KEY_ENV["openai"],
+    },
+    "anthropic": {
+        "provider": "anthropic",
+        "model": "claude-sonnet-4-5-20250929",
+        "api_key_env": DEFAULT_API_KEY_ENV["anthropic"],
+    },
+    "gemini": {
+        "provider": "gemini",
+        "model": "gemini-2.5-flash",
+        "api_key_env": DEFAULT_API_KEY_ENV["gemini"],
+    },
+    "xai": {
+        "provider": "xai",
+        "model": "grok-4-fast-non-reasoning",
+        "api_key_env": DEFAULT_API_KEY_ENV["xai"],
+    },
+}
+
 
 @osmosis_rubric
 def score_with_hosted_model(
@@ -110,32 +133,9 @@ def _normalize_profile_name(profile_name: str | None) -> str:
 def _resolve_provider_profile(profile_name: str | None) -> dict:
     profile_key = _normalize_profile_name(profile_name)
 
-    profile_catalog = {
-        "openai": {
-            "provider": "openai",
-            "model": "gpt-5-nano-2025-08-07",
-            "api_key_env": DEFAULT_API_KEY_ENV["openai"],
-        },
-        "anthropic": {
-            "provider": "anthropic",
-            "model": "claude-sonnet-4-5-20250929",
-            "api_key_env": DEFAULT_API_KEY_ENV["anthropic"],
-        },
-        "gemini": {
-            "provider": "gemini",
-            "model": "gemini-2.5-flash",
-            "api_key_env": DEFAULT_API_KEY_ENV["gemini"],
-        },
-        "xai": {
-            "provider": "xai",
-            "model": "grok-4-fast-non-reasoning",
-            "api_key_env": DEFAULT_API_KEY_ENV["xai"],
-        },
-    }
-
-    profile = profile_catalog.get(profile_key)
+    profile = PROFILE_CATALOG.get(profile_key)
     if profile is None:
-        options = ", ".join(sorted(profile_catalog))
+        options = ", ".join(sorted(PROFILE_CATALOG))
         raise ValueError(f"Unknown provider_profile '{profile_name}'. Supported profiles: {options}")
 
     return {
