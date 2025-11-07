@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "osmosis-ai"
-version = "0.2.5"
+dynamic = ["version"]
 description = "A Python library for reward function validation with strict type enforcement."
 readme = "README.md"
 authors = [
@@ -37,3 +37,6 @@ Issues = "https://github.com/Osmosis-AI/osmosis-sdk-python/issues"
 osmosis = "osmosis_ai.cli:main"
 osmosis_ai = "osmosis_ai.cli:main"
 osmosis-ai = "osmosis_ai.cli:main"
+
+[tool.setuptools.dynamic]
+version = {attr = "osmosis_ai.consts.package_version"}
