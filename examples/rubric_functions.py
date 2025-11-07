@@ -26,6 +26,7 @@ from osmosis_ai import (
 )
 from osmosis_ai.rubric_eval import DEFAULT_API_KEY_ENV
 
+# Rubric for the example
 RUBRIC = (
     "Evaluate the assistant's ability to handle a smart appliance support case. "
     "Award higher scores when the assistant: (1) confirms purchase information to "
@@ -39,6 +40,7 @@ RUBRIC = (
 SCORE_MIN = 0.0
 SCORE_MAX = 1.0
 
+# Data for the example
 SOLUTION_STR = (
     "Thanks, that order number shows you are still under warranty. A red slow blink usually means "
     "the fan safety cut-off engaged. Please unplug the purifier, remove the base panel, and check if "
@@ -61,16 +63,16 @@ def score_with_hosted_model(
 ) -> float:
     """
     Delegate rubric scoring to a hosted model while keeping @osmosis_rubric validation.
-
-    Pass `provider_profile` inside extra_info to choose between the supported presets.
     """
-    capture_details = bool(extra_info.get("capture_details"))
-    prompt_metadata = extra_info.get("metadata")
+    metadata = extra_info.get("metadata") if isinstance(extra_info, dict) else None
+    metadata = metadata if isinstance(metadata, dict) else None
+    capture_details = bool(metadata.get("capture_details")) if metadata else False
+    prompt_metadata = metadata if metadata else None
 
-    provider_config = _resolve_provider_profile(extra_info.get("provider_profile"))
+    provider_config = _resolve_provider_profile(metadata.get("provider_profile") if metadata else None)
 
     model_info = dict(provider_config["model_info"])
-    overrides = extra_info.get("model_info_overrides")
+    overrides = metadata.get("model_info_overrides") if metadata else None
     if isinstance(overrides, dict):
         model_info.update(overrides)
 
@@ -86,13 +88,13 @@ def score_with_hosted_model(
         metadata=prompt_metadata,
         score_min=score_min,
         score_max=score_max,
-        return_details=capture_details,
+        return_details=True,
     )
 
     if capture_details:
-        # Treat extra_info as an input/output channel to surface detailed results.
-        if extra_info is not None:
-            extra_info["result_details"] = result
+        # Surface the provider response via the metadata channel so callers can inspect it.
+        if metadata is not None:
+            metadata["result_details"] = result
         return float(result["score"])
 
     return float(result)
@@ -148,8 +150,11 @@ def _resolve_provider_profile(profile_name: str | None) -> dict:
 def _run(provider_name: str, provider_profile: str) -> None:
     try:
         context: dict = {
-            "provider_profile": provider_profile,
-            "capture_details": True,
+            "metadata": {
+                "provider_profile": provider_profile,
+                "capture_details": True,
+                "scenario_label": provider_name,
+            }
         }
         score = score_with_hosted_model(
             solution_str=SOLUTION_STR,
@@ -166,7 +171,8 @@ def _run(provider_name: str, provider_profile: str) -> None:
         print(f"{provider_name} failed: {exc.detail}")
         return
 
-    details = context.get("result_details")
+    metadata = context.get("metadata") if isinstance(context, dict) else None
+    details = metadata.get("result_details") if isinstance(metadata, dict) else None
     explanation = ""
     if isinstance(details, dict):
         explanation = details.get("explanation", "")
