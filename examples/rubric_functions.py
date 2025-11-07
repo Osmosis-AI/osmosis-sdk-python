@@ -92,7 +92,7 @@ def score_with_hosted_model(
     """
     metadata = extra_info.get("metadata") if isinstance(extra_info, dict) and isinstance(extra_info.get("metadata"), dict) else None
     capture_details = bool(extra_info.get("capture_details")) if isinstance(extra_info, dict) else False
-    prompt_metadata = metadata if metadata else None
+    prompt_metadata = metadata
 
     provider_config = _resolve_provider_profile(metadata.get("provider_profile") if metadata else None)
 
