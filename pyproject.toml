@@ -39,4 +39,4 @@ osmosis_ai = "osmosis_ai.cli:main"
 osmosis-ai = "osmosis_ai.cli:main"
 
 [tool.setuptools.dynamic]
-version = {attr = "osmosis_ai.consts.package_version"}
+version = {attr = "osmosis_ai.consts.PACKAGE_VERSION"}
