@@ -4,14 +4,18 @@ from typing import Tuple
 
 from .anthropic_provider import AnthropicProvider
 from .base import DEFAULT_REQUEST_TIMEOUT_SECONDS, ProviderRegistry, ProviderRequest, RubricProvider
+from .cerebras_provider import CerebrasProvider
 from .gemini_provider import GeminiProvider
 from .openai_family import OpenAIProvider, XAIProvider
+from .openrouter_provider import OpenRouterProvider
 
 _REGISTRY = ProviderRegistry()
 _REGISTRY.register(OpenAIProvider())
 _REGISTRY.register(XAIProvider())
 _REGISTRY.register(AnthropicProvider())
 _REGISTRY.register(GeminiProvider())
+_REGISTRY.register(OpenRouterProvider())
+_REGISTRY.register(CerebrasProvider())
 
 
 def get_provider(name: str) -> RubricProvider:

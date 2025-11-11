@@ -18,7 +18,7 @@ FAMILIES_USE_MAX_COMPLETION = ("gpt-5", "gpt-4.1", "gpt-4o", "o3", "o4")
 
 # ---- Tunables for safer defaults ----
 # Higher token budget avoids "reasoning-only consumed budget" on gpt-5.
-SAFE_DEFAULT_MAX_OUTPUT = 1536  # you can raise to 2048 if you prefer
+SAFE_DEFAULT_MAX_OUTPUT = 4096  # default max output tokens
 SAFE_MAX_OUTPUT_CAP = 4096      # hard safety cap to avoid unbounded growth
 SAFE_BUMP_FACTOR = 2            # when hitting max_output_tokens, bump once by this factor
 
