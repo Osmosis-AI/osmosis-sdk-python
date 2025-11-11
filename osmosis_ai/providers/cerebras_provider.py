@@ -49,14 +49,6 @@ class CerebrasProvider(RubricProvider):
             # Get JSON schema for structured output
             schema_payload = reward_json_schema()
 
-            # Wrap schema for response_format if needed
-            if isinstance(schema_payload, dict) and "schema" not in schema_payload:
-                schema_payload = {
-                    "name": "reward_score_schema",
-                    "strict": True,
-                    "schema": schema_payload,
-                }
-
             # Build messages
             messages = [
                 {"role": "system", "content": request.system_content},
