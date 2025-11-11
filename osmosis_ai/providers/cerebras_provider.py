@@ -3,9 +3,15 @@ from __future__ import annotations
 from typing import Any, Dict
 
 try:  # pragma: no cover - optional dependency
-    from cerebras.cloud.sdk import Cerebras  # type: ignore
+    from cerebras.cloud.sdk import (  # type: ignore
+        APIStatusError,
+        BadRequestError,
+        Cerebras,
+    )
 except ImportError:  # pragma: no cover - optional dependency
     Cerebras = None  # type: ignore[assignment]
+    BadRequestError = None  # type: ignore[assignment]
+    APIStatusError = None  # type: ignore[assignment]
 
 from ..rubric_types import ProviderRequestError, RewardRubricRunResult
 from .base import ProviderRequest, RubricProvider
@@ -29,7 +35,7 @@ class CerebrasProvider(RubricProvider):
 
     def run(self, request: ProviderRequest) -> RewardRubricRunResult:
         # Guard: SDK available
-        if Cerebras is None:
+        if Cerebras is None or BadRequestError is None:
             raise ProviderRequestError(
                 self.name,
                 request.model,
@@ -76,8 +82,10 @@ class CerebrasProvider(RubricProvider):
                     timeout=request.timeout,
                 )
 
-            except Exception as schema_err:
-                # If JSON schema fails, try with json_object mode
+            except (BadRequestError, TypeError) as schema_err:
+                # BadRequestError: Server-side rejection of unsupported parameters
+                # TypeError: Client-side SDK rejection of unsupported parameters
+                # Both indicate json_schema mode is not supported, fallback to json_object
                 error_msg = str(schema_err).lower()
                 if "response_format" in error_msg or "json_schema" in error_msg:
                     params["response_format"] = {"type": "json_object"}
