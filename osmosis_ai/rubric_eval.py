@@ -26,6 +26,8 @@ DEFAULT_API_KEY_ENV = {
     "anthropic": "ANTHROPIC_API_KEY",
     "xai": "XAI_API_KEY",
     "gemini": "GOOGLE_API_KEY",
+    "openrouter": "OPENROUTER_API_KEY",
+    "cerebras": "CEREBRAS_API_KEY",
 }
 
 REQUEST_TIMEOUT_SECONDS = DEFAULT_REQUEST_TIMEOUT_SECONDS
