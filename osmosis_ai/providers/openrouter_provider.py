@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from typing import Optional
-
 try:  # pragma: no cover - optional dependency
     from openai import OpenAI, OpenAIError  # type: ignore
 except ImportError:  # pragma: no cover - optional dependency
