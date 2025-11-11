@@ -11,8 +11,8 @@ and registers itself with the global provider registry so that
   registry that tracks available providers.
 - `shared.py` — Utility helpers (debug logging, schema definitions, JSON sanitising)
   reused across provider implementations.
-- `openai_family.py`, `anthropic_provider.py`, `gemini_provider.py` — Built-in
-  providers that wrap the official vendor SDKs (OpenAI and xAI share the OpenAI client wrapper).
+- `openai_family.py`, `anthropic_provider.py`, `gemini_provider.py`, `openrouter_provider.py`, `cerebras_provider.py` — Built-in
+  providers that wrap the official vendor SDKs (OpenAI, xAI, and OpenRouter share the OpenAI client wrapper).
 - `__init__.py` — Wires the default providers into the registry and exposes
   `register_provider`, `get_provider`, and `supported_providers`.
 

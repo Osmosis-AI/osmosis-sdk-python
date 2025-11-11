@@ -10,7 +10,7 @@ pip install osmosis-ai
 
 Requires Python 3.9 or newer.
 
-This installs the Osmosis CLI and pulls in the required provider SDKs (`openai`, `anthropic`, `google-genai`, `xai-sdk`) along with supporting utilities such as `PyYAML`, `python-dotenv`, `requests`, and `xxhash`.
+This installs the Osmosis CLI and pulls in the required provider SDKs (`openai`, `anthropic`, `google-genai`, `xai-sdk`, `cerebras_cloud_sdk`) along with supporting utilities such as `PyYAML`, `python-dotenv`, `requests`, and `xxhash`.
 
 For development:
 ```bash
@@ -60,6 +60,8 @@ print(rubric_score)  # -> 1.0 (full payload available via return_details=True)
 - **OpenAI / xAI** – Uses `OpenAI(...).responses.create` (or `chat.completions.create`) with `response_format={"type": "json_schema"}` and falls back to `json_object` when needed.
 - **Anthropic** – Forces a tool call with a JSON schema via `Anthropic(...).messages.create`, extracting the returned tool arguments.
 - **Google Gemini** – Invokes `google.genai.Client(...).models.generate_content` with `response_mime_type="application/json"` and `response_schema`.
+- **OpenRouter** – Uses OpenAI-compatible SDK with custom base URL `https://openrouter.ai/api/v1` to access hundreds of AI models through a unified API.
+- **Cerebras** – Uses `Cerebras(...).chat.completions.create` with JSON schema support for high-performance inference on Wafer-Scale Engine.
 
 Every provider therefore returns a strict JSON object with `{"score": number, "explanation": string}`. The helper clamps the score into your configured range, validates the structure, and exposes the raw payload when `return_details=True`.
 
@@ -69,6 +71,8 @@ Credentials are resolved from environment variables by default:
 - `ANTHROPIC_API_KEY` for Anthropic
 - `GOOGLE_API_KEY` for Google Gemini
 - `XAI_API_KEY` for xAI
+- `OPENROUTER_API_KEY` for OpenRouter
+- `CEREBRAS_API_KEY` for Cerebras
 
 Override the environment variable name with `model_info={"api_key_env": "CUSTOM_ENV_NAME"}` when needed, or supply an inline secret with `model_info={"api_key": "sk-..."}` for ephemeral credentials. Missing API keys raise a `MissingAPIKeyError` that explains how to export the secret before trying again.
 
@@ -89,7 +93,7 @@ Remote failures surface as `ProviderRequestError` instances, with `ModelNotFound
 
 ### Provider Architecture
 
-All remote integrations live in `osmosis_ai/providers/` and implement the `RubricProvider` interface. At import time the default registry registers OpenAI, xAI, Anthropic, and Google Gemini so `evaluate_rubric` can route requests without additional configuration. The request/response plumbing is encapsulated in each provider module, keeping `evaluate_rubric` focused on prompt construction, payload validation, and credential resolution.
+All remote integrations live in `osmosis_ai/providers/` and implement the `RubricProvider` interface. At import time the default registry registers OpenAI, xAI, Anthropic, Google Gemini, OpenRouter, and Cerebras so `evaluate_rubric` can route requests without additional configuration. The request/response plumbing is encapsulated in each provider module, keeping `evaluate_rubric` focused on prompt construction, payload validation, and credential resolution.
 
 Add your own provider by subclassing `RubricProvider`, implementing `run()` with the vendor SDK, and calling `register_provider()` during start-up. A step-by-step guide is available in [`osmosis_ai/providers/README.md`](osmosis_ai/providers/README.md).
 
@@ -179,7 +183,7 @@ def numeric_tolerance(solution_str: str, ground_truth: str, extra_info: dict = N
         return 0.0
 ```
 
-- `examples/rubric_functions.py` demonstrates `evaluate_rubric` with OpenAI, Anthropic, Gemini, and xAI using the schema-enforced SDK integrations.
+- `examples/rubric_functions.py` demonstrates `evaluate_rubric` with OpenAI, Anthropic, Gemini, xAI, OpenRouter, and Cerebras using the schema-enforced SDK integrations.
 - `examples/reward_functions.py` keeps local reward helpers that showcase the decorator contract without external calls.
 - `examples/rubric_configs.yaml` bundles two rubric definitions with provider configuration and scoring bounds.
 - `examples/sample_data.jsonl` contains two rubric-aligned solution strings so you can trial dataset validation.

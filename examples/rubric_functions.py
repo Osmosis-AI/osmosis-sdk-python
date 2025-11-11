@@ -7,6 +7,8 @@ Set the following environment variables before running the examples:
     export ANTHROPIC_API_KEY="..."
     export GOOGLE_API_KEY="..."
     export XAI_API_KEY="..."
+    export OPENROUTER_API_KEY="..."
+    export CEREBRAS_API_KEY="..."
 
 Uncomment the desired provider in the `__main__` section to trigger a request.
 
@@ -74,6 +76,16 @@ PROFILE_CATALOG = {
         "provider": "xai",
         "model": "grok-4-fast-non-reasoning",
         "api_key_env": DEFAULT_API_KEY_ENV["xai"],
+    },
+    "openrouter": {
+        "provider": "openrouter",
+        "model": "openai/gpt-oss-safeguard-20b",
+        "api_key_env": DEFAULT_API_KEY_ENV["openrouter"],
+    },
+    "cerebras": {
+        "provider": "cerebras",
+        "model": "qwen-3-235b-a22b-instruct-2507",
+        "api_key_env": DEFAULT_API_KEY_ENV["cerebras"],
     },
 }
 
@@ -207,10 +219,26 @@ def run_xai_example() -> None:
     )
 
 
+def run_openrouter_example() -> None:
+    _run(
+        "OpenRouter",
+        "openrouter",
+    )
+
+
+def run_cerebras_example() -> None:
+    _run(
+        "Cerebras",
+        "cerebras",
+    )
+
+
 if __name__ == "__main__":
     # Uncomment the provider calls you want to exercise:
-    run_openai_example()
-    run_anthropic_example()
-    run_gemini_example()
-    run_xai_example()
+    # run_openai_example()
+    # run_anthropic_example()
+    # run_gemini_example()
+    # run_xai_example()
+    run_openrouter_example()
+    run_cerebras_example()
     pass
