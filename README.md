@@ -1,6 +1,8 @@
 # osmosis-ai
 
-A Python library that provides reward and rubric validation helpers for LLM applications with strict type enforcement.
+A Python SDK for Osmosis LLM training workflows:
+- Reward/rubric validation helpers with strict type enforcement
+- Remote Rollout SDK for integrating agent frameworks with Osmosis training
 
 ## Installation
 
@@ -8,7 +10,7 @@ A Python library that provides reward and rubric validation helpers for LLM appl
 pip install osmosis-ai
 ```
 
-Requires Python 3.9 or newer.
+Requires Python 3.10 or newer.
 
 This installs the Osmosis CLI and pulls in the required provider SDKs (`openai`, `anthropic`, `google-genai`, `xai-sdk`, `cerebras_cloud_sdk`) along with supporting utilities such as `PyYAML`, `python-dotenv`, `requests`, and `xxhash`.
 
@@ -52,6 +54,12 @@ rubric_score = evaluate_rubric(
 
 print(rubric_score)  # -> 1.0 (full payload available via return_details=True)
 ```
+
+## Remote Rollout SDK
+
+If you're integrating an agent loop with Osmosis remote rollout / TrainGate, see:
+- `docs/rollout/README.md` (quick start)
+- `docs/rollout/architecture.md` (protocol + lifecycle)
 
 ## Remote Rubric Evaluation
 

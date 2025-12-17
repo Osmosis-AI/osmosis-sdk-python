@@ -3,6 +3,7 @@ include README.md
 include pyproject.toml
 include requirements.txt
 include pytest.ini
+recursive-include osmosis_ai py.typed
 include .env.sample
 include setup_env.sh
 include setup_env.bat
