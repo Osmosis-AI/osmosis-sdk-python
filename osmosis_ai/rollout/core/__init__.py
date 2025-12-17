@@ -39,15 +39,19 @@ from osmosis_ai.rollout.core.schemas import (
     DEFAULT_MAX_METADATA_SIZE_BYTES,
     InitResponse,
     MessageDict,
+    OpenAIFunctionCallSchema,
     OpenAIFunctionParametersSchema,
+    OpenAIFunctionParsedSchema,
     OpenAIFunctionPropertySchema,
     OpenAIFunctionSchema,
+    OpenAIFunctionToolCall,
     OpenAIFunctionToolSchema,
     RolloutMetrics,
     RolloutRequest,
     RolloutResponse,
     RolloutStatus,
     SamplingParamsDict,
+    ToolResponse,
     get_max_metadata_size_bytes,
     set_max_metadata_size_bytes,
 )
@@ -77,11 +81,16 @@ __all__ = [
     "CompletionsResponse",
     "CompletionsChoice",
     "CompletionUsage",
-    # Schemas - Tools
+    # Schemas - Tool Definition
     "OpenAIFunctionToolSchema",
     "OpenAIFunctionSchema",
     "OpenAIFunctionParametersSchema",
     "OpenAIFunctionPropertySchema",
+    # Schemas - Tool Call (adapted from verl)
+    "OpenAIFunctionParsedSchema",
+    "OpenAIFunctionCallSchema",
+    "OpenAIFunctionToolCall",
+    "ToolResponse",
     # Type aliases
     "MessageDict",
     "SamplingParamsDict",

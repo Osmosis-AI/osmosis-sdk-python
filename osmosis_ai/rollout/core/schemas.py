@@ -31,7 +31,7 @@ from __future__ import annotations
 import json
 import threading
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional, Tuple
 from urllib.parse import urlparse
 
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -61,8 +61,14 @@ Example:
 
 
 # =============================================================================
-# Tool Schemas (OpenAI-compatible)
+# Tool Definition Schemas (OpenAI-compatible)
 # =============================================================================
+# The following schemas define the structure of tool/function definitions
+# that are passed to the LLM. They follow the OpenAI function calling format.
+#
+# These schemas are adapted from verl/tools/schemas.py
+# (Copyright 2023-2024 SGLang Team, Copyright 2025 ModelBest Inc.)
+# Source: https://github.com/volcengine/verl/blob/main/verl/tools/schemas.py
 
 
 class OpenAIFunctionPropertySchema(BaseModel):
@@ -142,6 +148,167 @@ class OpenAIFunctionToolSchema(BaseModel):
 
     type: str
     function: OpenAIFunctionSchema
+
+
+# =============================================================================
+# Tool Call Schemas (OpenAI-compatible)
+# =============================================================================
+# The following schemas are adapted from verl/tools/schemas.py
+# (Copyright 2023-2024 SGLang Team, Copyright 2025 ModelBest Inc.)
+# They represent the runtime tool call structures used during agent execution.
+
+
+class OpenAIFunctionParsedSchema(BaseModel):
+    """Parsed function call from LLM output (arguments as JSON string).
+
+    This represents the raw output from the LLM before argument parsing.
+    The arguments field contains a JSON string that needs to be parsed.
+
+    Attributes:
+        name: The function name to call.
+        arguments: JSON string of function arguments (needs parsing).
+
+    Example:
+        parsed = OpenAIFunctionParsedSchema(
+            name="add",
+            arguments='{"a": 5, "b": 3}'
+        )
+    """
+
+    name: str
+    arguments: str  # JSON string
+
+
+class OpenAIFunctionCallSchema(BaseModel):
+    """Parsed function call with arguments as dict.
+
+    This represents a function call after the arguments JSON string
+    has been parsed into a Python dict.
+
+    Attributes:
+        name: The function name to call.
+        arguments: Parsed function arguments as a dictionary.
+
+    Example:
+        call = OpenAIFunctionCallSchema(
+            name="add",
+            arguments={"a": 5, "b": 3}
+        )
+    """
+
+    name: str
+    arguments: Dict[str, Any]
+
+    @staticmethod
+    def from_openai_function_parsed_schema(
+        parsed_schema: OpenAIFunctionParsedSchema,
+    ) -> Tuple["OpenAIFunctionCallSchema", bool]:
+        """Parse a function call from LLM output.
+
+        Args:
+            parsed_schema: The raw parsed schema with JSON string arguments.
+
+        Returns:
+            A tuple of (parsed_call, has_decode_error).
+            If decoding fails, arguments will be empty dict and has_decode_error=True.
+        """
+        has_decode_error = False
+        try:
+            arguments = json.loads(parsed_schema.arguments)
+        except json.JSONDecodeError:
+            arguments = {}
+            has_decode_error = True
+        # If the arguments is not a dict, it means the arguments is not a valid JSON string
+        if not isinstance(arguments, dict):
+            arguments = {}
+            has_decode_error = True
+
+        return (
+            OpenAIFunctionCallSchema(name=parsed_schema.name, arguments=arguments),
+            has_decode_error,
+        )
+
+
+class OpenAIFunctionToolCall(BaseModel):
+    """Complete tool call structure in OpenAI format.
+
+    This represents a full tool call as returned by the LLM, including
+    the unique call ID, type, and function details.
+
+    Attributes:
+        id: Unique identifier for this tool call (e.g., "call_abc123").
+        type: Tool type, always "function" for function calls.
+        function: The function call details.
+
+    Example:
+        tool_call = OpenAIFunctionToolCall(
+            id="call_abc123",
+            type="function",
+            function=OpenAIFunctionCallSchema(
+                name="add",
+                arguments={"a": 5, "b": 3}
+            )
+        )
+    """
+
+    id: str
+    type: Literal["function"] = "function"
+    function: OpenAIFunctionCallSchema
+
+
+class ToolResponse(BaseModel):
+    """Response from a tool execution.
+
+    Supports multimodal responses including text, images, and videos.
+    At least one field should be non-empty for a valid response.
+
+    Attributes:
+        text: Text response from the tool.
+        image: List of images (for multimodal tools).
+        video: List of videos (for multimodal tools).
+
+    Example:
+        # Text-only response
+        response = ToolResponse(text="The result is 42")
+
+        # Multimodal response
+        response = ToolResponse(
+            text="Here is the generated image",
+            image=[image_data]
+        )
+    """
+
+    text: Optional[str] = None
+    image: Optional[List[Any]] = None
+    video: Optional[List[Any]] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def validate_media_fields(cls, values: Dict[str, Any]) -> Dict[str, Any]:
+        """Validate that image and video fields are lists if provided."""
+        if "image" in values and values["image"] is not None:
+            if not isinstance(values["image"], list):
+                raise ValueError(
+                    f"image must be a list, but got {type(values['image'])}. "
+                    f"For single images, wrap in a list: [image]. "
+                    f"Example: {{'image': [img1]}} or {{'image': [img1, img2, ...]}}."
+                )
+        if "video" in values and values["video"] is not None:
+            if not isinstance(values["video"], list):
+                raise ValueError(
+                    f"video must be a list, but got {type(values['video'])}. "
+                    f"For single videos, wrap in a list: [video]. "
+                    f"Example: {{'video': [video1]}} or {{'video': [video1, video2, ...]}}."
+                )
+        return values
+
+    def is_empty(self) -> bool:
+        """Check if the response has no content."""
+        return not self.text and not self.image and not self.video
+
+    def is_text_only(self) -> bool:
+        """Check if the response contains only text."""
+        return bool(self.text) and not self.image and not self.video
 
 
 # =============================================================================
@@ -434,9 +601,16 @@ class CompletionsResponse(BaseModel):
         model: Model name.
         choices: List of completion choices.
         usage: Token usage statistics.
-        token_ids: Response token IDs (for training).
-        logprobs: Log probabilities (for training).
-        prompt_token_ids: Prompt token IDs (for training).
+        token_ids: Response token IDs (TrainGate internal use only).
+        logprobs: Log probabilities (TrainGate internal use only).
+        prompt_token_ids: Prompt token IDs (TrainGate internal use only).
+
+    Note:
+        The ``token_ids``, ``logprobs``, and ``prompt_token_ids`` fields are
+        used internally by TrainGate for training data collection. These fields
+        are accumulated in TrainGate's SessionManager and are NOT transmitted
+        via HTTP to RolloutServer. RolloutServer implementations should not
+        rely on or expect these fields in the response.
     """
 
     id: str
@@ -445,6 +619,8 @@ class CompletionsResponse(BaseModel):
     model: str = "default"
     choices: List[CompletionsChoice]
     usage: Optional[CompletionUsage] = None
+    # TrainGate internal fields - NOT transmitted via HTTP to RolloutServer.
+    # These are accumulated in SessionManager for building AgentLoopOutput.
     token_ids: Optional[List[int]] = None
     logprobs: Optional[List[float]] = None
     prompt_token_ids: Optional[List[int]] = None
