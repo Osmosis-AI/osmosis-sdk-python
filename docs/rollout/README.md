@@ -23,11 +23,8 @@ pip install osmosis-ai[server]
 # Optional: environment-driven settings (.env / env vars)
 pip install osmosis-ai[config]
 
-# Optional: observability extras
-pip install osmosis-ai[logging]       # structured logging (structlog)
-pip install osmosis-ai[tracing]       # OpenTelemetry tracing
-pip install osmosis-ai[observability] # logging + tracing
-pip install osmosis-ai[full]          # everything
+# Full installation with all optional features
+pip install osmosis-ai[full]
 ```
 
 ## Quick Start
@@ -178,15 +175,14 @@ app = create_app(
 
 When installed with `osmosis-ai[config]`, settings can be loaded from environment variables (or a `.env` file) using these prefixes:
 
-- `OSMOSIS_ROLLOUT_CLIENT_*`
-- `OSMOSIS_ROLLOUT_SERVER_*`
-- `OSMOSIS_ROLLOUT_LOG_*`
-- `OSMOSIS_ROLLOUT_TRACE_*`
+- `OSMOSIS_ROLLOUT_CLIENT_*` - Client settings (timeout, retries, etc.)
+- `OSMOSIS_ROLLOUT_SERVER_*` - Server settings (concurrency, TTL, etc.)
 
 Example:
 
 ```bash
-export OSMOSIS_ROLLOUT_LOG_LEVEL=INFO
+export OSMOSIS_ROLLOUT_CLIENT_TIMEOUT_SECONDS=120
+export OSMOSIS_ROLLOUT_SERVER_MAX_CONCURRENT_ROLLOUTS=200
 ```
 
 ## Next Steps

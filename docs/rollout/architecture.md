@@ -148,14 +148,6 @@ Server state management:
 - Background cleanup of old records
 - Concurrency limiting via semaphore
 
-### Observability
-
-The FastAPI server created by `create_app()` includes observability middleware:
-
-- Generates/propagates `X-Request-ID` and logs request metadata
-- Records request duration and status in logs
-- Creates tracing spans (when enabled)
-
 ## Error Handling
 
 ### Exception Hierarchy
