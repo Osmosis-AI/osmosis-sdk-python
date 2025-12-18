@@ -44,7 +44,6 @@ from osmosis_ai.rollout.core.schemas import (
     RolloutStatus,
 )
 from osmosis_ai.rollout.observability.logging import get_logger, set_rollout_id
-from osmosis_ai.rollout.observability.metrics import get_metrics
 from osmosis_ai.rollout.observability.tracing import SpanNames, span
 
 logger = get_logger(__name__)
@@ -269,7 +268,6 @@ class OsmosisLLMClient:
         client = await self._get_client()
         url = f"{self.server_url}/v1/chat/completions"
         last_error: Optional[Exception] = None
-        metrics = get_metrics()
 
         # Set context for logging
         set_rollout_id(self.rollout_id)
@@ -306,14 +304,6 @@ class OsmosisLLMClient:
                             self._prompt_tokens += prompt_tokens
                             self._response_tokens += completion_tokens
 
-                        # Update Prometheus metrics
-                        metrics.llm_requests_total.labels(status="success").inc()
-                        metrics.llm_request_duration_seconds.labels(status="success").observe(
-                            elapsed_ms / 1000
-                        )
-                        metrics.llm_tokens_total.labels(type="prompt").inc(prompt_tokens)
-                        metrics.llm_tokens_total.labels(type="completion").inc(completion_tokens)
-
                         # Set span attributes
                         s.set_attribute("status", "success")
                         s.set_attribute("prompt_tokens", prompt_tokens)
@@ -336,10 +326,6 @@ class OsmosisLLMClient:
                             status_code=response.status_code,
                             detail=detail[:200],
                         )
-                        metrics.llm_requests_total.labels(status="error").inc()
-                        metrics.llm_request_duration_seconds.labels(status="error").observe(
-                            elapsed_ms / 1000
-                        )
                         s.set_attribute("status", "validation_error")
                         s.set_attribute("status_code", response.status_code)
                         raise OsmosisValidationError(detail, response.status_code)
@@ -352,10 +338,6 @@ class OsmosisLLMClient:
                             attempt=attempt + 1,
                             max_attempts=self.max_retries + 1,
                             detail=detail[:200],
-                        )
-                        metrics.llm_requests_total.labels(status="error").inc()
-                        metrics.llm_request_duration_seconds.labels(status="error").observe(
-                            elapsed_ms / 1000
                         )
                         s.set_attribute("status", "server_error")
                         s.set_attribute("status_code", response.status_code)
@@ -374,10 +356,6 @@ class OsmosisLLMClient:
                         error=str(e),
                     )
                     s.set_attribute("status", "timeout")
-                    metrics.llm_requests_total.labels(status="timeout").inc()
-                    metrics.llm_request_duration_seconds.labels(status="timeout").observe(
-                        elapsed_ms / 1000
-                    )
                     last_error = OsmosisTimeoutError(str(e))
 
                 except httpx.RequestError as e:
@@ -390,10 +368,6 @@ class OsmosisLLMClient:
                         error=error_detail,
                     )
                     s.set_attribute("status", "transport_error")
-                    metrics.llm_requests_total.labels(status="error").inc()
-                    metrics.llm_request_duration_seconds.labels(status="error").observe(
-                        elapsed_ms / 1000
-                    )
                     last_error = OsmosisTransportError(error_detail)
 
                 except OsmosisValidationError:

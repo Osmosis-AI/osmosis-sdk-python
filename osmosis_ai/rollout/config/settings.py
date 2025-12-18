@@ -8,7 +8,6 @@ Environment Variable Prefixes:
     - OSMOSIS_ROLLOUT_SERVER_* - Server settings
     - OSMOSIS_ROLLOUT_LOG_* - Logging settings
     - OSMOSIS_ROLLOUT_TRACE_* - Tracing settings
-    - OSMOSIS_ROLLOUT_METRICS_* - Metrics settings
 
 Example:
     # Set via environment variables
@@ -261,49 +260,6 @@ class TracingSettings(_BaseSettings):
         description="Comma-separated list of propagators",
     )
 
-
-class MetricsSettings(_BaseSettings):
-    """Prometheus metrics configuration.
-
-    Loaded from environment variables with prefix: OSMOSIS_ROLLOUT_METRICS_
-
-    Attributes:
-        enabled: Whether metrics collection is enabled.
-        prefix: Prefix for metric names.
-        include_default_labels: Whether to include default labels.
-        expose_endpoint: Whether to expose /metrics endpoint.
-
-    Example:
-        export OSMOSIS_ROLLOUT_METRICS_ENABLED=true
-        export OSMOSIS_ROLLOUT_METRICS_PREFIX=my_agent
-    """
-
-    if PYDANTIC_SETTINGS_AVAILABLE:
-        model_config = SettingsConfigDict(
-            env_prefix="OSMOSIS_ROLLOUT_METRICS_",
-            env_file=".env",
-            env_file_encoding="utf-8",
-            extra="ignore",
-        )
-
-    enabled: bool = Field(
-        default=False,
-        description="Whether metrics collection is enabled",
-    )
-    prefix: str = Field(
-        default="osmosis_rollout",
-        description="Prefix for metric names",
-    )
-    include_default_labels: bool = Field(
-        default=True,
-        description="Whether to include default labels (service, version)",
-    )
-    expose_endpoint: bool = Field(
-        default=True,
-        description="Whether to expose /metrics endpoint when enabled",
-    )
-
-
 class RolloutSettings(_BaseSettings):
     """Main configuration for Osmosis rollout SDK.
 
@@ -314,7 +270,6 @@ class RolloutSettings(_BaseSettings):
         server: Server settings.
         logging: Logging settings.
         tracing: OpenTelemetry tracing settings.
-        metrics: Prometheus metrics settings.
         max_metadata_size_bytes: Maximum size for metadata in bytes.
 
     Example:
@@ -343,7 +298,6 @@ class RolloutSettings(_BaseSettings):
     server: RolloutServerSettings = Field(default_factory=RolloutServerSettings)
     logging: LoggingSettings = Field(default_factory=LoggingSettings)
     tracing: TracingSettings = Field(default_factory=TracingSettings)
-    metrics: MetricsSettings = Field(default_factory=MetricsSettings)
 
     # Global settings
     max_metadata_size_bytes: int = Field(
@@ -410,7 +364,6 @@ __all__ = [
     "RolloutServerSettings",
     "LoggingSettings",
     "TracingSettings",
-    "MetricsSettings",
     "RolloutSettings",
     # Functions
     "get_settings",

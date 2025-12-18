@@ -153,10 +153,8 @@ Server state management:
 The FastAPI server created by `create_app()` includes observability middleware:
 
 - Generates/propagates `X-Request-ID` and logs request metadata
-- Records HTTP request metrics
+- Records request duration and status in logs
 - Creates tracing spans (when enabled)
-
-When Prometheus metrics are enabled, the server also exposes `GET /metrics`.
 
 ## Error Handling
 

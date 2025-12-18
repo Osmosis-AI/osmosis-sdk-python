@@ -26,7 +26,6 @@ from typing import Dict, Optional, Tuple
 from osmosis_ai.rollout.config.settings import RolloutServerSettings, get_settings
 from osmosis_ai.rollout.core.schemas import InitResponse
 from osmosis_ai.rollout.observability.logging import get_logger
-from osmosis_ai.rollout.observability.metrics import get_metrics
 
 logger = get_logger(__name__)
 
@@ -41,7 +40,6 @@ class AppState:
         - Concurrency control via semaphore
         - Idempotency checking for duplicate requests
         - Automatic cleanup of old completion records
-        - Metrics integration
 
     Attributes:
         rollout_tasks: Dictionary of active rollout tasks by ID.
@@ -74,7 +72,7 @@ class AppState:
             record_ttl_seconds: TTL for completed records. Defaults to settings.
             cleanup_interval_seconds: Cleanup check interval. Defaults to settings.
             settings: Server settings. Defaults to global settings.
-            agent_loop_name: Name of the agent loop for metrics labels.
+            agent_loop_name: Name of the agent loop (for observability context).
         """
         if settings is None:
             settings = get_settings().server
@@ -191,10 +189,6 @@ class AppState:
         """
         self.rollout_tasks[rollout_id] = task
 
-        # Update metrics
-        metrics = get_metrics()
-        metrics.rollouts_active.labels(agent_loop=self._agent_loop_name).inc()
-
     def mark_completed(self, rollout_id: str) -> None:
         """Mark a rollout as completed.
 
@@ -206,10 +200,6 @@ class AppState:
         """
         self.rollout_tasks.pop(rollout_id, None)
         self.completed_rollouts[rollout_id] = time.monotonic()
-
-        # Update metrics
-        metrics = get_metrics()
-        metrics.rollouts_active.labels(agent_loop=self._agent_loop_name).dec()
 
     async def cancel_all(self) -> None:
         """Cancel all running rollout tasks.

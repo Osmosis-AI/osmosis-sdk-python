@@ -26,8 +26,7 @@ pip install osmosis-ai[config]
 # Optional: observability extras
 pip install osmosis-ai[logging]       # structured logging (structlog)
 pip install osmosis-ai[tracing]       # OpenTelemetry tracing
-pip install osmosis-ai[metrics]       # Prometheus metrics
-pip install osmosis-ai[observability] # logging + tracing + metrics
+pip install osmosis-ai[observability] # logging + tracing
 pip install osmosis-ai[full]          # everything
 ```
 
@@ -164,7 +163,6 @@ The server created by `create_app()` exposes:
 |----------|--------|-------------|
 | `/v1/rollout/init` | POST | Accept rollout requests (returns 202) |
 | `/health` | GET | Health check |
-| `/metrics` | GET | Prometheus metrics (when enabled) |
 
 ## Configuration Options
 
@@ -173,7 +171,6 @@ app = create_app(
     agent_loop,
     max_concurrent=100,      # Max concurrent rollouts
     record_ttl_seconds=3600, # How long to keep completed records
-    enable_metrics_endpoint=True,  # Expose /metrics when metrics are enabled
 )
 ```
 
@@ -185,14 +182,11 @@ When installed with `osmosis-ai[config]`, settings can be loaded from environmen
 - `OSMOSIS_ROLLOUT_SERVER_*`
 - `OSMOSIS_ROLLOUT_LOG_*`
 - `OSMOSIS_ROLLOUT_TRACE_*`
-- `OSMOSIS_ROLLOUT_METRICS_*`
 
 Example:
 
 ```bash
 export OSMOSIS_ROLLOUT_LOG_LEVEL=INFO
-export OSMOSIS_ROLLOUT_METRICS_ENABLED=true
-export OSMOSIS_ROLLOUT_METRICS_PREFIX=my_agent
 ```
 
 ## Next Steps

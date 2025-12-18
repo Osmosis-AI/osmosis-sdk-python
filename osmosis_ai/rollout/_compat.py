@@ -6,7 +6,6 @@ with graceful fallbacks when dependencies are not available.
 Example:
     from osmosis_ai.rollout._compat import (
         STRUCTLOG_AVAILABLE,
-        PROMETHEUS_AVAILABLE,
         require_optional,
     )
 
@@ -95,9 +94,6 @@ def require_optional(
 # Structured logging
 structlog, STRUCTLOG_AVAILABLE = import_optional("structlog")
 
-# Prometheus metrics
-prometheus_client, PROMETHEUS_AVAILABLE = import_optional("prometheus_client")
-
 # OpenTelemetry tracing
 _otel_api, OTEL_API_AVAILABLE = import_optional("opentelemetry.trace")
 _otel_sdk, OTEL_SDK_AVAILABLE = import_optional("opentelemetry.sdk.trace")
@@ -121,7 +117,6 @@ __all__ = [
     "require_optional",
     # Availability flags
     "STRUCTLOG_AVAILABLE",
-    "PROMETHEUS_AVAILABLE",
     "OTEL_AVAILABLE",
     "OTEL_API_AVAILABLE",
     "OTEL_SDK_AVAILABLE",
@@ -130,7 +125,6 @@ __all__ = [
     "FASTAPI_AVAILABLE",
     # Pre-imported modules (may be None)
     "structlog",
-    "prometheus_client",
     "pydantic_settings",
     "fastapi",
 ]

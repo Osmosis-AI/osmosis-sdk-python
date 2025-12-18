@@ -22,7 +22,6 @@ if TYPE_CHECKING:
     from starlette.responses import Response
 
 from osmosis_ai.rollout.observability.logging import get_logger, set_context, clear_context
-from osmosis_ai.rollout.observability.metrics import get_metrics
 from osmosis_ai.rollout.observability.tracing import span, SpanNames
 
 logger = get_logger(__name__)
@@ -39,7 +38,6 @@ async def observability_middleware(
     Features:
         - Automatic request ID generation
         - Request/response logging
-        - Prometheus metrics (request count, duration)
         - Distributed tracing (when enabled)
 
     Args:
@@ -50,7 +48,6 @@ async def observability_middleware(
         The response from the handler.
     """
     start_time = time.perf_counter()
-    metrics = get_metrics()
 
     # Generate or extract request ID
     request_id = request.headers.get("X-Request-ID", str(uuid4()))
@@ -76,13 +73,6 @@ async def observability_middleware(
                 response = await call_next(request)
                 status_code = response.status_code
 
-                # Record metrics
-                metrics.http_requests_total.labels(
-                    method=method,
-                    endpoint=endpoint,
-                    status_code=str(status_code),
-                ).inc()
-
                 # Set span attributes
                 s.set_attribute("http.status_code", status_code)
 
@@ -92,13 +82,6 @@ async def observability_middleware(
                 return response
 
             except Exception as e:
-                # Record error metrics
-                metrics.http_requests_total.labels(
-                    method=method,
-                    endpoint=endpoint,
-                    status_code="500",
-                ).inc()
-
                 s.set_attribute("http.status_code", 500)
                 s.set_attribute("error", str(e))
                 raise
@@ -106,10 +89,6 @@ async def observability_middleware(
     finally:
         # Calculate and record duration
         duration = time.perf_counter() - start_time
-        metrics.http_request_duration_seconds.labels(
-            method=method,
-            endpoint=endpoint,
-        ).observe(duration)
 
         # Log request completion
         logger.info(

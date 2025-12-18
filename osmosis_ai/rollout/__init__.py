@@ -10,7 +10,6 @@ Features:
     - FastAPI server factory for hosting agents
     - Structured logging with structlog (optional)
     - Distributed tracing with OpenTelemetry (optional)
-    - Prometheus metrics collection (optional)
     - Type-safe configuration with pydantic-settings (optional)
 
 Example:
@@ -40,8 +39,7 @@ Optional Features:
     pip install osmosis-ai[config]        # pydantic-settings configuration
     pip install osmosis-ai[logging]       # structlog structured logging
     pip install osmosis-ai[tracing]       # OpenTelemetry tracing
-    pip install osmosis-ai[metrics]       # Prometheus metrics
-    pip install osmosis-ai[observability] # All observability features
+    pip install osmosis-ai[observability] # logging + tracing
     pip install osmosis-ai[full]          # Everything
 """
 
@@ -119,7 +117,6 @@ from osmosis_ai.rollout.utils import (
 # Configuration
 from osmosis_ai.rollout.config import (
     LoggingSettings,
-    MetricsSettings,
     RolloutClientSettings,
     RolloutServerSettings,
     RolloutSettings,
@@ -134,13 +131,10 @@ from osmosis_ai.rollout.observability import (
     SpanNames,
     clear_context,
     configure_logging,
-    configure_metrics,
     configure_tracing,
     get_logger,
-    get_metrics,
     get_rollout_id,
     get_tracer,
-    reset_metrics,
     reset_tracing,
     set_rollout_id,
     span,
@@ -222,7 +216,6 @@ __all__ = [
     "RolloutServerSettings",
     "LoggingSettings",
     "TracingSettings",
-    "MetricsSettings",
     "get_settings",
     "configure",
     "reset_settings",
@@ -239,8 +232,4 @@ __all__ = [
     "span",
     "trace_async",
     "SpanNames",
-    # Observability - Metrics
-    "get_metrics",
-    "configure_metrics",
-    "reset_metrics",
 ]

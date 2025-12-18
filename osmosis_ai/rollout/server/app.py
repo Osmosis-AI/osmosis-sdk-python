@@ -32,11 +32,6 @@ from osmosis_ai.rollout.observability.logging import (
     set_rollout_id,
     clear_context,
 )
-from osmosis_ai.rollout.observability.metrics import (
-    configure_metrics,
-    get_metrics,
-    get_metrics_content,
-)
 from osmosis_ai.rollout.observability.tracing import configure_tracing, span, SpanNames
 from osmosis_ai.rollout.server.middleware import add_observability_middleware
 from osmosis_ai.rollout.server.state import AppState
@@ -50,25 +45,22 @@ def create_app(
     max_concurrent: Optional[int] = None,
     record_ttl_seconds: Optional[float] = None,
     settings: Optional[RolloutSettings] = None,
-    enable_metrics_endpoint: bool = True,
 ) -> "FastAPI":
     """Create a FastAPI application for the agent loop.
 
     This factory creates a complete FastAPI application with:
     - POST /v1/rollout/init: Accept rollout requests (returns 202 Accepted)
     - GET /health: Health check endpoint
-    - GET /metrics: Prometheus metrics endpoint (when enabled)
     - Background task management with concurrency control
     - Idempotency handling (duplicate requests return same response)
     - Automatic cleanup of completed rollout records
-    - Integrated logging, tracing, and metrics
+    - Integrated logging and tracing
 
     Args:
         agent_loop: The RolloutAgentLoop implementation to use.
         max_concurrent: Maximum concurrent rollouts. Defaults to settings.
         record_ttl_seconds: TTL for completed records. Defaults to settings.
         settings: Configuration settings. Defaults to global settings.
-        enable_metrics_endpoint: Whether to expose /metrics endpoint.
 
     Returns:
         FastAPI application ready to serve.
@@ -100,7 +92,6 @@ def create_app(
         )
 
     from fastapi import FastAPI
-    from starlette.responses import Response
 
     # Load settings
     if settings is None:
@@ -109,7 +100,6 @@ def create_app(
     # Configure observability
     configure_logging(settings.logging)
     configure_tracing(settings.tracing)
-    configure_metrics(settings.metrics)
 
     # Create app state
     state = AppState(
@@ -155,14 +145,6 @@ def create_app(
             "completed_rollouts": state.completed_count,
         }
 
-    # Add metrics endpoint if enabled
-    if enable_metrics_endpoint and settings.metrics.enabled and settings.metrics.expose_endpoint:
-        @app.get("/metrics")
-        async def metrics_endpoint() -> Response:
-            """Prometheus metrics endpoint."""
-            content, content_type = get_metrics_content()
-            return Response(content=content, media_type=content_type)
-
     @app.post("/v1/rollout/init", status_code=202)
     async def init_rollout(request: RolloutRequest) -> InitResponse:
         """Initialize a new rollout.
@@ -174,8 +156,6 @@ def create_app(
         Idempotency: If a rollout with the same ID is already running or
         recently completed, returns the same tools without starting a new rollout.
         """
-        metrics = get_metrics()
-
         with span(
             SpanNames.ROLLOUT_INIT,
             attributes={
@@ -240,17 +220,7 @@ def create_app(
                                                 metrics=result.metrics,
                                             )
 
-                                        # Record success metrics
                                         duration = time.monotonic() - start_time
-                                        metrics.rollouts_completed.labels(
-                                            agent_loop=agent_loop.name,
-                                            status=result.status,
-                                            finish_reason=result.finish_reason,
-                                        ).inc()
-                                        metrics.rollout_duration_seconds.labels(
-                                            agent_loop=agent_loop.name,
-                                            status=result.status,
-                                        ).observe(duration)
 
                                         run_span.set_attribute("status", result.status)
                                         run_span.set_attribute(
@@ -284,12 +254,6 @@ def create_app(
                                                 error_message=str(e),
                                             )
 
-                                        # Record error metrics
-                                        metrics.rollouts_failed.labels(
-                                            agent_loop=agent_loop.name,
-                                            error_type=type(e).__name__,
-                                        ).inc()
-
                             except Exception as e:
                                 # Client/infrastructure error
                                 logger.error(
@@ -298,10 +262,6 @@ def create_app(
                                     error=str(e),
                                     exc_info=True,
                                 )
-                                metrics.rollouts_failed.labels(
-                                    agent_loop=agent_loop.name,
-                                    error_type=type(e).__name__,
-                                ).inc()
 
                             finally:
                                 state.mark_completed(request.rollout_id)
@@ -310,9 +270,6 @@ def create_app(
                 # Start background task
                 task = asyncio.create_task(run_rollout())
                 state.mark_started(request.rollout_id, task)
-
-                # Record metrics (once per rollout)
-                metrics.rollouts_started.labels(agent_loop=agent_loop.name).inc()
 
                 init_response = InitResponse(rollout_id=request.rollout_id, tools=tools)
                 init_future.set_result(init_response)

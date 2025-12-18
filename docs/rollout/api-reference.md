@@ -233,7 +233,6 @@ app = create_app(
     agent_loop,
     max_concurrent=100,
     record_ttl_seconds=3600,
-    enable_metrics_endpoint=True,
 )
 ```
 
@@ -244,8 +243,7 @@ app = create_app(
 | `agent_loop` | `RolloutAgentLoop` | required | Your agent implementation |
 | `max_concurrent` | `int` | `100` | Max concurrent rollouts |
 | `record_ttl_seconds` | `float` | `3600` | TTL for completed records |
-| `settings` | `Optional[RolloutSettings]` | `None` | Global settings override (server/logging/tracing/metrics) |
-| `enable_metrics_endpoint` | `bool` | `True` | Expose `/metrics` when metrics are enabled |
+| `settings` | `Optional[RolloutSettings]` | `None` | Global settings override (server/logging/tracing) |
 
 **Returns:** `FastAPI` application
 
@@ -255,7 +253,6 @@ app = create_app(
 |----------|--------|--------|-------------|
 | `/v1/rollout/init` | POST | 202 | Accept rollout request |
 | `/health` | GET | 200 | Health check |
-| `/metrics` | GET | 200 | Prometheus metrics (when enabled) |
 
 ---
 
