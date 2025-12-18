@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "osmosis-ai"
 dynamic = ["version"]
-description = "A Python library for reward function validation with strict type enforcement."
+description = "A Python SDK for Osmosis LLM training workflows: reward/rubric validation and remote rollout."
 readme = "README.md"
 authors = [
     {name = "Osmosis AI", email = "jake@osmosis.ai"}
@@ -16,7 +16,7 @@ classifiers = [
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
 ]
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 dependencies = [
     "PyYAML>=6.0,<7.0",
     "python-dotenv>=0.1.0,<2.0.0",
@@ -28,6 +28,59 @@ dependencies = [
     "xai-sdk>=1.2.0",
     "cerebras-cloud-sdk>=1.0.0",
     "tqdm>=4.0.0,<5.0.0",
+    # Remote rollout SDK dependencies
+    "httpx>=0.25.0,<1.0.0",
+    "pydantic>=2.0.0,<3.0.0",
+]
+
+[project.optional-dependencies]
+# Optional server dependencies for create_app()
+server = [
+    "fastapi>=0.100.0,<1.0.0",
+    "uvicorn>=0.23.0,<1.0.0",
+]
+
+# Configuration management
+config = [
+    "pydantic-settings>=2.0.0,<3.0.0",
+]
+
+# Structured logging
+logging = [
+    "structlog>=24.0.0,<26.0.0",
+]
+
+# OpenTelemetry tracing
+tracing = [
+    "opentelemetry-api>=1.20.0,<2.0.0",
+    "opentelemetry-sdk>=1.20.0,<2.0.0",
+    "opentelemetry-exporter-otlp>=1.20.0,<2.0.0",
+]
+
+# Prometheus metrics
+metrics = [
+    "prometheus-client>=0.17.0,<1.0.0",
+]
+
+# All observability features
+observability = [
+    "structlog>=24.0.0,<26.0.0",
+    "opentelemetry-api>=1.20.0,<2.0.0",
+    "opentelemetry-sdk>=1.20.0,<2.0.0",
+    "opentelemetry-exporter-otlp>=1.20.0,<2.0.0",
+    "prometheus-client>=0.17.0,<1.0.0",
+]
+
+# Full installation with all optional features
+full = [
+    "fastapi>=0.100.0,<1.0.0",
+    "uvicorn>=0.23.0,<1.0.0",
+    "pydantic-settings>=2.0.0,<3.0.0",
+    "structlog>=24.0.0,<26.0.0",
+    "opentelemetry-api>=1.20.0,<2.0.0",
+    "opentelemetry-sdk>=1.20.0,<2.0.0",
+    "opentelemetry-exporter-otlp>=1.20.0,<2.0.0",
+    "prometheus-client>=0.17.0,<1.0.0",
 ]
 
 [project.urls]
@@ -38,6 +91,16 @@ Issues = "https://github.com/Osmosis-AI/osmosis-sdk-python/issues"
 osmosis = "osmosis_ai.cli:main"
 osmosis_ai = "osmosis_ai.cli:main"
 osmosis-ai = "osmosis_ai.cli:main"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["osmosis_ai*"]
+
+[tool.setuptools.package-data]
+osmosis_ai = ["py.typed"]
 
 [tool.setuptools.dynamic]
 version = {attr = "osmosis_ai.consts.PACKAGE_VERSION"}
