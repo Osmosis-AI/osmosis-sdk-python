@@ -1,4 +1,5 @@
 # Development requirements
 pytest>=8.0.0,<9.0.0     # For running tests
+pytest-asyncio>=0.23.0,<1.0.0  # For async test support
 black>=25.0.0,<26.0.0     # For code formatting
-isort>=5.0.0,<7.0.0     # For import sorting 
+isort>=5.0.0,<7.0.0     # For import sorting
