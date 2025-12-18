@@ -8,8 +8,6 @@ Features:
     - RolloutAgentLoop base class for implementing agent logic
     - HTTP client for TrainGate communication
     - FastAPI server factory for hosting agents
-    - Structured logging with structlog (optional)
-    - Distributed tracing with OpenTelemetry (optional)
     - Type-safe configuration with pydantic-settings (optional)
 
 Example:
@@ -36,11 +34,9 @@ Example:
 Optional Features:
     Install optional dependencies for enhanced functionality:
 
-    pip install osmosis-ai[config]        # pydantic-settings configuration
-    pip install osmosis-ai[logging]       # structlog structured logging
-    pip install osmosis-ai[tracing]       # OpenTelemetry tracing
-    pip install osmosis-ai[observability] # logging + tracing
-    pip install osmosis-ai[full]          # Everything
+    pip install osmosis-ai[config]  # pydantic-settings configuration
+    pip install osmosis-ai[server]  # FastAPI server support
+    pip install osmosis-ai[full]    # Everything
 """
 
 # Core classes
@@ -116,29 +112,12 @@ from osmosis_ai.rollout.utils import (
 
 # Configuration
 from osmosis_ai.rollout.config import (
-    LoggingSettings,
     RolloutClientSettings,
     RolloutServerSettings,
     RolloutSettings,
-    TracingSettings,
     configure,
     get_settings,
     reset_settings,
-)
-
-# Observability
-from osmosis_ai.rollout.observability import (
-    SpanNames,
-    clear_context,
-    configure_logging,
-    configure_tracing,
-    get_logger,
-    get_rollout_id,
-    get_tracer,
-    reset_tracing,
-    set_rollout_id,
-    span,
-    trace_async,
 )
 
 __all__ = [
@@ -214,22 +193,7 @@ __all__ = [
     "RolloutSettings",
     "RolloutClientSettings",
     "RolloutServerSettings",
-    "LoggingSettings",
-    "TracingSettings",
     "get_settings",
     "configure",
     "reset_settings",
-    # Observability - Logging
-    "get_logger",
-    "configure_logging",
-    "get_rollout_id",
-    "set_rollout_id",
-    "clear_context",
-    # Observability - Tracing
-    "get_tracer",
-    "configure_tracing",
-    "reset_tracing",
-    "span",
-    "trace_async",
-    "SpanNames",
 ]

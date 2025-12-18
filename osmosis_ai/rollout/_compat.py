@@ -5,16 +5,14 @@ with graceful fallbacks when dependencies are not available.
 
 Example:
     from osmosis_ai.rollout._compat import (
-        STRUCTLOG_AVAILABLE,
+        PYDANTIC_SETTINGS_AVAILABLE,
         require_optional,
     )
 
-    if STRUCTLOG_AVAILABLE:
-        import structlog
-        logger = structlog.get_logger()
+    if PYDANTIC_SETTINGS_AVAILABLE:
+        from pydantic_settings import BaseSettings
     else:
-        import logging
-        logger = logging.getLogger(__name__)
+        from pydantic import BaseModel as BaseSettings
 """
 
 from __future__ import annotations
@@ -36,9 +34,9 @@ def import_optional(
         Tuple of (module, available) where module is None if not available.
 
     Example:
-        structlog, available = import_optional("structlog")
+        pydantic_settings, available = import_optional("pydantic_settings")
         if available:
-            logger = structlog.get_logger()
+            from pydantic_settings import BaseSettings
     """
     try:
         import importlib
@@ -70,10 +68,10 @@ def require_optional(
         ImportError: If the module is not available.
 
     Example:
-        structlog = require_optional(
-            "structlog",
-            feature_name="structured logging",
-            install_extra="logging",
+        pydantic_settings = require_optional(
+            "pydantic_settings",
+            feature_name="configuration management",
+            install_extra="config",
         )
     """
     module, available = import_optional(module_name)
@@ -91,19 +89,6 @@ def require_optional(
 
 # Pre-defined availability checks for common optional dependencies
 
-# Structured logging
-structlog, STRUCTLOG_AVAILABLE = import_optional("structlog")
-
-# OpenTelemetry tracing
-_otel_api, OTEL_API_AVAILABLE = import_optional("opentelemetry.trace")
-_otel_sdk, OTEL_SDK_AVAILABLE = import_optional("opentelemetry.sdk.trace")
-OTEL_AVAILABLE = OTEL_API_AVAILABLE and OTEL_SDK_AVAILABLE
-
-# OpenTelemetry OTLP exporter
-_otlp_exporter, OTLP_EXPORTER_AVAILABLE = import_optional(
-    "opentelemetry.exporter.otlp.proto.grpc.trace_exporter"
-)
-
 # Pydantic settings
 pydantic_settings, PYDANTIC_SETTINGS_AVAILABLE = import_optional("pydantic_settings")
 
@@ -116,15 +101,9 @@ __all__ = [
     "import_optional",
     "require_optional",
     # Availability flags
-    "STRUCTLOG_AVAILABLE",
-    "OTEL_AVAILABLE",
-    "OTEL_API_AVAILABLE",
-    "OTEL_SDK_AVAILABLE",
-    "OTLP_EXPORTER_AVAILABLE",
     "PYDANTIC_SETTINGS_AVAILABLE",
     "FASTAPI_AVAILABLE",
     # Pre-imported modules (may be None)
-    "structlog",
     "pydantic_settings",
     "fastapi",
 ]

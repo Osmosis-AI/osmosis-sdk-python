@@ -20,14 +20,14 @@ Example:
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from typing import Dict, Optional, Tuple
 
 from osmosis_ai.rollout.config.settings import RolloutServerSettings, get_settings
 from osmosis_ai.rollout.core.schemas import InitResponse
-from osmosis_ai.rollout.observability.logging import get_logger
 
-logger = get_logger(__name__)
+logger = logging.getLogger(__name__)
 
 
 class AppState:
@@ -72,7 +72,7 @@ class AppState:
             record_ttl_seconds: TTL for completed records. Defaults to settings.
             cleanup_interval_seconds: Cleanup check interval. Defaults to settings.
             settings: Server settings. Defaults to global settings.
-            agent_loop_name: Name of the agent loop (for observability context).
+            agent_loop_name: Name of the agent loop (for logging context).
         """
         if settings is None:
             settings = get_settings().server
@@ -121,7 +121,7 @@ class AppState:
         """
         if self._cleanup_task is None or self._cleanup_task.done():
             self._cleanup_task = asyncio.create_task(self._cleanup_loop())
-            logger.info("cleanup_task_started", interval_seconds=self._cleanup_interval)
+            logger.info("Cleanup task started: interval=%.1fs", self._cleanup_interval)
 
     async def stop_cleanup_task(self) -> None:
         """Stop the background cleanup task.
@@ -135,7 +135,7 @@ class AppState:
             except asyncio.CancelledError:
                 pass
             self._cleanup_task = None
-            logger.info("cleanup_task_stopped")
+            logger.info("Cleanup task stopped")
 
     async def _cleanup_loop(self) -> None:
         """Periodically clean up completed rollout records."""
@@ -146,7 +146,7 @@ class AppState:
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.error("cleanup_loop_error", error=str(e))
+                logger.error("Cleanup loop error: %s", str(e))
 
     def _prune_completed_records(self) -> None:
         """Remove completed rollout records older than TTL."""
@@ -160,7 +160,7 @@ class AppState:
             self.completed_rollouts.pop(rid, None)
             self._init_futures.pop(rid, None)
         if expired:
-            logger.debug("pruned_completed_records", count=len(expired))
+            logger.debug("Pruned %d completed records", len(expired))
 
     def is_duplicate(self, rollout_id: str) -> bool:
         """Check if this rollout is already running or recently completed.
@@ -210,7 +210,7 @@ class AppState:
         if not self.rollout_tasks:
             return
 
-        logger.info("cancelling_all_rollouts", count=len(self.rollout_tasks))
+        logger.info("Cancelling all rollouts: count=%d", len(self.rollout_tasks))
         for task in self.rollout_tasks.values():
             task.cancel()
 
@@ -221,7 +221,7 @@ class AppState:
 
         cancelled = sum(1 for r in results if isinstance(r, asyncio.CancelledError))
         errors = sum(1 for r in results if isinstance(r, Exception) and not isinstance(r, asyncio.CancelledError))
-        logger.info("all_rollouts_cancelled", cancelled=cancelled, errors=errors)
+        logger.info("All rollouts cancelled: cancelled=%d, errors=%d", cancelled, errors)
 
         # Best-effort cleanup to avoid leaving stale tasks around.
         self.rollout_tasks.clear()

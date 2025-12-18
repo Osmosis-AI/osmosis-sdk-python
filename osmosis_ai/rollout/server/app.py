@@ -15,6 +15,7 @@ Example:
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from contextlib import asynccontextmanager
 from typing import Any, Dict, Optional, TYPE_CHECKING
@@ -26,18 +27,10 @@ from osmosis_ai.rollout._compat import FASTAPI_AVAILABLE
 from osmosis_ai.rollout.config.settings import RolloutSettings, get_settings
 from osmosis_ai.rollout.core.base import RolloutAgentLoop, RolloutContext
 from osmosis_ai.rollout.core.schemas import InitResponse, RolloutRequest
-from osmosis_ai.rollout.observability.logging import (
-    configure_logging,
-    get_logger,
-    set_rollout_id,
-    clear_context,
-)
-from osmosis_ai.rollout.observability.tracing import configure_tracing, span, SpanNames
-from osmosis_ai.rollout.server.middleware import add_observability_middleware
 from osmosis_ai.rollout.server.state import AppState
 from osmosis_ai.rollout.client import OsmosisLLMClient
 
-logger = get_logger(__name__)
+logger = logging.getLogger(__name__)
 
 
 def create_app(
@@ -54,7 +47,6 @@ def create_app(
     - Background task management with concurrency control
     - Idempotency handling (duplicate requests return same response)
     - Automatic cleanup of completed rollout records
-    - Integrated logging and tracing
 
     Args:
         agent_loop: The RolloutAgentLoop implementation to use.
@@ -97,10 +89,6 @@ def create_app(
     if settings is None:
         settings = get_settings()
 
-    # Configure observability
-    configure_logging(settings.logging)
-    configure_tracing(settings.tracing)
-
     # Create app state
     state = AppState(
         max_concurrent=max_concurrent,
@@ -113,13 +101,13 @@ def create_app(
     async def lifespan(app: FastAPI):
         """Manage application lifecycle."""
         logger.info(
-            "server_starting",
-            agent_loop=agent_loop.name,
-            max_concurrent=state._max_concurrent,
+            "Server starting: agent_loop=%s, max_concurrent=%d",
+            agent_loop.name,
+            state._max_concurrent,
         )
         state.start_cleanup_task()
         yield
-        logger.info("server_stopping")
+        logger.info("Server stopping")
         await state.stop_cleanup_task()
         await state.cancel_all()
 
@@ -128,9 +116,6 @@ def create_app(
         description="Remote rollout server for Osmosis agent training",
         lifespan=lifespan,
     )
-
-    # Add observability middleware
-    add_observability_middleware(app)
 
     @app.get("/health")
     async def health() -> Dict[str, Any]:
@@ -156,135 +141,105 @@ def create_app(
         Idempotency: If a rollout with the same ID is already running or
         recently completed, returns the same tools without starting a new rollout.
         """
-        with span(
-            SpanNames.ROLLOUT_INIT,
-            attributes={
-                "rollout_id": request.rollout_id,
-                "agent_loop": agent_loop.name,
-            },
-        ) as s:
-            init_future, created = state.get_or_create_init_future(request.rollout_id)
+        init_future, created = state.get_or_create_init_future(request.rollout_id)
 
-            # Duplicate request: await the same InitResponse and return it.
-            if not created:
-                logger.debug(
-                    "duplicate_rollout_request",
-                    rollout_id=request.rollout_id,
-                )
-                s.set_attribute("duplicate", True)
-                init_response = await init_future
-                s.set_attribute("tool_count", len(init_response.tools))
-                return init_response
+        # Duplicate request: await the same InitResponse and return it.
+        if not created:
+            logger.debug("Duplicate rollout request: rollout_id=%s", request.rollout_id)
+            init_response = await init_future
+            return init_response
 
-            try:
-                # Leader request: compute tools once and cache InitResponse.
-                tools = agent_loop.get_tools(request)
-                s.set_attribute("tool_count", len(tools))
+        try:
+            # Leader request: compute tools once and cache InitResponse.
+            tools = agent_loop.get_tools(request)
 
-                # Define the background task
-                async def run_rollout() -> None:
-                    """Execute the rollout in the background."""
-                    set_rollout_id(request.rollout_id)
-                    start_time = time.monotonic()
+            # Define the background task
+            async def run_rollout() -> None:
+                """Execute the rollout in the background."""
+                start_time = time.monotonic()
 
-                    async with state.semaphore:
-                        with span(
-                            SpanNames.ROLLOUT_RUN,
-                            attributes={
-                                "rollout_id": request.rollout_id,
-                                "max_turns": request.max_turns,
-                            },
-                        ) as run_span:
+                async with state.semaphore:
+                    try:
+                        async with OsmosisLLMClient(
+                            server_url=request.server_url,
+                            rollout_id=request.rollout_id,
+                            api_key=request.api_key,
+                        ) as llm:
+                            ctx = RolloutContext(
+                                request=request,
+                                tools=tools,
+                                llm=llm,
+                                _start_time=start_time,
+                            )
+
                             try:
-                                async with OsmosisLLMClient(
-                                    server_url=request.server_url,
-                                    rollout_id=request.rollout_id,
-                                    api_key=request.api_key,
-                                ) as llm:
-                                    ctx = RolloutContext(
-                                        request=request,
-                                        tools=tools,
-                                        llm=llm,
-                                        _start_time=start_time,
-                                    )
+                                result = await agent_loop.run(ctx)
 
-                                    try:
-                                        result = await agent_loop.run(ctx)
+                                await llm.complete_rollout(
+                                    status=result.status,
+                                    final_messages=result.final_messages,
+                                    finish_reason=result.finish_reason,
+                                    error_message=result.error_message,
+                                    metrics=result.metrics,
+                                )
 
-                                        with span(SpanNames.ROLLOUT_COMPLETE):
-                                            await llm.complete_rollout(
-                                                status=result.status,
-                                                final_messages=result.final_messages,
-                                                finish_reason=result.finish_reason,
-                                                error_message=result.error_message,
-                                                metrics=result.metrics,
-                                            )
+                                duration = time.monotonic() - start_time
 
-                                        duration = time.monotonic() - start_time
-
-                                        run_span.set_attribute("status", result.status)
-                                        run_span.set_attribute(
-                                            "finish_reason", result.finish_reason
-                                        )
-
-                                        logger.info(
-                                            "rollout_completed",
-                                            rollout_id=request.rollout_id,
-                                            status=result.status,
-                                            finish_reason=result.finish_reason,
-                                            duration_seconds=duration,
-                                        )
-
-                                    except Exception as e:
-                                        # Agent loop error
-                                        logger.error(
-                                            "rollout_agent_error",
-                                            rollout_id=request.rollout_id,
-                                            error=str(e),
-                                            exc_info=True,
-                                        )
-                                        run_span.set_attribute("status", "ERROR")
-                                        run_span.set_attribute("error", str(e))
-
-                                        with span(SpanNames.ROLLOUT_ERROR):
-                                            await llm.complete_rollout(
-                                                status="ERROR",
-                                                final_messages=[],
-                                                finish_reason="error",
-                                                error_message=str(e),
-                                            )
+                                logger.info(
+                                    "Rollout completed: rollout_id=%s, status=%s, "
+                                    "finish_reason=%s, duration=%.2fs",
+                                    request.rollout_id,
+                                    result.status,
+                                    result.finish_reason,
+                                    duration,
+                                )
 
                             except Exception as e:
-                                # Client/infrastructure error
+                                # Agent loop error
                                 logger.error(
-                                    "rollout_infrastructure_error",
-                                    rollout_id=request.rollout_id,
-                                    error=str(e),
+                                    "Rollout agent error: rollout_id=%s, error=%s",
+                                    request.rollout_id,
+                                    str(e),
                                     exc_info=True,
                                 )
 
-                            finally:
-                                state.mark_completed(request.rollout_id)
-                                clear_context()
+                                await llm.complete_rollout(
+                                    status="ERROR",
+                                    final_messages=[],
+                                    finish_reason="error",
+                                    error_message=str(e),
+                                )
 
-                # Start background task
-                task = asyncio.create_task(run_rollout())
-                state.mark_started(request.rollout_id, task)
+                    except Exception as e:
+                        # Client/infrastructure error
+                        logger.error(
+                            "Rollout infrastructure error: rollout_id=%s, error=%s",
+                            request.rollout_id,
+                            str(e),
+                            exc_info=True,
+                        )
 
-                init_response = InitResponse(rollout_id=request.rollout_id, tools=tools)
-                init_future.set_result(init_response)
+                    finally:
+                        state.mark_completed(request.rollout_id)
 
-                logger.info(
-                    "rollout_started",
-                    rollout_id=request.rollout_id,
-                    tool_count=len(tools),
-                )
+            # Start background task
+            task = asyncio.create_task(run_rollout())
+            state.mark_started(request.rollout_id, task)
 
-                return init_response
-            except Exception as e:
-                if not init_future.done():
-                    init_future.set_exception(e)
-                state.clear_init_record(request.rollout_id)
-                raise
+            init_response = InitResponse(rollout_id=request.rollout_id, tools=tools)
+            init_future.set_result(init_response)
+
+            logger.info(
+                "Rollout started: rollout_id=%s, tool_count=%d",
+                request.rollout_id,
+                len(tools),
+            )
+
+            return init_response
+        except Exception as e:
+            if not init_future.done():
+                init_future.set_exception(e)
+            state.clear_init_record(request.rollout_id)
+            raise
 
     return app

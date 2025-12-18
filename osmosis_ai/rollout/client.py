@@ -2,7 +2,7 @@
 
 This module provides the OsmosisLLMClient for making HTTP requests
 to TrainGate's /v1/chat/completions endpoint with automatic retries,
-connection pooling, and observability integration.
+connection pooling, and error handling.
 
 Example:
     async with OsmosisLLMClient(
@@ -24,6 +24,7 @@ Example:
 from __future__ import annotations
 
 import asyncio
+import logging
 import time
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
@@ -43,10 +44,8 @@ from osmosis_ai.rollout.core.schemas import (
     RolloutResponse,
     RolloutStatus,
 )
-from osmosis_ai.rollout.observability.logging import get_logger, set_rollout_id
-from osmosis_ai.rollout.observability.tracing import SpanNames, span
 
-logger = get_logger(__name__)
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -107,7 +106,6 @@ class OsmosisLLMClient:
         - Exponential backoff between retries
         - Connection pooling and keepalive
         - Metrics collection for monitoring
-        - Tracing integration (when enabled)
 
     Example:
         async with OsmosisLLMClient(
@@ -269,116 +267,88 @@ class OsmosisLLMClient:
         url = f"{self.server_url}/v1/chat/completions"
         last_error: Optional[Exception] = None
 
-        # Set context for logging
-        set_rollout_id(self.rollout_id)
-
         for attempt in range(self.max_retries + 1):
             start_time = time.monotonic()
 
-            with span(
-                SpanNames.LLM_CHAT_COMPLETIONS,
-                attributes={
-                    "rollout_id": self.rollout_id,
-                    "attempt": attempt + 1,
-                    "message_count": len(messages),
-                },
-            ) as s:
-                try:
-                    # Use JSON mode to ensure enums/complex types are serialized
-                    response = await client.post(
-                        url, json=request.model_dump(mode="json", exclude_none=True)
+            try:
+                # Use JSON mode to ensure enums/complex types are serialized
+                response = await client.post(
+                    url, json=request.model_dump(mode="json", exclude_none=True)
+                )
+                elapsed_ms = (time.monotonic() - start_time) * 1000
+
+                if response.status_code == 200:
+                    data = response.json()
+
+                    # Update internal metrics
+                    self._llm_latency_ms += elapsed_ms
+                    self._num_llm_calls += 1
+                    if "usage" in data:
+                        self._prompt_tokens += data["usage"].get("prompt_tokens", 0)
+                        self._response_tokens += data["usage"].get("completion_tokens", 0)
+
+                    # Extract response
+                    choice = data["choices"][0]
+                    return CompletionsResult(
+                        message=choice["message"],
+                        token_ids=data.get("token_ids", []),
+                        logprobs=data.get("logprobs", []),
+                        usage=data.get("usage", {}),
+                        finish_reason=choice.get("finish_reason", "stop"),
                     )
-                    elapsed_ms = (time.monotonic() - start_time) * 1000
 
-                    if response.status_code == 200:
-                        data = response.json()
+                if 400 <= response.status_code < 500:
+                    detail = response.text
+                    logger.error(
+                        "TrainGate validation error: status_code=%d, detail=%s",
+                        response.status_code,
+                        detail[:200],
+                    )
+                    raise OsmosisValidationError(detail, response.status_code)
 
-                        # Update internal metrics
-                        self._llm_latency_ms += elapsed_ms
-                        self._num_llm_calls += 1
-                        prompt_tokens = 0
-                        completion_tokens = 0
-                        if "usage" in data:
-                            prompt_tokens = data["usage"].get("prompt_tokens", 0)
-                            completion_tokens = data["usage"].get("completion_tokens", 0)
-                            self._prompt_tokens += prompt_tokens
-                            self._response_tokens += completion_tokens
-
-                        # Set span attributes
-                        s.set_attribute("status", "success")
-                        s.set_attribute("prompt_tokens", prompt_tokens)
-                        s.set_attribute("completion_tokens", completion_tokens)
-
-                        # Extract response
-                        choice = data["choices"][0]
-                        return CompletionsResult(
-                            message=choice["message"],
-                            token_ids=data.get("token_ids", []),
-                            logprobs=data.get("logprobs", []),
-                            usage=data.get("usage", {}),
-                            finish_reason=choice.get("finish_reason", "stop"),
-                        )
-
-                    if 400 <= response.status_code < 500:
-                        detail = response.text
-                        logger.error(
-                            "traingate_validation_error",
-                            status_code=response.status_code,
-                            detail=detail[:200],
-                        )
-                        s.set_attribute("status", "validation_error")
-                        s.set_attribute("status_code", response.status_code)
-                        raise OsmosisValidationError(detail, response.status_code)
-
-                    if response.status_code >= 500:
-                        detail = response.text
-                        logger.warning(
-                            "traingate_server_error",
-                            status_code=response.status_code,
-                            attempt=attempt + 1,
-                            max_attempts=self.max_retries + 1,
-                            detail=detail[:200],
-                        )
-                        s.set_attribute("status", "server_error")
-                        s.set_attribute("status_code", response.status_code)
-                        last_error = OsmosisServerError(detail, response.status_code)
-                    else:
-                        detail = f"Unexpected status code {response.status_code}"
-                        logger.error("traingate_unexpected_status", detail=detail)
-                        raise OsmosisValidationError(detail, response.status_code)
-
-                except httpx.TimeoutException as e:
-                    elapsed_ms = (time.monotonic() - start_time) * 1000
+                if response.status_code >= 500:
+                    detail = response.text
                     logger.warning(
-                        "request_timeout",
-                        attempt=attempt + 1,
-                        max_attempts=self.max_retries + 1,
-                        error=str(e),
+                        "TrainGate server error: status_code=%d, attempt=%d/%d, detail=%s",
+                        response.status_code,
+                        attempt + 1,
+                        self.max_retries + 1,
+                        detail[:200],
                     )
-                    s.set_attribute("status", "timeout")
-                    last_error = OsmosisTimeoutError(str(e))
+                    last_error = OsmosisServerError(detail, response.status_code)
+                else:
+                    detail = f"Unexpected status code {response.status_code}"
+                    logger.error("TrainGate unexpected status: %s", detail)
+                    raise OsmosisValidationError(detail, response.status_code)
 
-                except httpx.RequestError as e:
-                    elapsed_ms = (time.monotonic() - start_time) * 1000
-                    error_detail = f"{type(e).__name__}: {e}" if str(e) else f"{type(e).__name__}"
-                    logger.warning(
-                        "transport_error",
-                        attempt=attempt + 1,
-                        max_attempts=self.max_retries + 1,
-                        error=error_detail,
-                    )
-                    s.set_attribute("status", "transport_error")
-                    last_error = OsmosisTransportError(error_detail)
+            except httpx.TimeoutException as e:
+                logger.warning(
+                    "Request timeout: attempt=%d/%d, error=%s",
+                    attempt + 1,
+                    self.max_retries + 1,
+                    str(e),
+                )
+                last_error = OsmosisTimeoutError(str(e))
 
-                except OsmosisValidationError:
-                    raise
+            except httpx.RequestError as e:
+                error_detail = f"{type(e).__name__}: {e}" if str(e) else f"{type(e).__name__}"
+                logger.warning(
+                    "Transport error: attempt=%d/%d, error=%s",
+                    attempt + 1,
+                    self.max_retries + 1,
+                    error_detail,
+                )
+                last_error = OsmosisTransportError(error_detail)
+
+            except OsmosisValidationError:
+                raise
 
             if attempt < self.max_retries:
                 delay = self._calculate_retry_delay(attempt)
                 logger.info(
-                    "retrying_chat_completions",
-                    delay_seconds=delay,
-                    attempt=attempt + 1,
+                    "Retrying chat_completions: delay=%.1fs, attempt=%d",
+                    delay,
+                    attempt + 1,
                 )
                 await asyncio.sleep(delay)
 
@@ -435,83 +405,70 @@ class OsmosisLLMClient:
         last_error: Optional[Exception] = None
 
         for attempt in range(self.complete_rollout_retries + 1):
-            with span(
-                SpanNames.LLM_COMPLETE_ROLLOUT,
-                attributes={
-                    "rollout_id": self.rollout_id,
-                    "status": status,
-                    "attempt": attempt + 1,
-                },
-            ) as s:
-                try:
-                    # Use JSON mode to ensure enums/complex types are serialized
-                    response = await client.post(
-                        url,
-                        json=response_data.model_dump(mode="json", exclude_none=True),
+            try:
+                # Use JSON mode to ensure enums/complex types are serialized
+                response = await client.post(
+                    url,
+                    json=response_data.model_dump(mode="json", exclude_none=True),
+                )
+
+                if response.status_code == 200:
+                    logger.info(
+                        "Rollout completion acknowledged: rollout_id=%s, status=%s",
+                        self.rollout_id,
+                        status,
                     )
+                    return
 
-                    if response.status_code == 200:
-                        logger.info(
-                            "rollout_completion_acknowledged",
-                            rollout_id=self.rollout_id,
-                            status=status,
-                        )
-                        s.set_attribute("ack", True)
-                        return
+                if 400 <= response.status_code < 500:
+                    detail = response.text
+                    logger.error(
+                        "Completion validation error: status_code=%d, detail=%s",
+                        response.status_code,
+                        detail[:200],
+                    )
+                    raise OsmosisValidationError(detail, response.status_code)
 
-                    if 400 <= response.status_code < 500:
-                        detail = response.text
-                        logger.error(
-                            "completion_validation_error",
-                            status_code=response.status_code,
-                            detail=detail[:200],
-                        )
-                        s.set_attribute("status", "validation_error")
-                        raise OsmosisValidationError(detail, response.status_code)
-
-                    if response.status_code >= 500:
-                        detail = response.text
-                        logger.warning(
-                            "completion_server_error",
-                            status_code=response.status_code,
-                            attempt=attempt + 1,
-                            max_attempts=self.complete_rollout_retries + 1,
-                        )
-                        s.set_attribute("status", "server_error")
-                        last_error = OsmosisServerError(detail, response.status_code)
-
-                except httpx.TimeoutException as e:
+                if response.status_code >= 500:
+                    detail = response.text
                     logger.warning(
-                        "completion_timeout",
-                        attempt=attempt + 1,
-                        max_attempts=self.complete_rollout_retries + 1,
+                        "Completion server error: status_code=%d, attempt=%d/%d",
+                        response.status_code,
+                        attempt + 1,
+                        self.complete_rollout_retries + 1,
                     )
-                    s.set_attribute("status", "timeout")
-                    last_error = OsmosisTimeoutError(str(e))
+                    last_error = OsmosisServerError(detail, response.status_code)
 
-                except httpx.RequestError as e:
-                    error_detail = f"{type(e).__name__}: {e}" if str(e) else f"{type(e).__name__}"
-                    logger.warning(
-                        "completion_transport_error",
-                        attempt=attempt + 1,
-                        error=error_detail,
-                    )
-                    s.set_attribute("status", "transport_error")
-                    last_error = OsmosisTransportError(error_detail)
+            except httpx.TimeoutException as e:
+                logger.warning(
+                    "Completion timeout: attempt=%d/%d",
+                    attempt + 1,
+                    self.complete_rollout_retries + 1,
+                )
+                last_error = OsmosisTimeoutError(str(e))
 
-                except OsmosisValidationError:
-                    raise
+            except httpx.RequestError as e:
+                error_detail = f"{type(e).__name__}: {e}" if str(e) else f"{type(e).__name__}"
+                logger.warning(
+                    "Completion transport error: attempt=%d, error=%s",
+                    attempt + 1,
+                    error_detail,
+                )
+                last_error = OsmosisTransportError(error_detail)
+
+            except OsmosisValidationError:
+                raise
 
             if attempt < self.complete_rollout_retries:
                 delay = self._calculate_retry_delay(attempt)
-                logger.info("retrying_complete_rollout", delay_seconds=delay)
+                logger.info("Retrying complete_rollout: delay=%.1fs", delay)
                 await asyncio.sleep(delay)
 
         if last_error is not None:
             logger.error(
-                "rollout_completion_failed",
-                rollout_id=self.rollout_id,
-                attempts=self.complete_rollout_retries + 1,
+                "Rollout completion failed: rollout_id=%s, attempts=%d",
+                self.rollout_id,
+                self.complete_rollout_retries + 1,
             )
             raise last_error
 
