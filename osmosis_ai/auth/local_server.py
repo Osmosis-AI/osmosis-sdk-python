@@ -90,8 +90,6 @@ class AuthCallbackHandler(BaseHTTPRequestHandler):
             --border: #e4e4e7;
             --primary: #6366f1;
             --primary-light: #818cf8;
-            --success: #22c55e;
-            --success-light: #4ade80;
         }
         @media (prefers-color-scheme: dark) {
             :root {
@@ -103,8 +101,6 @@ class AuthCallbackHandler(BaseHTTPRequestHandler):
                 --border: #27272a;
                 --primary: #818cf8;
                 --primary-light: #a5b4fc;
-                --success: #4ade80;
-                --success-light: #86efac;
             }
         }
         * {
@@ -151,20 +147,6 @@ class AuthCallbackHandler(BaseHTTPRequestHandler):
             width: 24px;
             height: 24px;
         }
-        .icon-container {
-            width: 56px;
-            height: 56px;
-            border-radius: 50%;
-            background: linear-gradient(135deg, var(--success) 0%, var(--success-light) 100%);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }
-        .icon-container svg {
-            width: 28px;
-            height: 28px;
-            color: white;
-        }
         .card-content {
             padding: 20px 24px 24px;
             text-align: center;
@@ -203,11 +185,6 @@ class AuthCallbackHandler(BaseHTTPRequestHandler):
                 </svg>
                 Osmosis
             </div>
-            <div class="icon-container">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
-                    <polyline points="20 6 9 17 4 12"></polyline>
-                </svg>
-            </div>
         </div>
         <div class="card-content">
             <h1>Login Successful</h1>
@@ -242,7 +219,6 @@ class AuthCallbackHandler(BaseHTTPRequestHandler):
             --border: #e4e4e7;
             --primary: #6366f1;
             --destructive: #ef4444;
-            --destructive-light: #f87171;
             --destructive-bg: #fef2f2;
             --destructive-border: #fecaca;
         }}
@@ -256,7 +232,6 @@ class AuthCallbackHandler(BaseHTTPRequestHandler):
                 --border: #27272a;
                 --primary: #818cf8;
                 --destructive: #f87171;
-                --destructive-light: #fca5a5;
                 --destructive-bg: rgba(127, 29, 29, 0.5);
                 --destructive-border: #7f1d1d;
             }}
@@ -304,20 +279,6 @@ class AuthCallbackHandler(BaseHTTPRequestHandler):
         .logo svg {{
             width: 24px;
             height: 24px;
-        }}
-        .icon-container {{
-            width: 56px;
-            height: 56px;
-            border-radius: 50%;
-            background: linear-gradient(135deg, var(--destructive) 0%, var(--destructive-light) 100%);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-        }}
-        .icon-container svg {{
-            width: 28px;
-            height: 28px;
-            color: white;
         }}
         .card-content {{
             padding: 20px 24px 24px;
@@ -369,12 +330,6 @@ class AuthCallbackHandler(BaseHTTPRequestHandler):
                     </g>
                 </svg>
                 Osmosis
-            </div>
-            <div class="icon-container">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
-                    <line x1="18" y1="6" x2="6" y2="18"></line>
-                    <line x1="6" y1="6" x2="18" y2="18"></line>
-                </svg>
             </div>
         </div>
         <div class="card-content">

@@ -2,7 +2,6 @@
 
 from .config import CONFIG_DIR, CREDENTIALS_FILE, PLATFORM_URL
 from .credentials import (
-    Credentials,
     CredentialsStore,
     OrganizationInfo,
     UserInfo,
@@ -29,7 +28,6 @@ __all__ = [
     "CREDENTIALS_FILE",
     "PLATFORM_URL",
     # Credentials
-    "Credentials",
     "CredentialsStore",
     "OrganizationInfo",
     "UserInfo",

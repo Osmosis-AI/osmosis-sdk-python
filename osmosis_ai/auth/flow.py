@@ -7,11 +7,10 @@ import socket
 import webbrowser
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Optional
 from urllib.parse import urlencode
 
 from .config import PLATFORM_URL
-from .credentials import Credentials, OrganizationInfo, UserInfo, save_credentials
+from .credentials import WorkspaceCredentials, OrganizationInfo, UserInfo, save_credentials
 from .local_server import LocalAuthServer, find_available_port
 
 
@@ -128,7 +127,7 @@ def login(
         # Verify token and get user info from platform
         user_info, org_info, expires_at, token_id = _verify_and_get_user_info(token)
 
-        credentials = Credentials(
+        credentials = WorkspaceCredentials(
             access_token=token,
             token_type="Bearer",
             expires_at=expires_at,
