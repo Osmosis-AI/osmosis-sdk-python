@@ -4,7 +4,7 @@ import argparse
 import sys
 from typing import Optional
 
-from .cli_commands import EvalCommand, PreviewCommand
+from .cli_commands import EvalCommand, LoginCommand, PreviewCommand
 from .cli_services import CLIError
 
 
@@ -31,6 +31,12 @@ def _build_parser() -> argparse.ArgumentParser:
         description="Osmosis AI SDK - rubric evaluation and remote rollout server.",
     )
     subparsers = parser.add_subparsers(dest="command")
+
+    login_parser = subparsers.add_parser(
+        "login",
+        help="Authenticate with Osmosis AI.",
+    )
+    LoginCommand().configure_parser(login_parser)
 
     preview_parser = subparsers.add_parser(
         "preview",
