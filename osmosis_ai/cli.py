@@ -4,7 +4,7 @@ import argparse
 import sys
 from typing import Optional
 
-from .cli_commands import EvalCommand, LoginCommand, PreviewCommand
+from .cli_commands import EvalCommand, LoginCommand, LogoutCommand, PreviewCommand, WhoamiCommand, WorkspaceCommand
 from .cli_services import CLIError
 
 
@@ -37,6 +37,24 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Authenticate with Osmosis AI.",
     )
     LoginCommand().configure_parser(login_parser)
+
+    whoami_parser = subparsers.add_parser(
+        "whoami",
+        help="Show current authenticated user and workspace.",
+    )
+    WhoamiCommand().configure_parser(whoami_parser)
+
+    logout_parser = subparsers.add_parser(
+        "logout",
+        help="Logout and revoke CLI token.",
+    )
+    LogoutCommand().configure_parser(logout_parser)
+
+    workspace_parser = subparsers.add_parser(
+        "workspace",
+        help="Manage workspaces (list, switch, current).",
+    )
+    WorkspaceCommand().configure_parser(workspace_parser)
 
     preview_parser = subparsers.add_parser(
         "preview",

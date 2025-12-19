@@ -170,7 +170,7 @@ Call TrainGate's `/v1/chat/completions` endpoint.
 | `logprobs` | `bool` | `True` | Return log probabilities |
 
 Notes:
-- Extra/unknown keyword arguments are accepted and ignored for forward compatibility.
+- Extra/unknown keyword arguments are accepted and ignored.
 
 **Raises:**
 - `OsmosisTransportError`: Network errors
