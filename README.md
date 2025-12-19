@@ -18,7 +18,14 @@ For development:
 ```bash
 git clone https://github.com/Osmosis-AI/osmosis-sdk-python
 cd osmosis-sdk-python
+
+# Install package in editable mode
 pip install -e .
+
+# Install development dependencies (pytest, formatters, etc.)
+pip install -e ".[dev]"
+# Or using requirements file:
+pip install -r requirements-dev.txt
 ```
 
 ## Quick Start
@@ -214,7 +221,29 @@ rubrics:
 
 ## CLI Tools
 
-Installing the SDK also provides a lightweight CLI available as `osmosis` (aliases: `osmosis_ai`, `osmosis-ai`) for inspecting rubric YAML files and JSONL test payloads.
+Installing the SDK also provides a lightweight CLI available as `osmosis` (aliases: `osmosis_ai`, `osmosis-ai`).
+
+### Remote Rollout Server
+
+Start a RolloutServer for an agent loop implementation:
+
+```bash
+# Validate agent loop before starting (checks tools, async run, etc.)
+osmosis validate -m my_agent:agent_loop
+
+# Start server with validation (default port 9000)
+osmosis serve -m my_agent:agent_loop
+
+# Specify port
+osmosis serve -m my_agent:agent_loop -p 8080
+
+# Skip validation (not recommended)
+osmosis serve -m my_agent:agent_loop --no-validate
+```
+
+The module path format is `module:attribute`, e.g., `server:agent_loop` or `mypackage.agents:MyAgentClass`.
+
+### Rubric Tools
 
 Preview a rubric file and print every configuration discovered, including nested entries:
 

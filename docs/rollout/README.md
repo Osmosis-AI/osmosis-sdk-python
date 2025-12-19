@@ -80,9 +80,37 @@ class MyAgentLoop(RolloutAgentLoop):
         return ctx.complete(messages)
 ```
 
-### Step 2: Create the Server
+### Step 2: Run the Server
 
-Use `create_app()` to create a FastAPI application:
+#### Option 1: Using CLI (Recommended)
+
+Export an instance of your agent loop and use the CLI:
+
+```python
+# my_agent.py
+agent_loop = MyAgentLoop()
+```
+
+```bash
+# Validate agent loop (checks tools, async run method, etc.)
+osmosis validate -m my_agent:agent_loop
+
+# Start server with validation (default port 9000)
+osmosis serve -m my_agent:agent_loop
+
+# Specify port
+osmosis serve -m my_agent:agent_loop -p 8080
+
+# Skip validation (not recommended)
+osmosis serve -m my_agent:agent_loop --no-validate
+
+# Enable auto-reload for development
+osmosis serve -m my_agent:agent_loop --reload
+```
+
+#### Option 2: Using create_app()
+
+Create a FastAPI application manually:
 
 ```python
 from osmosis_ai.rollout import create_app
@@ -90,10 +118,22 @@ from osmosis_ai.rollout import create_app
 app = create_app(MyAgentLoop())
 ```
 
-### Step 3: Run the Server
-
 ```bash
 uvicorn main:app --host 0.0.0.0 --port 9000
+```
+
+#### Option 3: Using serve_agent_loop()
+
+Start programmatically with validation:
+
+```python
+from osmosis_ai.rollout import serve_agent_loop
+
+# Validates and starts server
+serve_agent_loop(MyAgentLoop(), port=9000)
+
+# Skip validation (not recommended)
+serve_agent_loop(MyAgentLoop(), port=9000, validate=False)
 ```
 
 Your server is now ready to receive rollout requests from TrainGate.

@@ -95,6 +95,9 @@ pydantic_settings, PYDANTIC_SETTINGS_AVAILABLE = import_optional("pydantic_setti
 # FastAPI (for server)
 fastapi, FASTAPI_AVAILABLE = import_optional("fastapi")
 
+# Uvicorn (for server)
+uvicorn, UVICORN_AVAILABLE = import_optional("uvicorn")
+
 
 __all__ = [
     # Functions
@@ -103,7 +106,9 @@ __all__ = [
     # Availability flags
     "PYDANTIC_SETTINGS_AVAILABLE",
     "FASTAPI_AVAILABLE",
+    "UVICORN_AVAILABLE",
     # Pre-imported modules (may be None)
     "pydantic_settings",
     "fastapi",
+    "uvicorn",
 ]

@@ -27,7 +27,8 @@ def main(argv: Optional[list[str]] = None) -> int:
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="osmosis", description="Utilities for inspecting Osmosis rubric and test data files."
+        prog="osmosis",
+        description="Osmosis AI SDK - rubric evaluation and remote rollout server.",
     )
     subparsers = parser.add_subparsers(dest="command")
 
@@ -42,6 +43,21 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Evaluate JSONL conversations against a rubric using remote providers.",
     )
     EvalCommand().configure_parser(eval_parser)
+
+    # Rollout server commands
+    from .rollout.cli import ServeCommand, ValidateCommand
+
+    serve_parser = subparsers.add_parser(
+        "serve",
+        help="Start a RolloutServer for an agent loop implementation.",
+    )
+    ServeCommand().configure_parser(serve_parser)
+
+    validate_parser = subparsers.add_parser(
+        "validate",
+        help="Validate a RolloutAgentLoop implementation without starting the server.",
+    )
+    ValidateCommand().configure_parser(validate_parser)
 
     return parser
 

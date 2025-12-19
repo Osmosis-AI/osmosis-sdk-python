@@ -91,6 +91,19 @@ from osmosis_ai.rollout.core.schemas import (
     set_max_metadata_size_bytes,
 )
 from osmosis_ai.rollout.server.app import create_app
+from osmosis_ai.rollout.server.serve import (
+    DEFAULT_HOST,
+    DEFAULT_PORT,
+    ServeError,
+    serve_agent_loop,
+    validate_and_report,
+)
+from osmosis_ai.rollout.validator import (
+    AgentLoopValidationError,
+    ValidationError,
+    ValidationResult,
+    validate_agent_loop,
+)
 from osmosis_ai.rollout.tools import (
     create_tool_error_result,
     create_tool_result,
@@ -130,6 +143,16 @@ __all__ = [
     "CompletionsResult",
     # Server
     "create_app",
+    "serve_agent_loop",
+    "validate_and_report",
+    "ServeError",
+    "DEFAULT_HOST",
+    "DEFAULT_PORT",
+    # Validation
+    "validate_agent_loop",
+    "ValidationResult",
+    "ValidationError",
+    "AgentLoopValidationError",
     # Registry
     "AgentLoopRegistry",
     "register_agent_loop",

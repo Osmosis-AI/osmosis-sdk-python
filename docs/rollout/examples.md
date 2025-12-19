@@ -2,6 +2,34 @@
 
 Complete working examples for the Osmosis Remote Rollout SDK.
 
+## CLI Quick Start
+
+The fastest way to run a RolloutServer is using the CLI:
+
+```bash
+# Validate agent loop (checks tools, async run, etc.)
+osmosis validate -m my_agent:agent_loop
+
+# Start server with validation (default port 9000)
+osmosis serve -m my_agent:agent_loop
+
+# Specify port
+osmosis serve -m my_agent:agent_loop -p 8080
+
+# Skip validation (not recommended)
+osmosis serve -m my_agent:agent_loop --no-validate
+
+# Enable auto-reload for development
+osmosis serve -m my_agent:agent_loop --reload
+
+# Verbose validation output
+osmosis validate -m my_agent:agent_loop -v
+```
+
+The module path format is `module:attribute`. The CLI automatically adds the current directory to Python path.
+
+---
+
 ## Basic Calculator Agent
 
 A simple agent that can perform arithmetic operations.
@@ -118,8 +146,11 @@ class CalculatorAgent(RolloutAgentLoop):
         return ctx.complete(messages, finish_reason="max_turns")
 
 
+# Export instance for CLI usage
+agent_loop = CalculatorAgent()
+
 # Create FastAPI app
-app = create_app(CalculatorAgent())
+app = create_app(agent_loop)
 
 
 if __name__ == "__main__":
@@ -127,7 +158,16 @@ if __name__ == "__main__":
     uvicorn.run(app, host="0.0.0.0", port=9000)
 ```
 
-Run with:
+Run with CLI (recommended):
+```bash
+# Validate first
+osmosis validate -m calculator_agent:agent_loop
+
+# Start server
+osmosis serve -m calculator_agent:agent_loop -p 9000
+```
+
+Or with uvicorn directly:
 ```bash
 uvicorn calculator_agent:app --port 9000
 ```
@@ -632,8 +672,30 @@ async def test_agent_run():
 
 ### Docker Configuration
 
+Using the CLI (recommended):
+
 ```dockerfile
 # Dockerfile
+
+FROM python:3.11-slim
+
+WORKDIR /app
+
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY . .
+
+EXPOSE 9000
+
+# Using CLI (validates on startup)
+CMD ["osmosis", "serve", "-m", "main:agent_loop", "-p", "9000"]
+```
+
+Or with uvicorn directly:
+
+```dockerfile
+# Dockerfile (alternative)
 
 FROM python:3.11-slim
 
