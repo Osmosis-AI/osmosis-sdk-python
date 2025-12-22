@@ -6,7 +6,7 @@ import os
 from pathlib import Path
 
 # Platform URL - can be overridden via environment variable for local development
-DEFAULT_PLATFORM_URL = "http://localhost:3000"
+DEFAULT_PLATFORM_URL = "https://platform.osmosis.ai"
 PLATFORM_URL = os.environ.get("OSMOSIS_PLATFORM_URL", DEFAULT_PLATFORM_URL)
 
 # Configuration directory and credentials file
