@@ -21,16 +21,41 @@ from contextlib import asynccontextmanager
 from typing import Any, Dict, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from fastapi import FastAPI
+    from fastapi import FastAPI, HTTPException, Request
+    from osmosis_ai.auth.credentials import WorkspaceCredentials
 
 from osmosis_ai.rollout._compat import FASTAPI_AVAILABLE
 from osmosis_ai.rollout.config.settings import RolloutSettings, get_settings
 from osmosis_ai.rollout.core.base import RolloutAgentLoop, RolloutContext
 from osmosis_ai.rollout.core.schemas import InitResponse, RolloutRequest
+from osmosis_ai.rollout.server.api_key import validate_api_key
 from osmosis_ai.rollout.server.state import AppState
 from osmosis_ai.rollout.client import OsmosisLLMClient
 
 logger = logging.getLogger(__name__)
+
+# NOTE: FastAPI is an optional dependency. We avoid importing it at module import
+# time unless it's available, but we DO need these symbols in module globals so
+# FastAPI can resolve forward-referenced annotations (due to postponed eval).
+if FASTAPI_AVAILABLE:
+    from fastapi import HTTPException, Request
+
+
+def _extract_bearer_token(auth_header: str) -> Optional[str]:
+    """Extract a bearer token from an Authorization header.
+
+    Accepts both:
+    - "Bearer <token>"
+    - "<token>" (raw token fallback)
+    """
+    auth_header = (auth_header or "").strip()
+    if not auth_header:
+        return None
+
+    parts = auth_header.split()
+    if len(parts) == 2 and parts[0].lower() == "bearer":
+        return parts[1]
+    return auth_header
 
 
 def create_app(
@@ -38,6 +63,10 @@ def create_app(
     max_concurrent: Optional[int] = None,
     record_ttl_seconds: Optional[float] = None,
     settings: Optional[RolloutSettings] = None,
+    credentials: Optional["WorkspaceCredentials"] = None,
+    server_host: Optional[str] = None,
+    server_port: Optional[int] = None,
+    api_key: Optional[str] = None,
 ) -> "FastAPI":
     """Create a FastAPI application for the agent loop.
 
@@ -47,12 +76,21 @@ def create_app(
     - Background task management with concurrency control
     - Idempotency handling (duplicate requests return same response)
     - Automatic cleanup of completed rollout records
+    - Optional platform registration on startup
+    - API key authentication for incoming requests
 
     Args:
         agent_loop: The RolloutAgentLoop implementation to use.
         max_concurrent: Maximum concurrent rollouts. Defaults to settings.
         record_ttl_seconds: TTL for completed records. Defaults to settings.
         settings: Configuration settings. Defaults to global settings.
+        credentials: Workspace credentials for platform registration.
+                     If None, registration is skipped.
+        server_host: Host the server is bound to (for registration).
+        server_port: Port the server is listening on (for registration).
+        api_key: API key for authenticating incoming requests.
+                 If provided, requests must include:
+                 - Authorization: Bearer <api_key>
 
     Returns:
         FastAPI application ready to serve.
@@ -106,6 +144,29 @@ def create_app(
             state._max_concurrent,
         )
         state.start_cleanup_task()
+
+        # Register with Platform if credentials provided
+        if credentials is not None and server_host is not None and server_port is not None:
+            from osmosis_ai.rollout.server.registration import (
+                register_with_platform,
+                print_registration_result,
+            )
+
+            result = register_with_platform(
+                host=server_host,
+                port=server_port,
+                agent_loop_name=agent_loop.name,
+                credentials=credentials,
+                api_key=api_key,
+            )
+            print_registration_result(
+                result=result,
+                host=server_host,
+                port=server_port,
+                agent_loop_name=agent_loop.name,
+                api_key=api_key,
+            )
+
         yield
         logger.info("Server stopping")
         await state.stop_cleanup_task()
@@ -130,8 +191,37 @@ def create_app(
             "completed_rollouts": state.completed_count,
         }
 
+    @app.get("/platform/health")
+    async def platform_health(request: Request) -> Dict[str, Any]:
+        """Platform health check endpoint (authenticated).
+
+        This endpoint is intended for Osmosis Platform to validate:
+        - Reachability of the server
+        - Correctness of the configured RolloutServer API key
+
+        It requires: Authorization: Bearer <api_key>
+        """
+        # If API key auth is disabled (e.g., local_debug), do not expose this endpoint.
+        if api_key is None:
+            raise HTTPException(status_code=404, detail="Not found")
+
+        provided = _extract_bearer_token(request.headers.get("authorization") or "")
+
+        if not validate_api_key(provided, api_key):
+            raise HTTPException(status_code=401, detail="Invalid or missing API key")
+
+        return {
+            "status": "healthy",
+            "agent_loop": agent_loop.name,
+            "active_rollouts": state.active_count,
+            "completed_rollouts": state.completed_count,
+        }
+
     @app.post("/v1/rollout/init", status_code=202)
-    async def init_rollout(request: RolloutRequest) -> InitResponse:
+    async def init_rollout(
+        rollout_request: RolloutRequest,
+        http_request: Request,
+    ) -> InitResponse:
         """Initialize a new rollout.
 
         This endpoint accepts a rollout request and starts the agent loop
@@ -141,17 +231,34 @@ def create_app(
         Idempotency: If a rollout with the same ID is already running or
         recently completed, returns the same tools without starting a new rollout.
         """
-        init_future, created = state.get_or_create_init_future(request.rollout_id)
+        # Validate RolloutServer auth if configured:
+        # TrainGate must send: Authorization: Bearer <api_key>
+        if api_key is not None:
+            provided = _extract_bearer_token(http_request.headers.get("authorization") or "")
+            if not validate_api_key(provided, api_key):
+                logger.warning(
+                    "Invalid API key for rollout request: rollout_id=%s",
+                    rollout_request.rollout_id,
+                )
+                raise HTTPException(status_code=401, detail="Invalid or missing API key")
+
+        # Idempotency key: prefer request.idempotency_key, fallback to rollout_id.
+        key = rollout_request.idempotency_key or rollout_request.rollout_id
+
+        init_future, created = state.get_or_create_init_future(key)
 
         # Duplicate request: await the same InitResponse and return it.
         if not created:
-            logger.debug("Duplicate rollout request: rollout_id=%s", request.rollout_id)
+            logger.debug(
+                "Duplicate rollout request: rollout_id=%s",
+                rollout_request.rollout_id,
+            )
             init_response = await init_future
             return init_response
 
         try:
             # Leader request: compute tools once and cache InitResponse.
-            tools = agent_loop.get_tools(request)
+            tools = agent_loop.get_tools(rollout_request)
 
             # Define the background task
             async def run_rollout() -> None:
@@ -161,12 +268,12 @@ def create_app(
                 async with state.semaphore:
                     try:
                         async with OsmosisLLMClient(
-                            server_url=request.server_url,
-                            rollout_id=request.rollout_id,
-                            api_key=request.api_key,
+                            server_url=rollout_request.server_url,
+                            rollout_id=rollout_request.rollout_id,
+                            api_key=rollout_request.api_key,
                         ) as llm:
                             ctx = RolloutContext(
-                                request=request,
+                                request=rollout_request,
                                 tools=tools,
                                 llm=llm,
                                 _start_time=start_time,
@@ -181,6 +288,7 @@ def create_app(
                                     finish_reason=result.finish_reason,
                                     error_message=result.error_message,
                                     metrics=result.metrics,
+                                    reward=result.reward,
                                 )
 
                                 duration = time.monotonic() - start_time
@@ -188,7 +296,7 @@ def create_app(
                                 logger.info(
                                     "Rollout completed: rollout_id=%s, status=%s, "
                                     "finish_reason=%s, duration=%.2fs",
-                                    request.rollout_id,
+                                    rollout_request.rollout_id,
                                     result.status,
                                     result.finish_reason,
                                     duration,
@@ -198,7 +306,7 @@ def create_app(
                                 # Agent loop error
                                 logger.error(
                                     "Rollout agent error: rollout_id=%s, error=%s",
-                                    request.rollout_id,
+                                    rollout_request.rollout_id,
                                     str(e),
                                     exc_info=True,
                                 )
@@ -214,24 +322,24 @@ def create_app(
                         # Client/infrastructure error
                         logger.error(
                             "Rollout infrastructure error: rollout_id=%s, error=%s",
-                            request.rollout_id,
+                            rollout_request.rollout_id,
                             str(e),
                             exc_info=True,
                         )
 
                     finally:
-                        state.mark_completed(request.rollout_id)
+                        state.mark_completed(key)
 
             # Start background task
             task = asyncio.create_task(run_rollout())
-            state.mark_started(request.rollout_id, task)
+            state.mark_started(key, task)
 
-            init_response = InitResponse(rollout_id=request.rollout_id, tools=tools)
+            init_response = InitResponse(rollout_id=rollout_request.rollout_id, tools=tools)
             init_future.set_result(init_response)
 
             logger.info(
                 "Rollout started: rollout_id=%s, tool_count=%d",
-                request.rollout_id,
+                rollout_request.rollout_id,
                 len(tools),
             )
 
@@ -239,7 +347,7 @@ def create_app(
         except Exception as e:
             if not init_future.done():
                 init_future.set_exception(e)
-            state.clear_init_record(request.rollout_id)
+            state.clear_init_record(key)
             raise
 
     return app

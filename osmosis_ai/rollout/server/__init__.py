@@ -15,6 +15,7 @@ Example:
     serve_agent_loop(MyAgentLoop(), port=9000)
 """
 
+from osmosis_ai.rollout.server.api_key import generate_api_key, validate_api_key
 from osmosis_ai.rollout.server.app import create_app
 from osmosis_ai.rollout.server.state import AppState
 from osmosis_ai.rollout.server.serve import (
@@ -33,4 +34,6 @@ __all__ = [
     "ServeError",
     "DEFAULT_HOST",
     "DEFAULT_PORT",
+    "generate_api_key",
+    "validate_api_key",
 ]

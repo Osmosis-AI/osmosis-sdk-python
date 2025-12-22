@@ -364,6 +364,7 @@ class OsmosisLLMClient:
         finish_reason: str = "stop",
         error_message: Optional[str] = None,
         metrics: Optional[RolloutMetrics] = None,
+        reward: Optional[float] = None,
     ) -> None:
         """Notify TrainGate that rollout is complete.
 
@@ -375,6 +376,7 @@ class OsmosisLLMClient:
             finish_reason: Why the rollout ended.
             error_message: Error message if status="ERROR".
             metrics: Optional execution metrics.
+            reward: Optional precomputed trajectory reward score.
 
         Raises:
             OsmosisTransportError: Network/connection errors after retries.
@@ -398,6 +400,7 @@ class OsmosisLLMClient:
             finish_reason=finish_reason,
             error_message=error_message,
             metrics=metrics,
+            reward=reward,
         )
 
         client = await self._get_client()

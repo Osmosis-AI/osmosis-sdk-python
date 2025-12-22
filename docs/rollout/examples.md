@@ -689,7 +689,7 @@ COPY . .
 EXPOSE 9000
 
 # Using CLI (validates on startup)
-CMD ["osmosis", "serve", "-m", "main:agent_loop", "-p", "9000"]
+CMD ["osmosis", "serve", "-m", "main:agent_loop", "-p", "9000", "--skip-register"]
 ```
 
 Or with uvicorn directly:

@@ -236,6 +236,70 @@ def test_health_endpoint_includes_agent_name() -> None:
 
 
 # =============================================================================
+# /platform/health Endpoint Tests (Authenticated Platform Health Check)
+# =============================================================================
+
+
+@pytest.mark.skipif(not FASTAPI_AVAILABLE, reason="FastAPI not installed")
+def test_platform_health_endpoint_not_exposed_without_api_key() -> None:
+    """Verify /platform/health is not exposed when API key auth is disabled."""
+    agent_loop = SimpleAgentLoop()
+    app = create_app(agent_loop)
+
+    with TestClient(app) as client:
+        response = client.get("/platform/health")
+
+    assert response.status_code == 404
+
+
+@pytest.mark.skipif(not FASTAPI_AVAILABLE, reason="FastAPI not installed")
+def test_platform_health_endpoint_missing_auth_returns_401() -> None:
+    """Verify /platform/health requires Authorization when API key is configured."""
+    agent_loop = SimpleAgentLoop()
+    app = create_app(agent_loop, api_key="test-api-key-12345")
+
+    with TestClient(app) as client:
+        response = client.get("/platform/health")
+
+    assert response.status_code == 401
+
+
+@pytest.mark.skipif(not FASTAPI_AVAILABLE, reason="FastAPI not installed")
+def test_platform_health_endpoint_invalid_auth_returns_401() -> None:
+    """Verify /platform/health rejects incorrect API keys."""
+    agent_loop = SimpleAgentLoop()
+    test_api_key = "test-api-key-12345"
+    app = create_app(agent_loop, api_key=test_api_key)
+
+    with TestClient(app) as client:
+        response = client.get(
+            "/platform/health",
+            headers={"Authorization": "Bearer wrong-api-key"},
+        )
+
+    assert response.status_code == 401
+
+
+@pytest.mark.skipif(not FASTAPI_AVAILABLE, reason="FastAPI not installed")
+def test_platform_health_endpoint_valid_auth_returns_200() -> None:
+    """Verify /platform/health returns status when given correct API key."""
+    agent_loop = SimpleAgentLoop()
+    test_api_key = "test-api-key-12345"
+    app = create_app(agent_loop, api_key=test_api_key)
+
+    with TestClient(app) as client:
+        response = client.get(
+            "/platform/health",
+            headers={"Authorization": f"Bearer {test_api_key}"},
+        )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "healthy"
+    assert data["agent_loop"] == "simple_agent"
+
+
+# =============================================================================
 # /v1/rollout/init Endpoint Tests
 # =============================================================================
 
@@ -488,6 +552,8 @@ async def test_background_rollout_completes() -> None:
                     "server_url": "http://localhost:8080",
                     "messages": [{"role": "user", "content": "test"}],
                     "completion_params": {},
+                    # Callback auth: RolloutServer -> TrainGate
+                    "api_key": "callback-token",
                 },
             )
 
@@ -497,6 +563,11 @@ async def test_background_rollout_completes() -> None:
             await asyncio.sleep(0.1)
 
         # Verify complete_rollout was called
+        MockClient.assert_called_once()
+        assert MockClient.call_args.kwargs["server_url"] == "http://localhost:8080"
+        assert MockClient.call_args.kwargs["rollout_id"] == "bg-test"
+        assert MockClient.call_args.kwargs["api_key"] == "callback-token"
+
         mock_client_instance.complete_rollout.assert_called_once()
         call_kwargs = mock_client_instance.complete_rollout.call_args[1]
         assert call_kwargs["status"] == "COMPLETED"
@@ -537,6 +608,98 @@ async def test_background_rollout_handles_agent_error() -> None:
         call_kwargs = mock_client_instance.complete_rollout.call_args[1]
         assert call_kwargs["status"] == "ERROR"
         assert "Test error" in call_kwargs["error_message"]
+
+
+# =============================================================================
+# API Key Validation Tests
+# =============================================================================
+
+
+@pytest.mark.skipif(not FASTAPI_AVAILABLE, reason="FastAPI not installed")
+def test_init_endpoint_with_valid_api_key() -> None:
+    """Verify /v1/rollout/init accepts requests with valid API key."""
+    agent_loop = SimpleAgentLoop()
+    test_api_key = "test-api-key-12345"
+    app = create_app(agent_loop, api_key=test_api_key)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/v1/rollout/init",
+            headers={"Authorization": f"Bearer {test_api_key}"},
+            json={
+                "rollout_id": "api-key-test",
+                "server_url": "http://localhost:8080",
+                "messages": [{"role": "user", "content": "Hello"}],
+                "completion_params": {"temperature": 0.7},
+            },
+        )
+
+    assert response.status_code == 202
+
+
+@pytest.mark.skipif(not FASTAPI_AVAILABLE, reason="FastAPI not installed")
+def test_init_endpoint_with_invalid_api_key() -> None:
+    """Verify /v1/rollout/init rejects requests with invalid API key."""
+    agent_loop = SimpleAgentLoop()
+    test_api_key = "test-api-key-12345"
+    app = create_app(agent_loop, api_key=test_api_key)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/v1/rollout/init",
+            headers={"Authorization": "Bearer wrong-api-key"},
+            json={
+                "rollout_id": "api-key-test",
+                "server_url": "http://localhost:8080",
+                "messages": [{"role": "user", "content": "Hello"}],
+                "completion_params": {"temperature": 0.7},
+            },
+        )
+
+    assert response.status_code == 401
+
+
+@pytest.mark.skipif(not FASTAPI_AVAILABLE, reason="FastAPI not installed")
+def test_init_endpoint_with_missing_api_key() -> None:
+    """Verify /v1/rollout/init rejects requests without API key when required."""
+    agent_loop = SimpleAgentLoop()
+    test_api_key = "test-api-key-12345"
+    app = create_app(agent_loop, api_key=test_api_key)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/v1/rollout/init",
+            json={
+                "rollout_id": "api-key-test",
+                "server_url": "http://localhost:8080",
+                "messages": [{"role": "user", "content": "Hello"}],
+                "completion_params": {"temperature": 0.7},
+                # No api_key provided
+            },
+        )
+
+    assert response.status_code == 401
+
+
+@pytest.mark.skipif(not FASTAPI_AVAILABLE, reason="FastAPI not installed")
+def test_init_endpoint_without_api_key_configured() -> None:
+    """Verify /v1/rollout/init works without API key when not configured."""
+    agent_loop = SimpleAgentLoop()
+    # No api_key parameter - should not require authentication
+    app = create_app(agent_loop)
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/v1/rollout/init",
+            json={
+                "rollout_id": "no-auth-test",
+                "server_url": "http://localhost:8080",
+                "messages": [{"role": "user", "content": "Hello"}],
+                "completion_params": {"temperature": 0.7},
+            },
+        )
+
+    assert response.status_code == 202
 
 
 # =============================================================================

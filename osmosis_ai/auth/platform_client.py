@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Optional
+from typing import Any, Optional, TYPE_CHECKING
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from .config import PLATFORM_URL
 from .credentials import delete_workspace_credentials, get_active_workspace, load_credentials
+
+if TYPE_CHECKING:
+    from .credentials import WorkspaceCredentials
 
 
 class AuthenticationExpiredError(Exception):
@@ -43,6 +46,7 @@ def platform_request(
     data: Optional[dict[str, Any]] = None,
     headers: Optional[dict[str, str]] = None,
     timeout: float = 30.0,
+    credentials: Optional["WorkspaceCredentials"] = None,
 ) -> dict[str, Any]:
     """Make an authenticated request to the Osmosis Platform API.
 
@@ -54,6 +58,8 @@ def platform_request(
         data: Request body data (will be JSON encoded)
         headers: Additional headers
         timeout: Request timeout in seconds
+        credentials: Optional explicit credentials override. If not provided,
+            uses the active workspace credentials from local storage.
 
     Returns:
         Parsed JSON response
@@ -62,7 +68,8 @@ def platform_request(
         AuthenticationExpiredError: If 401 received (credentials auto-deleted)
         PlatformAPIError: For other API errors
     """
-    credentials = load_credentials()
+    if credentials is None:
+        credentials = load_credentials()
     if credentials is None:
         raise AuthenticationExpiredError(
             "No valid credentials found. Please run 'osmosis login' first."
@@ -86,7 +93,20 @@ def platform_request(
     except HTTPError as e:
         if e.code == 401:
             _handle_401_and_cleanup()
-        raise PlatformAPIError(f"API error: HTTP {e.code}", e.code)
+        # Best-effort capture of response body for debugging (truncate to avoid huge logs)
+        detail = ""
+        try:
+            raw = e.read()
+            text = raw.decode("utf-8", errors="replace").strip() if raw else ""
+            if text:
+                if len(text) > 500:
+                    text = text[:500] + "...(truncated)"
+                detail = f" Response: {text}"
+        except Exception:
+            # Ignore body read/decoding failures; keep the original status code context.
+            pass
+
+        raise PlatformAPIError(f"API error: HTTP {e.code}.{detail}", e.code)
     except URLError as e:
         raise PlatformAPIError(f"Connection error: {e.reason}")
     except json.JSONDecodeError:

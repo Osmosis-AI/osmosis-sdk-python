@@ -151,6 +151,37 @@ class ServeCommand:
             help="Uvicorn log level (default: info)",
         )
 
+        parser.add_argument(
+            "--skip-register",
+            dest="skip_register",
+            action="store_true",
+            default=False,
+            help="Skip registering with Osmosis Platform (for local testing)",
+        )
+
+        parser.add_argument(
+            "--local",
+            "--local-debug",
+            dest="local_debug",
+            action="store_true",
+            default=False,
+            help=(
+                "Local debug mode: disable API key authentication and skip registering "
+                "with Osmosis Platform (NOT for production)"
+            ),
+        )
+
+        parser.add_argument(
+            "--api-key",
+            dest="api_key",
+            default=None,
+            help=(
+                "API key used by TrainGate to authenticate when calling this RolloutServer "
+                "(sent as 'Authorization: Bearer <api_key>'). "
+                "If not provided, one is generated. (NOT related to `osmosis login` token.)"
+            ),
+        )
+
     def run(self, args: argparse.Namespace) -> int:
         """Run the serve command."""
         module_path = args.module
@@ -159,6 +190,9 @@ class ServeCommand:
         validate = not args.no_validate
         reload = args.reload
         log_level = args.log_level
+        skip_register = args.skip_register
+        api_key = args.api_key
+        local_debug = args.local_debug
 
         # Load agent loop
         try:
@@ -176,6 +210,9 @@ class ServeCommand:
                 validate=validate,
                 log_level=log_level,
                 reload=reload,
+                skip_register=skip_register,
+                api_key=api_key,
+                local_debug=local_debug,
             )
         except ImportError as e:
             print(f"Error: {e}", file=sys.stderr)

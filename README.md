@@ -276,17 +276,30 @@ Start a RolloutServer for an agent loop implementation:
 # Validate agent loop before starting (checks tools, async run, etc.)
 osmosis validate -m my_agent:agent_loop
 
-# Start server with validation (default port 9000)
+# Start server with Platform registration (requires `osmosis login`)
+osmosis login
 osmosis serve -m my_agent:agent_loop
 
 # Specify port
 osmosis serve -m my_agent:agent_loop -p 8080
+
+# Local / container mode: skip Platform registration (no login required).
+# NOTE: API key auth is still enabled by default.
+osmosis serve -m my_agent:agent_loop --skip-register
+
+# Local debug mode: disable API key auth AND skip Platform registration
+osmosis serve -m my_agent:agent_loop --local
+
+# Provide a stable API key (otherwise one is generated and printed on startup)
+osmosis serve -m my_agent:agent_loop --skip-register --api-key "$MY_API_KEY"
 
 # Skip validation (not recommended)
 osmosis serve -m my_agent:agent_loop --no-validate
 ```
 
 The module path format is `module:attribute`, e.g., `server:agent_loop` or `mypackage.agents:MyAgentClass`.
+
+Note: The RolloutServer `--api-key` is used by TrainGate to call your RolloutServer and is **NOT** related to the `osmosis login` token (which is only for talking to Osmosis Platform). This key is **not** used for RolloutServer → TrainGate callbacks.
 
 ### Rubric Tools
 

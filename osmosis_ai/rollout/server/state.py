@@ -42,8 +42,8 @@ class AppState:
         - Automatic cleanup of old completion records
 
     Attributes:
-        rollout_tasks: Dictionary of active rollout tasks by ID.
-        completed_rollouts: Dictionary of completion times by ID.
+        rollout_tasks: Dictionary of active rollout tasks by idempotency key.
+        completed_rollouts: Dictionary of completion times by idempotency key.
         semaphore: Concurrency control semaphore.
         record_ttl: Time to live for completed records in seconds.
 
@@ -82,17 +82,20 @@ class AppState:
         self._cleanup_interval = cleanup_interval_seconds or settings.cleanup_interval_seconds
         self._agent_loop_name = agent_loop_name
 
+        # NOTE: The "key" used throughout is the idempotency key for init requests:
+        # - Prefer request.idempotency_key when provided
+        # - Fallback to request.rollout_id when idempotency_key is missing
         self.rollout_tasks: Dict[str, asyncio.Task] = {}
-        self.completed_rollouts: Dict[str, float] = {}  # rollout_id -> completion_time
+        self.completed_rollouts: Dict[str, float] = {}  # key -> completion_time
         # Cached init responses for idempotency (duplicate /v1/rollout/init requests)
         self._init_futures: Dict[str, asyncio.Future[InitResponse]] = {}
         self.semaphore = asyncio.Semaphore(self._max_concurrent)
         self._cleanup_task: Optional[asyncio.Task] = None
 
     def get_or_create_init_future(
-        self, rollout_id: str
+        self, key: str
     ) -> Tuple[asyncio.Future[InitResponse], bool]:
-        """Get or create the init future for a rollout_id.
+        """Get or create the init future for a given idempotency key.
 
         This is used to provide true idempotency for /v1/rollout/init:
         - The first request creates a future and becomes the "leader"
@@ -102,17 +105,17 @@ class AppState:
             (future, created) where created=True means caller should compute tools
             and resolve the future.
         """
-        existing = self._init_futures.get(rollout_id)
+        existing = self._init_futures.get(key)
         if existing is not None:
             return existing, False
 
         fut: asyncio.Future[InitResponse] = asyncio.get_running_loop().create_future()
-        self._init_futures[rollout_id] = fut
+        self._init_futures[key] = fut
         return fut, True
 
-    def clear_init_record(self, rollout_id: str) -> None:
-        """Remove any cached init future/response for a rollout_id."""
-        self._init_futures.pop(rollout_id, None)
+    def clear_init_record(self, key: str) -> None:
+        """Remove any cached init future/response for a given idempotency key."""
+        self._init_futures.pop(key, None)
 
     def start_cleanup_task(self) -> None:
         """Start the background cleanup task.
@@ -152,54 +155,54 @@ class AppState:
         """Remove completed rollout records older than TTL."""
         now = time.monotonic()
         expired = [
-            rid
-            for rid, completed_at in self.completed_rollouts.items()
+            key
+            for key, completed_at in self.completed_rollouts.items()
             if now - completed_at > self.record_ttl
         ]
-        for rid in expired:
-            self.completed_rollouts.pop(rid, None)
-            self._init_futures.pop(rid, None)
+        for key in expired:
+            self.completed_rollouts.pop(key, None)
+            self._init_futures.pop(key, None)
         if expired:
             logger.debug("Pruned %d completed records", len(expired))
 
-    def is_duplicate(self, rollout_id: str) -> bool:
-        """Check if this rollout is already running or recently completed.
+    def is_duplicate(self, key: str) -> bool:
+        """Check if this idempotency key is already running or recently completed.
 
         Used for idempotency - duplicate requests get the same response
         without starting a new rollout.
 
         Args:
-            rollout_id: The rollout ID to check.
+            key: The idempotency key to check (or rollout_id if no idempotency_key).
 
         Returns:
             True if the rollout is running or recently completed.
         """
         return (
-            rollout_id in self.rollout_tasks
-            or rollout_id in self.completed_rollouts
-            or rollout_id in self._init_futures
+            key in self.rollout_tasks
+            or key in self.completed_rollouts
+            or key in self._init_futures
         )
 
-    def mark_started(self, rollout_id: str, task: asyncio.Task) -> None:
+    def mark_started(self, key: str, task: asyncio.Task) -> None:
         """Mark a rollout as started.
 
         Args:
-            rollout_id: The rollout ID.
+            key: The idempotency key (or rollout_id if no idempotency_key).
             task: The asyncio task running the rollout.
         """
-        self.rollout_tasks[rollout_id] = task
+        self.rollout_tasks[key] = task
 
-    def mark_completed(self, rollout_id: str) -> None:
+    def mark_completed(self, key: str) -> None:
         """Mark a rollout as completed.
 
         Removes from active tasks and adds to completed records
         for idempotency checking.
 
         Args:
-            rollout_id: The rollout ID.
+            key: The idempotency key (or rollout_id if no idempotency_key).
         """
-        self.rollout_tasks.pop(rollout_id, None)
-        self.completed_rollouts[rollout_id] = time.monotonic()
+        self.rollout_tasks.pop(key, None)
+        self.completed_rollouts[key] = time.monotonic()
 
     async def cancel_all(self) -> None:
         """Cancel all running rollout tasks.

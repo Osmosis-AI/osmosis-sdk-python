@@ -430,7 +430,11 @@ class RolloutRequest(BaseModel):
         max_turns: Advisory max LLM calls.
         max_tokens_total: Advisory max total tokens.
         metadata: Optional fine-grained control parameters (max 1MB).
-        api_key: Optional API key for authenticating callbacks.
+        api_key: Optional API key for authenticating RolloutServer -> TrainGate
+            callback requests. If provided, RolloutServer will attach it as an
+            HTTP Bearer token when calling:
+            - POST {server_url}/v1/chat/completions
+            - POST {server_url}/v1/rollout/completed
         idempotency_key: Optional key for retry safety.
     """
 
@@ -508,6 +512,7 @@ class RolloutResponse(BaseModel):
         final_messages: Final conversation messages.
         finish_reason: Why the rollout ended.
         error_message: Error message if status=ERROR.
+        reward: Optional precomputed trajectory reward score.
         metrics: Optional execution metrics.
         extra_fields: Additional fields for extensibility.
     """
@@ -517,6 +522,7 @@ class RolloutResponse(BaseModel):
     final_messages: List[MessageDict] = Field(default_factory=list)
     finish_reason: Optional[str] = None
     error_message: Optional[str] = None
+    reward: Optional[float] = None
     metrics: Optional[RolloutMetrics] = None
     extra_fields: Dict[str, Any] = Field(default_factory=dict)
 

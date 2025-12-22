@@ -135,7 +135,7 @@ from osmosis_ai.rollout import OsmosisLLMClient
 async with OsmosisLLMClient(
     server_url="http://trainer:8080",
     rollout_id="rollout-123",
-    api_key="optional-token",
+    # api_key="... optional TrainGate bearer token ...",
     timeout_seconds=300.0,
     max_retries=3,
 ) as client:
@@ -148,7 +148,7 @@ async with OsmosisLLMClient(
 |-----------|------|---------|-------------|
 | `server_url` | `str` | required | TrainGate base URL |
 | `rollout_id` | `str` | required | Unique rollout identifier |
-| `api_key` | `Optional[str]` | `None` | Bearer token for authentication |
+| `api_key` | `Optional[str]` | `None` | Optional Bearer token attached to requests to TrainGate. In the remote-rollout protocol this value is provided by TrainGate in `RolloutRequest.api_key`, and RolloutServer forwards it on callbacks to TrainGate. |
 | `timeout_seconds` | `float` | `300.0` | Request timeout (seconds) |
 | `max_retries` | `int` | `3` | Max retries for transient errors (5xx / timeouts / transport) |
 | `complete_rollout_retries` | `int` | `2` | Max retries for `/v1/rollout/completed` callback |
@@ -244,6 +244,9 @@ serve_agent_loop(
     log_level="info",
     reload=False,
     settings=None,
+    skip_register=False,
+    api_key=None,
+    local_debug=False,
 )
 ```
 
@@ -258,6 +261,9 @@ serve_agent_loop(
 | `log_level` | `str` | `"info"` | Uvicorn log level |
 | `reload` | `bool` | `False` | Enable auto-reload for development |
 | `settings` | `Optional[RolloutSettings]` | `None` | Configuration override |
+| `skip_register` | `bool` | `False` | Skip registering with Osmosis Platform (local testing mode) |
+| `api_key` | `Optional[str]` | `None` | RolloutServer API key used by TrainGate to call this server via `Authorization: Bearer <api_key>` (generated if not provided). NOT related to `osmosis login`. |
+| `local_debug` | `bool` | `False` | Local debug mode: disable API key auth and force `skip_register=True` (NOT for production) |
 
 **Raises:**
 - `ImportError`: If FastAPI or uvicorn not installed
@@ -478,7 +484,7 @@ class RolloutRequest(BaseModel):
     max_turns: int = 10
     max_tokens_total: int = 8192
     metadata: Dict[str, Any] = {}  # JSON-serializable (size-limited; default 1MB)
-    api_key: Optional[str] = None
+    api_key: Optional[str] = None  # Optional Bearer token RolloutServer uses for callbacks to TrainGate
     idempotency_key: Optional[str] = None
 ```
 

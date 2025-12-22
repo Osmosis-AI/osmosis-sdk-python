@@ -23,6 +23,7 @@ from typing import Optional, TYPE_CHECKING
 
 from osmosis_ai.rollout._compat import FASTAPI_AVAILABLE, UVICORN_AVAILABLE
 from osmosis_ai.rollout.core.base import RolloutAgentLoop
+from osmosis_ai.rollout.server.api_key import generate_api_key
 from osmosis_ai.rollout.validator import (
     AgentLoopValidationError,
     ValidationResult,
@@ -31,6 +32,7 @@ from osmosis_ai.rollout.validator import (
 
 if TYPE_CHECKING:
     from osmosis_ai.rollout.config.settings import RolloutSettings
+    from osmosis_ai.auth.credentials import WorkspaceCredentials
 
 logger = logging.getLogger(__name__)
 
@@ -53,11 +55,15 @@ def serve_agent_loop(
     log_level: str = "info",
     reload: bool = False,
     settings: Optional["RolloutSettings"] = None,
+    skip_register: bool = False,
+    api_key: Optional[str] = None,
+    local_debug: bool = False,
 ) -> None:
     """Start a RolloutServer for the given agent loop.
 
     This function validates the agent loop (optional), creates a FastAPI
-    application, and starts it with uvicorn.
+    application, and starts it with uvicorn. By default, it also registers
+    the server with Osmosis Platform for health monitoring.
 
     Args:
         agent_loop: The RolloutAgentLoop instance to serve.
@@ -69,11 +75,22 @@ def serve_agent_loop(
         reload: Whether to enable auto-reload (for development).
                 Defaults to False.
         settings: Optional RolloutSettings for configuration.
+        skip_register: Whether to skip registering with Osmosis Platform.
+                       Defaults to False. If False, requires valid login
+                       credentials.
+        api_key: Optional API key for authenticating incoming requests.
+                 If None, a new key is generated automatically.
+                 TrainGate must send this key as:
+                 - Authorization: Bearer <api_key>
+                 when calling this RolloutServer.
+                 and is NOT related to the `osmosis login` token.
+        local_debug: Local debug mode. If True, disables API key authentication
+                     and forces skip_register=True. NOT for production.
 
     Raises:
         ImportError: If FastAPI or uvicorn is not installed.
         AgentLoopValidationError: If validation fails and validate=True.
-        ServeError: If server cannot be started.
+        ServeError: If server cannot be started or not logged in.
 
     Example:
         from osmosis_ai.rollout.server import serve_agent_loop
@@ -82,6 +99,16 @@ def serve_agent_loop(
 
         # Skip validation (not recommended)
         serve_agent_loop(MyAgentLoop(), port=9000, validate=False)
+
+        # Skip platform registration (for local testing)
+        serve_agent_loop(MyAgentLoop(), port=9000, skip_register=True)
+
+        # Use a custom API key (e.g., from environment variable)
+        import os
+        serve_agent_loop(MyAgentLoop(), api_key=os.environ.get("MY_API_KEY"))
+
+        # Local debug mode (no API key auth, no registration)
+        serve_agent_loop(MyAgentLoop(), local_debug=True)
     """
     # Check dependencies
     if not FASTAPI_AVAILABLE:
@@ -96,16 +123,58 @@ def serve_agent_loop(
             "Install it with: pip install osmosis-ai[server]"
         )
 
+    # Local debug mode: force skip registration and disable API key auth
+    if local_debug:
+        skip_register = True
+        if api_key is not None:
+            raise ServeError(
+                "local_debug=True disables API key authentication; "
+                "do not provide api_key in local debug mode."
+            )
+
+    # Check login status if registration is enabled
+    credentials: Optional["WorkspaceCredentials"] = None
+    if not skip_register:
+        from osmosis_ai.auth.credentials import get_valid_credentials
+
+        credentials = get_valid_credentials()
+        if credentials is None:
+            raise ServeError(
+                "Not logged in. Please run 'osmosis login' first, "
+                "or use skip_register=True for local testing."
+            )
+
     # Validate agent loop
     if validate:
         result = validate_agent_loop(agent_loop)
         _log_validation_result(result)
         result.raise_if_invalid()
 
+    # Configure API Key auth (required by default unless local_debug=True)
+    api_key_provided = api_key is not None
+    if local_debug:
+        logger.info("Local debug mode enabled: API key authentication disabled")
+        api_key = None
+        api_key_provided = False
+    else:
+        # Generate API Key for this server instance if not provided
+        if api_key is None:
+            api_key = generate_api_key()
+            logger.info("Generated new API key for server authentication")
+        else:
+            logger.info("Using provided API key for server authentication")
+
     # Create app
     from osmosis_ai.rollout.server.app import create_app
 
-    app = create_app(agent_loop, settings=settings)
+    app = create_app(
+        agent_loop,
+        settings=settings,
+        credentials=credentials,
+        server_host=host,
+        server_port=port,
+        api_key=api_key,
+    )
 
     # Start server
     import uvicorn
@@ -116,6 +185,24 @@ def serve_agent_loop(
         host,
         port,
     )
+
+    # Print server info including API key
+    print(f"\nRolloutServer starting...")
+    print(f"  Agent: {agent_loop.name}")
+    print(f"  Address: {host}:{port}")
+    if local_debug:
+        print("  API Key: (disabled - local debug)")
+    else:
+        if api_key_provided:
+            print("  API Key: (provided)")
+        else:
+            print(f"  API Key: {api_key}")
+    if skip_register:
+        if local_debug:
+            print("  Registration: skipped (local debug mode)")
+        else:
+            print("  Registration: skipped (local testing mode)")
+    print()
 
     uvicorn.run(
         app,

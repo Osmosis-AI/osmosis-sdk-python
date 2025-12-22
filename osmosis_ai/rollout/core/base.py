@@ -57,6 +57,7 @@ class RolloutResult:
         finish_reason: Why the rollout ended ("stop", "max_turns", "error", etc.).
         error_message: Error description if status="ERROR".
         metrics: Optional execution metrics for monitoring.
+        reward: Optional precomputed trajectory reward score.
 
     Example:
         # Success
@@ -64,6 +65,14 @@ class RolloutResult:
             status="COMPLETED",
             final_messages=[...],
             finish_reason="stop",
+        )
+
+        # Success with reward
+        result = RolloutResult(
+            status="COMPLETED",
+            final_messages=[...],
+            finish_reason="stop",
+            reward=1.0,
         )
 
         # Error
@@ -80,6 +89,7 @@ class RolloutResult:
     finish_reason: str
     error_message: Optional[str] = None
     metrics: Optional[RolloutMetrics] = None
+    reward: Optional[float] = None
 
 
 @dataclass
@@ -153,6 +163,7 @@ class RolloutContext:
         self,
         final_messages: List[Dict[str, Any]],
         finish_reason: str = "stop",
+        reward: Optional[float] = None,
     ) -> RolloutResult:
         """Create a successful completion result.
 
@@ -161,18 +172,23 @@ class RolloutContext:
         Args:
             final_messages: Final conversation messages.
             finish_reason: Why the rollout ended (default: "stop").
+            reward: Optional precomputed trajectory reward score.
 
         Returns:
             RolloutResult with status="COMPLETED".
 
         Example:
             return ctx.complete(messages, finish_reason="stop")
+
+            # With reward
+            return ctx.complete(messages, finish_reason="stop", reward=1.0)
         """
         return RolloutResult(
             status="COMPLETED",
             final_messages=final_messages,
             finish_reason=finish_reason,
             metrics=self._build_metrics(),
+            reward=reward,
         )
 
     def error(
