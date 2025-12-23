@@ -58,6 +58,7 @@ def serve_agent_loop(
     skip_register: bool = False,
     api_key: Optional[str] = None,
     local_debug: bool = False,
+    debug_dir: Optional[str] = None,
 ) -> None:
     """Start a RolloutServer for the given agent loop.
 
@@ -86,6 +87,10 @@ def serve_agent_loop(
                  and is NOT related to the `osmosis login` token.
         local_debug: Local debug mode. If True, disables API key authentication
                      and forces skip_register=True. NOT for production.
+        debug_dir: Optional directory for debug logging.
+                   If provided, each rollout will write detailed execution
+                   traces to {debug_dir}/{rollout_id}.jsonl files.
+                   Disabled by default.
 
     Raises:
         ImportError: If FastAPI or uvicorn is not installed.
@@ -164,6 +169,17 @@ def serve_agent_loop(
         else:
             logger.info("Using provided API key for server authentication")
 
+    # Create debug session directory with timestamp if debug_dir is provided
+    debug_session_dir: Optional[str] = None
+    if debug_dir:
+        import os
+        import time
+
+        timestamp = int(time.time())
+        debug_session_dir = os.path.join(debug_dir, str(timestamp))
+        os.makedirs(debug_session_dir, exist_ok=True)
+        logger.info("Debug logging enabled: session_dir=%s", debug_session_dir)
+
     # Create app
     from osmosis_ai.rollout.server.app import create_app
 
@@ -174,6 +190,7 @@ def serve_agent_loop(
         server_host=host,
         server_port=port,
         api_key=api_key,
+        debug_dir=debug_session_dir,
     )
 
     # Start server
@@ -202,6 +219,8 @@ def serve_agent_loop(
             print("  Registration: skipped (local debug mode)")
         else:
             print("  Registration: skipped (local testing mode)")
+    if debug_session_dir:
+        print(f"  Debug Log: {debug_session_dir}/")
     print()
 
     uvicorn.run(

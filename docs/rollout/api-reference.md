@@ -105,6 +105,30 @@ result = execute_tool(...)
 ctx.record_tool_call(latency_ms=(time.monotonic() - start) * 1000)
 ```
 
+#### `log_event(event_type, **data) -> None`
+
+Log a debug event to the rollout's JSONL file. No-op if debug logging is not enabled.
+
+```python
+# Log before LLM call
+ctx.log_event("pre_llm", turn=0, num_messages=len(messages))
+
+# Log LLM response
+ctx.log_event("llm_response", turn=0, has_tool_calls=result.has_tool_calls)
+
+# Log tool results
+ctx.log_event("tool_results", turn=0, num_results=len(tool_results))
+
+# Log completion
+ctx.log_event("rollout_complete", finish_reason="stop", reward=1.0)
+```
+
+**Properties:**
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `debug_enabled` | `bool` | Whether debug logging is enabled |
+
 ---
 
 ### RolloutResult
@@ -247,6 +271,7 @@ serve_agent_loop(
     skip_register=False,
     api_key=None,
     local_debug=False,
+    debug_dir=None,
 )
 ```
 
@@ -264,6 +289,7 @@ serve_agent_loop(
 | `skip_register` | `bool` | `False` | Skip registering with Osmosis Platform (local testing mode) |
 | `api_key` | `Optional[str]` | `None` | RolloutServer API key used by TrainGate to call this server via `Authorization: Bearer <api_key>` (generated if not provided). NOT related to `osmosis login`. |
 | `local_debug` | `bool` | `False` | Local debug mode: disable API key auth and force `skip_register=True` (NOT for production) |
+| `debug_dir` | `Optional[str]` | `None` | Directory for debug logging. If set, creates a timestamped subdirectory `{debug_dir}/{timestamp}/` and writes execution traces to `{rollout_id}.jsonl` files |
 
 **Raises:**
 - `ImportError`: If FastAPI or uvicorn not installed
@@ -282,6 +308,7 @@ app = create_app(
     agent_loop,
     max_concurrent=100,
     record_ttl_seconds=3600,
+    debug_dir="./rollout_logs",  # Optional: enable debug logging
 )
 ```
 
@@ -293,6 +320,7 @@ app = create_app(
 | `max_concurrent` | `int` | `100` | Max concurrent rollouts |
 | `record_ttl_seconds` | `float` | `3600` | TTL for completed records |
 | `settings` | `Optional[RolloutSettings]` | `None` | Global settings override (server/logging/tracing) |
+| `debug_dir` | `Optional[str]` | `None` | Directory for debug logging. If set, each rollout writes execution traces to `{debug_dir}/{rollout_id}.jsonl`. Note: when using `serve_agent_loop()` or CLI, a timestamped subdirectory is created automatically |
 
 **Returns:** `FastAPI` application
 

@@ -67,6 +67,7 @@ def create_app(
     server_host: Optional[str] = None,
     server_port: Optional[int] = None,
     api_key: Optional[str] = None,
+    debug_dir: Optional[str] = None,
 ) -> "FastAPI":
     """Create a FastAPI application for the agent loop.
 
@@ -91,6 +92,10 @@ def create_app(
         api_key: API key for authenticating incoming requests.
                  If provided, requests must include:
                  - Authorization: Bearer <api_key>
+        debug_dir: Optional directory for debug logging.
+                   If provided, each rollout will write detailed execution
+                   traces to {debug_dir}/{rollout_id}.jsonl files.
+                   Disabled by default.
 
     Returns:
         FastAPI application ready to serve.
@@ -143,6 +148,8 @@ def create_app(
             agent_loop.name,
             state._max_concurrent,
         )
+        if debug_dir:
+            logger.info("Debug logging enabled: output_dir=%s", debug_dir)
         state.start_cleanup_task()
 
         # Register with Platform if credentials provided
@@ -277,6 +284,7 @@ def create_app(
                                 tools=tools,
                                 llm=llm,
                                 _start_time=start_time,
+                                _debug_dir=debug_dir,
                             )
 
                             try:

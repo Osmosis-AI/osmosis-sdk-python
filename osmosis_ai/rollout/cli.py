@@ -182,6 +182,18 @@ class ServeCommand:
             ),
         )
 
+        parser.add_argument(
+            "--log",
+            dest="debug_dir",
+            default=None,
+            metavar="DIR",
+            help=(
+                "Enable logging and write execution traces to DIR. "
+                "Each rollout will create a {rollout_id}.jsonl file with "
+                "detailed event logs (pre-LLM state, responses, tool results, etc.)."
+            ),
+        )
+
     def run(self, args: argparse.Namespace) -> int:
         """Run the serve command."""
         module_path = args.module
@@ -193,6 +205,7 @@ class ServeCommand:
         skip_register = args.skip_register
         api_key = args.api_key
         local_debug = args.local_debug
+        debug_dir = args.debug_dir
 
         # Load agent loop
         try:
@@ -213,6 +226,7 @@ class ServeCommand:
                 skip_register=skip_register,
                 api_key=api_key,
                 local_debug=local_debug,
+                debug_dir=debug_dir,
             )
         except ImportError as e:
             print(f"Error: {e}", file=sys.stderr)

@@ -22,6 +22,9 @@ osmosis serve -m my_agent:agent_loop --no-validate
 # Enable auto-reload for development
 osmosis serve -m my_agent:agent_loop --reload
 
+# Enable debug logging (writes {rollout_id}.jsonl files to ./logs/)
+osmosis serve -m my_agent:agent_loop --log ./logs
+
 # Verbose validation output
 osmosis validate -m my_agent:agent_loop -v
 ```
@@ -418,6 +421,142 @@ class RobustAgent(RolloutAgentLoop):
 
 
 app = create_app(RobustAgent())
+```
+
+---
+
+## Agent with Debug Logging
+
+Using `ctx.log_event()` to track execution for debugging and analysis.
+
+```python
+# logging_agent.py
+
+import json
+from typing import List
+
+from osmosis_ai.rollout import (
+    RolloutAgentLoop,
+    RolloutContext,
+    RolloutRequest,
+    RolloutResult,
+    OpenAIFunctionToolSchema,
+    create_app,
+)
+
+
+class LoggingAgent(RolloutAgentLoop):
+    """Agent that logs execution details for debugging."""
+
+    name = "logging_agent"
+
+    def get_tools(self, request: RolloutRequest) -> List[OpenAIFunctionToolSchema]:
+        return []  # Add your tools here
+
+    async def run(self, ctx: RolloutContext) -> RolloutResult:
+        messages = list(ctx.request.messages)
+
+        for turn in range(ctx.request.max_turns):
+            # Log state before LLM call
+            ctx.log_event(
+                "pre_llm",
+                turn=turn,
+                num_messages=len(messages),
+                messages_summary=[
+                    {"role": m["role"], "content_preview": str(m.get("content", ""))[:50]}
+                    for m in messages
+                ],
+            )
+
+            # Call LLM
+            result = await ctx.chat(messages, **ctx.request.completion_params)
+            messages.append(result.message)
+
+            # Log LLM response
+            ctx.log_event(
+                "llm_response",
+                turn=turn,
+                has_tool_calls=result.has_tool_calls,
+                finish_reason=result.finish_reason,
+                content_preview=str(result.content or "")[:100],
+            )
+
+            if not result.has_tool_calls:
+                break
+
+            # Process tool calls
+            tool_results = []
+            for tool_call in result.tool_calls:
+                name = tool_call["function"]["name"]
+                args = json.loads(tool_call["function"]["arguments"])
+
+                tool_result = await self.execute_tool(name, args)
+                tool_results.append({
+                    "role": "tool",
+                    "content": tool_result,
+                    "tool_call_id": tool_call["id"],
+                })
+                ctx.record_tool_call()
+
+            messages.extend(tool_results)
+
+            # Log tool execution results
+            ctx.log_event(
+                "tool_results",
+                turn=turn,
+                num_results=len(tool_results),
+                results_summary=[
+                    {"tool_call_id": r["tool_call_id"], "content_preview": r["content"][:50]}
+                    for r in tool_results
+                ],
+            )
+
+        # Log completion with reward (if computed)
+        reward = self.compute_reward(messages, ctx.request.metadata)
+        ctx.log_event(
+            "rollout_complete",
+            finish_reason="stop" if turn < ctx.request.max_turns - 1 else "max_turns",
+            total_turns=turn + 1,
+            final_message_count=len(messages),
+            reward=reward,
+        )
+
+        return ctx.complete(messages, reward=reward)
+
+    async def execute_tool(self, name: str, args: dict) -> str:
+        # Your tool execution logic
+        return f"Result for {name}"
+
+    def compute_reward(self, messages: list, metadata: dict) -> float:
+        # Your reward computation logic
+        return 1.0
+
+
+# Run with: osmosis serve -m logging_agent:agent_loop --log ./rollout_logs
+agent_loop = LoggingAgent()
+app = create_app(agent_loop)
+```
+
+Each server session creates a timestamped subdirectory, and each rollout creates a JSONL file:
+
+```
+rollout_logs/
+├── 1703270400/           # Unix timestamp when server started
+│   ├── rollout-abc123.jsonl
+│   └── rollout-def456.jsonl
+└── 1703274000/           # Another server session
+    └── rollout-xyz789.jsonl
+```
+
+Example log file contents:
+
+```jsonl
+{"event": "pre_llm", "rollout_id": "rollout-abc123", "turn": 0, "num_messages": 1, ...}
+{"event": "llm_response", "rollout_id": "rollout-abc123", "turn": 0, "has_tool_calls": true, ...}
+{"event": "tool_results", "rollout_id": "rollout-abc123", "turn": 0, "num_results": 1, ...}
+{"event": "pre_llm", "rollout_id": "rollout-abc123", "turn": 1, "num_messages": 4, ...}
+{"event": "llm_response", "rollout_id": "rollout-abc123", "turn": 1, "has_tool_calls": false, ...}
+{"event": "rollout_complete", "rollout_id": "rollout-abc123", "total_turns": 2, "reward": 1.0, ...}
 ```
 
 ---

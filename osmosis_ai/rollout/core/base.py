@@ -30,6 +30,9 @@ Example:
 
 from __future__ import annotations
 
+import json
+import logging
+import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, TYPE_CHECKING
@@ -42,6 +45,8 @@ from osmosis_ai.rollout.core.schemas import (
 
 if TYPE_CHECKING:
     from osmosis_ai.rollout.client import CompletionsResult, OsmosisLLMClient
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -133,6 +138,9 @@ class RolloutContext:
     _start_time: float = field(default=0.0, repr=False)
     _tool_latency_ms: float = field(default=0.0, repr=False)
     _num_tool_calls: int = field(default=0, repr=False)
+
+    # Debug logging configuration
+    _debug_dir: Optional[str] = field(default=None, repr=False)
 
     async def chat(
         self,
@@ -234,6 +242,89 @@ class RolloutContext:
         """
         self._num_tool_calls += 1
         self._tool_latency_ms += latency_ms
+
+    @property
+    def debug_enabled(self) -> bool:
+        """Check if debug logging is enabled."""
+        return self._debug_dir is not None
+
+    def _get_debug_file_path(self) -> Optional[str]:
+        """Get the debug file path for this rollout."""
+        if not self._debug_dir:
+            return None
+        return os.path.join(self._debug_dir, f"{self.request.rollout_id}.jsonl")
+
+    def log_event(self, event_type: str, **data: Any) -> None:
+        """Log a debug event to the rollout's JSONL file.
+
+        Events are written to {debug_dir}/{rollout_id}.jsonl in JSONL format.
+        Each line is a JSON object with the event data.
+
+        This method is a no-op if debug logging is not enabled.
+
+        Args:
+            event_type: Type of event (e.g., "pre_llm", "llm_response", "tool_results").
+            **data: Additional event data to include.
+
+        Example:
+            # Log before LLM call
+            ctx.log_event(
+                "pre_llm",
+                turn=0,
+                num_messages=len(messages),
+                messages_summary=[{"role": m["role"]} for m in messages],
+            )
+
+            # Log LLM response
+            ctx.log_event(
+                "llm_response",
+                turn=0,
+                has_tool_calls=result.has_tool_calls,
+                finish_reason=result.finish_reason,
+            )
+
+            # Log tool execution results
+            ctx.log_event(
+                "tool_results",
+                turn=0,
+                num_tool_results=len(tool_results),
+            )
+
+            # Log rollout completion
+            ctx.log_event(
+                "rollout_complete",
+                finish_reason="stop",
+                reward=1.0,
+                total_turns=5,
+            )
+        """
+        if not self._debug_dir:
+            return
+
+        debug_file = self._get_debug_file_path()
+        if not debug_file:
+            return
+
+        # Ensure debug directory exists
+        try:
+            os.makedirs(self._debug_dir, exist_ok=True)
+        except OSError as e:
+            logger.warning("Failed to create debug directory %s: %s", self._debug_dir, e)
+            return
+
+        # Build event entry
+        entry = {
+            "event": event_type,
+            "rollout_id": self.request.rollout_id,
+            **data,
+        }
+
+        # Write to JSONL file
+        try:
+            with open(debug_file, "a", encoding="utf-8") as f:
+                f.write(json.dumps(entry, default=str) + "\n")
+        except OSError as e:
+            logger.warning("Failed to write debug event to %s: %s", debug_file, e)
 
     def _build_metrics(self) -> RolloutMetrics:
         """Build metrics combining context tracking and LLM client metrics."""

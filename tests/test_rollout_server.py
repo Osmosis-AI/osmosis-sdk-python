@@ -714,3 +714,244 @@ def test_create_app_raises_without_fastapi() -> None:
         # We need to reload the module to trigger the import error
         # For this test, we just verify the function exists
         pass  # Skip actual test as it requires complex module manipulation
+
+
+# =============================================================================
+# Debug Logging Tests
+# =============================================================================
+
+
+def test_rollout_context_debug_disabled_by_default() -> None:
+    """Verify debug logging is disabled by default."""
+    from osmosis_ai.rollout.core.base import RolloutContext
+    from osmosis_ai.rollout import RolloutRequest
+
+    request = RolloutRequest(
+        rollout_id="test-123",
+        server_url="http://localhost:8080",
+        messages=[],
+        completion_params={},
+    )
+
+    mock_llm = MagicMock()
+    ctx = RolloutContext(
+        request=request,
+        tools=[],
+        llm=mock_llm,
+    )
+
+    assert ctx.debug_enabled is False
+    assert ctx._debug_dir is None
+
+
+def test_rollout_context_debug_enabled_when_dir_set() -> None:
+    """Verify debug logging is enabled when _debug_dir is set."""
+    from osmosis_ai.rollout.core.base import RolloutContext
+    from osmosis_ai.rollout import RolloutRequest
+
+    request = RolloutRequest(
+        rollout_id="test-123",
+        server_url="http://localhost:8080",
+        messages=[],
+        completion_params={},
+    )
+
+    mock_llm = MagicMock()
+    ctx = RolloutContext(
+        request=request,
+        tools=[],
+        llm=mock_llm,
+        _debug_dir="/tmp/debug",
+    )
+
+    assert ctx.debug_enabled is True
+    assert ctx._debug_dir == "/tmp/debug"
+
+
+def test_rollout_context_log_event_noop_when_disabled() -> None:
+    """Verify log_event is a no-op when debug logging is disabled."""
+    from osmosis_ai.rollout.core.base import RolloutContext
+    from osmosis_ai.rollout import RolloutRequest
+
+    request = RolloutRequest(
+        rollout_id="test-123",
+        server_url="http://localhost:8080",
+        messages=[],
+        completion_params={},
+    )
+
+    mock_llm = MagicMock()
+    ctx = RolloutContext(
+        request=request,
+        tools=[],
+        llm=mock_llm,
+    )
+
+    # Should not raise or have any effect
+    ctx.log_event("test_event", key="value")
+
+
+def test_rollout_context_log_event_writes_to_file(tmp_path: Any) -> None:
+    """Verify log_event writes events to JSONL file."""
+    import json
+    from osmosis_ai.rollout.core.base import RolloutContext
+    from osmosis_ai.rollout import RolloutRequest
+
+    debug_dir = str(tmp_path / "debug_logs")
+
+    request = RolloutRequest(
+        rollout_id="test-rollout-456",
+        server_url="http://localhost:8080",
+        messages=[],
+        completion_params={},
+    )
+
+    mock_llm = MagicMock()
+    ctx = RolloutContext(
+        request=request,
+        tools=[],
+        llm=mock_llm,
+        _debug_dir=debug_dir,
+    )
+
+    # Log some events
+    ctx.log_event("pre_llm", turn=0, num_messages=3)
+    ctx.log_event("llm_response", turn=0, has_tool_calls=True)
+    ctx.log_event("rollout_complete", finish_reason="stop", reward=1.0)
+
+    # Verify file was created
+    import os
+    debug_file = os.path.join(debug_dir, "test-rollout-456.jsonl")
+    assert os.path.exists(debug_file)
+
+    # Verify contents
+    with open(debug_file, "r", encoding="utf-8") as f:
+        lines = f.readlines()
+
+    assert len(lines) == 3
+
+    event1 = json.loads(lines[0])
+    assert event1["event"] == "pre_llm"
+    assert event1["rollout_id"] == "test-rollout-456"
+    assert event1["turn"] == 0
+    assert event1["num_messages"] == 3
+
+    event2 = json.loads(lines[1])
+    assert event2["event"] == "llm_response"
+    assert event2["has_tool_calls"] is True
+
+    event3 = json.loads(lines[2])
+    assert event3["event"] == "rollout_complete"
+    assert event3["finish_reason"] == "stop"
+    assert event3["reward"] == 1.0
+
+
+def test_rollout_context_get_debug_file_path() -> None:
+    """Verify _get_debug_file_path returns correct path."""
+    from osmosis_ai.rollout.core.base import RolloutContext
+    from osmosis_ai.rollout import RolloutRequest
+
+    request = RolloutRequest(
+        rollout_id="my-rollout-id",
+        server_url="http://localhost:8080",
+        messages=[],
+        completion_params={},
+    )
+
+    mock_llm = MagicMock()
+
+    # Without debug_dir
+    ctx_no_debug = RolloutContext(
+        request=request,
+        tools=[],
+        llm=mock_llm,
+    )
+    assert ctx_no_debug._get_debug_file_path() is None
+
+    # With debug_dir
+    ctx_with_debug = RolloutContext(
+        request=request,
+        tools=[],
+        llm=mock_llm,
+        _debug_dir="/var/log/rollouts",
+    )
+    assert ctx_with_debug._get_debug_file_path() == "/var/log/rollouts/my-rollout-id.jsonl"
+
+
+@pytest.mark.skipif(not FASTAPI_AVAILABLE, reason="FastAPI not installed")
+def test_create_app_with_debug_dir(tmp_path: Any) -> None:
+    """Verify create_app accepts debug_dir parameter."""
+    debug_dir = str(tmp_path / "debug_logs")
+    agent_loop = SimpleAgentLoop()
+    app = create_app(agent_loop, debug_dir=debug_dir)
+
+    assert app is not None
+
+
+@pytest.mark.skipif(not FASTAPI_AVAILABLE, reason="FastAPI not installed")
+@pytest.mark.asyncio
+async def test_background_rollout_with_debug_logging(tmp_path: Any) -> None:
+    """Verify debug logging works in background rollout execution."""
+    import json
+    import os
+    from osmosis_ai.rollout import RolloutMetrics
+
+    debug_dir = str(tmp_path / "debug_logs")
+
+    class DebugLoggingAgentLoop(RolloutAgentLoop):
+        """Agent loop that uses debug logging."""
+
+        name = "debug_logging_agent"
+
+        def get_tools(self, request: RolloutRequest) -> List[OpenAIFunctionToolSchema]:
+            return []
+
+        async def run(self, ctx: RolloutContext) -> RolloutResult:
+            # Log some events
+            ctx.log_event("pre_llm", turn=0, num_messages=len(ctx.request.messages))
+            ctx.log_event("rollout_complete", finish_reason="stop")
+            return ctx.complete(list(ctx.request.messages))
+
+    agent_loop = DebugLoggingAgentLoop()
+    app = create_app(agent_loop, debug_dir=debug_dir)
+
+    with patch("osmosis_ai.rollout.server.app.OsmosisLLMClient") as MockClient:
+        mock_client_instance = AsyncMock()
+        mock_client_instance.__aenter__ = AsyncMock(return_value=mock_client_instance)
+        mock_client_instance.__aexit__ = AsyncMock(return_value=None)
+        mock_client_instance.complete_rollout = AsyncMock()
+        mock_client_instance.get_metrics = MagicMock(return_value=RolloutMetrics())
+        MockClient.return_value = mock_client_instance
+
+        with TestClient(app) as client:
+            response = client.post(
+                "/v1/rollout/init",
+                json={
+                    "rollout_id": "debug-test-789",
+                    "server_url": "http://localhost:8080",
+                    "messages": [{"role": "user", "content": "test"}],
+                    "completion_params": {},
+                },
+            )
+
+            assert response.status_code == 202
+
+            # Give background task time to complete
+            await asyncio.sleep(0.1)
+
+        # Verify debug file was created
+        debug_file = os.path.join(debug_dir, "debug-test-789.jsonl")
+        assert os.path.exists(debug_file)
+
+        # Verify contents
+        with open(debug_file, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+
+        assert len(lines) == 2
+
+        event1 = json.loads(lines[0])
+        assert event1["event"] == "pre_llm"
+        assert event1["rollout_id"] == "debug-test-789"
+
+        event2 = json.loads(lines[1])
+        assert event2["event"] == "rollout_complete"
