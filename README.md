@@ -299,7 +299,7 @@ osmosis serve -m my_agent:agent_loop --no-validate
 
 The module path format is `module:attribute`, e.g., `server:agent_loop` or `mypackage.agents:MyAgentClass`.
 
-Note: The RolloutServer `--api-key` is used by TrainGate to call your RolloutServer and is **NOT** related to the `osmosis login` token (which is only for talking to Osmosis Platform). This key is **not** used for RolloutServer → TrainGate callbacks.
+Note: The `--api-key` option sets the API key for this RolloutServer. It is used by TrainGate to authenticate its requests *to* your server. This key is **not** the same as your `osmosis login` token (which is for authenticating with the Osmosis Platform), nor is it used for callbacks *from* your server back to TrainGate.
 
 ### Rubric Tools
 
