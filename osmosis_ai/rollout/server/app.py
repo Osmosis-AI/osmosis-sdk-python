@@ -18,7 +18,7 @@ import asyncio
 import logging
 import time
 from contextlib import asynccontextmanager
-from typing import Any, Dict, Optional, TYPE_CHECKING
+from typing import Any, Awaitable, Callable, Dict, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from fastapi import FastAPI, HTTPException, Request
@@ -68,6 +68,8 @@ def create_app(
     server_port: Optional[int] = None,
     api_key: Optional[str] = None,
     debug_dir: Optional[str] = None,
+    on_startup: Optional[Callable[[], Awaitable[None]]] = None,
+    on_shutdown: Optional[Callable[[], Awaitable[None]]] = None,
 ) -> "FastAPI":
     """Create a FastAPI application for the agent loop.
 
@@ -96,6 +98,12 @@ def create_app(
                    If provided, each rollout will write detailed execution
                    traces to {debug_dir}/{rollout_id}.jsonl files.
                    Disabled by default.
+        on_startup: Optional async callback to run during application startup.
+                    Use this for custom initialization (e.g., warming caches,
+                    starting background services).
+        on_shutdown: Optional async callback to run during application shutdown.
+                     Use this for custom cleanup (e.g., stopping services,
+                     releasing resources).
 
     Returns:
         FastAPI application ready to serve.
@@ -174,7 +182,16 @@ def create_app(
                 api_key=api_key,
             )
 
+        # Run custom startup callback
+        if on_startup is not None:
+            await on_startup()
+
         yield
+
+        # Run custom shutdown callback
+        if on_shutdown is not None:
+            await on_shutdown()
+
         logger.info("Server stopping")
         await state.stop_cleanup_task()
         await state.cancel_all()
