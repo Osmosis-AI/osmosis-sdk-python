@@ -18,7 +18,14 @@ For development:
 ```bash
 git clone https://github.com/Osmosis-AI/osmosis-sdk-python
 cd osmosis-sdk-python
+
+# Install package in editable mode
 pip install -e .
+
+# Install development dependencies (pytest, formatters, etc.)
+pip install -e ".[dev]"
+# Or using requirements file:
+pip install -r requirements-dev.txt
 ```
 
 ## Quick Start
@@ -96,8 +103,7 @@ Pass `metadata={...}` to `evaluate_rubric` when you need structured context quot
 
 Remote failures surface as `ProviderRequestError` instances, with `ModelNotFoundError` reserved for missing model identifiers so you can retry with a new snapshot.
 
-> Older SDK versions that lack schema parameters automatically fall back to instruction-only JSON; the helper still validates the response payload before returning.
-> Provider model snapshot names change frequently. Check each vendor's dashboard for the latest identifier if you encounter a “model not found” error.
+> Provider model snapshot names change frequently. Check each vendor's dashboard for the latest identifier if you encounter a "model not found" error.
 
 ### Provider Architecture
 
@@ -214,7 +220,88 @@ rubrics:
 
 ## CLI Tools
 
-Installing the SDK also provides a lightweight CLI available as `osmosis` (aliases: `osmosis_ai`, `osmosis-ai`) for inspecting rubric YAML files and JSONL test payloads.
+Installing the SDK also provides a lightweight CLI available as `osmosis` (aliases: `osmosis_ai`, `osmosis-ai`).
+
+### Authentication
+
+Log in to Osmosis AI and manage workspace credentials:
+
+```bash
+# Log in to Osmosis AI (opens browser for authentication)
+osmosis login
+
+# Force re-login, clearing existing credentials
+osmosis login --force
+
+# Print the authentication URL without opening browser
+osmosis login --no-browser
+
+# Show current user and all workspaces
+osmosis whoami
+
+# Logout (interactive workspace selection)
+osmosis logout
+
+# Logout from all workspaces
+osmosis logout --all
+
+# Skip confirmation prompt
+osmosis logout -y
+```
+
+Credentials are saved to `~/.config/osmosis/credentials.json` and include workspace information and token expiration.
+
+### Workspace Management
+
+Manage multiple workspaces after logging in:
+
+```bash
+# List all logged-in workspaces
+osmosis workspace list
+
+# Show the current active workspace
+osmosis workspace current
+
+# Switch to a different workspace
+osmosis workspace switch <workspace-name>
+```
+
+You can log in to multiple workspaces and switch between them. Each workspace maintains its own credentials and role information.
+
+### Remote Rollout Server
+
+Start a RolloutServer for an agent loop implementation:
+
+```bash
+# Validate agent loop before starting (checks tools, async run, etc.)
+osmosis validate -m my_agent:agent_loop
+
+# Start server with Platform registration (requires `osmosis login`)
+osmosis login
+osmosis serve -m my_agent:agent_loop
+
+# Specify port
+osmosis serve -m my_agent:agent_loop -p 8080
+
+# Local / container mode: skip Platform registration (no login required).
+# NOTE: API key auth is still enabled by default.
+osmosis serve -m my_agent:agent_loop --skip-register
+
+# Local debug mode: disable API key auth AND skip Platform registration
+osmosis serve -m my_agent:agent_loop --local
+
+# Provide a stable API key (otherwise one is generated and printed on startup)
+osmosis serve -m my_agent:agent_loop --skip-register --api-key "$MY_API_KEY"
+
+# Skip validation (not recommended)
+osmosis serve -m my_agent:agent_loop --no-validate
+```
+
+The module path format is `module:attribute`, e.g., `server:agent_loop` or `mypackage.agents:MyAgentClass`.
+
+Note: The `--api-key` option sets the API key for this RolloutServer. It is used by TrainGate to authenticate its requests *to* your server. This key is **not** the same as your `osmosis login` token (which is for authenticating with the Osmosis Platform), nor is it used for callbacks *from* your server back to TrainGate.
+
+### Rubric Tools
 
 Preview a rubric file and print every configuration discovered, including nested entries:
 

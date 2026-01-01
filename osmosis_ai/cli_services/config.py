@@ -71,7 +71,7 @@ class RubricConfigDocumentSchema:
         raise NotImplementedError
 
 
-class LegacyRubricConfigSchema(RubricConfigDocumentSchema):
+class BaseRubricConfigSchema(RubricConfigDocumentSchema):
     """Schema handling documents without an explicit version."""
 
     version = None
@@ -89,8 +89,8 @@ class LegacyRubricConfigSchema(RubricConfigDocumentSchema):
         return _build_document_configs(entries, defaults, path=path, doc_index=doc_index, strict=strict)
 
 
-class Version1RubricConfigSchema(LegacyRubricConfigSchema):
-    """Schema for version 1 documents (currently aligned with legacy layout)."""
+class Version1RubricConfigSchema(BaseRubricConfigSchema):
+    """Schema for version 1 documents."""
 
     version = 1
 
@@ -100,7 +100,7 @@ class RubricConfigParser:
 
     def __init__(self, *, schemas: Optional[dict[Optional[int], RubricConfigDocumentSchema]] = None):
         self._schemas = schemas or {
-            None: LegacyRubricConfigSchema(),
+            None: BaseRubricConfigSchema(),
             1: Version1RubricConfigSchema(),
         }
         if None not in self._schemas:

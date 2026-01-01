@@ -45,30 +45,13 @@ config = [
     "pydantic-settings>=2.0.0,<3.0.0",
 ]
 
-# Structured logging
-logging = [
-    "structlog>=24.0.0,<26.0.0",
-]
-
-# OpenTelemetry tracing
-tracing = [
-    "opentelemetry-api>=1.20.0,<2.0.0",
-    "opentelemetry-sdk>=1.20.0,<2.0.0",
-    "opentelemetry-exporter-otlp>=1.20.0,<2.0.0",
-]
-
-# Prometheus metrics
-metrics = [
-    "prometheus-client>=0.17.0,<1.0.0",
-]
-
-# All observability features
-observability = [
-    "structlog>=24.0.0,<26.0.0",
-    "opentelemetry-api>=1.20.0,<2.0.0",
-    "opentelemetry-sdk>=1.20.0,<2.0.0",
-    "opentelemetry-exporter-otlp>=1.20.0,<2.0.0",
-    "prometheus-client>=0.17.0,<1.0.0",
+# Development dependencies (testing, formatting, etc.)
+dev = [
+    "pytest>=8.0.0,<10.0.0",
+    "pytest-asyncio>=0.23.0,<2.0.0",
+    "anyio>=4.0.0",
+    "black>=25.0.0,<26.0.0",
+    "isort>=5.0.0,<7.0.0",
 ]
 
 # Full installation with all optional features
@@ -76,11 +59,6 @@ full = [
     "fastapi>=0.100.0,<1.0.0",
     "uvicorn>=0.23.0,<1.0.0",
     "pydantic-settings>=2.0.0,<3.0.0",
-    "structlog>=24.0.0,<26.0.0",
-    "opentelemetry-api>=1.20.0,<2.0.0",
-    "opentelemetry-sdk>=1.20.0,<2.0.0",
-    "opentelemetry-exporter-otlp>=1.20.0,<2.0.0",
-    "prometheus-client>=0.17.0,<1.0.0",
 ]
 
 [project.urls]
