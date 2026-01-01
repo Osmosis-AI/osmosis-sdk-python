@@ -122,6 +122,13 @@ from osmosis_ai.rollout.utils import (
     normalize_stop,
     parse_tool_calls,
 )
+from osmosis_ai.rollout.network import (
+    detect_public_ip,
+    PublicIPDetectionError,
+    validate_ipv4,
+    is_valid_hostname_or_ip,
+    is_private_ip,
+)
 
 # Configuration
 from osmosis_ai.rollout.config import (
@@ -212,6 +219,12 @@ __all__ = [
     "is_tool_message",
     "is_user_message",
     "count_messages_by_role",
+    # Network utilities
+    "detect_public_ip",
+    "PublicIPDetectionError",
+    "validate_ipv4",
+    "is_valid_hostname_or_ip",
+    "is_private_ip",
     # Configuration
     "RolloutSettings",
     "RolloutClientSettings",

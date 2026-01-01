@@ -207,6 +207,9 @@ def serve_agent_loop(
     print(f"\nRolloutServer starting...")
     print(f"  Agent: {agent_loop.name}")
     print(f"  Address: {host}:{port}")
+    # Show detected public IP when binding to all interfaces
+    if host == "0.0.0.0":
+        _print_public_ip()
     if local_debug:
         print("  API Key: (disabled - local debug)")
     else:
@@ -257,6 +260,17 @@ def validate_and_report(
     result = validate_agent_loop(agent_loop)
     _log_validation_result(result, verbose=verbose)
     return result
+
+
+def _print_public_ip() -> None:
+    """Print detected public IP address."""
+    from osmosis_ai.rollout.network import detect_public_ip, PublicIPDetectionError
+
+    try:
+        public_ip = detect_public_ip()
+        print(f"  Public IP: {public_ip}")
+    except PublicIPDetectionError:
+        print("  Public IP: (could not detect)")
 
 
 def _log_validation_result(result: ValidationResult, *, verbose: bool = False) -> None:

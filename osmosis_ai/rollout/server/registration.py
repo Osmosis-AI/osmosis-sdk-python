@@ -7,9 +7,10 @@ including IP detection and health check verification.
 from __future__ import annotations
 
 import logging
-import socket
 from dataclasses import dataclass
 from typing import Any, Dict, Optional, TYPE_CHECKING
+
+from osmosis_ai.rollout.network import detect_public_ip, PublicIPDetectionError
 
 if TYPE_CHECKING:
     from osmosis_ai.auth.credentials import WorkspaceCredentials
@@ -33,42 +34,37 @@ class RegistrationResult:
         return self.status == "healthy"
 
 
-def get_local_ip() -> str:
-    """Get the local IP address of this machine.
+def get_public_ip() -> str:
+    """Get the public IP address of this machine.
 
-    Attempts to determine the IP address that would be used to connect
-    to external services (not localhost).
+    Uses multi-cloud detection (AWS/GCP/Azure metadata, external IP services).
 
     Returns:
-        Local IP address string, or "127.0.0.1" as fallback.
+        Public IP address string.
+
+    Raises:
+        PublicIPDetectionError: If all detection methods fail.
     """
-    try:
-        # Create a socket and connect to an external address
-        # This doesn't actually send data, just determines the route
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.settimeout(1.0)
-        s.connect(("8.8.8.8", 80))
-        ip = s.getsockname()[0]
-        s.close()
-        return ip
-    except Exception:
-        return "127.0.0.1"
+    return detect_public_ip()
 
 
 def get_report_host(host: str) -> str:
     """Get the host address to report to Platform.
 
     If the server is bound to 0.0.0.0 (all interfaces), returns the
-    detected local IP. Otherwise, returns the provided host.
+    detected public IP. Otherwise, returns the provided host.
 
     Args:
         host: The host the server is bound to.
 
     Returns:
         The host address to report to Platform.
+
+    Raises:
+        PublicIPDetectionError: If host is 0.0.0.0 and IP detection fails.
     """
     if host == "0.0.0.0":
-        return get_local_ip()
+        return get_public_ip()
     return host
 
 
@@ -103,7 +99,15 @@ def register_with_platform(
         AuthenticationExpiredError,
     )
 
-    report_host = get_report_host(host)
+    try:
+        report_host = get_report_host(host)
+    except PublicIPDetectionError as e:
+        logger.error("Failed to detect public IP for registration: %s", e)
+        return RegistrationResult(
+            success=False,
+            status="error",
+            error="Failed to detect public IP. Please provide an explicit host address.",
+        )
 
     logger.info(
         "Registering with Platform: agent=%s, address=%s:%d",
@@ -179,7 +183,7 @@ def print_registration_result(
     host: str,
     port: int,
     agent_loop_name: str,
-    api_key: Optional[str] = None,
+    api_key: Optional[str] = None,  # noqa: ARG001
 ) -> None:
     """Print the registration result to console.
 
@@ -190,7 +194,10 @@ def print_registration_result(
         agent_loop_name: Name of the agent loop being served.
         api_key: API key for this server (unused, kept for compatibility).
     """
-    report_host = get_report_host(host)
+    try:
+        report_host = get_report_host(host)
+    except PublicIPDetectionError:
+        report_host = host  # Fallback to original host for display
 
     if result.is_healthy:
         print(f"\n[OK] Registered with Osmosis Platform")
@@ -221,7 +228,7 @@ def print_registration_result(
 
 __all__ = [
     "RegistrationResult",
-    "get_local_ip",
+    "get_public_ip",
     "get_report_host",
     "register_with_platform",
     "print_registration_result",
