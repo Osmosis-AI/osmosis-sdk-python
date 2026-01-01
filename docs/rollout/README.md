@@ -23,12 +23,8 @@ pip install osmosis-ai[server]
 # Optional: environment-driven settings (.env / env vars)
 pip install osmosis-ai[config]
 
-# Optional: observability extras
-pip install osmosis-ai[logging]       # structured logging (structlog)
-pip install osmosis-ai[tracing]       # OpenTelemetry tracing
-pip install osmosis-ai[metrics]       # Prometheus metrics
-pip install osmosis-ai[observability] # logging + tracing + metrics
-pip install osmosis-ai[full]          # everything
+# Full installation with all optional features
+pip install osmosis-ai[full]
 ```
 
 ## Quick Start
@@ -84,9 +80,37 @@ class MyAgentLoop(RolloutAgentLoop):
         return ctx.complete(messages)
 ```
 
-### Step 2: Create the Server
+### Step 2: Run the Server
 
-Use `create_app()` to create a FastAPI application:
+#### Option 1: Using CLI (Recommended)
+
+Export an instance of your agent loop and use the CLI:
+
+```python
+# my_agent.py
+agent_loop = MyAgentLoop()
+```
+
+```bash
+# Validate agent loop (checks tools, async run method, etc.)
+osmosis validate -m my_agent:agent_loop
+
+# Start server with validation (default port 9000)
+osmosis serve -m my_agent:agent_loop
+
+# Specify port
+osmosis serve -m my_agent:agent_loop -p 8080
+
+# Skip validation (not recommended)
+osmosis serve -m my_agent:agent_loop --no-validate
+
+# Enable auto-reload for development
+osmosis serve -m my_agent:agent_loop --reload
+```
+
+#### Option 2: Using create_app()
+
+Create a FastAPI application manually:
 
 ```python
 from osmosis_ai.rollout import create_app
@@ -94,10 +118,22 @@ from osmosis_ai.rollout import create_app
 app = create_app(MyAgentLoop())
 ```
 
-### Step 3: Run the Server
-
 ```bash
 uvicorn main:app --host 0.0.0.0 --port 9000
+```
+
+#### Option 3: Using serve_agent_loop()
+
+Start programmatically with validation:
+
+```python
+from osmosis_ai.rollout import serve_agent_loop
+
+# Validates and starts server
+serve_agent_loop(MyAgentLoop(), port=9000)
+
+# Skip validation (not recommended)
+serve_agent_loop(MyAgentLoop(), port=9000, validate=False)
 ```
 
 Your server is now ready to receive rollout requests from TrainGate.
@@ -164,7 +200,6 @@ The server created by `create_app()` exposes:
 |----------|--------|-------------|
 | `/v1/rollout/init` | POST | Accept rollout requests (returns 202) |
 | `/health` | GET | Health check |
-| `/metrics` | GET | Prometheus metrics (when enabled) |
 
 ## Configuration Options
 
@@ -173,7 +208,6 @@ app = create_app(
     agent_loop,
     max_concurrent=100,      # Max concurrent rollouts
     record_ttl_seconds=3600, # How long to keep completed records
-    enable_metrics_endpoint=True,  # Expose /metrics when metrics are enabled
 )
 ```
 
@@ -181,18 +215,14 @@ app = create_app(
 
 When installed with `osmosis-ai[config]`, settings can be loaded from environment variables (or a `.env` file) using these prefixes:
 
-- `OSMOSIS_ROLLOUT_CLIENT_*`
-- `OSMOSIS_ROLLOUT_SERVER_*`
-- `OSMOSIS_ROLLOUT_LOG_*`
-- `OSMOSIS_ROLLOUT_TRACE_*`
-- `OSMOSIS_ROLLOUT_METRICS_*`
+- `OSMOSIS_ROLLOUT_CLIENT_*` - Client settings (timeout, retries, etc.)
+- `OSMOSIS_ROLLOUT_SERVER_*` - Server settings (concurrency, TTL, etc.)
 
 Example:
 
 ```bash
-export OSMOSIS_ROLLOUT_LOG_LEVEL=INFO
-export OSMOSIS_ROLLOUT_METRICS_ENABLED=true
-export OSMOSIS_ROLLOUT_METRICS_PREFIX=my_agent
+export OSMOSIS_ROLLOUT_CLIENT_TIMEOUT_SECONDS=120
+export OSMOSIS_ROLLOUT_SERVER_MAX_CONCURRENT_ROLLOUTS=200
 ```
 
 ## Next Steps

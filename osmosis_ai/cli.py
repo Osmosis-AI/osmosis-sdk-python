@@ -4,7 +4,7 @@ import argparse
 import sys
 from typing import Optional
 
-from .cli_commands import EvalCommand, PreviewCommand
+from .cli_commands import EvalCommand, LoginCommand, LogoutCommand, PreviewCommand, WhoamiCommand, WorkspaceCommand
 from .cli_services import CLIError
 
 
@@ -27,9 +27,34 @@ def main(argv: Optional[list[str]] = None) -> int:
 
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="osmosis", description="Utilities for inspecting Osmosis rubric and test data files."
+        prog="osmosis",
+        description="Osmosis AI SDK - rubric evaluation and remote rollout server.",
     )
     subparsers = parser.add_subparsers(dest="command")
+
+    login_parser = subparsers.add_parser(
+        "login",
+        help="Authenticate with Osmosis AI.",
+    )
+    LoginCommand().configure_parser(login_parser)
+
+    whoami_parser = subparsers.add_parser(
+        "whoami",
+        help="Show current authenticated user and workspace.",
+    )
+    WhoamiCommand().configure_parser(whoami_parser)
+
+    logout_parser = subparsers.add_parser(
+        "logout",
+        help="Logout and revoke CLI token.",
+    )
+    LogoutCommand().configure_parser(logout_parser)
+
+    workspace_parser = subparsers.add_parser(
+        "workspace",
+        help="Manage workspaces (list, switch, current).",
+    )
+    WorkspaceCommand().configure_parser(workspace_parser)
 
     preview_parser = subparsers.add_parser(
         "preview",
@@ -42,6 +67,21 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Evaluate JSONL conversations against a rubric using remote providers.",
     )
     EvalCommand().configure_parser(eval_parser)
+
+    # Rollout server commands
+    from .rollout.cli import ServeCommand, ValidateCommand
+
+    serve_parser = subparsers.add_parser(
+        "serve",
+        help="Start a RolloutServer for an agent loop implementation.",
+    )
+    ServeCommand().configure_parser(serve_parser)
+
+    validate_parser = subparsers.add_parser(
+        "validate",
+        help="Validate a RolloutAgentLoop implementation without starting the server.",
+    )
+    ValidateCommand().configure_parser(validate_parser)
 
     return parser
 

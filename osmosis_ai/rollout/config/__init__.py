@@ -18,12 +18,9 @@ Example:
 """
 
 from osmosis_ai.rollout.config.settings import (
-    LoggingSettings,
-    MetricsSettings,
     RolloutClientSettings,
     RolloutServerSettings,
     RolloutSettings,
-    TracingSettings,
     configure,
     get_settings,
     reset_settings,
@@ -34,9 +31,6 @@ __all__ = [
     "RolloutSettings",
     "RolloutClientSettings",
     "RolloutServerSettings",
-    "LoggingSettings",
-    "TracingSettings",
-    "MetricsSettings",
     # Functions
     "get_settings",
     "configure",

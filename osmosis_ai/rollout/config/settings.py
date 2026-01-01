@@ -6,14 +6,10 @@ via environment variables, .env files, or programmatically.
 Environment Variable Prefixes:
     - OSMOSIS_ROLLOUT_CLIENT_* - Client settings
     - OSMOSIS_ROLLOUT_SERVER_* - Server settings
-    - OSMOSIS_ROLLOUT_LOG_* - Logging settings
-    - OSMOSIS_ROLLOUT_TRACE_* - Tracing settings
-    - OSMOSIS_ROLLOUT_METRICS_* - Metrics settings
 
 Example:
     # Set via environment variables
     export OSMOSIS_ROLLOUT_CLIENT_TIMEOUT_SECONDS=120
-    export OSMOSIS_ROLLOUT_LOG_LEVEL=DEBUG
 
     # Use in code
     from osmosis_ai.rollout.config import get_settings
@@ -23,7 +19,7 @@ Example:
 
 from __future__ import annotations
 
-from typing import Any, Dict, Literal, Optional
+from typing import Optional
 
 from pydantic import BaseModel, Field
 
@@ -165,145 +161,6 @@ class RolloutServerSettings(_BaseSettings):
     )
 
 
-class LoggingSettings(_BaseSettings):
-    """Logging configuration.
-
-    Loaded from environment variables with prefix: OSMOSIS_ROLLOUT_LOG_
-
-    Attributes:
-        level: Log level (DEBUG, INFO, WARNING, ERROR).
-        format: Log format (json, console, plain).
-        include_timestamp: Whether to include timestamp in logs.
-        include_caller: Whether to include caller information.
-
-    Example:
-        export OSMOSIS_ROLLOUT_LOG_LEVEL=DEBUG
-        export OSMOSIS_ROLLOUT_LOG_FORMAT=json
-    """
-
-    if PYDANTIC_SETTINGS_AVAILABLE:
-        model_config = SettingsConfigDict(
-            env_prefix="OSMOSIS_ROLLOUT_LOG_",
-            env_file=".env",
-            env_file_encoding="utf-8",
-            extra="ignore",
-        )
-
-    level: Literal["DEBUG", "INFO", "WARNING", "ERROR"] = Field(
-        default="INFO",
-        description="Log level",
-    )
-    format: Literal["json", "console", "plain"] = Field(
-        default="json",
-        description="Log format",
-    )
-    include_timestamp: bool = Field(
-        default=True,
-        description="Whether to include timestamp in logs",
-    )
-    include_caller: bool = Field(
-        default=False,
-        description="Whether to include caller information",
-    )
-
-
-class TracingSettings(_BaseSettings):
-    """OpenTelemetry tracing configuration.
-
-    Loaded from environment variables with prefix: OSMOSIS_ROLLOUT_TRACE_
-
-    Attributes:
-        enabled: Whether tracing is enabled.
-        service_name: Service name for traces.
-        exporter: Trace exporter type (otlp, jaeger, zipkin, console, none).
-        endpoint: OTLP endpoint URL.
-        sample_rate: Sampling rate (0.0 to 1.0).
-        propagators: Trace context propagators to use.
-
-    Example:
-        export OSMOSIS_ROLLOUT_TRACE_ENABLED=true
-        export OSMOSIS_ROLLOUT_TRACE_EXPORTER=otlp
-        export OSMOSIS_ROLLOUT_TRACE_ENDPOINT=http://jaeger:4317
-    """
-
-    if PYDANTIC_SETTINGS_AVAILABLE:
-        model_config = SettingsConfigDict(
-            env_prefix="OSMOSIS_ROLLOUT_TRACE_",
-            env_file=".env",
-            env_file_encoding="utf-8",
-            extra="ignore",
-        )
-
-    enabled: bool = Field(
-        default=False,
-        description="Whether tracing is enabled",
-    )
-    service_name: str = Field(
-        default="osmosis-rollout",
-        description="Service name for traces",
-    )
-    exporter: Literal["otlp", "jaeger", "zipkin", "console", "none"] = Field(
-        default="otlp",
-        description="Trace exporter type",
-    )
-    endpoint: Optional[str] = Field(
-        default=None,
-        description="OTLP endpoint URL (e.g., http://localhost:4317)",
-    )
-    sample_rate: float = Field(
-        default=1.0,
-        description="Sampling rate (0.0 to 1.0)",
-        ge=0.0,
-        le=1.0,
-    )
-    propagators: str = Field(
-        default="tracecontext,b3",
-        description="Comma-separated list of propagators",
-    )
-
-
-class MetricsSettings(_BaseSettings):
-    """Prometheus metrics configuration.
-
-    Loaded from environment variables with prefix: OSMOSIS_ROLLOUT_METRICS_
-
-    Attributes:
-        enabled: Whether metrics collection is enabled.
-        prefix: Prefix for metric names.
-        include_default_labels: Whether to include default labels.
-        expose_endpoint: Whether to expose /metrics endpoint.
-
-    Example:
-        export OSMOSIS_ROLLOUT_METRICS_ENABLED=true
-        export OSMOSIS_ROLLOUT_METRICS_PREFIX=my_agent
-    """
-
-    if PYDANTIC_SETTINGS_AVAILABLE:
-        model_config = SettingsConfigDict(
-            env_prefix="OSMOSIS_ROLLOUT_METRICS_",
-            env_file=".env",
-            env_file_encoding="utf-8",
-            extra="ignore",
-        )
-
-    enabled: bool = Field(
-        default=False,
-        description="Whether metrics collection is enabled",
-    )
-    prefix: str = Field(
-        default="osmosis_rollout",
-        description="Prefix for metric names",
-    )
-    include_default_labels: bool = Field(
-        default=True,
-        description="Whether to include default labels (service, version)",
-    )
-    expose_endpoint: bool = Field(
-        default=True,
-        description="Whether to expose /metrics endpoint when enabled",
-    )
-
-
 class RolloutSettings(_BaseSettings):
     """Main configuration for Osmosis rollout SDK.
 
@@ -312,9 +169,6 @@ class RolloutSettings(_BaseSettings):
     Attributes:
         client: HTTP client settings.
         server: Server settings.
-        logging: Logging settings.
-        tracing: OpenTelemetry tracing settings.
-        metrics: Prometheus metrics settings.
         max_metadata_size_bytes: Maximum size for metadata in bytes.
 
     Example:
@@ -324,7 +178,6 @@ class RolloutSettings(_BaseSettings):
         # Override programmatically
         settings = RolloutSettings(
             client=RolloutClientSettings(timeout_seconds=120),
-            logging=LoggingSettings(level="DEBUG"),
         )
 
     Environment Variables:
@@ -341,9 +194,6 @@ class RolloutSettings(_BaseSettings):
 
     client: RolloutClientSettings = Field(default_factory=RolloutClientSettings)
     server: RolloutServerSettings = Field(default_factory=RolloutServerSettings)
-    logging: LoggingSettings = Field(default_factory=LoggingSettings)
-    tracing: TracingSettings = Field(default_factory=TracingSettings)
-    metrics: MetricsSettings = Field(default_factory=MetricsSettings)
 
     # Global settings
     max_metadata_size_bytes: int = Field(
@@ -408,9 +258,6 @@ __all__ = [
     # Settings classes
     "RolloutClientSettings",
     "RolloutServerSettings",
-    "LoggingSettings",
-    "TracingSettings",
-    "MetricsSettings",
     "RolloutSettings",
     # Functions
     "get_settings",

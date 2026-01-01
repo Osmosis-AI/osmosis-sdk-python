@@ -195,7 +195,7 @@ def _extract_openai_responses_text(payload: Any) -> Optional[str]:
                             dumped = _dump_json(part.get("json"))
                             if dumped:
                                 return dumped
-            # Legacy: choice-level content list
+            # choice-level content list
             content_list = first_choice.get("content")
             if isinstance(content_list, list):
                 for part in content_list:
@@ -207,7 +207,7 @@ def _extract_openai_responses_text(payload: Any) -> Optional[str]:
                                 return val
                         if isinstance(t, str) and t.strip():
                             return t
-                    # NEW: structured JSON in legacy content list
+                    # structured JSON in content list
                     if isinstance(part, dict) and part.get("type") in ("output_json", "json"):
                         dumped = _dump_json(part.get("json"))
                         if dumped:
@@ -235,7 +235,7 @@ def _openai_error_message(err: Exception) -> str:
 def _iterative_trim_call(create_fn, label: str, **kwargs):
     """
     Call an OpenAI SDK method and iteratively strip unsupported kwargs on TypeError/BadRequest.
-    This keeps compatibility with older SDKs (e.g., 2.3.0) and server-side feature-gating.
+    Handles server-side feature-gating by removing rejected parameters.
     """
     UNSUPPORTED_CANDIDATES = [
         "response_format", "modalities", "reasoning",

@@ -105,6 +105,30 @@ result = execute_tool(...)
 ctx.record_tool_call(latency_ms=(time.monotonic() - start) * 1000)
 ```
 
+#### `log_event(event_type, **data) -> None`
+
+Log a debug event to the rollout's JSONL file. No-op if debug logging is not enabled.
+
+```python
+# Log before LLM call
+ctx.log_event("pre_llm", turn=0, num_messages=len(messages))
+
+# Log LLM response
+ctx.log_event("llm_response", turn=0, has_tool_calls=result.has_tool_calls)
+
+# Log tool results
+ctx.log_event("tool_results", turn=0, num_results=len(tool_results))
+
+# Log completion
+ctx.log_event("rollout_complete", finish_reason="stop", reward=1.0)
+```
+
+**Properties:**
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `debug_enabled` | `bool` | Whether debug logging is enabled |
+
 ---
 
 ### RolloutResult
@@ -135,7 +159,7 @@ from osmosis_ai.rollout import OsmosisLLMClient
 async with OsmosisLLMClient(
     server_url="http://trainer:8080",
     rollout_id="rollout-123",
-    api_key="optional-token",
+    # api_key="... optional TrainGate bearer token ...",
     timeout_seconds=300.0,
     max_retries=3,
 ) as client:
@@ -148,7 +172,7 @@ async with OsmosisLLMClient(
 |-----------|------|---------|-------------|
 | `server_url` | `str` | required | TrainGate base URL |
 | `rollout_id` | `str` | required | Unique rollout identifier |
-| `api_key` | `Optional[str]` | `None` | Bearer token for authentication |
+| `api_key` | `Optional[str]` | `None` | Optional Bearer token attached to requests to TrainGate. In the remote-rollout protocol this value is provided by TrainGate in `RolloutRequest.api_key`, and RolloutServer forwards it on callbacks to TrainGate. |
 | `timeout_seconds` | `float` | `300.0` | Request timeout (seconds) |
 | `max_retries` | `int` | `3` | Max retries for transient errors (5xx / timeouts / transport) |
 | `complete_rollout_retries` | `int` | `2` | Max retries for `/v1/rollout/completed` callback |
@@ -170,7 +194,7 @@ Call TrainGate's `/v1/chat/completions` endpoint.
 | `logprobs` | `bool` | `True` | Return log probabilities |
 
 Notes:
-- Extra/unknown keyword arguments are accepted and ignored for forward compatibility.
+- Extra/unknown keyword arguments are accepted and ignored.
 
 **Raises:**
 - `OsmosisTransportError`: Network errors
@@ -222,6 +246,57 @@ class CompletionsResult:
 
 ## Server
 
+### serve_agent_loop()
+
+Start a RolloutServer with automatic validation.
+
+```python
+from osmosis_ai.rollout import serve_agent_loop
+
+# Start with validation (default)
+serve_agent_loop(agent_loop, port=9000)
+
+# Skip validation
+serve_agent_loop(agent_loop, port=9000, validate=False)
+
+# Full options
+serve_agent_loop(
+    agent_loop,
+    host="0.0.0.0",
+    port=9000,
+    validate=True,
+    log_level="info",
+    reload=False,
+    settings=None,
+    skip_register=False,
+    api_key=None,
+    local_debug=False,
+    debug_dir=None,
+)
+```
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `agent_loop` | `RolloutAgentLoop` | required | Your agent implementation |
+| `host` | `str` | `"0.0.0.0"` | Host to bind to |
+| `port` | `int` | `9000` | Port to bind to |
+| `validate` | `bool` | `True` | Validate agent loop before starting |
+| `log_level` | `str` | `"info"` | Uvicorn log level |
+| `reload` | `bool` | `False` | Enable auto-reload for development |
+| `settings` | `Optional[RolloutSettings]` | `None` | Configuration override |
+| `skip_register` | `bool` | `False` | Skip registering with Osmosis Platform (local testing mode) |
+| `api_key` | `Optional[str]` | `None` | RolloutServer API key used by TrainGate to call this server via `Authorization: Bearer <api_key>` (generated if not provided). NOT related to `osmosis login`. |
+| `local_debug` | `bool` | `False` | Local debug mode: disable API key auth and force `skip_register=True` (NOT for production) |
+| `debug_dir` | `Optional[str]` | `None` | Directory for debug logging. If set, creates a timestamped subdirectory `{debug_dir}/{timestamp}/` and writes execution traces to `{rollout_id}.jsonl` files |
+
+**Raises:**
+- `ImportError`: If FastAPI or uvicorn not installed
+- `AgentLoopValidationError`: If validation fails
+
+---
+
 ### create_app()
 
 Factory function to create a FastAPI application.
@@ -233,7 +308,7 @@ app = create_app(
     agent_loop,
     max_concurrent=100,
     record_ttl_seconds=3600,
-    enable_metrics_endpoint=True,
+    debug_dir="./rollout_logs",  # Optional: enable debug logging
 )
 ```
 
@@ -244,8 +319,8 @@ app = create_app(
 | `agent_loop` | `RolloutAgentLoop` | required | Your agent implementation |
 | `max_concurrent` | `int` | `100` | Max concurrent rollouts |
 | `record_ttl_seconds` | `float` | `3600` | TTL for completed records |
-| `settings` | `Optional[RolloutSettings]` | `None` | Global settings override (server/logging/tracing/metrics) |
-| `enable_metrics_endpoint` | `bool` | `True` | Expose `/metrics` when metrics are enabled |
+| `settings` | `Optional[RolloutSettings]` | `None` | Global settings override (server/logging/tracing) |
+| `debug_dir` | `Optional[str]` | `None` | Directory for debug logging. If set, each rollout writes execution traces to `{debug_dir}/{rollout_id}.jsonl`. Note: when using `serve_agent_loop()` or CLI, a timestamped subdirectory is created automatically |
 
 **Returns:** `FastAPI` application
 
@@ -255,7 +330,121 @@ app = create_app(
 |----------|--------|--------|-------------|
 | `/v1/rollout/init` | POST | 202 | Accept rollout request |
 | `/health` | GET | 200 | Health check |
-| `/metrics` | GET | 200 | Prometheus metrics (when enabled) |
+
+---
+
+## Validation
+
+### validate_agent_loop()
+
+Validate a RolloutAgentLoop implementation.
+
+```python
+from osmosis_ai.rollout import validate_agent_loop
+
+result = validate_agent_loop(agent_loop)
+
+if result.valid:
+    print(f"Agent '{result.agent_name}' is valid with {result.tool_count} tools")
+else:
+    for error in result.errors:
+        print(f"Error: {error}")
+
+# Or raise exception if invalid
+result.raise_if_invalid()
+```
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `agent_loop` | `RolloutAgentLoop` | required | Agent loop to validate |
+| `request` | `Optional[RolloutRequest]` | `None` | Custom request for testing get_tools() |
+
+**Returns:** `ValidationResult`
+
+**Validation Checks:**
+- `name` attribute is defined and non-empty
+- `get_tools()` returns a valid list
+- Each tool conforms to OpenAI function schema
+- `run()` method is async
+
+---
+
+### ValidationResult
+
+Result of agent loop validation.
+
+```python
+@dataclass
+class ValidationResult:
+    valid: bool
+    errors: List[ValidationError]
+    warnings: List[ValidationError]
+    agent_name: Optional[str]
+    tool_count: int
+```
+
+**Methods:**
+
+#### `raise_if_invalid() -> None`
+
+Raise `AgentLoopValidationError` if validation failed.
+
+#### `__bool__() -> bool`
+
+Returns `True` if validation passed.
+
+```python
+result = validate_agent_loop(agent_loop)
+if result:  # Same as result.valid
+    print("Valid!")
+```
+
+---
+
+### ValidationError
+
+A single validation error or warning.
+
+```python
+@dataclass
+class ValidationError:
+    code: str        # e.g., "MISSING_NAME", "INVALID_TOOL_TYPE"
+    message: str     # Human-readable message
+    field: Optional[str]  # Field that caused error
+    details: Optional[Dict[str, Any]]  # Additional context
+```
+
+**Common Error Codes:**
+
+| Code | Description |
+|------|-------------|
+| `MISSING_NAME` | Agent loop has no `name` attribute |
+| `EMPTY_NAME` | `name` is empty or whitespace |
+| `GET_TOOLS_EXCEPTION` | `get_tools()` raised an exception |
+| `GET_TOOLS_RETURNS_NONE` | `get_tools()` returned `None` |
+| `MISSING_TOOL_TYPE` | Tool missing `type` field |
+| `MISSING_FUNCTION` | Tool missing `function` field |
+| `MISSING_FUNCTION_NAME` | Function missing `name` field |
+| `RUN_NOT_ASYNC` | `run()` method is not async |
+
+---
+
+### AgentLoopValidationError
+
+Exception raised when validation fails.
+
+```python
+from osmosis_ai.rollout import AgentLoopValidationError
+
+try:
+    result.raise_if_invalid()
+except AgentLoopValidationError as e:
+    print(f"Validation failed: {e}")
+    for error in e.errors:
+        print(f"  - {error}")
+```
 
 ---
 
@@ -323,7 +512,7 @@ class RolloutRequest(BaseModel):
     max_turns: int = 10
     max_tokens_total: int = 8192
     metadata: Dict[str, Any] = {}  # JSON-serializable (size-limited; default 1MB)
-    api_key: Optional[str] = None
+    api_key: Optional[str] = None  # Optional Bearer token RolloutServer uses for callbacks to TrainGate
     idempotency_key: Optional[str] = None
 ```
 

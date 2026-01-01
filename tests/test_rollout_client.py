@@ -296,7 +296,7 @@ async def test_chat_completions_ignores_unknown_kwargs() -> None:
 
     result = await client.chat_completions(
         messages=[{"role": "user", "content": "Hi"}],
-        seed=123,  # Unknown kwarg should be ignored (forward-compat)
+        seed=123,  # Unknown kwargs are ignored
     )
     assert result.message["content"] == "OK"
 
