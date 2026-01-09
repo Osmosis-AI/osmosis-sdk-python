@@ -19,16 +19,30 @@ import asyncio
 import json
 import logging
 import sys
+from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
 
 from osmosis_ai.rollout.cli_utils import CLIError, load_agent_loop
 from osmosis_ai.rollout.console import Console
 
 if TYPE_CHECKING:
-    from osmosis_ai.rollout.test_mode.runner import LocalTestRunResult
+    from osmosis_ai.rollout.core.base import RolloutAgentLoop
+    from osmosis_ai.rollout.test_mode.dataset import DatasetRow
+    from osmosis_ai.rollout.test_mode.external_llm_client import ExternalLLMClient
+    from osmosis_ai.rollout.test_mode.runner import BatchTestResult, LocalTestRunResult
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class _SetupResult:
+    """Result of setup phase containing initialized components."""
+
+    agent_loop: "RolloutAgentLoop"
+    llm_client: "ExternalLLMClient"
+    rows: List["DatasetRow"]
+    completion_params: Dict[str, Any]
 
 
 # Alias for internal use
@@ -198,48 +212,62 @@ class TestCommand:
         """Run the test command."""
         return asyncio.run(self._run_async(args))
 
-    async def _run_async(self, args: argparse.Namespace) -> int:
-        """Async implementation of the test command."""
-        # Import test mode modules
-        from osmosis_ai.rollout.test_mode.dataset import DatasetReader
-        from osmosis_ai.rollout.test_mode.exceptions import (
-            DatasetParseError,
-            DatasetValidationError,
-            ProviderError,
-        )
-        from osmosis_ai.rollout.test_mode.external_llm_client import (
-            ExternalLLMClient,
-        )
-        from osmosis_ai.rollout.test_mode.runner import LocalTestRunner
+    def _validate_args(self, args: argparse.Namespace) -> Optional[str]:
+        """Validate argument combinations.
 
-        # Validate --row requires --interactive
+        Returns:
+            Error message if validation fails, None otherwise.
+        """
         if args.row is not None and not args.interactive:
-            self.console.print_error("Error: --row can only be used with --interactive mode")
-            return 1
+            return "--row can only be used with --interactive mode"
+        return None
 
-        # Print header
-        is_interactive = args.interactive
-        if not args.quiet:
-            from osmosis_ai.consts import PACKAGE_VERSION
+    def _print_header(self, args: argparse.Namespace) -> None:
+        """Print CLI header with version and mode info."""
+        if args.quiet:
+            return
 
-            mode_suffix = " (Interactive Mode)" if is_interactive else ""
-            self.console.print(f"osmosis-rollout-test v{PACKAGE_VERSION}{mode_suffix}", style="bold")
-            self.console.print()
+        from osmosis_ai.consts import PACKAGE_VERSION
 
-        # Load agent loop
+        mode_suffix = " (Interactive Mode)" if args.interactive else ""
+        self.console.print(f"osmosis-rollout-test v{PACKAGE_VERSION}{mode_suffix}", style="bold")
+        self.console.print()
+
+    def _load_agent(
+        self, args: argparse.Namespace
+    ) -> Tuple[Optional["RolloutAgentLoop"], Optional[str]]:
+        """Load the agent loop from module path.
+
+        Returns:
+            Tuple of (agent_loop, error_message). If successful, error is None.
+        """
         if not args.quiet:
             self.console.print(f"Loading agent: {args.module}")
 
         try:
             agent_loop = _load_agent_loop(args.module)
         except CLIError as e:
-            self.console.print_error(f"Error: {e}")
-            return 1
+            return None, str(e)
 
         if not args.quiet:
             self.console.print(f"  Agent name: {agent_loop.name}")
 
-        # Load dataset
+        return agent_loop, None
+
+    def _load_dataset(
+        self, args: argparse.Namespace
+    ) -> Tuple[Optional[List["DatasetRow"]], Optional[str]]:
+        """Load and validate the dataset.
+
+        Returns:
+            Tuple of (rows, error_message). If successful, error is None.
+        """
+        from osmosis_ai.rollout.test_mode.dataset import DatasetReader
+        from osmosis_ai.rollout.test_mode.exceptions import (
+            DatasetParseError,
+            DatasetValidationError,
+        )
+
         if not args.quiet:
             self.console.print(f"Loading dataset: {args.dataset}")
 
@@ -248,15 +276,12 @@ class TestCommand:
             total_rows = len(reader)
             rows = reader.read(limit=args.limit, offset=args.offset)
         except FileNotFoundError as e:
-            self.console.print_error(f"Error: {e}")
-            return 1
+            return None, str(e)
         except (DatasetParseError, DatasetValidationError) as e:
-            self.console.print_error(f"Error: {e}")
-            return 1
+            return None, str(e)
 
         if not rows:
-            self.console.print_error("Error: No rows to test")
-            return 1
+            return None, "No rows to test"
 
         if not args.quiet:
             if args.limit:
@@ -264,13 +289,22 @@ class TestCommand:
             else:
                 self.console.print(f"  Total rows: {len(rows)}")
 
-        # Initialize LLM client (via LiteLLM)
+        return rows, None
+
+    def _create_llm_client(
+        self, args: argparse.Namespace
+    ) -> Tuple[Optional["ExternalLLMClient"], Optional[str]]:
+        """Initialize the LLM client.
+
+        Returns:
+            Tuple of (llm_client, error_message). If successful, error is None.
+        """
+        from osmosis_ai.rollout.test_mode.exceptions import ProviderError
+        from osmosis_ai.rollout.test_mode.external_llm_client import ExternalLLMClient
+
         model = args.model
         if not args.quiet:
-            if "/" in model:
-                provider_name = model.split("/")[0]
-            else:
-                provider_name = "openai"
+            provider_name = model.split("/")[0] if "/" in model else "openai"
             self.console.print(f"Initializing provider: {provider_name}")
 
         try:
@@ -280,59 +314,79 @@ class TestCommand:
                 api_base=args.base_url,
             )
         except ProviderError as e:
-            self.console.print_error(f"Error: {e}")
-            return 1
+            return None, str(e)
 
         if not args.quiet:
             model_name = getattr(llm_client, "model", "default")
             self.console.print(f"  Model: {model_name}")
 
-        # Build completion params
-        completion_params: Dict[str, Any] = {}
+        return llm_client, None
+
+    def _build_completion_params(self, args: argparse.Namespace) -> Dict[str, Any]:
+        """Build completion parameters from CLI arguments."""
+        params: Dict[str, Any] = {}
         if args.temperature is not None:
-            completion_params["temperature"] = args.temperature
+            params["temperature"] = args.temperature
         if args.max_tokens is not None:
-            completion_params["max_tokens"] = args.max_tokens
+            params["max_tokens"] = args.max_tokens
+        return params
 
-        # Interactive mode vs batch mode
-        if is_interactive:
-            # Interactive mode: step-by-step execution
-            from osmosis_ai.rollout.test_mode.interactive import InteractiveRunner
+    async def _run_interactive_mode(
+        self,
+        args: argparse.Namespace,
+        setup: _SetupResult,
+    ) -> int:
+        """Run interactive mode session.
 
-            interactive_runner = InteractiveRunner(
-                agent_loop=agent_loop,
-                llm_client=llm_client,
-                debug=args.debug,
-            )
+        Returns:
+            Exit code (0 for success, 1 for failure).
+        """
+        from osmosis_ai.rollout.test_mode.interactive import InteractiveRunner
 
-            self.console.print()
-            try:
-                async with llm_client:
-                    await interactive_runner.run_interactive_session(
-                        rows=rows,
-                        max_turns=args.max_turns,
-                        completion_params=completion_params if completion_params else None,
-                        initial_row=args.row,
-                        row_offset=args.offset,
-                    )
-            except Exception as e:
-                self.console.print_error(f"Error during interactive session: {e}")
-                if args.debug:
-                    import traceback
-
-                    traceback.print_exc()
-                return 1
-
-            return 0
-
-        # Batch mode: run all tests
-        runner = LocalTestRunner(
-            agent_loop=agent_loop,
-            llm_client=llm_client,
+        interactive_runner = InteractiveRunner(
+            agent_loop=setup.agent_loop,
+            llm_client=setup.llm_client,
             debug=args.debug,
         )
 
-        # Progress callback
+        self.console.print()
+        try:
+            async with setup.llm_client:
+                await interactive_runner.run_interactive_session(
+                    rows=setup.rows,
+                    max_turns=args.max_turns,
+                    completion_params=setup.completion_params if setup.completion_params else None,
+                    initial_row=args.row,
+                    row_offset=args.offset,
+                )
+        except Exception as e:
+            self.console.print_error(f"Error during interactive session: {e}")
+            if args.debug:
+                import traceback
+
+                traceback.print_exc()
+            return 1
+
+        return 0
+
+    async def _run_batch_mode(
+        self,
+        args: argparse.Namespace,
+        setup: _SetupResult,
+    ) -> Tuple[Optional["BatchTestResult"], Optional[str]]:
+        """Run batch mode tests.
+
+        Returns:
+            Tuple of (batch_result, error_message). If successful, error is None.
+        """
+        from osmosis_ai.rollout.test_mode.runner import LocalTestRunner
+
+        runner = LocalTestRunner(
+            agent_loop=setup.agent_loop,
+            llm_client=setup.llm_client,
+            debug=args.debug,
+        )
+
         def on_progress(
             current: int, total: int, result: "LocalTestRunResult"
         ) -> None:
@@ -346,7 +400,6 @@ class TestCommand:
 
             error_suffix = ""
             if not result.success and result.error:
-                # Truncate error message
                 error_msg = result.error[:50] + "..." if len(result.error) > 50 else result.error
                 error_suffix = f" - {error_msg}"
 
@@ -356,79 +409,148 @@ class TestCommand:
                 f"({duration}, {_format_tokens(tokens)} tokens){error_suffix}"
             )
 
-        # Run tests
         if not args.quiet:
             self.console.print()
             self.console.print("Running tests...")
 
         try:
-            async with llm_client:
+            async with setup.llm_client:
                 batch_result = await runner.run_batch(
-                    rows=rows,
+                    rows=setup.rows,
                     max_turns=args.max_turns,
-                    completion_params=completion_params if completion_params else None,
+                    completion_params=setup.completion_params if setup.completion_params else None,
                     on_progress=on_progress,
                     start_index=args.offset,
                 )
         except Exception as e:
-            self.console.print_error(f"Error during test execution: {e}")
+            return None, str(e)
+
+        return batch_result, None
+
+    def _print_summary(self, batch_result: "BatchTestResult") -> None:
+        """Print batch test summary."""
+        self.console.print()
+        self.console.print("Summary:", style="bold")
+        self.console.print(f"  Total: {batch_result.total}")
+
+        passed_style = "green" if batch_result.passed > 0 else None
+        failed_style = "red" if batch_result.failed > 0 else None
+
+        passed_text = (
+            self.console.format_styled(str(batch_result.passed), passed_style)
+            if passed_style
+            else str(batch_result.passed)
+        )
+        failed_text = (
+            self.console.format_styled(str(batch_result.failed), failed_style)
+            if failed_style
+            else str(batch_result.failed)
+        )
+
+        self.console.print(f"  Passed: {passed_text}")
+        self.console.print(f"  Failed: {failed_text}")
+        self.console.print(f"  Duration: {_format_duration(batch_result.total_duration_ms)}")
+        self.console.print(f"  Total tokens: {_format_tokens(batch_result.total_tokens)}")
+
+    def _write_output(
+        self, args: argparse.Namespace, batch_result: "BatchTestResult"
+    ) -> None:
+        """Write test results to output file."""
+        if not args.output:
+            return
+
+        output_data = {
+            "summary": {
+                "total": batch_result.total,
+                "passed": batch_result.passed,
+                "failed": batch_result.failed,
+                "total_duration_ms": batch_result.total_duration_ms,
+                "total_tokens": batch_result.total_tokens,
+            },
+            "results": [
+                {
+                    "row_index": r.row_index,
+                    "success": r.success,
+                    "error": r.error,
+                    "duration_ms": r.duration_ms,
+                    "token_usage": r.token_usage,
+                    "reward": r.result.reward if r.result else None,
+                    "finish_reason": r.result.finish_reason if r.result else None,
+                }
+                for r in batch_result.results
+            ],
+        }
+
+        output_path = Path(args.output)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+
+        with open(output_path, "w", encoding="utf-8") as f:
+            json.dump(output_data, f, indent=2)
+
+        if not args.quiet:
+            self.console.print(f"\nResults written to: {args.output}")
+
+    async def _run_async(self, args: argparse.Namespace) -> int:
+        """Async implementation of the test command."""
+        # Validate arguments
+        if error := self._validate_args(args):
+            self.console.print_error(f"Error: {error}")
+            return 1
+
+        # Print header
+        self._print_header(args)
+
+        # Load agent loop
+        agent_loop, error = self._load_agent(args)
+        if error:
+            self.console.print_error(f"Error: {error}")
+            return 1
+
+        # Load dataset
+        rows, error = self._load_dataset(args)
+        if error:
+            self.console.print_error(f"Error: {error}")
+            return 1
+
+        # Initialize LLM client
+        llm_client, error = self._create_llm_client(args)
+        if error:
+            self.console.print_error(f"Error: {error}")
+            return 1
+
+        # Build completion params
+        completion_params = self._build_completion_params(args)
+
+        # Create setup result
+        setup = _SetupResult(
+            agent_loop=agent_loop,  # type: ignore[arg-type]
+            llm_client=llm_client,  # type: ignore[arg-type]
+            rows=rows,  # type: ignore[arg-type]
+            completion_params=completion_params,
+        )
+
+        # Interactive mode
+        if args.interactive:
+            return await self._run_interactive_mode(args, setup)
+
+        # Batch mode
+        batch_result, error = await self._run_batch_mode(args, setup)
+        if error:
+            self.console.print_error(f"Error during test execution: {error}")
             if args.debug:
                 import traceback
 
                 traceback.print_exc()
             return 1
 
-        # Print summary
+        # Print summary and write output
         if not args.quiet:
-            self.console.print()
-            self.console.print("Summary:", style="bold")
-            self.console.print(f"  Total: {batch_result.total}")
-            passed_style = "green" if batch_result.passed > 0 else None
-            failed_style = "red" if batch_result.failed > 0 else None
-            passed_text = self.console.format_styled(str(batch_result.passed), passed_style) if passed_style else str(batch_result.passed)
-            failed_text = self.console.format_styled(str(batch_result.failed), failed_style) if failed_style else str(batch_result.failed)
-            self.console.print(f"  Passed: {passed_text}")
-            self.console.print(f"  Failed: {failed_text}")
-            self.console.print(f"  Duration: {_format_duration(batch_result.total_duration_ms)}")
-            self.console.print(f"  Total tokens: {_format_tokens(batch_result.total_tokens)}")
+            self._print_summary(batch_result)  # type: ignore[arg-type]
 
-        # Write output file
-        if args.output:
-            output_data = {
-                "summary": {
-                    "total": batch_result.total,
-                    "passed": batch_result.passed,
-                    "failed": batch_result.failed,
-                    "total_duration_ms": batch_result.total_duration_ms,
-                    "total_tokens": batch_result.total_tokens,
-                },
-                "results": [
-                    {
-                        "row_index": r.row_index,
-                        "success": r.success,
-                        "error": r.error,
-                        "duration_ms": r.duration_ms,
-                        "token_usage": r.token_usage,
-                        "reward": r.result.reward if r.result else None,
-                        "finish_reason": r.result.finish_reason if r.result else None,
-                    }
-                    for r in batch_result.results
-                ],
-            }
-
-            output_path = Path(args.output)
-            output_path.parent.mkdir(parents=True, exist_ok=True)
-
-            with open(output_path, "w", encoding="utf-8") as f:
-                json.dump(output_data, f, indent=2)
-
-            if not args.quiet:
-                self.console.print(f"\nResults written to: {args.output}")
+        self._write_output(args, batch_result)  # type: ignore[arg-type]
 
         # Return exit code based on failures
-        if batch_result.failed > 0:
-            return 1
-        return 0
+        return 1 if batch_result.failed > 0 else 0  # type: ignore[union-attr]
 
 
 __all__ = ["TestCommand"]
