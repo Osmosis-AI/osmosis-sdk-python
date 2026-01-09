@@ -83,6 +83,14 @@ class ExternalLLMClient:
         """
         self._litellm = _get_litellm()
 
+        # Store exception types for error handling (lazy import friendly)
+        self._RateLimitError = self._litellm.RateLimitError
+        self._AuthenticationError = self._litellm.AuthenticationError
+        self._APIError = self._litellm.APIError
+        self._BudgetExceededError = self._litellm.BudgetExceededError
+        self._Timeout = self._litellm.Timeout
+        self._ContextWindowExceededError = self._litellm.ContextWindowExceededError
+
         # Auto-prefix simple model names with "openai/"
         if "/" not in model:
             model = f"openai/{model}"
@@ -192,26 +200,35 @@ class ExternalLLMClient:
             # Make async call via LiteLLM
             # LiteLLM returns response in OpenAI format regardless of provider
             response = await self._litellm.acompletion(**request_kwargs)
+        except self._RateLimitError as e:
+            raise ProviderError(
+                f"Rate limit exceeded. Try reducing dataset size with --limit. "
+                f"Original error: {e}"
+            ) from e
+        except self._AuthenticationError as e:
+            raise ProviderError(
+                f"Authentication failed. Check your API key is valid. "
+                f"Original error: {e}"
+            ) from e
+        except self._BudgetExceededError as e:
+            raise ProviderError(
+                f"Budget/quota exceeded. Check your account has available credits. "
+                f"Original error: {e}"
+            ) from e
+        except self._Timeout as e:
+            raise ProviderError(
+                f"Request timed out. The model may be slow or network issues occurred. "
+                f"Original error: {e}"
+            ) from e
+        except self._ContextWindowExceededError as e:
+            raise ProviderError(
+                f"Context window exceeded. Try reducing max_turns or message history. "
+                f"Original error: {e}"
+            ) from e
+        except self._APIError as e:
+            raise ProviderError(f"LLM API error: {e}") from e
         except Exception as e:
-            # Provide helpful error messages for common errors
-            error_str = str(e).lower()
-            if "rate" in error_str and "limit" in error_str:
-                raise ProviderError(
-                    f"Rate limit exceeded. Try reducing dataset size with --limit. "
-                    f"Original error: {e}"
-                ) from e
-            elif "authentication" in error_str or "api key" in error_str:
-                raise ProviderError(
-                    f"Authentication failed. Check your API key is valid. "
-                    f"Original error: {e}"
-                ) from e
-            elif "quota" in error_str or "billing" in error_str:
-                raise ProviderError(
-                    f"Quota/billing issue. Check your account has available credits. "
-                    f"Original error: {e}"
-                ) from e
-            else:
-                raise ProviderError(f"LLM API error: {e}") from e
+            raise ProviderError(f"Unexpected LLM client error: {e}") from e
 
         # Record metrics
         latency_ms = (time.monotonic() - start_time) * 1000
