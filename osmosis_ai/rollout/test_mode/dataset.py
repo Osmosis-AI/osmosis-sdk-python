@@ -390,7 +390,7 @@ def dataset_row_to_request(
         RolloutRequest ready to be passed to agent_loop.get_tools() and run().
 
     Note:
-        server_url is a placeholder since TestLLMClient handles LLM calls
+        server_url is a placeholder since ExternalLLMClient handles LLM calls
         directly without going through TrainGate.
 
         ground_truth is stored in metadata for reward function access.

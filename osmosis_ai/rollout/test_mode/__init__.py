@@ -1,66 +1,31 @@
-"""Test mode for RolloutServer agent loop validation.
+"""Test mode for RolloutAgentLoop validation.
 
-This package provides functionality to test RolloutAgentLoop implementations
-locally without requiring the full TrainGate infrastructure. It uses cloud
-LLM providers (OpenAI, Anthropic) to simulate the LLM calls that would
-normally be routed through TrainGate.
+Test agent loops locally without TrainGate using external LLM providers
+(OpenAI, Anthropic, Groq, Ollama, etc.) via LiteLLM.
 
-Key Components:
-    - DatasetReader: Read and validate test datasets (JSON, JSONL, Parquet)
-    - TestLLMClient: Base class for test mode LLM providers
-    - TestRunner: Execute agent loops against test data
-    - CLI: Command-line interface for running tests
+Components:
+    - DatasetReader: Read datasets (JSON, JSONL, Parquet)
+    - ExternalLLMClient: Call external LLM APIs via LiteLLM
+    - TestRunner: Batch test execution
+    - InteractiveRunner: Step-by-step debugging
 
-Supported Dataset Formats:
-    - .json - Array of objects
-    - .jsonl - JSON Lines (one object per line)
-    - .parquet - Apache Parquet
-
-Required Dataset Columns:
-    - ground_truth: Expected output for reward calculation
-    - user_prompt: User's input message
-    - system_prompt: System prompt for the agent
+Dataset columns: ground_truth, user_prompt, system_prompt
 
 Example:
-    # Programmatic usage
-    from osmosis_ai.rollout.test_mode import (
-        DatasetReader,
-        TestRunner,
-    )
-    from osmosis_ai.rollout.test_mode.providers import get_provider
+    from osmosis_ai.rollout.test_mode import TestRunner, ExternalLLMClient, DatasetReader
 
-    # Load dataset
     reader = DatasetReader("./test_data.jsonl")
-    rows = reader.read(limit=10)
-
-    # Create provider
-    client_class = get_provider("openai")
-    client = client_class(model="gpt-4o-mini")
-
-    # Run tests
+    client = ExternalLLMClient("gpt-4o")  # or "anthropic/claude-sonnet-4-20250514"
     runner = TestRunner(agent_loop=MyAgent(), llm_client=client)
-    results = await runner.run_batch(rows)
+    results = await runner.run_batch(reader.read())
 
-    # Check results
-    print(f"Passed: {results.passed}/{results.total}")
+CLI:
+    osmosis test --agent my_agent:MyAgentLoop --dataset data.jsonl --model gpt-4o
+    osmosis test ... --model anthropic/claude-sonnet-4-20250514
+    osmosis test ... --interactive  # Step-by-step mode
+    osmosis test ... --interactive --row 5  # Test specific row
 
-CLI Usage:
-    # Basic usage
-    osmosis test \\
-        --agent my_agent:MyAgentLoop \\
-        --dataset ./test_data.jsonl \\
-        --provider openai \\
-        --model gpt-4o
-
-    # With options
-    osmosis test \\
-        --agent my_agent:MyAgentLoop \\
-        --dataset ./test_data.jsonl \\
-        --provider openai \\
-        --model gpt-4o-mini \\
-        --limit 10 \\
-        --max-turns 5 \\
-        --output results.json
+See https://docs.litellm.ai/docs/providers for supported providers.
 """
 
 from osmosis_ai.rollout.test_mode.dataset import (
@@ -75,6 +40,12 @@ from osmosis_ai.rollout.test_mode.exceptions import (
     ProviderError,
     TestModeError,
     ToolValidationError,
+)
+from osmosis_ai.rollout.test_mode.external_llm_client import ExternalLLMClient
+from osmosis_ai.rollout.test_mode.interactive import (
+    InteractiveLLMClient,
+    InteractiveRunner,
+    InteractiveStep,
 )
 from osmosis_ai.rollout.test_mode.runner import (
     TestBatchResult,
@@ -92,6 +63,12 @@ __all__ = [
     "TestRunner",
     "TestRunResult",
     "TestBatchResult",
+    # Interactive
+    "InteractiveRunner",
+    "InteractiveLLMClient",
+    "InteractiveStep",
+    # LLM Client
+    "ExternalLLMClient",
     # Exceptions
     "TestModeError",
     "DatasetValidationError",

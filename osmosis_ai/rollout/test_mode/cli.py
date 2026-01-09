@@ -1,15 +1,15 @@
 """CLI command for test mode.
 
-This module provides the TestCommand for running agent loop tests
-against datasets using cloud LLM providers.
+Run agent loop tests against datasets using LLM providers via LiteLLM.
 
-Example:
-    osmosis test \\
-        --agent my_agent:MyAgentLoop \\
-        --dataset ./test_data.jsonl \\
-        --provider openai \\
-        --model gpt-4o-mini \\
-        --limit 10
+Examples:
+    # Batch mode
+    osmosis test --agent my_agent:MyAgentLoop --dataset data.jsonl --model gpt-4o
+    osmosis test ... --model anthropic/claude-sonnet-4-20250514
+
+    # Interactive mode
+    osmosis test ... --interactive
+    osmosis test ... --interactive --row 5
 """
 
 from __future__ import annotations
@@ -131,7 +131,7 @@ class TestCommand:
             required=True,
             help=(
                 "Module path to the agent loop in format 'module:attribute'. "
-                "Example: 'my_agent:MyAgentLoop'"
+                "Example: 'my_agent:MyAgentLoop'."
             ),
         )
 
@@ -140,22 +140,19 @@ class TestCommand:
             "--dataset",
             dest="dataset",
             required=True,
-            help="Path to dataset file (.json, .jsonl, or .parquet)",
-        )
-
-        parser.add_argument(
-            "-p",
-            "--provider",
-            dest="provider",
-            required=True,
-            help="LLM provider name (e.g., 'openai')",
+            help="Path to dataset file (.json, .jsonl, or .parquet).",
         )
 
         parser.add_argument(
             "--model",
             dest="model",
-            default=None,
-            help="Model name to use (default: provider-specific)",
+            default="gpt-4o",
+            help=(
+                "Model name to use. Can be:\n"
+                "  - Simple name: 'gpt-4o' (auto-prefixed to 'openai/gpt-4o')\n"
+                "  - LiteLLM format: 'provider/model' (e.g., 'anthropic/claude-sonnet-4-20250514')\n"
+                "Default: gpt-4o"
+            ),
         )
 
         parser.add_argument(
@@ -237,6 +234,26 @@ class TestCommand:
             help="Suppress progress output",
         )
 
+        parser.add_argument(
+            "--interactive",
+            "-i",
+            dest="interactive",
+            action="store_true",
+            default=False,
+            help="Enable interactive mode for step-by-step execution",
+        )
+
+        parser.add_argument(
+            "--row",
+            dest="row",
+            type=int,
+            default=None,
+            help=(
+                "Initial row to test in interactive mode (absolute index in dataset). "
+                "With --offset 50 --limit 10, valid range is 50-59."
+            ),
+        )
+
     def run(self, args: argparse.Namespace) -> int:
         """Run the test command."""
         return asyncio.run(self._run_async(args))
@@ -250,14 +267,26 @@ class TestCommand:
             DatasetValidationError,
             ProviderError,
         )
-        from osmosis_ai.rollout.test_mode.providers import get_provider, list_providers
+        from osmosis_ai.rollout.test_mode.external_llm_client import (
+            ExternalLLMClient,
+        )
         from osmosis_ai.rollout.test_mode.runner import TestRunner
 
+        # Validate --row requires --interactive
+        if args.row is not None and not args.interactive:
+            print(
+                "Error: --row can only be used with --interactive mode",
+                file=sys.stderr,
+            )
+            return 1
+
         # Print header
+        is_interactive = args.interactive
         if not args.quiet:
             from osmosis_ai.consts import PACKAGE_VERSION
 
-            print(f"osmosis-rollout-test v{PACKAGE_VERSION}")
+            mode_suffix = " (Interactive Mode)" if is_interactive else ""
+            print(f"osmosis-rollout-test v{PACKAGE_VERSION}{mode_suffix}")
             print()
 
         # Load agent loop
@@ -298,30 +327,21 @@ class TestCommand:
             else:
                 print(f"  Total rows: {len(rows)}")
 
-        # Initialize provider
+        # Initialize LLM client (via LiteLLM)
+        model = args.model
         if not args.quiet:
-            print(f"Initializing provider: {args.provider}")
+            if "/" in model:
+                provider_name = model.split("/")[0]
+            else:
+                provider_name = "openai"
+            print(f"Initializing provider: {provider_name}")
 
         try:
-            provider_class = get_provider(args.provider)
-        except ValueError as e:
-            print(f"Error: {e}", file=sys.stderr)
-            available = list_providers()
-            if available:
-                print(f"Available providers: {', '.join(available)}", file=sys.stderr)
-            return 1
-
-        # Build provider kwargs
-        provider_kwargs: Dict[str, Any] = {}
-        if args.api_key:
-            provider_kwargs["api_key"] = args.api_key
-        if args.model:
-            provider_kwargs["model"] = args.model
-        if args.base_url:
-            provider_kwargs["base_url"] = args.base_url
-
-        try:
-            llm_client = provider_class(**provider_kwargs)
+            llm_client = ExternalLLMClient(
+                model=model,
+                api_key=args.api_key,
+                api_base=args.base_url,
+            )
         except ProviderError as e:
             print(f"Error: {e}", file=sys.stderr)
             return 1
@@ -337,7 +357,38 @@ class TestCommand:
         if args.max_tokens is not None:
             completion_params["max_tokens"] = args.max_tokens
 
-        # Create runner
+        # Interactive mode vs batch mode
+        if is_interactive:
+            # Interactive mode: step-by-step execution
+            from osmosis_ai.rollout.test_mode.interactive import InteractiveRunner
+
+            interactive_runner = InteractiveRunner(
+                agent_loop=agent_loop,
+                llm_client=llm_client,
+                debug=args.debug,
+            )
+
+            print()
+            try:
+                async with llm_client:
+                    await interactive_runner.run_interactive_session(
+                        rows=rows,
+                        max_turns=args.max_turns,
+                        completion_params=completion_params if completion_params else None,
+                        initial_row=args.row,
+                        row_offset=args.offset,
+                    )
+            except Exception as e:
+                print(f"Error during interactive session: {e}", file=sys.stderr)
+                if args.debug:
+                    import traceback
+
+                    traceback.print_exc()
+                return 1
+
+            return 0
+
+        # Batch mode: run all tests
         runner = TestRunner(
             agent_loop=agent_loop,
             llm_client=llm_client,
@@ -378,6 +429,7 @@ class TestCommand:
                     max_turns=args.max_turns,
                     completion_params=completion_params if completion_params else None,
                     on_progress=on_progress,
+                    start_index=args.offset,
                 )
         except Exception as e:
             print(f"Error during test execution: {e}", file=sys.stderr)

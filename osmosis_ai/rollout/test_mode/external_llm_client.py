@@ -1,0 +1,267 @@
+"""External LLM client for test mode using LiteLLM.
+
+Supports 100+ providers: OpenAI, Anthropic, Groq, Ollama, etc.
+
+Model format (LiteLLM convention):
+    - "gpt-4o" -> auto-prefixed to "openai/gpt-4o"
+    - "anthropic/claude-sonnet-4-20250514"
+    - "groq/llama-3.1-70b-versatile"
+    - "ollama/llama3.1" (with api_base="http://localhost:11434")
+
+See https://docs.litellm.ai/docs/providers for full list.
+"""
+
+from __future__ import annotations
+
+import logging
+import time
+import warnings
+from typing import Any, Dict, List, Optional
+
+from osmosis_ai.rollout.client import CompletionsResult
+
+# Filter out Pydantic serialization warnings from LiteLLM
+# LiteLLM's internal caching calls model_dump() on ModelResponse, which triggers
+# warnings due to Union[Choices, StreamingChoices] type definitions in LiteLLM's
+# types. This is a known issue with LiteLLM's Pydantic models.
+warnings.filterwarnings(
+    "ignore",
+    message="Pydantic serializer warnings:",
+    category=UserWarning,
+)
+from osmosis_ai.rollout.core.schemas import RolloutMetrics
+from osmosis_ai.rollout.test_mode.exceptions import ProviderError
+
+logger = logging.getLogger(__name__)
+
+
+def _get_litellm():
+    """Lazy import LiteLLM to avoid hard dependency.
+
+    Returns:
+        litellm module.
+
+    Raises:
+        ProviderError: If litellm is not installed.
+    """
+    try:
+        import litellm
+
+        return litellm
+    except ImportError:
+        raise ProviderError(
+            "LiteLLM is required for test mode. "
+            "Install with: pip install 'osmosis-ai[test-mode]' or pip install litellm"
+        )
+
+
+class ExternalLLMClient:
+    """LLM client wrapping LiteLLM for test mode.
+
+    Handles message format conversion, tool calling translation, and metrics tracking.
+    In production, LLM calls go through TrainGate; in test mode, this client
+    lets you test against real LLM APIs locally.
+    """
+
+    def __init__(
+        self,
+        model: str = "gpt-4o",
+        api_key: Optional[str] = None,
+        api_base: Optional[str] = None,
+    ) -> None:
+        """Initialize the external LLM client.
+
+        Args:
+            model: Model name. Can be:
+                - Simple name: "gpt-4o" (auto-prefixed to "openai/gpt-4o")
+                - LiteLLM format: "provider/model" (e.g., "anthropic/claude-sonnet-4-20250514")
+            api_key: Optional API key (or set via environment variable).
+            api_base: Optional custom API base URL (for local models or proxies).
+
+        Raises:
+            ProviderError: If litellm package is not installed.
+        """
+        self._litellm = _get_litellm()
+
+        # Auto-prefix simple model names with "openai/"
+        if "/" not in model:
+            model = f"openai/{model}"
+
+        self.model = model
+        self._api_key = api_key
+        self._api_base = api_base
+
+        # Tools storage (injected per test row)
+        self._tools: Optional[List[Dict[str, Any]]] = None
+
+        # Metrics tracking (accumulated across calls within a row)
+        self._llm_latency_ms: float = 0.0
+        self._num_llm_calls: int = 0
+        self._prompt_tokens: int = 0
+        self._response_tokens: int = 0
+
+    def set_tools(self, tools: List[Any]) -> None:
+        """Set tools for the current test row.
+
+        Called by TestRunner before each row execution.
+        Tools are converted to dict format for API calls.
+
+        Note: We use exclude_none=True because LLM APIs reject null values
+        for optional fields like 'enum' (expects array or absent, not null).
+
+        Args:
+            tools: List of tool schemas from agent_loop.get_tools()
+        """
+        if tools:
+            self._tools = [
+                t.model_dump(exclude_none=True) if hasattr(t, "model_dump") else t
+                for t in tools
+            ]
+        else:
+            self._tools = None
+
+    def clear_tools(self) -> None:
+        """Clear tools after test row completion."""
+        self._tools = None
+
+    def reset_metrics(self) -> None:
+        """Reset metrics to zero. Call this before each test row."""
+        self._llm_latency_ms = 0.0
+        self._num_llm_calls = 0
+        self._prompt_tokens = 0
+        self._response_tokens = 0
+
+    async def chat_completions(
+        self,
+        messages: List[Dict[str, Any]],
+        **kwargs: Any,
+    ) -> CompletionsResult:
+        """Make a chat completion request.
+
+        LiteLLM automatically handles:
+        - Message format conversion (OpenAI <-> Anthropic <-> Gemini)
+        - Tool/function calling format translation
+        - Error standardization to OpenAI format
+
+        Args:
+            messages: Full conversation message list (OpenAI format).
+            **kwargs: Additional parameters (temperature, max_tokens, etc.)
+
+        Returns:
+            CompletionsResult with message in OpenAI format.
+
+        Raises:
+            ProviderError: If API call fails.
+        """
+        start_time = time.monotonic()
+
+        # Build request kwargs
+        request_kwargs: Dict[str, Any] = {
+            "model": kwargs.pop("model", self.model),
+            "messages": messages,
+        }
+
+        # Add tools if set and not explicitly provided
+        if self._tools is not None and "tools" not in kwargs:
+            request_kwargs["tools"] = self._tools
+
+        # Add optional authentication/endpoint config
+        if self._api_key:
+            request_kwargs["api_key"] = self._api_key
+        if self._api_base:
+            request_kwargs["api_base"] = self._api_base
+
+        # Handle temperature and max_tokens
+        if "temperature" in kwargs:
+            request_kwargs["temperature"] = kwargs.pop("temperature")
+        if "max_tokens" in kwargs:
+            request_kwargs["max_tokens"] = kwargs.pop("max_tokens")
+
+        # Add optional parameters if provided
+        if "top_p" in kwargs:
+            request_kwargs["top_p"] = kwargs.pop("top_p")
+        if "stop" in kwargs:
+            request_kwargs["stop"] = kwargs.pop("stop")
+        if "seed" in kwargs:
+            request_kwargs["seed"] = kwargs.pop("seed")
+
+        # Pass through other kwargs
+        request_kwargs.update(kwargs)
+
+        try:
+            # Make async call via LiteLLM
+            # LiteLLM returns response in OpenAI format regardless of provider
+            response = await self._litellm.acompletion(**request_kwargs)
+        except Exception as e:
+            # Provide helpful error messages for common errors
+            error_str = str(e).lower()
+            if "rate" in error_str and "limit" in error_str:
+                raise ProviderError(
+                    f"Rate limit exceeded. Try reducing dataset size with --limit. "
+                    f"Original error: {e}"
+                ) from e
+            elif "authentication" in error_str or "api key" in error_str:
+                raise ProviderError(
+                    f"Authentication failed. Check your API key is valid. "
+                    f"Original error: {e}"
+                ) from e
+            elif "quota" in error_str or "billing" in error_str:
+                raise ProviderError(
+                    f"Quota/billing issue. Check your account has available credits. "
+                    f"Original error: {e}"
+                ) from e
+            else:
+                raise ProviderError(f"LLM API error: {e}") from e
+
+        # Record metrics
+        latency_ms = (time.monotonic() - start_time) * 1000
+        usage = response.usage
+        self._llm_latency_ms += latency_ms
+        self._num_llm_calls += 1
+        self._prompt_tokens += usage.prompt_tokens if usage else 0
+        self._response_tokens += usage.completion_tokens if usage else 0
+
+        # Convert to CompletionsResult
+        # LiteLLM already returns OpenAI-compatible format
+        choice = response.choices[0]
+        message = choice.message.model_dump(exclude_none=True)
+
+        return CompletionsResult(
+            message=message,
+            token_ids=[],  # Not needed for testing
+            logprobs=[],  # Not needed for testing
+            usage={
+                "prompt_tokens": usage.prompt_tokens if usage else 0,
+                "completion_tokens": usage.completion_tokens if usage else 0,
+                "total_tokens": usage.total_tokens if usage else 0,
+            },
+            finish_reason=choice.finish_reason or "stop",
+        )
+
+    def get_metrics(self) -> RolloutMetrics:
+        """Return accumulated metrics.
+
+        Returns:
+            RolloutMetrics with current session statistics.
+        """
+        return RolloutMetrics(
+            llm_latency_ms=self._llm_latency_ms,
+            num_llm_calls=self._num_llm_calls,
+            prompt_tokens=self._prompt_tokens,
+            response_tokens=self._response_tokens,
+        )
+
+    async def close(self) -> None:
+        """Release resources. LiteLLM manages connections internally."""
+        pass
+
+    async def __aenter__(self) -> "ExternalLLMClient":
+        """Async context manager entry."""
+        return self
+
+    async def __aexit__(self, *args: Any) -> None:
+        """Async context manager exit."""
+        await self.close()
+
+
+__all__ = ["ExternalLLMClient"]

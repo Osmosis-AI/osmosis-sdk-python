@@ -109,7 +109,7 @@ class RolloutContext:
     Attributes:
         request: The original RolloutRequest with messages and parameters.
         tools: List of tools available for this rollout.
-        llm: LLM client implementing LLMClientProtocol (OsmosisLLMClient or TestLLMClient).
+        llm: LLM client implementing LLMClientProtocol (OsmosisLLMClient or ExternalLLMClient).
 
     Example:
         async def run(self, ctx: RolloutContext) -> RolloutResult:

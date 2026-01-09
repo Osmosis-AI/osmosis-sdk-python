@@ -20,7 +20,6 @@ from osmosis_ai.rollout.client import CompletionsResult
 from osmosis_ai.rollout.core.schemas import RolloutMetrics
 from osmosis_ai.rollout.test_mode.dataset import DatasetRow
 from osmosis_ai.rollout.test_mode.exceptions import ToolValidationError
-from osmosis_ai.rollout.test_mode.providers.base import TestLLMClient
 from osmosis_ai.rollout.test_mode.runner import (
     TestBatchResult,
     TestRunResult,
@@ -28,13 +27,18 @@ from osmosis_ai.rollout.test_mode.runner import (
 )
 
 
-class MockTestLLMClient(TestLLMClient):
-    """Mock LLM client for testing."""
+class MockTestLLMClient:
+    """Mock LLM client for testing.
 
-    provider_name = "mock"
+    Implements the same interface as ExternalLLMClient for testing purposes.
+    """
 
     def __init__(self) -> None:
-        super().__init__()
+        self._tools: List[Dict[str, Any]] | None = None
+        self._llm_latency_ms: float = 0.0
+        self._num_llm_calls: int = 0
+        self._prompt_tokens: int = 0
+        self._response_tokens: int = 0
         self.completions_calls: List[Dict[str, Any]] = []
         self.mock_response = CompletionsResult(
             message={"role": "assistant", "content": "Test response"},
@@ -44,9 +48,46 @@ class MockTestLLMClient(TestLLMClient):
             finish_reason="stop",
         )
 
-    async def _do_completion(
+    def set_tools(self, tools: List[Any]) -> None:
+        if tools:
+            self._tools = [
+                t.model_dump(exclude_none=True) if hasattr(t, "model_dump") else t
+                for t in tools
+            ]
+        else:
+            self._tools = None
+
+    def clear_tools(self) -> None:
+        self._tools = None
+
+    def reset_metrics(self) -> None:
+        self._llm_latency_ms = 0.0
+        self._num_llm_calls = 0
+        self._prompt_tokens = 0
+        self._response_tokens = 0
+
+    def get_metrics(self) -> RolloutMetrics:
+        return RolloutMetrics(
+            llm_latency_ms=self._llm_latency_ms,
+            num_llm_calls=self._num_llm_calls,
+            prompt_tokens=self._prompt_tokens,
+            response_tokens=self._response_tokens,
+        )
+
+    def _record_usage(
+        self, latency_ms: float, prompt_tokens: int, completion_tokens: int
+    ) -> None:
+        self._llm_latency_ms += latency_ms
+        self._num_llm_calls += 1
+        self._prompt_tokens += prompt_tokens
+        self._response_tokens += completion_tokens
+
+    async def chat_completions(
         self, messages: List[Dict[str, Any]], **kwargs: Any
     ) -> CompletionsResult:
+        # Auto-inject tools if set
+        if self._tools is not None and "tools" not in kwargs:
+            kwargs["tools"] = self._tools
         self.completions_calls.append({"messages": messages, "kwargs": kwargs})
         self._record_usage(latency_ms=50.0, prompt_tokens=10, completion_tokens=5)
         return self.mock_response
@@ -287,6 +328,52 @@ class TestTestRunner:
         assert progress_calls[0][0] == 1  # current
         assert progress_calls[0][1] == 3  # total
         assert progress_calls[2][0] == 3
+
+    @pytest.mark.asyncio
+    async def test_run_batch_with_start_index(self) -> None:
+        """Test that start_index offsets row indices correctly."""
+        client = MockTestLLMClient()
+        agent = MockAgentLoop(tools=[create_sample_tool()], call_llm=True)
+        runner = TestRunner(agent_loop=agent, llm_client=client)
+
+        rows = [create_sample_row(i) for i in range(3)]
+        result = await runner.run_batch(rows, start_index=50)
+
+        # Results should have offset row indices
+        assert result.results[0].row_index == 50
+        assert result.results[1].row_index == 51
+        assert result.results[2].row_index == 52
+
+        # Agent should have received requests with offset rollout IDs
+        assert len(agent.run_calls) == 3
+        assert agent.run_calls[0].request.rollout_id == "test-50"
+        assert agent.run_calls[1].request.rollout_id == "test-51"
+        assert agent.run_calls[2].request.rollout_id == "test-52"
+
+        # Metadata should also have correct row_index
+        assert agent.run_calls[0].request.metadata["row_index"] == 50
+        assert agent.run_calls[1].request.metadata["row_index"] == 51
+        assert agent.run_calls[2].request.metadata["row_index"] == 52
+
+    @pytest.mark.asyncio
+    async def test_run_batch_with_start_index_and_progress(self) -> None:
+        """Test that progress callback receives correct offset row indices."""
+        client = MockTestLLMClient()
+        agent = MockAgentLoop(tools=[create_sample_tool()])
+        runner = TestRunner(agent_loop=agent, llm_client=client)
+
+        progress_calls: List[tuple] = []
+
+        def on_progress(current: int, total: int, result: TestRunResult) -> None:
+            progress_calls.append((current, total, result.row_index))
+
+        rows = [create_sample_row(i) for i in range(3)]
+        await runner.run_batch(rows, on_progress=on_progress, start_index=100)
+
+        # Progress should report offset row indices
+        assert progress_calls[0][2] == 100  # row_index for first row
+        assert progress_calls[1][2] == 101
+        assert progress_calls[2][2] == 102
 
 
 class TestToolValidation:

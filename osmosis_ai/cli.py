@@ -4,12 +4,17 @@ import argparse
 import sys
 from typing import Optional
 
+from dotenv import load_dotenv
+
 from .cli_commands import EvalCommand, LoginCommand, LogoutCommand, PreviewCommand, WhoamiCommand, WorkspaceCommand
 from .cli_services import CLIError
 
 
 def main(argv: Optional[list[str]] = None) -> int:
     """Entry point for the osmosis CLI."""
+    # Load environment variables from .env file in current working directory
+    load_dotenv()
+
     parser = _build_parser()
     args = parser.parse_args(argv)
 

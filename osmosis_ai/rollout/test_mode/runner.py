@@ -1,30 +1,6 @@
 """Test runner for executing agent loops against datasets.
 
-This module provides the TestRunner class for running agent loops
-against test datasets. It handles the complete lifecycle:
-    1. Converting dataset rows to RolloutRequest
-    2. Getting and validating tools from the agent
-    3. Injecting tools into the test LLM client
-    4. Running the agent loop
-    5. Collecting and aggregating results
-
-Example:
-    from osmosis_ai.rollout.test_mode.runner import TestRunner
-    from osmosis_ai.rollout.test_mode.providers import get_provider
-
-    # Create provider client
-    client_class = get_provider("openai")
-    client = client_class(model="gpt-4o")
-
-    # Create runner
-    runner = TestRunner(agent_loop=MyAgent(), llm_client=client)
-
-    # Run tests
-    results = await runner.run_batch(rows, max_turns=10)
-
-    # Check results
-    passed = sum(1 for r in results if r.success)
-    print(f"Passed: {passed}/{len(results)}")
+Converts DatasetRow -> RolloutRequest, validates tools, and runs agent_loop.run(ctx).
 """
 
 from __future__ import annotations
@@ -43,7 +19,7 @@ from osmosis_ai.rollout.core.base import (
 from osmosis_ai.rollout.core.schemas import OpenAIFunctionToolSchema
 from osmosis_ai.rollout.test_mode.dataset import DatasetRow, dataset_row_to_request
 from osmosis_ai.rollout.test_mode.exceptions import ToolValidationError
-from osmosis_ai.rollout.test_mode.providers.base import TestLLMClient
+from osmosis_ai.rollout.test_mode.external_llm_client import ExternalLLMClient
 
 logger = logging.getLogger(__name__)
 
@@ -97,37 +73,13 @@ TOOL_NAME_PATTERN = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 class TestRunner:
     """Executes agent loop tests against dataset rows.
 
-    Workflow for each row:
-        1. Convert DatasetRow -> RolloutRequest
-        2. Get tools from agent_loop.get_tools(request)
-        3. Validate tool schemas
-        4. Inject tools into llm_client via set_tools()
-        5. Create RolloutContext with the TestLLMClient
-        6. Run agent_loop.run(ctx) - same code path as production!
-        7. Clear tools and collect results
-
-    Example:
-        runner = TestRunner(
-            agent_loop=MyAgent(),
-            llm_client=OpenAITestClient(model="gpt-4o"),
-            debug=True,
-        )
-
-        # Run single row
-        result = await runner.run_single(row, row_index=0)
-
-        # Run batch with progress callback
-        def on_progress(current, total, result):
-            status = "OK" if result.success else "FAILED"
-            print(f"[{current}/{total}] Row {result.row_index}: {status}")
-
-        results = await runner.run_batch(rows, on_progress=on_progress)
+    Workflow: DatasetRow -> RolloutRequest -> get_tools() -> run() -> collect results.
     """
 
     def __init__(
         self,
         agent_loop: RolloutAgentLoop,
-        llm_client: TestLLMClient,
+        llm_client: ExternalLLMClient,
         debug: bool = False,
         debug_dir: Optional[str] = None,
     ) -> None:
@@ -196,7 +148,7 @@ class TestRunner:
             # 5. Start timing AFTER preparation (matches production mode)
             agent_start_time = time.monotonic()
 
-            # 6. Create standard RolloutContext with TestLLMClient
+            # 6. Create standard RolloutContext with ExternalLLMClient
             ctx = RolloutContext(
                 request=request,
                 tools=tools,
@@ -252,6 +204,7 @@ class TestRunner:
         max_turns: int = 10,
         completion_params: Optional[Dict[str, Any]] = None,
         on_progress: Optional[Callable[[int, int, TestRunResult], None]] = None,
+        start_index: int = 0,
     ) -> TestBatchResult:
         """Run multiple test rows sequentially.
 
@@ -261,6 +214,8 @@ class TestRunner:
             completion_params: LLM sampling parameters.
             on_progress: Optional callback called after each row.
                          Arguments: (current_index, total_count, result)
+            start_index: Starting row index for row numbering (e.g., from --offset).
+                         Used for correct row_index in output, rollout IDs, and metadata.
 
         Returns:
             TestBatchResult with aggregated statistics.
@@ -269,9 +224,11 @@ class TestRunner:
         total_start = time.monotonic()
 
         for i, row in enumerate(rows):
+            # Calculate absolute row index (for debugging, rollout IDs, metadata)
+            row_index = start_index + i
             result = await self.run_single(
                 row=row,
-                row_index=i,
+                row_index=row_index,
                 max_turns=max_turns,
                 completion_params=completion_params,
             )

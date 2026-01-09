@@ -45,9 +45,10 @@ config = [
     "pydantic-settings>=2.0.0,<3.0.0",
 ]
 
-# Test mode dependencies (parquet support, CLI formatting)
+# Test mode dependencies (parquet support, multi-provider LLM support)
 test-mode = [
-    "pyarrow>=14.0.0",
+    "pyarrow>=14.0.0",      # Parquet file support
+    "litellm>=1.40.0",      # Multi-provider LLM support (100+ providers)
 ]
 
 # Development dependencies (testing, formatting, etc.)
@@ -65,6 +66,7 @@ full = [
     "uvicorn>=0.23.0,<1.0.0",
     "pydantic-settings>=2.0.0,<3.0.0",
     "pyarrow>=14.0.0",
+    "litellm>=1.40.0",
 ]
 
 [project.urls]
