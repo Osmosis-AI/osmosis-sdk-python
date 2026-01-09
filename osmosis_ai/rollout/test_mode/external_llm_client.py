@@ -163,15 +163,11 @@ class ExternalLLMClient:
         """
         start_time = time.monotonic()
 
-        # Build request kwargs
+        # Build request kwargs, starting with defaults
         request_kwargs: Dict[str, Any] = {
-            "model": kwargs.pop("model", self.model),
+            "model": self.model,
             "messages": messages,
         }
-
-        # Add tools if set and not explicitly provided
-        if self._tools is not None and "tools" not in kwargs:
-            request_kwargs["tools"] = self._tools
 
         # Add optional authentication/endpoint config
         if self._api_key:
@@ -179,21 +175,11 @@ class ExternalLLMClient:
         if self._api_base:
             request_kwargs["api_base"] = self._api_base
 
-        # Handle temperature and max_tokens
-        if "temperature" in kwargs:
-            request_kwargs["temperature"] = kwargs.pop("temperature")
-        if "max_tokens" in kwargs:
-            request_kwargs["max_tokens"] = kwargs.pop("max_tokens")
+        # Add tools if set for the client
+        if self._tools is not None:
+            request_kwargs["tools"] = self._tools
 
-        # Add optional parameters if provided
-        if "top_p" in kwargs:
-            request_kwargs["top_p"] = kwargs.pop("top_p")
-        if "stop" in kwargs:
-            request_kwargs["stop"] = kwargs.pop("stop")
-        if "seed" in kwargs:
-            request_kwargs["seed"] = kwargs.pop("seed")
-
-        # Pass through other kwargs
+        # Allow any user-provided kwargs to override defaults and add new ones
         request_kwargs.update(kwargs)
 
         try:
