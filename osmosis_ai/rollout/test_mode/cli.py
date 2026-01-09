@@ -504,27 +504,30 @@ class TestCommand:
         if error:
             self.console.print_error(f"Error: {error}")
             return 1
+        assert agent_loop is not None
 
         # Load dataset
         rows, error = self._load_dataset(args)
         if error:
             self.console.print_error(f"Error: {error}")
             return 1
+        assert rows is not None
 
         # Initialize LLM client
         llm_client, error = self._create_llm_client(args)
         if error:
             self.console.print_error(f"Error: {error}")
             return 1
+        assert llm_client is not None
 
         # Build completion params
         completion_params = self._build_completion_params(args)
 
         # Create setup result
         setup = _SetupResult(
-            agent_loop=agent_loop,  # type: ignore[arg-type]
-            llm_client=llm_client,  # type: ignore[arg-type]
-            rows=rows,  # type: ignore[arg-type]
+            agent_loop=agent_loop,
+            llm_client=llm_client,
+            rows=rows,
             completion_params=completion_params,
         )
 
