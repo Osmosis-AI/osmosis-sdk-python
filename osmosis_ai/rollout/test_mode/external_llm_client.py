@@ -35,6 +35,15 @@ from osmosis_ai.rollout.test_mode.exceptions import ProviderError
 logger = logging.getLogger(__name__)
 
 
+def _get_provider_message(e: Exception) -> str:
+    """Extract provider message without litellm wrapper."""
+    msg = getattr(e, "message", str(e))
+    prefix = f"litellm.{type(e).__name__}: "
+    if msg.startswith(prefix):
+        return msg[len(prefix) :]
+    return msg
+
+
 def _get_litellm():
     """Lazy import LiteLLM to avoid hard dependency.
 
@@ -203,32 +212,34 @@ class ExternalLLMClient:
         except self._RateLimitError as e:
             raise ProviderError(
                 f"Rate limit exceeded. Try reducing dataset size with --limit. "
-                f"Original error: {e}"
+                f"Details: {_get_provider_message(e)}"
             ) from e
         except self._AuthenticationError as e:
             raise ProviderError(
                 f"Authentication failed. Check your API key is valid. "
-                f"Original error: {e}"
+                f"Details: {_get_provider_message(e)}"
             ) from e
         except self._BudgetExceededError as e:
             raise ProviderError(
                 f"Budget/quota exceeded. Check your account has available credits. "
-                f"Original error: {e}"
+                f"Details: {_get_provider_message(e)}"
             ) from e
         except self._Timeout as e:
             raise ProviderError(
                 f"Request timed out. The model may be slow or network issues occurred. "
-                f"Original error: {e}"
+                f"Details: {_get_provider_message(e)}"
             ) from e
         except self._ContextWindowExceededError as e:
             raise ProviderError(
                 f"Context window exceeded. Try reducing max_turns or message history. "
-                f"Original error: {e}"
+                f"Details: {_get_provider_message(e)}"
             ) from e
         except self._APIError as e:
-            raise ProviderError(f"LLM API error: {e}") from e
+            raise ProviderError(
+                f"LLM API error: {_get_provider_message(e)}"
+            ) from e
         except Exception as e:
-            raise ProviderError(f"Unexpected LLM client error: {e}") from e
+            raise ProviderError(f"Unexpected error: {e}") from e
 
         # Record metrics
         latency_ms = (time.monotonic() - start_time) * 1000
