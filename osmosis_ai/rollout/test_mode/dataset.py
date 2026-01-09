@@ -131,29 +131,7 @@ class DatasetReader:
             DatasetValidationError: If required columns are missing or values invalid.
             DatasetParseError: If file parsing fails.
         """
-        if self._extension == ".json":
-            raw_rows = self._parse_json()
-        elif self._extension == ".jsonl":
-            raw_rows = self._parse_jsonl()
-        elif self._extension == ".parquet":
-            raw_rows = self._parse_parquet()
-        else:
-            raise DatasetParseError(f"Unsupported format: {self._extension}")
-
-        # Apply offset and limit
-        if offset > 0:
-            raw_rows = raw_rows[offset:]
-        if limit is not None:
-            raw_rows = raw_rows[:limit]
-
-        # Validate and normalize each row
-        validated_rows: List[DatasetRow] = []
-        for i, row in enumerate(raw_rows):
-            row_index = offset + i
-            validated = self._validate_row(row, row_index)
-            validated_rows.append(validated)
-
-        return validated_rows
+        return list(self.iter_rows(limit=limit, offset=offset))
 
     def iter_rows(
         self,

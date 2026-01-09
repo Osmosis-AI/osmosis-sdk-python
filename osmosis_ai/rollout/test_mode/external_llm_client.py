@@ -20,15 +20,6 @@ from typing import Any, Dict, List, Optional
 
 from osmosis_ai.rollout.client import CompletionsResult
 
-# Filter out Pydantic serialization warnings from LiteLLM
-# LiteLLM's internal caching calls model_dump() on ModelResponse, which triggers
-# warnings due to Union[Choices, StreamingChoices] type definitions in LiteLLM's
-# types. This is a known issue with LiteLLM's Pydantic models.
-warnings.filterwarnings(
-    "ignore",
-    message="Pydantic serializer warnings:",
-    category=UserWarning,
-)
 from osmosis_ai.rollout.core.schemas import RolloutMetrics
 from osmosis_ai.rollout.test_mode.exceptions import ProviderError
 
@@ -208,7 +199,17 @@ class ExternalLLMClient:
         try:
             # Make async call via LiteLLM
             # LiteLLM returns response in OpenAI format regardless of provider
-            response = await self._litellm.acompletion(**request_kwargs)
+            # Filter out Pydantic serialization warnings from LiteLLM locally.
+            # LiteLLM's internal caching calls model_dump() on ModelResponse,
+            # which triggers warnings due to Union[Choices, StreamingChoices]
+            # type definitions. Using catch_warnings() limits the filter scope.
+            with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "ignore",
+                    message="Pydantic serializer warnings:",
+                    category=UserWarning,
+                )
+                response = await self._litellm.acompletion(**request_kwargs)
         except self._RateLimitError as e:
             raise ProviderError(
                 f"Rate limit exceeded. Try reducing dataset size with --limit. "
