@@ -283,8 +283,33 @@ class ValidateCommand:
         return 0 if result.valid else 1
 
 
+class TestCommand:
+    """Handler for `osmosis test` (delegates to test_mode.cli).
+
+    This class acts as a proxy to avoid circular imports and keep the main CLI
+    module lightweight. The actual implementation lives in test_mode.cli.
+    """
+
+    def __init__(self) -> None:
+        """Initialize with lazy-loaded implementation."""
+        self._impl: Optional["_TestCommandImpl"] = None
+
+    def _get_impl(self) -> "_TestCommandImpl":
+        """Lazily load the actual TestCommand implementation."""
+        if self._impl is None:
+            from osmosis_ai.rollout.test_mode.cli import TestCommand as _TestCommandImpl
+
+            self._impl = _TestCommandImpl()
+        return self._impl
+
+    def configure_parser(self, parser: argparse.ArgumentParser) -> None:
+        """Configure argument parser for test command."""
+        self._get_impl().configure_parser(parser)
+
+
 __all__ = [
     "CLIError",
     "ServeCommand",
+    "TestCommand",
     "ValidateCommand",
 ]

@@ -45,6 +45,11 @@ config = [
     "pydantic-settings>=2.0.0,<3.0.0",
 ]
 
+# Test mode dependencies (parquet support, CLI formatting)
+test-mode = [
+    "pyarrow>=14.0.0",
+]
+
 # Development dependencies (testing, formatting, etc.)
 dev = [
     "pytest>=8.0.0,<10.0.0",
@@ -59,6 +64,7 @@ full = [
     "fastapi>=0.100.0,<1.0.0",
     "uvicorn>=0.23.0,<1.0.0",
     "pydantic-settings>=2.0.0,<3.0.0",
+    "pyarrow>=14.0.0",
 ]
 
 [project.urls]

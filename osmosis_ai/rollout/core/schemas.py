@@ -144,6 +144,20 @@ class OpenAIFunctionToolSchema(BaseModel):
     Attributes:
         type: Tool type (always "function" for now).
         function: The function schema definition.
+
+    Note:
+        When serializing this schema for LLM API calls (e.g., OpenAI, Anthropic),
+        always use ``model_dump(exclude_none=True)``. LLM APIs reject ``null``
+        values for optional fields like ``enum`` - they expect the field to be
+        either an array or absent entirely, not ``null``.
+
+        Example::
+
+            # Correct - excludes None values
+            tools = [t.model_dump(exclude_none=True) for t in tool_schemas]
+
+            # Wrong - will include {"enum": null} which causes API errors
+            tools = [t.model_dump() for t in tool_schemas]
     """
 
     type: str

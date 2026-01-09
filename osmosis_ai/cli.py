@@ -69,7 +69,7 @@ def _build_parser() -> argparse.ArgumentParser:
     EvalCommand().configure_parser(eval_parser)
 
     # Rollout server commands
-    from .rollout.cli import ServeCommand, ValidateCommand
+    from .rollout.cli import ServeCommand, TestCommand, ValidateCommand
 
     serve_parser = subparsers.add_parser(
         "serve",
@@ -82,6 +82,12 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Validate a RolloutAgentLoop implementation without starting the server.",
     )
     ValidateCommand().configure_parser(validate_parser)
+
+    test_parser = subparsers.add_parser(
+        "test",
+        help="Test a RolloutAgentLoop against a dataset using cloud LLM providers.",
+    )
+    TestCommand().configure_parser(test_parser)
 
     return parser
 
