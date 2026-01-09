@@ -6,17 +6,17 @@ Test agent loops locally without TrainGate using external LLM providers
 Components:
     - DatasetReader: Read datasets (JSON, JSONL, Parquet)
     - ExternalLLMClient: Call external LLM APIs via LiteLLM
-    - TestRunner: Batch test execution
+    - LocalTestRunner: Batch test execution
     - InteractiveRunner: Step-by-step debugging
 
 Dataset columns: ground_truth, user_prompt, system_prompt
 
 Example:
-    from osmosis_ai.rollout.test_mode import TestRunner, ExternalLLMClient, DatasetReader
+    from osmosis_ai.rollout.test_mode import LocalTestRunner, ExternalLLMClient, DatasetReader
 
     reader = DatasetReader("./test_data.jsonl")
     client = ExternalLLMClient("gpt-4o")  # or "anthropic/claude-sonnet-4-20250514"
-    runner = TestRunner(agent_loop=MyAgent(), llm_client=client)
+    runner = LocalTestRunner(agent_loop=MyAgent(), llm_client=client)
     results = await runner.run_batch(reader.read())
 
 CLI:
@@ -48,9 +48,9 @@ from osmosis_ai.rollout.test_mode.interactive import (
     InteractiveStep,
 )
 from osmosis_ai.rollout.test_mode.runner import (
-    TestBatchResult,
-    TestRunResult,
-    TestRunner,
+    LocalTestBatchResult,
+    LocalTestRunResult,
+    LocalTestRunner,
 )
 
 __all__ = [
@@ -60,9 +60,9 @@ __all__ = [
     "REQUIRED_COLUMNS",
     "dataset_row_to_request",
     # Runner
-    "TestRunner",
-    "TestRunResult",
-    "TestBatchResult",
+    "LocalTestRunner",
+    "LocalTestRunResult",
+    "LocalTestBatchResult",
     # Interactive
     "InteractiveRunner",
     "InteractiveLLMClient",

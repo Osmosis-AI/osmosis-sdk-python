@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
-class TestRunResult:
+class LocalTestRunResult:
     """Result from running a single test row.
 
     Attributes:
@@ -46,7 +46,7 @@ class TestRunResult:
 
 
 @dataclass
-class TestBatchResult:
+class LocalTestBatchResult:
     """Aggregated results from running a batch of tests.
 
     Attributes:
@@ -58,7 +58,7 @@ class TestBatchResult:
         total_tokens: Total tokens used.
     """
 
-    results: List[TestRunResult]
+    results: List[LocalTestRunResult]
     total: int
     passed: int
     failed: int
@@ -107,7 +107,7 @@ def validate_tools(tools: List[OpenAIFunctionToolSchema]) -> None:
                 )
 
 
-class TestRunner:
+class LocalTestRunner:
     """Executes agent loop tests against dataset rows.
 
     Workflow: DatasetRow -> RolloutRequest -> get_tools() -> run() -> collect results.
@@ -146,7 +146,7 @@ class TestRunner:
         row_index: int,
         max_turns: int = 10,
         completion_params: Optional[Dict[str, Any]] = None,
-    ) -> TestRunResult:
+    ) -> LocalTestRunResult:
         """Run a single test row.
 
         Args:
@@ -156,7 +156,7 @@ class TestRunner:
             completion_params: LLM sampling parameters.
 
         Returns:
-            TestRunResult with execution status and metrics.
+            LocalTestRunResult with execution status and metrics.
         """
         overall_start = time.monotonic()
 
@@ -200,7 +200,7 @@ class TestRunner:
             # Get metrics
             metrics = self.llm_client.get_metrics()
 
-            return TestRunResult(
+            return LocalTestRunResult(
                 row_index=row_index,
                 success=(result.status == "COMPLETED"),
                 result=result,
@@ -215,7 +215,7 @@ class TestRunner:
 
         except ToolValidationError as e:
             logger.error("Tool validation error for row %d: %s", row_index, e)
-            return TestRunResult(
+            return LocalTestRunResult(
                 row_index=row_index,
                 success=False,
                 error=f"Tool validation error: {e}",
@@ -224,7 +224,7 @@ class TestRunner:
 
         except Exception as e:
             logger.exception("Error running row %d", row_index)
-            return TestRunResult(
+            return LocalTestRunResult(
                 row_index=row_index,
                 success=False,
                 error=str(e),
@@ -240,9 +240,9 @@ class TestRunner:
         rows: List[DatasetRow],
         max_turns: int = 10,
         completion_params: Optional[Dict[str, Any]] = None,
-        on_progress: Optional[Callable[[int, int, TestRunResult], None]] = None,
+        on_progress: Optional[Callable[[int, int, LocalTestRunResult], None]] = None,
         start_index: int = 0,
-    ) -> TestBatchResult:
+    ) -> LocalTestBatchResult:
         """Run multiple test rows sequentially.
 
         Args:
@@ -255,9 +255,9 @@ class TestRunner:
                          Used for correct row_index in output, rollout IDs, and metadata.
 
         Returns:
-            TestBatchResult with aggregated statistics.
+            LocalTestBatchResult with aggregated statistics.
         """
-        results: List[TestRunResult] = []
+        results: List[LocalTestRunResult] = []
         total_start = time.monotonic()
 
         for i, row in enumerate(rows):
@@ -281,7 +281,7 @@ class TestRunner:
             r.token_usage.get("total_tokens", 0) for r in results
         )
 
-        return TestBatchResult(
+        return LocalTestBatchResult(
             results=results,
             total=len(results),
             passed=passed,
@@ -291,8 +291,8 @@ class TestRunner:
         )
 
 __all__ = [
-    "TestBatchResult",
-    "TestRunResult",
-    "TestRunner",
+    "LocalTestBatchResult",
+    "LocalTestRunResult",
+    "LocalTestRunner",
     "validate_tools",
 ]

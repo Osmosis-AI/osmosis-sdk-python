@@ -21,9 +21,9 @@ from osmosis_ai.rollout.core.schemas import RolloutMetrics
 from osmosis_ai.rollout.test_mode.dataset import DatasetRow
 from osmosis_ai.rollout.test_mode.exceptions import ToolValidationError
 from osmosis_ai.rollout.test_mode.runner import (
-    TestBatchResult,
-    TestRunResult,
-    TestRunner,
+    LocalTestBatchResult,
+    LocalTestRunResult,
+    LocalTestRunner,
 )
 
 
@@ -156,15 +156,15 @@ def create_sample_row(index: int = 0) -> DatasetRow:
     }
 
 
-class TestTestRunner:
-    """Tests for TestRunner class."""
+class TestLocalTestRunner:
+    """Tests for LocalTestRunner class."""
 
     @pytest.mark.asyncio
     async def test_run_single_success(self) -> None:
         """Test successful single row execution."""
         client = MockTestLLMClient()
         agent = MockAgentLoop(tools=[create_sample_tool()], call_llm=True)
-        runner = TestRunner(agent_loop=agent, llm_client=client)
+        runner = LocalTestRunner(agent_loop=agent, llm_client=client)
 
         row = create_sample_row(0)
         result = await runner.run_single(row, row_index=0)
@@ -183,7 +183,7 @@ class TestTestRunner:
         """Test that run_single calls agent.get_tools()."""
         client = MockTestLLMClient()
         agent = MockAgentLoop(tools=[create_sample_tool()])
-        runner = TestRunner(agent_loop=agent, llm_client=client)
+        runner = LocalTestRunner(agent_loop=agent, llm_client=client)
 
         row = create_sample_row(0)
         await runner.run_single(row, row_index=0)
@@ -197,7 +197,7 @@ class TestTestRunner:
         client = MockTestLLMClient()
         tool = create_sample_tool()
         agent = MockAgentLoop(tools=[tool])
-        runner = TestRunner(agent_loop=agent, llm_client=client)
+        runner = LocalTestRunner(agent_loop=agent, llm_client=client)
 
         row = create_sample_row(0)
         await runner.run_single(row, row_index=0)
@@ -213,7 +213,7 @@ class TestTestRunner:
         agent = MockAgentLoop(
             tools=[create_sample_tool()], run_error=RuntimeError("Test error")
         )
-        runner = TestRunner(agent_loop=agent, llm_client=client)
+        runner = LocalTestRunner(agent_loop=agent, llm_client=client)
 
         row = create_sample_row(0)
         result = await runner.run_single(row, row_index=0)
@@ -227,7 +227,7 @@ class TestTestRunner:
         """Test that metrics are reset before each run."""
         client = MockTestLLMClient()
         agent = MockAgentLoop(tools=[create_sample_tool()], call_llm=True)
-        runner = TestRunner(agent_loop=agent, llm_client=client)
+        runner = LocalTestRunner(agent_loop=agent, llm_client=client)
 
         # Simulate previous metrics
         client._record_usage(latency_ms=1000.0, prompt_tokens=100, completion_tokens=50)
@@ -244,7 +244,7 @@ class TestTestRunner:
         """Test that max_turns is passed to request."""
         client = MockTestLLMClient()
         agent = MockAgentLoop(tools=[])
-        runner = TestRunner(agent_loop=agent, llm_client=client)
+        runner = LocalTestRunner(agent_loop=agent, llm_client=client)
 
         row = create_sample_row(0)
         await runner.run_single(row, row_index=0, max_turns=20)
@@ -257,7 +257,7 @@ class TestTestRunner:
         """Test that completion_params are passed through."""
         client = MockTestLLMClient()
         agent = MockAgentLoop(tools=[])
-        runner = TestRunner(agent_loop=agent, llm_client=client)
+        runner = LocalTestRunner(agent_loop=agent, llm_client=client)
 
         row = create_sample_row(0)
         await runner.run_single(
@@ -272,12 +272,12 @@ class TestTestRunner:
         """Test running multiple rows."""
         client = MockTestLLMClient()
         agent = MockAgentLoop(tools=[create_sample_tool()], call_llm=True)
-        runner = TestRunner(agent_loop=agent, llm_client=client)
+        runner = LocalTestRunner(agent_loop=agent, llm_client=client)
 
         rows = [create_sample_row(i) for i in range(3)]
         result = await runner.run_batch(rows)
 
-        assert isinstance(result, TestBatchResult)
+        assert isinstance(result, LocalTestBatchResult)
         assert result.total == 3
         assert result.passed == 3
         assert result.failed == 0
@@ -298,7 +298,7 @@ class TestTestRunner:
                 return ctx.complete(list(ctx.request.messages))
 
         agent = FailingAgent(tools=[create_sample_tool()])
-        runner = TestRunner(agent_loop=agent, llm_client=client)
+        runner = LocalTestRunner(agent_loop=agent, llm_client=client)
 
         rows = [create_sample_row(i) for i in range(3)]
         result = await runner.run_batch(rows)
@@ -314,11 +314,11 @@ class TestTestRunner:
         """Test that progress callback is called."""
         client = MockTestLLMClient()
         agent = MockAgentLoop(tools=[create_sample_tool()])
-        runner = TestRunner(agent_loop=agent, llm_client=client)
+        runner = LocalTestRunner(agent_loop=agent, llm_client=client)
 
         progress_calls: List[tuple] = []
 
-        def on_progress(current: int, total: int, result: TestRunResult) -> None:
+        def on_progress(current: int, total: int, result: LocalTestRunResult) -> None:
             progress_calls.append((current, total, result))
 
         rows = [create_sample_row(i) for i in range(3)]
@@ -334,7 +334,7 @@ class TestTestRunner:
         """Test that start_index offsets row indices correctly."""
         client = MockTestLLMClient()
         agent = MockAgentLoop(tools=[create_sample_tool()], call_llm=True)
-        runner = TestRunner(agent_loop=agent, llm_client=client)
+        runner = LocalTestRunner(agent_loop=agent, llm_client=client)
 
         rows = [create_sample_row(i) for i in range(3)]
         result = await runner.run_batch(rows, start_index=50)
@@ -360,11 +360,11 @@ class TestTestRunner:
         """Test that progress callback receives correct offset row indices."""
         client = MockTestLLMClient()
         agent = MockAgentLoop(tools=[create_sample_tool()])
-        runner = TestRunner(agent_loop=agent, llm_client=client)
+        runner = LocalTestRunner(agent_loop=agent, llm_client=client)
 
         progress_calls: List[tuple] = []
 
-        def on_progress(current: int, total: int, result: TestRunResult) -> None:
+        def on_progress(current: int, total: int, result: LocalTestRunResult) -> None:
             progress_calls.append((current, total, result.row_index))
 
         rows = [create_sample_row(i) for i in range(3)]
@@ -384,7 +384,7 @@ class TestToolValidation:
         """Test that valid tool schema passes validation."""
         client = MockTestLLMClient()
         agent = MockAgentLoop(tools=[create_sample_tool()])
-        runner = TestRunner(agent_loop=agent, llm_client=client)
+        runner = LocalTestRunner(agent_loop=agent, llm_client=client)
 
         row = create_sample_row(0)
         result = await runner.run_single(row, row_index=0)
@@ -401,7 +401,7 @@ class TestToolValidation:
         invalid_tool.function = None
 
         agent = MockAgentLoop(tools=[invalid_tool])
-        runner = TestRunner(agent_loop=agent, llm_client=client)
+        runner = LocalTestRunner(agent_loop=agent, llm_client=client)
 
         row = create_sample_row(0)
         result = await runner.run_single(row, row_index=0)
@@ -421,7 +421,7 @@ class TestToolValidation:
         invalid_tool.function.name = None
 
         agent = MockAgentLoop(tools=[invalid_tool])
-        runner = TestRunner(agent_loop=agent, llm_client=client)
+        runner = LocalTestRunner(agent_loop=agent, llm_client=client)
 
         row = create_sample_row(0)
         result = await runner.run_single(row, row_index=0)
@@ -441,7 +441,7 @@ class TestToolValidation:
         invalid_tool.function.parameters = None
 
         agent = MockAgentLoop(tools=[invalid_tool])
-        runner = TestRunner(agent_loop=agent, llm_client=client)
+        runner = LocalTestRunner(agent_loop=agent, llm_client=client)
 
         row = create_sample_row(0)
         result = await runner.run_single(row, row_index=0)
@@ -463,7 +463,7 @@ class TestToolValidation:
         invalid_tool.function.parameters.type = "array"  # should be "object"
 
         agent = MockAgentLoop(tools=[invalid_tool])
-        runner = TestRunner(agent_loop=agent, llm_client=client)
+        runner = LocalTestRunner(agent_loop=agent, llm_client=client)
 
         row = create_sample_row(0)
         result = await runner.run_single(row, row_index=0)
@@ -480,7 +480,7 @@ class TestContextCreation:
         """Test that context has correct request data."""
         client = MockTestLLMClient()
         agent = MockAgentLoop(tools=[])
-        runner = TestRunner(agent_loop=agent, llm_client=client)
+        runner = LocalTestRunner(agent_loop=agent, llm_client=client)
 
         row: Dict[str, Any] = {
             "user_prompt": "Test question",
@@ -506,7 +506,7 @@ class TestContextCreation:
         client = MockTestLLMClient()
         tool = create_sample_tool()
         agent = MockAgentLoop(tools=[tool])
-        runner = TestRunner(agent_loop=agent, llm_client=client)
+        runner = LocalTestRunner(agent_loop=agent, llm_client=client)
 
         row = create_sample_row(0)
         await runner.run_single(row, row_index=0)
@@ -521,7 +521,7 @@ class TestContextCreation:
         """Test that context has the LLM client."""
         client = MockTestLLMClient()
         agent = MockAgentLoop(tools=[])
-        runner = TestRunner(agent_loop=agent, llm_client=client)
+        runner = LocalTestRunner(agent_loop=agent, llm_client=client)
 
         row = create_sample_row(0)
         await runner.run_single(row, row_index=0)

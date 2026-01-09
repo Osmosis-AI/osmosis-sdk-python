@@ -7,6 +7,7 @@ Commands: [n]ext, [c]ontinue, [m]essages, [t]ools, [q]uit
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 import sys
 import time
@@ -444,8 +445,8 @@ class InteractiveRunner:
 
             # Create callback to update current messages for the 'm' command
             def update_messages(messages: List[Dict[str, Any]]) -> None:
-                # Create a copy of the messages list to track conversation progress
-                self._current_messages = [dict(m) for m in messages]
+                # Create a deep copy of the messages list to track conversation progress
+                self._current_messages = copy.deepcopy(messages)
 
             # Create interactive client wrapper
             interactive_client = InteractiveLLMClient(

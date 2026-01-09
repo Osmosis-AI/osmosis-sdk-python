@@ -103,7 +103,7 @@ class ExternalLLMClient:
     def set_tools(self, tools: List[Any]) -> None:
         """Set tools for the current test row.
 
-        Called by TestRunner before each row execution.
+        Called by LocalTestRunner before each row execution.
         Tools are converted to dict format for API calls.
 
         Note: We use exclude_none=True because LLM APIs reject null values

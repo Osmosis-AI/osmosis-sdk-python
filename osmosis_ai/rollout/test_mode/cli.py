@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING, Any, Dict, Optional
 from osmosis_ai.rollout.core.base import RolloutAgentLoop
 
 if TYPE_CHECKING:
-    from osmosis_ai.rollout.test_mode.runner import TestRunResult
+    from osmosis_ai.rollout.test_mode.runner import LocalTestRunResult
 
 logger = logging.getLogger(__name__)
 
@@ -270,7 +270,7 @@ class TestCommand:
         from osmosis_ai.rollout.test_mode.external_llm_client import (
             ExternalLLMClient,
         )
-        from osmosis_ai.rollout.test_mode.runner import TestRunner
+        from osmosis_ai.rollout.test_mode.runner import LocalTestRunner
 
         # Validate --row requires --interactive
         if args.row is not None and not args.interactive:
@@ -389,7 +389,7 @@ class TestCommand:
             return 0
 
         # Batch mode: run all tests
-        runner = TestRunner(
+        runner = LocalTestRunner(
             agent_loop=agent_loop,
             llm_client=llm_client,
             debug=args.debug,
@@ -397,7 +397,7 @@ class TestCommand:
 
         # Progress callback
         def on_progress(
-            current: int, total: int, result: "TestRunResult"
+            current: int, total: int, result: "LocalTestRunResult"
         ) -> None:
             if args.quiet:
                 return
