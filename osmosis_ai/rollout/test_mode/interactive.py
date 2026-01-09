@@ -164,6 +164,31 @@ class InteractiveRunner:
     Pauses after each LLM call for user to inspect state and control execution.
     """
 
+    # Command definitions: maps aliases to (handler_method_name, description)
+    _COMMANDS: Dict[str, Tuple[str, str]] = {
+        "n": ("_cmd_next", "Continue to next step"),
+        "next": ("_cmd_next", "Continue to next step"),
+        "": ("_cmd_next", "Continue to next step"),
+        "c": ("_cmd_continue", "Continue to completion (no more pauses)"),
+        "continue": ("_cmd_continue", "Continue to completion (no more pauses)"),
+        "m": ("_cmd_messages", "Show all messages"),
+        "messages": ("_cmd_messages", "Show all messages"),
+        "t": ("_cmd_tools", "Show available tools"),
+        "tools": ("_cmd_tools", "Show available tools"),
+        "q": ("_cmd_quit", "Abort execution"),
+        "quit": ("_cmd_quit", "Abort execution"),
+        "exit": ("_cmd_quit", "Abort execution"),
+    }
+
+    # Short aliases for help display (primary commands only)
+    _HELP_COMMANDS: List[Tuple[str, str, str]] = [
+        ("n/next", "", "Continue to next step"),
+        ("c", "", "Continue to completion (no more pauses)"),
+        ("m", "", "Show all messages"),
+        ("t", "", "Show available tools"),
+        ("q/quit", "", "Abort execution"),
+    ]
+
     def __init__(
         self,
         agent_loop: RolloutAgentLoop,
@@ -323,6 +348,42 @@ class InteractiveRunner:
             self.console.print()
             return "q"
 
+    # Command handlers return: (should_return, return_value)
+    # If should_return is True, _handle_step returns return_value
+    # If should_return is False, the command loop continues
+
+    def _cmd_next(self) -> Tuple[bool, bool]:
+        """Continue to next step."""
+        return (True, True)
+
+    def _cmd_continue(self) -> Tuple[bool, bool]:
+        """Auto-continue to completion."""
+        self._auto_continue = True
+        self.console.print("Continuing to completion...", style="dim")
+        return (True, True)
+
+    def _cmd_messages(self) -> Tuple[bool, bool]:
+        """Show all messages."""
+        self._print_all_messages(self._current_messages)
+        return (False, False)
+
+    def _cmd_tools(self) -> Tuple[bool, bool]:
+        """Show tools."""
+        self._print_tools(self._current_tools)
+        return (False, False)
+
+    def _cmd_quit(self) -> Tuple[bool, bool]:
+        """Abort execution."""
+        self.console.print("Aborting execution...", style="yellow")
+        return (True, False)
+
+    def _print_help(self, unknown_cmd: Optional[str] = None) -> None:
+        """Print help for available commands."""
+        if unknown_cmd is not None:
+            self.console.print(f"Unknown command: {unknown_cmd}", style="red")
+        for cmd, _, desc in self._HELP_COMMANDS:
+            self.console.print(f"  {cmd:9} - {desc}")
+
     def _handle_step(self, step: InteractiveStep) -> bool:
         """Handle a step in interactive mode.
 
@@ -337,36 +398,14 @@ class InteractiveRunner:
         while True:
             user_input = self._get_user_input()
 
-            if user_input in ("n", "next", ""):
-                # Continue to next step
-                return True
-
-            elif user_input in ("c", "continue"):
-                # Auto-continue to completion
-                self._auto_continue = True
-                self.console.print("Continuing to completion...", style="dim")
-                return True
-
-            elif user_input in ("m", "messages"):
-                # Show all messages
-                self._print_all_messages(self._current_messages)
-
-            elif user_input in ("t", "tools"):
-                # Show tools
-                self._print_tools(self._current_tools)
-
-            elif user_input in ("q", "quit", "exit"):
-                # Abort execution
-                self.console.print("Aborting execution...", style="yellow")
-                return False
-
+            if user_input in self._COMMANDS:
+                handler_name, _ = self._COMMANDS[user_input]
+                handler = getattr(self, handler_name)
+                should_return, return_value = handler()
+                if should_return:
+                    return return_value
             else:
-                self.console.print(f"Unknown command: {user_input}", style="red")
-                self.console.print("  n/next  - Continue to next step")
-                self.console.print("  c       - Continue to completion (no more pauses)")
-                self.console.print("  m       - Show all messages")
-                self.console.print("  t       - Show available tools")
-                self.console.print("  q/quit  - Abort execution")
+                self._print_help(user_input)
 
     async def run_single_interactive(
         self,
