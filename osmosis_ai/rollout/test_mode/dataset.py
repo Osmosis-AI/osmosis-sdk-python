@@ -41,6 +41,8 @@ logger = logging.getLogger(__name__)
 
 # Required columns (consistent with Osmosis Platform app)
 REQUIRED_COLUMNS = ["ground_truth", "user_prompt", "system_prompt"]
+# Pre-computed set for efficient membership testing (all lowercase)
+REQUIRED_COLUMNS_SET = frozenset(REQUIRED_COLUMNS)
 
 
 class DatasetRow(TypedDict):
@@ -362,7 +364,7 @@ class DatasetReader:
 
         # Preserve additional columns with original casing
         for key, value in row.items():
-            if key.lower() not in [c.lower() for c in REQUIRED_COLUMNS]:
+            if key.lower() not in REQUIRED_COLUMNS_SET:
                 result[key] = value
 
         # Use cast instead of TypedDict constructor to preserve extra columns.
@@ -405,7 +407,7 @@ def dataset_row_to_request(
 
     # Preserve any extra columns from dataset
     for key, value in row.items():
-        if key not in REQUIRED_COLUMNS:
+        if key not in REQUIRED_COLUMNS_SET:
             metadata[key] = value
 
     return RolloutRequest(
