@@ -44,7 +44,8 @@ from osmosis_ai.rollout.core.schemas import (
 )
 
 if TYPE_CHECKING:
-    from osmosis_ai.rollout.client import CompletionsResult, OsmosisLLMClient
+    from osmosis_ai.rollout.client import CompletionsResult
+    from osmosis_ai.rollout.core.llm_client import LLMClientProtocol
 
 logger = logging.getLogger(__name__)
 
@@ -108,7 +109,7 @@ class RolloutContext:
     Attributes:
         request: The original RolloutRequest with messages and parameters.
         tools: List of tools available for this rollout.
-        llm: OsmosisLLMClient for calling TrainGate's LLM endpoint.
+        llm: LLM client implementing LLMClientProtocol (OsmosisLLMClient or ExternalLLMClient).
 
     Example:
         async def run(self, ctx: RolloutContext) -> RolloutResult:
@@ -132,7 +133,7 @@ class RolloutContext:
 
     request: RolloutRequest
     tools: List[OpenAIFunctionToolSchema]
-    llm: "OsmosisLLMClient"
+    llm: "LLMClientProtocol"
 
     # Internal state for tracking metrics
     _start_time: float = field(default=0.0, repr=False)

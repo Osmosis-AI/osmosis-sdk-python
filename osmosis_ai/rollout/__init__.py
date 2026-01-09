@@ -49,6 +49,7 @@ from osmosis_ai.rollout.client import (
     CompletionsResult,
     OsmosisLLMClient,
 )
+from osmosis_ai.rollout.core.llm_client import LLMClientProtocol
 from osmosis_ai.rollout.core.exceptions import (
     AgentLoopNotFoundError,
     OsmosisRolloutError,
@@ -148,6 +149,7 @@ __all__ = [
     # Client
     "OsmosisLLMClient",
     "CompletionsResult",
+    "LLMClientProtocol",
     # Server
     "create_app",
     "serve_agent_loop",
