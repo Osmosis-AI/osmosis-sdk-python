@@ -372,11 +372,14 @@ class TestCommand:
         self,
         args: argparse.Namespace,
         setup: _SetupResult,
-    ) -> Tuple[Optional["BatchTestResult"], Optional[str]]:
+    ) -> "BatchTestResult":
         """Run batch mode tests.
 
         Returns:
-            Tuple of (batch_result, error_message). If successful, error is None.
+            BatchTestResult with all test results.
+
+        Raises:
+            Exception: If test execution fails (propagates to caller for traceback).
         """
         from osmosis_ai.rollout.test_mode.runner import LocalTestRunner
 
@@ -412,19 +415,16 @@ class TestCommand:
             self.console.print()
             self.console.print("Running tests...")
 
-        try:
-            async with setup.llm_client:
-                batch_result = await runner.run_batch(
-                    rows=setup.rows,
-                    max_turns=args.max_turns,
-                    completion_params=setup.completion_params if setup.completion_params else None,
-                    on_progress=on_progress,
-                    start_index=args.offset,
-                )
-        except Exception as e:
-            return None, str(e)
+        async with setup.llm_client:
+            batch_result = await runner.run_batch(
+                rows=setup.rows,
+                max_turns=args.max_turns,
+                completion_params=setup.completion_params if setup.completion_params else None,
+                on_progress=on_progress,
+                start_index=args.offset,
+            )
 
-        return batch_result, None
+        return batch_result
 
     def _print_summary(self, batch_result: "BatchTestResult") -> None:
         """Print batch test summary."""
@@ -533,9 +533,10 @@ class TestCommand:
             return await self._run_interactive_mode(args, setup)
 
         # Batch mode
-        batch_result, error = await self._run_batch_mode(args, setup)
-        if error:
-            self.console.print_error(f"Error during test execution: {error}")
+        try:
+            batch_result = await self._run_batch_mode(args, setup)
+        except Exception as e:
+            self.console.print_error(f"Error during test execution: {e}")
             if args.debug:
                 import traceback
 
@@ -544,12 +545,12 @@ class TestCommand:
 
         # Print summary and write output
         if not args.quiet:
-            self._print_summary(batch_result)  # type: ignore[arg-type]
+            self._print_summary(batch_result)
 
-        self._write_output(args, batch_result)  # type: ignore[arg-type]
+        self._write_output(args, batch_result)
 
         # Return exit code based on failures
-        return 1 if batch_result.failed > 0 else 0  # type: ignore[union-attr]
+        return 1 if batch_result.failed > 0 else 0
 
 
 __all__ = ["TestCommand"]
