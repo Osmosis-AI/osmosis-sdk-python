@@ -22,6 +22,7 @@ import sys
 from typing import Optional, TYPE_CHECKING
 
 from osmosis_ai.rollout._compat import FASTAPI_AVAILABLE, UVICORN_AVAILABLE
+from osmosis_ai.rollout.console import Console
 from osmosis_ai.rollout.core.base import RolloutAgentLoop
 from osmosis_ai.rollout.server.api_key import generate_api_key
 from osmosis_ai.rollout.validator import (
@@ -204,27 +205,37 @@ def serve_agent_loop(
     )
 
     # Print server info including API key
-    print(f"\nRolloutServer starting...")
-    print(f"  Agent: {agent_loop.name}")
-    print(f"  Address: {host}:{port}")
+    console = Console()
+    info_lines = [f"Agent:       {agent_loop.name}", f"Address:     {host}:{port}"]
+
     # Show detected public IP when binding to all interfaces
     if host == "0.0.0.0":
-        _print_public_ip()
+        public_ip = _get_public_ip()
+        if public_ip:
+            info_lines.append(f"Public IP:   {public_ip}")
+        else:
+            info_lines.append("Public IP:   (could not detect)")
+
     if local_debug:
-        print("  API Key: (disabled - local debug)")
+        info_lines.append("API Key:     (disabled - local debug)")
     else:
         if api_key_provided:
-            print("  API Key: (provided)")
+            info_lines.append("API Key:     (provided)")
         else:
-            print(f"  API Key: {api_key}")
+            info_lines.append(f"API Key:     {api_key}")
+
     if skip_register:
         if local_debug:
-            print("  Registration: skipped (local debug mode)")
+            info_lines.append("Registration: skipped (local debug mode)")
         else:
-            print("  Registration: skipped (local testing mode)")
+            info_lines.append("Registration: skipped (local testing mode)")
+
     if debug_session_dir:
-        print(f"  Debug Log: {debug_session_dir}/")
-    print()
+        info_lines.append(f"Debug Log:   {debug_session_dir}/")
+
+    console.print()
+    console.panel("RolloutServer", "\n".join(info_lines), style="green")
+    console.print()
 
     uvicorn.run(
         app,
@@ -262,35 +273,35 @@ def validate_and_report(
     return result
 
 
-def _print_public_ip() -> None:
-    """Print detected public IP address."""
+def _get_public_ip() -> Optional[str]:
+    """Get detected public IP address, or None if detection fails."""
     from osmosis_ai.rollout.network import detect_public_ip, PublicIPDetectionError
 
     try:
-        public_ip = detect_public_ip()
-        print(f"  Public IP: {public_ip}")
+        return detect_public_ip()
     except PublicIPDetectionError:
-        print("  Public IP: (could not detect)")
+        return None
 
 
 def _log_validation_result(result: ValidationResult, *, verbose: bool = False) -> None:
     """Log validation result to console."""
+    console = Console()
     if result.valid:
-        print(f"Agent loop '{result.agent_name}' validated successfully.")
-        print(f"  - Tools: {result.tool_count}")
+        console.print(f"Agent loop '{result.agent_name}' validated successfully.", style="green")
+        console.print(f"  - Tools: {result.tool_count}")
         if result.warnings:
-            print(f"  - Warnings: {len(result.warnings)}")
+            console.print(f"  - Warnings: {len(result.warnings)}", style="yellow")
             if verbose:
                 for warning in result.warnings:
-                    print(f"    - {warning}")
+                    console.print(f"    - {warning}", style="yellow")
     else:
-        print(f"Agent loop validation failed with {len(result.errors)} error(s):", file=sys.stderr)
+        console.print_error(f"Agent loop validation failed with {len(result.errors)} error(s):")
         for error in result.errors:
-            print(f"  - {error}", file=sys.stderr)
+            console.print_error(f"  - {error}")
         if result.warnings and verbose:
-            print(f"\nWarnings ({len(result.warnings)}):", file=sys.stderr)
+            console.print_error(f"\nWarnings ({len(result.warnings)}):")
             for warning in result.warnings:
-                print(f"  - {warning}", file=sys.stderr)
+                console.print_error(f"  - {warning}")
 
 
 __all__ = [

@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, Optional
 
 from osmosis_ai.rollout.cli_utils import CLIError, load_agent_loop
+from osmosis_ai.rollout.console import Console
 
 if TYPE_CHECKING:
     from osmosis_ai.rollout.test_mode.runner import LocalTestRunResult
@@ -53,6 +54,10 @@ def _format_tokens(tokens: int) -> str:
 
 class TestCommand:
     """Handler for `osmosis test`."""
+
+    def __init__(self) -> None:
+        """Initialize the test command."""
+        self.console = Console()
 
     def configure_parser(self, parser: argparse.ArgumentParser) -> None:
         """Configure argument parser for test command."""
@@ -209,10 +214,7 @@ class TestCommand:
 
         # Validate --row requires --interactive
         if args.row is not None and not args.interactive:
-            print(
-                "Error: --row can only be used with --interactive mode",
-                file=sys.stderr,
-            )
+            self.console.print_error("Error: --row can only be used with --interactive mode")
             return 1
 
         # Print header
@@ -221,46 +223,46 @@ class TestCommand:
             from osmosis_ai.consts import PACKAGE_VERSION
 
             mode_suffix = " (Interactive Mode)" if is_interactive else ""
-            print(f"osmosis-rollout-test v{PACKAGE_VERSION}{mode_suffix}")
-            print()
+            self.console.print(f"osmosis-rollout-test v{PACKAGE_VERSION}{mode_suffix}", style="bold")
+            self.console.print()
 
         # Load agent loop
         if not args.quiet:
-            print(f"Loading agent: {args.module}")
+            self.console.print(f"Loading agent: {args.module}")
 
         try:
             agent_loop = _load_agent_loop(args.module)
         except CLIError as e:
-            print(f"Error: {e}", file=sys.stderr)
+            self.console.print_error(f"Error: {e}")
             return 1
 
         if not args.quiet:
-            print(f"  Agent name: {agent_loop.name}")
+            self.console.print(f"  Agent name: {agent_loop.name}")
 
         # Load dataset
         if not args.quiet:
-            print(f"Loading dataset: {args.dataset}")
+            self.console.print(f"Loading dataset: {args.dataset}")
 
         try:
             reader = DatasetReader(args.dataset)
             total_rows = len(reader)
             rows = reader.read(limit=args.limit, offset=args.offset)
         except FileNotFoundError as e:
-            print(f"Error: {e}", file=sys.stderr)
+            self.console.print_error(f"Error: {e}")
             return 1
         except (DatasetParseError, DatasetValidationError) as e:
-            print(f"Error: {e}", file=sys.stderr)
+            self.console.print_error(f"Error: {e}")
             return 1
 
         if not rows:
-            print("Error: No rows to test", file=sys.stderr)
+            self.console.print_error("Error: No rows to test")
             return 1
 
         if not args.quiet:
             if args.limit:
-                print(f"  Total rows: {total_rows} (testing {len(rows)})")
+                self.console.print(f"  Total rows: {total_rows} (testing {len(rows)})")
             else:
-                print(f"  Total rows: {len(rows)}")
+                self.console.print(f"  Total rows: {len(rows)}")
 
         # Initialize LLM client (via LiteLLM)
         model = args.model
@@ -269,7 +271,7 @@ class TestCommand:
                 provider_name = model.split("/")[0]
             else:
                 provider_name = "openai"
-            print(f"Initializing provider: {provider_name}")
+            self.console.print(f"Initializing provider: {provider_name}")
 
         try:
             llm_client = ExternalLLMClient(
@@ -278,12 +280,12 @@ class TestCommand:
                 api_base=args.base_url,
             )
         except ProviderError as e:
-            print(f"Error: {e}", file=sys.stderr)
+            self.console.print_error(f"Error: {e}")
             return 1
 
         if not args.quiet:
             model_name = getattr(llm_client, "model", "default")
-            print(f"  Model: {model_name}")
+            self.console.print(f"  Model: {model_name}")
 
         # Build completion params
         completion_params: Dict[str, Any] = {}
@@ -303,7 +305,7 @@ class TestCommand:
                 debug=args.debug,
             )
 
-            print()
+            self.console.print()
             try:
                 async with llm_client:
                     await interactive_runner.run_interactive_session(
@@ -314,7 +316,7 @@ class TestCommand:
                         row_offset=args.offset,
                     )
             except Exception as e:
-                print(f"Error during interactive session: {e}", file=sys.stderr)
+                self.console.print_error(f"Error during interactive session: {e}")
                 if args.debug:
                     import traceback
 
@@ -337,6 +339,7 @@ class TestCommand:
             if args.quiet:
                 return
 
+            status_style = "green" if result.success else "red"
             status = "OK" if result.success else "FAILED"
             duration = _format_duration(result.duration_ms)
             tokens = result.token_usage.get("total_tokens", 0)
@@ -347,15 +350,16 @@ class TestCommand:
                 error_msg = result.error[:50] + "..." if len(result.error) > 50 else result.error
                 error_suffix = f" - {error_msg}"
 
-            print(
-                f"[{current}/{total}] Row {result.row_index}: {status} "
+            status_styled = self.console.format_styled(status, status_style)
+            self.console.print(
+                f"[{current}/{total}] Row {result.row_index}: {status_styled} "
                 f"({duration}, {_format_tokens(tokens)} tokens){error_suffix}"
             )
 
         # Run tests
         if not args.quiet:
-            print()
-            print("Running tests...")
+            self.console.print()
+            self.console.print("Running tests...")
 
         try:
             async with llm_client:
@@ -367,7 +371,7 @@ class TestCommand:
                     start_index=args.offset,
                 )
         except Exception as e:
-            print(f"Error during test execution: {e}", file=sys.stderr)
+            self.console.print_error(f"Error during test execution: {e}")
             if args.debug:
                 import traceback
 
@@ -376,13 +380,17 @@ class TestCommand:
 
         # Print summary
         if not args.quiet:
-            print()
-            print("Summary:")
-            print(f"  Total: {batch_result.total}")
-            print(f"  Passed: {batch_result.passed}")
-            print(f"  Failed: {batch_result.failed}")
-            print(f"  Duration: {_format_duration(batch_result.total_duration_ms)}")
-            print(f"  Total tokens: {_format_tokens(batch_result.total_tokens)}")
+            self.console.print()
+            self.console.print("Summary:", style="bold")
+            self.console.print(f"  Total: {batch_result.total}")
+            passed_style = "green" if batch_result.passed > 0 else None
+            failed_style = "red" if batch_result.failed > 0 else None
+            passed_text = self.console.format_styled(str(batch_result.passed), passed_style) if passed_style else str(batch_result.passed)
+            failed_text = self.console.format_styled(str(batch_result.failed), failed_style) if failed_style else str(batch_result.failed)
+            self.console.print(f"  Passed: {passed_text}")
+            self.console.print(f"  Failed: {failed_text}")
+            self.console.print(f"  Duration: {_format_duration(batch_result.total_duration_ms)}")
+            self.console.print(f"  Total tokens: {_format_tokens(batch_result.total_tokens)}")
 
         # Write output file
         if args.output:
@@ -415,7 +423,7 @@ class TestCommand:
                 json.dump(output_data, f, indent=2)
 
             if not args.quiet:
-                print(f"\nResults written to: {args.output}")
+                self.console.print(f"\nResults written to: {args.output}")
 
         # Return exit code based on failures
         if batch_result.failed > 0:

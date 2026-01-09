@@ -9,12 +9,12 @@ from __future__ import annotations
 import asyncio
 import copy
 import json
-import sys
 import time
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from osmosis_ai.rollout.client import CompletionsResult
+from osmosis_ai.rollout.console import Console
 from osmosis_ai.rollout.core.base import (
     RolloutAgentLoop,
     RolloutContext,
@@ -164,17 +164,6 @@ class InteractiveRunner:
     Pauses after each LLM call for user to inspect state and control execution.
     """
 
-    # ANSI color codes
-    RESET = "\033[0m"
-    BOLD = "\033[1m"
-    DIM = "\033[2m"
-    GREEN = "\033[32m"
-    YELLOW = "\033[33m"
-    BLUE = "\033[34m"
-    MAGENTA = "\033[35m"
-    CYAN = "\033[36m"
-    RED = "\033[31m"
-
     def __init__(
         self,
         agent_loop: RolloutAgentLoop,
@@ -191,6 +180,7 @@ class InteractiveRunner:
         self.agent_loop = agent_loop
         self.llm_client = llm_client
         self.debug = debug
+        self.console = Console()
 
         # State for interactive session
         self._current_messages: List[Dict[str, Any]] = []
@@ -199,16 +189,7 @@ class InteractiveRunner:
 
     def _print_separator(self, title: str = "") -> None:
         """Print a separator line."""
-        width = 60
-        if title:
-            padding = (width - len(title) - 2) // 2
-            line = "─" * padding + f" {title} " + "─" * padding
-            # Adjust if odd length
-            if len(line) < width:
-                line += "─"
-        else:
-            line = "─" * width
-        print(f"{self.DIM}{line}{self.RESET}")
+        self.console.separator(title)
 
     def _print_message(self, msg: Dict[str, Any], prefix: str = "") -> None:
         """Print a message in a formatted way."""
@@ -216,28 +197,21 @@ class InteractiveRunner:
         content = msg.get("content", "")
 
         # Color based on role
-        if role == "system":
-            color = self.MAGENTA
-            label = "System"
-        elif role == "user":
-            color = self.GREEN
-            label = "User"
-        elif role == "assistant":
-            color = self.BLUE
-            label = "Assistant"
-        elif role == "tool":
-            color = self.CYAN
-            label = f"Tool ({msg.get('name', 'unknown')})"
-        else:
-            color = self.RESET
-            label = role.capitalize()
+        role_styles = {
+            "system": ("magenta", "System"),
+            "user": ("green", "User"),
+            "assistant": ("blue", "Assistant"),
+            "tool": ("cyan", f"Tool ({msg.get('name', 'unknown')})"),
+        }
 
-        print(f"{prefix}{color}[{label}]{self.RESET} {content}")
+        style, label = role_styles.get(role, (None, role.capitalize()))
+        styled_label = self.console.format_styled(f"[{label}]", style) if style else f"[{label}]"
+        self.console.print(f"{prefix}{styled_label} {content}")
 
         # Print tool calls if present
         tool_calls = msg.get("tool_calls", [])
         if tool_calls:
-            print(f"\n{prefix}{self.YELLOW}Tool calls:{self.RESET}")
+            self.console.print(f"\n{prefix}{self.console.format_styled('Tool calls:', 'yellow')}")
             for tc in tool_calls:
                 func = tc.get("function", {})
                 name = func.get("name", "unknown")
@@ -258,51 +232,53 @@ class InteractiveRunner:
                 else:
                     args_display = args_str
 
-                print(f"{prefix}  • {self.CYAN}{name}{self.RESET}({args_display})")
+                styled_name = self.console.format_styled(name, "cyan")
+                self.console.print(f"{prefix}  • {styled_name}({args_display})")
 
     def _print_step(self, step: InteractiveStep) -> None:
         """Print a step in the interactive session."""
         self._print_separator(f"Turn {step.turn}: LLM Response")
-        print()
+        self.console.print()
 
         if step.message:
             self._print_message(step.message)
 
         if step.finish_reason and step.finish_reason != "tool_calls":
-            print(f"\n{self.DIM}Finish reason: {step.finish_reason}{self.RESET}")
+            self.console.print(f"\nFinish reason: {step.finish_reason}", style="dim")
 
-        print()
+        self.console.print()
 
     def _print_initial_messages(self, messages: List[Dict[str, Any]]) -> None:
         """Print the initial conversation messages."""
         self._print_separator("Initial Messages")
-        print()
+        self.console.print()
         for msg in messages:
             self._print_message(msg)
-            print()
+            self.console.print()
 
     def _print_tools(self, tools: List[OpenAIFunctionToolSchema]) -> None:
         """Print available tools."""
         self._print_separator("Available Tools")
-        print()
+        self.console.print()
         for tool in tools:
             func = tool.function
-            print(f"  • {self.CYAN}{func.name}{self.RESET}")
+            styled_name = self.console.format_styled(func.name, "cyan")
+            self.console.print(f"  • {styled_name}")
             if func.description:
-                print(f"    {self.DIM}{func.description}{self.RESET}")
+                self.console.print(f"    {func.description}", style="dim")
             if func.parameters and func.parameters.properties:
                 props = func.parameters.properties
-                print(f"    Parameters: {', '.join(props.keys())}")
-        print()
+                self.console.print(f"    Parameters: {', '.join(props.keys())}")
+        self.console.print()
 
     def _print_all_messages(self, messages: List[Dict[str, Any]]) -> None:
         """Print all messages in the conversation."""
         self._print_separator("All Messages")
-        print()
+        self.console.print()
         for i, msg in enumerate(messages):
-            print(f"{self.DIM}[{i}]{self.RESET}", end=" ")
+            self.console.print(f"[{i}]", style="dim", end=" ")
             self._print_message(msg)
-            print()
+            self.console.print()
 
     def _print_result(
         self,
@@ -313,38 +289,38 @@ class InteractiveRunner:
     ) -> None:
         """Print the final result."""
         self._print_separator("Result")
-        print()
+        self.console.print()
 
         if error:
-            print(f"{self.RED}Status: ERROR{self.RESET}")
-            print(f"{self.RED}Error: {error}{self.RESET}")
+            self.console.print("Status: ERROR", style="red")
+            self.console.print(f"Error: {error}", style="red")
         elif result:
-            status_color = self.GREEN if result.status == "COMPLETED" else self.YELLOW
-            print(f"{status_color}Status: {result.status}{self.RESET}")
+            status_style = "green" if result.status == "COMPLETED" else "yellow"
+            self.console.print(f"Status: {result.status}", style=status_style)
 
             if result.reward is not None:
-                print(f"Reward: {result.reward}")
+                self.console.print(f"Reward: {result.reward}")
 
             if result.finish_reason:
-                print(f"Finish reason: {result.finish_reason}")
+                self.console.print(f"Finish reason: {result.finish_reason}")
 
-        print(f"Duration: {duration_ms/1000:.2f}s")
+        self.console.print(f"Duration: {duration_ms/1000:.2f}s")
         total_tokens = metrics.prompt_tokens + metrics.response_tokens
-        print(f"Tokens: {total_tokens:,} ({metrics.num_llm_calls} LLM calls)")
-        print()
+        self.console.print(f"Tokens: {total_tokens:,} ({metrics.num_llm_calls} LLM calls)")
+        self.console.print()
 
     def _get_user_input(self) -> str:
         """Get user input with command prompt."""
-        print(
-            f"{self.DIM}Commands: "
-            f"[n]ext, [c]ontinue, [m]essages, [t]ools, [q]uit{self.RESET}"
+        self.console.print(
+            "Commands: [n]ext, [c]ontinue, [m]essages, [t]ools, [q]uit",
+            style="dim",
         )
         try:
-            return input(f"{self.BOLD}>{self.RESET} ").strip().lower()
+            return self.console.input("> ", style="bold").strip().lower()
         except EOFError:
             return "q"
         except KeyboardInterrupt:
-            print()
+            self.console.print()
             return "q"
 
     def _handle_step(self, step: InteractiveStep) -> bool:
@@ -368,7 +344,7 @@ class InteractiveRunner:
             elif user_input in ("c", "continue"):
                 # Auto-continue to completion
                 self._auto_continue = True
-                print(f"{self.DIM}Continuing to completion...{self.RESET}")
+                self.console.print("Continuing to completion...", style="dim")
                 return True
 
             elif user_input in ("m", "messages"):
@@ -381,18 +357,16 @@ class InteractiveRunner:
 
             elif user_input in ("q", "quit", "exit"):
                 # Abort execution
-                print(f"{self.YELLOW}Aborting execution...{self.RESET}")
+                self.console.print("Aborting execution...", style="yellow")
                 return False
 
             else:
-                print(
-                    f"{self.RED}Unknown command: {user_input}{self.RESET}"
-                )
-                print("  n/next  - Continue to next step")
-                print("  c       - Continue to completion (no more pauses)")
-                print("  m       - Show all messages")
-                print("  t       - Show available tools")
-                print("  q/quit  - Abort execution")
+                self.console.print(f"Unknown command: {user_input}", style="red")
+                self.console.print("  n/next  - Continue to next step")
+                self.console.print("  c       - Continue to completion (no more pauses)")
+                self.console.print("  m       - Show all messages")
+                self.console.print("  t       - Show available tools")
+                self.console.print("  q/quit  - Abort execution")
 
     async def run_single_interactive(
         self,
@@ -523,7 +497,7 @@ class InteractiveRunner:
         total_rows = len(rows)
 
         if total_rows == 0:
-            print(f"{self.RED}No rows available to test.{self.RESET}")
+            self.console.print("No rows available to test.", style="red")
             return
 
         # Calculate display range (absolute row indices in the dataset file)
@@ -537,7 +511,7 @@ class InteractiveRunner:
             relative_row = initial_row - row_offset
             if 0 <= relative_row < total_rows:
                 self._print_separator(f"Row {initial_row}")
-                print()
+                self.console.print()
                 await self.run_single_interactive(
                     rows[relative_row],
                     initial_row,  # Pass absolute index for display/rollout_id
@@ -545,23 +519,23 @@ class InteractiveRunner:
                     completion_params,
                 )
             else:
-                print(
-                    f"{self.RED}Invalid row index: {initial_row}. "
-                    f"Valid range: {start_row}-{end_row}{self.RESET}"
+                styled_range = f"{start_row}-{end_row}"
+                self.console.print(
+                    f"Invalid row index: {initial_row}. Valid range: {styled_range}",
+                    style="red",
                 )
 
         # Interactive loop
         while True:
-            print()
-            print(
-                f"Select a row to test [{self.CYAN}{start_row}-{end_row}{self.RESET}] "
-                f"or '{self.CYAN}q{self.RESET}' to quit:"
-            )
+            self.console.print()
+            range_styled = self.console.format_styled(f"{start_row}-{end_row}", "cyan")
+            q_styled = self.console.format_styled("q", "cyan")
+            self.console.print(f"Select a row to test [{range_styled}] or '{q_styled}' to quit:")
 
             try:
-                user_input = input(f"{self.BOLD}>{self.RESET} ").strip().lower()
+                user_input = self.console.input("> ", style="bold").strip().lower()
             except (EOFError, KeyboardInterrupt):
-                print()
+                self.console.print()
                 break
 
             if user_input in ("q", "quit", "exit"):
@@ -574,7 +548,7 @@ class InteractiveRunner:
                 relative_row = absolute_row - row_offset
                 if 0 <= relative_row < total_rows:
                     self._print_separator(f"Row {absolute_row}")
-                    print()
+                    self.console.print()
                     await self.run_single_interactive(
                         rows[relative_row],
                         absolute_row,
@@ -582,14 +556,17 @@ class InteractiveRunner:
                         completion_params,
                     )
                 else:
-                    print(
-                        f"{self.RED}Invalid row index. "
-                        f"Valid range: {start_row}-{end_row}{self.RESET}"
+                    self.console.print(
+                        f"Invalid row index. Valid range: {start_row}-{end_row}",
+                        style="red",
                     )
             except ValueError:
-                print(f"{self.RED}Please enter a valid row number or 'q' to quit.{self.RESET}")
+                self.console.print(
+                    "Please enter a valid row number or 'q' to quit.",
+                    style="red",
+                )
 
-        print(f"\n{self.DIM}Interactive session ended.{self.RESET}")
+        self.console.print("\nInteractive session ended.", style="dim")
 
 
 __all__ = [
