@@ -402,7 +402,8 @@ class TestCommand:
 
             error_suffix = ""
             if not result.success and result.error:
-                error_msg = result.error[:50] + "..." if len(result.error) > 50 else result.error
+                error_text = result.error.replace("\n", " ")
+                error_msg = error_text[:47] + "..." if len(error_text) > 50 else error_text
                 error_suffix = f" - {error_msg}"
 
             status_styled = self.console.format_styled(status, status_style)

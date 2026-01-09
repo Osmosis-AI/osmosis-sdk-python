@@ -275,13 +275,16 @@ class DatasetReader:
         try:
             import pyarrow.parquet as pq
         except ImportError:
-            return 0
+            raise DatasetParseError(
+                "Parquet support requires pyarrow. "
+                "Install with: pip install 'osmosis-ai[test-mode]'"
+            )
 
         try:
             metadata = pq.read_metadata(self.file_path)
             return metadata.num_rows
-        except Exception:
-            return 0
+        except Exception as e:
+            raise DatasetParseError(f"Error reading Parquet metadata: {e}") from e
 
     def _validate_row(self, row: Any, row_index: int) -> DatasetRow:
         """Validate a single row and normalize column names.

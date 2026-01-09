@@ -106,8 +106,10 @@ class Console:
 
         if self._use_rich:
             self._rich = RichConsole(file=self._file, force_terminal=force_terminal)
+            self._rich_stderr = RichConsole(file=sys.stderr)
         else:
             self._rich = None
+            self._rich_stderr = None
 
     @property
     def is_tty(self) -> bool:
@@ -155,9 +157,8 @@ class Console:
         Args:
             message: Error message to print.
         """
-        if self._use_rich:
-            error_console = RichConsole(file=sys.stderr)
-            error_console.print(message, style="bold red")
+        if self._use_rich and self._rich_stderr:
+            self._rich_stderr.print(message, style="bold red")
         else:
             is_stderr_tty = getattr(sys.stderr, "isatty", lambda: False)()
             if is_stderr_tty and not self._no_color:
