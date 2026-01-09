@@ -70,6 +70,43 @@ class TestBatchResult:
 TOOL_NAME_PATTERN = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 
 
+def validate_tools(tools: List[OpenAIFunctionToolSchema]) -> None:
+    """Validate tool schemas before sending to LLM provider.
+
+    Catches common errors early with clear messages, rather than
+    letting them fail at the LLM API with cryptic errors.
+
+    Args:
+        tools: Tool schemas returned by agent_loop.get_tools()
+
+    Raises:
+        ToolValidationError: If tool schema is invalid.
+    """
+    for i, tool in enumerate(tools):
+        # Check tool has required fields
+        if not tool.function:
+            raise ToolValidationError(f"Tool {i}: missing 'function' field")
+        if not tool.function.name:
+            raise ToolValidationError(f"Tool {i}: function must have a 'name'")
+        if not tool.function.name.strip():
+            raise ToolValidationError(f"Tool {i}: function name cannot be empty")
+
+        # Check name format (alphanumeric + underscore, common LLM requirement)
+        if not TOOL_NAME_PATTERN.match(tool.function.name):
+            raise ToolValidationError(
+                f"Tool '{tool.function.name}': name must start with letter/underscore "
+                f"and contain only alphanumeric characters and underscores"
+            )
+
+        # Check parameters schema if present
+        if tool.function.parameters:
+            params = tool.function.parameters
+            if params.type != "object":
+                raise ToolValidationError(
+                    f"Tool '{tool.function.name}': parameters.type must be 'object'"
+                )
+
+
 class TestRunner:
     """Executes agent loop tests against dataset rows.
 
@@ -140,7 +177,7 @@ class TestRunner:
             tools = self.agent_loop.get_tools(request)
 
             # 3. Validate tool schemas
-            self._validate_tools(tools)
+            validate_tools(tools)
 
             # 4. Inject tools into client
             self.llm_client.set_tools(tools)
@@ -253,45 +290,9 @@ class TestRunner:
             total_tokens=total_tokens,
         )
 
-    def _validate_tools(self, tools: List[OpenAIFunctionToolSchema]) -> None:
-        """Validate tool schemas before sending to LLM provider.
-
-        Catches common errors early with clear messages, rather than
-        letting them fail at the LLM API with cryptic errors.
-
-        Args:
-            tools: Tool schemas returned by agent_loop.get_tools()
-
-        Raises:
-            ToolValidationError: If tool schema is invalid.
-        """
-        for i, tool in enumerate(tools):
-            # Check tool has required fields
-            if not tool.function:
-                raise ToolValidationError(f"Tool {i}: missing 'function' field")
-            if not tool.function.name:
-                raise ToolValidationError(f"Tool {i}: function must have a 'name'")
-            if not tool.function.name.strip():
-                raise ToolValidationError(f"Tool {i}: function name cannot be empty")
-
-            # Check name format (alphanumeric + underscore, common LLM requirement)
-            if not TOOL_NAME_PATTERN.match(tool.function.name):
-                raise ToolValidationError(
-                    f"Tool '{tool.function.name}': name must start with letter/underscore "
-                    f"and contain only alphanumeric characters and underscores"
-                )
-
-            # Check parameters schema if present
-            if tool.function.parameters:
-                params = tool.function.parameters
-                if params.type != "object":
-                    raise ToolValidationError(
-                        f"Tool '{tool.function.name}': parameters.type must be 'object'"
-                    )
-
-
 __all__ = [
     "TestBatchResult",
     "TestRunResult",
     "TestRunner",
+    "validate_tools",
 ]

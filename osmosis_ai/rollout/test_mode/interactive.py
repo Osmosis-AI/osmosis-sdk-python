@@ -23,7 +23,7 @@ from osmosis_ai.rollout.core.schemas import OpenAIFunctionToolSchema, RolloutMet
 from osmosis_ai.rollout.test_mode.dataset import DatasetRow, dataset_row_to_request
 from osmosis_ai.rollout.test_mode.exceptions import ToolValidationError
 from osmosis_ai.rollout.test_mode.external_llm_client import ExternalLLMClient
-from osmosis_ai.rollout.test_mode.runner import TOOL_NAME_PATTERN
+from osmosis_ai.rollout.test_mode.runner import validate_tools
 
 
 @dataclass
@@ -393,29 +393,6 @@ class InteractiveRunner:
                 print("  t       - Show available tools")
                 print("  q/quit  - Abort execution")
 
-    def _validate_tools(self, tools: List[OpenAIFunctionToolSchema]) -> None:
-        """Validate tool schemas."""
-        for i, tool in enumerate(tools):
-            if not tool.function:
-                raise ToolValidationError(f"Tool {i}: missing 'function' field")
-            if not tool.function.name:
-                raise ToolValidationError(f"Tool {i}: function must have a 'name'")
-            if not tool.function.name.strip():
-                raise ToolValidationError(f"Tool {i}: function name cannot be empty")
-
-            if not TOOL_NAME_PATTERN.match(tool.function.name):
-                raise ToolValidationError(
-                    f"Tool '{tool.function.name}': name must start with letter/underscore "
-                    f"and contain only alphanumeric characters and underscores"
-                )
-
-            if tool.function.parameters:
-                params = tool.function.parameters
-                if params.type != "object":
-                    raise ToolValidationError(
-                        f"Tool '{tool.function.name}': parameters.type must be 'object'"
-                    )
-
     async def run_single_interactive(
         self,
         row: DatasetRow,
@@ -458,7 +435,7 @@ class InteractiveRunner:
 
             # Get and validate tools
             tools = self.agent_loop.get_tools(request)
-            self._validate_tools(tools)
+            validate_tools(tools)
             self._current_tools = tools
 
             # Show tools
