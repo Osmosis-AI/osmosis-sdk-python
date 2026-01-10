@@ -230,3 +230,4 @@ export OSMOSIS_ROLLOUT_SERVER_MAX_CONCURRENT_ROLLOUTS=200
 - [Architecture](./architecture.md) - Understand the system design
 - [API Reference](./api-reference.md) - Complete API documentation
 - [Examples](./examples.md) - Full working examples
+- [Test Mode](./test-mode.md) - Local testing with external LLM providers

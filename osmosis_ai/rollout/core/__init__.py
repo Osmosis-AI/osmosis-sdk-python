@@ -21,6 +21,7 @@ from osmosis_ai.rollout.core.base import (
     RolloutContext,
     RolloutResult,
 )
+from osmosis_ai.rollout.core.llm_client import LLMClientProtocol
 from osmosis_ai.rollout.core.exceptions import (
     AgentLoopNotFoundError,
     OsmosisRolloutError,
@@ -61,6 +62,8 @@ __all__ = [
     "RolloutAgentLoop",
     "RolloutContext",
     "RolloutResult",
+    # Protocol
+    "LLMClientProtocol",
     # Exceptions
     "OsmosisRolloutError",
     "OsmosisTransportError",
