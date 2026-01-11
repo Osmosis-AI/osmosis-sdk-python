@@ -24,6 +24,7 @@ Example:
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 from dataclasses import dataclass
@@ -347,6 +348,191 @@ class OsmosisLLMClient:
                 delay = self._calculate_retry_delay(attempt)
                 logger.info(
                     "Retrying chat_completions: delay=%.1fs, attempt=%d",
+                    delay,
+                    attempt + 1,
+                )
+                await asyncio.sleep(delay)
+
+        if last_error is not None:
+            raise last_error
+
+        raise OsmosisTransportError("No attempts made")
+
+    async def chat_completions_stream(
+        self,
+        messages: List[Dict[str, Any]],
+        temperature: float = 1.0,
+        top_p: float = 1.0,
+        max_tokens: int = 512,
+        stop: Any = None,
+        logprobs: bool = True,
+        **kwargs: Any,
+    ) -> CompletionsResult:
+        """Call TrainGate's experimental SSE endpoint and return the final completion.
+
+        This is a *drop-in* alternative to `chat_completions()` that uses an
+        SSE response to keep long-running requests alive through intermediaries
+        (e.g. load balancers with idle timeouts).
+
+        Important:
+        - This endpoint does NOT stream tokens.
+        - It sends heartbeats, then emits the full JSON completion at the end.
+        - The returned `CompletionsResult` is identical to `chat_completions()`.
+        """
+        from osmosis_ai.rollout.utils import normalize_stop
+
+        request = CompletionsRequest(
+            rollout_id=self.rollout_id,
+            messages=messages,
+            temperature=temperature,
+            top_p=top_p,
+            max_tokens=max_tokens,
+            stop=normalize_stop(stop),
+            logprobs=logprobs,
+            **kwargs,
+        )
+
+        async def _read_final_completion_from_sse(response: httpx.Response) -> Dict[str, Any]:
+            current_event: Optional[str] = None
+            data_lines: List[str] = []
+            completion: Optional[Dict[str, Any]] = None
+
+            def _dispatch() -> None:
+                nonlocal current_event, data_lines, completion
+                if not data_lines:
+                    current_event = None
+                    return
+
+                data = "\n".join(data_lines)
+                data_lines = []
+
+                if data == "[DONE]":
+                    current_event = None
+                    return
+
+                if current_event == "completion":
+                    completion = json.loads(data)
+                elif current_event == "error":
+                    # Server reported an error inside the SSE stream (still HTTP 200).
+                    try:
+                        payload = json.loads(data)
+                    except Exception:
+                        payload = {"error": data}
+                    raise OsmosisServerError(str(payload), 500)
+
+                current_event = None
+
+            async for line in response.aiter_lines():
+                # Empty line terminates an SSE event.
+                if line == "":
+                    _dispatch()
+                    continue
+
+                # Comment/heartbeat line (e.g. ": ping")
+                if line.startswith(":"):
+                    continue
+
+                if line.startswith("event:"):
+                    current_event = line.split(":", 1)[1].strip()
+                    continue
+
+                if line.startswith("data:"):
+                    data_lines.append(line.split(":", 1)[1].lstrip())
+                    continue
+
+                # Ignore other SSE fields (id:, retry:, etc.) and any junk.
+
+            # Flush trailing event if stream ends without a final blank line.
+            _dispatch()
+
+            if completion is None:
+                raise OsmosisTransportError("SSE stream ended without a completion event")
+            return completion
+
+        client = await self._get_client()
+        url = f"{self.server_url}/v1/experimental/chat/completions"
+        last_error: Optional[Exception] = None
+
+        for attempt in range(self.max_retries + 1):
+            start_time = time.monotonic()
+            try:
+                async with client.stream(
+                    "POST",
+                    url,
+                    json=request.model_dump(mode="json", exclude_none=True),
+                ) as response:
+                    if response.status_code == 200:
+                        data = await _read_final_completion_from_sse(response)
+                        elapsed_ms = (time.monotonic() - start_time) * 1000
+
+                        # Update internal metrics
+                        self._llm_latency_ms += elapsed_ms
+                        self._num_llm_calls += 1
+                        if "usage" in data:
+                            self._prompt_tokens += data["usage"].get("prompt_tokens", 0)
+                            self._response_tokens += data["usage"].get("completion_tokens", 0)
+
+                        choice = data["choices"][0]
+                        return CompletionsResult(
+                            message=choice["message"],
+                            token_ids=data.get("token_ids", []),
+                            logprobs=data.get("logprobs", []),
+                            usage=data.get("usage", {}),
+                            finish_reason=choice.get("finish_reason", "stop"),
+                        )
+
+                    # Non-200: read body for details (may not be JSON/SSE).
+                    detail_bytes = await response.aread()
+                    detail = detail_bytes.decode("utf-8", errors="replace")
+
+                    if 400 <= response.status_code < 500:
+                        logger.error(
+                            "TrainGate validation error (stream): status_code=%d, detail=%s",
+                            response.status_code,
+                            detail[:200],
+                        )
+                        raise OsmosisValidationError(detail, response.status_code)
+
+                    if response.status_code >= 500:
+                        logger.warning(
+                            "TrainGate server error (stream): status_code=%d, attempt=%d/%d, detail=%s",
+                            response.status_code,
+                            attempt + 1,
+                            self.max_retries + 1,
+                            detail[:200],
+                        )
+                        last_error = OsmosisServerError(detail, response.status_code)
+                    else:
+                        detail2 = f"Unexpected status code {response.status_code}"
+                        logger.error("TrainGate unexpected status (stream): %s", detail2)
+                        raise OsmosisValidationError(detail2, response.status_code)
+
+            except httpx.TimeoutException as e:
+                logger.warning(
+                    "Request timeout (stream): attempt=%d/%d, error=%s",
+                    attempt + 1,
+                    self.max_retries + 1,
+                    str(e),
+                )
+                last_error = OsmosisTimeoutError(str(e))
+
+            except httpx.RequestError as e:
+                error_detail = f"{type(e).__name__}: {e}" if str(e) else f"{type(e).__name__}"
+                logger.warning(
+                    "Transport error (stream): attempt=%d/%d, error=%s",
+                    attempt + 1,
+                    self.max_retries + 1,
+                    error_detail,
+                )
+                last_error = OsmosisTransportError(error_detail)
+
+            except OsmosisValidationError:
+                raise
+
+            if attempt < self.max_retries:
+                delay = self._calculate_retry_delay(attempt)
+                logger.info(
+                    "Retrying chat_completions_stream: delay=%.1fs, attempt=%d",
                     delay,
                     attempt + 1,
                 )

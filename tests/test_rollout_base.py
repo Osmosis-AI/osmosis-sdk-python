@@ -133,6 +133,44 @@ def test_rollout_context_complete_returns_completed_result(
     assert len(result.final_messages) == 1
 
 
+@pytest.mark.asyncio
+async def test_rollout_context_chat_stream_calls_streaming_method_when_available(
+    sample_rollout_request: RolloutRequest,
+) -> None:
+    """Verify ctx.chat_stream() prefers llm.chat_completions_stream when present."""
+    mock_llm = create_mock_llm_client()
+    mock_llm.chat_completions_stream = AsyncMock()
+    mock_llm.chat_completions_stream.return_value = MagicMock()
+
+    ctx = RolloutContext(
+        request=sample_rollout_request,
+        tools=[],
+        llm=mock_llm,
+    )
+
+    await ctx.chat_stream(messages=[{"role": "user", "content": "hi"}], temperature=0.5)
+
+    assert mock_llm.chat_completions_stream.await_count == 1
+    assert mock_llm.chat_completions.await_count == 0
+
+
+@pytest.mark.asyncio
+async def test_rollout_context_chat_stream_falls_back_to_chat_when_streaming_missing(
+    sample_rollout_request: RolloutRequest,
+) -> None:
+    """Verify ctx.chat_stream() falls back to llm.chat_completions."""
+    mock_llm = create_mock_llm_client()
+    ctx = RolloutContext(
+        request=sample_rollout_request,
+        tools=[],
+        llm=mock_llm,
+    )
+
+    await ctx.chat_stream(messages=[{"role": "user", "content": "hi"}], temperature=0.5)
+
+    assert mock_llm.chat_completions.await_count == 1
+
+
 def test_rollout_context_complete_default_finish_reason(
     sample_rollout_request: RolloutRequest,
 ) -> None:

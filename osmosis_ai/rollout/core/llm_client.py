@@ -37,6 +37,19 @@ class LLMClientProtocol(Protocol):
         """
         ...
 
+    async def chat_completions_stream(
+        self,
+        messages: List[Dict[str, Any]],
+        **kwargs: Any,
+    ) -> "CompletionsResult":
+        """Make a chat completion request over SSE (final result only).
+
+        This is intended to be a drop-in alternative to `chat_completions()`
+        for environments with aggressive idle timeouts, where an SSE heartbeat
+        keeps the connection alive until the final response is ready.
+        """
+        ...
+
     def get_metrics(self) -> "RolloutMetrics":
         """Return accumulated metrics from this client session.
 

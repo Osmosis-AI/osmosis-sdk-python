@@ -452,6 +452,78 @@ async def test_chat_completions_transport_error() -> None:
         await client.chat_completions(messages=[])
 
 
+@pytest.mark.asyncio
+async def test_chat_completions_stream_success() -> None:
+    """Verify chat_completions_stream parses SSE and returns final completion."""
+    client = OsmosisLLMClient(
+        server_url="http://localhost:8080",
+        rollout_id="test-123",
+        max_retries=0,
+    )
+
+    completion_json = {
+        "id": "resp-1",
+        "choices": [
+            {
+                "index": 0,
+                "message": {"role": "assistant", "content": "Hello SSE!"},
+                "finish_reason": "stop",
+            }
+        ],
+        "usage": {"prompt_tokens": 10, "completion_tokens": 5},
+        "token_ids": [1, 2, 3],
+        "logprobs": [-0.1, -0.2],
+    }
+
+    sse_lines = [
+        ": ping",
+        "",
+        "event: completion",
+        f"data: {json.dumps(completion_json)}",
+        "",
+        "data: [DONE]",
+        "",
+    ]
+
+    class _FakeStreamResponse:
+        def __init__(self, lines):
+            self.status_code = 200
+            self._lines = list(lines)
+
+        async def aiter_lines(self):
+            for line in self._lines:
+                yield line
+
+        async def aread(self):
+            return b""
+
+    class _FakeStreamCM:
+        def __init__(self, resp):
+            self._resp = resp
+
+        async def __aenter__(self):
+            return self._resp
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    mock_http_client = AsyncMock()
+    mock_http_client.stream = MagicMock(
+        return_value=_FakeStreamCM(_FakeStreamResponse(sse_lines))
+    )
+    client._client = mock_http_client
+
+    result = await client.chat_completions_stream(
+        messages=[{"role": "user", "content": "Hi"}],
+        temperature=0.7,
+    )
+
+    assert result.message["content"] == "Hello SSE!"
+    assert result.finish_reason == "stop"
+    assert result.token_ids == [1, 2, 3]
+    assert result.usage["prompt_tokens"] == 10
+
+
 # =============================================================================
 # OsmosisLLMClient.complete_rollout Tests
 # =============================================================================

@@ -253,6 +253,18 @@ class ExternalLLMClient:
             finish_reason=choice.finish_reason or "stop",
         )
 
+    async def chat_completions_stream(
+        self,
+        messages: List[Dict[str, Any]],
+        **kwargs: Any,
+    ) -> CompletionsResult:
+        """SSE-compatible drop-in for production parity.
+
+        Test mode does not need SSE heartbeats; we delegate to `chat_completions()`
+        so `RolloutContext.chat_stream()` works in both production and test mode.
+        """
+        return await self.chat_completions(messages, **kwargs)
+
     def get_metrics(self) -> RolloutMetrics:
         """Return accumulated metrics.
 

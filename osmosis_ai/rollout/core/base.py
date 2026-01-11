@@ -168,6 +168,25 @@ class RolloutContext:
         """
         return await self.llm.chat_completions(messages, **kwargs)
 
+    async def chat_stream(
+        self,
+        messages: List[Dict[str, Any]],
+        **kwargs: Any,
+    ) -> "CompletionsResult":
+        """Make a chat completion call using the SSE-backed client method when available.
+
+        This is intended as a drop-in replacement for `chat()` in environments
+        where long-running requests are prone to being terminated by
+        intermediate idle timeouts.
+
+        If the underlying `llm` does not implement `chat_completions_stream`,
+        this method falls back to `chat_completions` (non-streaming).
+        """
+        stream_fn = getattr(self.llm, "chat_completions_stream", None)
+        if stream_fn is None:
+            return await self.llm.chat_completions(messages, **kwargs)
+        return await stream_fn(messages, **kwargs)
+
     def complete(
         self,
         final_messages: List[Dict[str, Any]],
