@@ -138,20 +138,38 @@ async def test_rollout_context_chat_stream_calls_streaming_method_when_available
     sample_rollout_request: RolloutRequest,
 ) -> None:
     """Verify ctx.chat_stream() prefers llm.chat_completions_stream when present."""
-    mock_llm = create_mock_llm_client()
-    mock_llm.chat_completions_stream = AsyncMock()
-    mock_llm.chat_completions_stream.return_value = MagicMock()
+    class _LLM:
+        def __init__(self) -> None:
+            self.stream_calls = 0
+            self.chat_calls = 0
 
+        async def chat_completions_stream(self, messages: List[Dict[str, Any]], **kwargs: Any):
+            self.stream_calls += 1
+            return "ok"
+
+        async def chat_completions(self, messages: List[Dict[str, Any]], **kwargs: Any):
+            self.chat_calls += 1
+            return "not-used"
+
+        def get_metrics(self) -> RolloutMetrics:
+            return RolloutMetrics(
+                llm_latency_ms=0.0,
+                num_llm_calls=0,
+                prompt_tokens=0,
+                response_tokens=0,
+            )
+
+    llm = _LLM()
     ctx = RolloutContext(
         request=sample_rollout_request,
         tools=[],
-        llm=mock_llm,
+        llm=llm,
     )
 
     await ctx.chat_stream(messages=[{"role": "user", "content": "hi"}], temperature=0.5)
 
-    assert mock_llm.chat_completions_stream.await_count == 1
-    assert mock_llm.chat_completions.await_count == 0
+    assert llm.stream_calls == 1
+    assert llm.chat_calls == 0
 
 
 @pytest.mark.asyncio
@@ -159,16 +177,32 @@ async def test_rollout_context_chat_stream_falls_back_to_chat_when_streaming_mis
     sample_rollout_request: RolloutRequest,
 ) -> None:
     """Verify ctx.chat_stream() falls back to llm.chat_completions."""
-    mock_llm = create_mock_llm_client()
+    class _LLM:
+        def __init__(self) -> None:
+            self.chat_calls = 0
+
+        async def chat_completions(self, messages: List[Dict[str, Any]], **kwargs: Any):
+            self.chat_calls += 1
+            return "ok"
+
+        def get_metrics(self) -> RolloutMetrics:
+            return RolloutMetrics(
+                llm_latency_ms=0.0,
+                num_llm_calls=0,
+                prompt_tokens=0,
+                response_tokens=0,
+            )
+
+    llm = _LLM()
     ctx = RolloutContext(
         request=sample_rollout_request,
         tools=[],
-        llm=mock_llm,
+        llm=llm,
     )
 
     await ctx.chat_stream(messages=[{"role": "user", "content": "hi"}], temperature=0.5)
 
-    assert mock_llm.chat_completions.await_count == 1
+    assert llm.chat_calls == 1
 
 
 def test_rollout_context_complete_default_finish_reason(
