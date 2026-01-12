@@ -34,6 +34,12 @@ from osmosis_ai.rollout import (
 from osmosis_ai.rollout.client import CompletionsResult
 
 
+@pytest.fixture
+def use_legacy_chat_completions(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Force legacy non-streaming endpoint for tests that mock .post()."""
+    monkeypatch.setenv("OSMOSIS_USE_LEGACY_CHAT_COMPLETIONS", "1")
+
+
 # =============================================================================
 # OsmosisLLMClient Initialization Tests
 # =============================================================================
@@ -229,7 +235,7 @@ def test_client_get_metrics_initial() -> None:
 
 
 @pytest.mark.asyncio
-async def test_chat_completions_success() -> None:
+async def test_chat_completions_success(use_legacy_chat_completions) -> None:
     """Verify successful chat_completions call."""
     client = OsmosisLLMClient(
         server_url="http://localhost:8080",
@@ -269,7 +275,7 @@ async def test_chat_completions_success() -> None:
 
 
 @pytest.mark.asyncio
-async def test_chat_completions_ignores_unknown_kwargs() -> None:
+async def test_chat_completions_ignores_unknown_kwargs(use_legacy_chat_completions) -> None:
     """Verify chat_completions accepts and ignores unknown kwargs."""
     client = OsmosisLLMClient(
         server_url="http://localhost:8080",
@@ -305,7 +311,7 @@ async def test_chat_completions_ignores_unknown_kwargs() -> None:
 
 
 @pytest.mark.asyncio
-async def test_chat_completions_normalizes_stop_string() -> None:
+async def test_chat_completions_normalizes_stop_string(use_legacy_chat_completions) -> None:
     """Verify stop can be provided as a string and is normalized to List[str]."""
     client = OsmosisLLMClient(
         server_url="http://localhost:8080",
@@ -340,7 +346,7 @@ async def test_chat_completions_normalizes_stop_string() -> None:
 
 
 @pytest.mark.asyncio
-async def test_chat_completions_updates_metrics() -> None:
+async def test_chat_completions_updates_metrics(use_legacy_chat_completions) -> None:
     """Verify metrics are updated after successful call."""
     client = OsmosisLLMClient(
         server_url="http://localhost:8080",
@@ -368,7 +374,7 @@ async def test_chat_completions_updates_metrics() -> None:
 
 
 @pytest.mark.asyncio
-async def test_chat_completions_no_retry_on_4xx() -> None:
+async def test_chat_completions_no_retry_on_4xx(use_legacy_chat_completions) -> None:
     """Verify 4xx errors are not retried."""
     client = OsmosisLLMClient(
         server_url="http://localhost:8080",
@@ -393,7 +399,7 @@ async def test_chat_completions_no_retry_on_4xx() -> None:
 
 
 @pytest.mark.asyncio
-async def test_chat_completions_retry_on_5xx() -> None:
+async def test_chat_completions_retry_on_5xx(use_legacy_chat_completions) -> None:
     """Verify 5xx errors trigger retries."""
     client = OsmosisLLMClient(
         server_url="http://localhost:8080",
@@ -419,7 +425,7 @@ async def test_chat_completions_retry_on_5xx() -> None:
 
 
 @pytest.mark.asyncio
-async def test_chat_completions_timeout_raises_error() -> None:
+async def test_chat_completions_timeout_raises_error(use_legacy_chat_completions) -> None:
     """Verify timeout raises OsmosisTimeoutError."""
     client = OsmosisLLMClient(
         server_url="http://localhost:8080",
@@ -436,7 +442,7 @@ async def test_chat_completions_timeout_raises_error() -> None:
 
 
 @pytest.mark.asyncio
-async def test_chat_completions_transport_error() -> None:
+async def test_chat_completions_transport_error(use_legacy_chat_completions) -> None:
     """Verify network errors raise OsmosisTransportError."""
     client = OsmosisLLMClient(
         server_url="http://localhost:8080",
@@ -522,6 +528,71 @@ async def test_chat_completions_stream_success() -> None:
     assert result.finish_reason == "stop"
     assert result.token_ids == [1, 2, 3]
     assert result.usage["prompt_tokens"] == 10
+
+
+@pytest.mark.asyncio
+async def test_chat_completions_defaults_to_streaming(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify chat_completions uses streaming endpoint by default."""
+    monkeypatch.delenv("OSMOSIS_USE_LEGACY_CHAT_COMPLETIONS", raising=False)
+    client = OsmosisLLMClient(
+        server_url="http://localhost:8080",
+        rollout_id="test-123",
+        max_retries=0,
+    )
+
+    completion_json = {
+        "id": "resp-1",
+        "choices": [
+            {
+                "index": 0,
+                "message": {"role": "assistant", "content": "Hello default SSE!"},
+                "finish_reason": "stop",
+            }
+        ],
+        "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+    }
+    sse_lines = [
+        ": ping",
+        "",
+        "event: completion",
+        f"data: {json.dumps(completion_json)}",
+        "",
+        "data: [DONE]",
+        "",
+    ]
+
+    class _FakeStreamResponse:
+        def __init__(self, lines):
+            self.status_code = 200
+            self._lines = list(lines)
+
+        async def aiter_lines(self):
+            for line in self._lines:
+                yield line
+
+        async def aread(self):
+            return b""
+
+    class _FakeStreamCM:
+        def __init__(self, resp):
+            self._resp = resp
+
+        async def __aenter__(self):
+            return self._resp
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+    mock_http_client = AsyncMock()
+    mock_http_client.stream = MagicMock(
+        return_value=_FakeStreamCM(_FakeStreamResponse(sse_lines))
+    )
+    # If chat_completions incorrectly tries legacy .post(), this will explode.
+    mock_http_client.post = MagicMock(side_effect=AssertionError("should use .stream()"))
+    client._client = mock_http_client
+
+    result = await client.chat_completions(messages=[{"role": "user", "content": "Hi"}])
+    assert result.message["content"] == "Hello default SSE!"
 
 
 # =============================================================================
