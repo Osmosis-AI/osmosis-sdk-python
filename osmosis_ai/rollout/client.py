@@ -27,6 +27,8 @@ import asyncio
 import json
 import logging
 import os
+import re
+import tempfile
 import time
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
@@ -48,6 +50,47 @@ from osmosis_ai.rollout.core.schemas import (
 )
 
 logger = logging.getLogger(__name__)
+
+_DEFAULT_SSE_LOG_DIR = os.path.join(tempfile.gettempdir(), "osmosis-sse")
+
+
+def _sanitize_filename(value: str) -> str:
+    # Keep filenames safe across OS/filesystems. Preserve common delimiters.
+    cleaned = re.sub(r"[^a-zA-Z0-9._-]+", "_", value).strip("._-")
+    return cleaned or "rollout"
+
+
+class _SSELogWriter:
+    """Write raw SSE activity as JSONL.
+
+    One file per rollout_id: <dir>/<rollout_id>.jsonl
+    """
+
+    def __init__(self, *, log_dir: str, rollout_id: str) -> None:
+        self._log_dir = log_dir
+        self._rollout_id = rollout_id
+        os.makedirs(self._log_dir, exist_ok=True)
+        fname = f"{_sanitize_filename(rollout_id)}.jsonl"
+        self._path = os.path.join(self._log_dir, fname)
+        # Line-buffered so tail -f works well.
+        self._fh = open(self._path, "a", encoding="utf-8", buffering=1)
+
+    @property
+    def path(self) -> str:
+        return self._path
+
+    def write(self, record: Dict[str, Any]) -> None:
+        record = dict(record)
+        record.setdefault("rollout_id", self._rollout_id)
+        record.setdefault("ts", time.time())
+        self._fh.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+    def close(self) -> None:
+        try:
+            self._fh.close()
+        except Exception:
+            # Best-effort logging only.
+            pass
 
 
 @dataclass(frozen=True)
@@ -143,6 +186,7 @@ class OsmosisLLMClient:
         max_retries: Optional[int] = None,
         complete_rollout_retries: Optional[int] = None,
         settings: Optional[RolloutClientSettings] = None,
+        sse_log_dir: Optional[str] = None,
     ):
         """Initialize the LLM client.
 
@@ -185,6 +229,21 @@ class OsmosisLLMClient:
         self._num_llm_calls: int = 0
         self._prompt_tokens: int = 0
         self._response_tokens: int = 0
+
+        # Optional: persist SSE debugging data (pings/events/raw lines) per rollout.
+        # If set, SDK writes to: <dir>/<rollout_id>.jsonl
+        env_dir = os.getenv("OSMOSIS_SSE_LOG_DIR")
+        # Empty string means "disable" (useful for environments where /tmp is unwritable).
+        if env_dir == "":
+            env_dir = None
+        if sse_log_dir == "":
+            # Per-instance opt-out.
+            self.sse_log_dir = None
+        elif sse_log_dir is not None:
+            self.sse_log_dir = sse_log_dir
+        else:
+            # ON by default: if env var isn't set, default to a temp directory.
+            self.sse_log_dir = env_dir or _DEFAULT_SSE_LOG_DIR
 
     async def _get_client(self) -> httpx.AsyncClient:
         """Get or create the HTTP client (thread-safe)."""
@@ -386,6 +445,7 @@ class OsmosisLLMClient:
         max_tokens: int = 512,
         stop: Any = None,
         logprobs: bool = True,
+        sse_log_dir: Optional[str] = None,
         **kwargs: Any,
     ) -> CompletionsResult:
         """Call TrainGate's experimental SSE endpoint and return the final completion.
@@ -412,10 +472,32 @@ class OsmosisLLMClient:
             **kwargs,
         )
 
-        async def _read_final_completion_from_sse(response: httpx.Response) -> Dict[str, Any]:
+        # Empty string means "disable" for this call.
+        effective_sse_log_dir = None if sse_log_dir == "" else (sse_log_dir or self.sse_log_dir)
+        sse_writer: Optional[_SSELogWriter] = None
+        if effective_sse_log_dir:
+            try:
+                sse_writer = _SSELogWriter(log_dir=effective_sse_log_dir, rollout_id=self.rollout_id)
+                logger.info("SSE debug log enabled: rollout_id=%s path=%s", self.rollout_id, sse_writer.path)
+            except Exception as e:
+                # Best-effort only: never fail the request because logging couldn't be set up.
+                logger.warning(
+                    "SSE debug log unavailable (disabling): rollout_id=%s log_dir=%s error=%s",
+                    self.rollout_id,
+                    effective_sse_log_dir,
+                    str(e),
+                )
+                sse_writer = None
+
+        async def _read_final_completion_from_sse(
+            response: httpx.Response, *, attempt: int, url: str
+        ) -> Dict[str, Any]:
             current_event: Optional[str] = None
             data_lines: List[str] = []
             completion: Optional[Dict[str, Any]] = None
+            ping_count = 0
+            event_count = 0
+            start = time.monotonic()
 
             def _dispatch() -> None:
                 nonlocal current_event, data_lines, completion
@@ -425,6 +507,19 @@ class OsmosisLLMClient:
 
                 data = "\n".join(data_lines)
                 data_lines = []
+                nonlocal event_count
+                event_count += 1
+
+                if sse_writer is not None:
+                    sse_writer.write(
+                        {
+                            "type": "dispatch",
+                            "attempt": attempt,
+                            "url": url,
+                            "event": current_event,
+                            "data_len": len(data),
+                        }
+                    )
 
                 if data == "[DONE]":
                     current_event = None
@@ -432,17 +527,47 @@ class OsmosisLLMClient:
 
                 if current_event == "completion":
                     completion = json.loads(data)
+                    logger.info(
+                        "SSE completion received: rollout_id=%s attempt=%d elapsed_s=%.3f pings=%d events=%d",
+                        self.rollout_id,
+                        attempt + 1,
+                        time.monotonic() - start,
+                        ping_count,
+                        event_count,
+                    )
+                    if sse_writer is not None:
+                        sse_writer.write(
+                            {
+                                "type": "completion",
+                                "attempt": attempt,
+                                "elapsed_s": time.monotonic() - start,
+                                "pings": ping_count,
+                                "events": event_count,
+                                "payload": completion,
+                            }
+                        )
                 elif current_event == "error":
                     # Server reported an error inside the SSE stream (still HTTP 200).
                     try:
                         payload = json.loads(data)
                     except Exception:
                         payload = {"error": data}
+                    logger.warning(
+                        "SSE error event: rollout_id=%s attempt=%d payload=%s",
+                        self.rollout_id,
+                        attempt + 1,
+                        str(payload)[:500],
+                    )
+                    if sse_writer is not None:
+                        sse_writer.write({"type": "error_event", "attempt": attempt, "payload": payload})
                     raise OsmosisServerError(str(payload), 500)
 
                 current_event = None
 
             async for line in response.aiter_lines():
+                if sse_writer is not None:
+                    sse_writer.write({"type": "line", "attempt": attempt, "line": line})
+
                 # Empty line terminates an SSE event.
                 if line == "":
                     _dispatch()
@@ -450,14 +575,38 @@ class OsmosisLLMClient:
 
                 # Comment/heartbeat line (e.g. ": ping")
                 if line.startswith(":"):
+                    ping_count += 1
+                    logger.info("SSE ping: rollout_id=%s attempt=%d line=%s", self.rollout_id, attempt + 1, line)
+                    if sse_writer is not None:
+                        sse_writer.write({"type": "ping", "attempt": attempt, "line": line})
                     continue
 
                 if line.startswith("event:"):
                     current_event = line.split(":", 1)[1].strip()
+                    logger.info(
+                        "SSE event field: rollout_id=%s attempt=%d event=%s",
+                        self.rollout_id,
+                        attempt + 1,
+                        current_event,
+                    )
+                    if sse_writer is not None:
+                        sse_writer.write({"type": "event_field", "attempt": attempt, "event": current_event})
                     continue
 
                 if line.startswith("data:"):
-                    data_lines.append(line.split(":", 1)[1].lstrip())
+                    data_piece = line.split(":", 1)[1].lstrip()
+                    data_lines.append(data_piece)
+                    if sse_writer is not None:
+                        preview = data_piece[:500]
+                        sse_writer.write(
+                            {
+                                "type": "data_field",
+                                "attempt": attempt,
+                                "event": current_event,
+                                "data_preview": preview,
+                                "data_len": len(data_piece),
+                            }
+                        )
                     continue
 
                 # Ignore other SSE fields (id:, retry:, etc.) and any junk.
@@ -473,90 +622,126 @@ class OsmosisLLMClient:
         url = f"{self.server_url}/v1/experimental/chat/completions"
         last_error: Optional[Exception] = None
 
-        for attempt in range(self.max_retries + 1):
-            start_time = time.monotonic()
-            try:
-                async with client.stream(
-                    "POST",
-                    url,
-                    json=request.model_dump(mode="json", exclude_none=True),
-                ) as response:
-                    if response.status_code == 200:
-                        data = await _read_final_completion_from_sse(response)
-                        elapsed_ms = (time.monotonic() - start_time) * 1000
+        try:
+            for attempt in range(self.max_retries + 1):
+                start_time = time.monotonic()
+                try:
+                    logger.info(
+                        "Starting SSE request: rollout_id=%s attempt=%d/%d url=%s",
+                        self.rollout_id,
+                        attempt + 1,
+                        self.max_retries + 1,
+                        url,
+                    )
+                    if sse_writer is not None:
+                        sse_writer.write({"type": "start_request", "attempt": attempt, "url": url})
+                    async with client.stream(
+                        "POST",
+                        url,
+                        json=request.model_dump(mode="json", exclude_none=True),
+                    ) as response:
+                        if response.status_code == 200:
+                            if sse_writer is not None:
+                                sse_writer.write(
+                                    {
+                                        "type": "http_response",
+                                        "attempt": attempt,
+                                        "status_code": response.status_code,
+                                        "headers": dict(response.headers),
+                                    }
+                                )
+                            data = await _read_final_completion_from_sse(response, attempt=attempt, url=url)
+                            elapsed_ms = (time.monotonic() - start_time) * 1000
 
-                        # Update internal metrics
-                        self._llm_latency_ms += elapsed_ms
-                        self._num_llm_calls += 1
-                        if "usage" in data:
-                            self._prompt_tokens += data["usage"].get("prompt_tokens", 0)
-                            self._response_tokens += data["usage"].get("completion_tokens", 0)
+                            # Update internal metrics
+                            self._llm_latency_ms += elapsed_ms
+                            self._num_llm_calls += 1
+                            if "usage" in data:
+                                self._prompt_tokens += data["usage"].get("prompt_tokens", 0)
+                                self._response_tokens += data["usage"].get("completion_tokens", 0)
 
-                        choice = data["choices"][0]
-                        return CompletionsResult(
-                            message=choice["message"],
-                            token_ids=data.get("token_ids", []),
-                            logprobs=data.get("logprobs", []),
-                            usage=data.get("usage", {}),
-                            finish_reason=choice.get("finish_reason", "stop"),
-                        )
+                            choice = data["choices"][0]
+                            return CompletionsResult(
+                                message=choice["message"],
+                                token_ids=data.get("token_ids", []),
+                                logprobs=data.get("logprobs", []),
+                                usage=data.get("usage", {}),
+                                finish_reason=choice.get("finish_reason", "stop"),
+                            )
 
-                    # Non-200: read body for details (may not be JSON/SSE).
-                    detail_bytes = await response.aread()
-                    detail = detail_bytes.decode("utf-8", errors="replace")
+                        # Non-200: read body for details (may not be JSON/SSE).
+                        detail_bytes = await response.aread()
+                        detail = detail_bytes.decode("utf-8", errors="replace")
+                        if sse_writer is not None:
+                            sse_writer.write(
+                                {
+                                    "type": "http_error",
+                                    "attempt": attempt,
+                                    "status_code": response.status_code,
+                                    "detail_preview": detail[:2000],
+                                }
+                            )
 
-                    if 400 <= response.status_code < 500:
-                        logger.error(
-                            "TrainGate validation error (stream): status_code=%d, detail=%s",
-                            response.status_code,
-                            detail[:200],
-                        )
-                        raise OsmosisValidationError(detail, response.status_code)
+                        if 400 <= response.status_code < 500:
+                            logger.error(
+                                "TrainGate validation error (stream): status_code=%d, detail=%s",
+                                response.status_code,
+                                detail[:200],
+                            )
+                            raise OsmosisValidationError(detail, response.status_code)
 
-                    if response.status_code >= 500:
-                        logger.warning(
-                            "TrainGate server error (stream): status_code=%d, attempt=%d/%d, detail=%s",
-                            response.status_code,
-                            attempt + 1,
-                            self.max_retries + 1,
-                            detail[:200],
-                        )
-                        last_error = OsmosisServerError(detail, response.status_code)
-                    else:
-                        detail2 = f"Unexpected status code {response.status_code}"
-                        logger.error("TrainGate unexpected status (stream): %s", detail2)
-                        raise OsmosisValidationError(detail2, response.status_code)
+                        if response.status_code >= 500:
+                            logger.warning(
+                                "TrainGate server error (stream): status_code=%d, attempt=%d/%d, detail=%s",
+                                response.status_code,
+                                attempt + 1,
+                                self.max_retries + 1,
+                                detail[:200],
+                            )
+                            last_error = OsmosisServerError(detail, response.status_code)
+                        else:
+                            detail2 = f"Unexpected status code {response.status_code}"
+                            logger.error("TrainGate unexpected status (stream): %s", detail2)
+                            raise OsmosisValidationError(detail2, response.status_code)
 
-            except httpx.TimeoutException as e:
-                logger.warning(
-                    "Request timeout (stream): attempt=%d/%d, error=%s",
-                    attempt + 1,
-                    self.max_retries + 1,
-                    str(e),
-                )
-                last_error = OsmosisTimeoutError(str(e))
+                except httpx.TimeoutException as e:
+                    logger.warning(
+                        "Request timeout (stream): attempt=%d/%d, error=%s",
+                        attempt + 1,
+                        self.max_retries + 1,
+                        str(e),
+                    )
+                    if sse_writer is not None:
+                        sse_writer.write({"type": "timeout", "attempt": attempt, "error": str(e)})
+                    last_error = OsmosisTimeoutError(str(e))
 
-            except httpx.RequestError as e:
-                error_detail = f"{type(e).__name__}: {e}" if str(e) else f"{type(e).__name__}"
-                logger.warning(
-                    "Transport error (stream): attempt=%d/%d, error=%s",
-                    attempt + 1,
-                    self.max_retries + 1,
-                    error_detail,
-                )
-                last_error = OsmosisTransportError(error_detail)
+                except httpx.RequestError as e:
+                    error_detail = f"{type(e).__name__}: {e}" if str(e) else f"{type(e).__name__}"
+                    logger.warning(
+                        "Transport error (stream): attempt=%d/%d, error=%s",
+                        attempt + 1,
+                        self.max_retries + 1,
+                        error_detail,
+                    )
+                    if sse_writer is not None:
+                        sse_writer.write({"type": "transport_error", "attempt": attempt, "error": error_detail})
+                    last_error = OsmosisTransportError(error_detail)
 
-            except OsmosisValidationError:
-                raise
+                except OsmosisValidationError:
+                    raise
 
-            if attempt < self.max_retries:
-                delay = self._calculate_retry_delay(attempt)
-                logger.info(
-                    "Retrying chat_completions_stream: delay=%.1fs, attempt=%d",
-                    delay,
-                    attempt + 1,
-                )
-                await asyncio.sleep(delay)
+                if attempt < self.max_retries:
+                    delay = self._calculate_retry_delay(attempt)
+                    logger.info(
+                        "Retrying chat_completions_stream: delay=%.1fs, attempt=%d",
+                        delay,
+                        attempt + 1,
+                    )
+                    await asyncio.sleep(delay)
+        finally:
+            if sse_writer is not None:
+                sse_writer.write({"type": "close"})
+                sse_writer.close()
 
         if last_error is not None:
             raise last_error
