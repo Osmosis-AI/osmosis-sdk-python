@@ -18,6 +18,12 @@ import time
 import warnings
 from typing import Any, Dict, List, Optional
 
+warnings.filterwarnings(
+    "ignore",
+    message="Pydantic serializer warnings:",
+    category=UserWarning,
+)
+
 from osmosis_ai.rollout.client import CompletionsResult
 
 from osmosis_ai.rollout.core.schemas import RolloutMetrics
@@ -185,17 +191,7 @@ class ExternalLLMClient:
         try:
             # Make async call via LiteLLM
             # LiteLLM returns response in OpenAI format regardless of provider
-            # Filter out Pydantic serialization warnings from LiteLLM locally.
-            # LiteLLM's internal caching calls model_dump() on ModelResponse,
-            # which triggers warnings due to Union[Choices, StreamingChoices]
-            # type definitions. Using catch_warnings() limits the filter scope.
-            with warnings.catch_warnings():
-                warnings.filterwarnings(
-                    "ignore",
-                    message="Pydantic serializer warnings:",
-                    category=UserWarning,
-                )
-                response = await self._litellm.acompletion(**request_kwargs)
+            response = await self._litellm.acompletion(**request_kwargs)
         except self._RateLimitError as e:
             raise ProviderError(
                 f"Rate limit exceeded. Try reducing dataset size with --limit. "
