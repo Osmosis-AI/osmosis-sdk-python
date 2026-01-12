@@ -26,6 +26,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import os
 import time
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
@@ -251,6 +252,25 @@ class OsmosisLLMClient:
             OsmosisValidationError: 4xx errors (invalid request).
             OsmosisTimeoutError: Request timed out.
         """
+        # Default to the SSE-backed endpoint to avoid idle timeouts in intermediaries.
+        # Set OSMOSIS_USE_LEGACY_CHAT_COMPLETIONS=1 to force the legacy non-streaming API.
+        if os.getenv("OSMOSIS_USE_LEGACY_CHAT_COMPLETIONS", "").strip().lower() not in (
+            "1",
+            "true",
+            "yes",
+            "y",
+            "on",
+        ):
+            return await self.chat_completions_stream(
+                messages=messages,
+                temperature=temperature,
+                top_p=top_p,
+                max_tokens=max_tokens,
+                stop=stop,
+                logprobs=logprobs,
+                **kwargs,
+            )
+
         from osmosis_ai.rollout.utils import normalize_stop
 
         request = CompletionsRequest(
