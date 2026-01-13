@@ -34,22 +34,18 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# Optional server dependencies for create_app()
+# Server dependencies for create_app() with test mode support
 server = [
     "fastapi>=0.100.0,<1.0.0",
     "uvicorn>=0.23.0,<1.0.0",
+    "pyarrow>=14.0.0",      # Parquet file support for test mode
+    "litellm>=1.40.0",      # Multi-provider LLM support (100+ providers)
+    "rich>=13.0.0",         # Beautiful terminal output
 ]
 
 # Configuration management
 config = [
     "pydantic-settings>=2.0.0,<3.0.0",
-]
-
-# Test mode dependencies (parquet support, multi-provider LLM support)
-test-mode = [
-    "pyarrow>=14.0.0",      # Parquet file support
-    "litellm>=1.40.0",      # Multi-provider LLM support (100+ providers)
-    "rich>=13.0.0",         # Beautiful terminal output
 ]
 
 # Development dependencies (testing, formatting, etc.)
@@ -61,14 +57,9 @@ dev = [
     "isort>=5.0.0,<7.0.0",
 ]
 
-# Full installation with all optional features
+# Full installation with all optional features (uses self-references to avoid duplication)
 full = [
-    "fastapi>=0.100.0,<1.0.0",
-    "uvicorn>=0.23.0,<1.0.0",
-    "pydantic-settings>=2.0.0,<3.0.0",
-    "pyarrow>=14.0.0",
-    "litellm>=1.40.0",
-    "rich>=13.0.0",
+    "osmosis-ai[server,config]",
 ]
 
 [project.urls]

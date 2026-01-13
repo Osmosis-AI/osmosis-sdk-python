@@ -160,33 +160,54 @@ def create_app(
             logger.info("Debug logging enabled: output_dir=%s", debug_dir)
         state.start_cleanup_task()
 
-        # Register with Platform if credentials provided
+        # Run custom startup callback
+        if on_startup is not None:
+            await on_startup()
+
+        # Start platform registration as a background task.
+        # The task waits briefly for the server to be ready (after yield),
+        # then registers with Platform. This ensures the health check succeeds.
+        registration_task: Optional[asyncio.Task] = None
         if credentials is not None and server_host is not None and server_port is not None:
             from osmosis_ai.rollout.server.registration import (
                 register_with_platform,
                 print_registration_result,
             )
 
-            result = register_with_platform(
-                host=server_host,
-                port=server_port,
-                agent_loop_name=agent_loop.name,
-                credentials=credentials,
-                api_key=api_key,
-            )
-            print_registration_result(
-                result=result,
-                host=server_host,
-                port=server_port,
-                agent_loop_name=agent_loop.name,
-                api_key=api_key,
-            )
+            async def do_registration():
+                # Wait for server to be fully ready (yield will happen during this sleep)
+                await asyncio.sleep(0.5)
+                # Run sync registration in thread pool to avoid blocking event loop
+                result = await asyncio.to_thread(
+                    register_with_platform,
+                    host=server_host,
+                    port=server_port,
+                    agent_loop_name=agent_loop.name,
+                    credentials=credentials,
+                    api_key=api_key,
+                )
+                print_registration_result(
+                    result=result,
+                    host=server_host,
+                    port=server_port,
+                    agent_loop_name=agent_loop.name,
+                    api_key=api_key,
+                )
 
-        # Run custom startup callback
-        if on_startup is not None:
-            await on_startup()
+            registration_task = asyncio.create_task(do_registration())
 
         yield
+
+        # Wait for registration to complete before shutdown
+        if registration_task is not None:
+            try:
+                await asyncio.wait_for(registration_task, timeout=30.0)
+            except asyncio.TimeoutError:
+                logger.warning("Platform registration timed out")
+            except asyncio.CancelledError:
+                logger.warning("Platform registration was cancelled")
+            except Exception as e:
+                logger.error("Platform registration failed: %s", e)
 
         # Run custom shutdown callback
         if on_shutdown is not None:
