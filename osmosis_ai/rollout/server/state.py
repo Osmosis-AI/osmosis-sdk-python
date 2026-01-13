@@ -42,6 +42,7 @@ class AppState:
         - Automatic cleanup of old completion records
 
     Attributes:
+        settings: Server settings (RolloutServerSettings instance).
         rollout_tasks: Dictionary of active rollout tasks by idempotency key.
         completed_rollouts: Dictionary of completion times by idempotency key.
         semaphore: Concurrency control semaphore.
@@ -77,6 +78,7 @@ class AppState:
         if settings is None:
             settings = get_settings().server
 
+        self.settings = settings
         self._max_concurrent = max_concurrent or settings.max_concurrent_rollouts
         self.record_ttl = record_ttl_seconds or settings.record_ttl_seconds
         self._cleanup_interval = cleanup_interval_seconds or settings.cleanup_interval_seconds
