@@ -159,6 +159,27 @@ class RolloutServerSettings(_BaseSettings):
         ge=10.0,
         le=3600.0,
     )
+    registration_readiness_timeout_seconds: float = Field(
+        default=10.0,
+        description=(
+            "Maximum time to wait for the server to become ready before platform registration. "
+            "The server polls its own health endpoint to confirm readiness."
+        ),
+        ge=1.0,
+        le=60.0,
+    )
+    registration_readiness_poll_interval_seconds: float = Field(
+        default=0.2,
+        description="Interval between health check polls during server readiness check.",
+        ge=0.05,
+        le=5.0,
+    )
+    registration_shutdown_timeout_seconds: float = Field(
+        default=30.0,
+        description="Timeout for waiting for platform registration to complete during shutdown.",
+        ge=1.0,
+        le=300.0,
+    )
 
 
 class RolloutSettings(_BaseSettings):

@@ -175,8 +175,40 @@ def create_app(
             )
 
             async def do_registration():
-                # Wait for server to be fully ready (yield will happen during this sleep)
-                await asyncio.sleep(0.5)
+                import httpx
+
+                # Poll health endpoint until server is ready
+                poll_interval = state.settings.registration_readiness_poll_interval_seconds
+                timeout = state.settings.registration_readiness_timeout_seconds
+                health_url = f"http://127.0.0.1:{server_port}/health"
+
+                start_time = time.monotonic()
+                server_ready = False
+
+                async with httpx.AsyncClient() as client:
+                    while time.monotonic() - start_time < timeout:
+                        try:
+                            resp = await client.get(health_url, timeout=1.0)
+                            if resp.status_code == 200:
+                                server_ready = True
+                                break
+                        except httpx.ConnectError:
+                            # Server not listening yet, expected during startup
+                            pass
+                        except httpx.RequestError as e:
+                            # Other request errors (timeout, etc.)
+                            logger.debug("Health check failed: %s", e)
+                        await asyncio.sleep(poll_interval)
+
+                elapsed = time.monotonic() - start_time
+                if server_ready:
+                    logger.debug("Server ready for registration in %.2fs", elapsed)
+                else:
+                    logger.warning(
+                        "Server did not become ready within %.1fs, attempting registration anyway",
+                        timeout,
+                    )
+
                 # Run sync registration in thread pool to avoid blocking event loop
                 result = await asyncio.to_thread(
                     register_with_platform,
@@ -201,7 +233,10 @@ def create_app(
         # Wait for registration to complete before shutdown
         if registration_task is not None:
             try:
-                await asyncio.wait_for(registration_task, timeout=30.0)
+                await asyncio.wait_for(
+                    registration_task,
+                    timeout=state.settings.registration_shutdown_timeout_seconds,
+                )
             except asyncio.TimeoutError:
                 logger.warning("Platform registration timed out")
             except asyncio.CancelledError:
