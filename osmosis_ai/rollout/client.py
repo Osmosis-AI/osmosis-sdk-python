@@ -34,6 +34,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 import httpx
+from httpx_sse import SSEError, aconnect_sse  # type: ignore[import-not-found]
 
 from osmosis_ai.rollout.config.settings import RolloutClientSettings, get_settings
 from osmosis_ai.rollout.core.exceptions import (
@@ -490,49 +491,39 @@ class OsmosisLLMClient:
                 sse_writer = None
 
         async def _read_final_completion_from_sse(
-            response: httpx.Response, *, attempt: int, url: str
+            event_source: Any, *, attempt: int, url: str
         ) -> Dict[str, Any]:
-            current_event: Optional[str] = None
-            data_lines: List[str] = []
             completion: Optional[Dict[str, Any]] = None
-            ping_count = 0
             event_count = 0
             start = time.monotonic()
 
-            def _dispatch() -> None:
-                nonlocal current_event, data_lines, completion
-                if not data_lines:
-                    current_event = None
-                    return
-
-                data = "\n".join(data_lines)
-                data_lines = []
-                nonlocal event_count
+            async for sse in event_source.aiter_sse():
+                event = sse.event or "message"
+                data = sse.data or ""
                 event_count += 1
 
                 if sse_writer is not None:
                     sse_writer.write(
                         {
-                            "type": "dispatch",
+                            "type": "event",
                             "attempt": attempt,
                             "url": url,
-                            "event": current_event,
+                            "event": event,
                             "data_len": len(data),
+                            "data_preview": data[:500],
                         }
                     )
 
                 if data == "[DONE]":
-                    current_event = None
-                    return
+                    break
 
-                if current_event == "completion":
+                if event == "completion":
                     completion = json.loads(data)
                     logger.info(
-                        "SSE completion received: rollout_id=%s attempt=%d elapsed_s=%.3f pings=%d events=%d",
+                        "SSE completion received: rollout_id=%s attempt=%d elapsed_s=%.3f events=%d",
                         self.rollout_id,
                         attempt + 1,
                         time.monotonic() - start,
-                        ping_count,
                         event_count,
                     )
                     if sse_writer is not None:
@@ -541,12 +532,11 @@ class OsmosisLLMClient:
                                 "type": "completion",
                                 "attempt": attempt,
                                 "elapsed_s": time.monotonic() - start,
-                                "pings": ping_count,
                                 "events": event_count,
                                 "payload": completion,
                             }
                         )
-                elif current_event == "error":
+                elif event == "error":
                     # Server reported an error inside the SSE stream (still HTTP 200).
                     try:
                         payload = json.loads(data)
@@ -561,58 +551,6 @@ class OsmosisLLMClient:
                     if sse_writer is not None:
                         sse_writer.write({"type": "error_event", "attempt": attempt, "payload": payload})
                     raise OsmosisServerError(str(payload), 500)
-
-                current_event = None
-
-            async for line in response.aiter_lines():
-                if sse_writer is not None:
-                    sse_writer.write({"type": "line", "attempt": attempt, "line": line})
-
-                # Empty line terminates an SSE event.
-                if line == "":
-                    _dispatch()
-                    continue
-
-                # Comment/heartbeat line (e.g. ": ping")
-                if line.startswith(":"):
-                    ping_count += 1
-                    logger.info("SSE ping: rollout_id=%s attempt=%d line=%s", self.rollout_id, attempt + 1, line)
-                    if sse_writer is not None:
-                        sse_writer.write({"type": "ping", "attempt": attempt, "line": line})
-                    continue
-
-                if line.startswith("event:"):
-                    current_event = line.split(":", 1)[1].strip()
-                    logger.info(
-                        "SSE event field: rollout_id=%s attempt=%d event=%s",
-                        self.rollout_id,
-                        attempt + 1,
-                        current_event,
-                    )
-                    if sse_writer is not None:
-                        sse_writer.write({"type": "event_field", "attempt": attempt, "event": current_event})
-                    continue
-
-                if line.startswith("data:"):
-                    data_piece = line.split(":", 1)[1].lstrip()
-                    data_lines.append(data_piece)
-                    if sse_writer is not None:
-                        preview = data_piece[:500]
-                        sse_writer.write(
-                            {
-                                "type": "data_field",
-                                "attempt": attempt,
-                                "event": current_event,
-                                "data_preview": preview,
-                                "data_len": len(data_piece),
-                            }
-                        )
-                    continue
-
-                # Ignore other SSE fields (id:, retry:, etc.) and any junk.
-
-            # Flush trailing event if stream ends without a final blank line.
-            _dispatch()
 
             if completion is None:
                 raise OsmosisTransportError("SSE stream ended without a completion event")
@@ -635,11 +573,13 @@ class OsmosisLLMClient:
                     )
                     if sse_writer is not None:
                         sse_writer.write({"type": "start_request", "attempt": attempt, "url": url})
-                    async with client.stream(
+                    async with aconnect_sse(
+                        client,
                         "POST",
                         url,
                         json=request.model_dump(mode="json", exclude_none=True),
-                    ) as response:
+                    ) as event_source:
+                        response = event_source.response
                         if response.status_code == 200:
                             if sse_writer is not None:
                                 sse_writer.write(
@@ -650,7 +590,9 @@ class OsmosisLLMClient:
                                         "headers": dict(response.headers),
                                     }
                                 )
-                            data = await _read_final_completion_from_sse(response, attempt=attempt, url=url)
+                            data = await _read_final_completion_from_sse(
+                                event_source, attempt=attempt, url=url
+                            )
                             elapsed_ms = (time.monotonic() - start_time) * 1000
 
                             # Update internal metrics
@@ -715,7 +657,7 @@ class OsmosisLLMClient:
                         sse_writer.write({"type": "timeout", "attempt": attempt, "error": str(e)})
                     last_error = OsmosisTimeoutError(str(e))
 
-                except httpx.RequestError as e:
+                except (httpx.RequestError, SSEError) as e:
                     error_detail = f"{type(e).__name__}: {e}" if str(e) else f"{type(e).__name__}"
                     logger.warning(
                         "Transport error (stream): attempt=%d/%d, error=%s",

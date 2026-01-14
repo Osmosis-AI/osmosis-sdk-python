@@ -30,6 +30,7 @@ dependencies = [
     "tqdm>=4.0.0,<5.0.0",
     # Remote rollout SDK dependencies
     "httpx>=0.25.0,<1.0.0",
+    "httpx-sse>=0.4.3",
     "pydantic>=2.0.0,<3.0.0",
 ]
 
