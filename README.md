@@ -22,10 +22,8 @@ cd osmosis-sdk-python
 # Install package in editable mode
 pip install -e .
 
-# Install development dependencies (pytest, formatters, etc.)
+# Install with development dependencies (pytest, formatters, etc.)
 pip install -e ".[dev]"
-# Or using requirements file:
-pip install -r requirements-dev.txt
 ```
 
 ## Quick Start
