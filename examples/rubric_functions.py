@@ -5,7 +5,7 @@ Set the following environment variables before running the examples:
 
     export OPENAI_API_KEY="..."
     export ANTHROPIC_API_KEY="..."
-    export GOOGLE_API_KEY="..."
+    export GEMINI_API_KEY="..."
     export XAI_API_KEY="..."
     export OPENROUTER_API_KEY="..."
     export CEREBRAS_API_KEY="..."

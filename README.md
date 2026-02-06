@@ -84,7 +84,7 @@ Credentials are resolved from environment variables by default:
 
 - `OPENAI_API_KEY` for OpenAI
 - `ANTHROPIC_API_KEY` for Anthropic
-- `GOOGLE_API_KEY` for Google Gemini
+- `GEMINI_API_KEY` for Google Gemini
 - `XAI_API_KEY` for xAI
 - `OPENROUTER_API_KEY` for OpenRouter
 - `CEREBRAS_API_KEY` for Cerebras
