@@ -20,9 +20,6 @@ pip install osmosis-ai
 # With server support (FastAPI + uvicorn)
 pip install osmosis-ai[server]
 
-# Optional: environment-driven settings (.env / env vars)
-pip install osmosis-ai[config]
-
 # Full installation with all optional features
 pip install osmosis-ai[full]
 ```
@@ -213,7 +210,7 @@ app = create_app(
 
 ## Settings (Environment Variables)
 
-When installed with `osmosis-ai[config]`, settings can be loaded from environment variables (or a `.env` file) using these prefixes:
+When installed with `osmosis-ai[server]`, settings can be loaded from environment variables (or a `.env` file) using these prefixes:
 
 - `OSMOSIS_ROLLOUT_CLIENT_*` - Client settings (timeout, retries, etc.)
 - `OSMOSIS_ROLLOUT_SERVER_*` - Server settings (concurrency, TTL, etc.)

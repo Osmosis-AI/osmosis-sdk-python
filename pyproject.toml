@@ -21,8 +21,7 @@ dependencies = [
     "PyYAML>=6.0,<7.0",
     "python-dotenv>=0.1.0,<2.0.0",
     "requests>=2.0.0,<3.0.0",
-    "xxhash>=3.0.0,<4.0.0",
-    "litellm>=1.40.0",  # Unified LLM provider (supports 100+ providers)
+    "litellm>=1.40.0,<2.0.0",  # Unified LLM provider (supports 100+ providers)
     "tqdm>=4.0.0,<5.0.0",
     # Remote rollout SDK dependencies
     "httpx>=0.25.0,<1.0.0",
@@ -34,13 +33,9 @@ dependencies = [
 server = [
     "fastapi>=0.100.0,<1.0.0",
     "uvicorn>=0.23.0,<1.0.0",
+    "pydantic-settings>=2.0.0,<3.0.0",
     "pyarrow>=14.0.0",      # Parquet file support for test mode
     "rich>=13.0.0",         # Beautiful terminal output
-]
-
-# Configuration management
-config = [
-    "pydantic-settings>=2.0.0,<3.0.0",
 ]
 
 # Development dependencies (testing, formatting, etc.)
@@ -52,9 +47,9 @@ dev = [
     "isort>=5.0.0,<7.0.0",
 ]
 
-# Full installation with all optional features (uses self-references to avoid duplication)
+# Full installation with all optional features
 full = [
-    "osmosis-ai[server,config]",
+    "osmosis-ai[server]",
 ]
 
 [project.urls]
