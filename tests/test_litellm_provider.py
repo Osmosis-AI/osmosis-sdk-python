@@ -243,6 +243,10 @@ class TestEvaluateRubric:
         )
         mock_litellm.APIError = litellm.APIError
         mock_litellm.NotFoundError = litellm.NotFoundError
+        mock_litellm.RateLimitError = litellm.RateLimitError
+        mock_litellm.AuthenticationError = litellm.AuthenticationError
+        mock_litellm.Timeout = litellm.Timeout
+        mock_litellm.APIConnectionError = litellm.APIConnectionError
 
         with patch.dict(sys.modules, {"litellm": mock_litellm}):
             with pytest.raises(ProviderRequestError) as exc_info:
@@ -300,6 +304,10 @@ class TestEvaluateRubric:
         )
         mock_litellm.APIError = litellm.APIError
         mock_litellm.NotFoundError = litellm.NotFoundError
+        mock_litellm.RateLimitError = litellm.RateLimitError
+        mock_litellm.AuthenticationError = litellm.AuthenticationError
+        mock_litellm.Timeout = litellm.Timeout
+        mock_litellm.APIConnectionError = litellm.APIConnectionError
 
         with patch.dict(sys.modules, {"litellm": mock_litellm}):
             with pytest.raises(ModelNotFoundError) as exc_info:
@@ -322,6 +330,10 @@ class TestEvaluateRubric:
         )
         mock_litellm.APIError = litellm.APIError
         mock_litellm.NotFoundError = litellm.NotFoundError
+        mock_litellm.RateLimitError = litellm.RateLimitError
+        mock_litellm.AuthenticationError = litellm.AuthenticationError
+        mock_litellm.Timeout = litellm.Timeout
+        mock_litellm.APIConnectionError = litellm.APIConnectionError
 
         with patch.dict(sys.modules, {"litellm": mock_litellm}):
             with pytest.raises(ProviderRequestError):
@@ -341,6 +353,10 @@ class TestEvaluateRubric:
         )
         mock_litellm.APIError = litellm.APIError
         mock_litellm.NotFoundError = litellm.NotFoundError
+        mock_litellm.RateLimitError = litellm.RateLimitError
+        mock_litellm.AuthenticationError = litellm.AuthenticationError
+        mock_litellm.Timeout = litellm.Timeout
+        mock_litellm.APIConnectionError = litellm.APIConnectionError
 
         with patch.dict(sys.modules, {"litellm": mock_litellm}):
             with pytest.raises(ProviderRequestError) as exc_info:
