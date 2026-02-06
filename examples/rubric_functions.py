@@ -5,16 +5,16 @@ Set the following environment variables before running the examples:
 
     export OPENAI_API_KEY="..."
     export ANTHROPIC_API_KEY="..."
-    export GOOGLE_API_KEY="..."
+    export GEMINI_API_KEY="..."
     export XAI_API_KEY="..."
     export OPENROUTER_API_KEY="..."
     export CEREBRAS_API_KEY="..."
 
 Uncomment the desired provider in the `__main__` section to trigger a request.
 
-Each helper call uses the provider's official Python SDK with structured JSON outputs
-enforced. Providers are pluggable; see `osmosis_ai/providers/README.md` for instructions
-on registering your own integration and then pass its name in `model_info`.
+Each helper call uses LiteLLM's unified interface with structured JSON outputs
+enforced. Any provider supported by LiteLLM can be used by passing its name
+in `model_info`.
 """
 
 from __future__ import annotations

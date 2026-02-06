@@ -8,8 +8,7 @@ echo Activating virtual environment...
 call venv\Scripts\activate.bat
 
 echo Installing dependencies...
-pip install -e .
-pip install -r requirements.txt
+pip install -e ".[dev]"
 
 if not exist .env (
     echo Creating .env file from template...

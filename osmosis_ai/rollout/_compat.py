@@ -71,7 +71,7 @@ def require_optional(
         pydantic_settings = require_optional(
             "pydantic_settings",
             feature_name="configuration management",
-            install_extra="config",
+            install_extra="server",
         )
     """
     module, available = import_optional(module_name)
