@@ -12,7 +12,7 @@ pip install osmosis-ai
 
 Requires Python 3.10 or newer.
 
-This installs the Osmosis CLI and pulls in `litellm` (unified LLM interface supporting 100+ providers) along with supporting utilities such as `PyYAML`, `python-dotenv`, `requests`, and `xxhash`.
+This installs the Osmosis CLI and pulls in `litellm` (unified LLM interface supporting 100+ providers) along with supporting utilities such as `PyYAML`, `python-dotenv`, and `requests`.
 
 For development:
 ```bash

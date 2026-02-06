@@ -69,22 +69,20 @@ def _default_timeout_for_model(provider: str, model: str) -> float:
     provider_lower = provider.lower().strip()
     model_lower = model.lower().strip()
 
-    if provider_lower == "xai":
-        return 60.0 if model_lower.startswith("grok-4") else 45.0
-
+    # Model-specific overrides
+    if provider_lower == "xai" and model_lower.startswith("grok-4"):
+        return 60.0
     if provider_lower == "openai" and model_lower.startswith("gpt-5"):
         return 45.0
 
-    if provider_lower == "gemini":
-        return 45.0
-
-    if provider_lower == "cerebras":
-        return 60.0
-
-    if provider_lower == "openrouter":
-        return 60.0
-
-    return DEFAULT_REQUEST_TIMEOUT_SECONDS
+    # Provider-level defaults
+    provider_timeouts = {
+        "xai": 45.0,
+        "gemini": 45.0,
+        "cerebras": 60.0,
+        "openrouter": 60.0,
+    }
+    return provider_timeouts.get(provider_lower, DEFAULT_REQUEST_TIMEOUT_SECONDS)
 
 
 # ============================================================================
@@ -421,14 +419,10 @@ def _call_litellm(
             f"Model '{model}' was not found. Confirm the model identifier is correct "
             f"and your {provider} account has access to it.",
         ) from err
-    except litellm.APIError as err:
+    except (litellm.APIError, litellm.RateLimitError, litellm.AuthenticationError, litellm.Timeout, litellm.APIConnectionError) as err:
         raise ProviderRequestError(provider, model, _extract_error_message(err)) from err
-    except Exception as err:
-        # LiteLLM exceptions like RateLimitError, AuthenticationError, and
-        # Timeout inherit from openai.* base classes rather than
-        # litellm.APIError, so they slip past the catch above.
-        if err.__class__.__module__.startswith(("litellm", "openai")):
-            raise ProviderRequestError(provider, model, _extract_error_message(err)) from err
+    except Exception:
+        # Re-raise other unexpected exceptions to be handled by the caller.
         raise
 
     raw = _dump_response(response)
