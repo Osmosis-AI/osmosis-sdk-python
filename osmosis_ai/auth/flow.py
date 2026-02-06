@@ -9,6 +9,7 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from urllib.parse import urlencode
 
+from ..consts import PACKAGE_VERSION
 from .config import PLATFORM_URL
 from .credentials import WorkspaceCredentials, OrganizationInfo, UserInfo, save_credentials
 from .local_server import LocalAuthServer, find_available_port
@@ -125,7 +126,13 @@ def login(
             raise LoginError("No token received from authentication")
 
         # Verify token and get user info from platform
-        user_info, org_info, expires_at, token_id = _verify_and_get_user_info(token)
+        try:
+            user_info, org_info, expires_at, token_id = _verify_and_get_user_info(token)
+        except LoginError as e:
+            server.set_verification_result(success=False, error=str(e))
+            raise
+
+        server.set_verification_result(success=True)
 
         credentials = WorkspaceCredentials(
             access_token=token,
@@ -147,6 +154,10 @@ def login(
         )
 
     finally:
+        # Ensure the callback handler is unblocked if verification wasn't reached
+        if not server._verification_event.is_set():
+            server.set_verification_result(success=False, error="Login failed unexpectedly")
+        server._shutdown_event.set()
         server.server_close()
 
 
@@ -174,6 +185,7 @@ def _verify_and_get_user_info(token: str) -> tuple[UserInfo, OrganizationInfo, d
         headers={
             "Authorization": f"Bearer {token}",
             "Content-Type": "application/json",
+            "User-Agent": f"osmosis-cli/{PACKAGE_VERSION}",
         },
     )
 

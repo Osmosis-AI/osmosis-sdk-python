@@ -45,17 +45,20 @@ class AuthCallbackHandler(BaseHTTPRequestHandler):
         if error:
             server.error = error_description or error
             self._send_error_page(error_description or error)
+            server._token_event.set()
             return
 
         if not token or not state:
             server.error = "Missing token or state parameter"
             self._send_error_page("Missing required parameters")
+            server._token_event.set()
             return
 
         # Validate state to prevent CSRF
         if state != server.expected_state:
             server.error = "Invalid state parameter"
             self._send_error_page("Invalid state - possible CSRF attack")
+            server._token_event.set()
             return
 
         # Store the token and revoked count
@@ -64,7 +67,18 @@ class AuthCallbackHandler(BaseHTTPRequestHandler):
             server.revoked_count = int(revoked_count_str) if revoked_count_str else 0
         except ValueError:
             server.revoked_count = 0
-        self._send_success_page()
+
+        # Signal main thread that token is ready, then wait for verification
+        server._token_event.set()
+
+        if not server._verification_event.wait(timeout=30):
+            self._send_error_page("Verification timed out")
+            return
+
+        if server._verification_result is True:
+            self._send_success_page()
+        else:
+            self._send_error_page(str(server._verification_result))
 
     def _send_response(self, status: int, message: str) -> None:
         """Send a simple text response."""
@@ -367,6 +381,20 @@ class LocalAuthServer(HTTPServer):
         self.error: Optional[str] = None
         self.revoked_count: int = 0
         self._shutdown_event = threading.Event()
+        # Synchronization for deferred browser response
+        self._token_event = threading.Event()
+        self._verification_event = threading.Event()
+        self._verification_result: object = None  # True = success, str = error message
+
+    def set_verification_result(self, success: bool, error: Optional[str] = None) -> None:
+        """Set the verification result and unblock the callback handler.
+
+        Args:
+            success: Whether token verification succeeded.
+            error: Error message if verification failed.
+        """
+        self._verification_result = True if success else (error or "Verification failed")
+        self._verification_event.set()
 
     def wait_for_callback(self, timeout: float = 300.0) -> tuple[Optional[str], Optional[str]]:
         """Wait for the OAuth callback.
@@ -381,16 +409,11 @@ class LocalAuthServer(HTTPServer):
         def serve_until_done() -> None:
             while not self._shutdown_event.is_set():
                 self.handle_request()
-                if self.received_token is not None or self.error is not None:
-                    break
 
-        server_thread = threading.Thread(target=serve_until_done)
-        server_thread.daemon = True
+        server_thread = threading.Thread(target=serve_until_done, daemon=True)
         server_thread.start()
 
-        server_thread.join(timeout=timeout)
-
-        if server_thread.is_alive():
+        if not self._token_event.wait(timeout=timeout):
             self._shutdown_event.set()
             return None, "Authentication timed out"
 
