@@ -34,8 +34,7 @@ Example:
 Optional Features:
     Install optional dependencies for enhanced functionality:
 
-    pip install osmosis-ai[config]  # pydantic-settings configuration
-    pip install osmosis-ai[server]  # FastAPI server support
+    pip install osmosis-ai[server]  # FastAPI server + configuration support
     pip install osmosis-ai[full]    # Everything
 """
 

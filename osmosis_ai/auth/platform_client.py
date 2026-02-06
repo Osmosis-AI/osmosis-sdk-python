@@ -7,6 +7,7 @@ from typing import Any, Optional, TYPE_CHECKING
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from ..consts import PACKAGE_VERSION
 from .config import PLATFORM_URL
 from .credentials import delete_workspace_credentials, get_active_workspace, load_credentials
 
@@ -80,6 +81,7 @@ def platform_request(
     req_headers = {
         "Authorization": f"Bearer {credentials.access_token}",
         "Content-Type": "application/json",
+        "User-Agent": f"osmosis-cli/{PACKAGE_VERSION}",
     }
     if headers:
         req_headers.update(headers)
