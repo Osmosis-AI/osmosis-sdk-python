@@ -13,6 +13,7 @@ class ModelInfo(TypedDict, total=False):
     system_prompt: Optional[str]
     original_input: Optional[str]
     timeout: float
+    reasoning_effort: Optional[str]
 
 
 class RewardRubricRunResult(TypedDict):

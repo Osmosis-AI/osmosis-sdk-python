@@ -347,6 +347,7 @@ def _call_litellm(
     score_min: float,
     score_max: float,
     timeout: float,
+    reasoning_effort: Optional[str] = None,
 ) -> RewardRubricRunResult:
     """Call LiteLLM and return the rubric evaluation result."""
     try:
@@ -380,6 +381,11 @@ def _call_litellm(
     # GPT-5 doesn't support temperature
     if not model.lower().strip().startswith("gpt-5"):
         completion_kwargs["temperature"] = 0
+
+    if reasoning_effort is not None:
+        completion_kwargs["reasoning_effort"] = reasoning_effort
+        # Let LiteLLM silently drop the param for models that don't support it
+        completion_kwargs["drop_params"] = True
 
     # Suppress Pydantic serialization warnings caused by LiteLLM model
     # definitions not matching provider responses.  Applied as a persistent
@@ -552,6 +558,8 @@ def evaluate_rubric(
         metadata,
     )
 
+    reasoning_effort = model_info.get("reasoning_effort")
+
     try:
         result = _call_litellm(
             provider=provider_name,
@@ -562,6 +570,7 @@ def evaluate_rubric(
             score_min=resolved_score_min,
             score_max=resolved_score_max,
             timeout=provider_timeout,
+            reasoning_effort=reasoning_effort,
         )
     except ProviderRequestError:
         raise
