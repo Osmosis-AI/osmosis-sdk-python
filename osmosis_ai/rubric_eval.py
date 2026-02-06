@@ -370,10 +370,17 @@ def _call_litellm(
         {"role": "user", "content": user_content},
     ]
 
+    # Use json_schema when the model supports it, otherwise fall back to
+    # json_object (e.g. Cerebras models that only accept the simpler mode).
+    if litellm.supports_response_schema(model=litellm_model, custom_llm_provider=None):
+        response_format: Dict[str, Any] = {"type": "json_schema", "json_schema": schema}
+    else:
+        response_format = {"type": "json_object"}
+
     completion_kwargs: Dict[str, Any] = {
         "model": litellm_model,
         "messages": messages,
-        "response_format": {"type": "json_schema", "json_schema": schema},
+        "response_format": response_format,
         "timeout": timeout,
         "api_key": api_key,
     }
@@ -410,6 +417,13 @@ def _call_litellm(
         ) from err
     except litellm.APIError as err:
         raise ProviderRequestError(provider, model, _extract_error_message(err)) from err
+    except Exception as err:
+        # LiteLLM exceptions like RateLimitError, AuthenticationError, and
+        # Timeout inherit from openai.* base classes rather than
+        # litellm.APIError, so they slip past the catch above.
+        if err.__class__.__module__.startswith(("litellm", "openai")):
+            raise ProviderRequestError(provider, model, _extract_error_message(err)) from err
+        raise
 
     raw = _dump_response(response)
     content = _extract_content(raw)

@@ -50,7 +50,7 @@ Shows how to call `osmosis_ai.evaluate_rubric` against different hosted judge pr
 - Prints the numeric score and explanation returned by each provider's schema-enforced response.
 - Gracefully skips providers whose API keys are not present (`MissingAPIKeyError`) and surfaces known remote failures via `ModelNotFoundError` / `ProviderRequestError`.
 
-The helper uses the new provider registry in `osmosis_ai.providers`; each example call only needs to supply `provider` and `model` because the integrations are registered at import time. To experiment with your own provider implementation, create a subclass of `RubricProvider`, call `register_provider(...)`, and then pass the new provider name in `model_info`. See [`../osmosis_ai/providers/README.md`](../osmosis_ai/providers/README.md) for the detailed checklist.
+The helper uses [LiteLLM](https://github.com/BerriAI/litellm) under the hood; each example call only needs to supply `provider` and `model` because LiteLLM routes to the correct API automatically. Any provider supported by LiteLLM can be used by passing its name in `model_info`.
 
 ## Rubric Configs and Dataset
 

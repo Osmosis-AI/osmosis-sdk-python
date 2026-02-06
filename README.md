@@ -12,7 +12,7 @@ pip install osmosis-ai
 
 Requires Python 3.10 or newer.
 
-This installs the Osmosis CLI and pulls in the required provider SDKs (`openai`, `anthropic`, `google-genai`, `xai-sdk`, `cerebras_cloud_sdk`) along with supporting utilities such as `PyYAML`, `python-dotenv`, `requests`, and `xxhash`.
+This installs the Osmosis CLI and pulls in `litellm` (unified LLM interface supporting 100+ providers) along with supporting utilities such as `PyYAML`, `python-dotenv`, `requests`, and `xxhash`.
 
 For development:
 ```bash
@@ -70,15 +70,7 @@ If you're integrating an agent loop with Osmosis remote rollout / TrainGate, see
 
 ## Remote Rubric Evaluation
 
-`evaluate_rubric` talks to each provider through its official Python SDK while enforcing the same JSON schema everywhere:
-
-- **OpenAI / xAI** – Uses `OpenAI(...).responses.create` (or `chat.completions.create`) with `response_format={"type": "json_schema"}` and falls back to `json_object` when needed.
-- **Anthropic** – Forces a tool call with a JSON schema via `Anthropic(...).messages.create`, extracting the returned tool arguments.
-- **Google Gemini** – Invokes `google.genai.Client(...).models.generate_content` with `response_mime_type="application/json"` and `response_schema`.
-- **OpenRouter** – Uses OpenAI-compatible SDK with custom base URL `https://openrouter.ai/api/v1` to access hundreds of AI models through a unified API.
-- **Cerebras** – Uses `Cerebras(...).chat.completions.create` with JSON schema support for high-performance inference on Wafer-Scale Engine.
-
-Every provider therefore returns a strict JSON object with `{"score": number, "explanation": string}`. The helper clamps the score into your configured range, validates the structure, and exposes the raw payload when `return_details=True`.
+`evaluate_rubric` talks to hosted LLM providers through [LiteLLM](https://github.com/BerriAI/litellm), a unified interface supporting 100+ providers (OpenAI, Anthropic, Google Gemini, xAI, OpenRouter, Cerebras, Azure, Bedrock, Vertex AI, and more). Every provider returns a strict JSON object with `{"score": number, "explanation": string}`. The helper clamps the score into your configured range, validates the structure, and exposes the raw payload when `return_details=True`.
 
 Credentials are resolved from environment variables by default:
 
@@ -107,9 +99,17 @@ Remote failures surface as `ProviderRequestError` instances, with `ModelNotFound
 
 ### Provider Architecture
 
-All remote integrations live in `osmosis_ai/providers/` and implement the `RubricProvider` interface. At import time the default registry registers OpenAI, xAI, Anthropic, Google Gemini, OpenRouter, and Cerebras so `evaluate_rubric` can route requests without additional configuration. The request/response plumbing is encapsulated in each provider module, keeping `evaluate_rubric` focused on prompt construction, payload validation, and credential resolution.
+All provider routing is handled by [LiteLLM](https://github.com/BerriAI/litellm). To use any supported provider, pass its name and model in `model_info`:
 
-Add your own provider by subclassing `RubricProvider`, implementing `run()` with the vendor SDK, and calling `register_provider()` during start-up. A step-by-step guide is available in [`osmosis_ai/providers/README.md`](osmosis_ai/providers/README.md).
+```python
+result = evaluate_rubric(
+    rubric="...",
+    solution_str="...",
+    model_info={"provider": "anthropic", "model": "claude-sonnet-4-5-20250929"},
+)
+```
+
+Any provider supported by LiteLLM can be used without additional configuration beyond setting the appropriate API key environment variable.
 
 ## Required Function Signature
 
@@ -197,7 +197,7 @@ def numeric_tolerance(solution_str: str, ground_truth: str, extra_info: dict = N
         return 0.0
 ```
 
-- `examples/rubric_functions.py` demonstrates `evaluate_rubric` with OpenAI, Anthropic, Gemini, xAI, OpenRouter, and Cerebras using the schema-enforced SDK integrations.
+- `examples/rubric_functions.py` demonstrates `evaluate_rubric` with OpenAI, Anthropic, Gemini, xAI, OpenRouter, and Cerebras via LiteLLM's unified interface.
 - `examples/reward_functions.py` keeps local reward helpers that showcase the decorator contract without external calls.
 - `examples/rubric_configs.yaml` bundles two rubric definitions with provider configuration and scoring bounds.
 - `examples/sample_data.jsonl` contains two rubric-aligned solution strings so you can trial dataset validation.
