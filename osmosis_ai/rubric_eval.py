@@ -78,6 +78,12 @@ def _default_timeout_for_model(provider: str, model: str) -> float:
     if provider_lower == "gemini":
         return 45.0
 
+    if provider_lower == "cerebras":
+        return 60.0
+
+    if provider_lower == "openrouter":
+        return 60.0
+
     return DEFAULT_REQUEST_TIMEOUT_SECONDS
 
 

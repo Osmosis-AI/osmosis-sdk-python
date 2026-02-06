@@ -74,6 +74,12 @@ class TestDefaultTimeoutForModel:
     def test_gemini_timeout(self):
         assert _default_timeout_for_model("gemini", "gemini-2.0-flash") == 45.0
 
+    def test_cerebras_timeout(self):
+        assert _default_timeout_for_model("cerebras", "llama-4-scout-17b") == 60.0
+
+    def test_openrouter_timeout(self):
+        assert _default_timeout_for_model("openrouter", "meta-llama/llama-4-maverick") == 60.0
+
     def test_anthropic_timeout(self):
         assert _default_timeout_for_model("anthropic", "claude-3-opus") == DEFAULT_REQUEST_TIMEOUT_SECONDS
 
