@@ -7,6 +7,7 @@ Features:
 - Type-safe interfaces for LLM-centric workflows
 """
 
+from .consts import PACKAGE_VERSION as __version__
 from .rubric_eval import MissingAPIKeyError, evaluate_rubric
 from .rubric_types import ModelNotFoundError, ProviderRequestError
 from .utils import osmosis_reward, osmosis_rubric
@@ -41,6 +42,8 @@ from .rollout import (
 )
 
 __all__ = [
+    # Version
+    "__version__",
     # Reward function decorators
     "osmosis_reward",
     "osmosis_rubric",
