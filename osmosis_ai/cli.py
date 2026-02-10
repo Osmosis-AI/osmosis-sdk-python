@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 
 from .cli_commands import EvalCommand, LoginCommand, LogoutCommand, PreviewCommand, WhoamiCommand, WorkspaceCommand
 from .cli_services import CLIError
+from .consts import PACKAGE_VERSION, package_name
 
 
 def main(argv: Optional[list[str]] = None) -> int:
@@ -35,6 +36,14 @@ def _build_parser() -> argparse.ArgumentParser:
         prog="osmosis",
         description="Osmosis AI SDK - rubric evaluation and remote rollout server.",
     )
+    
+    parser.add_argument(
+        "-V", "--version",
+        action="version",
+        version=f"{package_name} {PACKAGE_VERSION}",
+        help="Show version number.",
+    )
+    
     subparsers = parser.add_subparsers(dest="command")
 
     login_parser = subparsers.add_parser(
