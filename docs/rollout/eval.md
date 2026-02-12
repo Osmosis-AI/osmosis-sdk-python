@@ -16,6 +16,9 @@ Key capabilities:
 - **Concurrent execution** with `--batch-size` for faster benchmarks
 - Optionally use LiteLLM providers (e.g., `openai/gpt-4o`) as comparison baselines
 
+> Command split (development-stage breaking change):  
+> `osmosis eval-rubric` is for hosted rubric evaluation, while `osmosis eval` is for agent eval mode documented here.
+
 ## Quick Start
 
 ### Benchmarking a Trained Model
@@ -115,9 +118,9 @@ runner = EvalRunner(
     eval_fns=eval_fns,
 )
 
-# Run benchmark (batch_size=5 for concurrent execution)
+# Run evaluation (batch_size=5 for concurrent execution)
 async with client:
-    result = await runner.run_bench(
+    result = await runner.run_eval(
         rows=rows,
         n_runs=5,
         max_turns=10,
@@ -137,7 +140,7 @@ for name, summary in result.eval_summaries.items():
 
 ## Connecting to Model Endpoints
 
-Bench mode works with any OpenAI-compatible serving endpoint via `--base-url`:
+Eval mode works with any OpenAI-compatible serving endpoint via `--base-url`:
 
 | Serving Platform | Example `--base-url` |
 |-----------------|----------------------|
@@ -153,7 +156,7 @@ The `--model` parameter should match the model name as registered in the serving
 
 ## Dataset Format
 
-Bench mode uses the same dataset format as [Test Mode](./test-mode.md#dataset-format). Each row must contain these columns (case-insensitive):
+Eval mode uses the same dataset format as [Test Mode](./test-mode.md#dataset-format). Each row must contain these columns (case-insensitive):
 
 | Column | Type | Description |
 |--------|------|-------------|
@@ -341,8 +344,8 @@ runner = EvalRunner(
 # Single run
 result = await runner.run_single(row, row_index=0, run_index=0)
 
-# Full benchmark (batch_size for concurrent execution)
-bench_result = await runner.run_bench(
+# Full evaluation (batch_size for concurrent execution)
+eval_result = await runner.run_eval(
     rows=rows,
     n_runs=5,
     max_turns=10,
@@ -366,23 +369,23 @@ bench_result = await runner.run_bench(
 
 **Methods:**
 
-#### `async run_single(row, row_index, run_index, max_turns, completion_params) -> BenchRunResult`
+#### `async run_single(row, row_index, run_index, max_turns, completion_params) -> EvalRunResult`
 
 Run the agent once on a row and apply all eval functions.
 
-#### `async run_bench(rows, n_runs, max_turns, completion_params, pass_threshold, on_progress, start_index, batch_size) -> BenchResult`
+#### `async run_eval(rows, n_runs, max_turns, completion_params, pass_threshold, on_progress, start_index, batch_size) -> EvalResult`
 
 Run the full benchmark across all rows. When `batch_size > 1`, runs execute concurrently using a pool of independent LLM client instances.
 
 ---
 
-### BenchRunResult
+### EvalRunResult
 
 Result from a single agent run with eval scores.
 
 ```python
 @dataclass
-class BenchRunResult:
+class EvalRunResult:
     run_index: int              # Which run (0-indexed within a row)
     success: bool               # Whether agent completed successfully
     scores: Dict[str, float]    # Eval function name -> score
@@ -393,28 +396,28 @@ class BenchRunResult:
 
 ---
 
-### BenchRowResult
+### EvalRowResult
 
 All runs for a single dataset row.
 
 ```python
 @dataclass
-class BenchRowResult:
+class EvalRowResult:
     row_index: int                  # Dataset row index
-    runs: List[BenchRunResult]      # All runs for this row
+    runs: List[EvalRunResult]      # All runs for this row
 ```
 
 ---
 
-### BenchResult
+### EvalResult
 
 Full benchmark result with aggregated statistics.
 
 ```python
 @dataclass
-class BenchResult:
-    rows: List[BenchRowResult]                      # Per-row results
-    eval_summaries: Dict[str, BenchEvalSummary]     # Per-eval statistics
+class EvalResult:
+    rows: List[EvalRowResult]                      # Per-row results
+    eval_summaries: Dict[str, EvalEvalSummary]     # Per-eval statistics
     total_rows: int                                  # Number of dataset rows
     total_runs: int                                  # Total runs (rows * n_runs)
     total_tokens: int                                # Total tokens consumed
@@ -425,13 +428,13 @@ class BenchResult:
 
 ---
 
-### BenchEvalSummary
+### EvalEvalSummary
 
 Summary statistics for a single eval function.
 
 ```python
 @dataclass
-class BenchEvalSummary:
+class EvalEvalSummary:
     mean: float                     # Mean score across all runs
     std: float                      # Standard deviation
     min: float                      # Minimum score

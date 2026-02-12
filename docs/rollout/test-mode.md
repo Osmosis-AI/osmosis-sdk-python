@@ -2,6 +2,9 @@
 
 Test your `RolloutAgentLoop` implementations locally without TrainGate using external LLM providers via [LiteLLM](https://docs.litellm.ai/docs/providers).
 
+> Breaking change: the legacy import path `osmosis_ai.rollout.test_mode` was removed.  
+> Use `osmosis_ai.rollout.eval.common` and `osmosis_ai.rollout.eval.test_mode` instead.
+
 ## Overview
 
 Test mode enables you to:

@@ -186,6 +186,19 @@ class EvalCommand:
     def run(self, args: argparse.Namespace) -> int:
         return asyncio.run(self._run_async(args))
 
+    def _validate_args(self, args: argparse.Namespace) -> Optional[str]:
+        if args.n_runs < 1:
+            return "--n must be >= 1."
+        if args.batch_size < 1:
+            return "--batch-size must be >= 1."
+        if args.max_turns < 1:
+            return "--max-turns must be >= 1."
+        if args.offset < 0:
+            return "--offset must be >= 0."
+        if args.limit is not None and args.limit < 1:
+            return "--limit must be >= 1."
+        return None
+
     def _print_header(self, args: argparse.Namespace) -> None:
         if args.quiet:
             return
@@ -276,6 +289,10 @@ class EvalCommand:
     async def _run_async(self, args: argparse.Namespace) -> int:
         if args.debug:
             logging.basicConfig(level=logging.DEBUG)
+
+        if error := self._validate_args(args):
+            self.console.print_error(f"Error: {error}")
+            return 1
 
         self._print_header(args)
 

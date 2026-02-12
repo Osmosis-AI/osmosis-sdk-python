@@ -526,3 +526,47 @@ def test_eval_command_output_path_directory_with_suffix(tmp_path, capsys):
 
     assert exit_code == 1
     assert f"Output path '{output_path}' is a directory." in captured.err
+
+
+def test_rollout_eval_rejects_n_runs_zero(capsys):
+    exit_code = cli.main(
+        [
+            "eval",
+            "-m",
+            "my_agent:MyAgentLoop",
+            "-d",
+            "data.jsonl",
+            "--model",
+            "openai/gpt-4o",
+            "--eval-fn",
+            "rewards:score",
+            "--n",
+            "0",
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    assert "Error: --n must be >= 1." in captured.err
+
+
+def test_rollout_eval_rejects_batch_size_zero(capsys):
+    exit_code = cli.main(
+        [
+            "eval",
+            "-m",
+            "my_agent:MyAgentLoop",
+            "-d",
+            "data.jsonl",
+            "--model",
+            "openai/gpt-4o",
+            "--eval-fn",
+            "rewards:score",
+            "--batch-size",
+            "0",
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    assert "Error: --batch-size must be >= 1." in captured.err
