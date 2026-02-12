@@ -125,16 +125,16 @@ def test_eval_command_output_json(tmp_path, monkeypatch, capsys):
                 },
             }
 
-    from osmosis_ai.cli_commands import EvalCommand
+    from osmosis_ai.cli_commands import EvalRubricCommand
 
     fake_evaluator = FakeEvaluator()
     monkeypatch.setattr("osmosis_ai.cli_services.engine.RubricEvaluator", lambda: fake_evaluator)
-    monkeypatch.setattr(EvalCommand, "_generate_output_identifier", staticmethod(lambda: "1700000000"))
+    monkeypatch.setattr(EvalRubricCommand, "_generate_output_identifier", staticmethod(lambda: "1700000000"))
 
     output_stem = tmp_path / "results"
     exit_code = cli.main(
         [
-            "eval",
+            "eval-rubric",
             "--rubric",
             "support_followup",
             "--data",
@@ -207,7 +207,7 @@ def test_eval_command_missing_api_key_fails_fast(tmp_path, monkeypatch, capsys):
 
     exit_code = cli.main(
         [
-            "eval",
+            "eval-rubric",
             "--rubric",
             "support_followup",
             "--data",
@@ -268,16 +268,16 @@ def test_eval_command_with_baseline(tmp_path, monkeypatch, capsys):
                 "raw": {"call": self.calls},
             }
 
-    from osmosis_ai.cli_commands import EvalCommand
+    from osmosis_ai.cli_commands import EvalRubricCommand
 
     fake_evaluator = FakeEvaluator()
     monkeypatch.setattr("osmosis_ai.cli_services.engine.RubricEvaluator", lambda: fake_evaluator)
-    monkeypatch.setattr(EvalCommand, "_generate_output_identifier", staticmethod(lambda: "1700000001"))
+    monkeypatch.setattr(EvalRubricCommand, "_generate_output_identifier", staticmethod(lambda: "1700000001"))
 
     output_dir = tmp_path / "baseline_results"
     exit_code = cli.main(
         [
-            "eval",
+            "eval-rubric",
             "--rubric",
             "support_followup",
             "--data",
@@ -348,7 +348,7 @@ def test_eval_command_output_json_custom_file_path(tmp_path, monkeypatch, capsys
     output_path = tmp_path / "reports" / "custom_output.txt"
     exit_code = cli.main(
         [
-            "eval",
+            "eval-rubric",
             "--rubric",
             "support_followup",
             "--data",
@@ -414,7 +414,7 @@ def test_eval_command_empty_rubric_id_rejected(tmp_path, capsys):
 
     exit_code = cli.main(
         [
-            "eval",
+            "eval-rubric",
             "--rubric",
             "   ",
             "--data",
@@ -432,7 +432,7 @@ def test_eval_command_number_must_be_positive(tmp_path, capsys):
 
     exit_code = cli.main(
         [
-            "eval",
+            "eval-rubric",
             "--rubric",
             "support_followup",
             "--data",
@@ -452,7 +452,7 @@ def test_eval_command_number_zero_rejected(tmp_path, capsys):
 
     exit_code = cli.main(
         [
-            "eval",
+            "eval-rubric",
             "--rubric",
             "support_followup",
             "--data",
@@ -472,7 +472,7 @@ def test_eval_command_missing_data_path(tmp_path, capsys):
 
     exit_code = cli.main(
         [
-            "eval",
+            "eval-rubric",
             "--rubric",
             "support_followup",
             "--data",
@@ -511,7 +511,7 @@ def test_eval_command_output_path_directory_with_suffix(tmp_path, capsys):
 
     exit_code = cli.main(
         [
-            "eval",
+            "eval-rubric",
             "--rubric",
             "support_followup",
             "--data",
@@ -526,3 +526,47 @@ def test_eval_command_output_path_directory_with_suffix(tmp_path, capsys):
 
     assert exit_code == 1
     assert f"Output path '{output_path}' is a directory." in captured.err
+
+
+def test_rollout_eval_rejects_n_runs_zero(capsys):
+    exit_code = cli.main(
+        [
+            "eval",
+            "-m",
+            "my_agent:MyAgentLoop",
+            "-d",
+            "data.jsonl",
+            "--model",
+            "openai/gpt-4o",
+            "--eval-fn",
+            "rewards:score",
+            "--n",
+            "0",
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    assert "Error: --n must be >= 1." in captured.err
+
+
+def test_rollout_eval_rejects_batch_size_zero(capsys):
+    exit_code = cli.main(
+        [
+            "eval",
+            "-m",
+            "my_agent:MyAgentLoop",
+            "-d",
+            "data.jsonl",
+            "--model",
+            "openai/gpt-4o",
+            "--eval-fn",
+            "rewards:score",
+            "--batch-size",
+            "0",
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    assert "Error: --batch-size must be >= 1." in captured.err

@@ -79,8 +79,8 @@ class PreviewCommand:
         return 0
 
 
-class EvalCommand:
-    """Handler for `osmosis eval`."""
+class EvalRubricCommand:
+    """Handler for `osmosis eval-rubric`."""
 
     def __init__(
         self,

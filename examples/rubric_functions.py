@@ -69,7 +69,7 @@ PROFILE_CATALOG = {
     },
     "gemini": {
         "provider": "gemini",
-        "model": "gemini-2.5-flash",
+        "model": "gemini-3-flash-preview",
         "api_key_env": DEFAULT_API_KEY_ENV["gemini"],
     },
     "xai": {

@@ -220,10 +220,10 @@ class ValidateCommand:
 
 
 class TestCommand:
-    """Handler for `osmosis test` (delegates to test_mode.cli).
+    """Handler for `osmosis test` (delegates to eval.test_mode.cli).
 
     This class acts as a proxy to avoid circular imports and keep the main CLI
-    module lightweight. The actual implementation lives in test_mode.cli.
+    module lightweight. The actual implementation lives in eval.test_mode.cli.
     """
 
     def __init__(self) -> None:
@@ -233,7 +233,7 @@ class TestCommand:
     def _get_impl(self) -> "_TestCommandImpl":
         """Lazily load the actual TestCommand implementation."""
         if self._impl is None:
-            from osmosis_ai.rollout.test_mode.cli import TestCommand as _TestCommandImpl
+            from osmosis_ai.rollout.eval.test_mode.cli import TestCommand as _TestCommandImpl
 
             self._impl = _TestCommandImpl()
         return self._impl
@@ -243,8 +243,29 @@ class TestCommand:
         self._get_impl().configure_parser(parser)
 
 
+class EvalCommand:
+    """Handler for `osmosis eval` (delegates to eval.evaluation.cli).
+
+    Proxy class following the same lazy-loading pattern as TestCommand.
+    """
+
+    def __init__(self) -> None:
+        self._impl: Optional["_EvalCommandImpl"] = None
+
+    def _get_impl(self) -> "_EvalCommandImpl":
+        if self._impl is None:
+            from osmosis_ai.rollout.eval.evaluation.cli import EvalCommand as _EvalCommandImpl
+
+            self._impl = _EvalCommandImpl()
+        return self._impl
+
+    def configure_parser(self, parser: argparse.ArgumentParser) -> None:
+        self._get_impl().configure_parser(parser)
+
+
 __all__ = [
     "CLIError",
+    "EvalCommand",
     "ServeCommand",
     "TestCommand",
     "ValidateCommand",

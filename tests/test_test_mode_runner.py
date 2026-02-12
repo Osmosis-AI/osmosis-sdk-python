@@ -18,9 +18,8 @@ from osmosis_ai.rollout import (
 )
 from osmosis_ai.rollout.client import CompletionsResult
 from osmosis_ai.rollout.core.schemas import RolloutMetrics
-from osmosis_ai.rollout.test_mode.dataset import DatasetRow
-from osmosis_ai.rollout.test_mode.exceptions import ToolValidationError
-from osmosis_ai.rollout.test_mode.runner import (
+from osmosis_ai.rollout.eval.common.dataset import DatasetRow
+from osmosis_ai.rollout.eval.test_mode.runner import (
     LocalTestBatchResult,
     LocalTestRunResult,
     LocalTestRunner,

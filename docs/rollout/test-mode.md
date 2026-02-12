@@ -2,6 +2,9 @@
 
 Test your `RolloutAgentLoop` implementations locally without TrainGate using external LLM providers via [LiteLLM](https://docs.litellm.ai/docs/providers).
 
+> Breaking change: the legacy import path `osmosis_ai.rollout.test_mode` was removed.  
+> Use `osmosis_ai.rollout.eval.common` and `osmosis_ai.rollout.eval.test_mode` instead.
+
 ## Overview
 
 Test mode enables you to:
@@ -18,10 +21,10 @@ Test mode enables you to:
 
 ```bash
 # Basic batch test with OpenAI
-osmosis test --agent my_agent:MyAgentLoop --dataset data.jsonl --model gpt-4o
+osmosis test --agent my_agent:MyAgentLoop --dataset data.jsonl --model gpt-5-mini
 
 # Use Anthropic Claude
-osmosis test --agent my_agent:MyAgentLoop --dataset data.jsonl --model anthropic/claude-sonnet-4-20250514
+osmosis test --agent my_agent:MyAgentLoop --dataset data.jsonl --model anthropic/claude-sonnet-4-5
 
 # Interactive debugging
 osmosis test --agent my_agent:MyAgentLoop --dataset data.jsonl --interactive
@@ -33,18 +36,16 @@ osmosis test --agent my_agent:MyAgentLoop --dataset data.jsonl --interactive --r
 ### Programmatic Usage
 
 ```python
-from osmosis_ai.rollout.test_mode import (
-    DatasetReader,
-    ExternalLLMClient,
-    LocalTestRunner,
-)
+from osmosis_ai.rollout.eval.common import DatasetReader
+from osmosis_ai.rollout.eval.common import ExternalLLMClient
+from osmosis_ai.rollout.eval.test_mode import LocalTestRunner
 
 # Load dataset
 reader = DatasetReader("./test_data.jsonl")
 rows = reader.read(limit=10)
 
 # Initialize LLM client
-client = ExternalLLMClient("gpt-4o")  # or "anthropic/claude-sonnet-4-20250514"
+client = ExternalLLMClient("gpt-5-mini")  # or "anthropic/claude-sonnet-4-5"
 
 # Create runner
 runner = LocalTestRunner(
@@ -113,7 +114,7 @@ osmosis test [OPTIONS]
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--model MODEL` | `gpt-4o` | Model name (see [Model Format](#model-format)) |
+| `--model MODEL` | `gpt-5-mini` | Model name (see [Model Format](#model-format)) |
 | `--api-key KEY` | env var | API key for the LLM provider |
 | `--base-url URL` | - | Base URL for OpenAI-compatible APIs |
 
@@ -146,23 +147,23 @@ osmosis test [OPTIONS]
 
 Models can be specified in two formats:
 
-- **Simple**: `gpt-4o` (auto-prefixed to `openai/gpt-4o`)
-- **LiteLLM format**: `provider/model` (e.g., `anthropic/claude-sonnet-4-20250514`)
+- **Simple**: `gpt-5-mini` (auto-prefixed to `openai/gpt-5-mini`)
+- **LiteLLM format**: `provider/model` (e.g., `anthropic/claude-sonnet-4-5`)
 
 See [LiteLLM Providers](https://docs.litellm.ai/docs/providers) for supported providers.
 
 ### Examples
 
 ```bash
-# Test with GPT-4o (default)
+# Test with GPT-5-mini (default)
 osmosis test -m my_agent:agent_loop -d data.jsonl
 
 # Test with Claude
-osmosis test -m my_agent:agent_loop -d data.jsonl --model anthropic/claude-sonnet-4-20250514
+osmosis test -m my_agent:agent_loop -d data.jsonl --model anthropic/claude-sonnet-4-5
 
 # Test with local Ollama
 osmosis test -m my_agent:agent_loop -d data.jsonl \
-    --model ollama/llama2 \
+    --model ollama/llama3.1 \
     --base-url http://localhost:11434
 
 # Test subset of data
@@ -203,7 +204,7 @@ Loading agent: my_agent:agent_loop
 Loading dataset: data.jsonl
   Total rows: 100
 Initializing provider: openai
-  Model: openai/gpt-4o
+  Model: openai/gpt-5-mini
 
 [Interactive Mode] Row 0/100
 System: You are a helpful calculator.
@@ -242,7 +243,7 @@ Result: COMPLETED (reward=1.0)
 Read and validate test datasets.
 
 ```python
-from osmosis_ai.rollout.test_mode import DatasetReader
+from osmosis_ai.rollout.eval.common import DatasetReader
 
 reader = DatasetReader("./data.jsonl")
 
@@ -257,7 +258,7 @@ rows = reader.read(limit=10, offset=20)
 
 # Iterate rows (memory efficient)
 for row in reader.iter_rows():
-    print(row.user_prompt)
+    print(row["user_prompt"])
 ```
 
 **Constructor Parameters:**
@@ -278,16 +279,17 @@ for row in reader.iter_rows():
 
 ### DatasetRow
 
-A single row from the dataset.
+A single row from the dataset, represented as a `TypedDict`.
 
 ```python
-@dataclass
-class DatasetRow:
+class DatasetRow(TypedDict):
     ground_truth: str      # Expected output
     user_prompt: str       # User message
     system_prompt: str     # System prompt
-    extra_columns: Dict[str, Any]  # Additional columns
+    # Additional columns from the dataset are included as extra dict keys
 ```
+
+Access fields with dict syntax: `row["user_prompt"]`, `row["ground_truth"]`, etc.
 
 ---
 
@@ -296,23 +298,23 @@ class DatasetRow:
 Call external LLM APIs via LiteLLM.
 
 ```python
-from osmosis_ai.rollout.test_mode import ExternalLLMClient
+from osmosis_ai.rollout.eval.common import ExternalLLMClient
 
 # OpenAI (simple format)
-client = ExternalLLMClient("gpt-4o")
+client = ExternalLLMClient("gpt-5-mini")
 
 # Anthropic (LiteLLM format)
-client = ExternalLLMClient("anthropic/claude-sonnet-4-20250514")
+client = ExternalLLMClient("anthropic/claude-sonnet-4-5")
 
 # With explicit API key
 client = ExternalLLMClient(
-    model="gpt-4o",
+    model="gpt-5-mini",
     api_key="sk-...",
 )
 
 # Local Ollama
 client = ExternalLLMClient(
-    model="ollama/llama2",
+    model="ollama/llama3.1",
     api_base="http://localhost:11434",
 )
 
@@ -348,7 +350,7 @@ Call the LLM with messages and tools.
 Execute batch tests.
 
 ```python
-from osmosis_ai.rollout.test_mode import LocalTestRunner
+from osmosis_ai.rollout.eval.test_mode import LocalTestRunner
 
 runner = LocalTestRunner(
     agent_loop=MyAgentLoop(),
@@ -438,7 +440,7 @@ class LocalTestBatchResult:
 Step-by-step debugging runner.
 
 ```python
-from osmosis_ai.rollout.test_mode import InteractiveRunner
+from osmosis_ai.rollout.eval.test_mode import InteractiveRunner
 
 runner = InteractiveRunner(
     agent_loop=MyAgentLoop(),
@@ -459,11 +461,10 @@ await runner.run_interactive_session(
 
 ## Exceptions
 
-All test mode exceptions inherit from `TestModeError`.
+All local workflow exceptions are shared by local commands (`test` / `eval`).
 
 ```python
-from osmosis_ai.rollout.test_mode import (
-    TestModeError,
+from osmosis_ai.rollout.eval.common import (
     DatasetValidationError,
     DatasetParseError,
     ProviderError,
@@ -473,7 +474,6 @@ from osmosis_ai.rollout.test_mode import (
 
 | Exception | Description |
 |-----------|-------------|
-| `TestModeError` | Base exception for test mode |
 | `DatasetValidationError` | Dataset missing required columns or invalid values |
 | `DatasetParseError` | Failed to parse dataset file |
 | `ProviderError` | LLM provider error (auth, rate limit, etc.) |
@@ -482,7 +482,7 @@ from osmosis_ai.rollout.test_mode import (
 ### Example Error Handling
 
 ```python
-from osmosis_ai.rollout.test_mode import (
+from osmosis_ai.rollout.eval.common import (
     DatasetReader,
     DatasetValidationError,
     DatasetParseError,
@@ -564,6 +564,7 @@ See [LiteLLM Environment Variables](https://docs.litellm.ai/docs/providers) for 
 
 ## See Also
 
+- [Eval Mode](./eval.md) - Evaluate agents with eval functions and pass@k
 - [Architecture](./architecture.md) - System design overview
 - [API Reference](./api-reference.md) - Complete SDK API documentation
 - [Examples](./examples.md) - Working code examples
