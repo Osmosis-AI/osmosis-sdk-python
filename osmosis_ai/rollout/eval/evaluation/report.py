@@ -28,10 +28,10 @@ def pass_at_k(n: int, c: int, k: int) -> float:
     Returns:
         Estimated pass@k probability in [0, 1].
     """
-    if n < k:
-        return 0.0
     if c == 0:
         return 0.0
+    if n <= k:
+        return 1.0
     if c >= n:
         return 1.0
     if n - c < k:
