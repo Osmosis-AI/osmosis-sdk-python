@@ -50,7 +50,7 @@ class ExternalLLMClient:
 
     def __init__(
         self,
-        model: str = "gpt-4o",
+        model: str = "gpt-5-mini",
         api_key: Optional[str] = None,
         api_base: Optional[str] = None,
     ) -> None:

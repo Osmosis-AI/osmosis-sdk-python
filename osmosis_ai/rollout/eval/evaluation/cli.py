@@ -64,7 +64,7 @@ class EvalCommand:
             help=(
                 "Model to evaluate. Use with --base-url for trained model "
                 "endpoints (e.g., 'my-finetuned-model'), or LiteLLM provider "
-                "format for comparison baselines (e.g., 'openai/gpt-4o')."
+                "format for comparison baselines (e.g., 'openai/gpt-5-mini')."
             ),
         )
 

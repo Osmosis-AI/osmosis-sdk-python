@@ -21,10 +21,10 @@ Test mode enables you to:
 
 ```bash
 # Basic batch test with OpenAI
-osmosis test --agent my_agent:MyAgentLoop --dataset data.jsonl --model gpt-4o
+osmosis test --agent my_agent:MyAgentLoop --dataset data.jsonl --model gpt-5-mini
 
 # Use Anthropic Claude
-osmosis test --agent my_agent:MyAgentLoop --dataset data.jsonl --model anthropic/claude-sonnet-4-20250514
+osmosis test --agent my_agent:MyAgentLoop --dataset data.jsonl --model anthropic/claude-sonnet-4-5
 
 # Interactive debugging
 osmosis test --agent my_agent:MyAgentLoop --dataset data.jsonl --interactive
@@ -45,7 +45,7 @@ reader = DatasetReader("./test_data.jsonl")
 rows = reader.read(limit=10)
 
 # Initialize LLM client
-client = ExternalLLMClient("gpt-4o")  # or "anthropic/claude-sonnet-4-20250514"
+client = ExternalLLMClient("gpt-5-mini")  # or "anthropic/claude-sonnet-4-5"
 
 # Create runner
 runner = LocalTestRunner(
@@ -114,7 +114,7 @@ osmosis test [OPTIONS]
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--model MODEL` | `gpt-4o` | Model name (see [Model Format](#model-format)) |
+| `--model MODEL` | `gpt-5-mini` | Model name (see [Model Format](#model-format)) |
 | `--api-key KEY` | env var | API key for the LLM provider |
 | `--base-url URL` | - | Base URL for OpenAI-compatible APIs |
 
@@ -147,23 +147,23 @@ osmosis test [OPTIONS]
 
 Models can be specified in two formats:
 
-- **Simple**: `gpt-4o` (auto-prefixed to `openai/gpt-4o`)
-- **LiteLLM format**: `provider/model` (e.g., `anthropic/claude-sonnet-4-20250514`)
+- **Simple**: `gpt-5-mini` (auto-prefixed to `openai/gpt-5-mini`)
+- **LiteLLM format**: `provider/model` (e.g., `anthropic/claude-sonnet-4-5`)
 
 See [LiteLLM Providers](https://docs.litellm.ai/docs/providers) for supported providers.
 
 ### Examples
 
 ```bash
-# Test with GPT-4o (default)
+# Test with GPT-5-mini (default)
 osmosis test -m my_agent:agent_loop -d data.jsonl
 
 # Test with Claude
-osmosis test -m my_agent:agent_loop -d data.jsonl --model anthropic/claude-sonnet-4-20250514
+osmosis test -m my_agent:agent_loop -d data.jsonl --model anthropic/claude-sonnet-4-5
 
 # Test with local Ollama
 osmosis test -m my_agent:agent_loop -d data.jsonl \
-    --model ollama/llama2 \
+    --model ollama/llama3.1 \
     --base-url http://localhost:11434
 
 # Test subset of data
@@ -204,7 +204,7 @@ Loading agent: my_agent:agent_loop
 Loading dataset: data.jsonl
   Total rows: 100
 Initializing provider: openai
-  Model: openai/gpt-4o
+  Model: openai/gpt-5-mini
 
 [Interactive Mode] Row 0/100
 System: You are a helpful calculator.
@@ -301,20 +301,20 @@ Call external LLM APIs via LiteLLM.
 from osmosis_ai.rollout.eval.common import ExternalLLMClient
 
 # OpenAI (simple format)
-client = ExternalLLMClient("gpt-4o")
+client = ExternalLLMClient("gpt-5-mini")
 
 # Anthropic (LiteLLM format)
-client = ExternalLLMClient("anthropic/claude-sonnet-4-20250514")
+client = ExternalLLMClient("anthropic/claude-sonnet-4-5")
 
 # With explicit API key
 client = ExternalLLMClient(
-    model="gpt-4o",
+    model="gpt-5-mini",
     api_key="sk-...",
 )
 
 # Local Ollama
 client = ExternalLLMClient(
-    model="ollama/llama2",
+    model="ollama/llama3.1",
     api_base="http://localhost:11434",
 )
 

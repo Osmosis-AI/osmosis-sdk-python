@@ -76,12 +76,12 @@ class TestCommand:
         parser.add_argument(
             "--model",
             dest="model",
-            default="gpt-4o",
+            default="gpt-5-mini",
             help=(
                 "Model name to use. Can be:\n"
-                "  - Simple name: 'gpt-4o' (auto-prefixed to 'openai/gpt-4o')\n"
-                "  - LiteLLM format: 'provider/model' (e.g., 'anthropic/claude-sonnet-4-20250514')\n"
-                "Default: gpt-4o"
+                "  - Simple name: 'gpt-5-mini' (auto-prefixed to 'openai/gpt-5-mini')\n"
+                "  - LiteLLM format: 'provider/model' (e.g., 'anthropic/claude-sonnet-4-5')\n"
+                "Default: gpt-5-mini"
             ),
         )
 

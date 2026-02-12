@@ -14,7 +14,7 @@ Key capabilities:
 - Get statistical summaries (mean, std, min, max) per eval function
 - Compare model quality across checkpoints or configurations
 - **Concurrent execution** with `--batch-size` for faster benchmarks
-- Optionally use LiteLLM providers (e.g., `openai/gpt-4o`) as comparison baselines
+- Optionally use LiteLLM providers (e.g., `openai/gpt-5-mini`) as comparison baselines
 
 > Command split (development-stage breaking change):  
 > `osmosis eval-rubric` is for hosted rubric evaluation, while `osmosis eval` is for agent eval mode documented here.
@@ -54,11 +54,11 @@ You can also benchmark against external LLM providers using [LiteLLM](https://do
 ```bash
 # Compare against GPT-4o as a baseline
 osmosis eval -m my_agent:MyAgentLoop -d data.jsonl \
-    --eval-fn rewards:compute_reward --model openai/gpt-4o
+    --eval-fn rewards:compute_reward --model openai/gpt-5-mini
 
 # Compare against Claude
 osmosis eval -m my_agent:MyAgentLoop -d data.jsonl \
-    --eval-fn rewards:compute_reward --model anthropic/claude-sonnet-4-20250514
+    --eval-fn rewards:compute_reward --model anthropic/claude-sonnet-4-5
 ```
 
 ### Concurrent Execution
@@ -258,7 +258,7 @@ osmosis eval [OPTIONS]
 
 | Option | Description |
 |--------|-------------|
-| `--model MODEL` | Required. Model name at the serving endpoint (e.g., `my-finetuned-model`), or LiteLLM provider format for baselines (e.g., `openai/gpt-4o`) |
+| `--model MODEL` | Required. Model name at the serving endpoint (e.g., `my-finetuned-model`), or LiteLLM provider format for baselines (e.g., `openai/gpt-5-mini`) |
 | `--base-url URL` | Base URL for the model serving endpoint (e.g., `http://localhost:8000/v1`). Use this to connect to trained model endpoints. |
 | `--api-key KEY` | API key for the endpoint or LLM provider (or use env var) |
 
@@ -310,7 +310,7 @@ osmosis eval -m my_agent:agent_loop -d data.jsonl \
 # Baseline comparison with external LLM, save results
 osmosis eval -m my_agent:agent_loop -d data.jsonl \
     --eval-fn rewards:compute_reward \
-    --model openai/gpt-4o -o results.json
+    --model openai/gpt-5-mini -o results.json
 
 # Concurrent execution (5 runs at a time)
 osmosis eval -m my_agent:agent_loop -d data.jsonl \
@@ -573,7 +573,7 @@ See [Test Mode - Environment Variables](./test-mode.md#environment-variables) fo
 
 4. **Choose appropriate thresholds**: `--pass-threshold 1.0` (default) requires perfect scores. Use a lower threshold like `0.5` for partial-credit eval functions.
 
-5. **Compare against baselines**: Run the same benchmark with LiteLLM providers (e.g., `--model openai/gpt-4o`) to establish baseline performance.
+5. **Compare against baselines**: Run the same benchmark with LiteLLM providers (e.g., `--model openai/gpt-5-mini`) to establish baseline performance.
 
 6. **Reuse `@osmosis_reward` functions**: Existing reward functions work as eval functions in simple mode without modification.
 
