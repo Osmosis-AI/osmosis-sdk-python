@@ -9,16 +9,13 @@ from typing import Any, Dict
 
 import pytest
 
-from osmosis_ai.rollout.test_mode.dataset import (
+from osmosis_ai.rollout.eval.common.dataset import (
     REQUIRED_COLUMNS,
     DatasetReader,
     DatasetRow,
     dataset_row_to_request,
 )
-from osmosis_ai.rollout.test_mode.exceptions import (
-    DatasetParseError,
-    DatasetValidationError,
-)
+from osmosis_ai.rollout.eval.common.errors import DatasetParseError, DatasetValidationError
 
 # Check if pyarrow is available for Parquet tests
 try:
@@ -366,8 +363,8 @@ class TestDatasetRowToRequest:
 
         request = dataset_row_to_request(row, row_index=0)  # type: ignore[arg-type]
 
-        assert request.rollout_id == "test-0"
-        assert request.server_url == "http://test-mode.local"
+        assert request.rollout_id == "local-0"
+        assert request.server_url == "http://local-rollout.local"
         assert len(request.messages) == 2
         assert request.messages[0]["role"] == "system"
         assert request.messages[0]["content"] == "You are a calculator."
@@ -385,7 +382,6 @@ class TestDatasetRowToRequest:
         request = dataset_row_to_request(row, row_index=5)  # type: ignore[arg-type]
 
         assert request.metadata["ground_truth"] == "Expected Answer"
-        assert request.metadata["test_mode"] is True
         assert request.metadata["row_index"] == 5
 
     def test_extra_columns_in_metadata(self) -> None:
@@ -431,3 +427,22 @@ class TestDatasetRowToRequest:
 
         assert request.completion_params["temperature"] == 0.5
         assert request.completion_params["max_tokens"] == 1000
+
+    def test_rollout_id_prefix_and_metadata_overrides(self) -> None:
+        """Test custom rollout_id_prefix and metadata overrides."""
+        row: Dict[str, Any] = {
+            "user_prompt": "Question",
+            "system_prompt": "System",
+            "ground_truth": "Answer",
+        }
+
+        request = dataset_row_to_request(
+            row,  # type: ignore[arg-type]
+            row_index=3,
+            rollout_id_prefix="bench",
+            metadata_overrides={"execution_mode": "bench", "run_index": 2},
+        )
+
+        assert request.rollout_id == "bench-3"
+        assert request.metadata["execution_mode"] == "bench"
+        assert request.metadata["run_index"] == 2

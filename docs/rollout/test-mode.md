@@ -33,11 +33,9 @@ osmosis test --agent my_agent:MyAgentLoop --dataset data.jsonl --interactive --r
 ### Programmatic Usage
 
 ```python
-from osmosis_ai.rollout.test_mode import (
-    DatasetReader,
-    ExternalLLMClient,
-    LocalTestRunner,
-)
+from osmosis_ai.rollout.eval.common import DatasetReader
+from osmosis_ai.rollout.eval.common import ExternalLLMClient
+from osmosis_ai.rollout.eval.test_mode import LocalTestRunner
 
 # Load dataset
 reader = DatasetReader("./test_data.jsonl")
@@ -242,7 +240,7 @@ Result: COMPLETED (reward=1.0)
 Read and validate test datasets.
 
 ```python
-from osmosis_ai.rollout.test_mode import DatasetReader
+from osmosis_ai.rollout.eval.common import DatasetReader
 
 reader = DatasetReader("./data.jsonl")
 
@@ -257,7 +255,7 @@ rows = reader.read(limit=10, offset=20)
 
 # Iterate rows (memory efficient)
 for row in reader.iter_rows():
-    print(row.user_prompt)
+    print(row["user_prompt"])
 ```
 
 **Constructor Parameters:**
@@ -278,16 +276,17 @@ for row in reader.iter_rows():
 
 ### DatasetRow
 
-A single row from the dataset.
+A single row from the dataset, represented as a `TypedDict`.
 
 ```python
-@dataclass
-class DatasetRow:
+class DatasetRow(TypedDict):
     ground_truth: str      # Expected output
     user_prompt: str       # User message
     system_prompt: str     # System prompt
-    extra_columns: Dict[str, Any]  # Additional columns
+    # Additional columns from the dataset are included as extra dict keys
 ```
+
+Access fields with dict syntax: `row["user_prompt"]`, `row["ground_truth"]`, etc.
 
 ---
 
@@ -296,7 +295,7 @@ class DatasetRow:
 Call external LLM APIs via LiteLLM.
 
 ```python
-from osmosis_ai.rollout.test_mode import ExternalLLMClient
+from osmosis_ai.rollout.eval.common import ExternalLLMClient
 
 # OpenAI (simple format)
 client = ExternalLLMClient("gpt-4o")
@@ -348,7 +347,7 @@ Call the LLM with messages and tools.
 Execute batch tests.
 
 ```python
-from osmosis_ai.rollout.test_mode import LocalTestRunner
+from osmosis_ai.rollout.eval.test_mode import LocalTestRunner
 
 runner = LocalTestRunner(
     agent_loop=MyAgentLoop(),
@@ -438,7 +437,7 @@ class LocalTestBatchResult:
 Step-by-step debugging runner.
 
 ```python
-from osmosis_ai.rollout.test_mode import InteractiveRunner
+from osmosis_ai.rollout.eval.test_mode import InteractiveRunner
 
 runner = InteractiveRunner(
     agent_loop=MyAgentLoop(),
@@ -459,11 +458,10 @@ await runner.run_interactive_session(
 
 ## Exceptions
 
-All test mode exceptions inherit from `TestModeError`.
+All local workflow exceptions are shared by local commands (`test` / `bench`).
 
 ```python
-from osmosis_ai.rollout.test_mode import (
-    TestModeError,
+from osmosis_ai.rollout.eval.common import (
     DatasetValidationError,
     DatasetParseError,
     ProviderError,
@@ -473,7 +471,6 @@ from osmosis_ai.rollout.test_mode import (
 
 | Exception | Description |
 |-----------|-------------|
-| `TestModeError` | Base exception for test mode |
 | `DatasetValidationError` | Dataset missing required columns or invalid values |
 | `DatasetParseError` | Failed to parse dataset file |
 | `ProviderError` | LLM provider error (auth, rate limit, etc.) |
@@ -482,7 +479,7 @@ from osmosis_ai.rollout.test_mode import (
 ### Example Error Handling
 
 ```python
-from osmosis_ai.rollout.test_mode import (
+from osmosis_ai.rollout.eval.common import (
     DatasetReader,
     DatasetValidationError,
     DatasetParseError,
@@ -564,6 +561,7 @@ See [LiteLLM Environment Variables](https://docs.litellm.ai/docs/providers) for 
 
 ## See Also
 
+- [Bench Mode](./bench.md) - Benchmark agents with eval functions and pass@k
 - [Architecture](./architecture.md) - System design overview
 - [API Reference](./api-reference.md) - Complete SDK API documentation
 - [Examples](./examples.md) - Working code examples
