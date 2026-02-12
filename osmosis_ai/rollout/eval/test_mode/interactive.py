@@ -21,10 +21,10 @@ from osmosis_ai.rollout.core.base import (
     RolloutResult,
 )
 from osmosis_ai.rollout.core.schemas import OpenAIFunctionToolSchema, RolloutMetrics
-from osmosis_ai.rollout.test_mode.dataset import DatasetRow, dataset_row_to_request
-from osmosis_ai.rollout.test_mode.exceptions import ToolValidationError
-from osmosis_ai.rollout.test_mode.external_llm_client import ExternalLLMClient
-from osmosis_ai.rollout.test_mode.runner import validate_tools
+from osmosis_ai.rollout.eval.common.dataset import DatasetRow, dataset_row_to_request
+from osmosis_ai.rollout.eval.common.llm_client import ExternalLLMClient
+from osmosis_ai.rollout.eval.common.errors import ToolValidationError
+from osmosis_ai.rollout.eval.common.runner import validate_tools
 
 
 @dataclass
@@ -439,6 +439,11 @@ class InteractiveRunner:
                 row_index=row_index,
                 max_turns=max_turns,
                 completion_params=completion_params,
+                rollout_id_prefix="test",
+                metadata_overrides={
+                    "execution_mode": "test",
+                    "test_mode": True,
+                },
             )
 
             # Store initial messages
@@ -606,7 +611,6 @@ class InteractiveRunner:
                 )
 
         self.console.print("\nInteractive session ended.", style="dim")
-
 
 __all__ = [
     "InteractiveLLMClient",

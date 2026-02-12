@@ -47,7 +47,7 @@ def _to_litellm_model(provider: str, model: str) -> str:
 
     Examples:
         ("openai", "gpt-5-mini") -> "openai/responses/gpt-5-mini"
-        ("openai", "gpt-4o") -> "openai/gpt-4o"
+        ("openai", "gpt-5.2") -> "openai/responses/gpt-5.2"
         ("anthropic", "claude-sonnet-4-5-20250929") -> "anthropic/claude-sonnet-4-5-20250929"
     """
     provider_lower = provider.lower().strip()

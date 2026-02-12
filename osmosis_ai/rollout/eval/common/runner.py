@@ -1,6 +1,8 @@
-"""Test runner for executing agent loops against datasets.
+"""Shared local rollout execution runner.
 
-Converts DatasetRow -> RolloutRequest, validates tools, and runs agent_loop.run(ctx).
+Used by both:
+- `osmosis test`
+- `osmosis eval`
 """
 
 from __future__ import annotations
@@ -9,33 +11,31 @@ import logging
 import re
 import time
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Protocol
 
-from osmosis_ai.rollout.core.base import (
-    RolloutAgentLoop,
-    RolloutContext,
-    RolloutResult,
-)
+from osmosis_ai.rollout.core.base import RolloutAgentLoop, RolloutContext, RolloutResult
 from osmosis_ai.rollout.core.schemas import OpenAIFunctionToolSchema
-from osmosis_ai.rollout.test_mode.dataset import DatasetRow, dataset_row_to_request
-from osmosis_ai.rollout.test_mode.exceptions import ToolValidationError
-from osmosis_ai.rollout.test_mode.external_llm_client import ExternalLLMClient
+from osmosis_ai.rollout.eval.common.dataset import DatasetRow, dataset_row_to_request
+from osmosis_ai.rollout.eval.common.errors import ToolValidationError
 
 logger = logging.getLogger(__name__)
 
 
-@dataclass
-class LocalTestRunResult:
-    """Result from running a single test row.
+class LocalLLMClientProtocol(Protocol):
+    """LLM client contract required by LocalRolloutRunner."""
 
-    Attributes:
-        row_index: Index of the row in the dataset.
-        success: Whether the test passed (status == "COMPLETED").
-        result: RolloutResult if execution completed.
-        error: Error message if execution failed.
-        duration_ms: Total execution time in milliseconds.
-        token_usage: Token usage statistics from the LLM client.
-    """
+    def set_tools(self, tools: List[Any]) -> None: ...
+
+    def clear_tools(self) -> None: ...
+
+    def reset_metrics(self) -> None: ...
+
+    def get_metrics(self) -> Any: ...
+
+
+@dataclass
+class LocalRunResult:
+    """Result from running a single dataset row."""
 
     row_index: int
     success: bool
@@ -46,19 +46,10 @@ class LocalTestRunResult:
 
 
 @dataclass
-class LocalTestBatchResult:
-    """Aggregated results from running a batch of tests.
+class LocalBatchResult:
+    """Aggregated results from running a batch of rows."""
 
-    Attributes:
-        results: Individual test results.
-        total: Total number of tests.
-        passed: Number of passed tests.
-        failed: Number of failed tests.
-        total_duration_ms: Total execution time.
-        total_tokens: Total tokens used.
-    """
-
-    results: List[LocalTestRunResult]
+    results: List[LocalRunResult]
     total: int
     passed: int
     failed: int
@@ -66,24 +57,12 @@ class LocalTestBatchResult:
     total_tokens: int
 
 
-# Valid tool name pattern (alphanumeric + underscore, starting with letter/underscore)
 TOOL_NAME_PATTERN = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 
 
 def validate_tools(tools: List[OpenAIFunctionToolSchema]) -> None:
-    """Validate tool schemas before sending to LLM provider.
-
-    Catches common errors early with clear messages, rather than
-    letting them fail at the LLM API with cryptic errors.
-
-    Args:
-        tools: Tool schemas returned by agent_loop.get_tools()
-
-    Raises:
-        ToolValidationError: If tool schema is invalid.
-    """
+    """Validate tool schemas before sending to provider APIs."""
     for i, tool in enumerate(tools):
-        # Check tool has required fields
         if not tool.function:
             raise ToolValidationError(f"Tool {i}: missing 'function' field")
         if not tool.function.name:
@@ -91,14 +70,12 @@ def validate_tools(tools: List[OpenAIFunctionToolSchema]) -> None:
         if not tool.function.name.strip():
             raise ToolValidationError(f"Tool {i}: function name cannot be empty")
 
-        # Check name format (alphanumeric + underscore, common LLM requirement)
         if not TOOL_NAME_PATTERN.match(tool.function.name):
             raise ToolValidationError(
                 f"Tool '{tool.function.name}': name must start with letter/underscore "
                 f"and contain only alphanumeric characters and underscores"
             )
 
-        # Check parameters schema if present
         if tool.function.parameters:
             params = tool.function.parameters
             if params.type != "object":
@@ -107,36 +84,28 @@ def validate_tools(tools: List[OpenAIFunctionToolSchema]) -> None:
                 )
 
 
-class LocalTestRunner:
-    """Executes agent loop tests against dataset rows.
-
-    Workflow: DatasetRow -> RolloutRequest -> get_tools() -> run() -> collect results.
-    """
+class LocalRolloutRunner:
+    """Executes agent loops locally against dataset rows."""
 
     def __init__(
         self,
         agent_loop: RolloutAgentLoop,
-        llm_client: ExternalLLMClient,
+        llm_client: LocalLLMClientProtocol,
         debug: bool = False,
         debug_dir: Optional[str] = None,
+        rollout_id_prefix: str = "local",
+        request_metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
-        """Initialize the test runner.
-
-        Args:
-            agent_loop: Agent loop instance to test.
-            llm_client: Test LLM client instance.
-            debug: Enable debug logging.
-            debug_dir: Directory for debug output files. If not specified and
-                       debug=True, defaults to "./test_debug".
-        """
         self.agent_loop = agent_loop
         self.llm_client = llm_client
         self.debug = debug
-        # Resolve debug_dir: use explicit value, or default when debug is enabled
+        self.rollout_id_prefix = rollout_id_prefix
+        self.request_metadata = dict(request_metadata or {})
+
         if debug_dir is not None:
             self.debug_dir: Optional[str] = debug_dir
         elif debug:
-            self.debug_dir = "./test_debug"
+            self.debug_dir = "./local_debug"
         else:
             self.debug_dir = None
 
@@ -146,61 +115,48 @@ class LocalTestRunner:
         row_index: int,
         max_turns: int = 10,
         completion_params: Optional[Dict[str, Any]] = None,
-    ) -> LocalTestRunResult:
-        """Run a single test row.
-
-        Args:
-            row: Dataset row to test.
-            row_index: Index of the row (for logging and result).
-            max_turns: Maximum agent turns.
-            completion_params: LLM sampling parameters.
-
-        Returns:
-            LocalTestRunResult with execution status and metrics.
-        """
+        rollout_id: Optional[str] = None,
+        request_metadata: Optional[Dict[str, Any]] = None,
+    ) -> LocalRunResult:
+        """Run a single dataset row."""
         overall_start = time.monotonic()
 
-        # Reset client state for this row
         self.llm_client.reset_metrics()
         self.llm_client.clear_tools()
 
+        merged_metadata = dict(self.request_metadata)
+        if request_metadata:
+            merged_metadata.update(request_metadata)
+        metadata_overrides = merged_metadata or None
+
         try:
-            # 1. Convert dataset row to RolloutRequest
             request = dataset_row_to_request(
                 row=row,
                 row_index=row_index,
                 max_turns=max_turns,
                 completion_params=completion_params,
+                rollout_id_prefix=self.rollout_id_prefix,
+                rollout_id=rollout_id,
+                metadata_overrides=metadata_overrides,
             )
 
-            # 2. Get tools from agent
             tools = self.agent_loop.get_tools(request)
-
-            # 3. Validate tool schemas
             validate_tools(tools)
-
-            # 4. Inject tools into client
             self.llm_client.set_tools(tools)
 
-            # 5. Start timing AFTER preparation (matches production mode)
             agent_start_time = time.monotonic()
-
-            # 6. Create standard RolloutContext with ExternalLLMClient
             ctx = RolloutContext(
                 request=request,
                 tools=tools,
-                llm=self.llm_client,
+                llm=self.llm_client,  # type: ignore[arg-type]
                 _start_time=agent_start_time,
-                _debug_dir=self.debug_dir,  # Already resolved in __init__
+                _debug_dir=self.debug_dir,
             )
 
-            # 7. Run agent loop (uses same code path as production!)
             result = await self.agent_loop.run(ctx)
-
-            # Get metrics
             metrics = self.llm_client.get_metrics()
 
-            return LocalTestRunResult(
+            return LocalRunResult(
                 row_index=row_index,
                 success=(result.status == "COMPLETED"),
                 result=result,
@@ -215,7 +171,7 @@ class LocalTestRunner:
 
         except ToolValidationError as e:
             logger.error("Tool validation error for row %d: %s", row_index, e)
-            return LocalTestRunResult(
+            return LocalRunResult(
                 row_index=row_index,
                 success=False,
                 error=f"Tool validation error: {e}",
@@ -224,7 +180,7 @@ class LocalTestRunner:
 
         except Exception as e:
             logger.exception("Error running row %d", row_index)
-            return LocalTestRunResult(
+            return LocalRunResult(
                 row_index=row_index,
                 success=False,
                 error=str(e),
@@ -232,7 +188,6 @@ class LocalTestRunner:
             )
 
         finally:
-            # Always clear tools after row completion
             self.llm_client.clear_tools()
 
     async def run_batch(
@@ -240,28 +195,14 @@ class LocalTestRunner:
         rows: List[DatasetRow],
         max_turns: int = 10,
         completion_params: Optional[Dict[str, Any]] = None,
-        on_progress: Optional[Callable[[int, int, LocalTestRunResult], None]] = None,
+        on_progress: Optional[Callable[[int, int, LocalRunResult], None]] = None,
         start_index: int = 0,
-    ) -> LocalTestBatchResult:
-        """Run multiple test rows sequentially.
-
-        Args:
-            rows: List of dataset rows to test.
-            max_turns: Maximum agent turns per row.
-            completion_params: LLM sampling parameters.
-            on_progress: Optional callback called after each row.
-                         Arguments: (current_index, total_count, result)
-            start_index: Starting row index for row numbering (e.g., from --offset).
-                         Used for correct row_index in output, rollout IDs, and metadata.
-
-        Returns:
-            LocalTestBatchResult with aggregated statistics.
-        """
-        results: List[LocalTestRunResult] = []
+    ) -> LocalBatchResult:
+        """Run multiple rows sequentially."""
+        results: List[LocalRunResult] = []
         total_start = time.monotonic()
 
         for i, row in enumerate(rows):
-            # Calculate absolute row index (for debugging, rollout IDs, metadata)
             row_index = start_index + i
             result = await self.run_single(
                 row=row,
@@ -274,14 +215,11 @@ class LocalTestRunner:
             if on_progress:
                 on_progress(i + 1, len(rows), result)
 
-        # Aggregate results
         passed = sum(1 for r in results if r.success)
         failed = len(results) - passed
-        total_tokens = sum(
-            r.token_usage.get("total_tokens", 0) for r in results
-        )
+        total_tokens = sum(r.token_usage.get("total_tokens", 0) for r in results)
 
-        return LocalTestBatchResult(
+        return LocalBatchResult(
             results=results,
             total=len(results),
             passed=passed,
@@ -291,8 +229,9 @@ class LocalTestRunner:
         )
 
 __all__ = [
-    "LocalTestBatchResult",
-    "LocalTestRunResult",
-    "LocalTestRunner",
+    "LocalBatchResult",
+    "LocalLLMClientProtocol",
+    "LocalRolloutRunner",
+    "LocalRunResult",
     "validate_tools",
 ]

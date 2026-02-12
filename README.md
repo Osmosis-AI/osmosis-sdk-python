@@ -316,8 +316,12 @@ osmosis preview --path path/to/data.jsonl
 Evaluate a dataset against a hosted rubric configuration and print the returned scores:
 
 ```bash
-osmosis eval --rubric support_followup --data examples/sample_data.jsonl
+osmosis eval-rubric --rubric support_followup --data examples/sample_data.jsonl
 ```
+
+- Command split (development-stage breaking change):
+  - `osmosis eval-rubric` evaluates JSONL conversations against hosted rubrics.
+  - `osmosis eval` runs rollout eval functions against `RolloutAgentLoop` datasets.
 
 - Supply the dataset with `-d`/`--data path/to/data.jsonl`; the path is resolved relative to the current working directory.
 - Use `--config path/to/rubric_configs.yaml` when the rubric definitions are not located alongside the dataset.

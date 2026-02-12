@@ -6,8 +6,9 @@ from typing import Optional
 
 from dotenv import load_dotenv
 
-from .cli_commands import EvalCommand, LoginCommand, LogoutCommand, PreviewCommand, WhoamiCommand, WorkspaceCommand
+from .cli_commands import EvalRubricCommand, LoginCommand, LogoutCommand, PreviewCommand, WhoamiCommand, WorkspaceCommand
 from .cli_services import CLIError
+from .consts import PACKAGE_VERSION, package_name
 
 
 def main(argv: Optional[list[str]] = None) -> int:
@@ -35,6 +36,14 @@ def _build_parser() -> argparse.ArgumentParser:
         prog="osmosis",
         description="Osmosis AI SDK - rubric evaluation and remote rollout server.",
     )
+    
+    parser.add_argument(
+        "-V", "--version",
+        action="version",
+        version=f"{package_name} {PACKAGE_VERSION}",
+        help="Show version number.",
+    )
+    
     subparsers = parser.add_subparsers(dest="command")
 
     login_parser = subparsers.add_parser(
@@ -67,14 +76,14 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     PreviewCommand().configure_parser(preview_parser)
 
-    eval_parser = subparsers.add_parser(
-        "eval",
+    eval_rubric_parser = subparsers.add_parser(
+        "eval-rubric",
         help="Evaluate JSONL conversations against a rubric using remote providers.",
     )
-    EvalCommand().configure_parser(eval_parser)
+    EvalRubricCommand().configure_parser(eval_rubric_parser)
 
     # Rollout server commands
-    from .rollout.cli import ServeCommand, TestCommand, ValidateCommand
+    from .rollout.cli import EvalCommand, ServeCommand, TestCommand, ValidateCommand
 
     serve_parser = subparsers.add_parser(
         "serve",
@@ -93,6 +102,12 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Test a RolloutAgentLoop against a dataset using cloud LLM providers.",
     )
     TestCommand().configure_parser(test_parser)
+
+    eval_parser = subparsers.add_parser(
+        "eval",
+        help="Evaluate agent against dataset with eval functions.",
+    )
+    EvalCommand().configure_parser(eval_parser)
 
     return parser
 
