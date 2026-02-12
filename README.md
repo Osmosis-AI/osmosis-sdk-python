@@ -316,7 +316,7 @@ osmosis preview --path path/to/data.jsonl
 Evaluate a dataset against a hosted rubric configuration and print the returned scores:
 
 ```bash
-osmosis eval --rubric support_followup --data examples/sample_data.jsonl
+osmosis eval-rubric --rubric support_followup --data examples/sample_data.jsonl
 ```
 
 - Supply the dataset with `-d`/`--data path/to/data.jsonl`; the path is resolved relative to the current working directory.

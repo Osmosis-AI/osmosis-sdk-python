@@ -439,10 +439,10 @@ class TestDatasetRowToRequest:
         request = dataset_row_to_request(
             row,  # type: ignore[arg-type]
             row_index=3,
-            rollout_id_prefix="bench",
-            metadata_overrides={"execution_mode": "bench", "run_index": 2},
+            rollout_id_prefix="eval",
+            metadata_overrides={"execution_mode": "eval", "run_index": 2},
         )
 
-        assert request.rollout_id == "bench-3"
-        assert request.metadata["execution_mode"] == "bench"
+        assert request.rollout_id == "eval-3"
+        assert request.metadata["execution_mode"] == "eval"
         assert request.metadata["run_index"] == 2

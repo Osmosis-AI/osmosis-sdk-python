@@ -1,6 +1,6 @@
-"""CLI command for bench mode.
+"""CLI command for eval mode.
 
-Run agent loop benchmarks against datasets with eval functions and pass@n support.
+Run agent loop evaluations against datasets with eval functions and pass@n support.
 """
 
 from __future__ import annotations
@@ -22,15 +22,15 @@ from osmosis_ai.rollout.eval.common.cli import (
 )
 
 if TYPE_CHECKING:
-    from osmosis_ai.rollout.eval.bench.eval_fn import EvalFnWrapper
-    from osmosis_ai.rollout.eval.bench.runner import BenchResult, BenchRunResult
+    from osmosis_ai.rollout.eval.evaluation.eval_fn import EvalFnWrapper
+    from osmosis_ai.rollout.eval.evaluation.runner import EvalResult, EvalRunResult
 
 
 logger = logging.getLogger(__name__)
 
 
-class BenchCommand:
-    """Handler for `osmosis bench`."""
+class EvalCommand:
+    """Handler for `osmosis eval`."""
 
     def __init__(self) -> None:
         self.console = Console()
@@ -62,7 +62,7 @@ class BenchCommand:
             dest="model",
             required=True,
             help=(
-                "Model to benchmark. Use with --base-url for trained model "
+                "Model to evaluate. Use with --base-url for trained model "
                 "endpoints (e.g., 'my-finetuned-model'), or LiteLLM provider "
                 "format for comparison baselines (e.g., 'openai/gpt-4o')."
             ),
@@ -164,7 +164,7 @@ class BenchCommand:
             dest="limit",
             type=int,
             default=None,
-            help="Maximum number of rows to benchmark.",
+            help="Maximum number of rows to evaluate.",
         )
 
         parser.add_argument(
@@ -191,7 +191,7 @@ class BenchCommand:
             return
         from osmosis_ai.consts import PACKAGE_VERSION
 
-        self.console.print(f"osmosis-bench v{PACKAGE_VERSION}", style="bold")
+        self.console.print(f"osmosis-eval v{PACKAGE_VERSION}", style="bold")
         if args.base_url:
             self.console.print(f"Endpoint: {args.base_url}")
             self.console.print(f"Model: {args.model}")
@@ -202,7 +202,7 @@ class BenchCommand:
     def _load_eval_fns(
         self, args: argparse.Namespace
     ) -> Tuple[Optional[List["EvalFnWrapper"]], Optional[str]]:
-        from osmosis_ai.rollout.eval.bench.eval_fn import EvalFnError, load_eval_fns
+        from osmosis_ai.rollout.eval.evaluation.eval_fn import EvalFnError, load_eval_fns
 
         if not args.quiet:
             self.console.print(f"Loading eval functions: {', '.join(args.eval_fns)}")
@@ -218,7 +218,7 @@ class BenchCommand:
 
         return eval_fns, None
 
-    def _write_output(self, args: argparse.Namespace, result: "BenchResult") -> None:
+    def _write_output(self, args: argparse.Namespace, result: "EvalResult") -> None:
         if not args.output:
             return
 
@@ -295,8 +295,8 @@ class BenchCommand:
             offset=args.offset,
             quiet=args.quiet,
             console=self.console,
-            empty_error="No rows to benchmark",
-            action_label="benchmarking",
+            empty_error="No rows to evaluate",
+            action_label="evaluating",
         )
         if error:
             self.console.print_error(f"Error: {error}")
@@ -326,16 +326,16 @@ class BenchCommand:
             max_tokens=args.max_tokens,
         )
 
-        from osmosis_ai.rollout.eval.bench.runner import BenchRunner
+        from osmosis_ai.rollout.eval.evaluation.runner import EvalRunner
 
-        runner = BenchRunner(
+        runner = EvalRunner(
             agent_loop=agent_loop,
             llm_client=llm_client,
             eval_fns=eval_fns,
             debug=args.debug,
         )
 
-        def on_progress(current: int, total: int, result: "BenchRunResult") -> None:
+        def on_progress(current: int, total: int, result: "EvalRunResult") -> None:
             if args.quiet:
                 return
 
@@ -364,11 +364,11 @@ class BenchCommand:
             self.console.print()
             n_info = f" x{args.n_runs} runs" if args.n_runs > 1 else ""
             batch_info = f", batch_size={args.batch_size}" if args.batch_size > 1 else ""
-            self.console.print(f"Running benchmark ({len(rows)} rows{n_info}{batch_info})...")
+            self.console.print(f"Running evaluation ({len(rows)} rows{n_info}{batch_info})...")
 
         try:
             async with llm_client:
-                bench_result = await runner.run_bench(
+                eval_result = await runner.run_eval(
                     rows=rows,
                     n_runs=args.n_runs,
                     max_turns=args.max_turns,
@@ -379,7 +379,7 @@ class BenchCommand:
                     batch_size=args.batch_size,
                 )
         except Exception as e:
-            self.console.print_error(f"Error during benchmark: {e}")
+            self.console.print_error(f"Error during evaluation: {e}")
             if args.debug:
                 import traceback
 
@@ -387,11 +387,11 @@ class BenchCommand:
             return 1
 
         if not args.quiet:
-            from osmosis_ai.rollout.eval.bench.report import format_bench_report
+            from osmosis_ai.rollout.eval.evaluation.report import format_eval_report
 
-            format_bench_report(bench_result, self.console)
+            format_eval_report(eval_result, self.console)
 
-        self._write_output(args, bench_result)
+        self._write_output(args, eval_result)
         return 0
 
-__all__ = ["BenchCommand"]
+__all__ = ["EvalCommand"]

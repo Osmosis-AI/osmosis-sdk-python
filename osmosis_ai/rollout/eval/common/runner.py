@@ -2,7 +2,7 @@
 
 Used by both:
 - `osmosis test`
-- `osmosis bench`
+- `osmosis eval`
 """
 
 from __future__ import annotations

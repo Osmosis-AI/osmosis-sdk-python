@@ -243,20 +243,20 @@ class TestCommand:
         self._get_impl().configure_parser(parser)
 
 
-class BenchCommand:
-    """Handler for `osmosis bench` (delegates to eval.bench.cli).
+class EvalCommand:
+    """Handler for `osmosis eval` (delegates to eval.evaluation.cli).
 
     Proxy class following the same lazy-loading pattern as TestCommand.
     """
 
     def __init__(self) -> None:
-        self._impl: Optional["_BenchCommandImpl"] = None
+        self._impl: Optional["_EvalCommandImpl"] = None
 
-    def _get_impl(self) -> "_BenchCommandImpl":
+    def _get_impl(self) -> "_EvalCommandImpl":
         if self._impl is None:
-            from osmosis_ai.rollout.eval.bench.cli import BenchCommand as _BenchCommandImpl
+            from osmosis_ai.rollout.eval.evaluation.cli import EvalCommand as _EvalCommandImpl
 
-            self._impl = _BenchCommandImpl()
+            self._impl = _EvalCommandImpl()
         return self._impl
 
     def configure_parser(self, parser: argparse.ArgumentParser) -> None:
@@ -264,8 +264,8 @@ class BenchCommand:
 
 
 __all__ = [
-    "BenchCommand",
     "CLIError",
+    "EvalCommand",
     "ServeCommand",
     "TestCommand",
     "ValidateCommand",

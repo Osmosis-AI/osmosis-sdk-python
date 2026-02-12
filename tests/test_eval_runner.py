@@ -1,4 +1,4 @@
-"""Tests for bench runner."""
+"""Tests for eval runner."""
 
 from __future__ import annotations
 
@@ -15,8 +15,8 @@ from osmosis_ai.rollout import (
     RolloutRequest,
     RolloutResult,
 )
-from osmosis_ai.rollout.eval.bench.eval_fn import EvalFnWrapper
-from osmosis_ai.rollout.eval.bench.runner import BenchRunner
+from osmosis_ai.rollout.eval.evaluation.eval_fn import EvalFnWrapper
+from osmosis_ai.rollout.eval.evaluation.runner import EvalRunner
 from osmosis_ai.rollout.client import CompletionsResult
 from osmosis_ai.rollout.core.schemas import RolloutMetrics
 from osmosis_ai.rollout.eval.common.dataset import DatasetRow
@@ -29,7 +29,7 @@ class MockLLMClient:
         self._response_tokens = 0
         self._num_llm_calls = 0
         self.mock_response = CompletionsResult(
-            message={"role": "assistant", "content": "bench response"},
+            message={"role": "assistant", "content": "eval response"},
             token_ids=[],
             logprobs=[],
             usage={"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
@@ -73,7 +73,7 @@ class MockLLMClient:
 
 
 class MockAgentLoop(RolloutAgentLoop):
-    name = "bench_test_agent"
+    name = "eval_test_agent"
 
     def __init__(
         self,
@@ -121,7 +121,7 @@ def create_sample_row(index: int = 0) -> DatasetRow:
     }
 
 
-class TestBenchRunner:
+class TestEvalRunner:
     @pytest.mark.asyncio
     async def test_run_single_applies_eval_functions(self) -> None:
         client = MockLLMClient()
@@ -143,7 +143,7 @@ class TestBenchRunner:
         ) -> float:
             return 1.0 if "response" in solution_str else 0.0
 
-        runner = BenchRunner(
+        runner = EvalRunner(
             agent_loop=agent,
             llm_client=client,  # type: ignore[arg-type]
             eval_fns=[
@@ -168,7 +168,7 @@ class TestBenchRunner:
         client = MockLLMClient()
         agent = MockAgentLoop(
             tools=[create_sample_tool()],
-            run_error=RuntimeError("bench failure"),
+            run_error=RuntimeError("eval failure"),
         )
 
         def simple_eval(
@@ -178,7 +178,7 @@ class TestBenchRunner:
         ) -> float:
             return 1.0
 
-        runner = BenchRunner(
+        runner = EvalRunner(
             agent_loop=agent,
             llm_client=client,  # type: ignore[arg-type]
             eval_fns=[EvalFnWrapper(simple_eval, "simple_eval")],
@@ -192,11 +192,11 @@ class TestBenchRunner:
 
         assert result.success is False
         assert result.error is not None
-        assert "bench failure" in result.error
+        assert "eval failure" in result.error
         assert result.scores == {}
 
     @pytest.mark.asyncio
-    async def test_run_bench_computes_pass_at_k(self) -> None:
+    async def test_run_eval_computes_pass_at_k(self) -> None:
         client = MockLLMClient()
         agent = MockAgentLoop(tools=[create_sample_tool()], call_llm=True)
 
@@ -210,26 +210,26 @@ class TestBenchRunner:
             call_counter["n"] += 1
             return 1.0 if call_counter["n"] % 2 == 1 else 0.0
 
-        runner = BenchRunner(
+        runner = EvalRunner(
             agent_loop=agent,
             llm_client=client,  # type: ignore[arg-type]
             eval_fns=[EvalFnWrapper(alternating_eval, "alternating_eval")],
         )
 
-        bench_result = await runner.run_bench(
+        eval_result = await runner.run_eval(
             rows=[create_sample_row(0), create_sample_row(1)],
             n_runs=2,
             pass_threshold=0.5,
         )
 
-        summary = bench_result.eval_summaries["alternating_eval"]
-        assert bench_result.total_runs == 4
+        summary = eval_result.eval_summaries["alternating_eval"]
+        assert eval_result.total_runs == 4
         assert summary.mean == 0.5
         assert 1 in summary.pass_at_k
         assert 2 not in summary.pass_at_k
 
     @pytest.mark.asyncio
-    async def test_run_bench_concurrent(self) -> None:
+    async def test_run_eval_concurrent(self) -> None:
         """batch_size > 1 should produce the same results as sequential."""
         client = MockLLMClient()
         agent = MockAgentLoop(tools=[create_sample_tool()], call_llm=True)
@@ -241,7 +241,7 @@ class TestBenchRunner:
         ) -> float:
             return 1.0 if "response" in solution_str else 0.0
 
-        runner = BenchRunner(
+        runner = EvalRunner(
             agent_loop=agent,
             llm_client=client,  # type: ignore[arg-type]
             eval_fns=[EvalFnWrapper(simple_eval, "simple_eval")],
@@ -250,7 +250,7 @@ class TestBenchRunner:
 
         rows = [create_sample_row(i) for i in range(4)]
 
-        result = await runner.run_bench(
+        result = await runner.run_eval(
             rows=rows,
             n_runs=2,
             batch_size=3,
@@ -268,11 +268,11 @@ class TestBenchRunner:
         assert "simple_eval" in result.eval_summaries
 
     @pytest.mark.asyncio
-    async def test_run_bench_counts_failed_runs_as_zero_scores(self) -> None:
+    async def test_run_eval_counts_failed_runs_as_zero_scores(self) -> None:
         client = MockLLMClient()
         agent = MockAgentLoop(
             tools=[create_sample_tool()],
-            run_error=RuntimeError("bench failure"),
+            run_error=RuntimeError("eval failure"),
         )
 
         def simple_eval(
@@ -282,20 +282,20 @@ class TestBenchRunner:
         ) -> float:
             return 1.0
 
-        runner = BenchRunner(
+        runner = EvalRunner(
             agent_loop=agent,
             llm_client=client,  # type: ignore[arg-type]
             eval_fns=[EvalFnWrapper(simple_eval, "simple_eval")],
         )
 
-        bench_result = await runner.run_bench(
+        eval_result = await runner.run_eval(
             rows=[create_sample_row(0)],
             n_runs=2,
             pass_threshold=0.5,
         )
 
-        summary = bench_result.eval_summaries["simple_eval"]
-        assert bench_result.total_runs == 2
+        summary = eval_result.eval_summaries["simple_eval"]
+        assert eval_result.total_runs == 2
         assert summary.mean == 0.0
         assert summary.min == 0.0
         assert summary.max == 0.0

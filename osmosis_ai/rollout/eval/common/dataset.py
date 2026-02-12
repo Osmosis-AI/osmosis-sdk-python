@@ -2,7 +2,7 @@
 
 Shared by:
 - `osmosis test`
-- `osmosis bench`
+- `osmosis eval`
 """
 
 from __future__ import annotations

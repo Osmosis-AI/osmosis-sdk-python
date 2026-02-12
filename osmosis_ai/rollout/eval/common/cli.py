@@ -1,4 +1,4 @@
-"""Shared helpers for local-execution CLI commands (`test` and `bench`)."""
+"""Shared helpers for local-execution CLI commands (`test` and `eval`)."""
 
 from __future__ import annotations
 

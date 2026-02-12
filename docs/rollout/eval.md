@@ -1,10 +1,10 @@
-# Bench Mode
+# Eval Mode
 
-Benchmark your trained models by running `RolloutAgentLoop` implementations against datasets with custom eval functions, statistical analysis, and pass@k metrics.
+Evaluate your trained models by running `RolloutAgentLoop` implementations against datasets with custom eval functions, statistical analysis, and pass@k metrics.
 
 ## Overview
 
-Bench mode is designed for **evaluating trained models**. Connect to any OpenAI-compatible model serving endpoint (such as osmosis-serving, vLLM, or SGLang) and measure agent performance with custom eval functions.
+Eval mode is designed for **evaluating trained models**. Connect to any OpenAI-compatible model serving endpoint (such as osmosis-serving, vLLM, or SGLang) and measure agent performance with custom eval functions.
 
 Key capabilities:
 
@@ -13,7 +13,7 @@ Key capabilities:
 - Use existing `@osmosis_reward` functions or full-context eval functions
 - Get statistical summaries (mean, std, min, max) per eval function
 - Compare model quality across checkpoints or configurations
-- **Concurrent execution** with `--batch_size` for faster benchmarks
+- **Concurrent execution** with `--batch-size` for faster benchmarks
 - Optionally use LiteLLM providers (e.g., `openai/gpt-4o`) as comparison baselines
 
 ## Quick Start
@@ -24,20 +24,20 @@ The primary use case is connecting to a model serving endpoint:
 
 ```bash
 # Benchmark a trained model served at an endpoint
-osmosis bench -m my_agent:MyAgentLoop -d data.jsonl \
+osmosis eval -m my_agent:MyAgentLoop -d data.jsonl \
     --eval-fn rewards:compute_reward \
     --model my-finetuned-model \
     --base-url http://localhost:8000/v1
 
 # Benchmark against osmosis-serving
-osmosis bench -m my_agent:MyAgentLoop -d data.jsonl \
+osmosis eval -m my_agent:MyAgentLoop -d data.jsonl \
     --eval-fn rewards:compute_reward \
     --model my-trained-model \
     --base-url https://inference.osmosis.ai/v1 \
     --api-key $OSMOSIS_API_KEY
 
 # Multiple eval functions
-osmosis bench -m my_agent:MyAgentLoop -d data.jsonl \
+osmosis eval -m my_agent:MyAgentLoop -d data.jsonl \
     --eval-fn rewards:exact_match \
     --eval-fn rewards:partial_match \
     --model my-finetuned-model \
@@ -50,28 +50,28 @@ You can also benchmark against external LLM providers using [LiteLLM](https://do
 
 ```bash
 # Compare against GPT-4o as a baseline
-osmosis bench -m my_agent:MyAgentLoop -d data.jsonl \
+osmosis eval -m my_agent:MyAgentLoop -d data.jsonl \
     --eval-fn rewards:compute_reward --model openai/gpt-4o
 
 # Compare against Claude
-osmosis bench -m my_agent:MyAgentLoop -d data.jsonl \
+osmosis eval -m my_agent:MyAgentLoop -d data.jsonl \
     --eval-fn rewards:compute_reward --model anthropic/claude-sonnet-4-20250514
 ```
 
 ### Concurrent Execution
 
-Use `--batch_size` to run multiple requests in parallel:
+Use `--batch-size` to run multiple requests in parallel:
 
 ```bash
 # Run 5 concurrent requests
-osmosis bench -m my_agent:MyAgentLoop -d data.jsonl \
+osmosis eval -m my_agent:MyAgentLoop -d data.jsonl \
     --eval-fn rewards:compute_reward \
     --model my-finetuned-model --base-url http://localhost:8000/v1 \
-    --batch_size 5
+    --batch-size 5
 
 # Combine with pass@k — 10 runs per row, 5 concurrent
-osmosis bench -m my_agent:MyAgentLoop -d data.jsonl \
-    --eval-fn rewards:compute_reward --n 10 --batch_size 5 \
+osmosis eval -m my_agent:MyAgentLoop -d data.jsonl \
+    --eval-fn rewards:compute_reward --n 10 --batch-size 5 \
     --model my-finetuned-model --base-url http://localhost:8000/v1
 ```
 
@@ -79,12 +79,12 @@ osmosis bench -m my_agent:MyAgentLoop -d data.jsonl \
 
 ```bash
 # pass@k with 5 runs per row
-osmosis bench -m my_agent:MyAgentLoop -d data.jsonl \
+osmosis eval -m my_agent:MyAgentLoop -d data.jsonl \
     --eval-fn rewards:compute_reward --n 5 \
     --model my-finetuned-model --base-url http://localhost:8000/v1
 
 # Custom pass threshold (default is 1.0)
-osmosis bench -m my_agent:MyAgentLoop -d data.jsonl \
+osmosis eval -m my_agent:MyAgentLoop -d data.jsonl \
     --eval-fn rewards:compute_reward --n 5 --pass-threshold 0.5 \
     --model my-finetuned-model --base-url http://localhost:8000/v1
 ```
@@ -93,7 +93,7 @@ osmosis bench -m my_agent:MyAgentLoop -d data.jsonl \
 
 ```python
 from osmosis_ai.rollout.eval.common import DatasetReader, ExternalLLMClient
-from osmosis_ai.rollout.eval.bench import BenchRunner, EvalFnWrapper, load_eval_fns
+from osmosis_ai.rollout.eval.evaluation import EvalRunner, EvalFnWrapper, load_eval_fns
 
 # Load dataset
 reader = DatasetReader("./test_data.jsonl")
@@ -109,7 +109,7 @@ client = ExternalLLMClient(
 eval_fns = load_eval_fns(["rewards:exact_match", "rewards:partial_match"])
 
 # Create runner
-runner = BenchRunner(
+runner = EvalRunner(
     agent_loop=MyAgentLoop(),
     llm_client=client,
     eval_fns=eval_fns,
@@ -215,7 +215,7 @@ async def llm_judge(messages: list, ground_truth: str, metadata: dict, **kwargs)
 
 ## pass@k
 
-When `--n` is greater than 1, bench mode runs each dataset row multiple times and computes pass@k metrics.
+When `--n` is greater than 1, eval mode runs each dataset row multiple times and computes pass@k metrics.
 
 **pass@k** estimates the probability that at least one of `k` randomly selected samples from `n` total runs passes (score >= threshold).
 
@@ -239,7 +239,7 @@ With `--n 10 --pass-threshold 0.5`:
 ## CLI Reference
 
 ```
-osmosis bench [OPTIONS]
+osmosis eval [OPTIONS]
 ```
 
 ### Required Options
@@ -268,7 +268,7 @@ osmosis bench [OPTIONS]
 | `--max-turns N` | `10` | Maximum agent turns per run |
 | `--temperature FLOAT` | - | LLM sampling temperature |
 | `--max-tokens N` | - | Maximum tokens per completion |
-| `--batch_size N` | `1` | Number of concurrent runs |
+| `--batch-size N` | `1` | Number of concurrent runs |
 | `--limit N` | all | Maximum rows to benchmark |
 | `--offset N` | `0` | Number of rows to skip |
 
@@ -284,38 +284,38 @@ osmosis bench [OPTIONS]
 
 ```bash
 # Benchmark trained model at an endpoint
-osmosis bench -m my_agent:agent_loop -d data.jsonl \
+osmosis eval -m my_agent:agent_loop -d data.jsonl \
     --eval-fn rewards:compute_reward \
     --model my-finetuned-model --base-url http://localhost:8000/v1
 
 # Multiple eval functions
-osmosis bench -m my_agent:agent_loop -d data.jsonl \
+osmosis eval -m my_agent:agent_loop -d data.jsonl \
     --eval-fn rewards:exact_match \
     --eval-fn rewards:semantic_similarity \
     --model my-finetuned-model --base-url http://localhost:8000/v1
 
 # pass@5 analysis
-osmosis bench -m my_agent:agent_loop -d data.jsonl \
+osmosis eval -m my_agent:agent_loop -d data.jsonl \
     --eval-fn rewards:compute_reward --n 5 \
     --model my-finetuned-model --base-url http://localhost:8000/v1
 
 # Lenient pass threshold
-osmosis bench -m my_agent:agent_loop -d data.jsonl \
+osmosis eval -m my_agent:agent_loop -d data.jsonl \
     --eval-fn rewards:compute_reward --n 5 --pass-threshold 0.5 \
     --model my-finetuned-model --base-url http://localhost:8000/v1
 
 # Baseline comparison with external LLM, save results
-osmosis bench -m my_agent:agent_loop -d data.jsonl \
+osmosis eval -m my_agent:agent_loop -d data.jsonl \
     --eval-fn rewards:compute_reward \
     --model openai/gpt-4o -o results.json
 
 # Concurrent execution (5 runs at a time)
-osmosis bench -m my_agent:agent_loop -d data.jsonl \
-    --eval-fn rewards:compute_reward --batch_size 5 \
+osmosis eval -m my_agent:agent_loop -d data.jsonl \
+    --eval-fn rewards:compute_reward --batch-size 5 \
     --model my-finetuned-model --base-url http://localhost:8000/v1
 
 # Benchmark subset
-osmosis bench -m my_agent:agent_loop -d data.jsonl \
+osmosis eval -m my_agent:agent_loop -d data.jsonl \
     --eval-fn rewards:compute_reward --limit 10 --offset 50 \
     --model my-finetuned-model --base-url http://localhost:8000/v1
 ```
@@ -324,14 +324,14 @@ osmosis bench -m my_agent:agent_loop -d data.jsonl \
 
 ## API Reference
 
-### BenchRunner
+### EvalRunner
 
 Orchestrates benchmark execution with eval function scoring.
 
 ```python
-from osmosis_ai.rollout.eval.bench import BenchRunner
+from osmosis_ai.rollout.eval.evaluation import EvalRunner
 
-runner = BenchRunner(
+runner = EvalRunner(
     agent_loop=MyAgentLoop(),
     llm_client=client,
     eval_fns=eval_fns,
@@ -446,7 +446,7 @@ class BenchEvalSummary:
 Normalizes eval function signatures into a unified async interface.
 
 ```python
-from osmosis_ai.rollout.eval.bench import EvalFnWrapper
+from osmosis_ai.rollout.eval.evaluation import EvalFnWrapper
 
 wrapper = EvalFnWrapper(fn=my_eval_function, name="my_eval")
 
@@ -461,7 +461,7 @@ score = await wrapper(messages, ground_truth, metadata)
 Load and wrap eval functions from module paths.
 
 ```python
-from osmosis_ai.rollout.eval.bench import load_eval_fns
+from osmosis_ai.rollout.eval.evaluation import load_eval_fns
 
 eval_fns = load_eval_fns(["rewards:exact_match", "rewards:partial_match"])
 ```
@@ -541,7 +541,7 @@ from osmosis_ai.rollout.eval.common import (
     ProviderError,
     ToolValidationError,
 )
-from osmosis_ai.rollout.eval.bench import EvalFnError
+from osmosis_ai.rollout.eval.evaluation import EvalFnError
 ```
 
 | Exception | Description |
@@ -574,7 +574,7 @@ See [Test Mode - Environment Variables](./test-mode.md#environment-variables) fo
 
 6. **Reuse `@osmosis_reward` functions**: Existing reward functions work as eval functions in simple mode without modification.
 
-7. **Use `--batch_size` to speed up benchmarks**: Concurrent execution can significantly reduce wall time, especially with high-latency endpoints. Start with a moderate value (e.g., `5`) and increase based on endpoint capacity.
+7. **Use `--batch-size` to speed up benchmarks**: Concurrent execution can significantly reduce wall time, especially with high-latency endpoints. Start with a moderate value (e.g., `5`) and increase based on endpoint capacity.
 
 8. **Save results**: Use `-o results.json` to persist detailed per-run data for further analysis.
 

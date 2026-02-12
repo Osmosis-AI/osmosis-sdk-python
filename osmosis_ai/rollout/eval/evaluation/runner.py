@@ -1,4 +1,4 @@
-"""Benchmark runner for executing agent loops with eval functions.
+"""Evaluation runner for executing agent loops with eval functions.
 
 Runs the agent against each dataset row (optionally multiple times for pass@n),
 applies eval functions to each result, and aggregates statistics.
@@ -12,7 +12,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
-from osmosis_ai.rollout.eval.bench.eval_fn import EvalFnWrapper
+from osmosis_ai.rollout.eval.evaluation.eval_fn import EvalFnWrapper
 from osmosis_ai.rollout.core.base import RolloutAgentLoop
 from osmosis_ai.rollout.eval.common.dataset import DatasetRow
 from osmosis_ai.rollout.eval.common.llm_client import ExternalLLMClient
@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
-class BenchRunResult:
+class EvalRunResult:
     """Result from a single agent run + eval scoring.
 
     Attributes:
@@ -43,7 +43,7 @@ class BenchRunResult:
 
 
 @dataclass
-class BenchRowResult:
+class EvalRowResult:
     """Results from all runs of a single dataset row.
 
     Attributes:
@@ -52,11 +52,11 @@ class BenchRowResult:
     """
 
     row_index: int
-    runs: List[BenchRunResult] = field(default_factory=list)
+    runs: List[EvalRunResult] = field(default_factory=list)
 
 
 @dataclass
-class BenchEvalSummary:
+class EvalEvalSummary:
     """Summary statistics for a single eval function across all runs.
 
     Attributes:
@@ -75,8 +75,8 @@ class BenchEvalSummary:
 
 
 @dataclass
-class BenchResult:
-    """Full benchmark result with per-row data and aggregated summaries.
+class EvalResult:
+    """Full evaluation result with per-row data and aggregated summaries.
 
     Attributes:
         rows: Per-row results.
@@ -89,8 +89,8 @@ class BenchResult:
         pass_threshold: Score threshold for pass@k.
     """
 
-    rows: List[BenchRowResult]
-    eval_summaries: Dict[str, BenchEvalSummary]
+    rows: List[EvalRowResult]
+    eval_summaries: Dict[str, EvalEvalSummary]
     total_rows: int
     total_runs: int
     total_tokens: int
@@ -99,8 +99,8 @@ class BenchResult:
     pass_threshold: float
 
 
-class BenchRunner:
-    """Orchestrates benchmark execution: agent runs + eval function scoring."""
+class EvalRunner:
+    """Orchestrates evaluation execution: agent runs + eval function scoring."""
 
     def __init__(
         self,
@@ -122,8 +122,8 @@ class BenchRunner:
             llm_client=llm_client,
             debug=debug,
             debug_dir=debug_dir,
-            rollout_id_prefix="bench",
-            request_metadata={"execution_mode": "bench"},
+            rollout_id_prefix="eval",
+            request_metadata={"execution_mode": "eval"},
         )
 
     def _default_llm_client_factory(self) -> ExternalLLMClient:
@@ -145,8 +145,8 @@ class BenchRunner:
             llm_client=self._llm_client_factory(),
             debug=self.debug,
             debug_dir=self.debug_dir,
-            rollout_id_prefix="bench",
-            request_metadata={"execution_mode": "bench"},
+            rollout_id_prefix="eval",
+            request_metadata={"execution_mode": "eval"},
         )
 
     async def run_single(
@@ -157,7 +157,7 @@ class BenchRunner:
         max_turns: int = 10,
         completion_params: Optional[Dict[str, Any]] = None,
         runner: Optional[LocalRolloutRunner] = None,
-    ) -> BenchRunResult:
+    ) -> EvalRunResult:
         """Run agent once on a row and apply all eval functions.
 
         Args:
@@ -169,7 +169,7 @@ class BenchRunner:
             runner: Optional runner instance for concurrent execution.
 
         Returns:
-            BenchRunResult with scores from all eval functions.
+            EvalRunResult with scores from all eval functions.
         """
         # Run the agent
         rollout_runner = runner or self._rollout_runner
@@ -178,12 +178,12 @@ class BenchRunner:
             row_index=row_index,
             max_turns=max_turns,
             completion_params=completion_params,
-            rollout_id=f"bench-{row_index}-run-{run_index}",
+            rollout_id=f"eval-{row_index}-run-{run_index}",
             request_metadata={"run_index": run_index},
         )
 
         if not test_result.success or test_result.result is None:
-            return BenchRunResult(
+            return EvalRunResult(
                 run_index=run_index,
                 success=False,
                 duration_ms=test_result.duration_ms,
@@ -208,7 +208,7 @@ class BenchRunner:
                 )
                 scores[eval_fn.name] = 0.0
 
-        return BenchRunResult(
+        return EvalRunResult(
             run_index=run_index,
             success=True,
             scores=scores,
@@ -216,18 +216,18 @@ class BenchRunner:
             tokens=test_result.token_usage.get("total_tokens", 0),
         )
 
-    async def run_bench(
+    async def run_eval(
         self,
         rows: List[DatasetRow],
         n_runs: int = 1,
         max_turns: int = 10,
         completion_params: Optional[Dict[str, Any]] = None,
         pass_threshold: float = 1.0,
-        on_progress: Optional[Callable[[int, int, BenchRunResult], None]] = None,
+        on_progress: Optional[Callable[[int, int, EvalRunResult], None]] = None,
         start_index: int = 0,
         batch_size: int = 1,
-    ) -> BenchResult:
-        """Run the full benchmark.
+    ) -> EvalResult:
+        """Run the full evaluation.
 
         Args:
             rows: Dataset rows.
@@ -240,10 +240,10 @@ class BenchRunner:
             batch_size: Number of concurrent runs. Default 1 (sequential).
 
         Returns:
-            BenchResult with all results and statistics.
+            EvalResult with all results and statistics.
         """
         if batch_size > 1:
-            return await self._run_bench_concurrent(
+            return await self._run_eval_concurrent(
                 rows=rows,
                 n_runs=n_runs,
                 max_turns=max_turns,
@@ -255,13 +255,13 @@ class BenchRunner:
             )
 
         total_start = time.monotonic()
-        row_results: List[BenchRowResult] = []
+        row_results: List[EvalRowResult] = []
         total = len(rows) * n_runs
         current = 0
 
         for i, row in enumerate(rows):
             row_index = start_index + i
-            row_result = BenchRowResult(row_index=row_index)
+            row_result = EvalRowResult(row_index=row_index)
 
             for run_idx in range(n_runs):
                 result = await self.run_single(
@@ -289,7 +289,7 @@ class BenchRunner:
             row_results, n_runs, pass_threshold
         )
 
-        return BenchResult(
+        return EvalResult(
             rows=row_results,
             eval_summaries=eval_summaries,
             total_rows=len(rows),
@@ -300,18 +300,18 @@ class BenchRunner:
             pass_threshold=pass_threshold,
         )
 
-    async def _run_bench_concurrent(
+    async def _run_eval_concurrent(
         self,
         rows: List[DatasetRow],
         n_runs: int,
         max_turns: int,
         completion_params: Optional[Dict[str, Any]],
         pass_threshold: float,
-        on_progress: Optional[Callable[[int, int, BenchRunResult], None]],
+        on_progress: Optional[Callable[[int, int, EvalRunResult], None]],
         start_index: int,
         batch_size: int,
-    ) -> BenchResult:
-        """Run benchmark with concurrent execution.
+    ) -> EvalResult:
+        """Run evaluation with concurrent execution.
 
         Creates a pool of LocalRolloutRunner instances (each with its own
         ExternalLLMClient) and dispatches runs concurrently, limited by
@@ -331,7 +331,7 @@ class BenchRunner:
 
         async def _run_one(
             row: DatasetRow, row_index: int, run_index: int,
-        ) -> BenchRunResult:
+        ) -> EvalRunResult:
             nonlocal completed
             runner = await pool.get()
             try:
@@ -360,7 +360,7 @@ class BenchRunner:
         results = await asyncio.gather(*coros)
 
         # Organise flat results back into per-row structure.
-        row_results_map: Dict[int, BenchRowResult] = {}
+        row_results_map: Dict[int, EvalRowResult] = {}
         for idx, (i, row) in enumerate(
             (i, row)
             for i, row in enumerate(rows)
@@ -368,7 +368,7 @@ class BenchRunner:
         ):
             row_index = start_index + i
             if row_index not in row_results_map:
-                row_results_map[row_index] = BenchRowResult(row_index=row_index)
+                row_results_map[row_index] = EvalRowResult(row_index=row_index)
             row_results_map[row_index].runs.append(results[idx])
 
         # Ensure deterministic ordering within each row.
@@ -386,7 +386,7 @@ class BenchRunner:
             row_results, n_runs, pass_threshold
         )
 
-        return BenchResult(
+        return EvalResult(
             rows=row_results,
             eval_summaries=eval_summaries,
             total_rows=len(rows),
@@ -399,18 +399,18 @@ class BenchRunner:
 
     def _compute_summaries(
         self,
-        row_results: List[BenchRowResult],
+        row_results: List[EvalRowResult],
         n_runs: int,
         pass_threshold: float,
-    ) -> Dict[str, BenchEvalSummary]:
+    ) -> Dict[str, EvalEvalSummary]:
         """Compute per-eval-function summary statistics.
 
         Failed runs and missing eval scores are treated as 0.0 so reliability
-        issues are reflected in benchmark quality metrics.
+        issues are reflected in evaluation quality metrics.
         """
         import math
 
-        summaries: Dict[str, BenchEvalSummary] = {}
+        summaries: Dict[str, EvalEvalSummary] = {}
 
         for eval_fn in self.eval_fns:
             name = eval_fn.name
@@ -422,14 +422,14 @@ class BenchRunner:
                     all_scores.append(run.scores.get(name, 0.0))
 
             if not all_scores:
-                summaries[name] = BenchEvalSummary()
+                summaries[name] = EvalEvalSummary()
                 continue
 
             mean = sum(all_scores) / len(all_scores)
             variance = sum((s - mean) ** 2 for s in all_scores) / len(all_scores)
             std = math.sqrt(variance)
 
-            summary = BenchEvalSummary(
+            summary = EvalEvalSummary(
                 mean=mean,
                 std=std,
                 min=min(all_scores),
@@ -438,7 +438,7 @@ class BenchRunner:
 
             # Compute pass@k if n > 1
             if n_runs > 1:
-                from osmosis_ai.rollout.eval.bench.report import pass_at_k
+                from osmosis_ai.rollout.eval.evaluation.report import pass_at_k
 
                 for k in [1, 3, 5, 10]:
                     if k > n_runs:
@@ -461,9 +461,9 @@ class BenchRunner:
         return summaries
 
 __all__ = [
-    "BenchEvalSummary",
-    "BenchResult",
-    "BenchRowResult",
-    "BenchRunResult",
-    "BenchRunner",
+    "EvalEvalSummary",
+    "EvalResult",
+    "EvalRowResult",
+    "EvalRunResult",
+    "EvalRunner",
 ]

@@ -1,4 +1,4 @@
-"""Benchmark reporting: pass@k estimator and console output formatting."""
+"""Evaluation reporting: pass@k estimator and console output formatting."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 from osmosis_ai.rollout.eval.common.cli import format_duration
 
 if TYPE_CHECKING:
-    from osmosis_ai.rollout.eval.bench.runner import BenchResult
+    from osmosis_ai.rollout.eval.evaluation.runner import EvalResult
     from osmosis_ai.rollout.console import Console
 
 
@@ -60,18 +60,18 @@ def _score_color(value: float) -> str:
     return "red"
 
 
-def format_bench_report(result: "BenchResult", console: "Console") -> None:
-    """Print a formatted benchmark report to the console.
+def format_eval_report(result: "EvalResult", console: "Console") -> None:
+    """Print a formatted evaluation report to the console.
 
     Displays a table of eval function statistics including mean, min, max,
     std, and pass@k columns (when n > 1).
 
     Args:
-        result: The benchmark result to report.
+        result: The evaluation result to report.
         console: Console instance for output.
     """
     console.print()
-    console.print("Benchmark Results:", style="bold")
+    console.print("Evaluation Results:", style="bold")
     console.print(f"  Rows: {result.total_rows}")
     console.print(f"  Runs per row: {result.n_runs}")
     console.print(f"  Total runs: {result.total_runs}")
@@ -93,17 +93,17 @@ def format_bench_report(result: "BenchResult", console: "Console") -> None:
         pass_k_values.sort()
 
     if console.use_rich:
-        _format_bench_report_rich(result, console, pass_k_values)
+        _format_eval_report_rich(result, console, pass_k_values)
     else:
-        _format_bench_report_plain(result, console, pass_k_values)
+        _format_eval_report_plain(result, console, pass_k_values)
 
 
-def _format_bench_report_rich(
-    result: "BenchResult",
+def _format_eval_report_rich(
+    result: "EvalResult",
     console: "Console",
     pass_k_values: list[int],
 ) -> None:
-    """Render the benchmark table using rich."""
+    """Render the evaluation table using rich."""
     from rich.table import Table
     from rich import box
 
@@ -145,12 +145,12 @@ def _format_bench_report_rich(
     console._rich.print(table)  # type: ignore[union-attr]
 
 
-def _format_bench_report_plain(
-    result: "BenchResult",
+def _format_eval_report_plain(
+    result: "EvalResult",
     console: "Console",
     pass_k_values: list[int],
 ) -> None:
-    """Render the benchmark table as plain text."""
+    """Render the evaluation table as plain text."""
     # Build header
     header_parts = [
         f"{'Eval Function':<20}",
@@ -183,6 +183,6 @@ def _format_bench_report_plain(
         console.print(" | ".join(row_parts))
 
 __all__ = [
-    "format_bench_report",
+    "format_eval_report",
     "pass_at_k",
 ]

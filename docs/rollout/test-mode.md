@@ -458,7 +458,7 @@ await runner.run_interactive_session(
 
 ## Exceptions
 
-All local workflow exceptions are shared by local commands (`test` / `bench`).
+All local workflow exceptions are shared by local commands (`test` / `eval`).
 
 ```python
 from osmosis_ai.rollout.eval.common import (
@@ -561,7 +561,7 @@ See [LiteLLM Environment Variables](https://docs.litellm.ai/docs/providers) for 
 
 ## See Also
 
-- [Bench Mode](./bench.md) - Benchmark agents with eval functions and pass@k
+- [Eval Mode](./eval.md) - Evaluate agents with eval functions and pass@k
 - [Architecture](./architecture.md) - System design overview
 - [API Reference](./api-reference.md) - Complete SDK API documentation
 - [Examples](./examples.md) - Working code examples

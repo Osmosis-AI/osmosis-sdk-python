@@ -1,4 +1,4 @@
-"""Eval function loading and normalization for bench mode.
+"""Eval function loading and normalization for eval mode.
 
 Supports two eval function signatures, auto-detected via parameter inspection:
 
