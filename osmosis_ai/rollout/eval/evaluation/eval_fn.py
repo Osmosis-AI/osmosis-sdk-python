@@ -107,7 +107,8 @@ class EvalFnWrapper:
         if self._is_async:
             result = await self.fn(**kwargs)
         else:
-            result = self.fn(**kwargs)
+            loop = asyncio.get_running_loop()
+            result = await loop.run_in_executor(None, lambda: self.fn(**kwargs))
 
         if not isinstance(result, (int, float)):
             raise EvalFnError(
