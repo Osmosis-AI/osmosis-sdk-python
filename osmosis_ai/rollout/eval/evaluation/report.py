@@ -60,11 +60,23 @@ def _score_color(value: float) -> str:
     return "red"
 
 
+def _collect_pass_k_values(eval_summaries: dict[str, Any]) -> list[int]:
+    """Collect sorted pass@k column values from eval summaries."""
+    pass_k_values: list[int] = []
+    for summary in eval_summaries.values():
+        for k in summary.pass_at_k:
+            if k not in pass_k_values:
+                pass_k_values.append(k)
+    pass_k_values.sort()
+    return pass_k_values
+
+
 def format_eval_report(result: "EvalResult", console: "Console") -> None:
     """Print a formatted evaluation report to the console.
 
     Displays a table of eval function statistics including mean, min, max,
-    std, and pass@k columns (when n > 1).
+    std, and pass@k columns (when n > 1).  When model_summaries are present
+    (comparison mode), a per-model breakdown and win/loss/tie table is shown.
 
     Args:
         result: The evaluation result to report.
@@ -90,14 +102,13 @@ def format_eval_report(result: "EvalResult", console: "Console") -> None:
         return
 
     # Determine pass@k columns
-    pass_k_values: list[int] = []
-    if result.n_runs > 1:
-        for summary in result.eval_summaries.values():
-            for k in summary.pass_at_k:
-                if k not in pass_k_values:
-                    pass_k_values.append(k)
-        pass_k_values.sort()
+    pass_k_values = (
+        _collect_pass_k_values(result.eval_summaries)
+        if result.n_runs > 1
+        else []
+    )
 
+    # Standard single-model report
     if console.run_rich(
         lambda rich_console: _format_eval_report_rich(
             result,
@@ -105,9 +116,20 @@ def format_eval_report(result: "EvalResult", console: "Console") -> None:
             rich_console,
         )
     ):
-        return
+        pass
+    else:
+        _format_eval_report_plain(result, console, pass_k_values)
 
-    _format_eval_report_plain(result, console, pass_k_values)
+    # Comparison report (if baseline was used)
+    if result.comparisons:
+        if console.run_rich(
+            lambda rich_console: _format_comparison_report_rich(
+                result,
+                rich_console,
+            )
+        ):
+            return
+        _format_comparison_report_plain(result, console)
 
 
 def _format_eval_report_rich(
@@ -193,6 +215,107 @@ def _format_eval_report_plain(
             else:
                 row_parts.append(f"{'N/A':>8}")
         console.print(" | ".join(row_parts))
+
+def _delta_color(delta: float) -> str:
+    """Return a color name based on delta sign."""
+    if delta > 0:
+        return "green"
+    if delta < 0:
+        return "red"
+    return "dim"
+
+
+def _format_comparison_report_rich(
+    result: "EvalResult",
+    rich_console: Any,
+) -> None:
+    """Render the model comparison table using rich."""
+    from rich.table import Table
+    from rich import box
+
+    if not result.comparisons or not result.model_summaries:
+        return
+
+    primary_label = "primary"
+    baseline_label = "baseline"
+    for ms in result.model_summaries:
+        if ms.model_tag == "primary":
+            primary_label = ms.model or "primary"
+        elif ms.model_tag == "baseline":
+            baseline_label = ms.model or "baseline"
+
+    table = Table(
+        title="Model Comparison",
+        box=box.ROUNDED,
+        title_style="bold",
+        header_style="bold cyan",
+        show_lines=False,
+        padding=(0, 1),
+    )
+
+    table.add_column("Eval Function", style="bold", no_wrap=True)
+    table.add_column(f"Primary ({primary_label})", justify="right")
+    table.add_column(f"Baseline ({baseline_label})", justify="right")
+    table.add_column("Delta", justify="right")
+    table.add_column("Win", justify="right")
+    table.add_column("Loss", justify="right")
+    table.add_column("Tie", justify="right")
+
+    for comp in result.comparisons:
+        d_color = _delta_color(comp.delta)
+        delta_sign = "+" if comp.delta > 0 else ""
+        table.add_row(
+            comp.eval_fn,
+            f"[{_score_color(comp.primary_mean)}]{_format_score(comp.primary_mean)}[/{_score_color(comp.primary_mean)}]",
+            f"[{_score_color(comp.baseline_mean)}]{_format_score(comp.baseline_mean)}[/{_score_color(comp.baseline_mean)}]",
+            f"[{d_color}]{delta_sign}{_format_score(comp.delta)}[/{d_color}]",
+            str(comp.wins),
+            str(comp.losses),
+            str(comp.ties),
+        )
+
+    rich_console.print()
+    rich_console.print(table)
+
+
+def _format_comparison_report_plain(
+    result: "EvalResult",
+    console: "Console",
+) -> None:
+    """Render the model comparison table as plain text."""
+    if not result.comparisons or not result.model_summaries:
+        return
+
+    console.print()
+    console.print("Model Comparison:", style="bold")
+
+    header_parts = [
+        f"{'Eval Function':<20}",
+        f"{'Primary':>8}",
+        f"{'Baseline':>8}",
+        f"{'Delta':>8}",
+        f"{'Win':>5}",
+        f"{'Loss':>5}",
+        f"{'Tie':>5}",
+    ]
+    header = " | ".join(header_parts)
+
+    console.print(header, style="bold")
+    console.print("-" * len(header))
+
+    for comp in result.comparisons:
+        delta_sign = "+" if comp.delta > 0 else ""
+        row_parts = [
+            f"{comp.eval_fn:<20}",
+            f"{comp.primary_mean:>8.3f}",
+            f"{comp.baseline_mean:>8.3f}",
+            f"{delta_sign}{comp.delta:>7.3f}",
+            f"{comp.wins:>5}",
+            f"{comp.losses:>5}",
+            f"{comp.ties:>5}",
+        ]
+        console.print(" | ".join(row_parts))
+
 
 __all__ = [
     "format_eval_report",

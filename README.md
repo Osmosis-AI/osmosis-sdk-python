@@ -3,6 +3,9 @@
 A Python SDK for Osmosis LLM training workflows:
 - Reward/rubric validation helpers with strict type enforcement
 - Remote Rollout SDK for integrating agent frameworks with Osmosis training
+- Agent testing with external LLMs (`osmosis test`)
+- Model evaluation with custom eval functions, pass@k, and baseline comparison (`osmosis eval`)
+- MCP tools support for git-sync workflows (`--mcp`)
 
 ## Installation
 
@@ -65,6 +68,8 @@ print(rubric_score)  # -> 1.0 (full payload available via return_details=True)
 If you're integrating an agent loop with Osmosis remote rollout / TrainGate, see:
 - `docs/rollout/README.md` (quick start)
 - `docs/rollout/architecture.md` (protocol + lifecycle)
+- `docs/rollout/test-mode.md` (local testing with external LLMs)
+- `docs/rollout/eval.md` (model evaluation with eval functions and baseline comparison)
 
 ## Remote Rubric Evaluation
 
@@ -298,6 +303,52 @@ osmosis serve -m my_agent:agent_loop --no-validate
 The module path format is `module:attribute`, e.g., `server:agent_loop` or `mypackage.agents:MyAgentClass`.
 
 Note: The `--api-key` option sets the API key for this RolloutServer. It is used by TrainGate to authenticate its requests *to* your server. This key is **not** the same as your `osmosis login` token (which is for authenticating with the Osmosis Platform), nor is it used for callbacks *from* your server back to TrainGate.
+
+### Agent Testing
+
+Test your agent loop locally against a dataset using external LLMs:
+
+```bash
+# Batch test with OpenAI
+osmosis test -m my_agent:agent_loop -d data.jsonl --model openai/gpt-5-mini
+
+# Interactive step-by-step debugging
+osmosis test -m my_agent:agent_loop -d data.jsonl --interactive
+
+# Git-sync users: test MCP tools directly (no AgentLoop code needed)
+osmosis test --mcp ./mcp -d data.jsonl --model openai/gpt-5-mini
+```
+
+See `docs/rollout/test-mode.md` for full documentation.
+
+### Agent Evaluation
+
+Evaluate trained models with custom eval functions, pass@k metrics, and baseline comparison:
+
+```bash
+# Benchmark a trained model at a serving endpoint
+osmosis eval -m my_agent:agent_loop -d data.jsonl \
+    --eval-fn rewards:compute_reward \
+    --model my-finetuned-model --base-url http://localhost:8000/v1
+
+# pass@k with 5 runs per row
+osmosis eval -m my_agent:agent_loop -d data.jsonl \
+    --eval-fn rewards:compute_reward --n 5 \
+    --model my-finetuned-model --base-url http://localhost:8000/v1
+
+# Compare against a baseline model (win/loss/tie statistics)
+osmosis eval -m my_agent:agent_loop -d data.jsonl \
+    --eval-fn rewards:compute_reward \
+    --model my-finetuned-model --base-url http://localhost:8000/v1 \
+    --baseline-model openai/gpt-5-mini
+
+# Git-sync users: evaluate MCP tools directly
+osmosis eval --mcp ./mcp -d data.jsonl \
+    --eval-fn rewards:compute_reward \
+    --model openai/gpt-5-mini
+```
+
+See `docs/rollout/eval.md` for full documentation.
 
 ### Rubric Tools
 

@@ -24,7 +24,10 @@ from osmosis_ai.rollout.eval.common.dataset import DatasetRow
 
 
 class MockLLMClient:
-    def __init__(self) -> None:
+    def __init__(self, model: str = "mock-model") -> None:
+        self.model = model
+        self._api_key: str | None = None
+        self._api_base: str | None = None
         self._tools: List[Dict[str, Any]] | None = None
         self._prompt_tokens = 0
         self._response_tokens = 0
@@ -538,3 +541,214 @@ class TestEvalRunner:
         assert len(eval_result.rows[0].runs) == 1
         assert eval_result.rows[0].runs[0].success is False
         assert "eval failure" in (eval_result.stop_reason or "")
+
+
+class TestEvalRunnerBaseline:
+    """Tests for baseline model comparison support."""
+
+    @pytest.mark.asyncio
+    async def test_run_single_with_model_tag(self) -> None:
+        """model_tag should be propagated through to EvalRunResult."""
+        client = MockLLMClient()
+        agent = MockAgentLoop(tools=[create_sample_tool()], call_llm=True)
+
+        def simple_eval(
+            solution_str: str,
+            ground_truth: str,
+            extra_info: Dict[str, Any],
+        ) -> float:
+            return 1.0
+
+        runner = EvalRunner(
+            agent_loop=agent,
+            llm_client=client,  # type: ignore[arg-type]
+            eval_fns=[EvalFnWrapper(simple_eval, "simple_eval")],
+        )
+
+        result = await runner.run_single(
+            row=create_sample_row(0),
+            row_index=0,
+            run_index=0,
+            model_tag="primary",
+        )
+        assert result.model_tag == "primary"
+        assert result.success is True
+
+        result_none = await runner.run_single(
+            row=create_sample_row(0),
+            row_index=0,
+            run_index=0,
+        )
+        assert result_none.model_tag is None
+
+    @pytest.mark.asyncio
+    async def test_run_eval_baseline_sequential(self) -> None:
+        """Sequential mode with baseline should run both models per row."""
+        primary_client = MockLLMClient()
+        baseline_client = MockLLMClient()
+        agent = MockAgentLoop(tools=[create_sample_tool()], call_llm=True)
+
+        def simple_eval(
+            solution_str: str,
+            ground_truth: str,
+            extra_info: Dict[str, Any],
+        ) -> float:
+            return 1.0
+
+        runner = EvalRunner(
+            agent_loop=agent,
+            llm_client=primary_client,  # type: ignore[arg-type]
+            eval_fns=[EvalFnWrapper(simple_eval, "simple_eval")],
+            baseline_llm_client=baseline_client,  # type: ignore[arg-type]
+        )
+
+        rows = [create_sample_row(0), create_sample_row(1)]
+        result = await runner.run_eval(
+            rows=rows,
+            n_runs=1,
+            batch_size=1,
+        )
+
+        # 2 rows * 1 run * 2 models = 4 total runs
+        assert result.total_runs == 4
+        assert result.total_rows == 2
+
+        # Each row should have 2 runs (primary + baseline)
+        for row_result in result.rows:
+            tags = [r.model_tag for r in row_result.runs]
+            assert "primary" in tags
+            assert "baseline" in tags
+
+        # model_summaries and comparisons should be populated
+        assert result.model_summaries is not None
+        assert len(result.model_summaries) == 2
+        assert result.model_summaries[0].model_tag == "primary"
+        assert result.model_summaries[1].model_tag == "baseline"
+
+        assert result.comparisons is not None
+        assert len(result.comparisons) == 1
+        assert result.comparisons[0].eval_fn == "simple_eval"
+
+    @pytest.mark.asyncio
+    async def test_run_eval_baseline_concurrent(self) -> None:
+        """Concurrent mode with baseline should also produce comparison results."""
+        primary_client = MockLLMClient()
+        baseline_client = MockLLMClient()
+        agent = MockAgentLoop(tools=[create_sample_tool()], call_llm=True)
+
+        def simple_eval(
+            solution_str: str,
+            ground_truth: str,
+            extra_info: Dict[str, Any],
+        ) -> float:
+            return 1.0
+
+        runner = EvalRunner(
+            agent_loop=agent,
+            llm_client=primary_client,  # type: ignore[arg-type]
+            eval_fns=[EvalFnWrapper(simple_eval, "simple_eval")],
+            llm_client_factory=MockLLMClient,  # type: ignore[arg-type]
+            baseline_llm_client=baseline_client,  # type: ignore[arg-type]
+            baseline_llm_client_factory=MockLLMClient,  # type: ignore[arg-type]
+        )
+
+        rows = [create_sample_row(i) for i in range(3)]
+        result = await runner.run_eval(
+            rows=rows,
+            n_runs=1,
+            batch_size=4,
+        )
+
+        # 3 rows * 1 run * 2 models = 6 total runs
+        assert result.total_runs == 6
+        assert result.total_rows == 3
+
+        for row_result in result.rows:
+            tags = [r.model_tag for r in row_result.runs]
+            assert "primary" in tags
+            assert "baseline" in tags
+
+        assert result.model_summaries is not None
+        assert result.comparisons is not None
+
+    @pytest.mark.asyncio
+    async def test_run_eval_baseline_win_loss_tie(self) -> None:
+        """Verify win/loss/tie statistics are computed correctly."""
+        primary_client = MockLLMClient()
+        baseline_client = MockLLMClient()
+        agent = MockAgentLoop(tools=[create_sample_tool()], call_llm=True)
+
+        call_counter = {"n": 0}
+
+        def scoring_eval(
+            solution_str: str,
+            ground_truth: str,
+            extra_info: Dict[str, Any],
+        ) -> float:
+            """Return different scores for primary vs baseline per row.
+
+            Sequence of calls (sequential, batch_size=1):
+            row0-primary (call 1): 0.9 (odd -> 0.9)
+            row0-baseline (call 2): 0.3 (even -> 0.3)
+            row1-primary (call 3): 0.9 (odd -> 0.9)
+            row1-baseline (call 4): 0.3 (even -> 0.3)
+            row2-primary (call 5): 0.9 (odd -> 0.9)
+            row2-baseline (call 6): 0.3 (even -> 0.3)
+
+            Result: primary wins all 3 rows.
+            """
+            call_counter["n"] += 1
+            return 0.9 if call_counter["n"] % 2 == 1 else 0.3
+
+        runner = EvalRunner(
+            agent_loop=agent,
+            llm_client=primary_client,  # type: ignore[arg-type]
+            eval_fns=[EvalFnWrapper(scoring_eval, "scoring_eval")],
+            baseline_llm_client=baseline_client,  # type: ignore[arg-type]
+        )
+
+        rows = [create_sample_row(i) for i in range(3)]
+        result = await runner.run_eval(
+            rows=rows,
+            n_runs=1,
+            batch_size=1,
+        )
+
+        assert result.comparisons is not None
+        comp = result.comparisons[0]
+        assert comp.eval_fn == "scoring_eval"
+        assert comp.wins == 3
+        assert comp.losses == 0
+        assert comp.ties == 0
+        assert comp.delta > 0
+        assert comp.primary_mean == pytest.approx(0.9)
+        assert comp.baseline_mean == pytest.approx(0.3)
+
+    @pytest.mark.asyncio
+    async def test_run_eval_no_baseline_backward_compat(self) -> None:
+        """Without baseline, model_tag should be None and no comparison data."""
+        client = MockLLMClient()
+        agent = MockAgentLoop(tools=[create_sample_tool()], call_llm=True)
+
+        def simple_eval(
+            solution_str: str,
+            ground_truth: str,
+            extra_info: Dict[str, Any],
+        ) -> float:
+            return 1.0
+
+        runner = EvalRunner(
+            agent_loop=agent,
+            llm_client=client,  # type: ignore[arg-type]
+            eval_fns=[EvalFnWrapper(simple_eval, "simple_eval")],
+        )
+
+        rows = [create_sample_row(0)]
+        result = await runner.run_eval(rows=rows, n_runs=1)
+
+        assert result.total_runs == 1
+        assert result.model_summaries is None
+        assert result.comparisons is None
+        for row_result in result.rows:
+            for run in row_result.runs:
+                assert run.model_tag is None

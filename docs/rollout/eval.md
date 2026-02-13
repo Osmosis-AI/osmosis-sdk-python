@@ -91,19 +91,36 @@ def lookup(key: str) -> str:
 
 > **Note:** `--mcp` and `-m/--module` are mutually exclusive. Use one or the other.
 
-### Comparison Baselines with LiteLLM
+### Baseline Model Comparison
 
-You can also benchmark against external LLM providers using [LiteLLM](https://docs.litellm.ai/docs/providers) format for comparison:
+Compare your trained model against a baseline model. The SDK runs both models on the same dataset and reports per-row win/loss/tie statistics and per-eval-function deltas.
 
 ```bash
-# Compare against GPT-4o as a baseline
+# Compare trained model vs GPT-5-mini baseline
 osmosis eval -m my_agent:MyAgentLoop -d data.jsonl \
-    --eval-fn rewards:compute_reward --model openai/gpt-5-mini
+    --eval-fn rewards:compute_reward \
+    --model my-finetuned-model --base-url http://localhost:8000/v1 \
+    --baseline-model openai/gpt-5-mini
 
-# Compare against Claude
+# Compare two serving endpoints
 osmosis eval -m my_agent:MyAgentLoop -d data.jsonl \
-    --eval-fn rewards:compute_reward --model anthropic/claude-sonnet-4-5
+    --eval-fn rewards:compute_reward \
+    --model my-model-v2 --base-url http://localhost:8000/v1 \
+    --baseline-model my-model-v1 --baseline-base-url http://localhost:8001/v1
+
+# Baseline with explicit API key
+osmosis eval -m my_agent:MyAgentLoop -d data.jsonl \
+    --eval-fn rewards:compute_reward \
+    --model my-finetuned-model --base-url http://localhost:8000/v1 \
+    --baseline-model anthropic/claude-sonnet-4-5 --baseline-api-key $ANTHROPIC_API_KEY
 ```
+
+When a baseline is provided, the report includes:
+- **Per-model summaries** with separate mean/std/min/max for each model
+- **Win/loss/tie** counts per eval function (comparing per-row mean scores)
+- **Delta** showing the difference between primary and baseline mean scores
+
+You can also use LiteLLM providers (e.g., `openai/gpt-5-mini`, `anthropic/claude-sonnet-4-5`) as either the primary or baseline model. See [LiteLLM Providers](https://docs.litellm.ai/docs/providers) for supported providers.
 
 ### Concurrent Execution
 
@@ -152,32 +169,43 @@ client = ExternalLLMClient(
     api_base="http://localhost:8000/v1",
 )
 
+# Optional: baseline model for comparison
+baseline_client = ExternalLLMClient("openai/gpt-5-mini")
+
 # Load eval functions
 eval_fns = load_eval_fns(["rewards:exact_match", "rewards:partial_match"])
 
-# Create runner
+# Create runner (with optional baseline)
 runner = EvalRunner(
     agent_loop=MyAgentLoop(),
     llm_client=client,
     eval_fns=eval_fns,
+    baseline_llm_client=baseline_client,  # omit for single-model mode
 )
 
 # Run evaluation (batch_size=5 for concurrent execution)
 async with client:
-    result = await runner.run_eval(
-        rows=rows,
-        n_runs=5,
-        max_turns=10,
-        pass_threshold=0.5,
-        completion_params={"temperature": 0.7},
-        batch_size=5,
-    )
+    async with baseline_client:
+        result = await runner.run_eval(
+            rows=rows,
+            n_runs=5,
+            max_turns=10,
+            pass_threshold=0.5,
+            completion_params={"temperature": 0.7},
+            batch_size=5,
+        )
 
 # Print results
 for name, summary in result.eval_summaries.items():
     print(f"{name}: mean={summary.mean:.3f}, std={summary.std:.3f}")
     for k, v in summary.pass_at_k.items():
         print(f"  pass@{k}: {v*100:.1f}%")
+
+# Print comparison results (when baseline is used)
+if result.comparisons:
+    for comp in result.comparisons:
+        print(f"{comp.eval_fn}: delta={comp.delta:+.3f} "
+              f"(W:{comp.wins}/L:{comp.losses}/T:{comp.ties})")
 ```
 
 ---
@@ -312,6 +340,14 @@ osmosis eval [OPTIONS]
 | `--base-url URL` | Base URL for the model serving endpoint (e.g., `http://localhost:8000/v1`). Use this to connect to trained model endpoints. |
 | `--api-key KEY` | API key for the endpoint or LLM provider (or use env var) |
 
+### Baseline Options (optional)
+
+| Option | Description |
+|--------|-------------|
+| `--baseline-model MODEL` | Baseline model for comparison. Runs the same evaluation with a second model and reports win/loss/tie statistics. |
+| `--baseline-base-url URL` | Base URL for the baseline model's API endpoint. Requires `--baseline-model`. |
+| `--baseline-api-key KEY` | API key for the baseline model provider. Requires `--baseline-model`. |
+
 ### Execution Options
 
 | Option | Default | Description |
@@ -367,10 +403,17 @@ osmosis eval -m my_agent:agent_loop -d data.jsonl \
     --eval-fn rewards:compute_reward --n 5 --pass-threshold 0.5 \
     --model my-finetuned-model --base-url http://localhost:8000/v1
 
-# Baseline comparison with external LLM, save results
+# Baseline comparison: trained model vs external LLM
 osmosis eval -m my_agent:agent_loop -d data.jsonl \
     --eval-fn rewards:compute_reward \
-    --model openai/gpt-5-mini -o results.json
+    --model my-finetuned-model --base-url http://localhost:8000/v1 \
+    --baseline-model openai/gpt-5-mini -o results.json
+
+# Baseline comparison: two serving endpoints
+osmosis eval -m my_agent:agent_loop -d data.jsonl \
+    --eval-fn rewards:compute_reward \
+    --model my-model-v2 --base-url http://localhost:8000/v1 \
+    --baseline-model my-model-v1 --baseline-base-url http://localhost:8001/v1
 
 # Concurrent execution (5 runs at a time)
 osmosis eval -m my_agent:agent_loop -d data.jsonl \
@@ -426,6 +469,8 @@ eval_result = await runner.run_eval(
 | `debug` | `bool` | `False` | Enable debug logging |
 | `debug_dir` | `Optional[str]` | `None` | Directory for debug logs |
 | `llm_client_factory` | `Optional[Callable]` | `None` | Factory to create LLM client instances for concurrent execution. If `None`, clones from the provided `llm_client`. |
+| `baseline_llm_client` | `Optional[ExternalLLMClient]` | `None` | Baseline LLM client for comparison mode. When provided, each row is evaluated with both the primary and baseline models. |
+| `baseline_llm_client_factory` | `Optional[Callable]` | `None` | Factory to create baseline LLM client instances for concurrent execution. If `None`, clones from the provided `baseline_llm_client`. |
 
 **Methods:**
 
@@ -452,6 +497,7 @@ class EvalRunResult:
     duration_ms: float          # Execution time in milliseconds
     tokens: int                 # Total tokens used
     error: Optional[str]        # Error message (if failed)
+    model_tag: Optional[str]    # "primary", "baseline", or None (single-model mode)
 ```
 
 ---
@@ -484,6 +530,8 @@ class EvalResult:
     total_duration_ms: float                         # Total wall time
     n_runs: int                                      # Runs per row
     pass_threshold: float                            # Score threshold for pass@k
+    model_summaries: Optional[List[EvalModelSummary]]  # Per-model stats (comparison mode)
+    comparisons: Optional[List[EvalComparison]]        # Win/loss/tie per eval fn (comparison mode)
 ```
 
 ---
@@ -500,6 +548,41 @@ class EvalEvalSummary:
     min: float                      # Minimum score
     max: float                      # Maximum score
     pass_at_k: Dict[int, float]     # k -> pass@k value (only when n > 1)
+```
+
+---
+
+### EvalModelSummary
+
+Per-model summary statistics (comparison mode only).
+
+```python
+@dataclass
+class EvalModelSummary:
+    model: str                                     # Model identifier
+    model_tag: str                                 # "primary" or "baseline"
+    eval_summaries: Dict[str, EvalEvalSummary]     # Per-eval statistics for this model
+    total_runs: int                                # Number of runs for this model
+    total_tokens: int                              # Total tokens consumed
+    total_duration_ms: float                       # Total wall time
+```
+
+---
+
+### EvalComparison
+
+Win/loss/tie comparison per eval function (comparison mode only).
+
+```python
+@dataclass
+class EvalComparison:
+    eval_fn: str            # Eval function name
+    primary_mean: float     # Mean score for primary model
+    baseline_mean: float    # Mean score for baseline model
+    delta: float            # primary_mean - baseline_mean
+    wins: int               # Rows where primary scored higher
+    losses: int             # Rows where baseline scored higher
+    ties: int               # Rows where scores were equal
 ```
 
 ---
@@ -543,7 +626,8 @@ When using `--output`, results are saved as JSON:
     "model": "my-finetuned-model",
     "n_runs": 5,
     "pass_threshold": 0.5,
-    "eval_fns": ["rewards:exact_match", "rewards:partial_match"]
+    "eval_fns": ["rewards:exact_match", "rewards:partial_match"],
+    "baseline_model": "openai/gpt-5-mini"
   },
   "summary": {
     "total_rows": 100,
@@ -583,13 +667,71 @@ When using `--output`, results are saved as JSON:
             "rewards:partial_match": 1.0
           },
           "duration_ms": 450,
-          "tokens": 200
+          "tokens": 200,
+          "model_tag": "primary"
+        },
+        {
+          "run_index": 0,
+          "success": true,
+          "scores": {
+            "rewards:exact_match": 0.0,
+            "rewards:partial_match": 0.7
+          },
+          "duration_ms": 380,
+          "tokens": 180,
+          "model_tag": "baseline"
         }
       ]
+    }
+  ],
+  "model_summaries": [
+    {
+      "model": "my-finetuned-model",
+      "model_tag": "primary",
+      "total_runs": 500,
+      "total_tokens": 350000,
+      "total_duration_ms": 130000,
+      "eval_fns": {
+        "rewards:exact_match": { "mean": 0.82, "std": 0.38, "min": 0.0, "max": 1.0 },
+        "rewards:partial_match": { "mean": 0.91, "std": 0.15, "min": 0.4, "max": 1.0 }
+      }
+    },
+    {
+      "model": "openai/gpt-5-mini",
+      "model_tag": "baseline",
+      "total_runs": 500,
+      "total_tokens": 275000,
+      "total_duration_ms": 100500,
+      "eval_fns": {
+        "rewards:exact_match": { "mean": 0.62, "std": 0.49, "min": 0.0, "max": 1.0 },
+        "rewards:partial_match": { "mean": 0.78, "std": 0.25, "min": 0.2, "max": 1.0 }
+      }
+    }
+  ],
+  "comparisons": [
+    {
+      "eval_fn": "rewards:exact_match",
+      "primary_mean": 0.82,
+      "baseline_mean": 0.62,
+      "delta": 0.20,
+      "wins": 65,
+      "losses": 30,
+      "ties": 5
+    },
+    {
+      "eval_fn": "rewards:partial_match",
+      "primary_mean": 0.91,
+      "baseline_mean": 0.78,
+      "delta": 0.13,
+      "wins": 58,
+      "losses": 25,
+      "ties": 17
     }
   ]
 }
 ```
+
+> **Note:** The `model_tag`, `model_summaries`, and `comparisons` fields are only present when `--baseline-model` is used. In single-model mode, `model_tag` is omitted from run objects and the top-level `model_summaries` and `comparisons` keys are absent.
 
 ---
 
@@ -604,7 +746,11 @@ from osmosis_ai.rollout.eval.common import (
     ProviderError,
     ToolValidationError,
 )
-from osmosis_ai.rollout.eval.evaluation import EvalFnError
+from osmosis_ai.rollout.eval.evaluation import (
+    EvalFnError,
+    EvalComparison,
+    EvalModelSummary,
+)
 ```
 
 | Exception | Description |
@@ -633,7 +779,7 @@ See [Test Mode - Environment Variables](./test-mode.md#environment-variables) fo
 
 4. **Choose appropriate thresholds**: `--pass-threshold 1.0` (default) requires perfect scores. Use a lower threshold like `0.5` for partial-credit eval functions.
 
-5. **Compare against baselines**: Run the same benchmark with LiteLLM providers (e.g., `--model openai/gpt-5-mini`) to establish baseline performance.
+5. **Compare against baselines**: Use `--baseline-model` to run the same benchmark with a second model and get win/loss/tie statistics automatically.
 
 6. **Reuse `@osmosis_reward` functions**: Existing reward functions work as eval functions in simple mode without modification.
 

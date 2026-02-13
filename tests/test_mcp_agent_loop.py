@@ -475,12 +475,15 @@ class TestCLIMutualExclusion:
         cmd = EvalCommand()
         args = argparse.Namespace(
             module="foo:bar",
-            tools="./mcp",
+            mcp="./mcp",
             n_runs=1,
             batch_size=1,
             max_turns=10,
             offset=0,
             limit=None,
+            baseline_model=None,
+            baseline_base_url=None,
+            baseline_api_key=None,
         )
         error = cmd._validate_args(args)
         assert error is not None
@@ -492,12 +495,15 @@ class TestCLIMutualExclusion:
         cmd = EvalCommand()
         args = argparse.Namespace(
             module=None,
-            tools=None,
+            mcp=None,
             n_runs=1,
             batch_size=1,
             max_turns=10,
             offset=0,
             limit=None,
+            baseline_model=None,
+            baseline_base_url=None,
+            baseline_api_key=None,
         )
         error = cmd._validate_args(args)
         assert error is not None
@@ -509,12 +515,15 @@ class TestCLIMutualExclusion:
         cmd = EvalCommand()
         args = argparse.Namespace(
             module="foo:bar",
-            tools=None,
+            mcp=None,
             n_runs=1,
             batch_size=1,
             max_turns=10,
             offset=0,
             limit=None,
+            baseline_model=None,
+            baseline_base_url=None,
+            baseline_api_key=None,
         )
         assert cmd._validate_args(args) is None
 
@@ -524,12 +533,15 @@ class TestCLIMutualExclusion:
         cmd = EvalCommand()
         args = argparse.Namespace(
             module=None,
-            tools="./mcp",
+            mcp="./mcp",
             n_runs=1,
             batch_size=1,
             max_turns=10,
             offset=0,
             limit=None,
+            baseline_model=None,
+            baseline_base_url=None,
+            baseline_api_key=None,
         )
         assert cmd._validate_args(args) is None
 
@@ -539,7 +551,7 @@ class TestCLIMutualExclusion:
         cmd = TestCommand()
         args = argparse.Namespace(
             module="foo:bar",
-            tools="./mcp",
+            mcp="./mcp",
             row=None,
             interactive=False,
         )
@@ -553,7 +565,7 @@ class TestCLIMutualExclusion:
         cmd = TestCommand()
         args = argparse.Namespace(
             module=None,
-            tools=None,
+            mcp=None,
             row=None,
             interactive=False,
         )
@@ -567,7 +579,7 @@ class TestCLIMutualExclusion:
         cmd = TestCommand()
         args = argparse.Namespace(
             module=None,
-            tools="./mcp",
+            mcp="./mcp",
             row=None,
             interactive=False,
         )
@@ -637,7 +649,7 @@ class TestEvalCLIBatchSize:
         cmd = EvalCommand()
         args = argparse.Namespace(
             module="my_agent:MyAgentLoop",
-            tools=None,
+            mcp=None,
             dataset="data.jsonl",
             model="openai/gpt-4o",
             eval_fns=["rewards:score"],
@@ -648,6 +660,9 @@ class TestEvalCLIBatchSize:
             max_tokens=None,
             api_key=None,
             base_url=None,
+            baseline_model=None,
+            baseline_base_url=None,
+            baseline_api_key=None,
             output=None,
             debug=False,
             quiet=True,
