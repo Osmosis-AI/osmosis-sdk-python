@@ -6,6 +6,7 @@ Supports providers such as OpenAI, Anthropic, Groq, Ollama, and others.
 from __future__ import annotations
 
 import logging
+import inspect
 import time
 import warnings
 from typing import Any, Dict, List, Optional
@@ -36,6 +37,12 @@ def _get_litellm():
     """Lazy import LiteLLM to avoid hard dependency."""
     try:
         import litellm
+
+        # LiteLLM's atexit cleanup can emit "coroutine was never awaited"
+        # warnings on Python 3.12 when asyncio.run() has already closed the loop.
+        # We perform explicit async cleanup in ExternalLLMClient.close() instead.
+        if hasattr(litellm, "_async_client_cleanup_registered"):
+            litellm._async_client_cleanup_registered = True
 
         return litellm
     except ImportError as exc:
@@ -76,6 +83,7 @@ class ExternalLLMClient:
         self._num_llm_calls: int = 0
         self._prompt_tokens: int = 0
         self._response_tokens: int = 0
+        self._closed = False
 
     def set_tools(self, tools: List[Any]) -> None:
         """Set tools for the current execution row."""
@@ -184,8 +192,22 @@ class ExternalLLMClient:
         )
 
     async def close(self) -> None:
-        """Release resources. LiteLLM manages connections internally."""
-        pass
+        """Release resources and explicitly close LiteLLM async clients."""
+        if self._closed:
+            return
+        self._closed = True
+        self.clear_tools()
+
+        cleanup = getattr(self._litellm, "close_litellm_async_clients", None)
+        if not callable(cleanup):
+            return
+
+        try:
+            cleanup_result = cleanup()
+            if inspect.isawaitable(cleanup_result):
+                await cleanup_result
+        except Exception as exc:
+            logger.debug("LiteLLM async client cleanup failed: %s", exc)
 
     async def __aenter__(self) -> "ExternalLLMClient":
         return self
