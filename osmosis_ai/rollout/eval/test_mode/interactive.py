@@ -211,27 +211,55 @@ class InteractiveRunner:
         self._current_messages: List[Dict[str, Any]] = []
         self._current_tools: List[OpenAIFunctionToolSchema] = []
         self._auto_continue = False
+        self._last_msg_count_seen = 0
 
     def _print_separator(self, title: str = "") -> None:
         """Print a separator line."""
         self.console.separator(title)
 
-    def _print_message(self, msg: Dict[str, Any], prefix: str = "") -> None:
+    def _build_tool_name_map(self, messages: List[Dict[str, Any]]) -> Dict[str, str]:
+        """Build mapping from tool_call_id to function name."""
+        name_map: Dict[str, str] = {}
+        for msg in messages:
+            if msg.get("role") == "assistant":
+                for tc in msg.get("tool_calls") or []:
+                    tc_id = tc.get("id", "")
+                    func_name = tc.get("function", {}).get("name", "unknown")
+                    if tc_id:
+                        name_map[tc_id] = func_name
+        return name_map
+
+    def _print_message(
+        self,
+        msg: Dict[str, Any],
+        prefix: str = "",
+        tool_name_map: Optional[Dict[str, str]] = None,
+    ) -> None:
         """Print a message in a formatted way."""
         role = msg.get("role", "unknown")
-        content = msg.get("content", "")
+        content = msg.get("content") or ""
+
+        # Resolve tool name from tool_call_id mapping
+        if role == "tool":
+            tool_call_id = msg.get("tool_call_id", "")
+            tool_name = (tool_name_map or {}).get(
+                tool_call_id, msg.get("name", "unknown")
+            )
+            tool_label = f"Tool ({tool_name})"
+        else:
+            tool_label = "Tool (unknown)"
 
         # Color based on role
         role_styles = {
             "system": ("magenta", "System"),
             "user": ("green", "User"),
             "assistant": ("blue", "Assistant"),
-            "tool": ("cyan", f"Tool ({msg.get('name', 'unknown')})"),
+            "tool": ("cyan", tool_label),
         }
 
         style, label = role_styles.get(role, (None, role.capitalize()))
         styled_label = self.console.format_styled(f"[{label}]", style) if style else f"[{label}]"
-        self.console.print(f"{prefix}{styled_label} {content}")
+        self.console.print(f"{prefix}{styled_label} {self.console.escape(content)}")
 
         # Print tool calls if present
         tool_calls = msg.get("tool_calls", [])
@@ -258,7 +286,7 @@ class InteractiveRunner:
                     args_display = args_str
 
                 styled_name = self.console.format_styled(name, "cyan")
-                self.console.print(f"{prefix}  • {styled_name}({args_display})")
+                self.console.print(f"{prefix}  • {styled_name}({self.console.escape(args_display)})")
 
     def _print_step(self, step: InteractiveStep) -> None:
         """Print a step in the interactive session."""
@@ -300,9 +328,10 @@ class InteractiveRunner:
         """Print all messages in the conversation."""
         self._print_separator("All Messages")
         self.console.print()
+        tool_name_map = self._build_tool_name_map(messages)
         for i, msg in enumerate(messages):
             self.console.print(f"[{i}]", style="dim", end=" ")
-            self._print_message(msg)
+            self._print_message(msg, tool_name_map=tool_name_map)
             self.console.print()
 
     def _print_result(
@@ -334,10 +363,37 @@ class InteractiveRunner:
         self.console.print(f"Tokens: {total_tokens:,} ({metrics.num_llm_calls} LLM calls)")
         self.console.print()
 
+    def _post_result_prompt(self) -> None:
+        """Allow user to inspect messages after round completion."""
+        while True:
+            self.console.print(
+                f"Commands: {self._style_command_hint('m')}essages, "
+                f"{self._style_command_hint('Enter')} continue",
+                style="dim",
+            )
+            try:
+                user_input = self.console.input("> ", style="bold").strip().lower()
+            except (EOFError, KeyboardInterrupt):
+                self.console.print()
+                break
+
+            if user_input in ("m", "messages"):
+                self._print_all_messages(self._current_messages)
+            elif user_input in ("", "n", "next", "c", "continue", "q", "quit", "exit"):
+                break
+            else:
+                self.console.print(f"Unknown command: {user_input}", style="red")
+                self.console.print("  m         - Show all messages")
+                self.console.print("  Enter     - Continue to next row")
+
     def _get_user_input(self) -> str:
         """Get user input with command prompt."""
         self.console.print(
-            "Commands: [n]ext, [c]ontinue, [m]essages, [t]ools, [q]uit",
+            f"Commands: {self._style_command_hint('n')}ext, "
+            f"{self._style_command_hint('c')}ontinue, "
+            f"{self._style_command_hint('m')}essages, "
+            f"{self._style_command_hint('t')}ools, "
+            f"{self._style_command_hint('q')}uit",
             style="dim",
         )
         try:
@@ -376,6 +432,11 @@ class InteractiveRunner:
         """Abort execution."""
         self.console.print("Aborting execution...", style="yellow")
         return (True, False)
+
+    def _style_command_hint(self, command: str) -> str:
+        """Style command hints like [n] for rich and fallback consoles."""
+        # format_styled already calls rich_escape internally, so pass raw text.
+        return self.console.format_styled(f"[{command}]", "cyan")
 
     def _print_help(self, unknown_cmd: Optional[str] = None) -> None:
         """Print help for available commands."""
@@ -451,6 +512,7 @@ class InteractiveRunner:
 
             # Print initial messages
             self._print_initial_messages(self._current_messages)
+            self._last_msg_count_seen = len(self._current_messages)
 
             # Get and validate tools
             tools = self.agent_loop.get_tools(request)
@@ -463,6 +525,16 @@ class InteractiveRunner:
 
             # Create callback to update current messages for the 'm' command
             def update_messages(messages: List[Dict[str, Any]]) -> None:
+                # Print new tool messages since last update
+                new_msgs = messages[self._last_msg_count_seen:]
+                if any(m.get("role") == "tool" for m in new_msgs):
+                    tool_name_map = self._build_tool_name_map(messages)
+                    self.console.print()
+                    for msg in new_msgs:
+                        if msg.get("role") == "tool":
+                            self._print_message(msg, tool_name_map=tool_name_map)
+                    self.console.print()
+                self._last_msg_count_seen = len(messages)
                 # Create a deep copy of the messages list to track conversation progress
                 self._current_messages = copy.deepcopy(messages)
 
@@ -494,6 +566,10 @@ class InteractiveRunner:
             metrics = self.llm_client.get_metrics()
             self._print_result(result, duration_ms, metrics)
 
+            # Update messages to final state and allow inspection
+            self._current_messages = copy.deepcopy(result.final_messages)
+            self._post_result_prompt()
+
             return result, None
 
         except InterruptedError:
@@ -507,6 +583,7 @@ class InteractiveRunner:
             metrics = self.llm_client.get_metrics()
             error_msg = f"Tool validation error: {e}"
             self._print_result(None, duration_ms, metrics, error=error_msg)
+            self._post_result_prompt()
             return None, error_msg
 
         except Exception as e:
@@ -514,6 +591,7 @@ class InteractiveRunner:
             metrics = self.llm_client.get_metrics()
             error_msg = str(e)
             self._print_result(None, duration_ms, metrics, error=error_msg)
+            self._post_result_prompt()
             return None, error_msg
 
         finally:

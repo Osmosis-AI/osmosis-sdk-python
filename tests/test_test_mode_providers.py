@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import types
 from typing import Any, Dict, List
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -130,6 +131,38 @@ class TestExternalLLMClient:
 
             async with ExternalLLMClient() as client:
                 assert isinstance(client, ExternalLLMClient)
+
+    @pytest.mark.asyncio
+    async def test_close_runs_litellm_cleanup_once(self) -> None:
+        """Test that close() invokes LiteLLM cleanup and is idempotent."""
+        mock_litellm = MagicMock()
+        mock_litellm.close_litellm_async_clients = AsyncMock()
+
+        with patch(
+            "osmosis_ai.rollout.eval.common.llm_client._get_litellm",
+            return_value=mock_litellm,
+        ):
+            from osmosis_ai.rollout.eval.common.llm_client import (
+                ExternalLLMClient,
+            )
+
+            client = ExternalLLMClient()
+            await client.close()
+            await client.close()
+
+            mock_litellm.close_litellm_async_clients.assert_awaited_once()
+
+    def test_get_litellm_disables_atexit_cleanup_registration(self) -> None:
+        """Test _get_litellm marks cleanup registration as already handled."""
+        fake_litellm = types.SimpleNamespace(_async_client_cleanup_registered=False)
+
+        with patch.dict("sys.modules", {"litellm": fake_litellm}):
+            from osmosis_ai.rollout.eval.common.llm_client import _get_litellm
+
+            loaded = _get_litellm()
+
+        assert loaded is fake_litellm
+        assert fake_litellm._async_client_cleanup_registered is True
 
     @pytest.mark.asyncio
     async def test_chat_completions_calls_litellm(self) -> None:

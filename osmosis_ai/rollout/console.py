@@ -16,11 +16,12 @@ Usage:
 from __future__ import annotations
 
 import sys
-from typing import Any, List, Optional
+from typing import Any, Callable, List, Optional
 
 # Try to import rich, gracefully degrade if not available
 try:
     from rich.console import Console as RichConsole
+    from rich.markup import escape as rich_escape
     from rich.panel import Panel
     from rich.table import Table
     from rich.text import Text
@@ -121,11 +122,34 @@ class Console:
         """Whether rich formatting is being used."""
         return self._use_rich
 
+    def run_rich(self, render_fn: Callable[[Any], None]) -> bool:
+        """Run a rich renderer when available, with graceful fallback.
+
+        Args:
+            render_fn: Callable that receives the rich console instance.
+
+        Returns:
+            True if rich rendering was executed successfully, else False.
+        """
+        if not self._use_rich or self._rich is None:
+            return False
+
+        try:
+            render_fn(self._rich)
+            return True
+        except ImportError:
+            return False
+
     def _get_ansi_style(self, style: Optional[str]) -> str:
         """Get ANSI escape code for a style name."""
         if not style or self._no_color or not self._is_tty:
             return ""
         return _AnsiColors.STYLE_MAP.get(style.lower(), "")
+
+    def _filter_plain_print_kwargs(self, kwargs: dict[str, Any]) -> dict[str, Any]:
+        """Keep only kwargs supported by built-in print in fallback mode."""
+        allowed_kwargs = {"sep", "flush"}
+        return {key: value for key, value in kwargs.items() if key in allowed_kwargs}
 
     def print(
         self,
@@ -145,11 +169,16 @@ class Console:
         if self._use_rich and self._rich:
             self._rich.print(*args, style=style, end=end, **kwargs)
         else:
-            text = " ".join(str(arg) for arg in args)
+            plain_kwargs = self._filter_plain_print_kwargs(kwargs)
+            sep = plain_kwargs.pop("sep", " ")
             ansi_style = self._get_ansi_style(style)
+
             if ansi_style:
+                text = sep.join(str(arg) for arg in args)
                 text = f"{ansi_style}{text}{_AnsiColors.RESET}"
-            print(text, end=end, file=self._file, **kwargs)
+                print(text, end=end, file=self._file, **plain_kwargs)
+            else:
+                print(*args, end=end, sep=sep, file=self._file, **plain_kwargs)
 
     def print_error(self, message: str) -> None:
         """Print an error message to stderr.
@@ -279,6 +308,24 @@ class Console:
             for key, value in rows:
                 print(f"  {key.ljust(key_width)}  {value}", file=self._file)
 
+    def escape(self, text: str) -> str:
+        """Escape text so it is not interpreted as Rich markup.
+
+        In Rich mode, square brackets are escaped. In plain mode, returns
+        the text unchanged.
+
+        Args:
+            text: Text to escape.
+
+        Returns:
+            Escaped text safe for embedding in Rich markup strings.
+        """
+        if text is None:
+            return ""
+        if self._use_rich:
+            return rich_escape(str(text))
+        return str(text)
+
     def format_styled(self, text: str, style: str) -> str:
         """Return text with inline style markup (for rich) or ANSI codes.
 
@@ -292,7 +339,7 @@ class Console:
             Styled text string.
         """
         if self._use_rich:
-            return f"[{style}]{text}[/{style}]"
+            return f"[{style}]{rich_escape(text)}[/{style}]"
         else:
             ansi_style = self._get_ansi_style(style)
             if ansi_style:
