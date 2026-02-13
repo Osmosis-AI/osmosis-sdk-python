@@ -570,3 +570,45 @@ def test_rollout_eval_rejects_batch_size_zero(capsys):
 
     assert exit_code == 1
     assert "Error: --batch-size must be >= 1." in captured.err
+
+
+def test_rollout_eval_rejects_invalid_model_early(capsys):
+    exit_code = cli.main(
+        [
+            "eval",
+            "-m",
+            "my_agent:MyAgentLoop",
+            "-d",
+            "data.jsonl",
+            "--model",
+            "Qwen/Qwen3-0.6B",
+            "--base-url",
+            "http://localhost:1234/v1",
+            "--eval-fn",
+            "rewards:score",
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    assert "Error: Invalid model/provider format for --base-url." in captured.err
+
+
+def test_rollout_test_rejects_invalid_model_early(capsys):
+    exit_code = cli.main(
+        [
+            "test",
+            "-m",
+            "my_agent:MyAgentLoop",
+            "-d",
+            "data.jsonl",
+            "--model",
+            "Qwen/Qwen3-0.6B",
+            "--base-url",
+            "http://localhost:1234/v1",
+        ]
+    )
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    assert "Error: Invalid model/provider format for --base-url." in captured.err

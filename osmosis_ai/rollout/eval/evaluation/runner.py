@@ -7,15 +7,17 @@ applies eval functions to each result, and aggregates statistics.
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from osmosis_ai.rollout.eval.evaluation.eval_fn import EvalFnWrapper
 from osmosis_ai.rollout.core.base import RolloutAgentLoop
 from osmosis_ai.rollout.eval.common.dataset import DatasetRow
 from osmosis_ai.rollout.eval.common.llm_client import ExternalLLMClient
+from osmosis_ai.rollout.eval.common.errors import SystemicProviderError
 from osmosis_ai.rollout.eval.common.runner import LocalRolloutRunner
 
 logger = logging.getLogger(__name__)
@@ -97,6 +99,8 @@ class EvalResult:
     total_duration_ms: float
     n_runs: int
     pass_threshold: float
+    stopped_early: bool = False
+    stop_reason: Optional[str] = None
 
 
 class EvalRunner:
@@ -238,6 +242,9 @@ class EvalRunner:
             on_progress: Callback after each run: (current, total, result).
             start_index: Starting row index for numbering.
             batch_size: Number of concurrent runs. Default 1 (sequential).
+                For ``batch_size > 1``, runs execute in waves of at most
+                ``batch_size``. If any run in a wave fails, remaining waves
+                are skipped.
 
         Returns:
             EvalResult with all results and statistics.
@@ -258,26 +265,50 @@ class EvalRunner:
         row_results: List[EvalRowResult] = []
         total = len(rows) * n_runs
         current = 0
+        stopped_early = False
+        stop_reason: Optional[str] = None
 
         for i, row in enumerate(rows):
             row_index = start_index + i
             row_result = EvalRowResult(row_index=row_index)
 
             for run_idx in range(n_runs):
-                result = await self.run_single(
-                    row=row,
-                    row_index=row_index,
-                    run_index=run_idx,
-                    max_turns=max_turns,
-                    completion_params=completion_params,
-                )
+                try:
+                    result = await self.run_single(
+                        row=row,
+                        row_index=row_index,
+                        run_index=run_idx,
+                        max_turns=max_turns,
+                        completion_params=completion_params,
+                    )
+                except SystemicProviderError as e:
+                    result = EvalRunResult(
+                        run_index=run_idx,
+                        success=False,
+                        error=str(e),
+                    )
+                    row_result.runs.append(result)
+                    current += 1
+                    if on_progress:
+                        on_progress(current, total, result)
+                    stopped_early = True
+                    stop_reason = str(e)
+                    break
+
                 row_result.runs.append(result)
                 current += 1
 
                 if on_progress:
                     on_progress(current, total, result)
 
+                if not result.success:
+                    stopped_early = True
+                    stop_reason = result.error
+                    break
+
             row_results.append(row_result)
+            if stopped_early:
+                break
 
         total_duration_ms = (time.monotonic() - total_start) * 1000
         total_tokens = sum(
@@ -292,12 +323,14 @@ class EvalRunner:
         return EvalResult(
             rows=row_results,
             eval_summaries=eval_summaries,
-            total_rows=len(rows),
+            total_rows=len(row_results),
             total_runs=current,
             total_tokens=total_tokens,
             total_duration_ms=total_duration_ms,
             n_runs=n_runs,
             pass_threshold=pass_threshold,
+            stopped_early=stopped_early,
+            stop_reason=stop_reason,
         )
 
     async def _run_eval_concurrent(
@@ -323,18 +356,36 @@ class EvalRunner:
 
         # Build a runner pool — each runner has an independent LLM client
         # so metrics and tool state don't collide across concurrent runs.
+        runners = [self._create_rollout_runner() for _ in range(pool_size)]
         pool: asyncio.Queue[LocalRolloutRunner] = asyncio.Queue()
-        for _ in range(pool_size):
-            pool.put_nowait(self._create_rollout_runner())
+        for runner in runners:
+            pool.put_nowait(runner)
 
         completed = 0
+        stopped_early = False
+        stop_reason: Optional[str] = None
+        completed_results: List[Tuple[int, EvalRunResult]] = []
+
+        async def _close_runner_pool() -> None:
+            """Best-effort cleanup for per-runner LLM clients."""
+            for runner in runners:
+                close = getattr(runner.llm_client, "close", None)
+                if not callable(close):
+                    continue
+                try:
+                    maybe_awaitable = close()
+                    if inspect.isawaitable(maybe_awaitable):
+                        await maybe_awaitable
+                except Exception:
+                    logger.debug("Failed to close concurrent runner client", exc_info=True)
 
         async def _run_one(
             row: DatasetRow, row_index: int, run_index: int,
-        ) -> EvalRunResult:
+        ) -> Tuple[int, EvalRunResult]:
             nonlocal completed
-            runner = await pool.get()
+            runner: Optional[LocalRolloutRunner] = None
             try:
+                runner = await pool.get()
                 result = await self.run_single(
                     row=row,
                     row_index=row_index,
@@ -346,36 +397,73 @@ class EvalRunner:
                 completed += 1
                 if on_progress:
                     on_progress(completed, total, result)
-                return result
+                completed_results.append((row_index, result))
+                return row_index, result
+            except SystemicProviderError as e:
+                result = EvalRunResult(
+                    run_index=run_index,
+                    success=False,
+                    error=str(e),
+                )
+                completed += 1
+                if on_progress:
+                    on_progress(completed, total, result)
+                completed_results.append((row_index, result))
+                return row_index, result
             finally:
-                pool.put_nowait(runner)
+                if runner is not None:
+                    pool.put_nowait(runner)
 
-        # Launch all runs; the pool size naturally limits concurrency.
-        coros = []
+        work_items: List[Tuple[DatasetRow, int, int]] = []
         for i, row in enumerate(rows):
             row_index = start_index + i
             for run_idx in range(n_runs):
-                coros.append(_run_one(row, row_index, run_idx))
+                work_items.append((row, row_index, run_idx))
 
-        results = await asyncio.gather(*coros)
+        try:
+            cursor = 0
+            while cursor < len(work_items):
+                batch = work_items[cursor:cursor + batch_size]
+                tasks: List[asyncio.Task[Tuple[int, EvalRunResult]]] = [
+                    asyncio.create_task(_run_one(row, row_index, run_idx))
+                    for row, row_index, run_idx in batch
+                ]
+
+                batch_failed = False
+                batch_error: Optional[str] = None
+
+                for task in asyncio.as_completed(tasks):
+                    _row_index, result = await task
+                    if not result.success and not batch_failed:
+                        batch_failed = True
+                        batch_error = result.error
+
+                await asyncio.gather(*tasks, return_exceptions=True)
+
+                cursor += len(batch)
+
+                if batch_failed:
+                    if cursor < len(work_items):
+                        stopped_early = True
+                        stop_reason = batch_error
+                    break
+        except Exception:
+            raise
+        finally:
+            await _close_runner_pool()
 
         # Organise flat results back into per-row structure.
         row_results_map: Dict[int, EvalRowResult] = {}
-        for idx, (i, row) in enumerate(
-            (i, row)
-            for i, row in enumerate(rows)
-            for _ in range(n_runs)
-        ):
-            row_index = start_index + i
+        for row_index, run_result in completed_results:
             if row_index not in row_results_map:
                 row_results_map[row_index] = EvalRowResult(row_index=row_index)
-            row_results_map[row_index].runs.append(results[idx])
+            row_results_map[row_index].runs.append(run_result)
 
         # Ensure deterministic ordering within each row.
         for row_result in row_results_map.values():
             row_result.runs.sort(key=lambda r: r.run_index)
 
-        row_results = [row_results_map[start_index + i] for i in range(len(rows))]
+        row_results = [row_results_map[i] for i in sorted(row_results_map.keys())]
 
         total_duration_ms = (time.monotonic() - total_start) * 1000
         total_tokens = sum(
@@ -389,12 +477,14 @@ class EvalRunner:
         return EvalResult(
             rows=row_results,
             eval_summaries=eval_summaries,
-            total_rows=len(rows),
-            total_runs=total,
+            total_rows=len(row_results),
+            total_runs=len(completed_results),
             total_tokens=total_tokens,
             total_duration_ms=total_duration_ms,
             n_runs=n_runs,
             pass_threshold=pass_threshold,
+            stopped_early=stopped_early,
+            stop_reason=stop_reason,
         )
 
     def _compute_summaries(

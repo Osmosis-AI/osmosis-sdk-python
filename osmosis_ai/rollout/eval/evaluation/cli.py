@@ -19,6 +19,8 @@ from osmosis_ai.rollout.eval.common.cli import (
     format_duration,
     load_agent,
     load_dataset_rows,
+    load_mcp_agent,
+    verify_llm_client,
 )
 
 if TYPE_CHECKING:
@@ -42,10 +44,20 @@ class EvalCommand:
             "-m",
             "--module",
             dest="module",
-            required=True,
+            default=None,
             help=(
                 "Module path to the agent loop in format 'module:attribute'. "
                 "Example: 'my_agent:MyAgentLoop'."
+            ),
+        )
+
+        parser.add_argument(
+            "--tools",
+            dest="tools",
+            default=None,
+            help=(
+                "Path to MCP tools directory (must contain main.py with a FastMCP instance). "
+                "Mutually exclusive with -m/--module."
             ),
         )
 
@@ -187,6 +199,10 @@ class EvalCommand:
         return asyncio.run(self._run_async(args))
 
     def _validate_args(self, args: argparse.Namespace) -> Optional[str]:
+        if args.module and args.tools:
+            return "--module and --tools are mutually exclusive."
+        if not args.module and not args.tools:
+            return "Either --module (-m) or --tools is required."
         if args.n_runs < 1:
             return "--n must be >= 1."
         if args.batch_size < 1:
@@ -245,6 +261,8 @@ class EvalCommand:
             "summary": {
                 "total_rows": result.total_rows,
                 "total_runs": result.total_runs,
+                "stopped_early": result.stopped_early,
+                **({"stop_reason": result.stop_reason} if result.stop_reason else {}),
                 "eval_fns": {
                     name: {
                         "mean": summary.mean,
@@ -296,13 +314,39 @@ class EvalCommand:
 
         self._print_header(args)
 
-        agent_loop, error = load_agent(
-            module=args.module,
+        llm_client, error = create_llm_client(
+            model=args.model,
+            api_key=args.api_key,
+            base_url=args.base_url,
             quiet=args.quiet,
             console=self.console,
         )
         if error:
             self.console.print_error(f"Error: {error}")
+            return 1
+        assert llm_client is not None
+
+        error = await verify_llm_client(llm_client, args.quiet, self.console)
+        if error:
+            self.console.print_error(f"Error: {error}")
+            await llm_client.close()
+            return 1
+
+        if args.tools:
+            agent_loop, error = load_mcp_agent(
+                tools_path=args.tools,
+                quiet=args.quiet,
+                console=self.console,
+            )
+        else:
+            agent_loop, error = load_agent(
+                module=args.module,
+                quiet=args.quiet,
+                console=self.console,
+            )
+        if error:
+            self.console.print_error(f"Error: {error}")
+            await llm_client.close()
             return 1
         assert agent_loop is not None
 
@@ -317,26 +361,16 @@ class EvalCommand:
         )
         if error:
             self.console.print_error(f"Error: {error}")
+            await llm_client.close()
             return 1
         assert rows is not None
 
         eval_fns, error = self._load_eval_fns(args)
         if error:
             self.console.print_error(f"Error: {error}")
+            await llm_client.close()
             return 1
         assert eval_fns is not None
-
-        llm_client, error = create_llm_client(
-            model=args.model,
-            api_key=args.api_key,
-            base_url=args.base_url,
-            quiet=args.quiet,
-            console=self.console,
-        )
-        if error:
-            self.console.print_error(f"Error: {error}")
-            return 1
-        assert llm_client is not None
 
         completion_params = build_completion_params(
             temperature=args.temperature,

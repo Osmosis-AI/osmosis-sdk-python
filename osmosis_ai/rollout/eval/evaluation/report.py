@@ -77,6 +77,12 @@ def format_eval_report(result: "EvalResult", console: "Console") -> None:
     console.print(f"  Total runs: {result.total_runs}")
     console.print(f"  Duration: {format_duration(result.total_duration_ms)}")
     console.print(f"  Total tokens: {result.total_tokens:,}")
+    if result.stopped_early:
+        reason = f" Reason: {result.stop_reason}" if result.stop_reason else ""
+        console.print(
+            f"  Stopped early after a failed run.{reason}",
+            style="yellow",
+        )
     console.print()
 
     if not result.eval_summaries:

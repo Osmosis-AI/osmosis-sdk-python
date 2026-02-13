@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any, Dict, List
 
 import pytest
@@ -182,6 +183,7 @@ class TestEvalRunner:
             agent_loop=agent,
             llm_client=client,  # type: ignore[arg-type]
             eval_fns=[EvalFnWrapper(simple_eval, "simple_eval")],
+            llm_client_factory=MockLLMClient,  # type: ignore[arg-type]
         )
 
         result = await runner.run_single(
@@ -268,7 +270,242 @@ class TestEvalRunner:
         assert "simple_eval" in result.eval_summaries
 
     @pytest.mark.asyncio
+    async def test_run_eval_batch_size_gt_one_defaults_to_concurrent(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """batch_size > 1 should use concurrent mode by default."""
+        client = MockLLMClient()
+        agent = MockAgentLoop(tools=[create_sample_tool()], call_llm=True)
+
+        def simple_eval(
+            solution_str: str,
+            ground_truth: str,
+            extra_info: Dict[str, Any],
+        ) -> float:
+            return 1.0 if "response" in solution_str else 0.0
+
+        runner = EvalRunner(
+            agent_loop=agent,
+            llm_client=client,  # type: ignore[arg-type]
+            eval_fns=[EvalFnWrapper(simple_eval, "simple_eval")],
+            llm_client_factory=MockLLMClient,  # type: ignore[arg-type]
+        )
+
+        concurrent_called = {"value": False}
+        original_concurrent = EvalRunner._run_eval_concurrent
+
+        async def wrapped_concurrent(self: EvalRunner, *args: Any, **kwargs: Any):
+            concurrent_called["value"] = True
+            return await original_concurrent(self, *args, **kwargs)
+
+        monkeypatch.setattr(EvalRunner, "_run_eval_concurrent", wrapped_concurrent)
+
+        rows = [create_sample_row(i) for i in range(3)]
+        result = await runner.run_eval(
+            rows=rows,
+            n_runs=1,
+            batch_size=2,
+        )
+
+        assert concurrent_called["value"] is True
+        assert result.total_rows == 3
+        assert result.total_runs == 3
+
+    @pytest.mark.asyncio
+    async def test_run_eval_concurrent_stops_early_on_systemic_error(self) -> None:
+        """Concurrent eval should cancel pending runs on systemic provider errors."""
+        from osmosis_ai.rollout.eval.common.errors import SystemicProviderError
+
+        class SystemicAgent(MockAgentLoop):
+            async def run(self, ctx: RolloutContext) -> RolloutResult:
+                await asyncio.sleep(0.02)
+                raise SystemicProviderError("Authentication failed")
+
+        client = MockLLMClient()
+        agent = SystemicAgent(tools=[create_sample_tool()])
+
+        def simple_eval(
+            solution_str: str,
+            ground_truth: str,
+            extra_info: Dict[str, Any],
+        ) -> float:
+            return 1.0
+
+        runner = EvalRunner(
+            agent_loop=agent,
+            llm_client=client,  # type: ignore[arg-type]
+            eval_fns=[EvalFnWrapper(simple_eval, "simple_eval")],
+            llm_client_factory=MockLLMClient,  # type: ignore[arg-type]
+        )
+
+        rows = [create_sample_row(i) for i in range(20)]
+        result = await runner.run_eval(
+            rows=rows,
+            n_runs=2,
+            batch_size=3,
+        )
+
+        assert result.stopped_early is True
+        assert "Authentication failed" in (result.stop_reason or "")
+        assert result.total_runs == 3
+        assert result.total_rows <= len(rows)
+
+    @pytest.mark.asyncio
+    async def test_run_eval_concurrent_systemic_error_without_pending_not_early_stop(
+        self,
+    ) -> None:
+        """Systemic errors should not imply early-stop when no tasks were canceled."""
+        from osmosis_ai.rollout.eval.common.errors import SystemicProviderError
+
+        class SystemicAgent(MockAgentLoop):
+            async def run(self, ctx: RolloutContext) -> RolloutResult:
+                raise SystemicProviderError("Authentication failed")
+
+        client = MockLLMClient()
+        agent = SystemicAgent(tools=[create_sample_tool()])
+
+        def simple_eval(
+            solution_str: str,
+            ground_truth: str,
+            extra_info: Dict[str, Any],
+        ) -> float:
+            return 1.0
+
+        runner = EvalRunner(
+            agent_loop=agent,
+            llm_client=client,  # type: ignore[arg-type]
+            eval_fns=[EvalFnWrapper(simple_eval, "simple_eval")],
+            llm_client_factory=MockLLMClient,  # type: ignore[arg-type]
+        )
+
+        result = await runner.run_eval(
+            rows=[create_sample_row(0)],
+            n_runs=1,
+            batch_size=3,
+        )
+
+        assert result.total_rows == 1
+        assert result.total_runs == 1
+        assert result.rows[0].runs[0].success is False
+        assert "Authentication failed" in (result.rows[0].runs[0].error or "")
+        assert result.stopped_early is False
+        assert result.stop_reason is None
+
+    @pytest.mark.asyncio
+    async def test_run_eval_concurrent_normal_failures_stop_after_failed_batch(self) -> None:
+        """Concurrent failures should stop after finishing the current batch."""
+        class FailingAgent(MockAgentLoop):
+            async def run(self, ctx: RolloutContext) -> RolloutResult:
+                raise RuntimeError("eval failure")
+
+        client = MockLLMClient()
+        agent = FailingAgent(tools=[create_sample_tool()])
+
+        def simple_eval(
+            solution_str: str,
+            ground_truth: str,
+            extra_info: Dict[str, Any],
+        ) -> float:
+            return 1.0
+
+        runner = EvalRunner(
+            agent_loop=agent,
+            llm_client=client,  # type: ignore[arg-type]
+            eval_fns=[EvalFnWrapper(simple_eval, "simple_eval")],
+            llm_client_factory=MockLLMClient,  # type: ignore[arg-type]
+        )
+
+        rows = [create_sample_row(i) for i in range(4)]
+        result = await runner.run_eval(
+            rows=rows,
+            n_runs=2,
+            batch_size=3,
+        )
+
+        assert result.stopped_early is True
+        assert "eval failure" in (result.stop_reason or "")
+        assert result.total_runs == 3
+        assert result.total_rows < 4
+
+    @pytest.mark.asyncio
     async def test_run_eval_counts_failed_runs_as_zero_scores(self) -> None:
+        client = MockLLMClient()
+        agent = MockAgentLoop(
+            tools=[create_sample_tool()],
+            run_error=RuntimeError("eval failure"),
+        )
+
+        def simple_eval(
+            solution_str: str,
+            ground_truth: str,
+            extra_info: Dict[str, Any],
+        ) -> float:
+            return 1.0
+
+        runner = EvalRunner(
+            agent_loop=agent,
+            llm_client=client,  # type: ignore[arg-type]
+            eval_fns=[EvalFnWrapper(simple_eval, "simple_eval")],
+            llm_client_factory=MockLLMClient,  # type: ignore[arg-type]
+        )
+
+        eval_result = await runner.run_eval(
+            rows=[create_sample_row(0)],
+            n_runs=2,
+            pass_threshold=0.5,
+            batch_size=2,
+        )
+
+        summary = eval_result.eval_summaries["simple_eval"]
+        assert eval_result.total_runs == 2
+        assert summary.mean == 0.0
+        assert summary.min == 0.0
+        assert summary.max == 0.0
+        assert summary.pass_at_k.get(1) == 0.0
+
+    @pytest.mark.asyncio
+    async def test_run_eval_stops_early_on_systemic_error(self) -> None:
+        """SystemicProviderError should stop eval early."""
+        from osmosis_ai.rollout.eval.common.errors import SystemicProviderError
+
+        call_count = {"n": 0}
+
+        class SystemicAgent(MockAgentLoop):
+            async def run(self, ctx: RolloutContext) -> RolloutResult:
+                call_count["n"] += 1
+                raise SystemicProviderError("Authentication failed")
+
+        client = MockLLMClient()
+        agent = SystemicAgent(tools=[create_sample_tool()])
+
+        def simple_eval(
+            solution_str: str,
+            ground_truth: str,
+            extra_info: dict,
+        ) -> float:
+            return 1.0
+
+        runner = EvalRunner(
+            agent_loop=agent,
+            llm_client=client,  # type: ignore[arg-type]
+            eval_fns=[EvalFnWrapper(simple_eval, "simple_eval")],
+        )
+
+        eval_result = await runner.run_eval(
+            rows=[create_sample_row(0), create_sample_row(1), create_sample_row(2)],
+            n_runs=2,
+            pass_threshold=0.5,
+        )
+
+        assert eval_result.stopped_early is True
+        assert eval_result.stop_reason is not None
+        assert "Authentication failed" in eval_result.stop_reason
+        assert eval_result.total_rows == 1  # only first row attempted
+        assert call_count["n"] == 1  # only one agent run attempted
+
+    @pytest.mark.asyncio
+    async def test_run_eval_stops_early_on_first_failure(self) -> None:
         client = MockLLMClient()
         agent = MockAgentLoop(
             tools=[create_sample_tool()],
@@ -289,14 +526,15 @@ class TestEvalRunner:
         )
 
         eval_result = await runner.run_eval(
-            rows=[create_sample_row(0)],
+            rows=[create_sample_row(0), create_sample_row(1)],
             n_runs=2,
             pass_threshold=0.5,
         )
 
-        summary = eval_result.eval_summaries["simple_eval"]
-        assert eval_result.total_runs == 2
-        assert summary.mean == 0.0
-        assert summary.min == 0.0
-        assert summary.max == 0.0
-        assert summary.pass_at_k.get(1) == 0.0
+        assert eval_result.stopped_early is True
+        assert eval_result.total_rows == 1
+        assert eval_result.total_runs == 1
+        assert len(eval_result.rows) == 1
+        assert len(eval_result.rows[0].runs) == 1
+        assert eval_result.rows[0].runs[0].success is False
+        assert "eval failure" in (eval_result.stop_reason or "")

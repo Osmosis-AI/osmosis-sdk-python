@@ -19,18 +19,94 @@ warnings.filterwarnings(
 
 from osmosis_ai.rollout.client import CompletionsResult
 from osmosis_ai.rollout.core.schemas import RolloutMetrics
-from osmosis_ai.rollout.eval.common.errors import ProviderError
+from osmosis_ai.rollout.eval.common.errors import ProviderError, SystemicProviderError
 
 logger = logging.getLogger(__name__)
 
 
+_NOISE_MARKERS = (
+    "\nReceived Model Group=",
+    "\nTraceback",
+    "\nRequest to ",
+    "\ngive]",
+)
+
+_MAX_PROVIDER_MSG_LEN = 200
+
+
 def _get_provider_message(e: Exception) -> str:
-    """Extract provider message without litellm wrapper."""
+    """Extract provider message without litellm wrapper, truncating noise."""
     msg = getattr(e, "message", str(e))
     prefix = f"litellm.{type(e).__name__}: "
     if msg.startswith(prefix):
-        return msg[len(prefix) :]
+        msg = msg[len(prefix):]
+
+    # Strip litellm noise after common markers
+    for marker in _NOISE_MARKERS:
+        idx = msg.find(marker)
+        if idx > 0:
+            msg = msg[:idx]
+            break
+
+    msg = msg.strip()
+    if len(msg) > _MAX_PROVIDER_MSG_LEN:
+        msg = msg[:_MAX_PROVIDER_MSG_LEN] + "..."
     return msg
+
+
+def _is_missing_provider_error(message: str) -> bool:
+    """Return True if the message indicates missing/invalid LiteLLM provider."""
+    normalized = message.lower()
+    return (
+        "llm provider not provided" in normalized
+        or "pass in the llm provider you are trying to call" in normalized
+    )
+
+
+def _is_connection_error_message(message: str) -> bool:
+    """Return True if an APIError message actually indicates a connection failure.
+
+    LiteLLM sometimes wraps connection errors as ``InternalServerError``
+    (a subclass of ``APIError``) instead of ``APIConnectionError``.
+    """
+    normalized = message.lower()
+    return (
+        "connection error" in normalized
+        or "connection refused" in normalized
+        or "name or service not known" in normalized
+        or "nodename nor servname provided" in normalized
+        or "connect call failed" in normalized
+    )
+
+
+def _first_line(message: str) -> str:
+    """Return the first non-empty line to avoid multi-line noise."""
+    for line in message.splitlines():
+        stripped = line.strip()
+        if stripped:
+            return stripped
+    return message.strip()
+
+
+def _format_provider_hint(
+    model: str,
+    api_base: Optional[str],
+    raw_message: str,
+) -> str:
+    """Build a concise actionable error for provider/model format issues."""
+    detail = _first_line(raw_message)
+    if api_base:
+        return (
+            "Invalid model/provider format for --base-url. "
+            "Use an OpenAI-compatible model identifier with the 'openai/' prefix "
+            "(for example: --model openai/<model-id>). "
+            f"Received model='{model}'. Details: {detail}"
+        )
+    return (
+        "Invalid LiteLLM model format. Use 'provider/model' "
+        "(for example: openai/gpt-5-mini). "
+        f"Received model='{model}'. Details: {detail}"
+    )
 
 
 def _get_litellm():
@@ -65,10 +141,10 @@ class ExternalLLMClient:
 
         self._RateLimitError = self._litellm.RateLimitError
         self._AuthenticationError = self._litellm.AuthenticationError
-        self._APIError = self._litellm.APIError
         self._BudgetExceededError = self._litellm.BudgetExceededError
         self._Timeout = self._litellm.Timeout
         self._ContextWindowExceededError = self._litellm.ContextWindowExceededError
+        self._APIConnectionError = self._litellm.APIConnectionError
 
         if "/" not in model:
             model = f"openai/{model}"
@@ -130,19 +206,24 @@ class ExternalLLMClient:
 
         try:
             response = await self._litellm.acompletion(**request_kwargs)
-        except self._RateLimitError as e:
-            raise ProviderError(
-                f"Rate limit exceeded. Try reducing dataset size with --limit. "
-                f"Details: {_get_provider_message(e)}"
-            ) from e
         except self._AuthenticationError as e:
-            raise ProviderError(
+            raise SystemicProviderError(
                 f"Authentication failed. Check your API key is valid. "
                 f"Details: {_get_provider_message(e)}"
             ) from e
         except self._BudgetExceededError as e:
-            raise ProviderError(
+            raise SystemicProviderError(
                 f"Budget/quota exceeded. Check your account has available credits. "
+                f"Details: {_get_provider_message(e)}"
+            ) from e
+        except self._APIConnectionError as e:
+            raise SystemicProviderError(
+                f"Cannot connect to API endpoint. Check your --base-url or network. "
+                f"Details: {_get_provider_message(e)}"
+            ) from e
+        except self._RateLimitError as e:
+            raise ProviderError(
+                f"Rate limit exceeded. Try reducing dataset size with --limit. "
                 f"Details: {_get_provider_message(e)}"
             ) from e
         except self._Timeout as e:
@@ -155,10 +236,8 @@ class ExternalLLMClient:
                 f"Context window exceeded. Try reducing max_turns or message history. "
                 f"Details: {_get_provider_message(e)}"
             ) from e
-        except self._APIError as e:
-            raise ProviderError(f"LLM API error: {_get_provider_message(e)}") from e
         except Exception as e:
-            raise ProviderError(f"Unexpected error: {e}") from e
+            raise self._classify_unknown_error(e) from e
 
         latency_ms = (time.monotonic() - start_time) * 1000
         usage = response.usage
@@ -181,6 +260,80 @@ class ExternalLLMClient:
             },
             finish_reason=choice.finish_reason or "stop",
         )
+
+    async def preflight_check(self) -> None:
+        """Send a minimal request to verify connectivity and authentication.
+
+        Raises:
+            SystemicProviderError: If the provider is unreachable, authentication
+                fails, or the model does not exist.
+        """
+        try:
+            await self._litellm.acompletion(
+                model=self.model,
+                messages=[{"role": "user", "content": "hi"}],
+                max_tokens=1,
+                **({"api_key": self._api_key} if self._api_key else {}),
+                **({"api_base": self._api_base} if self._api_base else {}),
+            )
+        except self._RateLimitError:
+            # Rate-limited means the endpoint is reachable and authenticated.
+            return
+        except (
+            self._AuthenticationError,
+            self._BudgetExceededError,
+            self._APIConnectionError,
+        ) as e:
+            raise SystemicProviderError(
+                _get_provider_message(e)
+            ) from e
+        except Exception as e:
+            classified = self._classify_unknown_error(e)
+            if isinstance(classified, SystemicProviderError):
+                raise classified from e
+            # Non-systemic errors (transient 5xx, etc.) — don't block.
+            logger.debug("Preflight non-fatal error: %s", e)
+
+    def _classify_unknown_error(self, e: Exception) -> ProviderError:
+        """Classify an exception not caught by the specific litellm handlers.
+
+        LiteLLM exception classes don't actually inherit from ``litellm.APIError``
+        (they inherit from ``openai.*`` counterparts instead), so errors like
+        ``InternalServerError`` fall through to the generic ``except Exception``
+        block.  This method inspects the error's attributes and message to
+        determine the correct :class:`ProviderError` subclass.
+        """
+        msg = _get_provider_message(e)
+        status_code = getattr(e, "status_code", None)
+
+        # Systemic: auth / forbidden / model-not-found
+        if status_code in (401, 403, 404):
+            return SystemicProviderError(
+                f"LLM API error (HTTP {status_code}): {msg}"
+            )
+
+        # Systemic: connection errors wrapped as InternalServerError etc.
+        if _is_connection_error_message(msg):
+            return SystemicProviderError(
+                f"Cannot connect to API endpoint. "
+                f"Check your --base-url or network. Details: {msg}"
+            )
+
+        # Systemic: missing / invalid provider
+        if _is_missing_provider_error(msg):
+            return SystemicProviderError(
+                _format_provider_hint(
+                    model=self.model,
+                    api_base=self._api_base,
+                    raw_message=msg,
+                )
+            )
+
+        # Has a status_code → litellm API error (non-systemic)
+        if status_code is not None:
+            return ProviderError(f"LLM API error (HTTP {status_code}): {msg}")
+
+        return ProviderError(f"Unexpected error: {msg}")
 
     def get_metrics(self) -> RolloutMetrics:
         """Return accumulated metrics for the current row."""

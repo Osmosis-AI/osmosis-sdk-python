@@ -38,6 +38,11 @@ server = [
     "rich>=13.0.0",         # Beautiful terminal output
 ]
 
+# MCP tool support for git-sync users
+mcp = [
+    "fastmcp>=2.0.0",
+]
+
 # Development dependencies (testing, formatting, etc.)
 dev = [
     "pytest>=8.0.0,<10.0.0",
@@ -45,11 +50,13 @@ dev = [
     "anyio>=4.0.0",
     "black>=25.0.0,<26.0.0",
     "isort>=5.0.0,<7.0.0",
+    "fastmcp>=2.0.0",
 ]
 
 # Full installation with all optional features
 full = [
     "osmosis-ai[server]",
+    "osmosis-ai[mcp]",
 ]
 
 [project.urls]
