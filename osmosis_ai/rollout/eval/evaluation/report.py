@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from math import comb
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from osmosis_ai.rollout.eval.common.cli import format_duration
 
@@ -92,16 +92,22 @@ def format_eval_report(result: "EvalResult", console: "Console") -> None:
                     pass_k_values.append(k)
         pass_k_values.sort()
 
-    if console.use_rich:
-        _format_eval_report_rich(result, console, pass_k_values)
-    else:
-        _format_eval_report_plain(result, console, pass_k_values)
+    if console.run_rich(
+        lambda rich_console: _format_eval_report_rich(
+            result,
+            pass_k_values,
+            rich_console,
+        )
+    ):
+        return
+
+    _format_eval_report_plain(result, console, pass_k_values)
 
 
 def _format_eval_report_rich(
     result: "EvalResult",
-    console: "Console",
     pass_k_values: list[int],
+    rich_console: Any,
 ) -> None:
     """Render the evaluation table using rich."""
     from rich.table import Table
@@ -142,7 +148,7 @@ def _format_eval_report_rich(
                 row.append("[dim]N/A[/dim]")
         table.add_row(*row)
 
-    console._rich.print(table)  # type: ignore[union-attr]
+    rich_console.print(table)
 
 
 def _format_eval_report_plain(
