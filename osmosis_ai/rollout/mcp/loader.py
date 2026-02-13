@@ -19,7 +19,7 @@ class MCPLoadError(Exception):
     pass
 
 
-def load_mcp_server(tools_path: str) -> Any:
+def load_mcp_server(mcp_path: str) -> Any:
     """Load a FastMCP server instance from a directory.
 
     The directory must contain a ``main.py`` that creates a FastMCP instance
@@ -27,7 +27,7 @@ def load_mcp_server(tools_path: str) -> Any:
     all tool registrations.
 
     Args:
-        tools_path: Path to the MCP directory containing ``main.py``.
+        mcp_path: Path to the MCP directory containing ``main.py``.
 
     Returns:
         The FastMCP server instance found in ``main.py``.
@@ -45,23 +45,23 @@ def load_mcp_server(tools_path: str) -> Any:
         )
 
     # Validate directory
-    tools_dir = os.path.abspath(tools_path)
-    if not os.path.isdir(tools_dir):
-        raise MCPLoadError(f"Tools directory does not exist: {tools_dir}")
+    mcp_dir = os.path.abspath(mcp_path)
+    if not os.path.isdir(mcp_dir):
+        raise MCPLoadError(f"MCP directory does not exist: {mcp_dir}")
 
-    main_py = os.path.join(tools_dir, "main.py")
+    main_py = os.path.join(mcp_dir, "main.py")
     if not os.path.isfile(main_py):
         raise MCPLoadError(
-            f"No main.py found in tools directory: {tools_dir}\n"
-            "The --tools directory must contain a main.py with a FastMCP instance."
+            f"No main.py found in MCP directory: {mcp_dir}\n"
+            "The --mcp directory must contain a main.py with a FastMCP instance."
         )
 
-    # Add tools directory to sys.path so relative imports work
-    if tools_dir not in sys.path:
-        sys.path.insert(0, tools_dir)
+    # Add MCP directory to sys.path so relative imports work
+    if mcp_dir not in sys.path:
+        sys.path.insert(0, mcp_dir)
 
     # Import main.py with a unique module name to avoid conflicts
-    dir_hash = hashlib.md5(tools_dir.encode()).hexdigest()[:8]
+    dir_hash = hashlib.md5(mcp_dir.encode()).hexdigest()[:8]
     module_name = f"_osmosis_mcp_{dir_hash}"
 
     spec = importlib.util.spec_from_file_location(module_name, main_py)

@@ -111,8 +111,8 @@ def _mcp_tool_to_openai(
 class MCPAgentLoop(RolloutAgentLoop):
     """Agent loop that executes MCP tools from a FastMCP server instance.
 
-    This is the built-in loop used by ``osmosis eval --tools <dir>`` and
-    ``osmosis test --tools <dir>`` so that git-sync users don't need to
+    This is the built-in loop used by ``osmosis eval --mcp <dir>`` and
+    ``osmosis test --mcp <dir>`` so that git-sync users don't need to
     write their own ``RolloutAgentLoop``.
     """
 

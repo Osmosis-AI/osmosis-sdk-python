@@ -10,7 +10,7 @@ Test your agent implementations locally without TrainGate using external LLM pro
 Test mode enables you to:
 
 - Validate agent logic before deploying to training infrastructure
-- **Two agent modes**: provide a `RolloutAgentLoop` with `-m`, or load MCP tools directly with `--tools` (for git-sync users)
+- **Two agent modes**: provide a `RolloutAgentLoop` with `-m`, or load MCP tools directly with `--mcp` (for git-sync users)
 - Use 100+ LLM providers (OpenAI, Anthropic, Groq, Ollama, etc.)
 - Run batch tests against datasets with detailed metrics
 - Debug step-by-step with interactive mode
@@ -36,24 +36,24 @@ osmosis test --agent my_agent:MyAgentLoop --dataset data.jsonl --interactive --r
 
 ### Git-Sync Users (MCP Tools)
 
-If you use the **git-sync** workflow and provide MCP tools (`@mcp.tool()`) instead of a `RolloutAgentLoop`, use `--tools` to point at your MCP directory:
+If you use the **git-sync** workflow and provide MCP tools (`@mcp.tool()`) instead of a `RolloutAgentLoop`, use `--mcp` to point at your MCP directory:
 
 ```bash
 # Install MCP support
 pip install osmosis-ai[mcp]
 
 # Test MCP tools against a dataset
-osmosis test --tools ./mcp -d data.jsonl --model openai/gpt-5-mini
+osmosis test --mcp ./mcp -d data.jsonl --model openai/gpt-5-mini
 
 # Interactive debugging with MCP tools
-osmosis test --tools ./mcp -d data.jsonl --interactive
+osmosis test --mcp ./mcp -d data.jsonl --interactive
 
 # All options work: limits, temperature, output, etc.
-osmosis test --tools ./mcp -d data.jsonl --model gpt-5-mini \
+osmosis test --mcp ./mcp -d data.jsonl --model gpt-5-mini \
     --limit 5 --temperature 0.7 -o results.json
 ```
 
-The `--tools` directory must contain a `main.py` that creates a `FastMCP` instance with registered tools:
+The `--mcp` directory must contain a `main.py` that creates a `FastMCP` instance with registered tools:
 
 ```python
 # mcp/main.py
@@ -67,7 +67,7 @@ def calculate(expression: str) -> str:
     return str(eval(expression))
 ```
 
-> **Note:** `--tools` and `-m/--module` are mutually exclusive. Use one or the other.
+> **Note:** `--mcp` and `-m/--module` are mutually exclusive. Use one or the other.
 
 ### Programmatic Usage
 
@@ -150,7 +150,7 @@ osmosis test [OPTIONS]
 | Option | Description |
 |--------|-------------|
 | `-m, --module, --agent MODULE` | Module path to agent loop (format: `module:attribute`). Use for remote-rollout users who implement `RolloutAgentLoop`. |
-| `--tools DIR` | Path to MCP tools directory (must contain `main.py` with a `FastMCP` instance). Use for git-sync users who provide `@mcp.tool()` functions. Requires `pip install osmosis-ai[mcp]`. |
+| `--mcp DIR` | Path to MCP tools directory (must contain `main.py` with a `FastMCP` instance). Use for git-sync users who provide `@mcp.tool()` functions. Requires `pip install osmosis-ai[mcp]`. |
 
 ### Model Options
 
@@ -201,10 +201,10 @@ See [LiteLLM Providers](https://docs.litellm.ai/docs/providers) for supported pr
 osmosis test -m my_agent:agent_loop -d data.jsonl
 
 # Git-sync: test MCP tools without writing an AgentLoop
-osmosis test --tools ./mcp -d data.jsonl --model openai/gpt-5-mini
+osmosis test --mcp ./mcp -d data.jsonl --model openai/gpt-5-mini
 
 # Git-sync: interactive debugging with MCP tools
-osmosis test --tools ./mcp -d data.jsonl --interactive
+osmosis test --mcp ./mcp -d data.jsonl --interactive
 
 # Test with Claude
 osmosis test -m my_agent:agent_loop -d data.jsonl --model anthropic/claude-sonnet-4-5

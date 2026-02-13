@@ -81,11 +81,11 @@ def load_agent(
 
 
 def load_mcp_agent(
-    tools_path: str,
+    mcp_path: str,
     quiet: bool,
     console: Console,
 ) -> Tuple[Optional["RolloutAgentLoop"], Optional[str]]:
-    """Load an MCPAgentLoop from a tools directory.
+    """Load an MCPAgentLoop from an MCP directory.
 
     The directory must contain a ``main.py`` with a FastMCP instance and
     registered ``@mcp.tool()`` functions.
@@ -99,10 +99,10 @@ def load_mcp_agent(
         )
 
     if not quiet:
-        console.print(f"Loading MCP tools: {tools_path}")
+        console.print(f"Loading MCP tools: {mcp_path}")
 
     try:
-        mcp_server = load_mcp_server(tools_path)
+        mcp_server = load_mcp_server(mcp_path)
     except MCPLoadError as e:
         return None, str(e)
 

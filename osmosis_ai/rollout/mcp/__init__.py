@@ -1,8 +1,8 @@
 """MCP tool support for git-sync users.
 
 Provides :class:`MCPAgentLoop` — a built-in :class:`RolloutAgentLoop` that
-loads tools from a FastMCP server directory so that ``osmosis eval --tools``
-and ``osmosis test --tools`` work without any user-written AgentLoop code.
+loads tools from a FastMCP server directory so that ``osmosis eval --mcp``
+and ``osmosis test --mcp`` work without any user-written AgentLoop code.
 """
 
 from osmosis_ai.rollout.mcp.agent_loop import MCPAgentLoop

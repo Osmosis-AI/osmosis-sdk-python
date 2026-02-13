@@ -9,7 +9,7 @@ Eval mode is designed for **evaluating trained models**. Connect to any OpenAI-c
 Key capabilities:
 
 - **Benchmark trained models** against eval functions by connecting to serving endpoints
-- **Two agent modes**: provide a `RolloutAgentLoop` with `-m`, or load MCP tools directly with `--tools` (for git-sync users)
+- **Two agent modes**: provide a `RolloutAgentLoop` with `-m`, or load MCP tools directly with `--mcp` (for git-sync users)
 - Run multiple trials per row for pass@k analysis
 - Use existing `@osmosis_reward` functions or full-context eval functions
 - Get statistical summaries (mean, std, min, max) per eval function
@@ -50,26 +50,26 @@ osmosis eval -m my_agent:MyAgentLoop -d data.jsonl \
 
 ### Git-Sync Users (MCP Tools)
 
-If you use the **git-sync** workflow and provide MCP tools (`@mcp.tool()`) instead of a `RolloutAgentLoop`, use `--tools` to point at your MCP directory. The SDK automatically loads all registered tools and runs a standard agent loop — no AgentLoop code required.
+If you use the **git-sync** workflow and provide MCP tools (`@mcp.tool()`) instead of a `RolloutAgentLoop`, use `--mcp` to point at your MCP directory. The SDK automatically loads all registered tools and runs a standard agent loop — no AgentLoop code required.
 
 ```bash
 # Install MCP support
 pip install osmosis-ai[mcp]
 
 # Evaluate using MCP tools directory
-osmosis eval --tools ./mcp -d data.jsonl \
+osmosis eval --mcp ./mcp -d data.jsonl \
     --eval-fn reward_fn:compute_reward \
     --model openai/gpt-5-mini
 
 # Same options work: multiple eval functions, pass@k, batch, etc.
-osmosis eval --tools ./mcp -d data.jsonl \
+osmosis eval --mcp ./mcp -d data.jsonl \
     --eval-fn rewards:exact_match \
     --eval-fn rewards:partial_match \
     --model my-finetuned-model --base-url http://localhost:8000/v1 \
     --n 5 --batch-size 5
 ```
 
-The `--tools` directory must contain a `main.py` that creates a `FastMCP` instance with registered tools:
+The `--mcp` directory must contain a `main.py` that creates a `FastMCP` instance with registered tools:
 
 ```python
 # mcp/main.py
@@ -89,7 +89,7 @@ def lookup(key: str) -> str:
     return data.get(key, "not found")
 ```
 
-> **Note:** `--tools` and `-m/--module` are mutually exclusive. Use one or the other.
+> **Note:** `--mcp` and `-m/--module` are mutually exclusive. Use one or the other.
 
 ### Comparison Baselines with LiteLLM
 
@@ -302,7 +302,7 @@ osmosis eval [OPTIONS]
 | Option | Description |
 |--------|-------------|
 | `-m, --module MODULE` | Module path to agent loop (format: `module:attribute`). Use for remote-rollout users who implement `RolloutAgentLoop`. |
-| `--tools DIR` | Path to MCP tools directory (must contain `main.py` with a `FastMCP` instance). Use for git-sync users who provide `@mcp.tool()` functions. Requires `pip install osmosis-ai[mcp]`. |
+| `--mcp DIR` | Path to MCP tools directory (must contain `main.py` with a `FastMCP` instance). Use for git-sync users who provide `@mcp.tool()` functions. Requires `pip install osmosis-ai[mcp]`. |
 
 ### Model Options
 
@@ -342,12 +342,12 @@ osmosis eval -m my_agent:agent_loop -d data.jsonl \
     --model my-finetuned-model --base-url http://localhost:8000/v1
 
 # Git-sync: evaluate MCP tools without writing an AgentLoop
-osmosis eval --tools ./mcp -d data.jsonl \
+osmosis eval --mcp ./mcp -d data.jsonl \
     --eval-fn reward_fn:compute_reward \
     --model openai/gpt-5-mini
 
 # Git-sync: MCP tools with trained model endpoint
-osmosis eval --tools ./mcp -d data.jsonl \
+osmosis eval --mcp ./mcp -d data.jsonl \
     --eval-fn rewards:compute_reward \
     --model my-finetuned-model --base-url http://localhost:8000/v1
 

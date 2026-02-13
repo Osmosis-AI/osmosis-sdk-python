@@ -52,8 +52,8 @@ class EvalCommand:
         )
 
         parser.add_argument(
-            "--tools",
-            dest="tools",
+            "--mcp",
+            dest="mcp",
             default=None,
             help=(
                 "Path to MCP tools directory (must contain main.py with a FastMCP instance). "
@@ -199,10 +199,10 @@ class EvalCommand:
         return asyncio.run(self._run_async(args))
 
     def _validate_args(self, args: argparse.Namespace) -> Optional[str]:
-        if args.module and args.tools:
-            return "--module and --tools are mutually exclusive."
-        if not args.module and not args.tools:
-            return "Either --module (-m) or --tools is required."
+        if args.module and args.mcp:
+            return "--module and --mcp are mutually exclusive."
+        if not args.module and not args.mcp:
+            return "Either --module (-m) or --mcp is required."
         if args.n_runs < 1:
             return "--n must be >= 1."
         if args.batch_size < 1:
@@ -332,9 +332,9 @@ class EvalCommand:
             await llm_client.close()
             return 1
 
-        if args.tools:
+        if args.mcp:
             agent_loop, error = load_mcp_agent(
-                tools_path=args.tools,
+                mcp_path=args.mcp,
                 quiet=args.quiet,
                 console=self.console,
             )
