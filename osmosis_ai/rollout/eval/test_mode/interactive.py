@@ -222,7 +222,7 @@ class InteractiveRunner:
         name_map: Dict[str, str] = {}
         for msg in messages:
             if msg.get("role") == "assistant":
-                for tc in msg.get("tool_calls", []):
+                for tc in msg.get("tool_calls") or []:
                     tc_id = tc.get("id", "")
                     func_name = tc.get("function", {}).get("name", "unknown")
                     if tc_id:
