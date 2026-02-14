@@ -91,8 +91,9 @@ class TestCommand:
             default="gpt-5-mini",
             help=(
                 "Model name to use. Can be:\n"
-                "  - Simple name: 'gpt-5-mini' (auto-prefixed to 'openai/gpt-5-mini')\n"
+                "  - Simple name: 'gpt-5-mini'\n"
                 "  - LiteLLM format: 'provider/model' (e.g., 'anthropic/claude-sonnet-4-5')\n"
+                "  - Any name with --base-url (e.g., 'Qwen/Qwen3-0.6B')\n"
                 "Default: gpt-5-mini"
             ),
         )

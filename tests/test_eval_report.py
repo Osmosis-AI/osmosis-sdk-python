@@ -47,9 +47,9 @@ def test_format_eval_report_falls_back_when_rich_render_fails(monkeypatch) -> No
     def _raise_import_error(*args: object, **kwargs: object) -> None:
         raise ImportError("rich unavailable")
 
-    monkeypatch.setattr(report_module, "_format_eval_report_rich", _raise_import_error)
+    monkeypatch.setattr(report_module, "_format_tables_rich", _raise_import_error)
 
-    report_module.format_eval_report(_make_eval_result(), console)
+    report_module.format_eval_report(_make_eval_result(), console, model="test-model")
 
     text = output.getvalue()
     assert "Evaluation Results:" in text

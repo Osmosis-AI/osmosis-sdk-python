@@ -152,7 +152,7 @@ class EvalCommand:
             default=None,
             help=(
                 "Baseline model for comparison. Runs the same evaluation with "
-                "a second model and reports win/loss/tie statistics."
+                "a second model and reports per-model statistics."
             ),
         )
 
@@ -356,20 +356,6 @@ class EvalCommand:
                 for ms in result.model_summaries
             ]
 
-        if result.comparisons:
-            output_data["comparisons"] = [
-                {
-                    "eval_fn": c.eval_fn,
-                    "primary_mean": c.primary_mean,
-                    "baseline_mean": c.baseline_mean,
-                    "delta": c.delta,
-                    "wins": c.wins,
-                    "losses": c.losses,
-                    "ties": c.ties,
-                }
-                for c in result.comparisons
-            ]
-
         output_path = Path(args.output)
         output_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -559,7 +545,7 @@ class EvalCommand:
         if not args.quiet:
             from osmosis_ai.rollout.eval.evaluation.report import format_eval_report
 
-            format_eval_report(eval_result, self.console)
+            format_eval_report(eval_result, self.console, model=args.model)
 
         self._write_output(args, eval_result)
         return 0

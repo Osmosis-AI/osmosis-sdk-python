@@ -97,10 +97,8 @@ def _format_provider_hint(
     detail = _first_line(raw_message)
     if api_base:
         return (
-            "Invalid model/provider format for --base-url. "
-            "Use an OpenAI-compatible model identifier with the 'openai/' prefix "
-            "(for example: --model openai/<model-id>). "
-            f"Received model='{model}'. Details: {detail}"
+            "Cannot connect to custom endpoint. "
+            f"Received model='{model}', base_url='{api_base}'. Details: {detail}"
         )
     return (
         "Invalid LiteLLM model format. Use 'provider/model' "
@@ -113,6 +111,10 @@ def _get_litellm():
     """Lazy import LiteLLM to avoid hard dependency."""
     try:
         import litellm
+
+        # Suppress noisy "Give Feedback" and "LiteLLM.Info" messages that
+        # litellm prints to stdout/stderr on every exception.
+        litellm.suppress_debug_info = True
 
         # LiteLLM's atexit cleanup can emit "coroutine was never awaited"
         # warnings on Python 3.12 when asyncio.run() has already closed the loop.
@@ -146,8 +148,17 @@ class ExternalLLMClient:
         self._ContextWindowExceededError = self._litellm.ContextWindowExceededError
         self._APIConnectionError = self._litellm.APIConnectionError
 
-        if "/" not in model:
-            model = f"openai/{model}"
+        # Preserve the user's original model name for display purposes.
+        self.display_name = model
+
+        if api_base:
+            # Custom endpoint: always route through openai/ provider in litellm.
+            if not model.startswith("openai/"):
+                model = f"openai/{model}"
+        else:
+            # Standard litellm routing: auto-prefix bare names with openai/.
+            if "/" not in model:
+                model = f"openai/{model}"
 
         self.model = model
         self._api_key = api_key

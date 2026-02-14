@@ -99,29 +99,6 @@ class EvalModelSummary:
 
 
 @dataclass
-class EvalComparison:
-    """Win/loss/tie comparison per eval function.
-
-    Attributes:
-        eval_fn: Name of the eval function.
-        primary_mean: Mean score for the primary model.
-        baseline_mean: Mean score for the baseline model.
-        wins: Number of rows where primary scored higher.
-        losses: Number of rows where baseline scored higher.
-        ties: Number of rows where scores were equal.
-        delta: primary_mean - baseline_mean.
-    """
-
-    eval_fn: str
-    primary_mean: float
-    baseline_mean: float
-    wins: int
-    losses: int
-    ties: int
-    delta: float
-
-
-@dataclass
 class EvalResult:
     """Full evaluation result with per-row data and aggregated summaries.
 
@@ -135,7 +112,6 @@ class EvalResult:
         n_runs: Number of runs per row.
         pass_threshold: Score threshold for pass@k.
         model_summaries: Per-model summaries (comparison mode only).
-        comparisons: Per-eval-function comparisons (comparison mode only).
     """
 
     rows: List[EvalRowResult]
@@ -149,7 +125,6 @@ class EvalResult:
     stopped_early: bool = False
     stop_reason: Optional[str] = None
     model_summaries: Optional[List[EvalModelSummary]] = None
-    comparisons: Optional[List[EvalComparison]] = None
 
 
 class EvalRunner:
@@ -200,7 +175,7 @@ class EvalRunner:
     def _default_llm_client_factory(self) -> ExternalLLMClient:
         """Create a new ExternalLLMClient from the original client's config."""
         return ExternalLLMClient(
-            model=self.llm_client.model,
+            model=self.llm_client.display_name,
             api_key=self.llm_client._api_key,
             api_base=self.llm_client._api_base,
         )
@@ -210,7 +185,7 @@ class EvalRunner:
         if self._baseline_llm_client is None:
             raise RuntimeError("No baseline LLM client configured")
         return ExternalLLMClient(
-            model=self._baseline_llm_client.model,
+            model=self._baseline_llm_client.display_name,
             api_key=self._baseline_llm_client._api_key,
             api_base=self._baseline_llm_client._api_base,
         )
@@ -431,14 +406,12 @@ class EvalRunner:
             row_results, n_runs, pass_threshold
         )
 
-        # Compute per-model summaries and comparisons if baseline is configured
+        # Compute per-model summaries if baseline is configured
         model_summaries: Optional[List[EvalModelSummary]] = None
-        comparisons: Optional[List[EvalComparison]] = None
         if self.has_baseline:
             model_summaries = self._compute_model_summaries(
                 row_results, n_runs, pass_threshold
             )
-            comparisons = self._compute_comparisons(row_results)
 
         return EvalResult(
             rows=row_results,
@@ -452,7 +425,6 @@ class EvalRunner:
             stopped_early=stopped_early,
             stop_reason=stop_reason,
             model_summaries=model_summaries,
-            comparisons=comparisons,
         )
 
     async def _run_eval_concurrent(
@@ -626,14 +598,12 @@ class EvalRunner:
             row_results, n_runs, pass_threshold
         )
 
-        # Compute per-model summaries and comparisons if baseline is configured
+        # Compute per-model summaries if baseline is configured
         model_summaries: Optional[List[EvalModelSummary]] = None
-        comparisons: Optional[List[EvalComparison]] = None
         if self.has_baseline:
             model_summaries = self._compute_model_summaries(
                 row_results, n_runs, pass_threshold
             )
-            comparisons = self._compute_comparisons(row_results)
 
         return EvalResult(
             rows=row_results,
@@ -647,7 +617,6 @@ class EvalRunner:
             stopped_early=stopped_early,
             stop_reason=stop_reason,
             model_summaries=model_summaries,
-            comparisons=comparisons,
         )
 
     def _compute_summaries(
@@ -743,9 +712,9 @@ class EvalRunner:
             all_runs = [run for row in filtered for run in row.runs]
             model_name = ""
             if tag == "primary":
-                model_name = self.llm_client.model
+                model_name = self.llm_client.display_name
             elif self._baseline_llm_client is not None:
-                model_name = self._baseline_llm_client.model
+                model_name = self._baseline_llm_client.display_name
             summaries.append(EvalModelSummary(
                 model=model_name,
                 model_tag=tag,
@@ -756,59 +725,7 @@ class EvalRunner:
             ))
         return summaries
 
-    def _compute_comparisons(
-        self,
-        row_results: List[EvalRowResult],
-    ) -> List[EvalComparison]:
-        """Compute win/loss/tie statistics per eval function across rows."""
-        comparisons: List[EvalComparison] = []
-        for eval_fn in self.eval_fns:
-            name = eval_fn.name
-            primary_scores: List[float] = []
-            baseline_scores: List[float] = []
-            wins = 0
-            losses = 0
-            ties = 0
-
-            for row in row_results:
-                p_runs = [r for r in row.runs if r.model_tag == "primary"]
-                b_runs = [r for r in row.runs if r.model_tag == "baseline"]
-                if not p_runs or not b_runs:
-                    continue
-
-                p_mean = sum(r.scores.get(name, 0.0) for r in p_runs) / len(p_runs)
-                b_mean = sum(r.scores.get(name, 0.0) for r in b_runs) / len(b_runs)
-                primary_scores.append(p_mean)
-                baseline_scores.append(b_mean)
-
-                if p_mean > b_mean:
-                    wins += 1
-                elif p_mean < b_mean:
-                    losses += 1
-                else:
-                    ties += 1
-
-            p_overall = (
-                sum(primary_scores) / len(primary_scores) if primary_scores else 0.0
-            )
-            b_overall = (
-                sum(baseline_scores) / len(baseline_scores) if baseline_scores else 0.0
-            )
-
-            comparisons.append(EvalComparison(
-                eval_fn=name,
-                primary_mean=p_overall,
-                baseline_mean=b_overall,
-                wins=wins,
-                losses=losses,
-                ties=ties,
-                delta=p_overall - b_overall,
-            ))
-
-        return comparisons
-
 __all__ = [
-    "EvalComparison",
     "EvalEvalSummary",
     "EvalModelSummary",
     "EvalResult",

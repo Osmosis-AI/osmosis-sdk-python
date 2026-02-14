@@ -26,6 +26,7 @@ from osmosis_ai.rollout.eval.common.dataset import DatasetRow
 class MockLLMClient:
     def __init__(self, model: str = "mock-model") -> None:
         self.model = model
+        self.display_name = model
         self._api_key: str | None = None
         self._api_base: str | None = None
         self._tools: List[Dict[str, Any]] | None = None
@@ -619,15 +620,11 @@ class TestEvalRunnerBaseline:
             assert "primary" in tags
             assert "baseline" in tags
 
-        # model_summaries and comparisons should be populated
+        # model_summaries should be populated
         assert result.model_summaries is not None
         assert len(result.model_summaries) == 2
         assert result.model_summaries[0].model_tag == "primary"
         assert result.model_summaries[1].model_tag == "baseline"
-
-        assert result.comparisons is not None
-        assert len(result.comparisons) == 1
-        assert result.comparisons[0].eval_fn == "simple_eval"
 
     @pytest.mark.asyncio
     async def test_run_eval_baseline_concurrent(self) -> None:
@@ -669,60 +666,6 @@ class TestEvalRunnerBaseline:
             assert "baseline" in tags
 
         assert result.model_summaries is not None
-        assert result.comparisons is not None
-
-    @pytest.mark.asyncio
-    async def test_run_eval_baseline_win_loss_tie(self) -> None:
-        """Verify win/loss/tie statistics are computed correctly."""
-        primary_client = MockLLMClient()
-        baseline_client = MockLLMClient()
-        agent = MockAgentLoop(tools=[create_sample_tool()], call_llm=True)
-
-        call_counter = {"n": 0}
-
-        def scoring_eval(
-            solution_str: str,
-            ground_truth: str,
-            extra_info: Dict[str, Any],
-        ) -> float:
-            """Return different scores for primary vs baseline per row.
-
-            Sequence of calls (sequential, batch_size=1):
-            row0-primary (call 1): 0.9 (odd -> 0.9)
-            row0-baseline (call 2): 0.3 (even -> 0.3)
-            row1-primary (call 3): 0.9 (odd -> 0.9)
-            row1-baseline (call 4): 0.3 (even -> 0.3)
-            row2-primary (call 5): 0.9 (odd -> 0.9)
-            row2-baseline (call 6): 0.3 (even -> 0.3)
-
-            Result: primary wins all 3 rows.
-            """
-            call_counter["n"] += 1
-            return 0.9 if call_counter["n"] % 2 == 1 else 0.3
-
-        runner = EvalRunner(
-            agent_loop=agent,
-            llm_client=primary_client,  # type: ignore[arg-type]
-            eval_fns=[EvalFnWrapper(scoring_eval, "scoring_eval")],
-            baseline_llm_client=baseline_client,  # type: ignore[arg-type]
-        )
-
-        rows = [create_sample_row(i) for i in range(3)]
-        result = await runner.run_eval(
-            rows=rows,
-            n_runs=1,
-            batch_size=1,
-        )
-
-        assert result.comparisons is not None
-        comp = result.comparisons[0]
-        assert comp.eval_fn == "scoring_eval"
-        assert comp.wins == 3
-        assert comp.losses == 0
-        assert comp.ties == 0
-        assert comp.delta > 0
-        assert comp.primary_mean == pytest.approx(0.9)
-        assert comp.baseline_mean == pytest.approx(0.3)
 
     @pytest.mark.asyncio
     async def test_run_eval_no_baseline_backward_compat(self) -> None:
@@ -748,7 +691,6 @@ class TestEvalRunnerBaseline:
 
         assert result.total_runs == 1
         assert result.model_summaries is None
-        assert result.comparisons is None
         for row_result in result.rows:
             for run in row_result.runs:
                 assert run.model_tag is None

@@ -572,7 +572,8 @@ def test_rollout_eval_rejects_batch_size_zero(capsys):
     assert "Error: --batch-size must be >= 1." in captured.err
 
 
-def test_rollout_eval_rejects_invalid_model_early(capsys):
+def test_rollout_eval_accepts_any_model_with_base_url(capsys):
+    """With --base-url, any model name should be accepted and displayed as-is."""
     exit_code = cli.main(
         [
             "eval",
@@ -590,11 +591,14 @@ def test_rollout_eval_rejects_invalid_model_early(capsys):
     )
     captured = capsys.readouterr()
 
-    assert exit_code == 1
-    assert "Error: Invalid model/provider format for --base-url." in captured.err
+    # Should pass model validation (may fail later at connectivity/auth)
+    assert "Invalid model/provider format" not in captured.err
+    # Model should be displayed without openai/ prefix
+    assert "Model: Qwen/Qwen3-0.6B" in captured.out
 
 
-def test_rollout_test_rejects_invalid_model_early(capsys):
+def test_rollout_test_accepts_any_model_with_base_url(capsys):
+    """With --base-url, any model name should be accepted and displayed as-is."""
     exit_code = cli.main(
         [
             "test",
@@ -610,5 +614,7 @@ def test_rollout_test_rejects_invalid_model_early(capsys):
     )
     captured = capsys.readouterr()
 
-    assert exit_code == 1
-    assert "Error: Invalid model/provider format for --base-url." in captured.err
+    # Should pass model validation (may fail later at connectivity/auth)
+    assert "Invalid model/provider format" not in captured.err
+    # Model should be displayed without openai/ prefix
+    assert "Model: Qwen/Qwen3-0.6B" in captured.out

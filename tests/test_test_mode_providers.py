@@ -315,9 +315,8 @@ class TestExternalLLMClient:
                 )
 
             message = str(exc_info.value)
-            assert "Invalid model/provider format for --base-url" in message
-            assert "openai/<model-id>" in message
-            assert "Received model='Qwen/Qwen3-0.6B'" in message
+            assert "Cannot connect to custom endpoint" in message
+            assert "base_url='http://localhost:1234/v1'" in message
 
 
 class TestPreflightCheck:

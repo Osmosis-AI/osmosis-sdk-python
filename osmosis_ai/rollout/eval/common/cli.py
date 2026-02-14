@@ -184,9 +184,7 @@ def _format_model_error(model: str, base_url: Optional[str], detail: str) -> str
     """Format a concise model validation error with actionable guidance."""
     if base_url:
         return (
-            "Invalid model/provider format for --base-url. "
-            "Use an OpenAI-compatible model identifier with the 'openai/' prefix "
-            "(for example: --model openai/<model-id>). "
+            "Invalid model for --base-url. "
             f"Received model='{model}'. Details: {detail}"
         )
     return (
@@ -201,6 +199,11 @@ def _check_model(model: str, base_url: Optional[str]) -> Optional[str]:
     candidate = model.strip()
     if not candidate:
         return "Model cannot be empty. Pass a value with --model."
+
+    # When base_url is provided, any non-empty model name is valid.
+    # The ExternalLLMClient will route through openai/ provider internally.
+    if base_url:
+        return None
 
     normalized_model = candidate if "/" in candidate else f"openai/{candidate}"
     provider, model_name = normalized_model.split("/", 1)
@@ -219,9 +222,7 @@ def _check_model(model: str, base_url: Optional[str]) -> Optional[str]:
     if hasattr(litellm, "_async_client_cleanup_registered"):
         litellm._async_client_cleanup_registered = True
 
-    previous_debug_state = getattr(litellm, "suppress_debug_info", None)
-    if previous_debug_state is not None:
-        litellm.suppress_debug_info = True
+    litellm.suppress_debug_info = True
 
     try:
         litellm.get_llm_provider(model=normalized_model, api_base=base_url)
@@ -241,9 +242,6 @@ def _check_model(model: str, base_url: Optional[str]) -> Optional[str]:
             "Invalid model configuration. "
             f"Received model='{candidate}'. Details: {_first_line(provider_message)}"
         )
-    finally:
-        if previous_debug_state is not None:
-            litellm.suppress_debug_info = previous_debug_state
 
     return None
 
@@ -281,7 +279,7 @@ def create_llm_client(
         return None, str(e)
 
     if not quiet:
-        model_name = getattr(llm_client, "model", model)
+        model_name = getattr(llm_client, "display_name", model)
         console.print(f"  Model: {model_name}")
 
     return llm_client, None
