@@ -23,6 +23,22 @@ from osmosis_ai.rollout.eval.common.runner import LocalRolloutRunner
 logger = logging.getLogger(__name__)
 
 
+def _extract_systemic_error_metrics(
+    e: SystemicProviderError,
+    fallback_started_at: float,
+) -> tuple[float, int]:
+    """Extract (duration_ms, tokens) from a systemic error with sane fallbacks."""
+    duration_ms = getattr(e, "duration_ms", None)
+    if duration_ms is None:
+        duration_ms = (time.monotonic() - fallback_started_at) * 1000
+
+    tokens = getattr(e, "tokens", None)
+    if tokens is None:
+        tokens = 0
+
+    return float(duration_ms), int(tokens)
+
+
 @dataclass
 class EvalRunResult:
     """Result from a single agent run + eval scoring.
@@ -258,14 +274,24 @@ class EvalRunner:
             rollout_id = f"eval-{row_index}-run-{run_index}-{model_tag}"
         else:
             rollout_id = f"eval-{row_index}-run-{run_index}"
-        test_result = await rollout_runner.run_single(
-            row=row,
-            row_index=row_index,
-            max_turns=max_turns,
-            completion_params=completion_params,
-            rollout_id=rollout_id,
-            request_metadata={"run_index": run_index},
-        )
+        run_start = time.monotonic()
+        try:
+            test_result = await rollout_runner.run_single(
+                row=row,
+                row_index=row_index,
+                max_turns=max_turns,
+                completion_params=completion_params,
+                rollout_id=rollout_id,
+                request_metadata={"run_index": run_index},
+            )
+        except SystemicProviderError as e:
+            duration_ms, tokens = _extract_systemic_error_metrics(
+                e,
+                fallback_started_at=run_start,
+            )
+            setattr(e, "duration_ms", duration_ms)
+            setattr(e, "tokens", tokens)
+            raise
 
         if not test_result.success or test_result.result is None:
             return EvalRunResult(
@@ -360,6 +386,7 @@ class EvalRunner:
 
             for run_idx in range(n_runs):
                 for tag in model_tags:
+                    run_start = time.monotonic()
                     try:
                         result = await self.run_single(
                             row=row,
@@ -370,10 +397,16 @@ class EvalRunner:
                             model_tag=tag,
                         )
                     except SystemicProviderError as e:
+                        duration_ms, tokens = _extract_systemic_error_metrics(
+                            e,
+                            fallback_started_at=run_start,
+                        )
                         result = EvalRunResult(
                             run_index=run_idx,
                             success=False,
                             error=str(e),
+                            duration_ms=duration_ms,
+                            tokens=tokens,
                             model_tag=tag,
                         )
                         row_result.runs.append(result)
@@ -510,9 +543,11 @@ class EvalRunner:
         ) -> Tuple[int, EvalRunResult]:
             nonlocal completed
             runner: Optional[LocalRolloutRunner] = None
+            run_start = time.monotonic()
             target_pool = baseline_pool if model_tag == "baseline" else primary_pool
             try:
                 runner = await target_pool.get()
+                run_start = time.monotonic()
                 result = await self.run_single(
                     row=row,
                     row_index=row_index,
@@ -530,10 +565,16 @@ class EvalRunner:
             except SystemicProviderError as e:
                 # Record the failed result, then re-raise so the batch
                 # loop can detect the systemic failure and stop early.
+                duration_ms, tokens = _extract_systemic_error_metrics(
+                    e,
+                    fallback_started_at=run_start,
+                )
                 result = EvalRunResult(
                     run_index=run_index,
                     success=False,
                     error=str(e),
+                    duration_ms=duration_ms,
+                    tokens=tokens,
                     model_tag=model_tag,
                 )
                 completed += 1

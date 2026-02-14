@@ -162,7 +162,7 @@ def _check_api_key(
     if os.environ.get("LITELLM_API_KEY"):
         return None
 
-    provider = model.split("/")[0] if "/" in model else "openai"
+    provider = model.split("/")[0].lower() if "/" in model else "openai"
     env_var = _PROVIDER_ENV_KEYS.get(provider)
     if env_var is None:
         return None
@@ -270,7 +270,7 @@ def create_llm_client(
         if base_url:
             console.print(f"Connecting to endpoint: {base_url}")
         else:
-            provider_name = model.split("/")[0] if "/" in model else "openai"
+            provider_name = model.split("/")[0].lower() if "/" in model else "openai"
             console.print(f"Initializing provider: {provider_name}")
 
     try:

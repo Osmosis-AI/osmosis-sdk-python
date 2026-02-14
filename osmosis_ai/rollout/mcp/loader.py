@@ -28,6 +28,26 @@ def _clear_module_tree(prefix: str) -> None:
             sys.modules.pop(name, None)
 
 
+def _clear_new_local_imports(
+    *,
+    modules_before: set[str],
+    package_name: str,
+    mcp_dir: str,
+) -> None:
+    """Remove newly imported local sibling modules from ``sys.modules``.
+
+    During ``main.py`` import, users may do absolute local imports like
+    ``import helpers``. These names can leak globally and affect future loads.
+    """
+    for name in set(sys.modules.keys()) - modules_before:
+        if name.startswith(package_name):
+            continue
+        mod = sys.modules[name]
+        mod_file = getattr(mod, "__file__", None) or ""
+        if mod_file.startswith(mcp_dir + os.sep):
+            sys.modules.pop(name, None)
+
+
 @contextlib.contextmanager
 def _temporary_sys_path(path: str):
     """Temporarily prepend ``path`` to ``sys.path`` and restore exactly."""
@@ -82,7 +102,7 @@ def load_mcp_server(mcp_path: str) -> Any:
     # Import main.py as a submodule of a synthetic package:
     # - supports relative imports like `from .tools import ...`
     # - avoids leaking user module names into the global namespace
-    dir_hash = hashlib.md5(mcp_dir.encode()).hexdigest()[:8]
+    dir_hash = hashlib.sha256(mcp_dir.encode()).hexdigest()[:8]
     package_name = f"_osmosis_mcp_{dir_hash}"
     module_name = f"{package_name}.main"
 
@@ -103,28 +123,31 @@ def load_mcp_server(mcp_path: str) -> Any:
     module = importlib.util.module_from_spec(spec)
     sys.modules[module_name] = module
 
+    modules_before = set(sys.modules.keys())
     try:
         # Allow both relative imports (`from .x`) and legacy local absolute
         # imports (`import tools`) without persisting path changes.
         # Snapshot sys.modules so we can detect absolute sibling imports
         # (e.g. `import helpers`) that leak outside the synthetic package.
-        modules_before = set(sys.modules.keys())
         with _temporary_sys_path(mcp_dir):
             spec.loader.exec_module(module)
     except Exception as e:
+        _clear_new_local_imports(
+            modules_before=modules_before,
+            package_name=package_name,
+            mcp_dir=mcp_dir,
+        )
         _clear_module_tree(package_name)
         raise MCPLoadError(f"Error importing {main_py}: {e}") from e
 
     # Clean up absolute sibling imports that were cached globally during
     # exec_module.  Without this, loading a second MCP directory that also
     # does `import helpers` would silently reuse the first directory's module.
-    for name in set(sys.modules.keys()) - modules_before:
-        if name.startswith(package_name):
-            continue  # already managed by _clear_module_tree
-        mod = sys.modules[name]
-        mod_file = getattr(mod, "__file__", None) or ""
-        if mod_file.startswith(mcp_dir + os.sep):
-            sys.modules.pop(name, None)
+    _clear_new_local_imports(
+        modules_before=modules_before,
+        package_name=package_name,
+        mcp_dir=mcp_dir,
+    )
 
     # Find the FastMCP instance in the module
     from fastmcp import FastMCP

@@ -61,7 +61,16 @@ def _json_schema_to_property(
             return _json_schema_to_property(non_null[0], defs)
         return OpenAIFunctionPropertySchema(type="string")
 
-    prop_type = schema.get("type", "string")
+    prop_type_raw = schema.get("type", "string")
+    if isinstance(prop_type_raw, list):
+        # JSON Schema allows union types like ["integer", "null"].
+        non_null_types = [t for t in prop_type_raw if isinstance(t, str) and t != "null"]
+        prop_type = non_null_types[0] if non_null_types else "string"
+    elif isinstance(prop_type_raw, str):
+        prop_type = prop_type_raw
+    else:
+        prop_type = "string"
+
     description = schema.get("description")
     enum = schema.get("enum")
 

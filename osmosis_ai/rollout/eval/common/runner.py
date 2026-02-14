@@ -180,7 +180,19 @@ class LocalRolloutRunner:
                 duration_ms=(time.monotonic() - overall_start) * 1000,
             )
 
-        except SystemicProviderError:
+        except SystemicProviderError as e:
+            # Preserve partial timing/token usage so callers can report
+            # accurate stats for the failing run.
+            try:
+                metrics = self.llm_client.get_metrics()
+                tokens = (
+                    int(getattr(metrics, "prompt_tokens", 0))
+                    + int(getattr(metrics, "response_tokens", 0))
+                )
+            except Exception:
+                tokens = 0
+            setattr(e, "duration_ms", (time.monotonic() - overall_start) * 1000)
+            setattr(e, "tokens", tokens)
             raise
 
         except Exception as e:

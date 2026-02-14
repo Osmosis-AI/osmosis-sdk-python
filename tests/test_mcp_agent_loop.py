@@ -159,6 +159,23 @@ class TestMCPToolToOpenAI:
         prop = schema.function.parameters.properties["limit"]
         assert prop.type == "number"  # integer → number
 
+    def test_optional_via_type_list(self):
+        schema = _mcp_tool_to_openai(
+            name="search",
+            description="Search",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string"},
+                    "limit": {"type": ["integer", "null"]},
+                },
+                "required": ["query"],
+            },
+        )
+
+        prop = schema.function.parameters.properties["limit"]
+        assert prop.type == "number"
+
     def test_empty_description_fallback(self):
         schema = _mcp_tool_to_openai(
             name="noop",
@@ -531,6 +548,36 @@ class TestLoadMCPServer:
 
         server = load_mcp_server(str(tmp_path))
         assert "ping" in server._tool_manager._tools
+
+    def test_failed_load_does_not_leak_absolute_sibling_modules(self, tmp_path):
+        first_dir = tmp_path / "first"
+        second_dir = tmp_path / "second"
+        first_dir.mkdir()
+        second_dir.mkdir()
+
+        first_helper = first_dir / "leaky_shared_mod.py"
+        first_helper.write_text('VALUE = "from_first"\n')
+        first_main = first_dir / "main.py"
+        first_main.write_text(textwrap.dedent("""\
+            import leaky_shared_mod
+            raise RuntimeError("boom after import")
+        """))
+
+        second_helper = second_dir / "leaky_shared_mod.py"
+        second_helper.write_text('VALUE = "from_second"\n')
+        second_main = second_dir / "main.py"
+        second_main.write_text(textwrap.dedent("""\
+            import leaky_shared_mod
+            from fastmcp import FastMCP
+
+            mcp = FastMCP(leaky_shared_mod.VALUE)
+        """))
+
+        with pytest.raises(MCPLoadError, match="Error importing"):
+            load_mcp_server(str(first_dir))
+
+        server = load_mcp_server(str(second_dir))
+        assert server.name == "from_second"
 
 
 # ---------------------------------------------------------------------------

@@ -509,6 +509,84 @@ class TestEvalRunner:
         assert call_count["n"] == 1  # only one agent run attempted
 
     @pytest.mark.asyncio
+    async def test_run_eval_systemic_error_preserves_duration_and_tokens(self) -> None:
+        """Systemic failures should keep per-run duration/token stats."""
+        from osmosis_ai.rollout.eval.common.errors import SystemicProviderError
+
+        class SystemicAfterLLMAgent(MockAgentLoop):
+            async def run(self, ctx: RolloutContext) -> RolloutResult:
+                messages = list(ctx.request.messages)
+                _ = await ctx.chat(messages)
+                await asyncio.sleep(0.01)
+                raise SystemicProviderError("Authentication failed")
+
+        client = MockLLMClient()
+        agent = SystemicAfterLLMAgent(tools=[create_sample_tool()])
+
+        def simple_eval(
+            solution_str: str,
+            ground_truth: str,
+            extra_info: Dict[str, Any],
+        ) -> float:
+            return 1.0
+
+        runner = EvalRunner(
+            agent_loop=agent,
+            llm_client=client,  # type: ignore[arg-type]
+            eval_fns=[EvalFnWrapper(simple_eval, "simple_eval")],
+        )
+
+        eval_result = await runner.run_eval(
+            rows=[create_sample_row(0), create_sample_row(1)],
+            n_runs=1,
+        )
+
+        first_run = eval_result.rows[0].runs[0]
+        assert first_run.success is False
+        assert first_run.duration_ms > 0
+        assert first_run.tokens == 15
+
+    @pytest.mark.asyncio
+    async def test_run_eval_concurrent_systemic_error_preserves_duration_and_tokens(self) -> None:
+        """Concurrent systemic failures should keep per-run duration/token stats."""
+        from osmosis_ai.rollout.eval.common.errors import SystemicProviderError
+
+        class SystemicAfterLLMAgent(MockAgentLoop):
+            async def run(self, ctx: RolloutContext) -> RolloutResult:
+                messages = list(ctx.request.messages)
+                _ = await ctx.chat(messages)
+                await asyncio.sleep(0.01)
+                raise SystemicProviderError("Authentication failed")
+
+        client = MockLLMClient()
+        agent = SystemicAfterLLMAgent(tools=[create_sample_tool()])
+
+        def simple_eval(
+            solution_str: str,
+            ground_truth: str,
+            extra_info: Dict[str, Any],
+        ) -> float:
+            return 1.0
+
+        runner = EvalRunner(
+            agent_loop=agent,
+            llm_client=client,  # type: ignore[arg-type]
+            eval_fns=[EvalFnWrapper(simple_eval, "simple_eval")],
+            llm_client_factory=MockLLMClient,  # type: ignore[arg-type]
+        )
+
+        eval_result = await runner.run_eval(
+            rows=[create_sample_row(0), create_sample_row(1), create_sample_row(2)],
+            n_runs=1,
+            batch_size=2,
+        )
+
+        failed_runs = [run for row in eval_result.rows for run in row.runs if not run.success]
+        assert failed_runs
+        assert all(run.duration_ms > 0 for run in failed_runs)
+        assert all(run.tokens == 15 for run in failed_runs)
+
+    @pytest.mark.asyncio
     async def test_run_eval_continues_on_non_systemic_failure(self) -> None:
         """Non-systemic failures should be recorded without early stopping."""
         client = MockLLMClient()
