@@ -60,15 +60,69 @@ def _score_color(value: float) -> str:
     return "red"
 
 
-def format_eval_report(result: "EvalResult", console: "Console") -> None:
+def _collect_pass_k_values(eval_summaries: dict[str, Any]) -> list[int]:
+    """Collect sorted pass@k column values from eval summaries."""
+    pass_k_values: list[int] = []
+    for summary in eval_summaries.values():
+        for k in summary.pass_at_k:
+            if k not in pass_k_values:
+                pass_k_values.append(k)
+    pass_k_values.sort()
+    return pass_k_values
+
+
+def _build_model_data(result: "EvalResult", model: str) -> list[dict[str, Any]]:
+    """Build per-model data list for unified table rendering.
+
+    In comparison mode, returns one entry per model from model_summaries.
+    In single-model mode, returns one entry with overall stats.
+    """
+    if result.model_summaries:
+        model_data = []
+        for ms in result.model_summaries:
+            avg_latency = (
+                ms.total_duration_ms / ms.total_runs if ms.total_runs > 0 else 0
+            )
+            avg_tokens = (
+                ms.total_tokens / ms.total_runs if ms.total_runs > 0 else 0
+            )
+            model_data.append(
+                {
+                    "name": ms.model or ms.model_tag,
+                    "eval_summaries": ms.eval_summaries,
+                    "avg_latency_ms": avg_latency,
+                    "avg_tokens": avg_tokens,
+                }
+            )
+        return model_data
+
+    avg_latency = (
+        result.total_duration_ms / result.total_runs if result.total_runs > 0 else 0
+    )
+    avg_tokens = (
+        result.total_tokens / result.total_runs if result.total_runs > 0 else 0
+    )
+    return [
+        {
+            "name": model,
+            "eval_summaries": result.eval_summaries,
+            "avg_latency_ms": avg_latency,
+            "avg_tokens": avg_tokens,
+        }
+    ]
+
+
+def format_eval_report(
+    result: "EvalResult", console: "Console", model: str = ""
+) -> None:
     """Print a formatted evaluation report to the console.
 
-    Displays a table of eval function statistics including mean, min, max,
-    std, and pass@k columns (when n > 1).
+    Renders a unified table with per-model rows for each eval function.
 
     Args:
         result: The evaluation result to report.
         console: Console instance for output.
+        model: Model name for single-model mode display.
     """
     console.print()
     console.print("Evaluation Results:", style="bold")
@@ -77,52 +131,95 @@ def format_eval_report(result: "EvalResult", console: "Console") -> None:
     console.print(f"  Total runs: {result.total_runs}")
     console.print(f"  Duration: {format_duration(result.total_duration_ms)}")
     console.print(f"  Total tokens: {result.total_tokens:,}")
-    console.print()
+    if result.stopped_early:
+        reason = f" Reason: {result.stop_reason}" if result.stop_reason else ""
+        console.print(
+            f"  Stopped early after a failed run.{reason}",
+            style="yellow",
+        )
 
     if not result.eval_summaries:
+        console.print()
         console.print("  No eval results.")
         return
 
-    # Determine pass@k columns
+    model_data = _build_model_data(result, model)
+    console.print()
+
+    eval_fn_names = list(result.eval_summaries.keys())
+
+    # Collect pass@k columns from all models' summaries
     pass_k_values: list[int] = []
     if result.n_runs > 1:
-        for summary in result.eval_summaries.values():
-            for k in summary.pass_at_k:
+        for md in model_data:
+            for k in _collect_pass_k_values(md["eval_summaries"]):
                 if k not in pass_k_values:
                     pass_k_values.append(k)
         pass_k_values.sort()
 
     if console.run_rich(
-        lambda rich_console: _format_eval_report_rich(
-            result,
+        lambda rich_console: _format_tables_rich(
+            eval_fn_names,
+            model_data,
             pass_k_values,
             rich_console,
         )
     ):
-        return
+        pass
+    else:
+        _format_tables_plain(
+            eval_fn_names,
+            model_data,
+            pass_k_values,
+            console,
+        )
 
-    _format_eval_report_plain(result, console, pass_k_values)
+    console.print()
+    console.print()
 
 
-def _format_eval_report_rich(
-    result: "EvalResult",
+def _format_tables_rich(
+    eval_fn_names: list[str],
+    model_data: list[dict[str, Any]],
     pass_k_values: list[int],
     rich_console: Any,
 ) -> None:
-    """Render the evaluation table using rich."""
+    """Render the performance and eval results tables using rich."""
     from rich.table import Table
     from rich import box
 
-    table = Table(
-        title="Eval Scores",
+    # --- Performance table ---
+    perf_table = Table(
+        title="Performance",
         box=box.ROUNDED,
         title_style="bold",
         header_style="bold cyan",
-        show_lines=False,
+        padding=(0, 1),
+    )
+    perf_table.add_column("Model", style="bold", no_wrap=True)
+    perf_table.add_column("Avg Latency", justify="right")
+    perf_table.add_column("Avg Tokens", justify="right")
+    for md in model_data:
+        perf_table.add_row(
+            md["name"],
+            format_duration(md["avg_latency_ms"]),
+            f"{md['avg_tokens']:,.0f}",
+        )
+    rich_console.print(perf_table)
+    rich_console.print()
+
+    # --- Eval results table ---
+    table = Table(
+        title="Eval Results",
+        box=box.ROUNDED,
+        title_style="bold",
+        header_style="bold cyan",
+        show_lines=True,
         padding=(0, 1),
     )
 
     table.add_column("Eval Function", style="bold", no_wrap=True)
+    table.add_column("Model", no_wrap=True)
     table.add_column("Mean", justify="right")
     table.add_column("Min", justify="right")
     table.add_column("Max", justify="right")
@@ -130,36 +227,69 @@ def _format_eval_report_rich(
     for k in pass_k_values:
         table.add_column(f"pass@{k}", justify="right")
 
-    for name, summary in result.eval_summaries.items():
-        mean_color = _score_color(summary.mean)
-        row: list[str] = [
-            name,
-            f"[bold {mean_color}]{_format_score(summary.mean)}[/bold {mean_color}]",
-            _format_score(summary.min),
-            _format_score(summary.max),
-            _format_score(summary.std),
-        ]
-        for k in pass_k_values:
-            val = summary.pass_at_k.get(k)
-            if val is not None:
-                color = _score_color(val)
-                row.append(f"[{color}]{_format_percent(val)}[/{color}]")
-            else:
-                row.append("[dim]N/A[/dim]")
-        table.add_row(*row)
+    for fn_idx, fn_name in enumerate(eval_fn_names):
+        for m_idx, md in enumerate(model_data):
+            summary = md["eval_summaries"].get(fn_name)
+            if summary is None:
+                continue
+
+            display_fn = fn_name
+
+            mean_color = _score_color(summary.mean)
+            row: list[str] = [
+                display_fn,
+                md["name"],
+                f"[bold {mean_color}]{_format_score(summary.mean)}[/bold {mean_color}]",
+                _format_score(summary.min),
+                _format_score(summary.max),
+                _format_score(summary.std),
+            ]
+
+            for k in pass_k_values:
+                val = summary.pass_at_k.get(k)
+                if val is not None:
+                    color = _score_color(val)
+                    row.append(f"[{color}]{_format_percent(val)}[/{color}]")
+                else:
+                    row.append("[dim]N/A[/dim]")
+
+            table.add_row(*row)
 
     rich_console.print(table)
 
 
-def _format_eval_report_plain(
-    result: "EvalResult",
-    console: "Console",
+def _format_tables_plain(
+    eval_fn_names: list[str],
+    model_data: list[dict[str, Any]],
     pass_k_values: list[int],
+    console: "Console",
 ) -> None:
-    """Render the evaluation table as plain text."""
-    # Build header
+    """Render the performance and eval results tables as plain text."""
+    # --- Performance table ---
+    perf_header_parts = [
+        f"{'Model':<15}",
+        f"{'Avg Latency':>12}",
+        f"{'Avg Tokens':>11}",
+    ]
+    perf_header = " | ".join(perf_header_parts)
+    console.print("Performance:", style="bold")
+    console.print(perf_header, style="bold")
+    console.print("-" * len(perf_header))
+    for md in model_data:
+        perf_row = " | ".join(
+            [
+                f"{md['name']:<15}",
+                f"{format_duration(md['avg_latency_ms']):>12}",
+                f"{md['avg_tokens']:>11,.0f}",
+            ]
+        )
+        console.print(perf_row)
+    console.print()
+
+    # --- Eval results table ---
     header_parts = [
         f"{'Eval Function':<20}",
+        f"{'Model':<15}",
         f"{'Mean':>6}",
         f"{'Min':>6}",
         f"{'Max':>6}",
@@ -172,21 +302,38 @@ def _format_eval_report_plain(
     console.print(header, style="bold")
     console.print("-" * len(header))
 
-    for name, summary in result.eval_summaries.items():
-        row_parts = [
-            f"{name:<20}",
-            f"{summary.mean:>6.3f}",
-            f"{summary.min:>6.3f}",
-            f"{summary.max:>6.3f}",
-            f"{summary.std:>6.3f}",
-        ]
-        for k in pass_k_values:
-            val = summary.pass_at_k.get(k)
-            if val is not None:
-                row_parts.append(f"{val * 100:>7.1f}%")
-            else:
-                row_parts.append(f"{'N/A':>8}")
-        console.print(" | ".join(row_parts))
+    for fn_idx, fn_name in enumerate(eval_fn_names):
+        for m_idx, md in enumerate(model_data):
+            summary = md["eval_summaries"].get(fn_name)
+            if summary is None:
+                continue
+
+            display_fn = fn_name
+
+            row_parts = [
+                f"{display_fn:<20}",
+                f"{md['name']:<15}",
+                f"{summary.mean:>6.3f}",
+                f"{summary.min:>6.3f}",
+                f"{summary.max:>6.3f}",
+                f"{summary.std:>6.3f}",
+            ]
+
+            for k in pass_k_values:
+                val = summary.pass_at_k.get(k)
+                if val is not None:
+                    row_parts.append(f"{val * 100:>7.1f}%")
+                else:
+                    row_parts.append(f"{'N/A':>8}")
+
+            console.print(" | ".join(row_parts))
+
+            # Separator after every row except the very last
+            is_last_model = m_idx == len(model_data) - 1
+            is_last_fn = fn_idx == len(eval_fn_names) - 1
+            if not (is_last_model and is_last_fn):
+                console.print("-" * len(header))
+
 
 __all__ = [
     "format_eval_report",

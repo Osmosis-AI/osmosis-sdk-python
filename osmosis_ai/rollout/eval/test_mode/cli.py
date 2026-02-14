@@ -21,6 +21,8 @@ from osmosis_ai.rollout.eval.common.cli import (
     format_tokens,
     load_agent,
     load_dataset_rows,
+    load_mcp_agent,
+    verify_llm_client,
 )
 
 if TYPE_CHECKING:
@@ -58,10 +60,20 @@ class TestCommand:
             "--module",
             "--agent",
             dest="module",
-            required=True,
+            default=None,
             help=(
                 "Module path to the agent loop in format 'module:attribute'. "
                 "Example: 'my_agent:MyAgentLoop'."
+            ),
+        )
+
+        parser.add_argument(
+            "--mcp",
+            dest="mcp",
+            default=None,
+            help=(
+                "Path to MCP tools directory (must contain main.py with a FastMCP instance). "
+                "Mutually exclusive with -m/--module."
             ),
         )
 
@@ -79,8 +91,9 @@ class TestCommand:
             default="gpt-5-mini",
             help=(
                 "Model name to use. Can be:\n"
-                "  - Simple name: 'gpt-5-mini' (auto-prefixed to 'openai/gpt-5-mini')\n"
+                "  - Simple name: 'gpt-5-mini'\n"
                 "  - LiteLLM format: 'provider/model' (e.g., 'anthropic/claude-sonnet-4-5')\n"
+                "  - Any name with --base-url (e.g., 'Qwen/Qwen3-0.6B')\n"
                 "Default: gpt-5-mini"
             ),
         )
@@ -188,6 +201,10 @@ class TestCommand:
         return asyncio.run(self._run_async(args))
 
     def _validate_args(self, args: argparse.Namespace) -> Optional[str]:
+        if args.module and args.mcp:
+            return "--module and --mcp are mutually exclusive."
+        if not args.module and not args.mcp:
+            return "Either --module (-m) or --mcp is required."
         if args.row is not None and not args.interactive:
             return "--row can only be used with --interactive mode"
         return None
@@ -310,6 +327,13 @@ class TestCommand:
         self.console.print(f"  Duration: {format_duration(batch_result.total_duration_ms)}")
         self.console.print(f"  Total tokens: {format_tokens(batch_result.total_tokens)}")
 
+        if batch_result.stopped_early:
+            reason = f" Reason: {batch_result.stop_reason}" if batch_result.stop_reason else ""
+            self.console.print(
+                f"  Stopped early due to systemic provider error.{reason}",
+                style="red",
+            )
+
     def _write_output(
         self, args: argparse.Namespace, batch_result: "LocalTestBatchResult"
     ) -> None:
@@ -357,13 +381,39 @@ class TestCommand:
 
         self._print_header(args)
 
-        agent_loop, error = load_agent(
-            module=args.module,
+        llm_client, error = create_llm_client(
+            model=args.model,
+            api_key=args.api_key,
+            base_url=args.base_url,
             quiet=args.quiet,
             console=self.console,
         )
         if error:
             self.console.print_error(f"Error: {error}")
+            return 1
+        assert llm_client is not None
+
+        error = await verify_llm_client(llm_client, args.quiet, self.console)
+        if error:
+            self.console.print_error(f"Error: {error}")
+            await llm_client.close()
+            return 1
+
+        if args.mcp:
+            agent_loop, error = load_mcp_agent(
+                mcp_path=args.mcp,
+                quiet=args.quiet,
+                console=self.console,
+            )
+        else:
+            agent_loop, error = load_agent(
+                module=args.module,
+                quiet=args.quiet,
+                console=self.console,
+            )
+        if error:
+            self.console.print_error(f"Error: {error}")
+            await llm_client.close()
             return 1
         assert agent_loop is not None
 
@@ -378,20 +428,9 @@ class TestCommand:
         )
         if error:
             self.console.print_error(f"Error: {error}")
+            await llm_client.close()
             return 1
         assert rows is not None
-
-        llm_client, error = create_llm_client(
-            model=args.model,
-            api_key=args.api_key,
-            base_url=args.base_url,
-            quiet=args.quiet,
-            console=self.console,
-        )
-        if error:
-            self.console.print_error(f"Error: {error}")
-            return 1
-        assert llm_client is not None
 
         completion_params = build_completion_params(
             temperature=args.temperature,

@@ -16,7 +16,7 @@ from typing import Any, Callable, Dict, List, Optional, Protocol
 from osmosis_ai.rollout.core.base import RolloutAgentLoop, RolloutContext, RolloutResult
 from osmosis_ai.rollout.core.schemas import OpenAIFunctionToolSchema
 from osmosis_ai.rollout.eval.common.dataset import DatasetRow, dataset_row_to_request
-from osmosis_ai.rollout.eval.common.errors import ToolValidationError
+from osmosis_ai.rollout.eval.common.errors import SystemicProviderError, ToolValidationError
 
 logger = logging.getLogger(__name__)
 
@@ -55,6 +55,8 @@ class LocalBatchResult:
     failed: int
     total_duration_ms: float
     total_tokens: int
+    stopped_early: bool = False
+    stop_reason: Optional[str] = None
 
 
 TOOL_NAME_PATTERN = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
@@ -178,8 +180,26 @@ class LocalRolloutRunner:
                 duration_ms=(time.monotonic() - overall_start) * 1000,
             )
 
+        except SystemicProviderError as e:
+            # Preserve partial timing/token usage so callers can report
+            # accurate stats for the failing run.
+            try:
+                metrics = self.llm_client.get_metrics()
+                tokens = (
+                    int(getattr(metrics, "prompt_tokens", 0))
+                    + int(getattr(metrics, "response_tokens", 0))
+                )
+            except Exception:
+                tokens = 0
+            setattr(e, "duration_ms", (time.monotonic() - overall_start) * 1000)
+            setattr(e, "tokens", tokens)
+            raise
+
         except Exception as e:
-            logger.exception("Error running row %d", row_index)
+            if logger.isEnabledFor(logging.DEBUG):
+                logger.exception("Error running row %d", row_index)
+            else:
+                logger.error("Error running row %d: %s", row_index, e)
             return LocalRunResult(
                 row_index=row_index,
                 success=False,
@@ -201,15 +221,38 @@ class LocalRolloutRunner:
         """Run multiple rows sequentially."""
         results: List[LocalRunResult] = []
         total_start = time.monotonic()
+        stopped_early = False
+        stop_reason: Optional[str] = None
 
         for i, row in enumerate(rows):
             row_index = start_index + i
-            result = await self.run_single(
-                row=row,
-                row_index=row_index,
-                max_turns=max_turns,
-                completion_params=completion_params,
-            )
+            row_start = time.monotonic()
+            try:
+                result = await self.run_single(
+                    row=row,
+                    row_index=row_index,
+                    max_turns=max_turns,
+                    completion_params=completion_params,
+                )
+            except SystemicProviderError as e:
+                duration_ms = getattr(e, "duration_ms", None)
+                if duration_ms is None:
+                    duration_ms = (time.monotonic() - row_start) * 1000
+                tokens = int(getattr(e, "tokens", 0))
+                result = LocalRunResult(
+                    row_index=row_index,
+                    success=False,
+                    error=str(e),
+                    duration_ms=float(duration_ms),
+                    token_usage={"total_tokens": tokens} if tokens else {},
+                )
+                results.append(result)
+                if on_progress:
+                    on_progress(i + 1, len(rows), result)
+                stopped_early = True
+                stop_reason = str(e)
+                break
+
             results.append(result)
 
             if on_progress:
@@ -226,6 +269,8 @@ class LocalRolloutRunner:
             failed=failed,
             total_duration_ms=(time.monotonic() - total_start) * 1000,
             total_tokens=total_tokens,
+            stopped_early=stopped_early,
+            stop_reason=stop_reason,
         )
 
 __all__ = [

@@ -9,6 +9,7 @@ from osmosis_ai.rollout.eval.evaluation.eval_fn import (
 from osmosis_ai.rollout.eval.evaluation.report import format_eval_report, pass_at_k
 from osmosis_ai.rollout.eval.evaluation.runner import (
     EvalEvalSummary,
+    EvalModelSummary,
     EvalResult,
     EvalRowResult,
     EvalRunResult,
@@ -23,6 +24,7 @@ __all__ = [
     "EvalRunResult",
     "EvalRowResult",
     "EvalEvalSummary",
+    "EvalModelSummary",
     "EvalResult",
     "EvalRunner",
     "pass_at_k",

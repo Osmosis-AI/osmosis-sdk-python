@@ -19,6 +19,8 @@ from osmosis_ai.rollout.eval.common.cli import (
     format_duration,
     load_agent,
     load_dataset_rows,
+    load_mcp_agent,
+    verify_llm_client,
 )
 
 if TYPE_CHECKING:
@@ -42,10 +44,20 @@ class EvalCommand:
             "-m",
             "--module",
             dest="module",
-            required=True,
+            default=None,
             help=(
                 "Module path to the agent loop in format 'module:attribute'. "
                 "Example: 'my_agent:MyAgentLoop'."
+            ),
+        )
+
+        parser.add_argument(
+            "--mcp",
+            dest="mcp",
+            default=None,
+            help=(
+                "Path to MCP tools directory (must contain main.py with a FastMCP instance). "
+                "Mutually exclusive with -m/--module."
             ),
         )
 
@@ -135,6 +147,30 @@ class EvalCommand:
         )
 
         parser.add_argument(
+            "--baseline-model",
+            dest="baseline_model",
+            default=None,
+            help=(
+                "Baseline model for comparison. Runs the same evaluation with "
+                "a second model and reports per-model statistics."
+            ),
+        )
+
+        parser.add_argument(
+            "--baseline-base-url",
+            dest="baseline_base_url",
+            default=None,
+            help="Base URL for the baseline model's API endpoint.",
+        )
+
+        parser.add_argument(
+            "--baseline-api-key",
+            dest="baseline_api_key",
+            default=None,
+            help="API key for the baseline model provider.",
+        )
+
+        parser.add_argument(
             "--output",
             "-o",
             dest="output",
@@ -187,6 +223,10 @@ class EvalCommand:
         return asyncio.run(self._run_async(args))
 
     def _validate_args(self, args: argparse.Namespace) -> Optional[str]:
+        if args.module and args.mcp:
+            return "--module and --mcp are mutually exclusive."
+        if not args.module and not args.mcp:
+            return "Either --module (-m) or --mcp is required."
         if args.n_runs < 1:
             return "--n must be >= 1."
         if args.batch_size < 1:
@@ -197,6 +237,10 @@ class EvalCommand:
             return "--offset must be >= 0."
         if args.limit is not None and args.limit < 1:
             return "--limit must be >= 1."
+        if args.baseline_base_url and not args.baseline_model:
+            return "--baseline-base-url requires --baseline-model."
+        if args.baseline_api_key and not args.baseline_model:
+            return "--baseline-api-key requires --baseline-model."
         return None
 
     def _print_header(self, args: argparse.Namespace) -> None:
@@ -210,6 +254,10 @@ class EvalCommand:
             self.console.print(f"Model: {args.model}")
         else:
             self.console.print(f"Model: {args.model}")
+        if args.baseline_model:
+            if args.baseline_base_url:
+                self.console.print(f"Baseline endpoint: {args.baseline_base_url}")
+            self.console.print(f"Baseline model: {args.baseline_model}")
         self.console.print()
 
     def _load_eval_fns(
@@ -235,29 +283,37 @@ class EvalCommand:
         if not args.output:
             return
 
-        output_data = {
-            "config": {
-                "model": args.model,
-                "n_runs": args.n_runs,
-                "pass_threshold": args.pass_threshold,
-                "eval_fns": args.eval_fns,
+        config: Dict[str, Any] = {
+            "model": args.model,
+            "n_runs": args.n_runs,
+            "pass_threshold": args.pass_threshold,
+            "eval_fns": args.eval_fns,
+        }
+        if args.baseline_model:
+            config["baseline_model"] = args.baseline_model
+
+        summary: Dict[str, Any] = {
+            "total_rows": result.total_rows,
+            "total_runs": result.total_runs,
+            "stopped_early": result.stopped_early,
+            **({"stop_reason": result.stop_reason} if result.stop_reason else {}),
+            "eval_fns": {
+                name: {
+                    "mean": s.mean,
+                    "std": s.std,
+                    "min": s.min,
+                    "max": s.max,
+                    **{f"pass_at_{k}": v for k, v in s.pass_at_k.items()},
+                }
+                for name, s in result.eval_summaries.items()
             },
-            "summary": {
-                "total_rows": result.total_rows,
-                "total_runs": result.total_runs,
-                "eval_fns": {
-                    name: {
-                        "mean": summary.mean,
-                        "std": summary.std,
-                        "min": summary.min,
-                        "max": summary.max,
-                        **{f"pass_at_{k}": v for k, v in summary.pass_at_k.items()},
-                    }
-                    for name, summary in result.eval_summaries.items()
-                },
-                "total_tokens": result.total_tokens,
-                "total_duration_ms": result.total_duration_ms,
-            },
+            "total_tokens": result.total_tokens,
+            "total_duration_ms": result.total_duration_ms,
+        }
+
+        output_data: Dict[str, Any] = {
+            "config": config,
+            "summary": summary,
             "rows": [
                 {
                     "row_index": row.row_index,
@@ -268,6 +324,7 @@ class EvalCommand:
                             "scores": run.scores,
                             "duration_ms": run.duration_ms,
                             "tokens": run.tokens,
+                            **({"model_tag": run.model_tag} if run.model_tag else {}),
                             **({"error": run.error} if run.error else {}),
                         }
                         for run in row.runs
@@ -276,6 +333,28 @@ class EvalCommand:
                 for row in result.rows
             ],
         }
+
+        if result.model_summaries:
+            output_data["model_summaries"] = [
+                {
+                    "model": ms.model,
+                    "model_tag": ms.model_tag,
+                    "total_runs": ms.total_runs,
+                    "total_tokens": ms.total_tokens,
+                    "total_duration_ms": ms.total_duration_ms,
+                    "eval_fns": {
+                        name: {
+                            "mean": s.mean,
+                            "std": s.std,
+                            "min": s.min,
+                            "max": s.max,
+                            **{f"pass_at_{k}": v for k, v in s.pass_at_k.items()},
+                        }
+                        for name, s in ms.eval_summaries.items()
+                    },
+                }
+                for ms in result.model_summaries
+            ]
 
         output_path = Path(args.output)
         output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -296,13 +375,39 @@ class EvalCommand:
 
         self._print_header(args)
 
-        agent_loop, error = load_agent(
-            module=args.module,
+        llm_client, error = create_llm_client(
+            model=args.model,
+            api_key=args.api_key,
+            base_url=args.base_url,
             quiet=args.quiet,
             console=self.console,
         )
         if error:
             self.console.print_error(f"Error: {error}")
+            return 1
+        assert llm_client is not None
+
+        error = await verify_llm_client(llm_client, args.quiet, self.console)
+        if error:
+            self.console.print_error(f"Error: {error}")
+            await llm_client.close()
+            return 1
+
+        if args.mcp:
+            agent_loop, error = load_mcp_agent(
+                mcp_path=args.mcp,
+                quiet=args.quiet,
+                console=self.console,
+            )
+        else:
+            agent_loop, error = load_agent(
+                module=args.module,
+                quiet=args.quiet,
+                console=self.console,
+            )
+        if error:
+            self.console.print_error(f"Error: {error}")
+            await llm_client.close()
             return 1
         assert agent_loop is not None
 
@@ -317,31 +422,44 @@ class EvalCommand:
         )
         if error:
             self.console.print_error(f"Error: {error}")
+            await llm_client.close()
             return 1
         assert rows is not None
 
         eval_fns, error = self._load_eval_fns(args)
         if error:
             self.console.print_error(f"Error: {error}")
+            await llm_client.close()
             return 1
         assert eval_fns is not None
-
-        llm_client, error = create_llm_client(
-            model=args.model,
-            api_key=args.api_key,
-            base_url=args.base_url,
-            quiet=args.quiet,
-            console=self.console,
-        )
-        if error:
-            self.console.print_error(f"Error: {error}")
-            return 1
-        assert llm_client is not None
 
         completion_params = build_completion_params(
             temperature=args.temperature,
             max_tokens=args.max_tokens,
         )
+
+        # Create optional baseline LLM client
+        baseline_llm_client = None
+        if args.baseline_model:
+            baseline_llm_client, error = create_llm_client(
+                model=args.baseline_model,
+                api_key=args.baseline_api_key,
+                base_url=args.baseline_base_url,
+                quiet=args.quiet,
+                console=self.console,
+            )
+            if error:
+                self.console.print_error(f"Error (baseline): {error}")
+                await llm_client.close()
+                return 1
+            assert baseline_llm_client is not None
+
+            error = await verify_llm_client(baseline_llm_client, args.quiet, self.console)
+            if error:
+                self.console.print_error(f"Error (baseline): {error}")
+                await baseline_llm_client.close()
+                await llm_client.close()
+                return 1
 
         from osmosis_ai.rollout.eval.evaluation.runner import EvalRunner
 
@@ -350,6 +468,7 @@ class EvalCommand:
             llm_client=llm_client,
             eval_fns=eval_fns,
             debug=args.debug,
+            baseline_llm_client=baseline_llm_client,
         )
 
         def on_progress(current: int, total: int, result: "EvalRunResult") -> None:
@@ -359,6 +478,10 @@ class EvalCommand:
             status_style = "green" if result.success else "red"
             status = "OK" if result.success else "FAILED"
             duration = format_duration(result.duration_ms)
+
+            tag_prefix = ""
+            if result.model_tag:
+                tag_prefix = f"[{result.model_tag}] "
 
             scores_str = ""
             if result.success and result.scores:
@@ -373,7 +496,7 @@ class EvalCommand:
 
             status_styled = self.console.format_styled(status, status_style)
             self.console.print(
-                f"[{current}/{total}] {status_styled} "
+                f"[{current}/{total}] {tag_prefix}{status_styled} "
                 f"({duration}, {result.tokens:,} tokens){scores_str}{error_suffix}"
             )
 
@@ -381,20 +504,36 @@ class EvalCommand:
             self.console.print()
             n_info = f" x{args.n_runs} runs" if args.n_runs > 1 else ""
             batch_info = f", batch_size={args.batch_size}" if args.batch_size > 1 else ""
-            self.console.print(f"Running evaluation ({len(rows)} rows{n_info}{batch_info})...")
+            model_info = " x2 models" if args.baseline_model else ""
+            self.console.print(
+                f"Running evaluation ({len(rows)} rows{n_info}{model_info}{batch_info})..."
+            )
 
         try:
             async with llm_client:
-                eval_result = await runner.run_eval(
-                    rows=rows,
-                    n_runs=args.n_runs,
-                    max_turns=args.max_turns,
-                    completion_params=completion_params if completion_params else None,
-                    pass_threshold=args.pass_threshold,
-                    on_progress=on_progress,
-                    start_index=args.offset,
-                    batch_size=args.batch_size,
-                )
+                if baseline_llm_client is not None:
+                    async with baseline_llm_client:
+                        eval_result = await runner.run_eval(
+                            rows=rows,
+                            n_runs=args.n_runs,
+                            max_turns=args.max_turns,
+                            completion_params=completion_params if completion_params else None,
+                            pass_threshold=args.pass_threshold,
+                            on_progress=on_progress,
+                            start_index=args.offset,
+                            batch_size=args.batch_size,
+                        )
+                else:
+                    eval_result = await runner.run_eval(
+                        rows=rows,
+                        n_runs=args.n_runs,
+                        max_turns=args.max_turns,
+                        completion_params=completion_params if completion_params else None,
+                        pass_threshold=args.pass_threshold,
+                        on_progress=on_progress,
+                        start_index=args.offset,
+                        batch_size=args.batch_size,
+                    )
         except Exception as e:
             self.console.print_error(f"Error during evaluation: {e}")
             if args.debug:
@@ -406,7 +545,7 @@ class EvalCommand:
         if not args.quiet:
             from osmosis_ai.rollout.eval.evaluation.report import format_eval_report
 
-            format_eval_report(eval_result, self.console)
+            format_eval_report(eval_result, self.console, model=args.model)
 
         self._write_output(args, eval_result)
         return 0
