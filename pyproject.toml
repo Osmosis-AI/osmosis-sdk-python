@@ -53,10 +53,14 @@ dev = [
     "fastmcp>=2.0.0",
 ]
 
-# Full installation with all optional features
+# Full installation with all optional features (union of server + mcp)
 full = [
-    "osmosis-ai[server]",
-    "osmosis-ai[mcp]",
+    "fastapi>=0.100.0,<1.0.0",
+    "uvicorn>=0.23.0,<1.0.0",
+    "pydantic-settings>=2.0.0,<3.0.0",
+    "pyarrow>=14.0.0",
+    "rich>=13.0.0",
+    "fastmcp>=2.0.0",
 ]
 
 [project.urls]

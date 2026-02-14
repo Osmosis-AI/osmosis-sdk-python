@@ -374,8 +374,9 @@ class EvalRunner:
                         current += 1
                         if on_progress:
                             on_progress(current, total, result)
-                        stopped_early = True
-                        stop_reason = str(e)
+                        if current < total:
+                            stopped_early = True
+                            stop_reason = str(e)
                         break
 
                     row_result.runs.append(result)
@@ -385,8 +386,9 @@ class EvalRunner:
                         on_progress(current, total, result)
 
                     if not result.success:
-                        stopped_early = True
-                        stop_reason = result.error
+                        if current < total:
+                            stopped_early = True
+                            stop_reason = result.error
                         break
 
                 if stopped_early:
