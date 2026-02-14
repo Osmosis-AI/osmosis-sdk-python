@@ -7,18 +7,36 @@ applies eval functions to each result, and aggregates statistics.
 from __future__ import annotations
 
 import asyncio
+import inspect
 import logging
 import time
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from osmosis_ai.rollout.eval.evaluation.eval_fn import EvalFnWrapper
 from osmosis_ai.rollout.core.base import RolloutAgentLoop
 from osmosis_ai.rollout.eval.common.dataset import DatasetRow
 from osmosis_ai.rollout.eval.common.llm_client import ExternalLLMClient
+from osmosis_ai.rollout.eval.common.errors import SystemicProviderError
 from osmosis_ai.rollout.eval.common.runner import LocalRolloutRunner
 
 logger = logging.getLogger(__name__)
+
+
+def _extract_systemic_error_metrics(
+    e: SystemicProviderError,
+    fallback_started_at: float,
+) -> tuple[float, int]:
+    """Extract (duration_ms, tokens) from a systemic error with sane fallbacks."""
+    duration_ms = getattr(e, "duration_ms", None)
+    if duration_ms is None:
+        duration_ms = (time.monotonic() - fallback_started_at) * 1000
+
+    tokens = getattr(e, "tokens", None)
+    if tokens is None:
+        tokens = 0
+
+    return float(duration_ms), int(tokens)
 
 
 @dataclass
@@ -40,6 +58,7 @@ class EvalRunResult:
     duration_ms: float = 0.0
     tokens: int = 0
     error: Optional[str] = None
+    model_tag: Optional[str] = None
 
 
 @dataclass
@@ -75,6 +94,27 @@ class EvalEvalSummary:
 
 
 @dataclass
+class EvalModelSummary:
+    """Per-model summary (comparison mode only).
+
+    Attributes:
+        model: Model identifier string.
+        model_tag: "primary" or "baseline".
+        eval_summaries: Per-eval-function summary statistics for this model.
+        total_runs: Number of runs for this model.
+        total_tokens: Total tokens consumed by this model.
+        total_duration_ms: Total wall time for this model's runs.
+    """
+
+    model: str
+    model_tag: str
+    eval_summaries: Dict[str, EvalEvalSummary]
+    total_runs: int
+    total_tokens: int
+    total_duration_ms: float
+
+
+@dataclass
 class EvalResult:
     """Full evaluation result with per-row data and aggregated summaries.
 
@@ -87,6 +127,7 @@ class EvalResult:
         total_duration_ms: Total wall time.
         n_runs: Number of runs per row.
         pass_threshold: Score threshold for pass@k.
+        model_summaries: Per-model summaries (comparison mode only).
     """
 
     rows: List[EvalRowResult]
@@ -97,6 +138,9 @@ class EvalResult:
     total_duration_ms: float
     n_runs: int
     pass_threshold: float
+    stopped_early: bool = False
+    stop_reason: Optional[str] = None
+    model_summaries: Optional[List[EvalModelSummary]] = None
 
 
 class EvalRunner:
@@ -110,6 +154,8 @@ class EvalRunner:
         debug: bool = False,
         debug_dir: Optional[str] = None,
         llm_client_factory: Optional[Callable[[], Any]] = None,
+        baseline_llm_client: Optional[ExternalLLMClient] = None,
+        baseline_llm_client_factory: Optional[Callable[[], Any]] = None,
     ) -> None:
         self.agent_loop = agent_loop
         self.llm_client = llm_client
@@ -126,12 +172,38 @@ class EvalRunner:
             request_metadata={"execution_mode": "eval"},
         )
 
+        # Baseline model support (comparison mode)
+        self._baseline_llm_client = baseline_llm_client
+        self._baseline_llm_client_factory = (
+            baseline_llm_client_factory or self._default_baseline_llm_client_factory
+        )
+        self._baseline_rollout_runner: Optional[LocalRolloutRunner] = None
+        if baseline_llm_client is not None:
+            self._baseline_rollout_runner = LocalRolloutRunner(
+                agent_loop=agent_loop,
+                llm_client=baseline_llm_client,
+                debug=debug,
+                debug_dir=debug_dir,
+                rollout_id_prefix="eval-baseline",
+                request_metadata={"execution_mode": "eval", "model_tag": "baseline"},
+            )
+
     def _default_llm_client_factory(self) -> ExternalLLMClient:
         """Create a new ExternalLLMClient from the original client's config."""
         return ExternalLLMClient(
-            model=self.llm_client.model,
+            model=self.llm_client.display_name,
             api_key=self.llm_client._api_key,
             api_base=self.llm_client._api_base,
+        )
+
+    def _default_baseline_llm_client_factory(self) -> ExternalLLMClient:
+        """Create a new ExternalLLMClient from the baseline client's config."""
+        if self._baseline_llm_client is None:
+            raise RuntimeError("No baseline LLM client configured")
+        return ExternalLLMClient(
+            model=self._baseline_llm_client.display_name,
+            api_key=self._baseline_llm_client._api_key,
+            api_base=self._baseline_llm_client._api_base,
         )
 
     def _create_rollout_runner(self) -> LocalRolloutRunner:
@@ -149,6 +221,22 @@ class EvalRunner:
             request_metadata={"execution_mode": "eval"},
         )
 
+    def _create_baseline_rollout_runner(self) -> LocalRolloutRunner:
+        """Create a new LocalRolloutRunner with a fresh baseline LLM client."""
+        return LocalRolloutRunner(
+            agent_loop=self.agent_loop,
+            llm_client=self._baseline_llm_client_factory(),
+            debug=self.debug,
+            debug_dir=self.debug_dir,
+            rollout_id_prefix="eval-baseline",
+            request_metadata={"execution_mode": "eval", "model_tag": "baseline"},
+        )
+
+    @property
+    def has_baseline(self) -> bool:
+        """Whether a baseline model is configured for comparison."""
+        return self._baseline_llm_client is not None
+
     async def run_single(
         self,
         row: DatasetRow,
@@ -157,6 +245,7 @@ class EvalRunner:
         max_turns: int = 10,
         completion_params: Optional[Dict[str, Any]] = None,
         runner: Optional[LocalRolloutRunner] = None,
+        model_tag: Optional[str] = None,
     ) -> EvalRunResult:
         """Run agent once on a row and apply all eval functions.
 
@@ -167,20 +256,42 @@ class EvalRunner:
             max_turns: Max agent turns.
             completion_params: LLM sampling parameters.
             runner: Optional runner instance for concurrent execution.
+            model_tag: "primary", "baseline", or None for single-model mode.
 
         Returns:
             EvalRunResult with scores from all eval functions.
         """
-        # Run the agent
-        rollout_runner = runner or self._rollout_runner
-        test_result = await rollout_runner.run_single(
-            row=row,
-            row_index=row_index,
-            max_turns=max_turns,
-            completion_params=completion_params,
-            rollout_id=f"eval-{row_index}-run-{run_index}",
-            request_metadata={"run_index": run_index},
-        )
+        # Run the agent — select runner based on model_tag
+        if runner is not None:
+            rollout_runner = runner
+        elif model_tag == "baseline" and self._baseline_rollout_runner is not None:
+            rollout_runner = self._baseline_rollout_runner
+        else:
+            rollout_runner = self._rollout_runner
+        # Include model_tag in rollout ID so primary and baseline runs don't
+        # collide (debug traces are written as {rollout_id}.jsonl).
+        if model_tag:
+            rollout_id = f"eval-{row_index}-run-{run_index}-{model_tag}"
+        else:
+            rollout_id = f"eval-{row_index}-run-{run_index}"
+        run_start = time.monotonic()
+        try:
+            test_result = await rollout_runner.run_single(
+                row=row,
+                row_index=row_index,
+                max_turns=max_turns,
+                completion_params=completion_params,
+                rollout_id=rollout_id,
+                request_metadata={"run_index": run_index},
+            )
+        except SystemicProviderError as e:
+            duration_ms, tokens = _extract_systemic_error_metrics(
+                e,
+                fallback_started_at=run_start,
+            )
+            setattr(e, "duration_ms", duration_ms)
+            setattr(e, "tokens", tokens)
+            raise
 
         if not test_result.success or test_result.result is None:
             return EvalRunResult(
@@ -189,6 +300,7 @@ class EvalRunner:
                 duration_ms=test_result.duration_ms,
                 tokens=test_result.token_usage.get("total_tokens", 0),
                 error=test_result.error,
+                model_tag=model_tag,
             )
 
         # Apply eval functions
@@ -214,6 +326,7 @@ class EvalRunner:
             scores=scores,
             duration_ms=test_result.duration_ms,
             tokens=test_result.token_usage.get("total_tokens", 0),
+            model_tag=model_tag,
         )
 
     async def run_eval(
@@ -238,6 +351,9 @@ class EvalRunner:
             on_progress: Callback after each run: (current, total, result).
             start_index: Starting row index for numbering.
             batch_size: Number of concurrent runs. Default 1 (sequential).
+                For ``batch_size > 1``, runs execute in waves of at most
+                ``batch_size``. If any run in a wave fails, remaining waves
+                are skipped.
 
         Returns:
             EvalResult with all results and statistics.
@@ -256,48 +372,101 @@ class EvalRunner:
 
         total_start = time.monotonic()
         row_results: List[EvalRowResult] = []
-        total = len(rows) * n_runs
+        model_tags = (
+            ["primary", "baseline"] if self.has_baseline else [None]
+        )
+        total = len(rows) * n_runs * len(model_tags)
         current = 0
+        stopped_early = False
+        stop_reason: Optional[str] = None
 
         for i, row in enumerate(rows):
             row_index = start_index + i
             row_result = EvalRowResult(row_index=row_index)
 
             for run_idx in range(n_runs):
-                result = await self.run_single(
-                    row=row,
-                    row_index=row_index,
-                    run_index=run_idx,
-                    max_turns=max_turns,
-                    completion_params=completion_params,
-                )
-                row_result.runs.append(result)
-                current += 1
+                for tag in model_tags:
+                    run_start = time.monotonic()
+                    try:
+                        result = await self.run_single(
+                            row=row,
+                            row_index=row_index,
+                            run_index=run_idx,
+                            max_turns=max_turns,
+                            completion_params=completion_params,
+                            model_tag=tag,
+                        )
+                    except SystemicProviderError as e:
+                        duration_ms, tokens = _extract_systemic_error_metrics(
+                            e,
+                            fallback_started_at=run_start,
+                        )
+                        result = EvalRunResult(
+                            run_index=run_idx,
+                            success=False,
+                            error=str(e),
+                            duration_ms=duration_ms,
+                            tokens=tokens,
+                            model_tag=tag,
+                        )
+                        row_result.runs.append(result)
+                        current += 1
+                        if on_progress:
+                            on_progress(current, total, result)
+                        if current < total:
+                            stopped_early = True
+                            stop_reason = str(e)
+                        break
 
-                if on_progress:
-                    on_progress(current, total, result)
+                    row_result.runs.append(result)
+                    current += 1
+
+                    if on_progress:
+                        on_progress(current, total, result)
+
+                if stopped_early:
+                    break
 
             row_results.append(row_result)
+            if stopped_early:
+                break
 
         total_duration_ms = (time.monotonic() - total_start) * 1000
         total_tokens = sum(
             run.tokens for row in row_results for run in row.runs
         )
 
-        # Compute eval summaries
-        eval_summaries = self._compute_summaries(
-            row_results, n_runs, pass_threshold
-        )
+        # Compute per-model summaries if baseline is configured
+        model_summaries: Optional[List[EvalModelSummary]] = None
+        if self.has_baseline:
+            model_summaries = self._compute_model_summaries(
+                row_results, n_runs, pass_threshold
+            )
+
+        # Top-level eval summaries: primary model only when baseline is present,
+        # so that the "official" summary is never polluted by baseline scores.
+        if self.has_baseline:
+            primary_rows = self._filter_runs_by_tag(row_results, "primary")
+            eval_summaries = self._compute_summaries(
+                primary_rows, n_runs, pass_threshold
+            )
+        else:
+            eval_summaries = self._compute_summaries(
+                row_results, n_runs, pass_threshold
+            )
 
         return EvalResult(
             rows=row_results,
             eval_summaries=eval_summaries,
-            total_rows=len(rows),
+            total_rows=len(row_results),
             total_runs=current,
             total_tokens=total_tokens,
             total_duration_ms=total_duration_ms,
             n_runs=n_runs,
             pass_threshold=pass_threshold,
+            stopped_early=stopped_early,
+            stop_reason=stop_reason,
+            model_summaries=model_summaries,
         )
 
     async def _run_eval_concurrent(
@@ -315,26 +484,70 @@ class EvalRunner:
 
         Creates a pool of LocalRolloutRunner instances (each with its own
         ExternalLLMClient) and dispatches runs concurrently, limited by
-        batch_size.
+        batch_size.  When a baseline model is configured, two separate pools
+        are created and the batch_size is split between them.
         """
         total_start = time.monotonic()
-        total = len(rows) * n_runs
+        model_tags: List[Optional[str]] = (
+            ["primary", "baseline"] if self.has_baseline else [None]
+        )
+        total = len(rows) * n_runs * len(model_tags)
         pool_size = min(batch_size, total)
 
-        # Build a runner pool — each runner has an independent LLM client
-        # so metrics and tool state don't collide across concurrent runs.
-        pool: asyncio.Queue[LocalRolloutRunner] = asyncio.Queue()
-        for _ in range(pool_size):
-            pool.put_nowait(self._create_rollout_runner())
+        # Build runner pools.  When baseline is configured, size pools to match
+        # the expected task distribution: work items alternate [primary, baseline,
+        # primary, ...], so each batch of N items contains ceil(N/2) primary and
+        # floor(N/2) baseline tasks.
+        if self.has_baseline:
+            primary_pool_size = max(1, (pool_size + 1) // 2)
+            baseline_pool_size = max(1, pool_size - primary_pool_size)
+        else:
+            primary_pool_size = pool_size
+            baseline_pool_size = 0
+
+        primary_runners = [self._create_rollout_runner() for _ in range(primary_pool_size)]
+        primary_pool: asyncio.Queue[LocalRolloutRunner] = asyncio.Queue()
+        for runner in primary_runners:
+            primary_pool.put_nowait(runner)
+
+        baseline_runners: List[LocalRolloutRunner] = []
+        baseline_pool: asyncio.Queue[LocalRolloutRunner] = asyncio.Queue()
+        if baseline_pool_size > 0:
+            baseline_runners = [self._create_baseline_rollout_runner() for _ in range(baseline_pool_size)]
+            for runner in baseline_runners:
+                baseline_pool.put_nowait(runner)
+
+        all_runners = primary_runners + baseline_runners
 
         completed = 0
+        stopped_early = False
+        stop_reason: Optional[str] = None
+        completed_results: List[Tuple[int, EvalRunResult]] = []
+
+        async def _close_runner_pool() -> None:
+            """Best-effort cleanup for per-runner LLM clients."""
+            for runner in all_runners:
+                close = getattr(runner.llm_client, "close", None)
+                if not callable(close):
+                    continue
+                try:
+                    maybe_awaitable = close()
+                    if inspect.isawaitable(maybe_awaitable):
+                        await maybe_awaitable
+                except Exception:
+                    logger.debug("Failed to close concurrent runner client", exc_info=True)
 
         async def _run_one(
             row: DatasetRow, row_index: int, run_index: int,
-        ) -> EvalRunResult:
+            model_tag: Optional[str],
+        ) -> Tuple[int, EvalRunResult]:
             nonlocal completed
-            runner = await pool.get()
+            runner: Optional[LocalRolloutRunner] = None
+            run_start = time.monotonic()
+            target_pool = baseline_pool if model_tag == "baseline" else primary_pool
             try:
+                runner = await target_pool.get()
+                run_start = time.monotonic()
                 result = await self.run_single(
                     row=row,
                     row_index=row_index,
@@ -342,59 +555,136 @@ class EvalRunner:
                     max_turns=max_turns,
                     completion_params=completion_params,
                     runner=runner,
+                    model_tag=model_tag,
                 )
                 completed += 1
                 if on_progress:
                     on_progress(completed, total, result)
-                return result
+                completed_results.append((row_index, result))
+                return row_index, result
+            except SystemicProviderError as e:
+                # Record the failed result, then re-raise so the batch
+                # loop can detect the systemic failure and stop early.
+                duration_ms, tokens = _extract_systemic_error_metrics(
+                    e,
+                    fallback_started_at=run_start,
+                )
+                result = EvalRunResult(
+                    run_index=run_index,
+                    success=False,
+                    error=str(e),
+                    duration_ms=duration_ms,
+                    tokens=tokens,
+                    model_tag=model_tag,
+                )
+                completed += 1
+                if on_progress:
+                    on_progress(completed, total, result)
+                completed_results.append((row_index, result))
+                raise
             finally:
-                pool.put_nowait(runner)
+                if runner is not None:
+                    target_pool.put_nowait(runner)
 
-        # Launch all runs; the pool size naturally limits concurrency.
-        coros = []
+        # Build work items: interleave primary/baseline per (row, run_idx)
+        work_items: List[Tuple[DatasetRow, int, int, Optional[str]]] = []
         for i, row in enumerate(rows):
             row_index = start_index + i
             for run_idx in range(n_runs):
-                coros.append(_run_one(row, row_index, run_idx))
+                for tag in model_tags:
+                    work_items.append((row, row_index, run_idx, tag))
 
-        results = await asyncio.gather(*coros)
+        try:
+            cursor = 0
+            while cursor < len(work_items):
+                batch = work_items[cursor:cursor + batch_size]
+                tasks: List[asyncio.Task[Tuple[int, EvalRunResult]]] = [
+                    asyncio.create_task(_run_one(row, row_index, run_idx, tag))
+                    for row, row_index, run_idx, tag in batch
+                ]
+
+                systemic_error: Optional[str] = None
+
+                try:
+                    for task in asyncio.as_completed(tasks):
+                        try:
+                            _row_index, result = await task
+                        except SystemicProviderError as e:
+                            # Record error but keep awaiting remaining
+                            # tasks in this batch so their results are collected.
+                            if systemic_error is None:
+                                systemic_error = str(e)
+                except Exception:
+                    # Unexpected error: cancel remaining in-flight tasks
+                    for t in tasks:
+                        if not t.done():
+                            t.cancel()
+                    await asyncio.gather(*tasks, return_exceptions=True)
+                    raise
+
+                cursor += len(batch)
+
+                if systemic_error is not None:
+                    if cursor < len(work_items):
+                        stopped_early = True
+                        stop_reason = systemic_error
+                    break
+        finally:
+            await _close_runner_pool()
 
         # Organise flat results back into per-row structure.
         row_results_map: Dict[int, EvalRowResult] = {}
-        for idx, (i, row) in enumerate(
-            (i, row)
-            for i, row in enumerate(rows)
-            for _ in range(n_runs)
-        ):
-            row_index = start_index + i
+        for row_index, run_result in completed_results:
             if row_index not in row_results_map:
                 row_results_map[row_index] = EvalRowResult(row_index=row_index)
-            row_results_map[row_index].runs.append(results[idx])
+            row_results_map[row_index].runs.append(run_result)
 
-        # Ensure deterministic ordering within each row.
+        # Ensure deterministic ordering within each row:
+        # sort by (model_tag, run_index) so primary runs come first.
+        tag_order = {"primary": 0, "baseline": 1}
         for row_result in row_results_map.values():
-            row_result.runs.sort(key=lambda r: r.run_index)
+            row_result.runs.sort(
+                key=lambda r: (tag_order.get(r.model_tag or "", -1), r.run_index)
+            )
 
-        row_results = [row_results_map[start_index + i] for i in range(len(rows))]
+        row_results = [row_results_map[i] for i in sorted(row_results_map.keys())]
 
         total_duration_ms = (time.monotonic() - total_start) * 1000
         total_tokens = sum(
             run.tokens for row in row_results for run in row.runs
         )
 
-        eval_summaries = self._compute_summaries(
-            row_results, n_runs, pass_threshold
-        )
+        # Compute per-model summaries if baseline is configured
+        model_summaries: Optional[List[EvalModelSummary]] = None
+        if self.has_baseline:
+            model_summaries = self._compute_model_summaries(
+                row_results, n_runs, pass_threshold
+            )
+
+        # Top-level eval summaries: primary model only when baseline is present,
+        # so that the "official" summary is never polluted by baseline scores.
+        if self.has_baseline:
+            primary_rows = self._filter_runs_by_tag(row_results, "primary")
+            eval_summaries = self._compute_summaries(
+                primary_rows, n_runs, pass_threshold
+            )
+        else:
+            eval_summaries = self._compute_summaries(
+                row_results, n_runs, pass_threshold
+            )
 
         return EvalResult(
             rows=row_results,
             eval_summaries=eval_summaries,
-            total_rows=len(rows),
-            total_runs=total,
+            total_rows=len(row_results),
+            total_runs=len(completed_results),
             total_tokens=total_tokens,
             total_duration_ms=total_duration_ms,
             n_runs=n_runs,
             pass_threshold=pass_threshold,
+            stopped_early=stopped_early,
+            stop_reason=stop_reason,
+            model_summaries=model_summaries,
         )
 
     def _compute_summaries(
@@ -443,14 +733,16 @@ class EvalRunner:
                 for k in [1, 3, 5, 10]:
                     if k > n_runs:
                         break
-                    # Compute pass@k per row, then average
+                    # Compute pass@k per row, then average.
+                    # Use n_runs (not len(row.runs)) so that missing runs
+                    # (e.g. from early stopping) are treated as failures.
                     row_pass_at_k: List[float] = []
                     for row in row_results:
                         c = sum(
                             1 for run in row.runs
                             if run.scores.get(name, 0.0) >= pass_threshold
                         )
-                        n = len(row.runs)
+                        n = max(len(row.runs), n_runs)
                         if n > 0:
                             row_pass_at_k.append(pass_at_k(n, c, k))
                     if row_pass_at_k:
@@ -460,8 +752,52 @@ class EvalRunner:
 
         return summaries
 
+    def _filter_runs_by_tag(
+        self,
+        row_results: List[EvalRowResult],
+        model_tag: str,
+    ) -> List[EvalRowResult]:
+        """Build row results containing only runs matching the given model_tag."""
+        filtered: List[EvalRowResult] = []
+        for row in row_results:
+            tagged_runs = [r for r in row.runs if r.model_tag == model_tag]
+            if tagged_runs:
+                filtered.append(EvalRowResult(
+                    row_index=row.row_index,
+                    runs=tagged_runs,
+                ))
+        return filtered
+
+    def _compute_model_summaries(
+        self,
+        row_results: List[EvalRowResult],
+        n_runs: int,
+        pass_threshold: float,
+    ) -> List[EvalModelSummary]:
+        """Compute per-model summary statistics for comparison mode."""
+        summaries: List[EvalModelSummary] = []
+        for tag in ("primary", "baseline"):
+            filtered = self._filter_runs_by_tag(row_results, tag)
+            eval_summaries = self._compute_summaries(filtered, n_runs, pass_threshold)
+            all_runs = [run for row in filtered for run in row.runs]
+            model_name = ""
+            if tag == "primary":
+                model_name = self.llm_client.display_name
+            elif self._baseline_llm_client is not None:
+                model_name = self._baseline_llm_client.display_name
+            summaries.append(EvalModelSummary(
+                model=model_name,
+                model_tag=tag,
+                eval_summaries=eval_summaries,
+                total_runs=len(all_runs),
+                total_tokens=sum(r.tokens for r in all_runs),
+                total_duration_ms=sum(r.duration_ms for r in all_runs),
+            ))
+        return summaries
+
 __all__ = [
     "EvalEvalSummary",
+    "EvalModelSummary",
     "EvalResult",
     "EvalRowResult",
     "EvalRunResult",

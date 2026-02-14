@@ -1,6 +1,6 @@
 # Eval Mode
 
-Evaluate your trained models by running `RolloutAgentLoop` implementations against datasets with custom eval functions, statistical analysis, and pass@k metrics.
+Evaluate your trained models by running agent implementations against datasets with custom eval functions, statistical analysis, and pass@k metrics.
 
 ## Overview
 
@@ -9,12 +9,13 @@ Eval mode is designed for **evaluating trained models**. Connect to any OpenAI-c
 Key capabilities:
 
 - **Benchmark trained models** against eval functions by connecting to serving endpoints
+- **Two agent modes**: provide a `RolloutAgentLoop` with `-m`, or load MCP tools directly with `--mcp` (for git-sync users)
 - Run multiple trials per row for pass@k analysis
 - Use existing `@osmosis_reward` functions or full-context eval functions
 - Get statistical summaries (mean, std, min, max) per eval function
 - Compare model quality across checkpoints or configurations
 - **Concurrent execution** with `--batch-size` for faster benchmarks
-- Optionally use LiteLLM providers (e.g., `openai/gpt-5-mini`) as comparison baselines
+- Use LiteLLM providers (e.g., `openai/gpt-5-mini`) as the primary model
 
 > Command split (development-stage breaking change):  
 > `osmosis eval-rubric` is for hosted rubric evaluation, while `osmosis eval` is for agent eval mode documented here.
@@ -47,19 +48,76 @@ osmosis eval -m my_agent:MyAgentLoop -d data.jsonl \
     --base-url http://localhost:8000/v1
 ```
 
-### Comparison Baselines with LiteLLM
+### Git-Sync Users (MCP Tools)
 
-You can also benchmark against external LLM providers using [LiteLLM](https://docs.litellm.ai/docs/providers) format for comparison:
+If you use the **git-sync** workflow and provide MCP tools (`@mcp.tool()`) instead of a `RolloutAgentLoop`, use `--mcp` to point at your MCP directory. The SDK automatically loads all registered tools and runs a standard agent loop — no AgentLoop code required.
 
 ```bash
-# Compare against GPT-4o as a baseline
-osmosis eval -m my_agent:MyAgentLoop -d data.jsonl \
-    --eval-fn rewards:compute_reward --model openai/gpt-5-mini
+# Install MCP support
+pip install osmosis-ai[mcp]
 
-# Compare against Claude
-osmosis eval -m my_agent:MyAgentLoop -d data.jsonl \
-    --eval-fn rewards:compute_reward --model anthropic/claude-sonnet-4-5
+# Evaluate using MCP tools directory
+osmosis eval --mcp ./mcp -d data.jsonl \
+    --eval-fn reward_fn:compute_reward \
+    --model openai/gpt-5-mini
+
+# Same options work: multiple eval functions, pass@k, batch, etc.
+osmosis eval --mcp ./mcp -d data.jsonl \
+    --eval-fn rewards:exact_match \
+    --eval-fn rewards:partial_match \
+    --model my-finetuned-model --base-url http://localhost:8000/v1 \
+    --n 5 --batch-size 5
 ```
+
+The `--mcp` directory must contain a `main.py` that creates a `FastMCP` instance with registered tools:
+
+```python
+# mcp/main.py
+from fastmcp import FastMCP
+
+mcp = FastMCP("my_tools")
+
+@mcp.tool()
+def add(a: float, b: float) -> str:
+    """Add two numbers."""
+    return str(a + b)
+
+@mcp.tool()
+def lookup(key: str) -> str:
+    """Look up a value by key."""
+    data = {"pi": "3.14159", "e": "2.71828"}
+    return data.get(key, "not found")
+```
+
+> **Note:** `--mcp` and `-m/--module` are mutually exclusive. Use one or the other.
+
+### Baseline Model Comparison
+
+Compare your trained model against a baseline model. The SDK runs both models on the same dataset and reports per-model summary statistics.
+
+```bash
+# Compare trained model vs GPT-5-mini baseline
+osmosis eval -m my_agent:MyAgentLoop -d data.jsonl \
+    --eval-fn rewards:compute_reward \
+    --model my-finetuned-model --base-url http://localhost:8000/v1 \
+    --baseline-model openai/gpt-5-mini
+
+# Compare two serving endpoints
+osmosis eval -m my_agent:MyAgentLoop -d data.jsonl \
+    --eval-fn rewards:compute_reward \
+    --model my-model-v2 --base-url http://localhost:8000/v1 \
+    --baseline-model my-model-v1 --baseline-base-url http://localhost:8001/v1
+
+# Baseline with explicit API key
+osmosis eval -m my_agent:MyAgentLoop -d data.jsonl \
+    --eval-fn rewards:compute_reward \
+    --model my-finetuned-model --base-url http://localhost:8000/v1 \
+    --baseline-model anthropic/claude-sonnet-4-5 --baseline-api-key $ANTHROPIC_API_KEY
+```
+
+When a baseline is provided, the report includes **per-model summaries** with separate mean/std/min/max for each model, so you can compare their performance side by side.
+
+You can also use LiteLLM providers (e.g., `openai/gpt-5-mini`, `anthropic/claude-sonnet-4-5`) as either the primary or baseline model. See [LiteLLM Providers](https://docs.litellm.ai/docs/providers) for supported providers.
 
 ### Concurrent Execution
 
@@ -108,32 +166,44 @@ client = ExternalLLMClient(
     api_base="http://localhost:8000/v1",
 )
 
+# Optional: baseline model for comparison
+baseline_client = ExternalLLMClient("openai/gpt-5-mini")
+
 # Load eval functions
 eval_fns = load_eval_fns(["rewards:exact_match", "rewards:partial_match"])
 
-# Create runner
+# Create runner (with optional baseline)
 runner = EvalRunner(
     agent_loop=MyAgentLoop(),
     llm_client=client,
     eval_fns=eval_fns,
+    baseline_llm_client=baseline_client,  # omit for single-model mode
 )
 
 # Run evaluation (batch_size=5 for concurrent execution)
 async with client:
-    result = await runner.run_eval(
-        rows=rows,
-        n_runs=5,
-        max_turns=10,
-        pass_threshold=0.5,
-        completion_params={"temperature": 0.7},
-        batch_size=5,
-    )
+    async with baseline_client:
+        result = await runner.run_eval(
+            rows=rows,
+            n_runs=5,
+            max_turns=10,
+            pass_threshold=0.5,
+            completion_params={"temperature": 0.7},
+            batch_size=5,
+        )
 
 # Print results
 for name, summary in result.eval_summaries.items():
     print(f"{name}: mean={summary.mean:.3f}, std={summary.std:.3f}")
     for k, v in summary.pass_at_k.items():
         print(f"  pass@{k}: {v*100:.1f}%")
+
+# Print per-model summaries (when baseline is used)
+if result.model_summaries:
+    for ms in result.model_summaries:
+        print(f"\n[{ms.model_tag}] {ms.model}")
+        for name, summary in ms.eval_summaries.items():
+            print(f"  {name}: mean={summary.mean:.3f}, std={summary.std:.3f}")
 ```
 
 ---
@@ -249,10 +319,16 @@ osmosis eval [OPTIONS]
 
 | Option | Description |
 |--------|-------------|
-| `-m, --module MODULE` | Module path to agent loop (format: `module:attribute`) |
 | `-d, --dataset FILE` | Path to dataset file (.json, .jsonl, .parquet) |
 | `--eval-fn MODULE:FN` | Eval function path (can be specified multiple times) |
 | `--model MODEL` | Model to benchmark (see [Model Options](#model-options)) |
+
+### Agent Options (one required, mutually exclusive)
+
+| Option | Description |
+|--------|-------------|
+| `-m, --module MODULE` | Module path to agent loop (format: `module:attribute`). Use for remote-rollout users who implement `RolloutAgentLoop`. |
+| `--mcp DIR` | Path to MCP tools directory (must contain `main.py` with a `FastMCP` instance). Use for git-sync users who provide `@mcp.tool()` functions. Requires `pip install osmosis-ai[mcp]`. |
 
 ### Model Options
 
@@ -261,6 +337,14 @@ osmosis eval [OPTIONS]
 | `--model MODEL` | Required. Model name at the serving endpoint (e.g., `my-finetuned-model`), or LiteLLM provider format for baselines (e.g., `openai/gpt-5-mini`) |
 | `--base-url URL` | Base URL for the model serving endpoint (e.g., `http://localhost:8000/v1`). Use this to connect to trained model endpoints. |
 | `--api-key KEY` | API key for the endpoint or LLM provider (or use env var) |
+
+### Baseline Options (optional)
+
+| Option | Description |
+|--------|-------------|
+| `--baseline-model MODEL` | Baseline model for comparison. Runs the same evaluation with a second model and reports per-model summary statistics. |
+| `--baseline-base-url URL` | Base URL for the baseline model's API endpoint. Requires `--baseline-model`. |
+| `--baseline-api-key KEY` | API key for the baseline model provider. Requires `--baseline-model`. |
 
 ### Execution Options
 
@@ -291,6 +375,16 @@ osmosis eval -m my_agent:agent_loop -d data.jsonl \
     --eval-fn rewards:compute_reward \
     --model my-finetuned-model --base-url http://localhost:8000/v1
 
+# Git-sync: evaluate MCP tools without writing an AgentLoop
+osmosis eval --mcp ./mcp -d data.jsonl \
+    --eval-fn reward_fn:compute_reward \
+    --model openai/gpt-5-mini
+
+# Git-sync: MCP tools with trained model endpoint
+osmosis eval --mcp ./mcp -d data.jsonl \
+    --eval-fn rewards:compute_reward \
+    --model my-finetuned-model --base-url http://localhost:8000/v1
+
 # Multiple eval functions
 osmosis eval -m my_agent:agent_loop -d data.jsonl \
     --eval-fn rewards:exact_match \
@@ -307,10 +401,17 @@ osmosis eval -m my_agent:agent_loop -d data.jsonl \
     --eval-fn rewards:compute_reward --n 5 --pass-threshold 0.5 \
     --model my-finetuned-model --base-url http://localhost:8000/v1
 
-# Baseline comparison with external LLM, save results
+# Baseline comparison: trained model vs external LLM
 osmosis eval -m my_agent:agent_loop -d data.jsonl \
     --eval-fn rewards:compute_reward \
-    --model openai/gpt-5-mini -o results.json
+    --model my-finetuned-model --base-url http://localhost:8000/v1 \
+    --baseline-model openai/gpt-5-mini -o results.json
+
+# Baseline comparison: two serving endpoints
+osmosis eval -m my_agent:agent_loop -d data.jsonl \
+    --eval-fn rewards:compute_reward \
+    --model my-model-v2 --base-url http://localhost:8000/v1 \
+    --baseline-model my-model-v1 --baseline-base-url http://localhost:8001/v1
 
 # Concurrent execution (5 runs at a time)
 osmosis eval -m my_agent:agent_loop -d data.jsonl \
@@ -366,6 +467,8 @@ eval_result = await runner.run_eval(
 | `debug` | `bool` | `False` | Enable debug logging |
 | `debug_dir` | `Optional[str]` | `None` | Directory for debug logs |
 | `llm_client_factory` | `Optional[Callable]` | `None` | Factory to create LLM client instances for concurrent execution. If `None`, clones from the provided `llm_client`. |
+| `baseline_llm_client` | `Optional[ExternalLLMClient]` | `None` | Baseline LLM client for comparison mode. When provided, each row is evaluated with both the primary and baseline models. |
+| `baseline_llm_client_factory` | `Optional[Callable]` | `None` | Factory to create baseline LLM client instances for concurrent execution. If `None`, clones from the provided `baseline_llm_client`. |
 
 **Methods:**
 
@@ -392,6 +495,7 @@ class EvalRunResult:
     duration_ms: float          # Execution time in milliseconds
     tokens: int                 # Total tokens used
     error: Optional[str]        # Error message (if failed)
+    model_tag: Optional[str]    # "primary", "baseline", or None (single-model mode)
 ```
 
 ---
@@ -424,6 +528,7 @@ class EvalResult:
     total_duration_ms: float                         # Total wall time
     n_runs: int                                      # Runs per row
     pass_threshold: float                            # Score threshold for pass@k
+    model_summaries: Optional[List[EvalModelSummary]]  # Per-model stats (comparison mode)
 ```
 
 ---
@@ -440,6 +545,23 @@ class EvalEvalSummary:
     min: float                      # Minimum score
     max: float                      # Maximum score
     pass_at_k: Dict[int, float]     # k -> pass@k value (only when n > 1)
+```
+
+---
+
+### EvalModelSummary
+
+Per-model summary statistics (comparison mode only).
+
+```python
+@dataclass
+class EvalModelSummary:
+    model: str                                     # Model identifier
+    model_tag: str                                 # "primary" or "baseline"
+    eval_summaries: Dict[str, EvalEvalSummary]     # Per-eval statistics for this model
+    total_runs: int                                # Number of runs for this model
+    total_tokens: int                              # Total tokens consumed
+    total_duration_ms: float                       # Total wall time
 ```
 
 ---
@@ -483,7 +605,8 @@ When using `--output`, results are saved as JSON:
     "model": "my-finetuned-model",
     "n_runs": 5,
     "pass_threshold": 0.5,
-    "eval_fns": ["rewards:exact_match", "rewards:partial_match"]
+    "eval_fns": ["rewards:exact_match", "rewards:partial_match"],
+    "baseline_model": "openai/gpt-5-mini"
   },
   "summary": {
     "total_rows": 100,
@@ -523,13 +646,51 @@ When using `--output`, results are saved as JSON:
             "rewards:partial_match": 1.0
           },
           "duration_ms": 450,
-          "tokens": 200
+          "tokens": 200,
+          "model_tag": "primary"
+        },
+        {
+          "run_index": 0,
+          "success": true,
+          "scores": {
+            "rewards:exact_match": 0.0,
+            "rewards:partial_match": 0.7
+          },
+          "duration_ms": 380,
+          "tokens": 180,
+          "model_tag": "baseline"
         }
       ]
+    }
+  ],
+  "model_summaries": [
+    {
+      "model": "my-finetuned-model",
+      "model_tag": "primary",
+      "total_runs": 500,
+      "total_tokens": 350000,
+      "total_duration_ms": 130000,
+      "eval_summaries": {
+        "rewards:exact_match": { "mean": 0.82, "std": 0.38, "min": 0.0, "max": 1.0 },
+        "rewards:partial_match": { "mean": 0.91, "std": 0.15, "min": 0.4, "max": 1.0 }
+      }
+    },
+    {
+      "model": "openai/gpt-5-mini",
+      "model_tag": "baseline",
+      "total_runs": 500,
+      "total_tokens": 275000,
+      "total_duration_ms": 100500,
+      "eval_summaries": {
+        "rewards:exact_match": { "mean": 0.62, "std": 0.49, "min": 0.0, "max": 1.0 },
+        "rewards:partial_match": { "mean": 0.78, "std": 0.25, "min": 0.2, "max": 1.0 }
+      }
     }
   ]
 }
 ```
+
+> **Note:** The `model_tag` and `model_summaries` fields are only present when `--baseline-model` is used. In single-model mode, `model_tag` is omitted from run objects and the top-level `model_summaries` key is absent.
 
 ---
 
@@ -544,7 +705,10 @@ from osmosis_ai.rollout.eval.common import (
     ProviderError,
     ToolValidationError,
 )
-from osmosis_ai.rollout.eval.evaluation import EvalFnError
+from osmosis_ai.rollout.eval.evaluation import (
+    EvalFnError,
+    EvalModelSummary,
+)
 ```
 
 | Exception | Description |
@@ -573,7 +737,7 @@ See [Test Mode - Environment Variables](./test-mode.md#environment-variables) fo
 
 4. **Choose appropriate thresholds**: `--pass-threshold 1.0` (default) requires perfect scores. Use a lower threshold like `0.5` for partial-credit eval functions.
 
-5. **Compare against baselines**: Run the same benchmark with LiteLLM providers (e.g., `--model openai/gpt-5-mini`) to establish baseline performance.
+5. **Compare against baselines**: Use `--baseline-model` to run the same benchmark with a second model and get per-model summary statistics.
 
 6. **Reuse `@osmosis_reward` functions**: Existing reward functions work as eval functions in simple mode without modification.
 
@@ -589,4 +753,4 @@ See [Test Mode - Environment Variables](./test-mode.md#environment-variables) fo
 - [Architecture](./architecture.md) - System design overview
 - [API Reference](./api-reference.md) - Complete SDK API documentation
 - [Examples](./examples.md) - Working code examples
-- [LiteLLM Providers](https://docs.litellm.ai/docs/providers) - Supported LLM providers for baseline comparisons
+- [LiteLLM Providers](https://docs.litellm.ai/docs/providers) - Supported LLM providers

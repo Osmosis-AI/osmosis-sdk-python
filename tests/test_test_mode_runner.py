@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from typing import Any, Dict, List
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -222,6 +222,25 @@ class TestLocalTestRunner:
         assert client._tools is None  # should be cleared
 
     @pytest.mark.asyncio
+    async def test_run_single_logs_compact_error_without_traceback(self) -> None:
+        """Non-debug mode should log a compact error line only."""
+        client = MockTestLLMClient()
+        agent = MockAgentLoop(
+            tools=[create_sample_tool()],
+            run_error=RuntimeError("Test error"),
+        )
+        runner = LocalTestRunner(agent_loop=agent, llm_client=client)
+
+        with patch("osmosis_ai.rollout.eval.common.runner.logger") as mock_logger:
+            mock_logger.isEnabledFor.return_value = False
+            row = create_sample_row(0)
+            result = await runner.run_single(row, row_index=0)
+
+            assert result.success is False
+            mock_logger.exception.assert_not_called()
+            mock_logger.error.assert_called_once()
+
+    @pytest.mark.asyncio
     async def test_run_single_resets_metrics(self) -> None:
         """Test that metrics are reset before each run."""
         client = MockTestLLMClient()
@@ -373,6 +392,140 @@ class TestLocalTestRunner:
         assert progress_calls[0][2] == 100  # row_index for first row
         assert progress_calls[1][2] == 101
         assert progress_calls[2][2] == 102
+
+
+class TestSystemicProviderError:
+    """Tests for SystemicProviderError propagation and early batch termination."""
+
+    @pytest.mark.asyncio
+    async def test_run_single_propagates_systemic_error(self) -> None:
+        """SystemicProviderError should propagate through run_single."""
+        from osmosis_ai.rollout.eval.common.errors import SystemicProviderError
+
+        class SystemicAgent(MockAgentLoop):
+            async def run(self, ctx: RolloutContext) -> RolloutResult:
+                raise SystemicProviderError("Authentication failed")
+
+        client = MockTestLLMClient()
+        agent = SystemicAgent(tools=[create_sample_tool()])
+        runner = LocalTestRunner(agent_loop=agent, llm_client=client)
+
+        row = create_sample_row(0)
+        with pytest.raises(SystemicProviderError):
+            await runner.run_single(row, row_index=0)
+
+    @pytest.mark.asyncio
+    async def test_run_batch_stops_early_on_systemic_error(self) -> None:
+        """Batch should stop early when SystemicProviderError occurs."""
+        from osmosis_ai.rollout.eval.common.errors import SystemicProviderError
+
+        call_count = {"n": 0}
+
+        class SystemicAgent(MockAgentLoop):
+            async def run(self, ctx: RolloutContext) -> RolloutResult:
+                call_count["n"] += 1
+                raise SystemicProviderError("Authentication failed. Invalid API key.")
+
+        client = MockTestLLMClient()
+        agent = SystemicAgent(tools=[create_sample_tool()])
+        runner = LocalTestRunner(agent_loop=agent, llm_client=client)
+
+        rows = [create_sample_row(i) for i in range(5)]
+        result = await runner.run_batch(rows)
+
+        # Should stop after first row
+        assert result.stopped_early is True
+        assert result.stop_reason is not None
+        assert "Authentication failed" in result.stop_reason
+        assert result.total == 1  # only 1 result recorded
+        assert result.failed == 1
+        assert call_count["n"] == 1  # only 1 row was attempted
+
+    @pytest.mark.asyncio
+    async def test_run_batch_systemic_error_duration_is_per_row(self) -> None:
+        """Systemic error duration should measure only the failing row."""
+        from osmosis_ai.rollout.eval.common.errors import SystemicProviderError
+
+        class SequencedRunner(LocalTestRunner):
+            def __init__(self, *args: Any, **kwargs: Any) -> None:
+                super().__init__(*args, **kwargs)
+                self._calls = 0
+
+            async def run_single(
+                self,
+                row: DatasetRow,
+                row_index: int,
+                max_turns: int = 10,
+                completion_params: Dict[str, Any] | None = None,
+            ) -> LocalTestRunResult:
+                self._calls += 1
+                if self._calls == 1:
+                    return LocalTestRunResult(
+                        row_index=row_index,
+                        success=True,
+                        duration_ms=50.0,
+                        token_usage={"total_tokens": 0},
+                    )
+                raise SystemicProviderError("Authentication failed")
+
+        client = MockTestLLMClient()
+        agent = MockAgentLoop(tools=[create_sample_tool()])
+        runner = SequencedRunner(agent_loop=agent, llm_client=client)
+
+        rows = [create_sample_row(i) for i in range(3)]
+        with patch(
+            "osmosis_ai.rollout.eval.common.runner.time.monotonic",
+            side_effect=[100.0, 101.0, 105.0, 106.0, 110.0, 111.0],
+        ):
+            result = await runner.run_batch(rows)
+
+        assert result.stopped_early is True
+        assert len(result.results) == 2
+        assert result.results[1].duration_ms == pytest.approx(1000.0)
+
+    @pytest.mark.asyncio
+    async def test_run_batch_normal_errors_dont_stop_early(self) -> None:
+        """Regular exceptions should not stop the batch early."""
+        class FailingAgent(MockAgentLoop):
+            async def run(self, ctx: RolloutContext) -> RolloutResult:
+                raise RuntimeError("Transient error")
+
+        client = MockTestLLMClient()
+        agent = FailingAgent(tools=[create_sample_tool()])
+        runner = LocalTestRunner(agent_loop=agent, llm_client=client)
+
+        rows = [create_sample_row(i) for i in range(3)]
+        result = await runner.run_batch(rows)
+
+        # All rows should be attempted
+        assert result.stopped_early is False
+        assert result.stop_reason is None
+        assert result.total == 3
+        assert result.failed == 3
+
+    @pytest.mark.asyncio
+    async def test_run_batch_progress_called_on_systemic_error(self) -> None:
+        """Progress callback should be called even when stopping early."""
+        from osmosis_ai.rollout.eval.common.errors import SystemicProviderError
+
+        class SystemicAgent(MockAgentLoop):
+            async def run(self, ctx: RolloutContext) -> RolloutResult:
+                raise SystemicProviderError("Cannot connect")
+
+        client = MockTestLLMClient()
+        agent = SystemicAgent(tools=[create_sample_tool()])
+        runner = LocalTestRunner(agent_loop=agent, llm_client=client)
+
+        progress_calls: list = []
+
+        def on_progress(current: int, total: int, result: LocalTestRunResult) -> None:
+            progress_calls.append((current, total, result))
+
+        rows = [create_sample_row(i) for i in range(3)]
+        result = await runner.run_batch(rows, on_progress=on_progress)
+
+        assert result.stopped_early is True
+        assert len(progress_calls) == 1  # only one call before stopping
 
 
 class TestToolValidation:

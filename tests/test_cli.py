@@ -570,3 +570,51 @@ def test_rollout_eval_rejects_batch_size_zero(capsys):
 
     assert exit_code == 1
     assert "Error: --batch-size must be >= 1." in captured.err
+
+
+def test_rollout_eval_accepts_any_model_with_base_url(capsys):
+    """With --base-url, any model name should be accepted and displayed as-is."""
+    exit_code = cli.main(
+        [
+            "eval",
+            "-m",
+            "my_agent:MyAgentLoop",
+            "-d",
+            "data.jsonl",
+            "--model",
+            "Qwen/Qwen3-0.6B",
+            "--base-url",
+            "http://localhost:1234/v1",
+            "--eval-fn",
+            "rewards:score",
+        ]
+    )
+    captured = capsys.readouterr()
+
+    # Should pass model validation (may fail later at connectivity/auth)
+    assert "Invalid model/provider format" not in captured.err
+    # Model should be displayed without openai/ prefix
+    assert "Model: Qwen/Qwen3-0.6B" in captured.out
+
+
+def test_rollout_test_accepts_any_model_with_base_url(capsys):
+    """With --base-url, any model name should be accepted and displayed as-is."""
+    exit_code = cli.main(
+        [
+            "test",
+            "-m",
+            "my_agent:MyAgentLoop",
+            "-d",
+            "data.jsonl",
+            "--model",
+            "Qwen/Qwen3-0.6B",
+            "--base-url",
+            "http://localhost:1234/v1",
+        ]
+    )
+    captured = capsys.readouterr()
+
+    # Should pass model validation (may fail later at connectivity/auth)
+    assert "Invalid model/provider format" not in captured.err
+    # Model should be displayed without openai/ prefix
+    assert "Model: Qwen/Qwen3-0.6B" in captured.out

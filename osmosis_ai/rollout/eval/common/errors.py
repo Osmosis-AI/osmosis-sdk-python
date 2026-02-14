@@ -32,10 +32,23 @@ class ProviderError(LocalExecutionError):
 
     pass
 
+
+class SystemicProviderError(ProviderError):
+    """Provider error that affects ALL rows (auth, budget, connectivity).
+
+    Unlike transient errors (rate limits, timeouts, context window), these
+    errors indicate a systemic configuration problem that will cause every
+    single row to fail identically.  Callers should abort the batch early
+    rather than retrying each row.
+    """
+
+    pass
+
 __all__ = [
     "LocalExecutionError",
     "DatasetValidationError",
     "DatasetParseError",
     "ToolValidationError",
     "ProviderError",
+    "SystemicProviderError",
 ]
