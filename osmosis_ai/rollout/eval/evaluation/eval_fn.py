@@ -59,7 +59,10 @@ class EvalFnWrapper:
             else:
                 raise EvalFnError(
                     f"Cannot detect eval function mode: first parameter is '{first_param}'. "
-                    f"Expected 'solution_str' (simple mode) or 'messages' (full mode)."
+                    f"Expected 'solution_str' (simple mode) or 'messages' (full mode). "
+                    f"Note: Custom signatures are supported by "
+                    f"@osmosis_reward/@osmosis_rubric decorators but cannot be used "
+                    f"with 'osmosis eval' directly."
                 )
         except (ValueError, TypeError) as e:
             raise EvalFnError(f"Cannot inspect eval function signature: {e}")
