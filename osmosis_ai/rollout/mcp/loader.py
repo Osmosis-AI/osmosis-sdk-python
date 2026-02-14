@@ -6,10 +6,12 @@ making all registered @mcp.tool() functions available for use in MCPAgentLoop.
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import importlib.util
 import os
 import sys
+import types
 from typing import Any
 
 
@@ -17,6 +19,27 @@ class MCPLoadError(Exception):
     """Error raised when loading an MCP server fails."""
 
     pass
+
+
+def _clear_module_tree(prefix: str) -> None:
+    """Remove modules under ``prefix`` from ``sys.modules``."""
+    for name in list(sys.modules.keys()):
+        if name == prefix or name.startswith(prefix + "."):
+            sys.modules.pop(name, None)
+
+
+@contextlib.contextmanager
+def _temporary_sys_path(path: str):
+    """Temporarily prepend ``path`` to ``sys.path`` and restore exactly."""
+    original = list(sys.path)
+    # Ensure local sibling imports resolve to the MCP directory during import.
+    if path in sys.path:
+        sys.path.remove(path)
+    sys.path.insert(0, path)
+    try:
+        yield
+    finally:
+        sys.path[:] = original
 
 
 def load_mcp_server(mcp_path: str) -> Any:
@@ -36,14 +59,6 @@ def load_mcp_server(mcp_path: str) -> Any:
         MCPLoadError: If the directory is invalid, ``main.py`` is missing,
             fastmcp is not installed, or no FastMCP instance is found.
     """
-    # Check fastmcp is installed
-    try:
-        from fastmcp import FastMCP  # noqa: F401
-    except ImportError:
-        raise MCPLoadError(
-            "fastmcp is not installed. Install it with: pip install osmosis-ai[mcp]"
-        )
-
     # Validate directory
     mcp_dir = os.path.abspath(mcp_path)
     if not os.path.isdir(mcp_dir):
@@ -56,26 +71,45 @@ def load_mcp_server(mcp_path: str) -> Any:
             "The --mcp directory must contain a main.py with a FastMCP instance."
         )
 
-    # Add MCP directory to sys.path so relative imports work
-    if mcp_dir not in sys.path:
-        sys.path.insert(0, mcp_dir)
+    # Check fastmcp is installed
+    try:
+        from fastmcp import FastMCP  # noqa: F401
+    except ImportError:
+        raise MCPLoadError(
+            "fastmcp is not installed. Install it with: pip install osmosis-ai[mcp]"
+        )
 
-    # Import main.py with a unique module name to avoid conflicts
+    # Import main.py as a submodule of a synthetic package:
+    # - supports relative imports like `from .tools import ...`
+    # - avoids leaking user module names into the global namespace
     dir_hash = hashlib.md5(mcp_dir.encode()).hexdigest()[:8]
-    module_name = f"_osmosis_mcp_{dir_hash}"
+    package_name = f"_osmosis_mcp_{dir_hash}"
+    module_name = f"{package_name}.main"
+
+    # Ensure stale modules from previous loads don't shadow filesystem changes.
+    _clear_module_tree(package_name)
+
+    package = types.ModuleType(package_name)
+    package.__package__ = package_name
+    package.__path__ = [mcp_dir]  # type: ignore[attr-defined]
+    package.__file__ = os.path.join(mcp_dir, "__init__.py")
+    sys.modules[package_name] = package
 
     spec = importlib.util.spec_from_file_location(module_name, main_py)
     if spec is None or spec.loader is None:
+        sys.modules.pop(package_name, None)
         raise MCPLoadError(f"Cannot create module spec for: {main_py}")
 
     module = importlib.util.module_from_spec(spec)
     sys.modules[module_name] = module
 
     try:
-        spec.loader.exec_module(module)
+        # Allow both relative imports (`from .x`) and legacy local absolute
+        # imports (`import tools`) without persisting path changes.
+        with _temporary_sys_path(mcp_dir):
+            spec.loader.exec_module(module)
     except Exception as e:
-        # Clean up on failure
-        sys.modules.pop(module_name, None)
+        _clear_module_tree(package_name)
         raise MCPLoadError(f"Error importing {main_py}: {e}") from e
 
     # Find the FastMCP instance in the module

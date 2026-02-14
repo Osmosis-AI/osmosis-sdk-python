@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import argparse
 import os
+import sys
 import textwrap
+import types
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -46,6 +48,32 @@ def _make_mock_mcp_server(tools: Dict[str, Dict[str, Any]]) -> MagicMock:
     server = MagicMock()
     server._tool_manager = tool_manager
     return server
+
+
+def _install_fake_fastmcp(monkeypatch: pytest.MonkeyPatch) -> type:
+    """Install a minimal in-memory fastmcp module for loader tests."""
+
+    class FastMCP:
+        def __init__(self, name: str) -> None:
+            self.name = name
+            self._tool_manager = types.SimpleNamespace(_tools={})
+
+        def tool(self):
+            def _decorator(fn):
+                tool = types.SimpleNamespace(
+                    name=fn.__name__,
+                    description=(fn.__doc__ or "").strip(),
+                    parameters={"type": "object", "properties": {}, "required": []},
+                )
+                self._tool_manager._tools[tool.name] = tool
+                return fn
+
+            return _decorator
+
+    fastmcp_module = types.ModuleType("fastmcp")
+    fastmcp_module.FastMCP = FastMCP
+    monkeypatch.setitem(sys.modules, "fastmcp", fastmcp_module)
+    return FastMCP
 
 
 # ---------------------------------------------------------------------------
@@ -423,6 +451,10 @@ class TestExtractToolValue:
 
 
 class TestLoadMCPServer:
+    @pytest.fixture(autouse=True)
+    def _fake_fastmcp(self, monkeypatch: pytest.MonkeyPatch):
+        _install_fake_fastmcp(monkeypatch)
+
     def test_directory_not_found(self):
         with pytest.raises(MCPLoadError, match="does not exist"):
             load_mcp_server("/nonexistent/path/to/mcp")
@@ -461,6 +493,44 @@ class TestLoadMCPServer:
         main_py.write_text("import nonexistent_module_xyz\n")
         with pytest.raises(MCPLoadError, match="Error importing"):
             load_mcp_server(str(tmp_path))
+
+    def test_restores_sys_path_after_load(self, tmp_path):
+        original_sys_path = list(sys.path)
+
+        main_py = tmp_path / "main.py"
+        main_py.write_text(textwrap.dedent("""\
+            from fastmcp import FastMCP
+            mcp = FastMCP("path_test")
+        """))
+
+        _ = load_mcp_server(str(tmp_path))
+
+        assert sys.path == original_sys_path
+
+    def test_supports_relative_imports_in_main(self, tmp_path):
+        helpers_py = tmp_path / "helpers.py"
+        helpers_py.write_text(textwrap.dedent("""\
+            from fastmcp import FastMCP
+
+            def build_server():
+                mcp = FastMCP("relative_imports")
+
+                @mcp.tool()
+                def ping() -> str:
+                    return "pong"
+
+                return mcp
+        """))
+
+        main_py = tmp_path / "main.py"
+        main_py.write_text(textwrap.dedent("""\
+            from .helpers import build_server
+
+            mcp = build_server()
+        """))
+
+        server = load_mcp_server(str(tmp_path))
+        assert "ping" in server._tool_manager._tools
 
 
 # ---------------------------------------------------------------------------

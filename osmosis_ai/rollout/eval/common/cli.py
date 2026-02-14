@@ -158,6 +158,10 @@ def _check_api_key(
     if api_key or base_url:
         return None
 
+    # LITELLM_API_KEY is a global fallback accepted by LiteLLM for any provider
+    if os.environ.get("LITELLM_API_KEY"):
+        return None
+
     provider = model.split("/")[0] if "/" in model else "openai"
     env_var = _PROVIDER_ENV_KEYS.get(provider)
     if env_var is None:
@@ -166,7 +170,7 @@ def _check_api_key(
     if not os.environ.get(env_var):
         return (
             f"Missing API key for provider '{provider}'. "
-            f"Set the {env_var} environment variable or pass --api-key."
+            f"Set {env_var} or LITELLM_API_KEY, or pass --api-key."
         )
     return None
 

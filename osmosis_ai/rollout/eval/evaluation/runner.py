@@ -461,10 +461,12 @@ class EvalRunner:
         total = len(rows) * n_runs * len(model_tags)
         pool_size = min(batch_size, total)
 
-        # Build runner pools.  When baseline is configured, split slots
-        # between primary and baseline (each gets at least 1).
+        # Build runner pools.  When baseline is configured, size pools to match
+        # the expected task distribution: work items alternate [primary, baseline,
+        # primary, ...], so each batch of N items contains ceil(N/2) primary and
+        # floor(N/2) baseline tasks.
         if self.has_baseline:
-            primary_pool_size = max(1, pool_size // 2)
+            primary_pool_size = max(1, (pool_size + 1) // 2)
             baseline_pool_size = max(1, pool_size - primary_pool_size)
         else:
             primary_pool_size = pool_size
@@ -682,14 +684,16 @@ class EvalRunner:
                 for k in [1, 3, 5, 10]:
                     if k > n_runs:
                         break
-                    # Compute pass@k per row, then average
+                    # Compute pass@k per row, then average.
+                    # Use n_runs (not len(row.runs)) so that missing runs
+                    # (e.g. from early stopping) are treated as failures.
                     row_pass_at_k: List[float] = []
                     for row in row_results:
                         c = sum(
                             1 for run in row.runs
                             if run.scores.get(name, 0.0) >= pass_threshold
                         )
-                        n = len(row.runs)
+                        n = max(len(row.runs), n_runs)
                         if n > 0:
                             row_pass_at_k.append(pass_at_k(n, c, k))
                     if row_pass_at_k:
