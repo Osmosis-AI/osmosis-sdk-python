@@ -531,7 +531,6 @@ class EvalResult:
     n_runs: int                                      # Runs per row
     pass_threshold: float                            # Score threshold for pass@k
     model_summaries: Optional[List[EvalModelSummary]]  # Per-model stats (comparison mode)
-    comparisons: Optional[List[EvalComparison]]        # Win/loss/tie per eval fn (comparison mode)
 ```
 
 ---
@@ -565,24 +564,6 @@ class EvalModelSummary:
     total_runs: int                                # Number of runs for this model
     total_tokens: int                              # Total tokens consumed
     total_duration_ms: float                       # Total wall time
-```
-
----
-
-### EvalComparison
-
-Win/loss/tie comparison per eval function (comparison mode only).
-
-```python
-@dataclass
-class EvalComparison:
-    eval_fn: str            # Eval function name
-    primary_mean: float     # Mean score for primary model
-    baseline_mean: float    # Mean score for baseline model
-    delta: float            # primary_mean - baseline_mean
-    wins: int               # Rows where primary scored higher
-    losses: int             # Rows where baseline scored higher
-    ties: int               # Rows where scores were equal
 ```
 
 ---
@@ -748,7 +729,6 @@ from osmosis_ai.rollout.eval.common import (
 )
 from osmosis_ai.rollout.eval.evaluation import (
     EvalFnError,
-    EvalComparison,
     EvalModelSummary,
 )
 ```

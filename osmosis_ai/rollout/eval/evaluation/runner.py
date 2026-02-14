@@ -401,15 +401,22 @@ class EvalRunner:
             run.tokens for row in row_results for run in row.runs
         )
 
-        # Compute eval summaries (across all runs regardless of model_tag)
-        eval_summaries = self._compute_summaries(
-            row_results, n_runs, pass_threshold
-        )
-
         # Compute per-model summaries if baseline is configured
         model_summaries: Optional[List[EvalModelSummary]] = None
         if self.has_baseline:
             model_summaries = self._compute_model_summaries(
+                row_results, n_runs, pass_threshold
+            )
+
+        # Top-level eval summaries: primary model only when baseline is present,
+        # so that the "official" summary is never polluted by baseline scores.
+        if self.has_baseline:
+            primary_rows = self._filter_runs_by_tag(row_results, "primary")
+            eval_summaries = self._compute_summaries(
+                primary_rows, n_runs, pass_threshold
+            )
+        else:
+            eval_summaries = self._compute_summaries(
                 row_results, n_runs, pass_threshold
             )
 
@@ -594,14 +601,22 @@ class EvalRunner:
             run.tokens for row in row_results for run in row.runs
         )
 
-        eval_summaries = self._compute_summaries(
-            row_results, n_runs, pass_threshold
-        )
-
         # Compute per-model summaries if baseline is configured
         model_summaries: Optional[List[EvalModelSummary]] = None
         if self.has_baseline:
             model_summaries = self._compute_model_summaries(
+                row_results, n_runs, pass_threshold
+            )
+
+        # Top-level eval summaries: primary model only when baseline is present,
+        # so that the "official" summary is never polluted by baseline scores.
+        if self.has_baseline:
+            primary_rows = self._filter_runs_by_tag(row_results, "primary")
+            eval_summaries = self._compute_summaries(
+                primary_rows, n_runs, pass_threshold
+            )
+        else:
+            eval_summaries = self._compute_summaries(
                 row_results, n_runs, pass_threshold
             )
 

@@ -694,3 +694,107 @@ class TestEvalRunnerBaseline:
         for row_result in result.rows:
             for run in row_result.runs:
                 assert run.model_tag is None
+
+    @pytest.mark.asyncio
+    async def test_eval_summaries_not_polluted_by_baseline_sequential(self) -> None:
+        """Top-level eval_summaries should only reflect primary model scores."""
+        primary_client = MockLLMClient()
+        # Baseline returns different content so eval scores differ
+        baseline_client = MockLLMClient()
+        baseline_client.mock_response = CompletionsResult(
+            message={"role": "assistant", "content": "baseline wrong answer"},
+            token_ids=[],
+            logprobs=[],
+            usage={"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+            finish_reason="stop",
+        )
+        agent = MockAgentLoop(tools=[create_sample_tool()], call_llm=True)
+
+        def score_eval(
+            solution_str: str,
+            ground_truth: str,
+            extra_info: Dict[str, Any],
+        ) -> float:
+            # Primary gets "eval response" -> 1.0, baseline gets "baseline wrong answer" -> 0.0
+            return 1.0 if "eval response" in solution_str else 0.0
+
+        runner = EvalRunner(
+            agent_loop=agent,
+            llm_client=primary_client,  # type: ignore[arg-type]
+            eval_fns=[EvalFnWrapper(score_eval, "score_eval")],
+            baseline_llm_client=baseline_client,  # type: ignore[arg-type]
+        )
+
+        rows = [create_sample_row(0), create_sample_row(1)]
+        result = await runner.run_eval(rows=rows, n_runs=1, batch_size=1)
+
+        # Top-level eval_summaries should only contain primary scores (1.0)
+        assert result.eval_summaries["score_eval"].mean == 1.0
+        # If polluted by baseline, mean would be 0.5
+
+        # model_summaries should have correct per-model data
+        assert result.model_summaries is not None
+        primary_summary = result.model_summaries[0]
+        baseline_summary = result.model_summaries[1]
+        assert primary_summary.model_tag == "primary"
+        assert primary_summary.eval_summaries["score_eval"].mean == 1.0
+        assert baseline_summary.model_tag == "baseline"
+        assert baseline_summary.eval_summaries["score_eval"].mean == 0.0
+
+    @pytest.mark.asyncio
+    async def test_eval_summaries_not_polluted_by_baseline_concurrent(self) -> None:
+        """Concurrent path: top-level eval_summaries should only reflect primary."""
+        primary_client = MockLLMClient()
+        baseline_client = MockLLMClient()
+        baseline_client.mock_response = CompletionsResult(
+            message={"role": "assistant", "content": "baseline wrong answer"},
+            token_ids=[],
+            logprobs=[],
+            usage={"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+            finish_reason="stop",
+        )
+        agent = MockAgentLoop(tools=[create_sample_tool()], call_llm=True)
+
+        def score_eval(
+            solution_str: str,
+            ground_truth: str,
+            extra_info: Dict[str, Any],
+        ) -> float:
+            return 1.0 if "eval response" in solution_str else 0.0
+
+        def make_baseline() -> MockLLMClient:
+            c = MockLLMClient()
+            c.mock_response = CompletionsResult(
+                message={"role": "assistant", "content": "baseline wrong answer"},
+                token_ids=[],
+                logprobs=[],
+                usage={"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+                finish_reason="stop",
+            )
+            return c
+
+        runner = EvalRunner(
+            agent_loop=agent,
+            llm_client=primary_client,  # type: ignore[arg-type]
+            eval_fns=[EvalFnWrapper(score_eval, "score_eval")],
+            llm_client_factory=MockLLMClient,  # type: ignore[arg-type]
+            baseline_llm_client=baseline_client,  # type: ignore[arg-type]
+            baseline_llm_client_factory=make_baseline,  # type: ignore[arg-type]
+        )
+
+        rows = [create_sample_row(i) for i in range(3)]
+        result = await runner.run_eval(rows=rows, n_runs=1, batch_size=4)
+
+        # Top-level should be primary-only
+        assert result.eval_summaries["score_eval"].mean == 1.0
+
+        # Per-model should be separated
+        assert result.model_summaries is not None
+        primary_summary = next(
+            ms for ms in result.model_summaries if ms.model_tag == "primary"
+        )
+        baseline_summary = next(
+            ms for ms in result.model_summaries if ms.model_tag == "baseline"
+        )
+        assert primary_summary.eval_summaries["score_eval"].mean == 1.0
+        assert baseline_summary.eval_summaries["score_eval"].mean == 0.0
