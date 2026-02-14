@@ -57,6 +57,12 @@ def osmosis_reward(func: Callable) -> Callable:
             if params[2].default is inspect.Parameter.empty:
                 raise TypeError("Third parameter 'extra_info' must have a default value of None")
 
+    # Only strip data_source when the function can't accept it.
+    _drop_data_source = (
+        "data_source" not in sig.parameters
+        and not any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params)
+    )
+
     def _check_classic_return(result):
         if is_classic and not isinstance(result, float):
             raise TypeError(f"Function {func.__name__} must return a float, got {type(result).__name__}")
@@ -65,12 +71,14 @@ def osmosis_reward(func: Callable) -> Callable:
     if asyncio.iscoroutinefunction(func):
         @functools.wraps(func)
         async def wrapper(*args, **kwargs):
-            kwargs.pop("data_source", None)
+            if _drop_data_source:
+                kwargs.pop("data_source", None)
             return _check_classic_return(await func(*args, **kwargs))
     else:
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
-            kwargs.pop("data_source", None)
+            if _drop_data_source:
+                kwargs.pop("data_source", None)
             return _check_classic_return(func(*args, **kwargs))
 
     return wrapper
@@ -169,6 +177,12 @@ def osmosis_rubric(func: Callable) -> Callable:
         if extra_info_param.name != "extra_info":
             raise TypeError(f"Third parameter must be named 'extra_info', got '{extra_info_param.name}'")
 
+    # Only strip data_source when the function can't accept it.
+    _drop_data_source = (
+        "data_source" not in sig.parameters
+        and not any(p.kind == inspect.Parameter.VAR_KEYWORD for p in params)
+    )
+
     def _validate_classic_args(*args, **kwargs):
         bound = sig.bind_partial(*args, **kwargs)
         bound.apply_defaults()
@@ -198,14 +212,16 @@ def osmosis_rubric(func: Callable) -> Callable:
     if asyncio.iscoroutinefunction(func):
         @functools.wraps(func)
         async def wrapper(*args, **kwargs):
-            kwargs.pop("data_source", None)
+            if _drop_data_source:
+                kwargs.pop("data_source", None)
             if is_classic:
                 _validate_classic_args(*args, **kwargs)
             return _check_classic_return(await func(*args, **kwargs))
     else:
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
-            kwargs.pop("data_source", None)
+            if _drop_data_source:
+                kwargs.pop("data_source", None)
             if is_classic:
                 _validate_classic_args(*args, **kwargs)
             return _check_classic_return(func(*args, **kwargs))
