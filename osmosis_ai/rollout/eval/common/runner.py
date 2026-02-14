@@ -235,11 +235,16 @@ class LocalRolloutRunner:
                     completion_params=completion_params,
                 )
             except SystemicProviderError as e:
+                duration_ms = getattr(e, "duration_ms", None)
+                if duration_ms is None:
+                    duration_ms = (time.monotonic() - row_start) * 1000
+                tokens = int(getattr(e, "tokens", 0))
                 result = LocalRunResult(
                     row_index=row_index,
                     success=False,
                     error=str(e),
-                    duration_ms=(time.monotonic() - row_start) * 1000,
+                    duration_ms=float(duration_ms),
+                    token_usage={"total_tokens": tokens} if tokens else {},
                 )
                 results.append(result)
                 if on_progress:
