@@ -15,7 +15,7 @@ Key capabilities:
 - Get statistical summaries (mean, std, min, max) per eval function
 - Compare model quality across checkpoints or configurations
 - **Concurrent execution** with `--batch-size` for faster benchmarks
-- Optionally use LiteLLM providers (e.g., `openai/gpt-5-mini`) as comparison baselines
+- Use LiteLLM providers (e.g., `openai/gpt-5-mini`) as the primary model
 
 > Command split (development-stage breaking change):  
 > `osmosis eval-rubric` is for hosted rubric evaluation, while `osmosis eval` is for agent eval mode documented here.
@@ -93,7 +93,7 @@ def lookup(key: str) -> str:
 
 ### Baseline Model Comparison
 
-Compare your trained model against a baseline model. The SDK runs both models on the same dataset and reports per-row win/loss/tie statistics and per-eval-function deltas.
+Compare your trained model against a baseline model. The SDK runs both models on the same dataset and reports per-model summary statistics.
 
 ```bash
 # Compare trained model vs GPT-5-mini baseline
@@ -115,10 +115,7 @@ osmosis eval -m my_agent:MyAgentLoop -d data.jsonl \
     --baseline-model anthropic/claude-sonnet-4-5 --baseline-api-key $ANTHROPIC_API_KEY
 ```
 
-When a baseline is provided, the report includes:
-- **Per-model summaries** with separate mean/std/min/max for each model
-- **Win/loss/tie** counts per eval function (comparing per-row mean scores)
-- **Delta** showing the difference between primary and baseline mean scores
+When a baseline is provided, the report includes **per-model summaries** with separate mean/std/min/max for each model, so you can compare their performance side by side.
 
 You can also use LiteLLM providers (e.g., `openai/gpt-5-mini`, `anthropic/claude-sonnet-4-5`) as either the primary or baseline model. See [LiteLLM Providers](https://docs.litellm.ai/docs/providers) for supported providers.
 
@@ -201,11 +198,12 @@ for name, summary in result.eval_summaries.items():
     for k, v in summary.pass_at_k.items():
         print(f"  pass@{k}: {v*100:.1f}%")
 
-# Print comparison results (when baseline is used)
-if result.comparisons:
-    for comp in result.comparisons:
-        print(f"{comp.eval_fn}: delta={comp.delta:+.3f} "
-              f"(W:{comp.wins}/L:{comp.losses}/T:{comp.ties})")
+# Print per-model summaries (when baseline is used)
+if result.model_summaries:
+    for ms in result.model_summaries:
+        print(f"\n[{ms.model_tag}] {ms.model}")
+        for name, summary in ms.eval_summaries.items():
+            print(f"  {name}: mean={summary.mean:.3f}, std={summary.std:.3f}")
 ```
 
 ---
@@ -344,7 +342,7 @@ osmosis eval [OPTIONS]
 
 | Option | Description |
 |--------|-------------|
-| `--baseline-model MODEL` | Baseline model for comparison. Runs the same evaluation with a second model and reports win/loss/tie statistics. |
+| `--baseline-model MODEL` | Baseline model for comparison. Runs the same evaluation with a second model and reports per-model summary statistics. |
 | `--baseline-base-url URL` | Base URL for the baseline model's API endpoint. Requires `--baseline-model`. |
 | `--baseline-api-key KEY` | API key for the baseline model provider. Requires `--baseline-model`. |
 
@@ -688,31 +686,11 @@ When using `--output`, results are saved as JSON:
         "rewards:partial_match": { "mean": 0.78, "std": 0.25, "min": 0.2, "max": 1.0 }
       }
     }
-  ],
-  "comparisons": [
-    {
-      "eval_fn": "rewards:exact_match",
-      "primary_mean": 0.82,
-      "baseline_mean": 0.62,
-      "delta": 0.20,
-      "wins": 65,
-      "losses": 30,
-      "ties": 5
-    },
-    {
-      "eval_fn": "rewards:partial_match",
-      "primary_mean": 0.91,
-      "baseline_mean": 0.78,
-      "delta": 0.13,
-      "wins": 58,
-      "losses": 25,
-      "ties": 17
-    }
   ]
 }
 ```
 
-> **Note:** The `model_tag`, `model_summaries`, and `comparisons` fields are only present when `--baseline-model` is used. In single-model mode, `model_tag` is omitted from run objects and the top-level `model_summaries` and `comparisons` keys are absent.
+> **Note:** The `model_tag` and `model_summaries` fields are only present when `--baseline-model` is used. In single-model mode, `model_tag` is omitted from run objects and the top-level `model_summaries` key is absent.
 
 ---
 
@@ -759,7 +737,7 @@ See [Test Mode - Environment Variables](./test-mode.md#environment-variables) fo
 
 4. **Choose appropriate thresholds**: `--pass-threshold 1.0` (default) requires perfect scores. Use a lower threshold like `0.5` for partial-credit eval functions.
 
-5. **Compare against baselines**: Use `--baseline-model` to run the same benchmark with a second model and get win/loss/tie statistics automatically.
+5. **Compare against baselines**: Use `--baseline-model` to run the same benchmark with a second model and get per-model summary statistics.
 
 6. **Reuse `@osmosis_reward` functions**: Existing reward functions work as eval functions in simple mode without modification.
 
@@ -775,4 +753,4 @@ See [Test Mode - Environment Variables](./test-mode.md#environment-variables) fo
 - [Architecture](./architecture.md) - System design overview
 - [API Reference](./api-reference.md) - Complete SDK API documentation
 - [Examples](./examples.md) - Working code examples
-- [LiteLLM Providers](https://docs.litellm.ai/docs/providers) - Supported LLM providers for baseline comparisons
+- [LiteLLM Providers](https://docs.litellm.ai/docs/providers) - Supported LLM providers

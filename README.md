@@ -4,7 +4,7 @@ A Python SDK for Osmosis LLM training workflows:
 - Reward/rubric validation helpers with strict type enforcement
 - Remote Rollout SDK for integrating agent frameworks with Osmosis training
 - Agent testing with external LLMs (`osmosis test`)
-- Model evaluation with custom eval functions, pass@k, and baseline comparison (`osmosis eval`)
+- Model evaluation with custom eval functions and pass@k metrics (`osmosis eval`)
 - MCP tools support for git-sync workflows (`--mcp`)
 
 ## Installation
@@ -69,7 +69,7 @@ If you're integrating an agent loop with Osmosis remote rollout / TrainGate, see
 - `docs/rollout/README.md` (quick start)
 - `docs/rollout/architecture.md` (protocol + lifecycle)
 - `docs/rollout/test-mode.md` (local testing with external LLMs)
-- `docs/rollout/eval.md` (model evaluation with eval functions and baseline comparison)
+- `docs/rollout/eval.md` (model evaluation with eval functions and pass@k metrics)
 
 ## Remote Rubric Evaluation
 
@@ -323,7 +323,7 @@ See `docs/rollout/test-mode.md` for full documentation.
 
 ### Agent Evaluation
 
-Evaluate trained models with custom eval functions, pass@k metrics, and baseline comparison:
+Evaluate trained models with custom eval functions and pass@k metrics:
 
 ```bash
 # Benchmark a trained model at a serving endpoint
@@ -335,12 +335,6 @@ osmosis eval -m my_agent:agent_loop -d data.jsonl \
 osmosis eval -m my_agent:agent_loop -d data.jsonl \
     --eval-fn rewards:compute_reward --n 5 \
     --model my-finetuned-model --base-url http://localhost:8000/v1
-
-# Compare against a baseline model (win/loss/tie statistics)
-osmosis eval -m my_agent:agent_loop -d data.jsonl \
-    --eval-fn rewards:compute_reward \
-    --model my-finetuned-model --base-url http://localhost:8000/v1 \
-    --baseline-model openai/gpt-5-mini
 
 # Git-sync users: evaluate MCP tools directly
 osmosis eval --mcp ./mcp -d data.jsonl \

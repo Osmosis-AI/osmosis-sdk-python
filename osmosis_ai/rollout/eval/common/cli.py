@@ -23,7 +23,7 @@ _PROVIDER_ENV_KEYS: Dict[str, str] = {
     "mistral": "MISTRAL_API_KEY",
     "cohere": "COHERE_API_KEY",
     "together_ai": "TOGETHERAI_API_KEY",
-    "fireworks_ai": "FIREWORKS_AI_API_KEY",
+    "fireworks_ai": "FIREWORKS_API_KEY",
     "deepseek": "DEEPSEEK_API_KEY",
     "gemini": "GEMINI_API_KEY",
     "xai": "XAI_API_KEY",

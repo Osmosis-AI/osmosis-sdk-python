@@ -163,6 +163,10 @@ class MCPAgentLoop(RolloutAgentLoop):
                 finally:
                     latency_ms = (time.monotonic() - start) * 1000
                     ctx.record_tool_call(latency_ms=latency_ms)
+        else:
+            # Loop exhausted without breaking — LLM was still requesting
+            # tool calls when max_turns was reached.
+            return ctx.complete(messages, finish_reason="max_turns")
 
         return ctx.complete(messages)
 
