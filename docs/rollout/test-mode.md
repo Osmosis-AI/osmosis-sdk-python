@@ -62,9 +62,9 @@ from fastmcp import FastMCP
 mcp = FastMCP("my_tools")
 
 @mcp.tool()
-def calculate(expression: str) -> str:
-    """Evaluate a math expression."""
-    return str(eval(expression))
+def add(a: float, b: float) -> str:
+    """Add two numbers."""
+    return str(a + b)
 ```
 
 > **Note:** `--mcp` and `-m/--module` are mutually exclusive. Use one or the other.

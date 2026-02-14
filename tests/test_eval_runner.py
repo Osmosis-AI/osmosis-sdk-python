@@ -397,8 +397,8 @@ class TestEvalRunner:
         assert result.stop_reason is None
 
     @pytest.mark.asyncio
-    async def test_run_eval_concurrent_normal_failures_stop_after_failed_batch(self) -> None:
-        """Concurrent failures should stop after finishing the current batch."""
+    async def test_run_eval_concurrent_normal_failures_continue(self) -> None:
+        """Non-systemic concurrent failures should be recorded without early stopping."""
         class FailingAgent(MockAgentLoop):
             async def run(self, ctx: RolloutContext) -> RolloutResult:
                 raise RuntimeError("eval failure")
@@ -427,10 +427,10 @@ class TestEvalRunner:
             batch_size=3,
         )
 
-        assert result.stopped_early is True
-        assert "eval failure" in (result.stop_reason or "")
-        assert result.total_runs == 3
-        assert result.total_rows < 4
+        assert result.stopped_early is False
+        assert result.total_runs == 8
+        assert result.total_rows == 4
+        assert all(not run.success for row in result.rows for run in row.runs)
 
     @pytest.mark.asyncio
     async def test_run_eval_counts_failed_runs_as_zero_scores(self) -> None:
@@ -509,7 +509,8 @@ class TestEvalRunner:
         assert call_count["n"] == 1  # only one agent run attempted
 
     @pytest.mark.asyncio
-    async def test_run_eval_stops_early_on_first_failure(self) -> None:
+    async def test_run_eval_continues_on_non_systemic_failure(self) -> None:
+        """Non-systemic failures should be recorded without early stopping."""
         client = MockLLMClient()
         agent = MockAgentLoop(
             tools=[create_sample_tool()],
@@ -535,13 +536,10 @@ class TestEvalRunner:
             pass_threshold=0.5,
         )
 
-        assert eval_result.stopped_early is True
-        assert eval_result.total_rows == 1
-        assert eval_result.total_runs == 1
-        assert len(eval_result.rows) == 1
-        assert len(eval_result.rows[0].runs) == 1
-        assert eval_result.rows[0].runs[0].success is False
-        assert "eval failure" in (eval_result.stop_reason or "")
+        assert eval_result.stopped_early is False
+        assert eval_result.total_rows == 2
+        assert eval_result.total_runs == 4
+        assert all(not run.success for row in eval_result.rows for run in row.runs)
 
 
 class TestEvalRunnerBaseline:

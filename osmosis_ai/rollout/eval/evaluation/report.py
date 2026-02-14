@@ -148,12 +148,14 @@ def format_eval_report(
 
     eval_fn_names = list(result.eval_summaries.keys())
 
-    # Collect pass@k columns from the first model's summaries
-    pass_k_values = (
-        _collect_pass_k_values(model_data[0]["eval_summaries"])
-        if result.n_runs > 1
-        else []
-    )
+    # Collect pass@k columns from all models' summaries
+    pass_k_values: list[int] = []
+    if result.n_runs > 1:
+        for md in model_data:
+            for k in _collect_pass_k_values(md["eval_summaries"]):
+                if k not in pass_k_values:
+                    pass_k_values.append(k)
+        pass_k_values.sort()
 
     if console.run_rich(
         lambda rich_console: _format_tables_rich(

@@ -252,12 +252,18 @@ class EvalRunner:
             rollout_runner = self._baseline_rollout_runner
         else:
             rollout_runner = self._rollout_runner
+        # Include model_tag in rollout ID so primary and baseline runs don't
+        # collide (debug traces are written as {rollout_id}.jsonl).
+        if model_tag:
+            rollout_id = f"eval-{row_index}-run-{run_index}-{model_tag}"
+        else:
+            rollout_id = f"eval-{row_index}-run-{run_index}"
         test_result = await rollout_runner.run_single(
             row=row,
             row_index=row_index,
             max_turns=max_turns,
             completion_params=completion_params,
-            rollout_id=f"eval-{row_index}-run-{run_index}",
+            rollout_id=rollout_id,
             request_metadata={"run_index": run_index},
         )
 
@@ -384,12 +390,6 @@ class EvalRunner:
 
                     if on_progress:
                         on_progress(current, total, result)
-
-                    if not result.success:
-                        if current < total:
-                            stopped_early = True
-                            stop_reason = result.error
-                        break
 
                 if stopped_early:
                     break
@@ -528,6 +528,8 @@ class EvalRunner:
                 completed_results.append((row_index, result))
                 return row_index, result
             except SystemicProviderError as e:
+                # Record the failed result, then re-raise so the batch
+                # loop can detect the systemic failure and stop early.
                 result = EvalRunResult(
                     run_index=run_index,
                     success=False,
@@ -538,7 +540,7 @@ class EvalRunner:
                 if on_progress:
                     on_progress(completed, total, result)
                 completed_results.append((row_index, result))
-                return row_index, result
+                raise
             finally:
                 if runner is not None:
                     target_pool.put_nowait(runner)
@@ -560,26 +562,32 @@ class EvalRunner:
                     for row, row_index, run_idx, tag in batch
                 ]
 
-                batch_failed = False
-                batch_error: Optional[str] = None
+                systemic_error: Optional[str] = None
 
-                for task in asyncio.as_completed(tasks):
-                    _row_index, result = await task
-                    if not result.success and not batch_failed:
-                        batch_failed = True
-                        batch_error = result.error
-
-                await asyncio.gather(*tasks, return_exceptions=True)
+                try:
+                    for task in asyncio.as_completed(tasks):
+                        try:
+                            _row_index, result = await task
+                        except SystemicProviderError as e:
+                            # Record error but keep awaiting remaining
+                            # tasks in this batch so their results are collected.
+                            if systemic_error is None:
+                                systemic_error = str(e)
+                except Exception:
+                    # Unexpected error: cancel remaining in-flight tasks
+                    for t in tasks:
+                        if not t.done():
+                            t.cancel()
+                    await asyncio.gather(*tasks, return_exceptions=True)
+                    raise
 
                 cursor += len(batch)
 
-                if batch_failed:
+                if systemic_error is not None:
                     if cursor < len(work_items):
                         stopped_early = True
-                        stop_reason = batch_error
+                        stop_reason = systemic_error
                     break
-        except Exception:
-            raise
         finally:
             await _close_runner_pool()
 

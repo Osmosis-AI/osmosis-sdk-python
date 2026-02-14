@@ -106,11 +106,25 @@ def load_mcp_server(mcp_path: str) -> Any:
     try:
         # Allow both relative imports (`from .x`) and legacy local absolute
         # imports (`import tools`) without persisting path changes.
+        # Snapshot sys.modules so we can detect absolute sibling imports
+        # (e.g. `import helpers`) that leak outside the synthetic package.
+        modules_before = set(sys.modules.keys())
         with _temporary_sys_path(mcp_dir):
             spec.loader.exec_module(module)
     except Exception as e:
         _clear_module_tree(package_name)
         raise MCPLoadError(f"Error importing {main_py}: {e}") from e
+
+    # Clean up absolute sibling imports that were cached globally during
+    # exec_module.  Without this, loading a second MCP directory that also
+    # does `import helpers` would silently reuse the first directory's module.
+    for name in set(sys.modules.keys()) - modules_before:
+        if name.startswith(package_name):
+            continue  # already managed by _clear_module_tree
+        mod = sys.modules[name]
+        mod_file = getattr(mod, "__file__", None) or ""
+        if mod_file.startswith(mcp_dir + os.sep):
+            sys.modules.pop(name, None)
 
     # Find the FastMCP instance in the module
     from fastmcp import FastMCP

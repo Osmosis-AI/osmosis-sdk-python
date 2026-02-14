@@ -78,9 +78,9 @@ from fastmcp import FastMCP
 mcp = FastMCP("my_tools")
 
 @mcp.tool()
-def calculate(expression: str) -> str:
-    """Evaluate a math expression."""
-    return str(eval(expression))
+def add(a: float, b: float) -> str:
+    """Add two numbers."""
+    return str(a + b)
 
 @mcp.tool()
 def lookup(key: str) -> str:
@@ -670,7 +670,7 @@ When using `--output`, results are saved as JSON:
       "total_runs": 500,
       "total_tokens": 350000,
       "total_duration_ms": 130000,
-      "eval_fns": {
+      "eval_summaries": {
         "rewards:exact_match": { "mean": 0.82, "std": 0.38, "min": 0.0, "max": 1.0 },
         "rewards:partial_match": { "mean": 0.91, "std": 0.15, "min": 0.4, "max": 1.0 }
       }
@@ -681,7 +681,7 @@ When using `--output`, results are saved as JSON:
       "total_runs": 500,
       "total_tokens": 275000,
       "total_duration_ms": 100500,
-      "eval_fns": {
+      "eval_summaries": {
         "rewards:exact_match": { "mean": 0.62, "std": 0.49, "min": 0.0, "max": 1.0 },
         "rewards:partial_match": { "mean": 0.78, "std": 0.25, "min": 0.2, "max": 1.0 }
       }
