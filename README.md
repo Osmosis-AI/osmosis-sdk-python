@@ -27,6 +27,9 @@ pip install -e .
 
 # Install with development dependencies (pytest, formatters, etc.)
 pip install -e ".[dev]"
+
+# Install pre-commit hooks (runs ruff on every commit)
+pre-commit install
 ```
 
 ## Quick Start
