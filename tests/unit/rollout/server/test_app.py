@@ -27,7 +27,7 @@ from osmosis_ai.rollout import (
     create_app,
 )
 from osmosis_ai.rollout.server.app import _extract_bearer_token
-from tests.conftest import (
+from tests._helpers import (
     SimpleAgentLoop,
     SlowAgentLoop,
     make_rollout_payload,
@@ -230,6 +230,7 @@ class TestLifespanRegistration:
             resp = client.get("/health")
             assert resp.status_code == 200
 
+    @pytest.mark.slow
     async def test_registration_task_started_with_credentials(self) -> None:
         """Registration background task should be created when credentials are given."""
         mock_creds = MagicMock()
@@ -258,6 +259,7 @@ class TestLifespanRegistration:
                 # Give the registration background task time to run
                 await asyncio.sleep(0.5)
 
+    @pytest.mark.slow
     async def test_registration_error_handled_gracefully(self) -> None:
         """If the registration raises an error, shutdown should not crash."""
         mock_creds = MagicMock()
