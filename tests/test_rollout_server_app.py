@@ -22,12 +22,17 @@ from osmosis_ai.rollout import (
     OpenAIFunctionToolSchema,
     RolloutAgentLoop,
     RolloutContext,
-    RolloutMetrics,
     RolloutRequest,
     RolloutResult,
     create_app,
 )
 from osmosis_ai.rollout.server.app import _extract_bearer_token
+from tests.conftest import (
+    SimpleAgentLoop,
+    SlowAgentLoop,
+    make_rollout_payload,
+    mock_llm_client,
+)
 
 # Import FastAPI / httpx test utilities
 try:
@@ -42,39 +47,8 @@ pytestmark = pytest.mark.skipif(not FASTAPI_AVAILABLE, reason="FastAPI not insta
 
 
 # =============================================================================
-# Helpers — reusable agent loop stubs
+# Helpers — module-specific agent loop stubs
 # =============================================================================
-
-
-class SimpleAgentLoop(RolloutAgentLoop):
-    """Agent loop that completes immediately."""
-
-    name = "simple_agent"
-
-    def __init__(self, tools: list[OpenAIFunctionToolSchema] | None = None):
-        self._tools = tools or []
-
-    def get_tools(self, request: RolloutRequest) -> list[OpenAIFunctionToolSchema]:
-        return self._tools
-
-    async def run(self, ctx: RolloutContext) -> RolloutResult:
-        return ctx.complete(list(ctx.request.messages))
-
-
-class SlowAgentLoop(RolloutAgentLoop):
-    """Agent loop that sleeps for a configurable duration before completing."""
-
-    name = "slow_agent"
-
-    def __init__(self, delay: float = 0.5):
-        self._delay = delay
-
-    def get_tools(self, request: RolloutRequest) -> list[OpenAIFunctionToolSchema]:
-        return []
-
-    async def run(self, ctx: RolloutContext) -> RolloutResult:
-        await asyncio.sleep(self._delay)
-        return ctx.complete(list(ctx.request.messages))
 
 
 class FailingGetToolsAgentLoop(RolloutAgentLoop):
@@ -87,34 +61,6 @@ class FailingGetToolsAgentLoop(RolloutAgentLoop):
 
     async def run(self, ctx: RolloutContext) -> RolloutResult:
         return ctx.complete([])
-
-
-def _make_rollout_payload(
-    rollout_id: str = "test-123",
-    idempotency_key: str | None = None,
-    **overrides: Any,
-) -> dict[str, Any]:
-    """Build a minimal valid RolloutRequest JSON payload."""
-    payload: dict[str, Any] = {
-        "rollout_id": rollout_id,
-        "server_url": "http://localhost:8080",
-        "messages": [{"role": "user", "content": "Hello"}],
-        "completion_params": {"temperature": 0.7},
-    }
-    if idempotency_key is not None:
-        payload["idempotency_key"] = idempotency_key
-    payload.update(overrides)
-    return payload
-
-
-def _mock_llm_client() -> MagicMock:
-    """Create a mocked OsmosisLLMClient usable as an async context manager."""
-    mock = AsyncMock()
-    mock.__aenter__ = AsyncMock(return_value=mock)
-    mock.__aexit__ = AsyncMock(return_value=None)
-    mock.complete_rollout = AsyncMock()
-    mock.get_metrics = MagicMock(return_value=RolloutMetrics())
-    return mock
 
 
 # =============================================================================
@@ -354,7 +300,7 @@ class TestConcurrencyControl:
         agent = SlowAgentLoop(delay=0.3)
         app = create_app(agent, max_concurrent=max_concurrent)
 
-        mock_client = _mock_llm_client()
+        mock_client = mock_llm_client()
         with patch("osmosis_ai.rollout.server.app.OsmosisLLMClient") as MockCls:
             MockCls.return_value = mock_client
 
@@ -366,7 +312,7 @@ class TestConcurrencyControl:
                 for i in range(4):
                     resp = await client.post(
                         "/v1/rollout/init",
-                        json=_make_rollout_payload(rollout_id=f"conc-{i}"),
+                        json=make_rollout_payload(rollout_id=f"conc-{i}"),
                     )
                     assert resp.status_code == 202
 
@@ -402,7 +348,7 @@ class TestConcurrencyControl:
                 return ctx.complete(list(ctx.request.messages))
 
         app = create_app(OrderTrackingAgent(), max_concurrent=1)
-        mock_client = _mock_llm_client()
+        mock_client = mock_llm_client()
         with patch("osmosis_ai.rollout.server.app.OsmosisLLMClient") as MockCls:
             MockCls.return_value = mock_client
 
@@ -412,11 +358,11 @@ class TestConcurrencyControl:
             ) as client:
                 await client.post(
                     "/v1/rollout/init",
-                    json=_make_rollout_payload(rollout_id="r1"),
+                    json=make_rollout_payload(rollout_id="r1"),
                 )
                 await client.post(
                     "/v1/rollout/init",
-                    json=_make_rollout_payload(rollout_id="r2"),
+                    json=make_rollout_payload(rollout_id="r2"),
                 )
                 # Wait for both to finish
                 await asyncio.sleep(0.5)
@@ -445,7 +391,7 @@ class TestIdempotencyKey:
         """Two requests with different rollout_ids but same idempotency_key
         should be treated as duplicates."""
         app = create_app(SimpleAgentLoop())
-        mock_client = _mock_llm_client()
+        mock_client = mock_llm_client()
         with patch("osmosis_ai.rollout.server.app.OsmosisLLMClient") as MockCls:
             MockCls.return_value = mock_client
 
@@ -455,13 +401,13 @@ class TestIdempotencyKey:
             ) as client:
                 resp1 = await client.post(
                     "/v1/rollout/init",
-                    json=_make_rollout_payload(
+                    json=make_rollout_payload(
                         rollout_id="id-1", idempotency_key="shared-key"
                     ),
                 )
                 resp2 = await client.post(
                     "/v1/rollout/init",
-                    json=_make_rollout_payload(
+                    json=make_rollout_payload(
                         rollout_id="id-2", idempotency_key="shared-key"
                     ),
                 )
@@ -474,7 +420,7 @@ class TestIdempotencyKey:
     async def test_different_idempotency_keys_are_independent(self) -> None:
         """Requests with different idempotency_keys should be treated separately."""
         app = create_app(SimpleAgentLoop())
-        mock_client = _mock_llm_client()
+        mock_client = mock_llm_client()
         with patch("osmosis_ai.rollout.server.app.OsmosisLLMClient") as MockCls:
             MockCls.return_value = mock_client
 
@@ -484,13 +430,13 @@ class TestIdempotencyKey:
             ) as client:
                 resp1 = await client.post(
                     "/v1/rollout/init",
-                    json=_make_rollout_payload(
+                    json=make_rollout_payload(
                         rollout_id="id-a", idempotency_key="key-a"
                     ),
                 )
                 resp2 = await client.post(
                     "/v1/rollout/init",
-                    json=_make_rollout_payload(
+                    json=make_rollout_payload(
                         rollout_id="id-b", idempotency_key="key-b"
                     ),
                 )
@@ -502,7 +448,7 @@ class TestIdempotencyKey:
     async def test_fallback_to_rollout_id_when_no_idempotency_key(self) -> None:
         """Without idempotency_key, rollout_id is the idempotency key."""
         app = create_app(SimpleAgentLoop())
-        mock_client = _mock_llm_client()
+        mock_client = mock_llm_client()
         with patch("osmosis_ai.rollout.server.app.OsmosisLLMClient") as MockCls:
             MockCls.return_value = mock_client
 
@@ -512,11 +458,11 @@ class TestIdempotencyKey:
             ) as client:
                 resp1 = await client.post(
                     "/v1/rollout/init",
-                    json=_make_rollout_payload(rollout_id="dup-id"),
+                    json=make_rollout_payload(rollout_id="dup-id"),
                 )
                 resp2 = await client.post(
                     "/v1/rollout/init",
-                    json=_make_rollout_payload(rollout_id="dup-id"),
+                    json=make_rollout_payload(rollout_id="dup-id"),
                 )
 
         assert resp1.status_code == 202
@@ -541,7 +487,7 @@ class TestInitEndpointErrorHandling:
         async with AsyncClient(transport=transport, base_url="http://test") as client:
             resp = await client.post(
                 "/v1/rollout/init",
-                json=_make_rollout_payload(rollout_id="fail-tools"),
+                json=make_rollout_payload(rollout_id="fail-tools"),
             )
         assert resp.status_code == 500
 
@@ -567,7 +513,7 @@ class TestInitEndpointErrorHandling:
                 return ctx.complete([])
 
         app = create_app(FailOnceThenSucceedAgent())
-        mock_client = _mock_llm_client()
+        mock_client = mock_llm_client()
         with patch("osmosis_ai.rollout.server.app.OsmosisLLMClient") as MockCls:
             MockCls.return_value = mock_client
 
@@ -578,14 +524,14 @@ class TestInitEndpointErrorHandling:
                 # First request fails
                 resp1 = await client.post(
                     "/v1/rollout/init",
-                    json=_make_rollout_payload(rollout_id="retry-me"),
+                    json=make_rollout_payload(rollout_id="retry-me"),
                 )
                 assert resp1.status_code == 500
 
                 # Retry should succeed (init record was cleared)
                 resp2 = await client.post(
                     "/v1/rollout/init",
-                    json=_make_rollout_payload(rollout_id="retry-me"),
+                    json=make_rollout_payload(rollout_id="retry-me"),
                 )
                 assert resp2.status_code == 202
 
@@ -606,7 +552,7 @@ class TestInitEndpointErrorHandling:
             ) as client:
                 resp = await client.post(
                     "/v1/rollout/init",
-                    json=_make_rollout_payload(rollout_id="infra-err"),
+                    json=make_rollout_payload(rollout_id="infra-err"),
                 )
                 assert resp.status_code == 202
 
@@ -630,7 +576,7 @@ class TestBackgroundRolloutTask:
     async def test_successful_rollout_calls_complete_rollout(self) -> None:
         """A successful agent run should call llm.complete_rollout with COMPLETED."""
         app = create_app(SimpleAgentLoop())
-        mock_client = _mock_llm_client()
+        mock_client = mock_llm_client()
         with patch("osmosis_ai.rollout.server.app.OsmosisLLMClient") as MockCls:
             MockCls.return_value = mock_client
 
@@ -640,7 +586,7 @@ class TestBackgroundRolloutTask:
             ) as client:
                 resp = await client.post(
                     "/v1/rollout/init",
-                    json=_make_rollout_payload(rollout_id="bg-ok"),
+                    json=make_rollout_payload(rollout_id="bg-ok"),
                 )
                 assert resp.status_code == 202
                 await asyncio.sleep(0.2)
@@ -665,7 +611,7 @@ class TestBackgroundRolloutTask:
                 raise RuntimeError("Agent crashed")
 
         app = create_app(ErrorAgent())
-        mock_client = _mock_llm_client()
+        mock_client = mock_llm_client()
         with patch("osmosis_ai.rollout.server.app.OsmosisLLMClient") as MockCls:
             MockCls.return_value = mock_client
 
@@ -675,7 +621,7 @@ class TestBackgroundRolloutTask:
             ) as client:
                 resp = await client.post(
                     "/v1/rollout/init",
-                    json=_make_rollout_payload(rollout_id="bg-err"),
+                    json=make_rollout_payload(rollout_id="bg-err"),
                 )
                 assert resp.status_code == 202
                 await asyncio.sleep(0.2)
@@ -688,7 +634,7 @@ class TestBackgroundRolloutTask:
     async def test_rollout_uses_request_api_key_for_callback(self) -> None:
         """The OsmosisLLMClient should be constructed with the request's api_key."""
         app = create_app(SimpleAgentLoop())
-        mock_client = _mock_llm_client()
+        mock_client = mock_llm_client()
         with patch("osmosis_ai.rollout.server.app.OsmosisLLMClient") as MockCls:
             MockCls.return_value = mock_client
 
@@ -698,7 +644,7 @@ class TestBackgroundRolloutTask:
             ) as client:
                 resp = await client.post(
                     "/v1/rollout/init",
-                    json=_make_rollout_payload(
+                    json=make_rollout_payload(
                         rollout_id="api-key-cb", api_key="callback-secret"
                     ),
                 )
@@ -712,7 +658,7 @@ class TestBackgroundRolloutTask:
     async def test_rollout_passes_server_url_to_client(self) -> None:
         """The OsmosisLLMClient should receive the server_url from the request."""
         app = create_app(SimpleAgentLoop())
-        mock_client = _mock_llm_client()
+        mock_client = mock_llm_client()
         with patch("osmosis_ai.rollout.server.app.OsmosisLLMClient") as MockCls:
             MockCls.return_value = mock_client
 
@@ -722,7 +668,7 @@ class TestBackgroundRolloutTask:
             ) as client:
                 resp = await client.post(
                     "/v1/rollout/init",
-                    json=_make_rollout_payload(
+                    json=make_rollout_payload(
                         rollout_id="url-test",
                         server_url="http://traingate:9000",
                     ),
@@ -754,17 +700,6 @@ class TestPlatformHealthEdgeCases:
                 headers={"Authorization": api_key},
             )
         assert resp.status_code == 200
-
-    def test_empty_authorization_header_returns_401(self) -> None:
-        """An empty Authorization header should be rejected."""
-        app = create_app(SimpleAgentLoop(), api_key="some-key")
-
-        with TestClient(app) as client:
-            resp = client.get(
-                "/platform/health",
-                headers={"Authorization": ""},
-            )
-        assert resp.status_code == 401
 
     def test_platform_health_returns_agent_name_and_counts(self) -> None:
         """Authenticated /platform/health should return agent info and counts."""
@@ -801,41 +736,7 @@ class TestInitApiKeyEdgeCases:
             resp = client.post(
                 "/v1/rollout/init",
                 headers={"Authorization": api_key},
-                json=_make_rollout_payload(rollout_id="raw-auth"),
-            )
-        assert resp.status_code == 202
-
-    def test_empty_authorization_header_rejected_on_init(self) -> None:
-        """An empty Authorization header should be rejected on init."""
-        app = create_app(SimpleAgentLoop(), api_key="some-key")
-
-        with TestClient(app) as client:
-            resp = client.post(
-                "/v1/rollout/init",
-                headers={"Authorization": ""},
-                json=_make_rollout_payload(rollout_id="empty-auth"),
-            )
-        assert resp.status_code == 401
-
-    def test_no_auth_header_at_all_rejected(self) -> None:
-        """Missing Authorization header should be rejected when api_key is set."""
-        app = create_app(SimpleAgentLoop(), api_key="some-key")
-
-        with TestClient(app) as client:
-            resp = client.post(
-                "/v1/rollout/init",
-                json=_make_rollout_payload(rollout_id="no-auth"),
-            )
-        assert resp.status_code == 401
-
-    def test_no_api_key_configured_allows_unauthenticated(self) -> None:
-        """When api_key is not set, requests without auth should succeed."""
-        app = create_app(SimpleAgentLoop())
-
-        with TestClient(app) as client:
-            resp = client.post(
-                "/v1/rollout/init",
-                json=_make_rollout_payload(rollout_id="no-auth-needed"),
+                json=make_rollout_payload(rollout_id="raw-auth"),
             )
         assert resp.status_code == 202
 
@@ -852,7 +753,7 @@ class TestHealthEndpoint:
         """Health endpoint should report accurate active and completed counts."""
         agent = SlowAgentLoop(delay=0.3)
         app = create_app(agent)
-        mock_client = _mock_llm_client()
+        mock_client = mock_llm_client()
         with patch("osmosis_ai.rollout.server.app.OsmosisLLMClient") as MockCls:
             MockCls.return_value = mock_client
 
@@ -869,7 +770,7 @@ class TestHealthEndpoint:
                 # Start a rollout
                 await client.post(
                     "/v1/rollout/init",
-                    json=_make_rollout_payload(rollout_id="count-1"),
+                    json=make_rollout_payload(rollout_id="count-1"),
                 )
                 await asyncio.sleep(0.05)
 
@@ -883,22 +784,6 @@ class TestHealthEndpoint:
                 health = await client.get("/health")
                 data = health.json()
                 assert data["completed_rollouts"] >= 1
-
-    def test_health_includes_agent_loop_name(self) -> None:
-        """Health response should contain the agent loop name."""
-        app = create_app(SimpleAgentLoop())
-        with TestClient(app) as client:
-            resp = client.get("/health")
-        data = resp.json()
-        assert data["agent_loop"] == "simple_agent"
-
-    def test_health_returns_status_healthy(self) -> None:
-        """Health endpoint should return status 'healthy'."""
-        app = create_app(SimpleAgentLoop())
-        with TestClient(app) as client:
-            resp = client.get("/health")
-        assert resp.status_code == 200
-        assert resp.json()["status"] == "healthy"
 
 
 # =============================================================================
@@ -971,7 +856,7 @@ class TestDebugDirInRollout:
                 return ctx.complete([])
 
         app = create_app(InspectingAgent(), debug_dir=debug_dir)
-        mock_client = _mock_llm_client()
+        mock_client = mock_llm_client()
         with patch("osmosis_ai.rollout.server.app.OsmosisLLMClient") as MockCls:
             MockCls.return_value = mock_client
 
@@ -981,7 +866,7 @@ class TestDebugDirInRollout:
             ) as client:
                 await client.post(
                     "/v1/rollout/init",
-                    json=_make_rollout_payload(rollout_id="debug-prop"),
+                    json=make_rollout_payload(rollout_id="debug-prop"),
                 )
                 await asyncio.sleep(0.2)
 
@@ -1005,7 +890,7 @@ class TestDebugDirInRollout:
                 return ctx.complete([])
 
         app = create_app(InspectingAgent())
-        mock_client = _mock_llm_client()
+        mock_client = mock_llm_client()
         with patch("osmosis_ai.rollout.server.app.OsmosisLLMClient") as MockCls:
             MockCls.return_value = mock_client
 
@@ -1015,7 +900,7 @@ class TestDebugDirInRollout:
             ) as client:
                 await client.post(
                     "/v1/rollout/init",
-                    json=_make_rollout_payload(rollout_id="no-debug"),
+                    json=make_rollout_payload(rollout_id="no-debug"),
                 )
                 await asyncio.sleep(0.2)
 

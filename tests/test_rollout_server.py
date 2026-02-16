@@ -31,6 +31,7 @@ from osmosis_ai.rollout import (
     create_app,
 )
 from osmosis_ai.rollout.server import AppState
+from tests.conftest import FailingAgentLoop, SimpleAgentLoop
 
 # Import FastAPI test client
 try:
@@ -40,33 +41,6 @@ try:
     FASTAPI_AVAILABLE = True
 except ImportError:
     FASTAPI_AVAILABLE = False
-
-
-class SimpleAgentLoop(RolloutAgentLoop):
-    """Simple agent loop for testing."""
-
-    name = "simple_agent"
-
-    def __init__(self, tools: list[OpenAIFunctionToolSchema] | None = None):
-        self._tools = tools or []
-
-    def get_tools(self, request: RolloutRequest) -> list[OpenAIFunctionToolSchema]:
-        return self._tools
-
-    async def run(self, ctx: RolloutContext) -> RolloutResult:
-        return ctx.complete(list(ctx.request.messages))
-
-
-class FailingAgentLoop(RolloutAgentLoop):
-    """Agent loop that raises an error."""
-
-    name = "failing_agent"
-
-    def get_tools(self, request: RolloutRequest) -> list[OpenAIFunctionToolSchema]:
-        return []
-
-    async def run(self, ctx: RolloutContext) -> RolloutResult:
-        raise RuntimeError("Test error")
 
 
 # =============================================================================
@@ -322,6 +296,11 @@ def test_init_endpoint_returns_202() -> None:
         )
 
     assert response.status_code == 202
+    data = response.json()
+    assert "tools" in data
+    assert "rollout_id" in data
+    assert data["rollout_id"] == "test-123"
+    assert isinstance(data["tools"], list)
 
 
 @pytest.mark.skipif(not FASTAPI_AVAILABLE, reason="FastAPI not installed")
@@ -702,20 +681,6 @@ def test_init_endpoint_without_api_key_configured() -> None:
         )
 
     assert response.status_code == 202
-
-
-# =============================================================================
-# Import Error Test
-# =============================================================================
-
-
-def test_create_app_raises_without_fastapi() -> None:
-    """Verify create_app raises ImportError when FastAPI not available."""
-    # This test only makes sense if we mock the import
-    with patch.dict("sys.modules", {"fastapi": None}):
-        # We need to reload the module to trigger the import error
-        # For this test, we just verify the function exists
-        pass  # Skip actual test as it requires complex module manipulation
 
 
 # =============================================================================

@@ -274,8 +274,10 @@ async def test_rollout_context_chat_calls_llm(
 
 
 def test_agent_loop_subclass_requires_name() -> None:
-    """Verify subclass without name raises TypeError."""
-    with pytest.raises(TypeError, match="must define a 'name' class attribute"):
+    """Verify subclass without name raises TypeError mentioning the class name."""
+    with pytest.raises(
+        TypeError, match=r"NoNameLoop.*must define a 'name' class attribute"
+    ):
 
         class NoNameLoop(RolloutAgentLoop):
             def get_tools(self, request):
@@ -328,8 +330,9 @@ def test_agent_loop_abstract_methods_must_be_implemented() -> None:
 
         # Missing run() method
 
-    with pytest.raises(TypeError, match="abstract"):
+    with pytest.raises(TypeError, match="run") as exc_info:
         PartialLoop()
+    assert "abstract" in str(exc_info.value).lower()
 
 
 @pytest.mark.asyncio
