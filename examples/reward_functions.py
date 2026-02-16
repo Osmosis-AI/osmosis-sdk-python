@@ -2,7 +2,7 @@
 Reward function examples using the @osmosis_reward decorator.
 
 This file demonstrates correct and incorrect usage of the decorator,
-which enforces the signature: (solution_str: str, ground_truth: str, extra_info: dict = None) -> float
+which enforces the signature: (solution_str: str, ground_truth: str, extra_info: dict | None = None) -> float
 """
 
 from osmosis_ai import osmosis_reward
@@ -58,10 +58,11 @@ def numeric_tolerance(
         return 0.0
 
 
-# Only two parameters (extra_info is optional)
 @osmosis_reward
-def minimal_reward(solution_str: str, ground_truth: str) -> float:
-    """Minimal reward function with just required parameters."""
+def minimal_reward(
+    solution_str: str, ground_truth: str, extra_info: dict | None = None
+) -> float:
+    """Minimal reward function ignoring extra_info."""
     return float(solution_str == ground_truth)
 
 
@@ -78,11 +79,11 @@ def minimal_reward(solution_str: str, ground_truth: str) -> float:
 #     return solution_str == ground_truth
 
 # @osmosis_reward  # Wrong type annotations
-# def wrong_types(solution_str: int, ground_truth: str, extra_info: dict = None):
+# def wrong_types(solution_str: int, ground_truth: str, extra_info: dict | None = None):
 #     return str(solution_str) == ground_truth
 
 # @osmosis_reward  # Too many parameters
-# def too_many_params(solution_str: str, ground_truth: str, extra_info: dict = None, bonus: float = 0.0):
+# def too_many_params(solution_str: str, ground_truth: str, extra_info: dict | None = None, bonus: float = 0.0):
 #     return (solution_str == ground_truth) + bonus
 
 # @osmosis_reward  # Missing default value for extra_info

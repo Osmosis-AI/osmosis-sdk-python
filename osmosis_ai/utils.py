@@ -62,10 +62,19 @@ def osmosis_reward(func: Callable) -> Callable:
                 raise TypeError(
                     f"Third parameter must be named 'extra_info', got '{params[2].name}'"
                 )
-            if params[2].annotation is not dict:
-                raise TypeError(
-                    f"Third parameter 'extra_info' must be annotated as dict, got {params[2].annotation}"
-                )
+            ann = params[2].annotation
+            if ann is not dict:
+                # Also accept dict | None (PEP 604) and Optional[dict]
+                origin = get_origin(ann)
+                if origin not in _ALLOWED_UNION_ORIGINS:
+                    raise TypeError(
+                        f"Third parameter 'extra_info' must be annotated as dict or dict | None, got {ann}"
+                    )
+                non_none_args = tuple(a for a in get_args(ann) if a is not type(None))
+                if non_none_args != (dict,):
+                    raise TypeError(
+                        f"Third parameter 'extra_info' must be annotated as dict or dict | None, got {ann}"
+                    )
             if params[2].default is inspect.Parameter.empty:
                 raise TypeError(
                     "Third parameter 'extra_info' must have a default value of None"
