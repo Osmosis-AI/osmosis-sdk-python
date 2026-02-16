@@ -240,7 +240,7 @@ def _verify_and_get_user_info(
 
     except HTTPError as e:
         if e.code == 401:
-            raise LoginError("Invalid or expired token") from None
+            raise LoginError("Invalid or expired token") from e
         raise LoginError(f"Verification failed: HTTP {e.code}") from e
     except URLError as e:
         raise LoginError(f"Could not connect to platform: {e.reason}") from e
