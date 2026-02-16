@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Optional, TypedDict
+from typing import Any, TypedDict
 
 
 class ModelInfo(TypedDict, total=False):
@@ -10,10 +10,10 @@ class ModelInfo(TypedDict, total=False):
     api_key_env: str
     score_min: float
     score_max: float
-    system_prompt: Optional[str]
-    original_input: Optional[str]
+    system_prompt: str | None
+    original_input: str | None
     timeout: float
-    reasoning_effort: Optional[str]
+    reasoning_effort: str | None
 
 
 class RewardRubricRunResult(TypedDict):
@@ -32,8 +32,14 @@ class ProviderRequestError(RuntimeError):
     def __init__(self, provider: str, model: str, detail: str) -> None:
         self.provider = provider
         self.model = model
-        self.detail = detail.strip() if detail else "Provider request failed with no additional detail."
-        message = f"Provider '{provider}' request for model '{model}' failed. {self.detail}"
+        self.detail = (
+            detail.strip()
+            if detail
+            else "Provider request failed with no additional detail."
+        )
+        message = (
+            f"Provider '{provider}' request for model '{model}' failed. {self.detail}"
+        )
         super().__init__(message)
 
 
@@ -42,9 +48,9 @@ class ModelNotFoundError(ProviderRequestError):
 
 
 __all__ = [
-    "ModelInfo",
-    "RewardRubricRunResult",
     "MissingAPIKeyError",
-    "ProviderRequestError",
+    "ModelInfo",
     "ModelNotFoundError",
+    "ProviderRequestError",
+    "RewardRubricRunResult",
 ]

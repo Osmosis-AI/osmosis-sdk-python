@@ -16,9 +16,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict
-
-import pytest
+from typing import Any
 
 from osmosis_ai.rollout import (
     count_messages_by_role,
@@ -31,14 +29,13 @@ from osmosis_ai.rollout import (
     parse_tool_calls,
 )
 
-
 # =============================================================================
 # parse_tool_calls Tests
 # =============================================================================
 
 
 def test_parse_tool_calls_with_calls(
-    sample_assistant_message_with_tool_calls: Dict[str, Any]
+    sample_assistant_message_with_tool_calls: dict[str, Any],
 ) -> None:
     """Verify parse_tool_calls extracts tool_calls."""
     tool_calls = parse_tool_calls(sample_assistant_message_with_tool_calls)
@@ -46,7 +43,7 @@ def test_parse_tool_calls_with_calls(
     assert tool_calls[0]["id"] == "call_123"
 
 
-def test_parse_tool_calls_no_calls(sample_assistant_message: Dict[str, Any]) -> None:
+def test_parse_tool_calls_no_calls(sample_assistant_message: dict[str, Any]) -> None:
     """Verify parse_tool_calls returns empty list when no tool_calls."""
     tool_calls = parse_tool_calls(sample_assistant_message)
     assert tool_calls == []

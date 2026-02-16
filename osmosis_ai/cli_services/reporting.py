@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any
 
 from .engine import EvaluationRecordResult, EvaluationReport, EvaluationRun
 from .errors import CLIError
@@ -16,17 +17,25 @@ class TextReportFormatter:
     def build(
         self,
         report: EvaluationReport,
-        baseline: Optional["BaselineStatistics"] = None,
+        baseline: BaselineStatistics | None = None,
     ) -> list[str]:
         lines: list[str] = []
-        provider = str(report.rubric_config.model_info.get("provider", "")).strip() or "<unknown>"
-        model_name = str(report.rubric_config.model_info.get("model", "")).strip() or "<unspecified>"
+        provider = (
+            str(report.rubric_config.model_info.get("provider", "")).strip()
+            or "<unknown>"
+        )
+        model_name = (
+            str(report.rubric_config.model_info.get("model", "")).strip()
+            or "<unspecified>"
+        )
 
         lines.append(
             f"Rubric '{report.rubric_config.rubric_id}' "
             f"({report.rubric_config.source_label}) -> provider '{provider}' model '{model_name}'"
         )
-        lines.append(f"Loaded {len(report.record_results)} matching record(s) from {report.data_path}")
+        lines.append(
+            f"Loaded {len(report.record_results)} matching record(s) from {report.data_path}"
+        )
         lines.append(f"Running {report.number} evaluation(s) per record")
         lines.append("")
 
@@ -44,7 +53,9 @@ class TextReportFormatter:
             if index < total_runs - 1:
                 lines.append("")
 
-        summary_lines = self._format_summary(record_result.statistics, len(record_result.runs))
+        summary_lines = self._format_summary(
+            record_result.statistics, len(record_result.runs)
+        )
         if summary_lines:
             lines.extend(summary_lines)
         lines.append("")
@@ -66,26 +77,36 @@ class TextReportFormatter:
                 lines.append(self._format_detail_line("preview", run.preview))
             if run.explanation:
                 lines.append(self._format_detail_line("explanation", run.explanation))
-        lines.append(self._format_detail_line("duration", f"{run.duration_seconds:.2f}s"))
+        lines.append(
+            self._format_detail_line("duration", f"{run.duration_seconds:.2f}s")
+        )
         return lines
 
-    def _format_summary(self, statistics: dict[str, float], total_runs: int) -> list[str]:
+    def _format_summary(
+        self, statistics: dict[str, float], total_runs: int
+    ) -> list[str]:
         if not statistics:
             return []
-        success_count = int(round(statistics.get("success_count", total_runs)))
-        failure_count = int(round(statistics.get("failure_count", total_runs - success_count)))
+        success_count = round(statistics.get("success_count", total_runs))
+        failure_count = round(
+            statistics.get("failure_count", total_runs - success_count)
+        )
         if total_runs <= 1 and failure_count == 0:
             return []
 
         lines = ["  Summary:"]
-        lines.append(f"    total:     {int(round(statistics.get('total_runs', total_runs)))}")
+        lines.append(
+            f"    total:     {round(statistics.get('total_runs', total_runs))}"
+        )
         lines.append(f"    successes: {success_count}")
         lines.append(f"    failures:  {failure_count}")
         if success_count > 0:
             lines.append(f"    average:   {statistics.get('average', 0.0):.4f}")
             lines.append(f"    variance:  {statistics.get('variance', 0.0):.6f}")
             lines.append(f"    stdev:     {statistics.get('stdev', 0.0):.4f}")
-            lines.append(f"    min/max:   {statistics.get('min', 0.0):.4f} / {statistics.get('max', 0.0):.4f}")
+            lines.append(
+                f"    min/max:   {statistics.get('min', 0.0):.4f} / {statistics.get('max', 0.0):.4f}"
+            )
         else:
             lines.append("    average:   n/a")
             lines.append("    variance:  n/a")
@@ -96,11 +117,20 @@ class TextReportFormatter:
     def _format_baseline(
         self,
         report: EvaluationReport,
-        baseline: "BaselineStatistics",
+        baseline: BaselineStatistics,
     ) -> list[str]:
         lines = [f"Baseline comparison (source: {baseline.source_path}):"]
         deltas = baseline.delta(report.overall_statistics)
-        keys = ["average", "variance", "stdev", "min", "max", "success_count", "failure_count", "total_runs"]
+        keys = [
+            "average",
+            "variance",
+            "stdev",
+            "min",
+            "max",
+            "success_count",
+            "failure_count",
+            "total_runs",
+        ]
 
         for key in keys:
             if key not in baseline.statistics or key not in report.overall_statistics:
@@ -110,8 +140,8 @@ class TextReportFormatter:
             delta_value = float(deltas.get(key, current_value - baseline_value))
 
             if key in {"success_count", "failure_count", "total_runs"}:
-                baseline_str = f"{int(round(baseline_value))}"
-                current_str = f"{int(round(current_value))}"
+                baseline_str = f"{round(baseline_value)}"
+                current_str = f"{round(current_value)}"
                 delta_str = f"{delta_value:+.0f}"
             else:
                 precision = 6 if key == "variance" else 4
@@ -139,7 +169,7 @@ class ConsoleReportRenderer:
     def __init__(
         self,
         printer: Callable[[str], None] = print,
-        formatter: Optional[TextReportFormatter] = None,
+        formatter: TextReportFormatter | None = None,
     ):
         self._printer = printer
         self._formatter = formatter or TextReportFormatter()
@@ -147,7 +177,7 @@ class ConsoleReportRenderer:
     def render(
         self,
         report: EvaluationReport,
-        baseline: Optional["BaselineStatistics"] = None,
+        baseline: BaselineStatistics | None = None,
     ) -> None:
         for line in self._formatter.build(report, baseline):
             self._printer(line)
@@ -169,7 +199,9 @@ class BaselineComparator:
         if not path.exists():
             raise CLIError(f"Baseline path '{path}' does not exist.")
         if path.is_dir():
-            raise CLIError(f"Baseline path '{path}' is a directory, expected JSON file.")
+            raise CLIError(
+                f"Baseline path '{path}' is a directory, expected JSON file."
+            )
 
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
@@ -196,7 +228,9 @@ class BaselineComparator:
             except (TypeError, ValueError):
                 continue
         if not statistics:
-            raise CLIError("Baseline statistics could not be parsed into numeric values.")
+            raise CLIError(
+                "Baseline statistics could not be parsed into numeric values."
+            )
 
         return BaselineStatistics(source_path=path, statistics=statistics)
 
@@ -208,11 +242,17 @@ class JsonReportFormatter:
         self,
         report: EvaluationReport,
         *,
-        output_identifier: Optional[str],
-        baseline: Optional[BaselineStatistics],
+        output_identifier: str | None,
+        baseline: BaselineStatistics | None,
     ) -> dict[str, Any]:
-        provider = str(report.rubric_config.model_info.get("provider", "")).strip() or "<unknown>"
-        model_name = str(report.rubric_config.model_info.get("model", "")).strip() or "<unspecified>"
+        provider = (
+            str(report.rubric_config.model_info.get("provider", "")).strip()
+            or "<unknown>"
+        )
+        model_name = (
+            str(report.rubric_config.model_info.get("model", "")).strip()
+            or "<unspecified>"
+        )
 
         generated: dict[str, Any] = {
             "generated_at": datetime.now(timezone.utc).isoformat(),
@@ -231,7 +271,9 @@ class JsonReportFormatter:
 
         for record_result in report.record_results:
             conversation_label = record_result.conversation_label
-            record_identifier = record_result.record.record_identifier(conversation_label)
+            record_identifier = record_result.record.record_identifier(
+                conversation_label
+            )
 
             record_payload: dict[str, Any] = {
                 "id": record_identifier,
@@ -264,7 +306,9 @@ class JsonReportFormatter:
             generated["baseline_comparison"] = {
                 "source_path": str(baseline.source_path),
                 "baseline_statistics": _normalise_statistics(baseline.statistics),
-                "delta_statistics": _normalise_statistics(baseline.delta(report.overall_statistics)),
+                "delta_statistics": _normalise_statistics(
+                    baseline.delta(report.overall_statistics)
+                ),
             }
 
         return generated
@@ -273,7 +317,7 @@ class JsonReportFormatter:
 class JsonReportWriter:
     """Serialises an evaluation report to disk."""
 
-    def __init__(self, formatter: Optional[JsonReportFormatter] = None):
+    def __init__(self, formatter: JsonReportFormatter | None = None):
         self._formatter = formatter or JsonReportFormatter()
 
     def write(
@@ -281,8 +325,8 @@ class JsonReportWriter:
         report: EvaluationReport,
         *,
         output_path: Path,
-        output_identifier: Optional[str],
-        baseline: Optional[BaselineStatistics],
+        output_identifier: str | None,
+        baseline: BaselineStatistics | None,
     ) -> Path:
         parent_dir = output_path.parent
         if parent_dir and not parent_dir.exists():
@@ -297,11 +341,12 @@ class JsonReportWriter:
             json.dump(payload, fh, indent=2, ensure_ascii=False)
         return output_path
 
+
 def _normalise_statistics(stats: dict[str, float]) -> dict[str, Any]:
     normalised: dict[str, Any] = {}
     for key, value in stats.items():
         if key in {"success_count", "failure_count", "total_runs"}:
-            normalised[key] = int(round(value))
+            normalised[key] = round(value)
         else:
             normalised[key] = float(value)
     return normalised

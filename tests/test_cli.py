@@ -71,7 +71,12 @@ def test_preview_jsonl(tmp_path, capsys):
         "ground_truth": "Assistant cites the subscription policy, clarifies prorated billing, and avoids promising unauthorized discounts.",
         "metadata": {"policy_version": "2024-05-01"},
     }
-    jsonl_content = "\n".join([json.dumps(record_one, ensure_ascii=False), json.dumps(record_two, ensure_ascii=False)])
+    jsonl_content = "\n".join(
+        [
+            json.dumps(record_one, ensure_ascii=False),
+            json.dumps(record_two, ensure_ascii=False),
+        ]
+    )
     path = tmp_path / "data.jsonl"
     path.write_text(jsonl_content, encoding="utf-8")
 
@@ -82,7 +87,10 @@ def test_preview_jsonl(tmp_path, capsys):
     assert "Loaded 2 JSONL record(s)" in out
     assert "JSONL record #1" in out
     assert '"rubric_id": "support_followup"' in out
-    assert '"ground_truth": "Assistant verifies warranty information, gathers diagnostics, and suggests safe troubleshooting steps."' in out
+    assert (
+        '"ground_truth": "Assistant verifies warranty information, gathers diagnostics, and suggests safe troubleshooting steps."'
+        in out
+    )
 
 
 def test_eval_command_output_json(tmp_path, monkeypatch, capsys):
@@ -128,8 +136,14 @@ def test_eval_command_output_json(tmp_path, monkeypatch, capsys):
     from osmosis_ai.cli_commands import EvalRubricCommand
 
     fake_evaluator = FakeEvaluator()
-    monkeypatch.setattr("osmosis_ai.cli_services.engine.RubricEvaluator", lambda: fake_evaluator)
-    monkeypatch.setattr(EvalRubricCommand, "_generate_output_identifier", staticmethod(lambda: "1700000000"))
+    monkeypatch.setattr(
+        "osmosis_ai.cli_services.engine.RubricEvaluator", lambda: fake_evaluator
+    )
+    monkeypatch.setattr(
+        EvalRubricCommand,
+        "_generate_output_identifier",
+        staticmethod(lambda: "1700000000"),
+    )
 
     output_stem = tmp_path / "results"
     exit_code = cli.main(
@@ -271,8 +285,14 @@ def test_eval_command_with_baseline(tmp_path, monkeypatch, capsys):
     from osmosis_ai.cli_commands import EvalRubricCommand
 
     fake_evaluator = FakeEvaluator()
-    monkeypatch.setattr("osmosis_ai.cli_services.engine.RubricEvaluator", lambda: fake_evaluator)
-    monkeypatch.setattr(EvalRubricCommand, "_generate_output_identifier", staticmethod(lambda: "1700000001"))
+    monkeypatch.setattr(
+        "osmosis_ai.cli_services.engine.RubricEvaluator", lambda: fake_evaluator
+    )
+    monkeypatch.setattr(
+        EvalRubricCommand,
+        "_generate_output_identifier",
+        staticmethod(lambda: "1700000001"),
+    )
 
     output_dir = tmp_path / "baseline_results"
     exit_code = cli.main(
@@ -343,7 +363,9 @@ def test_eval_command_output_json_custom_file_path(tmp_path, monkeypatch, capsys
                 "raw": {"call": self.calls},
             }
 
-    monkeypatch.setattr("osmosis_ai.cli_services.engine.RubricEvaluator", lambda: FakeEvaluator())
+    monkeypatch.setattr(
+        "osmosis_ai.cli_services.engine.RubricEvaluator", lambda: FakeEvaluator()
+    )
 
     output_path = tmp_path / "reports" / "custom_output.txt"
     exit_code = cli.main(
@@ -574,7 +596,7 @@ def test_rollout_eval_rejects_batch_size_zero(capsys):
 
 def test_rollout_eval_accepts_any_model_with_base_url(capsys):
     """With --base-url, any model name should be accepted and displayed as-is."""
-    exit_code = cli.main(
+    cli.main(
         [
             "eval",
             "-m",
@@ -599,7 +621,7 @@ def test_rollout_eval_accepts_any_model_with_base_url(capsys):
 
 def test_rollout_test_accepts_any_model_with_base_url(capsys):
     """With --base-url, any model name should be accepted and displayed as-is."""
-    exit_code = cli.main(
+    cli.main(
         [
             "test",
             "-m",

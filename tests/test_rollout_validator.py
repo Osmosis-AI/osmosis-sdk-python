@@ -16,7 +16,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any
 
 import pytest
 
@@ -37,7 +37,6 @@ from osmosis_ai.rollout.validator import (
     validate_agent_loop,
 )
 
-
 # =============================================================================
 # Test Agent Loop Implementations
 # =============================================================================
@@ -48,7 +47,7 @@ class ValidAgentLoop(RolloutAgentLoop):
 
     name = "valid_agent"
 
-    def get_tools(self, request: RolloutRequest) -> List[OpenAIFunctionToolSchema]:
+    def get_tools(self, request: RolloutRequest) -> list[OpenAIFunctionToolSchema]:
         return [
             OpenAIFunctionToolSchema(
                 type="function",
@@ -76,7 +75,7 @@ class NoToolsAgentLoop(RolloutAgentLoop):
 
     name = "no_tools"
 
-    def get_tools(self, request: RolloutRequest) -> List[OpenAIFunctionToolSchema]:
+    def get_tools(self, request: RolloutRequest) -> list[OpenAIFunctionToolSchema]:
         return []
 
     async def run(self, ctx: RolloutContext) -> RolloutResult:
@@ -88,7 +87,7 @@ class DictToolsAgentLoop(RolloutAgentLoop):
 
     name = "dict_tools"
 
-    def get_tools(self, request: RolloutRequest) -> List[Any]:
+    def get_tools(self, request: RolloutRequest) -> list[Any]:
         return [
             {
                 "type": "function",
@@ -116,7 +115,7 @@ class InvalidToolsAgentLoop(RolloutAgentLoop):
 
     name = "invalid_tools"
 
-    def get_tools(self, request: RolloutRequest) -> List[Any]:
+    def get_tools(self, request: RolloutRequest) -> list[Any]:
         return [
             {"invalid": "tool"},  # Missing type and function
         ]
@@ -130,7 +129,7 @@ class GetToolsRaisesAgentLoop(RolloutAgentLoop):
 
     name = "get_tools_raises"
 
-    def get_tools(self, request: RolloutRequest) -> List[OpenAIFunctionToolSchema]:
+    def get_tools(self, request: RolloutRequest) -> list[OpenAIFunctionToolSchema]:
         raise ValueError("Test exception in get_tools")
 
     async def run(self, ctx: RolloutContext) -> RolloutResult:
@@ -154,7 +153,7 @@ class MissingFunctionNameAgentLoop(RolloutAgentLoop):
 
     name = "missing_function_name"
 
-    def get_tools(self, request: RolloutRequest) -> List[Any]:
+    def get_tools(self, request: RolloutRequest) -> list[Any]:
         return [
             {
                 "type": "function",
@@ -174,7 +173,7 @@ class MissingDescriptionAgentLoop(RolloutAgentLoop):
 
     name = "missing_description"
 
-    def get_tools(self, request: RolloutRequest) -> List[Any]:
+    def get_tools(self, request: RolloutRequest) -> list[Any]:
         return [
             {
                 "type": "function",

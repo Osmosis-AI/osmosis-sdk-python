@@ -44,11 +44,12 @@ class SystemicProviderError(ProviderError):
 
     pass
 
+
 __all__ = [
-    "LocalExecutionError",
-    "DatasetValidationError",
     "DatasetParseError",
-    "ToolValidationError",
+    "DatasetValidationError",
+    "LocalExecutionError",
     "ProviderError",
     "SystemicProviderError",
+    "ToolValidationError",
 ]

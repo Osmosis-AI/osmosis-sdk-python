@@ -93,11 +93,11 @@ def load_mcp_server(mcp_path: str) -> Any:
 
     # Check fastmcp is installed
     try:
-        from fastmcp import FastMCP  # noqa: F401
-    except ImportError:
+        from fastmcp import FastMCP
+    except ImportError as e:
         raise MCPLoadError(
             "fastmcp is not installed. Install it with: pip install osmosis-ai[mcp]"
-        )
+        ) from e
 
     # Import main.py as a submodule of a synthetic package:
     # - supports relative imports like `from .tools import ...`

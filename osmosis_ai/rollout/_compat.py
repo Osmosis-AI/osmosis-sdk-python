@@ -17,13 +17,13 @@ Example:
 
 from __future__ import annotations
 
-from typing import Any, Optional, Tuple
+from typing import Any
 
 
 def import_optional(
     module_name: str,
-    package_name: Optional[str] = None,
-) -> Tuple[Any, bool]:
+    package_name: str | None = None,
+) -> tuple[Any, bool]:
     """Attempt to import an optional module.
 
     Args:
@@ -49,9 +49,9 @@ def import_optional(
 
 def require_optional(
     module_name: str,
-    package_name: Optional[str] = None,
+    package_name: str | None = None,
     feature_name: str = "",
-    install_extra: Optional[str] = None,
+    install_extra: str | None = None,
 ) -> Any:
     """Import an optional module, raising a friendly error if unavailable.
 
@@ -100,15 +100,15 @@ uvicorn, UVICORN_AVAILABLE = import_optional("uvicorn")
 
 
 __all__ = [
-    # Functions
-    "import_optional",
-    "require_optional",
+    "FASTAPI_AVAILABLE",
     # Availability flags
     "PYDANTIC_SETTINGS_AVAILABLE",
-    "FASTAPI_AVAILABLE",
     "UVICORN_AVAILABLE",
+    "fastapi",
+    # Functions
+    "import_optional",
     # Pre-imported modules (may be None)
     "pydantic_settings",
-    "fastapi",
+    "require_optional",
     "uvicorn",
 ]

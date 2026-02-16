@@ -15,10 +15,10 @@ Example:
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 
-def parse_tool_calls(assistant_message: Dict[str, Any]) -> List[Dict[str, Any]]:
+def parse_tool_calls(assistant_message: dict[str, Any]) -> list[dict[str, Any]]:
     """Safely extract tool_calls from an assistant message.
 
     Handles edge cases where tool_calls may be None, missing, or not a list.
@@ -41,7 +41,7 @@ def parse_tool_calls(assistant_message: Dict[str, Any]) -> List[Dict[str, Any]]:
     return []
 
 
-def normalize_stop(stop: Any) -> Optional[List[str]]:
+def normalize_stop(stop: Any) -> list[str] | None:
     """Normalize stop parameter to consistent format.
 
     Handles various input formats and normalizes to List[str] or None.
@@ -66,7 +66,7 @@ def normalize_stop(stop: Any) -> Optional[List[str]]:
     return None
 
 
-def get_message_content(message: Dict[str, Any]) -> str:
+def get_message_content(message: dict[str, Any]) -> str:
     """Extract text content from a message.
 
     Handles messages where content may be None or missing.
@@ -84,7 +84,7 @@ def get_message_content(message: Dict[str, Any]) -> str:
     return content if isinstance(content, str) else ""
 
 
-def get_message_role(message: Dict[str, Any]) -> str:
+def get_message_role(message: dict[str, Any]) -> str:
     """Extract role from a message.
 
     Args:
@@ -100,7 +100,7 @@ def get_message_role(message: Dict[str, Any]) -> str:
     return role if isinstance(role, str) else "unknown"
 
 
-def is_assistant_message(message: Dict[str, Any]) -> bool:
+def is_assistant_message(message: dict[str, Any]) -> bool:
     """Check if a message is from the assistant.
 
     Args:
@@ -112,7 +112,7 @@ def is_assistant_message(message: Dict[str, Any]) -> bool:
     return get_message_role(message) == "assistant"
 
 
-def is_tool_message(message: Dict[str, Any]) -> bool:
+def is_tool_message(message: dict[str, Any]) -> bool:
     """Check if a message is a tool result.
 
     Args:
@@ -124,7 +124,7 @@ def is_tool_message(message: Dict[str, Any]) -> bool:
     return get_message_role(message) == "tool"
 
 
-def is_user_message(message: Dict[str, Any]) -> bool:
+def is_user_message(message: dict[str, Any]) -> bool:
     """Check if a message is from the user.
 
     Args:
@@ -136,7 +136,7 @@ def is_user_message(message: Dict[str, Any]) -> bool:
     return get_message_role(message) == "user"
 
 
-def count_messages_by_role(messages: List[Dict[str, Any]]) -> Dict[str, int]:
+def count_messages_by_role(messages: list[dict[str, Any]]) -> dict[str, int]:
     """Count messages by role.
 
     Args:
@@ -149,7 +149,7 @@ def count_messages_by_role(messages: List[Dict[str, Any]]) -> Dict[str, int]:
         counts = count_messages_by_role(messages)
         # {"user": 3, "assistant": 2, "tool": 1}
     """
-    counts: Dict[str, int] = {}
+    counts: dict[str, int] = {}
     for message in messages:
         role = get_message_role(message)
         counts[role] = counts.get(role, 0) + 1
@@ -157,12 +157,12 @@ def count_messages_by_role(messages: List[Dict[str, Any]]) -> Dict[str, int]:
 
 
 __all__ = [
-    "parse_tool_calls",
-    "normalize_stop",
+    "count_messages_by_role",
     "get_message_content",
     "get_message_role",
     "is_assistant_message",
     "is_tool_message",
     "is_user_message",
-    "count_messages_by_role",
+    "normalize_stop",
+    "parse_tool_calls",
 ]

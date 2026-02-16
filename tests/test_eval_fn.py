@@ -11,7 +11,9 @@ def _dummy_eval(solution_str: str, ground_truth: str, extra_info: dict) -> float
     return 1.0
 
 
-def test_load_eval_fns_uses_module_path_as_name(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_load_eval_fns_uses_module_path_as_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(
         "osmosis_ai.rollout.eval.evaluation.eval_fn.load_eval_fn",
         lambda _path: _dummy_eval,

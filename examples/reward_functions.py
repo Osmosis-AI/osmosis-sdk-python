@@ -2,56 +2,67 @@
 Reward function examples using the @osmosis_reward decorator.
 
 This file demonstrates correct and incorrect usage of the decorator,
-which enforces the signature: (solution_str: str, ground_truth: str, extra_info: dict = None) -> float
+which enforces the signature: (solution_str: str, ground_truth: str, extra_info: dict | None = None) -> float
 """
 
 from osmosis_ai import osmosis_reward
 
-
 # CORRECT USAGE EXAMPLES
 
+
 @osmosis_reward
-def simple_exact_match(solution_str: str, ground_truth: str, extra_info: dict = None) -> float:
+def simple_exact_match(
+    solution_str: str, ground_truth: str, extra_info: dict | None = None
+) -> float:
     """Basic exact match reward function."""
     return 1.0 if solution_str.strip() == ground_truth.strip() else 0.0
 
 
 @osmosis_reward
-def case_insensitive_match(solution_str: str, ground_truth: str, extra_info: dict = None) -> float:
+def case_insensitive_match(
+    solution_str: str, ground_truth: str, extra_info: dict | None = None
+) -> float:
     """Case-insensitive string matching with optional extra info."""
     match = solution_str.lower().strip() == ground_truth.lower().strip()
 
     # Use extra_info if provided
-    if extra_info and 'partial_credit' in extra_info:
-        if not match and extra_info['partial_credit']:
-            # Give partial credit for similar length
-            len_diff = abs(len(solution_str) - len(ground_truth))
-            if len_diff <= 2:
-                return 0.5
+    if (
+        extra_info
+        and "partial_credit" in extra_info
+        and not match
+        and extra_info["partial_credit"]
+    ):
+        # Give partial credit for similar length
+        len_diff = abs(len(solution_str) - len(ground_truth))
+        if len_diff <= 2:
+            return 0.5
 
     return 1.0 if match else 0.0
 
 
 @osmosis_reward
-def numeric_tolerance(solution_str: str, ground_truth: str, extra_info: dict = None) -> float:
+def numeric_tolerance(
+    solution_str: str, ground_truth: str, extra_info: dict | None = None
+) -> float:
     """Numeric comparison with tolerance."""
     try:
         solution_num = float(solution_str.strip())
         truth_num = float(ground_truth.strip())
 
         tolerance = 0.01  # default
-        if extra_info and 'tolerance' in extra_info:
-            tolerance = extra_info['tolerance']
+        if extra_info and "tolerance" in extra_info:
+            tolerance = extra_info["tolerance"]
 
         return 1.0 if abs(solution_num - truth_num) <= tolerance else 0.0
     except ValueError:
         return 0.0
 
 
-# Only two parameters (extra_info is optional)
 @osmosis_reward
-def minimal_reward(solution_str: str, ground_truth: str) -> float:
-    """Minimal reward function with just required parameters."""
+def minimal_reward(
+    solution_str: str, ground_truth: str, extra_info: dict | None = None
+) -> float:
+    """Minimal reward function ignoring extra_info."""
     return float(solution_str == ground_truth)
 
 
@@ -68,11 +79,11 @@ def minimal_reward(solution_str: str, ground_truth: str) -> float:
 #     return solution_str == ground_truth
 
 # @osmosis_reward  # Wrong type annotations
-# def wrong_types(solution_str: int, ground_truth: str, extra_info: dict = None):
+# def wrong_types(solution_str: int, ground_truth: str, extra_info: dict | None = None):
 #     return str(solution_str) == ground_truth
 
 # @osmosis_reward  # Too many parameters
-# def too_many_params(solution_str: str, ground_truth: str, extra_info: dict = None, bonus: float = 0.0):
+# def too_many_params(solution_str: str, ground_truth: str, extra_info: dict | None = None, bonus: float = 0.0):
 #     return (solution_str == ground_truth) + bonus
 
 # @osmosis_reward  # Missing default value for extra_info
@@ -93,7 +104,7 @@ if __name__ == "__main__":
         simple_exact_match,
         case_insensitive_match,
         numeric_tolerance,
-        minimal_reward
+        minimal_reward,
     ]
 
     for func in functions:

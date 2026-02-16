@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Dict, List
+from typing import Any
 
 import pytest
 
@@ -16,11 +16,11 @@ from osmosis_ai.rollout import (
     RolloutRequest,
     RolloutResult,
 )
-from osmosis_ai.rollout.eval.evaluation.eval_fn import EvalFnWrapper
-from osmosis_ai.rollout.eval.evaluation.runner import EvalRunner
 from osmosis_ai.rollout.client import CompletionsResult
 from osmosis_ai.rollout.core.schemas import RolloutMetrics
 from osmosis_ai.rollout.eval.common.dataset import DatasetRow
+from osmosis_ai.rollout.eval.evaluation.eval_fn import EvalFnWrapper
+from osmosis_ai.rollout.eval.evaluation.runner import EvalRunner
 
 
 class MockLLMClient:
@@ -29,7 +29,7 @@ class MockLLMClient:
         self.display_name = model
         self._api_key: str | None = None
         self._api_base: str | None = None
-        self._tools: List[Dict[str, Any]] | None = None
+        self._tools: list[dict[str, Any]] | None = None
         self._prompt_tokens = 0
         self._response_tokens = 0
         self._num_llm_calls = 0
@@ -41,7 +41,7 @@ class MockLLMClient:
             finish_reason="stop",
         )
 
-    def set_tools(self, tools: List[Any]) -> None:
+    def set_tools(self, tools: list[Any]) -> None:
         if tools:
             self._tools = [
                 t.model_dump(exclude_none=True) if hasattr(t, "model_dump") else t
@@ -67,7 +67,7 @@ class MockLLMClient:
         )
 
     async def chat_completions(
-        self, messages: List[Dict[str, Any]], **kwargs: Any
+        self, messages: list[dict[str, Any]], **kwargs: Any
     ) -> CompletionsResult:
         if self._tools is not None and "tools" not in kwargs:
             kwargs["tools"] = self._tools
@@ -82,7 +82,7 @@ class MockAgentLoop(RolloutAgentLoop):
 
     def __init__(
         self,
-        tools: List[OpenAIFunctionToolSchema] | None = None,
+        tools: list[OpenAIFunctionToolSchema] | None = None,
         run_error: Exception | None = None,
         call_llm: bool = False,
     ) -> None:
@@ -90,7 +90,7 @@ class MockAgentLoop(RolloutAgentLoop):
         self._run_error = run_error
         self._call_llm = call_llm
 
-    def get_tools(self, request: RolloutRequest) -> List[OpenAIFunctionToolSchema]:
+    def get_tools(self, request: RolloutRequest) -> list[OpenAIFunctionToolSchema]:
         return self._tools
 
     async def run(self, ctx: RolloutContext) -> RolloutResult:
@@ -133,9 +133,9 @@ class TestEvalRunner:
         agent = MockAgentLoop(tools=[create_sample_tool()], call_llm=True)
 
         async def full_eval(
-            messages: List[Dict[str, Any]],
+            messages: list[dict[str, Any]],
             ground_truth: str,
-            metadata: Dict[str, Any],
+            metadata: dict[str, Any],
         ) -> float:
             assert ground_truth.startswith("Answer")
             assert "user_prompt" in metadata
@@ -144,7 +144,7 @@ class TestEvalRunner:
         def simple_eval(
             solution_str: str,
             ground_truth: str,
-            extra_info: Dict[str, Any],
+            extra_info: dict[str, Any],
         ) -> float:
             return 1.0 if "response" in solution_str else 0.0
 
@@ -179,7 +179,7 @@ class TestEvalRunner:
         def simple_eval(
             solution_str: str,
             ground_truth: str,
-            extra_info: Dict[str, Any],
+            extra_info: dict[str, Any],
         ) -> float:
             return 1.0
 
@@ -211,7 +211,7 @@ class TestEvalRunner:
         def alternating_eval(
             solution_str: str,
             ground_truth: str,
-            extra_info: Dict[str, Any],
+            extra_info: dict[str, Any],
         ) -> float:
             call_counter["n"] += 1
             return 1.0 if call_counter["n"] % 2 == 1 else 0.0
@@ -243,7 +243,7 @@ class TestEvalRunner:
         def simple_eval(
             solution_str: str,
             ground_truth: str,
-            extra_info: Dict[str, Any],
+            extra_info: dict[str, Any],
         ) -> float:
             return 1.0 if "response" in solution_str else 0.0
 
@@ -285,7 +285,7 @@ class TestEvalRunner:
         def simple_eval(
             solution_str: str,
             ground_truth: str,
-            extra_info: Dict[str, Any],
+            extra_info: dict[str, Any],
         ) -> float:
             return 1.0 if "response" in solution_str else 0.0
 
@@ -332,7 +332,7 @@ class TestEvalRunner:
         def simple_eval(
             solution_str: str,
             ground_truth: str,
-            extra_info: Dict[str, Any],
+            extra_info: dict[str, Any],
         ) -> float:
             return 1.0
 
@@ -372,7 +372,7 @@ class TestEvalRunner:
         def simple_eval(
             solution_str: str,
             ground_truth: str,
-            extra_info: Dict[str, Any],
+            extra_info: dict[str, Any],
         ) -> float:
             return 1.0
 
@@ -399,6 +399,7 @@ class TestEvalRunner:
     @pytest.mark.asyncio
     async def test_run_eval_concurrent_normal_failures_continue(self) -> None:
         """Non-systemic concurrent failures should be recorded without early stopping."""
+
         class FailingAgent(MockAgentLoop):
             async def run(self, ctx: RolloutContext) -> RolloutResult:
                 raise RuntimeError("eval failure")
@@ -409,7 +410,7 @@ class TestEvalRunner:
         def simple_eval(
             solution_str: str,
             ground_truth: str,
-            extra_info: Dict[str, Any],
+            extra_info: dict[str, Any],
         ) -> float:
             return 1.0
 
@@ -443,7 +444,7 @@ class TestEvalRunner:
         def simple_eval(
             solution_str: str,
             ground_truth: str,
-            extra_info: Dict[str, Any],
+            extra_info: dict[str, Any],
         ) -> float:
             return 1.0
 
@@ -526,7 +527,7 @@ class TestEvalRunner:
         def simple_eval(
             solution_str: str,
             ground_truth: str,
-            extra_info: Dict[str, Any],
+            extra_info: dict[str, Any],
         ) -> float:
             return 1.0
 
@@ -547,7 +548,9 @@ class TestEvalRunner:
         assert first_run.tokens == 15
 
     @pytest.mark.asyncio
-    async def test_run_eval_concurrent_systemic_error_preserves_duration_and_tokens(self) -> None:
+    async def test_run_eval_concurrent_systemic_error_preserves_duration_and_tokens(
+        self,
+    ) -> None:
         """Concurrent systemic failures should keep per-run duration/token stats."""
         from osmosis_ai.rollout.eval.common.errors import SystemicProviderError
 
@@ -564,7 +567,7 @@ class TestEvalRunner:
         def simple_eval(
             solution_str: str,
             ground_truth: str,
-            extra_info: Dict[str, Any],
+            extra_info: dict[str, Any],
         ) -> float:
             return 1.0
 
@@ -581,7 +584,9 @@ class TestEvalRunner:
             batch_size=2,
         )
 
-        failed_runs = [run for row in eval_result.rows for run in row.runs if not run.success]
+        failed_runs = [
+            run for row in eval_result.rows for run in row.runs if not run.success
+        ]
         assert failed_runs
         assert all(run.duration_ms > 0 for run in failed_runs)
         assert all(run.tokens == 15 for run in failed_runs)
@@ -598,7 +603,7 @@ class TestEvalRunner:
         def simple_eval(
             solution_str: str,
             ground_truth: str,
-            extra_info: Dict[str, Any],
+            extra_info: dict[str, Any],
         ) -> float:
             return 1.0
 
@@ -632,7 +637,7 @@ class TestEvalRunnerBaseline:
         def simple_eval(
             solution_str: str,
             ground_truth: str,
-            extra_info: Dict[str, Any],
+            extra_info: dict[str, Any],
         ) -> float:
             return 1.0
 
@@ -668,7 +673,7 @@ class TestEvalRunnerBaseline:
         def simple_eval(
             solution_str: str,
             ground_truth: str,
-            extra_info: Dict[str, Any],
+            extra_info: dict[str, Any],
         ) -> float:
             return 1.0
 
@@ -712,7 +717,7 @@ class TestEvalRunnerBaseline:
         def simple_eval(
             solution_str: str,
             ground_truth: str,
-            extra_info: Dict[str, Any],
+            extra_info: dict[str, Any],
         ) -> float:
             return 1.0
 
@@ -752,7 +757,7 @@ class TestEvalRunnerBaseline:
         def simple_eval(
             solution_str: str,
             ground_truth: str,
-            extra_info: Dict[str, Any],
+            extra_info: dict[str, Any],
         ) -> float:
             return 1.0
 
@@ -789,7 +794,7 @@ class TestEvalRunnerBaseline:
         def score_eval(
             solution_str: str,
             ground_truth: str,
-            extra_info: Dict[str, Any],
+            extra_info: dict[str, Any],
         ) -> float:
             # Primary gets "eval response" -> 1.0, baseline gets "baseline wrong answer" -> 0.0
             return 1.0 if "eval response" in solution_str else 0.0
@@ -834,7 +839,7 @@ class TestEvalRunnerBaseline:
         def score_eval(
             solution_str: str,
             ground_truth: str,
-            extra_info: Dict[str, Any],
+            extra_info: dict[str, Any],
         ) -> float:
             return 1.0 if "eval response" in solution_str else 0.0
 

@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List
-from unittest.mock import AsyncMock, MagicMock, patch
+from typing import Any
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -21,8 +21,8 @@ from osmosis_ai.rollout.core.schemas import RolloutMetrics
 from osmosis_ai.rollout.eval.common.dataset import DatasetRow
 from osmosis_ai.rollout.eval.test_mode.runner import (
     LocalTestBatchResult,
-    LocalTestRunResult,
     LocalTestRunner,
+    LocalTestRunResult,
 )
 
 
@@ -33,12 +33,12 @@ class MockTestLLMClient:
     """
 
     def __init__(self) -> None:
-        self._tools: List[Dict[str, Any]] | None = None
+        self._tools: list[dict[str, Any]] | None = None
         self._llm_latency_ms: float = 0.0
         self._num_llm_calls: int = 0
         self._prompt_tokens: int = 0
         self._response_tokens: int = 0
-        self.completions_calls: List[Dict[str, Any]] = []
+        self.completions_calls: list[dict[str, Any]] = []
         self.mock_response = CompletionsResult(
             message={"role": "assistant", "content": "Test response"},
             token_ids=[],
@@ -47,7 +47,7 @@ class MockTestLLMClient:
             finish_reason="stop",
         )
 
-    def set_tools(self, tools: List[Any]) -> None:
+    def set_tools(self, tools: list[Any]) -> None:
         if tools:
             self._tools = [
                 t.model_dump(exclude_none=True) if hasattr(t, "model_dump") else t
@@ -82,7 +82,7 @@ class MockTestLLMClient:
         self._response_tokens += completion_tokens
 
     async def chat_completions(
-        self, messages: List[Dict[str, Any]], **kwargs: Any
+        self, messages: list[dict[str, Any]], **kwargs: Any
     ) -> CompletionsResult:
         # Auto-inject tools if set
         if self._tools is not None and "tools" not in kwargs:
@@ -99,7 +99,7 @@ class MockAgentLoop(RolloutAgentLoop):
 
     def __init__(
         self,
-        tools: List[OpenAIFunctionToolSchema] | None = None,
+        tools: list[OpenAIFunctionToolSchema] | None = None,
         run_result: RolloutResult | None = None,
         run_error: Exception | None = None,
         call_llm: bool = False,
@@ -108,10 +108,10 @@ class MockAgentLoop(RolloutAgentLoop):
         self._run_result = run_result
         self._run_error = run_error
         self._call_llm = call_llm
-        self.get_tools_calls: List[RolloutRequest] = []
-        self.run_calls: List[RolloutContext] = []
+        self.get_tools_calls: list[RolloutRequest] = []
+        self.run_calls: list[RolloutContext] = []
 
-    def get_tools(self, request: RolloutRequest) -> List[OpenAIFunctionToolSchema]:
+    def get_tools(self, request: RolloutRequest) -> list[OpenAIFunctionToolSchema]:
         self.get_tools_calls.append(request)
         return self._tools
 
@@ -334,7 +334,7 @@ class TestLocalTestRunner:
         agent = MockAgentLoop(tools=[create_sample_tool()])
         runner = LocalTestRunner(agent_loop=agent, llm_client=client)
 
-        progress_calls: List[tuple] = []
+        progress_calls: list[tuple] = []
 
         def on_progress(current: int, total: int, result: LocalTestRunResult) -> None:
             progress_calls.append((current, total, result))
@@ -380,7 +380,7 @@ class TestLocalTestRunner:
         agent = MockAgentLoop(tools=[create_sample_tool()])
         runner = LocalTestRunner(agent_loop=agent, llm_client=client)
 
-        progress_calls: List[tuple] = []
+        progress_calls: list[tuple] = []
 
         def on_progress(current: int, total: int, result: LocalTestRunResult) -> None:
             progress_calls.append((current, total, result.row_index))
@@ -456,7 +456,7 @@ class TestSystemicProviderError:
                 row: DatasetRow,
                 row_index: int,
                 max_turns: int = 10,
-                completion_params: Dict[str, Any] | None = None,
+                completion_params: dict[str, Any] | None = None,
             ) -> LocalTestRunResult:
                 self._calls += 1
                 if self._calls == 1:
@@ -486,6 +486,7 @@ class TestSystemicProviderError:
     @pytest.mark.asyncio
     async def test_run_batch_normal_errors_dont_stop_early(self) -> None:
         """Regular exceptions should not stop the batch early."""
+
         class FailingAgent(MockAgentLoop):
             async def run(self, ctx: RolloutContext) -> RolloutResult:
                 raise RuntimeError("Transient error")
@@ -634,7 +635,7 @@ class TestContextCreation:
         agent = MockAgentLoop(tools=[])
         runner = LocalTestRunner(agent_loop=agent, llm_client=client)
 
-        row: Dict[str, Any] = {
+        row: dict[str, Any] = {
             "user_prompt": "Test question",
             "system_prompt": "Test system",
             "ground_truth": "Test answer",

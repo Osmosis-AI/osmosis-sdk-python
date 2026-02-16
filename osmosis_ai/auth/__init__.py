@@ -27,9 +27,15 @@ __all__ = [
     "CONFIG_DIR",
     "CREDENTIALS_FILE",
     "PLATFORM_URL",
+    # Platform Client
+    "AuthenticationExpiredError",
     # Credentials
     "CredentialsStore",
+    # Flow
+    "LoginError",
+    "LoginResult",
     "OrganizationInfo",
+    "PlatformAPIError",
     "UserInfo",
     "WorkspaceCredentials",
     "delete_credentials",
@@ -38,14 +44,8 @@ __all__ = [
     "get_all_workspaces",
     "get_valid_credentials",
     "load_credentials",
+    "login",
+    "platform_request",
     "save_credentials",
     "set_active_workspace",
-    # Flow
-    "LoginError",
-    "LoginResult",
-    "login",
-    # Platform Client
-    "AuthenticationExpiredError",
-    "PlatformAPIError",
-    "platform_request",
 ]

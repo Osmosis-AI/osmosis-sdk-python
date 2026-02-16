@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from osmosis_ai.rollout.core.base import RolloutAgentLoop, RolloutContext, RolloutResult
 from osmosis_ai.rollout.core.schemas import (
@@ -32,7 +32,8 @@ logger = logging.getLogger(__name__)
 # MCP Tool → OpenAI Schema conversion
 # ---------------------------------------------------------------------------
 
-def _resolve_ref(ref: str, defs: Dict[str, Any]) -> Dict[str, Any]:
+
+def _resolve_ref(ref: str, defs: dict[str, Any]) -> dict[str, Any]:
     """Resolve a ``$ref`` pointer like ``#/$defs/Color`` against *defs*."""
     parts = ref.lstrip("#/").split("/")
     node: Any = {"$defs": defs}
@@ -42,8 +43,8 @@ def _resolve_ref(ref: str, defs: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _json_schema_to_property(
-    schema: Dict[str, Any],
-    defs: Dict[str, Any],
+    schema: dict[str, Any],
+    defs: dict[str, Any],
 ) -> OpenAIFunctionPropertySchema:
     """Convert a single JSON Schema property to an OpenAIFunctionPropertySchema.
 
@@ -64,7 +65,9 @@ def _json_schema_to_property(
     prop_type_raw = schema.get("type", "string")
     if isinstance(prop_type_raw, list):
         # JSON Schema allows union types like ["integer", "null"].
-        non_null_types = [t for t in prop_type_raw if isinstance(t, str) and t != "null"]
+        non_null_types = [
+            t for t in prop_type_raw if isinstance(t, str) and t != "null"
+        ]
         prop_type = non_null_types[0] if non_null_types else "string"
     elif isinstance(prop_type_raw, str):
         prop_type = prop_type_raw
@@ -88,14 +91,14 @@ def _json_schema_to_property(
 def _mcp_tool_to_openai(
     name: str,
     description: str,
-    parameters: Dict[str, Any],
+    parameters: dict[str, Any],
 ) -> OpenAIFunctionToolSchema:
     """Convert an MCP FunctionTool's metadata to an OpenAI tool schema."""
     defs = parameters.get("$defs", {})
     raw_props = parameters.get("properties", {})
     required = parameters.get("required", [])
 
-    properties: Dict[str, OpenAIFunctionPropertySchema] = {}
+    properties: dict[str, OpenAIFunctionPropertySchema] = {}
     for prop_name, prop_schema in raw_props.items():
         properties[prop_name] = _json_schema_to_property(prop_schema, defs)
 
@@ -117,6 +120,7 @@ def _mcp_tool_to_openai(
 # MCPAgentLoop
 # ---------------------------------------------------------------------------
 
+
 class MCPAgentLoop(RolloutAgentLoop):
     """Agent loop that executes MCP tools from a FastMCP server instance.
 
@@ -130,10 +134,10 @@ class MCPAgentLoop(RolloutAgentLoop):
     def __init__(self, mcp_server: Any, agent_name: str = "mcp_agent") -> None:
         self.name = agent_name  # type: ignore[misc]
         self._tool_manager = mcp_server._tool_manager
-        self._openai_schemas: List[OpenAIFunctionToolSchema] = []
+        self._openai_schemas: list[OpenAIFunctionToolSchema] = []
 
         # Build cached OpenAI schemas from registered MCP tools
-        for tool_name, tool in self._tool_manager._tools.items():
+        for _tool_name, tool in self._tool_manager._tools.items():
             self._openai_schemas.append(
                 _mcp_tool_to_openai(
                     name=tool.name,
@@ -142,13 +146,13 @@ class MCPAgentLoop(RolloutAgentLoop):
                 )
             )
 
-    def get_tools(self, request: RolloutRequest) -> List[OpenAIFunctionToolSchema]:
+    def get_tools(self, request: RolloutRequest) -> list[OpenAIFunctionToolSchema]:
         return list(self._openai_schemas)
 
     async def run(self, ctx: RolloutContext) -> RolloutResult:
         messages = list(ctx.request.messages)
 
-        for turn in range(ctx.request.max_turns):
+        for _turn in range(ctx.request.max_turns):
             result = await ctx.chat(messages, **ctx.request.completion_params)
             messages.append(result.message)
 
@@ -164,7 +168,9 @@ class MCPAgentLoop(RolloutAgentLoop):
 
                     # Extract value: prefer structured_content, fallback to content text
                     value = _extract_tool_value(tool_result)
-                    messages.append(create_tool_result(call_id, serialize_tool_result(value)))
+                    messages.append(
+                        create_tool_result(call_id, serialize_tool_result(value))
+                    )
                 except Exception as e:
                     call_id = tool_call.get("id", "unknown")
                     logger.warning("Tool call %s failed: %s", call_id, e)

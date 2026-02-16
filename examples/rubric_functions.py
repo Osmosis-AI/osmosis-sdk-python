@@ -102,11 +102,21 @@ def score_with_hosted_model(
     Provide provider-specific knobs inside `extra_info["metadata"]`. Toggle `extra_info["capture_details"]`
     when you want the provider response returned.
     """
-    metadata = extra_info.get("metadata") if isinstance(extra_info, dict) and isinstance(extra_info.get("metadata"), dict) else None
-    capture_details = bool(extra_info.get("capture_details")) if isinstance(extra_info, dict) else False
+    metadata = (
+        extra_info.get("metadata")
+        if isinstance(extra_info, dict) and isinstance(extra_info.get("metadata"), dict)
+        else None
+    )
+    capture_details = (
+        bool(extra_info.get("capture_details"))
+        if isinstance(extra_info, dict)
+        else False
+    )
     prompt_metadata = metadata
 
-    provider_config = _resolve_provider_profile(metadata.get("provider_profile") if metadata else None)
+    provider_config = _resolve_provider_profile(
+        metadata.get("provider_profile") if metadata else None
+    )
 
     model_info = dict(provider_config["model_info"])
 
@@ -148,7 +158,9 @@ def _resolve_provider_profile(profile_name: str | None) -> dict:
     profile = PROFILE_CATALOG.get(profile_key)
     if profile is None:
         options = ", ".join(sorted(PROFILE_CATALOG))
-        raise ValueError(f"Unknown provider_profile '{profile_name}'. Supported profiles: {options}")
+        raise ValueError(
+            f"Unknown provider_profile '{profile_name}'. Supported profiles: {options}"
+        )
 
     return {
         "model_info": profile,
@@ -165,7 +177,7 @@ def _run(provider_name: str, provider_profile: str) -> None:
             "metadata": {
                 "provider_profile": provider_profile,
                 "scenario_label": provider_name,
-            }
+            },
         }
         score = score_with_hosted_model(
             solution_str=SOLUTION_STR,

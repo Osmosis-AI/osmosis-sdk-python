@@ -32,14 +32,15 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from typing import Any, Awaitable, Callable, Dict, List, Union
+from collections.abc import Awaitable, Callable
+from typing import Any
 
-from osmosis_ai.rollout.core.exceptions import ToolArgumentError, ToolExecutionError
+from osmosis_ai.rollout.core.exceptions import ToolArgumentError
 
 logger = logging.getLogger(__name__)
 
 
-def create_tool_result(tool_call_id: str, content: str) -> Dict[str, str]:
+def create_tool_result(tool_call_id: str, content: str) -> dict[str, str]:
     """Create a standardized tool result message.
 
     Creates a message dict with role="tool" that can be appended to the
@@ -95,7 +96,7 @@ def serialize_tool_result(result: Any) -> str:
         return json.dumps(result)
 
 
-def parse_tool_arguments(arguments: Union[str, Dict[str, Any]]) -> Dict[str, Any]:
+def parse_tool_arguments(arguments: str | dict[str, Any]) -> dict[str, Any]:
     """Parse tool call arguments, handling both string and dict formats.
 
     LLM responses may provide arguments as either a JSON string or a dict.
@@ -127,14 +128,14 @@ def parse_tool_arguments(arguments: Union[str, Dict[str, Any]]) -> Dict[str, Any
                 f"Expected dict from JSON, got {type(parsed).__name__}"
             )
         except json.JSONDecodeError as e:
-            raise ToolArgumentError(f"Invalid JSON arguments: {e}")
+            raise ToolArgumentError(f"Invalid JSON arguments: {e}") from e
 
     raise ToolArgumentError(
         f"Expected str or dict arguments, got {type(arguments).__name__}"
     )
 
 
-def get_tool_call_info(tool_call: Dict[str, Any]) -> tuple[str, str, Dict[str, Any]]:
+def get_tool_call_info(tool_call: dict[str, Any]) -> tuple[str, str, dict[str, Any]]:
     """Extract tool call ID, name, and arguments from a tool call dict.
 
     Args:
@@ -167,15 +168,15 @@ def get_tool_call_info(tool_call: Dict[str, Any]) -> tuple[str, str, Dict[str, A
             str(e),
             tool_call_id=tool_call_id,
             tool_name=function_name,
-        )
+        ) from e
 
     return tool_call_id, function_name, arguments
 
 
 async def execute_tool_calls(
-    tool_calls: List[Dict[str, Any]],
-    executor: Callable[[Dict[str, Any]], Awaitable[Dict[str, str]]],
-) -> List[Dict[str, str]]:
+    tool_calls: list[dict[str, Any]],
+    executor: Callable[[dict[str, Any]], Awaitable[dict[str, str]]],
+) -> list[dict[str, str]]:
     """Execute multiple tool calls concurrently.
 
     Runs all tool calls in parallel using asyncio.gather. The executor
@@ -207,7 +208,7 @@ async def execute_tool_calls(
 def create_tool_error_result(
     tool_call_id: str,
     error_message: str,
-) -> Dict[str, str]:
+) -> dict[str, str]:
     """Create an error result message for a failed tool call.
 
     Use this to return error information to the LLM so it can potentially
@@ -230,10 +231,10 @@ def create_tool_error_result(
 
 
 __all__ = [
-    "create_tool_result",
-    "serialize_tool_result",
-    "parse_tool_arguments",
-    "get_tool_call_info",
-    "execute_tool_calls",
     "create_tool_error_result",
+    "create_tool_result",
+    "execute_tool_calls",
+    "get_tool_call_info",
+    "parse_tool_arguments",
+    "serialize_tool_result",
 ]

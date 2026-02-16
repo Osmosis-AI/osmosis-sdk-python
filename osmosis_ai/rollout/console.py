@@ -16,17 +16,18 @@ Usage:
 from __future__ import annotations
 
 import sys
-from typing import Any, Callable, List, Optional
+from collections.abc import Callable
+from typing import Any
 
 # Try to import rich, gracefully degrade if not available
 try:
+    from rich import box
     from rich.console import Console as RichConsole
     from rich.markup import escape as rich_escape
     from rich.panel import Panel
+    from rich.style import Style
     from rich.table import Table
     from rich.text import Text
-    from rich.style import Style
-    from rich import box
 
     RICH_AVAILABLE = True
 except ImportError:
@@ -83,7 +84,7 @@ class Console:
         self,
         *,
         file: Any = None,
-        force_terminal: Optional[bool] = None,
+        force_terminal: bool | None = None,
         no_color: bool = False,
     ):
         """Initialize the console.
@@ -140,7 +141,7 @@ class Console:
         except ImportError:
             return False
 
-    def _get_ansi_style(self, style: Optional[str]) -> str:
+    def _get_ansi_style(self, style: str | None) -> str:
         """Get ANSI escape code for a style name."""
         if not style or self._no_color or not self._is_tty:
             return ""
@@ -154,7 +155,7 @@ class Console:
     def print(
         self,
         *args: Any,
-        style: Optional[str] = None,
+        style: str | None = None,
         end: str = "\n",
         **kwargs: Any,
     ) -> None:
@@ -265,7 +266,10 @@ class Console:
             # Content lines
             for line in lines:
                 padded = line.ljust(box_width - 4)
-                print(f"{style_code}│{reset}  {padded}  {style_code}│{reset}", file=self._file)
+                print(
+                    f"{style_code}│{reset}  {padded}  {style_code}│{reset}",
+                    file=self._file,
+                )
 
             # Bottom border
             bottom = f"╰{'─' * (box_width - 2)}╯"
@@ -273,10 +277,10 @@ class Console:
 
     def table(
         self,
-        rows: List[tuple[str, str]],
+        rows: list[tuple[str, str]],
         *,
-        title: Optional[str] = None,
-        headers: Optional[tuple[str, str]] = None,
+        title: str | None = None,
+        headers: tuple[str, str] | None = None,
     ) -> None:
         """Print a simple two-column table.
 
@@ -346,7 +350,7 @@ class Console:
                 return f"{ansi_style}{text}{_AnsiColors.RESET}"
             return text
 
-    def input(self, prompt: str = "", style: Optional[str] = None) -> str:
+    def input(self, prompt: str = "", style: str | None = None) -> str:
         """Get user input with optional styled prompt.
 
         Args:
@@ -372,7 +376,7 @@ console = Console()
 
 
 __all__ = [
+    "RICH_AVAILABLE",
     "Console",
     "console",
-    "RICH_AVAILABLE",
 ]

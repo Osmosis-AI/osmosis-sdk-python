@@ -16,21 +16,19 @@
 
 from __future__ import annotations
 
-from typing import List
-
 import pytest
 
 from osmosis_ai.rollout import (
     AgentLoopNotFoundError,
+    OpenAIFunctionToolSchema,
     RolloutAgentLoop,
     RolloutContext,
     RolloutRequest,
     RolloutResult,
-    OpenAIFunctionToolSchema,
 )
 from osmosis_ai.rollout.registry import (
-    AgentLoopRegistry,
     _REGISTRY,
+    AgentLoopRegistry,
     get_agent_loop,
     list_agent_loops,
     register_agent_loop,
@@ -43,7 +41,7 @@ class TestAgentLoop(RolloutAgentLoop):
 
     name = "test_agent"
 
-    def get_tools(self, request: RolloutRequest) -> List[OpenAIFunctionToolSchema]:
+    def get_tools(self, request: RolloutRequest) -> list[OpenAIFunctionToolSchema]:
         return []
 
     async def run(self, ctx: RolloutContext) -> RolloutResult:
@@ -55,7 +53,7 @@ class AnotherAgentLoop(RolloutAgentLoop):
 
     name = "another_agent"
 
-    def get_tools(self, request: RolloutRequest) -> List[OpenAIFunctionToolSchema]:
+    def get_tools(self, request: RolloutRequest) -> list[OpenAIFunctionToolSchema]:
         return []
 
     async def run(self, ctx: RolloutContext) -> RolloutResult:

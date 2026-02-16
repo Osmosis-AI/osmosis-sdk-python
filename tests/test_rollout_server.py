@@ -17,17 +17,17 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Dict, List
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
 from osmosis_ai.rollout import (
+    OpenAIFunctionToolSchema,
     RolloutAgentLoop,
     RolloutContext,
     RolloutRequest,
     RolloutResult,
-    OpenAIFunctionToolSchema,
     create_app,
 )
 from osmosis_ai.rollout.server import AppState
@@ -47,10 +47,10 @@ class SimpleAgentLoop(RolloutAgentLoop):
 
     name = "simple_agent"
 
-    def __init__(self, tools: List[OpenAIFunctionToolSchema] | None = None):
+    def __init__(self, tools: list[OpenAIFunctionToolSchema] | None = None):
         self._tools = tools or []
 
-    def get_tools(self, request: RolloutRequest) -> List[OpenAIFunctionToolSchema]:
+    def get_tools(self, request: RolloutRequest) -> list[OpenAIFunctionToolSchema]:
         return self._tools
 
     async def run(self, ctx: RolloutContext) -> RolloutResult:
@@ -62,7 +62,7 @@ class FailingAgentLoop(RolloutAgentLoop):
 
     name = "failing_agent"
 
-    def get_tools(self, request: RolloutRequest) -> List[OpenAIFunctionToolSchema]:
+    def get_tools(self, request: RolloutRequest) -> list[OpenAIFunctionToolSchema]:
         return []
 
     async def run(self, ctx: RolloutContext) -> RolloutResult:
@@ -325,7 +325,9 @@ def test_init_endpoint_returns_202() -> None:
 
 
 @pytest.mark.skipif(not FASTAPI_AVAILABLE, reason="FastAPI not installed")
-def test_init_endpoint_returns_tools(sample_tool_schema: OpenAIFunctionToolSchema) -> None:
+def test_init_endpoint_returns_tools(
+    sample_tool_schema: OpenAIFunctionToolSchema,
+) -> None:
     """Verify /v1/rollout/init returns tools from agent_loop.get_tools()."""
     agent_loop = SimpleAgentLoop(tools=[sample_tool_schema])
     app = create_app(agent_loop)
@@ -476,7 +478,7 @@ def test_init_endpoint_idempotent_caches_tools() -> None:
         def __init__(self) -> None:
             self.calls = 0
 
-        def get_tools(self, request: RolloutRequest) -> List[OpenAIFunctionToolSchema]:
+        def get_tools(self, request: RolloutRequest) -> list[OpenAIFunctionToolSchema]:
             self.calls += 1
             return [
                 OpenAIFunctionToolSchema(
@@ -723,8 +725,8 @@ def test_create_app_raises_without_fastapi() -> None:
 
 def test_rollout_context_debug_disabled_by_default() -> None:
     """Verify debug logging is disabled by default."""
-    from osmosis_ai.rollout.core.base import RolloutContext
     from osmosis_ai.rollout import RolloutRequest
+    from osmosis_ai.rollout.core.base import RolloutContext
 
     request = RolloutRequest(
         rollout_id="test-123",
@@ -746,8 +748,8 @@ def test_rollout_context_debug_disabled_by_default() -> None:
 
 def test_rollout_context_debug_enabled_when_dir_set() -> None:
     """Verify debug logging is enabled when _debug_dir is set."""
-    from osmosis_ai.rollout.core.base import RolloutContext
     from osmosis_ai.rollout import RolloutRequest
+    from osmosis_ai.rollout.core.base import RolloutContext
 
     request = RolloutRequest(
         rollout_id="test-123",
@@ -770,8 +772,8 @@ def test_rollout_context_debug_enabled_when_dir_set() -> None:
 
 def test_rollout_context_log_event_noop_when_disabled() -> None:
     """Verify log_event is a no-op when debug logging is disabled."""
-    from osmosis_ai.rollout.core.base import RolloutContext
     from osmosis_ai.rollout import RolloutRequest
+    from osmosis_ai.rollout.core.base import RolloutContext
 
     request = RolloutRequest(
         rollout_id="test-123",
@@ -794,8 +796,9 @@ def test_rollout_context_log_event_noop_when_disabled() -> None:
 def test_rollout_context_log_event_writes_to_file(tmp_path: Any) -> None:
     """Verify log_event writes events to JSONL file."""
     import json
-    from osmosis_ai.rollout.core.base import RolloutContext
+
     from osmosis_ai.rollout import RolloutRequest
+    from osmosis_ai.rollout.core.base import RolloutContext
 
     debug_dir = str(tmp_path / "debug_logs")
 
@@ -821,11 +824,12 @@ def test_rollout_context_log_event_writes_to_file(tmp_path: Any) -> None:
 
     # Verify file was created
     import os
+
     debug_file = os.path.join(debug_dir, "test-rollout-456.jsonl")
     assert os.path.exists(debug_file)
 
     # Verify contents
-    with open(debug_file, "r", encoding="utf-8") as f:
+    with open(debug_file, encoding="utf-8") as f:
         lines = f.readlines()
 
     assert len(lines) == 3
@@ -848,8 +852,8 @@ def test_rollout_context_log_event_writes_to_file(tmp_path: Any) -> None:
 
 def test_rollout_context_get_debug_file_path() -> None:
     """Verify _get_debug_file_path returns correct path."""
-    from osmosis_ai.rollout.core.base import RolloutContext
     from osmosis_ai.rollout import RolloutRequest
+    from osmosis_ai.rollout.core.base import RolloutContext
 
     request = RolloutRequest(
         rollout_id="my-rollout-id",
@@ -875,7 +879,9 @@ def test_rollout_context_get_debug_file_path() -> None:
         llm=mock_llm,
         _debug_dir="/var/log/rollouts",
     )
-    assert ctx_with_debug._get_debug_file_path() == "/var/log/rollouts/my-rollout-id.jsonl"
+    assert (
+        ctx_with_debug._get_debug_file_path() == "/var/log/rollouts/my-rollout-id.jsonl"
+    )
 
 
 @pytest.mark.skipif(not FASTAPI_AVAILABLE, reason="FastAPI not installed")
@@ -894,6 +900,7 @@ async def test_background_rollout_with_debug_logging(tmp_path: Any) -> None:
     """Verify debug logging works in background rollout execution."""
     import json
     import os
+
     from osmosis_ai.rollout import RolloutMetrics
 
     debug_dir = str(tmp_path / "debug_logs")
@@ -903,7 +910,7 @@ async def test_background_rollout_with_debug_logging(tmp_path: Any) -> None:
 
         name = "debug_logging_agent"
 
-        def get_tools(self, request: RolloutRequest) -> List[OpenAIFunctionToolSchema]:
+        def get_tools(self, request: RolloutRequest) -> list[OpenAIFunctionToolSchema]:
             return []
 
         async def run(self, ctx: RolloutContext) -> RolloutResult:
@@ -944,7 +951,7 @@ async def test_background_rollout_with_debug_logging(tmp_path: Any) -> None:
         assert os.path.exists(debug_file)
 
         # Verify contents
-        with open(debug_file, "r", encoding="utf-8") as f:
+        with open(debug_file, encoding="utf-8") as f:
             lines = f.readlines()
 
         assert len(lines) == 2

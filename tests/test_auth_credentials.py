@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from osmosis_ai.auth.credentials import WorkspaceCredentials, OrganizationInfo, UserInfo
+from osmosis_ai.auth.credentials import OrganizationInfo, UserInfo, WorkspaceCredentials
 
 
 def _make_credentials(
@@ -50,5 +50,3 @@ def test_from_dict_rejects_naive_expires_at() -> None:
         assert "expires_at must be timezone-aware" in str(exc)
     else:
         raise AssertionError("Expected ValueError for naive expires_at")
-
-

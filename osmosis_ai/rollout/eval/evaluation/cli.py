@@ -10,7 +10,7 @@ import asyncio
 import json
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any
 
 from osmosis_ai.rollout.console import Console
 from osmosis_ai.rollout.eval.common.cli import (
@@ -222,7 +222,7 @@ class EvalCommand:
     def run(self, args: argparse.Namespace) -> int:
         return asyncio.run(self._run_async(args))
 
-    def _validate_args(self, args: argparse.Namespace) -> Optional[str]:
+    def _validate_args(self, args: argparse.Namespace) -> str | None:
         if args.module and args.mcp:
             return "--module and --mcp are mutually exclusive."
         if not args.module and not args.mcp:
@@ -262,8 +262,11 @@ class EvalCommand:
 
     def _load_eval_fns(
         self, args: argparse.Namespace
-    ) -> Tuple[Optional[List["EvalFnWrapper"]], Optional[str]]:
-        from osmosis_ai.rollout.eval.evaluation.eval_fn import EvalFnError, load_eval_fns
+    ) -> tuple[list[EvalFnWrapper] | None, str | None]:
+        from osmosis_ai.rollout.eval.evaluation.eval_fn import (
+            EvalFnError,
+            load_eval_fns,
+        )
 
         if not args.quiet:
             self.console.print(f"Loading eval functions: {', '.join(args.eval_fns)}")
@@ -279,11 +282,11 @@ class EvalCommand:
 
         return eval_fns, None
 
-    def _write_output(self, args: argparse.Namespace, result: "EvalResult") -> None:
+    def _write_output(self, args: argparse.Namespace, result: EvalResult) -> None:
         if not args.output:
             return
 
-        config: Dict[str, Any] = {
+        config: dict[str, Any] = {
             "model": args.model,
             "n_runs": args.n_runs,
             "pass_threshold": args.pass_threshold,
@@ -292,7 +295,7 @@ class EvalCommand:
         if args.baseline_model:
             config["baseline_model"] = args.baseline_model
 
-        summary: Dict[str, Any] = {
+        summary: dict[str, Any] = {
             "total_rows": result.total_rows,
             "total_runs": result.total_runs,
             "stopped_early": result.stopped_early,
@@ -311,7 +314,7 @@ class EvalCommand:
             "total_duration_ms": result.total_duration_ms,
         }
 
-        output_data: Dict[str, Any] = {
+        output_data: dict[str, Any] = {
             "config": config,
             "summary": summary,
             "rows": [
@@ -454,7 +457,9 @@ class EvalCommand:
                 return 1
             assert baseline_llm_client is not None
 
-            error = await verify_llm_client(baseline_llm_client, args.quiet, self.console)
+            error = await verify_llm_client(
+                baseline_llm_client, args.quiet, self.console
+            )
             if error:
                 self.console.print_error(f"Error (baseline): {error}")
                 await baseline_llm_client.close()
@@ -471,7 +476,7 @@ class EvalCommand:
             baseline_llm_client=baseline_llm_client,
         )
 
-        def on_progress(current: int, total: int, result: "EvalRunResult") -> None:
+        def on_progress(current: int, total: int, result: EvalRunResult) -> None:
             if args.quiet:
                 return
 
@@ -491,7 +496,9 @@ class EvalCommand:
             error_suffix = ""
             if not result.success and result.error:
                 error_text = result.error.replace("\n", " ")
-                error_msg = error_text[:47] + "..." if len(error_text) > 50 else error_text
+                error_msg = (
+                    error_text[:47] + "..." if len(error_text) > 50 else error_text
+                )
                 error_suffix = f" - {error_msg}"
 
             status_styled = self.console.format_styled(status, status_style)
@@ -503,7 +510,9 @@ class EvalCommand:
         if not args.quiet:
             self.console.print()
             n_info = f" x{args.n_runs} runs" if args.n_runs > 1 else ""
-            batch_info = f", batch_size={args.batch_size}" if args.batch_size > 1 else ""
+            batch_info = (
+                f", batch_size={args.batch_size}" if args.batch_size > 1 else ""
+            )
             model_info = " x2 models" if args.baseline_model else ""
             self.console.print(
                 f"Running evaluation ({len(rows)} rows{n_info}{model_info}{batch_info})..."
@@ -517,7 +526,9 @@ class EvalCommand:
                             rows=rows,
                             n_runs=args.n_runs,
                             max_turns=args.max_turns,
-                            completion_params=completion_params if completion_params else None,
+                            completion_params=completion_params
+                            if completion_params
+                            else None,
                             pass_threshold=args.pass_threshold,
                             on_progress=on_progress,
                             start_index=args.offset,
@@ -528,7 +539,9 @@ class EvalCommand:
                         rows=rows,
                         n_runs=args.n_runs,
                         max_turns=args.max_turns,
-                        completion_params=completion_params if completion_params else None,
+                        completion_params=completion_params
+                        if completion_params
+                        else None,
                         pass_threshold=args.pass_threshold,
                         on_progress=on_progress,
                         start_index=args.offset,
@@ -549,5 +562,6 @@ class EvalCommand:
 
         self._write_output(args, eval_result)
         return 0
+
 
 __all__ = ["EvalCommand"]

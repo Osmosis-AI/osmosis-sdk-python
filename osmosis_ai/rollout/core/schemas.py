@@ -31,17 +31,16 @@ from __future__ import annotations
 import json
 import threading
 from enum import Enum
-from typing import Any, Dict, List, Literal, Optional, Tuple
+from typing import Any, Literal
 from urllib.parse import urlparse
 
 from pydantic import BaseModel, Field, field_validator, model_validator
-
 
 # =============================================================================
 # Type Aliases
 # =============================================================================
 
-MessageDict = Dict[str, Any]
+MessageDict = dict[str, Any]
 """Type alias for message dicts in protocol transmission.
 
 Supports the full OpenAI message format including tool_call_id for tool responses.
@@ -50,7 +49,7 @@ Example:
     {"role": "tool", "content": "345", "tool_call_id": "call_123"}
 """
 
-SamplingParamsDict = Dict[str, Any]
+SamplingParamsDict = dict[str, Any]
 """Type alias for sampling parameters dict.
 
 Standard keys: temperature, top_p, max_tokens, stop, logprobs.
@@ -83,8 +82,8 @@ class OpenAIFunctionPropertySchema(BaseModel):
     """
 
     type: str
-    description: Optional[str] = None
-    enum: Optional[List[str]] = None
+    description: str | None = None
+    enum: list[str] | None = None
 
 
 class OpenAIFunctionParametersSchema(BaseModel):
@@ -97,8 +96,8 @@ class OpenAIFunctionParametersSchema(BaseModel):
     """
 
     type: str
-    properties: Dict[str, OpenAIFunctionPropertySchema]
-    required: List[str]
+    properties: dict[str, OpenAIFunctionPropertySchema]
+    required: list[str]
 
 
 class OpenAIFunctionSchema(BaseModel):
@@ -211,12 +210,12 @@ class OpenAIFunctionCallSchema(BaseModel):
     """
 
     name: str
-    arguments: Dict[str, Any]
+    arguments: dict[str, Any]
 
     @staticmethod
     def from_openai_function_parsed_schema(
         parsed_schema: OpenAIFunctionParsedSchema,
-    ) -> Tuple["OpenAIFunctionCallSchema", bool]:
+    ) -> tuple[OpenAIFunctionCallSchema, bool]:
         """Parse a function call from LLM output.
 
         Args:
@@ -292,28 +291,34 @@ class ToolResponse(BaseModel):
         )
     """
 
-    text: Optional[str] = None
-    image: Optional[List[Any]] = None
-    video: Optional[List[Any]] = None
+    text: str | None = None
+    image: list[Any] | None = None
+    video: list[Any] | None = None
 
     @model_validator(mode="before")
     @classmethod
-    def validate_media_fields(cls, values: Dict[str, Any]) -> Dict[str, Any]:
+    def validate_media_fields(cls, values: dict[str, Any]) -> dict[str, Any]:
         """Validate that image and video fields are lists if provided."""
-        if "image" in values and values["image"] is not None:
-            if not isinstance(values["image"], list):
-                raise ValueError(
-                    f"image must be a list, but got {type(values['image'])}. "
-                    f"For single images, wrap in a list: [image]. "
-                    f"Example: {{'image': [img1]}} or {{'image': [img1, img2, ...]}}."
-                )
-        if "video" in values and values["video"] is not None:
-            if not isinstance(values["video"], list):
-                raise ValueError(
-                    f"video must be a list, but got {type(values['video'])}. "
-                    f"For single videos, wrap in a list: [video]. "
-                    f"Example: {{'video': [video1]}} or {{'video': [video1, video2, ...]}}."
-                )
+        if (
+            "image" in values
+            and values["image"] is not None
+            and not isinstance(values["image"], list)
+        ):
+            raise ValueError(
+                f"image must be a list, but got {type(values['image'])}. "
+                f"For single images, wrap in a list: [image]. "
+                f"Example: {{'image': [img1]}} or {{'image': [img1, img2, ...]}}."
+            )
+        if (
+            "video" in values
+            and values["video"] is not None
+            and not isinstance(values["video"], list)
+        ):
+            raise ValueError(
+                f"video must be a list, but got {type(values['video'])}. "
+                f"For single videos, wrap in a list: [video]. "
+                f"Example: {{'video': [video1]}} or {{'video': [video1, video2, ...]}}."
+            )
         return values
 
     def is_empty(self) -> bool:
@@ -454,14 +459,14 @@ class RolloutRequest(BaseModel):
 
     rollout_id: str = Field(min_length=1, max_length=256)
     server_url: str
-    messages: List[MessageDict]
+    messages: list[MessageDict]
     completion_params: SamplingParamsDict
-    tool_server_url: Optional[str] = None
+    tool_server_url: str | None = None
     max_turns: int = 10
     max_tokens_total: int = 8192
-    metadata: Dict[str, Any] = Field(default_factory=dict)
-    api_key: Optional[str] = None
-    idempotency_key: Optional[str] = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    api_key: str | None = None
+    idempotency_key: str | None = None
 
     @field_validator("rollout_id")
     @classmethod
@@ -483,7 +488,7 @@ class RolloutRequest(BaseModel):
         return v
 
     @model_validator(mode="after")
-    def validate_metadata_size(self) -> "RolloutRequest":
+    def validate_metadata_size(self) -> RolloutRequest:
         """Validate metadata size does not exceed limit."""
         if self.metadata:
             try:
@@ -497,7 +502,7 @@ class RolloutRequest(BaseModel):
             except (TypeError, ValueError) as e:
                 if "exceeds maximum" in str(e):
                     raise
-                raise ValueError(f"metadata must be JSON serializable: {e}")
+                raise ValueError(f"metadata must be JSON serializable: {e}") from e
         return self
 
 
@@ -512,7 +517,7 @@ class InitResponse(BaseModel):
     """
 
     rollout_id: str
-    tools: List[OpenAIFunctionToolSchema] = Field(default_factory=list)
+    tools: list[OpenAIFunctionToolSchema] = Field(default_factory=list)
 
 
 class RolloutResponse(BaseModel):
@@ -533,12 +538,12 @@ class RolloutResponse(BaseModel):
 
     rollout_id: str
     status: RolloutStatus
-    final_messages: List[MessageDict] = Field(default_factory=list)
-    finish_reason: Optional[str] = None
-    error_message: Optional[str] = None
-    reward: Optional[float] = None
-    metrics: Optional[RolloutMetrics] = None
-    extra_fields: Dict[str, Any] = Field(default_factory=dict)
+    final_messages: list[MessageDict] = Field(default_factory=list)
+    finish_reason: str | None = None
+    error_message: str | None = None
+    reward: float | None = None
+    metrics: RolloutMetrics | None = None
+    extra_fields: dict[str, Any] = Field(default_factory=dict)
 
 
 # =============================================================================
@@ -566,12 +571,12 @@ class CompletionsRequest(BaseModel):
     """
 
     model: str = "default"
-    messages: List[MessageDict]
+    messages: list[MessageDict]
     rollout_id: str = Field(min_length=1, max_length=256)
     temperature: float = 1.0
     top_p: float = 1.0
     max_tokens: int = 512
-    stop: Optional[List[str]] = None
+    stop: list[str] | None = None
     logprobs: bool = True
 
     @field_validator("rollout_id")
@@ -637,10 +642,10 @@ class CompletionsResponse(BaseModel):
     object: str = "chat.completion"
     created: int
     model: str = "default"
-    choices: List[CompletionsChoice]
-    usage: Optional[CompletionUsage] = None
+    choices: list[CompletionsChoice]
+    usage: CompletionUsage | None = None
     # TrainGate internal fields - NOT transmitted via HTTP to RolloutServer.
     # These are accumulated in SessionManager for building AgentLoopOutput.
-    token_ids: Optional[List[int]] = None
-    logprobs: Optional[List[float]] = None
-    prompt_token_ids: Optional[List[int]] = None
+    token_ids: list[int] | None = None
+    logprobs: list[float] | None = None
+    prompt_token_ids: list[int] | None = None

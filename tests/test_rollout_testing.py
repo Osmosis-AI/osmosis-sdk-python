@@ -28,14 +28,12 @@ from osmosis_ai.rollout.testing import (
 # Check if FastAPI is available for testing
 try:
     from fastapi.testclient import TestClient
+
     HAS_FASTAPI = True
 except ImportError:
     HAS_FASTAPI = False
 
-requires_fastapi = pytest.mark.skipif(
-    not HAS_FASTAPI,
-    reason="FastAPI not installed"
-)
+requires_fastapi = pytest.mark.skipif(not HAS_FASTAPI, reason="FastAPI not installed")
 
 
 # =============================================================================
@@ -323,6 +321,7 @@ def test_mock_trainer_with_tracker() -> None:
 @requires_fastapi
 def test_mock_trainer_custom_tool_generator() -> None:
     """Verify mock trainer uses custom tool call generator."""
+
     def custom_generator(message):
         if "weather" in message.get("content", "").lower():
             return [
