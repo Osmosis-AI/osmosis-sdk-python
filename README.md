@@ -418,7 +418,13 @@ ruff format .
 ruff format --check .
 ```
 
-Please run `ruff check` and `ruff format` before submitting a pull request.
+A [pre-commit](https://pre-commit.com/) configuration is included to run Ruff automatically on every commit:
+
+```bash
+pre-commit install
+```
+
+This ensures `ruff check --fix` and `ruff format` run before each commit. Please make sure hooks are installed before submitting a pull request.
 
 ## License
 
