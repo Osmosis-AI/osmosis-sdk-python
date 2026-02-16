@@ -1,12 +1,15 @@
 from __future__ import annotations
 
-from statistics import mean, pvariance, pstdev
-from typing import Any, Collection, Optional, Set
+from collections.abc import Collection
+from statistics import mean, pstdev, pvariance
+from typing import Any
 
 from .errors import CLIError
 
 
-def coerce_optional_float(value: Any, field_name: str, source_label: str) -> Optional[float]:
+def coerce_optional_float(
+    value: Any, field_name: str, source_label: str
+) -> float | None:
     if value is None:
         return None
     if isinstance(value, (int, float)) and not isinstance(value, bool):
@@ -16,7 +19,7 @@ def coerce_optional_float(value: Any, field_name: str, source_label: str) -> Opt
     )
 
 
-def collapse_preview_text(value: Any, *, max_length: int = 140) -> Optional[str]:
+def collapse_preview_text(value: Any, *, max_length: int = 140) -> str | None:
     if not isinstance(value, str):
         return None
     collapsed = " ".join(value.strip().split())
@@ -48,7 +51,9 @@ def calculate_statistics(scores: list[float]) -> dict[str, float]:
     }
 
 
-def calculate_stat_deltas(baseline: dict[str, float], current: dict[str, float]) -> dict[str, float]:
+def calculate_stat_deltas(
+    baseline: dict[str, float], current: dict[str, float]
+) -> dict[str, float]:
     delta: dict[str, float] = {}
     for key, current_value in current.items():
         if key not in baseline:
@@ -67,8 +72,8 @@ def gather_text_fragments(
     fragments: list[str],
     *,
     allow_free_strings: bool = False,
-    seen: Optional[Set[int]] = None,
-    string_key_allowlist: Optional[Collection[str]] = None,
+    seen: set[int] | None = None,
+    string_key_allowlist: Collection[str] | None = None,
 ) -> None:
     """Collect textual snippets from nested message-like structures.
 
@@ -115,7 +120,7 @@ def gather_text_fragments(
         allowlist = {key.lower() for key in allowlist}
 
     prioritized_keys = ("text", "value")
-    handled_keys: Set[str] = {
+    handled_keys: set[str] = {
         "text",
         "value",
         "content",
@@ -148,15 +153,7 @@ def gather_text_fragments(
         if len(fragments) > before_count:
             break
 
-    if node.get("type") == "tool_result" and "content" in node:
-        gather_text_fragments(
-            node["content"],
-            fragments,
-            allow_free_strings=True,
-            seen=seen,
-            string_key_allowlist=string_key_allowlist,
-        )
-    elif "content" in node:
+    if (node.get("type") == "tool_result" and "content" in node) or "content" in node:
         gather_text_fragments(
             node["content"],
             fragments,
@@ -196,7 +193,7 @@ def collect_text_fragments(
     node: Any,
     *,
     allow_free_strings: bool = False,
-    string_key_allowlist: Optional[Collection[str]] = None,
+    string_key_allowlist: Collection[str] | None = None,
 ) -> list[str]:
     fragments: list[str] = []
     gather_text_fragments(

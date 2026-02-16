@@ -11,7 +11,12 @@ from urllib.parse import urlencode
 
 from ..consts import PACKAGE_VERSION
 from .config import PLATFORM_URL
-from .credentials import WorkspaceCredentials, OrganizationInfo, UserInfo, save_credentials
+from .credentials import (
+    OrganizationInfo,
+    UserInfo,
+    WorkspaceCredentials,
+    save_credentials,
+)
 from .local_server import LocalAuthServer, find_available_port
 
 
@@ -88,7 +93,7 @@ def login(
     port = find_available_port()
     if port is None:
         raise LoginError(
-            f"No available port found in range 8976-8985. "
+            "No available port found in range 8976-8985. "
             "Please close any applications using these ports."
         )
 
@@ -156,12 +161,16 @@ def login(
     finally:
         # Ensure the callback handler is unblocked if verification wasn't reached
         if not server._verification_event.is_set():
-            server.set_verification_result(success=False, error="Login failed unexpectedly")
+            server.set_verification_result(
+                success=False, error="Login failed unexpectedly"
+            )
         server._shutdown_event.set()
         server.server_close()
 
 
-def _verify_and_get_user_info(token: str) -> tuple[UserInfo, OrganizationInfo, datetime, str | None]:
+def _verify_and_get_user_info(
+    token: str,
+) -> tuple[UserInfo, OrganizationInfo, datetime, str | None]:
     """Verify token and get user info from the platform.
 
     Args:
@@ -217,7 +226,9 @@ def _verify_and_get_user_info(token: str) -> tuple[UserInfo, OrganizationInfo, d
             # Parse expiration - default to 90 days if not provided
             expires_at_str = data.get("expires_at")
             if expires_at_str:
-                expires_at = datetime.fromisoformat(expires_at_str.replace("Z", "+00:00"))
+                expires_at = datetime.fromisoformat(
+                    expires_at_str.replace("Z", "+00:00")
+                )
                 if expires_at.tzinfo is None:
                     raise LoginError(
                         "Invalid expires_at from platform: expected timezone-aware ISO8601 timestamp"
@@ -229,9 +240,9 @@ def _verify_and_get_user_info(token: str) -> tuple[UserInfo, OrganizationInfo, d
 
     except HTTPError as e:
         if e.code == 401:
-            raise LoginError("Invalid or expired token")
-        raise LoginError(f"Verification failed: HTTP {e.code}")
+            raise LoginError("Invalid or expired token") from None
+        raise LoginError(f"Verification failed: HTTP {e.code}") from e
     except URLError as e:
-        raise LoginError(f"Could not connect to platform: {e.reason}")
-    except json.JSONDecodeError:
-        raise LoginError("Invalid response from platform")
+        raise LoginError(f"Could not connect to platform: {e.reason}") from e
+    except json.JSONDecodeError as e:
+        raise LoginError("Invalid response from platform") from e

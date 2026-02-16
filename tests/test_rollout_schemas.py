@@ -20,22 +20,21 @@ import pytest
 from pydantic import ValidationError
 
 from osmosis_ai.rollout import (
+    DEFAULT_MAX_METADATA_SIZE_BYTES,
     CompletionsRequest,
     CompletionUsage,
-    DEFAULT_MAX_METADATA_SIZE_BYTES,
     InitResponse,
     OpenAIFunctionParametersSchema,
     OpenAIFunctionPropertySchema,
     OpenAIFunctionSchema,
+    OpenAIFunctionToolSchema,
     RolloutMetrics,
     RolloutRequest,
     RolloutResponse,
     RolloutStatus,
-    OpenAIFunctionToolSchema,
     get_max_metadata_size_bytes,
     set_max_metadata_size_bytes,
 )
-
 
 # =============================================================================
 # RolloutRequest Tests

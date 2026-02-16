@@ -21,7 +21,6 @@ from osmosis_ai.rollout.core.base import (
     RolloutContext,
     RolloutResult,
 )
-from osmosis_ai.rollout.core.llm_client import LLMClientProtocol
 from osmosis_ai.rollout.core.exceptions import (
     AgentLoopNotFoundError,
     OsmosisRolloutError,
@@ -32,12 +31,13 @@ from osmosis_ai.rollout.core.exceptions import (
     ToolArgumentError,
     ToolExecutionError,
 )
+from osmosis_ai.rollout.core.llm_client import LLMClientProtocol
 from osmosis_ai.rollout.core.schemas import (
-    CompletionUsage,
+    DEFAULT_MAX_METADATA_SIZE_BYTES,
     CompletionsChoice,
     CompletionsRequest,
     CompletionsResponse,
-    DEFAULT_MAX_METADATA_SIZE_BYTES,
+    CompletionUsage,
     InitResponse,
     MessageDict,
     OpenAIFunctionCallSchema,
@@ -58,47 +58,47 @@ from osmosis_ai.rollout.core.schemas import (
 )
 
 __all__ = [
-    # Base classes
-    "RolloutAgentLoop",
-    "RolloutContext",
-    "RolloutResult",
-    # Protocol
-    "LLMClientProtocol",
-    # Exceptions
-    "OsmosisRolloutError",
-    "OsmosisTransportError",
-    "OsmosisServerError",
-    "OsmosisValidationError",
-    "OsmosisTimeoutError",
+    # Configuration
+    "DEFAULT_MAX_METADATA_SIZE_BYTES",
     "AgentLoopNotFoundError",
-    "ToolExecutionError",
-    "ToolArgumentError",
-    # Schemas - Request/Response
-    "RolloutRequest",
-    "RolloutResponse",
-    "InitResponse",
-    "RolloutStatus",
-    "RolloutMetrics",
+    "CompletionUsage",
+    "CompletionsChoice",
     # Schemas - Completions
     "CompletionsRequest",
     "CompletionsResponse",
-    "CompletionsChoice",
-    "CompletionUsage",
-    # Schemas - Tool Definition
-    "OpenAIFunctionToolSchema",
-    "OpenAIFunctionSchema",
-    "OpenAIFunctionParametersSchema",
-    "OpenAIFunctionPropertySchema",
-    # Schemas - Tool Call (adapted from verl)
-    "OpenAIFunctionParsedSchema",
-    "OpenAIFunctionCallSchema",
-    "OpenAIFunctionToolCall",
-    "ToolResponse",
+    "InitResponse",
+    # Protocol
+    "LLMClientProtocol",
     # Type aliases
     "MessageDict",
+    "OpenAIFunctionCallSchema",
+    "OpenAIFunctionParametersSchema",
+    # Schemas - Tool Call (adapted from verl)
+    "OpenAIFunctionParsedSchema",
+    "OpenAIFunctionPropertySchema",
+    "OpenAIFunctionSchema",
+    "OpenAIFunctionToolCall",
+    # Schemas - Tool Definition
+    "OpenAIFunctionToolSchema",
+    # Exceptions
+    "OsmosisRolloutError",
+    "OsmosisServerError",
+    "OsmosisTimeoutError",
+    "OsmosisTransportError",
+    "OsmosisValidationError",
+    # Base classes
+    "RolloutAgentLoop",
+    "RolloutContext",
+    "RolloutMetrics",
+    # Schemas - Request/Response
+    "RolloutRequest",
+    "RolloutResponse",
+    "RolloutResult",
+    "RolloutStatus",
     "SamplingParamsDict",
-    # Configuration
-    "DEFAULT_MAX_METADATA_SIZE_BYTES",
+    "ToolArgumentError",
+    "ToolExecutionError",
+    "ToolResponse",
     "get_max_metadata_size_bytes",
     "set_max_metadata_size_bytes",
 ]

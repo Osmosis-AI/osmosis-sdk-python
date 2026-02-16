@@ -6,7 +6,7 @@ this interface through structural subtyping.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Dict, List, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from osmosis_ai.rollout.client import CompletionsResult
@@ -23,9 +23,9 @@ class LLMClientProtocol(Protocol):
 
     async def chat_completions(
         self,
-        messages: List[Dict[str, Any]],
+        messages: list[dict[str, Any]],
         **kwargs: Any,
-    ) -> "CompletionsResult":
+    ) -> CompletionsResult:
         """Make a chat completion request.
 
         Args:
@@ -37,7 +37,7 @@ class LLMClientProtocol(Protocol):
         """
         ...
 
-    def get_metrics(self) -> "RolloutMetrics":
+    def get_metrics(self) -> RolloutMetrics:
         """Return accumulated metrics from this client session.
 
         Returns:

@@ -2,16 +2,22 @@ from __future__ import annotations
 
 import argparse
 import sys
-from typing import Optional
 
 from dotenv import load_dotenv
 
-from .cli_commands import EvalRubricCommand, LoginCommand, LogoutCommand, PreviewCommand, WhoamiCommand, WorkspaceCommand
+from .cli_commands import (
+    EvalRubricCommand,
+    LoginCommand,
+    LogoutCommand,
+    PreviewCommand,
+    WhoamiCommand,
+    WorkspaceCommand,
+)
 from .cli_services import CLIError
 from .consts import PACKAGE_VERSION, package_name
 
 
-def main(argv: Optional[list[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     """Entry point for the osmosis CLI."""
     # Load environment variables from .env file in current working directory
     load_dotenv()
@@ -36,14 +42,15 @@ def _build_parser() -> argparse.ArgumentParser:
         prog="osmosis",
         description="Osmosis AI SDK - rubric evaluation and remote rollout server.",
     )
-    
+
     parser.add_argument(
-        "-V", "--version",
+        "-V",
+        "--version",
         action="version",
         version=f"{package_name} {PACKAGE_VERSION}",
         help="Show version number.",
     )
-    
+
     subparsers = parser.add_subparsers(dest="command")
 
     login_parser = subparsers.add_parser(

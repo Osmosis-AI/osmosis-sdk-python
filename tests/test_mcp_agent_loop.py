@@ -3,13 +3,11 @@
 from __future__ import annotations
 
 import argparse
-import os
 import sys
 import textwrap
 import types
-from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
-from unittest.mock import AsyncMock, MagicMock, patch
+from typing import Any
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -23,13 +21,12 @@ from osmosis_ai.rollout.mcp.agent_loop import (
 )
 from osmosis_ai.rollout.mcp.loader import MCPLoadError, load_mcp_server
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 
-def _make_mock_mcp_server(tools: Dict[str, Dict[str, Any]]) -> MagicMock:
+def _make_mock_mcp_server(tools: dict[str, dict[str, Any]]) -> MagicMock:
     """Create a mock FastMCP server with given tools.
 
     Args:
@@ -40,7 +37,9 @@ def _make_mock_mcp_server(tools: Dict[str, Dict[str, Any]]) -> MagicMock:
         tool = MagicMock()
         tool.name = name
         tool.description = info.get("description", "")
-        tool.parameters = info.get("parameters", {"type": "object", "properties": {}, "required": []})
+        tool.parameters = info.get(
+            "parameters", {"type": "object", "properties": {}, "required": []}
+        )
         mock_tools[name] = tool
 
     tool_manager = MagicMock()
@@ -248,12 +247,18 @@ class TestMCPAgentLoopGetTools:
 class TestMCPAgentLoopRun:
     async def test_no_tool_calls(self):
         """LLM responds without tool calls — loop should complete immediately."""
-        server = _make_mock_mcp_server({
-            "add": {
-                "description": "Add",
-                "parameters": {"type": "object", "properties": {"a": {"type": "integer"}}, "required": ["a"]},
-            },
-        })
+        server = _make_mock_mcp_server(
+            {
+                "add": {
+                    "description": "Add",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {"a": {"type": "integer"}},
+                        "required": ["a"],
+                    },
+                },
+            }
+        )
         agent = MCPAgentLoop(server)
 
         # Build context
@@ -294,16 +299,21 @@ class TestMCPAgentLoopRun:
     async def test_tool_call_then_response(self):
         """LLM makes a tool call, then responds with final answer."""
         # Set up MCP server with a tool
-        server = _make_mock_mcp_server({
-            "add": {
-                "description": "Add",
-                "parameters": {
-                    "type": "object",
-                    "properties": {"a": {"type": "integer"}, "b": {"type": "integer"}},
-                    "required": ["a", "b"],
+        server = _make_mock_mcp_server(
+            {
+                "add": {
+                    "description": "Add",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "a": {"type": "integer"},
+                            "b": {"type": "integer"},
+                        },
+                        "required": ["a", "b"],
+                    },
                 },
-            },
-        })
+            }
+        )
 
         # Mock call_tool to return a ToolResult-like object
         tool_result = MagicMock()
@@ -370,12 +380,14 @@ class TestMCPAgentLoopRun:
 
     async def test_tool_call_exception_handled(self):
         """Tool execution error should be captured as error message, loop continues."""
-        server = _make_mock_mcp_server({
-            "fail_tool": {
-                "description": "Always fails",
-                "parameters": {"type": "object", "properties": {}, "required": []},
-            },
-        })
+        server = _make_mock_mcp_server(
+            {
+                "fail_tool": {
+                    "description": "Always fails",
+                    "parameters": {"type": "object", "properties": {}, "required": []},
+                },
+            }
+        )
         server._tool_manager.call_tool = AsyncMock(side_effect=RuntimeError("boom"))
 
         agent = MCPAgentLoop(server)
@@ -402,7 +414,11 @@ class TestMCPAgentLoopRun:
             "role": "assistant",
             "content": None,
             "tool_calls": [
-                {"id": "call_err", "type": "function", "function": {"name": "fail_tool", "arguments": "{}"}},
+                {
+                    "id": "call_err",
+                    "type": "function",
+                    "function": {"name": "fail_tool", "arguments": "{}"},
+                },
             ],
         }
         tc_resp.has_tool_calls = True
@@ -477,7 +493,7 @@ class TestLoadMCPServer:
             load_mcp_server("/nonexistent/path/to/mcp")
 
     def test_no_main_py(self, tmp_path):
-        with pytest.raises(MCPLoadError, match="No main.py found"):
+        with pytest.raises(MCPLoadError, match=r"No main\.py found"):
             load_mcp_server(str(tmp_path))
 
     def test_no_fastmcp_instance(self, tmp_path):
@@ -488,7 +504,8 @@ class TestLoadMCPServer:
 
     def test_successful_load(self, tmp_path):
         main_py = tmp_path / "main.py"
-        main_py.write_text(textwrap.dedent("""\
+        main_py.write_text(
+            textwrap.dedent("""\
             from fastmcp import FastMCP
 
             mcp = FastMCP("test_server")
@@ -497,11 +514,13 @@ class TestLoadMCPServer:
             def add(a: int, b: int) -> int:
                 \"\"\"Add two numbers\"\"\"
                 return a + b
-        """))
+        """)
+        )
 
         server = load_mcp_server(str(tmp_path))
 
         from fastmcp import FastMCP
+
         assert isinstance(server, FastMCP)
         assert "add" in server._tool_manager._tools
 
@@ -515,10 +534,12 @@ class TestLoadMCPServer:
         original_sys_path = list(sys.path)
 
         main_py = tmp_path / "main.py"
-        main_py.write_text(textwrap.dedent("""\
+        main_py.write_text(
+            textwrap.dedent("""\
             from fastmcp import FastMCP
             mcp = FastMCP("path_test")
-        """))
+        """)
+        )
 
         _ = load_mcp_server(str(tmp_path))
 
@@ -526,7 +547,8 @@ class TestLoadMCPServer:
 
     def test_supports_relative_imports_in_main(self, tmp_path):
         helpers_py = tmp_path / "helpers.py"
-        helpers_py.write_text(textwrap.dedent("""\
+        helpers_py.write_text(
+            textwrap.dedent("""\
             from fastmcp import FastMCP
 
             def build_server():
@@ -537,14 +559,17 @@ class TestLoadMCPServer:
                     return "pong"
 
                 return mcp
-        """))
+        """)
+        )
 
         main_py = tmp_path / "main.py"
-        main_py.write_text(textwrap.dedent("""\
+        main_py.write_text(
+            textwrap.dedent("""\
             from .helpers import build_server
 
             mcp = build_server()
-        """))
+        """)
+        )
 
         server = load_mcp_server(str(tmp_path))
         assert "ping" in server._tool_manager._tools
@@ -558,20 +583,24 @@ class TestLoadMCPServer:
         first_helper = first_dir / "leaky_shared_mod.py"
         first_helper.write_text('VALUE = "from_first"\n')
         first_main = first_dir / "main.py"
-        first_main.write_text(textwrap.dedent("""\
+        first_main.write_text(
+            textwrap.dedent("""\
             import leaky_shared_mod
             raise RuntimeError("boom after import")
-        """))
+        """)
+        )
 
         second_helper = second_dir / "leaky_shared_mod.py"
         second_helper.write_text('VALUE = "from_second"\n')
         second_main = second_dir / "main.py"
-        second_main.write_text(textwrap.dedent("""\
+        second_main.write_text(
+            textwrap.dedent("""\
             import leaky_shared_mod
             from fastmcp import FastMCP
 
             mcp = FastMCP(leaky_shared_mod.VALUE)
-        """))
+        """)
+        )
 
         with pytest.raises(MCPLoadError, match="Error importing"):
             load_mcp_server(str(first_dir))
@@ -708,13 +737,13 @@ class TestEvalCLIBatchSize:
         self,
         monkeypatch: pytest.MonkeyPatch,
         batch_size: int,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         from osmosis_ai.rollout.eval.evaluation.cli import EvalCommand
 
-        captured_kwargs: Dict[str, Any] = {}
+        captured_kwargs: dict[str, Any] = {}
 
         class DummyLLMClient:
-            async def __aenter__(self) -> "DummyLLMClient":
+            async def __aenter__(self) -> DummyLLMClient:
                 return self
 
             async def __aexit__(self, exc_type, exc, tb) -> None:
@@ -731,7 +760,7 @@ class TestEvalCLIBatchSize:
                 captured_kwargs.update(kwargs)
                 return object()
 
-        async def _verify_llm_client(*args, **kwargs) -> Optional[str]:
+        async def _verify_llm_client(*args, **kwargs) -> str | None:
             return None
 
         monkeypatch.setattr(

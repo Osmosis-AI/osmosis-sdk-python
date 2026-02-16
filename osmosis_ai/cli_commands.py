@@ -2,28 +2,29 @@ from __future__ import annotations
 
 import argparse
 import time
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any
 
 from .auth import (
     LoginError,
     delete_credentials,
     delete_workspace_credentials,
-    get_all_workspaces,
     get_active_workspace,
+    get_all_workspaces,
     load_credentials,
     login,
     set_active_workspace,
 )
 from .cli_services import (
-    CLIError,
-    ParsedItem,
     BaselineComparator,
+    CLIError,
     ConsoleReportRenderer,
     DatasetLoader,
     EvaluationSession,
     EvaluationSessionRequest,
     JsonReportWriter,
+    ParsedItem,
     RubricEvaluationEngine,
     RubricSuite,
     discover_rubric_config_path,
@@ -74,7 +75,9 @@ class PreviewCommand:
             print(f"Loaded {len(records)} JSONL record(s) from {path}")
             print(render_json_records(records))
         else:
-            raise CLIError(f"Unsupported file extension '{suffix}'. Expected .yaml, .yml, or .jsonl.")
+            raise CLIError(
+                f"Unsupported file extension '{suffix}'. Expected .yaml, .yml, or .jsonl."
+            )
 
         return 0
 
@@ -85,14 +88,16 @@ class EvalRubricCommand:
     def __init__(
         self,
         *,
-        session: Optional[EvaluationSession] = None,
-        config_locator: Callable[[Optional[str], Path], Path] = discover_rubric_config_path,
+        session: EvaluationSession | None = None,
+        config_locator: Callable[
+            [str | None, Path], Path
+        ] = discover_rubric_config_path,
         suite_loader: Callable[[Path], RubricSuite] = load_rubric_suite,
-        dataset_loader: Optional[DatasetLoader] = None,
-        engine: Optional[RubricEvaluationEngine] = None,
-        renderer: Optional[ConsoleReportRenderer] = None,
-        report_writer: Optional[JsonReportWriter] = None,
-        baseline_comparator: Optional[BaselineComparator] = None,
+        dataset_loader: DatasetLoader | None = None,
+        engine: RubricEvaluationEngine | None = None,
+        renderer: ConsoleReportRenderer | None = None,
+        report_writer: JsonReportWriter | None = None,
+        baseline_comparator: BaselineComparator | None = None,
     ):
         self._renderer = renderer or ConsoleReportRenderer()
         if session is not None:
@@ -169,9 +174,15 @@ class EvalRubricCommand:
             rubric_id=rubric_id,
             data_path=data_path,
             number=number,
-            config_path=Path(config_path_value).expanduser() if config_path_value else None,
-            output_path=Path(output_path_value).expanduser() if output_path_value else None,
-            baseline_path=Path(baseline_path_value).expanduser() if baseline_path_value else None,
+            config_path=Path(config_path_value).expanduser()
+            if config_path_value
+            else None,
+            output_path=Path(output_path_value).expanduser()
+            if output_path_value
+            else None,
+            baseline_path=Path(baseline_path_value).expanduser()
+            if baseline_path_value
+            else None,
         )
 
         try:
@@ -237,12 +248,18 @@ class LoginCommand:
             print(f"\n[OK] Logged in as {result.user.email}")
             if result.user.name:
                 print(f"    Name: {result.user.name}")
-            print(f"    Workspace: {result.organization.name} ({result.organization.role})")
+            print(
+                f"    Workspace: {result.organization.name} ({result.organization.role})"
+            )
             print(f"    Token expires: {result.expires_at.strftime('%Y-%m-%d')}")
             if result.revoked_previous_tokens > 0:
-                token_word = "token" if result.revoked_previous_tokens == 1 else "tokens"
-                print(f"    [Note] {result.revoked_previous_tokens} previous {token_word} for this device was revoked")
-            print(f"    Credentials saved to ~/.config/osmosis/credentials.json")
+                token_word = (
+                    "token" if result.revoked_previous_tokens == 1 else "tokens"
+                )
+                print(
+                    f"    [Note] {result.revoked_previous_tokens} previous {token_word} for this device was revoked"
+                )
+            print("    Credentials saved to ~/.config/osmosis/credentials.json")
             return 0
 
         except LoginError as e:
@@ -284,7 +301,9 @@ class WhoamiCommand:
         for name, creds, is_active in workspaces:
             active_marker = " *" if is_active else ""
             expired_marker = " [expired]" if creds.is_expired() else ""
-            print(f"  {name} ({creds.organization.role}){active_marker}{expired_marker}")
+            print(
+                f"  {name} ({creds.organization.role}){active_marker}{expired_marker}"
+            )
 
         return 0
 
@@ -301,7 +320,8 @@ class LogoutCommand:
             help="Logout from all workspaces.",
         )
         parser.add_argument(
-            "-y", "--yes",
+            "-y",
+            "--yes",
             dest="skip_confirm",
             action="store_true",
             help="Skip confirmation prompt.",
@@ -369,7 +389,7 @@ class LogoutCommand:
             expired_marker = " [expired]" if creds.is_expired() else ""
             print(f"  {i}. {name}{active_marker}{expired_marker}")
         print(f"  {len(workspaces) + 1}. All workspaces")
-        print(f"  0. Cancel")
+        print("  0. Cancel")
 
         try:
             choice = input("\nEnter number: ").strip()
@@ -402,19 +422,27 @@ class WorkspaceCommand:
     """Handler for `osmosis workspace`."""
 
     def configure_parser(self, parser: argparse.ArgumentParser) -> None:
-        subparsers = parser.add_subparsers(dest="workspace_action", help="Workspace management commands")
+        subparsers = parser.add_subparsers(
+            dest="workspace_action", help="Workspace management commands"
+        )
 
         # workspace list
-        list_parser = subparsers.add_parser("list", help="List all logged-in workspaces")
+        list_parser = subparsers.add_parser(
+            "list", help="List all logged-in workspaces"
+        )
         list_parser.set_defaults(handler=self._run_list)
 
         # workspace switch
-        switch_parser = subparsers.add_parser("switch", help="Switch to a different workspace")
+        switch_parser = subparsers.add_parser(
+            "switch", help="Switch to a different workspace"
+        )
         switch_parser.add_argument("name", help="Name of the workspace to switch to")
         switch_parser.set_defaults(handler=self._run_switch)
 
         # workspace current
-        current_parser = subparsers.add_parser("current", help="Show the current active workspace")
+        current_parser = subparsers.add_parser(
+            "current", help="Show the current active workspace"
+        )
         current_parser.set_defaults(handler=self._run_current)
 
         # Default handler when no subcommand is provided
@@ -435,14 +463,18 @@ class WorkspaceCommand:
         workspaces = get_all_workspaces()
 
         if not workspaces:
-            print("No workspaces logged in. Run 'osmosis login' to log in to a workspace.")
+            print(
+                "No workspaces logged in. Run 'osmosis login' to log in to a workspace."
+            )
             return 0
 
         print("Logged-in workspaces:")
         for name, creds, is_active in workspaces:
             active_marker = " (active)" if is_active else ""
             expired_marker = " [expired]" if creds.is_expired() else ""
-            print(f"  {name} ({creds.organization.role}){active_marker}{expired_marker}")
+            print(
+                f"  {name} ({creds.organization.role}){active_marker}{expired_marker}"
+            )
 
         return 0
 
@@ -470,7 +502,9 @@ class WorkspaceCommand:
         for name, creds, is_active in workspaces:
             if is_active:
                 expired_marker = " [expired]" if creds.is_expired() else ""
-                print(f"Current workspace: {name} ({creds.organization.role}){expired_marker}")
+                print(
+                    f"Current workspace: {name} ({creds.organization.role}){expired_marker}"
+                )
                 print(f"  User: {creds.user.email}")
                 print(f"  Expires: {creds.expires_at.strftime('%Y-%m-%d')}")
                 return 0

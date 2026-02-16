@@ -8,9 +8,9 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Any, Dict, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
-from osmosis_ai.rollout.network import detect_public_ip, PublicIPDetectionError
+from osmosis_ai.rollout.network import PublicIPDetectionError, detect_public_ip
 
 if TYPE_CHECKING:
     from osmosis_ai.auth.credentials import WorkspaceCredentials
@@ -23,10 +23,10 @@ class RegistrationResult:
     """Result of platform registration."""
 
     success: bool
-    server_id: Optional[str] = None
+    server_id: str | None = None
     status: str = "unknown"
-    error: Optional[str] = None
-    server_info: Optional[Dict[str, Any]] = None
+    error: str | None = None
+    server_info: dict[str, Any] | None = None
 
     @property
     def is_healthy(self) -> bool:
@@ -72,8 +72,8 @@ def register_with_platform(
     host: str,
     port: int,
     agent_loop_name: str,
-    credentials: "WorkspaceCredentials",
-    api_key: Optional[str] = None,
+    credentials: WorkspaceCredentials,
+    api_key: str | None = None,
 ) -> RegistrationResult:
     """Register the rollout server with Osmosis Platform.
 
@@ -94,9 +94,9 @@ def register_with_platform(
         RegistrationResult with status and any error information.
     """
     from osmosis_ai.auth.platform_client import (
-        platform_request,
-        PlatformAPIError,
         AuthenticationExpiredError,
+        PlatformAPIError,
+        platform_request,
     )
 
     try:
@@ -117,7 +117,7 @@ def register_with_platform(
     )
 
     # Build registration data
-    registration_data: Dict[str, Any] = {
+    registration_data: dict[str, Any] = {
         "host": report_host,
         "port": port,
         "agent_loop_name": agent_loop_name,
@@ -183,7 +183,7 @@ def print_registration_result(
     host: str,
     port: int,
     agent_loop_name: str,
-    api_key: Optional[str] = None,  # noqa: ARG001
+    api_key: str | None = None,
 ) -> None:
     """Print the registration result to console.
 
@@ -200,7 +200,7 @@ def print_registration_result(
         report_host = host  # Fallback to original host for display
 
     if result.is_healthy:
-        print(f"\n[OK] Registered with Osmosis Platform")
+        print("\n[OK] Registered with Osmosis Platform")
         print(f"     Agent: {agent_loop_name}")
         print(f"     Address: {report_host}:{port}")
         print(f"     Status: {result.status}")
@@ -209,7 +209,7 @@ def print_registration_result(
             print(f"     Active rollouts: {active}")
     elif result.success:
         # Registration succeeded but health check failed
-        print(f"\n[WARNING] Registered but health check failed")
+        print("\n[WARNING] Registered but health check failed")
         print(f"     Agent: {agent_loop_name}")
         print(f"     Address: {report_host}:{port}")
         print(f"     Status: {result.status}")
@@ -220,7 +220,7 @@ def print_registration_result(
         print("     Tip: Use a VM with public IP and ensure the port is open.")
     else:
         # Registration failed entirely
-        print(f"\n[WARNING] Failed to register with Platform")
+        print("\n[WARNING] Failed to register with Platform")
         print(f"     Error: {result.error}")
         print()
         print("     The server will continue running without registration.")
@@ -230,6 +230,6 @@ __all__ = [
     "RegistrationResult",
     "get_public_ip",
     "get_report_host",
-    "register_with_platform",
     "print_registration_result",
+    "register_with_platform",
 ]

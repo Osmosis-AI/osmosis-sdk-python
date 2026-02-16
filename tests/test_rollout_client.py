@@ -17,7 +17,6 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Dict
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
@@ -32,7 +31,6 @@ from osmosis_ai.rollout import (
     RolloutMetrics,
 )
 from osmosis_ai.rollout.client import CompletionsResult
-
 
 # =============================================================================
 # OsmosisLLMClient Initialization Tests
@@ -765,7 +763,9 @@ async def test_client_async_context_manager() -> None:
     """Verify async context manager properly closes client."""
     mock_http_client = AsyncMock()
     # Patch httpx.AsyncClient to avoid creating a real SSL context in test env.
-    with patch("osmosis_ai.rollout.client.httpx.AsyncClient", return_value=mock_http_client):
+    with patch(
+        "osmosis_ai.rollout.client.httpx.AsyncClient", return_value=mock_http_client
+    ):
         async with OsmosisLLMClient(
             server_url="http://localhost:8080",
             rollout_id="test-123",

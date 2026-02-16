@@ -6,12 +6,12 @@ Commands: [n]ext, [c]ontinue, [m]essages, [t]ools, [q]uit
 
 from __future__ import annotations
 
-import asyncio
 import copy
 import json
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any
 
 from osmosis_ai.rollout.client import CompletionsResult
 from osmosis_ai.rollout.console import Console
@@ -22,8 +22,8 @@ from osmosis_ai.rollout.core.base import (
 )
 from osmosis_ai.rollout.core.schemas import OpenAIFunctionToolSchema, RolloutMetrics
 from osmosis_ai.rollout.eval.common.dataset import DatasetRow, dataset_row_to_request
-from osmosis_ai.rollout.eval.common.llm_client import ExternalLLMClient
 from osmosis_ai.rollout.eval.common.errors import ToolValidationError
+from osmosis_ai.rollout.eval.common.llm_client import ExternalLLMClient
 from osmosis_ai.rollout.eval.common.runner import validate_tools
 
 
@@ -41,9 +41,9 @@ class InteractiveStep:
 
     turn: int
     step_type: str  # "llm_response", "tool_result", "final"
-    message: Optional[Dict[str, Any]] = None
-    tool_calls: Optional[List[Dict[str, Any]]] = None
-    finish_reason: Optional[str] = None
+    message: dict[str, Any] | None = None
+    tool_calls: list[dict[str, Any]] | None = None
+    finish_reason: str | None = None
 
 
 class InteractiveLLMClient:
@@ -57,7 +57,7 @@ class InteractiveLLMClient:
         self,
         wrapped_client: ExternalLLMClient,
         on_step: Callable[[InteractiveStep], bool],
-        on_messages_updated: Optional[Callable[[List[Dict[str, Any]]], None]] = None,
+        on_messages_updated: Callable[[list[dict[str, Any]]], None] | None = None,
     ) -> None:
         """Initialize the interactive client wrapper.
 
@@ -75,7 +75,7 @@ class InteractiveLLMClient:
         self._turn = 0
         self._aborted = False
 
-    def set_tools(self, tools: List[Any]) -> None:
+    def set_tools(self, tools: list[Any]) -> None:
         """Delegate to wrapped client."""
         self._wrapped.set_tools(tools)
 
@@ -95,7 +95,7 @@ class InteractiveLLMClient:
 
     async def chat_completions(
         self,
-        messages: List[Dict[str, Any]],
+        messages: list[dict[str, Any]],
         **kwargs: Any,
     ) -> CompletionsResult:
         """Make a chat completion and pause for user interaction.
@@ -148,7 +148,7 @@ class InteractiveLLMClient:
         """Delegate to wrapped client."""
         await self._wrapped.close()
 
-    async def __aenter__(self) -> "InteractiveLLMClient":
+    async def __aenter__(self) -> InteractiveLLMClient:
         """Async context manager entry."""
         await self._wrapped.__aenter__()
         return self
@@ -165,7 +165,7 @@ class InteractiveRunner:
     """
 
     # Command definitions: maps aliases to (handler_method_name, description)
-    _COMMANDS: Dict[str, Tuple[str, str]] = {
+    _COMMANDS: dict[str, tuple[str, str]] = {
         "n": ("_cmd_next", "Continue to next step"),
         "next": ("_cmd_next", "Continue to next step"),
         "": ("_cmd_next", "Continue to next step"),
@@ -181,7 +181,7 @@ class InteractiveRunner:
     }
 
     # Short aliases for help display (primary commands only)
-    _HELP_COMMANDS: List[Tuple[str, str, str]] = [
+    _HELP_COMMANDS: list[tuple[str, str, str]] = [
         ("n/next", "", "Continue to next step"),
         ("c", "", "Continue to completion (no more pauses)"),
         ("m", "", "Show all messages"),
@@ -208,8 +208,8 @@ class InteractiveRunner:
         self.console = Console()
 
         # State for interactive session
-        self._current_messages: List[Dict[str, Any]] = []
-        self._current_tools: List[OpenAIFunctionToolSchema] = []
+        self._current_messages: list[dict[str, Any]] = []
+        self._current_tools: list[OpenAIFunctionToolSchema] = []
         self._auto_continue = False
         self._last_msg_count_seen = 0
 
@@ -217,9 +217,9 @@ class InteractiveRunner:
         """Print a separator line."""
         self.console.separator(title)
 
-    def _build_tool_name_map(self, messages: List[Dict[str, Any]]) -> Dict[str, str]:
+    def _build_tool_name_map(self, messages: list[dict[str, Any]]) -> dict[str, str]:
         """Build mapping from tool_call_id to function name."""
-        name_map: Dict[str, str] = {}
+        name_map: dict[str, str] = {}
         for msg in messages:
             if msg.get("role") == "assistant":
                 for tc in msg.get("tool_calls") or []:
@@ -231,9 +231,9 @@ class InteractiveRunner:
 
     def _print_message(
         self,
-        msg: Dict[str, Any],
+        msg: dict[str, Any],
         prefix: str = "",
-        tool_name_map: Optional[Dict[str, str]] = None,
+        tool_name_map: dict[str, str] | None = None,
     ) -> None:
         """Print a message in a formatted way."""
         role = msg.get("role", "unknown")
@@ -258,13 +258,17 @@ class InteractiveRunner:
         }
 
         style, label = role_styles.get(role, (None, role.capitalize()))
-        styled_label = self.console.format_styled(f"[{label}]", style) if style else f"[{label}]"
+        styled_label = (
+            self.console.format_styled(f"[{label}]", style) if style else f"[{label}]"
+        )
         self.console.print(f"{prefix}{styled_label} {self.console.escape(content)}")
 
         # Print tool calls if present
         tool_calls = msg.get("tool_calls", [])
         if tool_calls:
-            self.console.print(f"\n{prefix}{self.console.format_styled('Tool calls:', 'yellow')}")
+            self.console.print(
+                f"\n{prefix}{self.console.format_styled('Tool calls:', 'yellow')}"
+            )
             for tc in tool_calls:
                 func = tc.get("function", {})
                 name = func.get("name", "unknown")
@@ -279,14 +283,18 @@ class InteractiveRunner:
                 # Indent multi-line args
                 args_lines = args_str.split("\n")
                 if len(args_lines) > 1:
-                    args_display = args_lines[0] + "\n" + "\n".join(
-                        "    " + line for line in args_lines[1:]
+                    args_display = (
+                        args_lines[0]
+                        + "\n"
+                        + "\n".join("    " + line for line in args_lines[1:])
                     )
                 else:
                     args_display = args_str
 
                 styled_name = self.console.format_styled(name, "cyan")
-                self.console.print(f"{prefix}  • {styled_name}({self.console.escape(args_display)})")
+                self.console.print(
+                    f"{prefix}  • {styled_name}({self.console.escape(args_display)})"
+                )
 
     def _print_step(self, step: InteractiveStep) -> None:
         """Print a step in the interactive session."""
@@ -301,7 +309,7 @@ class InteractiveRunner:
 
         self.console.print()
 
-    def _print_initial_messages(self, messages: List[Dict[str, Any]]) -> None:
+    def _print_initial_messages(self, messages: list[dict[str, Any]]) -> None:
         """Print the initial conversation messages."""
         self._print_separator("Initial Messages")
         self.console.print()
@@ -309,7 +317,7 @@ class InteractiveRunner:
             self._print_message(msg)
             self.console.print()
 
-    def _print_tools(self, tools: List[OpenAIFunctionToolSchema]) -> None:
+    def _print_tools(self, tools: list[OpenAIFunctionToolSchema]) -> None:
         """Print available tools."""
         self._print_separator("Available Tools")
         self.console.print()
@@ -324,7 +332,7 @@ class InteractiveRunner:
                 self.console.print(f"    Parameters: {', '.join(props.keys())}")
         self.console.print()
 
-    def _print_all_messages(self, messages: List[Dict[str, Any]]) -> None:
+    def _print_all_messages(self, messages: list[dict[str, Any]]) -> None:
         """Print all messages in the conversation."""
         self._print_separator("All Messages")
         self.console.print()
@@ -336,10 +344,10 @@ class InteractiveRunner:
 
     def _print_result(
         self,
-        result: Optional[RolloutResult],
+        result: RolloutResult | None,
         duration_ms: float,
         metrics: RolloutMetrics,
-        error: Optional[str] = None,
+        error: str | None = None,
     ) -> None:
         """Print the final result."""
         self._print_separator("Result")
@@ -358,9 +366,11 @@ class InteractiveRunner:
             if result.finish_reason:
                 self.console.print(f"Finish reason: {result.finish_reason}")
 
-        self.console.print(f"Duration: {duration_ms/1000:.2f}s")
+        self.console.print(f"Duration: {duration_ms / 1000:.2f}s")
         total_tokens = metrics.prompt_tokens + metrics.response_tokens
-        self.console.print(f"Tokens: {total_tokens:,} ({metrics.num_llm_calls} LLM calls)")
+        self.console.print(
+            f"Tokens: {total_tokens:,} ({metrics.num_llm_calls} LLM calls)"
+        )
         self.console.print()
 
     def _post_result_prompt(self) -> None:
@@ -408,27 +418,27 @@ class InteractiveRunner:
     # If should_return is True, _handle_step returns return_value
     # If should_return is False, the command loop continues
 
-    def _cmd_next(self) -> Tuple[bool, bool]:
+    def _cmd_next(self) -> tuple[bool, bool]:
         """Continue to next step."""
         return (True, True)
 
-    def _cmd_continue(self) -> Tuple[bool, bool]:
+    def _cmd_continue(self) -> tuple[bool, bool]:
         """Auto-continue to completion."""
         self._auto_continue = True
         self.console.print("Continuing to completion...", style="dim")
         return (True, True)
 
-    def _cmd_messages(self) -> Tuple[bool, bool]:
+    def _cmd_messages(self) -> tuple[bool, bool]:
         """Show all messages."""
         self._print_all_messages(self._current_messages)
         return (False, False)
 
-    def _cmd_tools(self) -> Tuple[bool, bool]:
+    def _cmd_tools(self) -> tuple[bool, bool]:
         """Show tools."""
         self._print_tools(self._current_tools)
         return (False, False)
 
-    def _cmd_quit(self) -> Tuple[bool, bool]:
+    def _cmd_quit(self) -> tuple[bool, bool]:
         """Abort execution."""
         self.console.print("Aborting execution...", style="yellow")
         return (True, False)
@@ -438,7 +448,7 @@ class InteractiveRunner:
         # format_styled already calls rich_escape internally, so pass raw text.
         return self.console.format_styled(f"[{command}]", "cyan")
 
-    def _print_help(self, unknown_cmd: Optional[str] = None) -> None:
+    def _print_help(self, unknown_cmd: str | None = None) -> None:
         """Print help for available commands."""
         if unknown_cmd is not None:
             self.console.print(f"Unknown command: {unknown_cmd}", style="red")
@@ -473,8 +483,8 @@ class InteractiveRunner:
         row: DatasetRow,
         row_index: int,
         max_turns: int = 10,
-        completion_params: Optional[Dict[str, Any]] = None,
-    ) -> Tuple[Optional[RolloutResult], Optional[str]]:
+        completion_params: dict[str, Any] | None = None,
+    ) -> tuple[RolloutResult | None, str | None]:
         """Run a single row interactively.
 
         Args:
@@ -524,9 +534,9 @@ class InteractiveRunner:
                 self._print_tools(tools)
 
             # Create callback to update current messages for the 'm' command
-            def update_messages(messages: List[Dict[str, Any]]) -> None:
+            def update_messages(messages: list[dict[str, Any]]) -> None:
                 # Print new tool messages since last update
-                new_msgs = messages[self._last_msg_count_seen:]
+                new_msgs = messages[self._last_msg_count_seen :]
                 if any(m.get("role") == "tool" for m in new_msgs):
                     tool_name_map = self._build_tool_name_map(messages)
                     self.console.print()
@@ -599,10 +609,10 @@ class InteractiveRunner:
 
     async def run_interactive_session(
         self,
-        rows: List[DatasetRow],
+        rows: list[DatasetRow],
         max_turns: int = 10,
-        completion_params: Optional[Dict[str, Any]] = None,
-        initial_row: Optional[int] = None,
+        completion_params: dict[str, Any] | None = None,
+        initial_row: int | None = None,
         row_offset: int = 0,
     ) -> None:
         """Run an interactive testing session.
@@ -652,7 +662,9 @@ class InteractiveRunner:
             self.console.print()
             range_styled = self.console.format_styled(f"{start_row}-{end_row}", "cyan")
             q_styled = self.console.format_styled("q", "cyan")
-            self.console.print(f"Select a row to test [{range_styled}] or '{q_styled}' to quit:")
+            self.console.print(
+                f"Select a row to test [{range_styled}] or '{q_styled}' to quit:"
+            )
 
             try:
                 user_input = self.console.input("> ", style="bold").strip().lower()
@@ -689,6 +701,7 @@ class InteractiveRunner:
                 )
 
         self.console.print("\nInteractive session ended.", style="dim")
+
 
 __all__ = [
     "InteractiveLLMClient",

@@ -3,19 +3,19 @@
 from __future__ import annotations
 
 import json
-import tempfile
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 
 import pytest
 
 from osmosis_ai.rollout.eval.common.dataset import (
-    REQUIRED_COLUMNS,
     DatasetReader,
-    DatasetRow,
     dataset_row_to_request,
 )
-from osmosis_ai.rollout.eval.common.errors import DatasetParseError, DatasetValidationError
+from osmosis_ai.rollout.eval.common.errors import (
+    DatasetParseError,
+    DatasetValidationError,
+)
 
 # Check if pyarrow is available for Parquet tests
 try:
@@ -355,7 +355,7 @@ class TestDatasetRowToRequest:
 
     def test_basic_conversion(self) -> None:
         """Test basic conversion from DatasetRow to RolloutRequest."""
-        row: Dict[str, Any] = {
+        row: dict[str, Any] = {
             "user_prompt": "What is 2+2?",
             "system_prompt": "You are a calculator.",
             "ground_truth": "4",
@@ -373,7 +373,7 @@ class TestDatasetRowToRequest:
 
     def test_ground_truth_in_metadata(self) -> None:
         """Test that ground_truth is stored in metadata."""
-        row: Dict[str, Any] = {
+        row: dict[str, Any] = {
             "user_prompt": "Question",
             "system_prompt": "System",
             "ground_truth": "Expected Answer",
@@ -386,7 +386,7 @@ class TestDatasetRowToRequest:
 
     def test_extra_columns_in_metadata(self) -> None:
         """Test that extra columns are preserved in metadata."""
-        row: Dict[str, Any] = {
+        row: dict[str, Any] = {
             "user_prompt": "Question",
             "system_prompt": "System",
             "ground_truth": "Answer",
@@ -401,7 +401,7 @@ class TestDatasetRowToRequest:
 
     def test_max_turns_parameter(self) -> None:
         """Test that max_turns is passed correctly."""
-        row: Dict[str, Any] = {
+        row: dict[str, Any] = {
             "user_prompt": "Question",
             "system_prompt": "System",
             "ground_truth": "Answer",
@@ -413,7 +413,7 @@ class TestDatasetRowToRequest:
 
     def test_completion_params(self) -> None:
         """Test that completion_params are passed correctly."""
-        row: Dict[str, Any] = {
+        row: dict[str, Any] = {
             "user_prompt": "Question",
             "system_prompt": "System",
             "ground_truth": "Answer",
@@ -430,7 +430,7 @@ class TestDatasetRowToRequest:
 
     def test_rollout_id_prefix_and_metadata_overrides(self) -> None:
         """Test custom rollout_id_prefix and metadata overrides."""
-        row: Dict[str, Any] = {
+        row: dict[str, Any] = {
             "user_prompt": "Question",
             "system_prompt": "System",
             "ground_truth": "Answer",

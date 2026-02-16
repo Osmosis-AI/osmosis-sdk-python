@@ -16,12 +16,10 @@
 
 from __future__ import annotations
 
-import pytest
-
 from osmosis_ai.rollout.server.api_key import (
+    API_KEY_PREFIX,
     generate_api_key,
     validate_api_key,
-    API_KEY_PREFIX,
 )
 
 
@@ -42,7 +40,9 @@ class TestGenerateApiKey:
         """Verify generated key contains only URL-safe characters."""
         key = generate_api_key()
         # URL-safe base64 uses only alphanumeric, '-', and '_'
-        allowed = set("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_")
+        allowed = set(
+            "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789-_"
+        )
         for char in key:
             assert char in allowed, f"Unexpected character: {char}"
 

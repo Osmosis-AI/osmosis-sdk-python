@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any
 
 import pytest
 
@@ -10,11 +10,11 @@ from osmosis_ai.rollout import (
     OpenAIFunctionParametersSchema,
     OpenAIFunctionPropertySchema,
     OpenAIFunctionSchema,
+    OpenAIFunctionToolSchema,
     RolloutAgentLoop,
     RolloutContext,
     RolloutRequest,
     RolloutResult,
-    OpenAIFunctionToolSchema,
 )
 
 
@@ -25,7 +25,7 @@ class MockAgentLoop(RolloutAgentLoop):
 
     def __init__(
         self,
-        tools: List[OpenAIFunctionToolSchema] | None = None,
+        tools: list[OpenAIFunctionToolSchema] | None = None,
         run_result: RolloutResult | None = None,
         run_error: Exception | None = None,
     ):
@@ -33,7 +33,7 @@ class MockAgentLoop(RolloutAgentLoop):
         self._run_result = run_result
         self._run_error = run_error
 
-    def get_tools(self, request: RolloutRequest) -> List[OpenAIFunctionToolSchema]:
+    def get_tools(self, request: RolloutRequest) -> list[OpenAIFunctionToolSchema]:
         return self._tools
 
     async def run(self, ctx: RolloutContext) -> RolloutResult:
@@ -82,7 +82,7 @@ def sample_tool_schema() -> OpenAIFunctionToolSchema:
 
 
 @pytest.fixture
-def sample_messages() -> List[Dict[str, Any]]:
+def sample_messages() -> list[dict[str, Any]]:
     """Create sample messages for testing."""
     return [
         {"role": "system", "content": "You are a helpful assistant."},
@@ -91,13 +91,13 @@ def sample_messages() -> List[Dict[str, Any]]:
 
 
 @pytest.fixture
-def sample_assistant_message() -> Dict[str, Any]:
+def sample_assistant_message() -> dict[str, Any]:
     """Create a sample assistant message for testing."""
     return {"role": "assistant", "content": "The answer is 4."}
 
 
 @pytest.fixture
-def sample_assistant_message_with_tool_calls() -> Dict[str, Any]:
+def sample_assistant_message_with_tool_calls() -> dict[str, Any]:
     """Create a sample assistant message with tool calls."""
     return {
         "role": "assistant",
@@ -116,7 +116,7 @@ def sample_assistant_message_with_tool_calls() -> Dict[str, Any]:
 
 
 @pytest.fixture
-def sample_tool_message() -> Dict[str, Any]:
+def sample_tool_message() -> dict[str, Any]:
     """Create a sample tool result message."""
     return {
         "role": "tool",

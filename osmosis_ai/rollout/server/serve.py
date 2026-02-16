@@ -18,22 +18,20 @@ Example:
 from __future__ import annotations
 
 import logging
-import sys
-from typing import Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 from osmosis_ai.rollout._compat import FASTAPI_AVAILABLE, UVICORN_AVAILABLE
 from osmosis_ai.rollout.console import Console
 from osmosis_ai.rollout.core.base import RolloutAgentLoop
 from osmosis_ai.rollout.server.api_key import generate_api_key
 from osmosis_ai.rollout.validator import (
-    AgentLoopValidationError,
     ValidationResult,
     validate_agent_loop,
 )
 
 if TYPE_CHECKING:
-    from osmosis_ai.rollout.config.settings import RolloutSettings
     from osmosis_ai.auth.credentials import WorkspaceCredentials
+    from osmosis_ai.rollout.config.settings import RolloutSettings
 
 logger = logging.getLogger(__name__)
 
@@ -55,11 +53,11 @@ def serve_agent_loop(
     validate: bool = True,
     log_level: str = "info",
     reload: bool = False,
-    settings: Optional["RolloutSettings"] = None,
+    settings: RolloutSettings | None = None,
     skip_register: bool = False,
-    api_key: Optional[str] = None,
+    api_key: str | None = None,
     local_debug: bool = False,
-    debug_dir: Optional[str] = None,
+    debug_dir: str | None = None,
 ) -> None:
     """Start a RolloutServer for the given agent loop.
 
@@ -139,7 +137,7 @@ def serve_agent_loop(
             )
 
     # Check login status if registration is enabled
-    credentials: Optional["WorkspaceCredentials"] = None
+    credentials: WorkspaceCredentials | None = None
     if not skip_register:
         from osmosis_ai.auth.credentials import get_valid_credentials
 
@@ -171,7 +169,7 @@ def serve_agent_loop(
             logger.info("Using provided API key for server authentication")
 
     # Create debug session directory with timestamp if debug_dir is provided
-    debug_session_dir: Optional[str] = None
+    debug_session_dir: str | None = None
     if debug_dir:
         import os
         import time
@@ -273,9 +271,9 @@ def validate_and_report(
     return result
 
 
-def _get_public_ip() -> Optional[str]:
+def _get_public_ip() -> str | None:
     """Get detected public IP address, or None if detection fails."""
-    from osmosis_ai.rollout.network import detect_public_ip, PublicIPDetectionError
+    from osmosis_ai.rollout.network import PublicIPDetectionError, detect_public_ip
 
     try:
         return detect_public_ip()
@@ -287,7 +285,9 @@ def _log_validation_result(result: ValidationResult, *, verbose: bool = False) -
     """Log validation result to console."""
     console = Console()
     if result.valid:
-        console.print(f"Agent loop '{result.agent_name}' validated successfully.", style="green")
+        console.print(
+            f"Agent loop '{result.agent_name}' validated successfully.", style="green"
+        )
         console.print(f"  - Tools: {result.tool_count}")
         if result.warnings:
             console.print(f"  - Warnings: {len(result.warnings)}", style="yellow")
@@ -295,7 +295,9 @@ def _log_validation_result(result: ValidationResult, *, verbose: bool = False) -
                 for warning in result.warnings:
                     console.print(f"    - {warning}", style="yellow")
     else:
-        console.print_error(f"Agent loop validation failed with {len(result.errors)} error(s):")
+        console.print_error(
+            f"Agent loop validation failed with {len(result.errors)} error(s):"
+        )
         for error in result.errors:
             console.print_error(f"  - {error}")
         if result.warnings and verbose:

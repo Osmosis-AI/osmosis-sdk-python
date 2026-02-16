@@ -23,7 +23,6 @@ import concurrent.futures
 import ipaddress
 import logging
 import re
-from typing import Optional, Tuple
 
 import requests
 
@@ -136,7 +135,7 @@ def is_valid_hostname_or_ip(value: str) -> bool:
     # Pattern allows: alphanumeric, hyphens, underscores, dots
     # Single char hostnames are valid (e.g., "a", "1")
     # Labels can't start or end with hyphen
-    hostname_pattern = r'^[A-Za-z0-9_]([A-Za-z0-9_-]{0,61}[A-Za-z0-9_])?(\.[A-Za-z0-9_]([A-Za-z0-9_-]{0,61}[A-Za-z0-9_])?)*$|^[A-Za-z0-9]$'
+    hostname_pattern = r"^[A-Za-z0-9_]([A-Za-z0-9_-]{0,61}[A-Za-z0-9_])?(\.[A-Za-z0-9_]([A-Za-z0-9_-]{0,61}[A-Za-z0-9_])?)*$|^[A-Za-z0-9]$"
     return bool(re.match(hostname_pattern, host))
 
 
@@ -165,7 +164,7 @@ def is_private_ip(ip: str) -> bool:
 # ============================================================================
 
 
-def _get_aws_public_ip() -> Optional[str]:
+def _get_aws_public_ip() -> str | None:
     """Get public IP from AWS EC2 IMDSv2 metadata service.
 
     AWS IMDSv2 requires a session token before querying metadata.
@@ -205,7 +204,7 @@ def _get_aws_public_ip() -> Optional[str]:
     return None
 
 
-def _get_gcp_public_ip() -> Optional[str]:
+def _get_gcp_public_ip() -> str | None:
     """Get public IP from GCP Compute Engine metadata service.
 
     GCP requires the 'Metadata-Flavor: Google' header.
@@ -232,7 +231,7 @@ def _get_gcp_public_ip() -> Optional[str]:
     return None
 
 
-def _get_azure_public_ip() -> Optional[str]:
+def _get_azure_public_ip() -> str | None:
     """Get public IP from Azure Instance Metadata Service (IMDS).
 
     Note: Only works with Basic SKU public IPs. Standard SKU requires
@@ -261,7 +260,7 @@ def _get_azure_public_ip() -> Optional[str]:
     return None
 
 
-def detect_from_cloud_metadata() -> Optional[str]:
+def detect_from_cloud_metadata() -> str | None:
     """Try cloud metadata services in parallel.
 
     Cloud metadata services are:
@@ -299,7 +298,9 @@ def detect_from_cloud_metadata() -> Optional[str]:
                 try:
                     ip = future.result(timeout=0)  # Already completed
                     if ip:
-                        logger.debug(f"Cloud metadata detection succeeded: {futures[future]}")
+                        logger.debug(
+                            f"Cloud metadata detection succeeded: {futures[future]}"
+                        )
                         # Return immediately; other threads will complete on their
                         # own due to short request timeouts
                         return ip
@@ -317,7 +318,7 @@ def detect_from_cloud_metadata() -> Optional[str]:
 # ============================================================================
 
 
-def detect_from_external_services() -> Optional[str]:
+def detect_from_external_services() -> str | None:
     """Get public IP from external services (works on any cloud including Lambda Labs).
 
     Queries multiple services in PARALLEL and returns the first successful result.
@@ -342,7 +343,7 @@ def detect_from_external_services() -> Optional[str]:
         ("ifconfig.me", "https://ifconfig.me/ip"),
     ]
 
-    def _query_service(name_url: Tuple[str, str]) -> Optional[str]:
+    def _query_service(name_url: tuple[str, str]) -> str | None:
         name, url = name_url
         try:
             resp = requests.get(url, timeout=_EXTERNAL_SERVICE_TIMEOUT_SECONDS)
@@ -368,7 +369,9 @@ def detect_from_external_services() -> Optional[str]:
                     ip = future.result(timeout=0)
                     if ip:
                         service_name = futures[future]
-                        logger.info(f"Detected public IP via external service ({service_name}): {ip}")
+                        logger.info(
+                            f"Detected public IP via external service ({service_name}): {ip}"
+                        )
                         # Return immediately; other threads will complete on their
                         # own due to request timeouts
                         return ip
@@ -442,10 +445,10 @@ def detect_public_ip() -> str:
 
 
 __all__ = [
-    "detect_public_ip",
     "PublicIPDetectionError",
+    "detect_public_ip",
+    "is_private_ip",
+    "is_valid_hostname_or_ip",
     # Validation helpers
     "validate_ipv4",
-    "is_valid_hostname_or_ip",
-    "is_private_ip",
 ]

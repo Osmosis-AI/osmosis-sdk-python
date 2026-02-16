@@ -19,15 +19,11 @@ Example:
 
 from __future__ import annotations
 
-from typing import Optional
-
 from pydantic import BaseModel, Field
 
 from osmosis_ai.rollout._compat import (
     PYDANTIC_SETTINGS_AVAILABLE,
-    pydantic_settings,
 )
-
 
 # Conditionally use pydantic-settings BaseSettings or fallback to BaseModel
 if PYDANTIC_SETTINGS_AVAILABLE:
@@ -226,7 +222,7 @@ class RolloutSettings(_BaseSettings):
 
 
 # Global settings singleton
-_settings: Optional[RolloutSettings] = None
+_settings: RolloutSettings | None = None
 
 
 def get_settings() -> RolloutSettings:
@@ -280,8 +276,8 @@ __all__ = [
     "RolloutClientSettings",
     "RolloutServerSettings",
     "RolloutSettings",
+    "configure",
     # Functions
     "get_settings",
-    "configure",
     "reset_settings",
 ]

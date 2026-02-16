@@ -16,20 +16,18 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from osmosis_ai.rollout import (
+    OpenAIFunctionToolSchema,
     RolloutAgentLoop,
     RolloutContext,
     RolloutMetrics,
     RolloutRequest,
     RolloutResult,
-    OpenAIFunctionToolSchema,
 )
-
 
 # =============================================================================
 # RolloutResult Tests
@@ -343,7 +341,7 @@ async def test_agent_loop_run_can_return_complete_result(
     class SimpleLoop(RolloutAgentLoop):
         name = "simple"
 
-        def get_tools(self, request: RolloutRequest) -> List[OpenAIFunctionToolSchema]:
+        def get_tools(self, request: RolloutRequest) -> list[OpenAIFunctionToolSchema]:
             return []
 
         async def run(self, ctx: RolloutContext) -> RolloutResult:
@@ -375,7 +373,7 @@ async def test_agent_loop_run_can_return_error_result(
     class FailingLoop(RolloutAgentLoop):
         name = "failing"
 
-        def get_tools(self, request: RolloutRequest) -> List[OpenAIFunctionToolSchema]:
+        def get_tools(self, request: RolloutRequest) -> list[OpenAIFunctionToolSchema]:
             return []
 
         async def run(self, ctx: RolloutContext) -> RolloutResult:

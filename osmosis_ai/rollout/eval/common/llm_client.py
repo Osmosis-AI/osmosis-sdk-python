@@ -5,11 +5,11 @@ Supports providers such as OpenAI, Anthropic, Groq, Ollama, and others.
 
 from __future__ import annotations
 
-import logging
 import inspect
+import logging
 import time
 import warnings
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 warnings.filterwarnings(
     "ignore",
@@ -39,7 +39,7 @@ def _get_provider_message(e: Exception) -> str:
     msg = getattr(e, "message", str(e))
     prefix = f"litellm.{type(e).__name__}: "
     if msg.startswith(prefix):
-        msg = msg[len(prefix):]
+        msg = msg[len(prefix) :]
 
     # Strip litellm noise after common markers
     for marker in _NOISE_MARKERS:
@@ -90,7 +90,7 @@ def _first_line(message: str) -> str:
 
 def _format_provider_hint(
     model: str,
-    api_base: Optional[str],
+    api_base: str | None,
     raw_message: str,
 ) -> str:
     """Build a concise actionable error for provider/model format issues."""
@@ -136,8 +136,8 @@ class ExternalLLMClient:
     def __init__(
         self,
         model: str = "gpt-5-mini",
-        api_key: Optional[str] = None,
-        api_base: Optional[str] = None,
+        api_key: str | None = None,
+        api_base: str | None = None,
     ) -> None:
         self._litellm = _get_litellm()
 
@@ -164,7 +164,7 @@ class ExternalLLMClient:
         self._api_key = api_key
         self._api_base = api_base
 
-        self._tools: Optional[List[Dict[str, Any]]] = None
+        self._tools: list[dict[str, Any]] | None = None
 
         self._llm_latency_ms: float = 0.0
         self._num_llm_calls: int = 0
@@ -172,7 +172,7 @@ class ExternalLLMClient:
         self._response_tokens: int = 0
         self._closed = False
 
-    def set_tools(self, tools: List[Any]) -> None:
+    def set_tools(self, tools: list[Any]) -> None:
         """Set tools for the current execution row."""
         if tools:
             self._tools = [
@@ -195,13 +195,13 @@ class ExternalLLMClient:
 
     async def chat_completions(
         self,
-        messages: List[Dict[str, Any]],
+        messages: list[dict[str, Any]],
         **kwargs: Any,
     ) -> CompletionsResult:
         """Make a chat completion request via LiteLLM."""
         start_time = time.monotonic()
 
-        request_kwargs: Dict[str, Any] = {
+        request_kwargs: dict[str, Any] = {
             "model": self.model,
             "messages": messages,
         }
@@ -295,9 +295,7 @@ class ExternalLLMClient:
             self._BudgetExceededError,
             self._APIConnectionError,
         ) as e:
-            raise SystemicProviderError(
-                _get_provider_message(e)
-            ) from e
+            raise SystemicProviderError(_get_provider_message(e)) from e
         except Exception as e:
             classified = self._classify_unknown_error(e)
             if isinstance(classified, SystemicProviderError):
@@ -319,9 +317,7 @@ class ExternalLLMClient:
 
         # Systemic: auth / forbidden / model-not-found
         if status_code in (401, 403, 404):
-            return SystemicProviderError(
-                f"LLM API error (HTTP {status_code}): {msg}"
-            )
+            return SystemicProviderError(f"LLM API error (HTTP {status_code}): {msg}")
 
         # Systemic: connection errors wrapped as InternalServerError etc.
         if _is_connection_error_message(msg):
@@ -373,10 +369,11 @@ class ExternalLLMClient:
         except Exception as exc:
             logger.debug("LiteLLM async client cleanup failed: %s", exc)
 
-    async def __aenter__(self) -> "ExternalLLMClient":
+    async def __aenter__(self) -> ExternalLLMClient:
         return self
 
     async def __aexit__(self, *args: Any) -> None:
         await self.close()
+
 
 __all__ = ["ExternalLLMClient"]

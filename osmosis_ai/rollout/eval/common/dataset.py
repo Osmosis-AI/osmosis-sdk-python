@@ -9,11 +9,15 @@ from __future__ import annotations
 
 import json
 import logging
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Any, Dict, Iterator, List, Optional, TypedDict, cast
+from typing import Any, TypedDict, cast
 
 from osmosis_ai.rollout.core.schemas import RolloutRequest
-from osmosis_ai.rollout.eval.common.errors import DatasetParseError, DatasetValidationError
+from osmosis_ai.rollout.eval.common.errors import (
+    DatasetParseError,
+    DatasetValidationError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -46,19 +50,19 @@ class DatasetReader:
                 f"Supported formats: .json, .jsonl, .parquet"
             )
 
-        self._row_count: Optional[int] = None
+        self._row_count: int | None = None
 
     def read(
         self,
-        limit: Optional[int] = None,
+        limit: int | None = None,
         offset: int = 0,
-    ) -> List[DatasetRow]:
+    ) -> list[DatasetRow]:
         """Read rows from the dataset file."""
         return list(self.iter_rows(limit=limit, offset=offset))
 
     def iter_rows(
         self,
-        limit: Optional[int] = None,
+        limit: int | None = None,
         offset: int = 0,
     ) -> Iterator[DatasetRow]:
         """Yield validated rows lazily for memory-efficient iteration."""
@@ -78,7 +82,7 @@ class DatasetReader:
             yield validated
             count += 1
 
-    def _iter_raw_rows(self) -> Iterator[Dict[str, Any]]:
+    def _iter_raw_rows(self) -> Iterator[dict[str, Any]]:
         if self._extension == ".json":
             yield from self._parse_json()
         elif self._extension == ".jsonl":
@@ -101,9 +105,9 @@ class DatasetReader:
 
         return self._row_count
 
-    def _parse_json(self) -> List[Dict[str, Any]]:
+    def _parse_json(self) -> list[dict[str, Any]]:
         try:
-            with open(self.file_path, "r", encoding="utf-8") as f:
+            with open(self.file_path, encoding="utf-8") as f:
                 data = json.load(f)
         except json.JSONDecodeError as e:
             raise DatasetParseError(f"Invalid JSON file: {e}") from e
@@ -117,9 +121,9 @@ class DatasetReader:
 
         return data
 
-    def _iter_jsonl(self) -> Iterator[Dict[str, Any]]:
+    def _iter_jsonl(self) -> Iterator[dict[str, Any]]:
         try:
-            with open(self.file_path, "r", encoding="utf-8") as f:
+            with open(self.file_path, encoding="utf-8") as f:
                 for line_num, line in enumerate(f, start=1):
                     line = line.strip()
                     if not line:
@@ -137,7 +141,7 @@ class DatasetReader:
     def _count_jsonl_rows(self) -> int:
         count = 0
         try:
-            with open(self.file_path, "r", encoding="utf-8") as f:
+            with open(self.file_path, encoding="utf-8") as f:
                 for line in f:
                     if line.strip():
                         count += 1
@@ -145,7 +149,7 @@ class DatasetReader:
             pass
         return count
 
-    def _parse_parquet(self) -> List[Dict[str, Any]]:
+    def _parse_parquet(self) -> list[dict[str, Any]]:
         try:
             import pyarrow.parquet as pq
         except ImportError as e:
@@ -179,27 +183,33 @@ class DatasetReader:
                 f"Row {row_index}: Expected object, got {type(row).__name__}"
             )
 
-        lower_keys = {k.lower(): k for k in row.keys()}
+        lower_keys = {k.lower(): k for k in row}
 
-        missing = [required for required in REQUIRED_COLUMNS if required not in lower_keys]
+        missing = [
+            required for required in REQUIRED_COLUMNS if required not in lower_keys
+        ]
         if missing:
             raise DatasetValidationError(
                 f"Row {row_index}: Missing required columns: {missing}"
             )
 
-        result: Dict[str, Any] = {}
+        result: dict[str, Any] = {}
         for required in REQUIRED_COLUMNS:
             original_key = lower_keys[required]
             value = row[original_key]
             if value is None:
-                raise DatasetValidationError(f"Row {row_index}: '{required}' cannot be null")
+                raise DatasetValidationError(
+                    f"Row {row_index}: '{required}' cannot be null"
+                )
             if not isinstance(value, str):
                 raise DatasetValidationError(
                     f"Row {row_index}: '{required}' must be a string, "
                     f"got {type(value).__name__}"
                 )
             if not value.strip():
-                raise DatasetValidationError(f"Row {row_index}: '{required}' cannot be empty")
+                raise DatasetValidationError(
+                    f"Row {row_index}: '{required}' cannot be empty"
+                )
             result[required] = value
 
         for key, value in row.items():
@@ -214,13 +224,13 @@ def dataset_row_to_request(
     row_index: int,
     max_turns: int = 10,
     max_tokens_total: int = 4096,
-    completion_params: Optional[Dict[str, Any]] = None,
+    completion_params: dict[str, Any] | None = None,
     rollout_id_prefix: str = "local",
-    rollout_id: Optional[str] = None,
-    metadata_overrides: Optional[Dict[str, Any]] = None,
+    rollout_id: str | None = None,
+    metadata_overrides: dict[str, Any] | None = None,
 ) -> RolloutRequest:
     """Convert a dataset row to a local RolloutRequest."""
-    metadata: Dict[str, Any] = {
+    metadata: dict[str, Any] = {
         "ground_truth": row["ground_truth"],
         "row_index": row_index,
     }
@@ -246,6 +256,7 @@ def dataset_row_to_request(
         completion_params=completion_params or {},
         metadata=metadata,
     )
+
 
 __all__ = [
     "REQUIRED_COLUMNS",

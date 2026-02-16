@@ -46,7 +46,8 @@ def test_baseline_comparator_missing_statistics(tmp_path: Path) -> None:
     target.write_text(json.dumps({"metadata": {"average": 0.5}}), encoding="utf-8")
 
     with pytest.raises(
-        CLIError, match="Baseline JSON must include an 'overall_statistics' object or top-level statistics."
+        CLIError,
+        match=r"Baseline JSON must include an 'overall_statistics' object or top-level statistics.",
     ):
         comparator.load(target)
 
@@ -54,9 +55,13 @@ def test_baseline_comparator_missing_statistics(tmp_path: Path) -> None:
 def test_baseline_comparator_non_numeric_statistics(tmp_path: Path) -> None:
     comparator = BaselineComparator()
     target = tmp_path / "baseline.json"
-    target.write_text(json.dumps({"overall_statistics": {"average": "bad"}}), encoding="utf-8")
+    target.write_text(
+        json.dumps({"overall_statistics": {"average": "bad"}}), encoding="utf-8"
+    )
 
-    with pytest.raises(CLIError, match="Baseline statistics could not be parsed into numeric values."):
+    with pytest.raises(
+        CLIError, match=r"Baseline statistics could not be parsed into numeric values."
+    ):
         comparator.load(target)
 
 
@@ -91,11 +96,15 @@ def test_evaluation_session_errors_when_no_matching_records(tmp_path: Path) -> N
         session.execute(request)
 
 
-def test_resolve_output_path_defaults_to_cache(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_resolve_output_path_defaults_to_cache(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     monkeypatch.setattr("osmosis_ai.cli_services.session._CACHE_ROOT", tmp_path)
 
     session = EvaluationSession(identifier_factory=lambda: "12345")
-    path, identifier = session._resolve_output_path(None, None, rubric_id="My Rubric/ID")
+    path, identifier = session._resolve_output_path(
+        None, None, rubric_id="My Rubric/ID"
+    )
 
     expected_dir = tmp_path / "my_rubric_id"
     expected_path = expected_dir / "rubric_eval_result_12345.json"
@@ -106,7 +115,9 @@ def test_resolve_output_path_defaults_to_cache(monkeypatch: pytest.MonkeyPatch, 
 
 
 def _write_records(path: Path, lines: list[dict]) -> None:
-    path.write_text("\n".join(json.dumps(line) for line in lines) + "\n", encoding="utf-8")
+    path.write_text(
+        "\n".join(json.dumps(line) for line in lines) + "\n", encoding="utf-8"
+    )
 
 
 def test_dataset_loader_invalid_json(tmp_path: Path) -> None:
@@ -133,7 +144,10 @@ def test_dataset_loader_missing_solution_str(tmp_path: Path) -> None:
     record = {"rubric_id": "support_followup"}
     _write_records(data_path, [record])
 
-    with pytest.raises(CLIError, match="Record 'support_followup' must include a non-empty 'solution_str' string."):
+    with pytest.raises(
+        CLIError,
+        match=r"Record 'support_followup' must include a non-empty 'solution_str' string.",
+    ):
         loader.load(data_path)
 
 
@@ -146,7 +160,10 @@ def test_dataset_loader_blank_solution_str(tmp_path: Path) -> None:
     }
     _write_records(data_path, [record])
 
-    with pytest.raises(CLIError, match="Record 'support_followup' must include a non-empty 'solution_str' string."):
+    with pytest.raises(
+        CLIError,
+        match=r"Record 'support_followup' must include a non-empty 'solution_str' string.",
+    ):
         loader.load(data_path)
 
 
@@ -172,7 +189,9 @@ def test_dataset_loader_supports_original_input_in_extra_info(tmp_path: Path) ->
     loaded = loader.load(data_path)[0]
 
     assert loaded.original_input == "Please help me troubleshoot my purifier."
-    assert loaded.extra_info == {"original_input": "Please help me troubleshoot my purifier."}
+    assert loaded.extra_info == {
+        "original_input": "Please help me troubleshoot my purifier."
+    }
 
 
 def test_rubric_config_rejects_extra_info(tmp_path: Path) -> None:
@@ -227,7 +246,9 @@ def test_dataset_record_assistant_preview_truncates(tmp_path: Path) -> None:
     assert preview == ("A" * 137) + "..."
 
 
-def test_dataset_record_assistant_preview_returns_none_without_assistant(tmp_path: Path) -> None:
+def test_dataset_record_assistant_preview_returns_none_without_assistant(
+    tmp_path: Path,
+) -> None:
     record = DatasetRecord(
         payload={},
         rubric_id="support_followup",
@@ -271,7 +292,12 @@ def test_rubric_evaluator_enriches_extra_info() -> None:
     config = RubricConfig(
         rubric_id="support_followup",
         rubric_text="Score how well the assistant resolves the issue.",
-        model_info={"provider": "openai", "model": "gpt-5-mini", "api_key": "dummy", "system_prompt": "Judge fairly."},
+        model_info={
+            "provider": "openai",
+            "model": "gpt-5-mini",
+            "api_key": "dummy",
+            "system_prompt": "Judge fairly.",
+        },
         score_min=0.0,
         score_max=1.0,
         system_prompt="System override prompt.",

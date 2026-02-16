@@ -29,7 +29,6 @@ from osmosis_ai.rollout import (
     serialize_tool_result,
 )
 
-
 # =============================================================================
 # create_tool_result Tests
 # =============================================================================
@@ -203,7 +202,7 @@ def test_get_tool_call_info_missing_id() -> None:
             "arguments": "{}",
         },
     }
-    call_id, name, args = get_tool_call_info(tool_call)
+    call_id, _name, _args = get_tool_call_info(tool_call)
     assert call_id == "unknown"
 
 
