@@ -408,6 +408,9 @@ This project uses [Ruff](https://docs.astral.sh/ruff/) for linting and code form
 # Install dev dependencies (includes ruff)
 pip install -e ".[dev]"
 
+# Verify Ruff version
+ruff --version
+
 # Check for lint errors
 ruff check .
 
@@ -420,6 +423,8 @@ ruff format .
 # Check formatting without modifying files
 ruff format --check .
 ```
+
+Ruff is pinned to one version across `pyproject.toml`, `.pre-commit-config.yaml`, and CI so local checks, pre-commit hooks, and GitHub Actions produce the same results.
 
 A [pre-commit](https://pre-commit.com/) configuration is included to run Ruff automatically on every commit:
 
