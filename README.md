@@ -397,6 +397,29 @@ Run `python -m pytest` (or any subset under `tests/`) to exercise the updated he
 
 Add additional tests under `tests/` as you extend the library.
 
+## Linting & Formatting
+
+This project uses [Ruff](https://docs.astral.sh/ruff/) for linting and code formatting. Configuration lives in `pyproject.toml` under `[tool.ruff]`.
+
+```bash
+# Install dev dependencies (includes ruff)
+pip install -e ".[dev]"
+
+# Check for lint errors
+ruff check .
+
+# Auto-fix lint errors where possible
+ruff check --fix .
+
+# Format code
+ruff format .
+
+# Check formatting without modifying files
+ruff format --check .
+```
+
+Please run `ruff check` and `ruff format` before submitting a pull request.
+
 ## License
 
 MIT License - see [LICENSE](LICENSE) file for details.
