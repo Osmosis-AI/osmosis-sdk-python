@@ -203,7 +203,7 @@ class RubricEvaluator:
             )
 
             if is_evaluate_rubric_style:
-                return self._evaluate_fn(
+                result: dict[str, Any] = self._evaluate_fn(
                     rubric=config.rubric_text,
                     solution_str=solution,
                     model_info=model_info_payload,
@@ -214,6 +214,7 @@ class RubricEvaluator:
                     score_max=score_max,
                     return_details=True,
                 )
+                return result
 
             call_args: list[Any] = []
             call_kwargs: dict[str, Any] = {}
@@ -225,7 +226,7 @@ class RubricEvaluator:
                     continue
 
                 if param.name == "solution_str":
-                    value = solution
+                    value: Any = solution
                 elif param.name == "ground_truth":
                     value = ground_truth
                 elif param.name == "extra_info":
@@ -241,7 +242,10 @@ class RubricEvaluator:
                 else:
                     call_kwargs[param.name] = value
 
-            return self._evaluate_fn(*call_args, **call_kwargs)
+            fallback_result: dict[str, Any] = self._evaluate_fn(
+                *call_args, **call_kwargs
+            )
+            return fallback_result
         except (MissingAPIKeyError, ProviderRequestError, ModelNotFoundError) as exc:
             raise CLIError(str(exc)) from exc
 

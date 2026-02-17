@@ -105,6 +105,8 @@ class Console:
         # Use rich if available and writing to TTY
         self._use_rich = RICH_AVAILABLE and self._is_tty and not no_color
 
+        self._rich: RichConsole | None
+        self._rich_stderr: RichConsole | None
         if self._use_rich:
             self._rich = RichConsole(file=self._file, force_terminal=force_terminal)
             self._rich_stderr = RichConsole(file=sys.stderr)

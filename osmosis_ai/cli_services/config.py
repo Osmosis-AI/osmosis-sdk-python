@@ -76,7 +76,7 @@ class RubricConfigDocumentSchema:
 class BaseRubricConfigSchema(RubricConfigDocumentSchema):
     """Schema handling documents without an explicit version."""
 
-    version = None
+    version: int | None = None
 
     def parse_document(
         self,
@@ -96,7 +96,7 @@ class BaseRubricConfigSchema(RubricConfigDocumentSchema):
 class Version1RubricConfigSchema(BaseRubricConfigSchema):
     """Schema for version 1 documents."""
 
-    version = 1
+    version: int | None = 1
 
 
 class RubricConfigParser:
@@ -423,7 +423,7 @@ class _LiteralSafeDumper(yaml.SafeDumper):
     """YAML dumper that preserves multiline strings with literal blocks."""
 
 
-def _represent_str(dumper: _LiteralSafeDumper, data: str):  # type: ignore[type-arg]
+def _represent_str(dumper: _LiteralSafeDumper, data: str) -> Any:
     if "\n" in data:
         return dumper.represent_scalar("tag:yaml.org,2002:str", data, style="|")
     return SafeRepresenter.represent_str(dumper, data)

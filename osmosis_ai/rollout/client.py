@@ -87,7 +87,8 @@ class CompletionsResult:
     @property
     def tool_calls(self) -> list[dict[str, Any]]:
         """Get tool calls from the response."""
-        return self.message.get("tool_calls", [])
+        calls: list[dict[str, Any]] = self.message.get("tool_calls", [])
+        return calls
 
     @property
     def content(self) -> str | None:
@@ -173,8 +174,8 @@ class OsmosisLLMClient:
         # Settings for connection pool
         self._max_connections = settings.max_connections
         self._max_keepalive_connections = settings.max_keepalive_connections
-        self._retry_base_delay = settings.retry_base_delay
-        self._retry_max_delay = settings.retry_max_delay
+        self._retry_base_delay: float = settings.retry_base_delay
+        self._retry_max_delay: float = settings.retry_max_delay
 
         # HTTP client (lazy initialized)
         self._client: httpx.AsyncClient | None = None
@@ -218,7 +219,7 @@ class OsmosisLLMClient:
     def _calculate_retry_delay(self, attempt: int) -> float:
         """Calculate delay for retry with exponential backoff."""
         delay = self._retry_base_delay * (2**attempt)
-        return min(delay, self._retry_max_delay)
+        return float(min(delay, self._retry_max_delay))
 
     async def chat_completions(
         self,

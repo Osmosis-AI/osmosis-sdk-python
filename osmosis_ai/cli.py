@@ -31,7 +31,8 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
     try:
-        return handler(args)
+        exit_code: int = handler(args)
+        return exit_code
     except CLIError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1

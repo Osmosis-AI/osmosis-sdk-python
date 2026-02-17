@@ -295,7 +295,7 @@ def patch_httpx_for_mock_trainer(
 
     original_post = httpx.AsyncClient.post
 
-    async def mock_post(self, url: str, **kwargs):
+    async def mock_post(self: Any, url: str, **kwargs: Any) -> Any:
         if "/v1/chat/completions" in url:
             resp = client.post("/v1/chat/completions", **kwargs)
             return httpx.Response(

@@ -39,7 +39,8 @@ def _resolve_ref(ref: str, defs: dict[str, Any]) -> dict[str, Any]:
     node: Any = {"$defs": defs}
     for part in parts:
         node = node[part]
-    return node
+    result: dict[str, Any] = node
+    return result
 
 
 def _json_schema_to_property(

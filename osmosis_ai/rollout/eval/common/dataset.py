@@ -159,7 +159,8 @@ class DatasetReader:
 
         try:
             table = pq.read_table(self.file_path)
-            return table.to_pylist()
+            rows: list[dict[str, Any]] = table.to_pylist()
+            return rows
         except Exception as e:
             raise DatasetParseError(f"Error reading Parquet file: {e}") from e
 
@@ -173,7 +174,8 @@ class DatasetReader:
 
         try:
             metadata = pq.read_metadata(self.file_path)
-            return metadata.num_rows
+            count: int = metadata.num_rows
+            return count
         except Exception as e:
             raise DatasetParseError(f"Error reading Parquet metadata: {e}") from e
 
