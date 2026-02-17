@@ -299,8 +299,30 @@ class TestConcurrencyControl:
     async def test_semaphore_limits_concurrent_rollouts(self) -> None:
         """Only max_concurrent rollouts should run simultaneously."""
         max_concurrent = 2
-        agent = SlowAgentLoop(delay=0.3)
-        app = create_app(agent, max_concurrent=max_concurrent)
+        peak_concurrent = 0
+        current_concurrent = 0
+        lock = asyncio.Lock()
+
+        class ConcurrencyTrackingAgent(RolloutAgentLoop):
+            name = "concurrency_agent"
+
+            def get_tools(
+                self, request: RolloutRequest
+            ) -> list[OpenAIFunctionToolSchema]:
+                return []
+
+            async def run(self, ctx: RolloutContext) -> RolloutResult:
+                nonlocal peak_concurrent, current_concurrent
+                async with lock:
+                    current_concurrent += 1
+                    if current_concurrent > peak_concurrent:
+                        peak_concurrent = current_concurrent
+                await asyncio.sleep(0.3)
+                async with lock:
+                    current_concurrent -= 1
+                return ctx.complete(list(ctx.request.messages))
+
+        app = create_app(ConcurrencyTrackingAgent(), max_concurrent=max_concurrent)
 
         mock_client = mock_llm_client()
         with patch("osmosis_ai.rollout.server.app.OsmosisLLMClient") as MockCls:
@@ -318,17 +340,11 @@ class TestConcurrencyControl:
                     )
                     assert resp.status_code == 202
 
-                # Allow some time for background tasks
-                await asyncio.sleep(0.1)
-
-                # Check health to see active rollouts
-                health = await client.get("/health")
-                data = health.json()
-                # There should be some active rollouts queued up
-                assert data["active_rollouts"] >= 0
-
                 # Wait for all to complete
                 await asyncio.sleep(1.5)
+
+        # Peak concurrent executions must be capped by max_concurrent
+        assert peak_concurrent <= max_concurrent
 
     async def test_max_concurrent_one_serializes_rollouts(self) -> None:
         """With max_concurrent=1 rollouts must execute one at a time."""

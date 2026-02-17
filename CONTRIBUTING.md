@@ -23,7 +23,7 @@ pre-commit install
 pytest tests/
 
 # Run a single test file
-pytest tests/test_rollout_base.py
+pytest tests/unit/rollout/core/test_base.py
 
 # Run tests matching a pattern
 pytest -k "test_name"

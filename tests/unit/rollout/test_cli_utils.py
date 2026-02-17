@@ -303,6 +303,9 @@ def test_load_agent_loop_does_not_duplicate_cwd_in_sys_path() -> None:
 
     cwd = os.getcwd()
 
+    # Capture original sys.path so we can restore it
+    original_path = sys.path.copy()
+
     # Ensure cwd IS in sys.path
     if cwd not in sys.path:
         sys.path.insert(0, cwd)
@@ -315,7 +318,7 @@ def test_load_agent_loop_does_not_duplicate_cwd_in_sys_path() -> None:
         count_after = sys.path.count(cwd)
         assert count_after == count_before
     finally:
-        pass
+        sys.path[:] = original_path
 
 
 # =============================================================================
