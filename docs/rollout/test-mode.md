@@ -105,31 +105,7 @@ print(f"Total tokens: {results.total_tokens}")
 
 ## Dataset Format
 
-Test mode reads datasets in JSON, JSONL, or Parquet format. Each row must contain these columns (case-insensitive):
-
-| Column | Type | Description |
-|--------|------|-------------|
-| `ground_truth` | `str` | Expected output (for reward computation) |
-| `user_prompt` | `str` | User message to start the conversation |
-| `system_prompt` | `str` | System prompt for the LLM |
-
-Additional columns are passed to `RolloutRequest.metadata`.
-
-### Example Dataset (JSONL)
-
-```jsonl
-{"system_prompt": "You are a helpful calculator.", "user_prompt": "What is 2 + 2?", "ground_truth": "4"}
-{"system_prompt": "You are a helpful calculator.", "user_prompt": "What is 10 * 5?", "ground_truth": "50"}
-```
-
-### Example Dataset (JSON)
-
-```json
-[
-  {"system_prompt": "You are a helpful calculator.", "user_prompt": "What is 2 + 2?", "ground_truth": "4"},
-  {"system_prompt": "You are a helpful calculator.", "user_prompt": "What is 10 * 5?", "ground_truth": "50"}
-]
-```
+See [Dataset Format](./dataset-format.md) for supported formats and required columns.
 
 ---
 
@@ -143,7 +119,7 @@ osmosis test [OPTIONS]
 
 | Option | Description |
 |--------|-------------|
-| `-d, --dataset FILE` | Path to dataset file (.json, .jsonl, .parquet) |
+| `-d, --dataset FILE` | Path to dataset file (.parquet recommended, .jsonl, .csv) |
 
 ### Agent Options (one required, mutually exclusive)
 

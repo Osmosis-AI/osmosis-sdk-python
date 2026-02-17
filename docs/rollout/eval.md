@@ -17,7 +17,7 @@ Key capabilities:
 - **Concurrent execution** with `--batch-size` for faster benchmarks
 - Use LiteLLM providers (e.g., `openai/gpt-5-mini`) as the primary model
 
-> Command split (development-stage breaking change):  
+> Command split (development-stage breaking change):
 > `osmosis eval-rubric` is for hosted rubric evaluation, while `osmosis eval` is for agent eval mode documented here.
 
 ## Quick Start
@@ -226,15 +226,7 @@ The `--model` parameter should match the model name as registered in the serving
 
 ## Dataset Format
 
-Eval mode uses the same dataset format as [Test Mode](./test-mode.md#dataset-format). Each row must contain these columns (case-insensitive):
-
-| Column | Type | Description |
-|--------|------|-------------|
-| `ground_truth` | `str` | Expected output (passed to eval functions) |
-| `user_prompt` | `str` | User message to start the conversation |
-| `system_prompt` | `str` | System prompt for the LLM |
-
-Additional columns are passed to eval functions via `metadata` (full mode) or `extra_info` (simple mode).
+See [Dataset Format](./dataset-format.md) for supported formats and required columns.
 
 ---
 
@@ -319,7 +311,7 @@ osmosis eval [OPTIONS]
 
 | Option | Description |
 |--------|-------------|
-| `-d, --dataset FILE` | Path to dataset file (.json, .jsonl, .parquet) |
+| `-d, --dataset FILE` | Path to dataset file (.parquet recommended, .jsonl, .csv) |
 | `--eval-fn MODULE:FN` | Eval function path (can be specified multiple times) |
 | `--model MODEL` | Model to benchmark (see [Model Options](#model-options)) |
 

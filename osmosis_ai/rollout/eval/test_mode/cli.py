@@ -85,7 +85,7 @@ class TestCommand:
             "--dataset",
             dest="dataset",
             required=True,
-            help="Path to dataset file (.json, .jsonl, or .parquet).",
+            help="Path to dataset file (.parquet recommended, .jsonl, or .csv).",
         )
 
         parser.add_argument(

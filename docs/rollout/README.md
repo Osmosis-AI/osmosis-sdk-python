@@ -228,3 +228,6 @@ export OSMOSIS_ROLLOUT_SERVER_MAX_CONCURRENT_ROLLOUTS=200
 - [API Reference](./api-reference.md) - Complete API documentation
 - [Examples](./examples.md) - Full working examples
 - [Test Mode](./test-mode.md) - Local testing with external LLM providers
+- [Testing](./testing.md) - Unit tests and mock trainer
+- [Deployment](./deployment.md) - Docker, health checks, production config
+- [Dataset Format](./dataset-format.md) - Supported formats and required columns

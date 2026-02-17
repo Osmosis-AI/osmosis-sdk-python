@@ -30,30 +30,6 @@ except ImportError:
 class TestDatasetReader:
     """Tests for DatasetReader class."""
 
-    def test_read_json_file(self, tmp_path: Path) -> None:
-        """Test reading a valid JSON file."""
-        data = [
-            {
-                "user_prompt": "What is 2+2?",
-                "system_prompt": "You are a calculator.",
-                "ground_truth": "4",
-            },
-            {
-                "user_prompt": "What is 3+3?",
-                "system_prompt": "You are a calculator.",
-                "ground_truth": "6",
-            },
-        ]
-        file_path = tmp_path / "test.json"
-        file_path.write_text(json.dumps(data))
-
-        reader = DatasetReader(str(file_path))
-        rows = reader.read()
-
-        assert len(rows) == 2
-        assert rows[0]["user_prompt"] == "What is 2+2?"
-        assert rows[1]["ground_truth"] == "6"
-
     def test_read_jsonl_file(self, tmp_path: Path) -> None:
         """Test reading a valid JSONL file."""
         lines = [
@@ -69,6 +45,79 @@ class TestDatasetReader:
         assert len(rows) == 2
         assert rows[0]["user_prompt"] == "Hello"
         assert rows[1]["ground_truth"] == "Goodbye"
+
+    def test_read_csv_file(self, tmp_path: Path) -> None:
+        """Test reading a valid CSV file."""
+        content = (
+            "user_prompt,system_prompt,ground_truth\n"
+            "What is 2+2?,You are a calculator.,4\n"
+            "What is 3+3?,You are a calculator.,6\n"
+        )
+        file_path = tmp_path / "test.csv"
+        file_path.write_text(content)
+
+        reader = DatasetReader(str(file_path))
+        rows = reader.read()
+
+        assert len(rows) == 2
+        assert rows[0]["user_prompt"] == "What is 2+2?"
+        assert rows[1]["ground_truth"] == "6"
+
+    def test_csv_with_extra_columns(self, tmp_path: Path) -> None:
+        """Test that extra columns are preserved in CSV files."""
+        content = (
+            "user_prompt,system_prompt,ground_truth,difficulty,category\n"
+            "Question,System,Answer,easy,math\n"
+        )
+        file_path = tmp_path / "test.csv"
+        file_path.write_text(content)
+
+        reader = DatasetReader(str(file_path))
+        rows = reader.read()
+
+        assert len(rows) == 1
+        assert rows[0]["difficulty"] == "easy"
+        assert rows[0]["category"] == "math"
+
+    def test_csv_with_quoted_fields(self, tmp_path: Path) -> None:
+        """Test that CSV fields containing commas and quotes are parsed correctly."""
+        content = (
+            "system_prompt,user_prompt,ground_truth\n"
+            '"You are a helpful, friendly assistant.",What is 2 + 2?,4\n'
+            '"Say ""hello"".",Greet me,hello\n'
+        )
+        file_path = tmp_path / "test.csv"
+        file_path.write_text(content)
+
+        reader = DatasetReader(str(file_path))
+        rows = reader.read()
+
+        assert len(rows) == 2
+        assert rows[0]["system_prompt"] == "You are a helpful, friendly assistant."
+        assert rows[1]["system_prompt"] == 'Say "hello".'
+
+    def test_csv_missing_required_column(self, tmp_path: Path) -> None:
+        """Test that DatasetValidationError is raised for CSV with missing column."""
+        content = "user_prompt,system_prompt\nQuestion,System\n"
+        file_path = tmp_path / "test.csv"
+        file_path.write_text(content)
+
+        reader = DatasetReader(str(file_path))
+        with pytest.raises(DatasetValidationError) as exc_info:
+            reader.read()
+        assert "Missing required columns" in str(exc_info.value)
+        assert "ground_truth" in str(exc_info.value)
+
+    def test_csv_len(self, tmp_path: Path) -> None:
+        """Test that __len__ returns correct row count for CSV files."""
+        lines = ["user_prompt,system_prompt,ground_truth"]
+        for i in range(5):
+            lines.append(f"Q{i},sys,A{i}")
+        file_path = tmp_path / "test.csv"
+        file_path.write_text("\n".join(lines))
+
+        reader = DatasetReader(str(file_path))
+        assert len(reader) == 5
 
     @pytest.mark.skipif(not HAS_PYARROW, reason="pyarrow not installed")
     def test_read_parquet_file(self, tmp_path: Path) -> None:
@@ -132,12 +181,18 @@ class TestDatasetReader:
 
     def test_read_with_limit(self, tmp_path: Path) -> None:
         """Test reading with limit parameter."""
-        data = [
-            {"user_prompt": f"Q{i}", "system_prompt": "sys", "ground_truth": f"A{i}"}
+        lines = [
+            json.dumps(
+                {
+                    "user_prompt": f"Q{i}",
+                    "system_prompt": "sys",
+                    "ground_truth": f"A{i}",
+                }
+            )
             for i in range(10)
         ]
-        file_path = tmp_path / "test.json"
-        file_path.write_text(json.dumps(data))
+        file_path = tmp_path / "test.jsonl"
+        file_path.write_text("\n".join(lines))
 
         reader = DatasetReader(str(file_path))
         rows = reader.read(limit=3)
@@ -148,12 +203,18 @@ class TestDatasetReader:
 
     def test_read_with_offset(self, tmp_path: Path) -> None:
         """Test reading with offset parameter."""
-        data = [
-            {"user_prompt": f"Q{i}", "system_prompt": "sys", "ground_truth": f"A{i}"}
+        lines = [
+            json.dumps(
+                {
+                    "user_prompt": f"Q{i}",
+                    "system_prompt": "sys",
+                    "ground_truth": f"A{i}",
+                }
+            )
             for i in range(10)
         ]
-        file_path = tmp_path / "test.json"
-        file_path.write_text(json.dumps(data))
+        file_path = tmp_path / "test.jsonl"
+        file_path.write_text("\n".join(lines))
 
         reader = DatasetReader(str(file_path))
         rows = reader.read(offset=5)
@@ -164,12 +225,18 @@ class TestDatasetReader:
 
     def test_read_with_limit_and_offset(self, tmp_path: Path) -> None:
         """Test reading with both limit and offset."""
-        data = [
-            {"user_prompt": f"Q{i}", "system_prompt": "sys", "ground_truth": f"A{i}"}
+        lines = [
+            json.dumps(
+                {
+                    "user_prompt": f"Q{i}",
+                    "system_prompt": "sys",
+                    "ground_truth": f"A{i}",
+                }
+            )
             for i in range(10)
         ]
-        file_path = tmp_path / "test.json"
-        file_path.write_text(json.dumps(data))
+        file_path = tmp_path / "test.jsonl"
+        file_path.write_text("\n".join(lines))
 
         reader = DatasetReader(str(file_path))
         rows = reader.read(limit=3, offset=2)
@@ -180,15 +247,11 @@ class TestDatasetReader:
 
     def test_case_insensitive_column_names(self, tmp_path: Path) -> None:
         """Test that column names are matched case-insensitively."""
-        data = [
-            {
-                "USER_PROMPT": "Question",
-                "System_Prompt": "System",
-                "GROUND_TRUTH": "Answer",
-            }
+        lines = [
+            '{"USER_PROMPT": "Question", "System_Prompt": "System", "GROUND_TRUTH": "Answer"}'
         ]
-        file_path = tmp_path / "test.json"
-        file_path.write_text(json.dumps(data))
+        file_path = tmp_path / "test.jsonl"
+        file_path.write_text("\n".join(lines))
 
         reader = DatasetReader(str(file_path))
         rows = reader.read()
@@ -201,18 +264,20 @@ class TestDatasetReader:
 
     def test_preserve_extra_columns(self, tmp_path: Path) -> None:
         """Test that extra columns are preserved in the result."""
-        data = [
-            {
-                "user_prompt": "Question",
-                "system_prompt": "System",
-                "ground_truth": "Answer",
-                "difficulty": "easy",
-                "category": "math",
-                "custom_field": 123,
-            }
+        lines = [
+            json.dumps(
+                {
+                    "user_prompt": "Question",
+                    "system_prompt": "System",
+                    "ground_truth": "Answer",
+                    "difficulty": "easy",
+                    "category": "math",
+                    "custom_field": 123,
+                }
+            )
         ]
-        file_path = tmp_path / "test.json"
-        file_path.write_text(json.dumps(data))
+        file_path = tmp_path / "test.jsonl"
+        file_path.write_text("\n".join(lines))
 
         reader = DatasetReader(str(file_path))
         rows = reader.read()
@@ -225,12 +290,18 @@ class TestDatasetReader:
 
     def test_len_returns_row_count(self, tmp_path: Path) -> None:
         """Test that __len__ returns correct row count."""
-        data = [
-            {"user_prompt": f"Q{i}", "system_prompt": "sys", "ground_truth": f"A{i}"}
+        lines = [
+            json.dumps(
+                {
+                    "user_prompt": f"Q{i}",
+                    "system_prompt": "sys",
+                    "ground_truth": f"A{i}",
+                }
+            )
             for i in range(5)
         ]
-        file_path = tmp_path / "test.json"
-        file_path.write_text(json.dumps(data))
+        file_path = tmp_path / "test.jsonl"
+        file_path.write_text("\n".join(lines))
 
         reader = DatasetReader(str(file_path))
         assert len(reader) == 5
@@ -238,20 +309,20 @@ class TestDatasetReader:
     def test_file_not_found(self) -> None:
         """Test that FileNotFoundError is raised for missing file."""
         with pytest.raises(FileNotFoundError):
-            DatasetReader("/nonexistent/path/data.json")
+            DatasetReader("/nonexistent/path/data.jsonl")
 
     def test_unsupported_format(self, tmp_path: Path) -> None:
         """Test that DatasetParseError is raised for unsupported format."""
-        file_path = tmp_path / "test.csv"
-        file_path.write_text("a,b,c\n1,2,3")
+        file_path = tmp_path / "test.json"
+        file_path.write_text('[{"a": 1}]')
 
         with pytest.raises(DatasetParseError) as exc_info:
             DatasetReader(str(file_path))
         assert "Unsupported file format" in str(exc_info.value)
 
-    def test_invalid_json(self, tmp_path: Path) -> None:
-        """Test that DatasetParseError is raised for invalid JSON."""
-        file_path = tmp_path / "test.json"
+    def test_invalid_jsonl(self, tmp_path: Path) -> None:
+        """Test that DatasetParseError is raised for invalid JSONL."""
+        file_path = tmp_path / "test.jsonl"
         file_path.write_text("not valid json")
 
         reader = DatasetReader(str(file_path))
@@ -259,27 +330,19 @@ class TestDatasetReader:
             reader.read()
         assert "Invalid JSON" in str(exc_info.value)
 
-    def test_json_not_array(self, tmp_path: Path) -> None:
-        """Test that DatasetParseError is raised when JSON is not an array."""
-        file_path = tmp_path / "test.json"
-        file_path.write_text('{"key": "value"}')
-
-        reader = DatasetReader(str(file_path))
-        with pytest.raises(DatasetParseError) as exc_info:
-            reader.read()
-        assert "array of objects" in str(exc_info.value)
-
     def test_missing_required_column(self, tmp_path: Path) -> None:
         """Test that DatasetValidationError is raised for missing column."""
-        data = [
-            {
-                "user_prompt": "Question",
-                "system_prompt": "System",
-                # missing ground_truth
-            }
+        lines = [
+            json.dumps(
+                {
+                    "user_prompt": "Question",
+                    "system_prompt": "System",
+                    # missing ground_truth
+                }
+            )
         ]
-        file_path = tmp_path / "test.json"
-        file_path.write_text(json.dumps(data))
+        file_path = tmp_path / "test.jsonl"
+        file_path.write_text("\n".join(lines))
 
         reader = DatasetReader(str(file_path))
         with pytest.raises(DatasetValidationError) as exc_info:
@@ -289,15 +352,17 @@ class TestDatasetReader:
 
     def test_null_value_rejected(self, tmp_path: Path) -> None:
         """Test that null values are rejected."""
-        data = [
-            {
-                "user_prompt": None,
-                "system_prompt": "System",
-                "ground_truth": "Answer",
-            }
+        lines = [
+            json.dumps(
+                {
+                    "user_prompt": None,
+                    "system_prompt": "System",
+                    "ground_truth": "Answer",
+                }
+            )
         ]
-        file_path = tmp_path / "test.json"
-        file_path.write_text(json.dumps(data))
+        file_path = tmp_path / "test.jsonl"
+        file_path.write_text("\n".join(lines))
 
         reader = DatasetReader(str(file_path))
         with pytest.raises(DatasetValidationError) as exc_info:
@@ -306,15 +371,17 @@ class TestDatasetReader:
 
     def test_empty_string_rejected(self, tmp_path: Path) -> None:
         """Test that empty strings are rejected."""
-        data = [
-            {
-                "user_prompt": "  ",  # whitespace only
-                "system_prompt": "System",
-                "ground_truth": "Answer",
-            }
+        lines = [
+            json.dumps(
+                {
+                    "user_prompt": "  ",  # whitespace only
+                    "system_prompt": "System",
+                    "ground_truth": "Answer",
+                }
+            )
         ]
-        file_path = tmp_path / "test.json"
-        file_path.write_text(json.dumps(data))
+        file_path = tmp_path / "test.jsonl"
+        file_path.write_text("\n".join(lines))
 
         reader = DatasetReader(str(file_path))
         with pytest.raises(DatasetValidationError) as exc_info:
@@ -323,15 +390,17 @@ class TestDatasetReader:
 
     def test_non_string_value_rejected(self, tmp_path: Path) -> None:
         """Test that non-string values are rejected for required columns."""
-        data = [
-            {
-                "user_prompt": 123,  # number instead of string
-                "system_prompt": "System",
-                "ground_truth": "Answer",
-            }
+        lines = [
+            json.dumps(
+                {
+                    "user_prompt": 123,  # number instead of string
+                    "system_prompt": "System",
+                    "ground_truth": "Answer",
+                }
+            )
         ]
-        file_path = tmp_path / "test.json"
-        file_path.write_text(json.dumps(data))
+        file_path = tmp_path / "test.jsonl"
+        file_path.write_text("\n".join(lines))
 
         reader = DatasetReader(str(file_path))
         with pytest.raises(DatasetValidationError) as exc_info:
@@ -340,9 +409,9 @@ class TestDatasetReader:
 
     def test_row_not_object_rejected(self, tmp_path: Path) -> None:
         """Test that non-object rows are rejected."""
-        data = ["just a string", "another string"]
-        file_path = tmp_path / "test.json"
-        file_path.write_text(json.dumps(data))
+        lines = ['"just a string"', '"another string"']
+        file_path = tmp_path / "test.jsonl"
+        file_path.write_text("\n".join(lines))
 
         reader = DatasetReader(str(file_path))
         with pytest.raises(DatasetValidationError) as exc_info:
