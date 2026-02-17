@@ -30,7 +30,7 @@ pip install osmosis-ai[full]
 
 ### Step 1: Implement Your Agent Loop
 
-Create a class that inherits from `RolloutAgentLoop` and implements two methods:
+Create a class that inherits from `RolloutAgentLoop` and implements the required `get_tools` and `run` methods:
 
 ```python
 import json

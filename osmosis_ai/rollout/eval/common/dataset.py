@@ -168,8 +168,13 @@ class DatasetReader:
         try:
             with open(self.file_path, encoding="utf-8", newline="") as f:
                 reader = csv.DictReader(f)
-                for row in reader:
-                    yield dict(row)
+                for row_num, row in enumerate(reader, start=1):
+                    row_dict = dict(row)
+                    if None in row_dict:
+                        raise DatasetParseError(
+                            f"CSV row {row_num} has more columns than the header"
+                        )
+                    yield row_dict
         except csv.Error as e:
             raise DatasetParseError(f"Invalid CSV file: {e}") from e
         except OSError as e:
