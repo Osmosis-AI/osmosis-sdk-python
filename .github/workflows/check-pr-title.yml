@@ -12,7 +12,7 @@ jobs:
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
         run: |
-          PATTERN='^\[BREAKING\]?\[(reward|rollout|server|cli|auth|eval|misc|ci|doc)\] (feat|fix|refactor|chore|test|doc): .+'
+          PATTERN='^(\[BREAKING\])?\[(reward|rollout|server|cli|auth|eval|misc|ci|doc)\] (feat|fix|refactor|chore|test|doc): .+'
           if [[ ! "$PR_TITLE" =~ $PATTERN ]]; then
             echo "::error::PR title does not match required format."
             echo ""
