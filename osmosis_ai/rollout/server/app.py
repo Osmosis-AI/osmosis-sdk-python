@@ -180,6 +180,11 @@ def create_app(
                 register_with_platform,
             )
 
+            # Bind narrowed values to local variables for the closure
+            _reg_host: str = server_host
+            _reg_port: int = server_port
+            _reg_credentials: WorkspaceCredentials = credentials
+
             async def do_registration():
                 import httpx
 
@@ -188,7 +193,7 @@ def create_app(
                     state.settings.registration_readiness_poll_interval_seconds
                 )
                 timeout = state.settings.registration_readiness_timeout_seconds
-                health_url = f"http://127.0.0.1:{server_port}/health"
+                health_url = f"http://127.0.0.1:{_reg_port}/health"
 
                 start_time = time.monotonic()
                 server_ready = False
@@ -220,16 +225,16 @@ def create_app(
                 # Run sync registration in thread pool to avoid blocking event loop
                 result = await asyncio.to_thread(
                     register_with_platform,
-                    host=server_host,
-                    port=server_port,
+                    host=_reg_host,
+                    port=_reg_port,
                     agent_loop_name=agent_loop.name,
-                    credentials=credentials,
+                    credentials=_reg_credentials,
                     api_key=api_key,
                 )
                 print_registration_result(
                     result=result,
-                    host=server_host,
-                    port=server_port,
+                    host=_reg_host,
+                    port=_reg_port,
                     agent_loop_name=agent_loop.name,
                     api_key=api_key,
                 )

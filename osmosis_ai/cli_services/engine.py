@@ -13,7 +13,12 @@ from typing import Any
 from tqdm import tqdm
 
 from ..rubric_eval import DEFAULT_API_KEY_ENV, evaluate_rubric
-from ..rubric_types import MissingAPIKeyError, ModelNotFoundError, ProviderRequestError
+from ..rubric_types import (
+    MissingAPIKeyError,
+    ModelInfo,
+    ModelNotFoundError,
+    ProviderRequestError,
+)
 from .config import RubricConfig
 from .dataset import DatasetRecord
 from .errors import CLIError
@@ -39,7 +44,7 @@ def _compose_extra_info_context(
     api_key_env: str | None,
     score_min: float | None,
     score_max: float | None,
-    model_info: dict[str, Any],
+    model_info: ModelInfo,
 ) -> tuple[dict[str, Any], dict[str, Any] | None]:
     """
     Build the runtime context passed to rubric functions along with a sanitised

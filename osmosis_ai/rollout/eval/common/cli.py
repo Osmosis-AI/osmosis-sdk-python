@@ -108,7 +108,7 @@ def load_mcp_agent(
     agent_loop = MCPAgentLoop(mcp_server)
 
     if not quiet:
-        tool_names = [t.function.name for t in agent_loop.get_tools(None)]  # type: ignore[arg-type]
+        tool_names = [t.function.name for t in agent_loop.get_default_tools()]
         console.print(
             f"  Discovered {len(tool_names)} tool(s): {', '.join(tool_names)}"
         )

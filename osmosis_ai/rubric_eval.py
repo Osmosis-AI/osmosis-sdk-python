@@ -15,6 +15,27 @@ import re
 import warnings
 from typing import Any
 
+from ._litellm_compat import (
+    APIConnectionError as _LitellmAPIConnectionError,
+)
+from ._litellm_compat import (
+    APIError as _LitellmAPIError,
+)
+from ._litellm_compat import (
+    AuthenticationError as _LitellmAuthenticationError,
+)
+from ._litellm_compat import (
+    NotFoundError as _LitellmNotFoundError,
+)
+from ._litellm_compat import (
+    RateLimitError as _LitellmRateLimitError,
+)
+from ._litellm_compat import (
+    Timeout as _LitellmTimeout,
+)
+from ._litellm_compat import (
+    completion as _litellm_completion,
+)
 from .rubric_types import (
     MissingAPIKeyError,
     ModelInfo,
@@ -423,8 +444,8 @@ def _call_litellm(
     )
 
     try:
-        response = litellm.completion(**completion_kwargs)
-    except litellm.NotFoundError as err:
+        response = _litellm_completion(**completion_kwargs)
+    except _LitellmNotFoundError as err:
         raise ModelNotFoundError(
             provider,
             model,
@@ -432,11 +453,11 @@ def _call_litellm(
             f"and your {provider} account has access to it.",
         ) from err
     except (
-        litellm.APIError,
-        litellm.RateLimitError,
-        litellm.AuthenticationError,
-        litellm.Timeout,
-        litellm.APIConnectionError,
+        _LitellmAPIError,
+        _LitellmRateLimitError,
+        _LitellmAuthenticationError,
+        _LitellmTimeout,
+        _LitellmAPIConnectionError,
     ) as err:
         raise ProviderRequestError(
             provider, model, _extract_error_message(err)

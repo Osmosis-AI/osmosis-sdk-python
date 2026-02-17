@@ -43,15 +43,18 @@ mcp = [
     "fastmcp>=2.0.0",
 ]
 
-# Development dependencies (testing, formatting, etc.)
+# Development dependencies (testing, formatting, type checking, etc.)
+# Includes server + mcp extras so pyright/mypy can resolve all imports.
 dev = [
+    "osmosis-ai[server,mcp]",
     "pytest>=8.0.0,<10.0.0",
     "pytest-asyncio>=0.23.0,<2.0.0",
     "pytest-cov>=6.0.0",
     "anyio>=4.0.0",
     "ruff==0.15.1",  # Keep in sync with pre-commit and CI
     "pre-commit>=4.0.0,<5.0.0",
-    "fastmcp>=2.0.0",
+    "pyright[nodejs]==1.1.408",
+    "mypy==1.19.1",
 ]
 
 # Full installation with all optional features (union of server + mcp)
@@ -123,3 +126,22 @@ ignore = [
 
 [tool.ruff.lint.isort]
 known-first-party = ["osmosis_ai"]
+
+[tool.pyright]
+pythonVersion = "3.10"
+include = ["osmosis_ai"]
+exclude = ["tests", "build", "dist", "**/__pycache__"]
+typeCheckingMode = "standard"
+reportMissingTypeStubs = false
+reportCallInDefaultInitializer = false
+
+[tool.mypy]
+python_version = "3.10"
+files = ["osmosis_ai"]
+exclude = ["tests/", "build/", "dist/"]
+check_untyped_defs = true
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true
+warn_unused_ignores = false
+disallow_incomplete_defs = true

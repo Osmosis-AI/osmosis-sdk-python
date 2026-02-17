@@ -18,6 +18,40 @@ jobs:
         with:
           args: "format --check"
 
+  typecheck-pyright:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - name: Install dependencies
+        run: uv sync --frozen --extra dev
+      - name: Run pyright
+        run: uv run pyright osmosis_ai/
+      - name: Build and install for verifytypes
+        run: |
+          uv build --wheel --out-dir dist/
+          uv pip install dist/*.whl
+      - name: Verify public API types
+        continue-on-error: true
+        run: uv run pyright --verifytypes osmosis_ai --ignoreexternal
+
+  typecheck-mypy:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.12"
+          enable-cache: true
+      - name: Install dependencies
+        run: uv sync --frozen --extra dev
+      - name: Run mypy
+        run: uv run mypy osmosis_ai/
+
   test:
     runs-on: ubuntu-latest
     strategy:

@@ -241,7 +241,7 @@ class LocalRolloutRunner:
                 duration_ms = getattr(e, "duration_ms", None)
                 if duration_ms is None:
                     duration_ms = (time.monotonic() - row_start) * 1000
-                tokens = int(getattr(e, "tokens", 0))
+                tokens = int(e.tokens or 0)
                 result = LocalRunResult(
                     row_index=row_index,
                     success=False,

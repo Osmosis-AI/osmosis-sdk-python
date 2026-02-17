@@ -17,6 +17,14 @@ warnings.filterwarnings(
     category=UserWarning,
 )
 
+from osmosis_ai._litellm_compat import APIConnectionError as _APIConnectionError
+from osmosis_ai._litellm_compat import AuthenticationError as _AuthenticationError
+from osmosis_ai._litellm_compat import BudgetExceededError as _BudgetExceededError
+from osmosis_ai._litellm_compat import (
+    ContextWindowExceededError as _ContextWindowExceededError,
+)
+from osmosis_ai._litellm_compat import RateLimitError as _RateLimitError
+from osmosis_ai._litellm_compat import Timeout as _LitellmTimeout
 from osmosis_ai.rollout.client import CompletionsResult
 from osmosis_ai.rollout.core.schemas import RolloutMetrics
 from osmosis_ai.rollout.eval.common.errors import ProviderError, SystemicProviderError
@@ -141,12 +149,12 @@ class ExternalLLMClient:
     ) -> None:
         self._litellm = _get_litellm()
 
-        self._RateLimitError = self._litellm.RateLimitError
-        self._AuthenticationError = self._litellm.AuthenticationError
-        self._BudgetExceededError = self._litellm.BudgetExceededError
-        self._Timeout = self._litellm.Timeout
-        self._ContextWindowExceededError = self._litellm.ContextWindowExceededError
-        self._APIConnectionError = self._litellm.APIConnectionError
+        self._RateLimitError = _RateLimitError
+        self._AuthenticationError = _AuthenticationError
+        self._BudgetExceededError = _BudgetExceededError
+        self._Timeout = _LitellmTimeout
+        self._ContextWindowExceededError = _ContextWindowExceededError
+        self._APIConnectionError = _APIConnectionError
 
         # Preserve the user's original model name for display purposes.
         self.display_name = model
@@ -251,14 +259,16 @@ class ExternalLLMClient:
             raise self._classify_unknown_error(e) from e
 
         latency_ms = (time.monotonic() - start_time) * 1000
-        usage = response.usage
+        # litellm's ModelResponse stubs are incomplete — usage/choices/message
+        # are valid at runtime but not fully reflected in the published types.
+        usage = response.usage  # type: ignore[union-attr]
         self._llm_latency_ms += latency_ms
         self._num_llm_calls += 1
         self._prompt_tokens += usage.prompt_tokens if usage else 0
         self._response_tokens += usage.completion_tokens if usage else 0
 
-        choice = response.choices[0]
-        message = choice.message.model_dump(exclude_none=True)
+        choice = response.choices[0]  # type: ignore[union-attr]
+        message = choice.message.model_dump(exclude_none=True)  # type: ignore[union-attr]
 
         return CompletionsResult(
             message=message,
@@ -280,13 +290,16 @@ class ExternalLLMClient:
                 fails, or the model does not exist.
         """
         try:
-            await self._litellm.acompletion(
-                model=self.model,
-                messages=[{"role": "user", "content": "hi"}],
-                max_tokens=1,
-                **({"api_key": self._api_key} if self._api_key else {}),
-                **({"api_base": self._api_base} if self._api_base else {}),
-            )
+            preflight_kwargs: dict[str, Any] = {
+                "model": self.model,
+                "messages": [{"role": "user", "content": "hi"}],
+                "max_tokens": 1,
+            }
+            if self._api_key:
+                preflight_kwargs["api_key"] = self._api_key
+            if self._api_base:
+                preflight_kwargs["api_base"] = self._api_base
+            await self._litellm.acompletion(**preflight_kwargs)
         except self._RateLimitError:
             # Rate-limited means the endpoint is reachable and authenticated.
             return

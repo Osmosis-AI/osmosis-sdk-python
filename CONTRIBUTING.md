@@ -6,11 +6,12 @@
 git clone https://github.com/Osmosis-AI/osmosis-sdk-python
 cd osmosis-sdk-python
 
-# Install with all development dependencies
+# Install with all development dependencies (includes server + mcp extras
+# for type checking and full test coverage)
 pip install -e ".[dev]"
 
-# Or using uv
-uv sync --all-extras
+# Or using uv (recommended)
+uv sync --extra dev
 
 # Install pre-commit hooks
 pre-commit install
@@ -54,6 +55,30 @@ ruff format --check .
 
 Ruff is pinned to one version across `pyproject.toml`, `.pre-commit-config.yaml`, and CI so local checks, pre-commit hooks, and GitHub Actions produce the same results.
 
+## Type Checking
+
+This project uses [Pyright](https://microsoft.github.io/pyright/) as the primary type checker and [mypy](https://mypy-lang.org/) as a secondary checker. Both are included in the `dev` extras — install with:
+
+```bash
+uv sync --extra dev
+```
+
+Then run via `uv run`:
+
+```bash
+# Pyright — must pass (blocking in CI)
+uv run pyright osmosis_ai/
+
+# mypy — advisory (non-blocking in CI)
+uv run mypy osmosis_ai/
+```
+
+Pyright runs in `standard` mode. All pyright errors must be resolved before merging. mypy runs in CI with `continue-on-error` and serves as an advisory check — fix mypy warnings when practical, but they won't block a PR.
+
+Configuration for both tools lives in `pyproject.toml` under `[tool.pyright]` and `[tool.mypy]`.
+
+> **Note:** CI also runs `pyright --verifytypes osmosis_ai --ignoreexternal` to check public API type completeness, but this command requires a non-editable install to locate the `py.typed` marker. It does not work with local editable installs (`uv sync`) and is therefore non-blocking in CI.
+
 ## Pre-commit Hooks
 
 A [pre-commit](https://pre-commit.com/) configuration is included to run Ruff automatically on every commit:
@@ -72,4 +97,4 @@ This ensures `ruff check --fix` and `ruff format` run before each commit. Please
 4. Run tests and linting
 5. Submit a pull request
 
-CI will run linting (`ruff check` + `ruff format --check`) and tests with coverage on every PR.
+CI will run linting (`ruff check` + `ruff format --check`), type checking (pyright + mypy), and tests with coverage on every PR.

@@ -17,7 +17,14 @@ from __future__ import annotations
 
 import sys
 from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from rich import box as box
+    from rich.console import Console as RichConsole
+    from rich.markup import escape as rich_escape
+    from rich.panel import Panel
+    from rich.table import Table
 
 # Try to import rich, gracefully degrade if not available
 try:
@@ -25,19 +32,11 @@ try:
     from rich.console import Console as RichConsole
     from rich.markup import escape as rich_escape
     from rich.panel import Panel
-    from rich.style import Style
     from rich.table import Table
-    from rich.text import Text
 
     RICH_AVAILABLE = True
 except ImportError:
     RICH_AVAILABLE = False
-    RichConsole = None  # type: ignore
-    Panel = None  # type: ignore
-    Table = None  # type: ignore
-    Text = None  # type: ignore
-    Style = None  # type: ignore
-    box = None  # type: ignore
 
 
 class _AnsiColors:

@@ -901,8 +901,8 @@ class TestExtractSystemicErrorMetrics:
         from osmosis_ai.rollout.eval.common.errors import SystemicProviderError
 
         e = SystemicProviderError("test")
-        e.duration_ms = 1234.5  # type: ignore[attr-defined]
-        e.tokens = 42  # type: ignore[attr-defined]
+        e.duration_ms = 1234.5
+        e.tokens = 42
         dur, tok = _extract_systemic_error_metrics(e, fallback_started_at=0.0)
         assert dur == 1234.5
         assert tok == 42
@@ -924,8 +924,8 @@ class TestExtractSystemicErrorMetrics:
         from osmosis_ai.rollout.eval.common.errors import SystemicProviderError
 
         e = SystemicProviderError("test")
-        e.duration_ms = 100.0  # type: ignore[attr-defined]
-        e.tokens = None  # type: ignore[attr-defined]
+        e.duration_ms = 100.0
+        e.tokens = None
         dur, tok = _extract_systemic_error_metrics(e, fallback_started_at=0.0)
         assert dur == 100.0
         assert tok == 0

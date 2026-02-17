@@ -95,19 +95,20 @@ def osmosis_reward(func: Callable) -> Callable:
     if asyncio.iscoroutinefunction(func):
 
         @functools.wraps(func)
-        async def wrapper(*args, **kwargs):
+        async def wrapper(*args: Any, **kwargs: Any) -> Any:
             if _drop_data_source:
                 kwargs.pop("data_source", None)
             return _check_classic_return(await func(*args, **kwargs))
-    else:
 
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            if _drop_data_source:
-                kwargs.pop("data_source", None)
-            return _check_classic_return(func(*args, **kwargs))
+        return wrapper
 
-    return wrapper
+    @functools.wraps(func)
+    def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
+        if _drop_data_source:
+            kwargs.pop("data_source", None)
+        return _check_classic_return(func(*args, **kwargs))
+
+    return sync_wrapper
 
 
 def _is_str_annotation(annotation: Any) -> bool:
@@ -262,20 +263,21 @@ def osmosis_rubric(func: Callable) -> Callable:
     if asyncio.iscoroutinefunction(func):
 
         @functools.wraps(func)
-        async def wrapper(*args, **kwargs):
+        async def wrapper(*args: Any, **kwargs: Any) -> Any:
             if _drop_data_source:
                 kwargs.pop("data_source", None)
             if is_classic:
                 _validate_classic_args(*args, **kwargs)
             return _check_classic_return(await func(*args, **kwargs))
-    else:
 
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            if _drop_data_source:
-                kwargs.pop("data_source", None)
-            if is_classic:
-                _validate_classic_args(*args, **kwargs)
-            return _check_classic_return(func(*args, **kwargs))
+        return wrapper
 
-    return wrapper
+    @functools.wraps(func)
+    def sync_wrapper(*args: Any, **kwargs: Any) -> Any:
+        if _drop_data_source:
+            kwargs.pop("data_source", None)
+        if is_classic:
+            _validate_classic_args(*args, **kwargs)
+        return _check_classic_return(func(*args, **kwargs))
+
+    return sync_wrapper

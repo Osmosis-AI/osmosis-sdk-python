@@ -469,6 +469,17 @@ class RolloutAgentLoop(ABC):
         """
         raise NotImplementedError
 
+    def get_default_tools(self) -> list[OpenAIFunctionToolSchema]:
+        """Return default tool list for discovery/validation (no real request needed)."""
+        return self.get_tools(
+            RolloutRequest(
+                rollout_id="discovery",
+                server_url="http://localhost",
+                messages=[],
+                completion_params={},
+            )
+        )
+
     def __init_subclass__(cls, **kwargs: Any) -> None:
         """Validate that concrete subclasses define the name attribute."""
         super().__init_subclass__(**kwargs)
