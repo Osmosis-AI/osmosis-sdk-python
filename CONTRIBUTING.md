@@ -1,100 +1,79 @@
 # Contributing
 
-## Setup
+## Quick Start
+
+**Using uv (recommended):**
 
 ```bash
 git clone https://github.com/Osmosis-AI/osmosis-sdk-python
 cd osmosis-sdk-python
-
-# Install with all development dependencies (includes server + mcp extras
-# for type checking and full test coverage)
-pip install -e ".[dev]"
-
-# Or using uv (recommended)
 uv sync --extra dev
-
-# Install pre-commit hooks
 pre-commit install
+uv run pytest
 ```
+
+**Using pip:**
+
+```bash
+git clone https://github.com/Osmosis-AI/osmosis-sdk-python
+cd osmosis-sdk-python
+python -m venv .venv && source .venv/bin/activate
+pip install -e ".[dev]"
+pre-commit install
+pytest
+```
+
+## Commands Reference
+
+The table below lists all development commands. If you installed with **pip**, drop the `uv run` prefix.
+
+| Task | Command |
+|------|---------|
+| Run all tests | `uv run pytest` |
+| Run a single file | `uv run pytest tests/unit/rollout/core/test_base.py` |
+| Run tests by name | `uv run pytest -k "test_name"` |
+| Run with coverage | `uv run pytest --cov=osmosis_ai --cov-report=term-missing` |
+| Lint | `uv run ruff check .` |
+| Lint + autofix | `uv run ruff check --fix .` |
+| Format | `uv run ruff format .` |
+| Check formatting | `uv run ruff format --check .` |
+| Type check (pyright) | `uv run pyright osmosis_ai/` |
+| Type check (mypy) | `uv run mypy osmosis_ai/` |
 
 ## Testing
 
-```bash
-# Run all tests
-pytest tests/
-
-# Run a single test file
-pytest tests/unit/rollout/core/test_base.py
-
-# Run tests matching a pattern
-pytest -k "test_name"
-
-# Run with coverage report
-pytest --cov=osmosis_ai --cov-report=term-missing
-```
-
-Coverage configuration is in `pyproject.toml` under `[tool.coverage.*]`. CI enforces a minimum coverage threshold.
+Coverage configuration is in `pyproject.toml` under `[tool.coverage.*]`. CI enforces a minimum coverage threshold of 70%.
 
 ## Linting & Formatting
 
-This project uses [Ruff](https://docs.astral.sh/ruff/) for linting and code formatting. Configuration lives in `pyproject.toml` under `[tool.ruff]`.
-
-```bash
-# Check for lint errors
-ruff check .
-
-# Auto-fix lint errors where possible
-ruff check --fix .
-
-# Format code
-ruff format .
-
-# Check formatting without modifying files
-ruff format --check .
-```
+This project uses [Ruff](https://docs.astral.sh/ruff/) for both linting and code formatting. Configuration lives in `pyproject.toml` under `[tool.ruff]`.
 
 Ruff is pinned to one version across `pyproject.toml`, `.pre-commit-config.yaml`, and CI so local checks, pre-commit hooks, and GitHub Actions produce the same results.
 
 ## Type Checking
 
-This project uses [Pyright](https://microsoft.github.io/pyright/) as the primary type checker and [mypy](https://mypy-lang.org/) as a secondary checker. Both are included in the `dev` extras — install with:
+[Pyright](https://microsoft.github.io/pyright/) is the primary type checker and [mypy](https://mypy-lang.org/) is a secondary checker. Both are included in the `dev` extras.
 
-```bash
-uv sync --extra dev
-```
-
-Then run via `uv run`:
-
-```bash
-# Pyright — must pass (blocking in CI)
-uv run pyright osmosis_ai/
-
-# mypy — advisory (non-blocking in CI)
-uv run mypy osmosis_ai/
-```
-
-Pyright runs in `standard` mode. All pyright errors must be resolved before merging. mypy runs in CI with `continue-on-error` and serves as an advisory check — fix mypy warnings when practical, but they won't block a PR.
+- **Pyright** — must pass. All errors must be resolved before merging.
+- **mypy** — advisory (`continue-on-error` in CI). Fix warnings when practical, but they won't block a PR.
 
 Configuration for both tools lives in `pyproject.toml` under `[tool.pyright]` and `[tool.mypy]`.
 
-> **Note:** CI also runs `pyright --verifytypes osmosis_ai --ignoreexternal` to check public API type completeness, but this command requires a non-editable install to locate the `py.typed` marker. It does not work with local editable installs (`uv sync`) and is therefore non-blocking in CI.
+> **Note:** CI also runs `pyright --verifytypes osmosis_ai --ignoreexternal` to check public API type completeness. This requires a non-editable install and is non-blocking in CI.
 
 ## Pre-commit Hooks
 
-A [pre-commit](https://pre-commit.com/) configuration is included to run Ruff automatically on every commit:
+[Pre-commit](https://pre-commit.com/) runs `ruff check --fix` and `ruff format` automatically on every commit. Make sure hooks are installed before submitting a pull request:
 
 ```bash
 pre-commit install
 ```
 
-This ensures `ruff check --fix` and `ruff format` run before each commit. Please make sure hooks are installed before submitting a pull request.
-
 ## Pull Requests
 
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Run tests and linting
-5. Submit a pull request
+1. Fork the repository and create a feature branch
+2. Make your changes
+3. Run `uv run pytest` and `uv run ruff check .`
+4. Submit a pull request
 
-CI will run linting (`ruff check` + `ruff format --check`), type checking (pyright + mypy), and tests with coverage on every PR.
+CI will run linting, type checking (pyright + mypy), tests across Python 3.10–3.13, and a build validation on every PR.
