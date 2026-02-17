@@ -103,7 +103,7 @@ class RolloutAgentLoop(ABC):
     name: str  # Unique identifier
 
     @abstractmethod
-    def get_tools(self, request: RolloutRequest) -> List[OpenAIFunctionToolSchema]:
+    def get_tools(self, request: RolloutRequest) -> list[OpenAIFunctionToolSchema]:
         """Return tools for this rollout."""
 
     @abstractmethod
@@ -121,11 +121,11 @@ Execution context provided to the agent:
 @dataclass
 class RolloutContext:
     request: RolloutRequest      # Original request
-    tools: List[OpenAIFunctionToolSchema]      # Available tools
-    llm: OsmosisLLMClient        # LLM client
+    tools: list[OpenAIFunctionToolSchema]      # Available tools
+    llm: LLMClientProtocol       # LLM client (OsmosisLLMClient in production)
 
     async def chat(self, messages, **kwargs) -> CompletionsResult
-    def complete(self, messages, finish_reason="stop") -> RolloutResult
+    def complete(self, messages, finish_reason="stop", reward=None) -> RolloutResult
     def error(self, message, final_messages=None) -> RolloutResult
     def record_tool_call(self, latency_ms=0.0) -> None
 ```
@@ -228,6 +228,6 @@ On server shutdown:
 
 ## See Also
 
-- [Remote Rollout Overview](./overview.md) - Quick start guide
-- [Agent Loop Guide](./agent-loop.md) - Complete API documentation
-- [Examples](./examples.md) - Working code examples
+- [Remote Rollout Overview](./overview.md) -- Quick start guide
+- [Agent Loop Guide](./agent-loop.md) -- Complete API documentation
+- [Examples](./examples.md) -- Working code examples

@@ -15,7 +15,7 @@ def your_rubric(solution_str: str, ground_truth: str | None, extra_info: dict) -
     return float_score
 ```
 
-> The runtime forwards `None` for `ground_truth` when no reference answer exists. Annotate the parameter as `Optional[str]` (or handle `None` explicitly) if your rubric logic expects to run in that scenario.
+> **Note:** The runtime forwards `None` for `ground_truth` when no reference answer exists. Annotate the parameter as `Optional[str]` (or handle `None` explicitly) if your rubric logic expects to run in that scenario.
 
 ### Required `extra_info` Fields
 
@@ -32,7 +32,7 @@ def your_rubric(solution_str: str, ground_truth: str | None, extra_info: dict) -
 
 Additional keys are passthrough and can be used for custom configuration. The decorator enforces the parameter names/annotations, validates the embedded configuration at call time, and ensures the wrapped function returns a `float`.
 
-> Annotation quirk: `extra_info` must be annotated as `dict` **without** a default value, unlike `@osmosis_reward`.
+> **Note:** Annotation quirk: `extra_info` must be annotated as `dict` **without** a default value, unlike `@osmosis_reward`.
 
 ## evaluate_rubric
 

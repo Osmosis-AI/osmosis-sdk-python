@@ -27,9 +27,26 @@ class MyAgent(RolloutAgentLoop):
 |-----------|------|-------------|
 | `name` | `str` | Unique identifier for this agent loop (required) |
 
+**Subclass Validation (`__init_subclass__`):**
+
+When you define a concrete (non-abstract) subclass of `RolloutAgentLoop`, Python automatically validates at class definition time that the `name` class attribute is defined and non-empty. If it is missing or falsy, a `TypeError` is raised immediately:
+
+```python
+# This raises TypeError at class definition time:
+class BadAgent(RolloutAgentLoop):
+    # Missing 'name' attribute!
+    def get_tools(self, request):
+        return []
+    async def run(self, ctx):
+        return ctx.complete([])
+# TypeError: Agent loop class BadAgent must define a 'name' class attribute
+```
+
+Abstract subclasses (those with remaining abstract methods) are not validated, so you can create intermediate base classes without defining `name`.
+
 **Abstract Methods:**
 
-#### `get_tools(request: RolloutRequest) -> List[OpenAIFunctionToolSchema]`
+#### `get_tools(request: RolloutRequest) -> list[OpenAIFunctionToolSchema]`
 
 Return tools available for this rollout.
 
@@ -47,6 +64,23 @@ Execute the agent loop.
 - **Returns:** `RolloutResult` with final status and messages
 - **Notes:** Messages must be append-only; never modify previous messages
 
+**Convenience Methods:**
+
+#### `get_default_tools() -> list[OpenAIFunctionToolSchema]`
+
+Return the default tool list for discovery and validation purposes, without requiring a real `RolloutRequest`.
+
+Internally, this calls `get_tools()` with a synthetic request (`rollout_id="discovery"`, empty messages and params). This is used by the validation framework (`validate_agent_loop()`) and platform registration to discover the agent's tools without an active rollout.
+
+```python
+agent = MyAgent()
+tools = agent.get_default_tools()
+print(f"Agent provides {len(tools)} tools")
+```
+
+- **Returns:** list of `OpenAIFunctionToolSchema` objects
+- **Notes:** If your `get_tools()` returns different tools based on request metadata, `get_default_tools()` returns the tools for an empty/default request.
+
 ---
 
 ### RolloutContext
@@ -57,8 +91,8 @@ Execution context provided to the agent loop.
 @dataclass
 class RolloutContext:
     request: RolloutRequest
-    tools: List[OpenAIFunctionToolSchema]
-    llm: OsmosisLLMClient
+    tools: list[OpenAIFunctionToolSchema]
+    llm: LLMClientProtocol
 ```
 
 **Attributes:**
@@ -66,8 +100,8 @@ class RolloutContext:
 | Attribute | Type | Description |
 |-----------|------|-------------|
 | `request` | `RolloutRequest` | Original rollout request |
-| `tools` | `List[OpenAIFunctionToolSchema]` | Tools returned by `get_tools()` |
-| `llm` | `OsmosisLLMClient` | HTTP client for LLM calls |
+| `tools` | `list[OpenAIFunctionToolSchema]` | Tools returned by `get_tools()` |
+| `llm` | `LLMClientProtocol` | LLM client for chat completions. In production (served via `create_app()` / `serve_agent_loop()`), this is an `OsmosisLLMClient` that calls back to TrainGate. In test/eval mode (e.g., `osmosis test`), this may be an `ExternalLLMClient` that routes requests to an external provider (OpenAI, Anthropic, etc.) via LiteLLM. |
 
 **Methods:**
 
@@ -79,13 +113,22 @@ Shorthand for `self.llm.chat_completions()`.
 result = await ctx.chat(messages, temperature=0.7)
 ```
 
-#### `complete(final_messages, finish_reason="stop") -> RolloutResult`
+#### `complete(final_messages, finish_reason="stop", reward=None) -> RolloutResult`
 
 Create a successful completion result.
 
 ```python
 return ctx.complete(messages, finish_reason="stop")
+
+# With reward
+return ctx.complete(messages, finish_reason="stop", reward=1.0)
 ```
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `final_messages` | `List[Dict[str, Any]]` | required | Final conversation messages |
+| `finish_reason` | `str` | `"stop"` | Why the rollout ended |
+| `reward` | `float \| None` | `None` | Optional precomputed trajectory reward score |
 
 #### `error(error_message, final_messages=None) -> RolloutResult`
 
@@ -143,6 +186,7 @@ class RolloutResult:
     finish_reason: str
     error_message: Optional[str] = None
     metrics: Optional[RolloutMetrics] = None
+    reward: Optional[float] = None           # Precomputed trajectory reward
 ```
 
 ---
@@ -213,6 +257,7 @@ Notify TrainGate that rollout is complete.
 | `finish_reason` | `str` | `"stop"` | Why rollout ended |
 | `error_message` | `Optional[str]` | `None` | Error description |
 | `metrics` | `Optional[RolloutMetrics]` | `None` | Execution metrics |
+| `reward` | `Optional[float]` | `None` | Precomputed trajectory reward score |
 
 #### `get_metrics() -> RolloutMetrics`
 
@@ -310,6 +355,21 @@ app = create_app(
     record_ttl_seconds=3600,
     debug_dir="./rollout_logs",  # Optional: enable debug logging
 )
+
+# Full options
+app = create_app(
+    agent_loop,
+    max_concurrent=100,
+    record_ttl_seconds=3600,
+    settings=None,
+    credentials=my_credentials,         # For platform registration
+    server_host="0.0.0.0",
+    server_port=9000,
+    api_key="my-secret-key",
+    debug_dir="./rollout_logs",
+    on_startup=my_startup_callback,
+    on_shutdown=my_shutdown_callback,
+)
 ```
 
 **Parameters:**
@@ -317,10 +377,16 @@ app = create_app(
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
 | `agent_loop` | `RolloutAgentLoop` | required | Your agent implementation |
-| `max_concurrent` | `int` | `100` | Max concurrent rollouts |
-| `record_ttl_seconds` | `float` | `3600` | TTL for completed records |
+| `max_concurrent` | `int \| None` | `None` | Max concurrent rollouts (defaults to settings) |
+| `record_ttl_seconds` | `float \| None` | `None` | TTL for completed records (defaults to settings) |
 | `settings` | `Optional[RolloutSettings]` | `None` | Global settings override (server/logging/tracing) |
+| `credentials` | `Optional[WorkspaceCredentials]` | `None` | Workspace credentials for platform registration. If `None`, registration is skipped |
+| `server_host` | `Optional[str]` | `None` | Host the server is bound to (used for platform registration) |
+| `server_port` | `Optional[int]` | `None` | Port the server is listening on (used for platform registration) |
+| `api_key` | `Optional[str]` | `None` | API key for authenticating incoming requests. If provided, requests must include `Authorization: Bearer <api_key>` |
 | `debug_dir` | `Optional[str]` | `None` | Directory for debug logging. If set, each rollout writes execution traces to `{debug_dir}/{rollout_id}.jsonl`. Note: when using `serve_agent_loop()` or CLI, a timestamped subdirectory is created automatically |
+| `on_startup` | `Optional[Callable[[], Awaitable[None]]]` | `None` | Async callback to run during application startup (e.g., warming caches, starting background services) |
+| `on_shutdown` | `Optional[Callable[[], Awaitable[None]]]` | `None` | Async callback to run during application shutdown (e.g., stopping services, releasing resources) |
 
 **Returns:** `FastAPI` application
 
@@ -329,7 +395,8 @@ app = create_app(
 | Endpoint | Method | Status | Description |
 |----------|--------|--------|-------------|
 | `/v1/rollout/init` | POST | 202 | Accept rollout request |
-| `/health` | GET | 200 | Health check |
+| `/health` | GET | 200 | Health check (unauthenticated) |
+| `/platform/health` | GET | 200 | Authenticated health check for Osmosis Platform. Requires `Authorization: Bearer <api_key>`. Returns 404 if `api_key` is not configured (e.g., `local_debug` mode). Used by the platform to verify reachability and API key correctness. |
 
 ---
 
@@ -537,6 +604,7 @@ class RolloutResponse(BaseModel):
     final_messages: List[MessageDict] = []
     finish_reason: Optional[str] = None
     error_message: Optional[str] = None
+    reward: Optional[float] = None   # Precomputed trajectory reward
     metrics: Optional[RolloutMetrics] = None
     extra_fields: Dict[str, Any] = {}
 ```

@@ -33,8 +33,8 @@ Must return a `float`. The decorator raises `TypeError` if the return type check
 
 - Function must accept exactly `solution_str`, `ground_truth`, `extra_info` as positional parameters
 - `extra_info` must have a default value of `None`
-- Must include `**kwargs`
-- Return type annotation must be `float`
+- Must include `**kwargs` for platform compatibility
+- Return value must be a `float` (checked at call time)
 
 ---
 
@@ -128,12 +128,20 @@ score = evaluate_rubric(
 | `score_max` | `float` | No | Maximum score bound (default `1.0`) |
 | `system_prompt` | `str` | No | Optional context prepended to judge prompt |
 | `original_input` | `str` | No | Optional original user input for context |
-| `timeout` | `int` | No | Provider timeout in seconds |
+| `timeout` | `float` | No | Provider timeout in seconds |
+| `reasoning_effort` | `str \| None` | No | Reasoning effort hint passed to the provider (e.g., `"low"`, `"medium"`, `"high"`). Silently dropped for models that do not support it. |
 
 ### Return Value
 
 - When `return_details=False`: Returns a `float` score clamped to `[score_min, score_max]`
-- When `return_details=True`: Returns `RewardRubricRunResult` with full provider response
+- When `return_details=True`: Returns a `RewardRubricRunResult` dict with the following structure:
+
+```python
+class RewardRubricRunResult(TypedDict):
+    score: float        # The clamped rubric score
+    explanation: str    # The judge model's explanation for the score
+    raw: Any            # The full raw response from the LLM provider
+```
 
 ### Credential Resolution
 
@@ -167,7 +175,7 @@ Every provider returns a strict JSON object with `{"score": number, "explanation
 Raised when the required API key is not found in the environment.
 
 ```python
-from osmosis_ai.rubric import MissingAPIKeyError
+from osmosis_ai import MissingAPIKeyError
 
 try:
     score = evaluate_rubric(...)
@@ -181,7 +189,7 @@ except MissingAPIKeyError as e:
 Raised when the LLM provider returns an error.
 
 ```python
-from osmosis_ai.rubric import ProviderRequestError
+from osmosis_ai import ProviderRequestError
 
 try:
     score = evaluate_rubric(...)
@@ -191,10 +199,10 @@ except ProviderRequestError as e:
 
 ### ModelNotFoundError
 
-Raised when the specified model identifier is not recognized by the provider.
+Raised when the specified model identifier is not recognized by the provider. Subclass of `ProviderRequestError`.
 
 ```python
-from osmosis_ai.rubric import ModelNotFoundError
+from osmosis_ai import ModelNotFoundError
 
 try:
     score = evaluate_rubric(...)

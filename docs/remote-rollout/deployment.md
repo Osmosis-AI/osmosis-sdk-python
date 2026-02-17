@@ -103,6 +103,7 @@ logging.getLogger("httpx").setLevel(logging.WARNING)
 
 ## See Also
 
+- [Configuration](../configuration.md) -- environment variables and SDK settings
 - [Examples](./examples.md) -- agent implementations
 - [Testing](./testing.md) -- unit tests and mock trainer
 - [Architecture](./architecture.md) -- protocol design

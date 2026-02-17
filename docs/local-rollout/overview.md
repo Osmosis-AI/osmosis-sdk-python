@@ -1,6 +1,6 @@
 # Local Rollout
 
-Local Rollout is one of two training modes supported by the Osmosis platform. In this mode, Osmosis manages the entire agent loop -- you provide **reward functions**, **rubric evaluators**, and optionally **MCP tools** via a GitHub-synced repository. The training infrastructure handles LLM inference, tool execution, and trajectory collection automatically.
+Local Rollout is one of two training modes supported by the Osmosis platform. In this mode, Osmosis manages the entire agent loop -- you provide **reward functions**, **rubric evaluators**, and optionally **MCP tools** via a git-sync repository. The training infrastructure handles LLM inference, tool execution, and trajectory collection automatically.
 
 ## When to Choose Local Rollout
 

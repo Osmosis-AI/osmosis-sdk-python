@@ -4,8 +4,8 @@
 
 | Version | Supported          |
 |---------|--------------------|
-| Latest  | :white_check_mark: |
-| < Latest | :x:               |
+| Latest   | Yes |
+| < Latest | No  |
 
 Only the latest published version of `osmosis-ai` receives security updates.
 

@@ -18,6 +18,32 @@
 
 Python SDK for Osmosis AI training workflows. Supports two training modes with shared tooling for testing and evaluation.
 
+Osmosis AI is a platform for training LLMs with reinforcement learning. You define custom reward functions, LLM-as-judge rubrics, and agent tools -- then Osmosis handles the training loop on managed GPU clusters. This SDK provides everything you need to build and test those components locally, from `@osmosis_reward` decorators and MCP tool definitions to a full CLI for running agents against datasets before submitting training runs.
+
+## Quick Start
+
+The fastest way to get started is with **Local Rollout** using MCP tools. Clone the example repo and test it locally in under a minute:
+
+```bash
+# 1. Install the SDK with MCP support
+pip install "osmosis-ai[mcp]"
+
+# 2. Clone the example repo
+git clone https://github.com/Osmosis-AI/osmosis-git-sync-example.git
+cd osmosis-git-sync-example
+
+# 3. Set your LLM API key
+export OPENAI_API_KEY="sk-..."
+
+# 4. Run the agent against the sample dataset
+osmosis test --mcp ./mcp -d test_data.jsonl --model openai/gpt-4o-mini
+
+# 5. Try interactive mode to step through each LLM call
+osmosis test --mcp ./mcp -d test_data.jsonl --interactive
+```
+
+For detailed setup, see the [Local Rollout docs](docs/local-rollout/overview.md). For custom agent architectures, see [Remote Rollout](docs/remote-rollout/overview.md).
+
 ## Two Training Modes
 
 Osmosis supports **Local Rollout** and **Remote Rollout** as parallel approaches to training with reinforcement learning:
@@ -31,6 +57,12 @@ Osmosis supports **Local Rollout** and **Remote Rollout** as parallel approaches
 ## Installation
 
 Requires Python 3.10 or newer. For development setup, see [CONTRIBUTING.md](CONTRIBUTING.md).
+
+### Prerequisites
+
+- **Python 3.10+**
+- **An LLM API key** (e.g., OpenAI, Anthropic, Groq) -- required for `osmosis test` and `osmosis eval`. See [supported providers](https://docs.litellm.ai/docs/providers).
+- **Osmosis account** (optional) -- needed for platform features like `osmosis login`, workspace management, and submitting training runs. Sign up at [osmosis.ai](https://osmosis.ai).
 
 ### pip
 

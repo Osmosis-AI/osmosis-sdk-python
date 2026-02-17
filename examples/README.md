@@ -26,10 +26,12 @@ All functions decorated with `@osmosis_reward` must have this exact signature:
 
 ```python
 @osmosis_reward
-def your_function(solution_str: str, ground_truth: str, extra_info: dict = None) -> float:
+def your_function(solution_str: str, ground_truth: str, extra_info: dict = None, **kwargs) -> float:
     # Your reward logic here
     return float_score
 ```
+
+> **Note:** Including `**kwargs` is required for platform compatibility. The Osmosis platform passes additional keyword arguments to reward functions.
 
 ### Parameters
 

@@ -33,6 +33,8 @@ pip install osmosis-ai[full]
 Create a class that inherits from `RolloutAgentLoop` and implements two methods:
 
 ```python
+import json
+
 from osmosis_ai.rollout import (
     RolloutAgentLoop,
     RolloutContext,
@@ -57,6 +59,12 @@ class MyAgentLoop(RolloutAgentLoop):
             )
         ]
 
+    async def execute_tool(self, name: str, args: dict) -> str:
+        """Execute a tool and return the result as a string."""
+        if name == "search":
+            return f"Search results for '{args.get('query', '')}'"
+        return f"Unknown tool: {name}"
+
     async def run(self, ctx: RolloutContext) -> RolloutResult:
         """Execute the agent loop."""
         messages = list(ctx.request.messages)
@@ -72,8 +80,17 @@ class MyAgentLoop(RolloutAgentLoop):
 
             # Execute tools and add results
             for tool_call in result.tool_calls:
-                tool_result = await self.execute_tool(tool_call)
-                messages.append(tool_result)
+                tool_name = tool_call["function"]["name"]
+                tool_args = json.loads(tool_call["function"]["arguments"])
+
+                # Execute tool logic (replace with your implementation)
+                tool_result = await self.execute_tool(tool_name, tool_args)
+
+                messages.append({
+                    "role": "tool",
+                    "content": tool_result,
+                    "tool_call_id": tool_call["id"],
+                })
                 ctx.record_tool_call()
 
         return ctx.complete(messages)
@@ -230,10 +247,10 @@ See the complete working example: [osmosis-remote-rollout-example](https://githu
 
 ## Next Steps
 
-- [Architecture](./architecture.md) - Understand the system design
-- [Agent Loop Guide](./agent-loop.md) - Complete API documentation
-- [Examples](./examples.md) - Full working examples
-- [Testing](./testing.md) - Unit tests and mock trainer
-- [Deployment](./deployment.md) - Docker, health checks, production config
-- [Dataset Format](../datasets.md) - Supported formats and required columns
-- [Test Mode](../test-mode.md) - Local testing with external LLM providers
+- [Architecture](./architecture.md) -- Understand the system design
+- [Agent Loop Guide](./agent-loop.md) -- Complete API documentation
+- [Examples](./examples.md) -- Full working examples
+- [Testing](./testing.md) -- Unit tests and mock trainer
+- [Deployment](./deployment.md) -- Docker, health checks, production config
+- [Dataset Format](../datasets.md) -- Supported formats and required columns
+- [Test Mode](../test-mode.md) -- Local testing with external LLM providers

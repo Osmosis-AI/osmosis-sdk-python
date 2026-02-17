@@ -117,8 +117,8 @@ Start a RolloutServer for an agent loop implementation. The module path format i
 osmosis login
 osmosis serve -m my_agent:agent_loop
 
-# Specify port
-osmosis serve -m my_agent:agent_loop -p 8080
+# Specify host and port
+osmosis serve -m my_agent:agent_loop -H 127.0.0.1 -p 8080
 
 # Local / container mode: skip Platform registration (no login required).
 # NOTE: API key auth is still enabled by default.
@@ -130,19 +130,55 @@ osmosis serve -m my_agent:agent_loop --local
 # Provide a stable API key (otherwise one is generated and printed on startup)
 osmosis serve -m my_agent:agent_loop --skip-register --api-key "$MY_API_KEY"
 
+# Enable auto-reload for development
+osmosis serve -m my_agent:agent_loop --local --reload
+
+# Set log level and write execution traces to a directory
+osmosis serve -m my_agent:agent_loop --log-level debug --log ./traces
+
 # Skip validation (not recommended)
 osmosis serve -m my_agent:agent_loop --no-validate
 ```
 
-Note: The `--api-key` option sets the API key for this RolloutServer. It is used by TrainGate to authenticate its requests *to* your server. This key is **not** the same as your `osmosis login` token (which is for authenticating with the Osmosis Platform), nor is it used for callbacks *from* your server back to TrainGate.
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `-m`/`--module` | Module path to the agent loop (required) |
+| `-p`/`--port` | Port to bind to (default: 9000) |
+| `-H`/`--host` | Host to bind to (default: 0.0.0.0) |
+| `--skip-register` | Skip registering with Osmosis Platform (for local testing) |
+| `--local` | Local debug mode: disable API key auth and skip Platform registration |
+| `--api-key` | API key used by TrainGate to authenticate requests to this server |
+| `--no-validate` | Skip agent loop validation before starting |
+| `--reload` | Enable auto-reload for development |
+| `--log-level` | Uvicorn log level: debug, info, warning, error, critical (default: info) |
+| `--log DIR` | Enable logging and write per-rollout execution traces (as `{rollout_id}.jsonl`) to DIR |
+
+> **Note:** The `--api-key` option sets the API key for this RolloutServer. It is used by TrainGate to authenticate its requests *to* your server. This key is **not** the same as your `osmosis login` token (which is for authenticating with the Osmosis Platform), nor is it used for callbacks *from* your server back to TrainGate.
+
+See [Remote Rollout Overview](./remote-rollout/overview.md) for architecture details and the full agent lifecycle.
 
 ### osmosis validate
 
 Validate an agent loop before starting the server (checks tools, async run method, etc.):
 
 ```bash
+# Basic validation
 osmosis validate -m my_agent:agent_loop
+
+# Verbose output with detailed warnings
+osmosis validate -m my_agent:agent_loop -v
 ```
+
+**Options:**
+
+| Option | Description |
+|--------|-------------|
+| `-m`/`--module` | Module path to the agent loop (required) |
+| `-v`/`--verbose` | Show detailed validation output including warnings |
+
+See [Remote Rollout Overview](./remote-rollout/overview.md) for architecture details and the full agent lifecycle.
 
 ## Rubric Tools
 

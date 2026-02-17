@@ -17,7 +17,7 @@ Key capabilities:
 - **Concurrent execution** with `--batch-size` for faster benchmarks
 - Use LiteLLM providers (e.g., `openai/gpt-5-mini`) as the primary model
 
-> Command split (development-stage breaking change):
+> **Note:** Command split (development-stage breaking change):
 > `osmosis eval-rubric` is for hosted rubric evaluation, while `osmosis eval` is for agent eval mode documented here.
 
 ## Quick Start
@@ -62,25 +62,7 @@ osmosis eval --mcp ./mcp -d data.jsonl \
     --n 5 --batch-size 5
 ```
 
-The `--mcp` directory must contain a `main.py` that creates a `FastMCP` instance with registered tools:
-
-```python
-# mcp/main.py
-from fastmcp import FastMCP
-
-mcp = FastMCP("my_tools")
-
-@mcp.tool()
-def add(a: float, b: float) -> str:
-    """Add two numbers."""
-    return str(a + b)
-
-@mcp.tool()
-def lookup(key: str) -> str:
-    """Look up a value by key."""
-    data = {"pi": "3.14159", "e": "2.71828"}
-    return data.get(key, "not found")
-```
+The `--mcp` directory must contain a `main.py` that creates a `FastMCP` instance with registered tools. See [Local Rollout MCP Tools](./local-rollout/mcp-tools.md) for the full folder structure and examples.
 
 > **Note:** `--mcp` and `-m/--module` are mutually exclusive. Use one or the other.
 
@@ -718,8 +700,8 @@ See [Test Mode - Environment Variables](./test-mode.md#environment-variables) fo
 
 ## See Also
 
-- [Test Mode](./test-mode.md) - Test agent logic with external LLMs
-- [Dataset Format](./datasets.md) - Supported formats and required columns
-- [Remote Rollout Examples](./remote-rollout/examples.md) - Working code examples
-- [Local Rollout MCP Tools](./local-rollout/mcp-tools.md) - MCP tool definition
-- [LiteLLM Providers](https://docs.litellm.ai/docs/providers) - Supported LLM providers
+- [Test Mode](./test-mode.md) -- Test agent logic with external LLMs
+- [Dataset Format](./datasets.md) -- Supported formats and required columns
+- [Remote Rollout Examples](./remote-rollout/examples.md) -- Working code examples
+- [Local Rollout MCP Tools](./local-rollout/mcp-tools.md) -- MCP tool definition
+- [LiteLLM Providers](https://docs.litellm.ai/docs/providers) -- Supported LLM providers

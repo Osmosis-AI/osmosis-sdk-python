@@ -124,8 +124,13 @@ class RolloutContext:
 
                 # Execute tools and add results
                 for tool_call in result.tool_calls:
-                    tool_result = await self.execute_tool(tool_call)
-                    messages.append(tool_result)
+                    args = json.loads(tool_call["function"]["arguments"])
+                    tool_result = do_tool(tool_call["function"]["name"], args)
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tool_call["id"],
+                        "content": str(tool_result),
+                    })
                     ctx.record_tool_call(latency_ms=...)
 
             return ctx.complete(messages)

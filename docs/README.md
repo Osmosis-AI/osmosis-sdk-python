@@ -39,6 +39,12 @@ Used by both Local Rollout and Remote Rollout modes.
 
 - [Rewards API Reference](./rewards-api.md) -- `@osmosis_reward`, `@osmosis_rubric`, `evaluate_rubric` API details
 - [CLI Reference](./cli.md) -- all `osmosis` commands
+- [Configuration](./configuration.md) -- environment variables, settings classes, and programmatic configuration
+- [Troubleshooting](./troubleshooting.md) -- common errors, debug tips, and resolutions
+
+## Contributing
+
+We welcome contributions! See the [Contributing Guide](../CONTRIBUTING.md) for development setup, coding standards, and pull request guidelines.
 
 ## Other
 
