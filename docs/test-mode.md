@@ -1,6 +1,6 @@
 # Test Mode
 
-Test your agent implementations locally without TrainGate using external LLM providers via [LiteLLM](https://docs.litellm.ai/docs/providers).
+Test your agent implementations locally without TrainGate using external LLM providers via [LiteLLM](https://docs.litellm.ai/docs/providers). Works with both **Local Rollout** (MCP tools) and **Remote Rollout** (RolloutAgentLoop) agents.
 
 > Breaking change: the legacy import path `osmosis_ai.rollout.test_mode` was removed.
 > Use `osmosis_ai.rollout.eval.common` and `osmosis_ai.rollout.eval.test_mode` instead.
@@ -10,7 +10,7 @@ Test your agent implementations locally without TrainGate using external LLM pro
 Test mode enables you to:
 
 - Validate agent logic before deploying to training infrastructure
-- **Two agent modes**: provide a `RolloutAgentLoop` with `-m`, or load MCP tools directly with `--mcp` (for git-sync users)
+- **Two agent modes**: provide a `RolloutAgentLoop` with `-m`, or load MCP tools directly with `--mcp`
 - Use 100+ LLM providers (OpenAI, Anthropic, Groq, Ollama, etc.)
 - Run batch tests against datasets with detailed metrics
 - Debug step-by-step with interactive mode
@@ -18,23 +18,25 @@ Test mode enables you to:
 
 ## Quick Start
 
-### CLI Usage
+### Testing with Remote Rollout Agent
+
+If you implement a `RolloutAgentLoop`, use `-m` to point at your agent module:
 
 ```bash
 # Basic batch test with OpenAI
-osmosis test --agent my_agent:MyAgentLoop --dataset data.jsonl --model gpt-5-mini
+osmosis test -m my_agent:agent_loop -d data.jsonl --model gpt-5-mini
 
 # Use Anthropic Claude
-osmosis test --agent my_agent:MyAgentLoop --dataset data.jsonl --model anthropic/claude-sonnet-4-5
+osmosis test -m my_agent:agent_loop -d data.jsonl --model anthropic/claude-sonnet-4-5
 
 # Interactive debugging
-osmosis test --agent my_agent:MyAgentLoop --dataset data.jsonl --interactive
+osmosis test -m my_agent:agent_loop -d data.jsonl --interactive
 
 # Start at specific row
-osmosis test --agent my_agent:MyAgentLoop --dataset data.jsonl --interactive --row 5
+osmosis test -m my_agent:agent_loop -d data.jsonl --interactive --row 5
 ```
 
-### Git-Sync Users (MCP Tools)
+### Testing with Local Rollout MCP Tools
 
 If you use the **git-sync** workflow and provide MCP tools (`@mcp.tool()`) instead of a `RolloutAgentLoop`, use `--mcp` to point at your MCP directory:
 
@@ -105,7 +107,7 @@ print(f"Total tokens: {results.total_tokens}")
 
 ## Dataset Format
 
-See [Dataset Format](./dataset-format.md) for supported formats and required columns.
+See [Dataset Format](./datasets.md) for supported formats and required columns.
 
 ---
 
@@ -125,8 +127,8 @@ osmosis test [OPTIONS]
 
 | Option | Description |
 |--------|-------------|
-| `-m, --module, --agent MODULE` | Module path to agent loop (format: `module:attribute`). Use for remote-rollout users who implement `RolloutAgentLoop`. |
-| `--mcp DIR` | Path to MCP tools directory (must contain `main.py` with a `FastMCP` instance). Use for git-sync users who provide `@mcp.tool()` functions. Requires `pip install osmosis-ai[mcp]`. |
+| `-m, --module, --agent MODULE` | Module path to agent loop (format: `module:attribute`). Use for Remote Rollout users who implement `RolloutAgentLoop`. |
+| `--mcp DIR` | Path to MCP tools directory (must contain `main.py` with a `FastMCP` instance). Use for Local Rollout (git-sync) users who provide `@mcp.tool()` functions. Requires `pip install osmosis-ai[mcp]`. |
 
 ### Model Options
 
@@ -173,13 +175,13 @@ See [LiteLLM Providers](https://docs.litellm.ai/docs/providers) for supported pr
 ### Examples
 
 ```bash
-# Test with GPT-5-mini (default)
+# Remote Rollout: test with GPT-5-mini (default)
 osmosis test -m my_agent:agent_loop -d data.jsonl
 
-# Git-sync: test MCP tools without writing an AgentLoop
+# Local Rollout: test MCP tools
 osmosis test --mcp ./mcp -d data.jsonl --model openai/gpt-5-mini
 
-# Git-sync: interactive debugging with MCP tools
+# Local Rollout: interactive debugging with MCP tools
 osmosis test --mcp ./mcp -d data.jsonl --interactive
 
 # Test with Claude
@@ -588,8 +590,8 @@ See [LiteLLM Environment Variables](https://docs.litellm.ai/docs/providers) for 
 
 ## See Also
 
-- [Eval Mode](./eval.md) - Evaluate agents with eval functions and pass@k
-- [Architecture](./architecture.md) - System design overview
-- [API Reference](./api-reference.md) - Complete SDK API documentation
-- [Examples](./examples.md) - Working code examples
+- [Eval Mode](./eval-mode.md) - Evaluate agents with eval functions and pass@k
+- [Dataset Format](./datasets.md) - Supported formats and required columns
+- [Remote Rollout Examples](./remote-rollout/examples.md) - Working code examples
+- [Local Rollout MCP Tools](./local-rollout/mcp-tools.md) - MCP tool definition
 - [LiteLLM Providers](https://docs.litellm.ai/docs/providers) - Supported LLM providers

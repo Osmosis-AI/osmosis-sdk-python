@@ -1,4 +1,4 @@
-# API Reference
+# Agent Loop Guide
 
 Complete API documentation for the Osmosis Remote Rollout SDK.
 
@@ -714,3 +714,9 @@ MessageDict = Dict[str, Any]
 SamplingParamsDict = Dict[str, Any]
 # Example: {"temperature": 0.7, "max_tokens": 512}
 ```
+
+## See Also
+
+- [Remote Rollout Overview](./overview.md) - Quick start guide
+- [Architecture](./architecture.md) - Protocol design
+- [Examples](./examples.md) - Working code examples

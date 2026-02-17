@@ -149,5 +149,5 @@ async def test_agent_run():
 ## See Also
 
 - [Examples](./examples.md) -- agent implementations and utilities
-- [Test Mode](./test-mode.md) -- testing with cloud LLMs
+- [Test Mode](../test-mode.md) -- testing with cloud LLMs
 - [Deployment](./deployment.md) -- production deployment

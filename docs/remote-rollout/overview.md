@@ -11,6 +11,8 @@ The Remote Rollout SDK enables you to:
 - Execute tools and collect training data (trajectories, token IDs, logprobs)
 - Run agents as scalable HTTP servers
 
+For an alternative approach that requires no server infrastructure, see [Local Rollout](../local-rollout/overview.md).
+
 ## Installation
 
 ```bash
@@ -222,12 +224,16 @@ export OSMOSIS_ROLLOUT_CLIENT_TIMEOUT_SECONDS=120
 export OSMOSIS_ROLLOUT_SERVER_MAX_CONCURRENT_ROLLOUTS=200
 ```
 
+## Example Repository
+
+See the complete working example: [osmosis-remote-rollout-example](https://github.com/Osmosis-AI/osmosis-remote-rollout-example)
+
 ## Next Steps
 
 - [Architecture](./architecture.md) - Understand the system design
-- [API Reference](./api-reference.md) - Complete API documentation
+- [Agent Loop Guide](./agent-loop.md) - Complete API documentation
 - [Examples](./examples.md) - Full working examples
-- [Test Mode](./test-mode.md) - Local testing with external LLM providers
 - [Testing](./testing.md) - Unit tests and mock trainer
 - [Deployment](./deployment.md) - Docker, health checks, production config
-- [Dataset Format](./dataset-format.md) - Supported formats and required columns
+- [Dataset Format](../datasets.md) - Supported formats and required columns
+- [Test Mode](../test-mode.md) - Local testing with external LLM providers

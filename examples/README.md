@@ -2,7 +2,16 @@
 
 This directory contains example usage of the osmosis-ai library.
 
-## Reward Functions (`reward_functions.py`)
+## Full Example Repos
+
+Complete, runnable example projects:
+
+- **Local Rollout**: [osmosis-git-sync-example](https://github.com/Osmosis-AI/osmosis-git-sync-example) — reward functions, rubrics, and MCP tools
+- **Remote Rollout**: [osmosis-remote-rollout-example](https://github.com/Osmosis-AI/osmosis-remote-rollout-example) — custom `RolloutAgentLoop` server
+
+## SDK API Examples
+
+### Reward Functions (`reward_functions.py`)
 
 Demonstrates how to use the `@osmosis_reward` decorator with various reward function patterns:
 
@@ -41,7 +50,7 @@ PYTHONPATH=.. python reward_functions.py
 
 This will run test cases through all the example reward functions and show their outputs.
 
-## Remote Rubric Evaluation (`rubric_functions.py`)
+### Remote Rubric Evaluation (`rubric_functions.py`)
 
 Shows how to call `osmosis_ai.evaluate_rubric` against different hosted judge providers using their official Python SDKs. The example:
 
@@ -52,7 +61,7 @@ Shows how to call `osmosis_ai.evaluate_rubric` against different hosted judge pr
 
 The helper uses [LiteLLM](https://github.com/BerriAI/litellm) under the hood; each example call only needs to supply `provider` and `model` because LiteLLM routes to the correct API automatically. Any provider supported by LiteLLM can be used by passing its name in `model_info`.
 
-## Rubric Configs and Dataset
+### Rubric Configs and Dataset
 
 Use `rubric_configs.yaml` for a pair of ready-to-run rubric configurations (OpenAI and Anthropic) and `sample_data.jsonl` for two matching solution strings that exercise those rubrics. They are designed to work with `osmosis preview --path examples/<file>` and can be adapted when building your own evaluation suites.
 

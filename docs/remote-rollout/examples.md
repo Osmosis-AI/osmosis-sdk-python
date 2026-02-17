@@ -684,8 +684,12 @@ agent = get_agent_loop("calculator")
 app = create_app(agent)
 ```
 
+## Example Repository
+
+For a complete, runnable project with tools, rewards, and server setup, see: [osmosis-remote-rollout-example](https://github.com/Osmosis-AI/osmosis-remote-rollout-example)
+
 ## See Also
 
-- [Testing](./testing.md) — unit tests and mock trainer
-- [Deployment](./deployment.md) — Docker, health checks, production config
-- [API Reference](./api-reference.md) — endpoints, schemas, types
+- [Testing](./testing.md) -- unit tests and mock trainer
+- [Deployment](./deployment.md) -- Docker, health checks, production config
+- [Agent Loop Guide](./agent-loop.md) -- endpoints, schemas, types

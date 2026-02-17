@@ -1,6 +1,6 @@
 # Dataset Format
 
-Datasets define the test cases for evaluating and testing your rollout agents. They provide the prompts, expected outputs, and optional metadata used by both [test mode](./test-mode.md) and [evaluation](./eval.md).
+Datasets define the test cases for testing and evaluating your agents. They provide the prompts, expected outputs, and optional metadata used by both [test mode](./test-mode.md) and [eval mode](./eval-mode.md). Datasets are used by both **Local Rollout** and **Remote Rollout** modes.
 
 ## Supported Formats
 
@@ -56,4 +56,4 @@ Any columns beyond the three required ones are passed to `RolloutRequest.metadat
 ## See Also
 
 - [Test Mode](./test-mode.md) -- test agents locally with external LLMs
-- [Evaluation](./eval.md) -- evaluate agents with eval functions and pass@k
+- [Eval Mode](./eval-mode.md) -- evaluate agents with eval functions and pass@k

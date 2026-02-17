@@ -1,6 +1,6 @@
 # CLI Reference
 
-Installing the SDK provides a lightweight CLI available as `osmosis` (aliases: `osmosis_ai`, `osmosis-ai`). The CLI covers authentication, workspace management, rollout server operation, agent testing and evaluation, and rubric tools. It automatically loads `.env` from the current working directory via `python-dotenv`.
+Installing the SDK provides a lightweight CLI available as `osmosis` (aliases: `osmosis_ai`, `osmosis-ai`). The CLI automatically loads `.env` from the current working directory via `python-dotenv`.
 
 ## Authentication
 
@@ -44,11 +44,9 @@ Display the current user and all workspaces:
 osmosis whoami
 ```
 
-## Workspace Management
-
 ### osmosis workspace
 
-Manage multiple workspaces after logging in. You can log in to multiple workspaces and switch between them. Each workspace maintains its own credentials and role information.
+Manage multiple workspaces after logging in. You can log in to multiple workspaces and switch between them.
 
 ```bash
 # List all logged-in workspaces
@@ -60,6 +58,53 @@ osmosis workspace current
 # Switch to a different workspace
 osmosis workspace switch <workspace-name>
 ```
+
+## Testing Your Agent
+
+### osmosis test
+
+Test your agent locally against a dataset using external LLMs. Works with both Local Rollout (MCP tools) and Remote Rollout (RolloutAgentLoop) agents.
+
+```bash
+# Remote Rollout: test an AgentLoop implementation
+osmosis test -m my_agent:agent_loop -d data.jsonl --model openai/gpt-5-mini
+
+# Local Rollout: test MCP tools directly (no AgentLoop needed)
+osmosis test --mcp ./mcp -d data.jsonl --model openai/gpt-5-mini
+
+# Interactive step-by-step debugging
+osmosis test -m my_agent:agent_loop -d data.jsonl --interactive
+
+# Interactive with MCP tools
+osmosis test --mcp ./mcp -d data.jsonl --interactive
+```
+
+See [Test Mode](./test-mode.md) for full documentation on dataset format, interactive mode, and all options.
+
+## Evaluating Models
+
+### osmosis eval
+
+Evaluate trained models with custom eval functions and pass@k metrics. Works with both Local Rollout (MCP tools) and Remote Rollout (RolloutAgentLoop) agents.
+
+```bash
+# Remote Rollout: benchmark a trained model at a serving endpoint
+osmosis eval -m my_agent:agent_loop -d data.jsonl \
+    --eval-fn rewards:compute_reward \
+    --model my-finetuned-model --base-url http://localhost:8000/v1
+
+# Local Rollout: evaluate MCP tools directly
+osmosis eval --mcp ./mcp -d data.jsonl \
+    --eval-fn rewards:compute_reward \
+    --model openai/gpt-5-mini
+
+# pass@k with 5 runs per row
+osmosis eval -m my_agent:agent_loop -d data.jsonl \
+    --eval-fn rewards:compute_reward --n 5 \
+    --model my-finetuned-model --base-url http://localhost:8000/v1
+```
+
+See [Eval Mode](./eval-mode.md) for full documentation on eval functions, pass@k metrics, and output formats.
 
 ## Remote Rollout Server
 
@@ -99,50 +144,6 @@ Validate an agent loop before starting the server (checks tools, async run metho
 osmosis validate -m my_agent:agent_loop
 ```
 
-## Agent Testing
-
-### osmosis test
-
-Test your agent loop locally against a dataset using external LLMs:
-
-```bash
-# Batch test with OpenAI
-osmosis test -m my_agent:agent_loop -d data.jsonl --model openai/gpt-5-mini
-
-# Interactive step-by-step debugging
-osmosis test -m my_agent:agent_loop -d data.jsonl --interactive
-
-# Git-sync users: test MCP tools directly (no AgentLoop code needed)
-osmosis test --mcp ./mcp -d data.jsonl --model openai/gpt-5-mini
-```
-
-See [Test Mode](./rollout/test-mode.md) for full documentation on dataset format, interactive mode, and MCP tool testing.
-
-## Agent Evaluation
-
-### osmosis eval
-
-Evaluate trained models with custom eval functions and pass@k metrics:
-
-```bash
-# Benchmark a trained model at a serving endpoint
-osmosis eval -m my_agent:agent_loop -d data.jsonl \
-    --eval-fn rewards:compute_reward \
-    --model my-finetuned-model --base-url http://localhost:8000/v1
-
-# pass@k with 5 runs per row
-osmosis eval -m my_agent:agent_loop -d data.jsonl \
-    --eval-fn rewards:compute_reward --n 5 \
-    --model my-finetuned-model --base-url http://localhost:8000/v1
-
-# Git-sync users: evaluate MCP tools directly
-osmosis eval --mcp ./mcp -d data.jsonl \
-    --eval-fn rewards:compute_reward \
-    --model openai/gpt-5-mini
-```
-
-See [Evaluation](./rollout/eval.md) for full documentation on eval functions, pass@k metrics, and output formats.
-
 ## Rubric Tools
 
 ### osmosis preview
@@ -171,7 +172,7 @@ osmosis eval-rubric --rubric support_followup --data examples/sample_data.jsonl
 
 **Command split** (development-stage breaking change):
 - `osmosis eval-rubric` evaluates JSONL conversations against hosted rubrics.
-- `osmosis eval` runs rollout eval functions against `RolloutAgentLoop` datasets.
+- `osmosis eval` runs rollout eval functions against agent datasets.
 
 **Options:**
 
@@ -188,10 +189,9 @@ osmosis eval-rubric --rubric support_followup --data examples/sample_data.jsonl
 - When delegating to a custom `@osmosis_rubric` function, the CLI enriches `extra_info` with the active `provider`, `model`, `rubric`, score bounds, any configured `system_prompt`, the resolved `original_input`, and the record's metadata/extra fields so the decorator's required entries are always present.
 - Rubric configuration files intentionally reject `extra_info`; provide per-example context through the dataset instead.
 
-See [Rewards & Rubrics](./rewards.md) for details on `@osmosis_reward`, `@osmosis_rubric`, and `evaluate_rubric`.
-
 ## See Also
 
-- [Rewards & Rubrics](./rewards.md)
-- [Rollout Test Mode](./rollout/test-mode.md)
-- [Rollout Evaluation](./rollout/eval.md)
+- [Test Mode](./test-mode.md) -- full `osmosis test` documentation
+- [Eval Mode](./eval-mode.md) -- full `osmosis eval` documentation
+- [Rewards API Reference](./rewards-api.md) -- `@osmosis_reward`, `@osmosis_rubric`, `evaluate_rubric`
+- [Dataset Format](./datasets.md) -- supported formats and required columns

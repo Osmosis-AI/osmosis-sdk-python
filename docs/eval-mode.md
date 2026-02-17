@@ -1,6 +1,6 @@
 # Eval Mode
 
-Evaluate your trained models by running agent implementations against datasets with custom eval functions, statistical analysis, and pass@k metrics.
+Evaluate your trained models by running agent implementations against datasets with custom eval functions, statistical analysis, and pass@k metrics. Works with both **Local Rollout** (MCP tools) and **Remote Rollout** (RolloutAgentLoop) agents.
 
 ## Overview
 
@@ -9,7 +9,7 @@ Eval mode is designed for **evaluating trained models**. Connect to any OpenAI-c
 Key capabilities:
 
 - **Benchmark trained models** against eval functions by connecting to serving endpoints
-- **Two agent modes**: provide a `RolloutAgentLoop` with `-m`, or load MCP tools directly with `--mcp` (for git-sync users)
+- **Two agent modes**: provide a `RolloutAgentLoop` with `-m`, or load MCP tools directly with `--mcp`
 - Run multiple trials per row for pass@k analysis
 - Use existing `@osmosis_reward` functions or full-context eval functions
 - Get statistical summaries (mean, std, min, max) per eval function
@@ -22,35 +22,28 @@ Key capabilities:
 
 ## Quick Start
 
-### Benchmarking a Trained Model
+### Benchmarking with Remote Rollout Agent
 
 The primary use case is connecting to a model serving endpoint:
 
 ```bash
 # Benchmark a trained model served at an endpoint
-osmosis eval -m my_agent:MyAgentLoop -d data.jsonl \
+osmosis eval -m my_agent:agent_loop -d data.jsonl \
     --eval-fn rewards:compute_reward \
     --model my-finetuned-model \
     --base-url http://localhost:8000/v1
 
-# Benchmark against osmosis-serving
-osmosis eval -m my_agent:MyAgentLoop -d data.jsonl \
-    --eval-fn rewards:compute_reward \
-    --model my-trained-model \
-    --base-url https://inference.osmosis.ai/v1 \
-    --api-key $OSMOSIS_API_KEY
-
 # Multiple eval functions
-osmosis eval -m my_agent:MyAgentLoop -d data.jsonl \
+osmosis eval -m my_agent:agent_loop -d data.jsonl \
     --eval-fn rewards:exact_match \
     --eval-fn rewards:partial_match \
     --model my-finetuned-model \
     --base-url http://localhost:8000/v1
 ```
 
-### Git-Sync Users (MCP Tools)
+### Benchmarking with Local Rollout MCP Tools
 
-If you use the **git-sync** workflow and provide MCP tools (`@mcp.tool()`) instead of a `RolloutAgentLoop`, use `--mcp` to point at your MCP directory. The SDK automatically loads all registered tools and runs a standard agent loop — no AgentLoop code required.
+If you use the **git-sync** workflow and provide MCP tools (`@mcp.tool()`) instead of a `RolloutAgentLoop`, use `--mcp` to point at your MCP directory. The SDK automatically loads all registered tools and runs a standard agent loop.
 
 ```bash
 # Install MCP support
@@ -97,19 +90,19 @@ Compare your trained model against a baseline model. The SDK runs both models on
 
 ```bash
 # Compare trained model vs GPT-5-mini baseline
-osmosis eval -m my_agent:MyAgentLoop -d data.jsonl \
+osmosis eval -m my_agent:agent_loop -d data.jsonl \
     --eval-fn rewards:compute_reward \
     --model my-finetuned-model --base-url http://localhost:8000/v1 \
     --baseline-model openai/gpt-5-mini
 
 # Compare two serving endpoints
-osmosis eval -m my_agent:MyAgentLoop -d data.jsonl \
+osmosis eval -m my_agent:agent_loop -d data.jsonl \
     --eval-fn rewards:compute_reward \
     --model my-model-v2 --base-url http://localhost:8000/v1 \
     --baseline-model my-model-v1 --baseline-base-url http://localhost:8001/v1
 
 # Baseline with explicit API key
-osmosis eval -m my_agent:MyAgentLoop -d data.jsonl \
+osmosis eval -m my_agent:agent_loop -d data.jsonl \
     --eval-fn rewards:compute_reward \
     --model my-finetuned-model --base-url http://localhost:8000/v1 \
     --baseline-model anthropic/claude-sonnet-4-5 --baseline-api-key $ANTHROPIC_API_KEY
@@ -125,13 +118,13 @@ Use `--batch-size` to run multiple requests in parallel:
 
 ```bash
 # Run 5 concurrent requests
-osmosis eval -m my_agent:MyAgentLoop -d data.jsonl \
+osmosis eval -m my_agent:agent_loop -d data.jsonl \
     --eval-fn rewards:compute_reward \
     --model my-finetuned-model --base-url http://localhost:8000/v1 \
     --batch-size 5
 
 # Combine with pass@k — 10 runs per row, 5 concurrent
-osmosis eval -m my_agent:MyAgentLoop -d data.jsonl \
+osmosis eval -m my_agent:agent_loop -d data.jsonl \
     --eval-fn rewards:compute_reward --n 10 --batch-size 5 \
     --model my-finetuned-model --base-url http://localhost:8000/v1
 ```
@@ -140,12 +133,12 @@ osmosis eval -m my_agent:MyAgentLoop -d data.jsonl \
 
 ```bash
 # pass@k with 5 runs per row
-osmosis eval -m my_agent:MyAgentLoop -d data.jsonl \
+osmosis eval -m my_agent:agent_loop -d data.jsonl \
     --eval-fn rewards:compute_reward --n 5 \
     --model my-finetuned-model --base-url http://localhost:8000/v1
 
 # Custom pass threshold (default is 1.0)
-osmosis eval -m my_agent:MyAgentLoop -d data.jsonl \
+osmosis eval -m my_agent:agent_loop -d data.jsonl \
     --eval-fn rewards:compute_reward --n 5 --pass-threshold 0.5 \
     --model my-finetuned-model --base-url http://localhost:8000/v1
 ```
@@ -226,7 +219,7 @@ The `--model` parameter should match the model name as registered in the serving
 
 ## Dataset Format
 
-See [Dataset Format](./dataset-format.md) for supported formats and required columns.
+See [Dataset Format](./datasets.md) for supported formats and required columns.
 
 ---
 
@@ -319,8 +312,8 @@ osmosis eval [OPTIONS]
 
 | Option | Description |
 |--------|-------------|
-| `-m, --module MODULE` | Module path to agent loop (format: `module:attribute`). Use for remote-rollout users who implement `RolloutAgentLoop`. |
-| `--mcp DIR` | Path to MCP tools directory (must contain `main.py` with a `FastMCP` instance). Use for git-sync users who provide `@mcp.tool()` functions. Requires `pip install osmosis-ai[mcp]`. |
+| `-m, --module MODULE` | Module path to agent loop (format: `module:attribute`). Use for Remote Rollout users who implement `RolloutAgentLoop`. |
+| `--mcp DIR` | Path to MCP tools directory (must contain `main.py` with a `FastMCP` instance). Use for Local Rollout (git-sync) users who provide `@mcp.tool()` functions. Requires `pip install osmosis-ai[mcp]`. |
 
 ### Model Options
 
@@ -362,17 +355,17 @@ osmosis eval [OPTIONS]
 ### Examples
 
 ```bash
-# Benchmark trained model at an endpoint
+# Remote Rollout: benchmark trained model at an endpoint
 osmosis eval -m my_agent:agent_loop -d data.jsonl \
     --eval-fn rewards:compute_reward \
     --model my-finetuned-model --base-url http://localhost:8000/v1
 
-# Git-sync: evaluate MCP tools without writing an AgentLoop
+# Local Rollout: evaluate MCP tools
 osmosis eval --mcp ./mcp -d data.jsonl \
     --eval-fn reward_fn:compute_reward \
     --model openai/gpt-5-mini
 
-# Git-sync: MCP tools with trained model endpoint
+# Local Rollout: MCP tools with trained model endpoint
 osmosis eval --mcp ./mcp -d data.jsonl \
     --eval-fn rewards:compute_reward \
     --model my-finetuned-model --base-url http://localhost:8000/v1
@@ -388,31 +381,15 @@ osmosis eval -m my_agent:agent_loop -d data.jsonl \
     --eval-fn rewards:compute_reward --n 5 \
     --model my-finetuned-model --base-url http://localhost:8000/v1
 
-# Lenient pass threshold
-osmosis eval -m my_agent:agent_loop -d data.jsonl \
-    --eval-fn rewards:compute_reward --n 5 --pass-threshold 0.5 \
-    --model my-finetuned-model --base-url http://localhost:8000/v1
-
-# Baseline comparison: trained model vs external LLM
+# Baseline comparison
 osmosis eval -m my_agent:agent_loop -d data.jsonl \
     --eval-fn rewards:compute_reward \
     --model my-finetuned-model --base-url http://localhost:8000/v1 \
     --baseline-model openai/gpt-5-mini -o results.json
 
-# Baseline comparison: two serving endpoints
-osmosis eval -m my_agent:agent_loop -d data.jsonl \
-    --eval-fn rewards:compute_reward \
-    --model my-model-v2 --base-url http://localhost:8000/v1 \
-    --baseline-model my-model-v1 --baseline-base-url http://localhost:8001/v1
-
 # Concurrent execution (5 runs at a time)
 osmosis eval -m my_agent:agent_loop -d data.jsonl \
     --eval-fn rewards:compute_reward --batch-size 5 \
-    --model my-finetuned-model --base-url http://localhost:8000/v1
-
-# Benchmark subset
-osmosis eval -m my_agent:agent_loop -d data.jsonl \
-    --eval-fn rewards:compute_reward --limit 10 --offset 50 \
     --model my-finetuned-model --base-url http://localhost:8000/v1
 ```
 
@@ -742,7 +719,7 @@ See [Test Mode - Environment Variables](./test-mode.md#environment-variables) fo
 ## See Also
 
 - [Test Mode](./test-mode.md) - Test agent logic with external LLMs
-- [Architecture](./architecture.md) - System design overview
-- [API Reference](./api-reference.md) - Complete SDK API documentation
-- [Examples](./examples.md) - Working code examples
+- [Dataset Format](./datasets.md) - Supported formats and required columns
+- [Remote Rollout Examples](./remote-rollout/examples.md) - Working code examples
+- [Local Rollout MCP Tools](./local-rollout/mcp-tools.md) - MCP tool definition
 - [LiteLLM Providers](https://docs.litellm.ai/docs/providers) - Supported LLM providers
