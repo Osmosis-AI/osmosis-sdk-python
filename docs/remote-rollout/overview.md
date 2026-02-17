@@ -251,6 +251,5 @@ See the complete working example: [osmosis-remote-rollout-example](https://githu
 - [Agent Loop Guide](./agent-loop.md) -- Complete API documentation
 - [Examples](./examples.md) -- Full working examples
 - [Testing](./testing.md) -- Unit tests and mock trainer
-- [Deployment](./deployment.md) -- Docker, health checks, production config
 - [Dataset Format](../datasets.md) -- Supported formats and required columns
 - [Test Mode](../test-mode.md) -- Local testing with external LLM providers

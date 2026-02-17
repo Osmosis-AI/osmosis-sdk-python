@@ -201,4 +201,3 @@ Generates deterministic fake prompt token IDs for testing. The token count scale
 
 - [Examples](./examples.md) -- agent implementations and utilities
 - [Test Mode](../test-mode.md) -- testing with cloud LLMs
-- [Deployment](./deployment.md) -- production deployment

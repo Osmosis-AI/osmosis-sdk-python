@@ -691,5 +691,4 @@ For a complete, runnable project with tools, rewards, and server setup, see: [os
 ## See Also
 
 - [Testing](./testing.md) -- unit tests and mock trainer
-- [Deployment](./deployment.md) -- Docker, health checks, production config
 - [Agent Loop Guide](./agent-loop.md) -- endpoints, schemas, types

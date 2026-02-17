@@ -25,7 +25,6 @@ Self-hosted mode where you implement and run the agent loop as a server.
 - [Agent Loop Guide](./remote-rollout/agent-loop.md) -- API reference for classes, schemas, types
 - [Examples](./remote-rollout/examples.md) -- agent implementations and utilities
 - [Testing](./remote-rollout/testing.md) -- unit tests and mock trainer
-- [Deployment](./remote-rollout/deployment.md) -- Docker, health checks, production config
 
 ## Shared Concepts
 

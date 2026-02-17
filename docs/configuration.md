@@ -230,4 +230,3 @@ OPENAI_API_KEY=sk-...
 
 - [CLI Reference](./cli.md) -- all `osmosis` commands and options
 - [Troubleshooting](./troubleshooting.md) -- common errors and resolutions
-- [Deployment](./remote-rollout/deployment.md) -- production configuration for remote rollout
