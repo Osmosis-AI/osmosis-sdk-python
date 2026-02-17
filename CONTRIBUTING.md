@@ -71,9 +71,53 @@ pre-commit install
 
 ## Pull Requests
 
+### PR Title Format
+
+All PR titles **must** follow this format (enforced by CI):
+
+```
+[module] type: description
+```
+
+- **Modules**: `reward`, `rollout`, `server`, `cli`, `auth`, `eval`, `misc`, `ci`, `doc`
+- **Types**: `feat`, `fix`, `refactor`, `chore`, `test`, `doc`
+
+For breaking changes, add `[BREAKING]` before the module:
+
+```
+[BREAKING][module] type: description
+```
+
+**Examples:**
+
+```
+[rollout] feat: add streaming support for chat completions
+[server] fix: handle timeout in rollout init
+[cli] chore: update dependency versions
+[BREAKING][reward] refactor: rename decorator parameters
+```
+
+PR titles appear directly in auto-generated GitHub Release Notes, so keep them clear and descriptive.
+
+### Labels
+
+Add a label to your PR so it gets categorized correctly in Release Notes:
+
+| Label | Use when |
+|-------|----------|
+| `enhancement` | New feature |
+| `bug` | Bug fix |
+| `breaking` | Breaking change |
+| `documentation` | Docs update |
+| `chore` / `ci` / `refactor` / `dependencies` | Maintenance work |
+
+Module-specific labels (`reward`, `rollout`, `server`, `cli`, `auth`, `eval`) can also be added for filtering.
+
+### Workflow
+
 1. Fork the repository and create a feature branch
 2. Make your changes
 3. Run `uv run pytest` and `uv run ruff check .`
-4. Submit a pull request
+4. Submit a pull request with a properly formatted title and label
 
-CI will run linting, type checking (pyright + mypy), tests across Python 3.10–3.13, and a build validation on every PR.
+CI will run linting, type checking (pyright + mypy), tests across Python 3.10-3.13, PR title validation, and a build validation on every PR.
