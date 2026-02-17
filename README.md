@@ -22,27 +22,10 @@ Osmosis AI is a platform for training LLMs with reinforcement learning. You defi
 
 ## Quick Start
 
-The fastest way to get started is with **Local Rollout** using MCP tools. Clone the example repo and test it locally in under a minute:
+Pick a training mode and follow the example repo:
 
-```bash
-# 1. Install the SDK with MCP support
-pip install "osmosis-ai[mcp]"
-
-# 2. Clone the example repo
-git clone https://github.com/Osmosis-AI/osmosis-git-sync-example.git
-cd osmosis-git-sync-example
-
-# 3. Set your LLM API key
-export OPENAI_API_KEY="sk-..."
-
-# 4. Run the agent against the sample dataset
-osmosis test --mcp ./mcp -d test_data.jsonl --model openai/gpt-4o-mini
-
-# 5. Try interactive mode to step through each LLM call
-osmosis test --mcp ./mcp -d test_data.jsonl --interactive
-```
-
-For detailed setup, see the [Local Rollout docs](docs/local-rollout/overview.md). For custom agent architectures, see [Remote Rollout](docs/remote-rollout/overview.md).
+- **Local Rollout** (recommended for most users): **[osmosis-git-sync-example](https://github.com/Osmosis-AI/osmosis-git-sync-example)**
+- **Remote Rollout** (custom agent architectures): **[osmosis-remote-rollout-example](https://github.com/Osmosis-AI/osmosis-remote-rollout-example)**
 
 ## Two Training Modes
 
