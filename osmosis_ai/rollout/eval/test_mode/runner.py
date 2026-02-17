@@ -55,13 +55,16 @@ class LocalTestRunner(LocalRolloutRunner):
         row_index: int,
         max_turns: int = 10,
         completion_params: dict[str, Any] | None = None,
+        rollout_id: str | None = None,
+        request_metadata: dict[str, Any] | None = None,
     ) -> LocalTestRunResult:
         return await super().run_single(
             row=row,
             row_index=row_index,
             max_turns=max_turns,
             completion_params=completion_params,
-            rollout_id=f"test-{row_index}",
+            rollout_id=rollout_id or f"test-{row_index}",
+            request_metadata=request_metadata,
         )
 
 

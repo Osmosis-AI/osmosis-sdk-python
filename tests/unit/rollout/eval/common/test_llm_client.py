@@ -8,8 +8,55 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from osmosis_ai._litellm_compat import (
+    APIConnectionError as _APIConnectionError,
+)
+from osmosis_ai._litellm_compat import (
+    APIError as _APIError,
+)
+from osmosis_ai._litellm_compat import (
+    AuthenticationError as _AuthenticationError,
+)
+from osmosis_ai._litellm_compat import (
+    BudgetExceededError as _BudgetExceededError,
+)
+from osmosis_ai._litellm_compat import (
+    ContextWindowExceededError as _ContextWindowExceededError,
+)
+from osmosis_ai._litellm_compat import (
+    RateLimitError as _RateLimitError,
+)
+from osmosis_ai._litellm_compat import (
+    Timeout as _LitellmTimeout,
+)
 from osmosis_ai.rollout.client import CompletionsResult
 from osmosis_ai.rollout.core.schemas import OpenAIFunctionToolSchema
+
+
+def _make_litellm_error(cls: type, message: str, **attrs: Any) -> Exception:
+    """Instantiate a real litellm exception with required positional args.
+
+    litellm exception constructors require varying positional parameters
+    (message, model, llm_provider, etc.).  This helper fills them in so
+    tests only need to specify the human-readable *message*.
+    """
+    if cls is _BudgetExceededError:
+        exc = cls(current_cost=100.0, max_budget=50.0, message=message)
+    elif cls is _APIError:
+        exc = cls(
+            status_code=attrs.pop("status_code", 500),
+            message=message,
+            llm_provider="openai",
+            model="gpt-4o",
+        )
+    elif cls is _LitellmTimeout or cls is _ContextWindowExceededError:
+        exc = cls(message=message, model="gpt-4o", llm_provider="openai")
+    else:
+        # RateLimitError, AuthenticationError, APIConnectionError
+        exc = cls(message=message, llm_provider="openai", model="gpt-4o")
+    for k, v in attrs.items():
+        setattr(exc, k, v)
+    return exc
 
 
 class TestExternalLLMClient:
@@ -267,16 +314,6 @@ class TestExternalLLMClient:
     async def test_wraps_missing_provider_error_with_compact_hint(self) -> None:
         """Provider inference failures should return concise actionable errors."""
         mock_litellm = MagicMock()
-        for error_name in (
-            "RateLimitError",
-            "AuthenticationError",
-            "APIError",
-            "BudgetExceededError",
-            "Timeout",
-            "ContextWindowExceededError",
-            "APIConnectionError",
-        ):
-            setattr(mock_litellm, error_name, type(error_name, (Exception,), {}))
         mock_litellm.acompletion = AsyncMock(
             side_effect=Exception(
                 "litellm.BadRequestError: LLM Provider NOT provided. "
@@ -314,16 +351,6 @@ class TestPreflightCheck:
     async def test_preflight_success(self) -> None:
         """Preflight succeeds when acompletion returns normally."""
         mock_litellm = MagicMock()
-        for error_name in (
-            "RateLimitError",
-            "AuthenticationError",
-            "APIError",
-            "BudgetExceededError",
-            "Timeout",
-            "ContextWindowExceededError",
-            "APIConnectionError",
-        ):
-            setattr(mock_litellm, error_name, type(error_name, (Exception,), {}))
         mock_response = MagicMock()
         mock_response.choices = [
             MagicMock(
@@ -354,18 +381,7 @@ class TestPreflightCheck:
     async def test_preflight_auth_failure(self) -> None:
         """Preflight raises SystemicProviderError on auth failure."""
         mock_litellm = MagicMock()
-        for error_name in (
-            "RateLimitError",
-            "AuthenticationError",
-            "APIError",
-            "BudgetExceededError",
-            "Timeout",
-            "ContextWindowExceededError",
-            "APIConnectionError",
-        ):
-            setattr(mock_litellm, error_name, type(error_name, (Exception,), {}))
-
-        auth_error = mock_litellm.AuthenticationError("Invalid API key")
+        auth_error = _make_litellm_error(_AuthenticationError, "Invalid API key")
         mock_litellm.acompletion = AsyncMock(side_effect=auth_error)
 
         with patch(
@@ -383,18 +399,7 @@ class TestPreflightCheck:
     async def test_preflight_connection_failure(self) -> None:
         """Preflight raises SystemicProviderError on connection failure."""
         mock_litellm = MagicMock()
-        for error_name in (
-            "RateLimitError",
-            "AuthenticationError",
-            "APIError",
-            "BudgetExceededError",
-            "Timeout",
-            "ContextWindowExceededError",
-            "APIConnectionError",
-        ):
-            setattr(mock_litellm, error_name, type(error_name, (Exception,), {}))
-
-        conn_error = mock_litellm.APIConnectionError("Connection refused")
+        conn_error = _make_litellm_error(_APIConnectionError, "Connection refused")
         mock_litellm.acompletion = AsyncMock(side_effect=conn_error)
 
         with patch(
@@ -412,18 +417,7 @@ class TestPreflightCheck:
     async def test_preflight_rate_limit_passes(self) -> None:
         """Preflight treats RateLimitError as success (endpoint is reachable)."""
         mock_litellm = MagicMock()
-        for error_name in (
-            "RateLimitError",
-            "AuthenticationError",
-            "APIError",
-            "BudgetExceededError",
-            "Timeout",
-            "ContextWindowExceededError",
-            "APIConnectionError",
-        ):
-            setattr(mock_litellm, error_name, type(error_name, (Exception,), {}))
-
-        rate_error = mock_litellm.RateLimitError("Rate limited")
+        rate_error = _make_litellm_error(_RateLimitError, "Rate limited")
         mock_litellm.acompletion = AsyncMock(side_effect=rate_error)
 
         with patch(
@@ -440,19 +434,10 @@ class TestPreflightCheck:
     async def test_preflight_404_api_error(self) -> None:
         """Preflight raises SystemicProviderError on 404 API error."""
         mock_litellm = MagicMock()
-        for error_name in (
-            "RateLimitError",
-            "AuthenticationError",
-            "APIError",
-            "BudgetExceededError",
-            "Timeout",
-            "ContextWindowExceededError",
-            "APIConnectionError",
-        ):
-            setattr(mock_litellm, error_name, type(error_name, (Exception,), {}))
-
-        api_error = mock_litellm.APIError("Model not found")
-        api_error.status_code = 404
+        # Use a generic Exception with status_code=404 so it falls through
+        # to _classify_unknown_error which checks status_code.
+        api_error = Exception("Model not found")
+        api_error.status_code = 404  # type: ignore[attr-defined]
         mock_litellm.acompletion = AsyncMock(side_effect=api_error)
 
         with patch(
@@ -472,23 +457,14 @@ class TestPreflightCheck:
     ) -> None:
         """Preflight catches connection errors wrapped as InternalServerError (APIError subclass)."""
         mock_litellm = MagicMock()
-        for error_name in (
-            "RateLimitError",
-            "AuthenticationError",
-            "APIError",
-            "BudgetExceededError",
-            "Timeout",
-            "ContextWindowExceededError",
-            "APIConnectionError",
-        ):
-            setattr(mock_litellm, error_name, type(error_name, (Exception,), {}))
 
-        # litellm wraps connection errors as InternalServerError (APIError subclass)
-        InternalServerError = type("InternalServerError", (mock_litellm.APIError,), {})
-        api_error = InternalServerError(
+        # Simulate litellm wrapping connection errors as InternalServerError.
+        # Use a plain Exception with status_code and connection-error message
+        # so it falls through to _classify_unknown_error.
+        api_error = Exception(
             "InternalServerError: OpenAIException - Connection error."
         )
-        api_error.status_code = 500
+        api_error.status_code = 500  # type: ignore[attr-defined]
         mock_litellm.acompletion = AsyncMock(side_effect=api_error)
 
         with patch(
@@ -513,19 +489,8 @@ class TestSystemicErrorClassification:
     async def test_auth_error_is_systemic(self) -> None:
         """AuthenticationError should raise SystemicProviderError."""
         mock_litellm = MagicMock()
-        for error_name in (
-            "RateLimitError",
-            "AuthenticationError",
-            "APIError",
-            "BudgetExceededError",
-            "Timeout",
-            "ContextWindowExceededError",
-            "APIConnectionError",
-        ):
-            setattr(mock_litellm, error_name, type(error_name, (Exception,), {}))
-
         mock_litellm.acompletion = AsyncMock(
-            side_effect=mock_litellm.AuthenticationError("Invalid key")
+            side_effect=_make_litellm_error(_AuthenticationError, "Invalid key")
         )
 
         with patch(
@@ -543,19 +508,8 @@ class TestSystemicErrorClassification:
     async def test_connection_error_is_systemic(self) -> None:
         """APIConnectionError should raise SystemicProviderError."""
         mock_litellm = MagicMock()
-        for error_name in (
-            "RateLimitError",
-            "AuthenticationError",
-            "APIError",
-            "BudgetExceededError",
-            "Timeout",
-            "ContextWindowExceededError",
-            "APIConnectionError",
-        ):
-            setattr(mock_litellm, error_name, type(error_name, (Exception,), {}))
-
         mock_litellm.acompletion = AsyncMock(
-            side_effect=mock_litellm.APIConnectionError("Connection refused")
+            side_effect=_make_litellm_error(_APIConnectionError, "Connection refused")
         )
 
         with patch(
@@ -573,19 +527,8 @@ class TestSystemicErrorClassification:
     async def test_rate_limit_is_not_systemic(self) -> None:
         """RateLimitError should raise ProviderError, not SystemicProviderError."""
         mock_litellm = MagicMock()
-        for error_name in (
-            "RateLimitError",
-            "AuthenticationError",
-            "APIError",
-            "BudgetExceededError",
-            "Timeout",
-            "ContextWindowExceededError",
-            "APIConnectionError",
-        ):
-            setattr(mock_litellm, error_name, type(error_name, (Exception,), {}))
-
         mock_litellm.acompletion = AsyncMock(
-            side_effect=mock_litellm.RateLimitError("Too many requests")
+            side_effect=_make_litellm_error(_RateLimitError, "Too many requests")
         )
 
         with patch(
@@ -609,19 +552,10 @@ class TestSystemicErrorClassification:
     async def test_api_error_401_is_systemic(self) -> None:
         """APIError with 401 status should raise SystemicProviderError."""
         mock_litellm = MagicMock()
-        for error_name in (
-            "RateLimitError",
-            "AuthenticationError",
-            "APIError",
-            "BudgetExceededError",
-            "Timeout",
-            "ContextWindowExceededError",
-            "APIConnectionError",
-        ):
-            setattr(mock_litellm, error_name, type(error_name, (Exception,), {}))
-
-        api_error = mock_litellm.APIError("Unauthorized")
-        api_error.status_code = 401
+        # Use a generic Exception with status_code=401 so it falls through
+        # to _classify_unknown_error which checks status_code.
+        api_error = Exception("Unauthorized")
+        api_error.status_code = 401  # type: ignore[attr-defined]
         mock_litellm.acompletion = AsyncMock(side_effect=api_error)
 
         with patch(
@@ -639,23 +573,13 @@ class TestSystemicErrorClassification:
     async def test_connection_error_wrapped_as_api_error_is_systemic(self) -> None:
         """APIError with 'Connection error' message should raise SystemicProviderError."""
         mock_litellm = MagicMock()
-        for error_name in (
-            "RateLimitError",
-            "AuthenticationError",
-            "APIError",
-            "BudgetExceededError",
-            "Timeout",
-            "ContextWindowExceededError",
-            "APIConnectionError",
-        ):
-            setattr(mock_litellm, error_name, type(error_name, (Exception,), {}))
-
-        # Simulate litellm wrapping connection error as InternalServerError
-        InternalServerError = type("InternalServerError", (mock_litellm.APIError,), {})
-        api_error = InternalServerError(
+        # Simulate litellm wrapping connection error as InternalServerError.
+        # Use a plain Exception with status_code and connection-error message
+        # so it falls through to _classify_unknown_error.
+        api_error = Exception(
             "InternalServerError: OpenAIException - Connection error."
         )
-        api_error.status_code = 500
+        api_error.status_code = 500  # type: ignore[attr-defined]
         mock_litellm.acompletion = AsyncMock(side_effect=api_error)
 
         with patch(
@@ -676,19 +600,10 @@ class TestSystemicErrorClassification:
     async def test_api_error_500_is_not_systemic(self) -> None:
         """APIError with 500 status should raise ProviderError, not SystemicProviderError."""
         mock_litellm = MagicMock()
-        for error_name in (
-            "RateLimitError",
-            "AuthenticationError",
-            "APIError",
-            "BudgetExceededError",
-            "Timeout",
-            "ContextWindowExceededError",
-            "APIConnectionError",
-        ):
-            setattr(mock_litellm, error_name, type(error_name, (Exception,), {}))
-
-        api_error = mock_litellm.APIError("Internal error")
-        api_error.status_code = 500
+        # Use a generic Exception with status_code=500 so it falls through
+        # to _classify_unknown_error which checks status_code.
+        api_error = Exception("Internal error")
+        api_error.status_code = 500  # type: ignore[attr-defined]
         mock_litellm.acompletion = AsyncMock(side_effect=api_error)
 
         with patch(

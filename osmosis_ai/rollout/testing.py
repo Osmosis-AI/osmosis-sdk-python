@@ -34,6 +34,7 @@ if TYPE_CHECKING:
     from fastapi.testclient import TestClient
 
 from osmosis_ai.rollout.core.schemas import (
+    CompletionsChoice,
     CompletionsRequest,
     CompletionsResponse,
     CompletionUsage,
@@ -231,11 +232,11 @@ def create_mock_trainer_app(
             created=int(time.time()),
             model=request.model,
             choices=[
-                {
-                    "index": 0,
-                    "message": assistant_message,
-                    "finish_reason": "stop",
-                }
+                CompletionsChoice(
+                    index=0,
+                    message=assistant_message,
+                    finish_reason="stop",
+                )
             ],
             usage=CompletionUsage(
                 prompt_tokens=len(prompt_token_ids),
@@ -294,7 +295,7 @@ def patch_httpx_for_mock_trainer(
 
     original_post = httpx.AsyncClient.post
 
-    async def mock_post(self, url: str, **kwargs):
+    async def mock_post(self: Any, url: str, **kwargs: Any) -> Any:
         if "/v1/chat/completions" in url:
             resp = client.post("/v1/chat/completions", **kwargs)
             return httpx.Response(

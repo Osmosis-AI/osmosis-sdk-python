@@ -95,7 +95,8 @@ def platform_request(
 
     try:
         with urlopen(request, timeout=timeout) as response:
-            return json.loads(response.read().decode())
+            result: dict[str, Any] = json.loads(response.read().decode())
+            return result
     except HTTPError as e:
         if e.code == 401:
             _handle_401_and_cleanup()

@@ -378,7 +378,9 @@ class EvalRunner:
 
         total_start = time.monotonic()
         row_results: list[EvalRowResult] = []
-        model_tags = ["primary", "baseline"] if self.has_baseline else [None]
+        model_tags: list[str | None] = (
+            ["primary", "baseline"] if self.has_baseline else [None]
+        )
         total = len(rows) * n_runs * len(model_tags)
         current = 0
         stopped_early = False

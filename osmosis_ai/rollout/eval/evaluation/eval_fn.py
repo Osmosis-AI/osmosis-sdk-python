@@ -94,6 +94,7 @@ class EvalFnWrapper:
         Returns:
             Float score from the eval function.
         """
+        kwargs: dict[str, Any]
         if self._mode == "simple":
             solution_str = self._extract_last_assistant_content(messages)
             kwargs = {
@@ -162,7 +163,8 @@ def load_eval_fn(module_path: str) -> Callable:
     if not callable(fn):
         raise EvalFnError(f"'{attr_name}' in '{module_name}' is not callable")
 
-    return fn
+    result: Callable[..., Any] = fn
+    return result
 
 
 def load_eval_fns(module_paths: list[str]) -> list[EvalFnWrapper]:

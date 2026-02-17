@@ -225,7 +225,7 @@ class TestMCPAgentLoopGetTools:
         )
 
         agent = MCPAgentLoop(server)
-        tools = agent.get_tools(None)  # type: ignore[arg-type]
+        tools = agent.get_default_tools()
 
         assert len(tools) == 2
         names = {t.function.name for t in tools}

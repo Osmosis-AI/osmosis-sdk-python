@@ -4,11 +4,12 @@ import copy
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import yaml
 from yaml.representer import SafeRepresenter
 
+from ..rubric_types import ModelInfo
 from .errors import CLIError
 from .shared import coerce_optional_float
 
@@ -23,7 +24,7 @@ class ParsedItem:
 class RubricConfig:
     rubric_id: str
     rubric_text: str
-    model_info: dict[str, Any]
+    model_info: ModelInfo
     score_min: float | None
     score_max: float | None
     system_prompt: str | None
@@ -75,7 +76,7 @@ class RubricConfigDocumentSchema:
 class BaseRubricConfigSchema(RubricConfigDocumentSchema):
     """Schema handling documents without an explicit version."""
 
-    version = None
+    version: int | None = None
 
     def parse_document(
         self,
@@ -95,7 +96,7 @@ class BaseRubricConfigSchema(RubricConfigDocumentSchema):
 class Version1RubricConfigSchema(BaseRubricConfigSchema):
     """Schema for version 1 documents."""
 
-    version = 1
+    version: int | None = 1
 
 
 class RubricConfigParser:
@@ -270,7 +271,7 @@ def _build_document_configs(
         configs[rubric_key] = RubricConfig(
             rubric_id=rubric_key,
             rubric_text=rubric_text,
-            model_info=copy.deepcopy(model_info),
+            model_info=copy.deepcopy(cast(ModelInfo, model_info)),
             score_min=score_min,
             score_max=score_max,
             system_prompt=system_prompt if isinstance(system_prompt, str) else None,
@@ -422,7 +423,7 @@ class _LiteralSafeDumper(yaml.SafeDumper):
     """YAML dumper that preserves multiline strings with literal blocks."""
 
 
-def _represent_str(dumper: yaml.Dumper, data: str):
+def _represent_str(dumper: _LiteralSafeDumper, data: str) -> Any:
     if "\n" in data:
         return dumper.represent_scalar("tag:yaml.org,2002:str", data, style="|")
     return SafeRepresenter.represent_str(dumper, data)

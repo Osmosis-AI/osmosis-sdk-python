@@ -474,7 +474,8 @@ class InteractiveRunner:
                 handler = getattr(self, handler_name)
                 should_return, return_value = handler()
                 if should_return:
-                    return return_value
+                    result: bool = return_value
+                    return result
             else:
                 self._print_help(user_input)
 
