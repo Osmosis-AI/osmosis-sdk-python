@@ -1,4 +1,4 @@
-"""Tests for LiteLLM-based rubric evaluation."""
+"""Tests for osmosis_ai.rubric_eval — prompt building, JSON parsing, and LiteLLM evaluation."""
 
 import json
 import sys
@@ -9,12 +9,62 @@ import pytest
 
 from osmosis_ai.rubric_eval import (
     DEFAULT_REQUEST_TIMEOUT_SECONDS,
+    _build_user_prompt,
     _default_timeout_for_model,
     _sanitize_json,
+    _select_text,
     _to_litellm_model,
     evaluate_rubric,
 )
 from osmosis_ai.rubric_types import ModelNotFoundError, ProviderRequestError
+
+# =============================================================================
+# _select_text / _build_user_prompt Tests
+# =============================================================================
+
+
+def test_build_user_prompt_basic_blocks() -> None:
+    prompt = _build_user_prompt(
+        rubric_prompt="Score factual accuracy.",
+        score_min=0.0,
+        score_max=1.0,
+        candidate_output="The capital of France is Paris.",
+        original_input=None,
+        ground_truth=None,
+        metadata=None,
+    )
+
+    assert "Rubric:" in prompt
+    assert "Score range: 0.0 to 1.0." in prompt
+    assert "<<<BEGIN_CANDIDATE_OUTPUT>>>" in prompt
+    assert "The capital of France is Paris." in prompt
+
+
+def test_build_user_prompt_with_optional_sections() -> None:
+    prompt = _build_user_prompt(
+        rubric_prompt="Score the tone.",
+        score_min=0.0,
+        score_max=5.0,
+        candidate_output="Thank you for your patience!",
+        original_input="Please draft a friendly reply.",
+        ground_truth="Thanks for waiting!",
+        metadata={"notes": "Consider politeness."},
+    )
+
+    assert "<<<BEGIN_ORIGINAL_INPUT>>>" in prompt
+    assert "<<<BEGIN_GROUND_TRUTH>>>" in prompt
+    assert "<<<BEGIN_METADATA>>>" in prompt
+    assert "Consider politeness." in prompt
+
+
+def test_select_text_prefers_first_non_empty() -> None:
+    assert _select_text(None, "", "  value ", "fallback") == "value"
+    assert _select_text(None, "  ") is None
+
+
+# =============================================================================
+# _to_litellm_model Tests
+# =============================================================================
 
 
 class TestToLitellmModel:
@@ -75,6 +125,11 @@ class TestToLitellmModel:
         )
 
 
+# =============================================================================
+# _default_timeout_for_model Tests
+# =============================================================================
+
+
 class TestDefaultTimeoutForModel:
     """Tests for default timeout calculation."""
 
@@ -114,6 +169,11 @@ class TestDefaultTimeoutForModel:
         )
 
 
+# =============================================================================
+# _sanitize_json Tests
+# =============================================================================
+
+
 class TestSanitizeJson:
     """Tests for JSON response parsing."""
 
@@ -142,6 +202,11 @@ class TestSanitizeJson:
     def test_missing_explanation_raises(self):
         with pytest.raises(ValueError, match="'explanation'"):
             _sanitize_json('{"score": 0.5}')
+
+
+# =============================================================================
+# evaluate_rubric Tests
+# =============================================================================
 
 
 def _create_mock_litellm_response(score: float, explanation: str) -> MagicMock:

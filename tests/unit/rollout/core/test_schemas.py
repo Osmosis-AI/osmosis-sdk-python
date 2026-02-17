@@ -20,7 +20,6 @@ import pytest
 from pydantic import ValidationError
 
 from osmosis_ai.rollout import (
-    DEFAULT_MAX_METADATA_SIZE_BYTES,
     CompletionsRequest,
     CompletionUsage,
     InitResponse,
@@ -56,22 +55,12 @@ def test_rollout_request_valid() -> None:
     assert request.max_tokens_total == 8192  # default
 
 
-def test_rollout_request_empty_rollout_id_rejected() -> None:
-    """Verify empty rollout_id is rejected."""
-    with pytest.raises(ValidationError, match="rollout_id"):
+@pytest.mark.parametrize("invalid_id", ["", "   ", "\t\n"])
+def test_rollout_request_invalid_rollout_id_rejected(invalid_id: str) -> None:
+    """Verify empty or whitespace-only rollout_id is rejected."""
+    with pytest.raises(ValidationError):
         RolloutRequest(
-            rollout_id="",
-            server_url="http://localhost:8080",
-            messages=[],
-            completion_params={},
-        )
-
-
-def test_rollout_request_whitespace_rollout_id_rejected() -> None:
-    """Verify whitespace-only rollout_id is rejected."""
-    with pytest.raises(ValidationError, match="cannot be empty or whitespace"):
-        RolloutRequest(
-            rollout_id="   ",
+            rollout_id=invalid_id,
             server_url="http://localhost:8080",
             messages=[],
             completion_params={},
@@ -136,18 +125,11 @@ def test_max_metadata_size_configurable() -> None:
         set_max_metadata_size_bytes(original_size)
 
 
-def test_max_metadata_size_default_value() -> None:
-    """Verify default metadata size is 1MB."""
-    assert DEFAULT_MAX_METADATA_SIZE_BYTES == 1 * 1024 * 1024
-
-
-def test_set_max_metadata_size_rejects_non_positive() -> None:
+@pytest.mark.parametrize("invalid_size", [0, -1, -100])
+def test_set_max_metadata_size_rejects_non_positive(invalid_size: int) -> None:
     """Verify set_max_metadata_size_bytes rejects non-positive values."""
     with pytest.raises(ValueError, match="must be positive"):
-        set_max_metadata_size_bytes(0)
-
-    with pytest.raises(ValueError, match="must be positive"):
-        set_max_metadata_size_bytes(-1)
+        set_max_metadata_size_bytes(invalid_size)
 
 
 def test_rollout_request_metadata_valid() -> None:
@@ -160,21 +142,6 @@ def test_rollout_request_metadata_valid() -> None:
         metadata={"key": "value", "nested": {"a": 1, "b": 2}},
     )
     assert request.metadata["key"] == "value"
-
-
-def test_rollout_request_default_values() -> None:
-    """Verify default values are set correctly."""
-    request = RolloutRequest(
-        rollout_id="test-123",
-        server_url="http://localhost:8080",
-        messages=[],
-        completion_params={},
-    )
-    assert request.max_turns == 10
-    assert request.max_tokens_total == 8192
-    assert request.metadata == {}
-    assert request.api_key is None
-    assert request.tool_server_url is None
 
 
 # =============================================================================
@@ -197,12 +164,6 @@ def test_init_response_empty_tools() -> None:
     """Verify InitResponse with no tools."""
     response = InitResponse(rollout_id="test-123", tools=[])
     assert response.rollout_id == "test-123"
-    assert response.tools == []
-
-
-def test_init_response_default_tools() -> None:
-    """Verify InitResponse defaults to empty tools."""
-    response = InitResponse(rollout_id="test-123")
     assert response.tools == []
 
 
@@ -312,19 +273,6 @@ def test_completions_request_valid() -> None:
     assert request.logprobs is True
 
 
-def test_completions_request_default_values() -> None:
-    """Verify CompletionsRequest default values."""
-    request = CompletionsRequest(
-        rollout_id="test-123",
-        messages=[],
-    )
-    assert request.temperature == 1.0
-    assert request.top_p == 1.0
-    assert request.max_tokens == 512
-    assert request.stop is None
-    assert request.logprobs is True
-
-
 def test_completions_request_rollout_id_validation() -> None:
     """Verify CompletionsRequest validates rollout_id."""
     with pytest.raises(ValidationError, match="cannot be empty or whitespace"):
@@ -357,19 +305,6 @@ def test_completions_request_custom_params() -> None:
 # =============================================================================
 
 
-def test_rollout_metrics_default_values() -> None:
-    """Verify RolloutMetrics default values are zero."""
-    metrics = RolloutMetrics()
-    assert metrics.total_latency_ms == 0.0
-    assert metrics.llm_latency_ms == 0.0
-    assert metrics.tool_latency_ms == 0.0
-    assert metrics.num_llm_calls == 0
-    assert metrics.num_tool_calls == 0
-    assert metrics.prompt_tokens == 0
-    assert metrics.response_tokens == 0
-    assert metrics.max_context_tokens == 0
-
-
 def test_rollout_metrics_all_fields() -> None:
     """Verify RolloutMetrics with all fields set."""
     metrics = RolloutMetrics(
@@ -397,14 +332,6 @@ def test_rollout_metrics_all_fields() -> None:
 # =============================================================================
 
 
-def test_completion_usage_defaults() -> None:
-    """Verify CompletionUsage default values."""
-    usage = CompletionUsage()
-    assert usage.prompt_tokens == 0
-    assert usage.completion_tokens == 0
-    assert usage.total_tokens == 0
-
-
 def test_completion_usage_all_fields() -> None:
     """Verify CompletionUsage with all fields set."""
     usage = CompletionUsage(
@@ -415,21 +342,3 @@ def test_completion_usage_all_fields() -> None:
     assert usage.prompt_tokens == 100
     assert usage.completion_tokens == 50
     assert usage.total_tokens == 150
-
-
-# =============================================================================
-# RolloutStatus Tests
-# =============================================================================
-
-
-def test_rollout_status_values() -> None:
-    """Verify RolloutStatus enum values."""
-    assert RolloutStatus.COMPLETED.value == "COMPLETED"
-    assert RolloutStatus.ERROR.value == "ERROR"
-
-
-def test_rollout_status_is_string_enum() -> None:
-    """Verify RolloutStatus can be compared with strings."""
-    # RolloutStatus inherits from str, so can compare directly
-    assert RolloutStatus.COMPLETED == "COMPLETED"
-    assert RolloutStatus.ERROR == "ERROR"

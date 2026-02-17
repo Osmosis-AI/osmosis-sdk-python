@@ -274,8 +274,10 @@ async def test_rollout_context_chat_calls_llm(
 
 
 def test_agent_loop_subclass_requires_name() -> None:
-    """Verify subclass without name raises TypeError."""
-    with pytest.raises(TypeError, match="must define a 'name' class attribute"):
+    """Verify subclass without name raises TypeError mentioning the class name."""
+    with pytest.raises(
+        TypeError, match=r"NoNameLoop.*must define a 'name' class attribute"
+    ):
 
         class NoNameLoop(RolloutAgentLoop):
             def get_tools(self, request):
@@ -328,8 +330,9 @@ def test_agent_loop_abstract_methods_must_be_implemented() -> None:
 
         # Missing run() method
 
-    with pytest.raises(TypeError, match="abstract"):
+    with pytest.raises(TypeError, match="run") as exc_info:
         PartialLoop()
+    assert "abstract" in str(exc_info.value).lower()
 
 
 @pytest.mark.asyncio
@@ -391,3 +394,138 @@ async def test_agent_loop_run_can_return_error_result(
 
     assert result.status == "ERROR"
     assert result.error_message == "Something failed"
+
+
+# =============================================================================
+# RolloutContext Debug Logging Tests
+# =============================================================================
+
+
+def test_rollout_context_debug_disabled_by_default(
+    sample_rollout_request: RolloutRequest,
+) -> None:
+    """Verify debug logging is disabled by default."""
+    mock_llm = MagicMock()
+    ctx = RolloutContext(
+        request=sample_rollout_request,
+        tools=[],
+        llm=mock_llm,
+    )
+
+    assert ctx.debug_enabled is False
+    assert ctx._debug_dir is None
+
+
+def test_rollout_context_debug_enabled_when_dir_set(
+    sample_rollout_request: RolloutRequest,
+) -> None:
+    """Verify debug logging is enabled when _debug_dir is set."""
+    mock_llm = MagicMock()
+    ctx = RolloutContext(
+        request=sample_rollout_request,
+        tools=[],
+        llm=mock_llm,
+        _debug_dir="/tmp/debug",
+    )
+
+    assert ctx.debug_enabled is True
+    assert ctx._debug_dir == "/tmp/debug"
+
+
+def test_rollout_context_log_event_noop_when_disabled(
+    sample_rollout_request: RolloutRequest,
+) -> None:
+    """Verify log_event is a no-op when debug logging is disabled."""
+    mock_llm = MagicMock()
+    ctx = RolloutContext(
+        request=sample_rollout_request,
+        tools=[],
+        llm=mock_llm,
+    )
+
+    # Should not raise or have any effect
+    ctx.log_event("test_event", key="value")
+
+
+def test_rollout_context_log_event_writes_to_file(tmp_path) -> None:
+    """Verify log_event writes events to JSONL file."""
+    import json
+    import os
+
+    debug_dir = str(tmp_path / "debug_logs")
+
+    request = RolloutRequest(
+        rollout_id="test-rollout-456",
+        server_url="http://localhost:8080",
+        messages=[],
+        completion_params={},
+    )
+
+    mock_llm = MagicMock()
+    ctx = RolloutContext(
+        request=request,
+        tools=[],
+        llm=mock_llm,
+        _debug_dir=debug_dir,
+    )
+
+    # Log some events
+    ctx.log_event("pre_llm", turn=0, num_messages=3)
+    ctx.log_event("llm_response", turn=0, has_tool_calls=True)
+    ctx.log_event("rollout_complete", finish_reason="stop", reward=1.0)
+
+    # Verify file was created
+    debug_file = os.path.join(debug_dir, "test-rollout-456.jsonl")
+    assert os.path.exists(debug_file)
+
+    # Verify contents
+    with open(debug_file, encoding="utf-8") as f:
+        lines = f.readlines()
+
+    assert len(lines) == 3
+
+    event1 = json.loads(lines[0])
+    assert event1["event"] == "pre_llm"
+    assert event1["rollout_id"] == "test-rollout-456"
+    assert event1["turn"] == 0
+    assert event1["num_messages"] == 3
+
+    event2 = json.loads(lines[1])
+    assert event2["event"] == "llm_response"
+    assert event2["has_tool_calls"] is True
+
+    event3 = json.loads(lines[2])
+    assert event3["event"] == "rollout_complete"
+    assert event3["finish_reason"] == "stop"
+    assert event3["reward"] == 1.0
+
+
+def test_rollout_context_get_debug_file_path() -> None:
+    """Verify _get_debug_file_path returns correct path."""
+    request = RolloutRequest(
+        rollout_id="my-rollout-id",
+        server_url="http://localhost:8080",
+        messages=[],
+        completion_params={},
+    )
+
+    mock_llm = MagicMock()
+
+    # Without debug_dir
+    ctx_no_debug = RolloutContext(
+        request=request,
+        tools=[],
+        llm=mock_llm,
+    )
+    assert ctx_no_debug._get_debug_file_path() is None
+
+    # With debug_dir
+    ctx_with_debug = RolloutContext(
+        request=request,
+        tools=[],
+        llm=mock_llm,
+        _debug_dir="/var/log/rollouts",
+    )
+    assert (
+        ctx_with_debug._get_debug_file_path() == "/var/log/rollouts/my-rollout-id.jsonl"
+    )

@@ -18,6 +18,8 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
+
 from osmosis_ai.rollout import (
     count_messages_by_role,
     get_message_content,
@@ -78,35 +80,20 @@ def test_parse_tool_calls_empty_list() -> None:
 # =============================================================================
 
 
-def test_normalize_stop_none() -> None:
-    """Verify normalize_stop returns None for None input."""
-    assert normalize_stop(None) is None
-
-
-def test_normalize_stop_string() -> None:
-    """Verify normalize_stop converts string to list."""
-    assert normalize_stop("stop") == ["stop"]
-    assert normalize_stop("STOP") == ["STOP"]
-
-
-def test_normalize_stop_list_of_strings() -> None:
-    """Verify normalize_stop passes list of strings through."""
-    assert normalize_stop(["a", "b"]) == ["a", "b"]
-
-
-def test_normalize_stop_list_converts_to_strings() -> None:
-    """Verify normalize_stop converts list items to strings."""
-    assert normalize_stop([1, 2, 3]) == ["1", "2", "3"]
-
-
-def test_normalize_stop_empty_string() -> None:
-    """Verify normalize_stop handles empty string."""
-    assert normalize_stop("") == [""]
-
-
-def test_normalize_stop_empty_list() -> None:
-    """Verify normalize_stop handles empty list."""
-    assert normalize_stop([]) == []
+@pytest.mark.parametrize(
+    "input_val,expected",
+    [
+        (None, None),
+        ("stop", ["stop"]),
+        (["a", "b"], ["a", "b"]),
+        ([1, 2, 3], ["1", "2", "3"]),
+        ("", [""]),
+        ([], []),
+    ],
+)
+def test_normalize_stop(input_val: Any, expected: Any) -> None:
+    """Verify normalize_stop normalizes various input formats."""
+    assert normalize_stop(input_val) == expected
 
 
 def test_normalize_stop_invalid_type() -> None:
@@ -155,34 +142,19 @@ def test_get_message_content_not_string() -> None:
 # =============================================================================
 
 
-def test_get_message_role_user() -> None:
-    """Verify get_message_role extracts user role."""
-    message = {"role": "user", "content": "Hi"}
-    assert get_message_role(message) == "user"
-
-
-def test_get_message_role_assistant() -> None:
-    """Verify get_message_role extracts assistant role."""
-    message = {"role": "assistant", "content": "Hello"}
-    assert get_message_role(message) == "assistant"
-
-
-def test_get_message_role_tool() -> None:
-    """Verify get_message_role extracts tool role."""
-    message = {"role": "tool", "content": "42", "tool_call_id": "call_123"}
-    assert get_message_role(message) == "tool"
-
-
-def test_get_message_role_missing() -> None:
-    """Verify get_message_role returns 'unknown' if missing."""
-    message = {"content": "Hi"}
-    assert get_message_role(message) == "unknown"
-
-
-def test_get_message_role_not_string() -> None:
-    """Verify get_message_role returns 'unknown' for non-string role."""
-    message = {"role": 123}
-    assert get_message_role(message) == "unknown"
+@pytest.mark.parametrize(
+    "message,expected",
+    [
+        ({"role": "user", "content": "Hi"}, "user"),
+        ({"role": "assistant", "content": "Hello"}, "assistant"),
+        ({"role": "tool", "content": "42", "tool_call_id": "call_123"}, "tool"),
+        ({"content": "Hi"}, "unknown"),
+        ({"role": 123}, "unknown"),
+    ],
+)
+def test_get_message_role(message: dict[str, Any], expected: str) -> None:
+    """Verify get_message_role extracts role or returns 'unknown'."""
+    assert get_message_role(message) == expected
 
 
 # =============================================================================
@@ -190,37 +162,23 @@ def test_get_message_role_not_string() -> None:
 # =============================================================================
 
 
-def test_is_assistant_message_true() -> None:
-    """Verify is_assistant_message returns True for assistant."""
-    assert is_assistant_message({"role": "assistant"}) is True
-
-
-def test_is_assistant_message_false() -> None:
-    """Verify is_assistant_message returns False for other roles."""
-    assert is_assistant_message({"role": "user"}) is False
-    assert is_assistant_message({"role": "tool"}) is False
-
-
-def test_is_tool_message_true() -> None:
-    """Verify is_tool_message returns True for tool."""
-    assert is_tool_message({"role": "tool"}) is True
-
-
-def test_is_tool_message_false() -> None:
-    """Verify is_tool_message returns False for other roles."""
-    assert is_tool_message({"role": "user"}) is False
-    assert is_tool_message({"role": "assistant"}) is False
-
-
-def test_is_user_message_true() -> None:
-    """Verify is_user_message returns True for user."""
-    assert is_user_message({"role": "user"}) is True
-
-
-def test_is_user_message_false() -> None:
-    """Verify is_user_message returns False for other roles."""
-    assert is_user_message({"role": "assistant"}) is False
-    assert is_user_message({"role": "tool"}) is False
+@pytest.mark.parametrize(
+    "func,role,expected",
+    [
+        (is_assistant_message, "assistant", True),
+        (is_assistant_message, "user", False),
+        (is_tool_message, "tool", True),
+        (is_tool_message, "user", False),
+        (is_user_message, "user", True),
+        (is_user_message, "assistant", False),
+    ],
+)
+def test_is_role_message(func: Any, role: str, expected: bool) -> None:
+    """Verify is_*_message functions return correct bool for given role."""
+    msg: dict[str, Any] = {"role": role, "content": "test"}
+    if role == "tool":
+        msg["tool_call_id"] = "call_123"
+    assert func(msg) == expected
 
 
 # =============================================================================

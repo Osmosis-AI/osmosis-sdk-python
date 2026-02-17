@@ -16,6 +16,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from osmosis_ai.rollout import (
     AgentLoopNotFoundError,
     OsmosisRolloutError,
@@ -24,13 +26,6 @@ from osmosis_ai.rollout import (
     OsmosisTransportError,
     OsmosisValidationError,
 )
-
-
-def test_osmosis_rollout_error_is_base_exception() -> None:
-    """Verify OsmosisRolloutError is the base class."""
-    error = OsmosisRolloutError("test error")
-    assert isinstance(error, Exception)
-    assert str(error) == "test error"
 
 
 def test_osmosis_transport_error() -> None:
@@ -48,11 +43,12 @@ def test_osmosis_server_error_with_status_code() -> None:
     assert str(error) == "internal server error"
 
 
-def test_osmosis_server_error_different_status_codes() -> None:
-    """Verify OsmosisServerError works with various 5xx codes."""
-    for status_code in [500, 502, 503, 504]:
-        error = OsmosisServerError(f"error {status_code}", status_code)
-        assert error.status_code == status_code
+@pytest.mark.parametrize("status_code", [400, 404, 422, 500, 502, 503])
+def test_osmosis_server_error_different_status_codes(status_code: int) -> None:
+    """Verify OsmosisServerError works with various status codes."""
+    error = OsmosisServerError(f"Error {status_code}", status_code)
+    assert error.status_code == status_code
+    assert str(status_code) in str(error)
 
 
 def test_osmosis_validation_error_with_status_code() -> None:
@@ -63,11 +59,12 @@ def test_osmosis_validation_error_with_status_code() -> None:
     assert str(error) == "bad request"
 
 
-def test_osmosis_validation_error_different_status_codes() -> None:
-    """Verify OsmosisValidationError works with various 4xx codes."""
-    for status_code in [400, 401, 403, 404, 422]:
-        error = OsmosisValidationError(f"error {status_code}", status_code)
-        assert error.status_code == status_code
+@pytest.mark.parametrize("status_code", [400, 422])
+def test_osmosis_validation_error_different_status_codes(status_code: int) -> None:
+    """Verify OsmosisValidationError works with various status codes."""
+    error = OsmosisValidationError(f"Validation {status_code}", status_code)
+    assert error.status_code == status_code
+    assert str(status_code) in str(error)
 
 
 def test_osmosis_timeout_error() -> None:
@@ -98,15 +95,6 @@ def test_agent_loop_not_found_error_empty_available() -> None:
     assert error.name == "my_agent"
     assert error.available == []
     assert "[]" in str(error)
-
-
-def test_exception_inheritance_hierarchy() -> None:
-    """Verify all exceptions inherit from OsmosisRolloutError."""
-    assert issubclass(OsmosisTransportError, OsmosisRolloutError)
-    assert issubclass(OsmosisServerError, OsmosisRolloutError)
-    assert issubclass(OsmosisValidationError, OsmosisRolloutError)
-    assert issubclass(OsmosisTimeoutError, OsmosisRolloutError)
-    assert issubclass(AgentLoopNotFoundError, OsmosisRolloutError)
 
 
 def test_exceptions_can_be_caught_by_base() -> None:

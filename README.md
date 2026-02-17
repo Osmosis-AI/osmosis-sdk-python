@@ -17,20 +17,7 @@ Requires Python 3.10 or newer.
 
 This installs the Osmosis CLI and pulls in `litellm` (unified LLM interface supporting 100+ providers) along with supporting utilities such as `PyYAML`, `python-dotenv`, and `requests`.
 
-For development:
-```bash
-git clone https://github.com/Osmosis-AI/osmosis-sdk-python
-cd osmosis-sdk-python
-
-# Install package in editable mode
-pip install -e .
-
-# Install with development dependencies (pytest, formatters, etc.)
-pip install -e ".[dev]"
-
-# Install pre-commit hooks (runs ruff on every commit)
-pre-commit install
-```
+For development setup, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Quick Start
 
@@ -390,61 +377,13 @@ PYTHONPATH=. python examples/reward_functions.py
 PYTHONPATH=. python examples/rubric_functions.py  # Uncomment the provider you need before running
 ```
 
-## Testing
+## Contributing
 
-Run `python -m pytest` (or any subset under `tests/`) to exercise the updated helpers:
-
-- `tests/test_rubric_eval.py` covers prompt construction for `solution_str` evaluations.
-- `tests/test_cli_services.py` validates dataset parsing, extra-info enrichment, and engine interactions.
-- `tests/test_cli.py` ensures the CLI pathways surface the new fields end to end.
-
-Add additional tests under `tests/` as you extend the library.
-
-## Linting & Formatting
-
-This project uses [Ruff](https://docs.astral.sh/ruff/) for linting and code formatting. Configuration lives in `pyproject.toml` under `[tool.ruff]`.
-
-```bash
-# Install dev dependencies (includes ruff)
-pip install -e ".[dev]"
-
-# Verify Ruff version
-ruff --version
-
-# Check for lint errors
-ruff check .
-
-# Auto-fix lint errors where possible
-ruff check --fix .
-
-# Format code
-ruff format .
-
-# Check formatting without modifying files
-ruff format --check .
-```
-
-Ruff is pinned to one version across `pyproject.toml`, `.pre-commit-config.yaml`, and CI so local checks, pre-commit hooks, and GitHub Actions produce the same results.
-
-A [pre-commit](https://pre-commit.com/) configuration is included to run Ruff automatically on every commit:
-
-```bash
-pre-commit install
-```
-
-This ensures `ruff check --fix` and `ruff format` run before each commit. Please make sure hooks are installed before submitting a pull request.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, testing, linting, and PR guidelines.
 
 ## License
 
 MIT License - see [LICENSE](LICENSE) file for details.
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Run tests and examples
-5. Submit a pull request
 
 ## Links
 

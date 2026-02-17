@@ -879,3 +879,668 @@ class TestEvalRunnerBaseline:
         )
         assert primary_summary.eval_summaries["score_eval"].mean == 1.0
         assert baseline_summary.eval_summaries["score_eval"].mean == 0.0
+
+
+# ---------------------------------------------------------------------------
+# Additional coverage: eval function error handling, pass@k edge cases,
+# score aggregation, token statistics, _extract_systemic_error_metrics,
+# _compute_summaries edge cases, _filter_runs_by_tag.
+# ---------------------------------------------------------------------------
+
+from osmosis_ai.rollout.eval.evaluation.runner import (
+    EvalRowResult,
+    EvalRunResult,
+    _extract_systemic_error_metrics,
+)
+
+
+class TestExtractSystemicErrorMetrics:
+    """Tests for the _extract_systemic_error_metrics utility."""
+
+    def test_uses_attributes_when_present(self) -> None:
+        from osmosis_ai.rollout.eval.common.errors import SystemicProviderError
+
+        e = SystemicProviderError("test")
+        e.duration_ms = 1234.5  # type: ignore[attr-defined]
+        e.tokens = 42  # type: ignore[attr-defined]
+        dur, tok = _extract_systemic_error_metrics(e, fallback_started_at=0.0)
+        assert dur == 1234.5
+        assert tok == 42
+
+    def test_fallback_duration_when_missing(self) -> None:
+        import time
+
+        from osmosis_ai.rollout.eval.common.errors import SystemicProviderError
+
+        e = SystemicProviderError("test")
+        # No duration_ms attribute
+        started = time.monotonic() - 0.5  # 500ms ago
+        dur, tok = _extract_systemic_error_metrics(e, fallback_started_at=started)
+        # Duration should be >= 500ms (within reason)
+        assert dur >= 400.0
+        assert tok == 0
+
+    def test_fallback_tokens_when_none(self) -> None:
+        from osmosis_ai.rollout.eval.common.errors import SystemicProviderError
+
+        e = SystemicProviderError("test")
+        e.duration_ms = 100.0  # type: ignore[attr-defined]
+        e.tokens = None  # type: ignore[attr-defined]
+        dur, tok = _extract_systemic_error_metrics(e, fallback_started_at=0.0)
+        assert dur == 100.0
+        assert tok == 0
+
+
+class TestEvalFunctionErrorHandling:
+    """Tests for eval function exception and type error handling."""
+
+    @pytest.mark.asyncio
+    async def test_eval_fn_exception_returns_zero_score(self) -> None:
+        """When an eval function raises, its score should be 0.0."""
+        client = MockLLMClient()
+        agent = MockAgentLoop(tools=[create_sample_tool()], call_llm=True)
+
+        def failing_eval(
+            solution_str: str,
+            ground_truth: str,
+            extra_info: dict[str, Any],
+        ) -> float:
+            raise ValueError("boom")
+
+        runner = EvalRunner(
+            agent_loop=agent,
+            llm_client=client,  # type: ignore[arg-type]
+            eval_fns=[EvalFnWrapper(failing_eval, "failing_eval")],
+        )
+
+        result = await runner.run_single(
+            row=create_sample_row(0),
+            row_index=0,
+            run_index=0,
+        )
+
+        assert result.success is True
+        assert result.scores["failing_eval"] == 0.0
+
+    @pytest.mark.asyncio
+    async def test_eval_fn_returning_non_float_returns_zero(self) -> None:
+        """When an eval function returns a non-numeric type, it should be caught
+        by EvalFnWrapper and the score should default to 0.0 (via the exception
+        handler in run_single)."""
+        client = MockLLMClient()
+        agent = MockAgentLoop(tools=[create_sample_tool()], call_llm=True)
+
+        def bad_return_eval(
+            solution_str: str,
+            ground_truth: str,
+            extra_info: dict[str, Any],
+        ) -> float:
+            return "not_a_float"  # type: ignore[return-value]
+
+        runner = EvalRunner(
+            agent_loop=agent,
+            llm_client=client,  # type: ignore[arg-type]
+            eval_fns=[EvalFnWrapper(bad_return_eval, "bad_return_eval")],
+        )
+
+        result = await runner.run_single(
+            row=create_sample_row(0),
+            row_index=0,
+            run_index=0,
+        )
+
+        assert result.success is True
+        # EvalFnWrapper raises EvalFnError which is caught by run_single -> 0.0
+        assert result.scores["bad_return_eval"] == 0.0
+
+    @pytest.mark.asyncio
+    async def test_multiple_eval_fns_one_fails(self) -> None:
+        """If one eval fn fails, others should still be scored correctly."""
+        client = MockLLMClient()
+        agent = MockAgentLoop(tools=[create_sample_tool()], call_llm=True)
+
+        def good_eval(
+            solution_str: str,
+            ground_truth: str,
+            extra_info: dict[str, Any],
+        ) -> float:
+            return 0.75
+
+        def bad_eval(
+            solution_str: str,
+            ground_truth: str,
+            extra_info: dict[str, Any],
+        ) -> float:
+            raise RuntimeError("eval exploded")
+
+        runner = EvalRunner(
+            agent_loop=agent,
+            llm_client=client,  # type: ignore[arg-type]
+            eval_fns=[
+                EvalFnWrapper(good_eval, "good_eval"),
+                EvalFnWrapper(bad_eval, "bad_eval"),
+            ],
+        )
+
+        result = await runner.run_single(
+            row=create_sample_row(0),
+            row_index=0,
+            run_index=0,
+        )
+
+        assert result.success is True
+        assert result.scores["good_eval"] == 0.75
+        assert result.scores["bad_eval"] == 0.0
+
+
+class TestPassAtKEdgeCases:
+    """Edge cases for pass@k computation in _compute_summaries."""
+
+    @pytest.mark.asyncio
+    async def test_all_runs_pass(self) -> None:
+        """When all runs pass, pass@k should be 1.0 for all k."""
+        client = MockLLMClient()
+        agent = MockAgentLoop(tools=[create_sample_tool()], call_llm=True)
+
+        def perfect_eval(
+            solution_str: str,
+            ground_truth: str,
+            extra_info: dict[str, Any],
+        ) -> float:
+            return 1.0
+
+        runner = EvalRunner(
+            agent_loop=agent,
+            llm_client=client,  # type: ignore[arg-type]
+            eval_fns=[EvalFnWrapper(perfect_eval, "perfect_eval")],
+        )
+
+        eval_result = await runner.run_eval(
+            rows=[create_sample_row(i) for i in range(3)],
+            n_runs=5,
+            pass_threshold=1.0,
+        )
+
+        summary = eval_result.eval_summaries["perfect_eval"]
+        assert summary.mean == 1.0
+        assert summary.min == 1.0
+        assert summary.max == 1.0
+        # pass@1 through pass@5 should all be 1.0
+        for k in [1, 3, 5]:
+            assert summary.pass_at_k[k] == 1.0
+
+    @pytest.mark.asyncio
+    async def test_no_runs_pass(self) -> None:
+        """When no runs pass, pass@k should be 0.0 for all k."""
+        client = MockLLMClient()
+        agent = MockAgentLoop(tools=[create_sample_tool()], call_llm=True)
+
+        def zero_eval(
+            solution_str: str,
+            ground_truth: str,
+            extra_info: dict[str, Any],
+        ) -> float:
+            return 0.0
+
+        runner = EvalRunner(
+            agent_loop=agent,
+            llm_client=client,  # type: ignore[arg-type]
+            eval_fns=[EvalFnWrapper(zero_eval, "zero_eval")],
+        )
+
+        eval_result = await runner.run_eval(
+            rows=[create_sample_row(0)],
+            n_runs=5,
+            pass_threshold=0.5,
+        )
+
+        summary = eval_result.eval_summaries["zero_eval"]
+        assert summary.mean == 0.0
+        for k in [1, 3, 5]:
+            assert summary.pass_at_k[k] == 0.0
+
+    @pytest.mark.asyncio
+    async def test_pass_at_k_not_computed_for_single_run(self) -> None:
+        """pass@k should not be computed when n_runs == 1."""
+        client = MockLLMClient()
+        agent = MockAgentLoop(tools=[create_sample_tool()], call_llm=True)
+
+        def simple_eval(
+            solution_str: str,
+            ground_truth: str,
+            extra_info: dict[str, Any],
+        ) -> float:
+            return 1.0
+
+        runner = EvalRunner(
+            agent_loop=agent,
+            llm_client=client,  # type: ignore[arg-type]
+            eval_fns=[EvalFnWrapper(simple_eval, "simple_eval")],
+        )
+
+        eval_result = await runner.run_eval(
+            rows=[create_sample_row(0)],
+            n_runs=1,
+        )
+
+        summary = eval_result.eval_summaries["simple_eval"]
+        assert summary.pass_at_k == {}
+
+    @pytest.mark.asyncio
+    async def test_pass_at_k_skips_k_greater_than_n_runs(self) -> None:
+        """pass@k should not be computed for k > n_runs."""
+        client = MockLLMClient()
+        agent = MockAgentLoop(tools=[create_sample_tool()], call_llm=True)
+
+        def simple_eval(
+            solution_str: str,
+            ground_truth: str,
+            extra_info: dict[str, Any],
+        ) -> float:
+            return 1.0
+
+        runner = EvalRunner(
+            agent_loop=agent,
+            llm_client=client,  # type: ignore[arg-type]
+            eval_fns=[EvalFnWrapper(simple_eval, "simple_eval")],
+        )
+
+        eval_result = await runner.run_eval(
+            rows=[create_sample_row(0)],
+            n_runs=2,
+            pass_threshold=0.5,
+        )
+
+        summary = eval_result.eval_summaries["simple_eval"]
+        # k=1 should be present, k=3, 5, 10 should not
+        assert 1 in summary.pass_at_k
+        assert 3 not in summary.pass_at_k
+        assert 5 not in summary.pass_at_k
+        assert 10 not in summary.pass_at_k
+
+
+class TestScoreAggregation:
+    """Tests for score aggregation across multiple runs and rows."""
+
+    @pytest.mark.asyncio
+    async def test_mean_std_with_varied_scores(self) -> None:
+        """Verify mean and std computation with varying scores."""
+        import math
+
+        client = MockLLMClient()
+        agent = MockAgentLoop(tools=[create_sample_tool()], call_llm=True)
+
+        scores = iter([0.0, 0.5, 1.0, 0.5])
+
+        def varying_eval(
+            solution_str: str,
+            ground_truth: str,
+            extra_info: dict[str, Any],
+        ) -> float:
+            return next(scores)
+
+        runner = EvalRunner(
+            agent_loop=agent,
+            llm_client=client,  # type: ignore[arg-type]
+            eval_fns=[EvalFnWrapper(varying_eval, "varying_eval")],
+        )
+
+        eval_result = await runner.run_eval(
+            rows=[create_sample_row(0), create_sample_row(1)],
+            n_runs=2,
+            pass_threshold=0.5,
+        )
+
+        summary = eval_result.eval_summaries["varying_eval"]
+        # Scores: [0.0, 0.5, 1.0, 0.5] -> mean=0.5
+        assert summary.mean == pytest.approx(0.5)
+        assert summary.min == 0.0
+        assert summary.max == 1.0
+        # Population std: sqrt(((0-0.5)^2+(0.5-0.5)^2+(1-0.5)^2+(0.5-0.5)^2)/4)
+        expected_std = math.sqrt((0.25 + 0.0 + 0.25 + 0.0) / 4)
+        assert summary.std == pytest.approx(expected_std)
+
+    @pytest.mark.asyncio
+    async def test_progress_callback_invoked(self) -> None:
+        """on_progress callback should be called for each run."""
+        client = MockLLMClient()
+        agent = MockAgentLoop(tools=[create_sample_tool()], call_llm=True)
+
+        def simple_eval(
+            solution_str: str,
+            ground_truth: str,
+            extra_info: dict[str, Any],
+        ) -> float:
+            return 1.0
+
+        runner = EvalRunner(
+            agent_loop=agent,
+            llm_client=client,  # type: ignore[arg-type]
+            eval_fns=[EvalFnWrapper(simple_eval, "simple_eval")],
+        )
+
+        progress_calls: list[tuple[int, int]] = []
+
+        def on_progress(current: int, total: int, _result: EvalRunResult) -> None:
+            progress_calls.append((current, total))
+
+        await runner.run_eval(
+            rows=[create_sample_row(0), create_sample_row(1)],
+            n_runs=2,
+            on_progress=on_progress,
+        )
+
+        assert len(progress_calls) == 4
+        assert progress_calls[-1] == (4, 4)
+
+    @pytest.mark.asyncio
+    async def test_start_index_offset(self) -> None:
+        """start_index should offset row_index in results."""
+        client = MockLLMClient()
+        agent = MockAgentLoop(tools=[create_sample_tool()], call_llm=True)
+
+        def simple_eval(
+            solution_str: str,
+            ground_truth: str,
+            extra_info: dict[str, Any],
+        ) -> float:
+            return 1.0
+
+        runner = EvalRunner(
+            agent_loop=agent,
+            llm_client=client,  # type: ignore[arg-type]
+            eval_fns=[EvalFnWrapper(simple_eval, "simple_eval")],
+        )
+
+        eval_result = await runner.run_eval(
+            rows=[create_sample_row(0), create_sample_row(1)],
+            n_runs=1,
+            start_index=10,
+        )
+
+        assert eval_result.rows[0].row_index == 10
+        assert eval_result.rows[1].row_index == 11
+
+
+class TestTokenStatistics:
+    """Tests for token usage accumulation."""
+
+    @pytest.mark.asyncio
+    async def test_tokens_accumulated_across_runs(self) -> None:
+        """Total tokens should be sum of all runs."""
+        client = MockLLMClient()
+        agent = MockAgentLoop(tools=[create_sample_tool()], call_llm=True)
+
+        def simple_eval(
+            solution_str: str,
+            ground_truth: str,
+            extra_info: dict[str, Any],
+        ) -> float:
+            return 1.0
+
+        runner = EvalRunner(
+            agent_loop=agent,
+            llm_client=client,  # type: ignore[arg-type]
+            eval_fns=[EvalFnWrapper(simple_eval, "simple_eval")],
+        )
+
+        eval_result = await runner.run_eval(
+            rows=[create_sample_row(0), create_sample_row(1)],
+            n_runs=3,
+        )
+
+        # MockLLMClient: each chat call uses 10 prompt + 5 completion = 15 tokens
+        # 2 rows * 3 runs * 1 chat call each = 6 runs * 15 tokens = 90 total
+        assert eval_result.total_tokens == 90
+        assert eval_result.total_runs == 6
+
+    @pytest.mark.asyncio
+    async def test_failed_runs_contribute_zero_tokens(self) -> None:
+        """Failed agent runs that never call LLM should have 0 tokens."""
+        client = MockLLMClient()
+        agent = MockAgentLoop(
+            tools=[create_sample_tool()],
+            run_error=RuntimeError("fail"),
+        )
+
+        def simple_eval(
+            solution_str: str,
+            ground_truth: str,
+            extra_info: dict[str, Any],
+        ) -> float:
+            return 1.0
+
+        runner = EvalRunner(
+            agent_loop=agent,
+            llm_client=client,  # type: ignore[arg-type]
+            eval_fns=[EvalFnWrapper(simple_eval, "simple_eval")],
+        )
+
+        eval_result = await runner.run_eval(
+            rows=[create_sample_row(0)],
+            n_runs=2,
+        )
+
+        assert eval_result.total_tokens == 0
+        for row in eval_result.rows:
+            for run in row.runs:
+                assert run.tokens == 0
+
+    @pytest.mark.asyncio
+    async def test_duration_is_positive(self) -> None:
+        """All runs should have positive duration."""
+        client = MockLLMClient()
+        agent = MockAgentLoop(tools=[create_sample_tool()], call_llm=True)
+
+        def simple_eval(
+            solution_str: str,
+            ground_truth: str,
+            extra_info: dict[str, Any],
+        ) -> float:
+            return 1.0
+
+        runner = EvalRunner(
+            agent_loop=agent,
+            llm_client=client,  # type: ignore[arg-type]
+            eval_fns=[EvalFnWrapper(simple_eval, "simple_eval")],
+        )
+
+        eval_result = await runner.run_eval(
+            rows=[create_sample_row(0)],
+            n_runs=1,
+        )
+
+        assert eval_result.total_duration_ms > 0
+        for row in eval_result.rows:
+            for run in row.runs:
+                assert run.duration_ms > 0
+
+
+class TestComputeSummariesEdgeCases:
+    """Tests for _compute_summaries with edge cases."""
+
+    @pytest.mark.asyncio
+    async def test_empty_rows_produces_empty_summaries(self) -> None:
+        """_compute_summaries with empty row results should produce zero summaries."""
+        client = MockLLMClient()
+        agent = MockAgentLoop(tools=[create_sample_tool()])
+
+        def simple_eval(
+            solution_str: str,
+            ground_truth: str,
+            extra_info: dict[str, Any],
+        ) -> float:
+            return 1.0
+
+        runner = EvalRunner(
+            agent_loop=agent,
+            llm_client=client,  # type: ignore[arg-type]
+            eval_fns=[EvalFnWrapper(simple_eval, "simple_eval")],
+        )
+
+        summaries = runner._compute_summaries([], n_runs=1, pass_threshold=1.0)
+        assert "simple_eval" in summaries
+        summary = summaries["simple_eval"]
+        assert summary.mean == 0.0
+        assert summary.std == 0.0
+        assert summary.min == 0.0
+        assert summary.max == 0.0
+
+    @pytest.mark.asyncio
+    async def test_missing_score_defaults_to_zero(self) -> None:
+        """Runs with missing eval score should count as 0.0 in aggregation."""
+        client = MockLLMClient()
+        agent = MockAgentLoop(tools=[create_sample_tool()])
+
+        def simple_eval(
+            solution_str: str,
+            ground_truth: str,
+            extra_info: dict[str, Any],
+        ) -> float:
+            return 1.0
+
+        runner = EvalRunner(
+            agent_loop=agent,
+            llm_client=client,  # type: ignore[arg-type]
+            eval_fns=[EvalFnWrapper(simple_eval, "simple_eval")],
+        )
+
+        # Construct row results where some runs have scores and some don't
+        row_results = [
+            EvalRowResult(
+                row_index=0,
+                runs=[
+                    EvalRunResult(
+                        run_index=0,
+                        success=True,
+                        scores={"simple_eval": 1.0},
+                        tokens=10,
+                    ),
+                    EvalRunResult(
+                        run_index=1,
+                        success=False,
+                        scores={},  # missing score - should be 0.0
+                        tokens=0,
+                    ),
+                ],
+            ),
+        ]
+
+        summaries = runner._compute_summaries(row_results, n_runs=2, pass_threshold=0.5)
+        summary = summaries["simple_eval"]
+        assert summary.mean == pytest.approx(0.5)
+        assert summary.min == 0.0
+        assert summary.max == 1.0
+
+
+class TestFilterRunsByTag:
+    """Tests for _filter_runs_by_tag."""
+
+    def test_filters_correctly(self) -> None:
+        client = MockLLMClient()
+        agent = MockAgentLoop(tools=[create_sample_tool()])
+        runner = EvalRunner(
+            agent_loop=agent,
+            llm_client=client,  # type: ignore[arg-type]
+            eval_fns=[],
+        )
+
+        row_results = [
+            EvalRowResult(
+                row_index=0,
+                runs=[
+                    EvalRunResult(run_index=0, success=True, model_tag="primary"),
+                    EvalRunResult(run_index=0, success=True, model_tag="baseline"),
+                ],
+            ),
+            EvalRowResult(
+                row_index=1,
+                runs=[
+                    EvalRunResult(run_index=0, success=True, model_tag="primary"),
+                    EvalRunResult(run_index=0, success=True, model_tag="baseline"),
+                ],
+            ),
+        ]
+
+        primary_only = runner._filter_runs_by_tag(row_results, "primary")
+        assert len(primary_only) == 2
+        for row in primary_only:
+            assert all(r.model_tag == "primary" for r in row.runs)
+
+    def test_no_matching_tag_returns_empty(self) -> None:
+        client = MockLLMClient()
+        agent = MockAgentLoop(tools=[create_sample_tool()])
+        runner = EvalRunner(
+            agent_loop=agent,
+            llm_client=client,  # type: ignore[arg-type]
+            eval_fns=[],
+        )
+
+        row_results = [
+            EvalRowResult(
+                row_index=0,
+                runs=[
+                    EvalRunResult(run_index=0, success=True, model_tag="primary"),
+                ],
+            ),
+        ]
+
+        result = runner._filter_runs_by_tag(row_results, "baseline")
+        assert result == []
+
+
+class TestRunSingleRouting:
+    """Tests for runner routing based on model_tag."""
+
+    @pytest.mark.asyncio
+    async def test_baseline_tag_uses_baseline_runner(self) -> None:
+        """model_tag='baseline' should route to the baseline rollout runner."""
+        primary_client = MockLLMClient(model="primary-model")
+        baseline_client = MockLLMClient(model="baseline-model")
+        agent = MockAgentLoop(tools=[create_sample_tool()], call_llm=True)
+
+        def simple_eval(
+            solution_str: str,
+            ground_truth: str,
+            extra_info: dict[str, Any],
+        ) -> float:
+            return 1.0
+
+        runner = EvalRunner(
+            agent_loop=agent,
+            llm_client=primary_client,  # type: ignore[arg-type]
+            eval_fns=[EvalFnWrapper(simple_eval, "simple_eval")],
+            baseline_llm_client=baseline_client,  # type: ignore[arg-type]
+        )
+
+        assert runner.has_baseline is True
+
+        primary_result = await runner.run_single(
+            row=create_sample_row(0),
+            row_index=0,
+            run_index=0,
+            model_tag="primary",
+        )
+        assert primary_result.model_tag == "primary"
+        assert primary_result.success is True
+
+        baseline_result = await runner.run_single(
+            row=create_sample_row(0),
+            row_index=0,
+            run_index=0,
+            model_tag="baseline",
+        )
+        assert baseline_result.model_tag == "baseline"
+        assert baseline_result.success is True
+
+    @pytest.mark.asyncio
+    async def test_no_baseline_has_baseline_false(self) -> None:
+        """Without baseline_llm_client, has_baseline should be False."""
+        client = MockLLMClient()
+        agent = MockAgentLoop(tools=[create_sample_tool()])
+        runner = EvalRunner(
+            agent_loop=agent,
+            llm_client=client,  # type: ignore[arg-type]
+            eval_fns=[],
+        )
+        assert runner.has_baseline is False
