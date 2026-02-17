@@ -1,10 +1,20 @@
 name: Auto approve
+
 on: pull_request_target
 
 jobs:
-  build:
+  auto-approve:
     runs-on: ubuntu-latest
     permissions:
       pull-requests: write
+    if: >-
+      github.actor == 'dependabot[bot]' ||
+      github.actor == 'BaiqingL' ||
+      github.actor == 'JoyboyBrian' ||
+      github.actor == 'JakeTrock' ||
+      github.actor == 'allenlinsh' ||
+      github.actor == 'mathewjhan' ||
+      github.actor == 'pandyamarut' ||
+      github.actor == 'artem-osmosis'
     steps:
       - uses: hmarr/auto-approve-action@v4
