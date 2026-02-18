@@ -8,14 +8,7 @@ from __future__ import annotations
 import inspect
 import logging
 import time
-import warnings
 from typing import Any
-
-warnings.filterwarnings(
-    "ignore",
-    message="Pydantic serializer warnings:",
-    category=UserWarning,
-)
 
 from osmosis_ai._litellm_compat import APIConnectionError as _APIConnectionError
 from osmosis_ai._litellm_compat import AuthenticationError as _AuthenticationError
