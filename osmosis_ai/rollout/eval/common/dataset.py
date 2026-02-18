@@ -7,6 +7,7 @@ Shared by:
 
 from __future__ import annotations
 
+import csv
 import json
 import logging
 from collections.abc import Iterator
@@ -35,7 +36,7 @@ class DatasetRow(TypedDict):
 
 
 class DatasetReader:
-    """Reader for JSON / JSONL / Parquet datasets used by local workflows."""
+    """Reader for Parquet / JSONL / CSV datasets used by local workflows."""
 
     def __init__(self, file_path: str) -> None:
         self.file_path = Path(file_path)
@@ -44,10 +45,10 @@ class DatasetReader:
             raise FileNotFoundError(f"Dataset file not found: {file_path}")
 
         self._extension = self.file_path.suffix.lower()
-        if self._extension not in (".json", ".jsonl", ".parquet"):
+        if self._extension not in (".parquet", ".jsonl", ".csv"):
             raise DatasetParseError(
                 f"Unsupported file format: {self._extension}. "
-                f"Supported formats: .json, .jsonl, .parquet"
+                f"Supported formats: .parquet (recommended), .jsonl, .csv"
             )
 
         self._row_count: int | None = None
@@ -83,43 +84,27 @@ class DatasetReader:
             count += 1
 
     def _iter_raw_rows(self) -> Iterator[dict[str, Any]]:
-        if self._extension == ".json":
-            yield from self._parse_json()
-        elif self._extension == ".jsonl":
+        if self._extension == ".jsonl":
             yield from self._iter_jsonl()
         elif self._extension == ".parquet":
             yield from self._parse_parquet()
+        elif self._extension == ".csv":
+            yield from self._iter_csv()
 
     def __len__(self) -> int:
         if self._row_count is not None:
             return self._row_count
 
-        if self._extension == ".json":
-            self._row_count = len(self._parse_json())
-        elif self._extension == ".jsonl":
+        if self._extension == ".jsonl":
             self._row_count = self._count_jsonl_rows()
         elif self._extension == ".parquet":
             self._row_count = self._count_parquet_rows()
+        elif self._extension == ".csv":
+            self._row_count = self._count_csv_rows()
         else:
             self._row_count = 0
 
         return self._row_count
-
-    def _parse_json(self) -> list[dict[str, Any]]:
-        try:
-            with open(self.file_path, encoding="utf-8") as f:
-                data = json.load(f)
-        except json.JSONDecodeError as e:
-            raise DatasetParseError(f"Invalid JSON file: {e}") from e
-        except OSError as e:
-            raise DatasetParseError(f"Error reading file: {e}") from e
-
-        if not isinstance(data, list):
-            raise DatasetParseError(
-                f"JSON file must contain an array of objects, got {type(data).__name__}"
-            )
-
-        return data
 
     def _iter_jsonl(self) -> Iterator[dict[str, Any]]:
         try:
@@ -145,8 +130,8 @@ class DatasetReader:
                 for line in f:
                     if line.strip():
                         count += 1
-        except OSError:
-            pass
+        except OSError as e:
+            logger.warning("Failed to count JSONL rows in %s: %s", self.file_path, e)
         return count
 
     def _parse_parquet(self) -> list[dict[str, Any]]:
@@ -178,6 +163,33 @@ class DatasetReader:
             return count
         except Exception as e:
             raise DatasetParseError(f"Error reading Parquet metadata: {e}") from e
+
+    def _iter_csv(self) -> Iterator[dict[str, Any]]:
+        try:
+            with open(self.file_path, encoding="utf-8", newline="") as f:
+                reader = csv.DictReader(f)
+                for row_num, row in enumerate(reader, start=1):
+                    row_dict = dict(row)
+                    if None in row_dict:
+                        raise DatasetParseError(
+                            f"CSV row {row_num} has more columns than the header"
+                        )
+                    yield row_dict
+        except csv.Error as e:
+            raise DatasetParseError(f"Invalid CSV file: {e}") from e
+        except OSError as e:
+            raise DatasetParseError(f"Error reading file: {e}") from e
+
+    def _count_csv_rows(self) -> int:
+        count = 0
+        try:
+            with open(self.file_path, encoding="utf-8", newline="") as f:
+                reader = csv.DictReader(f)
+                for _ in reader:
+                    count += 1
+        except (OSError, csv.Error) as e:
+            logger.warning("Failed to count CSV rows in %s: %s", self.file_path, e)
+        return count
 
     def _validate_row(self, row: Any, row_index: int) -> DatasetRow:
         if not isinstance(row, dict):

@@ -1,13 +1,1 @@
-# Default: core maintainers review everything
-* @BaiqingL @JoyboyBrian @JakeTrock @allenlinsh @mathewjhan @pandyamarut @artem-osmosis
-
-# Rollout SDK (core training integration)
-/osmosis_ai/rollout/ @BaiqingL @JoyboyBrian @JakeTrock @allenlinsh @mathewjhan @pandyamarut @artem-osmosis
-
-# CI/CD and build configuration
-/.github/ @BaiqingL @JoyboyBrian @JakeTrock
-/pyproject.toml @BaiqingL @JoyboyBrian @JakeTrock
-
-# Documentation
-/README.md @BaiqingL @JoyboyBrian @JakeTrock
-/CONTRIBUTING.md @BaiqingL @JoyboyBrian @JakeTrock
+* @BaiqingL @JoyboyBrian
