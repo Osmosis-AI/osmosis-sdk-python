@@ -8,8 +8,8 @@ from typing import TYPE_CHECKING, Any
 from osmosis_ai.rollout.eval.common.cli import format_duration
 
 if TYPE_CHECKING:
-    from osmosis_ai.rollout.eval.evaluation.runner import EvalResult
     from osmosis_ai.rollout.console import Console
+    from osmosis_ai.rollout.eval.evaluation.runner import EvalResult
 
 
 def pass_at_k(n: int, c: int, k: int) -> float:
@@ -71,7 +71,7 @@ def _collect_pass_k_values(eval_summaries: dict[str, Any]) -> list[int]:
     return pass_k_values
 
 
-def _build_model_data(result: "EvalResult", model: str) -> list[dict[str, Any]]:
+def _build_model_data(result: EvalResult, model: str) -> list[dict[str, Any]]:
     """Build per-model data list for unified table rendering.
 
     In comparison mode, returns one entry per model from model_summaries.
@@ -83,9 +83,7 @@ def _build_model_data(result: "EvalResult", model: str) -> list[dict[str, Any]]:
             avg_latency = (
                 ms.total_duration_ms / ms.total_runs if ms.total_runs > 0 else 0
             )
-            avg_tokens = (
-                ms.total_tokens / ms.total_runs if ms.total_runs > 0 else 0
-            )
+            avg_tokens = ms.total_tokens / ms.total_runs if ms.total_runs > 0 else 0
             model_data.append(
                 {
                     "name": ms.model or ms.model_tag,
@@ -99,9 +97,7 @@ def _build_model_data(result: "EvalResult", model: str) -> list[dict[str, Any]]:
     avg_latency = (
         result.total_duration_ms / result.total_runs if result.total_runs > 0 else 0
     )
-    avg_tokens = (
-        result.total_tokens / result.total_runs if result.total_runs > 0 else 0
-    )
+    avg_tokens = result.total_tokens / result.total_runs if result.total_runs > 0 else 0
     return [
         {
             "name": model,
@@ -112,9 +108,7 @@ def _build_model_data(result: "EvalResult", model: str) -> list[dict[str, Any]]:
     ]
 
 
-def format_eval_report(
-    result: "EvalResult", console: "Console", model: str = ""
-) -> None:
+def format_eval_report(result: EvalResult, console: Console, model: str = "") -> None:
     """Print a formatted evaluation report to the console.
 
     Renders a unified table with per-model rows for each eval function.
@@ -185,8 +179,8 @@ def _format_tables_rich(
     rich_console: Any,
 ) -> None:
     """Render the performance and eval results tables using rich."""
-    from rich.table import Table
     from rich import box
+    from rich.table import Table
 
     # --- Performance table ---
     perf_table = Table(
@@ -227,8 +221,8 @@ def _format_tables_rich(
     for k in pass_k_values:
         table.add_column(f"pass@{k}", justify="right")
 
-    for fn_idx, fn_name in enumerate(eval_fn_names):
-        for m_idx, md in enumerate(model_data):
+    for _fn_idx, fn_name in enumerate(eval_fn_names):
+        for _m_idx, md in enumerate(model_data):
             summary = md["eval_summaries"].get(fn_name)
             if summary is None:
                 continue
@@ -262,7 +256,7 @@ def _format_tables_plain(
     eval_fn_names: list[str],
     model_data: list[dict[str, Any]],
     pass_k_values: list[int],
-    console: "Console",
+    console: Console,
 ) -> None:
     """Render the performance and eval results tables as plain text."""
     # --- Performance table ---

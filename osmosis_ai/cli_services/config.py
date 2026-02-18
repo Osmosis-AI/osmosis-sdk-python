@@ -1,20 +1,22 @@
 from __future__ import annotations
 
 import copy
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional, Sequence
+from typing import Any, cast
 
 import yaml
 from yaml.representer import SafeRepresenter
 
+from ..rubric_types import ModelInfo
 from .errors import CLIError
 from .shared import coerce_optional_float
 
 
 @dataclass(frozen=True)
 class ParsedItem:
-    label: Optional[str]
+    label: str | None
     payload: Any
 
 
@@ -22,19 +24,19 @@ class ParsedItem:
 class RubricConfig:
     rubric_id: str
     rubric_text: str
-    model_info: dict[str, Any]
-    score_min: Optional[float]
-    score_max: Optional[float]
-    system_prompt: Optional[str]
-    original_input: Optional[str]
-    ground_truth: Optional[str]
+    model_info: ModelInfo
+    score_min: float | None
+    score_max: float | None
+    system_prompt: str | None
+    original_input: str | None
+    ground_truth: str | None
     source_label: str
 
 
 @dataclass(frozen=True)
 class RubricSuite:
     source_path: Path
-    version: Optional[int]
+    version: int | None
     configs: dict[str, RubricConfig]
 
     def get(self, rubric_id: str) -> RubricConfig:
@@ -58,7 +60,7 @@ class RubricConfigDocumentResult:
 class RubricConfigDocumentSchema:
     """Base interface for schema-specific rubric config parsing."""
 
-    version: Optional[int] = None
+    version: int | None = None
 
     def parse_document(
         self,
@@ -74,7 +76,7 @@ class RubricConfigDocumentSchema:
 class BaseRubricConfigSchema(RubricConfigDocumentSchema):
     """Schema handling documents without an explicit version."""
 
-    version = None
+    version: int | None = None
 
     def parse_document(
         self,
@@ -86,19 +88,25 @@ class BaseRubricConfigSchema(RubricConfigDocumentSchema):
     ) -> RubricConfigDocumentResult:
         defaults = _extract_config_defaults(document, path, doc_index)
         entries = _extract_rubric_items(document, context=None, doc_index=doc_index)
-        return _build_document_configs(entries, defaults, path=path, doc_index=doc_index, strict=strict)
+        return _build_document_configs(
+            entries, defaults, path=path, doc_index=doc_index, strict=strict
+        )
 
 
 class Version1RubricConfigSchema(BaseRubricConfigSchema):
     """Schema for version 1 documents."""
 
-    version = 1
+    version: int | None = 1
 
 
 class RubricConfigParser:
     """Parses rubric configuration files and produces typed suites."""
 
-    def __init__(self, *, schemas: Optional[dict[Optional[int], RubricConfigDocumentSchema]] = None):
+    def __init__(
+        self,
+        *,
+        schemas: dict[int | None, RubricConfigDocumentSchema] | None = None,
+    ):
         self._schemas = schemas or {
             None: BaseRubricConfigSchema(),
             1: Version1RubricConfigSchema(),
@@ -106,11 +114,13 @@ class RubricConfigParser:
         if None not in self._schemas:
             raise ValueError("At least one default schema (key=None) must be provided.")
 
-    def parse(self, path: Path, *, strict: bool = True) -> tuple[RubricSuite, list[ParsedItem]]:
+    def parse(
+        self, path: Path, *, strict: bool = True
+    ) -> tuple[RubricSuite, list[ParsedItem]]:
         documents = _load_yaml_documents(path)
         configs: dict[str, RubricConfig] = {}
         parsed_items: list[ParsedItem] = []
-        detected_version: Optional[int] = None
+        detected_version: int | None = None
         document_indices = []
 
         for doc_index, document in enumerate(documents):
@@ -144,7 +154,9 @@ class RubricConfigParser:
             parsed_items.extend(result.items)
             for rubric_id, config in result.configs.items():
                 if rubric_id in configs:
-                    raise CLIError(f"Duplicate rubric id '{rubric_id}' detected in '{path}'.")
+                    raise CLIError(
+                        f"Duplicate rubric id '{rubric_id}' detected in '{path}'."
+                    )
                 configs[rubric_id] = config
 
         if strict and not configs:
@@ -153,7 +165,7 @@ class RubricConfigParser:
         suite = RubricSuite(source_path=path, version=detected_version, configs=configs)
         return suite, parsed_items
 
-    def _select_schema(self, version: Optional[int]) -> RubricConfigDocumentSchema:
+    def _select_schema(self, version: int | None) -> RubricConfigDocumentSchema:
         if version in self._schemas:
             return self._schemas[version]
         if version is None:
@@ -161,7 +173,9 @@ class RubricConfigParser:
         raise CLIError(f"Unsupported rubric config version '{version}'.")
 
     @staticmethod
-    def _coerce_optional_version(document: Any, path: Path, doc_index: int) -> Optional[int]:
+    def _coerce_optional_version(
+        document: Any, path: Path, doc_index: int
+    ) -> int | None:
         if not isinstance(document, dict):
             return None
         version_value = document.get("version")
@@ -195,9 +209,7 @@ def _build_document_configs(
         if not isinstance(payload, dict):
             continue
         if "extra_info" in payload:
-            message = (
-                f"Rubric entry in '{path}' (document {doc_index + 1}) must not include 'extra_info'."
-            )
+            message = f"Rubric entry in '{path}' (document {doc_index + 1}) must not include 'extra_info'."
             if strict:
                 raise CLIError(message)
             continue
@@ -259,7 +271,7 @@ def _build_document_configs(
         configs[rubric_key] = RubricConfig(
             rubric_id=rubric_key,
             rubric_text=rubric_text,
-            model_info=copy.deepcopy(model_info),
+            model_info=copy.deepcopy(cast(ModelInfo, model_info)),
             score_min=score_min,
             score_max=score_max,
             system_prompt=system_prompt if isinstance(system_prompt, str) else None,
@@ -271,7 +283,7 @@ def _build_document_configs(
     return RubricConfigDocumentResult(configs=configs, items=parsed_items)
 
 
-def discover_rubric_config_path(config_arg: Optional[str], data_path: Path) -> Path:
+def discover_rubric_config_path(config_arg: str | None, data_path: Path) -> Path:
     if config_arg:
         candidate = Path(config_arg).expanduser()
         if not candidate.exists():
@@ -344,7 +356,9 @@ def _load_yaml_documents(path: Path) -> list[Any]:
         raise CLIError(f"Unable to read rubric config '{path}': {exc}") from exc
 
 
-def _extract_config_defaults(document: Any, path: Path, doc_index: int) -> dict[str, Any]:
+def _extract_config_defaults(
+    document: Any, path: Path, doc_index: int
+) -> dict[str, Any]:
     if not isinstance(document, dict):
         return {
             "model_info": None,
@@ -375,7 +389,9 @@ def _extract_config_defaults(document: Any, path: Path, doc_index: int) -> dict[
     return defaults
 
 
-def _extract_rubric_items(node: Any, context: Optional[str], doc_index: int) -> list[ParsedItem]:
+def _extract_rubric_items(
+    node: Any, context: str | None, doc_index: int
+) -> list[ParsedItem]:
     items: list[ParsedItem] = []
 
     if node is None:
@@ -388,11 +404,17 @@ def _extract_rubric_items(node: Any, context: Optional[str], doc_index: int) -> 
         else:
             for key, value in node.items():
                 next_context = str(key) if isinstance(key, str) else context
-                items.extend(_extract_rubric_items(value, context=next_context, doc_index=doc_index))
+                items.extend(
+                    _extract_rubric_items(
+                        value, context=next_context, doc_index=doc_index
+                    )
+                )
     elif isinstance(node, list):
         for index, value in enumerate(node):
             idx_context = f"{context}[{index}]" if context else None
-            items.extend(_extract_rubric_items(value, context=idx_context, doc_index=doc_index))
+            items.extend(
+                _extract_rubric_items(value, context=idx_context, doc_index=doc_index)
+            )
 
     return items
 
@@ -401,7 +423,7 @@ class _LiteralSafeDumper(yaml.SafeDumper):
     """YAML dumper that preserves multiline strings with literal blocks."""
 
 
-def _represent_str(dumper: yaml.Dumper, data: str):
+def _represent_str(dumper: _LiteralSafeDumper, data: str) -> Any:
     if "\n" in data:
         return dumper.represent_scalar("tag:yaml.org,2002:str", data, style="|")
     return SafeRepresenter.represent_str(dumper, data)

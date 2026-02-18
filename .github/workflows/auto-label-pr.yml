@@ -1,0 +1,63 @@
+name: Auto Label PR
+
+on:
+  pull_request:
+    types: [opened, edited]
+
+jobs:
+  label:
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Apply labels based on PR title
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          labels=()
+
+          # Breaking change
+          if [[ "$PR_TITLE" =~ ^\[BREAKING\] ]]; then
+            labels+=("breaking")
+          fi
+
+          # Type-based labels (maps to release.yml categories)
+          if [[ "$PR_TITLE" =~ \]\ feat: ]]; then
+            labels+=("enhancement")
+          elif [[ "$PR_TITLE" =~ \]\ fix: ]]; then
+            labels+=("bug")
+          elif [[ "$PR_TITLE" =~ \]\ doc: ]]; then
+            labels+=("documentation")
+          elif [[ "$PR_TITLE" =~ \]\ chore: ]]; then
+            labels+=("chore")
+          elif [[ "$PR_TITLE" =~ \]\ refactor: ]]; then
+            labels+=("refactor")
+          elif [[ "$PR_TITLE" =~ \]\ test: ]]; then
+            labels+=("chore")
+          fi
+
+          # Module label from [module] in title
+          if [[ "$PR_TITLE" =~ \[([a-z]+)\] ]]; then
+            module="${BASH_REMATCH[1]}"
+            # Map [doc] module to existing 'documentation' label
+            if [[ "$module" == "doc" ]]; then
+              labels+=("documentation")
+            elif [[ "$module" != "misc" ]]; then
+              labels+=("$module")
+            fi
+          fi
+
+          if [ ${#labels[@]} -eq 0 ]; then
+            echo "No labels to apply"
+            exit 0
+          fi
+
+          # Deduplicate
+          labels=($(printf '%s\n' "${labels[@]}" | sort -u))
+
+          echo "Applying labels: ${labels[*]}"
+          gh pr edit "$PR_NUMBER" \
+            --repo "${{ github.repository }}" \
+            --add-label "$(IFS=,; echo "${labels[*]}")"

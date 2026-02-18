@@ -17,20 +17,22 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager
-from typing import Any, Awaitable, Callable, Dict, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from fastapi import FastAPI, HTTPException, Request
+
     from osmosis_ai.auth.credentials import WorkspaceCredentials
 
 from osmosis_ai.rollout._compat import FASTAPI_AVAILABLE
+from osmosis_ai.rollout.client import OsmosisLLMClient
 from osmosis_ai.rollout.config.settings import RolloutSettings, get_settings
 from osmosis_ai.rollout.core.base import RolloutAgentLoop, RolloutContext
 from osmosis_ai.rollout.core.schemas import InitResponse, RolloutRequest
 from osmosis_ai.rollout.server.api_key import validate_api_key
 from osmosis_ai.rollout.server.state import AppState
-from osmosis_ai.rollout.client import OsmosisLLMClient
 
 logger = logging.getLogger(__name__)
 
@@ -41,7 +43,7 @@ if FASTAPI_AVAILABLE:
     from fastapi import HTTPException, Request
 
 
-def _extract_bearer_token(auth_header: str) -> Optional[str]:
+def _extract_bearer_token(auth_header: str) -> str | None:
     """Extract a bearer token from an Authorization header.
 
     Accepts both:
@@ -60,17 +62,17 @@ def _extract_bearer_token(auth_header: str) -> Optional[str]:
 
 def create_app(
     agent_loop: RolloutAgentLoop,
-    max_concurrent: Optional[int] = None,
-    record_ttl_seconds: Optional[float] = None,
-    settings: Optional[RolloutSettings] = None,
-    credentials: Optional["WorkspaceCredentials"] = None,
-    server_host: Optional[str] = None,
-    server_port: Optional[int] = None,
-    api_key: Optional[str] = None,
-    debug_dir: Optional[str] = None,
-    on_startup: Optional[Callable[[], Awaitable[None]]] = None,
-    on_shutdown: Optional[Callable[[], Awaitable[None]]] = None,
-) -> "FastAPI":
+    max_concurrent: int | None = None,
+    record_ttl_seconds: float | None = None,
+    settings: RolloutSettings | None = None,
+    credentials: WorkspaceCredentials | None = None,
+    server_host: str | None = None,
+    server_port: int | None = None,
+    api_key: str | None = None,
+    debug_dir: str | None = None,
+    on_startup: Callable[[], Awaitable[None]] | None = None,
+    on_shutdown: Callable[[], Awaitable[None]] | None = None,
+) -> FastAPI:
     """Create a FastAPI application for the agent loop.
 
     This factory creates a complete FastAPI application with:
@@ -149,7 +151,7 @@ def create_app(
     )
 
     @asynccontextmanager
-    async def lifespan(app: FastAPI):
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         """Manage application lifecycle."""
         logger.info(
             "Server starting: agent_loop=%s, max_concurrent=%d",
@@ -167,20 +169,31 @@ def create_app(
         # Start platform registration as a background task.
         # The task waits briefly for the server to be ready (after yield),
         # then registers with Platform. This ensures the health check succeeds.
-        registration_task: Optional[asyncio.Task] = None
-        if credentials is not None and server_host is not None and server_port is not None:
+        registration_task: asyncio.Task | None = None
+        if (
+            credentials is not None
+            and server_host is not None
+            and server_port is not None
+        ):
             from osmosis_ai.rollout.server.registration import (
-                register_with_platform,
                 print_registration_result,
+                register_with_platform,
             )
+
+            # Bind narrowed values to local variables for the closure
+            _reg_host: str = server_host
+            _reg_port: int = server_port
+            _reg_credentials: WorkspaceCredentials = credentials
 
             async def do_registration():
                 import httpx
 
                 # Poll health endpoint until server is ready
-                poll_interval = state.settings.registration_readiness_poll_interval_seconds
+                poll_interval = (
+                    state.settings.registration_readiness_poll_interval_seconds
+                )
                 timeout = state.settings.registration_readiness_timeout_seconds
-                health_url = f"http://127.0.0.1:{server_port}/health"
+                health_url = f"http://127.0.0.1:{_reg_port}/health"
 
                 start_time = time.monotonic()
                 server_ready = False
@@ -212,16 +225,16 @@ def create_app(
                 # Run sync registration in thread pool to avoid blocking event loop
                 result = await asyncio.to_thread(
                     register_with_platform,
-                    host=server_host,
-                    port=server_port,
+                    host=_reg_host,
+                    port=_reg_port,
                     agent_loop_name=agent_loop.name,
-                    credentials=credentials,
+                    credentials=_reg_credentials,
                     api_key=api_key,
                 )
                 print_registration_result(
                     result=result,
-                    host=server_host,
-                    port=server_port,
+                    host=_reg_host,
+                    port=_reg_port,
                     agent_loop_name=agent_loop.name,
                     api_key=api_key,
                 )
@@ -259,7 +272,7 @@ def create_app(
     )
 
     @app.get("/health")
-    async def health() -> Dict[str, Any]:
+    async def health() -> dict[str, Any]:
         """Health check endpoint.
 
         Returns server status and statistics.
@@ -272,7 +285,7 @@ def create_app(
         }
 
     @app.get("/platform/health")
-    async def platform_health(request: Request) -> Dict[str, Any]:
+    async def platform_health(request: Request) -> dict[str, Any]:
         """Platform health check endpoint (authenticated).
 
         This endpoint is intended for Osmosis Platform to validate:
@@ -314,13 +327,17 @@ def create_app(
         # Validate RolloutServer auth if configured:
         # TrainGate must send: Authorization: Bearer <api_key>
         if api_key is not None:
-            provided = _extract_bearer_token(http_request.headers.get("authorization") or "")
+            provided = _extract_bearer_token(
+                http_request.headers.get("authorization") or ""
+            )
             if not validate_api_key(provided, api_key):
                 logger.warning(
                     "Invalid API key for rollout request: rollout_id=%s",
                     rollout_request.rollout_id,
                 )
-                raise HTTPException(status_code=401, detail="Invalid or missing API key")
+                raise HTTPException(
+                    status_code=401, detail="Invalid or missing API key"
+                )
 
         # Idempotency key: prefer request.idempotency_key, fallback to rollout_id.
         key = rollout_request.idempotency_key or rollout_request.rollout_id
@@ -415,7 +432,9 @@ def create_app(
             task = asyncio.create_task(run_rollout())
             state.mark_started(key, task)
 
-            init_response = InitResponse(rollout_id=rollout_request.rollout_id, tools=tools)
+            init_response = InitResponse(
+                rollout_id=rollout_request.rollout_id, tools=tools
+            )
             init_future.set_result(init_response)
 
             logger.info(

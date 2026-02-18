@@ -22,20 +22,14 @@ Example:
 
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, TYPE_CHECKING
+from typing import Any
 
 from osmosis_ai.rollout.core.base import RolloutAgentLoop
 from osmosis_ai.rollout.core.schemas import (
     OpenAIFunctionToolSchema,
     RolloutRequest,
 )
-
-if TYPE_CHECKING:
-    pass
-
-logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -51,8 +45,8 @@ class ValidationError:
 
     code: str
     message: str
-    field: Optional[str] = None
-    details: Optional[Dict[str, Any]] = None
+    field: str | None = None
+    details: dict[str, Any] | None = None
 
     def __str__(self) -> str:
         if self.field:
@@ -73,9 +67,9 @@ class ValidationResult:
     """
 
     valid: bool
-    errors: List[ValidationError] = field(default_factory=list)
-    warnings: List[ValidationError] = field(default_factory=list)
-    agent_name: Optional[str] = None
+    errors: list[ValidationError] = field(default_factory=list)
+    warnings: list[ValidationError] = field(default_factory=list)
+    agent_name: str | None = None
     tool_count: int = 0
 
     def __bool__(self) -> bool:
@@ -104,7 +98,7 @@ class AgentLoopValidationError(Exception):
         errors: List of validation errors that caused the failure.
     """
 
-    def __init__(self, message: str, errors: Optional[List[ValidationError]] = None):
+    def __init__(self, message: str, errors: list[ValidationError] | None = None):
         super().__init__(message)
         self.errors = errors or []
 
@@ -120,9 +114,9 @@ def _create_mock_request() -> RolloutRequest:
     )
 
 
-def _validate_name(agent_loop: RolloutAgentLoop) -> List[ValidationError]:
+def _validate_name(agent_loop: RolloutAgentLoop) -> list[ValidationError]:
     """Validate agent loop name attribute."""
-    errors: List[ValidationError] = []
+    errors: list[ValidationError] = []
 
     name = getattr(agent_loop, "name", None)
     if name is None:
@@ -155,14 +149,14 @@ def _validate_name(agent_loop: RolloutAgentLoop) -> List[ValidationError]:
 
 def _validate_tool_schema(
     tool: Any, index: int
-) -> tuple[List[ValidationError], List[ValidationError]]:
+) -> tuple[list[ValidationError], list[ValidationError]]:
     """Validate a single tool schema.
 
     Returns:
         Tuple of (errors, warnings).
     """
-    errors: List[ValidationError] = []
-    warnings: List[ValidationError] = []
+    errors: list[ValidationError] = []
+    warnings: list[ValidationError] = []
     field_prefix = f"tools[{index}]"
 
     # Check if it's a valid OpenAIFunctionToolSchema or dict
@@ -266,14 +260,14 @@ def _validate_tool_schema(
 
 def _validate_get_tools(
     agent_loop: RolloutAgentLoop, request: RolloutRequest
-) -> tuple[List[ValidationError], List[ValidationError], int]:
+) -> tuple[list[ValidationError], list[ValidationError], int]:
     """Validate get_tools() method.
 
     Returns:
         Tuple of (errors, warnings, tool_count).
     """
-    errors: List[ValidationError] = []
-    warnings: List[ValidationError] = []
+    errors: list[ValidationError] = []
+    warnings: list[ValidationError] = []
     tool_count = 0
 
     try:
@@ -284,7 +278,10 @@ def _validate_get_tools(
                 code="GET_TOOLS_EXCEPTION",
                 message=f"get_tools() raised an exception: {type(e).__name__}: {e}",
                 field="get_tools",
-                details={"exception_type": type(e).__name__, "exception_message": str(e)},
+                details={
+                    "exception_type": type(e).__name__,
+                    "exception_message": str(e),
+                },
             )
         )
         return errors, warnings, 0
@@ -320,9 +317,9 @@ def _validate_get_tools(
     return errors, warnings, tool_count
 
 
-def _validate_run_method(agent_loop: RolloutAgentLoop) -> List[ValidationError]:
+def _validate_run_method(agent_loop: RolloutAgentLoop) -> list[ValidationError]:
     """Validate that run() method exists and is async."""
-    errors: List[ValidationError] = []
+    errors: list[ValidationError] = []
 
     run_method = getattr(agent_loop, "run", None)
     if run_method is None:
@@ -359,7 +356,7 @@ def _validate_run_method(agent_loop: RolloutAgentLoop) -> List[ValidationError]:
 def validate_agent_loop(
     agent_loop: RolloutAgentLoop,
     *,
-    request: Optional[RolloutRequest] = None,
+    request: RolloutRequest | None = None,
 ) -> ValidationResult:
     """Validate a RolloutAgentLoop implementation.
 
@@ -390,8 +387,8 @@ def validate_agent_loop(
         # Or raise exception if invalid
         result.raise_if_invalid()
     """
-    errors: List[ValidationError] = []
-    warnings: List[ValidationError] = []
+    errors: list[ValidationError] = []
+    warnings: list[ValidationError] = []
 
     # Validate name
     name_errors = _validate_name(agent_loop)
@@ -421,8 +418,8 @@ def validate_agent_loop(
 
 
 __all__ = [
+    "AgentLoopValidationError",
     "ValidationError",
     "ValidationResult",
-    "AgentLoopValidationError",
     "validate_agent_loop",
 ]

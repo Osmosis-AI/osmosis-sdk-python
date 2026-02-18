@@ -42,13 +42,20 @@ class SystemicProviderError(ProviderError):
     rather than retrying each row.
     """
 
-    pass
+    duration_ms: float | None
+    tokens: int | None
+
+    def __init__(self, *args: object) -> None:
+        super().__init__(*args)
+        self.duration_ms = None
+        self.tokens = None
+
 
 __all__ = [
-    "LocalExecutionError",
-    "DatasetValidationError",
     "DatasetParseError",
-    "ToolValidationError",
+    "DatasetValidationError",
+    "LocalExecutionError",
     "ProviderError",
     "SystemicProviderError",
+    "ToolValidationError",
 ]

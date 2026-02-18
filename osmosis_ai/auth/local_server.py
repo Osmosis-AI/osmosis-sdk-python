@@ -6,7 +6,6 @@ import html
 import socket
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
-from typing import Optional
 from urllib.parse import parse_qs, urlparse
 
 from .config import LOCAL_SERVER_PORT_END, LOCAL_SERVER_PORT_START
@@ -377,8 +376,8 @@ class LocalAuthServer(HTTPServer):
         """
         super().__init__(("localhost", port), AuthCallbackHandler)
         self.expected_state = expected_state
-        self.received_token: Optional[str] = None
-        self.error: Optional[str] = None
+        self.received_token: str | None = None
+        self.error: str | None = None
         self.revoked_count: int = 0
         self._shutdown_event = threading.Event()
         # Synchronization for deferred browser response
@@ -386,17 +385,21 @@ class LocalAuthServer(HTTPServer):
         self._verification_event = threading.Event()
         self._verification_result: object = None  # True = success, str = error message
 
-    def set_verification_result(self, success: bool, error: Optional[str] = None) -> None:
+    def set_verification_result(self, success: bool, error: str | None = None) -> None:
         """Set the verification result and unblock the callback handler.
 
         Args:
             success: Whether token verification succeeded.
             error: Error message if verification failed.
         """
-        self._verification_result = True if success else (error or "Verification failed")
+        self._verification_result = (
+            True if success else (error or "Verification failed")
+        )
         self._verification_event.set()
 
-    def wait_for_callback(self, timeout: float = 300.0) -> tuple[Optional[str], Optional[str]]:
+    def wait_for_callback(
+        self, timeout: float = 300.0
+    ) -> tuple[str | None, str | None]:
         """Wait for the OAuth callback.
 
         Args:
@@ -425,7 +428,7 @@ class LocalAuthServer(HTTPServer):
         super().shutdown()
 
 
-def find_available_port() -> Optional[int]:
+def find_available_port() -> int | None:
     """Find an available port in the configured range.
 
     Returns:

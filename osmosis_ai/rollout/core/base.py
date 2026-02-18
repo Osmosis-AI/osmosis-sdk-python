@@ -35,7 +35,7 @@ import logging
 import os
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from osmosis_ai.rollout.core.schemas import (
     OpenAIFunctionToolSchema,
@@ -91,11 +91,11 @@ class RolloutResult:
     """
 
     status: str
-    final_messages: List[Dict[str, Any]]
+    final_messages: list[dict[str, Any]]
     finish_reason: str
-    error_message: Optional[str] = None
-    metrics: Optional[RolloutMetrics] = None
-    reward: Optional[float] = None
+    error_message: str | None = None
+    metrics: RolloutMetrics | None = None
+    reward: float | None = None
 
 
 @dataclass
@@ -124,16 +124,23 @@ class RolloutContext:
 
                 # Execute tools and add results
                 for tool_call in result.tool_calls:
-                    tool_result = await self.execute_tool(tool_call)
-                    messages.append(tool_result)
-                    ctx.record_tool_call(latency_ms=...)
+                    args = json.loads(tool_call["function"]["arguments"])
+                    start = time.monotonic()
+                    tool_result = your_tool_fn(tool_call["function"]["name"], args)
+                    latency_ms = (time.monotonic() - start) * 1000.0
+                    messages.append({
+                        "role": "tool",
+                        "tool_call_id": tool_call["id"],
+                        "content": str(tool_result),
+                    })
+                    ctx.record_tool_call(latency_ms=latency_ms)
 
             return ctx.complete(messages)
     """
 
     request: RolloutRequest
-    tools: List[OpenAIFunctionToolSchema]
-    llm: "LLMClientProtocol"
+    tools: list[OpenAIFunctionToolSchema]
+    llm: LLMClientProtocol
 
     # Internal state for tracking metrics
     _start_time: float = field(default=0.0, repr=False)
@@ -141,13 +148,13 @@ class RolloutContext:
     _num_tool_calls: int = field(default=0, repr=False)
 
     # Debug logging configuration
-    _debug_dir: Optional[str] = field(default=None, repr=False)
+    _debug_dir: str | None = field(default=None, repr=False)
 
     async def chat(
         self,
-        messages: List[Dict[str, Any]],
+        messages: list[dict[str, Any]],
         **kwargs: Any,
-    ) -> "CompletionsResult":
+    ) -> CompletionsResult:
         """Make a chat completion call to the LLM.
 
         Shorthand for self.llm.chat_completions(). Passes through
@@ -170,9 +177,9 @@ class RolloutContext:
 
     def complete(
         self,
-        final_messages: List[Dict[str, Any]],
+        final_messages: list[dict[str, Any]],
         finish_reason: str = "stop",
-        reward: Optional[float] = None,
+        reward: float | None = None,
     ) -> RolloutResult:
         """Create a successful completion result.
 
@@ -203,7 +210,7 @@ class RolloutContext:
     def error(
         self,
         error_message: str,
-        final_messages: Optional[List[Dict[str, Any]]] = None,
+        final_messages: list[dict[str, Any]] | None = None,
     ) -> RolloutResult:
         """Create an error result.
 
@@ -249,7 +256,7 @@ class RolloutContext:
         """Check if debug logging is enabled."""
         return self._debug_dir is not None
 
-    def _get_debug_file_path(self) -> Optional[str]:
+    def _get_debug_file_path(self) -> str | None:
         """Get the debug file path for this rollout."""
         if not self._debug_dir:
             return None
@@ -310,7 +317,9 @@ class RolloutContext:
         try:
             os.makedirs(self._debug_dir, exist_ok=True)
         except OSError as e:
-            logger.warning("Failed to create debug directory %s: %s", self._debug_dir, e)
+            logger.warning(
+                "Failed to create debug directory %s: %s", self._debug_dir, e
+            )
             return
 
         # Build event entry
@@ -416,7 +425,7 @@ class RolloutAgentLoop(ABC):
     name: str  # Must be set by subclass
 
     @abstractmethod
-    def get_tools(self, request: RolloutRequest) -> List[OpenAIFunctionToolSchema]:
+    def get_tools(self, request: RolloutRequest) -> list[OpenAIFunctionToolSchema]:
         """Return the tools available for this rollout.
 
         Called when a new rollout request arrives. Can return different
@@ -466,6 +475,17 @@ class RolloutAgentLoop(ABC):
                       and converted to an ERROR result.
         """
         raise NotImplementedError
+
+    def get_default_tools(self) -> list[OpenAIFunctionToolSchema]:
+        """Return default tool list for discovery/validation (no real request needed)."""
+        return self.get_tools(
+            RolloutRequest(
+                rollout_id="discovery",
+                server_url="http://localhost",
+                messages=[],
+                completion_params={},
+            )
+        )
 
     def __init_subclass__(cls, **kwargs: Any) -> None:
         """Validate that concrete subclasses define the name attribute."""

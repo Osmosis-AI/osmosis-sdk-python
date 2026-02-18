@@ -1,25 +1,31 @@
 from __future__ import annotations
 
 import copy
+import inspect
 import sys
 import time
+from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-import inspect
-from typing import Any, Optional, Sequence
+from typing import Any
 
 from tqdm import tqdm
 
 from ..rubric_eval import DEFAULT_API_KEY_ENV, evaluate_rubric
-from ..rubric_types import MissingAPIKeyError, ModelNotFoundError, ProviderRequestError
+from ..rubric_types import (
+    MissingAPIKeyError,
+    ModelInfo,
+    ModelNotFoundError,
+    ProviderRequestError,
+)
 from .config import RubricConfig
 from .dataset import DatasetRecord
 from .errors import CLIError
 from .shared import calculate_statistics, coerce_optional_float, collapse_preview_text
 
 
-def _normalize_config_str(value: Any) -> Optional[str]:
+def _normalize_config_str(value: Any) -> str | None:
     if value is None:
         return None
     text = str(value).strip()
@@ -27,19 +33,19 @@ def _normalize_config_str(value: Any) -> Optional[str]:
 
 
 def _compose_extra_info_context(
-    base: Optional[dict[str, Any]],
+    base: dict[str, Any] | None,
     *,
     rubric_text: str,
-    provider: Optional[str],
-    model: Optional[str],
-    system_prompt: Optional[str],
-    original_input: Optional[str],
-    api_key: Optional[str],
-    api_key_env: Optional[str],
-    score_min: Optional[float],
-    score_max: Optional[float],
-    model_info: dict[str, Any],
-) -> tuple[dict[str, Any], Optional[dict[str, Any]]]:
+    provider: str | None,
+    model: str | None,
+    system_prompt: str | None,
+    original_input: str | None,
+    api_key: str | None,
+    api_key_env: str | None,
+    score_min: float | None,
+    score_max: float | None,
+    model_info: ModelInfo,
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
     """
     Build the runtime context passed to rubric functions along with a sanitised
     copy safe for prompt injection.
@@ -76,7 +82,7 @@ def _compose_extra_info_context(
             model_info_copy["api_key_env"] = api_key_env
     decorated_payload["model_info"] = model_info_copy
 
-    prompt_payload: Optional[dict[str, Any]] = None
+    prompt_payload: dict[str, Any] | None = None
     base_metadata = decorated_payload.get("metadata")
     if isinstance(base_metadata, dict):
         prompt_payload = copy.deepcopy(base_metadata)
@@ -98,9 +104,9 @@ def _compose_extra_info_context(
 
 
 def _merge_system_prompts(
-    prepend_prompt: Optional[str],
-    base_prompt: Optional[str],
-) -> Optional[str]:
+    prepend_prompt: str | None,
+    base_prompt: str | None,
+) -> str | None:
     prompts: list[str] = []
     if prepend_prompt:
         prompts.append(prepend_prompt)
@@ -121,7 +127,9 @@ class RubricEvaluator:
         solution = record.solution_str
         if not isinstance(solution, str) or not solution.strip():
             label = record.conversation_id or record.rubric_id or "<record>"
-            raise CLIError(f"Record '{label}' must include a non-empty 'solution_str' string.")
+            raise CLIError(
+                f"Record '{label}' must include a non-empty 'solution_str' string."
+            )
 
         score_min = coerce_optional_float(
             record.score_min if record.score_min is not None else config.score_min,
@@ -134,8 +142,16 @@ class RubricEvaluator:
             f"record '{record.conversation_id or '<record>'}'",
         )
 
-        ground_truth = record.ground_truth if record.ground_truth is not None else config.ground_truth
-        original_input = record.original_input if record.original_input is not None else config.original_input
+        ground_truth = (
+            record.ground_truth
+            if record.ground_truth is not None
+            else config.ground_truth
+        )
+        original_input = (
+            record.original_input
+            if record.original_input is not None
+            else config.original_input
+        )
 
         provider_value = _normalize_config_str(config.model_info.get("provider"))
         model_value = _normalize_config_str(config.model_info.get("model"))
@@ -149,8 +165,12 @@ class RubricEvaluator:
 
         try:
             model_info_payload = copy.deepcopy(config.model_info)
-            base_system_prompt = _normalize_config_str(model_info_payload.get("system_prompt"))
-            combined_system_prompt = _merge_system_prompts(system_prompt_value, base_system_prompt)
+            base_system_prompt = _normalize_config_str(
+                model_info_payload.get("system_prompt")
+            )
+            combined_system_prompt = _merge_system_prompts(
+                system_prompt_value, base_system_prompt
+            )
             if combined_system_prompt is not None:
                 model_info_payload["system_prompt"] = combined_system_prompt
             else:
@@ -173,12 +193,17 @@ class RubricEvaluator:
             signature = inspect.signature(self._evaluate_fn)
             parameters = signature.parameters
             accepts_var_kwargs = any(
-                param.kind == inspect.Parameter.VAR_KEYWORD for param in parameters.values()
+                param.kind == inspect.Parameter.VAR_KEYWORD
+                for param in parameters.values()
             )
-            is_evaluate_rubric_style = accepts_var_kwargs or "rubric" in parameters or "model_info" in parameters
+            is_evaluate_rubric_style = (
+                accepts_var_kwargs
+                or "rubric" in parameters
+                or "model_info" in parameters
+            )
 
             if is_evaluate_rubric_style:
-                return self._evaluate_fn(
+                result: dict[str, Any] = self._evaluate_fn(
                     rubric=config.rubric_text,
                     solution_str=solution,
                     model_info=model_info_payload,
@@ -189,15 +214,19 @@ class RubricEvaluator:
                     score_max=score_max,
                     return_details=True,
                 )
+                return result
 
             call_args: list[Any] = []
             call_kwargs: dict[str, Any] = {}
             for param in parameters.values():
-                if param.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD):
+                if param.kind in (
+                    inspect.Parameter.VAR_POSITIONAL,
+                    inspect.Parameter.VAR_KEYWORD,
+                ):
                     continue
 
                 if param.name == "solution_str":
-                    value = solution
+                    value: Any = solution
                 elif param.name == "ground_truth":
                     value = ground_truth
                 elif param.name == "extra_info":
@@ -213,7 +242,10 @@ class RubricEvaluator:
                 else:
                     call_kwargs[param.name] = value
 
-            return self._evaluate_fn(*call_args, **call_kwargs)
+            fallback_result: dict[str, Any] = self._evaluate_fn(
+                *call_args, **call_kwargs
+            )
+            return fallback_result
         except (MissingAPIKeyError, ProviderRequestError, ModelNotFoundError) as exc:
             raise CLIError(str(exc)) from exc
 
@@ -222,13 +254,13 @@ class RubricEvaluator:
 class EvaluationRun:
     run_index: int
     status: str
-    score: Optional[float]
-    explanation: Optional[str]
-    preview: Optional[str]
+    score: float | None
+    explanation: str | None
+    preview: str | None
     duration_seconds: float
     started_at: datetime
     completed_at: datetime
-    error: Optional[str]
+    error: str | None
     raw: Any
 
 
@@ -254,7 +286,7 @@ class EvaluationReport:
 class RubricEvaluationEngine:
     """Executes rubric evaluations across a dataset and aggregates statistics."""
 
-    def __init__(self, evaluator: Optional[RubricEvaluator] = None):
+    def __init__(self, evaluator: RubricEvaluator | None = None):
         self._evaluator = evaluator or RubricEvaluator()
 
     def execute(
@@ -272,7 +304,9 @@ class RubricEvaluationEngine:
         total_successes = 0
 
         progress_total = len(records) * number
-        show_progress = progress_total > 1 and getattr(sys.stderr, "isatty", lambda: False)()
+        show_progress = (
+            progress_total > 1 and getattr(sys.stderr, "isatty", lambda: False)()
+        )
         progress = (
             tqdm(
                 total=progress_total,
@@ -296,10 +330,10 @@ class RubricEvaluationEngine:
                     started_at = datetime.now(timezone.utc)
                     timer_start = time.perf_counter()
                     status = "success"
-                    error_message: Optional[str] = None
-                    score_value: Optional[float] = None
-                    explanation_value: Optional[str] = None
-                    preview_value: Optional[str] = None
+                    error_message: str | None = None
+                    score_value: float | None = None
+                    explanation_value: str | None = None
+                    preview_value: str | None = None
                     raw_payload: Any = None
 
                     try:
@@ -320,8 +354,12 @@ class RubricEvaluationEngine:
                         if isinstance(result, dict):
                             raw_payload = result.get("raw")
                             score_value = _extract_float(result.get("score"))
-                            explanation_value = _normalize_optional_text(result.get("explanation"))
-                            preview_value = self._resolve_preview_text(result, fallback_preview)
+                            explanation_value = _normalize_optional_text(
+                                result.get("explanation")
+                            )
+                            preview_value = self._resolve_preview_text(
+                                result, fallback_preview
+                            )
                             if score_value is not None:
                                 scores.append(score_value)
                                 aggregate_scores.append(score_value)
@@ -389,7 +427,9 @@ class RubricEvaluationEngine:
         )
 
     @staticmethod
-    def _resolve_preview_text(result: Optional[dict[str, Any]], fallback: Optional[str]) -> Optional[str]:
+    def _resolve_preview_text(
+        result: dict[str, Any] | None, fallback: str | None
+    ) -> str | None:
         if not isinstance(result, dict):
             return fallback
         preview = collapse_preview_text(result.get("preview"))
@@ -405,7 +445,7 @@ class RubricEvaluationEngine:
         return fallback
 
 
-def _extract_float(value: Any) -> Optional[float]:
+def _extract_float(value: Any) -> float | None:
     try:
         if isinstance(value, (int, float)) and not isinstance(value, bool):
             return float(value)
@@ -414,7 +454,7 @@ def _extract_float(value: Any) -> Optional[float]:
         return None
 
 
-def _normalize_optional_text(value: Any) -> Optional[str]:
+def _normalize_optional_text(value: Any) -> str | None:
     if value is None:
         return None
     text = str(value).strip()

@@ -49,15 +49,15 @@ def load_agent_loop(module_path: str) -> RolloutAgentLoop:
     try:
         module = importlib.import_module(module_name)
     except ImportError as e:
-        raise CLIError(f"Cannot import module '{module_name}': {e}")
+        raise CLIError(f"Cannot import module '{module_name}': {e}") from e
 
     try:
         agent_loop = getattr(module, attr_name)
-    except AttributeError:
+    except AttributeError as e:
         raise CLIError(
             f"Module '{module_name}' has no attribute '{attr_name}'. "
             f"Available attributes: {[a for a in dir(module) if not a.startswith('_')]}"
-        )
+        ) from e
 
     # If it's a class, instantiate it
     if isinstance(agent_loop, type):
@@ -68,7 +68,7 @@ def load_agent_loop(module_path: str) -> RolloutAgentLoop:
         try:
             agent_loop = agent_loop()
         except Exception as e:
-            raise CLIError(f"Cannot instantiate '{attr_name}': {e}")
+            raise CLIError(f"Cannot instantiate '{attr_name}': {e}") from e
 
     # Validate it's a RolloutAgentLoop instance
     if not isinstance(agent_loop, RolloutAgentLoop):

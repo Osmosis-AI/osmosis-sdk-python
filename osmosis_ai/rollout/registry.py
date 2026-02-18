@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import threading
-from typing import Dict, List, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 from osmosis_ai.rollout.core.exceptions import AgentLoopNotFoundError
 
@@ -29,10 +29,10 @@ class AgentLoopRegistry:
 
     def __init__(self):
         """Initialize an empty registry."""
-        self._loops: Dict[str, "RolloutAgentLoop"] = {}
+        self._loops: dict[str, RolloutAgentLoop] = {}
         self._lock = threading.Lock()
 
-    def register(self, loop: "RolloutAgentLoop") -> None:
+    def register(self, loop: RolloutAgentLoop) -> None:
         """Register an agent loop implementation.
 
         This method is thread-safe.
@@ -68,7 +68,7 @@ class AgentLoopRegistry:
                 return True
             return False
 
-    def get(self, name: str) -> Optional["RolloutAgentLoop"]:
+    def get(self, name: str) -> RolloutAgentLoop | None:
         """Get an agent loop by name.
 
         This method is thread-safe.
@@ -82,7 +82,7 @@ class AgentLoopRegistry:
         with self._lock:
             return self._loops.get(name)
 
-    def list_names(self) -> List[str]:
+    def list_names(self) -> list[str]:
         """List all registered agent loop names.
 
         This method is thread-safe.
@@ -106,7 +106,7 @@ class AgentLoopRegistry:
 _REGISTRY = AgentLoopRegistry()
 
 
-def register_agent_loop(loop: "RolloutAgentLoop") -> None:
+def register_agent_loop(loop: RolloutAgentLoop) -> None:
     """Register an agent loop with the global registry.
 
     Args:
@@ -137,7 +137,7 @@ def unregister_agent_loop(name: str) -> bool:
     return _REGISTRY.unregister(name)
 
 
-def get_agent_loop(name: str) -> "RolloutAgentLoop":
+def get_agent_loop(name: str) -> RolloutAgentLoop:
     """Get an agent loop from the global registry.
 
     Args:
@@ -159,7 +159,7 @@ def get_agent_loop(name: str) -> "RolloutAgentLoop":
     return loop
 
 
-def list_agent_loops() -> List[str]:
+def list_agent_loops() -> list[str]:
     """List all registered agent loop names in the global registry.
 
     Returns:

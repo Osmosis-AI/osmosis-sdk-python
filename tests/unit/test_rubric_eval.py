@@ -1,0 +1,528 @@
+"""Tests for osmosis_ai.rubric_eval -- prompt building, JSON parsing, and LiteLLM evaluation."""
+
+import json
+import sys
+from unittest.mock import MagicMock, patch
+
+import litellm
+import pytest
+
+from osmosis_ai.rubric_eval import (
+    DEFAULT_REQUEST_TIMEOUT_SECONDS,
+    _build_user_prompt,
+    _default_timeout_for_model,
+    _sanitize_json,
+    _select_text,
+    _to_litellm_model,
+    evaluate_rubric,
+)
+from osmosis_ai.rubric_types import ModelNotFoundError, ProviderRequestError
+
+# =============================================================================
+# _select_text / _build_user_prompt Tests
+# =============================================================================
+
+
+def test_build_user_prompt_basic_blocks() -> None:
+    prompt = _build_user_prompt(
+        rubric_prompt="Score factual accuracy.",
+        score_min=0.0,
+        score_max=1.0,
+        candidate_output="The capital of France is Paris.",
+        original_input=None,
+        ground_truth=None,
+        metadata=None,
+    )
+
+    assert "Rubric:" in prompt
+    assert "Score range: 0.0 to 1.0." in prompt
+    assert "<<<BEGIN_CANDIDATE_OUTPUT>>>" in prompt
+    assert "The capital of France is Paris." in prompt
+
+
+def test_build_user_prompt_with_optional_sections() -> None:
+    prompt = _build_user_prompt(
+        rubric_prompt="Score the tone.",
+        score_min=0.0,
+        score_max=5.0,
+        candidate_output="Thank you for your patience!",
+        original_input="Please draft a friendly reply.",
+        ground_truth="Thanks for waiting!",
+        metadata={"notes": "Consider politeness."},
+    )
+
+    assert "<<<BEGIN_ORIGINAL_INPUT>>>" in prompt
+    assert "<<<BEGIN_GROUND_TRUTH>>>" in prompt
+    assert "<<<BEGIN_METADATA>>>" in prompt
+    assert "Consider politeness." in prompt
+
+
+def test_select_text_prefers_first_non_empty() -> None:
+    assert _select_text(None, "", "  value ", "fallback") == "value"
+    assert _select_text(None, "  ") is None
+
+
+# =============================================================================
+# _to_litellm_model Tests
+# =============================================================================
+
+
+class TestToLitellmModel:
+    """Tests for model format conversion."""
+
+    def test_openai_gpt5_uses_responses_prefix(self):
+        assert (
+            _to_litellm_model("openai", "gpt-5-mini") == "openai/responses/gpt-5-mini"
+        )
+        assert _to_litellm_model("openai", "gpt-5") == "openai/responses/gpt-5"
+        assert (
+            _to_litellm_model("OpenAI", "GPT-5-turbo") == "openai/responses/GPT-5-turbo"
+        )
+
+    def test_openai_other_models_standard_prefix(self):
+        assert _to_litellm_model("openai", "gpt-4o") == "openai/gpt-4o"
+        assert _to_litellm_model("openai", "gpt-4-turbo") == "openai/gpt-4-turbo"
+        assert _to_litellm_model("openai", "o1-preview") == "openai/o1-preview"
+
+    def test_anthropic_models(self):
+        assert (
+            _to_litellm_model("anthropic", "claude-sonnet-4-5-20250929")
+            == "anthropic/claude-sonnet-4-5-20250929"
+        )
+        assert (
+            _to_litellm_model("anthropic", "claude-3-opus-20240229")
+            == "anthropic/claude-3-opus-20240229"
+        )
+
+    def test_xai_models(self):
+        assert _to_litellm_model("xai", "grok-4-fast") == "xai/grok-4-fast"
+        assert _to_litellm_model("xai", "grok-2") == "xai/grok-2"
+
+    def test_gemini_models(self):
+        assert (
+            _to_litellm_model("gemini", "gemini-2.0-flash") == "gemini/gemini-2.0-flash"
+        )
+        assert _to_litellm_model("gemini", "gemini-1.5-pro") == "gemini/gemini-1.5-pro"
+
+    def test_other_providers(self):
+        assert (
+            _to_litellm_model("cerebras", "llama-3.1-70b") == "cerebras/llama-3.1-70b"
+        )
+        assert (
+            _to_litellm_model("openrouter", "meta-llama/llama-3-70b")
+            == "openrouter/meta-llama/llama-3-70b"
+        )
+
+    def test_empty_provider_returns_model_only(self):
+        assert _to_litellm_model("", "gpt-4o") == "gpt-4o"
+
+    def test_case_insensitive(self):
+        assert (
+            _to_litellm_model("OPENAI", "gpt-5-mini") == "openai/responses/gpt-5-mini"
+        )
+        assert (
+            _to_litellm_model("Anthropic", "claude-3-opus") == "anthropic/claude-3-opus"
+        )
+
+
+# =============================================================================
+# _default_timeout_for_model Tests
+# =============================================================================
+
+
+class TestDefaultTimeoutForModel:
+    """Tests for default timeout calculation."""
+
+    def test_xai_grok4_timeout(self):
+        assert _default_timeout_for_model("xai", "grok-4-fast") == 60.0
+        assert _default_timeout_for_model("xai", "grok-4") == 60.0
+
+    def test_xai_other_timeout(self):
+        assert _default_timeout_for_model("xai", "grok-2") == 45.0
+
+    def test_openai_gpt5_timeout(self):
+        assert _default_timeout_for_model("openai", "gpt-5-mini") == 45.0
+        assert _default_timeout_for_model("openai", "gpt-5") == 45.0
+
+    def test_openai_other_timeout(self):
+        assert (
+            _default_timeout_for_model("openai", "gpt-4o")
+            == DEFAULT_REQUEST_TIMEOUT_SECONDS
+        )
+
+    def test_gemini_timeout(self):
+        assert _default_timeout_for_model("gemini", "gemini-2.0-flash") == 45.0
+
+    def test_cerebras_timeout(self):
+        assert _default_timeout_for_model("cerebras", "llama-4-scout-17b") == 60.0
+
+    def test_openrouter_timeout(self):
+        assert (
+            _default_timeout_for_model("openrouter", "meta-llama/llama-4-maverick")
+            == 60.0
+        )
+
+    def test_anthropic_timeout(self):
+        assert (
+            _default_timeout_for_model("anthropic", "claude-3-opus")
+            == DEFAULT_REQUEST_TIMEOUT_SECONDS
+        )
+
+
+# =============================================================================
+# _sanitize_json Tests
+# =============================================================================
+
+
+class TestSanitizeJson:
+    """Tests for JSON response parsing."""
+
+    def test_valid_json(self):
+        score, explanation = _sanitize_json(
+            '{"score": 0.85, "explanation": "Good response"}'
+        )
+        assert score == 0.85
+        assert explanation == "Good response"
+
+    def test_json_with_code_fence(self):
+        score, explanation = _sanitize_json(
+            '```json\n{"score": 0.9, "explanation": "Test"}\n```'
+        )
+        assert score == 0.9
+        assert explanation == "Test"
+
+    def test_invalid_json_raises(self):
+        with pytest.raises(ValueError, match="not valid JSON"):
+            _sanitize_json("not valid json")
+
+    def test_missing_score_raises(self):
+        with pytest.raises(ValueError, match="numeric 'score'"):
+            _sanitize_json('{"explanation": "No score"}')
+
+    def test_missing_explanation_raises(self):
+        with pytest.raises(ValueError, match="'explanation'"):
+            _sanitize_json('{"score": 0.5}')
+
+
+# =============================================================================
+# evaluate_rubric Tests
+# =============================================================================
+
+
+def _create_mock_litellm_response(score: float, explanation: str) -> MagicMock:
+    """Helper to create a mock LiteLLM response."""
+    mock_response = MagicMock()
+    mock_response.model_dump.return_value = {
+        "choices": [
+            {
+                "message": {
+                    "content": json.dumps({"score": score, "explanation": explanation})
+                }
+            }
+        ]
+    }
+    return mock_response
+
+
+# The _litellm_completion reference is captured at import time from the compat
+# layer, so we must patch it on the rubric_eval module directly rather than
+# replacing sys.modules["litellm"].  The litellm module-level import inside
+# _call_litellm (used for suppress_debug_info and supports_response_schema)
+# is still patched via sys.modules.
+_COMPLETION_PATCH = "osmosis_ai.rubric_eval._litellm_completion"
+
+
+class TestEvaluateRubric:
+    """Tests for the main evaluate_rubric function."""
+
+    @pytest.fixture()
+    def mock_rubric_litellm(self):
+        """Mock both litellm module and _litellm_completion for rubric eval tests."""
+        mock_litellm = MagicMock()
+        mock_completion = MagicMock()
+        with (
+            patch.dict(sys.modules, {"litellm": mock_litellm}),
+            patch(_COMPLETION_PATCH, mock_completion),
+        ):
+            yield mock_litellm, mock_completion
+
+    def test_evaluate_rubric_success(self, mock_rubric_litellm):
+        _, mock_completion = mock_rubric_litellm
+        mock_completion.return_value = _create_mock_litellm_response(
+            0.85, "Good response"
+        )
+
+        result = evaluate_rubric(
+            rubric="Score accuracy",
+            solution_str="The answer is 42",
+            model_info={
+                "provider": "openai",
+                "model": "gpt-4o",
+                "api_key": "test-key",
+            },
+        )
+
+        assert result == 0.85
+        mock_completion.assert_called_once()
+        call_kwargs = mock_completion.call_args.kwargs
+        assert call_kwargs["model"] == "openai/gpt-4o"
+        assert call_kwargs["api_key"] == "test-key"
+        assert call_kwargs["temperature"] == 0
+
+    def test_evaluate_rubric_gpt5_no_temperature(self, mock_rubric_litellm):
+        _, mock_completion = mock_rubric_litellm
+        mock_completion.return_value = _create_mock_litellm_response(0.9, "Excellent")
+
+        evaluate_rubric(
+            rubric="Score quality",
+            solution_str="Test response",
+            model_info={
+                "provider": "openai",
+                "model": "gpt-5-mini",
+                "api_key": "test-key",
+            },
+        )
+
+        call_kwargs = mock_completion.call_args.kwargs
+        assert call_kwargs["model"] == "openai/responses/gpt-5-mini"
+        assert "temperature" not in call_kwargs
+
+    def test_evaluate_rubric_anthropic(self, mock_rubric_litellm):
+        _, mock_completion = mock_rubric_litellm
+        mock_completion.return_value = _create_mock_litellm_response(0.9, "Excellent")
+
+        result = evaluate_rubric(
+            rubric="Score quality",
+            solution_str="Well written response",
+            model_info={
+                "provider": "anthropic",
+                "model": "claude-sonnet-4-5-20250929",
+                "api_key": "test-key",
+            },
+        )
+
+        assert result == 0.9
+        call_kwargs = mock_completion.call_args.kwargs
+        assert call_kwargs["model"] == "anthropic/claude-sonnet-4-5-20250929"
+
+    def test_evaluate_rubric_xai(self, mock_rubric_litellm):
+        _, mock_completion = mock_rubric_litellm
+        mock_completion.return_value = _create_mock_litellm_response(0.8, "Good")
+
+        result = evaluate_rubric(
+            rubric="Score response",
+            solution_str="Some response",
+            model_info={
+                "provider": "xai",
+                "model": "grok-4-fast",
+                "api_key": "test-key",
+            },
+        )
+
+        assert result == 0.8
+        call_kwargs = mock_completion.call_args.kwargs
+        assert call_kwargs["model"] == "xai/grok-4-fast"
+
+    def test_evaluate_rubric_return_details(self, mock_rubric_litellm):
+        _, mock_completion = mock_rubric_litellm
+        mock_completion.return_value = _create_mock_litellm_response(
+            0.65, "Detailed explanation"
+        )
+
+        result = evaluate_rubric(
+            rubric="Score accuracy",
+            solution_str="Some answer",
+            model_info={
+                "provider": "openai",
+                "model": "gpt-4o",
+                "api_key": "test-key",
+            },
+            return_details=True,
+        )
+
+        assert result["score"] == 0.65
+        assert result["explanation"] == "Detailed explanation"
+        assert "raw" in result
+
+    def test_evaluate_rubric_score_clamping_max(self, mock_rubric_litellm):
+        _, mock_completion = mock_rubric_litellm
+        mock_completion.return_value = _create_mock_litellm_response(1.5, "Over max")
+
+        result = evaluate_rubric(
+            rubric="Score",
+            solution_str="Response",
+            model_info={
+                "provider": "openai",
+                "model": "gpt-4o",
+                "api_key": "test-key",
+            },
+        )
+
+        assert result == 1.0  # Clamped to max
+
+    def test_evaluate_rubric_score_clamping_min(self, mock_rubric_litellm):
+        _, mock_completion = mock_rubric_litellm
+        mock_completion.return_value = _create_mock_litellm_response(-0.5, "Under min")
+
+        result = evaluate_rubric(
+            rubric="Score",
+            solution_str="Response",
+            model_info={
+                "provider": "openai",
+                "model": "gpt-4o",
+                "api_key": "test-key",
+            },
+        )
+
+        assert result == 0.0  # Clamped to min
+
+    def test_evaluate_rubric_api_error(self, mock_rubric_litellm):
+        _, mock_completion = mock_rubric_litellm
+        mock_completion.side_effect = litellm.APIError(
+            message="API rate limit exceeded",
+            llm_provider="openai",
+            model="gpt-4o",
+            status_code=429,
+        )
+
+        with pytest.raises(ProviderRequestError) as exc_info:
+            evaluate_rubric(
+                rubric="Score",
+                solution_str="Response",
+                model_info={
+                    "provider": "openai",
+                    "model": "gpt-4o",
+                    "api_key": "test-key",
+                },
+            )
+
+        assert "rate limit" in str(exc_info.value).lower()
+
+    def test_evaluate_rubric_invalid_json_response(self, mock_rubric_litellm):
+        _, mock_completion = mock_rubric_litellm
+        mock_response = MagicMock()
+        mock_response.model_dump.return_value = {
+            "choices": [{"message": {"content": "Not valid JSON"}}]
+        }
+        mock_completion.return_value = mock_response
+
+        with pytest.raises(ProviderRequestError) as exc_info:
+            evaluate_rubric(
+                rubric="Score",
+                solution_str="Response",
+                model_info={
+                    "provider": "openai",
+                    "model": "gpt-4o",
+                    "api_key": "test-key",
+                },
+            )
+
+        assert "not valid JSON" in str(exc_info.value)
+
+    def test_evaluate_rubric_empty_response(self, mock_rubric_litellm):
+        _, mock_completion = mock_rubric_litellm
+        mock_response = MagicMock()
+        mock_response.model_dump.return_value = {
+            "choices": [{"message": {"content": ""}}]
+        }
+        mock_completion.return_value = mock_response
+
+        with pytest.raises(ProviderRequestError) as exc_info:
+            evaluate_rubric(
+                rubric="Score",
+                solution_str="Response",
+                model_info={
+                    "provider": "openai",
+                    "model": "gpt-4o",
+                    "api_key": "test-key",
+                },
+            )
+
+        assert "did not include any content" in str(exc_info.value)
+
+    def test_evaluate_rubric_model_not_found_404(self, mock_rubric_litellm):
+        """NotFoundError from litellm should raise ModelNotFoundError."""
+        _, mock_completion = mock_rubric_litellm
+        mock_completion.side_effect = litellm.NotFoundError(
+            message="The model `no-such-model` does not exist",
+            llm_provider="openai",
+            model="no-such-model",
+        )
+
+        with pytest.raises(ModelNotFoundError) as exc_info:
+            evaluate_rubric(
+                rubric="Score",
+                solution_str="Response",
+                model_info={
+                    "provider": "openai",
+                    "model": "no-such-model",
+                    "api_key": "test-key",
+                },
+            )
+
+        assert exc_info.value.provider == "openai"
+        assert exc_info.value.model == "no-such-model"
+
+    def test_evaluate_rubric_model_not_found_is_provider_request_error(
+        self, mock_rubric_litellm
+    ):
+        """ModelNotFoundError should be catchable as ProviderRequestError."""
+        _, mock_completion = mock_rubric_litellm
+        mock_completion.side_effect = litellm.NotFoundError(
+            message="Not found",
+            llm_provider="anthropic",
+            model="bad-model",
+        )
+
+        with pytest.raises(ProviderRequestError):
+            evaluate_rubric(
+                rubric="Score",
+                solution_str="Response",
+                model_info={
+                    "provider": "anthropic",
+                    "model": "bad-model",
+                    "api_key": "test-key",
+                },
+            )
+
+    def test_evaluate_rubric_non_404_error_is_not_model_not_found(
+        self, mock_rubric_litellm
+    ):
+        """Non-NotFoundError should raise ProviderRequestError, not ModelNotFoundError."""
+        _, mock_completion = mock_rubric_litellm
+        mock_completion.side_effect = litellm.RateLimitError(
+            message="Rate limit exceeded",
+            llm_provider="openai",
+            model="gpt-4o",
+        )
+
+        with pytest.raises(ProviderRequestError) as exc_info:
+            evaluate_rubric(
+                rubric="Score",
+                solution_str="Response",
+                model_info={
+                    "provider": "openai",
+                    "model": "gpt-4o",
+                    "api_key": "test-key",
+                },
+            )
+
+        assert not isinstance(exc_info.value, ModelNotFoundError)
+
+    def test_evaluate_rubric_custom_score_range(self, mock_rubric_litellm):
+        _, mock_completion = mock_rubric_litellm
+        mock_completion.return_value = _create_mock_litellm_response(7.5, "Good")
+
+        result = evaluate_rubric(
+            rubric="Score from 0-10",
+            solution_str="Response",
+            model_info={
+                "provider": "openai",
+                "model": "gpt-4o",
+                "api_key": "test-key",
+            },
+            score_min=0.0,
+            score_max=10.0,
+        )
+
+        assert result == 7.5

@@ -20,9 +20,9 @@ Example:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import time
-from typing import Dict, Optional, Tuple
 
 from osmosis_ai.rollout.config.settings import RolloutServerSettings, get_settings
 from osmosis_ai.rollout.core.schemas import InitResponse
@@ -60,10 +60,10 @@ class AppState:
 
     def __init__(
         self,
-        max_concurrent: Optional[int] = None,
-        record_ttl_seconds: Optional[float] = None,
-        cleanup_interval_seconds: Optional[float] = None,
-        settings: Optional[RolloutServerSettings] = None,
+        max_concurrent: int | None = None,
+        record_ttl_seconds: float | None = None,
+        cleanup_interval_seconds: float | None = None,
+        settings: RolloutServerSettings | None = None,
         agent_loop_name: str = "default",
     ):
         """Initialize application state.
@@ -81,22 +81,24 @@ class AppState:
         self.settings = settings
         self._max_concurrent = max_concurrent or settings.max_concurrent_rollouts
         self.record_ttl = record_ttl_seconds or settings.record_ttl_seconds
-        self._cleanup_interval = cleanup_interval_seconds or settings.cleanup_interval_seconds
+        self._cleanup_interval = (
+            cleanup_interval_seconds or settings.cleanup_interval_seconds
+        )
         self._agent_loop_name = agent_loop_name
 
         # NOTE: The "key" used throughout is the idempotency key for init requests:
         # - Prefer request.idempotency_key when provided
         # - Fallback to request.rollout_id when idempotency_key is missing
-        self.rollout_tasks: Dict[str, asyncio.Task] = {}
-        self.completed_rollouts: Dict[str, float] = {}  # key -> completion_time
+        self.rollout_tasks: dict[str, asyncio.Task] = {}
+        self.completed_rollouts: dict[str, float] = {}  # key -> completion_time
         # Cached init responses for idempotency (duplicate /v1/rollout/init requests)
-        self._init_futures: Dict[str, asyncio.Future[InitResponse]] = {}
+        self._init_futures: dict[str, asyncio.Future[InitResponse]] = {}
         self.semaphore = asyncio.Semaphore(self._max_concurrent)
-        self._cleanup_task: Optional[asyncio.Task] = None
+        self._cleanup_task: asyncio.Task | None = None
 
     def get_or_create_init_future(
         self, key: str
-    ) -> Tuple[asyncio.Future[InitResponse], bool]:
+    ) -> tuple[asyncio.Future[InitResponse], bool]:
         """Get or create the init future for a given idempotency key.
 
         This is used to provide true idempotency for /v1/rollout/init:
@@ -135,10 +137,8 @@ class AppState:
         """
         if self._cleanup_task:
             self._cleanup_task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await self._cleanup_task
-            except asyncio.CancelledError:
-                pass
             self._cleanup_task = None
             logger.info("Cleanup task stopped")
 
@@ -225,8 +225,14 @@ class AppState:
         )
 
         cancelled = sum(1 for r in results if isinstance(r, asyncio.CancelledError))
-        errors = sum(1 for r in results if isinstance(r, Exception) and not isinstance(r, asyncio.CancelledError))
-        logger.info("All rollouts cancelled: cancelled=%d, errors=%d", cancelled, errors)
+        errors = sum(
+            1
+            for r in results
+            if isinstance(r, Exception) and not isinstance(r, asyncio.CancelledError)
+        )
+        logger.info(
+            "All rollouts cancelled: cancelled=%d, errors=%d", cancelled, errors
+        )
 
         # Best-effort cleanup to avoid leaving stale tasks around.
         self.rollout_tasks.clear()

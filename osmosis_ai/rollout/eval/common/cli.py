@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import os
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING, Any
 
 from osmosis_ai.rollout.cli_utils import CLIError, load_agent_loop
 from osmosis_ai.rollout.console import Console
@@ -16,7 +16,7 @@ from osmosis_ai.rollout.eval.common.errors import (
 )
 
 # Mapping of LiteLLM provider prefixes to their expected environment variables.
-_PROVIDER_ENV_KEYS: Dict[str, str] = {
+_PROVIDER_ENV_KEYS: dict[str, str] = {
     "openai": "OPENAI_API_KEY",
     "anthropic": "ANTHROPIC_API_KEY",
     "groq": "GROQ_API_KEY",
@@ -49,7 +49,7 @@ def format_duration(ms: float) -> str:
     if ms < 1000:
         return f"{ms:.0f}ms"
     if ms < 60000:
-        return f"{ms/1000:.1f}s"
+        return f"{ms / 1000:.1f}s"
     minutes = int(ms // 60000)
     seconds = (ms % 60000) / 1000
     return f"{minutes}m{seconds:.1f}s"
@@ -64,7 +64,7 @@ def load_agent(
     module: str,
     quiet: bool,
     console: Console,
-) -> Tuple[Optional["RolloutAgentLoop"], Optional[str]]:
+) -> tuple[RolloutAgentLoop | None, str | None]:
     """Load agent loop from module path."""
     if not quiet:
         console.print(f"Loading agent: {module}")
@@ -84,7 +84,7 @@ def load_mcp_agent(
     mcp_path: str,
     quiet: bool,
     console: Console,
-) -> Tuple[Optional["RolloutAgentLoop"], Optional[str]]:
+) -> tuple[RolloutAgentLoop | None, str | None]:
     """Load an MCPAgentLoop from an MCP directory.
 
     The directory must contain a ``main.py`` with a FastMCP instance and
@@ -94,8 +94,7 @@ def load_mcp_agent(
         from osmosis_ai.rollout.mcp import MCPAgentLoop, MCPLoadError, load_mcp_server
     except ImportError:
         return None, (
-            "MCP support requires fastmcp. "
-            "Install it with: pip install osmosis-ai[mcp]"
+            "MCP support requires fastmcp. Install it with: pip install osmosis-ai[mcp]"
         )
 
     if not quiet:
@@ -109,21 +108,23 @@ def load_mcp_agent(
     agent_loop = MCPAgentLoop(mcp_server)
 
     if not quiet:
-        tool_names = [t.function.name for t in agent_loop.get_tools(None)]  # type: ignore[arg-type]
-        console.print(f"  Discovered {len(tool_names)} tool(s): {', '.join(tool_names)}")
+        tool_names = [t.function.name for t in agent_loop.get_default_tools()]
+        console.print(
+            f"  Discovered {len(tool_names)} tool(s): {', '.join(tool_names)}"
+        )
 
     return agent_loop, None
 
 
 def load_dataset_rows(
     dataset_path: str,
-    limit: Optional[int],
+    limit: int | None,
     offset: int,
     quiet: bool,
     console: Console,
     empty_error: str,
     action_label: str,
-) -> Tuple[Optional[List["DatasetRow"]], Optional[str]]:
+) -> tuple[list[DatasetRow] | None, str | None]:
     """Load rows from dataset and provide command-specific messaging."""
     if not quiet:
         console.print(f"Loading dataset: {dataset_path}")
@@ -151,9 +152,9 @@ def load_dataset_rows(
 
 def _check_api_key(
     model: str,
-    api_key: Optional[str],
-    base_url: Optional[str],
-) -> Optional[str]:
+    api_key: str | None,
+    base_url: str | None,
+) -> str | None:
     """Return an error message if the required API key is missing, else None."""
     if api_key or base_url:
         return None
@@ -184,12 +185,11 @@ def _first_line(message: str) -> str:
     return message.strip()
 
 
-def _format_model_error(model: str, base_url: Optional[str], detail: str) -> str:
+def _format_model_error(model: str, base_url: str | None, detail: str) -> str:
     """Format a concise model validation error with actionable guidance."""
     if base_url:
         return (
-            "Invalid model for --base-url. "
-            f"Received model='{model}'. Details: {detail}"
+            f"Invalid model for --base-url. Received model='{model}'. Details: {detail}"
         )
     return (
         "Invalid LiteLLM model format. Use 'provider/model' "
@@ -198,7 +198,7 @@ def _format_model_error(model: str, base_url: Optional[str], detail: str) -> str
     )
 
 
-def _check_model(model: str, base_url: Optional[str]) -> Optional[str]:
+def _check_model(model: str, base_url: str | None) -> str | None:
     """Return an error message if model format is invalid, else None."""
     candidate = model.strip()
     if not candidate:
@@ -212,7 +212,9 @@ def _check_model(model: str, base_url: Optional[str]) -> Optional[str]:
     normalized_model = candidate if "/" in candidate else f"openai/{candidate}"
     provider, model_name = normalized_model.split("/", 1)
     if not provider.strip() or not model_name.strip():
-        return _format_model_error(candidate, base_url, "missing provider or model name")
+        return _format_model_error(
+            candidate, base_url, "missing provider or model name"
+        )
 
     try:
         import litellm
@@ -252,11 +254,11 @@ def _check_model(model: str, base_url: Optional[str]) -> Optional[str]:
 
 def create_llm_client(
     model: str,
-    api_key: Optional[str],
-    base_url: Optional[str],
+    api_key: str | None,
+    base_url: str | None,
     quiet: bool,
     console: Console,
-) -> Tuple[Optional["ExternalLLMClient"], Optional[str]]:
+) -> tuple[ExternalLLMClient | None, str | None]:
     """Initialize ExternalLLMClient with consistent messaging and errors."""
     if error := _check_model(model, base_url):
         return None, error
@@ -290,10 +292,10 @@ def create_llm_client(
 
 
 async def verify_llm_client(
-    llm_client: "ExternalLLMClient",
+    llm_client: ExternalLLMClient,
     quiet: bool,
     console: Console,
-) -> Optional[str]:
+) -> str | None:
     """Run a preflight check against the LLM provider.
 
     Returns an error message string on failure, or None on success.
@@ -310,16 +312,17 @@ async def verify_llm_client(
 
 
 def build_completion_params(
-    temperature: Optional[float],
-    max_tokens: Optional[int],
-) -> Dict[str, Any]:
+    temperature: float | None,
+    max_tokens: int | None,
+) -> dict[str, Any]:
     """Build completion params dict from CLI options."""
-    params: Dict[str, Any] = {}
+    params: dict[str, Any] = {}
     if temperature is not None:
         params["temperature"] = temperature
     if max_tokens is not None:
         params["max_tokens"] = max_tokens
     return params
+
 
 __all__ = [
     "build_completion_params",

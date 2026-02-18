@@ -39,16 +39,25 @@ Optional Features:
 """
 
 # Core classes
+from osmosis_ai.rollout.client import (
+    CompletionsResult,
+    OsmosisLLMClient,
+)
+
+# Configuration
+from osmosis_ai.rollout.config import (
+    RolloutClientSettings,
+    RolloutServerSettings,
+    RolloutSettings,
+    configure,
+    get_settings,
+    reset_settings,
+)
 from osmosis_ai.rollout.core.base import (
     RolloutAgentLoop,
     RolloutContext,
     RolloutResult,
 )
-from osmosis_ai.rollout.client import (
-    CompletionsResult,
-    OsmosisLLMClient,
-)
-from osmosis_ai.rollout.core.llm_client import LLMClientProtocol
 from osmosis_ai.rollout.core.exceptions import (
     AgentLoopNotFoundError,
     OsmosisRolloutError,
@@ -59,19 +68,13 @@ from osmosis_ai.rollout.core.exceptions import (
     ToolArgumentError,
     ToolExecutionError,
 )
-from osmosis_ai.rollout.registry import (
-    AgentLoopRegistry,
-    get_agent_loop,
-    list_agent_loops,
-    register_agent_loop,
-    unregister_agent_loop,
-)
+from osmosis_ai.rollout.core.llm_client import LLMClientProtocol
 from osmosis_ai.rollout.core.schemas import (
-    CompletionUsage,
+    DEFAULT_MAX_METADATA_SIZE_BYTES,
     CompletionsChoice,
     CompletionsRequest,
     CompletionsResponse,
-    DEFAULT_MAX_METADATA_SIZE_BYTES,
+    CompletionUsage,
     InitResponse,
     MessageDict,
     OpenAIFunctionCallSchema,
@@ -90,6 +93,20 @@ from osmosis_ai.rollout.core.schemas import (
     get_max_metadata_size_bytes,
     set_max_metadata_size_bytes,
 )
+from osmosis_ai.rollout.network import (
+    PublicIPDetectionError,
+    detect_public_ip,
+    is_private_ip,
+    is_valid_hostname_or_ip,
+    validate_ipv4,
+)
+from osmosis_ai.rollout.registry import (
+    AgentLoopRegistry,
+    get_agent_loop,
+    list_agent_loops,
+    register_agent_loop,
+    unregister_agent_loop,
+)
 from osmosis_ai.rollout.server.app import create_app
 from osmosis_ai.rollout.server.serve import (
     DEFAULT_HOST,
@@ -97,12 +114,6 @@ from osmosis_ai.rollout.server.serve import (
     ServeError,
     serve_agent_loop,
     validate_and_report,
-)
-from osmosis_ai.rollout.validator import (
-    AgentLoopValidationError,
-    ValidationError,
-    ValidationResult,
-    validate_agent_loop,
 )
 from osmosis_ai.rollout.tools import (
     create_tool_error_result,
@@ -122,115 +133,104 @@ from osmosis_ai.rollout.utils import (
     normalize_stop,
     parse_tool_calls,
 )
-from osmosis_ai.rollout.network import (
-    detect_public_ip,
-    PublicIPDetectionError,
-    validate_ipv4,
-    is_valid_hostname_or_ip,
-    is_private_ip,
-)
-
-# Configuration
-from osmosis_ai.rollout.config import (
-    RolloutClientSettings,
-    RolloutServerSettings,
-    RolloutSettings,
-    configure,
-    get_settings,
-    reset_settings,
+from osmosis_ai.rollout.validator import (
+    AgentLoopValidationError,
+    ValidationError,
+    ValidationResult,
+    validate_agent_loop,
 )
 
 __all__ = [
-    # Core classes
-    "RolloutAgentLoop",
-    "RolloutContext",
-    "RolloutResult",
-    # Client
-    "OsmosisLLMClient",
-    "CompletionsResult",
-    "LLMClientProtocol",
-    # Server
-    "create_app",
-    "serve_agent_loop",
-    "validate_and_report",
-    "ServeError",
     "DEFAULT_HOST",
+    # Schemas - Configuration
+    "DEFAULT_MAX_METADATA_SIZE_BYTES",
     "DEFAULT_PORT",
-    # Validation
-    "validate_agent_loop",
-    "ValidationResult",
-    "ValidationError",
-    "AgentLoopValidationError",
+    "AgentLoopNotFoundError",
     # Registry
     "AgentLoopRegistry",
-    "register_agent_loop",
-    "unregister_agent_loop",
-    "get_agent_loop",
-    "list_agent_loops",
-    # Schemas - Request/Response
-    "RolloutRequest",
-    "RolloutResponse",
-    "InitResponse",
-    "RolloutStatus",
-    "RolloutMetrics",
+    "AgentLoopValidationError",
+    "CompletionUsage",
+    "CompletionsChoice",
     # Schemas - Completions
     "CompletionsRequest",
     "CompletionsResponse",
-    "CompletionsChoice",
-    "CompletionUsage",
-    # Schemas - Tool Definition
-    "OpenAIFunctionToolSchema",
-    "OpenAIFunctionSchema",
-    "OpenAIFunctionParametersSchema",
-    "OpenAIFunctionPropertySchema",
-    # Schemas - Tool Call (adapted from verl)
-    "OpenAIFunctionParsedSchema",
-    "OpenAIFunctionCallSchema",
-    "OpenAIFunctionToolCall",
-    "ToolResponse",
+    "CompletionsResult",
+    "InitResponse",
+    "LLMClientProtocol",
     # Schemas - Type Aliases
     "MessageDict",
-    "SamplingParamsDict",
-    # Schemas - Configuration
-    "DEFAULT_MAX_METADATA_SIZE_BYTES",
-    "get_max_metadata_size_bytes",
-    "set_max_metadata_size_bytes",
+    "OpenAIFunctionCallSchema",
+    "OpenAIFunctionParametersSchema",
+    # Schemas - Tool Call (adapted from verl)
+    "OpenAIFunctionParsedSchema",
+    "OpenAIFunctionPropertySchema",
+    "OpenAIFunctionSchema",
+    "OpenAIFunctionToolCall",
+    # Schemas - Tool Definition
+    "OpenAIFunctionToolSchema",
+    # Client
+    "OsmosisLLMClient",
     # Exceptions
     "OsmosisRolloutError",
-    "OsmosisTransportError",
     "OsmosisServerError",
-    "OsmosisValidationError",
     "OsmosisTimeoutError",
-    "AgentLoopNotFoundError",
-    "ToolExecutionError",
-    "ToolArgumentError",
-    # Tool utilities
-    "create_tool_result",
-    "create_tool_error_result",
-    "serialize_tool_result",
-    "parse_tool_arguments",
-    "get_tool_call_info",
-    "execute_tool_calls",
-    # Message utilities
-    "parse_tool_calls",
-    "normalize_stop",
-    "get_message_content",
-    "get_message_role",
-    "is_assistant_message",
-    "is_tool_message",
-    "is_user_message",
-    "count_messages_by_role",
-    # Network utilities
-    "detect_public_ip",
+    "OsmosisTransportError",
+    "OsmosisValidationError",
     "PublicIPDetectionError",
-    "validate_ipv4",
-    "is_valid_hostname_or_ip",
-    "is_private_ip",
+    # Core classes
+    "RolloutAgentLoop",
+    "RolloutClientSettings",
+    "RolloutContext",
+    "RolloutMetrics",
+    # Schemas - Request/Response
+    "RolloutRequest",
+    "RolloutResponse",
+    "RolloutResult",
+    "RolloutServerSettings",
     # Configuration
     "RolloutSettings",
-    "RolloutClientSettings",
-    "RolloutServerSettings",
-    "get_settings",
+    "RolloutStatus",
+    "SamplingParamsDict",
+    "ServeError",
+    "ToolArgumentError",
+    "ToolExecutionError",
+    "ToolResponse",
+    "ValidationError",
+    "ValidationResult",
     "configure",
+    "count_messages_by_role",
+    # Server
+    "create_app",
+    "create_tool_error_result",
+    # Tool utilities
+    "create_tool_result",
+    # Network utilities
+    "detect_public_ip",
+    "execute_tool_calls",
+    "get_agent_loop",
+    "get_max_metadata_size_bytes",
+    "get_message_content",
+    "get_message_role",
+    "get_settings",
+    "get_tool_call_info",
+    "is_assistant_message",
+    "is_private_ip",
+    "is_tool_message",
+    "is_user_message",
+    "is_valid_hostname_or_ip",
+    "list_agent_loops",
+    "normalize_stop",
+    "parse_tool_arguments",
+    # Message utilities
+    "parse_tool_calls",
+    "register_agent_loop",
     "reset_settings",
+    "serialize_tool_result",
+    "serve_agent_loop",
+    "set_max_metadata_size_bytes",
+    "unregister_agent_loop",
+    # Validation
+    "validate_agent_loop",
+    "validate_and_report",
+    "validate_ipv4",
 ]

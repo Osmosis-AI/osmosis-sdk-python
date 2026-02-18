@@ -10,13 +10,17 @@ from __future__ import annotations
 import logging
 import re
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, Protocol
+from typing import Any, Protocol
 
 from osmosis_ai.rollout.core.base import RolloutAgentLoop, RolloutContext, RolloutResult
 from osmosis_ai.rollout.core.schemas import OpenAIFunctionToolSchema
 from osmosis_ai.rollout.eval.common.dataset import DatasetRow, dataset_row_to_request
-from osmosis_ai.rollout.eval.common.errors import SystemicProviderError, ToolValidationError
+from osmosis_ai.rollout.eval.common.errors import (
+    SystemicProviderError,
+    ToolValidationError,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +28,7 @@ logger = logging.getLogger(__name__)
 class LocalLLMClientProtocol(Protocol):
     """LLM client contract required by LocalRolloutRunner."""
 
-    def set_tools(self, tools: List[Any]) -> None: ...
+    def set_tools(self, tools: list[Any]) -> None: ...
 
     def clear_tools(self) -> None: ...
 
@@ -39,30 +43,30 @@ class LocalRunResult:
 
     row_index: int
     success: bool
-    result: Optional[RolloutResult] = None
-    error: Optional[str] = None
+    result: RolloutResult | None = None
+    error: str | None = None
     duration_ms: float = 0.0
-    token_usage: Dict[str, Any] = field(default_factory=dict)
+    token_usage: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
 class LocalBatchResult:
     """Aggregated results from running a batch of rows."""
 
-    results: List[LocalRunResult]
+    results: list[LocalRunResult]
     total: int
     passed: int
     failed: int
     total_duration_ms: float
     total_tokens: int
     stopped_early: bool = False
-    stop_reason: Optional[str] = None
+    stop_reason: str | None = None
 
 
 TOOL_NAME_PATTERN = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_]*$")
 
 
-def validate_tools(tools: List[OpenAIFunctionToolSchema]) -> None:
+def validate_tools(tools: list[OpenAIFunctionToolSchema]) -> None:
     """Validate tool schemas before sending to provider APIs."""
     for i, tool in enumerate(tools):
         if not tool.function:
@@ -94,9 +98,9 @@ class LocalRolloutRunner:
         agent_loop: RolloutAgentLoop,
         llm_client: LocalLLMClientProtocol,
         debug: bool = False,
-        debug_dir: Optional[str] = None,
+        debug_dir: str | None = None,
         rollout_id_prefix: str = "local",
-        request_metadata: Optional[Dict[str, Any]] = None,
+        request_metadata: dict[str, Any] | None = None,
     ) -> None:
         self.agent_loop = agent_loop
         self.llm_client = llm_client
@@ -105,7 +109,7 @@ class LocalRolloutRunner:
         self.request_metadata = dict(request_metadata or {})
 
         if debug_dir is not None:
-            self.debug_dir: Optional[str] = debug_dir
+            self.debug_dir: str | None = debug_dir
         elif debug:
             self.debug_dir = "./local_debug"
         else:
@@ -116,9 +120,9 @@ class LocalRolloutRunner:
         row: DatasetRow,
         row_index: int,
         max_turns: int = 10,
-        completion_params: Optional[Dict[str, Any]] = None,
-        rollout_id: Optional[str] = None,
-        request_metadata: Optional[Dict[str, Any]] = None,
+        completion_params: dict[str, Any] | None = None,
+        rollout_id: str | None = None,
+        request_metadata: dict[str, Any] | None = None,
     ) -> LocalRunResult:
         """Run a single dataset row."""
         overall_start = time.monotonic()
@@ -185,14 +189,13 @@ class LocalRolloutRunner:
             # accurate stats for the failing run.
             try:
                 metrics = self.llm_client.get_metrics()
-                tokens = (
-                    int(getattr(metrics, "prompt_tokens", 0))
-                    + int(getattr(metrics, "response_tokens", 0))
+                tokens = int(getattr(metrics, "prompt_tokens", 0)) + int(
+                    getattr(metrics, "response_tokens", 0)
                 )
             except Exception:
                 tokens = 0
-            setattr(e, "duration_ms", (time.monotonic() - overall_start) * 1000)
-            setattr(e, "tokens", tokens)
+            e.duration_ms = (time.monotonic() - overall_start) * 1000
+            e.tokens = tokens
             raise
 
         except Exception as e:
@@ -212,17 +215,17 @@ class LocalRolloutRunner:
 
     async def run_batch(
         self,
-        rows: List[DatasetRow],
+        rows: list[DatasetRow],
         max_turns: int = 10,
-        completion_params: Optional[Dict[str, Any]] = None,
-        on_progress: Optional[Callable[[int, int, LocalRunResult], None]] = None,
+        completion_params: dict[str, Any] | None = None,
+        on_progress: Callable[[int, int, LocalRunResult], None] | None = None,
         start_index: int = 0,
     ) -> LocalBatchResult:
         """Run multiple rows sequentially."""
-        results: List[LocalRunResult] = []
+        results: list[LocalRunResult] = []
         total_start = time.monotonic()
         stopped_early = False
-        stop_reason: Optional[str] = None
+        stop_reason: str | None = None
 
         for i, row in enumerate(rows):
             row_index = start_index + i
@@ -238,7 +241,7 @@ class LocalRolloutRunner:
                 duration_ms = getattr(e, "duration_ms", None)
                 if duration_ms is None:
                     duration_ms = (time.monotonic() - row_start) * 1000
-                tokens = int(getattr(e, "tokens", 0))
+                tokens = int(e.tokens or 0)
                 result = LocalRunResult(
                     row_index=row_index,
                     success=False,
@@ -272,6 +275,7 @@ class LocalRolloutRunner:
             stopped_early=stopped_early,
             stop_reason=stop_reason,
         )
+
 
 __all__ = [
     "LocalBatchResult",

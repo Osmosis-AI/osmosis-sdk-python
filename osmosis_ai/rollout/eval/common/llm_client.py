@@ -5,18 +5,19 @@ Supports providers such as OpenAI, Anthropic, Groq, Ollama, and others.
 
 from __future__ import annotations
 
-import logging
 import inspect
+import logging
 import time
-import warnings
-from typing import Any, Dict, List, Optional
+from typing import Any
 
-warnings.filterwarnings(
-    "ignore",
-    message="Pydantic serializer warnings:",
-    category=UserWarning,
+from osmosis_ai._litellm_compat import APIConnectionError as _APIConnectionError
+from osmosis_ai._litellm_compat import AuthenticationError as _AuthenticationError
+from osmosis_ai._litellm_compat import BudgetExceededError as _BudgetExceededError
+from osmosis_ai._litellm_compat import (
+    ContextWindowExceededError as _ContextWindowExceededError,
 )
-
+from osmosis_ai._litellm_compat import RateLimitError as _RateLimitError
+from osmosis_ai._litellm_compat import Timeout as _LitellmTimeout
 from osmosis_ai.rollout.client import CompletionsResult
 from osmosis_ai.rollout.core.schemas import RolloutMetrics
 from osmosis_ai.rollout.eval.common.errors import ProviderError, SystemicProviderError
@@ -39,7 +40,7 @@ def _get_provider_message(e: Exception) -> str:
     msg = getattr(e, "message", str(e))
     prefix = f"litellm.{type(e).__name__}: "
     if msg.startswith(prefix):
-        msg = msg[len(prefix):]
+        msg = msg[len(prefix) :]
 
     # Strip litellm noise after common markers
     for marker in _NOISE_MARKERS:
@@ -90,7 +91,7 @@ def _first_line(message: str) -> str:
 
 def _format_provider_hint(
     model: str,
-    api_base: Optional[str],
+    api_base: str | None,
     raw_message: str,
 ) -> str:
     """Build a concise actionable error for provider/model format issues."""
@@ -136,17 +137,17 @@ class ExternalLLMClient:
     def __init__(
         self,
         model: str = "gpt-5-mini",
-        api_key: Optional[str] = None,
-        api_base: Optional[str] = None,
+        api_key: str | None = None,
+        api_base: str | None = None,
     ) -> None:
         self._litellm = _get_litellm()
 
-        self._RateLimitError = self._litellm.RateLimitError
-        self._AuthenticationError = self._litellm.AuthenticationError
-        self._BudgetExceededError = self._litellm.BudgetExceededError
-        self._Timeout = self._litellm.Timeout
-        self._ContextWindowExceededError = self._litellm.ContextWindowExceededError
-        self._APIConnectionError = self._litellm.APIConnectionError
+        self._RateLimitError = _RateLimitError
+        self._AuthenticationError = _AuthenticationError
+        self._BudgetExceededError = _BudgetExceededError
+        self._Timeout = _LitellmTimeout
+        self._ContextWindowExceededError = _ContextWindowExceededError
+        self._APIConnectionError = _APIConnectionError
 
         # Preserve the user's original model name for display purposes.
         self.display_name = model
@@ -164,7 +165,7 @@ class ExternalLLMClient:
         self._api_key = api_key
         self._api_base = api_base
 
-        self._tools: Optional[List[Dict[str, Any]]] = None
+        self._tools: list[dict[str, Any]] | None = None
 
         self._llm_latency_ms: float = 0.0
         self._num_llm_calls: int = 0
@@ -172,7 +173,7 @@ class ExternalLLMClient:
         self._response_tokens: int = 0
         self._closed = False
 
-    def set_tools(self, tools: List[Any]) -> None:
+    def set_tools(self, tools: list[Any]) -> None:
         """Set tools for the current execution row."""
         if tools:
             self._tools = [
@@ -195,13 +196,13 @@ class ExternalLLMClient:
 
     async def chat_completions(
         self,
-        messages: List[Dict[str, Any]],
+        messages: list[dict[str, Any]],
         **kwargs: Any,
     ) -> CompletionsResult:
         """Make a chat completion request via LiteLLM."""
         start_time = time.monotonic()
 
-        request_kwargs: Dict[str, Any] = {
+        request_kwargs: dict[str, Any] = {
             "model": self.model,
             "messages": messages,
         }
@@ -251,14 +252,16 @@ class ExternalLLMClient:
             raise self._classify_unknown_error(e) from e
 
         latency_ms = (time.monotonic() - start_time) * 1000
-        usage = response.usage
+        # litellm's ModelResponse stubs are incomplete — usage/choices/message
+        # are valid at runtime but not fully reflected in the published types.
+        usage = response.usage  # type: ignore[union-attr]
         self._llm_latency_ms += latency_ms
         self._num_llm_calls += 1
         self._prompt_tokens += usage.prompt_tokens if usage else 0
         self._response_tokens += usage.completion_tokens if usage else 0
 
-        choice = response.choices[0]
-        message = choice.message.model_dump(exclude_none=True)
+        choice = response.choices[0]  # type: ignore[union-attr]
+        message = choice.message.model_dump(exclude_none=True)  # type: ignore[union-attr]
 
         return CompletionsResult(
             message=message,
@@ -280,13 +283,16 @@ class ExternalLLMClient:
                 fails, or the model does not exist.
         """
         try:
-            await self._litellm.acompletion(
-                model=self.model,
-                messages=[{"role": "user", "content": "hi"}],
-                max_tokens=1,
-                **({"api_key": self._api_key} if self._api_key else {}),
-                **({"api_base": self._api_base} if self._api_base else {}),
-            )
+            preflight_kwargs: dict[str, Any] = {
+                "model": self.model,
+                "messages": [{"role": "user", "content": "hi"}],
+                "max_tokens": 1,
+            }
+            if self._api_key:
+                preflight_kwargs["api_key"] = self._api_key
+            if self._api_base:
+                preflight_kwargs["api_base"] = self._api_base
+            await self._litellm.acompletion(**preflight_kwargs)
         except self._RateLimitError:
             # Rate-limited means the endpoint is reachable and authenticated.
             return
@@ -295,9 +301,7 @@ class ExternalLLMClient:
             self._BudgetExceededError,
             self._APIConnectionError,
         ) as e:
-            raise SystemicProviderError(
-                _get_provider_message(e)
-            ) from e
+            raise SystemicProviderError(_get_provider_message(e)) from e
         except Exception as e:
             classified = self._classify_unknown_error(e)
             if isinstance(classified, SystemicProviderError):
@@ -319,9 +323,7 @@ class ExternalLLMClient:
 
         # Systemic: auth / forbidden / model-not-found
         if status_code in (401, 403, 404):
-            return SystemicProviderError(
-                f"LLM API error (HTTP {status_code}): {msg}"
-            )
+            return SystemicProviderError(f"LLM API error (HTTP {status_code}): {msg}")
 
         # Systemic: connection errors wrapped as InternalServerError etc.
         if _is_connection_error_message(msg):
@@ -373,10 +375,11 @@ class ExternalLLMClient:
         except Exception as exc:
             logger.debug("LiteLLM async client cleanup failed: %s", exc)
 
-    async def __aenter__(self) -> "ExternalLLMClient":
+    async def __aenter__(self) -> ExternalLLMClient:
         return self
 
     async def __aexit__(self, *args: Any) -> None:
         await self.close()
+
 
 __all__ = ["ExternalLLMClient"]

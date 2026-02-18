@@ -13,6 +13,10 @@ authors = [
 license = {file = "LICENSE"}
 classifiers = [
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
 ]
@@ -43,14 +47,20 @@ mcp = [
     "fastmcp>=2.0.0",
 ]
 
-# Development dependencies (testing, formatting, etc.)
+# Development dependencies (testing, formatting, type checking, etc.)
+# Includes server + mcp extras so pyright/mypy can resolve all imports.
 dev = [
+    "osmosis-ai[server,mcp]",
     "pytest>=8.0.0,<10.0.0",
     "pytest-asyncio>=0.23.0,<2.0.0",
+    "pytest-cov>=6.0.0",
     "anyio>=4.0.0",
-    "black>=25.0.0,<26.0.0",
-    "isort>=5.0.0,<7.0.0",
-    "fastmcp>=2.0.0",
+    "ruff==0.15.1",  # Keep in sync with pre-commit and CI
+    "pre-commit>=4.0.0,<5.0.0",
+    "pyright[nodejs]==1.1.408",
+    "mypy==1.19.1",
+    "types-PyYAML>=6.0",
+    "types-requests>=2.0",
 ]
 
 # Full installation with all optional features (union of server + mcp)
@@ -84,3 +94,60 @@ osmosis_ai = ["py.typed"]
 
 [tool.setuptools.dynamic]
 version = {attr = "osmosis_ai.consts.PACKAGE_VERSION"}
+
+[tool.coverage.run]
+source = ["osmosis_ai"]
+omit = ["tests/*", "*/consts.py"]
+
+[tool.coverage.report]
+fail_under = 70
+show_missing = true
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "if __name__ == .__main__.",
+]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 88
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "F",    # pyflakes
+    "W",    # pycodestyle warnings
+    "I",    # isort
+    "UP",   # pyupgrade
+    "B",    # flake8-bugbear
+    "SIM",  # flake8-simplify
+    "RUF",  # ruff-specific rules
+]
+ignore = [
+    "E501",    # line-too-long (handled by ruff format)
+    "E402",    # module-import-not-at-top-of-file (intentional lazy/conditional imports)
+    "SIM117",  # multiple-with-statements (nested with is often clearer in tests)
+    "RUF012",  # mutable-class-default (common with Pydantic models)
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["osmosis_ai"]
+
+[tool.pyright]
+pythonVersion = "3.10"
+include = ["osmosis_ai"]
+exclude = ["tests", "build", "dist", "**/__pycache__"]
+typeCheckingMode = "standard"
+reportMissingTypeStubs = false
+reportCallInDefaultInitializer = false
+
+[tool.mypy]
+python_version = "3.10"
+files = ["osmosis_ai"]
+exclude = ["tests/", "build/", "dist/"]
+check_untyped_defs = true
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true
+warn_unused_ignores = false
+disallow_incomplete_defs = true

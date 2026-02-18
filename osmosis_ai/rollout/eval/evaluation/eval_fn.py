@@ -17,7 +17,8 @@ import importlib
 import inspect
 import os
 import sys
-from typing import Any, Callable, Dict, List
+from collections.abc import Callable
+from typing import Any
 
 
 class EvalFnError(Exception):
@@ -48,8 +49,8 @@ class EvalFnWrapper:
             params = list(sig.parameters.keys())
             if not params:
                 raise EvalFnError(
-                    f"Eval function has no parameters. "
-                    f"Expected (solution_str, ...) or (messages, ...)"
+                    "Eval function has no parameters. "
+                    "Expected (solution_str, ...) or (messages, ...)"
                 )
             first_param = params[0]
             if first_param == "solution_str":
@@ -65,10 +66,10 @@ class EvalFnWrapper:
                     f"with 'osmosis eval' directly."
                 )
         except (ValueError, TypeError) as e:
-            raise EvalFnError(f"Cannot inspect eval function signature: {e}")
+            raise EvalFnError(f"Cannot inspect eval function signature: {e}") from e
 
     @staticmethod
-    def _extract_last_assistant_content(messages: List[Dict[str, Any]]) -> str:
+    def _extract_last_assistant_content(messages: list[dict[str, Any]]) -> str:
         """Extract content from the last assistant message."""
         for msg in reversed(messages):
             if msg.get("role") == "assistant":
@@ -79,9 +80,9 @@ class EvalFnWrapper:
 
     async def __call__(
         self,
-        messages: List[Dict[str, Any]],
+        messages: list[dict[str, Any]],
         ground_truth: str,
-        metadata: Dict[str, Any],
+        metadata: dict[str, Any],
     ) -> float:
         """Call the eval function with normalized arguments.
 
@@ -93,6 +94,7 @@ class EvalFnWrapper:
         Returns:
             Float score from the eval function.
         """
+        kwargs: dict[str, Any]
         if self._mode == "simple":
             solution_str = self._extract_last_assistant_content(messages)
             kwargs = {
@@ -148,23 +150,24 @@ def load_eval_fn(module_path: str) -> Callable:
     try:
         module = importlib.import_module(module_name)
     except ImportError as e:
-        raise EvalFnError(f"Cannot import module '{module_name}': {e}")
+        raise EvalFnError(f"Cannot import module '{module_name}': {e}") from e
 
     try:
         fn = getattr(module, attr_name)
-    except AttributeError:
+    except AttributeError as e:
         raise EvalFnError(
             f"Module '{module_name}' has no attribute '{attr_name}'. "
             f"Available: {[a for a in dir(module) if not a.startswith('_')]}"
-        )
+        ) from e
 
     if not callable(fn):
         raise EvalFnError(f"'{attr_name}' in '{module_name}' is not callable")
 
-    return fn
+    result: Callable[..., Any] = fn
+    return result
 
 
-def load_eval_fns(module_paths: List[str]) -> List[EvalFnWrapper]:
+def load_eval_fns(module_paths: list[str]) -> list[EvalFnWrapper]:
     """Load multiple eval functions and wrap them.
 
     Args:
@@ -188,6 +191,7 @@ def load_eval_fns(module_paths: List[str]) -> List[EvalFnWrapper]:
         wrapper = EvalFnWrapper(fn, name)
         wrappers.append(wrapper)
     return wrappers
+
 
 __all__ = [
     "EvalFnError",

@@ -1,25 +1,31 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Optional, Sequence
 
 from ..rubric_eval import ensure_api_key_available
 from ..rubric_types import MissingAPIKeyError
-from .config import RubricConfig, RubricSuite, discover_rubric_config_path, load_rubric_suite
+from .config import (
+    RubricConfig,
+    RubricSuite,
+    discover_rubric_config_path,
+    load_rubric_suite,
+)
 from .dataset import DatasetLoader, DatasetRecord
-from .engine import RubricEvaluationEngine, EvaluationReport
+from .engine import EvaluationReport, RubricEvaluationEngine
 from .errors import CLIError
 from .reporting import BaselineComparator, BaselineStatistics, JsonReportWriter
-
 
 _CACHE_ROOT = Path("~/.cache/osmosis/eval_result").expanduser()
 
 
 def _sanitise_rubric_folder(rubric_id: str) -> str:
     """Produce a filesystem-safe folder name for the rubric id."""
-    clean = "".join(ch if ch.isalnum() or ch in {"-", "_"} else "_" for ch in rubric_id.strip())
+    clean = "".join(
+        ch if ch.isalnum() or ch in {"-", "_"} else "_" for ch in rubric_id.strip()
+    )
     clean = clean.strip("_") or "rubric"
     return clean.lower()
 
@@ -29,10 +35,10 @@ class EvaluationSessionRequest:
     rubric_id: str
     data_path: Path
     number: int = 1
-    config_path: Optional[Path] = None
-    output_path: Optional[Path] = None
-    output_identifier: Optional[str] = None
-    baseline_path: Optional[Path] = None
+    config_path: Path | None = None
+    output_path: Path | None = None
+    output_identifier: str | None = None
+    baseline_path: Path | None = None
 
 
 @dataclass
@@ -43,9 +49,9 @@ class EvaluationSessionResult:
     rubric_config: RubricConfig
     records: Sequence[DatasetRecord]
     report: EvaluationReport
-    baseline: Optional[BaselineStatistics]
-    written_path: Optional[Path]
-    output_identifier: Optional[str]
+    baseline: BaselineStatistics | None
+    written_path: Path | None
+    output_identifier: str | None
 
 
 class EvaluationSession:
@@ -54,13 +60,15 @@ class EvaluationSession:
     def __init__(
         self,
         *,
-        config_locator: Callable[[Optional[str], Path], Path] = discover_rubric_config_path,
+        config_locator: Callable[
+            [str | None, Path], Path
+        ] = discover_rubric_config_path,
         suite_loader: Callable[[Path], RubricSuite] = load_rubric_suite,
-        dataset_loader: Optional[DatasetLoader] = None,
-        engine: Optional[RubricEvaluationEngine] = None,
-        baseline_comparator: Optional[BaselineComparator] = None,
-        report_writer: Optional[JsonReportWriter] = None,
-        identifier_factory: Optional[Callable[[], str]] = None,
+        dataset_loader: DatasetLoader | None = None,
+        engine: RubricEvaluationEngine | None = None,
+        baseline_comparator: BaselineComparator | None = None,
+        report_writer: JsonReportWriter | None = None,
+        identifier_factory: Callable[[], str] | None = None,
     ):
         self._config_locator = config_locator
         self._suite_loader = suite_loader
@@ -84,9 +92,13 @@ class EvaluationSession:
         if not data_path.exists():
             raise CLIError(f"Data path '{data_path}' does not exist.")
         if data_path.is_dir():
-            raise CLIError(f"Expected a JSONL file but received directory '{data_path}'.")
+            raise CLIError(
+                f"Expected a JSONL file but received directory '{data_path}'."
+            )
 
-        config_override = str(request.config_path.expanduser()) if request.config_path else None
+        config_override = (
+            str(request.config_path.expanduser()) if request.config_path else None
+        )
         config_path = self._config_locator(config_override, data_path)
         suite = self._suite_loader(config_path)
         rubric_config = suite.get(rubric_id)
@@ -98,10 +110,14 @@ class EvaluationSession:
 
         all_records = self._dataset_loader.load(data_path)
         matching_records = [
-            record for record in all_records if record.rubric_id.lower() == rubric_id.lower()
+            record
+            for record in all_records
+            if record.rubric_id.lower() == rubric_id.lower()
         ]
         if not matching_records:
-            raise CLIError(f"No records in '{data_path}' reference rubric '{rubric_id}'.")
+            raise CLIError(
+                f"No records in '{data_path}' reference rubric '{rubric_id}'."
+            )
 
         baseline_stats = self._load_baseline(request.baseline_path)
 
@@ -140,7 +156,7 @@ class EvaluationSession:
             output_identifier=resolved_identifier,
         )
 
-    def _load_baseline(self, baseline_path: Optional[Path]) -> Optional[BaselineStatistics]:
+    def _load_baseline(self, baseline_path: Path | None) -> BaselineStatistics | None:
         if baseline_path is None:
             return None
         resolved = baseline_path.expanduser()
@@ -148,11 +164,11 @@ class EvaluationSession:
 
     def _resolve_output_path(
         self,
-        output_candidate: Optional[Path],
-        output_identifier: Optional[str],
+        output_candidate: Path | None,
+        output_identifier: str | None,
         *,
         rubric_id: str,
-    ) -> tuple[Optional[Path], Optional[str]]:
+    ) -> tuple[Path | None, str | None]:
         if output_candidate is None:
             identifier = output_identifier or self._identifier_factory()
             target_dir = _CACHE_ROOT / _sanitise_rubric_folder(rubric_id)

@@ -12,10 +12,36 @@ from __future__ import annotations
 import json
 import os
 import re
-import warnings
-from typing import Any, Dict, Optional, Union
+from typing import Any
 
-from .rubric_types import MissingAPIKeyError, ModelInfo, ModelNotFoundError, ProviderRequestError, RewardRubricRunResult
+from ._litellm_compat import (
+    APIConnectionError as _LitellmAPIConnectionError,
+)
+from ._litellm_compat import (
+    APIError as _LitellmAPIError,
+)
+from ._litellm_compat import (
+    AuthenticationError as _LitellmAuthenticationError,
+)
+from ._litellm_compat import (
+    NotFoundError as _LitellmNotFoundError,
+)
+from ._litellm_compat import (
+    RateLimitError as _LitellmRateLimitError,
+)
+from ._litellm_compat import (
+    Timeout as _LitellmTimeout,
+)
+from ._litellm_compat import (
+    completion as _litellm_completion,
+)
+from .rubric_types import (
+    MissingAPIKeyError,
+    ModelInfo,
+    ModelNotFoundError,
+    ProviderRequestError,
+    RewardRubricRunResult,
+)
 
 # Default timeout for LLM requests
 DEFAULT_REQUEST_TIMEOUT_SECONDS = 30.0
@@ -90,7 +116,7 @@ def _default_timeout_for_model(provider: str, model: str) -> float:
 # ============================================================================
 
 
-def _reward_json_schema() -> Dict[str, Any]:
+def _reward_json_schema() -> dict[str, Any]:
     """Return the JSON schema for rubric evaluation responses."""
     return {
         "name": "reward_rubric_response",
@@ -136,7 +162,9 @@ def _sanitize_json(raw: str) -> tuple[float, str]:
         raise ValueError("Model response must include a finite numeric 'score'.")
 
     if not isinstance(explanation_raw, str) or not explanation_raw.strip():
-        raise ValueError("Model response must include a non-empty 'explanation' string.")
+        raise ValueError(
+            "Model response must include a non-empty 'explanation' string."
+        )
 
     return score, explanation_raw.strip()
 
@@ -158,14 +186,16 @@ def _end_sentinel(label: str) -> str:
     return f"<<<END_{label}>>>"
 
 
-def _quoted_block(label: str, text: Optional[str]) -> str:
+def _quoted_block(label: str, text: str | None) -> str:
     if not text or not text.strip():
         return ""
     cleaned = _escape_triple_backticks(text.strip())
     return "\n".join((_start_sentinel(label), cleaned, _end_sentinel(label)))
 
 
-def _build_system_prompt(score_min: float, score_max: float, custom_system_prompt: Optional[str]) -> str:
+def _build_system_prompt(
+    score_min: float, score_max: float, custom_system_prompt: str | None
+) -> str:
     base = (
         "You are an impartial reward judge. "
         "Score outputs strictly according to the provided rubric. "
@@ -183,7 +213,7 @@ def _build_system_prompt(score_min: float, score_max: float, custom_system_promp
     return base
 
 
-def _format_metadata(metadata: Optional[Dict[str, Any]]) -> Optional[str]:
+def _format_metadata(metadata: dict[str, Any] | None) -> str | None:
     if not metadata:
         return None
     try:
@@ -193,7 +223,7 @@ def _format_metadata(metadata: Optional[Dict[str, Any]]) -> Optional[str]:
         return json.dumps(serialisable, ensure_ascii=False, indent=2, sort_keys=True)
 
 
-def _select_text(*candidates: Optional[str]) -> Optional[str]:
+def _select_text(*candidates: str | None) -> str | None:
     for candidate in candidates:
         if isinstance(candidate, str):
             stripped = candidate.strip()
@@ -207,9 +237,9 @@ def _build_user_prompt(
     score_min: float,
     score_max: float,
     candidate_output: str,
-    original_input: Optional[str],
-    ground_truth: Optional[str],
-    metadata: Optional[Dict[str, Any]],
+    original_input: str | None,
+    ground_truth: str | None,
+    metadata: dict[str, Any] | None,
 ) -> str:
     lines = [
         "Rubric:",
@@ -269,7 +299,7 @@ def _build_user_prompt(
 # ============================================================================
 
 
-def _get_api_key_env_name(provider: str, model_info: ModelInfo) -> Optional[str]:
+def _get_api_key_env_name(provider: str, model_info: ModelInfo) -> str | None:
     env_name = model_info.get("api_key_env")
     if isinstance(env_name, str):
         env_name = env_name.strip()
@@ -278,8 +308,8 @@ def _get_api_key_env_name(provider: str, model_info: ModelInfo) -> Optional[str]
     return DEFAULT_API_KEY_ENV.get(provider.lower())
 
 
-def _format_api_key_hint(provider: str, env_name: Optional[str]) -> str:
-    export_line: Optional[str] = None
+def _format_api_key_hint(provider: str, env_name: str | None) -> str:
+    export_line: str | None = None
 
     if env_name:
         export_line = f'    export {env_name}="..."'
@@ -291,7 +321,9 @@ def _format_api_key_hint(provider: str, env_name: Optional[str]) -> str:
     if export_line:
         return "Set the required API key before running:\n\n" + export_line
 
-    exports = "\n".join(f'    export {name}="..."' for name in DEFAULT_API_KEY_ENV.values())
+    exports = "\n".join(
+        f'    export {name}="..."' for name in DEFAULT_API_KEY_ENV.values()
+    )
     return "Set the required API key before running:\n\n" + exports
 
 
@@ -351,17 +383,17 @@ def _call_litellm(
     score_min: float,
     score_max: float,
     timeout: float,
-    reasoning_effort: Optional[str] = None,
+    reasoning_effort: str | None = None,
 ) -> RewardRubricRunResult:
     """Call LiteLLM and return the rubric evaluation result."""
     try:
         import litellm
-    except ImportError:
+    except ImportError as e:
         raise ProviderRequestError(
             provider,
             model,
             "LiteLLM is required. Install it via `pip install litellm`.",
-        )
+        ) from e
 
     # Suppress LiteLLM's "Provider List: ..." debug prints
     litellm.suppress_debug_info = True
@@ -377,11 +409,11 @@ def _call_litellm(
     # Use json_schema when the model supports it, otherwise fall back to
     # json_object (e.g. Cerebras models that only accept the simpler mode).
     if litellm.supports_response_schema(model=litellm_model, custom_llm_provider=None):
-        response_format: Dict[str, Any] = {"type": "json_schema", "json_schema": schema}
+        response_format: dict[str, Any] = {"type": "json_schema", "json_schema": schema}
     else:
         response_format = {"type": "json_object"}
 
-    completion_kwargs: Dict[str, Any] = {
+    completion_kwargs: dict[str, Any] = {
         "model": litellm_model,
         "messages": messages,
         "response_format": response_format,
@@ -398,29 +430,25 @@ def _call_litellm(
         # Let LiteLLM silently drop the param for models that don't support it
         completion_kwargs["drop_params"] = True
 
-    # Suppress Pydantic serialization warnings caused by LiteLLM model
-    # definitions not matching provider responses.  Applied as a persistent
-    # filter because some providers (e.g. Gemini) trigger the warning lazily
-    # after the completion call returns.
-    # See: https://github.com/BerriAI/litellm/issues/17631
-    warnings.filterwarnings(
-        "ignore",
-        message="Pydantic serializer warnings",
-        category=UserWarning,
-        module=r"pydantic\.main",
-    )
-
     try:
-        response = litellm.completion(**completion_kwargs)
-    except litellm.NotFoundError as err:
+        response = _litellm_completion(**completion_kwargs)
+    except _LitellmNotFoundError as err:
         raise ModelNotFoundError(
             provider,
             model,
             f"Model '{model}' was not found. Confirm the model identifier is correct "
             f"and your {provider} account has access to it.",
         ) from err
-    except (litellm.APIError, litellm.RateLimitError, litellm.AuthenticationError, litellm.Timeout, litellm.APIConnectionError) as err:
-        raise ProviderRequestError(provider, model, _extract_error_message(err)) from err
+    except (
+        _LitellmAPIError,
+        _LitellmRateLimitError,
+        _LitellmAuthenticationError,
+        _LitellmTimeout,
+        _LitellmAPIConnectionError,
+    ) as err:
+        raise ProviderRequestError(
+            provider, model, _extract_error_message(err)
+        ) from err
     except Exception:
         # Re-raise other unexpected exceptions to be handled by the caller.
         raise
@@ -429,7 +457,9 @@ def _call_litellm(
     content = _extract_content(raw)
 
     if not content:
-        raise ProviderRequestError(provider, model, "Model response did not include any content.")
+        raise ProviderRequestError(
+            provider, model, "Model response did not include any content."
+        )
 
     try:
         score, explanation = _sanitize_json(content)
@@ -457,7 +487,10 @@ def _extract_error_message(err: Exception) -> str:
         elif isinstance(error_field, str) and error_field.strip():
             return error_field.strip()
 
-    return str(err).strip() or f"{err.__class__.__name__} encountered while contacting provider."
+    return (
+        str(err).strip()
+        or f"{err.__class__.__name__} encountered while contacting provider."
+    )
 
 
 def _dump_response(response: Any) -> Any:
@@ -472,7 +505,7 @@ def _dump_response(response: Any) -> Any:
     return response
 
 
-def _extract_content(raw: Any) -> Optional[str]:
+def _extract_content(raw: Any) -> str | None:
     """Extract text content from LiteLLM response."""
     if not isinstance(raw, dict):
         return None
@@ -500,14 +533,14 @@ def evaluate_rubric(
     solution_str: str,
     model_info: ModelInfo,
     *,
-    ground_truth: Optional[str] = None,
-    original_input: Optional[str] = None,
-    metadata: Optional[Dict[str, Any]] = None,
-    score_min: Optional[float] = None,
-    score_max: Optional[float] = None,
-    timeout: Optional[float] = None,
+    ground_truth: str | None = None,
+    original_input: str | None = None,
+    metadata: dict[str, Any] | None = None,
+    score_min: float | None = None,
+    score_max: float | None = None,
+    timeout: float | None = None,
     return_details: bool = False,
-) -> Union[float, RewardRubricRunResult]:
+) -> float | RewardRubricRunResult:
     """
     Evaluate a single model output against a rubric by delegating scoring to a hosted LLM.
 
@@ -547,21 +580,33 @@ def evaluate_rubric(
     if not isinstance(solution_str, str) or not solution_str.strip():
         raise TypeError("'solution_str' must be a non-empty string")
 
-    resolved_score_min = float(score_min if score_min is not None else model_info.get("score_min", 0.0))
-    resolved_score_max = float(score_max if score_max is not None else model_info.get("score_max", 1.0))
+    resolved_score_min = float(
+        score_min if score_min is not None else model_info.get("score_min", 0.0)
+    )
+    resolved_score_max = float(
+        score_max if score_max is not None else model_info.get("score_max", 1.0)
+    )
     if resolved_score_max <= resolved_score_min:
         raise ValueError("'score_max' must be greater than 'score_min'")
 
     resolved_system_prompt = _select_text(model_info.get("system_prompt"))
-    resolved_original_input = _select_text(original_input, model_info.get("original_input"))
+    resolved_original_input = _select_text(
+        original_input, model_info.get("original_input")
+    )
 
     if timeout is not None:
         provider_timeout = float(timeout)
     else:
         model_timeout = model_info.get("timeout")
-        provider_timeout = float(model_timeout) if model_timeout else _default_timeout_for_model(provider_name, model)
+        provider_timeout = (
+            float(model_timeout)
+            if model_timeout
+            else _default_timeout_for_model(provider_name, model)
+        )
 
-    system_content = _build_system_prompt(resolved_score_min, resolved_score_max, resolved_system_prompt)
+    system_content = _build_system_prompt(
+        resolved_score_min, resolved_score_max, resolved_system_prompt
+    )
     user_content = _build_user_prompt(
         rubric,
         resolved_score_min,
@@ -589,17 +634,20 @@ def evaluate_rubric(
     except ProviderRequestError:
         raise
     except Exception as exc:
-        detail = str(exc).strip() or f"{exc.__class__.__name__} encountered while contacting provider."
+        detail = (
+            str(exc).strip()
+            or f"{exc.__class__.__name__} encountered while contacting provider."
+        )
         raise ProviderRequestError(provider_name, model, detail) from exc
 
     return result if return_details else result["score"]
 
 
 __all__ = [
-    "evaluate_rubric",
-    "ensure_api_key_available",
+    "DEFAULT_REQUEST_TIMEOUT_SECONDS",
+    "MissingAPIKeyError",
     "ModelInfo",
     "RewardRubricRunResult",
-    "MissingAPIKeyError",
-    "DEFAULT_REQUEST_TIMEOUT_SECONDS",
+    "ensure_api_key_available",
+    "evaluate_rubric",
 ]

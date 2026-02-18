@@ -11,7 +11,7 @@ import json
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, List, Optional
+from typing import TYPE_CHECKING, Any
 
 from osmosis_ai.rollout.console import Console
 from osmosis_ai.rollout.eval.common.cli import (
@@ -29,20 +29,20 @@ if TYPE_CHECKING:
     from osmosis_ai.rollout.core.base import RolloutAgentLoop
     from osmosis_ai.rollout.eval.common.dataset import DatasetRow
     from osmosis_ai.rollout.eval.common.llm_client import ExternalLLMClient
-    from osmosis_ai.rollout.eval.test_mode.runner import LocalTestBatchResult, LocalTestRunResult
-
-
-logger = logging.getLogger(__name__)
+    from osmosis_ai.rollout.eval.test_mode.runner import (
+        LocalTestBatchResult,
+        LocalTestRunResult,
+    )
 
 
 @dataclass
 class _SetupResult:
     """Result of setup phase containing initialized components."""
 
-    agent_loop: "RolloutAgentLoop"
-    llm_client: "ExternalLLMClient"
-    rows: List["DatasetRow"]
-    completion_params: Dict[str, Any]
+    agent_loop: RolloutAgentLoop
+    llm_client: ExternalLLMClient
+    rows: list[DatasetRow]
+    completion_params: dict[str, Any]
 
 
 class TestCommand:
@@ -82,7 +82,7 @@ class TestCommand:
             "--dataset",
             dest="dataset",
             required=True,
-            help="Path to dataset file (.json, .jsonl, or .parquet).",
+            help="Path to dataset file (.parquet recommended, .jsonl, or .csv).",
         )
 
         parser.add_argument(
@@ -200,7 +200,7 @@ class TestCommand:
     def run(self, args: argparse.Namespace) -> int:
         return asyncio.run(self._run_async(args))
 
-    def _validate_args(self, args: argparse.Namespace) -> Optional[str]:
+    def _validate_args(self, args: argparse.Namespace) -> str | None:
         if args.module and args.mcp:
             return "--module and --mcp are mutually exclusive."
         if not args.module and not args.mcp:
@@ -216,7 +216,9 @@ class TestCommand:
         from osmosis_ai.consts import PACKAGE_VERSION
 
         mode_suffix = " (Interactive Mode)" if args.interactive else ""
-        self.console.print(f"osmosis-rollout-test v{PACKAGE_VERSION}{mode_suffix}", style="bold")
+        self.console.print(
+            f"osmosis-rollout-test v{PACKAGE_VERSION}{mode_suffix}", style="bold"
+        )
         self.console.print()
 
     async def _run_interactive_mode(
@@ -238,7 +240,9 @@ class TestCommand:
                 await interactive_runner.run_interactive_session(
                     rows=setup.rows,
                     max_turns=args.max_turns,
-                    completion_params=setup.completion_params if setup.completion_params else None,
+                    completion_params=setup.completion_params
+                    if setup.completion_params
+                    else None,
                     initial_row=args.row,
                     row_offset=args.offset,
                 )
@@ -256,7 +260,7 @@ class TestCommand:
         self,
         args: argparse.Namespace,
         setup: _SetupResult,
-    ) -> "LocalTestBatchResult":
+    ) -> LocalTestBatchResult:
         from osmosis_ai.rollout.eval.test_mode.runner import LocalTestRunner
 
         runner = LocalTestRunner(
@@ -265,9 +269,7 @@ class TestCommand:
             debug=args.debug,
         )
 
-        def on_progress(
-            current: int, total: int, result: "LocalTestRunResult"
-        ) -> None:
+        def on_progress(current: int, total: int, result: LocalTestRunResult) -> None:
             if args.quiet:
                 return
 
@@ -279,7 +281,9 @@ class TestCommand:
             error_suffix = ""
             if not result.success and result.error:
                 error_text = result.error.replace("\n", " ")
-                error_msg = error_text[:47] + "..." if len(error_text) > 50 else error_text
+                error_msg = (
+                    error_text[:47] + "..." if len(error_text) > 50 else error_text
+                )
                 error_suffix = f" - {error_msg}"
 
             status_styled = self.console.format_styled(status, status_style)
@@ -296,14 +300,16 @@ class TestCommand:
             batch_result = await runner.run_batch(
                 rows=setup.rows,
                 max_turns=args.max_turns,
-                completion_params=setup.completion_params if setup.completion_params else None,
+                completion_params=setup.completion_params
+                if setup.completion_params
+                else None,
                 on_progress=on_progress,
                 start_index=args.offset,
             )
 
         return batch_result
 
-    def _print_summary(self, batch_result: "LocalTestBatchResult") -> None:
+    def _print_summary(self, batch_result: LocalTestBatchResult) -> None:
         self.console.print()
         self.console.print("Summary:", style="bold")
         self.console.print(f"  Total: {batch_result.total}")
@@ -324,18 +330,26 @@ class TestCommand:
 
         self.console.print(f"  Passed: {passed_text}")
         self.console.print(f"  Failed: {failed_text}")
-        self.console.print(f"  Duration: {format_duration(batch_result.total_duration_ms)}")
-        self.console.print(f"  Total tokens: {format_tokens(batch_result.total_tokens)}")
+        self.console.print(
+            f"  Duration: {format_duration(batch_result.total_duration_ms)}"
+        )
+        self.console.print(
+            f"  Total tokens: {format_tokens(batch_result.total_tokens)}"
+        )
 
         if batch_result.stopped_early:
-            reason = f" Reason: {batch_result.stop_reason}" if batch_result.stop_reason else ""
+            reason = (
+                f" Reason: {batch_result.stop_reason}"
+                if batch_result.stop_reason
+                else ""
+            )
             self.console.print(
                 f"  Stopped early due to systemic provider error.{reason}",
                 style="red",
             )
 
     def _write_output(
-        self, args: argparse.Namespace, batch_result: "LocalTestBatchResult"
+        self, args: argparse.Namespace, batch_result: LocalTestBatchResult
     ) -> None:
         if not args.output:
             return
@@ -462,5 +476,6 @@ class TestCommand:
 
         self._write_output(args, batch_result)
         return 1 if batch_result.failed > 0 else 0
+
 
 __all__ = ["TestCommand"]

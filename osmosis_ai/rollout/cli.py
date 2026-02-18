@@ -11,7 +11,15 @@ from __future__ import annotations
 
 import argparse
 import sys
-from typing import Optional
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from osmosis_ai.rollout.eval.evaluation.cli import (
+        EvalCommand as _EvalCommandImpl,
+    )
+    from osmosis_ai.rollout.eval.test_mode.cli import (
+        TestCommand as _TestCommandImpl,
+    )
 
 from osmosis_ai.rollout.cli_utils import CLIError, load_agent_loop
 from osmosis_ai.rollout.server.serve import (
@@ -20,8 +28,6 @@ from osmosis_ai.rollout.server.serve import (
     serve_agent_loop,
     validate_and_report,
 )
-from osmosis_ai.rollout.validator import validate_agent_loop
-
 
 # Re-export CLIError for backwards compatibility
 # (load_agent_loop is private, renamed from _load_agent_loop)
@@ -228,12 +234,14 @@ class TestCommand:
 
     def __init__(self) -> None:
         """Initialize with lazy-loaded implementation."""
-        self._impl: Optional["_TestCommandImpl"] = None
+        self._impl: _TestCommandImpl | None = None
 
-    def _get_impl(self) -> "_TestCommandImpl":
+    def _get_impl(self) -> _TestCommandImpl:
         """Lazily load the actual TestCommand implementation."""
         if self._impl is None:
-            from osmosis_ai.rollout.eval.test_mode.cli import TestCommand as _TestCommandImpl
+            from osmosis_ai.rollout.eval.test_mode.cli import (
+                TestCommand as _TestCommandImpl,
+            )
 
             self._impl = _TestCommandImpl()
         return self._impl
@@ -250,11 +258,13 @@ class EvalCommand:
     """
 
     def __init__(self) -> None:
-        self._impl: Optional["_EvalCommandImpl"] = None
+        self._impl: _EvalCommandImpl | None = None
 
-    def _get_impl(self) -> "_EvalCommandImpl":
+    def _get_impl(self) -> _EvalCommandImpl:
         if self._impl is None:
-            from osmosis_ai.rollout.eval.evaluation.cli import EvalCommand as _EvalCommandImpl
+            from osmosis_ai.rollout.eval.evaluation.cli import (
+                EvalCommand as _EvalCommandImpl,
+            )
 
             self._impl = _EvalCommandImpl()
         return self._impl

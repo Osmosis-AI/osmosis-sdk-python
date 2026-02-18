@@ -7,10 +7,6 @@ and validating incoming requests against them.
 from __future__ import annotations
 
 import secrets
-import logging
-from typing import Optional
-
-logger = logging.getLogger(__name__)
 
 # API Key prefix for identification
 API_KEY_PREFIX = "osm_rollout_"
@@ -36,7 +32,7 @@ def generate_api_key() -> str:
     return f"{API_KEY_PREFIX}{random_part}"
 
 
-def validate_api_key(provided_key: Optional[str], expected_key: str) -> bool:
+def validate_api_key(provided_key: str | None, expected_key: str) -> bool:
     """Validate a provided API key against the expected key.
 
     Uses constant-time comparison to prevent timing attacks.
@@ -54,7 +50,7 @@ def validate_api_key(provided_key: Optional[str], expected_key: str) -> bool:
 
 
 __all__ = [
+    "API_KEY_PREFIX",
     "generate_api_key",
     "validate_api_key",
-    "API_KEY_PREFIX",
 ]

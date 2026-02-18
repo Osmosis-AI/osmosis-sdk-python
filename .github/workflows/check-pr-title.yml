@@ -1,0 +1,34 @@
+name: Check PR Title
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize]
+
+permissions:
+  contents: read
+
+jobs:
+  check-title:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate PR title format
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          PATTERN='^(\[BREAKING\])?\[(reward|rollout|server|cli|auth|eval|misc|ci|doc)\] (feat|fix|refactor|chore|test|doc): .+'
+          if [[ ! "$PR_TITLE" =~ $PATTERN ]]; then
+            echo "::error::PR title does not match required format."
+            echo ""
+            echo "Expected format: [module] type: description"
+            echo "  modules: reward, rollout, server, cli, auth, eval, misc, ci, doc"
+            echo "  types:   feat, fix, refactor, chore, test, doc"
+            echo ""
+            echo "Examples:"
+            echo "  [rollout] feat: add streaming support for chat completions"
+            echo "  [BREAKING][reward] refactor: rename decorator parameters"
+            echo "  [ci] chore: update GitHub Actions versions"
+            echo ""
+            echo "Got: $PR_TITLE"
+            exit 1
+          fi
+          echo "PR title is valid: $PR_TITLE"

@@ -10,7 +10,12 @@ from .config import (
     load_rubric_suite,
     render_yaml_items,
 )
-from .dataset import DatasetLoader, DatasetRecord, load_jsonl_records, render_json_records
+from .dataset import (
+    DatasetLoader,
+    DatasetRecord,
+    load_jsonl_records,
+    render_json_records,
+)
 from .engine import (
     EvaluationRecordResult,
     EvaluationReport,
@@ -27,7 +32,11 @@ from .reporting import (
     JsonReportWriter,
     TextReportFormatter,
 )
-from .session import EvaluationSession, EvaluationSessionRequest, EvaluationSessionResult
+from .session import (
+    EvaluationSession,
+    EvaluationSessionRequest,
+    EvaluationSessionResult,
+)
 
 __all__ = [
     "BaselineComparator",
@@ -36,12 +45,12 @@ __all__ = [
     "ConsoleReportRenderer",
     "DatasetLoader",
     "DatasetRecord",
-    "EvaluationSession",
-    "EvaluationSessionRequest",
-    "EvaluationSessionResult",
     "EvaluationRecordResult",
     "EvaluationReport",
     "EvaluationRun",
+    "EvaluationSession",
+    "EvaluationSessionRequest",
+    "EvaluationSessionResult",
     "JsonReportFormatter",
     "JsonReportWriter",
     "ParsedItem",

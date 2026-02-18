@@ -28,8 +28,6 @@ Example:
 
 from __future__ import annotations
 
-from typing import List
-
 
 class OsmosisRolloutError(Exception):
     """Base exception for all Osmosis rollout errors.
@@ -121,7 +119,7 @@ class AgentLoopNotFoundError(OsmosisRolloutError):
         available: List of registered agent loop names.
     """
 
-    def __init__(self, name: str, available: List[str]):
+    def __init__(self, name: str, available: list[str]):
         """Initialize with lookup name and available names.
 
         Args:
@@ -130,9 +128,7 @@ class AgentLoopNotFoundError(OsmosisRolloutError):
         """
         self.name = name
         self.available = available
-        super().__init__(
-            f"Agent loop '{name}' not found. Available: {available}"
-        )
+        super().__init__(f"Agent loop '{name}' not found. Available: {available}")
 
 
 class ToolExecutionError(OsmosisRolloutError):

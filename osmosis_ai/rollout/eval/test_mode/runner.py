@@ -6,13 +6,17 @@ This module keeps test-mode naming conventions for readability.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any, Dict, Optional
+from typing import TYPE_CHECKING, Any
 
 from osmosis_ai.rollout.eval.common.runner import (
     LocalBatchResult as LocalTestBatchResult,
+)
+from osmosis_ai.rollout.eval.common.runner import (
     LocalRolloutRunner,
-    LocalRunResult as LocalTestRunResult,
     validate_tools,
+)
+from osmosis_ai.rollout.eval.common.runner import (
+    LocalRunResult as LocalTestRunResult,
 )
 
 if TYPE_CHECKING:
@@ -26,16 +30,18 @@ class LocalTestRunner(LocalRolloutRunner):
 
     def __init__(
         self,
-        agent_loop: "RolloutAgentLoop",
-        llm_client: "ExternalLLMClient",
+        agent_loop: RolloutAgentLoop,
+        llm_client: ExternalLLMClient,
         debug: bool = False,
-        debug_dir: Optional[str] = None,
+        debug_dir: str | None = None,
     ) -> None:
         super().__init__(
             agent_loop=agent_loop,
             llm_client=llm_client,
             debug=debug,
-            debug_dir=debug_dir if debug_dir is not None else ("./test_debug" if debug else None),
+            debug_dir=debug_dir
+            if debug_dir is not None
+            else ("./test_debug" if debug else None),
             rollout_id_prefix="test",
             request_metadata={
                 "execution_mode": "test",
@@ -45,17 +51,26 @@ class LocalTestRunner(LocalRolloutRunner):
 
     async def run_single(
         self,
-        row: "DatasetRow",
+        row: DatasetRow,
         row_index: int,
         max_turns: int = 10,
-        completion_params: Optional[Dict[str, Any]] = None,
+        completion_params: dict[str, Any] | None = None,
+        rollout_id: str | None = None,
+        request_metadata: dict[str, Any] | None = None,
     ) -> LocalTestRunResult:
         return await super().run_single(
             row=row,
             row_index=row_index,
             max_turns=max_turns,
             completion_params=completion_params,
-            rollout_id=f"test-{row_index}",
+            rollout_id=rollout_id or f"test-{row_index}",
+            request_metadata=request_metadata,
         )
 
-__all__ = ["LocalTestBatchResult", "LocalTestRunResult", "LocalTestRunner", "validate_tools"]
+
+__all__ = [
+    "LocalTestBatchResult",
+    "LocalTestRunResult",
+    "LocalTestRunner",
+    "validate_tools",
+]

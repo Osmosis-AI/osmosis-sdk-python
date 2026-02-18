@@ -17,7 +17,6 @@ Example:
 
 from osmosis_ai.rollout.server.api_key import generate_api_key, validate_api_key
 from osmosis_ai.rollout.server.app import create_app
-from osmosis_ai.rollout.server.state import AppState
 from osmosis_ai.rollout.server.serve import (
     DEFAULT_HOST,
     DEFAULT_PORT,
@@ -25,15 +24,16 @@ from osmosis_ai.rollout.server.serve import (
     serve_agent_loop,
     validate_and_report,
 )
+from osmosis_ai.rollout.server.state import AppState
 
 __all__ = [
-    "create_app",
-    "AppState",
-    "serve_agent_loop",
-    "validate_and_report",
-    "ServeError",
     "DEFAULT_HOST",
     "DEFAULT_PORT",
+    "AppState",
+    "ServeError",
+    "create_app",
     "generate_api_key",
+    "serve_agent_loop",
+    "validate_and_report",
     "validate_api_key",
 ]

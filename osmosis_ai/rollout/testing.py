@@ -24,8 +24,9 @@ from __future__ import annotations
 
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable, Dict, List, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     import pytest
@@ -33,14 +34,15 @@ if TYPE_CHECKING:
     from fastapi.testclient import TestClient
 
 from osmosis_ai.rollout.core.schemas import (
-    CompletionUsage,
+    CompletionsChoice,
     CompletionsRequest,
     CompletionsResponse,
+    CompletionUsage,
     RolloutResponse,
 )
 
 
-def fake_token_ids(text: str) -> List[int]:
+def fake_token_ids(text: str) -> list[int]:
     """Generate deterministic fake token IDs for testing.
 
     Args:
@@ -52,7 +54,7 @@ def fake_token_ids(text: str) -> List[int]:
     return list(range(len(text)))
 
 
-def fake_prompt_token_ids(messages: List[Dict[str, Any]]) -> List[int]:
+def fake_prompt_token_ids(messages: list[dict[str, Any]]) -> list[int]:
     """Generate deterministic fake prompt token IDs for testing.
 
     Token count grows with message count to simulate real behavior.
@@ -87,9 +89,9 @@ class RolloutCompletionTracker:
     """
 
     event: threading.Event = field(default_factory=threading.Event)
-    responses: List[Dict[str, Any]] = field(default_factory=list)
+    responses: list[dict[str, Any]] = field(default_factory=list)
 
-    def record(self, response: Dict[str, Any]) -> None:
+    def record(self, response: dict[str, Any]) -> None:
         """Record a completion response and signal the event.
 
         Args:
@@ -115,7 +117,7 @@ class RolloutCompletionTracker:
         return self.event.wait(timeout=timeout)
 
 
-def _should_use_tools(last_message: Dict[str, Any]) -> bool:
+def _should_use_tools(last_message: dict[str, Any]) -> bool:
     """Determine if the mock trainer should return tool calls.
 
     This heuristic detects calculator-related keywords to trigger tool use.
@@ -136,9 +138,10 @@ def _should_use_tools(last_message: Dict[str, Any]) -> bool:
 
 
 def create_mock_trainer_app(
-    tracker: Optional[RolloutCompletionTracker] = None,
-    tool_call_generator: Optional[Callable[[Dict[str, Any]], Optional[List[Dict[str, Any]]]]] = None,
-) -> "FastAPI":
+    tracker: RolloutCompletionTracker | None = None,
+    tool_call_generator: Callable[[dict[str, Any]], list[dict[str, Any]] | None]
+    | None = None,
+) -> FastAPI:
     """Create a mock trainer FastAPI application for testing.
 
     The mock trainer implements:
@@ -173,16 +176,16 @@ def create_mock_trainer_app(
     """
     try:
         from fastapi import FastAPI
-    except ImportError:
+    except ImportError as e:
         raise ImportError(
             "FastAPI is required for create_mock_trainer_app(). "
             "Install it with: pip install fastapi"
-        )
+        ) from e
 
     app = FastAPI(title="Mock Trainer Server")
 
     # In-memory storage of completed rollouts
-    completed_rollouts: Dict[str, Dict[str, Any]] = {}
+    completed_rollouts: dict[str, dict[str, Any]] = {}
 
     @app.post("/v1/chat/completions")
     async def completions(request: CompletionsRequest) -> CompletionsResponse:
@@ -190,7 +193,7 @@ def create_mock_trainer_app(
         last_message = messages[-1] if messages else {"role": "user", "content": ""}
 
         # Determine response based on message content
-        tool_calls: Optional[List[Dict[str, Any]]] = None
+        tool_calls: list[dict[str, Any]] | None = None
 
         if tool_call_generator is not None:
             tool_calls = tool_call_generator(last_message)
@@ -204,7 +207,7 @@ def create_mock_trainer_app(
             ]
 
         if tool_calls:
-            assistant_message: Dict[str, Any] = {
+            assistant_message: dict[str, Any] = {
                 "role": "assistant",
                 "content": "I'll help you with that calculation.",
                 "tool_calls": tool_calls,
@@ -229,11 +232,11 @@ def create_mock_trainer_app(
             created=int(time.time()),
             model=request.model,
             choices=[
-                {
-                    "index": 0,
-                    "message": assistant_message,
-                    "finish_reason": "stop",
-                }
+                CompletionsChoice(
+                    index=0,
+                    message=assistant_message,
+                    finish_reason="stop",
+                )
             ],
             usage=CompletionUsage(
                 prompt_tokens=len(prompt_token_ids),
@@ -246,7 +249,7 @@ def create_mock_trainer_app(
         )
 
     @app.post("/v1/rollout/completed")
-    async def rollout_completed(response: RolloutResponse) -> Dict[str, Any]:
+    async def rollout_completed(response: RolloutResponse) -> dict[str, Any]:
         payload = response.model_dump(mode="json", exclude_none=True)
         completed_rollouts[response.rollout_id] = payload
 
@@ -256,19 +259,19 @@ def create_mock_trainer_app(
         return {"status": "ok"}
 
     @app.get("/v1/rollout/completed/{rollout_id}")
-    async def get_completed_rollout(rollout_id: str) -> Dict[str, Any]:
+    async def get_completed_rollout(rollout_id: str) -> dict[str, Any]:
         return completed_rollouts.get(rollout_id, {})
 
     @app.get("/health")
-    async def health() -> Dict[str, Any]:
+    async def health() -> dict[str, Any]:
         return {"status": "healthy", "service": "mock-trainer"}
 
     return app
 
 
 def patch_httpx_for_mock_trainer(
-    client: "TestClient",
-    monkeypatch: "pytest.MonkeyPatch",
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Patch httpx.AsyncClient to route requests to the mock trainer.
 
@@ -292,7 +295,7 @@ def patch_httpx_for_mock_trainer(
 
     original_post = httpx.AsyncClient.post
 
-    async def mock_post(self, url: str, **kwargs):
+    async def mock_post(self: Any, url: str, **kwargs: Any) -> Any:
         if "/v1/chat/completions" in url:
             resp = client.post("/v1/chat/completions", **kwargs)
             return httpx.Response(
@@ -313,9 +316,9 @@ def patch_httpx_for_mock_trainer(
 
 
 __all__ = [
-    "create_mock_trainer_app",
     "RolloutCompletionTracker",
-    "patch_httpx_for_mock_trainer",
-    "fake_token_ids",
+    "create_mock_trainer_app",
     "fake_prompt_token_ids",
+    "fake_token_ids",
+    "patch_httpx_for_mock_trainer",
 ]

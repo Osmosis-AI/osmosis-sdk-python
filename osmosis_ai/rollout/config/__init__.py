@@ -27,12 +27,12 @@ from osmosis_ai.rollout.config.settings import (
 )
 
 __all__ = [
-    # Settings classes
-    "RolloutSettings",
     "RolloutClientSettings",
     "RolloutServerSettings",
+    # Settings classes
+    "RolloutSettings",
+    "configure",
     # Functions
     "get_settings",
-    "configure",
     "reset_settings",
 ]

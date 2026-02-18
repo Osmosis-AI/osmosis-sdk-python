@@ -3,13 +3,17 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Optional, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from ..consts import PACKAGE_VERSION
 from .config import PLATFORM_URL
-from .credentials import delete_workspace_credentials, get_active_workspace, load_credentials
+from .credentials import (
+    delete_workspace_credentials,
+    get_active_workspace,
+    load_credentials,
+)
 
 if TYPE_CHECKING:
     from .credentials import WorkspaceCredentials
@@ -24,7 +28,7 @@ class AuthenticationExpiredError(Exception):
 class PlatformAPIError(Exception):
     """Raised when a Platform API call fails."""
 
-    def __init__(self, message: str, status_code: Optional[int] = None):
+    def __init__(self, message: str, status_code: int | None = None):
         super().__init__(message)
         self.status_code = status_code
 
@@ -44,10 +48,10 @@ def _handle_401_and_cleanup() -> None:
 def platform_request(
     endpoint: str,
     method: str = "GET",
-    data: Optional[dict[str, Any]] = None,
-    headers: Optional[dict[str, str]] = None,
+    data: dict[str, Any] | None = None,
+    headers: dict[str, str] | None = None,
     timeout: float = 30.0,
-    credentials: Optional["WorkspaceCredentials"] = None,
+    credentials: WorkspaceCredentials | None = None,
 ) -> dict[str, Any]:
     """Make an authenticated request to the Osmosis Platform API.
 
@@ -91,7 +95,8 @@ def platform_request(
 
     try:
         with urlopen(request, timeout=timeout) as response:
-            return json.loads(response.read().decode())
+            result: dict[str, Any] = json.loads(response.read().decode())
+            return result
     except HTTPError as e:
         if e.code == 401:
             _handle_401_and_cleanup()
@@ -108,8 +113,8 @@ def platform_request(
             # Ignore body read/decoding failures; keep the original status code context.
             pass
 
-        raise PlatformAPIError(f"API error: HTTP {e.code}.{detail}", e.code)
+        raise PlatformAPIError(f"API error: HTTP {e.code}.{detail}", e.code) from e
     except URLError as e:
-        raise PlatformAPIError(f"Connection error: {e.reason}")
-    except json.JSONDecodeError:
-        raise PlatformAPIError("Invalid JSON response from platform")
+        raise PlatformAPIError(f"Connection error: {e.reason}") from e
+    except json.JSONDecodeError as e:
+        raise PlatformAPIError("Invalid JSON response from platform") from e

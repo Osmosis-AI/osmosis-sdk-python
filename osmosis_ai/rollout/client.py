@@ -27,7 +27,7 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import httpx
 
@@ -73,10 +73,10 @@ class CompletionsResult:
             print(result.content)
     """
 
-    message: Dict[str, Any]
-    token_ids: List[int]
-    logprobs: List[float]
-    usage: Dict[str, int]
+    message: dict[str, Any]
+    token_ids: list[int]
+    logprobs: list[float]
+    usage: dict[str, int]
     finish_reason: str
 
     @property
@@ -85,12 +85,13 @@ class CompletionsResult:
         return bool(self.message.get("tool_calls"))
 
     @property
-    def tool_calls(self) -> List[Dict[str, Any]]:
+    def tool_calls(self) -> list[dict[str, Any]]:
         """Get tool calls from the response."""
-        return self.message.get("tool_calls", [])
+        calls: list[dict[str, Any]] = self.message.get("tool_calls", [])
+        return calls
 
     @property
-    def content(self) -> Optional[str]:
+    def content(self) -> str | None:
         """Get text content from the response."""
         return self.message.get("content")
 
@@ -136,11 +137,11 @@ class OsmosisLLMClient:
         self,
         server_url: str,
         rollout_id: str,
-        api_key: Optional[str] = None,
-        timeout_seconds: Optional[float] = None,
-        max_retries: Optional[int] = None,
-        complete_rollout_retries: Optional[int] = None,
-        settings: Optional[RolloutClientSettings] = None,
+        api_key: str | None = None,
+        timeout_seconds: float | None = None,
+        max_retries: int | None = None,
+        complete_rollout_retries: int | None = None,
+        settings: RolloutClientSettings | None = None,
     ):
         """Initialize the LLM client.
 
@@ -161,7 +162,9 @@ class OsmosisLLMClient:
         self.rollout_id = rollout_id
         self.api_key = api_key
         self.timeout_seconds = timeout_seconds or settings.timeout_seconds
-        self.max_retries = max_retries if max_retries is not None else settings.max_retries
+        self.max_retries = (
+            max_retries if max_retries is not None else settings.max_retries
+        )
         self.complete_rollout_retries = (
             complete_rollout_retries
             if complete_rollout_retries is not None
@@ -171,11 +174,11 @@ class OsmosisLLMClient:
         # Settings for connection pool
         self._max_connections = settings.max_connections
         self._max_keepalive_connections = settings.max_keepalive_connections
-        self._retry_base_delay = settings.retry_base_delay
-        self._retry_max_delay = settings.retry_max_delay
+        self._retry_base_delay: float = settings.retry_base_delay
+        self._retry_max_delay: float = settings.retry_max_delay
 
         # HTTP client (lazy initialized)
-        self._client: Optional[httpx.AsyncClient] = None
+        self._client: httpx.AsyncClient | None = None
         self._client_lock = asyncio.Lock()
 
         # Metrics tracking
@@ -215,12 +218,12 @@ class OsmosisLLMClient:
 
     def _calculate_retry_delay(self, attempt: int) -> float:
         """Calculate delay for retry with exponential backoff."""
-        delay = self._retry_base_delay * (2 ** attempt)
-        return min(delay, self._retry_max_delay)
+        delay = self._retry_base_delay * (2**attempt)
+        return float(min(delay, self._retry_max_delay))
 
     async def chat_completions(
         self,
-        messages: List[Dict[str, Any]],
+        messages: list[dict[str, Any]],
         temperature: float = 1.0,
         top_p: float = 1.0,
         max_tokens: int = 512,
@@ -265,7 +268,7 @@ class OsmosisLLMClient:
 
         client = await self._get_client()
         url = f"{self.server_url}/v1/chat/completions"
-        last_error: Optional[Exception] = None
+        last_error: Exception | None = None
 
         for attempt in range(self.max_retries + 1):
             start_time = time.monotonic()
@@ -285,7 +288,9 @@ class OsmosisLLMClient:
                     self._num_llm_calls += 1
                     if "usage" in data:
                         self._prompt_tokens += data["usage"].get("prompt_tokens", 0)
-                        self._response_tokens += data["usage"].get("completion_tokens", 0)
+                        self._response_tokens += data["usage"].get(
+                            "completion_tokens", 0
+                        )
 
                     # Extract response
                     choice = data["choices"][0]
@@ -331,7 +336,9 @@ class OsmosisLLMClient:
                 last_error = OsmosisTimeoutError(str(e))
 
             except httpx.RequestError as e:
-                error_detail = f"{type(e).__name__}: {e}" if str(e) else f"{type(e).__name__}"
+                error_detail = (
+                    f"{type(e).__name__}: {e}" if str(e) else f"{type(e).__name__}"
+                )
                 logger.warning(
                     "Transport error: attempt=%d/%d, error=%s",
                     attempt + 1,
@@ -360,11 +367,11 @@ class OsmosisLLMClient:
     async def complete_rollout(
         self,
         status: str,
-        final_messages: List[Dict[str, Any]],
+        final_messages: list[dict[str, Any]],
         finish_reason: str = "stop",
-        error_message: Optional[str] = None,
-        metrics: Optional[RolloutMetrics] = None,
-        reward: Optional[float] = None,
+        error_message: str | None = None,
+        metrics: RolloutMetrics | None = None,
+        reward: float | None = None,
     ) -> None:
         """Notify TrainGate that rollout is complete.
 
@@ -405,7 +412,7 @@ class OsmosisLLMClient:
 
         client = await self._get_client()
         url = f"{self.server_url}/v1/rollout/completed"
-        last_error: Optional[Exception] = None
+        last_error: Exception | None = None
 
         for attempt in range(self.complete_rollout_retries + 1):
             try:
@@ -451,7 +458,9 @@ class OsmosisLLMClient:
                 last_error = OsmosisTimeoutError(str(e))
 
             except httpx.RequestError as e:
-                error_detail = f"{type(e).__name__}: {e}" if str(e) else f"{type(e).__name__}"
+                error_detail = (
+                    f"{type(e).__name__}: {e}" if str(e) else f"{type(e).__name__}"
+                )
                 logger.warning(
                     "Completion transport error: attempt=%d, error=%s",
                     attempt + 1,
@@ -490,7 +499,7 @@ class OsmosisLLMClient:
             response_tokens=self._response_tokens,
         )
 
-    async def __aenter__(self) -> "OsmosisLLMClient":
+    async def __aenter__(self) -> OsmosisLLMClient:
         """Async context manager entry."""
         return self
 

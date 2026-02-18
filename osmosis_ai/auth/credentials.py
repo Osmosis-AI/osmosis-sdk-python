@@ -8,7 +8,7 @@ import stat
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from .config import CONFIG_DIR, CREDENTIALS_FILE, CREDENTIALS_VERSION
 
@@ -19,7 +19,7 @@ class UserInfo:
 
     id: str
     email: str
-    name: Optional[str] = None
+    name: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {"id": self.id, "email": self.email, "name": self.name}
@@ -63,7 +63,7 @@ class WorkspaceCredentials:
     user: UserInfo
     organization: OrganizationInfo
     created_at: datetime
-    token_id: Optional[str] = None  # Platform token ID for revocation
+    token_id: str | None = None  # Platform token ID for revocation
 
     def to_dict(self) -> dict[str, Any]:
         result = {
@@ -82,7 +82,9 @@ class WorkspaceCredentials:
     def from_dict(cls, data: dict[str, Any]) -> WorkspaceCredentials:
         expires_at = datetime.fromisoformat(data["expires_at"])
         if expires_at.tzinfo is None:
-            raise ValueError("expires_at must be timezone-aware (ISO8601 with timezone offset)")
+            raise ValueError(
+                "expires_at must be timezone-aware (ISO8601 with timezone offset)"
+            )
         return cls(
             access_token=data["access_token"],
             token_type=data["token_type"],
@@ -106,7 +108,7 @@ class WorkspaceCredentials:
 class CredentialsStore:
     """Multi-workspace credentials storage."""
 
-    active_workspace: Optional[str]  # workspace name
+    active_workspace: str | None  # workspace name
     workspaces: dict[str, WorkspaceCredentials]  # keyed by workspace name
 
     def to_dict(self) -> dict[str, Any]:
@@ -128,15 +130,11 @@ class CredentialsStore:
             workspaces=workspaces,
         )
 
-    def get_active_credentials(self) -> Optional[WorkspaceCredentials]:
+    def get_active_credentials(self) -> WorkspaceCredentials | None:
         """Get credentials for the active workspace."""
         if not self.active_workspace:
             return None
         return self.workspaces.get(self.active_workspace)
-
-    def get_workspace_names(self) -> list[str]:
-        """Get list of all workspace names."""
-        return list(self.workspaces.keys())
 
 
 def _ensure_config_dir() -> None:
@@ -155,13 +153,13 @@ def _set_file_permissions(path: Path) -> None:
     os.chmod(path, stat.S_IRUSR | stat.S_IWUSR)  # 0o600
 
 
-def _load_store() -> Optional[CredentialsStore]:
+def _load_store() -> CredentialsStore | None:
     """Load the credentials store from file."""
     if not CREDENTIALS_FILE.exists():
         return None
 
     try:
-        with open(CREDENTIALS_FILE, "r", encoding="utf-8") as f:
+        with open(CREDENTIALS_FILE, encoding="utf-8") as f:
             data = json.load(f)
         return CredentialsStore.from_dict(data)
     except (json.JSONDecodeError, KeyError, ValueError):
@@ -205,7 +203,7 @@ def save_credentials(credentials: WorkspaceCredentials) -> None:
     _save_store(store)
 
 
-def load_credentials() -> Optional[WorkspaceCredentials]:
+def load_credentials() -> WorkspaceCredentials | None:
     """Load credentials for the active workspace.
 
     Returns:
@@ -255,7 +253,7 @@ def delete_workspace_credentials(workspace_name: str) -> bool:
     return True
 
 
-def get_valid_credentials() -> Optional[WorkspaceCredentials]:
+def get_valid_credentials() -> WorkspaceCredentials | None:
     """Get credentials for the active workspace if they exist and are not expired.
 
     Returns:
@@ -286,7 +284,7 @@ def get_all_workspaces() -> list[tuple[str, WorkspaceCredentials, bool]]:
     return result
 
 
-def get_active_workspace() -> Optional[str]:
+def get_active_workspace() -> str | None:
     """Get the name of the active workspace.
 
     Returns:

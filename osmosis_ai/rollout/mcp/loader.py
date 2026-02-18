@@ -12,6 +12,7 @@ import importlib.util
 import os
 import sys
 import types
+from collections.abc import Iterator
 from typing import Any
 
 
@@ -49,7 +50,7 @@ def _clear_new_local_imports(
 
 
 @contextlib.contextmanager
-def _temporary_sys_path(path: str):
+def _temporary_sys_path(path: str) -> Iterator[None]:
     """Temporarily prepend ``path`` to ``sys.path`` and restore exactly."""
     original = list(sys.path)
     # Ensure local sibling imports resolve to the MCP directory during import.
@@ -93,11 +94,11 @@ def load_mcp_server(mcp_path: str) -> Any:
 
     # Check fastmcp is installed
     try:
-        from fastmcp import FastMCP  # noqa: F401
-    except ImportError:
+        from fastmcp import FastMCP
+    except ImportError as e:
         raise MCPLoadError(
             "fastmcp is not installed. Install it with: pip install osmosis-ai[mcp]"
-        )
+        ) from e
 
     # Import main.py as a submodule of a synthetic package:
     # - supports relative imports like `from .tools import ...`
