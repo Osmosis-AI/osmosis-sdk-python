@@ -24,16 +24,13 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from osmosis_ai.rollout.core.base import RolloutAgentLoop
 from osmosis_ai.rollout.core.schemas import (
     OpenAIFunctionToolSchema,
     RolloutRequest,
 )
-
-if TYPE_CHECKING:
-    pass
 
 logger = logging.getLogger(__name__)
 

@@ -136,10 +136,6 @@ class CredentialsStore:
             return None
         return self.workspaces.get(self.active_workspace)
 
-    def get_workspace_names(self) -> list[str]:
-        """Get list of all workspace names."""
-        return list(self.workspaces.keys())
-
 
 def _ensure_config_dir() -> None:
     """Ensure the config directory exists with proper permissions."""
