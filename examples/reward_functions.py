@@ -66,31 +66,6 @@ def minimal_reward(
     return float(solution_str == ground_truth)
 
 
-# INCORRECT USAGE EXAMPLES (these will raise TypeError)
-
-# Uncomment these to see the validation errors:
-
-# @osmosis_reward  # Wrong parameter names
-# def wrong_names(input_str: str, expected: str, extra: dict = None):
-#     return input_str == expected
-
-# @osmosis_reward  # Missing type annotations
-# def missing_annotations(solution_str, ground_truth, extra_info=None):
-#     return solution_str == ground_truth
-
-# @osmosis_reward  # Wrong type annotations
-# def wrong_types(solution_str: int, ground_truth: str, extra_info: dict | None = None):
-#     return str(solution_str) == ground_truth
-
-# @osmosis_reward  # Too many parameters
-# def too_many_params(solution_str: str, ground_truth: str, extra_info: dict | None = None, bonus: float = 0.0):
-#     return (solution_str == ground_truth) + bonus
-
-# @osmosis_reward  # Missing default value for extra_info
-# def no_default(solution_str: str, ground_truth: str, extra_info: dict):
-#     return solution_str == ground_truth
-
-
 if __name__ == "__main__":
     # Test the reward functions
     test_cases = [
