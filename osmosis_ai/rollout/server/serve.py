@@ -159,7 +159,6 @@ def serve_agent_loop(
     if local_debug:
         logger.info("Local debug mode enabled: API key authentication disabled")
         api_key = None
-        api_key_provided = False
     else:
         # Generate API Key for this server instance if not provided
         if api_key is None:

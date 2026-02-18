@@ -22,7 +22,6 @@ Example:
 
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -31,8 +30,6 @@ from osmosis_ai.rollout.core.schemas import (
     OpenAIFunctionToolSchema,
     RolloutRequest,
 )
-
-logger = logging.getLogger(__name__)
 
 
 @dataclass

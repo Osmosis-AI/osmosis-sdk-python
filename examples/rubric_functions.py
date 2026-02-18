@@ -253,4 +253,3 @@ if __name__ == "__main__":
     # run_xai_example()
     run_openrouter_example()
     run_cerebras_example()
-    pass

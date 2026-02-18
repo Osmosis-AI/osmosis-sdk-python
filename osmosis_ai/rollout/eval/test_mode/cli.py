@@ -35,9 +35,6 @@ if TYPE_CHECKING:
     )
 
 
-logger = logging.getLogger(__name__)
-
-
 @dataclass
 class _SetupResult:
     """Result of setup phase containing initialized components."""

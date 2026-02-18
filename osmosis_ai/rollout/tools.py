@@ -31,13 +31,10 @@ from __future__ import annotations
 
 import asyncio
 import json
-import logging
 from collections.abc import Awaitable, Callable
 from typing import Any
 
 from osmosis_ai.rollout.core.exceptions import ToolArgumentError
-
-logger = logging.getLogger(__name__)
 
 
 def create_tool_result(tool_call_id: str, content: str) -> dict[str, str]:

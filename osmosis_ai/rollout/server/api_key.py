@@ -6,10 +6,7 @@ and validating incoming requests against them.
 
 from __future__ import annotations
 
-import logging
 import secrets
-
-logger = logging.getLogger(__name__)
 
 # API Key prefix for identification
 API_KEY_PREFIX = "osm_rollout_"

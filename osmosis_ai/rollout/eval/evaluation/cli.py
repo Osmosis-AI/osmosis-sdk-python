@@ -28,9 +28,6 @@ if TYPE_CHECKING:
     from osmosis_ai.rollout.eval.evaluation.runner import EvalResult, EvalRunResult
 
 
-logger = logging.getLogger(__name__)
-
-
 class EvalCommand:
     """Handler for `osmosis eval`."""
 

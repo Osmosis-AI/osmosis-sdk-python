@@ -621,7 +621,7 @@ class EvalRunner:
                 try:
                     for task in asyncio.as_completed(tasks):
                         try:
-                            _row_index, _result = await task
+                            await task
                         except SystemicProviderError as e:
                             # Record error but keep awaiting remaining
                             # tasks in this batch so their results are collected.
