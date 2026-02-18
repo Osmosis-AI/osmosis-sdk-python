@@ -177,5 +177,5 @@ osmosis eval-rubric --rubric support_followup --data examples/sample_data.jsonl
 
 - [Test Mode](./test-mode.md) -- full `osmosis test` documentation
 - [Eval Mode](./eval-mode.md) -- full `osmosis eval` documentation
-- [Rewards API Reference](./rewards-api.md) -- `@osmosis_reward`, `@osmosis_rubric`, `evaluate_rubric`
+- [Reward Rubrics](./local-rollout/reward-rubrics.md) -- `@osmosis_rubric`, `evaluate_rubric`
 - [Dataset Format](./datasets.md) -- supported formats and required columns

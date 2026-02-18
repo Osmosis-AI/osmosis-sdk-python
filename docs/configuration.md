@@ -42,7 +42,7 @@ Server-side configuration for the RolloutServer process.
 
 ## Programmatic Configuration
 
-Configuration is organized into three Pydantic Settings classes that automatically read from environment variables and `.env` files:
+Configuration is organized into three Pydantic Settings classes. When the `pydantic-settings` package is installed (included in the `server` extra), these classes automatically read from environment variables and `.env` files. Without `pydantic-settings`, they fall back to plain Pydantic models that only accept values passed programmatically:
 
 | Class | Env Prefix | Description |
 |-------|-----------|-------------|

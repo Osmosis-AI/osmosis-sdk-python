@@ -119,23 +119,10 @@ numeric type.
 
 ## Rubric Evaluation Errors
 
-These errors originate from `osmosis_ai.rubric_eval` and
-`osmosis_ai.rubric_types`.
-
 ### MissingAPIKeyError
 
 Raised when the LLM provider API key cannot be found. The error message
 includes a hint showing the expected environment variable.
-
-Example:
-
-```
-MissingAPIKeyError: Environment variable 'OPENAI_API_KEY' is not set.
-Export it with your openai API key before calling evaluate_rubric.
-Set the required API key before running:
-
-    export OPENAI_API_KEY="..."
-```
 
 Resolution -- set the appropriate environment variable for your provider:
 
@@ -156,37 +143,17 @@ You can also provide the key directly in `model_info` via the `api_key` or
 
 ### ProviderRequestError
 
-Raised when the LLM provider call fails. The error includes the provider name,
-model name, and a detail string.
-
-```
-ProviderRequestError: Provider 'openai' request for model 'gpt-5-mini' failed. <detail>
-```
-
-Common causes:
+Raised when the LLM provider call fails. Common causes:
 
 - **Authentication failure** -- your API key is invalid or expired.
-- **Rate limiting** -- you have exceeded the provider's rate limit. Wait and
-  retry.
-- **Timeout** -- the request took too long. Try increasing the `timeout`
-  parameter or use a faster model.
-- **Connection error** -- network issue between you and the provider. Check
-  connectivity.
-- **Invalid JSON response** -- the model returned content that could not be
-  parsed. Refine rubric instructions so the model returns valid JSON.
+- **Rate limiting** -- you have exceeded the provider's rate limit. Wait and retry.
+- **Timeout** -- the request took too long. Try increasing the `timeout` parameter or use a faster model.
+- **Invalid JSON response** -- the model returned content that could not be parsed.
 
 ### ModelNotFoundError
 
 A subclass of `ProviderRequestError` raised when the requested model does not
-exist.
-
-```
-ModelNotFoundError: Provider 'openai' request for model 'gpt-99' failed.
-Model 'gpt-99' was not found. Confirm the model identifier is correct and your openai account has access to it.
-```
-
-Resolution -- verify the model name and that your account has access. Use the
-`provider/model` format, e.g. `openai/gpt-5-mini`, `anthropic/claude-sonnet-4-5`.
+exist. Verify the model name and that your account has access.
 
 ## Test Mode Errors
 
@@ -195,18 +162,6 @@ These errors occur when running `osmosis test` or `osmosis eval`.
 ### DatasetParseError
 
 Raised when the dataset file cannot be read or parsed.
-
-```
-DatasetParseError: Unsupported file format: .txt. Supported formats: .parquet (recommended), .jsonl, .csv
-```
-
-```
-DatasetParseError: Invalid JSON at line 5: Expecting ',' delimiter
-```
-
-```
-DatasetParseError: Parquet support requires pyarrow. Install with: pip install pyarrow
-```
 
 Resolution:
 
@@ -217,18 +172,6 @@ Resolution:
 ### DatasetValidationError
 
 Raised when dataset rows are missing required columns or have invalid values.
-
-```
-DatasetValidationError: Row 0: Missing required columns: ['user_prompt']
-```
-
-```
-DatasetValidationError: Row 3: 'ground_truth' cannot be null
-```
-
-```
-DatasetValidationError: Row 7: 'system_prompt' must be a string, got int
-```
 
 Every dataset row must include these columns:
 
@@ -242,37 +185,21 @@ All values must be non-empty strings.
 
 ### ToolValidationError
 
-Raised when tool schemas returned by your agent are invalid for the provider's
-API.
-
-```
-ToolValidationError: <detail>
-```
-
-Resolution -- ensure your `get_tools()` method returns valid OpenAI-compatible
-function tool schemas. Each tool must have a `type` field set to `"function"` and
-a `function` object with at least a `name`.
+Ensure your `get_tools()` method returns valid OpenAI-compatible function tool
+schemas. Each tool must have a `type` field set to `"function"` and a `function`
+object with at least a `name`.
 
 ### Provider connection errors
 
 `SystemicProviderError` is raised when a provider error affects all rows (e.g.
-authentication failure, budget exhausted, network unreachable). The batch aborts
-early instead of retrying each row.
-
-Resolution -- fix the underlying credential or connectivity issue and re-run.
+authentication failure, budget exhausted). The batch aborts early instead of
+retrying each row. Fix the underlying credential or connectivity issue and re-run.
 
 ## Remote Rollout Errors
 
 ### AgentLoopValidationError
 
-Raised by `osmosis validate` or when starting a server with `validate=True`
-(the default). The error lists all validation failures.
-
-```
-AgentLoopValidationError: Agent loop validation failed with 2 error(s):
-  - [MISSING_NAME] name: Agent loop must have a 'name' attribute
-  - [RUN_NOT_ASYNC] run: 'run' method must be an async function (async def)
-```
+Raised by `osmosis validate` or when starting a server with `validate=True`.
 
 Common validation error codes:
 
@@ -281,16 +208,11 @@ Common validation error codes:
 | `MISSING_NAME` | Agent loop class has no `name` attribute. |
 | `INVALID_NAME_TYPE` | `name` is not a string. |
 | `EMPTY_NAME` | `name` is empty or whitespace. |
-| `MISSING_RUN_METHOD` | No `run` method defined. |
-| `RUN_NOT_CALLABLE` | `run` exists but is not callable. |
 | `RUN_NOT_ASYNC` | `run` is not an `async def` function. |
 | `GET_TOOLS_RETURNS_NONE` | `get_tools()` returned `None` instead of a list. |
-| `GET_TOOLS_INVALID_TYPE` | `get_tools()` returned a non-list type. |
 | `GET_TOOLS_EXCEPTION` | `get_tools()` raised an exception. |
 | `MISSING_TOOL_TYPE` | A tool dict is missing the `type` field. |
-| `MISSING_FUNCTION` | A tool dict is missing the `function` field. |
 | `MISSING_FUNCTION_NAME` | A function definition has no `name`. |
-| `INVALID_FUNCTION_NAME` | Function name is empty or not a string. |
 
 Run validation before serving to catch these early:
 
@@ -299,8 +221,6 @@ osmosis validate -m server:agent_loop
 ```
 
 ### ServeError
-
-Raised when `serve_agent_loop()` or `osmosis serve` cannot start the server.
 
 **Not logged in:**
 
@@ -311,144 +231,35 @@ ServeError: Not logged in. Please run 'osmosis login' first, or use skip_registe
 Resolution -- run `osmosis login`, or pass `--skip-register` / `--local` if you
 do not need platform registration.
 
-**Conflicting options:**
-
-```
-ServeError: local_debug=True disables API key authentication; do not provide api_key in local debug mode.
-```
-
-Resolution -- do not combine `--local` with `--api-key`. Local debug mode
-intentionally disables API key authentication.
-
 **Missing dependencies:**
 
 ```
 ImportError: FastAPI is required for serve_agent_loop(). Install it with: pip install osmosis-ai[server]
 ```
 
-```
-ImportError: uvicorn is required for serve_agent_loop(). Install it with: pip install osmosis-ai[server]
-```
-
-Resolution:
-
-```bash
-pip install osmosis-ai[server]
-```
-
 ### Connection / timeout issues
 
-Rollout protocol exceptions are defined in
-`osmosis_ai.rollout.core.exceptions`:
+Rollout protocol exceptions:
 
 | Exception | Description | Retryable? |
 |-----------|-------------|------------|
 | `OsmosisTransportError` | Network-level failure (connection refused, DNS error). | Yes |
-| `OsmosisServerError` | Server returned HTTP 5xx. Includes `status_code` attribute. | Yes |
-| `OsmosisValidationError` | Server returned HTTP 4xx. Includes `status_code` attribute. | No |
+| `OsmosisServerError` | Server returned HTTP 5xx. | Yes |
+| `OsmosisValidationError` | Server returned HTTP 4xx. | No |
 | `OsmosisTimeoutError` | Request exceeded configured timeout. | Yes |
-| `AgentLoopNotFoundError` | Registry lookup for agent name failed. Includes `name` and `available` attributes. | No |
-| `ToolExecutionError` | A tool call failed during execution. Includes `tool_call_id` and `tool_name`. | Depends |
-| `ToolArgumentError` | Tool arguments could not be parsed (subclass of `ToolExecutionError`). | No |
+| `AgentLoopNotFoundError` | Registry lookup for agent name failed. | No |
+| `ToolExecutionError` | A tool call failed during execution. | Depends |
+| `ToolArgumentError` | Tool arguments could not be parsed. | No |
 
-For retryable errors, use exponential backoff. The SDK client settings provide
-configurable retry parameters (see [Configuration](./configuration.md)).
+For retryable errors, use exponential backoff. See [Configuration](./configuration.md) for client retry settings.
 
 ### PublicIPDetectionError
 
-Raised when the server cannot detect its public IP address. This happens when
-binding to `0.0.0.0` and all detection methods fail.
-
-```
-PublicIPDetectionError: Failed to detect public IP address. All detection methods failed:
-  1. Cloud metadata (AWS/GCP/Azure): unavailable or returned no public IP
-  2. External IP services: all failed or timed out
-
-To fix this, provide an explicit IP/hostname to your application.
-```
-
-Resolution -- the SDK tries cloud metadata services (AWS, GCP, Azure) first,
-then external IP services (checkip.amazonaws.com, ipify, icanhazip, ifconfig.me)
-as a fallback. If all fail:
+Raised when the server cannot detect its public IP address. Resolution:
 
 - Check network connectivity and firewall rules.
-- Provide an explicit host via the `OSMOSIS_PUBLIC_HOST` environment variable
-  or the `--host` flag.
-- If running locally, use `--local` mode which skips IP detection for
-  platform registration.
-
-## Debug Tips
-
-### Using `--verbose` flag
-
-The `osmosis validate` command accepts `-v` / `--verbose` to show detailed
-validation output including warnings.
-
-```bash
-osmosis validate -m server:agent_loop --verbose
-```
-
-### Using `--debug` flag
-
-The `osmosis test` and `osmosis eval` commands accept `--debug` to enable debug
-logging, which prints detailed information about each step including provider
-requests and responses.
-
-```bash
-osmosis test -m server:agent_loop -d data.jsonl --model openai/gpt-5-mini --debug
-osmosis eval -m server:agent_loop -d data.jsonl --eval-fn rewards:fn --model openai/gpt-5-mini --debug
-```
-
-### Interactive mode in test mode
-
-Use `--interactive` with `osmosis test` to step through each row one at a time.
-This is useful for debugging agent logic and inspecting intermediate messages:
-
-```bash
-osmosis test -m server:agent_loop -d data.jsonl --interactive
-
-# Start at a specific row
-osmosis test -m server:agent_loop -d data.jsonl --interactive --row 5
-```
-
-### Debug directory for rollout server
-
-When serving an agent, use `--log` to write detailed execution traces
-for each rollout to JSONL files:
-
-```bash
-osmosis serve -m server:agent_loop --log ./debug-logs
-```
-
-Each rollout will produce a file at `{debug_dir}/{timestamp}/{rollout_id}.jsonl`.
-
-### Checking logs
-
-The SDK uses Python's standard `logging` module. Increase the log level to see
-more detail:
-
-```python
-import logging
-logging.basicConfig(level=logging.DEBUG)
-```
-
-Or set the uvicorn log level when serving:
-
-```bash
-osmosis serve -m server:agent_loop --log-level debug
-```
-
-### Checking credentials
-
-To verify your authentication state and credential file:
-
-```bash
-# Show current user and workspace
-osmosis whoami
-
-# Credentials are stored at:
-#   ~/.config/osmosis/credentials.json
-```
+- Provide an explicit host via `OSMOSIS_PUBLIC_HOST` environment variable or the `--host` flag.
+- If running locally, use `--local` mode which skips IP detection.
 
 ## See Also
 
@@ -457,4 +268,3 @@ osmosis whoami
 - [Dataset Format](./datasets.md) -- supported formats and required columns
 - [Test Mode](./test-mode.md) -- full `osmosis test` documentation
 - [Eval Mode](./eval-mode.md) -- full `osmosis eval` documentation
-- [Rewards API Reference](./rewards-api.md) -- `@osmosis_reward`, `@osmosis_rubric`, `evaluate_rubric`

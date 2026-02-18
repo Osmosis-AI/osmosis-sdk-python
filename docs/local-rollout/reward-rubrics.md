@@ -15,7 +15,7 @@ def your_rubric(solution_str: str, ground_truth: str | None, extra_info: dict) -
     return float_score
 ```
 
-> **Note:** The runtime forwards `None` for `ground_truth` when no reference answer exists. Annotate the parameter as `Optional[str]` (or handle `None` explicitly) if your rubric logic expects to run in that scenario.
+> **Note:** The runtime forwards `None` for `ground_truth` when no reference answer exists.
 
 ### Required `extra_info` Fields
 
@@ -30,22 +30,16 @@ def your_rubric(solution_str: str, ground_truth: str | None, extra_info: dict) -
 - **`score_min` / `score_max`** -- Optional numeric overrides for the expected score range.
 - **`model_info_overrides`** -- Optional dict merged into the provider configuration.
 
-Additional keys are passthrough and can be used for custom configuration. The decorator enforces the parameter names/annotations, validates the embedded configuration at call time, and ensures the wrapped function returns a `float`.
+> **Note:** `extra_info` must be annotated as `dict` **without** a default value, unlike `@osmosis_reward`.
 
-> **Note:** Annotation quirk: `extra_info` must be annotated as `dict` **without** a default value, unlike `@osmosis_reward`.
+## evaluate_rubric()
 
-## evaluate_rubric
-
-`evaluate_rubric` talks to hosted LLM providers through [LiteLLM](https://github.com/BerriAI/litellm), a unified interface supporting 100+ providers. Every provider returns a strict JSON object with `{"score": number, "explanation": string}`.
-
-### Basic Usage
+Evaluate a solution against a natural-language rubric using an external LLM judge via [LiteLLM](https://github.com/BerriAI/litellm).
 
 ```python
 from osmosis_ai import evaluate_rubric
 
-solution = "The capital of France is Paris."
-
-rubric_score = evaluate_rubric(
+score = evaluate_rubric(
     rubric="Assistant must mention the verified capital city.",
     solution_str=solution,
     model_info={
@@ -54,35 +48,42 @@ rubric_score = evaluate_rubric(
         "api_key_env": "OPENAI_API_KEY",
     },
     ground_truth="Paris",
+    metadata=None,          # optional structured context quoted in the judge prompt
+    return_details=False,   # True returns RewardRubricRunResult with score, explanation, raw
 )
+```
 
-print(rubric_score)  # -> 1.0 (full payload available via return_details=True)
+When `return_details=True`, returns a `RewardRubricRunResult` dict:
+
+```python
+class RewardRubricRunResult(TypedDict):
+    score: float        # The clamped rubric score
+    explanation: str    # The judge model's explanation
+    raw: Any            # Full raw response from the LLM provider
 ```
 
 ### Credentials
 
-Credentials are resolved from environment variables by default:
+Credentials are resolved in order: `api_key` (direct) > `api_key_env` (env var name) > provider default:
 
-- `OPENAI_API_KEY` for OpenAI
-- `ANTHROPIC_API_KEY` for Anthropic
-- `GEMINI_API_KEY` for Google Gemini
-- `XAI_API_KEY` for xAI
-- `OPENROUTER_API_KEY` for OpenRouter
-- `CEREBRAS_API_KEY` for Cerebras
+| Provider | Default Environment Variable |
+|----------|------------------------------|
+| OpenAI | `OPENAI_API_KEY` |
+| Anthropic | `ANTHROPIC_API_KEY` |
+| Google Gemini | `GEMINI_API_KEY` |
+| xAI | `XAI_API_KEY` |
+| OpenRouter | `OPENROUTER_API_KEY` |
+| Cerebras | `CEREBRAS_API_KEY` |
 
-Override the environment variable name with `model_info={"api_key_env": "CUSTOM_ENV_NAME"}` when needed, or supply an inline secret with `model_info={"api_key": "sk-..."}` for ephemeral credentials.
+Any provider supported by LiteLLM can be used without additional configuration beyond setting the appropriate API key environment variable.
 
-`api_key` and `api_key_env` are mutually exclusive. When `api_key` is present and non-empty it is used directly, skipping any environment lookup. Otherwise the resolver falls back to `api_key_env` (or the provider default) and pulls the value from your local environment with `os.getenv`.
-
-## Provider Examples
-
-### OpenAI
+## Example
 
 ```python
 from osmosis_ai import osmosis_rubric, evaluate_rubric
 
 @osmosis_rubric
-def compute_rubric_score_openai(solution_str: str, ground_truth: str | None, extra_info: dict) -> float:
+def compute_rubric_score(solution_str: str, ground_truth: str | None, extra_info: dict) -> float:
     return evaluate_rubric(
         rubric="Evaluate whether the solution correctly matches the expected answer.",
         solution_str=solution_str,
@@ -95,40 +96,19 @@ def compute_rubric_score_openai(solution_str: str, ground_truth: str | None, ext
     )
 ```
 
-### Anthropic
+## Error Types
 
-```python
-@osmosis_rubric
-def compute_rubric_score_anthropic(solution_str: str, ground_truth: str | None, extra_info: dict) -> float:
-    return evaluate_rubric(
-        rubric="Evaluate whether the solution correctly matches the expected answer.",
-        solution_str=solution_str,
-        ground_truth=ground_truth,
-        model_info={
-            "provider": "anthropic",
-            "model": "claude-sonnet-4-5-20250929",
-            "api_key_env": "ANTHROPIC_API_KEY",
-        },
-    )
-```
-
-Any provider supported by LiteLLM can be used without additional configuration beyond setting the appropriate API key environment variable.
+| Exception | Description |
+|-----------|-------------|
+| `MissingAPIKeyError` | Required API key not found in environment. Message explains which env var to export. |
+| `ProviderRequestError` | LLM provider returned an error (auth, rate limit, timeout, invalid response). |
+| `ModelNotFoundError` | Model identifier not recognized by the provider. Subclass of `ProviderRequestError`. |
 
 ## File Placement
 
-In a Local Rollout repository, place rubric functions in the `reward_rubric/` directory:
-
-```
-reward_rubric/
-├── reward_rubric_openai.py
-├── reward_rubric_anthropic.py
-└── reward_rubric_xai.py
-```
-
-Osmosis discovers and syncs all `@osmosis_rubric`-decorated functions from this directory. See the [osmosis-git-sync-example](https://github.com/Osmosis-AI/osmosis-git-sync-example) for working examples.
+In a Local Rollout repository, place rubric functions in the `reward_rubric/` directory. Osmosis discovers and syncs all `@osmosis_rubric`-decorated functions from this directory. See the [osmosis-git-sync-example](https://github.com/Osmosis-AI/osmosis-git-sync-example) for working examples.
 
 ## See Also
 
 - [Reward Functions](./reward-functions.md) -- deterministic scoring with `@osmosis_reward`
-- [Rewards API Reference](../rewards-api.md) -- full API reference for decorators and `evaluate_rubric`
 - [Local Rollout Overview](./overview.md) -- repository structure and setup
