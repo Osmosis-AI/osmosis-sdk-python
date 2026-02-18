@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import argparse
 import sys
+import warnings
 
-from dotenv import load_dotenv
+from dotenv import find_dotenv, load_dotenv
 
 from .cli_commands import (
     EvalRubricCommand,
@@ -19,8 +20,16 @@ from .consts import PACKAGE_VERSION, package_name
 
 def main(argv: list[str] | None = None) -> int:
     """Entry point for the osmosis CLI."""
-    # Load environment variables from .env file in current working directory
-    load_dotenv()
+    # Suppress all Python warnings for a clean CLI experience.
+    # This only affects the CLI process; library consumers are not impacted.
+    # Meaningful user-facing messages should use logging or print instead.
+    warnings.filterwarnings("ignore")
+
+    # Load environment variables from .env file in current working directory.
+    # find_dotenv(usecwd=True) is required because the default find_dotenv()
+    # walks up from the caller's file path (site-packages or editable source),
+    # which never reaches the user's project directory.
+    load_dotenv(find_dotenv(usecwd=True))
 
     parser = _build_parser()
     args = parser.parse_args(argv)

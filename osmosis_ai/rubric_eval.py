@@ -12,7 +12,6 @@ from __future__ import annotations
 import json
 import os
 import re
-import warnings
 from typing import Any
 
 from ._litellm_compat import (
@@ -430,18 +429,6 @@ def _call_litellm(
         completion_kwargs["reasoning_effort"] = reasoning_effort
         # Let LiteLLM silently drop the param for models that don't support it
         completion_kwargs["drop_params"] = True
-
-    # Suppress Pydantic serialization warnings caused by LiteLLM model
-    # definitions not matching provider responses.  Applied as a persistent
-    # filter because some providers (e.g. Gemini) trigger the warning lazily
-    # after the completion call returns.
-    # See: https://github.com/BerriAI/litellm/issues/17631
-    warnings.filterwarnings(
-        "ignore",
-        message="Pydantic serializer warnings",
-        category=UserWarning,
-        module=r"pydantic\.main",
-    )
 
     try:
         response = _litellm_completion(**completion_kwargs)
