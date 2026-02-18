@@ -1,18 +1,18 @@
 changelog:
   categories:
-    - title: "\u26a0\ufe0f Breaking Changes"
+    - title: "⚠️ Breaking Changes"
       labels:
         - breaking
-    - title: "\ud83d\ude80 Features"
+    - title: "🚀 Features"
       labels:
         - enhancement
-    - title: "\ud83d\udc1b Bug Fixes"
+    - title: "🐛 Bug Fixes"
       labels:
         - bug
-    - title: "\ud83d\udcd6 Documentation"
+    - title: "📖 Documentation"
       labels:
         - documentation
-    - title: "\ud83d\udd27 Maintenance"
+    - title: "🔧 Maintenance"
       labels:
         - chore
         - ci
