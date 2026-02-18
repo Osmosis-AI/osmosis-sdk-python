@@ -130,8 +130,8 @@ class DatasetReader:
                 for line in f:
                     if line.strip():
                         count += 1
-        except OSError:
-            pass
+        except OSError as e:
+            logger.warning("Failed to count JSONL rows in %s: %s", self.file_path, e)
         return count
 
     def _parse_parquet(self) -> list[dict[str, Any]]:
@@ -187,8 +187,8 @@ class DatasetReader:
                 reader = csv.DictReader(f)
                 for _ in reader:
                     count += 1
-        except (OSError, csv.Error):
-            pass
+        except (OSError, csv.Error) as e:
+            logger.warning("Failed to count CSV rows in %s: %s", self.file_path, e)
         return count
 
     def _validate_row(self, row: Any, row_index: int) -> DatasetRow:
