@@ -47,7 +47,7 @@ Requires Python 3.10 or newer. For development setup, see [CONTRIBUTING.md](CONT
 
 - **Python 3.10+**
 - **An LLM API key** (e.g., OpenAI, Anthropic, Groq) -- required for `osmosis test` and `osmosis eval`. See [supported providers](https://docs.litellm.ai/docs/providers).
-- **Osmosis account** (optional) -- needed for platform features like `osmosis login`, workspace management, and submitting training runs. Sign up at [osmosis.ai](https://osmosis.ai).
+- **Osmosis account** (optional) -- needed for platform features like `osmosis login`, workspace management, and submitting training runs. Sign up at [platform.osmosis.ai](https://platform.osmosis.ai).
 
 ### pip
 
