@@ -16,6 +16,8 @@
 
 # osmosis-ai
 
+> ⚠️ **Warning**: osmosis-ai is still in active development. APIs may change between versions.
+
 Python SDK for Osmosis AI training workflows. Supports two training modes with shared tooling for testing and evaluation.
 
 Osmosis AI is a platform for training LLMs with reinforcement learning. You define custom reward functions, LLM-as-judge rubrics, and agent tools -- then Osmosis handles the training loop on managed GPU clusters. This SDK provides everything you need to build and test those components locally, from `@osmosis_reward` decorators and MCP tool definitions to a full CLI for running agents against datasets before submitting training runs.
