@@ -4,7 +4,7 @@ import argparse
 import sys
 import warnings
 
-from dotenv import load_dotenv
+from dotenv import find_dotenv, load_dotenv
 
 from .cli_commands import (
     EvalRubricCommand,
@@ -25,8 +25,11 @@ def main(argv: list[str] | None = None) -> int:
     # Meaningful user-facing messages should use logging or print instead.
     warnings.filterwarnings("ignore")
 
-    # Load environment variables from .env file in current working directory
-    load_dotenv()
+    # Load environment variables from .env file in current working directory.
+    # find_dotenv(usecwd=True) is required because the default find_dotenv()
+    # walks up from the caller's file path (site-packages or editable source),
+    # which never reaches the user's project directory.
+    load_dotenv(find_dotenv(usecwd=True))
 
     parser = _build_parser()
     args = parser.parse_args(argv)
