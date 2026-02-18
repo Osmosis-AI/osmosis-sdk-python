@@ -295,7 +295,7 @@ Common validation error codes:
 Run validation before serving to catch these early:
 
 ```bash
-osmosis validate -m my_agent:agent_loop
+osmosis validate -m server:agent_loop
 ```
 
 ### ServeError
@@ -381,11 +381,11 @@ as a fallback. If all fail:
 
 ### Using `--verbose` flag
 
-The `osmosis serve` command accepts `-v` / `--verbose` to increase output
-verbosity, which prints detailed validation warnings and server configuration.
+The `osmosis validate` command accepts `-v` / `--verbose` to show detailed
+validation output including warnings.
 
 ```bash
-osmosis serve -m my_agent:agent_loop --verbose
+osmosis validate -m server:agent_loop --verbose
 ```
 
 ### Using `--debug` flag
@@ -395,8 +395,8 @@ logging, which prints detailed information about each step including provider
 requests and responses.
 
 ```bash
-osmosis test -m my_agent:agent_loop -d data.jsonl --model openai/gpt-5-mini --debug
-osmosis eval -m my_agent:agent_loop -d data.jsonl --eval-fn rewards:fn --model openai/gpt-5-mini --debug
+osmosis test -m server:agent_loop -d data.jsonl --model openai/gpt-5-mini --debug
+osmosis eval -m server:agent_loop -d data.jsonl --eval-fn rewards:fn --model openai/gpt-5-mini --debug
 ```
 
 ### Interactive mode in test mode
@@ -405,19 +405,19 @@ Use `--interactive` with `osmosis test` to step through each row one at a time.
 This is useful for debugging agent logic and inspecting intermediate messages:
 
 ```bash
-osmosis test -m my_agent:agent_loop -d data.jsonl --interactive
+osmosis test -m server:agent_loop -d data.jsonl --interactive
 
 # Start at a specific row
-osmosis test -m my_agent:agent_loop -d data.jsonl --interactive --row 5
+osmosis test -m server:agent_loop -d data.jsonl --interactive --row 5
 ```
 
 ### Debug directory for rollout server
 
-When serving an agent, use `--debug-dir` to write detailed execution traces
+When serving an agent, use `--log` to write detailed execution traces
 for each rollout to JSONL files:
 
 ```bash
-osmosis serve -m my_agent:agent_loop --debug-dir ./debug-logs
+osmosis serve -m server:agent_loop --log ./debug-logs
 ```
 
 Each rollout will produce a file at `{debug_dir}/{timestamp}/{rollout_id}.jsonl`.
@@ -435,7 +435,7 @@ logging.basicConfig(level=logging.DEBUG)
 Or set the uvicorn log level when serving:
 
 ```bash
-osmosis serve -m my_agent:agent_loop --log-level debug
+osmosis serve -m server:agent_loop --log-level debug
 ```
 
 ### Checking credentials

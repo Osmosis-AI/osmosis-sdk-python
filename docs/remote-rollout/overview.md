@@ -28,131 +28,61 @@ pip install osmosis-ai[full]
 
 ## Quick Start
 
+### Project Structure
+
+```
+rollout-server/
+├── server.py        # Agent loop + FastAPI app
+├── tools.py         # Tool definitions and execution
+├── rewards.py       # Reward computation
+├── test_data.jsonl  # Test dataset
+└── pyproject.toml   # Dependencies: osmosis-ai[server]>=0.2.14
+```
+
+For the complete working project, see [osmosis-remote-rollout-example](https://github.com/Osmosis-AI/osmosis-remote-rollout-example).
+
 ### Step 1: Implement Your Agent Loop
 
-Create a class that inherits from `RolloutAgentLoop` and implements the required `get_tools` and `run` methods:
+Create `server.py` with a class that inherits from `RolloutAgentLoop`:
 
 ```python
-import json
+class CalculatorAgentLoop(RolloutAgentLoop):
+    name = "calculator"
 
-from osmosis_ai.rollout import (
-    RolloutAgentLoop,
-    RolloutContext,
-    RolloutResult,
-    RolloutRequest,
-    OpenAIFunctionToolSchema,
-    OpenAIFunctionSchema,
-)
-
-class MyAgentLoop(RolloutAgentLoop):
-    name = "my_agent"  # Required: unique identifier
-
-    def get_tools(self, request: RolloutRequest) -> list[OpenAIFunctionToolSchema]:
-        """Return tools available for this rollout."""
-        return [
-            OpenAIFunctionToolSchema(
-                type="function",
-                function=OpenAIFunctionSchema(
-                    name="search",
-                    description="Search for information",
-                ),
-            )
-        ]
-
-    async def execute_tool(self, name: str, args: dict) -> str:
-        """Execute a tool and return the result as a string."""
-        if name == "search":
-            return f"Search results for '{args.get('query', '')}'"
-        return f"Unknown tool: {name}"
+    def get_tools(self, request: RolloutRequest):
+        return CALCULATOR_TOOL_SCHEMAS
 
     async def run(self, ctx: RolloutContext) -> RolloutResult:
-        """Execute the agent loop."""
         messages = list(ctx.request.messages)
-
-        for _ in range(ctx.request.max_turns):
-            # Call LLM through TrainGate
+        for _turn in range(ctx.request.max_turns):
             result = await ctx.chat(messages, **ctx.request.completion_params)
             messages.append(result.message)
-
-            # Check if done
             if not result.has_tool_calls:
                 break
+            tool_results = await execute_tools(result.tool_calls)
+            messages.extend(tool_results)
+        return ctx.complete(messages, reward=compute_reward(...))
 
-            # Execute tools and add results
-            for tool_call in result.tool_calls:
-                tool_name = tool_call["function"]["name"]
-                tool_args = json.loads(tool_call["function"]["arguments"])
-
-                # Execute tool logic (replace with your implementation)
-                tool_result = await self.execute_tool(tool_name, tool_args)
-
-                messages.append({
-                    "role": "tool",
-                    "content": tool_result,
-                    "tool_call_id": tool_call["id"],
-                })
-                ctx.record_tool_call()
-
-        return ctx.complete(messages)
+agent_loop = CalculatorAgentLoop()
+app = create_app(agent_loop)
 ```
+
+See [Examples](./examples.md) for the complete `tools.py` and `rewards.py` files.
 
 ### Step 2: Run the Server
 
-#### Option 1: Using CLI (Recommended)
-
-Export an instance of your agent loop and use the CLI:
-
-```python
-# my_agent.py
-agent_loop = MyAgentLoop()
-```
-
 ```bash
 # Validate agent loop (checks tools, async run method, etc.)
-osmosis validate -m my_agent:agent_loop
+osmosis validate -m server:agent_loop
 
 # Start server with validation (default port 9000)
-osmosis serve -m my_agent:agent_loop
+osmosis serve -m server:agent_loop
 
-# Specify port
-osmosis serve -m my_agent:agent_loop -p 8080
-
-# Skip validation (not recommended)
-osmosis serve -m my_agent:agent_loop --no-validate
-
-# Enable auto-reload for development
-osmosis serve -m my_agent:agent_loop --reload
+# Specify port and enable auto-reload
+osmosis serve -m server:agent_loop -p 8080 --reload
 ```
 
-#### Option 2: Using create_app()
-
-Create a FastAPI application manually:
-
-```python
-from osmosis_ai.rollout import create_app
-
-app = create_app(MyAgentLoop())
-```
-
-```bash
-uvicorn main:app --host 0.0.0.0 --port 9000
-```
-
-#### Option 3: Using serve_agent_loop()
-
-Start programmatically with validation:
-
-```python
-from osmosis_ai.rollout import serve_agent_loop
-
-# Validates and starts server
-serve_agent_loop(MyAgentLoop(), port=9000)
-
-# Skip validation (not recommended)
-serve_agent_loop(MyAgentLoop(), port=9000, validate=False)
-```
-
-Your server is now ready to receive rollout requests from TrainGate.
+For programmatic alternatives (`create_app()`, `serve_agent_loop()`), see [Agent Loop Guide](./agent-loop.md#server).
 
 ## Key Concepts
 
@@ -172,12 +102,7 @@ Provided to your `run()` method, containing:
 - `tools`: List of tools returned by `get_tools()`
 - `llm`: The `OsmosisLLMClient` for LLM calls
 
-Key methods:
-
-- `ctx.chat(messages, **kwargs)`: Call the LLM
-- `ctx.complete(messages)`: Return successful result
-- `ctx.error(message)`: Return error result
-- `ctx.record_tool_call()`: Track tool execution metrics
+Key methods: `ctx.chat()`, `ctx.complete()`, `ctx.error()`, `ctx.record_tool_call()`
 
 ### RolloutResult
 
@@ -187,26 +112,6 @@ The return value from your agent loop:
 - `final_messages`: The complete conversation history
 - `finish_reason`: Why the rollout ended
 - `metrics`: Execution metrics (latency, token counts)
-
-### OpenAIFunctionToolSchema
-
-OpenAI-compatible tool definition format. Define your tools using:
-
-```python
-OpenAIFunctionToolSchema(
-    type="function",
-    function=OpenAIFunctionSchema(
-        name="tool_name",
-        description="What this tool does",
-        parameters=OpenAIFunctionParametersSchema(
-            properties={
-                "arg1": OpenAIFunctionPropertySchema(type="string"),
-            },
-            required=["arg1"],
-        ),
-    ),
-)
-```
 
 ## Server Endpoints
 
@@ -234,12 +139,7 @@ When installed with `osmosis-ai[server]`, settings can be loaded from environmen
 - `OSMOSIS_ROLLOUT_CLIENT_*` - Client settings (timeout, retries, etc.)
 - `OSMOSIS_ROLLOUT_SERVER_*` - Server settings (concurrency, TTL, etc.)
 
-Example:
-
-```bash
-export OSMOSIS_ROLLOUT_CLIENT_TIMEOUT_SECONDS=120
-export OSMOSIS_ROLLOUT_SERVER_MAX_CONCURRENT_ROLLOUTS=200
-```
+See [Configuration](../configuration.md) for the full list of environment variables.
 
 ## Example Repository
 

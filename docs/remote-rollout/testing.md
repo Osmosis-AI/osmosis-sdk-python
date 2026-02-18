@@ -62,90 +62,6 @@ def weather_tool_generator(message):
 app = create_mock_trainer_app(tool_call_generator=weather_tool_generator)
 ```
 
-## Example Test Using FastAPI TestClient
-
-```python
-# test_my_agent.py
-
-import pytest
-from unittest.mock import AsyncMock, patch
-
-from fastapi.testclient import TestClient
-from osmosis_ai.rollout import create_app
-
-from my_agent import MyAgentLoop
-
-
-@pytest.fixture
-def app():
-    """Create test application."""
-    return create_app(MyAgentLoop())
-
-
-@pytest.fixture
-def client(app):
-    """Create test client."""
-    with TestClient(app) as client:
-        yield client
-
-
-def test_health_endpoint(client):
-    """Test health check."""
-    response = client.get("/health")
-    assert response.status_code == 200
-    assert response.json()["status"] == "healthy"
-
-
-def test_init_returns_tools(client):
-    """Test /v1/rollout/init returns tools."""
-    response = client.post(
-        "/v1/rollout/init",
-        json={
-            "rollout_id": "test-123",
-            "server_url": "http://localhost:8080",
-            "messages": [{"role": "user", "content": "Hello"}],
-            "completion_params": {"temperature": 0.7},
-        },
-    )
-    assert response.status_code == 202
-    data = response.json()
-    assert "tools" in data
-
-
-@pytest.mark.asyncio
-async def test_agent_run():
-    """Test agent run directly."""
-    from unittest.mock import MagicMock
-    from osmosis_ai.rollout import RolloutContext, RolloutRequest, RolloutMetrics
-
-    agent = MyAgentLoop()
-
-    # Create mock context
-    mock_llm = MagicMock()
-    mock_llm.get_metrics.return_value = RolloutMetrics()
-    mock_llm.chat_completions = AsyncMock(return_value=MagicMock(
-        message={"role": "assistant", "content": "Hello!"},
-        has_tool_calls=False,
-    ))
-
-    request = RolloutRequest(
-        rollout_id="test",
-        server_url="http://localhost",
-        messages=[{"role": "user", "content": "Hi"}],
-        completion_params={},
-    )
-
-    ctx = RolloutContext(
-        request=request,
-        tools=[],
-        llm=mock_llm,
-    )
-
-    result = await agent.run(ctx)
-
-    assert result.status == "COMPLETED"
-```
-
 ## Testing Utilities Reference
 
 The `osmosis_ai.rollout.testing` module provides the following public utilities for testing agent loops without a real TrainGate server.
@@ -177,25 +93,11 @@ Thread-safe tracker that captures `/v1/rollout/completed` callbacks during tests
 
 Patches `httpx.AsyncClient.post` so that any requests to `/v1/chat/completions` or `/v1/rollout/completed` are routed to the mock trainer `TestClient` instead of making real HTTP calls. All other requests pass through unchanged.
 
-```python
-@pytest.fixture
-def mock_trainer(monkeypatch):
-    tracker = RolloutCompletionTracker()
-    app = create_mock_trainer_app(tracker=tracker)
-    client = TestClient(app)
-    patch_httpx_for_mock_trainer(client, monkeypatch)
-    return client, tracker
-```
+### `fake_token_ids(text)` / `fake_prompt_token_ids(messages)`
 
-### `fake_token_ids(text)`
+Generate deterministic fake token IDs for testing. These produce deterministic output suitable for snapshot testing but do not correspond to any real tokenizer.
 
-Generates deterministic fake token IDs for testing. Returns a list of sequential integers, one per character in the input text (e.g. `fake_token_ids("hello")` returns `[0, 1, 2, 3, 4]`).
-
-### `fake_prompt_token_ids(messages)`
-
-Generates deterministic fake prompt token IDs for testing. The token count scales with the number of messages to simulate realistic prompt growth. Returns `list(range(10 * max(1, len(messages))))`.
-
-> **Note:** These fake token ID functions produce deterministic output suitable for snapshot testing but do not correspond to any real tokenizer.
+For a complete test file example, see the [osmosis-remote-rollout-example](https://github.com/Osmosis-AI/osmosis-remote-rollout-example) repository.
 
 ## See Also
 

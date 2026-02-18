@@ -14,81 +14,37 @@ Test mode enables you to:
 - Use 100+ LLM providers (OpenAI, Anthropic, Groq, Ollama, etc.)
 - Run batch tests against datasets with detailed metrics
 - Debug step-by-step with interactive mode
-- Track token usage, latency, and reward
 
 ## Quick Start
 
-### Testing with Remote Rollout Agent
-
-If you implement a `RolloutAgentLoop`, use `-m` to point at your agent module:
-
 ```bash
-# Basic batch test with OpenAI
-osmosis test -m my_agent:agent_loop -d data.jsonl --model gpt-5-mini
+# Remote Rollout: batch test with OpenAI
+osmosis test -m server:agent_loop -d data.jsonl --model gpt-5-mini
 
-# Use Anthropic Claude
-osmosis test -m my_agent:agent_loop -d data.jsonl --model anthropic/claude-sonnet-4-5
-
-# Interactive debugging
-osmosis test -m my_agent:agent_loop -d data.jsonl --interactive
-
-# Start at specific row
-osmosis test -m my_agent:agent_loop -d data.jsonl --interactive --row 5
-```
-
-### Testing with Local Rollout MCP Tools
-
-If you use the **git-sync** workflow and provide MCP tools (`@mcp.tool()`) instead of a `RolloutAgentLoop`, use `--mcp` to point at your MCP directory:
-
-```bash
-# Install MCP support
-pip install osmosis-ai[mcp]
-
-# Test MCP tools against a dataset
+# Local Rollout: test MCP tools
 osmosis test --mcp ./mcp -d data.jsonl --model openai/gpt-5-mini
 
-# Interactive debugging with MCP tools
-osmosis test --mcp ./mcp -d data.jsonl --interactive
-
-# All options work: limits, temperature, output, etc.
-osmosis test --mcp ./mcp -d data.jsonl --model gpt-5-mini \
-    --limit 5 --temperature 0.7 -o results.json
+# Interactive debugging (start at specific row)
+osmosis test -m server:agent_loop -d data.jsonl --interactive --row 5
 ```
 
-The `--mcp` directory must contain a `main.py` that creates a `FastMCP` instance with registered tools. See [Local Rollout MCP Tools](./local-rollout/mcp-tools.md) for the full folder structure and examples.
-
-> **Note:** `--mcp` and `-m/--module` are mutually exclusive. Use one or the other.
+The `--mcp` directory must contain a `main.py` with a `FastMCP` instance. See [Local Rollout MCP Tools](./local-rollout/mcp-tools.md). `--mcp` and `-m` are mutually exclusive.
 
 ### Programmatic Usage
 
 ```python
-from osmosis_ai.rollout.eval.common import DatasetReader
-from osmosis_ai.rollout.eval.common import ExternalLLMClient
+from osmosis_ai.rollout.eval.common import DatasetReader, ExternalLLMClient
 from osmosis_ai.rollout.eval.test_mode import LocalTestRunner
 
-# Load dataset
 reader = DatasetReader("./test_data.jsonl")
 rows = reader.read(limit=10)
+client = ExternalLLMClient("gpt-5-mini")
 
-# Initialize LLM client
-client = ExternalLLMClient("gpt-5-mini")  # or "anthropic/claude-sonnet-4-5"
-
-# Create runner
-runner = LocalTestRunner(
-    agent_loop=MyAgentLoop(),
-    llm_client=client,
-)
-
-# Run batch tests
+runner = LocalTestRunner(agent_loop=CalculatorAgentLoop(), llm_client=client)
 async with client:
-    results = await runner.run_batch(
-        rows=rows,
-        max_turns=10,
-        completion_params={"temperature": 0.7},
-    )
+    results = await runner.run_batch(rows=rows, max_turns=10)
 
 print(f"Passed: {results.passed}/{results.total}")
-print(f"Total tokens: {results.total_tokens}")
 ```
 
 ---
@@ -115,8 +71,8 @@ osmosis test [OPTIONS]
 
 | Option | Description |
 |--------|-------------|
-| `-m, --module, --agent MODULE` | Module path to agent loop (format: `module:attribute`). Use for Remote Rollout users who implement `RolloutAgentLoop`. |
-| `--mcp DIR` | Path to MCP tools directory (must contain `main.py` with a `FastMCP` instance). Use for Local Rollout (git-sync) users who provide `@mcp.tool()` functions. Requires `pip install osmosis-ai[mcp]`. |
+| `-m, --module, --agent MODULE` | Module path to agent loop (format: `module:attribute`) |
+| `--mcp DIR` | Path to MCP tools directory. Requires `pip install osmosis-ai[mcp]`. |
 
 ### Model Options
 
@@ -160,36 +116,6 @@ Models can be specified in two formats:
 
 See [LiteLLM Providers](https://docs.litellm.ai/docs/providers) for supported providers.
 
-### Examples
-
-```bash
-# Remote Rollout: test with GPT-5-mini (default)
-osmosis test -m my_agent:agent_loop -d data.jsonl
-
-# Local Rollout: test MCP tools
-osmosis test --mcp ./mcp -d data.jsonl --model openai/gpt-5-mini
-
-# Local Rollout: interactive debugging with MCP tools
-osmosis test --mcp ./mcp -d data.jsonl --interactive
-
-# Test with Claude
-osmosis test -m my_agent:agent_loop -d data.jsonl --model anthropic/claude-sonnet-4-5
-
-# Test with local Ollama
-osmosis test -m my_agent:agent_loop -d data.jsonl \
-    --model ollama/llama3.1 \
-    --base-url http://localhost:11434
-
-# Test subset of data
-osmosis test -m my_agent:agent_loop -d data.jsonl --limit 10 --offset 50
-
-# Save results to file
-osmosis test -m my_agent:agent_loop -d data.jsonl -o results.json
-
-# Interactive debugging starting at row 5
-osmosis test -m my_agent:agent_loop -d data.jsonl --interactive --row 5
-```
-
 ---
 
 ## Interactive Mode
@@ -208,80 +134,18 @@ Interactive mode allows step-by-step debugging of agent execution. After each LL
 | `r` / `row N` | Jump to row N |
 | `?` / `help` | Show help |
 
-### Example Session
-
-```
-osmosis-rollout-test v0.1.0 (Interactive Mode)
-
-Loading agent: my_agent:agent_loop
-  Agent name: calculator
-Loading dataset: data.jsonl
-  Total rows: 100
-Initializing provider: openai
-  Model: openai/gpt-5-mini
-
-[Interactive Mode] Row 0/100
-System: You are a helpful calculator.
-User: What is 2 + 2?
-
-[Step 1] Waiting for LLM response...
-> n
-
-Assistant called tool: calculate(operation="add", a=2, b=2)
-Tool result: 4
-
-[Step 2] Waiting for LLM response...
-> m
-
-Messages:
-  [0] system: You are a helpful calculator.
-  [1] user: What is 2 + 2?
-  [2] assistant: [tool_call: calculate]
-  [3] tool: 4
-
-> c
-
-Continuing without stepping...
-Result: COMPLETED (reward=1.0)
-
-[Row 0 Complete] Next row? (n=next, q=quit, r N=jump to row N)
-> q
-```
-
 ---
 
 ## API Reference
 
 ### DatasetReader
 
-Read and validate test datasets.
-
 ```python
 from osmosis_ai.rollout.eval.common import DatasetReader
 
 reader = DatasetReader("./data.jsonl")
-
-# Get total row count
-total = len(reader)
-
-# Read all rows
-rows = reader.read()
-
-# Read with pagination
 rows = reader.read(limit=10, offset=20)
-
-# Iterate rows (memory efficient)
-for row in reader.iter_rows():
-    print(row["user_prompt"])
 ```
-
-**Constructor Parameters:**
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `path` | `str` | Path to dataset file |
-
-**Methods:**
 
 | Method | Returns | Description |
 |--------|---------|-------------|
@@ -289,55 +153,17 @@ for row in reader.iter_rows():
 | `iter_rows()` | `Iterator[DatasetRow]` | Memory-efficient iterator |
 | `__len__()` | `int` | Total row count |
 
----
-
-### DatasetRow
-
-A single row from the dataset, represented as a `TypedDict`.
-
-```python
-class DatasetRow(TypedDict):
-    ground_truth: str      # Expected output
-    user_prompt: str       # User message
-    system_prompt: str     # System prompt
-    # Additional columns from the dataset are included as extra dict keys
-```
-
-Access fields with dict syntax: `row["user_prompt"]`, `row["ground_truth"]`, etc.
-
----
+`DatasetRow` is a `TypedDict` with `ground_truth`, `user_prompt`, `system_prompt`, plus any extra columns from the dataset.
 
 ### ExternalLLMClient
-
-Call external LLM APIs via LiteLLM.
 
 ```python
 from osmosis_ai.rollout.eval.common import ExternalLLMClient
 
-# OpenAI (simple format)
-client = ExternalLLMClient("gpt-5-mini")
-
-# Anthropic (LiteLLM format)
-client = ExternalLLMClient("anthropic/claude-sonnet-4-5")
-
-# With explicit API key
-client = ExternalLLMClient(
-    model="gpt-5-mini",
-    api_key="sk-...",
-)
-
-# Local Ollama
-client = ExternalLLMClient(
-    model="ollama/llama3.1",
-    api_base="http://localhost:11434",
-)
-
-# Use as async context manager
-async with client:
-    result = await client.chat_completions(messages, tools=tools)
+client = ExternalLLMClient("gpt-5-mini")                          # OpenAI
+client = ExternalLLMClient("anthropic/claude-sonnet-4-5")          # Anthropic
+client = ExternalLLMClient("ollama/llama3.1", api_base="http://localhost:11434")  # Local
 ```
-
-**Constructor Parameters:**
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
@@ -345,47 +171,17 @@ async with client:
 | `api_key` | `Optional[str]` | `None` | API key (or use env var) |
 | `api_base` | `Optional[str]` | `None` | Base URL for OpenAI-compatible APIs |
 
-**Methods:**
-
-#### `async chat_completions(messages, tools, **kwargs) -> CompletionsResult`
-
-Call the LLM with messages and tools.
-
-| Parameter | Type | Description |
-|-----------|------|-------------|
-| `messages` | `List[Dict]` | Conversation history |
-| `tools` | `List[Dict]` | Tool definitions (OpenAI format) |
-| `**kwargs` | - | Additional params (temperature, max_tokens, etc.) |
-
----
+Method: `async chat_completions(messages, tools, **kwargs) -> CompletionsResult`
 
 ### LocalTestRunner
-
-Execute batch tests.
 
 ```python
 from osmosis_ai.rollout.eval.test_mode import LocalTestRunner
 
-runner = LocalTestRunner(
-    agent_loop=MyAgentLoop(),
-    llm_client=client,
-    debug=True,
-)
-
-# Single row test
+runner = LocalTestRunner(agent_loop=agent, llm_client=client)
 result = await runner.run_single(row, row_index=0)
-
-# Batch test
-batch_result = await runner.run_batch(
-    rows=rows,
-    max_turns=10,
-    completion_params={"temperature": 0.7},
-    on_progress=lambda current, total, result: print(f"[{current}/{total}]"),
-    start_index=0,
-)
+batch_result = await runner.run_batch(rows=rows, max_turns=10)
 ```
-
-**Constructor Parameters:**
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
@@ -394,97 +190,29 @@ batch_result = await runner.run_batch(
 | `debug` | `bool` | `False` | Enable debug output |
 | `debug_dir` | `Optional[str]` | `None` | Directory for debug logs |
 
-**Methods:**
+### Result Types
 
-#### `async run_single(row, row_index, max_turns, completion_params) -> LocalTestRunResult`
+| Type | Key Fields |
+|------|------------|
+| `LocalTestRunResult` | `row_index`, `success`, `result: Optional[RolloutResult]`, `error`, `duration_ms`, `token_usage` |
+| `LocalTestBatchResult` | `results`, `total`, `passed`, `failed`, `total_duration_ms`, `total_tokens` |
 
-Test a single row.
-
-#### `async run_batch(rows, max_turns, completion_params, on_progress, start_index) -> LocalTestBatchResult`
-
-Test multiple rows.
-
----
-
-### LocalTestRunResult
-
-Result from a single test run.
-
-```python
-@dataclass
-class LocalTestRunResult:
-    row_index: int                    # Dataset row index
-    success: bool                     # Whether completed without error
-    result: Optional[RolloutResult]   # Agent result (if successful)
-    error: Optional[str]              # Error message (if failed)
-    duration_ms: float                # Execution time
-    token_usage: Dict[str, int]       # Token statistics
-```
-
-**Token Usage Fields:**
-
-| Field | Description |
-|-------|-------------|
-| `prompt_tokens` | Input tokens |
-| `completion_tokens` | Output tokens |
-| `total_tokens` | Total tokens |
-| `num_llm_calls` | Number of LLM calls |
-
----
-
-### LocalTestBatchResult
-
-Aggregated results from batch testing.
-
-```python
-@dataclass
-class LocalTestBatchResult:
-    results: List[LocalTestRunResult]  # Individual results
-    total: int                         # Total rows tested
-    passed: int                        # Successful completions
-    failed: int                        # Failed tests
-    total_duration_ms: float           # Total execution time
-    total_tokens: int                  # Total tokens used
-```
-
----
+`token_usage` dict contains: `prompt_tokens`, `completion_tokens`, `total_tokens`, `num_llm_calls`.
 
 ### InteractiveRunner
-
-Step-by-step debugging runner.
 
 ```python
 from osmosis_ai.rollout.eval.test_mode import InteractiveRunner
 
-runner = InteractiveRunner(
-    agent_loop=MyAgentLoop(),
-    llm_client=client,
-    debug=True,
-)
-
-await runner.run_interactive_session(
-    rows=rows,
-    max_turns=10,
-    completion_params={"temperature": 0.7},
-    initial_row=5,
-    row_offset=0,
-)
+runner = InteractiveRunner(agent_loop=agent, llm_client=client)
+await runner.run_interactive_session(rows=rows, max_turns=10, initial_row=5)
 ```
 
 ---
 
 ## Exceptions
 
-All local workflow exceptions are shared by local commands (`test` / `eval`).
-
-```python
-from osmosis_ai.rollout.eval.common import (
-    DatasetValidationError,
-    DatasetParseError,
-    ProviderError,
-    ToolValidationError,
-)
-```
+All local workflow exceptions are shared by `test` and `eval` commands.
 
 | Exception | Description |
 |-----------|-------------|
@@ -493,57 +221,14 @@ from osmosis_ai.rollout.eval.common import (
 | `ProviderError` | LLM provider error (auth, rate limit, etc.) |
 | `ToolValidationError` | Invalid tool schema |
 
-### Example Error Handling
-
-```python
-from osmosis_ai.rollout.eval.common import (
-    DatasetReader,
-    DatasetValidationError,
-    DatasetParseError,
-)
-
-try:
-    reader = DatasetReader("./data.jsonl")
-    rows = reader.read()
-except DatasetParseError as e:
-    print(f"Failed to parse file: {e}")
-except DatasetValidationError as e:
-    print(f"Invalid dataset: {e}")
-```
-
 ---
 
 ## Output Format
 
-When using `--output`, results are saved as JSON:
+When using `--output`, results are saved as JSON with this structure:
 
-```json
-{
-  "summary": {
-    "total": 100,
-    "passed": 95,
-    "failed": 5,
-    "total_duration_ms": 45230,
-    "total_tokens": 125000
-  },
-  "results": [
-    {
-      "row_index": 0,
-      "success": true,
-      "error": null,
-      "duration_ms": 450,
-      "token_usage": {
-        "prompt_tokens": 150,
-        "completion_tokens": 50,
-        "total_tokens": 200,
-        "num_llm_calls": 2
-      },
-      "reward": 1.0,
-      "finish_reason": "stop"
-    }
-  ]
-}
-```
+- `summary` -- total, passed, failed, total_duration_ms, total_tokens
+- `results[]` -- per-row: row_index, success, error, duration_ms, token_usage, reward, finish_reason
 
 ---
 
@@ -559,20 +244,6 @@ API keys can be set via environment variables:
 | Azure | `AZURE_API_KEY` |
 
 See [LiteLLM Environment Variables](https://docs.litellm.ai/docs/providers) for more providers.
-
----
-
-## Best Practices
-
-1. **Start with a small dataset**: Use `--limit 5` to validate your setup before running full tests.
-
-2. **Use interactive mode for debugging**: When a test fails, use `--interactive --row N` to step through execution.
-
-3. **Save results for analysis**: Use `-o results.json` to save detailed metrics for later analysis.
-
-4. **Set appropriate timeouts**: Complex agent loops may need longer `--max-turns` values.
-
-5. **Monitor token usage**: Track `total_tokens` to estimate costs before running large batches.
 
 ---
 
