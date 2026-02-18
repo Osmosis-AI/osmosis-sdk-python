@@ -125,13 +125,15 @@ class RolloutContext:
                 # Execute tools and add results
                 for tool_call in result.tool_calls:
                     args = json.loads(tool_call["function"]["arguments"])
-                    tool_result = do_tool(tool_call["function"]["name"], args)
+                    start = time.monotonic()
+                    tool_result = your_tool_fn(tool_call["function"]["name"], args)
+                    latency_ms = (time.monotonic() - start) * 1000.0
                     messages.append({
                         "role": "tool",
                         "tool_call_id": tool_call["id"],
                         "content": str(tool_result),
                     })
-                    ctx.record_tool_call(latency_ms=...)
+                    ctx.record_tool_call(latency_ms=latency_ms)
 
             return ctx.complete(messages)
     """
