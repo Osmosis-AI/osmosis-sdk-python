@@ -39,42 +39,23 @@ Requires **Python 3.10+**. For development setup, see [CONTRIBUTING.md](CONTRIBU
 - **An LLM API key** (e.g., OpenAI, Anthropic, Groq) -- required for `osmosis test` and `osmosis eval`. See [supported providers](https://docs.litellm.ai/docs/providers).
 - **Osmosis account** (optional) -- needed for platform features like `osmosis login`, workspace management, and submitting training runs. Sign up at [platform.osmosis.ai](https://platform.osmosis.ai).
 
-<table width="100%">
-<tr>
-<td>
-
 **pip**
 
 ```bash
-# Core SDK
-pip install osmosis-ai
-# + FastAPI server
-pip install osmosis-ai[server]
-# + MCP tool support
-pip install osmosis-ai[mcp]
-# All features
-pip install osmosis-ai[full]
+pip install osmosis-ai            # Core SDK
+pip install osmosis-ai[server]    # + FastAPI server
+pip install osmosis-ai[mcp]       # + MCP tool support
+pip install osmosis-ai[full]      # All features
 ```
-
-</td>
-<td>
 
 **uv**
 
 ```bash
-# Core SDK
-uv add osmosis-ai
-# + FastAPI server
-uv add osmosis-ai[server]
-# + MCP tool support
-uv add osmosis-ai[mcp]
-# All features
-uv add osmosis-ai[full]
+uv add osmosis-ai                 # Core SDK
+uv add osmosis-ai[server]         # + FastAPI server
+uv add osmosis-ai[mcp]            # + MCP tool support
+uv add osmosis-ai[full]           # All features
 ```
-
-</td>
-</tr>
-</table>
 
 ## Testing & Evaluation
 
