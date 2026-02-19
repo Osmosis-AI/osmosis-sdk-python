@@ -18,15 +18,6 @@ Examples:
 <!-- Why are these changes needed? Link any related issues. -->
 <!-- Closes #<issue_number> -->
 
-## Type of Change
-
-- [ ] Bug fix (non-breaking change that fixes an issue)
-- [ ] New feature (non-breaking change that adds functionality)
-- [ ] Breaking change (fix or feature that would cause existing functionality to change)
-- [ ] Refactor (code change that neither fixes a bug nor adds a feature)
-- [ ] Documentation update
-- [ ] CI/build configuration change
-
 ## How to Test
 
 <!-- Describe how reviewers can verify these changes. -->
