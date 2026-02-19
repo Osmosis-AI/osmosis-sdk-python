@@ -22,7 +22,7 @@ from osmosis_ai.rollout.eval.common.errors import (
     ToolValidationError,
 )
 
-logger = logging.getLogger(__name__)
+logger: logging.Logger = logging.getLogger(__name__)
 
 
 class LocalLLMClientProtocol(Protocol):
@@ -106,7 +106,7 @@ class LocalRolloutRunner:
         self.llm_client = llm_client
         self.debug = debug
         self.rollout_id_prefix = rollout_id_prefix
-        self.request_metadata = dict(request_metadata or {})
+        self.request_metadata: dict[str, Any] = dict(request_metadata or {})
 
         if debug_dir is not None:
             self.debug_dir: str | None = debug_dir

@@ -205,7 +205,7 @@ class InteractiveRunner:
         self.agent_loop = agent_loop
         self.llm_client = llm_client
         self.debug = debug
-        self.console = Console()
+        self.console: Console = Console()
 
         # State for interactive session
         self._current_messages: list[dict[str, Any]] = []

@@ -20,7 +20,7 @@ from osmosis_ai.rollout.eval.common.errors import (
     DatasetValidationError,
 )
 
-logger = logging.getLogger(__name__)
+logger: logging.Logger = logging.getLogger(__name__)
 
 
 REQUIRED_COLUMNS = ["ground_truth", "user_prompt", "system_prompt"]
@@ -39,7 +39,7 @@ class DatasetReader:
     """Reader for Parquet / JSONL / CSV datasets used by local workflows."""
 
     def __init__(self, file_path: str) -> None:
-        self.file_path = Path(file_path)
+        self.file_path: Path = Path(file_path)
 
         if not self.file_path.exists():
             raise FileNotFoundError(f"Dataset file not found: {file_path}")

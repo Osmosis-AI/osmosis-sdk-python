@@ -27,7 +27,7 @@ import time
 from osmosis_ai.rollout.config.settings import RolloutServerSettings, get_settings
 from osmosis_ai.rollout.core.schemas import InitResponse
 
-logger = logging.getLogger(__name__)
+logger: logging.Logger = logging.getLogger(__name__)
 
 
 class AppState:
@@ -80,7 +80,7 @@ class AppState:
 
         self.settings = settings
         self._max_concurrent = max_concurrent or settings.max_concurrent_rollouts
-        self.record_ttl = record_ttl_seconds or settings.record_ttl_seconds
+        self.record_ttl: float = record_ttl_seconds or settings.record_ttl_seconds
         self._cleanup_interval = (
             cleanup_interval_seconds or settings.cleanup_interval_seconds
         )
@@ -89,11 +89,11 @@ class AppState:
         # NOTE: The "key" used throughout is the idempotency key for init requests:
         # - Prefer request.idempotency_key when provided
         # - Fallback to request.rollout_id when idempotency_key is missing
-        self.rollout_tasks: dict[str, asyncio.Task] = {}
+        self.rollout_tasks: dict[str, asyncio.Task[None]] = {}
         self.completed_rollouts: dict[str, float] = {}  # key -> completion_time
         # Cached init responses for idempotency (duplicate /v1/rollout/init requests)
         self._init_futures: dict[str, asyncio.Future[InitResponse]] = {}
-        self.semaphore = asyncio.Semaphore(self._max_concurrent)
+        self.semaphore: asyncio.Semaphore = asyncio.Semaphore(self._max_concurrent)
         self._cleanup_task: asyncio.Task | None = None
 
     def get_or_create_init_future(
@@ -185,7 +185,7 @@ class AppState:
             or key in self._init_futures
         )
 
-    def mark_started(self, key: str, task: asyncio.Task) -> None:
+    def mark_started(self, key: str, task: asyncio.Task[None]) -> None:
         """Mark a rollout as started.
 
         Args:

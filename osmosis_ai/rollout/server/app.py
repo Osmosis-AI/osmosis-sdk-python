@@ -34,7 +34,7 @@ from osmosis_ai.rollout.core.schemas import InitResponse, RolloutRequest
 from osmosis_ai.rollout.server.api_key import validate_api_key
 from osmosis_ai.rollout.server.state import AppState
 
-logger = logging.getLogger(__name__)
+logger: logging.Logger = logging.getLogger(__name__)
 
 # NOTE: FastAPI is an optional dependency. We avoid importing it at module import
 # time unless it's available, but we DO need these symbols in module globals so

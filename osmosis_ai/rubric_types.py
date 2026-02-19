@@ -32,7 +32,7 @@ class ProviderRequestError(RuntimeError):
     def __init__(self, provider: str, model: str, detail: str) -> None:
         self.provider = provider
         self.model = model
-        self.detail = (
+        self.detail: str = (
             detail.strip()
             if detail
             else "Provider request failed with no additional detail."

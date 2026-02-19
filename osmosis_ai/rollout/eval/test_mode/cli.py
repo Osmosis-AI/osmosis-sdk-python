@@ -49,7 +49,7 @@ class TestCommand:
     """Handler for `osmosis test`."""
 
     def __init__(self) -> None:
-        self.console = Console()
+        self.console: Console = Console()
 
     def configure_parser(self, parser: argparse.ArgumentParser) -> None:
         """Configure argument parser for test command."""

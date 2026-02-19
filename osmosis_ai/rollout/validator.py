@@ -100,7 +100,7 @@ class AgentLoopValidationError(Exception):
 
     def __init__(self, message: str, errors: list[ValidationError] | None = None):
         super().__init__(message)
-        self.errors = errors or []
+        self.errors: list[ValidationError] = errors or []
 
 
 def _create_mock_request() -> RolloutRequest:

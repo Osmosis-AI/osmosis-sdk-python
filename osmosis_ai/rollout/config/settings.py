@@ -19,7 +19,7 @@ Example:
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, ClassVar
 
 from pydantic import BaseModel, Field
 
@@ -58,7 +58,7 @@ class RolloutClientSettings(_BaseSettings):
     """
 
     if PYDANTIC_SETTINGS_AVAILABLE:
-        model_config = SettingsConfigDict(
+        model_config: ClassVar[SettingsConfigDict] = SettingsConfigDict(
             env_prefix="OSMOSIS_ROLLOUT_CLIENT_",
             env_file=".env",
             env_file_encoding="utf-8",
@@ -126,7 +126,7 @@ class RolloutServerSettings(_BaseSettings):
     """
 
     if PYDANTIC_SETTINGS_AVAILABLE:
-        model_config = SettingsConfigDict(
+        model_config: ClassVar[SettingsConfigDict] = SettingsConfigDict(
             env_prefix="OSMOSIS_ROLLOUT_SERVER_",
             env_file=".env",
             env_file_encoding="utf-8",
@@ -204,7 +204,7 @@ class RolloutSettings(_BaseSettings):
     """
 
     if PYDANTIC_SETTINGS_AVAILABLE:
-        model_config = SettingsConfigDict(
+        model_config: ClassVar[SettingsConfigDict] = SettingsConfigDict(
             env_prefix="OSMOSIS_ROLLOUT_",
             env_file=".env",
             env_file_encoding="utf-8",
