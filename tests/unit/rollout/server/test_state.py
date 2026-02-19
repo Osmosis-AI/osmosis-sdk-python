@@ -76,7 +76,7 @@ class TestAppStateInit:
     def test_custom_max_concurrent(self) -> None:
         """max_concurrent is stored from constructor arg."""
         state = _make_state(max_concurrent=42)
-        assert state._max_concurrent == 42
+        assert state.max_concurrent == 42
 
     def test_custom_record_ttl(self) -> None:
         """record_ttl is stored from constructor arg."""
