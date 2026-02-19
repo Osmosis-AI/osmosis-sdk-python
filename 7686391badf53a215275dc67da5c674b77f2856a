@@ -1,0 +1,23 @@
+README.md
+  511ec2179d75abed 52,54,56,66,68,70,72
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.4",
+  "base_commit_sha": "7686391badf53a215275dc67da5c674b77f2856a",
+  "prompts": {
+    "511ec2179d75abed": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "71c72d5d-d4a0-4c75-87d0-ab696628c169",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>",
+      "messages": [],
+      "total_additions": 16,
+      "total_deletions": 8,
+      "accepted_lines": 7,
+      "overriden_lines": 0
+    }
+  }
+}
