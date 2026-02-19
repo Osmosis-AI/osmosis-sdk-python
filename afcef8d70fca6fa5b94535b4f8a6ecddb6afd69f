@@ -1,0 +1,25 @@
+.github/workflows/check-pr-title.yml
+  afbb6ec16c4b9e2d 16
+.github/workflows/auto-label-pr.yml
+  afbb6ec16c4b9e2d 13
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.4",
+  "base_commit_sha": "afcef8d70fca6fa5b94535b4f8a6ecddb6afd69f",
+  "prompts": {
+    "afbb6ec16c4b9e2d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "fe0cf8aa-343a-4273-8e8c-6d8f240d4815",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>",
+      "messages": [],
+      "total_additions": 2,
+      "total_deletions": 1,
+      "accepted_lines": 2,
+      "overriden_lines": 0
+    }
+  }
+}
