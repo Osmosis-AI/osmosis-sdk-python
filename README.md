@@ -43,8 +43,8 @@ Requires **Python 3.10+**. For development setup, see [CONTRIBUTING.md](CONTRIBU
 
 ```bash
 pip install osmosis-ai            # Core SDK
-pip install osmosis-ai[server]    # + FastAPI server
-pip install osmosis-ai[mcp]       # + MCP tool support
+pip install osmosis-ai[server]    # + FastAPI server for Remote Rollout
+pip install osmosis-ai[mcp]       # + MCP tool support for Local Rollout
 pip install osmosis-ai[full]      # All features
 ```
 
@@ -52,8 +52,8 @@ pip install osmosis-ai[full]      # All features
 
 ```bash
 uv add osmosis-ai                 # Core SDK
-uv add osmosis-ai[server]         # + FastAPI server
-uv add osmosis-ai[mcp]            # + MCP tool support
+uv add osmosis-ai[server]         # + FastAPI server for Remote Rollout
+uv add osmosis-ai[mcp]            # + MCP tool support for Local Rollout
 uv add osmosis-ai[full]           # All features
 ```
 
