@@ -32,7 +32,7 @@ class EvalCommand:
     """Handler for `osmosis eval`."""
 
     def __init__(self) -> None:
-        self.console = Console()
+        self.console: Console = Console()
 
     def configure_parser(self, parser: argparse.ArgumentParser) -> None:
         parser.set_defaults(handler=self.run)

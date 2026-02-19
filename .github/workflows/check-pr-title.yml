@@ -7,24 +7,32 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   check-title:
+    if: github.actor != 'dependabot[bot]' && (github.event.action != 'edited' || github.event.changes.title)
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - name: Validate PR title format
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
         run: |
-          PATTERN='^(\[BREAKING\])?\[(reward|rollout|server|cli|auth|eval|misc|ci|doc)\] (feat|fix|refactor|chore|test|doc): .+'
+          PATTERN='^(\[BREAKING\])?(\[(reward|rollout|server|cli|auth|eval|misc|ci|doc)\]){1,3} (feat|fix|refactor|chore|test|doc): .+'
           if [[ ! "$PR_TITLE" =~ $PATTERN ]]; then
             echo "::error::PR title does not match required format."
             echo ""
             echo "Expected format: [module] type: description"
+            echo "  Multi-module:  [mod1][mod2] type: description (up to 3 modules)"
             echo "  modules: reward, rollout, server, cli, auth, eval, misc, ci, doc"
             echo "  types:   feat, fix, refactor, chore, test, doc"
             echo ""
             echo "Examples:"
             echo "  [rollout] feat: add streaming support for chat completions"
+            echo "  [rollout][auth] refactor: extract LifecycleManager"
             echo "  [BREAKING][reward] refactor: rename decorator parameters"
             echo "  [ci] chore: update GitHub Actions versions"
             echo ""

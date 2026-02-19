@@ -45,7 +45,7 @@ from osmosis_ai.rollout.core.schemas import (
     RolloutStatus,
 )
 
-logger = logging.getLogger(__name__)
+logger: logging.Logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -158,14 +158,14 @@ class OsmosisLLMClient:
         if settings is None:
             settings = get_settings().client
 
-        self.server_url = server_url.rstrip("/")
+        self.server_url: str = server_url.rstrip("/")
         self.rollout_id = rollout_id
         self.api_key = api_key
-        self.timeout_seconds = timeout_seconds or settings.timeout_seconds
-        self.max_retries = (
+        self.timeout_seconds: float = timeout_seconds or settings.timeout_seconds
+        self.max_retries: int = (
             max_retries if max_retries is not None else settings.max_retries
         )
-        self.complete_rollout_retries = (
+        self.complete_rollout_retries: int = (
             complete_rollout_retries
             if complete_rollout_retries is not None
             else settings.complete_rollout_retries

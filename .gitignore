@@ -53,3 +53,8 @@ todo.md
 .DS_Store
 
 CLAUDE.md
+
+.claude/
+.cursor/
+.gemini/
+.mcp.json

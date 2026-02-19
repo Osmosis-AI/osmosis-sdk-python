@@ -39,6 +39,7 @@ The table below lists all development commands. If you installed with **pip**, d
 | Check formatting | `uv run ruff format --check .` |
 | Type check (pyright) | `uv run pyright osmosis_ai/` |
 | Type check (mypy) | `uv run mypy osmosis_ai/` |
+| Verify public API types | `uv run --no-editable pyright --verifytypes osmosis_ai --ignoreexternal` |
 
 ## Testing
 
@@ -55,11 +56,12 @@ Ruff is pinned to one version across `pyproject.toml`, `.pre-commit-config.yaml`
 [Pyright](https://microsoft.github.io/pyright/) is the primary type checker and [mypy](https://mypy-lang.org/) is a secondary checker. Both are included in the `dev` extras.
 
 - **Pyright** — must pass. All errors must be resolved before merging.
+- **Pyright `--verifytypes`** — must pass. Ensures all public API symbols have complete type annotations.
 - **mypy** — advisory (`continue-on-error` in CI). Fix warnings when practical, but they won't block a PR.
 
 Configuration for both tools lives in `pyproject.toml` under `[tool.pyright]` and `[tool.mypy]`.
 
-> **Note:** CI also runs `pyright --verifytypes osmosis_ai --ignoreexternal` to check public API type completeness. This requires a non-editable install and is non-blocking in CI.
+> **Note:** `--verifytypes` requires a non-editable install. The `--no-editable` flag in `uv run` handles this automatically — it temporarily installs the package from a built wheel for the duration of the command.
 
 ## Pre-commit Hooks
 
@@ -69,6 +71,8 @@ Configuration for both tools lives in `pyproject.toml` under `[tool.pyright]` an
 pre-commit install
 ```
 
+> **Tip:** Run `uv run pyright osmosis_ai/` before pushing to catch type errors early. For full CI parity, also run `uv run --no-editable pyright --verifytypes osmosis_ai --ignoreexternal`. CI will block PRs with pyright failures.
+
 ## Pull Requests
 
 ### PR Title Format
@@ -77,12 +81,13 @@ All PR titles **must** follow this format (enforced by CI):
 
 ```
 [module] type: description
+[mod1][mod2] type: description          # multi-module (up to 3)
 ```
 
 - **Modules**: `reward`, `rollout`, `server`, `cli`, `auth`, `eval`, `misc`, `ci`, `doc`
 - **Types**: `feat`, `fix`, `refactor`, `chore`, `test`, `doc`
 
-For breaking changes, add `[BREAKING]` before the module:
+For breaking changes, add `[BREAKING]` before the modules:
 
 ```
 [BREAKING][module] type: description
@@ -92,6 +97,7 @@ For breaking changes, add `[BREAKING]` before the module:
 
 ```
 [rollout] feat: add streaming support for chat completions
+[rollout][auth] refactor: extract LifecycleManager
 [server] fix: handle timeout in rollout init
 [cli] chore: update dependency versions
 [BREAKING][reward] refactor: rename decorator parameters

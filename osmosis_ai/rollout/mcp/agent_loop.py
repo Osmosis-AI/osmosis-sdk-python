@@ -25,7 +25,7 @@ from osmosis_ai.rollout.tools import (
     serialize_tool_result,
 )
 
-logger = logging.getLogger(__name__)
+logger: logging.Logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -130,10 +130,10 @@ class MCPAgentLoop(RolloutAgentLoop):
     write their own ``RolloutAgentLoop``.
     """
 
-    name = "mcp_agent"
+    name: str = "mcp_agent"
 
     def __init__(self, mcp_server: Any, agent_name: str = "mcp_agent") -> None:
-        self.name = agent_name  # type: ignore[misc]
+        self.name = agent_name
         self._tool_manager = mcp_server._tool_manager
         self._openai_schemas: list[OpenAIFunctionToolSchema] = []
 

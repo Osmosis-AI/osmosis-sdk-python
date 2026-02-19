@@ -47,7 +47,7 @@ if TYPE_CHECKING:
     from osmosis_ai.rollout.client import CompletionsResult
     from osmosis_ai.rollout.core.llm_client import LLMClientProtocol
 
-logger = logging.getLogger(__name__)
+logger: logging.Logger = logging.getLogger(__name__)
 
 
 @dataclass

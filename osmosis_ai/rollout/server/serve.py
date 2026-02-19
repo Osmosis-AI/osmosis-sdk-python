@@ -33,7 +33,7 @@ if TYPE_CHECKING:
     from osmosis_ai.auth.credentials import WorkspaceCredentials
     from osmosis_ai.rollout.config.settings import RolloutSettings
 
-logger = logging.getLogger(__name__)
+logger: logging.Logger = logging.getLogger(__name__)
 
 DEFAULT_PORT = 9000
 DEFAULT_HOST = "0.0.0.0"

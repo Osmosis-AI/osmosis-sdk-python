@@ -15,7 +15,7 @@ from osmosis_ai.rollout.network import PublicIPDetectionError, detect_public_ip
 if TYPE_CHECKING:
     from osmosis_ai.auth.credentials import WorkspaceCredentials
 
-logger = logging.getLogger(__name__)
+logger: logging.Logger = logging.getLogger(__name__)
 
 
 @dataclass

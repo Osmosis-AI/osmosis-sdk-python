@@ -4,9 +4,15 @@ on:
   pull_request:
     types: [opened, edited]
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   label:
+    if: github.event.action == 'opened' || github.event.changes.title
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     permissions:
       pull-requests: write
     steps:
@@ -38,16 +44,17 @@ jobs:
             labels+=("chore")
           fi
 
-          # Module label from [module] in title
-          if [[ "$PR_TITLE" =~ \[([a-z]+)\] ]]; then
+          # Module labels from [module] tags in title (supports multi-module like [rollout][auth])
+          remaining="$PR_TITLE"
+          while [[ "$remaining" =~ \[([a-z]+)\] ]]; do
             module="${BASH_REMATCH[1]}"
-            # Map [doc] module to existing 'documentation' label
+            remaining="${remaining#*]}"
             if [[ "$module" == "doc" ]]; then
               labels+=("documentation")
             elif [[ "$module" != "misc" ]]; then
               labels+=("$module")
             fi
-          fi
+          done
 
           if [ ${#labels[@]} -eq 0 ]; then
             echo "No labels to apply"

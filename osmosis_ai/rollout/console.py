@@ -373,7 +373,7 @@ class Console:
 
 
 # Default console instance for convenient access
-console = Console()
+console: Console = Console()
 
 
 __all__ = [

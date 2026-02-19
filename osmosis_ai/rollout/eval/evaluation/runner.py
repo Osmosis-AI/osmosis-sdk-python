@@ -21,7 +21,7 @@ from osmosis_ai.rollout.eval.common.llm_client import ExternalLLMClient
 from osmosis_ai.rollout.eval.common.runner import LocalRolloutRunner
 from osmosis_ai.rollout.eval.evaluation.eval_fn import EvalFnWrapper
 
-logger = logging.getLogger(__name__)
+logger: logging.Logger = logging.getLogger(__name__)
 
 
 def _extract_systemic_error_metrics(
