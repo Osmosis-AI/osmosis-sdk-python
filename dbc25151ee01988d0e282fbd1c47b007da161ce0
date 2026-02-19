@@ -1,0 +1,37 @@
+osmosis_ai/rollout/server/app.py
+  a625d547b7e1447f 288
+  ce62e40a619d076c 114,116-117,119-120,162-164,262,283-285,300
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.4",
+  "base_commit_sha": "dbc25151ee01988d0e282fbd1c47b007da161ce0",
+  "prompts": {
+    "a625d547b7e1447f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6f006fc4-fcd7-4e53-8421-30dcd3384898",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>",
+      "messages": [],
+      "total_additions": 1,
+      "total_deletions": 1,
+      "accepted_lines": 1,
+      "overriden_lines": 0
+    },
+    "ce62e40a619d076c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "68614c44-aae5-401c-a33b-97c6109f0ced",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>",
+      "messages": [],
+      "total_additions": 34,
+      "total_deletions": 25,
+      "accepted_lines": 13,
+      "overriden_lines": 0
+    }
+  }
+}
