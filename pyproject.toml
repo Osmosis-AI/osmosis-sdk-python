@@ -90,7 +90,7 @@ where = ["."]
 include = ["osmosis_ai*"]
 
 [tool.setuptools.package-data]
-osmosis_ai = ["py.typed"]
+osmosis_ai = ["py.typed", "auth/templates/*.html"]
 
 [tool.setuptools.dynamic]
 version = {attr = "osmosis_ai.consts.PACKAGE_VERSION"}
