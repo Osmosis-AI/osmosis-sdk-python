@@ -40,12 +40,7 @@ jobs:
       - name: Run pyright
         run: uv run pyright osmosis_ai/
       - name: Verify public API types
-        run: |
-          uv build --wheel --out-dir dist/
-          VENV="$(pwd)/.venv"
-          uv pip uninstall --python "$VENV/bin/python" osmosis-ai
-          uv pip install --python "$VENV/bin/python" dist/*.whl
-          "$VENV/bin/pyright" --verifytypes osmosis_ai --ignoreexternal
+        run: uv run --no-editable pyright --verifytypes osmosis_ai --ignoreexternal
 
   pytest:
     runs-on: ubuntu-latest
