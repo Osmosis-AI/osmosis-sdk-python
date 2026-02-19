@@ -1,0 +1,75 @@
+.github/workflows/tests.yml
+  a1a250e97d024bc6 36,39-41
+  8d2fc5bae7ce00f8 42
+osmosis_ai/rollout/core/base.py
+  a1a250e97d024bc6 50
+osmosis_ai/rollout/mcp/agent_loop.py
+  a1a250e97d024bc6 28,133,136
+osmosis_ai/rollout/eval/evaluation/runner.py
+  a1a250e97d024bc6 24
+osmosis_ai/rubric_types.py
+  a1a250e97d024bc6 35
+osmosis_ai/rollout/server/registration.py
+  a1a250e97d024bc6 18
+osmosis_ai/rollout/network.py
+  a1a250e97d024bc6 29
+osmosis_ai/rollout/validator.py
+  a1a250e97d024bc6 103
+osmosis_ai/rollout/eval/test_mode/cli.py
+  a1a250e97d024bc6 52
+osmosis_ai/rollout/console.py
+  a1a250e97d024bc6 376
+osmosis_ai/rollout/server/serve.py
+  a1a250e97d024bc6 36
+osmosis_ai/rollout/eval/evaluation/cli.py
+  a1a250e97d024bc6 35
+osmosis_ai/rollout/eval/common/dataset.py
+  a1a250e97d024bc6 23,42
+osmosis_ai/rollout/eval/test_mode/interactive.py
+  a1a250e97d024bc6 208
+osmosis_ai/rollout/eval/common/runner.py
+  a1a250e97d024bc6 25,109
+osmosis_ai/rollout/server/state.py
+  a1a250e97d024bc6 30,83,92,96,188
+osmosis_ai/rollout/eval/common/llm_client.py
+  a1a250e97d024bc6 25
+osmosis_ai/rollout/config/settings.py
+  a1a250e97d024bc6 22,61,129,207
+osmosis_ai/rollout/client.py
+  a1a250e97d024bc6 48,161,164-165,168
+osmosis_ai/rollout/server/app.py
+  a1a250e97d024bc6 37
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.4",
+  "base_commit_sha": "f61e139857a1e3797efaf815d1152664ab381d15",
+  "prompts": {
+    "8d2fc5bae7ce00f8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "04bc2704-0f3b-4a48-aac0-3170cd6d750c",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>",
+      "messages": [],
+      "total_additions": 1,
+      "total_deletions": 1,
+      "accepted_lines": 1,
+      "overriden_lines": 0
+    },
+    "a1a250e97d024bc6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1d9d6bd0-0d8b-4a38-b7f5-48e3cde32098",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>",
+      "messages": [],
+      "total_additions": 41,
+      "total_deletions": 41,
+      "accepted_lines": 38,
+      "overriden_lines": 0
+    }
+  }
+}
