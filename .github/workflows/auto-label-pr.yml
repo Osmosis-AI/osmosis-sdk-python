@@ -10,6 +10,7 @@ concurrency:
 
 jobs:
   label:
+    if: github.event.action == 'opened' || github.event.changes.title
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
