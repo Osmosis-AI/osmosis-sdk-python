@@ -60,6 +60,407 @@ def _extract_bearer_token(auth_header: str) -> str | None:
     return auth_header
 
 
+# ---------------------------------------------------------------------------
+# LifecycleManager
+# ---------------------------------------------------------------------------
+
+
+class LifecycleManager:
+    """Manages application startup, shutdown, and platform registration."""
+
+    def __init__(
+        self,
+        agent_loop: RolloutAgentLoop,
+        state: AppState,
+        *,
+        debug_dir: str | None = None,
+        credentials: WorkspaceCredentials | None = None,
+        server_host: str | None = None,
+        server_port: int | None = None,
+        api_key: str | None = None,
+        on_startup: Callable[[], Awaitable[None]] | None = None,
+        on_shutdown: Callable[[], Awaitable[None]] | None = None,
+    ) -> None:
+        self._agent_loop = agent_loop
+        self._state = state
+        self._debug_dir = debug_dir
+        self._credentials = credentials
+        self._server_host = server_host
+        self._server_port = server_port
+        self._api_key = api_key
+        self._on_startup = on_startup
+        self._on_shutdown = on_shutdown
+
+    @asynccontextmanager
+    async def lifespan(self, app: FastAPI) -> AsyncIterator[None]:
+        """Manage application lifecycle."""
+        logger.info(
+            "Server starting: agent_loop=%s, max_concurrent=%d",
+            self._agent_loop.name,
+            self._state._max_concurrent,
+        )
+        if self._debug_dir:
+            logger.info("Debug logging enabled: output_dir=%s", self._debug_dir)
+        self._state.start_cleanup_task()
+
+        if self._on_startup is not None:
+            await self._on_startup()
+
+        # Start platform registration as a background task.
+        # The task waits briefly for the server to be ready (after yield),
+        # then registers with Platform. This ensures the health check succeeds.
+        registration_task = self._start_registration()
+
+        try:
+            yield
+        finally:
+            await self._await_registration(registration_task)
+
+            if self._on_shutdown is not None:
+                await self._on_shutdown()
+
+            logger.info("Server stopping")
+            await self._state.stop_cleanup_task()
+            await self._state.cancel_all()
+
+    # -- Registration helpers ------------------------------------------------
+
+    def _start_registration(self) -> asyncio.Task | None:
+        """Start platform registration as a background task, if configured."""
+        if (
+            self._credentials is not None
+            and self._server_host is not None
+            and self._server_port is not None
+        ):
+            return asyncio.create_task(self._do_registration())
+        return None
+
+    async def _await_registration(self, task: asyncio.Task | None) -> None:
+        """Wait for a registration task to finish, suppressing errors."""
+        if task is None:
+            return
+        try:
+            await asyncio.wait_for(
+                task,
+                timeout=self._state.settings.registration_shutdown_timeout_seconds,
+            )
+        except asyncio.TimeoutError:
+            logger.warning("Platform registration timed out")
+        except asyncio.CancelledError:
+            logger.warning("Platform registration was cancelled")
+        except Exception as e:
+            logger.error("Platform registration failed: %s", e)
+
+    async def _do_registration(self) -> None:
+        """Poll for server readiness, then register with Platform."""
+        from osmosis_ai.rollout.server.registration import (
+            print_registration_result,
+            register_with_platform,
+        )
+
+        # Guaranteed non-None by _start_registration() guard
+        assert self._server_host is not None
+        assert self._server_port is not None
+        assert self._credentials is not None
+        host: str = self._server_host
+        port: int = self._server_port
+        credentials: WorkspaceCredentials = self._credentials
+
+        await self._wait_for_server_ready(port)
+
+        # Run sync registration in thread pool to avoid blocking event loop
+        result = await asyncio.to_thread(
+            register_with_platform,
+            host=host,
+            port=port,
+            agent_loop_name=self._agent_loop.name,
+            credentials=credentials,
+            api_key=self._api_key,
+        )
+        print_registration_result(
+            result=result,
+            host=host,
+            port=port,
+            agent_loop_name=self._agent_loop.name,
+            api_key=self._api_key,
+        )
+
+    async def _wait_for_server_ready(self, port: int) -> None:
+        """Poll the local health endpoint until the server is accepting requests."""
+        import httpx
+
+        poll_interval = (
+            self._state.settings.registration_readiness_poll_interval_seconds
+        )
+        timeout = self._state.settings.registration_readiness_timeout_seconds
+        health_url = f"http://127.0.0.1:{port}/health"
+
+        start_time = time.monotonic()
+        server_ready = False
+
+        async with httpx.AsyncClient() as client:
+            while time.monotonic() - start_time < timeout:
+                try:
+                    resp = await client.get(health_url, timeout=1.0)
+                    if resp.status_code == 200:
+                        server_ready = True
+                        break
+                except httpx.ConnectError:
+                    # Server not listening yet, expected during startup
+                    pass
+                except httpx.RequestError as e:
+                    # Other request errors (timeout, etc.)
+                    logger.debug("Health check failed: %s", e)
+                await asyncio.sleep(poll_interval)
+
+        elapsed = time.monotonic() - start_time
+        if server_ready:
+            logger.debug("Server ready for registration in %.2fs", elapsed)
+        else:
+            logger.warning(
+                "Server did not become ready within %.1fs, "
+                "attempting registration anyway",
+                timeout,
+            )
+
+
+# ---------------------------------------------------------------------------
+# RolloutExecutor
+# ---------------------------------------------------------------------------
+
+
+class RolloutExecutor:
+    """Handles rollout initialization and background execution."""
+
+    def __init__(
+        self,
+        agent_loop: RolloutAgentLoop,
+        state: AppState,
+        *,
+        debug_dir: str | None = None,
+    ) -> None:
+        self._agent_loop = agent_loop
+        self._state = state
+        self._debug_dir = debug_dir
+
+    async def init(self, rollout_request: RolloutRequest) -> InitResponse:
+        """Initialize a rollout: check idempotency, compute tools, start execution.
+
+        Returns the InitResponse immediately; actual execution runs in the background.
+        """
+        key = rollout_request.idempotency_key or rollout_request.rollout_id
+        init_future, created = self._state.get_or_create_init_future(key)
+
+        # Duplicate request: await the same InitResponse and return it.
+        if not created:
+            logger.debug(
+                "Duplicate rollout request: rollout_id=%s",
+                rollout_request.rollout_id,
+            )
+            return await init_future
+
+        task: asyncio.Task | None = None
+        try:
+            # Leader request: compute tools once and cache InitResponse.
+            tools = self._agent_loop.get_tools(rollout_request)
+
+            task = asyncio.create_task(self._execute(rollout_request, tools, key))
+            self._state.mark_started(key, task)
+
+            init_response = InitResponse(
+                rollout_id=rollout_request.rollout_id, tools=tools
+            )
+            init_future.set_result(init_response)
+
+            logger.info(
+                "Rollout started: rollout_id=%s, tool_count=%d",
+                rollout_request.rollout_id,
+                len(tools),
+            )
+
+            return init_response
+        except Exception as e:
+            # Cancel the background task if it was already created
+            if task is not None:
+                task.cancel()
+            if not init_future.done():
+                init_future.set_exception(e)
+            self._state.clear_init_record(key)
+            raise
+
+    async def _execute(
+        self,
+        rollout_request: RolloutRequest,
+        tools: list,
+        key: str,
+    ) -> None:
+        """Run the rollout as a background task with concurrency control."""
+        start_time = time.monotonic()
+
+        try:
+            async with self._state.semaphore:
+                try:
+                    await self._run_with_client(rollout_request, tools, start_time)
+                except Exception as e:
+                    # Client/infrastructure error
+                    logger.error(
+                        "Rollout infrastructure error: rollout_id=%s, error=%s",
+                        rollout_request.rollout_id,
+                        str(e),
+                        exc_info=True,
+                    )
+        finally:
+            self._state.mark_completed(key)
+
+    async def _run_with_client(
+        self,
+        rollout_request: RolloutRequest,
+        tools: list,
+        start_time: float,
+    ) -> None:
+        """Open an LLM client connection and run the agent loop."""
+        async with OsmosisLLMClient(
+            server_url=rollout_request.server_url,
+            rollout_id=rollout_request.rollout_id,
+            api_key=rollout_request.api_key,
+        ) as llm:
+            ctx = RolloutContext(
+                request=rollout_request,
+                tools=tools,
+                llm=llm,
+                _start_time=start_time,
+                _debug_dir=self._debug_dir,
+            )
+
+            try:
+                result = await self._agent_loop.run(ctx)
+
+                await llm.complete_rollout(
+                    status=result.status,
+                    final_messages=result.final_messages,
+                    finish_reason=result.finish_reason,
+                    error_message=result.error_message,
+                    metrics=result.metrics,
+                    reward=result.reward,
+                )
+
+                duration = time.monotonic() - start_time
+
+                logger.info(
+                    "Rollout completed: rollout_id=%s, status=%s, "
+                    "finish_reason=%s, duration=%.2fs",
+                    rollout_request.rollout_id,
+                    result.status,
+                    result.finish_reason,
+                    duration,
+                )
+
+            except Exception as e:
+                # Agent loop error
+                logger.error(
+                    "Rollout agent error: rollout_id=%s, error=%s",
+                    rollout_request.rollout_id,
+                    str(e),
+                    exc_info=True,
+                )
+
+                await llm.complete_rollout(
+                    status="ERROR",
+                    final_messages=[],
+                    finish_reason="error",
+                    error_message=str(e),
+                )
+
+
+# ---------------------------------------------------------------------------
+# Route registration
+# ---------------------------------------------------------------------------
+
+
+def _register_routes(
+    app: FastAPI,
+    *,
+    agent_loop: RolloutAgentLoop,
+    state: AppState,
+    executor: RolloutExecutor,
+    api_key: str | None,
+) -> None:
+    """Register all API routes on the FastAPI application."""
+
+    def _health_status() -> dict[str, Any]:
+        return {
+            "status": "healthy",
+            "agent_loop": agent_loop.name,
+            "active_rollouts": state.active_count,
+            "completed_rollouts": state.completed_count,
+        }
+
+    @app.get("/health")
+    async def health() -> dict[str, Any]:
+        """Health check endpoint.
+
+        Returns server status and statistics.
+        """
+        return _health_status()
+
+    @app.get("/platform/health")
+    async def platform_health(request: Request) -> dict[str, Any]:
+        """Platform health check endpoint (authenticated).
+
+        This endpoint is intended for Osmosis Platform to validate:
+        - Reachability of the server
+        - Correctness of the configured RolloutServer API key
+
+        It requires: Authorization: Bearer <api_key>
+        """
+        # If API key auth is disabled (e.g., local_debug), do not expose this endpoint.
+        if api_key is None:
+            raise HTTPException(status_code=404, detail="Not found")
+
+        provided = _extract_bearer_token(request.headers.get("authorization") or "")
+
+        if not validate_api_key(provided, api_key):
+            raise HTTPException(status_code=401, detail="Invalid or missing API key")
+
+        return _health_status()
+
+    @app.post("/v1/rollout/init", status_code=202)
+    async def init_rollout(
+        rollout_request: RolloutRequest,
+        http_request: Request,
+    ) -> InitResponse:
+        """Initialize a new rollout.
+
+        This endpoint accepts a rollout request and starts the agent loop
+        in the background. Returns 202 Accepted immediately with the tools
+        available for this rollout.
+
+        Idempotency: If a rollout with the same ID is already running or
+        recently completed, returns the same tools without starting a new rollout.
+        """
+        # Validate RolloutServer auth if configured:
+        # TrainGate must send: Authorization: Bearer <api_key>
+        if api_key is not None:
+            provided = _extract_bearer_token(
+                http_request.headers.get("authorization") or ""
+            )
+            if not validate_api_key(provided, api_key):
+                logger.warning(
+                    "Invalid API key for rollout request: rollout_id=%s",
+                    rollout_request.rollout_id,
+                )
+                raise HTTPException(
+                    status_code=401, detail="Invalid or missing API key"
+                )
+
+        return await executor.init(rollout_request)
+
+
+# ---------------------------------------------------------------------------
+# Application factory
+# ---------------------------------------------------------------------------
+
+
 def create_app(
     agent_loop: RolloutAgentLoop,
     max_concurrent: int | None = None,
@@ -138,11 +539,9 @@ def create_app(
 
     from fastapi import FastAPI
 
-    # Load settings
     if settings is None:
         settings = get_settings()
 
-    # Create app state
     state = AppState(
         max_concurrent=max_concurrent,
         record_ttl_seconds=record_ttl_seconds,
@@ -150,304 +549,36 @@ def create_app(
         agent_loop_name=agent_loop.name,
     )
 
-    @asynccontextmanager
-    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        """Manage application lifecycle."""
-        logger.info(
-            "Server starting: agent_loop=%s, max_concurrent=%d",
-            agent_loop.name,
-            state._max_concurrent,
-        )
-        if debug_dir:
-            logger.info("Debug logging enabled: output_dir=%s", debug_dir)
-        state.start_cleanup_task()
+    lifecycle = LifecycleManager(
+        agent_loop,
+        state,
+        debug_dir=debug_dir,
+        credentials=credentials,
+        server_host=server_host,
+        server_port=server_port,
+        api_key=api_key,
+        on_startup=on_startup,
+        on_shutdown=on_shutdown,
+    )
 
-        # Run custom startup callback
-        if on_startup is not None:
-            await on_startup()
-
-        # Start platform registration as a background task.
-        # The task waits briefly for the server to be ready (after yield),
-        # then registers with Platform. This ensures the health check succeeds.
-        registration_task: asyncio.Task | None = None
-        if (
-            credentials is not None
-            and server_host is not None
-            and server_port is not None
-        ):
-            from osmosis_ai.rollout.server.registration import (
-                print_registration_result,
-                register_with_platform,
-            )
-
-            # Bind narrowed values to local variables for the closure
-            _reg_host: str = server_host
-            _reg_port: int = server_port
-            _reg_credentials: WorkspaceCredentials = credentials
-
-            async def do_registration():
-                import httpx
-
-                # Poll health endpoint until server is ready
-                poll_interval = (
-                    state.settings.registration_readiness_poll_interval_seconds
-                )
-                timeout = state.settings.registration_readiness_timeout_seconds
-                health_url = f"http://127.0.0.1:{_reg_port}/health"
-
-                start_time = time.monotonic()
-                server_ready = False
-
-                async with httpx.AsyncClient() as client:
-                    while time.monotonic() - start_time < timeout:
-                        try:
-                            resp = await client.get(health_url, timeout=1.0)
-                            if resp.status_code == 200:
-                                server_ready = True
-                                break
-                        except httpx.ConnectError:
-                            # Server not listening yet, expected during startup
-                            pass
-                        except httpx.RequestError as e:
-                            # Other request errors (timeout, etc.)
-                            logger.debug("Health check failed: %s", e)
-                        await asyncio.sleep(poll_interval)
-
-                elapsed = time.monotonic() - start_time
-                if server_ready:
-                    logger.debug("Server ready for registration in %.2fs", elapsed)
-                else:
-                    logger.warning(
-                        "Server did not become ready within %.1fs, attempting registration anyway",
-                        timeout,
-                    )
-
-                # Run sync registration in thread pool to avoid blocking event loop
-                result = await asyncio.to_thread(
-                    register_with_platform,
-                    host=_reg_host,
-                    port=_reg_port,
-                    agent_loop_name=agent_loop.name,
-                    credentials=_reg_credentials,
-                    api_key=api_key,
-                )
-                print_registration_result(
-                    result=result,
-                    host=_reg_host,
-                    port=_reg_port,
-                    agent_loop_name=agent_loop.name,
-                    api_key=api_key,
-                )
-
-            registration_task = asyncio.create_task(do_registration())
-
-        yield
-
-        # Wait for registration to complete before shutdown
-        if registration_task is not None:
-            try:
-                await asyncio.wait_for(
-                    registration_task,
-                    timeout=state.settings.registration_shutdown_timeout_seconds,
-                )
-            except asyncio.TimeoutError:
-                logger.warning("Platform registration timed out")
-            except asyncio.CancelledError:
-                logger.warning("Platform registration was cancelled")
-            except Exception as e:
-                logger.error("Platform registration failed: %s", e)
-
-        # Run custom shutdown callback
-        if on_shutdown is not None:
-            await on_shutdown()
-
-        logger.info("Server stopping")
-        await state.stop_cleanup_task()
-        await state.cancel_all()
+    executor = RolloutExecutor(
+        agent_loop,
+        state,
+        debug_dir=debug_dir,
+    )
 
     app = FastAPI(
         title=f"Osmosis RolloutServer ({agent_loop.name})",
         description="Remote rollout server for Osmosis agent training",
-        lifespan=lifespan,
+        lifespan=lifecycle.lifespan,
     )
 
-    @app.get("/health")
-    async def health() -> dict[str, Any]:
-        """Health check endpoint.
-
-        Returns server status and statistics.
-        """
-        return {
-            "status": "healthy",
-            "agent_loop": agent_loop.name,
-            "active_rollouts": state.active_count,
-            "completed_rollouts": state.completed_count,
-        }
-
-    @app.get("/platform/health")
-    async def platform_health(request: Request) -> dict[str, Any]:
-        """Platform health check endpoint (authenticated).
-
-        This endpoint is intended for Osmosis Platform to validate:
-        - Reachability of the server
-        - Correctness of the configured RolloutServer API key
-
-        It requires: Authorization: Bearer <api_key>
-        """
-        # If API key auth is disabled (e.g., local_debug), do not expose this endpoint.
-        if api_key is None:
-            raise HTTPException(status_code=404, detail="Not found")
-
-        provided = _extract_bearer_token(request.headers.get("authorization") or "")
-
-        if not validate_api_key(provided, api_key):
-            raise HTTPException(status_code=401, detail="Invalid or missing API key")
-
-        return {
-            "status": "healthy",
-            "agent_loop": agent_loop.name,
-            "active_rollouts": state.active_count,
-            "completed_rollouts": state.completed_count,
-        }
-
-    @app.post("/v1/rollout/init", status_code=202)
-    async def init_rollout(
-        rollout_request: RolloutRequest,
-        http_request: Request,
-    ) -> InitResponse:
-        """Initialize a new rollout.
-
-        This endpoint accepts a rollout request and starts the agent loop
-        in the background. Returns 202 Accepted immediately with the tools
-        available for this rollout.
-
-        Idempotency: If a rollout with the same ID is already running or
-        recently completed, returns the same tools without starting a new rollout.
-        """
-        # Validate RolloutServer auth if configured:
-        # TrainGate must send: Authorization: Bearer <api_key>
-        if api_key is not None:
-            provided = _extract_bearer_token(
-                http_request.headers.get("authorization") or ""
-            )
-            if not validate_api_key(provided, api_key):
-                logger.warning(
-                    "Invalid API key for rollout request: rollout_id=%s",
-                    rollout_request.rollout_id,
-                )
-                raise HTTPException(
-                    status_code=401, detail="Invalid or missing API key"
-                )
-
-        # Idempotency key: prefer request.idempotency_key, fallback to rollout_id.
-        key = rollout_request.idempotency_key or rollout_request.rollout_id
-
-        init_future, created = state.get_or_create_init_future(key)
-
-        # Duplicate request: await the same InitResponse and return it.
-        if not created:
-            logger.debug(
-                "Duplicate rollout request: rollout_id=%s",
-                rollout_request.rollout_id,
-            )
-            init_response = await init_future
-            return init_response
-
-        try:
-            # Leader request: compute tools once and cache InitResponse.
-            tools = agent_loop.get_tools(rollout_request)
-
-            # Define the background task
-            async def run_rollout() -> None:
-                """Execute the rollout in the background."""
-                start_time = time.monotonic()
-
-                async with state.semaphore:
-                    try:
-                        async with OsmosisLLMClient(
-                            server_url=rollout_request.server_url,
-                            rollout_id=rollout_request.rollout_id,
-                            api_key=rollout_request.api_key,
-                        ) as llm:
-                            ctx = RolloutContext(
-                                request=rollout_request,
-                                tools=tools,
-                                llm=llm,
-                                _start_time=start_time,
-                                _debug_dir=debug_dir,
-                            )
-
-                            try:
-                                result = await agent_loop.run(ctx)
-
-                                await llm.complete_rollout(
-                                    status=result.status,
-                                    final_messages=result.final_messages,
-                                    finish_reason=result.finish_reason,
-                                    error_message=result.error_message,
-                                    metrics=result.metrics,
-                                    reward=result.reward,
-                                )
-
-                                duration = time.monotonic() - start_time
-
-                                logger.info(
-                                    "Rollout completed: rollout_id=%s, status=%s, "
-                                    "finish_reason=%s, duration=%.2fs",
-                                    rollout_request.rollout_id,
-                                    result.status,
-                                    result.finish_reason,
-                                    duration,
-                                )
-
-                            except Exception as e:
-                                # Agent loop error
-                                logger.error(
-                                    "Rollout agent error: rollout_id=%s, error=%s",
-                                    rollout_request.rollout_id,
-                                    str(e),
-                                    exc_info=True,
-                                )
-
-                                await llm.complete_rollout(
-                                    status="ERROR",
-                                    final_messages=[],
-                                    finish_reason="error",
-                                    error_message=str(e),
-                                )
-
-                    except Exception as e:
-                        # Client/infrastructure error
-                        logger.error(
-                            "Rollout infrastructure error: rollout_id=%s, error=%s",
-                            rollout_request.rollout_id,
-                            str(e),
-                            exc_info=True,
-                        )
-
-                    finally:
-                        state.mark_completed(key)
-
-            # Start background task
-            task = asyncio.create_task(run_rollout())
-            state.mark_started(key, task)
-
-            init_response = InitResponse(
-                rollout_id=rollout_request.rollout_id, tools=tools
-            )
-            init_future.set_result(init_response)
-
-            logger.info(
-                "Rollout started: rollout_id=%s, tool_count=%d",
-                rollout_request.rollout_id,
-                len(tools),
-            )
-
-            return init_response
-        except Exception as e:
-            if not init_future.done():
-                init_future.set_exception(e)
-            state.clear_init_record(key)
-            raise
+    _register_routes(
+        app,
+        agent_loop=agent_loop,
+        state=state,
+        executor=executor,
+        api_key=api_key,
+    )
 
     return app
