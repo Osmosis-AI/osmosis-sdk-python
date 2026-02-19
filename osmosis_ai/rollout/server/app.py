@@ -97,7 +97,7 @@ class LifecycleManager:
         logger.info(
             "Server starting: agent_loop=%s, max_concurrent=%d",
             self._agent_loop.name,
-            self._state._max_concurrent,
+            self._state.max_concurrent,
         )
         if self._debug_dir:
             logger.info("Debug logging enabled: output_dir=%s", self._debug_dir)

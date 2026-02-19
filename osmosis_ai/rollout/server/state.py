@@ -238,6 +238,11 @@ class AppState:
         self.rollout_tasks.clear()
 
     @property
+    def max_concurrent(self) -> int:
+        """Get the maximum number of concurrent rollouts."""
+        return self._max_concurrent
+
+    @property
     def active_count(self) -> int:
         """Get the number of active rollouts."""
         return len(self.rollout_tasks)
