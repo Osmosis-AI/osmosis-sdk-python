@@ -1,0 +1,23 @@
+tests/unit/rollout/eval/evaluation/test_eval_cache_integration.py
+  64076f8ab2631244 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.4",
+  "base_commit_sha": "d3b05f32b5ffdfe1727cf6d0d0ba189613f320d0",
+  "prompts": {
+    "64076f8ab2631244": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d8641d27-97dc-44a9-bccf-5a988a8846ac",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>",
+      "messages": [],
+      "total_additions": 1000,
+      "total_deletions": 43,
+      "accepted_lines": 959,
+      "overriden_lines": 0
+    }
+  }
+}
