@@ -978,6 +978,91 @@ class TestProgressCallback:
         assert currents[-1] == 3
 
     @pytest.mark.asyncio
+    async def test_on_progress_resume_includes_prior_runs_sequential(self) -> None:
+        """Resume mode progress should include prior completed runs."""
+        progress_calls: list[tuple[int, int, EvalRunResult]] = []
+
+        def progress_cb(current: int, total: int, result: EvalRunResult) -> None:
+            progress_calls.append((current, total, result))
+
+        cache_backend = MockCacheBackend(
+            cache_data={
+                "status": "in_progress",
+                "runs": [
+                    {
+                        "row_index": 0,
+                        "run_index": 0,
+                        "success": True,
+                        "scores": {"test_eval": 1.0},
+                        "duration_ms": 0,
+                        "tokens": 0,
+                    },
+                ],
+                "summary": None,
+            },
+            completed_runs={(0, 0, None)},
+        )
+
+        orch = _make_orchestrator(
+            rows=_make_rows(3),
+            cache_backend=cache_backend,
+            on_progress=progress_cb,
+        )
+        await orch.run()
+
+        currents = [c for c, _, _ in progress_calls]
+        assert currents == [2, 3]
+        for _, total, _ in progress_calls:
+            assert total == 3
+
+    @pytest.mark.asyncio
+    async def test_on_progress_resume_includes_prior_runs_batched(self) -> None:
+        """Batched resume progress should include prior completed runs."""
+        progress_calls: list[tuple[int, int, EvalRunResult]] = []
+
+        def progress_cb(current: int, total: int, result: EvalRunResult) -> None:
+            progress_calls.append((current, total, result))
+
+        cache_backend = MockCacheBackend(
+            cache_data={
+                "status": "in_progress",
+                "runs": [
+                    {
+                        "row_index": 0,
+                        "run_index": 0,
+                        "success": True,
+                        "scores": {"test_eval": 1.0},
+                        "duration_ms": 0,
+                        "tokens": 0,
+                    },
+                    {
+                        "row_index": 1,
+                        "run_index": 0,
+                        "success": True,
+                        "scores": {"test_eval": 1.0},
+                        "duration_ms": 0,
+                        "tokens": 0,
+                    },
+                ],
+                "summary": None,
+            },
+            completed_runs={(0, 0, None), (1, 0, None)},
+        )
+
+        orch = _make_orchestrator(
+            rows=_make_rows(4),
+            batch_size=2,
+            cache_backend=cache_backend,
+            on_progress=progress_cb,
+        )
+        await orch.run()
+
+        currents = [c for c, _, _ in progress_calls]
+        assert currents == [3, 4]
+        for _, total, _ in progress_calls:
+            assert total == 4
+
+    @pytest.mark.asyncio
     async def test_on_progress_called_on_systemic_error(self) -> None:
         """Progress should be reported even for the failing run."""
         progress_calls: list[tuple[int, int, EvalRunResult]] = []

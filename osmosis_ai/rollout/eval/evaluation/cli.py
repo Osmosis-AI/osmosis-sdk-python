@@ -688,7 +688,7 @@ class EvalCommand:
             compute_task_id,
         )
 
-        module_spec = args.module or args.mcp
+        module_spec = f"mcp:{Path(args.mcp).resolve()!s}" if args.mcp else args.module
         dataset_fingerprint = compute_dataset_fingerprint(args.dataset)
         module_fingerprint = compute_module_fingerprint(module_spec)
         eval_fns_fingerprint = compute_eval_fns_fingerprint(args.eval_fns)

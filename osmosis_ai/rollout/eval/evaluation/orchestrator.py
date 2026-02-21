@@ -233,6 +233,7 @@ class EvalOrchestrator:
                 cache_data=cache_data,
                 prior_runs_count=len(completed_runs),
             )
+            prior_completed_count = len(completed_runs)
 
             dataset_checker: DatasetIntegrityChecker | None = None
             if self.dataset_path is not None and self.dataset_fingerprint is not None:
@@ -249,7 +250,11 @@ class EvalOrchestrator:
                         dataset_modified,
                         stop_reason,
                     ) = await self._run_batched(
-                        work_items, cache_data, flush_ctl, dataset_checker
+                        work_items,
+                        cache_data,
+                        flush_ctl,
+                        dataset_checker,
+                        prior_completed_count,
                     )
                 else:
                     (
@@ -258,7 +263,11 @@ class EvalOrchestrator:
                         dataset_modified,
                         stop_reason,
                     ) = await self._run_sequential(
-                        work_items, cache_data, flush_ctl, dataset_checker
+                        work_items,
+                        cache_data,
+                        flush_ctl,
+                        dataset_checker,
+                        prior_completed_count,
                     )
             finally:
                 flush_ctl.force_flush()
@@ -332,6 +341,7 @@ class EvalOrchestrator:
         cache_data: dict,
         flush_ctl: CacheFlushController,
         dataset_checker: DatasetIntegrityChecker | None,
+        prior_completed_count: int,
     ) -> tuple[int, bool, bool, str | None]:
         """Execute work items one at a time.
 
@@ -382,9 +392,10 @@ class EvalOrchestrator:
                 current += 1
                 stop_reason = str(e)
                 if self.on_progress is not None:
-                    self.on_progress(
-                        len(cache_data.get("runs", [])), total_expected, result
+                    completed_so_far = prior_completed_count + len(
+                        cache_data.get("runs", [])
                     )
+                    self.on_progress(completed_so_far, total_expected, result)
                 break
 
             self._record_result(result, cache_data, row_index, run_idx)
@@ -393,7 +404,9 @@ class EvalOrchestrator:
             flush_ctl.maybe_flush()
 
             if self.on_progress is not None:
-                completed_so_far = len(cache_data.get("runs", []))
+                completed_so_far = prior_completed_count + len(
+                    cache_data.get("runs", [])
+                )
                 self.on_progress(completed_so_far, total_expected, result)
 
         return current, interrupted, dataset_modified, stop_reason
@@ -404,6 +417,7 @@ class EvalOrchestrator:
         cache_data: dict,
         flush_ctl: CacheFlushController,
         dataset_checker: DatasetIntegrityChecker | None,
+        prior_completed_count: int,
     ) -> tuple[int, bool, bool, str | None]:
         """Execute work items in batches of ``self.batch_size``.
 
@@ -447,7 +461,9 @@ class EvalOrchestrator:
                 current += 1
 
                 if self.on_progress is not None:
-                    completed_so_far = len(cache_data.get("runs", []))
+                    completed_so_far = prior_completed_count + len(
+                        cache_data.get("runs", [])
+                    )
                     self.on_progress(completed_so_far, total_expected, result)
 
             completed_in_batch = sum(1 for r in batch_results if r is not None)

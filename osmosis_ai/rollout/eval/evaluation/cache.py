@@ -196,10 +196,16 @@ def _hash_directory_tree(directory: Path) -> str | None:
 def compute_module_fingerprint(module_path: str) -> str | None:
     """Hash the agent module's source code.
 
+    - MCP module (mcp:/path/to/dir) -> hash directory tree at that path
     - Package (__init__.py entry) -> hash entire directory tree
     - Single .py file -> hash just that file
     - Returns None if source cannot be located
     """
+    if module_path.startswith("mcp:"):
+        dir_path = Path(module_path[4:])
+        if not dir_path.is_dir():
+            return None
+        return _hash_directory_tree(dir_path)
     module_name, _, _ = module_path.partition(":")
     try:
         mod = importlib.import_module(module_name)
