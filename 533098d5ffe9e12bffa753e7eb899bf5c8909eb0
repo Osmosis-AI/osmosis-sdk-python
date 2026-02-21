@@ -1,0 +1,25 @@
+osmosis_ai/rollout/eval/evaluation/orchestrator.py
+  d24a6b66928779f1 1-27,29-126,128-135,137-138,140,142-198,200-202,205-207,209-211,214-415,417-419,421-489
+tests/unit/rollout/eval/evaluation/test_orchestrator.py
+  d24a6b66928779f1 1-47,49-55,57-281,283-330,332-363,365-371,373-1115,1117-1123,1125-1187
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.4",
+  "base_commit_sha": "533098d5ffe9e12bffa753e7eb899bf5c8909eb0",
+  "prompts": {
+    "d24a6b66928779f1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1a44ca02-74a2-4581-92e3-700e9e0845f0",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>",
+      "messages": [],
+      "total_additions": 1680,
+      "total_deletions": 52,
+      "accepted_lines": 1655,
+      "overriden_lines": 16
+    }
+  }
+}
