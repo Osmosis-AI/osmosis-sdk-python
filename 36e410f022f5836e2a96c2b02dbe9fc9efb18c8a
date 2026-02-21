@@ -1,0 +1,29 @@
+osmosis_ai/cli_services/session.py
+  8233918e761b5f25 3-4,23-63,124
+osmosis_ai/rollout/eval/evaluation/cli.py
+  8233918e761b5f25 12-13,40-55,83-84,91-92,104-105,240-260,262-275,277-283,285-299,321-322,364-373,375-376,378-391,394-400,403-404,406-422,424-425,427-451,603-682,684-692,696-707,712,714,723-757,759-782,786,789,791-808,810-811,815-874
+osmosis_ai/rollout/eval/evaluation/orchestrator.py
+  8233918e761b5f25 159-165,167-176,181,249-256,262
+tests/unit/rollout/mcp/test_agent_loop.py
+  8233918e761b5f25 736,757,759-766,768-772,774-775,777-779,812-826,847,853-855,866,876
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.4",
+  "base_commit_sha": "36e410f022f5836e2a96c2b02dbe9fc9efb18c8a",
+  "prompts": {
+    "8233918e761b5f25": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2aa72924-1df1-4cdb-9d99-417888150b61",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>",
+      "messages": [],
+      "total_additions": 552,
+      "total_deletions": 136,
+      "accepted_lines": 535,
+      "overriden_lines": 1
+    }
+  }
+}
