@@ -1,0 +1,39 @@
+osmosis_ai/rollout/eval/evaluation/runner.py
+  3624c12d2343ebff 563-564,739-740
+  71faee06bb01c852 54-56,66-67,312-313,343-344,347-483
+tests/unit/rollout/eval/evaluation/test_runner_adaptation.py
+  71faee06bb01c852 1-22,24-597
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.4",
+  "base_commit_sha": "fa0ea8caa813bc6dbf30a87aa865601c11c79df8",
+  "prompts": {
+    "3624c12d2343ebff": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "babb334f-77cd-4029-b626-87fe5d229448",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>",
+      "messages": [],
+      "total_additions": 4,
+      "total_deletions": 2,
+      "accepted_lines": 4,
+      "overriden_lines": 0
+    },
+    "71faee06bb01c852": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6f83b55e-55d2-4521-8225-41f89ab5b691",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>",
+      "messages": [],
+      "total_additions": 750,
+      "total_deletions": 0,
+      "accepted_lines": 742,
+      "overriden_lines": 1
+    }
+  }
+}
