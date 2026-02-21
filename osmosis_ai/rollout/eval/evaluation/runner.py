@@ -440,6 +440,7 @@ class EvalRunner:
             run_start = time.monotonic()
             try:
                 runner = await target_pool.get()
+                run_start = time.monotonic()
                 result = await self.run_single(
                     row=row,
                     row_index=row_index,
@@ -721,6 +722,7 @@ class EvalRunner:
             run_start = time.monotonic()
             try:
                 runner = await target_pool.get()
+                run_start = time.monotonic()
                 result = await self.run_single(
                     row=row,
                     row_index=row_index,

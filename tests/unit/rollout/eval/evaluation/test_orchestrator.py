@@ -185,6 +185,7 @@ def _make_orchestrator(
     dataset_path: Path | None = None,
     dataset_fingerprint: str | None = None,
     fresh: bool = False,
+    retry_failed: bool = False,
     pass_threshold: float = 1.0,
     start_index: int = 0,
 ) -> EvalOrchestrator:
@@ -201,6 +202,7 @@ def _make_orchestrator(
         dataset_path=dataset_path,
         dataset_fingerprint=dataset_fingerprint,
         fresh=fresh,
+        retry_failed=retry_failed,
         pass_threshold=pass_threshold,
         start_index=start_index,
     )
@@ -386,6 +388,107 @@ class TestOrchestratorResume:
 
 
 # ---------------------------------------------------------------------------
+# Test: --retry-failed
+# ---------------------------------------------------------------------------
+
+
+class TestOrchestratorRetryFailed:
+    @pytest.mark.asyncio
+    async def test_retry_failed_requeues_failed_runs_only(self, tmp_path: Path) -> None:
+        """Only failed keys should be re-queued when retry_failed=True."""
+        runner = MockRunner()
+        cache_backend = MockCacheBackend(
+            cache_path=tmp_path / "retry_failed_requeue.json",
+            cache_data={
+                "status": "in_progress",
+                "runs": [
+                    {
+                        "row_index": 0,
+                        "run_index": 0,
+                        "success": True,
+                        "scores": {"test_eval": 1.0},
+                        "duration_ms": 0,
+                        "tokens": 0,
+                    },
+                    {
+                        "row_index": 1,
+                        "run_index": 0,
+                        "success": False,
+                        "scores": {"test_eval": 0.0},
+                        "duration_ms": 0,
+                        "tokens": 0,
+                        "error": "provider error",
+                    },
+                ],
+                "summary": None,
+            },
+            completed_runs={(0, 0, None), (1, 0, None)},
+        )
+        rows = _make_rows(2)
+
+        orch = _make_orchestrator(
+            runner=runner,
+            cache_backend=cache_backend,
+            rows=rows,
+            retry_failed=True,
+        )
+        result = await orch.run()
+
+        assert result.status == "completed"
+        assert len(runner.run_single_calls) == 1
+        assert runner.run_single_calls[0][1] == 1
+        assert result.total_completed == 2
+        assert all(run["success"] for run in result.cache_data.get("runs", []))
+
+    @pytest.mark.asyncio
+    async def test_retry_failed_cleans_failed_duplicates_for_same_key(
+        self, tmp_path: Path
+    ) -> None:
+        """Failed duplicate records should be pruned when a key already succeeded."""
+        runner = MockRunner()
+        cache_backend = MockCacheBackend(
+            cache_path=tmp_path / "retry_failed_dupes.json",
+            cache_data={
+                "status": "in_progress",
+                "runs": [
+                    {
+                        "row_index": 0,
+                        "run_index": 0,
+                        "success": False,
+                        "scores": {"test_eval": 0.0},
+                        "duration_ms": 0,
+                        "tokens": 0,
+                        "error": "old failure",
+                    },
+                    {
+                        "row_index": 0,
+                        "run_index": 0,
+                        "success": True,
+                        "scores": {"test_eval": 1.0},
+                        "duration_ms": 0,
+                        "tokens": 0,
+                    },
+                ],
+                "summary": None,
+            },
+            completed_runs={(0, 0, None)},
+        )
+
+        orch = _make_orchestrator(
+            runner=runner,
+            cache_backend=cache_backend,
+            rows=_make_rows(1),
+            retry_failed=True,
+        )
+        result = await orch.run()
+
+        assert result.status == "completed"
+        assert len(runner.run_single_calls) == 0
+        assert len(result.cache_data.get("runs", [])) == 1
+        assert result.cache_data["runs"][0]["success"] is True
+
+
+# ---------------------------------------------------------------------------
 # Test: Interrupted via SIGINT
 # ---------------------------------------------------------------------------
 
@@ -525,10 +628,15 @@ class TestOrchestratorDatasetModified:
                 cache_data: dict,
                 flush_ctl: Any,
                 dataset_checker: Any,
+                prior_completed_count: int,
             ) -> tuple:
                 mock_checker = MockDatasetChecker(DatasetStatus.MODIFIED)
                 return await original_seq(
-                    work_items, cache_data, flush_ctl, mock_checker
+                    work_items,
+                    cache_data,
+                    flush_ctl,
+                    mock_checker,
+                    prior_completed_count,
                 )
 
             orch._run_sequential = seq_with_mock_checker  # type: ignore[assignment]

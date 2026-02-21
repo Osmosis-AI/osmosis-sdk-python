@@ -146,21 +146,22 @@ class EvalOrchestrator:
             )
             self._samples_path = samples_path
 
-            # Handle --retry-failed: remove failed runs so they get re-queued
+            # Handle --retry-failed: keep only successful runs in completed set.
             if self.retry_failed and completed_runs:
+                all_runs = cache_data.get("runs", [])
+                successful_runs = [r for r in all_runs if r.get("success", True)]
                 successful_keys = {
                     (r["row_index"], r["run_index"], r.get("model_tag"))
-                    for r in cache_data.get("runs", [])
-                    if r.get("success", True)
+                    for r in successful_runs
                 }
-                failed_count = len(completed_runs) - len(successful_keys)
+                completed_runs = successful_keys
+
+                # Write back a cleaned cache only if failed records existed.
+                failed_count = len(all_runs) - len(successful_runs)
                 if failed_count > 0:
-                    cache_data["runs"] = [
-                        r for r in cache_data.get("runs", []) if r.get("success", True)
-                    ]
+                    cache_data["runs"] = successful_runs
                     cache_data["status"] = "in_progress"
                     self.cache_backend.write_cache(cache_path, cache_data)
-                    completed_runs = successful_keys
 
             # Case C: already completed
             if cache_data.get("status") == "completed":

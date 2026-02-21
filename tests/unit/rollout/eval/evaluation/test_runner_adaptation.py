@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 import pytest
@@ -595,3 +596,147 @@ class TestRunEvalBackwardCompat:
         assert "system" in roles
         assert "user" in roles
         assert "assistant" in roles
+
+
+class TestSystemicErrorDurationInBatchedPaths:
+    @pytest.mark.asyncio
+    async def test_run_batch_systemic_duration_excludes_pool_wait_time(self) -> None:
+        """run_batch fallback duration should not include queue wait time."""
+        hold_seconds = 0.35
+        error_message = "queue-wait systemic"
+
+        class QueueWaitRunner(EvalRunner):
+            def __init__(self, *args: Any, **kwargs: Any) -> None:
+                super().__init__(*args, **kwargs)
+                self._baseline_calls = 0
+
+            async def run_single(
+                self,
+                row: DatasetRow,
+                row_index: int,
+                run_index: int,
+                max_turns: int = 10,
+                completion_params: dict[str, Any] | None = None,
+                runner: Any | None = None,
+                model_tag: str | None = None,
+            ) -> EvalRunResult:
+                if model_tag == "baseline":
+                    self._baseline_calls += 1
+                    if self._baseline_calls == 1:
+                        await asyncio.sleep(hold_seconds)
+                    elif self._baseline_calls == 2:
+                        raise SystemicProviderError(error_message)
+                return EvalRunResult(
+                    run_index=run_index,
+                    success=True,
+                    scores={"simple_eval": 1.0},
+                    duration_ms=1.0,
+                    tokens=0,
+                    model_tag=model_tag,
+                    messages=[],
+                    row_index=row_index,
+                )
+
+        primary_client = MockLLMClient(model="primary")
+        baseline_client = MockLLMClient(model="baseline")
+        agent = MockAgentLoop(tools=[create_sample_tool()], call_llm=True)
+
+        eval_runner = QueueWaitRunner(
+            agent_loop=agent,
+            llm_client=primary_client,  # type: ignore[arg-type]
+            eval_fns=[_make_simple_eval()],
+            llm_client_factory=lambda: MockLLMClient(model="primary"),  # type: ignore[arg-type]
+            baseline_llm_client=baseline_client,  # type: ignore[arg-type]
+            baseline_llm_client_factory=lambda: MockLLMClient(model="baseline"),  # type: ignore[arg-type]
+        )
+
+        work_items: list[tuple[DatasetRow, int, int, str | None]] = [
+            (create_sample_row(0), 0, 0, "baseline"),
+            (create_sample_row(1), 1, 0, "baseline"),
+            (create_sample_row(2), 2, 0, "baseline"),
+        ]
+        batch_results, systemic_error = await eval_runner.run_batch(work_items)
+
+        assert systemic_error is not None
+        assert error_message in systemic_error
+        failed_results = [
+            result
+            for result in batch_results
+            if result is not None
+            and not result.success
+            and error_message in (result.error or "")
+        ]
+        assert len(failed_results) == 1
+        # Guard against counting pool queue wait in fallback duration.
+        assert failed_results[0].duration_ms < hold_seconds * 1000 * 0.8
+
+    @pytest.mark.asyncio
+    async def test_run_eval_concurrent_systemic_duration_excludes_pool_wait_time(
+        self,
+    ) -> None:
+        """_run_eval_concurrent fallback duration should not include queue wait."""
+        hold_seconds = 0.35
+        error_message = "queue-wait systemic"
+
+        class QueueWaitRunner(EvalRunner):
+            def __init__(self, *args: Any, **kwargs: Any) -> None:
+                super().__init__(*args, **kwargs)
+                self._baseline_calls = 0
+
+            async def run_single(
+                self,
+                row: DatasetRow,
+                row_index: int,
+                run_index: int,
+                max_turns: int = 10,
+                completion_params: dict[str, Any] | None = None,
+                runner: Any | None = None,
+                model_tag: str | None = None,
+            ) -> EvalRunResult:
+                if model_tag == "baseline":
+                    self._baseline_calls += 1
+                    # With rows=3 and batch_size=3, baseline calls are:
+                    # call #1 in batch 1, then calls #2 and #3 in batch 2.
+                    if self._baseline_calls == 2:
+                        await asyncio.sleep(hold_seconds)
+                    elif self._baseline_calls == 3:
+                        raise SystemicProviderError(error_message)
+                return EvalRunResult(
+                    run_index=run_index,
+                    success=True,
+                    scores={"simple_eval": 1.0},
+                    duration_ms=1.0,
+                    tokens=0,
+                    model_tag=model_tag,
+                    messages=[],
+                    row_index=row_index,
+                )
+
+        primary_client = MockLLMClient(model="primary")
+        baseline_client = MockLLMClient(model="baseline")
+        agent = MockAgentLoop(tools=[create_sample_tool()], call_llm=True)
+
+        eval_runner = QueueWaitRunner(
+            agent_loop=agent,
+            llm_client=primary_client,  # type: ignore[arg-type]
+            eval_fns=[_make_simple_eval()],
+            llm_client_factory=lambda: MockLLMClient(model="primary"),  # type: ignore[arg-type]
+            baseline_llm_client=baseline_client,  # type: ignore[arg-type]
+            baseline_llm_client_factory=lambda: MockLLMClient(model="baseline"),  # type: ignore[arg-type]
+        )
+
+        eval_result = await eval_runner.run_eval(
+            rows=[create_sample_row(i) for i in range(3)],
+            n_runs=1,
+            batch_size=3,
+        )
+
+        failed_results = [
+            run
+            for row_result in eval_result.rows
+            for run in row_result.runs
+            if not run.success and error_message in (run.error or "")
+        ]
+        assert len(failed_results) == 1
+        # Guard against counting pool queue wait in fallback duration.
+        assert failed_results[0].duration_ms < hold_seconds * 1000 * 0.8
