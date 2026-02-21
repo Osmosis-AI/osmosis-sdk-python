@@ -827,6 +827,7 @@ class EvalCommand:
                     orch_result.total_expected,
                 )
                 self.console.print(f"\nCache: {orch_result.cache_path}")
+                self.console.print("Use --fresh to re-run from scratch.")
             if output_path:
                 results_path = self._write_orchestrator_output(
                     output_path=output_path,
@@ -888,6 +889,12 @@ class EvalCommand:
                 orch_result.total_expected,
             )
             self.console.print(f"\nCache: {orch_result.cache_path}")
+            if orch_result.samples_path:
+                self.console.print(f"Samples: {orch_result.samples_path}")
+            if not args.log_samples:
+                self.console.print(
+                    "Tip: Use --log-samples to save full conversation logs for debugging."
+                )
 
         if output_path:
             results_path = self._write_orchestrator_output(
