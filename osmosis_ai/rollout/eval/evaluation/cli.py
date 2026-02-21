@@ -269,9 +269,10 @@ class EvalCommand:
         )
 
     def _run_cache_dir(self, args: argparse.Namespace) -> int:
-        from osmosis_ai.rollout.eval.evaluation.cache import _get_cache_root
+        from osmosis_ai.rollout.eval.evaluation.cache import JsonFileCacheBackend
 
-        self.console.print(str(_get_cache_root()))
+        backend = JsonFileCacheBackend()
+        self.console.print(str(backend.cache_root))
         return 0
 
     def _run_cache_default(self, args: argparse.Namespace) -> int:
@@ -698,6 +699,7 @@ class EvalCommand:
             batch_size=args.batch_size,
             log_samples=log_samples,
             fresh=fresh,
+            retry_failed=getattr(args, "retry_failed", False),
             dataset_path=Path(args.dataset),
             dataset_fingerprint=dataset_fingerprint,
             start_index=args.offset,

@@ -18,8 +18,10 @@ import sys
 import tempfile
 import time
 import unicodedata
+from collections import defaultdict
 from contextlib import suppress
 from dataclasses import dataclass
+from math import comb
 from pathlib import Path
 from typing import Protocol
 
@@ -48,7 +50,7 @@ def _deterministic_json(obj: object) -> bytes:
             if math.isnan(v) or math.isinf(v):
                 raise ValueError(
                     f"Non-finite float {v!r} in eval config. "
-                    f"Config values must be finite numbers."
+                    f"Float values must be finite (NaN and Inf are not allowed)."
                 )
             if v == 0.0:
                 return 0.0  # normalize -0.0 to 0.0
@@ -127,6 +129,10 @@ def compute_dataset_fingerprint(path: str | Path) -> str:
     """Compute xxh3_128 fingerprint of dataset file via streaming hash.
 
     Reads file in 128KB chunks for memory efficiency.
+
+    Raises:
+        FileNotFoundError: If the file does not exist. Callers are expected
+            to handle this.
     """
     path = Path(path)
     hasher = xxhash.xxh3_128()
@@ -566,7 +572,7 @@ class CacheBackend(Protocol):
 def _backup_corrupt_cache(cache_path: Path) -> Path | None:
     """Rename a corrupt cache file to a .corrupt.{timestamp} backup."""
     ts = int(time.time())
-    backup_path = cache_path.with_name(f"{cache_path.name}.corrupt.{ts}")
+    backup_path = cache_path.with_name(f"{cache_path.name}.corrupt.{ts}_{os.getpid()}")
     try:
         os.replace(cache_path, backup_path)
     except OSError as e:
@@ -580,7 +586,9 @@ def _backup_corrupt_cache(cache_path: Path) -> Path | None:
         return None
     jsonl_path = cache_path.with_suffix(".jsonl")
     if jsonl_path.exists():
-        jsonl_backup = jsonl_path.with_name(f"{jsonl_path.name}.corrupt.{ts}")
+        jsonl_backup = jsonl_path.with_name(
+            f"{jsonl_path.name}.corrupt.{ts}_{os.getpid()}"
+        )
         try:
             os.replace(jsonl_path, jsonl_backup)
         except OSError as e:
@@ -606,8 +614,6 @@ def build_summary(
 
     Returns a summary dict with per-eval-fn stats (mean, std, min, max, pass_at_k).
     """
-    import math as _math
-
     eval_summaries: dict[str, dict] = {}
     for name in eval_fn_names:
         all_scores = [r["scores"].get(name, 0.0) for r in runs]
@@ -618,7 +624,7 @@ def build_summary(
 
         mean = sum(all_scores) / len(all_scores)
         variance = sum((s - mean) ** 2 for s in all_scores) / len(all_scores)
-        std = _math.sqrt(variance)
+        std = math.sqrt(variance)
 
         summary: dict[str, object] = {
             "mean": mean,
@@ -630,8 +636,6 @@ def build_summary(
         # pass@k computation for n_runs > 1
         if n_runs > 1:
             # Group runs by (row_index, model_tag)
-            from collections import defaultdict
-
             rows: dict[tuple[int, str | None], list[dict]] = defaultdict(list)
             for r in runs:
                 key = (r["row_index"], r.get("model_tag"))
@@ -650,8 +654,6 @@ def build_summary(
                     n = max(len(row_runs), n_runs)
                     if n > 0 and k <= n:
                         # pass@k formula
-                        from math import comb
-
                         if c == n:
                             pak = 1.0
                         elif c < k:

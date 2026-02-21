@@ -309,7 +309,9 @@ class EvalRunner:
                 tokens=test_result.token_usage.get("total_tokens", 0),
                 error=test_result.error,
                 model_tag=model_tag,
-                messages=None,
+                messages=test_result.result.final_messages
+                if test_result.result is not None
+                else None,
                 row_index=row_index,
             )
 
@@ -377,22 +379,33 @@ class EvalRunner:
             primary_pool_size = pool_size
             baseline_pool_size = 0
 
-        primary_runners = [
-            self._create_rollout_runner() for _ in range(primary_pool_size)
-        ]
+        primary_runners: list[LocalRolloutRunner] = []
+        baseline_runners: list[LocalRolloutRunner] = []
+        try:
+            for _ in range(primary_pool_size):
+                primary_runners.append(self._create_rollout_runner())
+            for _ in range(baseline_pool_size):
+                baseline_runners.append(self._create_baseline_rollout_runner())
+        except Exception:
+            # Clean up already-created runners
+            for runner in primary_runners + baseline_runners:
+                close = getattr(runner.llm_client, "close", None)
+                if callable(close):
+                    try:
+                        maybe_awaitable = close()
+                        if inspect.isawaitable(maybe_awaitable):
+                            await maybe_awaitable
+                    except Exception:
+                        pass
+            raise
+
         primary_pool: asyncio.Queue[LocalRolloutRunner] = asyncio.Queue()
         for runner in primary_runners:
             primary_pool.put_nowait(runner)
 
-        baseline_runners: list[LocalRolloutRunner] = []
         baseline_pool: asyncio.Queue[LocalRolloutRunner] = asyncio.Queue()
-        if baseline_pool_size > 0:
-            baseline_runners = [
-                self._create_baseline_rollout_runner()
-                for _ in range(baseline_pool_size)
-            ]
-            for runner in baseline_runners:
-                baseline_pool.put_nowait(runner)
+        for runner in baseline_runners:
+            baseline_pool.put_nowait(runner)
 
         all_runners = primary_runners + baseline_runners
 
@@ -424,9 +437,9 @@ class EvalRunner:
             nonlocal systemic_error
             runner: LocalRolloutRunner | None = None
             target_pool = baseline_pool if model_tag == "baseline" else primary_pool
+            run_start = time.monotonic()
             try:
                 runner = await target_pool.get()
-                run_start = time.monotonic()
                 result = await self.run_single(
                     row=row,
                     row_index=row_index,
@@ -705,9 +718,9 @@ class EvalRunner:
             nonlocal completed
             runner: LocalRolloutRunner | None = None
             target_pool = baseline_pool if model_tag == "baseline" else primary_pool
+            run_start = time.monotonic()
             try:
                 runner = await target_pool.get()
-                run_start = time.monotonic()
                 result = await self.run_single(
                     row=row,
                     row_index=row_index,

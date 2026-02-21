@@ -8,6 +8,7 @@ agent execution to EvalRunner.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import signal
 from collections.abc import Callable
@@ -81,6 +82,7 @@ class EvalOrchestrator:
         batch_size: int = 1,
         log_samples: bool = False,
         fresh: bool = False,
+        retry_failed: bool = False,
         dataset_path: Path | None = None,
         dataset_fingerprint: str | None = None,
         start_index: int = 0,
@@ -98,6 +100,7 @@ class EvalOrchestrator:
         self.batch_size = batch_size
         self.log_samples = log_samples
         self.fresh = fresh
+        self.retry_failed = retry_failed
         self.dataset_path = dataset_path
         self.dataset_fingerprint = dataset_fingerprint
         self.start_index = start_index
@@ -141,6 +144,22 @@ class EvalOrchestrator:
             )
             self._samples_path = samples_path
 
+            # Handle --retry-failed: remove failed runs so they get re-queued
+            if self.retry_failed and completed_runs:
+                successful_keys = {
+                    (r["row_index"], r["run_index"], r.get("model_tag"))
+                    for r in cache_data.get("runs", [])
+                    if r.get("success", True)
+                }
+                failed_count = len(completed_runs) - len(successful_keys)
+                if failed_count > 0:
+                    cache_data["runs"] = [
+                        r for r in cache_data.get("runs", []) if r.get("success", True)
+                    ]
+                    cache_data["status"] = "in_progress"
+                    self.cache_backend.write_cache(cache_path, cache_data)
+                    completed_runs = successful_keys
+
             # Case C: already completed
             if cache_data.get("status") == "completed":
                 return OrchestratorResult(
@@ -160,6 +179,8 @@ class EvalOrchestrator:
             # can properly merge old (from disk) + new (in-memory) without duplication.
             # The flush controller reads old runs from disk and prepends them,
             # so cache_data["runs"] must only contain newly-appended runs.
+            # Save original runs first as fallback for the no-work-items path.
+            prior_runs_snapshot = list(cache_data.get("runs", []))
             if completed_runs:
                 cache_data["runs"] = []
 
@@ -167,13 +188,11 @@ class EvalOrchestrator:
                 # All runs already completed but status wasn't "completed".
                 # Re-read runs from disk since we may have cleared cache_data["runs"]
                 # above for the flush controller.
-                import json as _json
-
                 try:
-                    disk_data = _json.loads(cache_path.read_text())
+                    disk_data = json.loads(cache_path.read_text())
                     all_runs = disk_data.get("runs", [])
                 except (ValueError, OSError):
-                    all_runs = []
+                    all_runs = prior_runs_snapshot
                 eval_fn_names = [fn.name for fn in self.runner.eval_fns]
                 summary = build_summary(
                     all_runs, eval_fn_names, self.pass_threshold, self.n_runs
@@ -248,13 +267,13 @@ class EvalOrchestrator:
             if status == "completed":
                 # After force_flush, disk has the full merged runs list.
                 # Re-read from disk to get all runs (old + new) for summary.
-                import json as _json
-
+                # Fall back to in-memory runs (which include at least the new
+                # runs from this session) to avoid data loss if disk read fails.
                 try:
-                    disk_data = _json.loads(cache_path.read_text())
+                    disk_data = json.loads(cache_path.read_text())
                     all_runs = disk_data.get("runs", [])
                 except (ValueError, OSError):
-                    all_runs = cache_data.get("runs", [])
+                    all_runs = prior_runs_snapshot + cache_data.get("runs", [])
                 eval_fn_names = [fn.name for fn in self.runner.eval_fns]
                 summary = build_summary(
                     all_runs, eval_fn_names, self.pass_threshold, self.n_runs
