@@ -733,7 +733,7 @@ class TestCLIMutualExclusion:
 
 
 class TestEvalCLIBatchSize:
-    async def _run_eval_cli_and_capture_run_eval_kwargs(
+    async def _run_eval_cli_and_capture_orchestrator_kwargs(
         self,
         monkeypatch: pytest.MonkeyPatch,
         batch_size: int,
@@ -754,11 +754,29 @@ class TestEvalCLIBatchSize:
 
         class FakeEvalRunner:
             def __init__(self, *args, **kwargs) -> None:
-                pass
+                self.eval_fns = kwargs.get("eval_fns", [])
 
-            async def run_eval(self, **kwargs):
+        class FakeOrchestratorResult:
+            status = "completed"
+            cache_path = "/tmp/fake_cache.json"
+            samples_path = None
+            summary = {
+                "eval_fns": {},
+                "total_runs": 1,
+                "total_tokens": 0,
+                "total_duration_ms": 0.0,
+            }
+            total_completed = 1
+            total_expected = 1
+            cache_data = {"summary": summary, "runs": [], "status": "completed"}
+            stop_reason = None
+
+        class FakeOrchestrator:
+            def __init__(self, **kwargs) -> None:
                 captured_kwargs.update(kwargs)
-                return object()
+
+            async def run(self):
+                return FakeOrchestratorResult()
 
         async def _verify_llm_client(*args, **kwargs) -> str | None:
             return None
@@ -791,6 +809,22 @@ class TestEvalCLIBatchSize:
             "osmosis_ai.rollout.eval.evaluation.runner.EvalRunner",
             FakeEvalRunner,
         )
+        monkeypatch.setattr(
+            "osmosis_ai.rollout.eval.evaluation.cache.compute_dataset_fingerprint",
+            lambda path: "fake_fingerprint",
+        )
+        monkeypatch.setattr(
+            "osmosis_ai.rollout.eval.evaluation.cache.compute_module_fingerprint",
+            lambda module_path: "fake_module_fp",
+        )
+        monkeypatch.setattr(
+            "osmosis_ai.rollout.eval.evaluation.cache.compute_eval_fns_fingerprint",
+            lambda eval_fn_paths: "fake_eval_fns_fp",
+        )
+        monkeypatch.setattr(
+            "osmosis_ai.rollout.eval.evaluation.orchestrator.EvalOrchestrator",
+            FakeOrchestrator,
+        )
 
         cmd = EvalCommand()
         args = argparse.Namespace(
@@ -810,11 +844,15 @@ class TestEvalCLIBatchSize:
             baseline_base_url=None,
             baseline_api_key=None,
             output=None,
+            output_path=None,
             debug=False,
             quiet=True,
             limit=None,
             offset=0,
             batch_size=batch_size,
+            fresh=False,
+            log_samples=False,
+            retry_failed=False,
         )
 
         exit_code = await cmd._run_async(args)
@@ -825,20 +863,18 @@ class TestEvalCLIBatchSize:
         self,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        kwargs = await self._run_eval_cli_and_capture_run_eval_kwargs(
+        kwargs = await self._run_eval_cli_and_capture_orchestrator_kwargs(
             monkeypatch,
             batch_size=4,
         )
         assert kwargs["batch_size"] == 4
-        assert "fail_fast" not in kwargs
 
     async def test_batch_size_one_forwards_batch_size_only(
         self,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        kwargs = await self._run_eval_cli_and_capture_run_eval_kwargs(
+        kwargs = await self._run_eval_cli_and_capture_orchestrator_kwargs(
             monkeypatch,
             batch_size=1,
         )
         assert kwargs["batch_size"] == 1
-        assert "fail_fast" not in kwargs

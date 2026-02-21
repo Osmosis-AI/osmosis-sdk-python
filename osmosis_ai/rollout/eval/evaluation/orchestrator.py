@@ -156,13 +156,29 @@ class EvalOrchestrator:
             # Build work items, skipping already-completed runs
             work_items = self._build_work_items(completed_runs)
 
+            # Strip prior runs from in-memory cache_data so CacheFlushController
+            # can properly merge old (from disk) + new (in-memory) without duplication.
+            # The flush controller reads old runs from disk and prepends them,
+            # so cache_data["runs"] must only contain newly-appended runs.
+            if completed_runs:
+                cache_data["runs"] = []
+
             if not work_items:
-                # All runs already completed but status wasn't "completed"
-                all_runs = cache_data.get("runs", [])
+                # All runs already completed but status wasn't "completed".
+                # Re-read runs from disk since we may have cleared cache_data["runs"]
+                # above for the flush controller.
+                import json as _json
+
+                try:
+                    disk_data = _json.loads(cache_path.read_text())
+                    all_runs = disk_data.get("runs", [])
+                except (ValueError, OSError):
+                    all_runs = []
                 eval_fn_names = [fn.name for fn in self.runner.eval_fns]
                 summary = build_summary(
                     all_runs, eval_fn_names, self.pass_threshold, self.n_runs
                 )
+                cache_data["runs"] = all_runs
                 cache_data["status"] = "completed"
                 cache_data["summary"] = summary
                 self.cache_backend.write_cache(cache_path, cache_data)
@@ -230,11 +246,20 @@ class EvalOrchestrator:
 
             summary: dict | None = None
             if status == "completed":
-                all_runs = cache_data.get("runs", [])
+                # After force_flush, disk has the full merged runs list.
+                # Re-read from disk to get all runs (old + new) for summary.
+                import json as _json
+
+                try:
+                    disk_data = _json.loads(cache_path.read_text())
+                    all_runs = disk_data.get("runs", [])
+                except (ValueError, OSError):
+                    all_runs = cache_data.get("runs", [])
                 eval_fn_names = [fn.name for fn in self.runner.eval_fns]
                 summary = build_summary(
                     all_runs, eval_fn_names, self.pass_threshold, self.n_runs
                 )
+                cache_data["runs"] = all_runs
                 cache_data["status"] = "completed"
                 cache_data["summary"] = summary
                 self.cache_backend.write_cache(cache_path, cache_data)
