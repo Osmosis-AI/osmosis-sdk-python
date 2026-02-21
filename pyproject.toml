@@ -30,6 +30,9 @@ dependencies = [
     # Remote rollout SDK dependencies
     "httpx>=0.25.0,<1.0.0",
     "pydantic>=2.0.0,<3.0.0",
+    # Eval cache dependencies
+    "filelock>=3.0.0,<4.0.0",
+    "xxhash>=3.0.0",
 ]
 
 [project.optional-dependencies]
