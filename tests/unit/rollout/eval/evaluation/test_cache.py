@@ -856,6 +856,21 @@ class TestBuildSummary:
         # With 2 passing out of 3, pass@1 should be > 0
         assert fn1["pass_at_1"] > 0.0
 
+    def test_pass_at_k_with_fewer_passes_than_k(self):
+        """pass@k uses the combinatorial estimator when c < k."""
+        runs = [
+            {"row_index": 0, "run_index": 0, "scores": {"fn1": 1.0}, "success": True},
+            {"row_index": 0, "run_index": 1, "scores": {"fn1": 1.0}, "success": True},
+            {"row_index": 0, "run_index": 2, "scores": {"fn1": 0.0}, "success": False},
+            {"row_index": 0, "run_index": 3, "scores": {"fn1": 0.0}, "success": False},
+            {"row_index": 0, "run_index": 4, "scores": {"fn1": 0.0}, "success": False},
+        ]
+        result = build_summary(runs, ["fn1"], pass_threshold=0.5, n_runs=5)
+        fn1 = result["eval_fns"]["fn1"]
+
+        # n=5, c=2, k=3 => 1 - C(3,3)/C(5,3) = 0.9
+        assert fn1["pass_at_3"] == pytest.approx(0.9)
+
     def test_multiple_eval_fns(self):
         """Summary computed for each eval fn independently."""
         runs = [

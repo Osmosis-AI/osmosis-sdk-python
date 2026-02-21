@@ -73,6 +73,7 @@ class MockCacheBackend:
         total_rows: int,
         model: str | None = None,
         dataset_path: str | None = None,
+        dataset_fingerprint: str | None = None,
     ) -> tuple[Path, dict, set[tuple[int, int, str | None]]]:
         return self.cache_path, self.cache_data, self.completed_runs
 
@@ -831,8 +832,8 @@ class TestRecordResult:
 
         assert cache_data["runs"][0]["model_tag"] == "primary"
 
-    def test_record_omits_model_tag_when_none(self) -> None:
-        """model_tag should NOT be in run dict when tag is None."""
+    def test_record_includes_model_tag_when_none(self) -> None:
+        """model_tag should be in run dict even when tag is None."""
         orch = _make_orchestrator()
         cache_data: dict[str, Any] = {"runs": []}
 
@@ -840,7 +841,7 @@ class TestRecordResult:
 
         orch._record_result(result, cache_data, row_index=0, run_index=0)
 
-        assert "model_tag" not in cache_data["runs"][0]
+        assert cache_data["runs"][0]["model_tag"] is None
 
     def test_record_includes_error_when_present(self) -> None:
         """Error message should be in run dict when result has error."""

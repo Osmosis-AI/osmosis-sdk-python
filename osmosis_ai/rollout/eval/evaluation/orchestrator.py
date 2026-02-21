@@ -55,6 +55,7 @@ class OrchestratorResult:
     total_expected: int
     cache_data: dict
     stop_reason: str | None = None
+    dataset_fingerprint_warning: str | None = None
 
 
 class EvalOrchestrator:
@@ -136,6 +137,7 @@ class EvalOrchestrator:
                     total_rows=cfg.total_rows,
                     model=cfg.model,
                     dataset_path=cfg.dataset_path,
+                    dataset_fingerprint=self.dataset_fingerprint,
                 )
             )
 
@@ -162,6 +164,15 @@ class EvalOrchestrator:
 
             # Case C: already completed
             if cache_data.get("status") == "completed":
+                dataset_fingerprint_warning: str | None = None
+                if self.dataset_fingerprint is not None:
+                    cached_fp = cache_data.get("config", {}).get("dataset_fingerprint")
+                    if cached_fp and self.dataset_fingerprint != cached_fp:
+                        dataset_fingerprint_warning = (
+                            f"Warning: Dataset file has changed since this eval completed.\n"
+                            f"  Cached: {cached_fp[:16]}... | Current: {self.dataset_fingerprint[:16]}...\n"
+                            f"  Results below are from the original dataset."
+                        )
                 return OrchestratorResult(
                     status="already_completed",
                     cache_path=cache_path,
@@ -170,6 +181,7 @@ class EvalOrchestrator:
                     total_completed=len(completed_runs),
                     total_expected=total_expected,
                     cache_data=cache_data,
+                    dataset_fingerprint_warning=dataset_fingerprint_warning,
                 )
 
             # Build work items, skipping already-completed runs
@@ -477,11 +489,9 @@ class EvalOrchestrator:
             "scores": result.scores,
             "duration_ms": result.duration_ms,
             "tokens": result.tokens,
+            "model_tag": result.model_tag,
+            "error": result.error,
         }
-        if result.model_tag is not None:
-            run_dict["model_tag"] = result.model_tag
-        if result.error is not None:
-            run_dict["error"] = result.error
 
         cache_data["runs"].append(run_dict)
 

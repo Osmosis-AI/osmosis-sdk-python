@@ -376,9 +376,15 @@ class EvalCommand:
         Creates {output_path}/{model_sanitized}/{dataset_sanitized}/ directory
         structure and writes results JSON and optional samples JSONL.
 
+        The output file uses the same JSON schema as the cache file, with
+        status always set to "completed".
+
         Returns the path to the written results JSON file.
         """
-        from osmosis_ai.rollout.eval.evaluation.cache import _sanitize_path_part
+        from osmosis_ai.rollout.eval.evaluation.cache import (
+            _atomic_write_json,
+            _sanitize_path_part,
+        )
 
         model_dir = _sanitize_path_part(model)
         dataset_dir = _sanitize_path_part(Path(dataset_path).stem)
@@ -391,18 +397,10 @@ class EvalCommand:
         results_filename = f"results_{unix_ts}_{task_id}.json"
         results_path = out_dir / results_filename
 
-        output_data: dict[str, Any] = {
-            "task_id": cache_data.get("task_id"),
-            "config_hash": cache_data.get("config_hash"),
-            "config": cache_data.get("config"),
-            "summary": cache_data.get("summary"),
-            "runs": cache_data.get("runs", []),
-            "created_at": cache_data.get("created_at"),
-            "completed_at": cache_data.get("updated_at"),
-        }
+        output_data = dict(cache_data)  # Copy all fields from cache
+        output_data["status"] = "completed"  # Always completed for output
 
-        with open(results_path, "w", encoding="utf-8") as f:
-            json.dump(output_data, f, indent=2)
+        _atomic_write_json(results_path, output_data)
 
         if samples_path is not None and samples_path.exists():
             samples_filename = f"samples_{unix_ts}_{task_id}.jsonl"
@@ -450,6 +448,84 @@ class EvalCommand:
                     if key.startswith("pass_at_"):
                         k_val = key.replace("pass_at_", "")
                         self.console.print(f"    pass@{k_val}: {val * 100:.1f}%")
+
+    def _print_resume_hints(
+        self,
+        cache_backend: Any,
+        task_id: str,
+        model: str,
+        dataset_path: str,
+        total_expected: int,
+        log_samples: bool,
+        module_spec: str,
+        is_mcp: bool,
+    ) -> None:
+        """Print informational messages when resuming from cached progress."""
+        from osmosis_ai.rollout.eval.evaluation.cache import _sanitize_path_part
+
+        # Peek at existing cache file to check for prior completed runs
+        model_dir = _sanitize_path_part(model)
+        dataset_dir = _sanitize_path_part(Path(dataset_path).stem)
+        cache_dir = cache_backend.cache_root / model_dir / dataset_dir
+
+        if not cache_dir.exists():
+            return
+
+        pattern = f"*_{task_id}.json"
+        matches = sorted(cache_dir.glob(pattern), reverse=True)
+        if not matches:
+            return
+
+        try:
+            cache_data = json.loads(matches[0].read_text())
+        except (json.JSONDecodeError, OSError):
+            return
+
+        completed_runs = cache_data.get("runs", [])
+        if not completed_runs:
+            return
+
+        status = cache_data.get("status", "in_progress")
+        if status == "completed":
+            # Will be handled as "already_completed" by the orchestrator
+            return
+
+        completed = len(completed_runs)
+
+        # Determine fingerprint scope description
+        if is_mcp:
+            scope = f"MCP directory {module_spec}"
+        else:
+            module_name = module_spec.partition(":")[0]
+            # Check if the module resolves to a package (__init__.py)
+            try:
+                import importlib
+
+                mod = importlib.import_module(module_name)
+                source_file = getattr(mod, "__file__", None)
+                if source_file and Path(source_file).name == "__init__.py":
+                    scope = f"package {module_name}/"
+                else:
+                    scope = f"file {module_name}.py"
+            except ImportError:
+                scope = f"file {module_name}.py"
+
+        self.console.print(
+            f"Resuming eval ({completed}/{total_expected} runs completed)"
+        )
+        self.console.print(
+            f"Note: Module fingerprint covers {scope}. External dependency changes\n"
+            f"      are not detected. Use --fresh if you changed external imports."
+        )
+
+        # Check --log-samples with missing prior samples
+        if log_samples:
+            samples_path = matches[0].with_suffix(".jsonl")
+            if not samples_path.exists() or samples_path.stat().st_size == 0:
+                self.console.print(
+                    "Note: Only new runs will be logged. "
+                    "Use --fresh to re-run all with full logging."
+                )
 
     async def _run_async(self, args: argparse.Namespace) -> int:
         if args.debug:
@@ -685,6 +761,20 @@ class EvalCommand:
         fresh = getattr(args, "fresh", False)
         log_samples = getattr(args, "log_samples", False)
 
+        # Print resume hints if resuming from cached progress
+        if not args.quiet and not fresh:
+            total_expected = len(rows) * args.n_runs * len(model_tags)
+            self._print_resume_hints(
+                cache_backend=cache_backend,
+                task_id=task_id,
+                model=args.model,
+                dataset_path=args.dataset,
+                total_expected=total_expected,
+                log_samples=log_samples,
+                module_spec=module_spec,
+                is_mcp=bool(args.mcp),
+            )
+
         from osmosis_ai.rollout.eval.evaluation.orchestrator import EvalOrchestrator
 
         orchestrator = EvalOrchestrator(
@@ -729,6 +819,8 @@ class EvalCommand:
                     "\nEvaluation already completed (cached).",
                     style="bold",
                 )
+                if orch_result.dataset_fingerprint_warning:
+                    self.console.print(orch_result.dataset_fingerprint_warning)
                 self._print_orchestrator_summary(
                     orch_result.summary,
                     orch_result.total_completed,

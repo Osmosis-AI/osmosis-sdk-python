@@ -549,6 +549,7 @@ class CacheBackend(Protocol):
         total_rows: int,
         model: str | None = None,
         dataset_path: str | None = None,
+        dataset_fingerprint: str | None = None,
     ) -> tuple[Path, dict, set[tuple[int, int, str | None]]]: ...
 
     def write_cache(self, cache_path: Path, cache_data: dict) -> None: ...
@@ -654,10 +655,10 @@ def build_summary(
                     n = max(len(row_runs), n_runs)
                     if n > 0 and k <= n:
                         # pass@k formula
-                        if c == n:
-                            pak = 1.0
-                        elif c < k:
+                        if c == 0:
                             pak = 0.0
+                        elif n <= k or c >= n or n - c < k:
+                            pak = 1.0
                         else:
                             pak = 1.0 - comb(n - c, k) / comb(n, k)
                         row_pass_at_k.append(pak)
@@ -734,6 +735,7 @@ class JsonFileCacheBackend:
         total_rows: int,
         model: str | None = None,
         dataset_path: str | None = None,
+        dataset_fingerprint: str | None = None,
     ) -> tuple[Path, dict, set[tuple[int, int, str | None]]]:
         # Determine cache dir
         _model = model or config.get("model", "unknown")
@@ -866,6 +868,16 @@ class JsonFileCacheBackend:
                 f"  different config (e.g. add --temperature 0.7), or manually\n"
                 f"  delete: {cache_path}"
             )
+
+        # Case B: verify dataset fingerprint hasn't changed
+        if dataset_fingerprint is not None:
+            cached_fp = cache_data.get("config", {}).get("dataset_fingerprint")
+            if cached_fp and dataset_fingerprint != cached_fp:
+                raise RuntimeError(
+                    f"Dataset file has changed since cache was created.\n"
+                    f"  Cached: {cached_fp[:16]}... | Current: {dataset_fingerprint[:16]}...\n"
+                    f"  Use --fresh to start a new evaluation."
+                )
 
         # Build completed runs set
         completed_runs = {
