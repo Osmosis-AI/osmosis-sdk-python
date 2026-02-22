@@ -369,7 +369,7 @@ def _atomic_write_json(path: Path, data: dict) -> None:  # type: ignore[type-arg
             delete=False,
         ) as f:
             tmp_path = f.name
-            json.dump(data, f)
+            json.dump(data, f, ensure_ascii=False)
             f.flush()
             _fsync(f.fileno())
         _replace_with_retry(tmp_path, path)

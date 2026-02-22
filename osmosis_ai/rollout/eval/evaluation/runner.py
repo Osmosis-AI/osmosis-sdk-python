@@ -200,8 +200,8 @@ class EvalRunner:
         """Create a new ExternalLLMClient from the original client's config."""
         return ExternalLLMClient(
             model=self.llm_client.display_name,
-            api_key=self.llm_client._api_key,
-            api_base=self.llm_client._api_base,
+            api_key=self.llm_client.api_key,
+            api_base=self.llm_client.api_base,
         )
 
     def _default_baseline_llm_client_factory(self) -> ExternalLLMClient:
@@ -210,8 +210,8 @@ class EvalRunner:
             raise RuntimeError("No baseline LLM client configured")
         return ExternalLLMClient(
             model=self._baseline_llm_client.display_name,
-            api_key=self._baseline_llm_client._api_key,
-            api_base=self._baseline_llm_client._api_base,
+            api_key=self._baseline_llm_client.api_key,
+            api_base=self._baseline_llm_client.api_base,
         )
 
     def _create_rollout_runner(self) -> LocalRolloutRunner:
@@ -437,7 +437,6 @@ class EvalRunner:
             nonlocal systemic_error
             runner: LocalRolloutRunner | None = None
             target_pool = baseline_pool if model_tag == "baseline" else primary_pool
-            run_start = time.monotonic()
             try:
                 runner = await target_pool.get()
                 run_start = time.monotonic()
@@ -719,7 +718,6 @@ class EvalRunner:
             nonlocal completed
             runner: LocalRolloutRunner | None = None
             target_pool = baseline_pool if model_tag == "baseline" else primary_pool
-            run_start = time.monotonic()
             try:
                 runner = await target_pool.get()
                 run_start = time.monotonic()

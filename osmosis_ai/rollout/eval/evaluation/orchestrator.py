@@ -45,6 +45,8 @@ class OrchestratorResult:
         total_expected: Total number of runs expected.
         cache_data: The full cache data dict.
         stop_reason: Human-readable reason the eval stopped early, or ``None``.
+        dataset_fingerprint_warning: Warning message if the dataset file has changed
+            since the cached evaluation completed, or ``None``.
     """
 
     status: str
