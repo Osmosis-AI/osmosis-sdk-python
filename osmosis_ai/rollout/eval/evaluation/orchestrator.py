@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import logging
 import signal
 from collections.abc import Callable
 from contextlib import suppress
@@ -28,8 +27,6 @@ from osmosis_ai.rollout.eval.evaluation.cache import (
     build_summary,
 )
 from osmosis_ai.rollout.eval.evaluation.runner import EvalRunner, EvalRunResult
-
-logger: logging.Logger = logging.getLogger(__name__)
 
 
 @dataclass

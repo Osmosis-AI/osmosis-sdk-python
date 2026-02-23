@@ -535,7 +535,7 @@ class EvalCommand:
                     ):
                         grandparent.rmdir()
             except OSError:
-                pass
+                pass  # Best-effort cleanup of empty directories
             deleted += 1
 
         self.console.print(f"Deleted {deleted} cached evaluation(s).")

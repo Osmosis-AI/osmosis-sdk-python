@@ -516,7 +516,14 @@ class CacheFlushController:
             try:
                 disk_cache = json.loads(self.cache_path.read_text())
                 old_runs = disk_cache.get("runs", [])[: self._prior_runs_count]
-            except (json.JSONDecodeError, OSError):
+            except (json.JSONDecodeError, OSError) as exc:
+                logger.warning(
+                    "Could not read prior runs from cache file %s during flush: %s. "
+                    "Prior session runs (%d) will be missing from this write.",
+                    self.cache_path,
+                    exc,
+                    self._prior_runs_count,
+                )
                 old_runs = []
             merged_data = {
                 **self.cache_data,

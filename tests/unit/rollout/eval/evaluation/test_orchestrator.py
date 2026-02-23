@@ -520,42 +520,8 @@ class TestOrchestratorInterrupted:
     @pytest.mark.asyncio
     async def test_interrupted_records_completed_runs(self) -> None:
         """Runs completed before the interrupt should still be in cache_data."""
-        runner = MockRunner()
-        call_count = 0
-
-        original_run_single = runner.run_single
-
-        async def counting_run_single(
-            row: dict,
-            row_index: int,
-            run_index: int,
-            max_turns: int = 10,
-            completion_params: dict | None = None,
-            model_tag: str | None = None,
-        ) -> EvalRunResult:
-            nonlocal call_count
-            result = await original_run_single(
-                row, row_index, run_index, max_turns, completion_params, model_tag
-            )
-            call_count += 1
-            return result
-
-        runner.run_single = counting_run_single  # type: ignore[assignment]
-
-        cache_backend = MockCacheBackend()
-        rows = _make_rows(5)
-        orch = _make_orchestrator(runner=runner, cache_backend=cache_backend, rows=rows)
-
-        # Set the shutdown event after the first run completes
-        original_orch_run_sequential = orch._run_sequential
-
-        async def patched_sequential(*args: Any, **kwargs: Any) -> Any:
-            # Let the first item proceed, then set the event
-            result = await original_orch_run_sequential(*args, **kwargs)
-            return result
-
-        # Instead of complex patching, just verify the cache_data has runs
-        # after interrupt. We'll set shutdown event from run_single.
+        # Verify the cache_data has runs after interrupt.
+        # We set the shutdown event from inside run_single.
         runner2 = MockRunner()
         call_count2 = 0
 

@@ -396,7 +396,7 @@ class EvalRunner:
                         if inspect.isawaitable(maybe_awaitable):
                             await maybe_awaitable
                     except Exception:
-                        pass
+                        pass  # Best-effort cleanup; re-raising the original error below
             raise
 
         primary_pool: asyncio.Queue[LocalRolloutRunner] = asyncio.Queue()
