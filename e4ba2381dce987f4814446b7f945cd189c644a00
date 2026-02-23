@@ -1,0 +1,27 @@
+osmosis_ai/rollout/eval/evaluation/runner.py
+  e4e8b928a4813932 440,722
+osmosis_ai/rollout/eval/evaluation/cache.py
+  e4e8b928a4813932 384-393,408-410,587-591,604-607,664
+tests/unit/rollout/eval/evaluation/test_eval_cache_integration.py
+  e4e8b928a4813932 599,609
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.4",
+  "base_commit_sha": "e4ba2381dce987f4814446b7f945cd189c644a00",
+  "prompts": {
+    "e4e8b928a4813932": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "53d21a4f-e331-480f-b43a-af09ce0a53fb",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>",
+      "messages": [],
+      "total_additions": 29,
+      "total_deletions": 23,
+      "accepted_lines": 29,
+      "overriden_lines": 1
+    }
+  }
+}
