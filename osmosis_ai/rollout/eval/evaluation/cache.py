@@ -230,7 +230,7 @@ def compute_eval_fns_fingerprint(eval_fn_paths: list[str]) -> str | None:
         module_name, _, _ = fn_path.partition(":")
         try:
             mod = importlib.import_module(module_name)
-        except ImportError:
+        except Exception:
             return None
         source_file = _resolve_source_file(mod)
         if source_file is None:

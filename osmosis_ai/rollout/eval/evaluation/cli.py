@@ -486,6 +486,8 @@ class EvalCommand:
         # Select targets
         if task_id:
             targets = [e for e in all_entries if e.get("task_id") == task_id]
+        elif rm_all:
+            targets = all_entries
         else:
             targets = self._filter_caches(
                 all_entries, model_filter, dataset_filter, status_filter
