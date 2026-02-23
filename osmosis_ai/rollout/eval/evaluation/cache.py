@@ -348,13 +348,15 @@ def _replace_with_retry(src: str, dst: Path, max_retries: int = 3) -> None:
 
 
 _WRITE_FAILURE_WARN_THRESHOLD = 3
+_consecutive_write_failures = 0
 
 
 def atomic_write_json(path: Path, data: dict) -> None:  # type: ignore[type-arg]
     """Write JSON atomically via NamedTemporaryFile + os.replace().
 
-    Tracks consecutive failures via function attribute, warns to stderr after 3.
+    Tracks consecutive failures via module-level counter, warns to stderr after 3.
     """
+    global _consecutive_write_failures
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path: str | None = None
     try:
@@ -370,29 +372,26 @@ def atomic_write_json(path: Path, data: dict) -> None:  # type: ignore[type-arg]
             f.flush()
             _fsync(f.fileno())
         _replace_with_retry(tmp_path, path)
-        atomic_write_json._consecutive_failures = 0
+        _consecutive_write_failures = 0
     except BaseException as exc:
         if tmp_path is not None:
             with suppress(OSError):
                 os.unlink(tmp_path)
         if not isinstance(exc, (KeyboardInterrupt, SystemExit)):
-            atomic_write_json._consecutive_failures += 1
-            if atomic_write_json._consecutive_failures >= _WRITE_FAILURE_WARN_THRESHOLD:
+            _consecutive_write_failures += 1
+            if _consecutive_write_failures >= _WRITE_FAILURE_WARN_THRESHOLD:
                 logger.warning(
                     "Cache write has failed %d consecutive times (%s: %s). "
                     "Eval results are held in memory but NOT persisted to disk. "
                     "If the process exits, up to %d runs of scores may be lost. "
                     "Check available disk space and permissions for: %s",
-                    atomic_write_json._consecutive_failures,
+                    _consecutive_write_failures,
                     type(exc).__name__,
                     exc,
-                    atomic_write_json._consecutive_failures * 50,
+                    _consecutive_write_failures * 50,
                     path.parent,
                 )
         raise
-
-
-atomic_write_json._consecutive_failures = 0  # type: ignore[attr-defined]
 
 
 def _get_lock_timeout() -> int:

@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from osmosis_ai.rollout.eval.common.dataset import DatasetRow
 from osmosis_ai.rollout.eval.common.errors import SystemicProviderError
 from osmosis_ai.rollout.eval.evaluation.cache import (
     CacheBackend,
@@ -77,7 +78,7 @@ class EvalOrchestrator:
         runner: EvalRunner,
         cache_backend: CacheBackend,
         cache_config: CacheConfig,
-        rows: list[dict],
+        rows: list[DatasetRow],
         n_runs: int = 1,
         max_turns: int = 10,
         completion_params: dict[str, Any] | None = None,
@@ -323,13 +324,13 @@ class EvalOrchestrator:
 
     def _build_work_items(
         self, completed_runs: set[tuple[int, int, str | None]]
-    ) -> list[tuple[dict, int, int, str | None]]:
+    ) -> list[tuple[DatasetRow, int, int, str | None]]:
         """Build list of work items, skipping those already completed.
 
         Returns:
             List of ``(row, row_index, run_index, model_tag)`` tuples.
         """
-        work_items: list[tuple[dict, int, int, str | None]] = []
+        work_items: list[tuple[DatasetRow, int, int, str | None]] = []
         for i, row in enumerate(self.rows):
             row_index = self.start_index + i
             for run_idx in range(self.n_runs):
@@ -340,7 +341,7 @@ class EvalOrchestrator:
 
     async def _run_sequential(
         self,
-        work_items: list[tuple[dict, int, int, str | None]],
+        work_items: list[tuple[DatasetRow, int, int, str | None]],
         cache_data: dict,
         flush_ctl: CacheFlushController,
         dataset_checker: DatasetIntegrityChecker | None,
@@ -416,7 +417,7 @@ class EvalOrchestrator:
 
     async def _run_batched(
         self,
-        work_items: list[tuple[dict, int, int, str | None]],
+        work_items: list[tuple[DatasetRow, int, int, str | None]],
         cache_data: dict,
         flush_ctl: CacheFlushController,
         dataset_checker: DatasetIntegrityChecker | None,
