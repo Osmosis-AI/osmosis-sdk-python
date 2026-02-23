@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import logging
 import os
-import sys
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 from ..rubric_eval import ensure_api_key_available
 from ..rubric_types import MissingAPIKeyError
@@ -43,12 +45,13 @@ def _migrate_rubric_cache() -> None:
 
     if _CACHE_ROOT.exists():
         # Both exist — warn but don't overwrite
-        print(
-            f"Warning: Both old and new rubric cache directories exist.\n"
-            f"  Old: {_OLD_RUBRIC_CACHE_ROOT}\n"
-            f"  New: {_CACHE_ROOT}\n"
-            f"  Please manually merge or remove the old directory.",
-            file=sys.stderr,
+        logger.warning(
+            "Both old and new rubric cache directories exist.\n"
+            "  Old: %s\n"
+            "  New: %s\n"
+            "  Please manually merge or remove the old directory.",
+            _OLD_RUBRIC_CACHE_ROOT,
+            _CACHE_ROOT,
         )
         return
 
@@ -57,10 +60,7 @@ def _migrate_rubric_cache() -> None:
         os.rename(_OLD_RUBRIC_CACHE_ROOT, _CACHE_ROOT)
     except OSError as e:
         # TOCTOU race or permission issue — fall back silently
-        print(
-            f"Warning: Could not migrate rubric cache: {e}",
-            file=sys.stderr,
-        )
+        logger.warning("Could not migrate rubric cache: %s", e)
 
 
 def _sanitise_rubric_folder(rubric_id: str) -> str:

@@ -437,7 +437,6 @@ class EvalRunner:
             nonlocal systemic_error
             runner: LocalRolloutRunner | None = None
             target_pool = baseline_pool if model_tag == "baseline" else primary_pool
-            run_start = time.monotonic()
             try:
                 runner = await target_pool.get()
                 run_start = time.monotonic()
@@ -719,7 +718,6 @@ class EvalRunner:
             nonlocal completed
             runner: LocalRolloutRunner | None = None
             target_pool = baseline_pool if model_tag == "baseline" else primary_pool
-            run_start = time.monotonic()
             try:
                 runner = await target_pool.get()
                 run_start = time.monotonic()

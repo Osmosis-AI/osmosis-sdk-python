@@ -179,7 +179,7 @@ def _hash_directory_tree(directory: Path) -> str | None:
     hasher = xxhash.xxh3_128()
     try:
         py_files = sorted(f for f in directory.rglob("*.py") if not f.is_symlink())
-    except PermissionError:
+    except OSError:
         return None
     if not py_files:
         return None
