@@ -596,13 +596,18 @@ class TestE2EDatasetModified:
                 cache_data: dict,
                 flush_ctl: Any,
                 dataset_checker: Any,
+                prior_completed_count: int = 0,
             ) -> tuple:
                 if dataset_checker is not None:
                     # Force immediate check
                     dataset_checker._runs_since_check = 100
                     dataset_checker._last_check_time = 0.0
                 return await original_seq(
-                    work_items, cache_data, flush_ctl, dataset_checker
+                    work_items,
+                    cache_data,
+                    flush_ctl,
+                    dataset_checker,
+                    prior_completed_count,
                 )
 
             orch._run_sequential = seq_with_forced_check  # type: ignore[assignment]

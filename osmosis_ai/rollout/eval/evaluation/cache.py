@@ -381,14 +381,16 @@ def _atomic_write_json(path: Path, data: dict) -> None:  # type: ignore[type-arg
         if not isinstance(exc, (KeyboardInterrupt, SystemExit)):
             _consecutive_write_failures += 1
             if _consecutive_write_failures >= _WRITE_FAILURE_WARN_THRESHOLD:
-                print(
-                    f"Warning: Cache write has failed {_consecutive_write_failures} "
-                    f"consecutive times ({type(exc).__name__}: {exc}).\n"
-                    f"  Eval results are held in memory but NOT persisted to disk.\n"
-                    f"  If the process exits, up to "
-                    f"{_consecutive_write_failures * 50} runs of scores may be lost.\n"
-                    f"  Check available disk space and permissions for: {path.parent}",
-                    file=sys.stderr,
+                logger.warning(
+                    "Cache write has failed %d consecutive times (%s: %s). "
+                    "Eval results are held in memory but NOT persisted to disk. "
+                    "If the process exits, up to %d runs of scores may be lost. "
+                    "Check available disk space and permissions for: %s",
+                    _consecutive_write_failures,
+                    type(exc).__name__,
+                    exc,
+                    _consecutive_write_failures * 50,
+                    path.parent,
                 )
         raise
 
@@ -403,10 +405,9 @@ def _get_lock_timeout() -> int:
                 raise ValueError
             return timeout
         except ValueError:
-            print(
-                f"Warning: Invalid OSMOSIS_EVAL_LOCK_TIMEOUT={env_val!r}, "
-                f"using default 30s",
-                file=sys.stderr,
+            logger.warning(
+                "Invalid OSMOSIS_EVAL_LOCK_TIMEOUT=%r, using default 30s",
+                env_val,
             )
     return 30
 
@@ -583,10 +584,11 @@ def _backup_corrupt_cache(cache_path: Path) -> Path | None:
     try:
         os.replace(cache_path, backup_path)
     except OSError as e:
-        print(
-            f"Warning: Could not back up corrupt cache to {backup_path}: {e}\n"
-            f"  Attempting to overwrite corrupt file in place.",
-            file=sys.stderr,
+        logger.warning(
+            "Could not back up corrupt cache to %s: %s. "
+            "Attempting to overwrite corrupt file in place.",
+            backup_path,
+            e,
         )
         with suppress(OSError):
             cache_path.unlink()
@@ -599,9 +601,10 @@ def _backup_corrupt_cache(cache_path: Path) -> Path | None:
         try:
             os.replace(jsonl_path, jsonl_backup)
         except OSError as e:
-            print(
-                f"Warning: Could not back up corrupt samples to {jsonl_backup}: {e}",
-                file=sys.stderr,
+            logger.warning(
+                "Could not back up corrupt samples to %s: %s",
+                jsonl_backup,
+                e,
             )
     return backup_path
 
@@ -658,7 +661,7 @@ def build_summary(
                         for r in row_runs
                         if r["scores"].get(name, 0.0) >= pass_threshold
                     )
-                    n = max(len(row_runs), n_runs)
+                    n = len(row_runs)
                     if n > 0 and k <= n:
                         # pass@k formula
                         if c == 0:
