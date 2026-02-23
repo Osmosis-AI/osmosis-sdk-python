@@ -77,7 +77,7 @@ See [Test Mode](./test-mode.md) for full documentation on dataset format, intera
 
 ### osmosis eval
 
-Evaluate trained models with custom eval functions and pass@k metrics. Works with both Local Rollout (MCP tools) and Remote Rollout (RolloutAgentLoop) agents.
+Evaluate trained models with custom eval functions and pass@k metrics. Works with both Local Rollout (MCP tools) and Remote Rollout (RolloutAgentLoop) agents. Results are automatically cached to disk so interrupted evaluations can be resumed.
 
 ```bash
 osmosis eval -m server:agent_loop -d data.jsonl \
@@ -86,9 +86,40 @@ osmosis eval -m server:agent_loop -d data.jsonl \
 
 osmosis eval --mcp ./mcp -d data.jsonl \
     --eval-fn rewards:compute_reward --model openai/gpt-5-mini
+
+# Resume automatically — re-run the same command after interruption
+# Force fresh start, discarding cached results
+osmosis eval -m server:agent_loop -d data.jsonl \
+    --eval-fn rewards:compute_reward --model my-model --fresh
+
+# Re-run only failed runs from a previous evaluation
+osmosis eval -m server:agent_loop -d data.jsonl \
+    --eval-fn rewards:compute_reward --model my-model --retry-failed
+
+# Save conversation logs alongside results
+osmosis eval -m server:agent_loop -d data.jsonl \
+    --eval-fn rewards:compute_reward --model my-model --log-samples
 ```
 
-See [Eval Mode](./eval-mode.md) for full documentation on eval functions, pass@k metrics, and output formats.
+**Additional Options:**
+
+| Option | Description |
+|--------|-------------|
+| `--fresh` | Force restart, discarding cached results |
+| `--retry-failed` | Re-execute only failed runs (mutually exclusive with `--fresh`) |
+| `--log-samples` | Save full conversation messages to JSONL |
+| `--output-path DIR` | Write results to structured directory |
+
+### osmosis eval cache
+
+Manage the eval result cache.
+
+```bash
+# Print the cache root directory path
+osmosis eval cache dir
+```
+
+See [Eval Mode](./eval-mode.md) for full documentation on eval functions, pass@k metrics, caching, and output formats.
 
 ## Remote Rollout Server
 

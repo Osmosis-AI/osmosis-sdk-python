@@ -40,6 +40,17 @@ Server-side configuration for the RolloutServer process.
 |----------|------|---------|-------|-------------|
 | `OSMOSIS_ROLLOUT_MAX_METADATA_SIZE_BYTES` | `int` | `1048576` (1 MB) | 1024 -- 104857600 (100 MB) | Maximum allowed size for rollout metadata in bytes. |
 
+### Eval Cache Settings
+
+These environment variables control the behavior of `osmosis eval` result caching.
+
+| Variable | Type | Default | Description |
+|----------|------|---------|-------------|
+| `OSMOSIS_CACHE_DIR` | `str` | - | Override the eval cache root directory. When set, cache files are stored under `$OSMOSIS_CACHE_DIR/eval/`. |
+| `OSMOSIS_EVAL_LOCK_TIMEOUT` | `int` | `30` | Timeout in seconds for acquiring the cache file lock. If another eval with the same config is running, the process waits up to this duration before failing. Must be a positive integer. |
+
+When `OSMOSIS_CACHE_DIR` is not set, the cache follows the XDG Base Directory convention: `$XDG_CACHE_HOME/osmosis/eval/` (defaults to `~/.cache/osmosis/eval/`).
+
 ## Programmatic Configuration
 
 Configuration is organized into three Pydantic Settings classes. When the `pydantic-settings` package is installed (included in the `server` extra), these classes automatically read from environment variables and `.env` files. Without `pydantic-settings`, they fall back to plain Pydantic models that only accept values passed programmatically:
