@@ -208,6 +208,7 @@ def find_available_port() -> int | None:
     for port in range(LOCAL_SERVER_PORT_START, LOCAL_SERVER_PORT_END + 1):
         try:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+                s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
                 s.bind(("localhost", port))
                 return port
         except OSError:

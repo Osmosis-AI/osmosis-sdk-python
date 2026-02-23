@@ -173,6 +173,16 @@ class ExternalLLMClient:
         self._response_tokens: int = 0
         self._closed = False
 
+    @property
+    def api_key(self) -> str | None:
+        """The API key used for authentication."""
+        return self._api_key
+
+    @property
+    def api_base(self) -> str | None:
+        """The base URL for API requests."""
+        return self._api_base
+
     def set_tools(self, tools: list[Any]) -> None:
         """Set tools for the current execution row."""
         if tools:

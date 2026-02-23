@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+import os
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
@@ -18,7 +20,47 @@ from .engine import EvaluationReport, RubricEvaluationEngine
 from .errors import CLIError
 from .reporting import BaselineComparator, BaselineStatistics, JsonReportWriter
 
-_CACHE_ROOT = Path("~/.cache/osmosis/eval_result").expanduser()
+logger: logging.Logger = logging.getLogger(__name__)
+
+_CACHE_ROOT = Path("~/.cache/osmosis/rubric").expanduser()
+_OLD_RUBRIC_CACHE_ROOT = Path("~/.cache/osmosis/eval_result").expanduser()
+
+
+_migration_done = False
+
+
+def _migrate_rubric_cache() -> None:
+    """Migrate rubric cache from old path to new path.
+
+    Old: ~/.cache/osmosis/eval_result
+    New: ~/.cache/osmosis/rubric
+    """
+    global _migration_done
+    if _migration_done:
+        return
+    _migration_done = True
+
+    if not _OLD_RUBRIC_CACHE_ROOT.exists():
+        return
+
+    if _CACHE_ROOT.exists():
+        # Both exist — warn but don't overwrite
+        logger.warning(
+            "Both old and new rubric cache directories exist.\n"
+            "  Old: %s\n"
+            "  New: %s\n"
+            "  Please manually merge or remove the old directory.",
+            _OLD_RUBRIC_CACHE_ROOT,
+            _CACHE_ROOT,
+        )
+        return
+
+    try:
+        _CACHE_ROOT.parent.mkdir(parents=True, exist_ok=True)
+        os.rename(_OLD_RUBRIC_CACHE_ROOT, _CACHE_ROOT)
+    except OSError as e:
+        # TOCTOU race or permission issue — fall back silently
+        logger.warning("Could not migrate rubric cache: %s", e)
 
 
 def _sanitise_rubric_folder(rubric_id: str) -> str:
@@ -79,6 +121,7 @@ class EvaluationSession:
         self._identifier_factory = identifier_factory or self._default_identifier
 
     def execute(self, request: EvaluationSessionRequest) -> EvaluationSessionResult:
+        _migrate_rubric_cache()
         rubric_id = request.rubric_id.strip()
         if not rubric_id:
             raise CLIError("Rubric identifier cannot be empty.")

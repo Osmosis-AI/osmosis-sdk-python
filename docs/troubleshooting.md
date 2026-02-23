@@ -195,6 +195,70 @@ object with at least a `name`.
 authentication failure, budget exhausted). The batch aborts early instead of
 retrying each row. Fix the underlying credential or connectivity issue and re-run.
 
+## Eval Cache Errors
+
+### Lock contention
+
+```
+TimeoutError: Another eval with the same config is already running.
+```
+
+This means another `osmosis eval` process with the same configuration is already
+holding the cache lock. Wait for it to finish, or increase the timeout:
+
+```bash
+export OSMOSIS_EVAL_LOCK_TIMEOUT=120  # seconds (default: 30)
+```
+
+If the other process crashed without releasing the lock, the lock file (`.lock`)
+will be automatically released when the process exits. If a stale lock persists,
+you can manually delete it:
+
+```bash
+# Find the cache directory
+osmosis eval cache dir
+# Delete the stale lock file
+rm ~/.cache/osmosis/eval/{model}/{dataset}/{task_id}.lock
+```
+
+### Dataset changed during evaluation
+
+```
+Error: Dataset was modified during evaluation. Results may be inconsistent. Use --fresh to restart.
+```
+
+The dataset file was modified while the evaluation was in progress. Re-run with
+`--fresh` to start from scratch with the current dataset.
+
+### Dataset changed since cached evaluation
+
+```
+Warning: Dataset file has changed since this eval completed.
+```
+
+A completed evaluation is loaded from cache but the dataset file has been
+modified since. The displayed results are from the original dataset. Use
+`--fresh` to re-evaluate with the current dataset.
+
+### Cache version mismatch
+
+```
+RuntimeError: Cache file created by a newer version of osmosis (vN).
+```
+
+The cache file was created by a newer version of the SDK. Upgrade osmosis or
+use `--fresh` to discard the incompatible cache and start a new evaluation.
+
+### Config hash collision
+
+```
+RuntimeError: Cache file belongs to a different eval configuration
+```
+
+Extremely rare: two different configurations produced the same short task ID.
+Re-run with a slightly different parameter (e.g., add `--temperature 0.7`)
+or manually delete the conflicting cache file.
+
 ## Remote Rollout Errors
 
 ### AgentLoopValidationError

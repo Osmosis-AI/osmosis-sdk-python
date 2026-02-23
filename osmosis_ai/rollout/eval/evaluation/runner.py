@@ -51,6 +51,9 @@ class EvalRunResult:
         duration_ms: Execution time in milliseconds.
         tokens: Total tokens used.
         error: Error message if agent execution failed.
+        model_tag: "primary", "baseline", or None for single-model mode.
+        messages: Final conversation messages from the agent run, or None on failure.
+        row_index: The dataset row index this result belongs to.
     """
 
     run_index: int
@@ -60,6 +63,8 @@ class EvalRunResult:
     tokens: int = 0
     error: str | None = None
     model_tag: str | None = None
+    messages: list[dict[str, Any]] | None = None
+    row_index: int = 0
 
 
 @dataclass
@@ -195,8 +200,8 @@ class EvalRunner:
         """Create a new ExternalLLMClient from the original client's config."""
         return ExternalLLMClient(
             model=self.llm_client.display_name,
-            api_key=self.llm_client._api_key,
-            api_base=self.llm_client._api_base,
+            api_key=self.llm_client.api_key,
+            api_base=self.llm_client.api_base,
         )
 
     def _default_baseline_llm_client_factory(self) -> ExternalLLMClient:
@@ -205,8 +210,8 @@ class EvalRunner:
             raise RuntimeError("No baseline LLM client configured")
         return ExternalLLMClient(
             model=self._baseline_llm_client.display_name,
-            api_key=self._baseline_llm_client._api_key,
-            api_base=self._baseline_llm_client._api_base,
+            api_key=self._baseline_llm_client.api_key,
+            api_base=self._baseline_llm_client.api_base,
         )
 
     def _create_rollout_runner(self) -> LocalRolloutRunner:
@@ -304,6 +309,10 @@ class EvalRunner:
                 tokens=test_result.token_usage.get("total_tokens", 0),
                 error=test_result.error,
                 model_tag=model_tag,
+                messages=test_result.result.final_messages
+                if test_result.result is not None
+                else None,
+                row_index=row_index,
             )
 
         # Apply eval functions
@@ -333,7 +342,158 @@ class EvalRunner:
             duration_ms=test_result.duration_ms,
             tokens=test_result.token_usage.get("total_tokens", 0),
             model_tag=model_tag,
+            messages=test_result.result.final_messages,
+            row_index=row_index,
         )
+
+    async def run_batch(
+        self,
+        work_items: list[tuple[DatasetRow, int, int, str | None]],
+        max_turns: int = 10,
+        completion_params: dict[str, Any] | None = None,
+    ) -> tuple[list[EvalRunResult | None], str | None]:
+        """Run a batch of work items concurrently and return ordered results.
+
+        Args:
+            work_items: List of (row, row_index, run_index, model_tag) tuples.
+            max_turns: Max agent turns per run.
+            completion_params: LLM sampling parameters.
+
+        Returns:
+            A tuple of (batch_results, systemic_error) where batch_results is
+            a list matching the order of work_items (None for items not
+            attempted), and systemic_error is the error string if a
+            SystemicProviderError occurred.
+        """
+        if not work_items:
+            return [], None
+
+        pool_size = len(work_items)
+
+        # Build runner pools
+        has_baseline_items = any(tag == "baseline" for _, _, _, tag in work_items)
+        if has_baseline_items:
+            primary_pool_size = max(1, (pool_size + 1) // 2)
+            baseline_pool_size = max(1, pool_size - primary_pool_size)
+        else:
+            primary_pool_size = pool_size
+            baseline_pool_size = 0
+
+        primary_runners: list[LocalRolloutRunner] = []
+        baseline_runners: list[LocalRolloutRunner] = []
+        try:
+            for _ in range(primary_pool_size):
+                primary_runners.append(self._create_rollout_runner())
+            for _ in range(baseline_pool_size):
+                baseline_runners.append(self._create_baseline_rollout_runner())
+        except Exception:
+            # Clean up already-created runners
+            for runner in primary_runners + baseline_runners:
+                close = getattr(runner.llm_client, "close", None)
+                if callable(close):
+                    try:
+                        maybe_awaitable = close()
+                        if inspect.isawaitable(maybe_awaitable):
+                            await maybe_awaitable
+                    except Exception:
+                        pass  # Best-effort cleanup; re-raising the original error below
+            raise
+
+        primary_pool: asyncio.Queue[LocalRolloutRunner] = asyncio.Queue()
+        for runner in primary_runners:
+            primary_pool.put_nowait(runner)
+
+        baseline_pool: asyncio.Queue[LocalRolloutRunner] = asyncio.Queue()
+        for runner in baseline_runners:
+            baseline_pool.put_nowait(runner)
+
+        all_runners = primary_runners + baseline_runners
+
+        batch_results: list[EvalRunResult | None] = [None] * len(work_items)
+        systemic_error: str | None = None
+
+        async def _close_runner_pool() -> None:
+            """Best-effort cleanup for per-runner LLM clients."""
+            for runner in all_runners:
+                close = getattr(runner.llm_client, "close", None)
+                if not callable(close):
+                    continue
+                try:
+                    maybe_awaitable = close()
+                    if inspect.isawaitable(maybe_awaitable):
+                        await maybe_awaitable
+                except Exception:
+                    logger.debug(
+                        "Failed to close concurrent runner client", exc_info=True
+                    )
+
+        async def _run_one(
+            idx: int,
+            row: DatasetRow,
+            row_index: int,
+            run_index: int,
+            model_tag: str | None,
+        ) -> None:
+            nonlocal systemic_error
+            runner: LocalRolloutRunner | None = None
+            target_pool = baseline_pool if model_tag == "baseline" else primary_pool
+            run_start = time.monotonic()
+            try:
+                runner = await target_pool.get()
+                run_start = time.monotonic()
+                result = await self.run_single(
+                    row=row,
+                    row_index=row_index,
+                    run_index=run_index,
+                    max_turns=max_turns,
+                    completion_params=completion_params,
+                    runner=runner,
+                    model_tag=model_tag,
+                )
+                batch_results[idx] = result
+            except SystemicProviderError as e:
+                duration_ms, tokens = _extract_systemic_error_metrics(
+                    e,
+                    fallback_started_at=run_start,
+                )
+                batch_results[idx] = EvalRunResult(
+                    run_index=run_index,
+                    success=False,
+                    error=str(e),
+                    duration_ms=duration_ms,
+                    tokens=tokens,
+                    model_tag=model_tag,
+                    messages=None,
+                    row_index=row_index,
+                )
+                if systemic_error is None:
+                    systemic_error = str(e)
+            finally:
+                if runner is not None:
+                    target_pool.put_nowait(runner)
+
+        try:
+            tasks: list[asyncio.Task[None]] = [
+                asyncio.create_task(_run_one(idx, row, row_index, run_index, model_tag))
+                for idx, (row, row_index, run_index, model_tag) in enumerate(work_items)
+            ]
+
+            try:
+                # Wait for all tasks — let them all complete even if
+                # a systemic error occurs, since they're already in-flight.
+                for task in asyncio.as_completed(tasks):
+                    await task
+            except Exception:
+                # Unexpected error: cancel remaining in-flight tasks
+                for t in tasks:
+                    if not t.done():
+                        t.cancel()
+                await asyncio.gather(*tasks, return_exceptions=True)
+                raise
+        finally:
+            await _close_runner_pool()
+
+        return batch_results, systemic_error
 
     async def run_eval(
         self,
@@ -414,6 +574,8 @@ class EvalRunner:
                             duration_ms=duration_ms,
                             tokens=tokens,
                             model_tag=tag,
+                            messages=None,
+                            row_index=row_index,
                         )
                         row_result.runs.append(result)
                         current += 1
@@ -556,8 +718,8 @@ class EvalRunner:
         ) -> tuple[int, EvalRunResult]:
             nonlocal completed
             runner: LocalRolloutRunner | None = None
-            run_start = time.monotonic()
             target_pool = baseline_pool if model_tag == "baseline" else primary_pool
+            run_start = time.monotonic()
             try:
                 runner = await target_pool.get()
                 run_start = time.monotonic()
@@ -589,6 +751,8 @@ class EvalRunner:
                     duration_ms=duration_ms,
                     tokens=tokens,
                     model_tag=model_tag,
+                    messages=None,
+                    row_index=row_index,
                 )
                 completed += 1
                 if on_progress:

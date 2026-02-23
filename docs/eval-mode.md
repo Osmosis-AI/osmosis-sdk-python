@@ -80,10 +80,143 @@ Formula: `pass@k = 1 - C(n-c, k) / C(n, k)` where `n` = total runs, `c` = passin
 
 ---
 
+## Result Caching & Resume
+
+Eval mode automatically caches results to disk so evaluations can be **interrupted and resumed** without losing progress. This is especially useful for long-running evaluations with many rows or multiple runs per row.
+
+### How It Works
+
+1. When an evaluation starts, a **task ID** is computed from the full configuration (model, dataset, eval functions, parameters, and source code fingerprints).
+2. Results are written to a JSON cache file under `~/.cache/osmosis/eval/` (or `$OSMOSIS_CACHE_DIR/eval/`), organized by `{model}/{dataset}/`.
+3. If the evaluation is interrupted (Ctrl+C, SIGTERM, or crash), re-running the **same command** automatically resumes from where it left off.
+4. A file lock prevents concurrent evaluations with the same configuration from conflicting.
+
+### Cache Invalidation
+
+The cache is keyed on a fingerprint that includes:
+
+- **Module source code** — changes to your agent's `.py` file (or entire package directory for packages, or MCP directory) invalidate the cache.
+- **Eval function source code** — changes to any eval function's source file invalidate the cache.
+- **Dataset content** — the dataset file is fingerprinted; any modification is detected.
+- **All CLI parameters** — model, base URL, `--n`, `--max-turns`, `--pass-threshold`, `--temperature`, `--max-tokens`, `--offset`, `--limit`.
+
+If any of these change, a new cache entry is created automatically.
+
+> **Note**: Module fingerprinting covers the agent's own source file (or package directory). Changes to external dependencies (e.g., a library your agent imports) are **not** detected. Use `--fresh` to force a clean restart when external imports change.
+
+### Resuming After Interruption
+
+Simply re-run the exact same command:
+
+```bash
+# First run — interrupted at row 50/100
+osmosis eval -m server:agent_loop -d data.jsonl --eval-fn rewards:score --model my-model
+# ^C (interrupted)
+
+# Second run — resumes from row 50
+osmosis eval -m server:agent_loop -d data.jsonl --eval-fn rewards:score --model my-model
+```
+
+When resuming, the CLI displays:
+
+```
+Resuming eval (50/100 runs completed)
+Note: Module fingerprint covers file server.py. External dependency changes
+      are not detected. Use --fresh if you changed external imports.
+```
+
+### Dataset Integrity
+
+During evaluation, the dataset file is periodically re-checked (every 100 runs or 5 minutes) to detect modifications. If the dataset changes mid-evaluation, the run stops with an error:
+
+```
+Error: Dataset was modified during evaluation. Results may be inconsistent. Use --fresh to restart.
+```
+
+If a completed evaluation is loaded from cache but the dataset has since changed, a warning is displayed alongside the cached results.
+
+### Cache Management
+
+```bash
+# Print the cache root directory path
+osmosis eval cache dir
+
+# List all cached evaluations
+osmosis eval cache ls
+
+# List with filters
+osmosis eval cache ls --model gpt-4
+osmosis eval cache ls --status in_progress
+osmosis eval cache ls --dataset my_data
+
+# Remove a specific cached evaluation by task ID
+osmosis eval cache rm <task_id>
+
+# Remove all cached evaluations (with confirmation prompt)
+osmosis eval cache rm --all
+
+# Remove with filters (skip confirmation with -y)
+osmosis eval cache rm --status in_progress --yes
+osmosis eval cache rm --model gpt-4 --yes
+
+# Force a fresh evaluation, discarding cached results
+osmosis eval -m server:agent_loop -d data.jsonl --eval-fn rewards:score --model my-model --fresh
+
+# Re-run only failed runs from a previous evaluation
+osmosis eval -m server:agent_loop -d data.jsonl --eval-fn rewards:score --model my-model --retry-failed
+```
+
+The `--fresh` flag backs up existing cache files (with a `.backup.{timestamp}` suffix) before creating a new cache.
+
+`--fresh` and `--retry-failed` are mutually exclusive.
+
+---
+
+## Conversation Logging
+
+Use `--log-samples` to save the full conversation messages for each run to a JSONL file alongside the cache:
+
+```bash
+osmosis eval -m server:agent_loop -d data.jsonl --eval-fn rewards:score \
+    --model my-model --log-samples
+```
+
+Each line in the samples file is a JSON object containing `row_index`, `run_index`, `model_tag` (if using baseline comparison), and the full `messages` array.
+
+> **Note**: When resuming a previously interrupted evaluation, only new runs are logged. Prior runs from the cache do not have their messages retroactively saved. Use `--fresh --log-samples` if you need complete logs for all runs.
+
+---
+
+## Structured Output
+
+Use `--output-path` to write results to a structured directory:
+
+```bash
+osmosis eval -m server:agent_loop -d data.jsonl --eval-fn rewards:score \
+    --model my-model --output-path ./results
+```
+
+This creates:
+
+```
+results/
+  {model}/
+    {dataset}/
+      results_{timestamp}_{task_id}.json
+      samples_{timestamp}_{task_id}.jsonl   # if --log-samples is used
+```
+
+The results JSON uses the same schema as the internal cache file, with `status` always set to `"completed"`.
+
+The legacy `-o`/`--output` flag is still supported and writes a single JSON file with the original nested format.
+
+---
+
 ## CLI Reference
 
 ```
 osmosis eval [OPTIONS]
+osmosis eval cache dir
 ```
 
 ### Required Options
@@ -130,13 +263,28 @@ osmosis eval [OPTIONS]
 | `--limit N` | all | Maximum rows to benchmark |
 | `--offset N` | `0` | Number of rows to skip |
 
+### Cache & Resume Options
+
+| Option | Description |
+|--------|-------------|
+| `--fresh` | Force restart evaluation from scratch, discarding any cached results (backs up existing cache) |
+| `--retry-failed` | Re-execute only failed runs from a previous evaluation. Mutually exclusive with `--fresh`. |
+
 ### Output Options
 
 | Option | Description |
 |--------|-------------|
-| `-o, --output FILE` | Write results to JSON file |
+| `-o, --output FILE` | Write results to JSON file (legacy format) |
+| `--output-path DIR` | Write results to structured directory (`{model}/{dataset}/results_{ts}_{id}.json`) |
+| `--log-samples` | Save full conversation messages to a JSONL file alongside the cache |
 | `-q, --quiet` | Suppress progress output |
 | `--debug` | Enable debug logging |
+
+### Cache Management Subcommands
+
+| Command | Description |
+|---------|-------------|
+| `osmosis eval cache dir` | Print the cache root directory path |
 
 ---
 
@@ -145,6 +293,8 @@ osmosis eval [OPTIONS]
 | Exception | Description |
 |-----------|-------------|
 | `EvalFnError` | Eval function loading, signature detection, or execution error |
+| `TimeoutError` | Another evaluation with the same config is already running (lock contention) |
+| `RuntimeError` | Cache version mismatch, config hash collision, or dataset fingerprint mismatch |
 
 All other exceptions are shared with [Test Mode](./test-mode.md#exceptions).
 
@@ -154,4 +304,5 @@ All other exceptions are shared with [Test Mode](./test-mode.md#exceptions).
 
 - [Test Mode](./test-mode.md) -- Test agent logic with external LLMs
 - [Dataset Format](./datasets.md) -- Supported formats and required columns
+- [Configuration](./configuration.md) -- Environment variables including cache settings
 - [LiteLLM Providers](https://docs.litellm.ai/docs/providers) -- Supported LLM providers
