@@ -117,7 +117,35 @@ Manage the eval result cache.
 ```bash
 # Print the cache root directory path
 osmosis eval cache dir
+
+# List cached evaluations
+osmosis eval cache ls
+osmosis eval cache ls --model gpt-4 --status completed
+
+# Remove cached evaluations
+osmosis eval cache rm <task_id>
+osmosis eval cache rm --all --yes
+osmosis eval cache rm --status in_progress --yes
 ```
+
+**`osmosis eval cache ls` options:**
+
+| Option | Description |
+|--------|-------------|
+| `--model NAME` | Filter by model name (case-insensitive substring) |
+| `--dataset NAME` | Filter by dataset path (case-insensitive substring) |
+| `--status STATUS` | Filter by status (`in_progress` or `completed`) |
+
+**`osmosis eval cache rm` options:**
+
+| Option | Description |
+|--------|-------------|
+| `TASK_ID` | Task ID of the cache entry to delete (no confirmation) |
+| `--all` | Delete all cached evaluations |
+| `--model NAME` | Filter by model name (case-insensitive substring) |
+| `--dataset NAME` | Filter by dataset path (case-insensitive substring) |
+| `--status STATUS` | Filter by status (`in_progress` or `completed`) |
+| `-y`, `--yes` | Skip confirmation prompt for batch deletions |
 
 See [Eval Mode](./eval-mode.md) for full documentation on eval functions, pass@k metrics, caching, and output formats.
 

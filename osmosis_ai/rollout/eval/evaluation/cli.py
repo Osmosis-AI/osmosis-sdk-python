@@ -51,6 +51,73 @@ class EvalCommand:
         )
         dir_parser.set_defaults(handler=self._run_cache_dir)
 
+        # cache ls
+        ls_parser = cache_subparsers.add_parser("ls", help="List cached evaluations")
+        ls_parser.add_argument(
+            "--model",
+            dest="cache_model",
+            default=None,
+            help="Filter by model name (case-insensitive substring match).",
+        )
+        ls_parser.add_argument(
+            "--dataset",
+            dest="cache_dataset",
+            default=None,
+            help="Filter by dataset path (case-insensitive substring match).",
+        )
+        ls_parser.add_argument(
+            "--status",
+            dest="cache_status",
+            default=None,
+            choices=["in_progress", "completed"],
+            help="Filter by status.",
+        )
+        ls_parser.set_defaults(handler=self._run_cache_ls)
+
+        # cache rm
+        rm_parser = cache_subparsers.add_parser("rm", help="Remove cached evaluations")
+        rm_parser.add_argument(
+            "task_id",
+            nargs="?",
+            default=None,
+            help="Task ID of the cache entry to delete.",
+        )
+        rm_parser.add_argument(
+            "--all",
+            dest="rm_all",
+            action="store_true",
+            default=False,
+            help="Delete all cached evaluations.",
+        )
+        rm_parser.add_argument(
+            "--model",
+            dest="cache_model",
+            default=None,
+            help="Filter by model name (case-insensitive substring match).",
+        )
+        rm_parser.add_argument(
+            "--dataset",
+            dest="cache_dataset",
+            default=None,
+            help="Filter by dataset path (case-insensitive substring match).",
+        )
+        rm_parser.add_argument(
+            "--status",
+            dest="cache_status",
+            default=None,
+            choices=["in_progress", "completed"],
+            help="Filter by status.",
+        )
+        rm_parser.add_argument(
+            "-y",
+            "--yes",
+            dest="yes",
+            action="store_true",
+            default=False,
+            help="Skip confirmation prompt.",
+        )
+        rm_parser.set_defaults(handler=self._run_cache_rm)
+
         cache_parser.set_defaults(handler=self._run_cache_default)
 
         # Default handler: run evaluation
@@ -281,6 +348,197 @@ class EvalCommand:
         self.console.print("")
         self.console.print("Commands:")
         self.console.print("  dir     Print cache root directory path")
+        self.console.print("  ls      List cached evaluations")
+        self.console.print("  rm      Remove cached evaluations")
+        return 0
+
+    @staticmethod
+    def _filter_caches(
+        entries: list[dict],
+        model: str | None,
+        dataset: str | None,
+        status: str | None,
+    ) -> list[dict]:
+        """Filter cache entries by model/dataset/status."""
+        result = entries
+        if model:
+            model_lower = model.lower()
+            result = [
+                e
+                for e in result
+                if model_lower in e.get("config", {}).get("model", "").lower()
+            ]
+        if dataset:
+            dataset_lower = dataset.lower()
+            result = [
+                e
+                for e in result
+                if dataset_lower in e.get("config", {}).get("dataset", "").lower()
+            ]
+        if status:
+            result = [e for e in result if e.get("status") == status]
+        return result
+
+    def _run_cache_ls(self, args: argparse.Namespace) -> int:
+        from osmosis_ai.rollout.eval.evaluation.cache import JsonFileCacheBackend
+
+        backend = JsonFileCacheBackend()
+        entries = backend.list_caches()
+        entries = self._filter_caches(
+            entries,
+            model=getattr(args, "cache_model", None),
+            dataset=getattr(args, "cache_dataset", None),
+            status=getattr(args, "cache_status", None),
+        )
+
+        # Sort by created_at descending (newest first)
+        entries.sort(key=lambda e: e.get("created_at", ""), reverse=True)
+
+        if not entries:
+            self.console.print("No cached evaluations found.")
+            return 0
+
+        def _render_rich(rc: Any) -> None:
+            from rich.table import Table as RichTable
+
+            table = RichTable(show_header=True, header_style="bold")
+            table.add_column("TASK ID")
+            table.add_column("MODEL")
+            table.add_column("DATASET")
+            table.add_column("STATUS")
+            table.add_column("RUNS", justify="right")
+            table.add_column("CREATED")
+            for e in entries:
+                config = e.get("config", {})
+                created = e.get("created_at", "")
+                if created and len(created) >= 16:
+                    created = created[:16].replace("T", " ")
+                table.add_row(
+                    e.get("task_id", ""),
+                    config.get("model", ""),
+                    config.get("dataset", ""),
+                    e.get("status", ""),
+                    str(e.get("runs_count", 0)),
+                    created,
+                )
+            rc.print(table)
+
+        if not self.console.run_rich(_render_rich):
+            # Plain text fallback (tab-separated for piping)
+            is_tty = self.console.is_tty
+            if is_tty:
+                header = (
+                    f"{'TASK ID':<14} {'MODEL':<20} {'DATASET':<20} "
+                    f"{'STATUS':<14} {'RUNS':>5}  {'CREATED'}"
+                )
+                self.console.print(header)
+            for e in entries:
+                config = e.get("config", {})
+                created = e.get("created_at", "")
+                if created and len(created) >= 16:
+                    created = created[:16].replace("T", " ")
+                if is_tty:
+                    line = (
+                        f"{e.get('task_id', ''):<14} "
+                        f"{config.get('model', ''):<20} "
+                        f"{config.get('dataset', ''):<20} "
+                        f"{e.get('status', ''):<14} "
+                        f"{e.get('runs_count', 0):>5}  "
+                        f"{created}"
+                    )
+                else:
+                    line = "\t".join(
+                        [
+                            e.get("task_id", ""),
+                            config.get("model", ""),
+                            config.get("dataset", ""),
+                            e.get("status", ""),
+                            str(e.get("runs_count", 0)),
+                            created,
+                        ]
+                    )
+                self.console.print(line)
+
+        return 0
+
+    def _run_cache_rm(self, args: argparse.Namespace) -> int:
+        from osmosis_ai.rollout.eval.evaluation.cache import JsonFileCacheBackend
+
+        task_id = getattr(args, "task_id", None)
+        rm_all = getattr(args, "rm_all", False)
+        model_filter = getattr(args, "cache_model", None)
+        dataset_filter = getattr(args, "cache_dataset", None)
+        status_filter = getattr(args, "cache_status", None)
+        skip_confirm = getattr(args, "yes", False)
+
+        has_filter = any([model_filter, dataset_filter, status_filter])
+
+        if not task_id and not rm_all and not has_filter:
+            self.console.print_error(
+                "Error: Provide a task_id, --all, or at least one filter "
+                "(--model, --dataset, --status)."
+            )
+            return 1
+
+        backend = JsonFileCacheBackend()
+        all_entries = backend.list_caches()
+
+        # Select targets
+        if task_id:
+            targets = [e for e in all_entries if e.get("task_id") == task_id]
+        else:
+            targets = self._filter_caches(
+                all_entries, model_filter, dataset_filter, status_filter
+            )
+
+        if not targets:
+            self.console.print("No matching cached evaluations found.")
+            return 1
+
+        # Single task_id deletion: no confirmation needed
+        is_batch = not task_id
+        if is_batch and not skip_confirm:
+            self.console.print(f"Will delete {len(targets)} cached evaluation(s):")
+            for e in targets:
+                config = e.get("config", {})
+                self.console.print(
+                    f"  {e.get('task_id', '')}"
+                    f"  {config.get('model', '')}"
+                    f"  {config.get('dataset', '')}"
+                    f"  ({e.get('status', '')})"
+                )
+            try:
+                answer = self.console.input(
+                    f"Delete {len(targets)} cached evaluation(s)? [y/N] "
+                )
+            except (EOFError, KeyboardInterrupt):
+                self.console.print("\nAborted.")
+                return 130
+            if answer.strip().lower() not in ("y", "yes"):
+                self.console.print("Aborted.")
+                return 0
+
+        deleted = 0
+        for entry in targets:
+            cache_path = Path(entry["path"])
+            backend.delete_cache(cache_path)
+            # Clean up empty parent directories
+            parent = cache_path.parent
+            try:
+                if parent.is_dir() and not any(parent.iterdir()):
+                    parent.rmdir()
+                    grandparent = parent.parent
+                    if (
+                        grandparent.is_dir()
+                        and grandparent != backend.cache_root
+                        and not any(grandparent.iterdir())
+                    ):
+                        grandparent.rmdir()
+            except OSError:
+                pass
+            deleted += 1
+
+        self.console.print(f"Deleted {deleted} cached evaluation(s).")
         return 0
 
     def run(self, args: argparse.Namespace) -> int:

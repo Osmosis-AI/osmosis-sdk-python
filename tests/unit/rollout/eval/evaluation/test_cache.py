@@ -1,10 +1,12 @@
-"""Tests for eval cache: deterministic JSON, task ID, and fingerprints."""
+"""Tests for eval cache: deterministic JSON, task ID, fingerprints, and CLI commands."""
 
 from __future__ import annotations
 
+import argparse
 import json
 import types
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -1205,3 +1207,403 @@ class TestJsonFileCacheBackend:
         assert "updated_at" in cache_data
         data = json.loads(cache_path.read_text())
         assert "updated_at" in data
+
+
+# ============================================================
+# Helper: create cache entries in a tmp_path backend
+# ============================================================
+
+
+def _make_cache_entry(
+    cache_root: Path,
+    task_id: str,
+    model: str,
+    dataset: str,
+    status: str = "completed",
+    runs_count: int = 10,
+    created_at: str = "2024-02-23T15:30:00Z",
+) -> Path:
+    """Create a cache JSON file for testing."""
+    model_dir = sanitize_path_part(model)
+    dataset_dir = sanitize_path_part(Path(dataset).stem)
+    cache_dir = cache_root / model_dir / dataset_dir
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
+    if created_at:
+        from datetime import datetime
+
+        dt = datetime.fromisoformat(created_at.replace("Z", "+00:00"))
+        unix_ts = int(dt.timestamp())
+    else:
+        unix_ts = 0
+    cache_path = cache_dir / f"{unix_ts}_{task_id}.json"
+    runs = [
+        {"row_index": i, "run_index": 0, "scores": {"fn": 0.5}}
+        for i in range(runs_count)
+    ]
+    data = {
+        "version": 1,
+        "task_id": task_id,
+        "config_hash": "a" * 32,
+        "status": status,
+        "created_at": created_at,
+        "updated_at": created_at,
+        "config": {"model": model, "dataset": dataset},
+        "runs": runs,
+        "summary": None,
+    }
+    cache_path.write_text(json.dumps(data))
+    # Also create a companion JSONL
+    jsonl_path = cache_path.with_suffix(".jsonl")
+    jsonl_path.write_text('{"row_index": 0, "run_index": 0}\n')
+    return cache_path
+
+
+# ============================================================
+# EvalCommand cache ls tests
+# ============================================================
+
+
+class TestCacheLs:
+    def _make_command(self):
+        from osmosis_ai.rollout.console import Console
+        from osmosis_ai.rollout.eval.evaluation.cli import EvalCommand
+
+        cmd = EvalCommand()
+        cmd.console = Console(force_terminal=False, no_color=True)
+        return cmd
+
+    def test_ls_empty(self, tmp_path: Path, monkeypatch):
+        """No caches prints 'No cached evaluations found.'."""
+        monkeypatch.setattr(
+            "osmosis_ai.rollout.eval.evaluation.cache._get_cache_root",
+            lambda: tmp_path,
+        )
+        cmd = self._make_command()
+        args = argparse.Namespace(
+            cache_model=None, cache_dataset=None, cache_status=None
+        )
+        ret = cmd._run_cache_ls(args)
+        assert ret == 0
+
+    def test_ls_lists_entries(self, tmp_path: Path, monkeypatch):
+        """Lists cache entries."""
+        _make_cache_entry(tmp_path, "abc123", "openai/gpt-4", "my_data.jsonl")
+        _make_cache_entry(
+            tmp_path,
+            "def456",
+            "openai/gpt-3.5",
+            "other.jsonl",
+            status="in_progress",
+            runs_count=5,
+        )
+        monkeypatch.setattr(
+            "osmosis_ai.rollout.eval.evaluation.cache._get_cache_root",
+            lambda: tmp_path,
+        )
+
+        cmd = self._make_command()
+        args = argparse.Namespace(
+            cache_model=None, cache_dataset=None, cache_status=None
+        )
+        ret = cmd._run_cache_ls(args)
+        assert ret == 0
+
+    def test_ls_filter_by_model(self, tmp_path: Path):
+        """--model filters by model substring."""
+        _make_cache_entry(tmp_path, "abc123", "openai/gpt-4", "data.jsonl")
+        _make_cache_entry(tmp_path, "def456", "anthropic/claude", "data.jsonl")
+
+        backend = JsonFileCacheBackend(cache_root=tmp_path)
+        entries = backend.list_caches()
+
+        from osmosis_ai.rollout.eval.evaluation.cli import EvalCommand
+
+        filtered = EvalCommand._filter_caches(
+            entries, model="gpt-4", dataset=None, status=None
+        )
+        assert len(filtered) == 1
+        assert filtered[0]["task_id"] == "abc123"
+
+    def test_ls_filter_by_status(self, tmp_path: Path):
+        """--status filters by status."""
+        _make_cache_entry(tmp_path, "abc123", "gpt-4", "data.jsonl", status="completed")
+        _make_cache_entry(
+            tmp_path, "def456", "gpt-4", "data2.jsonl", status="in_progress"
+        )
+
+        backend = JsonFileCacheBackend(cache_root=tmp_path)
+        entries = backend.list_caches()
+
+        from osmosis_ai.rollout.eval.evaluation.cli import EvalCommand
+
+        filtered = EvalCommand._filter_caches(
+            entries, model=None, dataset=None, status="in_progress"
+        )
+        assert len(filtered) == 1
+        assert filtered[0]["task_id"] == "def456"
+
+    def test_ls_filter_by_dataset(self, tmp_path: Path):
+        """--dataset filters by dataset substring."""
+        _make_cache_entry(tmp_path, "abc123", "gpt-4", "train_data.jsonl")
+        _make_cache_entry(tmp_path, "def456", "gpt-4", "test_data.jsonl")
+
+        backend = JsonFileCacheBackend(cache_root=tmp_path)
+        entries = backend.list_caches()
+
+        from osmosis_ai.rollout.eval.evaluation.cli import EvalCommand
+
+        filtered = EvalCommand._filter_caches(
+            entries, model=None, dataset="train", status=None
+        )
+        assert len(filtered) == 1
+        assert filtered[0]["task_id"] == "abc123"
+
+    def test_ls_filter_case_insensitive(self, tmp_path: Path):
+        """Filters are case-insensitive."""
+        _make_cache_entry(tmp_path, "abc123", "OpenAI/GPT-4", "data.jsonl")
+
+        backend = JsonFileCacheBackend(cache_root=tmp_path)
+        entries = backend.list_caches()
+
+        from osmosis_ai.rollout.eval.evaluation.cli import EvalCommand
+
+        filtered = EvalCommand._filter_caches(
+            entries, model="openai/gpt-4", dataset=None, status=None
+        )
+        assert len(filtered) == 1
+
+    def test_ls_sorted_newest_first(self, tmp_path: Path):
+        """Entries are sorted by created_at descending."""
+        _make_cache_entry(
+            tmp_path,
+            "old111",
+            "gpt-4",
+            "a.jsonl",
+            created_at="2024-01-01T00:00:00Z",
+        )
+        _make_cache_entry(
+            tmp_path,
+            "new222",
+            "gpt-4",
+            "b.jsonl",
+            created_at="2024-06-15T00:00:00Z",
+        )
+
+        backend = JsonFileCacheBackend(cache_root=tmp_path)
+        entries = backend.list_caches()
+        entries.sort(key=lambda e: e.get("created_at", ""), reverse=True)
+        assert entries[0]["task_id"] == "new222"
+        assert entries[1]["task_id"] == "old111"
+
+
+# ============================================================
+# EvalCommand cache rm tests
+# ============================================================
+
+
+class TestCacheRm:
+    def _make_command(self):
+        from osmosis_ai.rollout.console import Console
+        from osmosis_ai.rollout.eval.evaluation.cli import EvalCommand
+
+        cmd = EvalCommand()
+        cmd.console = Console(force_terminal=False, no_color=True)
+        return cmd
+
+    def test_rm_no_args_errors(self, tmp_path: Path, monkeypatch):
+        """No arguments prints error."""
+        monkeypatch.setattr(
+            "osmosis_ai.rollout.eval.evaluation.cache._get_cache_root",
+            lambda: tmp_path,
+        )
+        cmd = self._make_command()
+        args = argparse.Namespace(
+            task_id=None,
+            rm_all=False,
+            cache_model=None,
+            cache_dataset=None,
+            cache_status=None,
+            yes=False,
+        )
+        ret = cmd._run_cache_rm(args)
+        assert ret == 1
+
+    def test_rm_by_task_id(self, tmp_path: Path, monkeypatch):
+        """Delete single entry by task_id without confirmation."""
+        cache_path = _make_cache_entry(tmp_path, "abc123", "gpt-4", "data.jsonl")
+        jsonl_path = cache_path.with_suffix(".jsonl")
+        assert cache_path.exists()
+        assert jsonl_path.exists()
+
+        monkeypatch.setattr(
+            "osmosis_ai.rollout.eval.evaluation.cache._get_cache_root",
+            lambda: tmp_path,
+        )
+        cmd = self._make_command()
+        args = argparse.Namespace(
+            task_id="abc123",
+            rm_all=False,
+            cache_model=None,
+            cache_dataset=None,
+            cache_status=None,
+            yes=False,
+        )
+        ret = cmd._run_cache_rm(args)
+        assert ret == 0
+        assert not cache_path.exists()
+        assert not jsonl_path.exists()
+
+    def test_rm_nonexistent_task_id(self, tmp_path: Path, monkeypatch):
+        """Non-existent task_id prints message and returns 1."""
+        monkeypatch.setattr(
+            "osmosis_ai.rollout.eval.evaluation.cache._get_cache_root",
+            lambda: tmp_path,
+        )
+        cmd = self._make_command()
+        args = argparse.Namespace(
+            task_id="nonexistent",
+            rm_all=False,
+            cache_model=None,
+            cache_dataset=None,
+            cache_status=None,
+            yes=False,
+        )
+        ret = cmd._run_cache_rm(args)
+        assert ret == 1
+
+    def test_rm_all_with_yes(self, tmp_path: Path, monkeypatch):
+        """--all --yes deletes everything without prompting."""
+        p1 = _make_cache_entry(tmp_path, "abc123", "gpt-4", "data.jsonl")
+        p2 = _make_cache_entry(tmp_path, "def456", "gpt-3.5", "data2.jsonl")
+
+        monkeypatch.setattr(
+            "osmosis_ai.rollout.eval.evaluation.cache._get_cache_root",
+            lambda: tmp_path,
+        )
+        cmd = self._make_command()
+        args = argparse.Namespace(
+            task_id=None,
+            rm_all=True,
+            cache_model=None,
+            cache_dataset=None,
+            cache_status=None,
+            yes=True,
+        )
+        ret = cmd._run_cache_rm(args)
+        assert ret == 0
+        assert not p1.exists()
+        assert not p2.exists()
+
+    def test_rm_all_confirm_yes(self, tmp_path: Path, monkeypatch):
+        """--all with 'y' confirmation deletes."""
+        _make_cache_entry(tmp_path, "abc123", "gpt-4", "data.jsonl")
+
+        monkeypatch.setattr(
+            "osmosis_ai.rollout.eval.evaluation.cache._get_cache_root",
+            lambda: tmp_path,
+        )
+        cmd = self._make_command()
+        args = argparse.Namespace(
+            task_id=None,
+            rm_all=True,
+            cache_model=None,
+            cache_dataset=None,
+            cache_status=None,
+            yes=False,
+        )
+        with patch("builtins.input", return_value="y"):
+            ret = cmd._run_cache_rm(args)
+        assert ret == 0
+
+    def test_rm_all_confirm_no(self, tmp_path: Path, monkeypatch):
+        """--all with 'n' confirmation aborts."""
+        p1 = _make_cache_entry(tmp_path, "abc123", "gpt-4", "data.jsonl")
+
+        monkeypatch.setattr(
+            "osmosis_ai.rollout.eval.evaluation.cache._get_cache_root",
+            lambda: tmp_path,
+        )
+        cmd = self._make_command()
+        args = argparse.Namespace(
+            task_id=None,
+            rm_all=True,
+            cache_model=None,
+            cache_dataset=None,
+            cache_status=None,
+            yes=False,
+        )
+        with patch("builtins.input", return_value="n"):
+            ret = cmd._run_cache_rm(args)
+        assert ret == 0
+        assert p1.exists()  # Not deleted
+
+    def test_rm_filter_by_status(self, tmp_path: Path, monkeypatch):
+        """Filter by --status deletes only matching entries."""
+        p_completed = _make_cache_entry(
+            tmp_path, "abc123", "gpt-4", "data.jsonl", status="completed"
+        )
+        p_progress = _make_cache_entry(
+            tmp_path, "def456", "gpt-4", "data2.jsonl", status="in_progress"
+        )
+
+        monkeypatch.setattr(
+            "osmosis_ai.rollout.eval.evaluation.cache._get_cache_root",
+            lambda: tmp_path,
+        )
+        cmd = self._make_command()
+        args = argparse.Namespace(
+            task_id=None,
+            rm_all=False,
+            cache_model=None,
+            cache_dataset=None,
+            cache_status="in_progress",
+            yes=True,
+        )
+        ret = cmd._run_cache_rm(args)
+        assert ret == 0
+        assert p_completed.exists()
+        assert not p_progress.exists()
+
+    def test_rm_cleans_empty_dirs(self, tmp_path: Path, monkeypatch):
+        """After deletion, empty parent directories are cleaned up."""
+        p = _make_cache_entry(tmp_path, "abc123", "gpt-4", "data.jsonl")
+        parent_dir = p.parent
+
+        monkeypatch.setattr(
+            "osmosis_ai.rollout.eval.evaluation.cache._get_cache_root",
+            lambda: tmp_path,
+        )
+        cmd = self._make_command()
+        args = argparse.Namespace(
+            task_id="abc123",
+            rm_all=False,
+            cache_model=None,
+            cache_dataset=None,
+            cache_status=None,
+            yes=False,
+        )
+        ret = cmd._run_cache_rm(args)
+        assert ret == 0
+        assert not parent_dir.exists()
+
+    def test_rm_eof_aborts(self, tmp_path: Path, monkeypatch):
+        """EOFError during confirmation aborts gracefully."""
+        _make_cache_entry(tmp_path, "abc123", "gpt-4", "data.jsonl")
+
+        monkeypatch.setattr(
+            "osmosis_ai.rollout.eval.evaluation.cache._get_cache_root",
+            lambda: tmp_path,
+        )
+        cmd = self._make_command()
+        args = argparse.Namespace(
+            task_id=None,
+            rm_all=True,
+            cache_model=None,
+            cache_dataset=None,
+            cache_status=None,
+            yes=False,
+        )
+        with patch("builtins.input", side_effect=EOFError):
+            ret = cmd._run_cache_rm(args)
+        assert ret == 130

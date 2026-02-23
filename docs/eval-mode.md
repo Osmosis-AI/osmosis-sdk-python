@@ -141,6 +141,24 @@ If a completed evaluation is loaded from cache but the dataset has since changed
 # Print the cache root directory path
 osmosis eval cache dir
 
+# List all cached evaluations
+osmosis eval cache ls
+
+# List with filters
+osmosis eval cache ls --model gpt-4
+osmosis eval cache ls --status in_progress
+osmosis eval cache ls --dataset my_data
+
+# Remove a specific cached evaluation by task ID
+osmosis eval cache rm <task_id>
+
+# Remove all cached evaluations (with confirmation prompt)
+osmosis eval cache rm --all
+
+# Remove with filters (skip confirmation with -y)
+osmosis eval cache rm --status in_progress --yes
+osmosis eval cache rm --model gpt-4 --yes
+
 # Force a fresh evaluation, discarding cached results
 osmosis eval -m server:agent_loop -d data.jsonl --eval-fn rewards:score --model my-model --fresh
 
