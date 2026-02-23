@@ -20,7 +20,7 @@ from .engine import EvaluationReport, RubricEvaluationEngine
 from .errors import CLIError
 from .reporting import BaselineComparator, BaselineStatistics, JsonReportWriter
 
-logger = logging.getLogger(__name__)
+logger: logging.Logger = logging.getLogger(__name__)
 
 _CACHE_ROOT = Path("~/.cache/osmosis/rubric").expanduser()
 _OLD_RUBRIC_CACHE_ROOT = Path("~/.cache/osmosis/eval_result").expanduser()

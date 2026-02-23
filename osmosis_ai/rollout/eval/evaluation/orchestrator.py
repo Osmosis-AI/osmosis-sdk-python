@@ -29,7 +29,7 @@ from osmosis_ai.rollout.eval.evaluation.cache import (
 )
 from osmosis_ai.rollout.eval.evaluation.runner import EvalRunner, EvalRunResult
 
-logger = logging.getLogger(__name__)
+logger: logging.Logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -53,10 +53,10 @@ class OrchestratorResult:
     status: str
     cache_path: Path
     samples_path: Path | None
-    summary: dict | None
+    summary: dict[str, Any] | None
     total_completed: int
     total_expected: int
-    cache_data: dict
+    cache_data: dict[str, Any]
     stop_reason: str | None = None
     dataset_fingerprint_warning: str | None = None
 
@@ -108,7 +108,9 @@ class EvalOrchestrator:
         self.dataset_path = dataset_path
         self.dataset_fingerprint = dataset_fingerprint
         self.start_index = start_index
-        self.model_tags = model_tags if model_tags is not None else [None]
+        self.model_tags: list[str | None] = (
+            model_tags if model_tags is not None else [None]
+        )
         self.on_progress = on_progress
 
         # Runtime state (set during run())
@@ -288,7 +290,7 @@ class EvalOrchestrator:
             else:
                 status = "completed"
 
-            summary: dict | None = None
+            summary: dict[str, Any] | None = None
             if status == "completed":
                 # After force_flush, disk has the full merged runs list.
                 # Re-read from disk to get all runs (old + new) for summary.
@@ -342,7 +344,7 @@ class EvalOrchestrator:
     async def _run_sequential(
         self,
         work_items: list[tuple[DatasetRow, int, int, str | None]],
-        cache_data: dict,
+        cache_data: dict[str, Any],
         flush_ctl: CacheFlushController,
         dataset_checker: DatasetIntegrityChecker | None,
         prior_completed_count: int,
@@ -418,7 +420,7 @@ class EvalOrchestrator:
     async def _run_batched(
         self,
         work_items: list[tuple[DatasetRow, int, int, str | None]],
-        cache_data: dict,
+        cache_data: dict[str, Any],
         flush_ctl: CacheFlushController,
         dataset_checker: DatasetIntegrityChecker | None,
         prior_completed_count: int,
@@ -484,7 +486,7 @@ class EvalOrchestrator:
     def _record_result(
         self,
         result: EvalRunResult,
-        cache_data: dict,
+        cache_data: dict[str, Any],
         row_index: int,
         run_index: int,
     ) -> None:

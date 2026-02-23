@@ -23,12 +23,12 @@ from contextlib import suppress
 from dataclasses import dataclass
 from math import comb
 from pathlib import Path
-from typing import Protocol
+from typing import Any, Protocol
 
 import filelock
 import xxhash
 
-logger = logging.getLogger(__name__)
+logger: logging.Logger = logging.getLogger(__name__)
 
 
 # ============================================================
@@ -351,7 +351,7 @@ _WRITE_FAILURE_WARN_THRESHOLD = 3
 _consecutive_write_failures = 0
 
 
-def atomic_write_json(path: Path, data: dict) -> None:  # type: ignore[type-arg]
+def atomic_write_json(path: Path, data: dict[str, Any]) -> None:
     """Write JSON atomically via NamedTemporaryFile + os.replace().
 
     Tracks consecutive failures via module-level counter, warns to stderr after 3.
@@ -424,7 +424,7 @@ class CacheConfig:
     config_hash: str
     model: str
     dataset_path: str
-    config: dict  # Full config dict for storage in cache file
+    config: dict[str, Any]  # Full config dict for storage in cache file
     total_rows: int
 
 
@@ -485,7 +485,7 @@ class CacheFlushController:
     def __init__(
         self,
         cache_path: Path,
-        cache_data: dict,
+        cache_data: dict[str, Any],
         flush_interval_runs: int = 50,
         flush_interval_secs: float = 60.0,
         prior_runs_count: int = 0,
@@ -552,24 +552,24 @@ class CacheBackend(Protocol):
         task_id: str,
         config_hash: str,
         fresh: bool,
-        config: dict,
+        config: dict[str, Any],
         total_rows: int,
         model: str | None = None,
         dataset_path: str | None = None,
         dataset_fingerprint: str | None = None,
-    ) -> tuple[Path, dict, set[tuple[int, int, str | None]]]: ...
+    ) -> tuple[Path, dict[str, Any], set[tuple[int, int, str | None]]]: ...
 
-    def write_cache(self, cache_path: Path, cache_data: dict) -> None: ...
+    def write_cache(self, cache_path: Path, cache_data: dict[str, Any]) -> None: ...
 
-    def append_run(self, cache_path: Path, run: dict) -> None: ...
+    def append_run(self, cache_path: Path, run: dict[str, Any]) -> None: ...
 
-    def append_sample(self, samples_path: Path, sample: dict) -> None: ...
+    def append_sample(self, samples_path: Path, sample: dict[str, Any]) -> None: ...
 
-    def read_samples(self, samples_path: Path) -> list[dict]: ...
+    def read_samples(self, samples_path: Path) -> list[dict[str, Any]]: ...
 
     def delete_cache(self, cache_path: Path) -> None: ...
 
-    def list_caches(self, root: Path | None = None) -> list[dict]: ...
+    def list_caches(self, root: Path | None = None) -> list[dict[str, Any]]: ...
 
 
 # ============================================================
@@ -615,11 +615,11 @@ def _backup_corrupt_cache(cache_path: Path) -> Path | None:
 
 
 def build_summary(
-    runs: list[dict],
+    runs: list[dict[str, Any]],
     eval_fn_names: list[str],
     pass_threshold: float,
     n_runs: int,
-) -> dict:
+) -> dict[str, Any]:
     """Compute aggregated statistics from runs list.
 
     Returns a summary dict with per-eval-fn stats (mean, std, min, max, pass_at_k).
@@ -738,12 +738,12 @@ class JsonFileCacheBackend:
         task_id: str,
         config_hash: str,
         fresh: bool,
-        config: dict,
+        config: dict[str, Any],
         total_rows: int,
         model: str | None = None,
         dataset_path: str | None = None,
         dataset_fingerprint: str | None = None,
-    ) -> tuple[Path, dict, set[tuple[int, int, str | None]]]:
+    ) -> tuple[Path, dict[str, Any], set[tuple[int, int, str | None]]]:
         # Determine cache dir
         _model = model or config.get("model", "unknown")
         _dataset_path = dataset_path or config.get("dataset_path", "unknown")
@@ -893,14 +893,14 @@ class JsonFileCacheBackend:
         }
         return cache_path, cache_data, completed_runs
 
-    def write_cache(self, cache_path: Path, cache_data: dict) -> None:
+    def write_cache(self, cache_path: Path, cache_data: dict[str, Any]) -> None:
         cache_data["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
         atomic_write_json(cache_path, cache_data)
 
-    def append_run(self, cache_path: Path, run: dict) -> None:
+    def append_run(self, cache_path: Path, run: dict[str, Any]) -> None:
         pass  # No-op for JSON backend; runs buffered in-memory
 
-    def append_sample(self, samples_path: Path, sample: dict) -> None:
+    def append_sample(self, samples_path: Path, sample: dict[str, Any]) -> None:
         samples_path.parent.mkdir(parents=True, exist_ok=True)
         try:
             line = json.dumps(sample, ensure_ascii=False)
@@ -910,10 +910,10 @@ class JsonFileCacheBackend:
         except OSError as e:
             logger.warning("Failed to write sample to %s: %s", samples_path, e)
 
-    def read_samples(self, samples_path: Path) -> list[dict]:
+    def read_samples(self, samples_path: Path) -> list[dict[str, Any]]:
         if not samples_path.exists():
             return []
-        samples_by_key: dict[tuple[int, int, str | None], dict] = {}
+        samples_by_key: dict[tuple[int, int, str | None], dict[str, Any]] = {}
         with open(samples_path, encoding="utf-8") as f:
             for lineno, line in enumerate(f, 1):
                 line = line.strip()
@@ -940,7 +940,7 @@ class JsonFileCacheBackend:
         with suppress(OSError):
             jsonl_path.unlink()
 
-    def list_caches(self, root: Path | None = None) -> list[dict]:
+    def list_caches(self, root: Path | None = None) -> list[dict[str, Any]]:
         search_root = root or self._cache_root
         if not search_root.exists():
             return []

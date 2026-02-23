@@ -63,7 +63,7 @@ class EvalRunResult:
     tokens: int = 0
     error: str | None = None
     model_tag: str | None = None
-    messages: list[dict] | None = None
+    messages: list[dict[str, Any]] | None = None
     row_index: int = 0
 
 
