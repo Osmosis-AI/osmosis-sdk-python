@@ -15,7 +15,6 @@ from osmosis_ai.rollout.eval.evaluation.cache import (
     DatasetIntegrityChecker,
     DatasetStatus,
     JsonFileCacheBackend,
-    _atomic_write_json,
     _backup_corrupt_cache,
     _deterministic_json,
     _get_cache_root,
@@ -23,12 +22,13 @@ from osmosis_ai.rollout.eval.evaluation.cache import (
     _hash_directory_tree,
     _hash_file,
     _resolve_source_file,
-    _sanitize_path_part,
+    atomic_write_json,
     build_summary,
     compute_dataset_fingerprint,
     compute_eval_fns_fingerprint,
     compute_module_fingerprint,
     compute_task_id,
+    sanitize_path_part,
 )
 
 # ============================================================
@@ -500,63 +500,63 @@ class TestGetCacheRoot:
 
 
 # ============================================================
-# _sanitize_path_part tests
+# sanitize_path_part tests
 # ============================================================
 
 
 class TestSanitizePathPart:
     def test_slash_to_dash(self):
-        assert _sanitize_path_part("openai/gpt-4o") == "openai-gpt-4o"
+        assert sanitize_path_part("openai/gpt-4o") == "openai-gpt-4o"
 
     def test_cjk_preserved(self):
-        assert _sanitize_path_part("中文模型") == "中文模型"
+        assert sanitize_path_part("中文模型") == "中文模型"
 
     def test_windows_reserved(self):
-        assert _sanitize_path_part("NUL") == "_nul"
-        assert _sanitize_path_part("CON") == "_con"
-        assert _sanitize_path_part("AUX") == "_aux"
+        assert sanitize_path_part("NUL") == "_nul"
+        assert sanitize_path_part("CON") == "_con"
+        assert sanitize_path_part("AUX") == "_aux"
 
     def test_long_name_truncation(self):
         long_name = "a" * 100
-        result = _sanitize_path_part(long_name)
+        result = sanitize_path_part(long_name)
         assert len(result) <= 60
 
     def test_long_names_dont_collide(self):
         name1 = "a" * 100 + "v1"
         name2 = "a" * 100 + "v2"
-        assert _sanitize_path_part(name1) != _sanitize_path_part(name2)
+        assert sanitize_path_part(name1) != sanitize_path_part(name2)
 
     def test_empty_input(self):
-        result = _sanitize_path_part("///")
+        result = sanitize_path_part("///")
         assert result.startswith("eval-")
 
     def test_accents_stripped(self):
-        result = _sanitize_path_part("café-model")
+        result = sanitize_path_part("café-model")
         assert result == "cafe-model"
 
 
 # ============================================================
-# _atomic_write_json tests
+# atomic_write_json tests
 # ============================================================
 
 
 class TestAtomicWriteJson:
     def test_basic_write(self, tmp_path):
         path = tmp_path / "test.json"
-        _atomic_write_json(path, {"key": "value"})
+        atomic_write_json(path, {"key": "value"})
         assert path.exists()
         data = json.loads(path.read_text())
         assert data == {"key": "value"}
 
     def test_creates_parent_dirs(self, tmp_path):
         path = tmp_path / "a" / "b" / "test.json"
-        _atomic_write_json(path, {"key": "value"})
+        atomic_write_json(path, {"key": "value"})
         assert path.exists()
 
     def test_overwrites_existing(self, tmp_path):
         path = tmp_path / "test.json"
-        _atomic_write_json(path, {"v": 1})
-        _atomic_write_json(path, {"v": 2})
+        atomic_write_json(path, {"v": 1})
+        atomic_write_json(path, {"v": 2})
         data = json.loads(path.read_text())
         assert data == {"v": 2}
 

@@ -1206,7 +1206,7 @@ class TestFlushController:
         # We verify indirectly: after run, the cache_data should have been
         # passed to write_cache (which is called by force_flush via the
         # CacheFlushController). Since we use MockCacheBackend, force_flush
-        # calls _atomic_write_json on the real CacheFlushController.
+        # calls atomic_write_json on the real CacheFlushController.
         # Instead, let's verify the finally block runs by checking that
         # a completed orchestrator wrote the cache.
         cache_backend = MockCacheBackend()
@@ -1215,7 +1215,7 @@ class TestFlushController:
 
         assert result.status == "completed"
         # write_cache is called for the final summary; the flush controller's
-        # force_flush writes via _atomic_write_json (not via backend.write_cache).
+        # force_flush writes via atomic_write_json (not via backend.write_cache).
         # The important thing is that the orchestrator completes without error
         # and the lock is released, indicating the finally block ran.
         assert cache_backend.lock.released is True

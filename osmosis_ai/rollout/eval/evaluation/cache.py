@@ -209,7 +209,7 @@ def compute_module_fingerprint(module_path: str) -> str | None:
     module_name, _, _ = module_path.partition(":")
     try:
         mod = importlib.import_module(module_name)
-    except ImportError:
+    except Exception:
         return None
     source_file = _resolve_source_file(mod)
     if source_file is None:
@@ -292,7 +292,7 @@ _WINDOWS_RESERVED_NAMES = frozenset(
 )
 
 
-def _sanitize_path_part(s: str, max_len: int = 60) -> str:
+def sanitize_path_part(s: str, max_len: int = 60) -> str:
     """Sanitize a string for safe use as a directory name.
 
     - Unicode NFD normalization, strips combining marks (accents)
@@ -347,17 +347,14 @@ def _replace_with_retry(src: str, dst: Path, max_retries: int = 3) -> None:
             time.sleep(0.1 * (attempt + 1))
 
 
-_consecutive_write_failures = 0
 _WRITE_FAILURE_WARN_THRESHOLD = 3
 
 
-def _atomic_write_json(path: Path, data: dict) -> None:  # type: ignore[type-arg]
+def atomic_write_json(path: Path, data: dict) -> None:  # type: ignore[type-arg]
     """Write JSON atomically via NamedTemporaryFile + os.replace().
 
-    Tracks consecutive failures, warns to stderr after 3.
+    Tracks consecutive failures via function attribute, warns to stderr after 3.
     """
-    global _consecutive_write_failures
-
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path: str | None = None
     try:
@@ -373,26 +370,29 @@ def _atomic_write_json(path: Path, data: dict) -> None:  # type: ignore[type-arg
             f.flush()
             _fsync(f.fileno())
         _replace_with_retry(tmp_path, path)
-        _consecutive_write_failures = 0
+        atomic_write_json._consecutive_failures = 0
     except BaseException as exc:
         if tmp_path is not None:
             with suppress(OSError):
                 os.unlink(tmp_path)
         if not isinstance(exc, (KeyboardInterrupt, SystemExit)):
-            _consecutive_write_failures += 1
-            if _consecutive_write_failures >= _WRITE_FAILURE_WARN_THRESHOLD:
+            atomic_write_json._consecutive_failures += 1
+            if atomic_write_json._consecutive_failures >= _WRITE_FAILURE_WARN_THRESHOLD:
                 logger.warning(
                     "Cache write has failed %d consecutive times (%s: %s). "
                     "Eval results are held in memory but NOT persisted to disk. "
                     "If the process exits, up to %d runs of scores may be lost. "
                     "Check available disk space and permissions for: %s",
-                    _consecutive_write_failures,
+                    atomic_write_json._consecutive_failures,
                     type(exc).__name__,
                     exc,
-                    _consecutive_write_failures * 50,
+                    atomic_write_json._consecutive_failures * 50,
                     path.parent,
                 )
         raise
+
+
+atomic_write_json._consecutive_failures = 0  # type: ignore[attr-defined]
 
 
 def _get_lock_timeout() -> int:
@@ -512,6 +512,7 @@ class CacheFlushController:
         self._do_flush()
 
     def _do_flush(self) -> None:
+        # NOTE: Caller must hold the cache file lock (via CacheBackend.acquire_lock).
         if self._prior_runs_count > 0:
             try:
                 disk_cache = json.loads(self.cache_path.read_text())
@@ -522,9 +523,9 @@ class CacheFlushController:
                 **self.cache_data,
                 "runs": old_runs + self.cache_data["runs"],
             }
-            _atomic_write_json(self.cache_path, merged_data)
+            atomic_write_json(self.cache_path, merged_data)
         else:
-            _atomic_write_json(self.cache_path, self.cache_data)
+            atomic_write_json(self.cache_path, self.cache_data)
         self._runs_since_flush = 0
         self._last_flush_time = time.monotonic()
 
@@ -633,6 +634,7 @@ def build_summary(
             continue
 
         mean = sum(all_scores) / len(all_scores)
+        # Population std (not sample): we compute over all runs, not a sample.
         variance = sum((s - mean) ** 2 for s in all_scores) / len(all_scores)
         std = math.sqrt(variance)
 
@@ -696,13 +698,10 @@ class _FileLock:
 
     def __init__(self, lock_path: Path, timeout: int):
         self._lock = filelock.FileLock(str(lock_path), timeout=timeout)
-        self._lock_path = lock_path
         self._lock.acquire()
 
     def release(self) -> None:
         self._lock.release()
-        with suppress(OSError):
-            self._lock_path.unlink()
 
 
 class JsonFileCacheBackend:
@@ -716,8 +715,8 @@ class JsonFileCacheBackend:
         return self._cache_root
 
     def _resolve_cache_dir(self, model: str, dataset_path: str) -> Path:
-        model_dir = _sanitize_path_part(model)
-        dataset_dir = _sanitize_path_part(Path(dataset_path).stem)
+        model_dir = sanitize_path_part(model)
+        dataset_dir = sanitize_path_part(Path(dataset_path).stem)
         return self._cache_root / model_dir / dataset_dir
 
     def acquire_lock(self, task_id: str, model: str, dataset_path: str) -> CacheLock:
@@ -803,7 +802,7 @@ class JsonFileCacheBackend:
                 "runs": [],
                 "summary": None,
             }
-            _atomic_write_json(cache_path, cache_data)
+            atomic_write_json(cache_path, cache_data)
             return cache_path, cache_data, set()
 
         # Use most recent match
@@ -844,7 +843,7 @@ class JsonFileCacheBackend:
                 "runs": [],
                 "summary": None,
             }
-            _atomic_write_json(cache_path, cache_data)
+            atomic_write_json(cache_path, cache_data)
             return cache_path, cache_data, set()
 
         # Version check
@@ -897,7 +896,7 @@ class JsonFileCacheBackend:
 
     def write_cache(self, cache_path: Path, cache_data: dict) -> None:
         cache_data["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-        _atomic_write_json(cache_path, cache_data)
+        atomic_write_json(cache_path, cache_data)
 
     def append_run(self, cache_path: Path, run: dict) -> None:
         pass  # No-op for JSON backend; runs buffered in-memory

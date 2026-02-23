@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import importlib
 import json
 import logging
 import shutil
@@ -382,12 +383,12 @@ class EvalCommand:
         Returns the path to the written results JSON file.
         """
         from osmosis_ai.rollout.eval.evaluation.cache import (
-            _atomic_write_json,
-            _sanitize_path_part,
+            atomic_write_json,
+            sanitize_path_part,
         )
 
-        model_dir = _sanitize_path_part(model)
-        dataset_dir = _sanitize_path_part(Path(dataset_path).stem)
+        model_dir = sanitize_path_part(model)
+        dataset_dir = sanitize_path_part(Path(dataset_path).stem)
 
         out_dir = Path(output_path) / model_dir / dataset_dir
         out_dir.mkdir(parents=True, exist_ok=True)
@@ -400,7 +401,7 @@ class EvalCommand:
         output_data = dict(cache_data)  # Copy all fields from cache
         output_data["status"] = "completed"  # Always completed for output
 
-        _atomic_write_json(results_path, output_data)
+        atomic_write_json(results_path, output_data)
 
         if samples_path is not None and samples_path.exists():
             samples_filename = f"samples_{unix_ts}_{task_id}.jsonl"
@@ -461,11 +462,11 @@ class EvalCommand:
         is_mcp: bool,
     ) -> None:
         """Print informational messages when resuming from cached progress."""
-        from osmosis_ai.rollout.eval.evaluation.cache import _sanitize_path_part
+        from osmosis_ai.rollout.eval.evaluation.cache import sanitize_path_part
 
         # Peek at existing cache file to check for prior completed runs
-        model_dir = _sanitize_path_part(model)
-        dataset_dir = _sanitize_path_part(Path(dataset_path).stem)
+        model_dir = sanitize_path_part(model)
+        dataset_dir = sanitize_path_part(Path(dataset_path).stem)
         cache_dir = cache_backend.cache_root / model_dir / dataset_dir
 
         if not cache_dir.exists():
@@ -499,15 +500,13 @@ class EvalCommand:
             module_name = module_spec.partition(":")[0]
             # Check if the module resolves to a package (__init__.py)
             try:
-                import importlib
-
                 mod = importlib.import_module(module_name)
                 source_file = getattr(mod, "__file__", None)
                 if source_file and Path(source_file).name == "__init__.py":
                     scope = f"package {module_name}/"
                 else:
                     scope = f"file {module_name}.py"
-            except ImportError:
+            except Exception:
                 scope = f"file {module_name}.py"
 
         self.console.print(
@@ -726,6 +725,9 @@ class EvalCommand:
             "offset": args.offset,
             "limit": args.limit,
             "completion_params": completion_params,
+            "dataset_fingerprint": dataset_fingerprint,
+            "module_fingerprint": module_fingerprint,
+            "eval_fns_fingerprint": eval_fns_fingerprint,
         }
         config_dict = {k: v for k, v in config_dict.items() if v is not None}
 
