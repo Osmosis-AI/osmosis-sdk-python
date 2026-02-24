@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from io import StringIO
 
-import osmosis_ai.rollout.console as console_module
+import osmosis_ai.cli.console as console_module
 
 
 def test_print_fallback_ignores_rich_only_kwargs(monkeypatch) -> None:

@@ -1,4 +1,4 @@
-"""Tests for osmosis_ai.auth.local_server."""
+"""Tests for osmosis_ai.platform.auth.local_server."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import http.client
 import threading
 from unittest.mock import patch
 
-from osmosis_ai.auth.local_server import (
+from osmosis_ai.platform.auth.local_server import (
     _ERROR_PLACEHOLDER,
     _FALLBACK_ERROR_HTML,
     _FALLBACK_SUCCESS_HTML,
@@ -60,7 +60,7 @@ class TestGetTemplateHtml:
 
     def test_success_html_fallback_on_missing_template(self) -> None:
         with patch(
-            "osmosis_ai.auth.local_server._TEMPLATES",
+            "osmosis_ai.platform.auth.local_server._TEMPLATES",
             **{
                 "__truediv__": lambda self, name: (_ for _ in ()).throw(
                     FileNotFoundError
@@ -73,7 +73,7 @@ class TestGetTemplateHtml:
 
     def test_error_html_fallback_on_missing_template(self) -> None:
         with patch(
-            "osmosis_ai.auth.local_server._TEMPLATES",
+            "osmosis_ai.platform.auth.local_server._TEMPLATES",
             **{
                 "__truediv__": lambda self, name: (_ for _ in ()).throw(
                     FileNotFoundError
@@ -87,7 +87,7 @@ class TestGetTemplateHtml:
         """Error template without {{ERROR_MESSAGE}} should fall back."""
         bad_template = "<html><body>No placeholder here</body></html>"
         mock_path = patch(
-            "osmosis_ai.auth.local_server._TEMPLATES",
+            "osmosis_ai.platform.auth.local_server._TEMPLATES",
         )
         with mock_path as mock_templates:
             mock_file = mock_templates.__truediv__.return_value
@@ -334,7 +334,7 @@ class TestFindAvailablePort:
         assert 8976 <= port <= 8985
 
     def test_returns_none_when_all_ports_busy(self) -> None:
-        with patch("osmosis_ai.auth.local_server.socket.socket") as mock_sock:
+        with patch("osmosis_ai.platform.auth.local_server.socket.socket") as mock_sock:
             mock_instance = mock_sock.return_value.__enter__.return_value
             mock_instance.bind.side_effect = OSError("Address in use")
             assert find_available_port() is None

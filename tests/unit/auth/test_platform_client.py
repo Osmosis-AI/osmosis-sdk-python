@@ -1,4 +1,4 @@
-"""Tests for osmosis_ai.auth.platform_client."""
+"""Tests for osmosis_ai.platform.auth.platform_client."""
 
 from __future__ import annotations
 
@@ -12,8 +12,12 @@ from urllib.error import HTTPError, URLError
 
 import pytest
 
-from osmosis_ai.auth.credentials import OrganizationInfo, UserInfo, WorkspaceCredentials
-from osmosis_ai.auth.platform_client import (
+from osmosis_ai.platform.auth.credentials import (
+    OrganizationInfo,
+    UserInfo,
+    WorkspaceCredentials,
+)
+from osmosis_ai.platform.auth.platform_client import (
     AuthenticationExpiredError,
     PlatformAPIError,
     _handle_401_and_cleanup,
@@ -96,8 +100,8 @@ class TestExceptionClasses:
 class TestHandle401AndCleanup:
     """Tests for the _handle_401_and_cleanup function."""
 
-    @patch("osmosis_ai.auth.platform_client.delete_workspace_credentials")
-    @patch("osmosis_ai.auth.platform_client.get_active_workspace")
+    @patch("osmosis_ai.platform.auth.platform_client.delete_workspace_credentials")
+    @patch("osmosis_ai.platform.auth.platform_client.get_active_workspace")
     def test_deletes_active_workspace_credentials(
         self, mock_get_ws: MagicMock, mock_delete: MagicMock
     ) -> None:
@@ -109,8 +113,8 @@ class TestHandle401AndCleanup:
 
         mock_delete.assert_called_once_with("MyWorkspace")
 
-    @patch("osmosis_ai.auth.platform_client.delete_workspace_credentials")
-    @patch("osmosis_ai.auth.platform_client.get_active_workspace")
+    @patch("osmosis_ai.platform.auth.platform_client.delete_workspace_credentials")
+    @patch("osmosis_ai.platform.auth.platform_client.get_active_workspace")
     def test_no_active_workspace_skips_delete(
         self, mock_get_ws: MagicMock, mock_delete: MagicMock
     ) -> None:
@@ -122,8 +126,8 @@ class TestHandle401AndCleanup:
 
         mock_delete.assert_not_called()
 
-    @patch("osmosis_ai.auth.platform_client.delete_workspace_credentials")
-    @patch("osmosis_ai.auth.platform_client.get_active_workspace")
+    @patch("osmosis_ai.platform.auth.platform_client.delete_workspace_credentials")
+    @patch("osmosis_ai.platform.auth.platform_client.get_active_workspace")
     def test_always_raises_even_after_cleanup(
         self, mock_get_ws: MagicMock, mock_delete: MagicMock
     ) -> None:
@@ -147,7 +151,7 @@ class TestPlatformRequest:
     # Credential Loading
     # -------------------------------------------------------------------------
 
-    @patch("osmosis_ai.auth.platform_client.load_credentials")
+    @patch("osmosis_ai.platform.auth.platform_client.load_credentials")
     def test_raises_when_no_credentials_found(self, mock_load: MagicMock) -> None:
         """Verify AuthenticationExpiredError when no credentials exist."""
         mock_load.return_value = None
@@ -155,8 +159,8 @@ class TestPlatformRequest:
         with pytest.raises(AuthenticationExpiredError, match="No valid credentials"):
             platform_request("/api/test")
 
-    @patch("osmosis_ai.auth.platform_client.urlopen")
-    @patch("osmosis_ai.auth.platform_client.load_credentials")
+    @patch("osmosis_ai.platform.auth.platform_client.urlopen")
+    @patch("osmosis_ai.platform.auth.platform_client.load_credentials")
     def test_uses_loaded_credentials_when_none_provided(
         self, mock_load: MagicMock, mock_urlopen: MagicMock
     ) -> None:
@@ -172,8 +176,8 @@ class TestPlatformRequest:
         request_obj = mock_urlopen.call_args[0][0]
         assert request_obj.get_header("Authorization") == "Bearer loaded-token"
 
-    @patch("osmosis_ai.auth.platform_client.urlopen")
-    @patch("osmosis_ai.auth.platform_client.load_credentials")
+    @patch("osmosis_ai.platform.auth.platform_client.urlopen")
+    @patch("osmosis_ai.platform.auth.platform_client.load_credentials")
     def test_uses_explicit_credentials_when_provided(
         self, mock_load: MagicMock, mock_urlopen: MagicMock
     ) -> None:
@@ -191,21 +195,22 @@ class TestPlatformRequest:
     # Request Construction
     # -------------------------------------------------------------------------
 
-    @patch("osmosis_ai.auth.platform_client.urlopen")
+    @patch("osmosis_ai.platform.auth.platform_client.urlopen")
     def test_constructs_correct_url(self, mock_urlopen: MagicMock) -> None:
         """Verify the full URL is built from PLATFORM_URL + endpoint."""
         mock_urlopen.return_value = _make_http_response({"ok": True})
         creds = _make_credentials()
 
         with patch(
-            "osmosis_ai.auth.platform_client.PLATFORM_URL", "https://test.osmosis.ai"
+            "osmosis_ai.platform.auth.platform_client.PLATFORM_URL",
+            "https://test.osmosis.ai",
         ):
             platform_request("/api/v1/verify", credentials=creds)
 
         request_obj = mock_urlopen.call_args[0][0]
         assert request_obj.full_url == "https://test.osmosis.ai/api/v1/verify"
 
-    @patch("osmosis_ai.auth.platform_client.urlopen")
+    @patch("osmosis_ai.platform.auth.platform_client.urlopen")
     def test_sets_required_headers(self, mock_urlopen: MagicMock) -> None:
         """Verify Authorization, Content-Type, and User-Agent headers are set."""
         mock_urlopen.return_value = _make_http_response({"ok": True})
@@ -218,7 +223,7 @@ class TestPlatformRequest:
         assert request_obj.get_header("Content-type") == "application/json"
         assert "osmosis-cli/" in request_obj.get_header("User-agent")
 
-    @patch("osmosis_ai.auth.platform_client.urlopen")
+    @patch("osmosis_ai.platform.auth.platform_client.urlopen")
     def test_custom_headers_are_merged(self, mock_urlopen: MagicMock) -> None:
         """Verify additional headers are merged into the request."""
         mock_urlopen.return_value = _make_http_response({"ok": True})
@@ -233,7 +238,7 @@ class TestPlatformRequest:
         request_obj = mock_urlopen.call_args[0][0]
         assert request_obj.get_header("X-custom") == "value123"
 
-    @patch("osmosis_ai.auth.platform_client.urlopen")
+    @patch("osmosis_ai.platform.auth.platform_client.urlopen")
     def test_get_request_has_no_body(self, mock_urlopen: MagicMock) -> None:
         """Verify GET requests send no request body."""
         mock_urlopen.return_value = _make_http_response({"ok": True})
@@ -245,7 +250,7 @@ class TestPlatformRequest:
         assert request_obj.data is None
         assert request_obj.get_method() == "GET"
 
-    @patch("osmosis_ai.auth.platform_client.urlopen")
+    @patch("osmosis_ai.platform.auth.platform_client.urlopen")
     def test_post_request_sends_json_body(self, mock_urlopen: MagicMock) -> None:
         """Verify POST requests with data encode body as JSON."""
         mock_urlopen.return_value = _make_http_response({"created": True})
@@ -261,7 +266,7 @@ class TestPlatformRequest:
         body = json.loads(request_obj.data.decode())
         assert body == {"host": "10.0.0.1", "port": 8080}
 
-    @patch("osmosis_ai.auth.platform_client.urlopen")
+    @patch("osmosis_ai.platform.auth.platform_client.urlopen")
     def test_timeout_is_passed_to_urlopen(self, mock_urlopen: MagicMock) -> None:
         """Verify the timeout parameter is forwarded to urlopen."""
         mock_urlopen.return_value = _make_http_response({"ok": True})
@@ -272,7 +277,7 @@ class TestPlatformRequest:
         _, kwargs = mock_urlopen.call_args
         assert kwargs["timeout"] == 5.0
 
-    @patch("osmosis_ai.auth.platform_client.urlopen")
+    @patch("osmosis_ai.platform.auth.platform_client.urlopen")
     def test_default_timeout_is_30(self, mock_urlopen: MagicMock) -> None:
         """Verify default timeout is 30 seconds."""
         mock_urlopen.return_value = _make_http_response({"ok": True})
@@ -287,7 +292,7 @@ class TestPlatformRequest:
     # Successful Response Handling
     # -------------------------------------------------------------------------
 
-    @patch("osmosis_ai.auth.platform_client.urlopen")
+    @patch("osmosis_ai.platform.auth.platform_client.urlopen")
     def test_returns_parsed_json_response(self, mock_urlopen: MagicMock) -> None:
         """Verify the response JSON is parsed and returned."""
         expected = {"id": "srv_1", "status": "healthy"}
@@ -302,8 +307,8 @@ class TestPlatformRequest:
     # HTTP Error Handling
     # -------------------------------------------------------------------------
 
-    @patch("osmosis_ai.auth.platform_client._handle_401_and_cleanup")
-    @patch("osmosis_ai.auth.platform_client.urlopen")
+    @patch("osmosis_ai.platform.auth.platform_client._handle_401_and_cleanup")
+    @patch("osmosis_ai.platform.auth.platform_client.urlopen")
     def test_401_triggers_cleanup_and_raises(
         self, mock_urlopen: MagicMock, mock_cleanup: MagicMock
     ) -> None:
@@ -317,7 +322,7 @@ class TestPlatformRequest:
 
         mock_cleanup.assert_called_once()
 
-    @patch("osmosis_ai.auth.platform_client.urlopen")
+    @patch("osmosis_ai.platform.auth.platform_client.urlopen")
     def test_non_401_http_error_raises_platform_api_error(
         self, mock_urlopen: MagicMock
     ) -> None:
@@ -331,7 +336,7 @@ class TestPlatformRequest:
         assert exc_info.value.status_code == 500
         assert "HTTP 500" in str(exc_info.value)
 
-    @patch("osmosis_ai.auth.platform_client.urlopen")
+    @patch("osmosis_ai.platform.auth.platform_client.urlopen")
     def test_http_error_includes_response_body_in_message(
         self, mock_urlopen: MagicMock
     ) -> None:
@@ -346,7 +351,7 @@ class TestPlatformRequest:
         assert "Agent not found" in str(exc_info.value)
         assert exc_info.value.status_code == 404
 
-    @patch("osmosis_ai.auth.platform_client.urlopen")
+    @patch("osmosis_ai.platform.auth.platform_client.urlopen")
     def test_http_error_truncates_long_response_body(
         self, mock_urlopen: MagicMock
     ) -> None:
@@ -361,7 +366,7 @@ class TestPlatformRequest:
         msg = str(exc_info.value)
         assert "(truncated)" in msg
 
-    @patch("osmosis_ai.auth.platform_client.urlopen")
+    @patch("osmosis_ai.platform.auth.platform_client.urlopen")
     def test_http_error_with_empty_body(self, mock_urlopen: MagicMock) -> None:
         """Verify HTTP errors with empty body still produce a useful message."""
         mock_urlopen.side_effect = _make_http_error(502, "")
@@ -373,7 +378,7 @@ class TestPlatformRequest:
         assert "HTTP 502" in str(exc_info.value)
         assert exc_info.value.status_code == 502
 
-    @patch("osmosis_ai.auth.platform_client.urlopen")
+    @patch("osmosis_ai.platform.auth.platform_client.urlopen")
     def test_http_error_with_unreadable_body_does_not_crash(
         self, mock_urlopen: MagicMock
     ) -> None:
@@ -395,7 +400,7 @@ class TestPlatformRequest:
     # URLError (Connection Errors)
     # -------------------------------------------------------------------------
 
-    @patch("osmosis_ai.auth.platform_client.urlopen")
+    @patch("osmosis_ai.platform.auth.platform_client.urlopen")
     def test_url_error_raises_platform_api_error(self, mock_urlopen: MagicMock) -> None:
         """Verify URLError is wrapped in PlatformAPIError."""
         mock_urlopen.side_effect = URLError("Name resolution failed")
@@ -404,7 +409,7 @@ class TestPlatformRequest:
         with pytest.raises(PlatformAPIError, match="Connection error"):
             platform_request("/api/test", credentials=creds)
 
-    @patch("osmosis_ai.auth.platform_client.urlopen")
+    @patch("osmosis_ai.platform.auth.platform_client.urlopen")
     def test_url_error_does_not_include_status_code(
         self, mock_urlopen: MagicMock
     ) -> None:
@@ -421,7 +426,7 @@ class TestPlatformRequest:
     # JSON Decode Errors
     # -------------------------------------------------------------------------
 
-    @patch("osmosis_ai.auth.platform_client.urlopen")
+    @patch("osmosis_ai.platform.auth.platform_client.urlopen")
     def test_invalid_json_response_raises_platform_api_error(
         self, mock_urlopen: MagicMock
     ) -> None:
@@ -440,8 +445,8 @@ class TestPlatformRequest:
     # Integration-style: Credential flow
     # -------------------------------------------------------------------------
 
-    @patch("osmosis_ai.auth.platform_client.urlopen")
-    @patch("osmosis_ai.auth.platform_client.load_credentials")
+    @patch("osmosis_ai.platform.auth.platform_client.urlopen")
+    @patch("osmosis_ai.platform.auth.platform_client.load_credentials")
     def test_explicit_none_credentials_triggers_load(
         self, mock_load: MagicMock, mock_urlopen: MagicMock
     ) -> None:
@@ -454,7 +459,7 @@ class TestPlatformRequest:
 
         mock_load.assert_called_once()
 
-    @patch("osmosis_ai.auth.platform_client.load_credentials")
+    @patch("osmosis_ai.platform.auth.platform_client.load_credentials")
     def test_load_returns_none_raises_auth_error(self, mock_load: MagicMock) -> None:
         """Verify AuthenticationExpiredError when load_credentials returns None."""
         mock_load.return_value = None

@@ -10,13 +10,8 @@ import importlib
 import os
 import sys
 
+from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.rollout.core.base import RolloutAgentLoop
-
-
-class CLIError(Exception):
-    """CLI-specific error."""
-
-    pass
 
 
 def load_agent_loop(module_path: str) -> RolloutAgentLoop:

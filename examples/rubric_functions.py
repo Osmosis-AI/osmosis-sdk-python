@@ -26,7 +26,7 @@ from osmosis_ai import (
     evaluate_rubric,
     osmosis_rubric,
 )
-from osmosis_ai.rubric_eval import DEFAULT_API_KEY_ENV
+from osmosis_ai.rubric.eval import DEFAULT_API_KEY_ENV
 
 # Rubric for the example
 RUBRIC = (

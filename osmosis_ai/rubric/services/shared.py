@@ -3,7 +3,7 @@ from __future__ import annotations
 from statistics import mean, pstdev, pvariance
 from typing import Any
 
-from .errors import CLIError
+from osmosis_ai.cli.errors import CLIError
 
 
 def coerce_optional_float(

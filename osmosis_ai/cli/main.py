@@ -6,16 +6,18 @@ import warnings
 
 from dotenv import find_dotenv, load_dotenv
 
-from .cli_commands import (
-    EvalRubricCommand,
+from osmosis_ai.cli.errors import CLIError
+from osmosis_ai.consts import PACKAGE_VERSION, package_name
+from osmosis_ai.platform.cli import (
     LoginCommand,
     LogoutCommand,
-    PreviewCommand,
     WhoamiCommand,
     WorkspaceCommand,
 )
-from .cli_services import CLIError
-from .consts import PACKAGE_VERSION, package_name
+from osmosis_ai.rubric.cli import (
+    EvalRubricCommand,
+    PreviewCommand,
+)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -100,7 +102,12 @@ def _build_parser() -> argparse.ArgumentParser:
     EvalRubricCommand().configure_parser(eval_rubric_parser)
 
     # Rollout server commands
-    from .rollout.cli import EvalCommand, ServeCommand, TestCommand, ValidateCommand
+    from osmosis_ai.rollout.cli import (
+        EvalCommand,
+        ServeCommand,
+        TestCommand,
+        ValidateCommand,
+    )
 
     serve_parser = subparsers.add_parser(
         "serve",

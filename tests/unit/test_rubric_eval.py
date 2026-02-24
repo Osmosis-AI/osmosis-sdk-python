@@ -1,4 +1,4 @@
-"""Tests for osmosis_ai.rubric_eval -- prompt building, JSON parsing, and LiteLLM evaluation."""
+"""Tests for osmosis_ai.rubric.eval -- prompt building, JSON parsing, and LiteLLM evaluation."""
 
 import json
 import sys
@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 import litellm
 import pytest
 
-from osmosis_ai.rubric_eval import (
+from osmosis_ai.rubric.eval import (
     DEFAULT_REQUEST_TIMEOUT_SECONDS,
     _build_user_prompt,
     _default_timeout_for_model,
@@ -16,7 +16,7 @@ from osmosis_ai.rubric_eval import (
     _to_litellm_model,
     evaluate_rubric,
 )
-from osmosis_ai.rubric_types import ModelNotFoundError, ProviderRequestError
+from osmosis_ai.rubric.types import ModelNotFoundError, ProviderRequestError
 
 # =============================================================================
 # _select_text / _build_user_prompt Tests
@@ -229,7 +229,7 @@ def _create_mock_litellm_response(score: float, explanation: str) -> MagicMock:
 # replacing sys.modules["litellm"].  The litellm module-level import inside
 # _call_litellm (used for suppress_debug_info and supports_response_schema)
 # is still patched via sys.modules.
-_COMPLETION_PATCH = "osmosis_ai.rubric_eval._litellm_completion"
+_COMPLETION_PATCH = "osmosis_ai.rubric.eval._litellm_completion"
 
 
 class TestEvaluateRubric:

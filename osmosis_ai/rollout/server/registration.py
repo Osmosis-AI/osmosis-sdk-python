@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any
 from osmosis_ai.rollout.network import PublicIPDetectionError, detect_public_ip
 
 if TYPE_CHECKING:
-    from osmosis_ai.auth.credentials import WorkspaceCredentials
+    from osmosis_ai.platform.auth.credentials import WorkspaceCredentials
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -93,7 +93,7 @@ def register_with_platform(
     Returns:
         RegistrationResult with status and any error information.
     """
-    from osmosis_ai.auth.platform_client import (
+    from osmosis_ai.platform.auth.platform_client import (
         AuthenticationExpiredError,
         PlatformAPIError,
         platform_request,

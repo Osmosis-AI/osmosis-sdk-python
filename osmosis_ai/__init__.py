@@ -37,8 +37,12 @@ from .rollout import (
     # Registry
     register_agent_loop,
 )
-from .rubric_eval import MissingAPIKeyError, evaluate_rubric
-from .rubric_types import ModelNotFoundError, ProviderRequestError
+from .rubric import (
+    MissingAPIKeyError,
+    ModelNotFoundError,
+    ProviderRequestError,
+    evaluate_rubric,
+)
 from .utils import osmosis_reward, osmosis_rubric
 
 __all__ = [

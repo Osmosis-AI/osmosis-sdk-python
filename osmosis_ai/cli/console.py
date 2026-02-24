@@ -5,7 +5,7 @@ when available, with automatic fallback to plain text when rich is not installed
 or when output is redirected to a non-TTY.
 
 Usage:
-    from osmosis_ai.rollout.console import console
+    from osmosis_ai.cli.console import console
 
     console.print("Hello", style="green")
     console.print_error("Something went wrong")

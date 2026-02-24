@@ -12,16 +12,17 @@ from typing import Any
 
 from tqdm import tqdm
 
-from ..rubric_eval import DEFAULT_API_KEY_ENV, evaluate_rubric
-from ..rubric_types import (
+from osmosis_ai.cli.errors import CLIError
+from osmosis_ai.rubric.eval import DEFAULT_API_KEY_ENV, evaluate_rubric
+from osmosis_ai.rubric.types import (
     MissingAPIKeyError,
     ModelInfo,
     ModelNotFoundError,
     ProviderRequestError,
 )
+
 from .config import RubricConfig
 from .dataset import DatasetRecord
-from .errors import CLIError
 from .shared import calculate_statistics, coerce_optional_float, collapse_preview_text
 
 

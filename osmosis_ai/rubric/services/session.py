@@ -7,8 +7,10 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
-from ..rubric_eval import ensure_api_key_available
-from ..rubric_types import MissingAPIKeyError
+from osmosis_ai.cli.errors import CLIError
+from osmosis_ai.rubric.eval import ensure_api_key_available
+from osmosis_ai.rubric.types import MissingAPIKeyError
+
 from .config import (
     RubricConfig,
     RubricSuite,
@@ -17,7 +19,6 @@ from .config import (
 )
 from .dataset import DatasetLoader, DatasetRecord
 from .engine import EvaluationReport, RubricEvaluationEngine
-from .errors import CLIError
 from .reporting import BaselineComparator, BaselineStatistics, JsonReportWriter
 
 logger: logging.Logger = logging.getLogger(__name__)

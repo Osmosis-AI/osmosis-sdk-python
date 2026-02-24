@@ -9,7 +9,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from urllib.parse import urlencode
 
-from ..consts import PACKAGE_VERSION
+from osmosis_ai.consts import PACKAGE_VERSION
+
 from .config import PLATFORM_URL
 from .credentials import (
     OrganizationInfo,

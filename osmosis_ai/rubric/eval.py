@@ -14,28 +14,29 @@ import os
 import re
 from typing import Any
 
-from ._litellm_compat import (
+from osmosis_ai._litellm_compat import (
     APIConnectionError as _LitellmAPIConnectionError,
 )
-from ._litellm_compat import (
+from osmosis_ai._litellm_compat import (
     APIError as _LitellmAPIError,
 )
-from ._litellm_compat import (
+from osmosis_ai._litellm_compat import (
     AuthenticationError as _LitellmAuthenticationError,
 )
-from ._litellm_compat import (
+from osmosis_ai._litellm_compat import (
     NotFoundError as _LitellmNotFoundError,
 )
-from ._litellm_compat import (
+from osmosis_ai._litellm_compat import (
     RateLimitError as _LitellmRateLimitError,
 )
-from ._litellm_compat import (
+from osmosis_ai._litellm_compat import (
     Timeout as _LitellmTimeout,
 )
-from ._litellm_compat import (
+from osmosis_ai._litellm_compat import (
     completion as _litellm_completion,
 )
-from .rubric_types import (
+
+from .types import (
     MissingAPIKeyError,
     ModelInfo,
     ModelNotFoundError,

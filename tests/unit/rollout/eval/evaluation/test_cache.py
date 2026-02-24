@@ -1266,7 +1266,7 @@ def _make_cache_entry(
 
 class TestCacheLs:
     def _make_command(self):
-        from osmosis_ai.rollout.console import Console
+        from osmosis_ai.cli.console import Console
         from osmosis_ai.rollout.eval.evaluation.cli import EvalCommand
 
         cmd = EvalCommand()
@@ -1404,7 +1404,7 @@ class TestCacheLs:
 
 class TestCacheRm:
     def _make_command(self):
-        from osmosis_ai.rollout.console import Console
+        from osmosis_ai.cli.console import Console
         from osmosis_ai.rollout.eval.evaluation.cli import EvalCommand
 
         cmd = EvalCommand()

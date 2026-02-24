@@ -12,7 +12,7 @@ from urllib.parse import parse_qs, urlparse
 
 from .config import LOCAL_SERVER_PORT_END, LOCAL_SERVER_PORT_START
 
-_TEMPLATES = files("osmosis_ai.auth") / "templates"
+_TEMPLATES = files("osmosis_ai.platform.auth") / "templates"
 _ERROR_PLACEHOLDER = "{{ERROR_MESSAGE}}"
 _FALLBACK_SUCCESS_HTML = (
     "<html><body><h1>Login Successful</h1>"

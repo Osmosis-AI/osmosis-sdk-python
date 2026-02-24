@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from osmosis_ai.rollout.console import Console
+from osmosis_ai.cli.console import Console
 from osmosis_ai.rollout.eval.common.cli import (
     build_completion_params,
     create_llm_client,

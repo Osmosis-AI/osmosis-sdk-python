@@ -21,7 +21,8 @@ if TYPE_CHECKING:
         TestCommand as _TestCommandImpl,
     )
 
-from osmosis_ai.rollout.cli_utils import CLIError, load_agent_loop
+from osmosis_ai.cli.errors import CLIError
+from osmosis_ai.rollout.cli_utils import load_agent_loop
 from osmosis_ai.rollout.server.serve import (
     DEFAULT_HOST,
     DEFAULT_PORT,

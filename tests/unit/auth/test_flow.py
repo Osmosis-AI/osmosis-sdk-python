@@ -1,4 +1,4 @@
-"""Tests for osmosis_ai.auth.flow - login orchestration."""
+"""Tests for osmosis_ai.platform.auth.flow - login orchestration."""
 
 from __future__ import annotations
 
@@ -12,9 +12,13 @@ from urllib.parse import parse_qs, urlparse
 
 import pytest
 
-from osmosis_ai.auth.config import PLATFORM_URL
-from osmosis_ai.auth.credentials import OrganizationInfo, UserInfo, WorkspaceCredentials
-from osmosis_ai.auth.flow import (
+from osmosis_ai.platform.auth.config import PLATFORM_URL
+from osmosis_ai.platform.auth.credentials import (
+    OrganizationInfo,
+    UserInfo,
+    WorkspaceCredentials,
+)
+from osmosis_ai.platform.auth.flow import (
     LoginError,
     LoginResult,
     _build_login_url,
@@ -298,7 +302,9 @@ class TestLogin:
         return mock_resp
 
     def test_no_available_port_raises_login_error(self) -> None:
-        with patch("osmosis_ai.auth.flow.find_available_port", return_value=None):
+        with patch(
+            "osmosis_ai.platform.auth.flow.find_available_port", return_value=None
+        ):
             with pytest.raises(LoginError, match="No available port"):
                 login()
 
@@ -313,11 +319,16 @@ class TestLogin:
         mock_server._verification_event.is_set.return_value = True
 
         with (
-            patch("osmosis_ai.auth.flow.find_available_port", return_value=8976),
-            patch("osmosis_ai.auth.flow.LocalAuthServer", return_value=mock_server),
-            patch("osmosis_ai.auth.flow.webbrowser") as mock_wb,
+            patch(
+                "osmosis_ai.platform.auth.flow.find_available_port", return_value=8976
+            ),
+            patch(
+                "osmosis_ai.platform.auth.flow.LocalAuthServer",
+                return_value=mock_server,
+            ),
+            patch("osmosis_ai.platform.auth.flow.webbrowser") as mock_wb,
             patch("urllib.request.urlopen", return_value=mock_verify_resp),
-            patch("osmosis_ai.auth.flow.save_credentials") as mock_save,
+            patch("osmosis_ai.platform.auth.flow.save_credentials") as mock_save,
         ):
             mock_wb.open.return_value = True
             result = login()
@@ -337,11 +348,16 @@ class TestLogin:
         mock_server._verification_event.is_set.return_value = True
 
         with (
-            patch("osmosis_ai.auth.flow.find_available_port", return_value=8976),
-            patch("osmosis_ai.auth.flow.LocalAuthServer", return_value=mock_server),
-            patch("osmosis_ai.auth.flow.webbrowser") as mock_wb,
+            patch(
+                "osmosis_ai.platform.auth.flow.find_available_port", return_value=8976
+            ),
+            patch(
+                "osmosis_ai.platform.auth.flow.LocalAuthServer",
+                return_value=mock_server,
+            ),
+            patch("osmosis_ai.platform.auth.flow.webbrowser") as mock_wb,
             patch("urllib.request.urlopen", return_value=mock_verify_resp),
-            patch("osmosis_ai.auth.flow.save_credentials"),
+            patch("osmosis_ai.platform.auth.flow.save_credentials"),
         ):
             login(no_browser=True)
 
@@ -355,9 +371,14 @@ class TestLogin:
         mock_server._verification_event.is_set.return_value = False
 
         with (
-            patch("osmosis_ai.auth.flow.find_available_port", return_value=8976),
-            patch("osmosis_ai.auth.flow.LocalAuthServer", return_value=mock_server),
-            patch("osmosis_ai.auth.flow.webbrowser"),
+            patch(
+                "osmosis_ai.platform.auth.flow.find_available_port", return_value=8976
+            ),
+            patch(
+                "osmosis_ai.platform.auth.flow.LocalAuthServer",
+                return_value=mock_server,
+            ),
+            patch("osmosis_ai.platform.auth.flow.webbrowser"),
         ):
             with pytest.raises(LoginError, match="Authentication failed: User denied"):
                 login()
@@ -370,9 +391,14 @@ class TestLogin:
         mock_server._verification_event.is_set.return_value = False
 
         with (
-            patch("osmosis_ai.auth.flow.find_available_port", return_value=8976),
-            patch("osmosis_ai.auth.flow.LocalAuthServer", return_value=mock_server),
-            patch("osmosis_ai.auth.flow.webbrowser"),
+            patch(
+                "osmosis_ai.platform.auth.flow.find_available_port", return_value=8976
+            ),
+            patch(
+                "osmosis_ai.platform.auth.flow.LocalAuthServer",
+                return_value=mock_server,
+            ),
+            patch("osmosis_ai.platform.auth.flow.webbrowser"),
         ):
             with pytest.raises(LoginError, match="No token received"):
                 login()
@@ -394,9 +420,14 @@ class TestLogin:
         )
 
         with (
-            patch("osmosis_ai.auth.flow.find_available_port", return_value=8976),
-            patch("osmosis_ai.auth.flow.LocalAuthServer", return_value=mock_server),
-            patch("osmosis_ai.auth.flow.webbrowser"),
+            patch(
+                "osmosis_ai.platform.auth.flow.find_available_port", return_value=8976
+            ),
+            patch(
+                "osmosis_ai.platform.auth.flow.LocalAuthServer",
+                return_value=mock_server,
+            ),
+            patch("osmosis_ai.platform.auth.flow.webbrowser"),
             patch("urllib.request.urlopen", side_effect=verify_error),
         ):
             with pytest.raises(LoginError, match="Invalid or expired token"):
@@ -417,9 +448,14 @@ class TestLogin:
         mock_server._shutdown_event = MagicMock()
 
         with (
-            patch("osmosis_ai.auth.flow.find_available_port", return_value=8976),
-            patch("osmosis_ai.auth.flow.LocalAuthServer", return_value=mock_server),
-            patch("osmosis_ai.auth.flow.webbrowser"),
+            patch(
+                "osmosis_ai.platform.auth.flow.find_available_port", return_value=8976
+            ),
+            patch(
+                "osmosis_ai.platform.auth.flow.LocalAuthServer",
+                return_value=mock_server,
+            ),
+            patch("osmosis_ai.platform.auth.flow.webbrowser"),
         ):
             with pytest.raises(LoginError):
                 login()
@@ -437,11 +473,16 @@ class TestLogin:
         mock_server._verification_event.is_set.return_value = True
 
         with (
-            patch("osmosis_ai.auth.flow.find_available_port", return_value=8976),
-            patch("osmosis_ai.auth.flow.LocalAuthServer", return_value=mock_server),
-            patch("osmosis_ai.auth.flow.webbrowser") as mock_wb,
+            patch(
+                "osmosis_ai.platform.auth.flow.find_available_port", return_value=8976
+            ),
+            patch(
+                "osmosis_ai.platform.auth.flow.LocalAuthServer",
+                return_value=mock_server,
+            ),
+            patch("osmosis_ai.platform.auth.flow.webbrowser") as mock_wb,
             patch("urllib.request.urlopen", return_value=mock_verify_resp),
-            patch("osmosis_ai.auth.flow.save_credentials"),
+            patch("osmosis_ai.platform.auth.flow.save_credentials"),
         ):
             mock_wb.open.return_value = False
             result = login()
@@ -459,11 +500,16 @@ class TestLogin:
         mock_server._verification_event.is_set.return_value = True
 
         with (
-            patch("osmosis_ai.auth.flow.find_available_port", return_value=8976),
-            patch("osmosis_ai.auth.flow.LocalAuthServer", return_value=mock_server),
-            patch("osmosis_ai.auth.flow.webbrowser") as mock_wb,
+            patch(
+                "osmosis_ai.platform.auth.flow.find_available_port", return_value=8976
+            ),
+            patch(
+                "osmosis_ai.platform.auth.flow.LocalAuthServer",
+                return_value=mock_server,
+            ),
+            patch("osmosis_ai.platform.auth.flow.webbrowser") as mock_wb,
             patch("urllib.request.urlopen", return_value=mock_verify_resp),
-            patch("osmosis_ai.auth.flow.save_credentials"),
+            patch("osmosis_ai.platform.auth.flow.save_credentials"),
         ):
             mock_wb.open.return_value = True
             result = login()
@@ -481,11 +527,16 @@ class TestLogin:
         mock_server._verification_event.is_set.return_value = True
 
         with (
-            patch("osmosis_ai.auth.flow.find_available_port", return_value=8976),
-            patch("osmosis_ai.auth.flow.LocalAuthServer", return_value=mock_server),
-            patch("osmosis_ai.auth.flow.webbrowser") as mock_wb,
+            patch(
+                "osmosis_ai.platform.auth.flow.find_available_port", return_value=8976
+            ),
+            patch(
+                "osmosis_ai.platform.auth.flow.LocalAuthServer",
+                return_value=mock_server,
+            ),
+            patch("osmosis_ai.platform.auth.flow.webbrowser") as mock_wb,
             patch("urllib.request.urlopen", return_value=mock_verify_resp),
-            patch("osmosis_ai.auth.flow.save_credentials") as mock_save,
+            patch("osmosis_ai.platform.auth.flow.save_credentials") as mock_save,
         ):
             mock_wb.open.return_value = True
             login()

@@ -9,8 +9,9 @@ from typing import Any, cast
 import yaml
 from yaml.representer import SafeRepresenter
 
-from ..rubric_types import ModelInfo
-from .errors import CLIError
+from osmosis_ai.cli.errors import CLIError
+from osmosis_ai.rubric.types import ModelInfo
+
 from .shared import coerce_optional_float
 
 

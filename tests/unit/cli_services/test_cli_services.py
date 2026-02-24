@@ -6,12 +6,15 @@ from typing import Any
 import pytest
 
 from osmosis_ai import osmosis_rubric
-from osmosis_ai.cli_services import CLIError
-from osmosis_ai.cli_services.config import RubricConfig, load_rubric_suite
-from osmosis_ai.cli_services.dataset import DatasetLoader, DatasetRecord
-from osmosis_ai.cli_services.engine import RubricEvaluator
-from osmosis_ai.cli_services.reporting import BaselineComparator
-from osmosis_ai.cli_services.session import EvaluationSession, EvaluationSessionRequest
+from osmosis_ai.cli.errors import CLIError
+from osmosis_ai.rubric.services.config import RubricConfig, load_rubric_suite
+from osmosis_ai.rubric.services.dataset import DatasetLoader, DatasetRecord
+from osmosis_ai.rubric.services.engine import RubricEvaluator
+from osmosis_ai.rubric.services.reporting import BaselineComparator
+from osmosis_ai.rubric.services.session import (
+    EvaluationSession,
+    EvaluationSessionRequest,
+)
 
 
 def test_baseline_comparator_missing_path(tmp_path: Path) -> None:
@@ -99,7 +102,7 @@ def test_evaluation_session_errors_when_no_matching_records(tmp_path: Path) -> N
 def test_resolve_output_path_defaults_to_cache(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    monkeypatch.setattr("osmosis_ai.cli_services.session._CACHE_ROOT", tmp_path)
+    monkeypatch.setattr("osmosis_ai.rubric.services.session._CACHE_ROOT", tmp_path)
 
     session = EvaluationSession(identifier_factory=lambda: "12345")
     path, identifier = session._resolve_output_path(

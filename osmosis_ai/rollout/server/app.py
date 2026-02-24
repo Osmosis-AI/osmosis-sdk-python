@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from fastapi import FastAPI, HTTPException, Request
 
-    from osmosis_ai.auth.credentials import WorkspaceCredentials
+    from osmosis_ai.platform.auth.credentials import WorkspaceCredentials
 
 from osmosis_ai.rollout._compat import FASTAPI_AVAILABLE
 from osmosis_ai.rollout.client import OsmosisLLMClient

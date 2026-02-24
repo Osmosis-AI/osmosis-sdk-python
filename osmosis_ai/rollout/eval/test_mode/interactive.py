@@ -13,8 +13,8 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
+from osmosis_ai.cli.console import Console
 from osmosis_ai.rollout.client import CompletionsResult
-from osmosis_ai.rollout.console import Console
 from osmosis_ai.rollout.core.base import (
     RolloutAgentLoop,
     RolloutContext,

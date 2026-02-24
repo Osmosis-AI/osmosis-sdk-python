@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from osmosis_ai.auth.credentials import OrganizationInfo, UserInfo, WorkspaceCredentials
+from osmosis_ai.platform.auth.credentials import (
+    OrganizationInfo,
+    UserInfo,
+    WorkspaceCredentials,
+)
 
 
 def _make_credentials(

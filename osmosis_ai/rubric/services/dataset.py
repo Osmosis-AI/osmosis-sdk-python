@@ -7,7 +7,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .errors import CLIError
+from osmosis_ai.cli.errors import CLIError
+
 from .shared import coerce_optional_float
 
 
