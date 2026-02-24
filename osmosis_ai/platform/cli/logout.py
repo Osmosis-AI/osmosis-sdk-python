@@ -52,7 +52,10 @@ class LogoutCommand:
             print(f"This will logout from {len(workspaces)} workspace(s):")
             for name in workspace_names:
                 print(f"  - {name}")
-            confirm = input("\nAre you sure? [y/N]: ").strip().lower()
+            try:
+                confirm = input("\nAre you sure? [y/N]: ").strip().lower()
+            except EOFError:
+                confirm = ""
             if confirm not in ("y", "yes"):
                 print("Cancelled.")
                 return 0
@@ -75,7 +78,10 @@ class LogoutCommand:
             # Only one workspace, logout directly
             name, _, _ = workspaces[0]
             if not skip_confirm:
-                confirm = input(f"Logout from '{name}'? [y/N]: ").strip().lower()
+                try:
+                    confirm = input(f"Logout from '{name}'? [y/N]: ").strip().lower()
+                except EOFError:
+                    confirm = ""
                 if confirm not in ("y", "yes"):
                     print("Cancelled.")
                     return 0
@@ -107,7 +113,10 @@ class LogoutCommand:
         elif 1 <= choice_num <= len(workspaces):
             name, _, _ = workspaces[choice_num - 1]
             if not skip_confirm:
-                confirm = input(f"Logout from '{name}'? [y/N]: ").strip().lower()
+                try:
+                    confirm = input(f"Logout from '{name}'? [y/N]: ").strip().lower()
+                except EOFError:
+                    confirm = ""
                 if confirm not in ("y", "yes"):
                     print("Cancelled.")
                     return 0
