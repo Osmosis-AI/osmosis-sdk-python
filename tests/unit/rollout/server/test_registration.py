@@ -130,7 +130,7 @@ class TestRegisterWithPlatform:
     """Tests for the register_with_platform function."""
 
     @patch("osmosis_ai.rollout.server.registration.get_report_host")
-    @patch("osmosis_ai.auth.platform_client.platform_request")
+    @patch("osmosis_ai.platform.auth.platform_client.platform_request")
     def test_healthy_registration(
         self, mock_request: MagicMock, mock_host: MagicMock
     ) -> None:
@@ -158,7 +158,7 @@ class TestRegisterWithPlatform:
         assert result.error is None
 
     @patch("osmosis_ai.rollout.server.registration.get_report_host")
-    @patch("osmosis_ai.auth.platform_client.platform_request")
+    @patch("osmosis_ai.platform.auth.platform_client.platform_request")
     def test_registration_succeeded_but_health_check_failed(
         self, mock_request: MagicMock, mock_host: MagicMock
     ) -> None:
@@ -186,7 +186,7 @@ class TestRegisterWithPlatform:
         assert result.error == "Connection refused"
 
     @patch("osmosis_ai.rollout.server.registration.get_report_host")
-    @patch("osmosis_ai.auth.platform_client.platform_request")
+    @patch("osmosis_ai.platform.auth.platform_client.platform_request")
     def test_registration_sends_correct_data_without_api_key(
         self, mock_request: MagicMock, mock_host: MagicMock
     ) -> None:
@@ -219,7 +219,7 @@ class TestRegisterWithPlatform:
         )
 
     @patch("osmosis_ai.rollout.server.registration.get_report_host")
-    @patch("osmosis_ai.auth.platform_client.platform_request")
+    @patch("osmosis_ai.platform.auth.platform_client.platform_request")
     def test_registration_sends_api_key_when_provided(
         self, mock_request: MagicMock, mock_host: MagicMock
     ) -> None:
@@ -262,12 +262,12 @@ class TestRegisterWithPlatform:
         assert "public IP" in result.error
 
     @patch("osmosis_ai.rollout.server.registration.get_report_host")
-    @patch("osmosis_ai.auth.platform_client.platform_request")
+    @patch("osmosis_ai.platform.auth.platform_client.platform_request")
     def test_authentication_expired_returns_error_result(
         self, mock_request: MagicMock, mock_host: MagicMock
     ) -> None:
         """Verify AuthenticationExpiredError is caught and returned as error result."""
-        from osmosis_ai.auth.platform_client import AuthenticationExpiredError
+        from osmosis_ai.platform.auth.platform_client import AuthenticationExpiredError
 
         mock_host.return_value = "10.0.0.5"
         mock_request.side_effect = AuthenticationExpiredError("session expired")
@@ -284,12 +284,12 @@ class TestRegisterWithPlatform:
         assert "session expired" in result.error
 
     @patch("osmosis_ai.rollout.server.registration.get_report_host")
-    @patch("osmosis_ai.auth.platform_client.platform_request")
+    @patch("osmosis_ai.platform.auth.platform_client.platform_request")
     def test_platform_api_error_returns_error_result(
         self, mock_request: MagicMock, mock_host: MagicMock
     ) -> None:
         """Verify PlatformAPIError is caught and returned as error result."""
-        from osmosis_ai.auth.platform_client import PlatformAPIError
+        from osmosis_ai.platform.auth.platform_client import PlatformAPIError
 
         mock_host.return_value = "10.0.0.5"
         mock_request.side_effect = PlatformAPIError("HTTP 500", status_code=500)
@@ -306,7 +306,7 @@ class TestRegisterWithPlatform:
         assert "HTTP 500" in result.error
 
     @patch("osmosis_ai.rollout.server.registration.get_report_host")
-    @patch("osmosis_ai.auth.platform_client.platform_request")
+    @patch("osmosis_ai.platform.auth.platform_client.platform_request")
     def test_unexpected_exception_returns_error_result(
         self, mock_request: MagicMock, mock_host: MagicMock
     ) -> None:
@@ -326,7 +326,7 @@ class TestRegisterWithPlatform:
         assert "unexpected network issue" in result.error
 
     @patch("osmosis_ai.rollout.server.registration.get_report_host")
-    @patch("osmosis_ai.auth.platform_client.platform_request")
+    @patch("osmosis_ai.platform.auth.platform_client.platform_request")
     def test_missing_status_defaults_to_unknown(
         self, mock_request: MagicMock, mock_host: MagicMock
     ) -> None:
@@ -351,7 +351,7 @@ class TestRegisterWithPlatform:
         assert result.is_healthy is False
 
     @patch("osmosis_ai.rollout.server.registration.get_report_host")
-    @patch("osmosis_ai.auth.platform_client.platform_request")
+    @patch("osmosis_ai.platform.auth.platform_client.platform_request")
     def test_health_check_failed_default_error_message(
         self, mock_request: MagicMock, mock_host: MagicMock
     ) -> None:

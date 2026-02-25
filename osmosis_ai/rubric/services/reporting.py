@@ -6,8 +6,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from osmosis_ai.cli.errors import CLIError
+
 from .engine import EvaluationRecordResult, EvaluationReport, EvaluationRun
-from .errors import CLIError
 from .shared import calculate_stat_deltas
 
 

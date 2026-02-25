@@ -5,8 +5,9 @@ from __future__ import annotations
 import os
 from typing import TYPE_CHECKING, Any
 
-from osmosis_ai.rollout.cli_utils import CLIError, load_agent_loop
-from osmosis_ai.rollout.console import Console
+from osmosis_ai.cli.console import Console
+from osmosis_ai.cli.errors import CLIError
+from osmosis_ai.rollout.cli_utils import load_agent_loop
 from osmosis_ai.rollout.eval.common.dataset import DatasetReader
 from osmosis_ai.rollout.eval.common.errors import (
     DatasetParseError,

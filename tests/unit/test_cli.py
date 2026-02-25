@@ -8,7 +8,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from osmosis_ai import cli
+from osmosis_ai.cli import main as cli
 
 
 def test_preview_yaml_single_config(tmp_path, capsys):
@@ -133,11 +133,11 @@ def test_eval_command_output_json(tmp_path, monkeypatch, capsys):
                 },
             }
 
-    from osmosis_ai.cli_commands import EvalRubricCommand
+    from osmosis_ai.rubric.cli import EvalRubricCommand
 
     fake_evaluator = FakeEvaluator()
     monkeypatch.setattr(
-        "osmosis_ai.cli_services.engine.RubricEvaluator", lambda: fake_evaluator
+        "osmosis_ai.rubric.services.engine.RubricEvaluator", lambda: fake_evaluator
     )
     monkeypatch.setattr(
         EvalRubricCommand,
@@ -282,11 +282,11 @@ def test_eval_command_with_baseline(tmp_path, monkeypatch, capsys):
                 "raw": {"call": self.calls},
             }
 
-    from osmosis_ai.cli_commands import EvalRubricCommand
+    from osmosis_ai.rubric.cli import EvalRubricCommand
 
     fake_evaluator = FakeEvaluator()
     monkeypatch.setattr(
-        "osmosis_ai.cli_services.engine.RubricEvaluator", lambda: fake_evaluator
+        "osmosis_ai.rubric.services.engine.RubricEvaluator", lambda: fake_evaluator
     )
     monkeypatch.setattr(
         EvalRubricCommand,
@@ -364,7 +364,7 @@ def test_eval_command_output_json_custom_file_path(tmp_path, monkeypatch, capsys
             }
 
     monkeypatch.setattr(
-        "osmosis_ai.cli_services.engine.RubricEvaluator", lambda: FakeEvaluator()
+        "osmosis_ai.rubric.services.engine.RubricEvaluator", lambda: FakeEvaluator()
     )
 
     output_path = tmp_path / "reports" / "custom_output.txt"

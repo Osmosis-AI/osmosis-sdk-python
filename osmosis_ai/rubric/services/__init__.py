@@ -23,7 +23,6 @@ from .engine import (
     RubricEvaluationEngine,
     RubricEvaluator,
 )
-from .errors import CLIError
 from .reporting import (
     BaselineComparator,
     BaselineStatistics,
@@ -41,7 +40,6 @@ from .session import (
 __all__ = [
     "BaselineComparator",
     "BaselineStatistics",
-    "CLIError",
     "ConsoleReportRenderer",
     "DatasetLoader",
     "DatasetRecord",

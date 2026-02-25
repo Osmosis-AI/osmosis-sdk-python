@@ -20,8 +20,8 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
+from osmosis_ai.cli.console import Console
 from osmosis_ai.rollout._compat import FASTAPI_AVAILABLE, UVICORN_AVAILABLE
-from osmosis_ai.rollout.console import Console
 from osmosis_ai.rollout.core.base import RolloutAgentLoop
 from osmosis_ai.rollout.server.api_key import generate_api_key
 from osmosis_ai.rollout.validator import (
@@ -30,7 +30,7 @@ from osmosis_ai.rollout.validator import (
 )
 
 if TYPE_CHECKING:
-    from osmosis_ai.auth.credentials import WorkspaceCredentials
+    from osmosis_ai.platform.auth.credentials import WorkspaceCredentials
     from osmosis_ai.rollout.config.settings import RolloutSettings
 
 logger: logging.Logger = logging.getLogger(__name__)
@@ -139,7 +139,7 @@ def serve_agent_loop(
     # Check login status if registration is enabled
     credentials: WorkspaceCredentials | None = None
     if not skip_register:
-        from osmosis_ai.auth.credentials import get_valid_credentials
+        from osmosis_ai.platform.auth.credentials import get_valid_credentials
 
         credentials = get_valid_credentials()
         if credentials is None:

@@ -7,7 +7,8 @@ from typing import TYPE_CHECKING, Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-from ..consts import PACKAGE_VERSION
+from osmosis_ai.consts import PACKAGE_VERSION
+
 from .config import PLATFORM_URL
 from .credentials import (
     delete_workspace_credentials,
