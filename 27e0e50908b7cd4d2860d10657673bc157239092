@@ -1,0 +1,29 @@
+osmosis_ai/platform/cli/dataset.py
+  c10156315e32a1e0 139-145,318-319,365-394
+pyproject.toml
+  c10156315e32a1e0 39-44,47,74,76
+osmosis_ai/platform/api/upload.py
+  c10156315e32a1e0 130
+osmosis_ai/platform/auth/local_config.py
+  c10156315e32a1e0 24-29,31-38
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.5",
+  "base_commit_sha": "27e0e50908b7cd4d2860d10657673bc157239092",
+  "prompts": {
+    "c10156315e32a1e0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "c82d301f-085b-41d0-bcd1-d245f84eff79",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>",
+      "messages": [],
+      "total_additions": 74,
+      "total_deletions": 26,
+      "accepted_lines": 63,
+      "overriden_lines": 0
+    }
+  }
+}
