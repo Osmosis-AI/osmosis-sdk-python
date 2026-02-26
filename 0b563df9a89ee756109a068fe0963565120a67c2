@@ -1,0 +1,41 @@
+osmosis_ai/platform/auth/flow.py
+  7974149adca05fe9 250
+osmosis_ai/platform/cli/dataset.py
+  7974149adca05fe9 337-338,342,344-354
+  03a82c4f4117f438 233,235,237
+osmosis_ai/platform/api/upload.py
+  7974149adca05fe9 127-130
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.5",
+  "base_commit_sha": "0b563df9a89ee756109a068fe0963565120a67c2",
+  "prompts": {
+    "03a82c4f4117f438": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "2591b9b4-5c30-4ffd-a65c-910e0759a25e",
+        "model": "gpt-5.3-codex-xhigh"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>",
+      "messages": [],
+      "total_additions": 5,
+      "total_deletions": 1,
+      "accepted_lines": 3,
+      "overriden_lines": 0
+    },
+    "7974149adca05fe9": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "dcbc0647-52a6-45c1-955b-ec5d6beb3f97",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>",
+      "messages": [],
+      "total_additions": 20,
+      "total_deletions": 2,
+      "accepted_lines": 19,
+      "overriden_lines": 0
+    }
+  }
+}
