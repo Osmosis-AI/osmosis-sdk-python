@@ -247,7 +247,7 @@ def _verify_and_get_user_info(token: str) -> VerifyResult:
                 expires_at = datetime.now(timezone.utc) + timedelta(days=90)
 
             projects = data.get("projects")
-            if projects is not None:
+            if projects is not None and org_info.name:
                 save_workspace_projects(org_info.name, projects)
 
             return VerifyResult(

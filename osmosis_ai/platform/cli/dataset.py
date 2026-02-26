@@ -230,7 +230,11 @@ class DatasetCommand:
         print(f"  Size:   {_format_size(ds.file_size)}")
         print(f"  Status: {ds.status}")
         if ds.processing_step:
-            pct = f" ({ds.processing_percent:.0f}%)" if ds.processing_percent else ""
+            pct = (
+                f" ({ds.processing_percent:.0f}%)"
+                if ds.processing_percent is not None
+                else ""
+            )
             print(f"  Step:   {ds.processing_step}{pct}")
         if ds.error:
             print(f"  Error:  {ds.error}")
@@ -330,10 +334,24 @@ def _poll_dataset_status(client, dataset_id: str, *, timeout: int = 600):
 
     start = time.monotonic()
     interval = 2
+    consecutive_errors = 0
+    max_consecutive_errors = 5
 
     while time.monotonic() - start < timeout:
         time.sleep(interval)
-        ds = client.get_dataset(dataset_id)
+        try:
+            ds = client.get_dataset(dataset_id)
+        except Exception:
+            consecutive_errors += 1
+            if consecutive_errors >= max_consecutive_errors:
+                print(
+                    f"Warning: lost connection while polling dataset status "
+                    f"(failed {consecutive_errors} times). "
+                    f"Check status manually: osmosis dataset status {dataset_id}"
+                )
+                return ds
+            continue
+        consecutive_errors = 0
         if ds.is_terminal:
             return ds
         if time.monotonic() - start > 30:
