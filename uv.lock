@@ -2066,6 +2066,10 @@ full = [
 mcp = [
     { name = "fastmcp" },
 ]
+platform = [
+    { name = "pyarrow" },
+    { name = "rich" },
+]
 server = [
     { name = "fastapi" },
     { name = "pyarrow" },
@@ -2077,20 +2081,18 @@ server = [
 [package.metadata]
 requires-dist = [
     { name = "anyio", marker = "extra == 'dev'", specifier = ">=4.0.0" },
-    { name = "fastapi", marker = "extra == 'full'", specifier = ">=0.100.0,<1.0.0" },
     { name = "fastapi", marker = "extra == 'server'", specifier = ">=0.100.0,<1.0.0" },
-    { name = "fastmcp", marker = "extra == 'full'", specifier = ">=2.0.0" },
     { name = "fastmcp", marker = "extra == 'mcp'", specifier = ">=2.0.0" },
     { name = "filelock", specifier = ">=3.0.0,<4.0.0" },
     { name = "httpx", specifier = ">=0.25.0,<1.0.0" },
     { name = "litellm", specifier = ">=1.40.0,<2.0.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = "==1.19.1" },
     { name = "osmosis-ai", extras = ["mcp", "server"], marker = "extra == 'dev'" },
+    { name = "osmosis-ai", extras = ["mcp", "server"], marker = "extra == 'full'" },
+    { name = "osmosis-ai", extras = ["platform"], marker = "extra == 'server'" },
     { name = "pre-commit", marker = "extra == 'dev'", specifier = ">=4.0.0,<5.0.0" },
-    { name = "pyarrow", marker = "extra == 'full'", specifier = ">=14.0.0" },
-    { name = "pyarrow", marker = "extra == 'server'", specifier = ">=14.0.0" },
+    { name = "pyarrow", marker = "extra == 'platform'", specifier = ">=14.0.0" },
     { name = "pydantic", specifier = ">=2.0.0,<3.0.0" },
-    { name = "pydantic-settings", marker = "extra == 'full'", specifier = ">=2.0.0,<3.0.0" },
     { name = "pydantic-settings", marker = "extra == 'server'", specifier = ">=2.0.0,<3.0.0" },
     { name = "pyright", extras = ["nodejs"], marker = "extra == 'dev'", specifier = "==1.1.408" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0,<10.0.0" },
@@ -2099,17 +2101,15 @@ requires-dist = [
     { name = "python-dotenv", specifier = ">=0.1.0,<2.0.0" },
     { name = "pyyaml", specifier = ">=6.0,<7.0" },
     { name = "requests", specifier = ">=2.0.0,<3.0.0" },
-    { name = "rich", marker = "extra == 'full'", specifier = ">=13.0.0" },
-    { name = "rich", marker = "extra == 'server'", specifier = ">=13.0.0" },
+    { name = "rich", marker = "extra == 'platform'", specifier = ">=13.0.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = "==0.15.2" },
     { name = "tqdm", specifier = ">=4.0.0,<5.0.0" },
     { name = "types-pyyaml", marker = "extra == 'dev'", specifier = ">=6.0" },
     { name = "types-requests", marker = "extra == 'dev'", specifier = ">=2.0" },
-    { name = "uvicorn", marker = "extra == 'full'", specifier = ">=0.23.0,<1.0.0" },
     { name = "uvicorn", marker = "extra == 'server'", specifier = ">=0.23.0,<1.0.0" },
     { name = "xxhash", specifier = ">=3.0.0" },
 ]
-provides-extras = ["server", "mcp", "dev", "full"]
+provides-extras = ["platform", "server", "mcp", "dev", "full"]
 
 [[package]]
 name = "packaging"

@@ -21,7 +21,21 @@ def _load_config() -> dict[str, Any]:
     try:
         with open(CONFIG_FILE, encoding="utf-8") as f:
             return json.load(f)
-    except (json.JSONDecodeError, OSError):
+    except json.JSONDecodeError:
+        import sys
+
+        print(
+            f"Warning: config file is corrupted ({CONFIG_FILE}), using defaults.",
+            file=sys.stderr,
+        )
+        return {}
+    except OSError as exc:
+        import sys
+
+        print(
+            f"Warning: cannot read config file ({CONFIG_FILE}): {exc}",
+            file=sys.stderr,
+        )
         return {}
 
 

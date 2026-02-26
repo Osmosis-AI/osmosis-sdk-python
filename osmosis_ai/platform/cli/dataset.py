@@ -136,6 +136,13 @@ class DatasetCommand:
         if file_size == 0:
             raise CLIError("File is empty.")
 
+        # Validate file contents before uploading
+        errors = _validate_file(file_path, ext)
+        if errors:
+            raise CLIError(
+                "File validation failed:\n" + "\n".join(f"  - {e}" for e in errors)
+            )
+
         project_id = _resolve_project_id(args)
         client = OsmosisClient()
 
@@ -308,13 +315,8 @@ class DatasetCommand:
                 f"File too large ({_format_size(file_size)}). Maximum: {_format_size(MAX_FILE_SIZE)}"
             )
 
-        # Basic format validation
-        errors = []
-        if ext == "jsonl":
-            errors = _validate_jsonl(file_path)
-        elif ext == "csv":
-            errors = _validate_csv(file_path)
-        # Parquet validation requires pyarrow, skip for now
+        # Format validation
+        errors = _validate_file(file_path, ext)
 
         if errors:
             print("Validation errors:")
@@ -358,6 +360,36 @@ def _poll_dataset_status(client, dataset_id: str, *, timeout: int = 600):
             interval = 5
 
     return ds
+
+
+def _validate_file(file_path: Path, ext: str) -> list[str]:
+    """Validate file contents based on extension."""
+    if ext == "jsonl":
+        return _validate_jsonl(file_path)
+    elif ext == "csv":
+        return _validate_csv(file_path)
+    elif ext == "parquet":
+        return _validate_parquet(file_path)
+    return []
+
+
+def _validate_parquet(file_path: Path) -> list[str]:
+    """Validate parquet file structure using pyarrow."""
+    try:
+        import pyarrow.parquet as pq
+    except ImportError:
+        return []  # pyarrow not installed, skip content validation
+
+    errors = []
+    try:
+        pf = pq.ParquetFile(file_path)
+        if len(pf.schema) == 0:
+            errors.append("Parquet file has no columns")
+        if pf.metadata.num_rows == 0:
+            errors.append("Parquet file has no rows")
+    except Exception as e:
+        errors.append(f"Invalid parquet file: {e}")
+    return errors
 
 
 def _validate_jsonl(file_path: Path) -> list[str]:

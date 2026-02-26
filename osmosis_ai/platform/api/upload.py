@@ -127,7 +127,8 @@ def upload_file_to_presigned_url(
         # Increase socket timeout for the response phase — after a large
         # upload (up to 5 GB) S3 may take longer to finalise than the 30 s
         # connection timeout allows.
-        conn.sock.settimeout(120)
+        if conn.sock is not None:
+            conn.sock.settimeout(120)
         response = conn.getresponse()
         if response.status >= 300:
             body = response.read().decode("utf-8", errors="replace")[:500]

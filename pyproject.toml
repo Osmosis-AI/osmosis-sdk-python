@@ -36,13 +36,18 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# Platform CLI (dataset upload/validate, rich progress bars)
+platform = [
+    "pyarrow>=14.0.0",      # Parquet file validation
+    "rich>=13.0.0",         # Beautiful terminal output
+]
+
 # Server dependencies for create_app() with test mode support
 server = [
+    "osmosis-ai[platform]",
     "fastapi>=0.100.0,<1.0.0",
     "uvicorn>=0.23.0,<1.0.0",
     "pydantic-settings>=2.0.0,<3.0.0",
-    "pyarrow>=14.0.0",      # Parquet file support for test mode
-    "rich>=13.0.0",         # Beautiful terminal output
 ]
 
 # MCP tool support for git-sync users
@@ -66,14 +71,9 @@ dev = [
     "types-requests>=2.0",
 ]
 
-# Full installation with all optional features (union of server + mcp)
+# Full installation with all optional features
 full = [
-    "fastapi>=0.100.0,<1.0.0",
-    "uvicorn>=0.23.0,<1.0.0",
-    "pydantic-settings>=2.0.0,<3.0.0",
-    "pyarrow>=14.0.0",
-    "rich>=13.0.0",
-    "fastmcp>=2.0.0",
+    "osmosis-ai[server,mcp]",
 ]
 
 [project.urls]
