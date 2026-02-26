@@ -1,0 +1,25 @@
+tests/unit/platform/cli/test_dataset_validation.py
+  eee8dd5e512c6bcc 1-24,26-27,29-30,32-56,58-96,98-175,177-226,228-283
+osmosis_ai/platform/cli/dataset.py
+  eee8dd5e512c6bcc 7,17,379-422,424,435,437-438,445,449-451,460-463,468-490,492,497,501-503,510-511,513,523-525,528-547
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.5",
+  "base_commit_sha": "34b390421a4bcf707df9afd122fc068d622278ee",
+  "prompts": {
+    "eee8dd5e512c6bcc": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "fe356080-67c4-40df-b09f-f542d80948b6",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>",
+      "messages": [],
+      "total_additions": 390,
+      "total_deletions": 13,
+      "accepted_lines": 388,
+      "overriden_lines": 1
+    }
+  }
+}
