@@ -18,7 +18,7 @@ from .credentials import (
     WorkspaceCredentials,
     save_credentials,
 )
-from .local_config import save_workspace_projects
+from .local_config import save_subscription_status, save_workspace_projects
 from .local_server import LocalAuthServer, find_available_port
 
 
@@ -247,8 +247,12 @@ def _verify_and_get_user_info(token: str) -> VerifyResult:
                 expires_at = datetime.now(timezone.utc) + timedelta(days=90)
 
             projects = data.get("projects")
-            if projects is not None and org_info.name:
-                save_workspace_projects(org_info.name, projects)
+            if org_info.name:
+                if projects is not None:
+                    save_workspace_projects(org_info.name, projects)
+                has_subscription = data.get("has_subscription")
+                if has_subscription is not None:
+                    save_subscription_status(org_info.name, bool(has_subscription))
 
             return VerifyResult(
                 user=user_info,

@@ -9,7 +9,7 @@ from pathlib import Path
 from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.platform.auth import PlatformAPIError
 
-from .project import _require_auth, _resolve_project
+from .project import _require_auth, _require_subscription, _resolve_project
 
 VALID_EXTENSIONS = {"csv", "jsonl", "parquet"}
 MAX_FILE_SIZE = 5 * 1024 * 1024 * 1024  # 5GB
@@ -114,6 +114,7 @@ class DatasetCommand:
 
     def _run_upload(self, args: argparse.Namespace) -> int:
         _require_auth()
+        _require_subscription()
         from osmosis_ai.platform.api.client import OsmosisClient
         from osmosis_ai.platform.api.upload import upload_file_to_presigned_url
 

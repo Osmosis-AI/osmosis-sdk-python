@@ -17,7 +17,12 @@ from osmosis_ai.platform.auth import (
     load_workspace_projects,
     save_workspace_projects,
 )
-from osmosis_ai.platform.auth.local_config import get_default_project
+from osmosis_ai.platform.auth.config import PLATFORM_URL
+from osmosis_ai.platform.auth.local_config import (
+    get_default_project,
+    load_subscription_status,
+    save_subscription_status,
+)
 
 CACHE_TTL_SECONDS = 300
 DISPLAY_LIMIT = 10
@@ -268,6 +273,9 @@ def _refresh_projects() -> list[dict]:
     ws_name = get_active_workspace()
     if ws_name:
         save_workspace_projects(ws_name, projects)
+        has_subscription = info.get("has_subscription")
+        if has_subscription is not None:
+            save_subscription_status(ws_name, bool(has_subscription))
     return projects
 
 
@@ -326,3 +334,30 @@ def _require_auth() -> None:
     creds = get_valid_credentials()
     if creds is None:
         raise CLIError("Not logged in. Run 'osmosis login' first.")
+
+
+def _require_subscription() -> None:
+    """Check that the active workspace has an active subscription.
+
+    Uses cached status first. If cached status is False or missing,
+    refreshes from the platform to avoid blocking users who just subscribed.
+    """
+    ws_name = get_active_workspace()
+    if not ws_name:
+        return  # Will be caught by _require_auth
+
+    cached = load_subscription_status(ws_name)
+    if cached is True:
+        return
+
+    # Cached status is False or None — refresh to get the latest
+    with contextlib.suppress(Exception):
+        _refresh_projects()  # Also updates subscription cache
+
+    # Re-check after refresh
+    status = load_subscription_status(ws_name)
+    if status is not True:
+        raise CLIError(
+            "Your workspace requires an active subscription for this action.\n"
+            f"  Upgrade at: {PLATFORM_URL}/settings/billing"
+        )

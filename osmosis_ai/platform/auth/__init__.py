@@ -20,6 +20,7 @@ from .local_config import load_workspace_projects, save_workspace_projects
 from .platform_client import (
     AuthenticationExpiredError,
     PlatformAPIError,
+    SubscriptionRequiredError,
     platform_request,
 )
 
@@ -37,6 +38,7 @@ __all__ = [
     "LoginResult",
     "OrganizationInfo",
     "PlatformAPIError",
+    "SubscriptionRequiredError",
     "UserInfo",
     "WorkspaceCredentials",
     "delete_credentials",

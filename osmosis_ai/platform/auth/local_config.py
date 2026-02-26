@@ -118,3 +118,29 @@ def load_workspace_projects(
     config = _load_config()
     cache = config.get("project_cache", {}).get(workspace_name, {})
     return cache.get("projects", []), cache.get("refreshed_at")
+
+
+# ── Subscription status cache ────────────────────────────────────
+
+
+def save_subscription_status(workspace_name: str, has_subscription: bool) -> None:
+    """Cache the subscription status for a workspace."""
+    config = _load_config()
+    if "subscription_cache" not in config:
+        config["subscription_cache"] = {}
+    config["subscription_cache"][workspace_name] = {
+        "has_subscription": has_subscription,
+        "refreshed_at": time.time(),
+    }
+    _save_config(config)
+
+
+def load_subscription_status(workspace_name: str) -> bool | None:
+    """Load cached subscription status for a workspace.
+
+    Returns:
+        True/False if cached, or None if not yet fetched.
+    """
+    config = _load_config()
+    cache = config.get("subscription_cache", {}).get(workspace_name, {})
+    return cache.get("has_subscription")

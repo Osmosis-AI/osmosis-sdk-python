@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 from typing import TYPE_CHECKING, Any
 from urllib.error import HTTPError, URLError
@@ -32,6 +33,16 @@ class PlatformAPIError(Exception):
     def __init__(self, message: str, status_code: int | None = None):
         super().__init__(message)
         self.status_code = status_code
+
+
+class SubscriptionRequiredError(PlatformAPIError):
+    """Raised when the workspace requires an active subscription for the requested action."""
+
+    def __init__(self, message: str | None = None):
+        super().__init__(
+            message or "Active subscription required",
+            status_code=403,
+        )
 
 
 def _handle_401_and_cleanup() -> None:
@@ -101,18 +112,28 @@ def platform_request(
     except HTTPError as e:
         if e.code == 401:
             _handle_401_and_cleanup()
+
         # Best-effort capture of response body for debugging (truncate to avoid huge logs)
         detail = ""
+        error_body: dict[str, Any] = {}
         try:
             raw = e.read()
             text = raw.decode("utf-8", errors="replace").strip() if raw else ""
             if text:
+                with contextlib.suppress(json.JSONDecodeError, ValueError):
+                    error_body = json.loads(text)
                 if len(text) > 500:
                     text = text[:500] + "...(truncated)"
                 detail = f" Response: {text}"
         except Exception:
             # Ignore body read/decoding failures; keep the original status code context.
             pass
+
+        # Detect subscription-required responses (403 with subscription message)
+        if e.code == 403:
+            error_msg = error_body.get("error", "")
+            if "subscription" in error_msg.lower():
+                raise SubscriptionRequiredError(error_msg) from e
 
         raise PlatformAPIError(f"API error: HTTP {e.code}.{detail}", e.code) from e
     except URLError as e:
