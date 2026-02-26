@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import time
+from collections.abc import Iterable
 from pathlib import Path
 
 from osmosis_ai.cli.errors import CLIError
@@ -13,6 +14,7 @@ from .project import _require_auth, _require_subscription, _resolve_project
 
 VALID_EXTENSIONS = {"csv", "jsonl", "parquet"}
 MAX_FILE_SIZE = 5 * 1024 * 1024 * 1024  # 5GB
+REQUIRED_COLUMNS = {"system_prompt", "user_prompt", "ground_truth"}
 
 CONTENT_TYPE_MAP = {
     "csv": "text/csv",
@@ -374,8 +376,52 @@ def _validate_file(file_path: Path, ext: str) -> list[str]:
     return []
 
 
+def _check_required_columns(columns: Iterable[str]) -> list[str]:
+    """Check that required columns are present."""
+    missing = REQUIRED_COLUMNS - set(columns)
+    if missing:
+        return [
+            f"Missing required columns: {', '.join(sorted(missing))}. "
+            f"Required: {', '.join(sorted(REQUIRED_COLUMNS))}"
+        ]
+    return []
+
+
+def _read_tail_lines(
+    file_path: Path, n: int, chunk_size: int = 1024 * 1024
+) -> list[str]:
+    """Read approximately the last *n* lines of a text file.
+
+    Seeks to the end and reads a chunk backwards. If the file is smaller
+    than *chunk_size* the entire content is returned (caller should handle
+    overlap with head validation).
+    """
+    with open(file_path, "rb") as f:
+        f.seek(0, 2)
+        file_size = f.tell()
+        if file_size == 0:
+            return []
+        read_size = min(chunk_size, file_size)
+        f.seek(file_size - read_size)
+        data = f.read(read_size)
+
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError:
+        return []  # can't decode tail — skip tail validation
+
+    lines = text.split("\n")
+    # If we didn't read from the start, the first "line" may be partial
+    if read_size < file_size:
+        lines = lines[1:]
+    # Drop trailing empty string produced by a final newline
+    if lines and not lines[-1]:
+        lines = lines[:-1]
+    return lines[-n:]
+
+
 def _validate_parquet(file_path: Path) -> list[str]:
-    """Validate parquet file structure using pyarrow."""
+    """Validate parquet file structure and required columns."""
     try:
         import pyarrow.parquet as pq
     except ImportError:
@@ -386,18 +432,23 @@ def _validate_parquet(file_path: Path) -> list[str]:
         pf = pq.ParquetFile(file_path)
         if len(pf.schema) == 0:
             errors.append("Parquet file has no columns")
-        if pf.metadata.num_rows == 0:
+        elif pf.metadata.num_rows == 0:
             errors.append("Parquet file has no rows")
+        else:
+            errors.extend(_check_required_columns(pf.schema_arrow.names))
     except Exception as e:
         errors.append(f"Invalid parquet file: {e}")
     return errors
 
 
 def _validate_jsonl(file_path: Path) -> list[str]:
-    """Basic JSONL validation - check first 100 lines parse as JSON."""
+    """Validate JSONL: required columns + first/last 100 lines."""
     import json
 
     errors = []
+    columns_checked = False
+    file_fully_read = False
+
     with open(file_path, encoding="utf-8") as f:
         for i, line in enumerate(f, 1):
             if i > 100:
@@ -406,27 +457,60 @@ def _validate_jsonl(file_path: Path) -> list[str]:
             if not stripped:
                 continue
             try:
-                json.loads(stripped)
+                obj = json.loads(stripped)
+                if not columns_checked and isinstance(obj, dict):
+                    errors.extend(_check_required_columns(obj.keys()))
+                    columns_checked = True
             except json.JSONDecodeError as e:
                 errors.append(f"Line {i}: invalid JSON - {e}")
                 if len(errors) >= 5:
                     errors.append("... (showing first 5 errors)")
-                    break
+                    return errors
+        else:
+            # Loop completed without break — entire file was read
+            file_fully_read = True
+
+    if file_fully_read or len(errors) >= 5:
+        return errors
+
+    # Validate last 100 lines
+    tail_lines = _read_tail_lines(file_path, 100)
+    for line in tail_lines:
+        stripped = line.strip()
+        if not stripped:
+            continue
+        try:
+            obj = json.loads(stripped)
+            if not columns_checked and isinstance(obj, dict):
+                errors.extend(_check_required_columns(obj.keys()))
+                columns_checked = True
+        except json.JSONDecodeError as e:
+            errors.append(f"Near end of file: invalid JSON - {e}")
+            if len(errors) >= 5:
+                errors.append("... (showing first 5 errors)")
+                break
+
     return errors
 
 
 def _validate_csv(file_path: Path) -> list[str]:
-    """Basic CSV validation - check it parses and has consistent columns."""
+    """Validate CSV: required columns + first/last 100 rows."""
     import csv
 
     errors = []
+    num_cols = 0
+    file_fully_read = False
+
     try:
         with open(file_path, encoding="utf-8", newline="") as f:
             reader = csv.reader(f)
             header = next(reader, None)
             if header is None:
                 return ["File has no header row"]
+
+            errors.extend(_check_required_columns(header))
             num_cols = len(header)
+
             for i, row in enumerate(reader, 2):
                 if i > 100:
                     break
@@ -436,7 +520,29 @@ def _validate_csv(file_path: Path) -> list[str]:
                     )
                     if len(errors) >= 5:
                         errors.append("... (showing first 5 errors)")
-                        break
+                        return errors
+            else:
+                file_fully_read = True
     except UnicodeDecodeError as e:
         errors.append(f"File encoding error: {e}")
+        return errors
+
+    if file_fully_read or len(errors) >= 5:
+        return errors
+
+    # Validate last 100 rows
+    tail_lines = _read_tail_lines(file_path, 100)
+    try:
+        reader = csv.reader(tail_lines)
+        for row in reader:
+            if len(row) != num_cols:
+                errors.append(
+                    f"Near end of file: expected {num_cols} columns, got {len(row)}"
+                )
+                if len(errors) >= 5:
+                    errors.append("... (showing first 5 errors)")
+                    break
+    except csv.Error as e:
+        errors.append(f"Near end of file: CSV parse error - {e}")
+
     return errors
