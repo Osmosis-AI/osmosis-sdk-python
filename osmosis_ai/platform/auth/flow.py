@@ -18,6 +18,7 @@ from .credentials import (
     WorkspaceCredentials,
     save_credentials,
 )
+from .local_config import save_workspace_projects
 from .local_server import LocalAuthServer, find_available_port
 
 
@@ -28,6 +29,17 @@ class LoginError(Exception):
 
 
 @dataclass
+class VerifyResult:
+    """Result of token verification against the platform."""
+
+    user: UserInfo
+    organization: OrganizationInfo
+    expires_at: datetime
+    token_id: str | None
+    projects: list[dict] | None
+
+
+@dataclass
 class LoginResult:
     """Result of a successful login."""
 
@@ -35,6 +47,7 @@ class LoginResult:
     organization: OrganizationInfo
     expires_at: datetime
     revoked_previous_tokens: int = 0
+    projects: list[dict] | None = None
 
 
 def _generate_state() -> str:
@@ -133,7 +146,7 @@ def login(
 
         # Verify token and get user info from platform
         try:
-            user_info, org_info, expires_at, token_id = _verify_and_get_user_info(token)
+            verified = _verify_and_get_user_info(token)
         except LoginError as e:
             server.set_verification_result(success=False, error=str(e))
             raise
@@ -143,20 +156,21 @@ def login(
         credentials = WorkspaceCredentials(
             access_token=token,
             token_type="Bearer",
-            expires_at=expires_at,
-            user=user_info,
-            organization=org_info,
+            expires_at=verified.expires_at,
+            user=verified.user,
+            organization=verified.organization,
             created_at=datetime.now(timezone.utc),
-            token_id=token_id,
+            token_id=verified.token_id,
         )
 
         save_credentials(credentials)
 
         return LoginResult(
-            user=user_info,
-            organization=org_info,
-            expires_at=expires_at,
+            user=verified.user,
+            organization=verified.organization,
+            expires_at=verified.expires_at,
             revoked_previous_tokens=revoked_count,
+            projects=verified.projects,
         )
 
     finally:
@@ -169,16 +183,14 @@ def login(
         server.server_close()
 
 
-def _verify_and_get_user_info(
-    token: str,
-) -> tuple[UserInfo, OrganizationInfo, datetime, str | None]:
+def _verify_and_get_user_info(token: str) -> VerifyResult:
     """Verify token and get user info from the platform.
 
     Args:
         token: The access token to verify.
 
     Returns:
-        Tuple of (UserInfo, OrganizationInfo, expiration datetime, token_id).
+        VerifyResult with user, organization, expiration, token_id, and projects.
 
     Raises:
         LoginError: If verification fails.
@@ -206,7 +218,6 @@ def _verify_and_get_user_info(
             if not data.get("valid"):
                 raise LoginError("Token verification failed")
 
-            # Get token_id for revocation
             token_id = data.get("token_id")
 
             user_data = data.get("user", {})
@@ -216,7 +227,6 @@ def _verify_and_get_user_info(
                 name=user_data.get("name"),
             )
 
-            # Parse organization info
             org_data = data.get("organization", {})
             org_info = OrganizationInfo(
                 id=org_data.get("id", ""),
@@ -224,7 +234,6 @@ def _verify_and_get_user_info(
                 role=org_data.get("role", "member"),
             )
 
-            # Parse expiration - default to 90 days if not provided
             expires_at_str = data.get("expires_at")
             if expires_at_str:
                 expires_at = datetime.fromisoformat(
@@ -237,7 +246,17 @@ def _verify_and_get_user_info(
             else:
                 expires_at = datetime.now(timezone.utc) + timedelta(days=90)
 
-            return user_info, org_info, expires_at, token_id
+            projects = data.get("projects")
+            if projects is not None:
+                save_workspace_projects(org_info.name, projects)
+
+            return VerifyResult(
+                user=user_info,
+                organization=org_info,
+                expires_at=expires_at,
+                token_id=token_id,
+                projects=projects,
+            )
 
     except HTTPError as e:
         if e.code == 401:

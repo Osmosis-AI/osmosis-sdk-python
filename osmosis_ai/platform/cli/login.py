@@ -67,7 +67,9 @@ class LoginCommand:
                 print(
                     f"    [Note] {result.revoked_previous_tokens} previous {token_word} for this device was revoked"
                 )
-            print("    Credentials saved to ~/.config/osmosis/credentials.json")
+
+            print("\nRun 'osmosis workspace' to select a default project.")
+
             return 0
 
         except LoginError as e:

@@ -16,6 +16,7 @@ from .credentials import (
     set_active_workspace,
 )
 from .flow import LoginError, LoginResult, login
+from .local_config import load_workspace_projects, save_workspace_projects
 from .platform_client import (
     AuthenticationExpiredError,
     PlatformAPIError,
@@ -44,8 +45,10 @@ __all__ = [
     "get_all_workspaces",
     "get_valid_credentials",
     "load_credentials",
+    "load_workspace_projects",
     "login",
     "platform_request",
     "save_credentials",
+    "save_workspace_projects",
     "set_active_workspace",
 ]

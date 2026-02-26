@@ -9,6 +9,7 @@ from dotenv import find_dotenv, load_dotenv
 from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.consts import PACKAGE_VERSION, package_name
 from osmosis_ai.platform.cli import (
+    DatasetCommand,
     LoginCommand,
     LogoutCommand,
     WhoamiCommand,
@@ -85,9 +86,15 @@ def _build_parser() -> argparse.ArgumentParser:
 
     workspace_parser = subparsers.add_parser(
         "workspace",
-        help="Manage workspaces (list, switch, current).",
+        help="Switch workspace and default project.",
     )
     WorkspaceCommand().configure_parser(workspace_parser)
+
+    dataset_parser = subparsers.add_parser(
+        "dataset",
+        help="Manage datasets (upload, list, status, preview, delete, validate).",
+    )
+    DatasetCommand().configure_parser(dataset_parser)
 
     preview_parser = subparsers.add_parser(
         "preview",

@@ -21,6 +21,7 @@ from osmosis_ai.platform.auth.credentials import (
 from osmosis_ai.platform.auth.flow import (
     LoginError,
     LoginResult,
+    VerifyResult,
     _build_login_url,
     _generate_state,
     _get_device_name,
@@ -150,14 +151,16 @@ class TestVerifyAndGetUserInfo:
         mock_resp.__exit__ = MagicMock(return_value=False)
 
         with patch("urllib.request.urlopen", return_value=mock_resp):
-            user, org, exp, tid = _verify_and_get_user_info("test-token")
+            result = _verify_and_get_user_info("test-token")
 
-        assert isinstance(user, UserInfo)
-        assert user.email == "u@test.com"
-        assert isinstance(org, OrganizationInfo)
-        assert org.name == "TestOrg"
-        assert exp.tzinfo is not None
-        assert tid == "tok_abc"
+        assert isinstance(result, VerifyResult)
+        assert isinstance(result.user, UserInfo)
+        assert result.user.email == "u@test.com"
+        assert isinstance(result.organization, OrganizationInfo)
+        assert result.organization.name == "TestOrg"
+        assert result.expires_at.tzinfo is not None
+        assert result.token_id == "tok_abc"
+        assert result.projects is None
 
     def test_verification_with_no_expires_at_defaults_to_90_days(self) -> None:
         body = _make_verify_response(expires_at=None)
@@ -168,11 +171,11 @@ class TestVerifyAndGetUserInfo:
 
         before = datetime.now(timezone.utc)
         with patch("urllib.request.urlopen", return_value=mock_resp):
-            _, _, exp, _ = _verify_and_get_user_info("token")
+            result = _verify_and_get_user_info("token")
         after = datetime.now(timezone.utc)
 
-        assert exp >= before + timedelta(days=89)
-        assert exp <= after + timedelta(days=91)
+        assert result.expires_at >= before + timedelta(days=89)
+        assert result.expires_at <= after + timedelta(days=91)
 
     def test_invalid_token_raises_login_error(self) -> None:
         body = _make_verify_response(valid=False)
@@ -252,14 +255,14 @@ class TestVerifyAndGetUserInfo:
         mock_resp.__exit__ = MagicMock(return_value=False)
 
         with patch("urllib.request.urlopen", return_value=mock_resp):
-            user, org, _, _ = _verify_and_get_user_info("token")
+            result = _verify_and_get_user_info("token")
 
-        assert user.id == ""
-        assert user.email == ""
-        assert user.name is None
-        assert org.id == ""
-        assert org.name == ""
-        assert org.role == "member"
+        assert result.user.id == ""
+        assert result.user.email == ""
+        assert result.user.name is None
+        assert result.organization.id == ""
+        assert result.organization.name == ""
+        assert result.organization.role == "member"
 
     def test_no_token_id_in_response(self) -> None:
         expires_str = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
@@ -278,9 +281,9 @@ class TestVerifyAndGetUserInfo:
         mock_resp.__exit__ = MagicMock(return_value=False)
 
         with patch("urllib.request.urlopen", return_value=mock_resp):
-            _, _, _, tid = _verify_and_get_user_info("token")
+            result = _verify_and_get_user_info("token")
 
-        assert tid is None
+        assert result.token_id is None
 
 
 # ---------------------------------------------------------------------------
