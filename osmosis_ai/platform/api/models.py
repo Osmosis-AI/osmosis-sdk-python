@@ -74,6 +74,45 @@ class ProjectDetail:
 
 
 @dataclass
+class UploadInfo:
+    """Upload instructions returned by the create-dataset endpoint."""
+
+    method: str  # "simple" | "multipart"
+    s3_key: str
+    # simple upload fields
+    presigned_url: str | None = None
+    expires_in: int | None = None
+    upload_headers: dict[str, str] | None = None
+    # multipart upload fields
+    upload_id: str | None = None
+    part_size: int | None = None
+    total_parts: int | None = None
+    presigned_urls: list[dict[str, Any]] | None = None  # [{partNumber, presignedUrl}]
+
+    VALID_METHODS = {"simple", "multipart"}
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> UploadInfo:
+        method = data.get("method", "simple")
+        if method not in cls.VALID_METHODS:
+            raise ValueError(
+                f"Unknown upload method {method!r}. "
+                f"Expected one of: {', '.join(sorted(cls.VALID_METHODS))}"
+            )
+        return cls(
+            method=method,
+            s3_key=data.get("s3_key", ""),
+            presigned_url=data.get("presigned_url"),
+            expires_in=data.get("expires_in"),
+            upload_headers=data.get("upload_headers"),
+            upload_id=data.get("upload_id"),
+            part_size=data.get("part_size"),
+            total_parts=data.get("total_parts"),
+            presigned_urls=data.get("presigned_urls"),
+        )
+
+
+@dataclass
 class DatasetFile:
     """A training data file record."""
 
@@ -89,14 +128,13 @@ class DatasetFile:
     project_id: str | None = None
     created_at: str = ""
     updated_at: str = ""
-    # Upload fields — only present in create_dataset response
-    presigned_url: str | None = None
-    s3_key: str | None = None
-    upload_headers: dict[str, str] = field(default_factory=dict)
+    # Upload info — only present in create_dataset response
+    upload: UploadInfo | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> DatasetFile:
-        upload = data.get("upload") or {}
+        upload_data = data.get("upload")
+        upload = UploadInfo.from_dict(upload_data) if upload_data else None
         return cls(
             id=data["id"],
             file_name=data.get("file_name", ""),
@@ -110,9 +148,7 @@ class DatasetFile:
             project_id=data.get("project_id"),
             created_at=data.get("created_at", ""),
             updated_at=data.get("updated_at", ""),
-            presigned_url=upload.get("presigned_url"),
-            s3_key=upload.get("s3_key"),
-            upload_headers=upload.get("upload_headers", {}),
+            upload=upload,
         )
 
     @property

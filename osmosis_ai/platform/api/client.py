@@ -64,13 +64,37 @@ class OsmosisClient:
         )
         return DatasetFile.from_dict(data)
 
-    def complete_upload(self, file_id: str, s3_key: str, extension: str) -> DatasetFile:
+    def complete_upload(
+        self,
+        file_id: str,
+        s3_key: str,
+        extension: str | None = None,
+        upload_id: str | None = None,
+        parts: list[dict] | None = None,
+    ) -> DatasetFile:
+        payload: dict = {"s3_key": s3_key}
+        if extension is not None:
+            payload["extension"] = extension
+        if upload_id or parts:
+            if not upload_id or not parts:
+                raise ValueError(
+                    "upload_id and parts must both be provided for multipart completion"
+                )
+            payload["upload_id"] = upload_id
+            payload["parts"] = parts
         data = platform_request(
             f"/api/cli/datasets/{file_id}/complete",
             method="POST",
-            data={"s3_key": s3_key, "extension": extension},
+            data=payload,
         )
         return DatasetFile.from_dict(data)
+
+    def abort_upload(self, file_id: str, upload_id: str) -> None:
+        platform_request(
+            f"/api/cli/datasets/{file_id}/abort",
+            method="POST",
+            data={"upload_id": upload_id},
+        )
 
     def list_datasets(
         self, project_id: str, limit: int = 50, offset: int = 0

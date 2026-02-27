@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import argparse
-import time
+import asyncio
+import contextlib
 from collections.abc import Iterable
 from pathlib import Path
 
@@ -15,12 +16,6 @@ from .project import _require_auth, _require_subscription, _resolve_project
 VALID_EXTENSIONS = {"csv", "jsonl", "parquet"}
 MAX_FILE_SIZE = 5 * 1024 * 1024 * 1024  # 5GB
 REQUIRED_COLUMNS = {"system_prompt", "user_prompt", "ground_truth"}
-
-CONTENT_TYPE_MAP = {
-    "csv": "text/csv",
-    "jsonl": "application/x-ndjson",
-    "parquet": "application/vnd.apache.parquet",
-}
 
 
 def _format_size(size_bytes: int | float) -> str:
@@ -55,11 +50,6 @@ class DatasetCommand:
         upload_parser.add_argument("file", help="Path to the file to upload")
         upload_parser.add_argument(
             "--project", help="Project name (default: current project)"
-        )
-        upload_parser.add_argument(
-            "--no-wait",
-            action="store_true",
-            help="Don't wait for processing to complete",
         )
         upload_parser.set_defaults(handler=self._run_upload)
 
@@ -102,6 +92,13 @@ class DatasetCommand:
 
         parser.set_defaults(handler=self._run_default)
 
+    @staticmethod
+    def _abort_multipart(client, dataset_id: str, upload_id: str | None) -> None:
+        """Best-effort abort of a multipart upload."""
+        if upload_id:
+            with contextlib.suppress(Exception):
+                client.abort_upload(dataset_id, upload_id)
+
     def _run_default(self, args: argparse.Namespace) -> int:
         print("Usage: osmosis dataset <command>")
         print("")
@@ -117,8 +114,13 @@ class DatasetCommand:
     def _run_upload(self, args: argparse.Namespace) -> int:
         _require_auth()
         _require_subscription()
+
         from osmosis_ai.platform.api.client import OsmosisClient
-        from osmosis_ai.platform.api.upload import upload_file_to_presigned_url
+        from osmosis_ai.platform.api.upload import (
+            make_progress_bar,
+            upload_file_multipart,
+            upload_file_simple,
+        )
 
         file_path = Path(args.file).resolve()
         if not file_path.exists():
@@ -149,44 +151,68 @@ class DatasetCommand:
         project_id = _resolve_project_id(args)
         client = OsmosisClient()
 
-        # Step 1: Create dataset record + get presigned upload URL
-        print(f"Uploading {file_path.name} ({_format_size(file_size)})...")
+        # Step 1: Create dataset record + get upload instructions
         try:
             dataset = client.create_dataset(project_id, file_path.name, file_size, ext)
         except PlatformAPIError as e:
             raise CLIError(f"Failed to create dataset: {e}") from e
 
-        # Step 2: Upload file to S3
-        content_type = CONTENT_TYPE_MAP.get(ext, "application/octet-stream")
-        try:
-            upload_file_to_presigned_url(
-                file_path,
-                dataset.presigned_url,
-                content_type,
-                extra_headers=dataset.upload_headers,
-            )
-        except RuntimeError as e:
-            raise CLIError(f"Upload failed: {e}") from e
+        upload = dataset.upload
+        if upload is None:
+            raise CLIError("Server did not return upload instructions.")
 
-        # Step 3: Mark upload complete
-        try:
-            client.complete_upload(dataset.id, dataset.s3_key, ext)
-        except PlatformAPIError as e:
-            raise CLIError(f"Failed to complete upload: {e}") from e
+        # Step 2: Upload file to S3
+        is_multipart = upload.method == "multipart"
+        if is_multipart:
+            parts_label = f", {upload.total_parts} parts" if upload.total_parts else ""
+            print(
+                f"Uploading {file_path.name} ({_format_size(file_size)}, multipart{parts_label})..."
+            )
+        else:
+            print(f"Uploading {file_path.name} ({_format_size(file_size)})...")
+
+        progress_ctx, progress_cb = make_progress_bar(file_size)
+        ctx = progress_ctx or contextlib.nullcontext()
+
+        if is_multipart:
+            try:
+                with ctx:
+                    parts = asyncio.run(
+                        upload_file_multipart(
+                            file_path, upload, progress_callback=progress_cb
+                        )
+                    )
+                client.complete_upload(
+                    dataset.id,
+                    upload.s3_key,
+                    ext,
+                    upload_id=upload.upload_id,
+                    parts=parts,
+                )
+            except KeyboardInterrupt:
+                self._abort_multipart(client, dataset.id, upload.upload_id)
+                raise CLIError("Upload cancelled by user.") from None
+            except RuntimeError as e:
+                self._abort_multipart(client, dataset.id, upload.upload_id)
+                raise CLIError(f"Upload failed: {e}") from e
+            except PlatformAPIError as e:
+                self._abort_multipart(client, dataset.id, upload.upload_id)
+                raise CLIError(f"Failed to complete upload: {e}") from e
+        else:
+            try:
+                with ctx:
+                    upload_file_simple(file_path, upload, progress_callback=progress_cb)
+                client.complete_upload(dataset.id, upload.s3_key, ext)
+            except KeyboardInterrupt:
+                print("\nUpload interrupted.")
+                raise CLIError("Upload cancelled by user.") from None
+            except RuntimeError as e:
+                raise CLIError(f"Upload failed: {e}") from e
+            except PlatformAPIError as e:
+                raise CLIError(f"Failed to complete upload: {e}") from e
 
         print(f"Upload complete. Dataset ID: {dataset.id}")
-
-        # Step 4: Optionally poll for processing
-        if not args.no_wait:
-            print("Waiting for processing...")
-            ds = _poll_dataset_status(client, dataset.id)
-            if ds.status == "uploaded":
-                print("Processing complete.")
-            elif ds.status == "error":
-                print(f"Processing failed: {ds.error}")
-                return 1
-            else:
-                print(f"Processing status: {ds.status}")
+        print("Processing will continue on the platform. Check status in the web UI.")
 
         return 0
 
@@ -323,40 +349,6 @@ class DatasetCommand:
 
         print(f"Valid {ext} file: {file_path.name} ({_format_size(file_size)})")
         return 0
-
-
-def _poll_dataset_status(client, dataset_id: str, *, timeout: int = 600):
-    """Poll dataset status until terminal state or timeout."""
-    ds = client.get_dataset(dataset_id)
-    if ds.is_terminal:
-        return ds
-
-    start = time.monotonic()
-    interval = 2
-    consecutive_errors = 0
-    max_consecutive_errors = 5
-
-    while time.monotonic() - start < timeout:
-        time.sleep(interval)
-        try:
-            ds = client.get_dataset(dataset_id)
-        except Exception:
-            consecutive_errors += 1
-            if consecutive_errors >= max_consecutive_errors:
-                print(
-                    f"Warning: lost connection while polling dataset status "
-                    f"(failed {consecutive_errors} times). "
-                    f"Check status manually: osmosis dataset status {dataset_id}"
-                )
-                return ds
-            continue
-        consecutive_errors = 0
-        if ds.is_terminal:
-            return ds
-        if time.monotonic() - start > 30:
-            interval = 5
-
-    return ds
 
 
 def _validate_file(file_path: Path, ext: str) -> list[str]:
