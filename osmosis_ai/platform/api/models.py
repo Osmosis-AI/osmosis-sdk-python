@@ -89,9 +89,14 @@ class DatasetFile:
     project_id: str | None = None
     created_at: str = ""
     updated_at: str = ""
+    # Upload fields — only present in create_dataset response
+    presigned_url: str | None = None
+    s3_key: str | None = None
+    upload_headers: dict[str, str] = field(default_factory=dict)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> DatasetFile:
+        upload = data.get("upload") or {}
         return cls(
             id=data["id"],
             file_name=data.get("file_name", ""),
@@ -105,6 +110,9 @@ class DatasetFile:
             project_id=data.get("project_id"),
             created_at=data.get("created_at", ""),
             updated_at=data.get("updated_at", ""),
+            presigned_url=upload.get("presigned_url"),
+            s3_key=upload.get("s3_key"),
+            upload_headers=upload.get("upload_headers", {}),
         )
 
     @property
@@ -127,23 +135,4 @@ class PaginatedDatasets:
             datasets=[DatasetFile.from_dict(d) for d in data.get("datasets", [])],
             total_count=data.get("total_count", 0),
             has_more=data.get("has_more", False),
-        )
-
-
-@dataclass
-class PresignedUpload:
-    """Result from upload-url endpoint."""
-
-    presigned_url: str
-    s3_key: str
-    expires_in: int
-    upload_headers: dict[str, str]
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> PresignedUpload:
-        return cls(
-            presigned_url=data["presigned_url"],
-            s3_key=data["s3_key"],
-            expires_in=data.get("expires_in", 3600),
-            upload_headers=data.get("upload_headers", {}),
         )

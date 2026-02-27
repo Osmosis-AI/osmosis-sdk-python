@@ -149,40 +149,34 @@ class DatasetCommand:
         project_id = _resolve_project_id(args)
         client = OsmosisClient()
 
-        # Step 1: Create dataset record
+        # Step 1: Create dataset record + get presigned upload URL
         print(f"Uploading {file_path.name} ({_format_size(file_size)})...")
         try:
-            dataset = client.create_dataset(project_id, file_path.name, file_size)
+            dataset = client.create_dataset(project_id, file_path.name, file_size, ext)
         except PlatformAPIError as e:
             raise CLIError(f"Failed to create dataset: {e}") from e
 
-        # Step 2: Get presigned upload URL
-        try:
-            upload_info = client.get_upload_url(dataset.id, ext)
-        except PlatformAPIError as e:
-            raise CLIError(f"Failed to get upload URL: {e}") from e
-
-        # Step 3: Upload file
+        # Step 2: Upload file to S3
         content_type = CONTENT_TYPE_MAP.get(ext, "application/octet-stream")
         try:
             upload_file_to_presigned_url(
                 file_path,
-                upload_info.presigned_url,
+                dataset.presigned_url,
                 content_type,
-                extra_headers=upload_info.upload_headers,
+                extra_headers=dataset.upload_headers,
             )
         except RuntimeError as e:
             raise CLIError(f"Upload failed: {e}") from e
 
-        # Step 4: Mark upload complete
+        # Step 3: Mark upload complete
         try:
-            client.complete_upload(dataset.id, upload_info.s3_key, ext)
+            client.complete_upload(dataset.id, dataset.s3_key, ext)
         except PlatformAPIError as e:
             raise CLIError(f"Failed to complete upload: {e}") from e
 
         print(f"Upload complete. Dataset ID: {dataset.id}")
 
-        # Step 5: Optionally poll for processing
+        # Step 4: Optionally poll for processing
         if not args.no_wait:
             print("Waiting for processing...")
             ds = _poll_dataset_status(client, dataset.id)

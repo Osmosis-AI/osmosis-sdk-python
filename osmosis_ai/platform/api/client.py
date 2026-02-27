@@ -9,7 +9,6 @@ from osmosis_ai.platform.auth.platform_client import platform_request
 from .models import (
     DatasetFile,
     PaginatedDatasets,
-    PresignedUpload,
     Project,
     ProjectDetail,
 )
@@ -51,7 +50,7 @@ class OsmosisClient:
     # ── Datasets ─────────────────────────────────────────────────────
 
     def create_dataset(
-        self, project_id: str, file_name: str, file_size: int
+        self, project_id: str, file_name: str, file_size: int, extension: str
     ) -> DatasetFile:
         data = platform_request(
             "/api/cli/datasets",
@@ -60,17 +59,10 @@ class OsmosisClient:
                 "project_id": project_id,
                 "file_name": file_name,
                 "file_size": file_size,
+                "extension": extension,
             },
         )
         return DatasetFile.from_dict(data)
-
-    def get_upload_url(self, file_id: str, extension: str) -> PresignedUpload:
-        data = platform_request(
-            "/api/cli/datasets/upload-url",
-            method="POST",
-            data={"file_id": file_id, "extension": extension},
-        )
-        return PresignedUpload.from_dict(data)
 
     def complete_upload(self, file_id: str, s3_key: str, extension: str) -> DatasetFile:
         data = platform_request(
