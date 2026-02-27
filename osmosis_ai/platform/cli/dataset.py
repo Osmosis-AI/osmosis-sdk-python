@@ -506,7 +506,7 @@ def _validate_csv(file_path: Path) -> list[str]:
             num_cols = len(header)
 
             for i, row in enumerate(reader, 2):
-                if i > 100:
+                if i > 101:
                     break
                 if len(row) != num_cols:
                     errors.append(

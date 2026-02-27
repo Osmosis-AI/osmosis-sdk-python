@@ -220,6 +220,24 @@ class TestValidateCsv:
         f.write_text("\n".join([header] + [good] * 20) + "\n")
         assert _validate_csv(f) == []
 
+    def test_exactly_100_data_rows_no_tail_pass(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        """100 data rows are fully covered by head validation for CSV."""
+        import osmosis_ai.platform.cli.dataset as dataset_module
+
+        f = tmp_path / "exactly_100.csv"
+        header = "system_prompt,user_prompt,ground_truth"
+        good = "s,u,g"
+        f.write_text("\n".join([header] + [good] * 100) + "\n")
+
+        def _should_not_be_called(*_args, **_kwargs):
+            raise AssertionError("Tail validation should not run for 100 data rows")
+
+        monkeypatch.setattr(dataset_module, "_read_tail_lines", _should_not_be_called)
+
+        assert _validate_csv(f) == []
+
 
 # ---------------------------------------------------------------------------
 # _validate_parquet
