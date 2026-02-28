@@ -359,5 +359,5 @@ def _require_subscription() -> None:
     if status is not True:
         raise CLIError(
             "Your workspace requires an active subscription for this action.\n"
-            f"  Upgrade at: {PLATFORM_URL}/settings/billing"
+            f"  Upgrade at: {PLATFORM_URL}/{ws_name}/settings/billing"
         )

@@ -5,11 +5,13 @@ from __future__ import annotations
 import argparse
 import asyncio
 import contextlib
+import sys
 from collections.abc import Iterable
 from pathlib import Path
 
 from osmosis_ai.cli.errors import CLIError
-from osmosis_ai.platform.auth import PlatformAPIError
+from osmosis_ai.platform.auth import PlatformAPIError, get_active_workspace
+from osmosis_ai.platform.auth.config import PLATFORM_URL
 
 from .project import _require_auth, _require_subscription, _resolve_project
 
@@ -148,7 +150,25 @@ class DatasetCommand:
                 "File validation failed:\n" + "\n".join(f"  - {e}" for e in errors)
             )
 
-        project_id = _resolve_project_id(args)
+        project = _resolve_project(getattr(args, "project", None))
+        project_id = project["id"]
+        project_name = project.get("project_name", "")
+        ws_name = get_active_workspace()
+
+        # Confirm upload target
+        print(f"  Workspace : {ws_name or 'unknown'}")
+        print(f"  Project   : {project_name or project_id}")
+        print(f"  File      : {file_path.name} ({_format_size(file_size)})")
+        if sys.stdin.isatty():
+            try:
+                answer = input("Proceed with upload? [Y/n] ").strip().lower()
+            except (EOFError, KeyboardInterrupt):
+                print()
+                return 1
+            if answer and answer not in ("y", "yes"):
+                print("Upload cancelled.")
+                return 1
+
         client = OsmosisClient()
 
         # Step 1: Create dataset record + get upload instructions
@@ -192,12 +212,12 @@ class DatasetCommand:
             except KeyboardInterrupt:
                 self._abort_multipart(client, dataset.id, upload.upload_id)
                 raise CLIError("Upload cancelled by user.") from None
-            except RuntimeError as e:
+            except (RuntimeError, PlatformAPIError) as e:
                 self._abort_multipart(client, dataset.id, upload.upload_id)
                 raise CLIError(f"Upload failed: {e}") from e
-            except PlatformAPIError as e:
+            except Exception:
                 self._abort_multipart(client, dataset.id, upload.upload_id)
-                raise CLIError(f"Failed to complete upload: {e}") from e
+                raise
         else:
             try:
                 with ctx:
@@ -212,7 +232,8 @@ class DatasetCommand:
                 raise CLIError(f"Failed to complete upload: {e}") from e
 
         print(f"Upload complete. Dataset ID: {dataset.id}")
-        print("Processing will continue on the platform. Check status in the web UI.")
+        url = f"{PLATFORM_URL}/{ws_name}/{project_name}/training-data/{dataset.id}"
+        print(f"Processing will continue on the platform. Check status at: {url}")
 
         return 0
 

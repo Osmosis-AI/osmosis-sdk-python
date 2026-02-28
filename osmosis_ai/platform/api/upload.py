@@ -42,6 +42,34 @@ def _backoff_delay(
     return random.uniform(0, exp)
 
 
+# ── Progress wrapper ──────────────────────────────────────────────
+
+
+class _ProgressReader:
+    """Wraps a file object to invoke a callback as httpx reads chunks."""
+
+    def __init__(
+        self,
+        fp: Any,
+        total: int,
+        callback: ProgressCallback,
+    ) -> None:
+        self._fp = fp
+        self._total = total
+        self._callback = callback
+        self._bytes_read = 0
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._fp, name)
+
+    def read(self, size: int = -1) -> bytes:
+        data = self._fp.read(size)
+        if data:
+            self._bytes_read += len(data)
+            self._callback(self._bytes_read, self._total)
+        return data
+
+
 # ── Simple upload ─────────────────────────────────────────────────────
 
 
@@ -68,19 +96,8 @@ def upload_file_simple(
     url = info.presigned_url
 
     headers = dict(info.upload_headers or {})
-    chunk_size = 256 * 1024  # 256 KB
-
-    def _stream():
-        uploaded = 0
-        with open(file_path, "rb") as f:
-            while True:
-                chunk = f.read(chunk_size)
-                if not chunk:
-                    break
-                uploaded += len(chunk)
-                if progress_callback:
-                    progress_callback(uploaded, file_size)
-                yield chunk
+    # S3 presigned PUT requires Content-Length (does not support chunked encoding)
+    headers["Content-Length"] = str(file_size)
 
     last_error: Exception | None = None
     for attempt in range(MAX_RETRIES_SIMPLE):
@@ -94,14 +111,21 @@ def upload_file_simple(
                 progress_callback(0, file_size)
 
         try:
-            with httpx.Client(
-                timeout=httpx.Timeout(SIMPLE_UPLOAD_TIMEOUT, connect=30.0)
-            ) as client:
-                resp = client.put(url, headers=headers, content=_stream())
-                if resp.status_code >= 300:
-                    raise RuntimeError(
-                        f"Upload failed: HTTP {resp.status_code}. {resp.text[:500]}"
-                    )
+            with open(file_path, "rb") as f:
+                content: Any = f
+                if progress_callback:
+                    content = _ProgressReader(f, file_size, progress_callback)
+                with httpx.Client(
+                    timeout=httpx.Timeout(SIMPLE_UPLOAD_TIMEOUT, connect=30.0)
+                ) as client:
+                    resp = client.put(url, headers=headers, content=content)
+                    if resp.status_code >= 300:
+                        raise RuntimeError(
+                            f"Upload failed: HTTP {resp.status_code}. {resp.text[:500]}"
+                        )
+            # Ensure progress shows 100% on success
+            if progress_callback:
+                progress_callback(file_size, file_size)
             return  # success
         except (httpx.HTTPError, RuntimeError) as exc:
             last_error = exc

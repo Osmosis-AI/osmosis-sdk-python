@@ -82,10 +82,14 @@ class OsmosisClient:
                 )
             payload["upload_id"] = upload_id
             payload["parts"] = parts
+        # Completing a multipart upload can take a while (S3 must assemble
+        # all parts), so use a longer timeout than the default 30s.
+        timeout = 120.0 if upload_id else 30.0
         data = platform_request(
             f"/api/cli/datasets/{file_id}/complete",
             method="POST",
             data=payload,
+            timeout=timeout,
         )
         return DatasetFile.from_dict(data)
 
