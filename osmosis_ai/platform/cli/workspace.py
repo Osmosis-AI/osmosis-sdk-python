@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import argparse
-import sys
 
+from osmosis_ai.cli.console import console
 from osmosis_ai.cli.errors import CLIError
+from osmosis_ai.cli.prompts import Choice, is_interactive, select
 from osmosis_ai.platform.auth import (
     get_active_workspace,
     get_all_workspaces,
@@ -38,49 +39,49 @@ class WorkspaceCommand:
             project_name = (
                 default_project["project_name"]
                 if default_project
-                else "(no project selected)"
+                else console.format_styled("(no project selected)", "dim")
             )
-            print(f"Current: {active_ws} / {project_name}")
-            print()
+            console.print(
+                f"{console.format_styled('Current:', 'bold')} {console.format_styled(active_ws, 'cyan')} / {project_name}"
+            )
+            console.print()
 
         # Non-interactive: just show current context
-        if not sys.stdin.isatty():
+        if not is_interactive():
             return 0
 
         # --- Workspace selection ---
         ws_name = self._select_workspace(workspaces, active_ws)
+        if ws_name is None:
+            raise CLIError("Cancelled.")
 
-        if ws_name != active_ws:
+        switched = ws_name != active_ws
+        if switched:
             set_active_workspace(ws_name)
+            console.print(
+                f"{console.format_styled('Switched to:', 'bold')} {console.format_styled(ws_name, 'cyan')}"
+            )
 
-        # --- Project selection ---
-        return self._select_project(ws_name)
+        # --- Project selection (only if same workspace) ---
+        if not switched:
+            return self._select_project(ws_name)
+
+        return 0
 
     def _select_workspace(
         self,
         workspaces: list[tuple],
         active_ws: str | None,
-    ) -> str:
-        """Prompt the user to select a workspace. Auto-selects if only one."""
-        if len(workspaces) == 1:
-            return workspaces[0][0]
-
-        print("Available workspaces:")
-        current_idx = 1
-        for i, (name, creds, is_active) in enumerate(workspaces, 1):
+    ) -> str | None:
+        """Prompt the user to select a workspace."""
+        choices = []
+        for name, creds, is_active in workspaces:
             marker = " (current)" if is_active else ""
             expired = " [expired]" if creds.is_expired() else ""
-            print(f"  [{i}] {name}{marker}{expired}")
-            if is_active:
-                current_idx = i
-        print()
+            title = f"{name}{marker}{expired}"
+            choices.append(Choice(title, value=name))
 
-        choice = _prompt(f"Select workspace [{current_idx}]: ")
-        if choice is None:
-            raise CLIError("Cancelled.")
-        idx = current_idx - 1 if not choice else _parse_choice(choice, len(workspaces))
-
-        return workspaces[idx][0]
+        return select("Select workspace:", choices=choices)
 
     def _select_project(self, ws_name: str) -> int:
         """Prompt the user to select a default project."""
@@ -94,25 +95,7 @@ class WorkspaceCommand:
             return 0
 
         set_default_project(ws_name, result["id"], result["project_name"])
-        print(f"Switched to: {ws_name} / {result['project_name']}")
+        console.print(
+            f"{console.format_styled('Switched to:', 'bold')} {console.format_styled(ws_name, 'cyan')} / {console.format_styled(result['project_name'], 'cyan')}"
+        )
         return 0
-
-
-def _prompt(message: str) -> str | None:
-    """Read input, returning None on interrupt/EOF."""
-    try:
-        return input(message).strip()
-    except (EOFError, KeyboardInterrupt):
-        print()
-        return None
-
-
-def _parse_choice(value: str, max_val: int) -> int:
-    """Parse a 1-based numeric choice, returning a 0-based index."""
-    try:
-        idx = int(value) - 1
-    except ValueError:
-        raise CLIError("Invalid input.") from None
-    if not (0 <= idx < max_val):
-        raise CLIError("Invalid selection.")
-    return idx

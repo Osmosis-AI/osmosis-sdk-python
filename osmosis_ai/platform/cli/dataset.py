@@ -5,11 +5,12 @@ from __future__ import annotations
 import argparse
 import asyncio
 import contextlib
-import sys
 from collections.abc import Iterable
 from pathlib import Path
 
+from osmosis_ai.cli.console import console
 from osmosis_ai.cli.errors import CLIError
+from osmosis_ai.cli.prompts import confirm, is_interactive
 from osmosis_ai.platform.auth import PlatformAPIError, get_active_workspace
 from osmosis_ai.platform.auth.config import PLATFORM_URL
 
@@ -43,6 +44,7 @@ class DatasetCommand:
     """Handler for `osmosis dataset`."""
 
     def configure_parser(self, parser: argparse.ArgumentParser) -> None:
+        self._parser = parser
         subparsers = parser.add_subparsers(
             dest="dataset_action", help="Dataset management commands"
         )
@@ -101,16 +103,8 @@ class DatasetCommand:
             with contextlib.suppress(Exception):
                 client.abort_upload(dataset_id, upload_id)
 
-    def _run_default(self, args: argparse.Namespace) -> int:
-        print("Usage: osmosis dataset <command>")
-        print("")
-        print("Commands:")
-        print("  upload    Upload a dataset file")
-        print("  list      List datasets in a project")
-        print("  status    Check dataset processing status")
-        print("  preview   Preview dataset rows")
-        print("  delete    Delete a dataset")
-        print("  validate  Validate a dataset file locally")
+    def _run_default(self, _args: argparse.Namespace) -> int:
+        self._parser.print_help()
         return 0
 
     def _run_upload(self, args: argparse.Namespace) -> int:
@@ -156,17 +150,20 @@ class DatasetCommand:
         ws_name = get_active_workspace()
 
         # Confirm upload target
-        print(f"  Workspace : {ws_name or 'unknown'}")
-        print(f"  Project   : {project_name or project_id}")
-        print(f"  File      : {file_path.name} ({_format_size(file_size)})")
-        if sys.stdin.isatty():
-            try:
-                answer = input("Proceed with upload? [Y/n] ").strip().lower()
-            except (EOFError, KeyboardInterrupt):
-                print()
-                return 1
-            if answer and answer not in ("y", "yes"):
-                print("Upload cancelled.")
+        console.print()
+        console.table(
+            [
+                ("Workspace", ws_name or "unknown"),
+                ("Project", project_name or project_id),
+                ("File", f"{file_path.name} ({_format_size(file_size)})"),
+            ],
+            title="Upload Target",
+        )
+        console.print()
+        if is_interactive():
+            proceed = confirm("Proceed with upload?", default=True)
+            if proceed is None or not proceed:
+                console.print("Upload cancelled.", style="dim")
                 return 1
 
         client = OsmosisClient()
@@ -185,11 +182,11 @@ class DatasetCommand:
         is_multipart = upload.method == "multipart"
         if is_multipart:
             parts_label = f", {upload.total_parts} parts" if upload.total_parts else ""
-            print(
+            console.print(
                 f"Uploading {file_path.name} ({_format_size(file_size)}, multipart{parts_label})..."
             )
         else:
-            print(f"Uploading {file_path.name} ({_format_size(file_size)})...")
+            console.print(f"Uploading {file_path.name} ({_format_size(file_size)})...")
 
         progress_ctx, progress_cb = make_progress_bar(file_size)
         ctx = progress_ctx or contextlib.nullcontext()
@@ -224,16 +221,18 @@ class DatasetCommand:
                     upload_file_simple(file_path, upload, progress_callback=progress_cb)
                 client.complete_upload(dataset.id, upload.s3_key, ext)
             except KeyboardInterrupt:
-                print("\nUpload interrupted.")
+                console.print("\nUpload interrupted.")
                 raise CLIError("Upload cancelled by user.") from None
             except RuntimeError as e:
                 raise CLIError(f"Upload failed: {e}") from e
             except PlatformAPIError as e:
                 raise CLIError(f"Failed to complete upload: {e}") from e
 
-        print(f"Upload complete. Dataset ID: {dataset.id}")
+        console.print(f"Upload complete. Dataset ID: {dataset.id}", style="green")
         url = f"{PLATFORM_URL}/{ws_name}/{project_name}/training-data/{dataset.id}"
-        print(f"Processing will continue on the platform. Check status at: {url}")
+        console.print(
+            f"Processing will continue on the platform. Check status at: {url}"
+        )
 
         return 0
 
@@ -249,20 +248,34 @@ class DatasetCommand:
             raise CLIError(str(e)) from e
 
         if not result.datasets:
-            print("No datasets found.")
+            console.print("No datasets found.")
             return 0
 
-        print(f"Datasets ({result.total_count}):")
+        console.print(f"Datasets ({result.total_count}):", style="bold")
         for d in result.datasets:
+            # Determine status color
+            if d.status == "ready":
+                status_color = "green"
+            elif d.status == "processing" or d.status == "uploaded":
+                status_color = "yellow"
+            elif d.status == "failed":
+                status_color = "red"
+            else:
+                status_color = None
+
             status_info = f"[{d.status}]"
             if d.processing_step:
                 status_info = f"[{d.status}: {d.processing_step}]"
-            print(
+
+            if status_color:
+                status_info = console.format_styled(status_info, status_color)
+
+            console.print(
                 f"  {d.id[:8]}  {d.file_name}  {_format_size(d.file_size)}  {status_info}"
             )
 
         if result.has_more:
-            print(f"  ... and {result.total_count - len(result.datasets)} more")
+            console.print(f"  ... and {result.total_count - len(result.datasets)} more")
 
         return 0
 
@@ -276,19 +289,23 @@ class DatasetCommand:
         except PlatformAPIError as e:
             raise CLIError(str(e)) from e
 
-        print(f"Dataset: {ds.file_name}")
-        print(f"  ID:     {ds.id}")
-        print(f"  Size:   {_format_size(ds.file_size)}")
-        print(f"  Status: {ds.status}")
+        rows = [
+            ("File", ds.file_name),
+            ("ID", ds.id),
+            ("Size", _format_size(ds.file_size)),
+            ("Status", ds.status),
+        ]
         if ds.processing_step:
             pct = (
                 f" ({ds.processing_percent:.0f}%)"
                 if ds.processing_percent is not None
                 else ""
             )
-            print(f"  Step:   {ds.processing_step}{pct}")
+            rows.append(("Step", f"{ds.processing_step}{pct}"))
         if ds.error:
-            print(f"  Error:  {ds.error}")
+            rows.append(("Error", ds.error))
+
+        console.table(rows, title="Dataset Status")
         return 0
 
     def _run_preview(self, args: argparse.Namespace) -> int:
@@ -303,18 +320,21 @@ class DatasetCommand:
 
         if ds.data_preview is None:
             if ds.status == "uploaded":
-                print("No preview available for this dataset.")
+                console.print("No preview available for this dataset.", style="dim")
             else:
-                print(f"Dataset is still processing (status: {ds.status}).")
+                console.print(
+                    f"Dataset is still processing (status: {ds.status}).",
+                    style="yellow",
+                )
             return 0
 
         rows = ds.data_preview
         if isinstance(rows, list):
             limit = min(args.rows, len(rows))
             for row in rows[:limit]:
-                print(row)
+                console.print(str(row))
         else:
-            print(rows)
+            console.print(str(rows))
 
         return 0
 
@@ -323,11 +343,12 @@ class DatasetCommand:
         from osmosis_ai.platform.api.client import OsmosisClient
 
         if not args.yes:
-            confirm = input(
-                f"Delete dataset '{args.id}'? This cannot be undone. [y/N] "
+            proceed = confirm(
+                f"Delete dataset '{args.id}'? This cannot be undone.",
+                default=False,
             )
-            if confirm.lower() not in ("y", "yes"):
-                print("Cancelled.")
+            if proceed is None or not proceed:
+                console.print("Cancelled.", style="dim")
                 return 0
 
         client = OsmosisClient()
@@ -336,7 +357,7 @@ class DatasetCommand:
         except PlatformAPIError as e:
             raise CLIError(str(e)) from e
 
-        print("Dataset deleted.")
+        console.print("Dataset deleted.", style="green")
         return 0
 
     def _run_validate(self, args: argparse.Namespace) -> int:
@@ -363,12 +384,15 @@ class DatasetCommand:
         errors = _validate_file(file_path, ext)
 
         if errors:
-            print("Validation errors:")
+            console.print("Validation errors:")
             for err in errors:
-                print(f"  - {err}")
+                console.print(f"  - {err}")
             return 1
 
-        print(f"Valid {ext} file: {file_path.name} ({_format_size(file_size)})")
+        console.print(
+            f"Valid {ext} file: {file_path.name} ({_format_size(file_size)})",
+            style="green",
+        )
         return 0
 
 

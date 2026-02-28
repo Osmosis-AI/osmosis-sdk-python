@@ -5,10 +5,11 @@ from __future__ import annotations
 import contextlib
 import os
 import re
-import sys
 import time
 
+from osmosis_ai.cli.console import console
 from osmosis_ai.cli.errors import CLIError
+from osmosis_ai.cli.prompts import Choice, Separator, is_interactive, select, text
 from osmosis_ai.platform.api.client import OsmosisClient
 from osmosis_ai.platform.auth import (
     PlatformAPIError,
@@ -25,7 +26,6 @@ from osmosis_ai.platform.auth.local_config import (
 )
 
 CACHE_TTL_SECONDS = 300
-DISPLAY_LIMIT = 10
 
 # Must match the frontend validation in osmosis-monolith:
 # platform-app/src/constants/projects.ts + org-routes.ts
@@ -99,19 +99,18 @@ def select_project_interactive(
         except Exception:
             projects = _get_cached_projects(max_age=None)
             if projects:
-                print(
-                    "Warning: Could not reach platform, showing cached data.",
-                    file=sys.stderr,
+                console.print_error(
+                    "Warning: Could not reach platform, showing cached data."
                 )
 
-    if not sys.stdin.isatty():
+    if not is_interactive():
         # Non-interactive: auto-select if exactly one, otherwise skip
         if len(projects) == 1:
             return projects[0]
         return None
 
     if not projects:
-        print(f"No projects in '{ws_name}'.")
+        console.print(f"No projects in '{ws_name}'.")
         return _prompt_create()
 
     return _prompt_select(projects, current_project_id)
@@ -119,34 +118,41 @@ def select_project_interactive(
 
 def _prompt_create() -> dict | None:
     """Prompt to create a new project."""
-    try:
-        name = input("Project name: ").strip()
-    except (EOFError, KeyboardInterrupt):
-        print()
-        return None
 
-    if not name:
+    def validate_input(value: str) -> bool | str:
+        """Validator for questionary text prompt."""
+        if not value:
+            return "Project name is required."
+        # Normalize to lowercase first
+        normalized = value.lower()
+        error = validate_project_name(normalized)
+        if error:
+            return error
+        return True
+
+    name = text(
+        "Project name:",
+        validate=validate_input,
+        instruction="lowercase letters, digits, and hyphens only",
+    )
+
+    if name is None:
         return None
 
     # Normalize to lowercase (matching frontend behavior)
     name = name.lower()
 
-    error = validate_project_name(name)
-    if error:
-        print(f"Invalid project name: {error}", file=sys.stderr)
-        return None
-
     try:
         client = OsmosisClient()
         project = client.create_project(name)
     except PlatformAPIError as e:
-        print(f"Failed to create project: {e}", file=sys.stderr)
+        console.print_error(f"Failed to create project: {e}")
         return None
 
     with contextlib.suppress(Exception):
         _refresh_projects()
 
-    print(f"Created project '{project.project_name}'.")
+    console.print(f"Created project '{project.project_name}'.")
     return {"id": project.id, "project_name": project.project_name}
 
 
@@ -154,90 +160,36 @@ def _prompt_select(
     projects: list[dict],
     current_project_id: str | None,
 ) -> dict | None:
-    """Display project list with search and create support."""
-    total = len(projects)
-    display = projects[:DISPLAY_LIMIT]
+    """Display project list with arrow-key selection and create option."""
+    # Build choices for ALL projects (no DISPLAY_LIMIT cap)
+    choices = []
 
-    current_idx = None
-    for i, p in enumerate(display, 1):
-        if p.get("id") == current_project_id:
-            current_idx = i
+    for p in projects:
+        is_current = p.get("id") == current_project_id
+        title = p["project_name"]
+        if is_current:
+            title += " (current)"
+        choices.append(Choice(title, value=p))
 
-    count_hint = (
-        f" (showing {DISPLAY_LIMIT} of {total})" if total > DISPLAY_LIMIT else ""
+    # Add separator + create option
+    choices.append(Separator())
+    choices.append(Choice("Create new project", value="__create__"))
+
+    # Prompt user
+    result = select(
+        "Select a project:",
+        choices=choices,
     )
-    print(f"Projects{count_hint}:")
-    for i, p in enumerate(display, 1):
-        marker = " (current)" if p.get("id") == current_project_id else ""
-        print(f"  [{i}]  {p['project_name']}{marker}")
-    print("  [+]  Create new project")
 
-    default_hint = f" [{current_idx}]" if current_idx else ""
+    if result is None:
+        return None
 
-    while True:
-        try:
-            choice = input(f"Select or search by name{default_hint}: ").strip()
-        except (EOFError, KeyboardInterrupt):
-            print()
-            return None
+    # Handle create option
+    if result == "__create__":
+        return _prompt_create()
 
-        if not choice:
-            if current_idx:
-                return display[current_idx - 1]
-            continue
-
-        if choice == "+":
-            result = _prompt_create()
-            if result:
-                return result
-            continue
-
-        # Numeric selection
-        try:
-            idx = int(choice)
-            if 1 <= idx <= len(display):
-                return display[idx - 1]
-            print("Invalid selection.")
-            continue
-        except ValueError:
-            pass
-
-        # Name search (substring, case-insensitive)
-        query = choice.lower()
-        matches = [p for p in projects if query in p.get("project_name", "").lower()]
-
-        if not matches:
-            print(f"No projects matching '{choice}'.")
-            continue
-
-        if len(matches) == 1:
-            return matches[0]
-
-        # Multiple matches
-        show = matches[:DISPLAY_LIMIT]
-        extra = (
-            f" (showing {DISPLAY_LIMIT} of {len(matches)})"
-            if len(matches) > DISPLAY_LIMIT
-            else ""
-        )
-        print(f"\nMatching projects{extra}:")
-        for i, p in enumerate(show, 1):
-            print(f"  [{i}]  {p['project_name']}")
-
-        try:
-            sub = input(f"Select [1-{len(show)}]: ").strip()
-        except (EOFError, KeyboardInterrupt):
-            print()
-            return None
-
-        try:
-            sub_idx = int(sub)
-            if 1 <= sub_idx <= len(show):
-                return show[sub_idx - 1]
-        except ValueError:
-            pass
-
-        print("Invalid selection.")
+    # Otherwise result is the project dict
+    return result
 
 
 # ── Caching ────────────────────────────────────────────────────────
@@ -256,9 +208,8 @@ def _get_cached_projects(*, max_age: float | None = CACHE_TTL_SECONDS) -> list[d
             try:
                 return _refresh_projects()
             except Exception:
-                print(
-                    "Warning: Could not refresh project list, using cached data.",
-                    file=sys.stderr,
+                console.print_error(
+                    "Warning: Could not refresh project list, using cached data."
                 )
                 return projects
 

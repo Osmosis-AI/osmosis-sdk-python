@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 
+from osmosis_ai.cli.console import console
 from osmosis_ai.platform.auth import (
     LoginError,
     delete_credentials,
@@ -30,21 +31,9 @@ class LoginCommand:
         )
 
     def run(self, args: argparse.Namespace) -> int:
-        ascii_art = """
-                       ___           ___           ___           ___           ___                       ___
-            ___       /\\  \\         /\\  \\         /\\__\\         /\\  \\         /\\  \\          ___        /\\  \\
-      __   /\\__\\     /::\\  \\       /::\\  \\       /::|  |       /::\\  \\       /::\\  \\        /\\  \\      /::\\  \\
-    /\\__\\  \\/__/    /:/\\:\\  \\     /:/\\ \\  \\     /:|:|  |      /:/\\:\\  \\     /:/\\ \\  \\       \\:\\  \\    /:/\\ \\  \\
-   /:/  /  /\\__\\   /:/  \\:\\  \\   _\\:\\~\\ \\  \\   /:/|:|__|__   /:/  \\:\\  \\   _\\:\\~\\ \\  \\      /::\\__\\  _\\:\\~\\ \\  \\
-  /:/  /  /:/  /  /:/__/ \\:\\__\\ /\\ \\:\\ \\ \\__\\ /:/ |::::\\__\\ /:/__/ \\:\\__\\ /\\ \\:\\ \\ \\__\\  __/:/\\/__/ /\\ \\:\\ \\ \\__\\
-  \\/__/  /:/  /   \\:\\  \\ /:/  / \\:\\ \\:\\ \\/__/ \\/__/~~/:/  / \\:\\  \\ /:/  / \\:\\ \\:\\ \\/__/ /\\/:/  /    \\:\\ \\:\\ \\/__/
-  /\\__\\  \\/__/     \\:\\  /:/  /   \\:\\ \\:\\__\\         /:/  /   \\:\\  /:/  /   \\:\\ \\:\\__\\   \\::/__/      \\:\\ \\:\\__\\
-  \\/__/             \\:\\/:/  /     \\:\\/:/  /        /:/  /     \\:\\/:/  /     \\:\\/:/  /    \\:\\__\\       \\:\\/:/  /
-                     \\::/  /       \\::/  /        /:/  /       \\::/  /       \\::/  /      \\/__/        \\::/  /
-                      \\/__/         \\/__/         \\/__/         \\/__/         \\/__/                     \\/__/
-
-"""
-        print(ascii_art)
+        console.print()
+        console.print("  Osmosis AI", style="bold magenta")
+        console.print()
 
         try:
             # Clear existing credentials if forcing re-login
@@ -53,28 +42,34 @@ class LoginCommand:
 
             result = login(no_browser=args.no_browser)
 
-            print(f"\n[OK] Logged in as {result.user.email}")
+            info_lines = [f"Email: {result.user.email}"]
             if result.user.name:
-                print(f"    Name: {result.user.name}")
-            print(
-                f"    Workspace: {result.organization.name} ({result.organization.role})"
+                info_lines.append(f"Name: {result.user.name}")
+            info_lines.append(
+                f"Workspace: {result.organization.name} ({result.organization.role})"
             )
-            print(f"    Token expires: {result.expires_at.strftime('%Y-%m-%d')}")
+            info_lines.append(f"Expires: {result.expires_at.strftime('%Y-%m-%d')}")
+
+            console.panel("Login Successful", "\n".join(info_lines), style="green")
+
             if result.revoked_previous_tokens > 0:
                 token_word = (
                     "token" if result.revoked_previous_tokens == 1 else "tokens"
                 )
-                print(
-                    f"    [Note] {result.revoked_previous_tokens} previous {token_word} for this device was revoked"
+                console.print(
+                    f"[Note] {result.revoked_previous_tokens} previous {token_word} for this device was revoked",
+                    style="dim",
                 )
 
-            print("\nRun 'osmosis workspace' to select a default project.")
+            console.print(
+                "\nRun 'osmosis workspace' to select a default project.", style="dim"
+            )
 
             return 0
 
         except LoginError as e:
-            print(f"\n[ERROR] {e}")
+            console.print_error(str(e))
             return 1
         except KeyboardInterrupt:
-            print("\n\nLogin cancelled.")
+            console.print("\n\nLogin cancelled.")
             return 1

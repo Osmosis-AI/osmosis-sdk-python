@@ -3,6 +3,8 @@ from __future__ import annotations
 import argparse
 from typing import Any
 
+from osmosis_ai.cli.console import console
+from osmosis_ai.cli.prompts import Choice, Separator, confirm, select
 from osmosis_ai.platform.auth import (
     delete_workspace_credentials,
     get_all_workspaces,
@@ -32,7 +34,7 @@ class LogoutCommand:
         workspaces = get_all_workspaces()
 
         if not workspaces:
-            print("Not logged in.")
+            console.print("Not logged in.")
             return 0
 
         if args.logout_all:
@@ -49,15 +51,17 @@ class LogoutCommand:
         workspace_names = [name for name, _, _ in workspaces]
 
         if not skip_confirm:
-            print(f"This will logout from {len(workspaces)} workspace(s):")
+            console.print(f"This will logout from {len(workspaces)} workspace(s):")
             for name in workspace_names:
-                print(f"  - {name}")
-            try:
-                confirm = input("\nAre you sure? [y/N]: ").strip().lower()
-            except EOFError:
-                confirm = ""
-            if confirm not in ("y", "yes"):
-                print("Cancelled.")
+                console.print(f"  - {name}")
+
+            result = confirm(
+                f"Logout from all {len(workspaces)} workspace(s)?", default=False
+            )
+            if result is None:  # User cancelled with Ctrl+C
+                return 0
+            if not result:
+                console.print("Cancelled.")
                 return 0
 
         success_count = 0
@@ -65,7 +69,10 @@ class LogoutCommand:
             if delete_workspace_credentials(name):
                 success_count += 1
 
-        print(f"Logged out from {success_count}/{len(workspaces)} workspace(s).")
+        console.print(
+            f"Logged out from {success_count}/{len(workspaces)} workspace(s).",
+            style="green",
+        )
         return 0
 
     def _logout_interactive(
@@ -78,51 +85,43 @@ class LogoutCommand:
             # Only one workspace, logout directly
             name, _, _ = workspaces[0]
             if not skip_confirm:
-                try:
-                    confirm = input(f"Logout from '{name}'? [y/N]: ").strip().lower()
-                except EOFError:
-                    confirm = ""
-                if confirm not in ("y", "yes"):
-                    print("Cancelled.")
+                result = confirm(f"Logout from '{name}'?", default=False)
+                if result is None:  # User cancelled with Ctrl+C
+                    return 0
+                if not result:
+                    console.print("Cancelled.")
                     return 0
             if delete_workspace_credentials(name):
-                print(f"Logged out from '{name}'.")
+                console.print(f"Logged out from '{name}'.", style="green")
             return 0
 
         # Multiple workspaces, show selection
-        print("Select workspace to logout from:\n")
-        for i, (name, creds, is_active) in enumerate(workspaces, 1):
+        choices = []
+        for name, creds, is_active in workspaces:
             active_marker = " (active)" if is_active else ""
             expired_marker = " [expired]" if creds.is_expired() else ""
-            print(f"  {i}. {name}{active_marker}{expired_marker}")
-        print(f"  {len(workspaces) + 1}. All workspaces")
-        print("  0. Cancel")
+            title = f"{name}{active_marker}{expired_marker}"
+            choices.append(Choice(title=title, value=name))
 
-        try:
-            choice = input("\nEnter number: ").strip()
-            choice_num = int(choice)
-        except (ValueError, EOFError):
-            print("Cancelled.")
+        choices.append(Separator())
+        choices.append(Choice(title="All workspaces", value="__all__"))
+
+        selected = select("Select workspace to logout from:", choices=choices)
+        if selected is None:  # User cancelled with Ctrl+C
             return 0
 
-        if choice_num == 0:
-            print("Cancelled.")
-            return 0
-        elif choice_num == len(workspaces) + 1:
+        if selected == "__all__":
             return self._logout_all(workspaces, skip_confirm)
-        elif 1 <= choice_num <= len(workspaces):
-            name, _, _ = workspaces[choice_num - 1]
+        else:
+            # Selected a specific workspace
+            name = selected
             if not skip_confirm:
-                try:
-                    confirm = input(f"Logout from '{name}'? [y/N]: ").strip().lower()
-                except EOFError:
-                    confirm = ""
-                if confirm not in ("y", "yes"):
-                    print("Cancelled.")
+                result = confirm(f"Logout from '{name}'?", default=False)
+                if result is None:  # User cancelled with Ctrl+C
+                    return 0
+                if not result:
+                    console.print("Cancelled.")
                     return 0
             if delete_workspace_credentials(name):
-                print(f"Logged out from '{name}'.")
+                console.print(f"Logged out from '{name}'.", style="green")
             return 0
-        else:
-            print("Invalid selection.")
-            return 1
