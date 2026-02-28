@@ -1,0 +1,64 @@
+osmosis_ai/platform/cli/project.py
+  9b07bc203cfa1fe4 10,12,102,106,113,122-131,133-139,149,155,163-181,184,187-189,191-192,211
+osmosis_ai/platform/cli/logout.py
+  9b07bc203cfa1fe4 6-7,37,54,56-59,61-64,72-73,88-89,91-92,95,99,103-104,106-107,109-110,112-113,115-117,119-120,122-123,126
+osmosis_ai/cli/prompts.py
+  9b07bc203cfa1fe4 1-139
+osmosis_ai/platform/cli/whoami.py
+  9b07bc203cfa1fe4 5,19-20,33,35-36,39,41-57
+pyproject.toml
+  9b07bc203cfa1fe4 36-37
+osmosis_ai/platform/cli/dataset.py
+  9b07bc203cfa1fe4 11,13,47,106-107,153-160,162-166,185,189,224,231,233,251,254,256-265,269-273,278,292-297,304,306-308,323,325-327,335,337,346-348,350-351,360,387,389,392-394
+osmosis_ai/platform/cli/login.py
+  9b07bc203cfa1fe4 5,34-36,45,47-49,51-54,59-61,64-65,71,74
+osmosis_ai/platform/cli/workspace.py
+  9b07bc203cfa1fe4 5,7,42,44-45,47,50,55-56,75,77,81-82,98-99
+  fed65532d314b562 58-59,61-63,65-66,68-69,76,84
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.6",
+  "base_commit_sha": "cf2b5d35007f601106a55d422485d3a52f9ca5a3",
+  "prompts": {
+    "9b07bc203cfa1fe4": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9e19e268-e773-4c23-bc4e-fd161e7092d7",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>",
+      "messages": [],
+      "total_additions": 379,
+      "total_deletions": 271,
+      "accepted_lines": 356,
+      "overriden_lines": 1
+    },
+    "eb085597770f96c2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "03daa9c5-3749-42b2-a112-073ec0fa96a3",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>",
+      "messages": [],
+      "total_additions": 1,
+      "total_deletions": 1,
+      "accepted_lines": 0,
+      "overriden_lines": 0
+    },
+    "fed65532d314b562": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "47eaf60d-72b5-4606-a6ab-4fdfe91c22ea",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>",
+      "messages": [],
+      "total_additions": 12,
+      "total_deletions": 14,
+      "accepted_lines": 11,
+      "overriden_lines": 0
+    }
+  }
+}
