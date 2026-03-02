@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import asyncio
 import contextlib
 from collections.abc import Iterable
 from pathlib import Path
@@ -194,10 +193,8 @@ class DatasetCommand:
         if is_multipart:
             try:
                 with ctx:
-                    parts = asyncio.run(
-                        upload_file_multipart(
-                            file_path, upload, progress_callback=progress_cb
-                        )
+                    parts = upload_file_multipart(
+                        file_path, upload, progress_callback=progress_cb
                     )
                 client.complete_upload(
                     dataset.id,

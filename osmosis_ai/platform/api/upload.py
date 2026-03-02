@@ -1,45 +1,153 @@
-"""S3 upload with httpx — simple PUT and multipart support."""
+"""S3 upload with httpx — simple PUT and multipart support.
+
+Design aligned with huggingface_hub: sequential uploads, single file handle
+for multipart, unified retry via _http_put_with_backoff.
+"""
 
 from __future__ import annotations
 
-import asyncio
-import random
 import sys
 import time
 from collections.abc import Callable
 from contextlib import AbstractContextManager
+from io import RawIOBase
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import httpx
 
 if TYPE_CHECKING:
+    from typing import IO
+
     from .models import UploadInfo
 
 # ── Constants ─────────────────────────────────────────────────────────
 
-MAX_CONCURRENCY = 6
 PART_UPLOAD_TIMEOUT = 300.0  # 5 minutes per part
 SIMPLE_UPLOAD_TIMEOUT = 600.0  # 10 minutes for simple upload
 
-MAX_RETRIES_SIMPLE = 3
-MAX_RETRIES_MULTIPART = 5
-BACKOFF_BASE = 2  # seconds
-BACKOFF_MAX = 30  # seconds
-BACKOFF_MAX_SIMPLE = 10  # shorter cap for simple (single-request) uploads
+MAX_RETRIES = 5
+BACKOFF_BASE = 1.0  # seconds
+BACKOFF_CAP = 8.0  # seconds
+
+_RETRY_STATUS_CODES = {429, 500, 502, 503, 504}
 
 ProgressCallback = Callable[[int, int], None]  # (bytes_completed, total_bytes)
 
 
-# ── Retry helper ──────────────────────────────────────────────────────
+# ── SliceFileObj — virtual file slice (ported from huggingface_hub) ───
 
 
-def _backoff_delay(
-    attempt: int, base: float = BACKOFF_BASE, cap: float = BACKOFF_MAX
-) -> float:
-    """Exponential backoff with full jitter."""
-    exp = min(base * (2**attempt), cap)
-    return random.uniform(0, exp)
+class SliceFileObj(RawIOBase):
+    """Wrap a file object to read only a slice [seek_from, seek_from + read_limit).
+
+    Ported from huggingface_hub/utils/_lfs.py.  Allows streaming a single
+    part of a multipart upload from one open file descriptor without reading
+    the entire part into memory.
+    """
+
+    def __init__(self, fobj: IO[bytes], seek_from: int, read_limit: int) -> None:
+        self._fobj = fobj
+        self._seek_from = seek_from
+        self._read_limit = read_limit
+        self._bytes_read = 0
+
+    # -- context manager --------------------------------------------------
+
+    def __enter__(self) -> SliceFileObj:
+        self._fobj.seek(self._seek_from)
+        self._bytes_read = 0
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        pass
+
+    # -- file-like interface ----------------------------------------------
+
+    def read(self, n: int = -1) -> bytes:  # type: ignore[override]
+        remaining = self._read_limit - self._bytes_read
+        if remaining <= 0:
+            return b""
+        if n < 0 or n > remaining:
+            n = remaining
+        data = self._fobj.read(n)
+        if data:
+            self._bytes_read += len(data)
+        return data if data else b""
+
+    def tell(self) -> int:
+        return self._bytes_read
+
+    def seek(self, offset: int, whence: int = 0) -> int:
+        if whence == 0:
+            # Absolute — relative to slice start
+            self._bytes_read = max(0, min(offset, self._read_limit))
+            self._fobj.seek(self._seek_from + self._bytes_read)
+        elif whence == 1:
+            # Relative to current position
+            self._bytes_read = max(0, min(self._bytes_read + offset, self._read_limit))
+            self._fobj.seek(self._seek_from + self._bytes_read)
+        elif whence == 2:
+            # Relative to end of slice
+            self._bytes_read = max(0, min(self._read_limit + offset, self._read_limit))
+            self._fobj.seek(self._seek_from + self._bytes_read)
+        return self._bytes_read
+
+    def readable(self) -> bool:
+        return True
+
+    def writable(self) -> bool:
+        return False
+
+
+# ── Retry helper (inspired by huggingface_hub http_backoff) ──────────
+
+
+def _http_put_with_backoff(
+    url: str,
+    *,
+    data: Any,
+    headers: dict[str, str] | None = None,
+    timeout: float = PART_UPLOAD_TIMEOUT,
+    max_retries: int = MAX_RETRIES,
+) -> httpx.Response:
+    """PUT *data* to *url* with exponential backoff on transient errors.
+
+    If *data* is file-like (has ``seek``), it is rewound before each retry
+    so the same slice can be re-uploaded.
+    """
+    initial_pos: int | None = None
+    if hasattr(data, "seek") and hasattr(data, "tell"):
+        initial_pos = data.tell()
+
+    last_error: Exception | None = None
+    for attempt in range(max_retries):
+        if attempt > 0:
+            delay = min(BACKOFF_BASE * (2 ** (attempt - 1)), BACKOFF_CAP)
+            time.sleep(delay)
+            # Rewind file-like data for retry
+            if initial_pos is not None:
+                data.seek(initial_pos)
+
+        try:
+            with httpx.Client(timeout=httpx.Timeout(timeout, connect=30.0)) as client:
+                resp = client.put(url, headers=headers, content=data)
+
+            if resp.status_code < 300:
+                return resp
+
+            if resp.status_code in _RETRY_STATUS_CODES:
+                last_error = RuntimeError(f"HTTP {resp.status_code}: {resp.text[:200]}")
+                continue
+
+            # Non-retryable HTTP error
+            raise RuntimeError(
+                f"Upload failed: HTTP {resp.status_code}. {resp.text[:500]}"
+            )
+        except (httpx.TimeoutException, httpx.NetworkError) as exc:
+            last_error = exc
+
+    raise RuntimeError(f"Upload failed after {max_retries} attempts: {last_error}")
 
 
 # ── Progress wrapper ──────────────────────────────────────────────
@@ -99,91 +207,33 @@ def upload_file_simple(
     # S3 presigned PUT requires Content-Length (does not support chunked encoding)
     headers["Content-Length"] = str(file_size)
 
-    last_error: Exception | None = None
-    for attempt in range(MAX_RETRIES_SIMPLE):
-        if attempt > 0:
-            delay = _backoff_delay(
-                attempt - 1, base=BACKOFF_BASE, cap=BACKOFF_MAX_SIMPLE
-            )
-            time.sleep(delay)
-            # Reset progress bar so the user sees the retry from 0%
-            if progress_callback:
-                progress_callback(0, file_size)
+    with open(file_path, "rb") as f:
+        content: Any = f
+        if progress_callback:
+            content = _ProgressReader(f, file_size, progress_callback)
+        _http_put_with_backoff(
+            url,
+            data=content,
+            headers=headers,
+            timeout=SIMPLE_UPLOAD_TIMEOUT,
+        )
 
-        try:
-            with open(file_path, "rb") as f:
-                content: Any = f
-                if progress_callback:
-                    content = _ProgressReader(f, file_size, progress_callback)
-                with httpx.Client(
-                    timeout=httpx.Timeout(SIMPLE_UPLOAD_TIMEOUT, connect=30.0)
-                ) as client:
-                    resp = client.put(url, headers=headers, content=content)
-                    if resp.status_code >= 300:
-                        raise RuntimeError(
-                            f"Upload failed: HTTP {resp.status_code}. {resp.text[:500]}"
-                        )
-            # Ensure progress shows 100% on success
-            if progress_callback:
-                progress_callback(file_size, file_size)
-            return  # success
-        except (httpx.HTTPError, RuntimeError) as exc:
-            last_error = exc
-
-    raise RuntimeError(
-        f"Upload failed after {MAX_RETRIES_SIMPLE} attempts: {last_error}"
-    )
+    # Ensure progress shows 100% on success
+    if progress_callback:
+        progress_callback(file_size, file_size)
 
 
 # ── Multipart upload ─────────────────────────────────────────────────
 
 
-async def _upload_one_part(
-    client: httpx.AsyncClient,
-    url: str,
-    data: bytes,
-    part_number: int,
-) -> dict:
-    """Upload a single part with retry + exponential backoff + jitter.
-
-    Returns:
-        {"PartNumber": int, "ETag": str}
-    """
-    last_error: Exception | None = None
-    for attempt in range(MAX_RETRIES_MULTIPART):
-        if attempt > 0:
-            delay = _backoff_delay(attempt - 1)
-            await asyncio.sleep(delay)
-
-        try:
-            resp = await client.put(url, content=data)
-            if resp.status_code >= 300:
-                raise RuntimeError(
-                    f"Part {part_number} upload failed: HTTP {resp.status_code}"
-                )
-            etag = resp.headers.get("etag", "")
-            if not etag:
-                raise RuntimeError(
-                    f"Part {part_number}: S3 did not return an ETag header"
-                )
-            return {"PartNumber": part_number, "ETag": etag}
-        except (httpx.HTTPError, RuntimeError) as exc:
-            last_error = exc
-
-    raise RuntimeError(
-        f"Part {part_number} failed after {MAX_RETRIES_MULTIPART} retries: {last_error}"
-    )
-
-
-async def upload_file_multipart(
+def upload_file_multipart(
     file_path: Path,
     upload_info: UploadInfo,
     progress_callback: ProgressCallback | None = None,
 ) -> list[dict]:
-    """Concurrent multipart upload to S3.
+    """Sequential multipart upload to S3 using a single file handle.
 
-    Semaphore acquired BEFORE reading each chunk and released AFTER upload
-    completes, keeping peak memory at MAX_CONCURRENCY * part_size.
+    Each part is streamed via SliceFileObj — no full-part buffer in memory.
 
     Args:
         file_path: Local file to upload.
@@ -225,49 +275,32 @@ async def upload_file_multipart(
             f"but {info.total_parts} expected. Missing: {missing[:10]}"
         )
 
-    semaphore = asyncio.Semaphore(MAX_CONCURRENCY)
     completed_parts: list[dict] = []
-    lock = asyncio.Lock()
     bytes_uploaded = 0
 
-    async def _do_part(
-        http_client: httpx.AsyncClient,
-        part_number: int,
-        offset: int,
-        size: int,
-    ) -> None:
-        nonlocal bytes_uploaded
-        async with semaphore:
-            # Read chunk while holding semaphore to control memory.
-            # Use to_thread to avoid blocking the event loop on file I/O.
-            def _read_chunk():
-                with open(file_path, "rb") as f:
-                    f.seek(offset)
-                    return f.read(size)
-
-            data = await asyncio.to_thread(_read_chunk)
-
-            url = url_map[part_number]
-            result = await _upload_one_part(http_client, url, data, part_number)
-
-            async with lock:
-                completed_parts.append(result)
-                bytes_uploaded += size
-                if progress_callback:
-                    progress_callback(bytes_uploaded, file_size)
-
-    timeout = httpx.Timeout(PART_UPLOAD_TIMEOUT, connect=30.0)
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        tasks: list[asyncio.Task] = []
+    with open(file_path, "rb") as f:
         for i in range(info.total_parts):
             part_number = i + 1
             offset = i * part_size
             size = min(part_size, file_size - offset)
-            tasks.append(
-                asyncio.create_task(_do_part(client, part_number, offset, size))
-            )
 
-        await asyncio.gather(*tasks)
+            with SliceFileObj(f, seek_from=offset, read_limit=size) as slice_obj:
+                resp = _http_put_with_backoff(
+                    url_map[part_number],
+                    data=slice_obj,
+                    timeout=PART_UPLOAD_TIMEOUT,
+                )
+
+            etag = resp.headers.get("etag", "")
+            if not etag:
+                raise RuntimeError(
+                    f"Part {part_number}: S3 did not return an ETag header"
+                )
+            completed_parts.append({"PartNumber": part_number, "ETag": etag})
+
+            bytes_uploaded += size
+            if progress_callback:
+                progress_callback(bytes_uploaded, file_size)
 
     completed_parts.sort(key=lambda p: p["PartNumber"])
     return completed_parts
