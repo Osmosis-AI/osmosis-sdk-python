@@ -48,6 +48,11 @@ def main(argv: list[str] | None = None) -> int:
     except CLIError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
+    except KeyboardInterrupt:
+        return 130
+    except Exception as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
 
 
 def _build_parser() -> argparse.ArgumentParser:
