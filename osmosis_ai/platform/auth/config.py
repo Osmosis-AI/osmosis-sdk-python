@@ -12,6 +12,7 @@ PLATFORM_URL = os.environ.get("OSMOSIS_PLATFORM_URL", DEFAULT_PLATFORM_URL)
 # Configuration directory and credentials file
 CONFIG_DIR = Path.home() / ".config" / "osmosis"
 CREDENTIALS_FILE = CONFIG_DIR / "credentials.json"
+CACHE_DIR = CONFIG_DIR / "cache"
 
 # Local server port range for OAuth callback
 LOCAL_SERVER_PORT_START = 8976

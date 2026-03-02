@@ -9,6 +9,7 @@ from osmosis_ai.platform.auth import (
     delete_workspace_credentials,
     get_all_workspaces,
 )
+from osmosis_ai.platform.auth.local_config import clear_workspace_data
 
 
 class LogoutCommand:
@@ -67,6 +68,7 @@ class LogoutCommand:
         success_count = 0
         for name, _, _ in workspaces:
             if delete_workspace_credentials(name):
+                clear_workspace_data(name)
                 success_count += 1
 
         console.print(
@@ -92,6 +94,7 @@ class LogoutCommand:
                     console.print("Cancelled.")
                     return 0
             if delete_workspace_credentials(name):
+                clear_workspace_data(name)
                 console.print(f"Logged out from '{name}'.", style="green")
             return 0
 
@@ -123,5 +126,6 @@ class LogoutCommand:
                     console.print("Cancelled.")
                     return 0
             if delete_workspace_credentials(name):
+                clear_workspace_data(name)
                 console.print(f"Logged out from '{name}'.", style="green")
             return 0

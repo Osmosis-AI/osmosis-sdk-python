@@ -2,17 +2,29 @@
 
 Stored separately from credentials to keep secrets and preferences apart.
 File: ~/.config/osmosis/config.json
+
+Cache data (project lists, subscription status) is stored as individual
+files under ~/.config/osmosis/cache/ so that concurrent writes to different
+workspaces never conflict.
 """
 
 from __future__ import annotations
 
+import contextlib
 import json
+import os
+import re
+import tempfile
 import time
+from pathlib import Path
 from typing import Any
 
-from .config import CONFIG_DIR
+from .config import CACHE_DIR, CONFIG_DIR
 
 CONFIG_FILE = CONFIG_DIR / "config.json"
+
+
+# ── Internal helpers ────────────────────────────────────────────────
 
 
 def _load_config() -> dict[str, Any]:
@@ -52,6 +64,36 @@ def _save_config(data: dict[str, Any]) -> None:
         raise
 
 
+def _safe_ws_name(name: str) -> str:
+    """Sanitise a workspace name for use as a filename component."""
+    return re.sub(r"[^a-zA-Z0-9_-]", "_", name).lower()
+
+
+def _write_cache(path: Path, data: Any) -> None:
+    """Atomically write *data* as JSON to *path* (tempfile + os.replace)."""
+    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(dir=CACHE_DIR, suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+        os.replace(tmp, path)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp)
+        raise
+
+
+def _read_cache(path: Path) -> Any | None:
+    """Read a single JSON cache file. Returns None on missing / corrupt."""
+    if not path.exists():
+        return None
+    try:
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return None
+
+
 # ── Default project ──────────────────────────────────────────────
 
 
@@ -83,13 +125,24 @@ def set_default_project(
     _save_config(config)
 
 
-def clear_default_project(workspace_name: str) -> None:
-    """Clear the default project for a workspace."""
+# ── Workspace cleanup ────────────────────────────────────────────
+
+
+def clear_workspace_data(workspace_name: str) -> None:
+    """Remove all local data for a workspace (defaults + cache files)."""
+    # Clear default project from config.json
     config = _load_config()
     defaults = config.get("defaults", {})
     if workspace_name in defaults:
         del defaults[workspace_name]
         _save_config(config)
+
+    # Remove cache files
+    safe = _safe_ws_name(workspace_name)
+    for prefix in ("projects", "subscription"):
+        path = CACHE_DIR / f"{prefix}_{safe}.json"
+        with contextlib.suppress(OSError):
+            path.unlink()
 
 
 # ── Project cache ────────────────────────────────────────────────
@@ -97,14 +150,9 @@ def clear_default_project(workspace_name: str) -> None:
 
 def save_workspace_projects(workspace_name: str, projects: list[dict]) -> None:
     """Cache the project list for a workspace."""
-    config = _load_config()
-    if "project_cache" not in config:
-        config["project_cache"] = {}
-    config["project_cache"][workspace_name] = {
-        "projects": projects,
-        "refreshed_at": time.time(),
-    }
-    _save_config(config)
+    safe = _safe_ws_name(workspace_name)
+    path = CACHE_DIR / f"projects_{safe}.json"
+    _write_cache(path, {"projects": projects, "refreshed_at": time.time()})
 
 
 def load_workspace_projects(
@@ -115,9 +163,12 @@ def load_workspace_projects(
     Returns:
         Tuple of (projects list, refreshed_at timestamp or None).
     """
-    config = _load_config()
-    cache = config.get("project_cache", {}).get(workspace_name, {})
-    return cache.get("projects", []), cache.get("refreshed_at")
+    safe = _safe_ws_name(workspace_name)
+    path = CACHE_DIR / f"projects_{safe}.json"
+    data = _read_cache(path)
+    if data is None:
+        return [], None
+    return data.get("projects", []), data.get("refreshed_at")
 
 
 # ── Subscription status cache ────────────────────────────────────
@@ -125,14 +176,11 @@ def load_workspace_projects(
 
 def save_subscription_status(workspace_name: str, has_subscription: bool) -> None:
     """Cache the subscription status for a workspace."""
-    config = _load_config()
-    if "subscription_cache" not in config:
-        config["subscription_cache"] = {}
-    config["subscription_cache"][workspace_name] = {
-        "has_subscription": has_subscription,
-        "refreshed_at": time.time(),
-    }
-    _save_config(config)
+    safe = _safe_ws_name(workspace_name)
+    path = CACHE_DIR / f"subscription_{safe}.json"
+    _write_cache(
+        path, {"has_subscription": has_subscription, "refreshed_at": time.time()}
+    )
 
 
 def load_subscription_status(workspace_name: str) -> bool | None:
@@ -141,6 +189,9 @@ def load_subscription_status(workspace_name: str) -> bool | None:
     Returns:
         True/False if cached, or None if not yet fetched.
     """
-    config = _load_config()
-    cache = config.get("subscription_cache", {}).get(workspace_name, {})
-    return cache.get("has_subscription")
+    safe = _safe_ws_name(workspace_name)
+    path = CACHE_DIR / f"subscription_{safe}.json"
+    data = _read_cache(path)
+    if data is None:
+        return None
+    return data.get("has_subscription")
