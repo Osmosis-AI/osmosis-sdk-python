@@ -154,7 +154,14 @@ class DatasetFile:
     @property
     def is_terminal(self) -> bool:
         """Whether the file is in a terminal processing state."""
-        return self.status in ("uploaded", "error", "cancelled", "deleted")
+        return self.status in (
+            "uploaded",
+            "ready",
+            "error",
+            "failed",
+            "cancelled",
+            "deleted",
+        )
 
 
 @dataclass

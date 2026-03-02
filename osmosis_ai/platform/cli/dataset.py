@@ -164,7 +164,7 @@ class DatasetCommand:
             proceed = confirm("Proceed with upload?", default=True)
             if proceed is None or not proceed:
                 console.print("Upload cancelled.", style="dim")
-                return 1
+                return 0
 
         client = OsmosisClient()
 
@@ -258,7 +258,7 @@ class DatasetCommand:
                 status_color = "green"
             elif d.status == "processing" or d.status == "uploaded":
                 status_color = "yellow"
-            elif d.status == "failed":
+            elif d.status in ("failed", "error"):
                 status_color = "red"
             else:
                 status_color = None
