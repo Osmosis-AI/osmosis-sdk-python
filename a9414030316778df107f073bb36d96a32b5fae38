@@ -1,0 +1,29 @@
+osmosis_ai/platform/auth/local_server.py
+  570a6b3a8de9fa1a 88,149
+osmosis_ai/platform/api/upload.py
+  570a6b3a8de9fa1a 294
+osmosis_ai/platform/auth/flow.py
+  570a6b3a8de9fa1a 121,219-220
+osmosis_ai/platform/cli/project.py
+  570a6b3a8de9fa1a 102-104,127,145
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.7",
+  "base_commit_sha": "a9414030316778df107f073bb36d96a32b5fae38",
+  "prompts": {
+    "570a6b3a8de9fa1a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "44542cd3-ac4e-4566-8131-309e54560ad5",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>",
+      "messages": [],
+      "total_additions": 13,
+      "total_deletions": 17,
+      "accepted_lines": 11,
+      "overriden_lines": 0
+    }
+  }
+}
