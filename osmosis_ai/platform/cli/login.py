@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 
 from osmosis_ai.cli.console import console
 from osmosis_ai.platform.auth import (
@@ -30,10 +31,33 @@ class LoginCommand:
             help="Don't open browser automatically, just print the URL.",
         )
 
+    ASCII_ART = r"""
+                       ___           ___           ___           ___           ___                       ___
+            ___       /\  \         /\  \         /\__\         /\  \         /\  \          ___        /\  \
+      __   /\__\     /::\  \       /::\  \       /::|  |       /::\  \       /::\  \        /\  \      /::\  \
+    /\__\  \/__/    /:/\:\  \     /:/\ \  \     /:|:|  |      /:/\:\  \     /:/\ \  \       \:\  \    /:/\ \  \
+   /:/  /  /\__\   /:/  \:\  \   _\:\~\ \  \   /:/|:|__|__   /:/  \:\  \   _\:\~\ \  \      /::\__\  _\:\~\ \  \
+  /:/  /  /:/  /  /:/__/ \:\__\ /\ \:\ \ \__\ /:/ |::::\__\ /:/__/ \:\__\ /\ \:\ \ \__\  __/:/\/__/ /\ \:\ \ \__\
+  \/__/  /:/  /   \:\  \ /:/  / \:\ \:\ \/__/ \/__/~~/:/  / \:\  \ /:/  / \:\ \:\ \/__/ /\/:/  /    \:\ \:\ \/__/
+  /\__\  \/__/     \:\  /:/  /   \:\ \:\__\         /:/  /   \:\  /:/  /   \:\ \:\__\   \::/__/      \:\ \:\__\
+  \/__/             \:\/:/  /     \:\/:/  /        /:/  /     \:\/:/  /     \:\/:/  /    \:\__\       \:\/:/  /
+                     \::/  /       \::/  /        /:/  /       \::/  /       \::/  /      \/__/        \::/  /
+                      \/__/         \/__/         \/__/         \/__/         \/__/                     \/__/
+"""
+    ASCII_ART_MIN_WIDTH = 113
+
     def run(self, args: argparse.Namespace) -> int:
-        console.print()
-        console.print("  Osmosis AI", style="bold magenta")
-        console.print()
+        try:
+            term_width = os.get_terminal_size().columns
+        except OSError:
+            term_width = 80
+
+        if term_width >= self.ASCII_ART_MIN_WIDTH:
+            print(self.ASCII_ART)
+        else:
+            console.print()
+            console.print("  Osmosis AI", style="bold magenta")
+            console.print()
 
         try:
             # Clear existing credentials if forcing re-login
