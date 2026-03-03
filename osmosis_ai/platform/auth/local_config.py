@@ -183,15 +183,27 @@ def save_subscription_status(workspace_name: str, has_subscription: bool) -> Non
     )
 
 
-def load_subscription_status(workspace_name: str) -> bool | None:
+def load_subscription_status(
+    workspace_name: str, max_age: float | None = None
+) -> bool | None:
     """Load cached subscription status for a workspace.
 
+    Args:
+        workspace_name: Name of the workspace.
+        max_age: Maximum cache age in seconds. If the cached entry is older
+            than this, ``None`` is returned so the caller can refresh.
+            Pass ``None`` to accept any age.
+
     Returns:
-        True/False if cached, or None if not yet fetched.
+        True/False if cached (and within *max_age*), or None if missing/expired.
     """
     safe = _safe_ws_name(workspace_name)
     path = CACHE_DIR / f"subscription_{safe}.json"
     data = _read_cache(path)
     if data is None:
         return None
+    if max_age is not None:
+        refreshed_at = data.get("refreshed_at")
+        if refreshed_at is None or (time.time() - refreshed_at) > max_age:
+            return None
     return data.get("has_subscription")

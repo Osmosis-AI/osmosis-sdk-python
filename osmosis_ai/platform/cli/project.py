@@ -290,22 +290,22 @@ def _require_auth() -> None:
 def _require_subscription() -> None:
     """Check that the active workspace has an active subscription.
 
-    Uses cached status first. If cached status is False or missing,
+    Uses cached status with TTL. If the cache is expired, stale, or False,
     refreshes from the platform to avoid blocking users who just subscribed.
     """
     ws_name = get_active_workspace()
     if not ws_name:
         return  # Will be caught by _require_auth
 
-    cached = load_subscription_status(ws_name)
+    cached = load_subscription_status(ws_name, max_age=CACHE_TTL_SECONDS)
     if cached is True:
         return
 
-    # Cached status is False or None — refresh to get the latest
+    # Cached status is False, None, or expired — refresh to get the latest
     with contextlib.suppress(Exception):
         _refresh_projects()  # Also updates subscription cache
 
-    # Re-check after refresh
+    # Re-check after refresh (no TTL — we just refreshed)
     status = load_subscription_status(ws_name)
     if status is not True:
         raise CLIError(

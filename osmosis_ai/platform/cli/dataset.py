@@ -10,6 +10,11 @@ from pathlib import Path
 from osmosis_ai.cli.console import console
 from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.cli.prompts import confirm, is_interactive
+from osmosis_ai.platform.api.models import (
+    STATUSES_ERROR,
+    STATUSES_IN_PROGRESS,
+    STATUSES_SUCCESS,
+)
 from osmosis_ai.platform.auth import PlatformAPIError, get_active_workspace
 from osmosis_ai.platform.auth.config import PLATFORM_URL
 
@@ -219,6 +224,8 @@ class DatasetCommand:
                 client.complete_upload(dataset.id, upload.s3_key, ext)
             except KeyboardInterrupt:
                 console.print("\nUpload interrupted.")
+                with contextlib.suppress(Exception):
+                    client.delete_dataset(dataset.id)
                 raise CLIError("Upload cancelled by user.") from None
             except RuntimeError as e:
                 raise CLIError(f"Upload failed: {e}") from e
@@ -251,11 +258,11 @@ class DatasetCommand:
         console.print(f"Datasets ({result.total_count}):", style="bold")
         for d in result.datasets:
             # Determine status color
-            if d.status == "ready":
+            if d.status in STATUSES_SUCCESS:
                 status_color = "green"
-            elif d.status == "processing" or d.status == "uploaded":
+            elif d.status in STATUSES_IN_PROGRESS:
                 status_color = "yellow"
-            elif d.status in ("failed", "error"):
+            elif d.status in STATUSES_ERROR:
                 status_color = "red"
             else:
                 status_color = None
@@ -316,13 +323,13 @@ class DatasetCommand:
             raise CLIError(str(e)) from e
 
         if ds.data_preview is None:
-            if ds.status == "uploaded":
-                console.print("No preview available for this dataset.", style="dim")
-            else:
+            if ds.status in STATUSES_IN_PROGRESS:
                 console.print(
                     f"Dataset is still processing (status: {ds.status}).",
                     style="yellow",
                 )
+            else:
+                console.print("No preview available for this dataset.", style="dim")
             return 0
 
         rows = ds.data_preview

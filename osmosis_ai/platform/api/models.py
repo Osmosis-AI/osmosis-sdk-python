@@ -5,6 +5,17 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
+# ── Dataset status constants ─────────────────────────────────────
+# Single source of truth for status classification.
+
+STATUSES_SUCCESS: frozenset[str] = frozenset({"ready"})
+STATUSES_IN_PROGRESS: frozenset[str] = frozenset({"processing", "uploaded"})
+STATUSES_ERROR: frozenset[str] = frozenset({"failed", "error"})
+STATUSES_INACTIVE: frozenset[str] = frozenset({"cancelled", "deleted"})
+STATUSES_TERMINAL: frozenset[str] = (
+    STATUSES_SUCCESS | STATUSES_ERROR | STATUSES_INACTIVE
+)
+
 
 @dataclass
 class Project:
@@ -154,14 +165,7 @@ class DatasetFile:
     @property
     def is_terminal(self) -> bool:
         """Whether the file is in a terminal processing state."""
-        return self.status in (
-            "uploaded",
-            "ready",
-            "error",
-            "failed",
-            "cancelled",
-            "deleted",
-        )
+        return self.status in STATUSES_TERMINAL
 
 
 @dataclass

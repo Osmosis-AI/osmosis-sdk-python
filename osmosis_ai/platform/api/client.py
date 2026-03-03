@@ -75,7 +75,7 @@ class OsmosisClient:
         payload: dict = {"s3_key": s3_key}
         if extension is not None:
             payload["extension"] = extension
-        if upload_id or parts:
+        if upload_id is not None or parts is not None:
             if not upload_id or not parts:
                 raise ValueError(
                     "upload_id and parts must both be provided for multipart completion"
