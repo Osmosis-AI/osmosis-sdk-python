@@ -99,8 +99,9 @@ def select_project_interactive(
         except Exception:
             projects = _get_cached_projects(max_age=None)
             if projects:
-                console.print_error(
-                    "Warning: Could not reach platform, showing cached data."
+                console.print(
+                    "Warning: Failed to refresh projects, using cached data.",
+                    style="yellow",
                 )
 
     if not is_interactive():
@@ -123,9 +124,7 @@ def _prompt_create() -> dict | None:
         """Validator for questionary text prompt."""
         if not value:
             return "Project name is required."
-        # Normalize to lowercase first
-        normalized = value.lower()
-        error = validate_project_name(normalized)
+        error = validate_project_name(value)
         if error:
             return error
         return True
@@ -139,15 +138,11 @@ def _prompt_create() -> dict | None:
     if name is None:
         return None
 
-    # Normalize to lowercase (matching frontend behavior)
-    name = name.lower()
-
     try:
         client = OsmosisClient()
         project = client.create_project(name)
     except PlatformAPIError as e:
-        console.print_error(f"Failed to create project: {e}")
-        return None
+        raise CLIError(f"Failed to create project: {e}") from e
 
     with contextlib.suppress(Exception):
         _refresh_projects()

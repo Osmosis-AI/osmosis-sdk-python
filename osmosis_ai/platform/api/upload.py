@@ -291,7 +291,7 @@ def upload_file_multipart(
                     timeout=PART_UPLOAD_TIMEOUT,
                 )
 
-            etag = resp.headers.get("etag", "")
+            etag = resp.headers.get("etag", "").strip('"')
             if not etag:
                 raise RuntimeError(
                     f"Part {part_number}: S3 did not return an ETag header"

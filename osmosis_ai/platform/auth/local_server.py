@@ -85,7 +85,7 @@ class AuthCallbackHandler(BaseHTTPRequestHandler):
             return
 
         # Validate state to prevent CSRF
-        if state != server.expected_state:
+        if state != server._expected_state:
             server.error = "Invalid state parameter"
             self._send_error_page("Invalid state - possible CSRF attack")
             server._token_event.set()
@@ -146,7 +146,7 @@ class LocalAuthServer(HTTPServer):
             expected_state: The expected state parameter for CSRF validation.
         """
         super().__init__(("localhost", port), AuthCallbackHandler)
-        self.expected_state = expected_state
+        self._expected_state = expected_state
         self.received_token: str | None = None
         self.error: str | None = None
         self.revoked_count: int = 0

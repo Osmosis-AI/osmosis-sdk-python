@@ -118,7 +118,7 @@ def login(
     login_url = _build_login_url(state, port)
 
     # Start the local server
-    server = LocalAuthServer(port, state)
+    server = LocalAuthServer(port, expected_state=state)
 
     try:
         # Always print the URL so users can copy/paste if browser doesn't open
@@ -216,7 +216,8 @@ def _verify_and_get_user_info(token: str) -> VerifyResult:
             data = json.loads(response.read().decode())
 
             if not data.get("valid"):
-                raise LoginError("Token verification failed")
+                reason = data.get("reason") or data.get("error") or "unknown reason"
+                raise LoginError(f"Token verification failed: {reason}")
 
             token_id = data.get("token_id")
 
