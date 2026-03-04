@@ -19,6 +19,7 @@ from typing import Any
 from osmosis_ai.rollout.eval.common.dataset import DatasetRow
 from osmosis_ai.rollout.eval.common.errors import SystemicProviderError
 from osmosis_ai.rollout.eval.evaluation.cache import (
+    BuildSummaryResult,
     CacheBackend,
     CacheConfig,
     CacheFlushController,
@@ -50,7 +51,7 @@ class OrchestratorResult:
     status: str
     cache_path: Path
     samples_path: Path | None
-    summary: dict[str, Any] | None
+    summary: BuildSummaryResult | None
     total_completed: int
     total_expected: int
     cache_data: dict[str, Any]
@@ -287,7 +288,7 @@ class EvalOrchestrator:
             else:
                 status = "completed"
 
-            summary: dict[str, Any] | None = None
+            summary: BuildSummaryResult | None = None
             if status == "completed":
                 # After force_flush, disk has the full merged runs list.
                 # Re-read from disk to get all runs (old + new) for summary.
