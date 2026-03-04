@@ -1,0 +1,69 @@
+tests/unit/rollout/eval/evaluation/test_runner.py
+  4b386f3a30b48abe 1025-1026,1056
+osmosis_ai/rollout/eval/evaluation/runner.py
+  4b386f3a30b48abe 675-676,682-694,696-697,699,701-715
+  c80339ca40a7183b 680
+  fdf69121b8d7c9be 527,538-539,544,546-547,551-554,556-562,564-566,568-584,586,588-590,594-597,600-604,617-620,622
+osmosis_ai/rollout/eval/evaluation/cache.py
+  727d6d14483e4f60 25,623-643,649,699-700
+  4b386f3a30b48abe 725,727
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.8",
+  "base_commit_sha": "0b87424bcda80a746c3d543e8ba36593e1aa0776",
+  "prompts": {
+    "4b386f3a30b48abe": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3df155cd-c25e-47de-a1ef-e19e897a0d97",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>",
+      "messages": [],
+      "total_additions": 47,
+      "total_deletions": 80,
+      "accepted_lines": 42,
+      "overriden_lines": 0
+    },
+    "727d6d14483e4f60": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "785cf9e0-33f0-49ac-91f8-9c7b3b33e90c",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>",
+      "messages": [],
+      "total_additions": 29,
+      "total_deletions": 5,
+      "accepted_lines": 25,
+      "overriden_lines": 0
+    },
+    "c80339ca40a7183b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "3f404de9-aba4-4507-9343-9dd38bbfd86d",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>",
+      "messages": [],
+      "total_additions": 1,
+      "total_deletions": 4,
+      "accepted_lines": 1,
+      "overriden_lines": 0
+    },
+    "fdf69121b8d7c9be": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f4866ebf-f800-40fd-8908-272156f36150",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>",
+      "messages": [],
+      "total_additions": 61,
+      "total_deletions": 378,
+      "accepted_lines": 55,
+      "overriden_lines": 0
+    }
+  }
+}
