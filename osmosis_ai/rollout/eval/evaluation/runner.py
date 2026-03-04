@@ -352,33 +352,22 @@ class EvalRunner:
             row_index=row_index,
         )
 
-    async def run_batch(
+    async def _create_runner_pools(
         self,
-        work_items: list[tuple[DatasetRow, int, int, str | None]],
-        max_turns: int = 10,
-        completion_params: dict[str, Any] | None = None,
-    ) -> tuple[list[EvalRunResult | None], str | None]:
-        """Run a batch of work items concurrently and return ordered results.
-
-        Args:
-            work_items: List of (row, row_index, run_index, model_tag) tuples.
-            max_turns: Max agent turns per run.
-            completion_params: LLM sampling parameters.
+        pool_size: int,
+        has_baseline: bool,
+    ) -> tuple[
+        asyncio.Queue[LocalRolloutRunner],
+        asyncio.Queue[LocalRolloutRunner],
+        list[LocalRolloutRunner],
+    ]:
+        """Create runner pools for concurrent execution.
 
         Returns:
-            A tuple of (batch_results, systemic_error) where batch_results is
-            a list matching the order of work_items (None for items not
-            attempted), and systemic_error is the error string if a
-            SystemicProviderError occurred.
+            (primary_pool, baseline_pool, all_runners) where all_runners is
+            the flat list for cleanup.
         """
-        if not work_items:
-            return [], None
-
-        pool_size = len(work_items)
-
-        # Build runner pools
-        has_baseline_items = any(tag == "baseline" for _, _, _, tag in work_items)
-        if has_baseline_items:
+        if has_baseline:
             primary_pool_size = max(1, (pool_size + 1) // 2)
             baseline_pool_size = max(1, pool_size - primary_pool_size)
         else:
@@ -393,7 +382,6 @@ class EvalRunner:
             for _ in range(baseline_pool_size):
                 baseline_runners.append(self._create_baseline_rollout_runner())
         except Exception:
-            # Clean up already-created runners
             for runner in primary_runners + baseline_runners:
                 close = getattr(runner.llm_client, "close", None)
                 if callable(close):
@@ -402,7 +390,7 @@ class EvalRunner:
                         if inspect.isawaitable(maybe_awaitable):
                             await maybe_awaitable
                     except Exception:
-                        pass  # Best-effort cleanup; re-raising the original error below
+                        pass
             raise
 
         primary_pool: asyncio.Queue[LocalRolloutRunner] = asyncio.Queue()
@@ -413,25 +401,61 @@ class EvalRunner:
         for runner in baseline_runners:
             baseline_pool.put_nowait(runner)
 
-        all_runners = primary_runners + baseline_runners
+        return primary_pool, baseline_pool, primary_runners + baseline_runners
+
+    @staticmethod
+    async def _close_runner_pool(all_runners: list[LocalRolloutRunner]) -> None:
+        """Best-effort cleanup for per-runner LLM clients."""
+        for runner in all_runners:
+            close = getattr(runner.llm_client, "close", None)
+            if not callable(close):
+                continue
+            try:
+                maybe_awaitable = close()
+                if inspect.isawaitable(maybe_awaitable):
+                    await maybe_awaitable
+            except Exception:
+                logger.debug("Failed to close concurrent runner client", exc_info=True)
+
+    async def run_batch(
+        self,
+        work_items: list[tuple[DatasetRow, int, int, str | None]],
+        max_turns: int = 10,
+        completion_params: dict[str, Any] | None = None,
+        primary_pool: asyncio.Queue[LocalRolloutRunner] | None = None,
+        baseline_pool: asyncio.Queue[LocalRolloutRunner] | None = None,
+    ) -> tuple[list[EvalRunResult | None], str | None]:
+        """Run a batch of work items concurrently and return ordered results.
+
+        Args:
+            work_items: List of (row, row_index, run_index, model_tag) tuples.
+            max_turns: Max agent turns per run.
+            completion_params: LLM sampling parameters.
+            primary_pool: Pre-created primary runner pool (reused across waves).
+            baseline_pool: Pre-created baseline runner pool (reused across waves).
+
+        Returns:
+            A tuple of (batch_results, systemic_error) where batch_results is
+            a list matching the order of work_items (None for items not
+            attempted), and systemic_error is the error string if a
+            SystemicProviderError occurred.
+        """
+        if not work_items:
+            return [], None
+
+        # Create ephemeral pools if none provided (standalone call)
+        owns_pools = primary_pool is None
+        all_runners: list[LocalRolloutRunner] = []
+        if owns_pools:
+            has_baseline_items = any(tag == "baseline" for _, _, _, tag in work_items)
+            primary_pool, baseline_pool, all_runners = await self._create_runner_pools(
+                len(work_items), has_baseline_items
+            )
+        elif baseline_pool is None:
+            baseline_pool = asyncio.Queue()
 
         batch_results: list[EvalRunResult | None] = [None] * len(work_items)
         systemic_error: str | None = None
-
-        async def _close_runner_pool() -> None:
-            """Best-effort cleanup for per-runner LLM clients."""
-            for runner in all_runners:
-                close = getattr(runner.llm_client, "close", None)
-                if not callable(close):
-                    continue
-                try:
-                    maybe_awaitable = close()
-                    if inspect.isawaitable(maybe_awaitable):
-                        await maybe_awaitable
-                except Exception:
-                    logger.debug(
-                        "Failed to close concurrent runner client", exc_info=True
-                    )
 
         async def _run_one(
             idx: int,
@@ -443,6 +467,7 @@ class EvalRunner:
             nonlocal systemic_error
             runner: LocalRolloutRunner | None = None
             target_pool = baseline_pool if model_tag == "baseline" else primary_pool
+            assert target_pool is not None
             run_start = time.monotonic()
             try:
                 runner = await target_pool.get()
@@ -485,19 +510,17 @@ class EvalRunner:
             ]
 
             try:
-                # Wait for all tasks — let them all complete even if
-                # a systemic error occurs, since they're already in-flight.
                 for task in asyncio.as_completed(tasks):
                     await task
             except Exception:
-                # Unexpected error: cancel remaining in-flight tasks
                 for t in tasks:
                     if not t.done():
                         t.cancel()
                 await asyncio.gather(*tasks, return_exceptions=True)
                 raise
         finally:
-            await _close_runner_pool()
+            if owns_pools:
+                await self._close_runner_pool(all_runners)
 
         return batch_results, systemic_error
 
@@ -535,81 +558,100 @@ class EvalRunner:
             ["primary", "baseline"] if self.has_baseline else [None]
         )
 
-        # Build flat work items: (row, row_index, run_index, model_tag)
-        work_items: list[tuple[DatasetRow, int, int, str | None]] = []
-        for i, row in enumerate(rows):
-            row_index = start_index + i
-            for run_idx in range(n_runs):
-                for tag in model_tags:
-                    work_items.append((row, row_index, run_idx, tag))
-
-        total = len(work_items)
+        total = len(rows) * n_runs * len(model_tags)
         completed_results: list[EvalRunResult] = []
         stopped_early = False
         stop_reason: str | None = None
 
         if batch_size <= 1:
-            # Sequential execution
-            for row, row_index, run_idx, tag in work_items:
-                run_start = time.monotonic()
-                try:
-                    result = await self.run_single(
-                        row=row,
-                        row_index=row_index,
-                        run_index=run_idx,
+            # Sequential execution — iterate directly to avoid materializing
+            # the full work_items list (can be large for big datasets * n_runs).
+            _seq_stopped = False
+            for i, row in enumerate(rows):
+                if _seq_stopped:
+                    break
+                row_index = start_index + i
+                for run_idx in range(n_runs):
+                    if _seq_stopped:
+                        break
+                    for tag in model_tags:
+                        run_start = time.monotonic()
+                        try:
+                            result = await self.run_single(
+                                row=row,
+                                row_index=row_index,
+                                run_index=run_idx,
+                                max_turns=max_turns,
+                                completion_params=completion_params,
+                                model_tag=tag,
+                            )
+                        except SystemicProviderError as e:
+                            duration_ms, tokens = _extract_systemic_error_metrics(
+                                e, fallback_started_at=run_start
+                            )
+                            result = EvalRunResult(
+                                run_index=run_idx,
+                                success=False,
+                                error=str(e),
+                                duration_ms=duration_ms,
+                                tokens=tokens,
+                                model_tag=tag,
+                                messages=None,
+                                row_index=row_index,
+                            )
+                            completed_results.append(result)
+                            if on_progress:
+                                on_progress(len(completed_results), total, result)
+                            if len(completed_results) < total:
+                                stopped_early = True
+                                stop_reason = str(e)
+                            _seq_stopped = True
+                            break
+
+                        completed_results.append(result)
+                        if on_progress:
+                            on_progress(len(completed_results), total, result)
+        else:
+            # Concurrent execution in waves — materialize work items for batching
+            work_items: list[tuple[DatasetRow, int, int, str | None]] = []
+            for i, row in enumerate(rows):
+                row_index = start_index + i
+                for run_idx in range(n_runs):
+                    for tag in model_tags:
+                        work_items.append((row, row_index, run_idx, tag))
+
+            # Create runner pools once and reuse across all waves to avoid
+            # connection churn from recreating LLM clients per batch.
+            primary_pool, baseline_pool, all_runners = await self._create_runner_pools(
+                batch_size, self.has_baseline
+            )
+            try:
+                cursor = 0
+                while cursor < len(work_items):
+                    batch = work_items[cursor : cursor + batch_size]
+                    batch_results, systemic_error = await self.run_batch(
+                        work_items=batch,
                         max_turns=max_turns,
                         completion_params=completion_params,
-                        model_tag=tag,
+                        primary_pool=primary_pool,
+                        baseline_pool=baseline_pool,
                     )
-                except SystemicProviderError as e:
-                    duration_ms, tokens = _extract_systemic_error_metrics(
-                        e, fallback_started_at=run_start
-                    )
-                    result = EvalRunResult(
-                        run_index=run_idx,
-                        success=False,
-                        error=str(e),
-                        duration_ms=duration_ms,
-                        tokens=tokens,
-                        model_tag=tag,
-                        messages=None,
-                        row_index=row_index,
-                    )
-                    completed_results.append(result)
-                    if on_progress:
-                        on_progress(len(completed_results), total, result)
-                    if len(completed_results) < total:
-                        stopped_early = True
-                        stop_reason = str(e)
-                    break
 
-                completed_results.append(result)
-                if on_progress:
-                    on_progress(len(completed_results), total, result)
-        else:
-            # Concurrent execution in waves via run_batch()
-            cursor = 0
-            while cursor < len(work_items):
-                batch = work_items[cursor : cursor + batch_size]
-                batch_results, systemic_error = await self.run_batch(
-                    work_items=batch,
-                    max_turns=max_turns,
-                    completion_params=completion_params,
-                )
+                    for res in batch_results:
+                        if res is not None:
+                            completed_results.append(res)
+                            if on_progress:
+                                on_progress(len(completed_results), total, res)
 
-                for res in batch_results:
-                    if res is not None:
-                        completed_results.append(res)
-                        if on_progress:
-                            on_progress(len(completed_results), total, res)
+                    cursor += len(batch)
 
-                cursor += len(batch)
-
-                if systemic_error is not None:
-                    if cursor < len(work_items):
-                        stopped_early = True
-                        stop_reason = systemic_error
-                    break
+                    if systemic_error is not None:
+                        if cursor < len(work_items):
+                            stopped_early = True
+                            stop_reason = systemic_error
+                        break
+            finally:
+                await self._close_runner_pool(all_runners)
 
         # Organise flat results into per-row structure
         row_results_map: dict[int, EvalRowResult] = {}

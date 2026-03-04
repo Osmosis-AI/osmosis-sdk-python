@@ -681,7 +681,10 @@ def build_summary(
         if len(sorted_scores) < 2:
             p25 = p75 = sorted_scores[0]
         else:
-            quantiles = statistics.quantiles(sorted_scores, n=4)
+            # Use "inclusive" method (R method 7) to avoid extrapolating
+            # outside the observed range, which the default "exclusive"
+            # method can do for small sample sizes (<=4).
+            quantiles = statistics.quantiles(sorted_scores, n=4, method="inclusive")
             p25 = quantiles[0]
             p75 = quantiles[2]
 

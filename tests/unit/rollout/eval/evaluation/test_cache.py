@@ -834,8 +834,9 @@ class TestBuildSummary:
         assert fn1["median"] == 0.8
         assert fn1["min"] == 0.6
         assert fn1["max"] == 1.0
-        assert fn1["p25"] == 0.6
-        assert fn1["p75"] == 1.0
+        # inclusive quantile method: Q1=0.7, Q3=0.9 for [0.6, 0.8, 1.0]
+        assert fn1["p25"] == 0.7
+        assert fn1["p75"] == 0.9
         assert result["total_runs"] == 3
         assert result["total_tokens"] == 300
         assert result["total_duration_ms"] == 150.0
