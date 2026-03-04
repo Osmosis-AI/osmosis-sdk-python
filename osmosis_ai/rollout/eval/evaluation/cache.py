@@ -21,9 +21,8 @@ import unicodedata
 from collections import defaultdict
 from contextlib import suppress
 from dataclasses import dataclass
-from math import comb
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Protocol, TypedDict
 
 import filelock
 import xxhash
@@ -621,22 +620,55 @@ def _backup_corrupt_cache(cache_path: Path) -> Path | None:
 # ============================================================
 
 
+class EvalFnSummaryDict(TypedDict, total=False):
+    """Per-eval-function statistics returned by ``build_summary``."""
+
+    mean: float
+    median: float
+    std: float
+    min: float
+    max: float
+    p25: float
+    p75: float
+    pass_at_k: dict[int, float]
+
+
+class BuildSummaryResult(TypedDict):
+    """Return type of ``build_summary``."""
+
+    eval_fns: dict[str, EvalFnSummaryDict]
+    total_runs: int
+    total_tokens: int
+    total_duration_ms: float
+
+
 def build_summary(
     runs: list[dict[str, Any]],
     eval_fn_names: list[str],
     pass_threshold: float,
     n_runs: int,
-) -> dict[str, Any]:
+) -> BuildSummaryResult:
     """Compute aggregated statistics from runs list.
 
-    Returns a summary dict with per-eval-fn stats (mean, std, min, max, pass_at_k).
+    Returns a summary dict with per-eval-fn stats (mean, median, std, min, max,
+    p25, p75, pass_at_k).
     """
-    eval_summaries: dict[str, dict] = {}
+    import statistics
+
+    eval_summaries: dict[str, EvalFnSummaryDict] = {}
     for name in eval_fn_names:
         all_scores = [r["scores"].get(name, 0.0) for r in runs]
 
         if not all_scores:
-            eval_summaries[name] = {"mean": 0.0, "std": 0.0, "min": 0.0, "max": 0.0}
+            eval_summaries[name] = {
+                "mean": 0.0,
+                "median": 0.0,
+                "std": 0.0,
+                "min": 0.0,
+                "max": 0.0,
+                "p25": 0.0,
+                "p75": 0.0,
+            }
             continue
 
         mean = sum(all_scores) / len(all_scores)
@@ -644,24 +676,50 @@ def build_summary(
         variance = sum((s - mean) ** 2 for s in all_scores) / len(all_scores)
         std = math.sqrt(variance)
 
-        summary: dict[str, object] = {
+        sorted_scores = sorted(all_scores)
+        median = statistics.median(sorted_scores)
+        if len(sorted_scores) < 2:
+            p25 = p75 = sorted_scores[0]
+        else:
+            # Use "inclusive" method (R method 7) to avoid extrapolating
+            # outside the observed range, which the default "exclusive"
+            # method can do for small sample sizes (<=4).
+            quantiles = statistics.quantiles(sorted_scores, n=4, method="inclusive")
+            p25 = quantiles[0]
+            p75 = quantiles[2]
+
+        summary: EvalFnSummaryDict = {
             "mean": mean,
+            "median": median,
             "std": std,
             "min": min(all_scores),
             "max": max(all_scores),
+            "p25": p25,
+            "p75": p75,
         }
 
         # pass@k computation for n_runs > 1
         if n_runs > 1:
+            from osmosis_ai.rollout.eval.evaluation.report import pass_at_k
+
             # Group runs by (row_index, model_tag)
             rows: dict[tuple[int, str | None], list[dict]] = defaultdict(list)
             for r in runs:
                 key = (r["row_index"], r.get("model_tag"))
                 rows[key].append(r)
 
-            for k in [1, 3, 5, 10]:
-                if k > n_runs:
-                    break
+            # Power-of-2 sequence up to n_runs, always including n_runs itself.
+            # e.g. n_runs=10 → [1, 2, 4, 8, 10]; n_runs=8 → [1, 2, 4, 8]
+            k_values = []
+            p = 1
+            while p < n_runs:
+                k_values.append(p)
+                p *= 2
+            if not k_values or k_values[-1] != n_runs:
+                k_values.append(n_runs)
+
+            pak: dict[int, float] = {}
+            for k in k_values:
                 row_pass_at_k: list[float] = []
                 for row_runs in rows.values():
                     c = sum(
@@ -669,27 +727,22 @@ def build_summary(
                         for r in row_runs
                         if r["scores"].get(name, 0.0) >= pass_threshold
                     )
-                    n = len(row_runs)
+                    n = max(len(row_runs), n_runs)
                     if n > 0 and k <= n:
-                        # pass@k formula
-                        if c == 0:
-                            pak = 0.0
-                        elif n <= k or c >= n or n - c < k:
-                            pak = 1.0
-                        else:
-                            pak = 1.0 - comb(n - c, k) / comb(n, k)
-                        row_pass_at_k.append(pak)
+                        row_pass_at_k.append(pass_at_k(n, c, k))
                 if row_pass_at_k:
-                    summary[f"pass_at_{k}"] = sum(row_pass_at_k) / len(row_pass_at_k)
+                    pak[k] = sum(row_pass_at_k) / len(row_pass_at_k)
+            if pak:
+                summary["pass_at_k"] = pak
 
         eval_summaries[name] = summary
 
-    return {
-        "eval_fns": eval_summaries,
-        "total_runs": len(runs),
-        "total_tokens": sum(r.get("tokens", 0) for r in runs),
-        "total_duration_ms": sum(r.get("duration_ms", 0.0) for r in runs),
-    }
+    return BuildSummaryResult(
+        eval_fns=eval_summaries,
+        total_runs=len(runs),
+        total_tokens=sum(r.get("tokens", 0) for r in runs),
+        total_duration_ms=sum(r.get("duration_ms", 0.0) for r in runs),
+    )
 
 
 # ============================================================

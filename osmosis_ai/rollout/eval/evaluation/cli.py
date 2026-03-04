@@ -27,6 +27,7 @@ from osmosis_ai.rollout.eval.common.cli import (
 )
 
 if TYPE_CHECKING:
+    from osmosis_ai.rollout.eval.evaluation.cache import BuildSummaryResult
     from osmosis_ai.rollout.eval.evaluation.eval_fn import EvalFnWrapper
     from osmosis_ai.rollout.eval.evaluation.runner import EvalRunResult
 
@@ -257,14 +258,6 @@ class EvalCommand:
         )
 
         parser.add_argument(
-            "--output",
-            "-o",
-            dest="output",
-            default=None,
-            help="Save results to JSON file.",
-        )
-
-        parser.add_argument(
             "--debug",
             dest="debug",
             action="store_true",
@@ -323,6 +316,7 @@ class EvalCommand:
 
         parser.add_argument(
             "--output-path",
+            "-o",
             dest="output_path",
             default=None,
             help="Directory path for structured output (results JSON and optional samples JSONL).",
@@ -672,7 +666,7 @@ class EvalCommand:
 
     def _print_orchestrator_summary(
         self,
-        summary: dict | None,
+        summary: BuildSummaryResult | None,
         total_completed: int,
         total_expected: int,
     ) -> None:
@@ -697,18 +691,14 @@ class EvalCommand:
             self.console.print()
             for fn_name, stats in eval_fns.items():
                 mean = stats.get("mean", 0.0)
+                median = stats.get("median", 0.0)
                 std = stats.get("std", 0.0)
-                s_min = stats.get("min", 0.0)
-                s_max = stats.get("max", 0.0)
                 self.console.print(
-                    f"  {fn_name}: mean={mean:.3f} std={std:.3f} "
-                    f"min={s_min:.3f} max={s_max:.3f}"
+                    f"  {fn_name}: mean={mean:.3f} median={median:.3f} std={std:.3f}"
                 )
                 # Print pass@k if present
-                for key, val in stats.items():
-                    if key.startswith("pass_at_"):
-                        k_val = key.replace("pass_at_", "")
-                        self.console.print(f"    pass@{k_val}: {val * 100:.1f}%")
+                for k_val, val in sorted(stats.get("pass_at_k", {}).items()):
+                    self.console.print(f"    pass@{k_val}: {float(val) * 100:.1f}%")
 
     def _print_resume_hints(
         self,
@@ -1101,8 +1091,6 @@ class EvalCommand:
                 )
                 if not args.quiet:
                     self.console.print(f"Output written to: {results_path}")
-            # Also write legacy output if --output/-o is set
-            self._write_legacy_output_from_cache(args, orch_result.cache_data)
             return 0
 
         if orch_result.status == "interrupted":
@@ -1170,71 +1158,7 @@ class EvalCommand:
             if not args.quiet:
                 self.console.print(f"Output written to: {results_path}")
 
-        # Also write legacy output if --output/-o is set
-        self._write_legacy_output_from_cache(args, orch_result.cache_data)
-
         return 0
-
-    def _write_legacy_output_from_cache(
-        self, args: argparse.Namespace, cache_data: dict
-    ) -> None:
-        """Write legacy --output/-o JSON from cache data for backward compatibility.
-
-        Reconstructs the nested ``rows`` structure expected by the original format:
-        ``{"config": ..., "summary": ..., "rows": [{"row_index": N, "runs": [...]}]}``
-        """
-        if not getattr(args, "output", None):
-            return
-
-        config: dict[str, Any] = {
-            "model": args.model,
-            "n_runs": args.n_runs,
-            "pass_threshold": args.pass_threshold,
-            "eval_fns": args.eval_fns,
-        }
-        if args.baseline_model:
-            config["baseline_model"] = args.baseline_model
-
-        summary_data = cache_data.get("summary", {}) or {}
-        flat_runs = cache_data.get("runs", [])
-
-        # Reconstruct nested rows structure from flat runs list
-        rows_map: dict[int, list[dict[str, Any]]] = {}
-        for run in flat_runs:
-            row_idx = run.get("row_index", 0)
-            if row_idx not in rows_map:
-                rows_map[row_idx] = []
-            rows_map[row_idx].append(
-                {
-                    "run_index": run.get("run_index", 0),
-                    "success": run.get("success", False),
-                    "scores": run.get("scores", {}),
-                    "duration_ms": run.get("duration_ms", 0.0),
-                    "tokens": run.get("tokens", 0),
-                    **({"model_tag": run["model_tag"]} if run.get("model_tag") else {}),
-                    **({"error": run["error"]} if run.get("error") else {}),
-                }
-            )
-
-        rows_list = [
-            {"row_index": row_idx, "runs": runs}
-            for row_idx, runs in sorted(rows_map.items())
-        ]
-
-        output_data: dict[str, Any] = {
-            "config": config,
-            "summary": summary_data,
-            "rows": rows_list,
-        }
-
-        output_file = Path(args.output)
-        output_file.parent.mkdir(parents=True, exist_ok=True)
-
-        with open(output_file, "w", encoding="utf-8") as f:
-            json.dump(output_data, f, indent=2)
-
-        if not args.quiet:
-            self.console.print(f"\nResults written to: {args.output}")
 
 
 __all__ = ["EvalCommand"]

@@ -16,9 +16,12 @@ def _make_eval_result() -> EvalResult:
         eval_summaries={
             "accuracy": EvalEvalSummary(
                 mean=0.75,
+                median=0.75,
                 std=0.2,
                 min=0.5,
                 max=1.0,
+                p25=0.625,
+                p75=0.875,
                 pass_at_k={1: 1.0},
             )
         },
@@ -55,4 +58,7 @@ def test_format_eval_report_falls_back_when_rich_render_fails(monkeypatch) -> No
     assert "Evaluation Results:" in text
     assert "Eval Function" in text
     assert "accuracy" in text
+    assert "Median" in text
+    assert "Min" not in text
+    assert "Max" not in text
     assert "pass@1" in text
