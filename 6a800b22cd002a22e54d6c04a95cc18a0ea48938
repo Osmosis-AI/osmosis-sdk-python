@@ -1,0 +1,25 @@
+osmosis_ai/rollout/eval/evaluation/cache.py
+  4445c2ae39861f2e 662-672
+tests/unit/rollout/eval/evaluation/test_cache.py
+  4445c2ae39861f2e 848,856,858,875-884
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.8",
+  "base_commit_sha": "6a800b22cd002a22e54d6c04a95cc18a0ea48938",
+  "prompts": {
+    "4445c2ae39861f2e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "a52bbf67-28a1-4465-a3f9-2a7291027fa5",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>",
+      "messages": [],
+      "total_additions": 26,
+      "total_deletions": 8,
+      "accepted_lines": 24,
+      "overriden_lines": 0
+    }
+  }
+}
