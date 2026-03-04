@@ -1,0 +1,25 @@
+osmosis_ai/platform/cli/whoami.py
+  7fac0ce69f200f5c 7,42,47,60
+osmosis_ai/platform/cli/workspace.py
+  7fac0ce69f200f5c 13,50-55,92-95
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.8",
+  "base_commit_sha": "ab328b367304b13e2c78309ecd11c9a11ce9cf9f",
+  "prompts": {
+    "7fac0ce69f200f5c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4af20e11-a9a1-4f06-a61d-3a9d008f805a",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>",
+      "messages": [],
+      "total_additions": 15,
+      "total_deletions": 0,
+      "accepted_lines": 15,
+      "overriden_lines": 0
+    }
+  }
+}
