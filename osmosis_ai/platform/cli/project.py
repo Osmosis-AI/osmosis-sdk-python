@@ -78,7 +78,8 @@ def select_project_interactive(
     ws_name: str,
     projects: list[dict] | None = None,
     current_project_id: str | None = None,
-) -> dict | None:
+    allow_back: bool = False,
+) -> dict | str | None:
     """Interactively select or create a project.
 
     - 0 projects: prompt to create (TTY only)
@@ -89,9 +90,11 @@ def select_project_interactive(
         ws_name: Workspace name for display.
         projects: Pre-fetched project list, or None to fetch from API.
         current_project_id: ID of the current default (for "current" marker).
+        allow_back: If True, show a "Back" option to return to previous step.
 
     Returns:
-        Dict with 'id' and 'project_name', or None if skipped/cancelled.
+        Dict with 'id' and 'project_name', "__back__" if back selected,
+        or None if skipped/cancelled.
     """
     if projects is None:
         try:
@@ -114,7 +117,7 @@ def select_project_interactive(
         console.print(f"No projects in '{ws_name}'.")
         return _prompt_create()
 
-    return _prompt_select(projects, current_project_id)
+    return _prompt_select(projects, current_project_id, allow_back=allow_back)
 
 
 def _prompt_create() -> dict | None:
@@ -154,7 +157,8 @@ def _prompt_create() -> dict | None:
 def _prompt_select(
     projects: list[dict],
     current_project_id: str | None,
-) -> dict | None:
+    allow_back: bool = False,
+) -> dict | str | None:
     """Display project list with arrow-key selection and create option."""
     # Build choices for ALL projects (no DISPLAY_LIMIT cap)
     choices = []
@@ -166,9 +170,11 @@ def _prompt_select(
             title += " (current)"
         choices.append(Choice(title, value=p))
 
-    # Add separator + create option
+    # Add separator + create option + optional back
     choices.append(Separator())
     choices.append(Choice("Create new project", value="__create__"))
+    if allow_back:
+        choices.append(Choice("Back", value="__back__"))
 
     # Prompt user
     result = select(
@@ -179,7 +185,9 @@ def _prompt_select(
     if result is None:
         return None
 
-    # Handle create option
+    # Handle special options
+    if result == "__back__":
+        return "__back__"
     if result == "__create__":
         return _prompt_create()
 
