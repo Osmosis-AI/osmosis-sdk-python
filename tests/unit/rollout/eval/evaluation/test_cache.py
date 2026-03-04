@@ -891,12 +891,13 @@ class TestBuildSummary:
         ]
         result = build_summary(runs, ["fn1"], pass_threshold=0.5, n_runs=3)
         fn1 = result["eval_fns"]["fn1"]
+        pak = fn1.get("pass_at_k", {})
         # n_runs=3 → k_values = [1, 2, 3]
-        assert "pass_at_1" in fn1
-        assert "pass_at_2" in fn1
-        assert "pass_at_3" in fn1
+        assert 1 in pak
+        assert 2 in pak
+        assert 3 in pak
         # With 2 passing out of 3, pass@1 should be > 0
-        assert fn1["pass_at_1"] > 0.0
+        assert pak[1] > 0.0
 
     def test_pass_at_k_with_fewer_passes_than_k(self):
         """pass@k uses the combinatorial estimator when c < k."""
@@ -909,17 +910,18 @@ class TestBuildSummary:
         ]
         result = build_summary(runs, ["fn1"], pass_threshold=0.5, n_runs=5)
         fn1 = result["eval_fns"]["fn1"]
+        pak = fn1.get("pass_at_k", {})
 
         # n_runs=5 → k_values = [1, 2, 4, 5]
-        assert "pass_at_1" in fn1
-        assert "pass_at_2" in fn1
-        assert "pass_at_4" in fn1
-        assert "pass_at_5" in fn1
+        assert 1 in pak
+        assert 2 in pak
+        assert 4 in pak
+        assert 5 in pak
         # n=5, c=2, k=4 => 1 - C(3,4)/C(5,4) = 1 - 0/5 = 1.0
         # (since C(3,4) = 0 because 4 > 3)
-        assert fn1["pass_at_4"] == pytest.approx(1.0)
+        assert pak[4] == pytest.approx(1.0)
         # n=5, c=2, k=2 => 1 - C(3,2)/C(5,2) = 1 - 3/10 = 0.7
-        assert fn1["pass_at_2"] == pytest.approx(0.7)
+        assert pak[2] == pytest.approx(0.7)
 
     def test_multiple_eval_fns(self):
         """Summary computed for each eval fn independently."""

@@ -697,11 +697,8 @@ class EvalCommand:
                     f"  {fn_name}: mean={mean:.3f} median={median:.3f} std={std:.3f}"
                 )
                 # Print pass@k if present
-                stats_dict: dict[str, Any] = dict(stats)
-                for key, val in stats_dict.items():
-                    if key.startswith("pass_at_"):
-                        k_val = key.replace("pass_at_", "")
-                        self.console.print(f"    pass@{k_val}: {float(val) * 100:.1f}%")
+                for k_val, val in sorted(stats.get("pass_at_k", {}).items()):
+                    self.console.print(f"    pass@{k_val}: {float(val) * 100:.1f}%")
 
     def _print_resume_hints(
         self,

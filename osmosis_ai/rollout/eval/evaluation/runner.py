@@ -699,12 +699,6 @@ class EvalRunner:
         # Map dict → EvalEvalSummary
         summaries: dict[str, EvalEvalSummary] = {}
         for name, stats in raw["eval_fns"].items():
-            stats_dict: dict[str, Any] = dict(stats)
-            pass_at_k: dict[int, float] = {
-                int(k.removeprefix("pass_at_")): float(v)
-                for k, v in stats_dict.items()
-                if k.startswith("pass_at_")
-            }
             summaries[name] = EvalEvalSummary(
                 mean=stats.get("mean", 0.0),
                 median=stats.get("median", 0.0),
@@ -713,7 +707,7 @@ class EvalRunner:
                 max=stats.get("max", 0.0),
                 p25=stats.get("p25", 0.0),
                 p75=stats.get("p75", 0.0),
-                pass_at_k=pass_at_k,
+                pass_at_k=stats.get("pass_at_k", {}),
             )
         return summaries
 

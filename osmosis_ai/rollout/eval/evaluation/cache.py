@@ -22,7 +22,7 @@ from collections import defaultdict
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Protocol, TypedDict, cast
+from typing import Any, Protocol, TypedDict
 
 import filelock
 import xxhash
@@ -630,6 +630,7 @@ class EvalFnSummaryDict(TypedDict, total=False):
     max: float
     p25: float
     p75: float
+    pass_at_k: dict[int, float]
 
 
 class BuildSummaryResult(TypedDict):
@@ -684,7 +685,7 @@ def build_summary(
             p25 = quantiles[0]
             p75 = quantiles[2]
 
-        summary: dict[str, float] = {
+        summary: EvalFnSummaryDict = {
             "mean": mean,
             "median": median,
             "std": std,
@@ -714,6 +715,7 @@ def build_summary(
             if not k_values or k_values[-1] != n_runs:
                 k_values.append(n_runs)
 
+            pak: dict[int, float] = {}
             for k in k_values:
                 row_pass_at_k: list[float] = []
                 for row_runs in rows.values():
@@ -726,9 +728,11 @@ def build_summary(
                     if n > 0 and k <= n:
                         row_pass_at_k.append(pass_at_k(n, c, k))
                 if row_pass_at_k:
-                    summary[f"pass_at_{k}"] = sum(row_pass_at_k) / len(row_pass_at_k)
+                    pak[k] = sum(row_pass_at_k) / len(row_pass_at_k)
+            if pak:
+                summary["pass_at_k"] = pak
 
-        eval_summaries[name] = cast(EvalFnSummaryDict, summary)
+        eval_summaries[name] = summary
 
     return BuildSummaryResult(
         eval_fns=eval_summaries,
