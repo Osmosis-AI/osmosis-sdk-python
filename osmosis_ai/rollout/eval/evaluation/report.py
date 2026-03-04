@@ -215,8 +215,7 @@ def _format_tables_rich(
     table.add_column("Eval Function", style="bold", no_wrap=True)
     table.add_column("Model", no_wrap=True)
     table.add_column("Mean", justify="right")
-    table.add_column("Min", justify="right")
-    table.add_column("Max", justify="right")
+    table.add_column("Median", justify="right")
     table.add_column("Std", justify="right", style="dim")
     for k in pass_k_values:
         table.add_column(f"pass@{k}", justify="right")
@@ -230,12 +229,12 @@ def _format_tables_rich(
             display_fn = fn_name
 
             mean_color = _score_color(summary.mean)
+            median_color = _score_color(summary.median)
             row: list[str] = [
                 display_fn,
                 md["name"],
                 f"[bold {mean_color}]{_format_score(summary.mean)}[/bold {mean_color}]",
-                _format_score(summary.min),
-                _format_score(summary.max),
+                f"[bold {median_color}]{_format_score(summary.median)}[/bold {median_color}]",
                 _format_score(summary.std),
             ]
 
@@ -285,8 +284,7 @@ def _format_tables_plain(
         f"{'Eval Function':<20}",
         f"{'Model':<15}",
         f"{'Mean':>6}",
-        f"{'Min':>6}",
-        f"{'Max':>6}",
+        f"{'Median':>8}",
         f"{'Std':>6}",
     ]
     for k in pass_k_values:
@@ -308,8 +306,7 @@ def _format_tables_plain(
                 f"{display_fn:<20}",
                 f"{md['name']:<15}",
                 f"{summary.mean:>6.3f}",
-                f"{summary.min:>6.3f}",
-                f"{summary.max:>6.3f}",
+                f"{summary.median:>8.3f}",
                 f"{summary.std:>6.3f}",
             ]
 

@@ -27,6 +27,7 @@ from osmosis_ai.rollout.eval.common.cli import (
 )
 
 if TYPE_CHECKING:
+    from osmosis_ai.rollout.eval.evaluation.cache import BuildSummaryResult
     from osmosis_ai.rollout.eval.evaluation.eval_fn import EvalFnWrapper
     from osmosis_ai.rollout.eval.evaluation.runner import EvalRunResult
 
@@ -665,7 +666,7 @@ class EvalCommand:
 
     def _print_orchestrator_summary(
         self,
-        summary: dict | None,
+        summary: BuildSummaryResult | None,
         total_completed: int,
         total_expected: int,
     ) -> None:
@@ -690,18 +691,14 @@ class EvalCommand:
             self.console.print()
             for fn_name, stats in eval_fns.items():
                 mean = stats.get("mean", 0.0)
+                median = stats.get("median", 0.0)
                 std = stats.get("std", 0.0)
-                s_min = stats.get("min", 0.0)
-                s_max = stats.get("max", 0.0)
                 self.console.print(
-                    f"  {fn_name}: mean={mean:.3f} std={std:.3f} "
-                    f"min={s_min:.3f} max={s_max:.3f}"
+                    f"  {fn_name}: mean={mean:.3f} median={median:.3f} std={std:.3f}"
                 )
                 # Print pass@k if present
-                for key, val in stats.items():
-                    if key.startswith("pass_at_"):
-                        k_val = key.replace("pass_at_", "")
-                        self.console.print(f"    pass@{k_val}: {val * 100:.1f}%")
+                for k_val, val in sorted(stats.get("pass_at_k", {}).items()):
+                    self.console.print(f"    pass@{k_val}: {float(val) * 100:.1f}%")
 
     def _print_resume_hints(
         self,

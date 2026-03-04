@@ -314,7 +314,7 @@ Evaluation Results:
   Duration: 3m12.4s
   Total tokens: 89,240
 
-  compute_reward: mean=0.850 std=0.127 min=0.400 max=1.000
+  compute_reward: mean=0.850 median=0.900 std=0.127
     pass@1: 85.0%
     pass@2: 95.0%
     pass@4: 100.0%
@@ -357,12 +357,12 @@ Evaluation Results:
   Total tokens: 21,340
 
   [primary] my-finetuned-model:
-  compute_reward: mean=0.900 std=0.105 min=0.500 max=1.000
-  format_score: mean=0.830 std=0.090 min=0.600 max=1.000
+  compute_reward: mean=0.900 median=0.950 std=0.105
+  format_score: mean=0.830 median=0.850 std=0.090
 
   [baseline] openai/gpt-5-mini:
-  compute_reward: mean=0.720 std=0.185 min=0.250 max=1.000
-  format_score: mean=0.810 std=0.110 min=0.550 max=1.000
+  compute_reward: mean=0.720 median=0.780 std=0.185
+  format_score: mean=0.810 median=0.830 std=0.110
 ```
 
 ### Resuming After Interruption
@@ -404,7 +404,7 @@ Evaluation Results:
   Duration: 3m12.4s
   Total tokens: 89,240
 
-  compute_reward: mean=0.850 std=0.127 min=0.400 max=1.000
+  compute_reward: mean=0.850 median=0.900 std=0.127
     pass@1: 85.0%
     pass@2: 95.0%
     pass@4: 100.0%

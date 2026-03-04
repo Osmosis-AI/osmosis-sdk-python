@@ -800,7 +800,7 @@ class TestBackupCorruptCache:
 
 class TestBuildSummary:
     def test_basic_summary(self):
-        """Computes mean, std, min, max correctly."""
+        """Computes mean, median, std, min, max, p25, p75 correctly."""
         runs = [
             {
                 "row_index": 0,
@@ -831,8 +831,12 @@ class TestBuildSummary:
         assert "eval_fns" in result
         fn1 = result["eval_fns"]["fn1"]
         assert abs(fn1["mean"] - 0.8) < 1e-9
+        assert fn1["median"] == 0.8
         assert fn1["min"] == 0.6
         assert fn1["max"] == 1.0
+        # inclusive quantile method: Q1=0.7, Q3=0.9 for [0.6, 0.8, 1.0]
+        assert fn1["p25"] == 0.7
+        assert fn1["p75"] == 0.9
         assert result["total_runs"] == 3
         assert result["total_tokens"] == 300
         assert result["total_duration_ms"] == 150.0
@@ -842,7 +846,42 @@ class TestBuildSummary:
         result = build_summary([], ["fn1"], pass_threshold=0.5, n_runs=1)
         fn1 = result["eval_fns"]["fn1"]
         assert fn1["mean"] == 0.0
+        assert fn1["median"] == 0.0
+        assert fn1["p25"] == 0.0
+        assert fn1["p75"] == 0.0
         assert result["total_runs"] == 0
+
+    def test_single_run_percentiles(self):
+        """Single run: median, p25, p75 all equal the single score."""
+        runs = [
+            {
+                "row_index": 0,
+                "run_index": 0,
+                "scores": {"fn1": 0.7},
+                "success": True,
+                "tokens": 50,
+                "duration_ms": 25.0,
+            },
+        ]
+        result = build_summary(runs, ["fn1"], pass_threshold=0.5, n_runs=1)
+        fn1 = result["eval_fns"]["fn1"]
+        assert fn1["median"] == 0.7
+        assert fn1["p25"] == 0.7
+        assert fn1["p75"] == 0.7
+
+    def test_skewed_scores(self):
+        """With skewed distribution, median differs from mean."""
+        runs = [
+            {"row_index": i, "run_index": 0, "scores": {"fn1": 1.0}, "success": True}
+            for i in range(9)
+        ] + [
+            {"row_index": 9, "run_index": 0, "scores": {"fn1": 0.0}, "success": True},
+        ]
+        result = build_summary(runs, ["fn1"], pass_threshold=0.5, n_runs=1)
+        fn1 = result["eval_fns"]["fn1"]
+        assert fn1["mean"] == pytest.approx(0.9)
+        assert fn1["median"] == 1.0
+        assert fn1["median"] != fn1["mean"]
 
     def test_pass_at_k(self):
         """pass@k is computed when n_runs > 1 using power-of-2 + N sequence."""
@@ -853,12 +892,13 @@ class TestBuildSummary:
         ]
         result = build_summary(runs, ["fn1"], pass_threshold=0.5, n_runs=3)
         fn1 = result["eval_fns"]["fn1"]
+        pak = fn1.get("pass_at_k", {})
         # n_runs=3 → k_values = [1, 2, 3]
-        assert "pass_at_1" in fn1
-        assert "pass_at_2" in fn1
-        assert "pass_at_3" in fn1
+        assert 1 in pak
+        assert 2 in pak
+        assert 3 in pak
         # With 2 passing out of 3, pass@1 should be > 0
-        assert fn1["pass_at_1"] > 0.0
+        assert pak[1] > 0.0
 
     def test_pass_at_k_with_fewer_passes_than_k(self):
         """pass@k uses the combinatorial estimator when c < k."""
@@ -871,17 +911,18 @@ class TestBuildSummary:
         ]
         result = build_summary(runs, ["fn1"], pass_threshold=0.5, n_runs=5)
         fn1 = result["eval_fns"]["fn1"]
+        pak = fn1.get("pass_at_k", {})
 
         # n_runs=5 → k_values = [1, 2, 4, 5]
-        assert "pass_at_1" in fn1
-        assert "pass_at_2" in fn1
-        assert "pass_at_4" in fn1
-        assert "pass_at_5" in fn1
+        assert 1 in pak
+        assert 2 in pak
+        assert 4 in pak
+        assert 5 in pak
         # n=5, c=2, k=4 => 1 - C(3,4)/C(5,4) = 1 - 0/5 = 1.0
         # (since C(3,4) = 0 because 4 > 3)
-        assert fn1["pass_at_4"] == pytest.approx(1.0)
+        assert pak[4] == pytest.approx(1.0)
         # n=5, c=2, k=2 => 1 - C(3,2)/C(5,2) = 1 - 3/10 = 0.7
-        assert fn1["pass_at_2"] == pytest.approx(0.7)
+        assert pak[2] == pytest.approx(0.7)
 
     def test_multiple_eval_fns(self):
         """Summary computed for each eval fn independently."""
