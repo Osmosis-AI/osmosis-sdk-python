@@ -845,7 +845,7 @@ class TestBuildSummary:
         assert result["total_runs"] == 0
 
     def test_pass_at_k(self):
-        """pass@k is computed when n_runs > 1."""
+        """pass@k is computed when n_runs > 1 using power-of-2 + N sequence."""
         runs = [
             {"row_index": 0, "run_index": 0, "scores": {"fn1": 1.0}, "success": True},
             {"row_index": 0, "run_index": 1, "scores": {"fn1": 0.0}, "success": False},
@@ -853,7 +853,9 @@ class TestBuildSummary:
         ]
         result = build_summary(runs, ["fn1"], pass_threshold=0.5, n_runs=3)
         fn1 = result["eval_fns"]["fn1"]
+        # n_runs=3 → k_values = [1, 2, 3]
         assert "pass_at_1" in fn1
+        assert "pass_at_2" in fn1
         assert "pass_at_3" in fn1
         # With 2 passing out of 3, pass@1 should be > 0
         assert fn1["pass_at_1"] > 0.0
@@ -870,8 +872,16 @@ class TestBuildSummary:
         result = build_summary(runs, ["fn1"], pass_threshold=0.5, n_runs=5)
         fn1 = result["eval_fns"]["fn1"]
 
-        # n=5, c=2, k=3 => 1 - C(3,3)/C(5,3) = 0.9
-        assert fn1["pass_at_3"] == pytest.approx(0.9)
+        # n_runs=5 → k_values = [1, 2, 4, 5]
+        assert "pass_at_1" in fn1
+        assert "pass_at_2" in fn1
+        assert "pass_at_4" in fn1
+        assert "pass_at_5" in fn1
+        # n=5, c=2, k=4 => 1 - C(3,4)/C(5,4) = 1 - 0/5 = 1.0
+        # (since C(3,4) = 0 because 4 > 3)
+        assert fn1["pass_at_4"] == pytest.approx(1.0)
+        # n=5, c=2, k=2 => 1 - C(3,2)/C(5,2) = 1 - 3/10 = 0.7
+        assert fn1["pass_at_2"] == pytest.approx(0.7)
 
     def test_multiple_eval_fns(self):
         """Summary computed for each eval fn independently."""
