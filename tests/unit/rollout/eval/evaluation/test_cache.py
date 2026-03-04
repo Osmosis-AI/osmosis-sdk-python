@@ -800,7 +800,7 @@ class TestBackupCorruptCache:
 
 class TestBuildSummary:
     def test_basic_summary(self):
-        """Computes mean, std, min, max correctly."""
+        """Computes mean, median, std, min, max, p25, p75 correctly."""
         runs = [
             {
                 "row_index": 0,
@@ -831,8 +831,11 @@ class TestBuildSummary:
         assert "eval_fns" in result
         fn1 = result["eval_fns"]["fn1"]
         assert abs(fn1["mean"] - 0.8) < 1e-9
+        assert fn1["median"] == 0.8
         assert fn1["min"] == 0.6
         assert fn1["max"] == 1.0
+        assert fn1["p25"] == 0.6
+        assert fn1["p75"] == 1.0
         assert result["total_runs"] == 3
         assert result["total_tokens"] == 300
         assert result["total_duration_ms"] == 150.0
@@ -842,7 +845,42 @@ class TestBuildSummary:
         result = build_summary([], ["fn1"], pass_threshold=0.5, n_runs=1)
         fn1 = result["eval_fns"]["fn1"]
         assert fn1["mean"] == 0.0
+        assert fn1["median"] == 0.0
+        assert fn1["p25"] == 0.0
+        assert fn1["p75"] == 0.0
         assert result["total_runs"] == 0
+
+    def test_single_run_percentiles(self):
+        """Single run: median, p25, p75 all equal the single score."""
+        runs = [
+            {
+                "row_index": 0,
+                "run_index": 0,
+                "scores": {"fn1": 0.7},
+                "success": True,
+                "tokens": 50,
+                "duration_ms": 25.0,
+            },
+        ]
+        result = build_summary(runs, ["fn1"], pass_threshold=0.5, n_runs=1)
+        fn1 = result["eval_fns"]["fn1"]
+        assert fn1["median"] == 0.7
+        assert fn1["p25"] == 0.7
+        assert fn1["p75"] == 0.7
+
+    def test_skewed_scores(self):
+        """With skewed distribution, median differs from mean."""
+        runs = [
+            {"row_index": i, "run_index": 0, "scores": {"fn1": 1.0}, "success": True}
+            for i in range(9)
+        ] + [
+            {"row_index": 9, "run_index": 0, "scores": {"fn1": 0.0}, "success": True},
+        ]
+        result = build_summary(runs, ["fn1"], pass_threshold=0.5, n_runs=1)
+        fn1 = result["eval_fns"]["fn1"]
+        assert fn1["mean"] == pytest.approx(0.9)
+        assert fn1["median"] == 1.0
+        assert fn1["median"] != fn1["mean"]
 
     def test_pass_at_k(self):
         """pass@k is computed when n_runs > 1 using power-of-2 + N sequence."""

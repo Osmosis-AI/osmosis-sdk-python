@@ -629,14 +629,25 @@ def build_summary(
 ) -> dict[str, Any]:
     """Compute aggregated statistics from runs list.
 
-    Returns a summary dict with per-eval-fn stats (mean, std, min, max, pass_at_k).
+    Returns a summary dict with per-eval-fn stats (mean, median, std, min, max,
+    p25, p75, pass_at_k).
     """
+    import statistics
+
     eval_summaries: dict[str, dict] = {}
     for name in eval_fn_names:
         all_scores = [r["scores"].get(name, 0.0) for r in runs]
 
         if not all_scores:
-            eval_summaries[name] = {"mean": 0.0, "std": 0.0, "min": 0.0, "max": 0.0}
+            eval_summaries[name] = {
+                "mean": 0.0,
+                "median": 0.0,
+                "std": 0.0,
+                "min": 0.0,
+                "max": 0.0,
+                "p25": 0.0,
+                "p75": 0.0,
+            }
             continue
 
         mean = sum(all_scores) / len(all_scores)
@@ -644,11 +655,23 @@ def build_summary(
         variance = sum((s - mean) ** 2 for s in all_scores) / len(all_scores)
         std = math.sqrt(variance)
 
+        sorted_scores = sorted(all_scores)
+        median = statistics.median(sorted_scores)
+        if len(sorted_scores) < 2:
+            p25 = p75 = sorted_scores[0]
+        else:
+            quantiles = statistics.quantiles(sorted_scores, n=4)
+            p25 = quantiles[0]
+            p75 = quantiles[2]
+
         summary: dict[str, object] = {
             "mean": mean,
+            "median": median,
             "std": std,
             "min": min(all_scores),
             "max": max(all_scores),
+            "p25": p25,
+            "p75": p75,
         }
 
         # pass@k computation for n_runs > 1

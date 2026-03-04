@@ -690,12 +690,10 @@ class EvalCommand:
             self.console.print()
             for fn_name, stats in eval_fns.items():
                 mean = stats.get("mean", 0.0)
+                median = stats.get("median", 0.0)
                 std = stats.get("std", 0.0)
-                s_min = stats.get("min", 0.0)
-                s_max = stats.get("max", 0.0)
                 self.console.print(
-                    f"  {fn_name}: mean={mean:.3f} std={std:.3f} "
-                    f"min={s_min:.3f} max={s_max:.3f}"
+                    f"  {fn_name}: mean={mean:.3f} median={median:.3f} std={std:.3f}"
                 )
                 # Print pass@k if present
                 for key, val in stats.items():

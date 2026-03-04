@@ -86,16 +86,22 @@ class EvalEvalSummary:
 
     Attributes:
         mean: Mean score.
+        median: Median score.
         std: Standard deviation of scores.
         min: Minimum score.
         max: Maximum score.
+        p25: 25th percentile score.
+        p75: 75th percentile score.
         pass_at_k: Dict of k -> pass@k value. Only populated when n > 1.
     """
 
     mean: float = 0.0
+    median: float = 0.0
     std: float = 0.0
     min: float = 0.0
     max: float = 0.0
+    p25: float = 0.0
+    p75: float = 0.0
     pass_at_k: dict[int, float] = field(default_factory=dict)
 
 
@@ -874,6 +880,7 @@ class EvalRunner:
         issues are reflected in evaluation quality metrics.
         """
         import math
+        import statistics
 
         summaries: dict[str, EvalEvalSummary] = {}
 
@@ -894,11 +901,23 @@ class EvalRunner:
             variance = sum((s - mean) ** 2 for s in all_scores) / len(all_scores)
             std = math.sqrt(variance)
 
+            sorted_scores = sorted(all_scores)
+            median = statistics.median(sorted_scores)
+            if len(sorted_scores) < 2:
+                p25 = p75 = sorted_scores[0]
+            else:
+                quantiles = statistics.quantiles(sorted_scores, n=4)
+                p25 = quantiles[0]
+                p75 = quantiles[2]
+
             summary = EvalEvalSummary(
                 mean=mean,
+                median=median,
                 std=std,
                 min=min(all_scores),
                 max=max(all_scores),
+                p25=p25,
+                p75=p75,
             )
 
             # Compute pass@k if n > 1
