@@ -21,9 +21,8 @@ import unicodedata
 from collections import defaultdict
 from contextlib import suppress
 from dataclasses import dataclass
-from math import comb
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Protocol, TypedDict
 
 import filelock
 import xxhash
@@ -621,12 +620,33 @@ def _backup_corrupt_cache(cache_path: Path) -> Path | None:
 # ============================================================
 
 
+class EvalFnSummaryDict(TypedDict, total=False):
+    """Per-eval-function statistics returned by ``build_summary``."""
+
+    mean: float
+    median: float
+    std: float
+    min: float
+    max: float
+    p25: float
+    p75: float
+
+
+class BuildSummaryResult(TypedDict):
+    """Return type of ``build_summary``."""
+
+    eval_fns: dict[str, EvalFnSummaryDict]
+    total_runs: int
+    total_tokens: int
+    total_duration_ms: float
+
+
 def build_summary(
     runs: list[dict[str, Any]],
     eval_fn_names: list[str],
     pass_threshold: float,
     n_runs: int,
-) -> dict[str, Any]:
+) -> BuildSummaryResult:
     """Compute aggregated statistics from runs list.
 
     Returns a summary dict with per-eval-fn stats (mean, median, std, min, max,
@@ -676,6 +696,8 @@ def build_summary(
 
         # pass@k computation for n_runs > 1
         if n_runs > 1:
+            from osmosis_ai.rollout.eval.evaluation.report import pass_at_k
+
             # Group runs by (row_index, model_tag)
             rows: dict[tuple[int, str | None], list[dict]] = defaultdict(list)
             for r in runs:
@@ -700,16 +722,9 @@ def build_summary(
                         for r in row_runs
                         if r["scores"].get(name, 0.0) >= pass_threshold
                     )
-                    n = len(row_runs)
+                    n = max(len(row_runs), n_runs)
                     if n > 0 and k <= n:
-                        # pass@k formula
-                        if c == 0:
-                            pak = 0.0
-                        elif n <= k or c >= n or n - c < k:
-                            pak = 1.0
-                        else:
-                            pak = 1.0 - comb(n - c, k) / comb(n, k)
-                        row_pass_at_k.append(pak)
+                        row_pass_at_k.append(pass_at_k(n, c, k))
                 if row_pass_at_k:
                     summary[f"pass_at_{k}"] = sum(row_pass_at_k) / len(row_pass_at_k)
 

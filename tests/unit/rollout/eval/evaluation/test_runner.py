@@ -232,7 +232,7 @@ class TestEvalRunner:
         assert eval_result.total_runs == 4
         assert summary.mean == 0.5
         assert 1 in summary.pass_at_k
-        assert 2 not in summary.pass_at_k
+        assert 2 in summary.pass_at_k
 
     @pytest.mark.asyncio
     async def test_run_eval_concurrent(self) -> None:
@@ -272,49 +272,6 @@ class TestEvalRunner:
             assert row_result.runs[1].run_index == 1
         # Eval scores should still be computed
         assert "simple_eval" in result.eval_summaries
-
-    @pytest.mark.asyncio
-    async def test_run_eval_batch_size_gt_one_defaults_to_concurrent(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-    ) -> None:
-        """batch_size > 1 should use concurrent mode by default."""
-        client = MockLLMClient()
-        agent = MockAgentLoop(tools=[create_sample_tool()], call_llm=True)
-
-        def simple_eval(
-            solution_str: str,
-            ground_truth: str,
-            extra_info: dict[str, Any],
-        ) -> float:
-            return 1.0 if "response" in solution_str else 0.0
-
-        runner = EvalRunner(
-            agent_loop=agent,
-            llm_client=client,  # type: ignore[arg-type]
-            eval_fns=[EvalFnWrapper(simple_eval, "simple_eval")],
-            llm_client_factory=MockLLMClient,  # type: ignore[arg-type]
-        )
-
-        concurrent_called = {"value": False}
-        original_concurrent = EvalRunner._run_eval_concurrent
-
-        async def wrapped_concurrent(self: EvalRunner, *args: Any, **kwargs: Any):
-            concurrent_called["value"] = True
-            return await original_concurrent(self, *args, **kwargs)
-
-        monkeypatch.setattr(EvalRunner, "_run_eval_concurrent", wrapped_concurrent)
-
-        rows = [create_sample_row(i) for i in range(3)]
-        result = await runner.run_eval(
-            rows=rows,
-            n_runs=1,
-            batch_size=2,
-        )
-
-        assert concurrent_called["value"] is True
-        assert result.total_rows == 3
-        assert result.total_runs == 3
 
     @pytest.mark.asyncio
     async def test_run_eval_concurrent_stops_early_on_systemic_error(self) -> None:
@@ -1065,8 +1022,8 @@ class TestPassAtKEdgeCases:
         assert summary.mean == 1.0
         assert summary.min == 1.0
         assert summary.max == 1.0
-        # pass@1 through pass@5 should all be 1.0
-        for k in [1, 3, 5]:
+        # pass@k should all be 1.0 (power-of-2 sequence: 1, 2, 4, 5)
+        for k in [1, 2, 4, 5]:
             assert summary.pass_at_k[k] == 1.0
 
     @pytest.mark.asyncio
@@ -1096,7 +1053,7 @@ class TestPassAtKEdgeCases:
 
         summary = eval_result.eval_summaries["zero_eval"]
         assert summary.mean == 0.0
-        for k in [1, 3, 5]:
+        for k in [1, 2, 4, 5]:
             assert summary.pass_at_k[k] == 0.0
 
     @pytest.mark.asyncio

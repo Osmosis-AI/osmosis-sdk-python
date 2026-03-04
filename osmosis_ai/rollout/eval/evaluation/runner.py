@@ -524,252 +524,18 @@ class EvalRunner:
             start_index: Starting row index for numbering.
             batch_size: Number of concurrent runs. Default 1 (sequential).
                 For ``batch_size > 1``, runs execute in waves of at most
-                ``batch_size``. If any run in a wave fails, remaining waves
-                are skipped.
+                ``batch_size``. If any run in a wave hits a systemic error,
+                remaining waves are skipped.
 
         Returns:
             EvalResult with all results and statistics.
         """
-        if batch_size > 1:
-            return await self._run_eval_concurrent(
-                rows=rows,
-                n_runs=n_runs,
-                max_turns=max_turns,
-                completion_params=completion_params,
-                pass_threshold=pass_threshold,
-                on_progress=on_progress,
-                start_index=start_index,
-                batch_size=batch_size,
-            )
-
-        total_start = time.monotonic()
-        row_results: list[EvalRowResult] = []
-        model_tags: list[str | None] = (
-            ["primary", "baseline"] if self.has_baseline else [None]
-        )
-        total = len(rows) * n_runs * len(model_tags)
-        current = 0
-        stopped_early = False
-        stop_reason: str | None = None
-
-        for i, row in enumerate(rows):
-            row_index = start_index + i
-            row_result = EvalRowResult(row_index=row_index)
-
-            for run_idx in range(n_runs):
-                for tag in model_tags:
-                    run_start = time.monotonic()
-                    try:
-                        result = await self.run_single(
-                            row=row,
-                            row_index=row_index,
-                            run_index=run_idx,
-                            max_turns=max_turns,
-                            completion_params=completion_params,
-                            model_tag=tag,
-                        )
-                    except SystemicProviderError as e:
-                        duration_ms, tokens = _extract_systemic_error_metrics(
-                            e,
-                            fallback_started_at=run_start,
-                        )
-                        result = EvalRunResult(
-                            run_index=run_idx,
-                            success=False,
-                            error=str(e),
-                            duration_ms=duration_ms,
-                            tokens=tokens,
-                            model_tag=tag,
-                            messages=None,
-                            row_index=row_index,
-                        )
-                        row_result.runs.append(result)
-                        current += 1
-                        if on_progress:
-                            on_progress(current, total, result)
-                        if current < total:
-                            stopped_early = True
-                            stop_reason = str(e)
-                        break
-
-                    row_result.runs.append(result)
-                    current += 1
-
-                    if on_progress:
-                        on_progress(current, total, result)
-
-                if stopped_early:
-                    break
-
-            row_results.append(row_result)
-            if stopped_early:
-                break
-
-        total_duration_ms = (time.monotonic() - total_start) * 1000
-        total_tokens = sum(run.tokens for row in row_results for run in row.runs)
-
-        # Compute per-model summaries if baseline is configured
-        model_summaries: list[EvalModelSummary] | None = None
-        if self.has_baseline:
-            model_summaries = self._compute_model_summaries(
-                row_results, n_runs, pass_threshold
-            )
-
-        # Top-level eval summaries: primary model only when baseline is present,
-        # so that the "official" summary is never polluted by baseline scores.
-        if self.has_baseline:
-            primary_rows = self._filter_runs_by_tag(row_results, "primary")
-            eval_summaries = self._compute_summaries(
-                primary_rows, n_runs, pass_threshold
-            )
-        else:
-            eval_summaries = self._compute_summaries(
-                row_results, n_runs, pass_threshold
-            )
-
-        return EvalResult(
-            rows=row_results,
-            eval_summaries=eval_summaries,
-            total_rows=len(row_results),
-            total_runs=current,
-            total_tokens=total_tokens,
-            total_duration_ms=total_duration_ms,
-            n_runs=n_runs,
-            pass_threshold=pass_threshold,
-            stopped_early=stopped_early,
-            stop_reason=stop_reason,
-            model_summaries=model_summaries,
-        )
-
-    async def _run_eval_concurrent(
-        self,
-        rows: list[DatasetRow],
-        n_runs: int,
-        max_turns: int,
-        completion_params: dict[str, Any] | None,
-        pass_threshold: float,
-        on_progress: Callable[[int, int, EvalRunResult], None] | None,
-        start_index: int,
-        batch_size: int,
-    ) -> EvalResult:
-        """Run evaluation with concurrent execution.
-
-        Creates a pool of LocalRolloutRunner instances (each with its own
-        ExternalLLMClient) and dispatches runs concurrently, limited by
-        batch_size.  When a baseline model is configured, two separate pools
-        are created and the batch_size is split between them.
-        """
         total_start = time.monotonic()
         model_tags: list[str | None] = (
             ["primary", "baseline"] if self.has_baseline else [None]
         )
-        total = len(rows) * n_runs * len(model_tags)
-        pool_size = min(batch_size, total)
 
-        # Build runner pools.  When baseline is configured, size pools to match
-        # the expected task distribution: work items alternate [primary, baseline,
-        # primary, ...], so each batch of N items contains ceil(N/2) primary and
-        # floor(N/2) baseline tasks.
-        if self.has_baseline:
-            primary_pool_size = max(1, (pool_size + 1) // 2)
-            baseline_pool_size = max(1, pool_size - primary_pool_size)
-        else:
-            primary_pool_size = pool_size
-            baseline_pool_size = 0
-
-        primary_runners = [
-            self._create_rollout_runner() for _ in range(primary_pool_size)
-        ]
-        primary_pool: asyncio.Queue[LocalRolloutRunner] = asyncio.Queue()
-        for runner in primary_runners:
-            primary_pool.put_nowait(runner)
-
-        baseline_runners: list[LocalRolloutRunner] = []
-        baseline_pool: asyncio.Queue[LocalRolloutRunner] = asyncio.Queue()
-        if baseline_pool_size > 0:
-            baseline_runners = [
-                self._create_baseline_rollout_runner()
-                for _ in range(baseline_pool_size)
-            ]
-            for runner in baseline_runners:
-                baseline_pool.put_nowait(runner)
-
-        all_runners = primary_runners + baseline_runners
-
-        completed = 0
-        stopped_early = False
-        stop_reason: str | None = None
-        completed_results: list[tuple[int, EvalRunResult]] = []
-
-        async def _close_runner_pool() -> None:
-            """Best-effort cleanup for per-runner LLM clients."""
-            for runner in all_runners:
-                close = getattr(runner.llm_client, "close", None)
-                if not callable(close):
-                    continue
-                try:
-                    maybe_awaitable = close()
-                    if inspect.isawaitable(maybe_awaitable):
-                        await maybe_awaitable
-                except Exception:
-                    logger.debug(
-                        "Failed to close concurrent runner client", exc_info=True
-                    )
-
-        async def _run_one(
-            row: DatasetRow,
-            row_index: int,
-            run_index: int,
-            model_tag: str | None,
-        ) -> tuple[int, EvalRunResult]:
-            nonlocal completed
-            runner: LocalRolloutRunner | None = None
-            target_pool = baseline_pool if model_tag == "baseline" else primary_pool
-            run_start = time.monotonic()
-            try:
-                runner = await target_pool.get()
-                run_start = time.monotonic()
-                result = await self.run_single(
-                    row=row,
-                    row_index=row_index,
-                    run_index=run_index,
-                    max_turns=max_turns,
-                    completion_params=completion_params,
-                    runner=runner,
-                    model_tag=model_tag,
-                )
-                completed += 1
-                if on_progress:
-                    on_progress(completed, total, result)
-                completed_results.append((row_index, result))
-                return row_index, result
-            except SystemicProviderError as e:
-                # Record the failed result, then re-raise so the batch
-                # loop can detect the systemic failure and stop early.
-                duration_ms, tokens = _extract_systemic_error_metrics(
-                    e,
-                    fallback_started_at=run_start,
-                )
-                result = EvalRunResult(
-                    run_index=run_index,
-                    success=False,
-                    error=str(e),
-                    duration_ms=duration_ms,
-                    tokens=tokens,
-                    model_tag=model_tag,
-                    messages=None,
-                    row_index=row_index,
-                )
-                completed += 1
-                if on_progress:
-                    on_progress(completed, total, result)
-                completed_results.append((row_index, result))
-                raise
-            finally:
-                if runner is not None:
-                    target_pool.put_nowait(runner)
-
-        # Build work items: interleave primary/baseline per (row, run_idx)
+        # Build flat work items: (row, row_index, run_index, model_tag)
         work_items: list[tuple[DatasetRow, int, int, str | None]] = []
         for i, row in enumerate(rows):
             row_index = start_index + i
@@ -777,33 +543,65 @@ class EvalRunner:
                 for tag in model_tags:
                     work_items.append((row, row_index, run_idx, tag))
 
-        try:
+        total = len(work_items)
+        completed_results: list[EvalRunResult] = []
+        stopped_early = False
+        stop_reason: str | None = None
+
+        if batch_size <= 1:
+            # Sequential execution
+            for row, row_index, run_idx, tag in work_items:
+                run_start = time.monotonic()
+                try:
+                    result = await self.run_single(
+                        row=row,
+                        row_index=row_index,
+                        run_index=run_idx,
+                        max_turns=max_turns,
+                        completion_params=completion_params,
+                        model_tag=tag,
+                    )
+                except SystemicProviderError as e:
+                    duration_ms, tokens = _extract_systemic_error_metrics(
+                        e, fallback_started_at=run_start
+                    )
+                    result = EvalRunResult(
+                        run_index=run_idx,
+                        success=False,
+                        error=str(e),
+                        duration_ms=duration_ms,
+                        tokens=tokens,
+                        model_tag=tag,
+                        messages=None,
+                        row_index=row_index,
+                    )
+                    completed_results.append(result)
+                    if on_progress:
+                        on_progress(len(completed_results), total, result)
+                    if len(completed_results) < total:
+                        stopped_early = True
+                        stop_reason = str(e)
+                    break
+
+                completed_results.append(result)
+                if on_progress:
+                    on_progress(len(completed_results), total, result)
+        else:
+            # Concurrent execution in waves via run_batch()
             cursor = 0
             while cursor < len(work_items):
                 batch = work_items[cursor : cursor + batch_size]
-                tasks: list[asyncio.Task[tuple[int, EvalRunResult]]] = [
-                    asyncio.create_task(_run_one(row, row_index, run_idx, tag))
-                    for row, row_index, run_idx, tag in batch
-                ]
+                batch_results, systemic_error = await self.run_batch(
+                    work_items=batch,
+                    max_turns=max_turns,
+                    completion_params=completion_params,
+                )
 
-                systemic_error: str | None = None
-
-                try:
-                    for task in asyncio.as_completed(tasks):
-                        try:
-                            await task
-                        except SystemicProviderError as e:
-                            # Record error but keep awaiting remaining
-                            # tasks in this batch so their results are collected.
-                            if systemic_error is None:
-                                systemic_error = str(e)
-                except Exception:
-                    # Unexpected error: cancel remaining in-flight tasks
-                    for t in tasks:
-                        if not t.done():
-                            t.cancel()
-                    await asyncio.gather(*tasks, return_exceptions=True)
-                    raise
+                for res in batch_results:
+                    if res is not None:
+                        completed_results.append(res)
+                        if on_progress:
+                            on_progress(len(completed_results), total, res)
 
                 cursor += len(batch)
 
@@ -812,18 +610,16 @@ class EvalRunner:
                         stopped_early = True
                         stop_reason = systemic_error
                     break
-        finally:
-            await _close_runner_pool()
 
-        # Organise flat results back into per-row structure.
+        # Organise flat results into per-row structure
         row_results_map: dict[int, EvalRowResult] = {}
-        for row_index, run_result in completed_results:
-            if row_index not in row_results_map:
-                row_results_map[row_index] = EvalRowResult(row_index=row_index)
-            row_results_map[row_index].runs.append(run_result)
+        for run_result in completed_results:
+            ri = run_result.row_index
+            if ri not in row_results_map:
+                row_results_map[ri] = EvalRowResult(row_index=ri)
+            row_results_map[ri].runs.append(run_result)
 
-        # Ensure deterministic ordering within each row:
-        # sort by (model_tag, run_index) so primary runs come first.
+        # Deterministic ordering within each row
         tag_order = {"primary": 0, "baseline": 1}
         for row_result in row_results_map.values():
             row_result.runs.sort(
@@ -876,75 +672,48 @@ class EvalRunner:
     ) -> dict[str, EvalEvalSummary]:
         """Compute per-eval-function summary statistics.
 
-        Failed runs and missing eval scores are treated as 0.0 so reliability
-        issues are reflected in evaluation quality metrics.
+        Delegates to ``build_summary`` so that cache and runner share the
+        exact same aggregation logic.  Failed runs and missing eval scores
+        are treated as 0.0 so reliability issues are reflected in evaluation
+        quality metrics.
         """
-        import math
-        import statistics
+        from osmosis_ai.rollout.eval.evaluation.cache import build_summary
 
+        # Convert dataclass rows → flat list[dict] expected by build_summary
+        runs: list[dict[str, Any]] = []
+        for row in row_results:
+            for run in row.runs:
+                runs.append(
+                    {
+                        "row_index": row.row_index,
+                        "model_tag": run.model_tag,
+                        "scores": run.scores,
+                        "tokens": run.tokens,
+                        "duration_ms": run.duration_ms,
+                    }
+                )
+
+        eval_fn_names = [fn.name for fn in self.eval_fns]
+        raw = build_summary(runs, eval_fn_names, pass_threshold, n_runs)
+
+        # Map dict → EvalEvalSummary
         summaries: dict[str, EvalEvalSummary] = {}
-
-        for eval_fn in self.eval_fns:
-            name = eval_fn.name
-
-            # Collect all scores for this eval fn. Missing scores count as 0.
-            all_scores: list[float] = []
-            for row in row_results:
-                for run in row.runs:
-                    all_scores.append(run.scores.get(name, 0.0))
-
-            if not all_scores:
-                summaries[name] = EvalEvalSummary()
-                continue
-
-            mean = sum(all_scores) / len(all_scores)
-            variance = sum((s - mean) ** 2 for s in all_scores) / len(all_scores)
-            std = math.sqrt(variance)
-
-            sorted_scores = sorted(all_scores)
-            median = statistics.median(sorted_scores)
-            if len(sorted_scores) < 2:
-                p25 = p75 = sorted_scores[0]
-            else:
-                quantiles = statistics.quantiles(sorted_scores, n=4)
-                p25 = quantiles[0]
-                p75 = quantiles[2]
-
-            summary = EvalEvalSummary(
-                mean=mean,
-                median=median,
-                std=std,
-                min=min(all_scores),
-                max=max(all_scores),
-                p25=p25,
-                p75=p75,
+        for name, stats in raw["eval_fns"].items():
+            pass_at_k = {
+                int(k.removeprefix("pass_at_")): v
+                for k, v in stats.items()
+                if k.startswith("pass_at_")
+            }
+            summaries[name] = EvalEvalSummary(
+                mean=stats["mean"],
+                median=stats["median"],
+                std=stats["std"],
+                min=stats["min"],
+                max=stats["max"],
+                p25=stats["p25"],
+                p75=stats["p75"],
+                pass_at_k=pass_at_k,
             )
-
-            # Compute pass@k if n > 1
-            if n_runs > 1:
-                from osmosis_ai.rollout.eval.evaluation.report import pass_at_k
-
-                for k in [1, 3, 5, 10]:
-                    if k > n_runs:
-                        break
-                    # Compute pass@k per row, then average.
-                    # Use n_runs (not len(row.runs)) so that missing runs
-                    # (e.g. from early stopping) are treated as failures.
-                    row_pass_at_k: list[float] = []
-                    for row in row_results:
-                        c = sum(
-                            1
-                            for run in row.runs
-                            if run.scores.get(name, 0.0) >= pass_threshold
-                        )
-                        n = max(len(row.runs), n_runs)
-                        if n > 0:
-                            row_pass_at_k.append(pass_at_k(n, c, k))
-                    if row_pass_at_k:
-                        summary.pass_at_k[k] = sum(row_pass_at_k) / len(row_pass_at_k)
-
-            summaries[name] = summary
-
         return summaries
 
     def _filter_runs_by_tag(
