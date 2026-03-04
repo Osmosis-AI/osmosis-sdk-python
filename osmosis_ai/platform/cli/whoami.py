@@ -4,6 +4,7 @@ import argparse
 
 from osmosis_ai.cli.console import console
 from osmosis_ai.platform.auth import get_all_workspaces
+from osmosis_ai.platform.auth.config import PLATFORM_URL
 
 
 class WhoamiCommand:
@@ -38,10 +39,12 @@ class WhoamiCommand:
         # Show all workspaces
         console.print(f"\nWorkspaces ({len(workspaces)}):", style="bold")
         for name, creds, is_active in workspaces:
+            url = f"{PLATFORM_URL}/{name}"
             if is_active:
                 # Active workspace: green bullet + name + role
                 line = console.format_styled("●", "green")
                 line += f" {name} ({creds.organization.role})"
+                line += f"  {console.format_styled(url, 'dim')}"
                 console.print(line)
             elif creds.is_expired():
                 # Expired workspace: dim/red + name + role + [expired]
@@ -54,6 +57,7 @@ class WhoamiCommand:
                 # Inactive but valid workspace
                 line = console.format_styled("○", "dim")
                 line += f" {name} ({creds.organization.role})"
+                line += f"  {console.format_styled(url, 'dim')}"
                 console.print(line)
 
         return 0

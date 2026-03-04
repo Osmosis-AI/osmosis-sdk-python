@@ -10,6 +10,7 @@ from osmosis_ai.platform.auth import (
     get_all_workspaces,
     set_active_workspace,
 )
+from osmosis_ai.platform.auth.config import PLATFORM_URL
 from osmosis_ai.platform.auth.local_config import (
     get_default_project,
     set_default_project,
@@ -46,6 +47,12 @@ class WorkspaceCommand:
             console.print(
                 f"{console.format_styled('Current:', 'bold')} {console.format_styled(active_ws, 'cyan')} / {project_name}"
             )
+            url = f"{PLATFORM_URL}/{active_ws}"
+            if default_project:
+                url += f"/{default_project['project_name']}"
+            console.print(
+                f"{console.format_styled('URL:', 'bold')}     {console.format_styled(url, 'dim')}"
+            )
             console.print()
 
         # Non-interactive: just show current context
@@ -81,6 +88,10 @@ class WorkspaceCommand:
             set_default_project(ws_name, result["id"], result["project_name"])
             console.print(
                 f"{console.format_styled('Switched to:', 'bold')} {console.format_styled(ws_name, 'cyan')} / {console.format_styled(result['project_name'], 'cyan')}"
+            )
+            url = f"{PLATFORM_URL}/{ws_name}/{result['project_name']}"
+            console.print(
+                f"{console.format_styled('URL:', 'bold')}         {console.format_styled(url, 'dim')}"
             )
             return 0
 
