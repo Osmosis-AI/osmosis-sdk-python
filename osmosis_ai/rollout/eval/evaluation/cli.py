@@ -257,14 +257,6 @@ class EvalCommand:
         )
 
         parser.add_argument(
-            "--output",
-            "-o",
-            dest="output",
-            default=None,
-            help="Save results to JSON file.",
-        )
-
-        parser.add_argument(
             "--debug",
             dest="debug",
             action="store_true",
@@ -323,6 +315,7 @@ class EvalCommand:
 
         parser.add_argument(
             "--output-path",
+            "-o",
             dest="output_path",
             default=None,
             help="Directory path for structured output (results JSON and optional samples JSONL).",
@@ -1101,8 +1094,6 @@ class EvalCommand:
                 )
                 if not args.quiet:
                     self.console.print(f"Output written to: {results_path}")
-            # Also write legacy output if --output/-o is set
-            self._write_legacy_output_from_cache(args, orch_result.cache_data)
             return 0
 
         if orch_result.status == "interrupted":
@@ -1170,71 +1161,7 @@ class EvalCommand:
             if not args.quiet:
                 self.console.print(f"Output written to: {results_path}")
 
-        # Also write legacy output if --output/-o is set
-        self._write_legacy_output_from_cache(args, orch_result.cache_data)
-
         return 0
-
-    def _write_legacy_output_from_cache(
-        self, args: argparse.Namespace, cache_data: dict
-    ) -> None:
-        """Write legacy --output/-o JSON from cache data for backward compatibility.
-
-        Reconstructs the nested ``rows`` structure expected by the original format:
-        ``{"config": ..., "summary": ..., "rows": [{"row_index": N, "runs": [...]}]}``
-        """
-        if not getattr(args, "output", None):
-            return
-
-        config: dict[str, Any] = {
-            "model": args.model,
-            "n_runs": args.n_runs,
-            "pass_threshold": args.pass_threshold,
-            "eval_fns": args.eval_fns,
-        }
-        if args.baseline_model:
-            config["baseline_model"] = args.baseline_model
-
-        summary_data = cache_data.get("summary", {}) or {}
-        flat_runs = cache_data.get("runs", [])
-
-        # Reconstruct nested rows structure from flat runs list
-        rows_map: dict[int, list[dict[str, Any]]] = {}
-        for run in flat_runs:
-            row_idx = run.get("row_index", 0)
-            if row_idx not in rows_map:
-                rows_map[row_idx] = []
-            rows_map[row_idx].append(
-                {
-                    "run_index": run.get("run_index", 0),
-                    "success": run.get("success", False),
-                    "scores": run.get("scores", {}),
-                    "duration_ms": run.get("duration_ms", 0.0),
-                    "tokens": run.get("tokens", 0),
-                    **({"model_tag": run["model_tag"]} if run.get("model_tag") else {}),
-                    **({"error": run["error"]} if run.get("error") else {}),
-                }
-            )
-
-        rows_list = [
-            {"row_index": row_idx, "runs": runs}
-            for row_idx, runs in sorted(rows_map.items())
-        ]
-
-        output_data: dict[str, Any] = {
-            "config": config,
-            "summary": summary_data,
-            "rows": rows_list,
-        }
-
-        output_file = Path(args.output)
-        output_file.parent.mkdir(parents=True, exist_ok=True)
-
-        with open(output_file, "w", encoding="utf-8") as f:
-            json.dump(output_data, f, indent=2)
-
-        if not args.quiet:
-            self.console.print(f"\nResults written to: {args.output}")
 
 
 __all__ = ["EvalCommand"]

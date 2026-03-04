@@ -659,9 +659,17 @@ def build_summary(
                 key = (r["row_index"], r.get("model_tag"))
                 rows[key].append(r)
 
-            for k in [1, 3, 5, 10]:
-                if k > n_runs:
-                    break
+            # Power-of-2 sequence up to n_runs, always including n_runs itself.
+            # e.g. n_runs=10 → [1, 2, 4, 8, 10]; n_runs=8 → [1, 2, 4, 8]
+            k_values = []
+            p = 1
+            while p < n_runs:
+                k_values.append(p)
+                p *= 2
+            if not k_values or k_values[-1] != n_runs:
+                k_values.append(n_runs)
+
+            for k in k_values:
                 row_pass_at_k: list[float] = []
                 for row_runs in rows.values():
                     c = sum(
