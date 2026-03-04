@@ -22,7 +22,7 @@ from collections import defaultdict
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Protocol, TypedDict
+from typing import Any, Protocol, TypedDict, cast
 
 import filelock
 import xxhash
@@ -654,7 +654,7 @@ def build_summary(
     """
     import statistics
 
-    eval_summaries: dict[str, dict] = {}
+    eval_summaries: dict[str, EvalFnSummaryDict] = {}
     for name in eval_fn_names:
         all_scores = [r["scores"].get(name, 0.0) for r in runs]
 
@@ -684,7 +684,7 @@ def build_summary(
             p25 = quantiles[0]
             p75 = quantiles[2]
 
-        summary: dict[str, object] = {
+        summary: dict[str, float] = {
             "mean": mean,
             "median": median,
             "std": std,
@@ -728,14 +728,14 @@ def build_summary(
                 if row_pass_at_k:
                     summary[f"pass_at_{k}"] = sum(row_pass_at_k) / len(row_pass_at_k)
 
-        eval_summaries[name] = summary
+        eval_summaries[name] = cast(EvalFnSummaryDict, summary)
 
-    return {
-        "eval_fns": eval_summaries,
-        "total_runs": len(runs),
-        "total_tokens": sum(r.get("tokens", 0) for r in runs),
-        "total_duration_ms": sum(r.get("duration_ms", 0.0) for r in runs),
-    }
+    return BuildSummaryResult(
+        eval_fns=eval_summaries,
+        total_runs=len(runs),
+        total_tokens=sum(r.get("tokens", 0) for r in runs),
+        total_duration_ms=sum(r.get("duration_ms", 0.0) for r in runs),
+    )
 
 
 # ============================================================

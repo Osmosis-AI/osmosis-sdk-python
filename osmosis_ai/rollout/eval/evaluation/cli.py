@@ -27,6 +27,7 @@ from osmosis_ai.rollout.eval.common.cli import (
 )
 
 if TYPE_CHECKING:
+    from osmosis_ai.rollout.eval.evaluation.cache import BuildSummaryResult
     from osmosis_ai.rollout.eval.evaluation.eval_fn import EvalFnWrapper
     from osmosis_ai.rollout.eval.evaluation.runner import EvalRunResult
 
@@ -665,7 +666,7 @@ class EvalCommand:
 
     def _print_orchestrator_summary(
         self,
-        summary: dict | None,
+        summary: BuildSummaryResult | None,
         total_completed: int,
         total_expected: int,
     ) -> None:
@@ -696,10 +697,11 @@ class EvalCommand:
                     f"  {fn_name}: mean={mean:.3f} median={median:.3f} std={std:.3f}"
                 )
                 # Print pass@k if present
-                for key, val in stats.items():
+                stats_dict: dict[str, Any] = dict(stats)
+                for key, val in stats_dict.items():
                     if key.startswith("pass_at_"):
                         k_val = key.replace("pass_at_", "")
-                        self.console.print(f"    pass@{k_val}: {val * 100:.1f}%")
+                        self.console.print(f"    pass@{k_val}: {float(val) * 100:.1f}%")
 
     def _print_resume_hints(
         self,
