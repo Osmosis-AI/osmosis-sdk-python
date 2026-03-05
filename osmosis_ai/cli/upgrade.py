@@ -29,53 +29,27 @@ def _fetch_latest_version() -> str | None:
 def _detect_install_method() -> str:
     """Detect how the package was installed.
 
-    Returns one of: "uv_tool", "pipx", "uv", "pip".
+    Returns one of: "uv_tool", "pipx", "pip".
     """
-    # Check if installed via uv tool
-    if shutil.which("uv"):
-        try:
-            result = subprocess.run(
-                ["uv", "tool", "list"],
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
-            if result.returncode == 0 and package_name in result.stdout:
-                return "uv_tool"
-        except Exception:
-            pass
-
-    # Check if installed via pipx
-    if shutil.which("pipx"):
-        try:
-            result = subprocess.run(
-                ["pipx", "list", "--short"],
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
-            if result.returncode == 0 and package_name in result.stdout:
-                return "pipx"
-        except Exception:
-            pass
-
-    # Check if uv is available (prefer uv pip over plain pip)
-    if shutil.which("uv"):
-        return "uv"
-
+    exe_path = sys.executable
+    if "uv/tools" in exe_path or "uv\\tools" in exe_path:
+        return "uv_tool"
+    if "pipx/venvs" in exe_path or "pipx\\venvs" in exe_path:
+        return "pipx"
     return "pip"
 
 
-def _get_upgrade_command(method: str) -> list[str]:
-    """Return the shell command to upgrade the package."""
-    commands = {
-        "uv_tool": ["uv", "tool", "upgrade", package_name],
-        "pipx": ["pipx", "upgrade", package_name],
-        "uv": ["uv", "pip", "install", "--upgrade", package_name],
+def _get_upgrade_commands(method: str) -> list[list[str]]:
+    """Return the shell commands to try for upgrading the package."""
+    commands: dict[str, list[list[str]]] = {
+        "uv_tool": [["uv", "tool", "upgrade", package_name]],
+        "pipx": [["pipx", "upgrade", package_name]],
+        "pip": [
+            ["uv", "pip", "install", "--upgrade", package_name],
+            [sys.executable, "-m", "pip", "install", "--upgrade", package_name],
+        ],
     }
-    return commands.get(
-        method, [sys.executable, "-m", "pip", "install", "--upgrade", package_name]
-    )
+    return commands.get(method, commands["pip"])
 
 
 class UpgradeCommand:
@@ -109,25 +83,33 @@ class UpgradeCommand:
         console.print()
 
         method = _detect_install_method()
-        cmd = _get_upgrade_command(method)
+        cmds = _get_upgrade_commands(method)
 
         console.print(f"Detected install method: {method}")
-        console.print(f"Running: {' '.join(cmd)}", style="dim")
         console.print()
 
-        try:
-            result = subprocess.run(cmd, timeout=120)
-        except subprocess.TimeoutExpired:
-            console.print_error("Upgrade timed out.")
-            return 1
-        except Exception as exc:
-            console.print_error(f"Upgrade failed: {exc}")
-            return 1
+        for cmd in cmds:
+            if shutil.which(cmd[0]) is None:
+                continue
 
-        if result.returncode != 0:
-            console.print_error("Upgrade command failed.")
-            return 1
+            console.print(f"Running: {' '.join(cmd)}", style="dim")
+            try:
+                result = subprocess.run(cmd, timeout=120)
+                if result.returncode == 0:
+                    console.print()
+                    console.print(
+                        f"Successfully upgraded to {latest}!", style="bold green"
+                    )
+                    return 0
+                console.print_error(f"Command failed (exit {result.returncode}).")
+            except subprocess.TimeoutExpired:
+                console.print_error("Upgrade command timed out.")
+            except Exception as exc:
+                console.print_error(f"Error running upgrade: {exc}")
 
         console.print()
-        console.print(f"Successfully upgraded to {latest}!", style="bold green")
-        return 0
+        console.print_error("Upgrade failed. You can try manually:")
+        console.print(f"  uv tool upgrade {package_name}", style="dim")
+        console.print(f"  pipx upgrade {package_name}", style="dim")
+        console.print(f"  pip install --upgrade {package_name}", style="dim")
+        return 1
