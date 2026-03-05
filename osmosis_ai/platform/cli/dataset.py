@@ -15,15 +15,21 @@ from osmosis_ai.platform.api.models import (
     STATUSES_IN_PROGRESS,
     STATUSES_SUCCESS,
 )
-from osmosis_ai.platform.auth import PlatformAPIError, get_active_workspace
+from osmosis_ai.platform.auth import (
+    AuthenticationExpiredError,
+    PlatformAPIError,
+    get_active_workspace,
+)
 from osmosis_ai.platform.auth.config import PLATFORM_URL
 
+from .constants import (
+    MAX_FILE_SIZE,
+    MSG_SESSION_EXPIRED,
+    REQUIRED_COLUMNS,
+    VALID_EXTENSIONS,
+)
 from .project import _require_auth, _require_subscription, _resolve_project
 from .utils import format_size as _format_size
-
-VALID_EXTENSIONS = {"csv", "jsonl", "parquet"}
-MAX_FILE_SIZE = 5 * 1024 * 1024 * 1024  # 5GB
-REQUIRED_COLUMNS = {"system_prompt", "user_prompt", "ground_truth"}
 
 
 def _resolve_project_id(args: argparse.Namespace) -> str:
@@ -156,6 +162,8 @@ class DatasetCommand:
         # Step 1: Create dataset record + get upload instructions
         try:
             dataset = client.create_dataset(project_id, file_path.name, file_size, ext)
+        except AuthenticationExpiredError:
+            raise CLIError(MSG_SESSION_EXPIRED) from None
         except PlatformAPIError as e:
             raise CLIError(f"Failed to create dataset: {e}") from e
 
@@ -229,6 +237,8 @@ class DatasetCommand:
         client = OsmosisClient()
         try:
             result = client.list_datasets(project_id)
+        except AuthenticationExpiredError:
+            raise CLIError(MSG_SESSION_EXPIRED) from None
         except PlatformAPIError as e:
             raise CLIError(str(e)) from e
 
@@ -271,6 +281,8 @@ class DatasetCommand:
         client = OsmosisClient()
         try:
             ds = client.get_dataset(args.id)
+        except AuthenticationExpiredError:
+            raise CLIError(MSG_SESSION_EXPIRED) from None
         except PlatformAPIError as e:
             raise CLIError(str(e)) from e
 
@@ -300,6 +312,8 @@ class DatasetCommand:
         client = OsmosisClient()
         try:
             ds = client.get_dataset(args.id)
+        except AuthenticationExpiredError:
+            raise CLIError(MSG_SESSION_EXPIRED) from None
         except PlatformAPIError as e:
             raise CLIError(str(e)) from e
 

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import contextlib
 import os
-import re
 import time
 
 from osmosis_ai.cli.console import console
@@ -19,6 +18,7 @@ from osmosis_ai.cli.prompts import (
 )
 from osmosis_ai.platform.api.client import OsmosisClient
 from osmosis_ai.platform.auth import (
+    AuthenticationExpiredError,
     PlatformAPIError,
     get_active_workspace,
     get_valid_credentials,
@@ -31,29 +31,15 @@ from osmosis_ai.platform.auth.local_config import (
     load_subscription_status,
     save_subscription_status,
 )
-
-CACHE_TTL_SECONDS = 300
-
-# Must match the frontend validation in osmosis-monolith:
-# platform-app/src/constants/projects.ts + org-routes.ts
-_PROJECT_NAME_RE = re.compile(r"^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$")
-_PROJECT_NAME_MAX = 64
-_RESERVED_PROJECT_NAMES = frozenset(
-    {
-        # Org-level route segments
-        "projects",
-        "data-sources",
-        "tools",
-        "reward-functions",
-        "llm-judges",
-        "rollout-servers",
-        "settings",
-        # System reserved
-        "api",
-        "admin",
-        "new",
-        "project",
-    }
+from osmosis_ai.platform.cli.constants import (
+    BACK,
+    CACHE_TTL_SECONDS,
+    CREATE,
+    MSG_NOT_LOGGED_IN,
+    MSG_SESSION_EXPIRED,
+    PROJECT_NAME_MAX,
+    PROJECT_NAME_RE,
+    RESERVED_PROJECT_NAMES,
 )
 
 
@@ -64,16 +50,16 @@ def validate_project_name(name: str) -> str | None:
     """
     if not name:
         return "Project name is required."
-    if len(name) > _PROJECT_NAME_MAX:
-        return f"Project name must be {_PROJECT_NAME_MAX} characters or less."
+    if len(name) > PROJECT_NAME_MAX:
+        return f"Project name must be {PROJECT_NAME_MAX} characters or less."
     if name != name.lower():
         return "Project name must be lowercase."
-    if not _PROJECT_NAME_RE.match(name):
+    if not PROJECT_NAME_RE.match(name):
         return (
             "Project name must contain only lowercase letters, digits, and hyphens, "
             "and cannot start or end with a hyphen."
         )
-    if name in _RESERVED_PROJECT_NAMES:
+    if name in RESERVED_PROJECT_NAMES:
         return f"'{name}' is a reserved name and cannot be used."
     return None
 
@@ -100,12 +86,14 @@ def select_project_interactive(
         allow_back: If True, show a "Back" option to return to previous step.
 
     Returns:
-        Dict with 'id' and 'project_name', "__back__" if back selected,
+        Dict with 'id' and 'project_name', BACK if back selected,
         or None if skipped/cancelled.
     """
     if projects is None:
         try:
             projects = _refresh_projects()
+        except AuthenticationExpiredError:
+            raise CLIError(MSG_SESSION_EXPIRED) from None
         except Exception:
             projects = _get_cached_projects(max_age=None)
             if projects:
@@ -152,6 +140,8 @@ def _prompt_create() -> dict | None:
     try:
         client = OsmosisClient()
         project = client.create_project(name)
+    except AuthenticationExpiredError:
+        raise CLIError(MSG_SESSION_EXPIRED) from None
     except PlatformAPIError as e:
         raise CLIError(f"Failed to create project: {e}") from e
 
@@ -180,9 +170,9 @@ def _prompt_select(
 
     # Add separator + create option + optional back
     choices.append(Separator())
-    choices.append(Choice("Create new project", value="__create__"))
+    choices.append(Choice("Create new project", value=CREATE))
     if allow_back:
-        choices.append(Choice("Back", value="__back__"))
+        choices.append(Choice("Back", value=BACK))
 
     # Prompt user
     console.separator()
@@ -195,9 +185,9 @@ def _prompt_select(
         return None
 
     # Handle special options
-    if result == "__back__":
-        return "__back__"
-    if result == "__create__":
+    if result == BACK:
+        return BACK
+    if result == CREATE:
         return _prompt_create()
 
     # Otherwise result is the project dict
@@ -219,6 +209,8 @@ def _get_cached_projects(*, max_age: float | None = CACHE_TTL_SECONDS) -> list[d
         if is_stale:
             try:
                 return _refresh_projects()
+            except AuthenticationExpiredError:
+                raise CLIError(MSG_SESSION_EXPIRED) from None
             except Exception:
                 console.print_error(
                     "Warning: Could not refresh project list, using cached data."
@@ -274,9 +266,12 @@ def _resolve_project(name_or_id: str | None, *, refresh: bool = False) -> dict:
             hint += f"\n\nAvailable projects: {names}"
         raise CLIError(hint)
 
-    projects = _get_cached_projects()
-    if refresh or not projects:
-        projects = _refresh_projects()
+    try:
+        projects = _get_cached_projects()
+        if refresh or not projects:
+            projects = _refresh_projects()
+    except AuthenticationExpiredError:
+        raise CLIError(MSG_SESSION_EXPIRED) from None
 
     target = name_or_id.lower()
     for p in projects:
@@ -284,7 +279,10 @@ def _resolve_project(name_or_id: str | None, *, refresh: bool = False) -> dict:
             return p
 
     if not refresh:
-        projects = _refresh_projects()
+        try:
+            projects = _refresh_projects()
+        except AuthenticationExpiredError:
+            raise CLIError(MSG_SESSION_EXPIRED) from None
         for p in projects:
             if p.get("project_name", "").lower() == target or p.get("id") == name_or_id:
                 return p
@@ -296,7 +294,7 @@ def _require_auth() -> None:
     """Check that user is authenticated."""
     creds = get_valid_credentials()
     if creds is None:
-        raise CLIError("Not logged in. Run 'osmosis login' first.")
+        raise CLIError(MSG_NOT_LOGGED_IN)
 
 
 def _require_subscription() -> None:

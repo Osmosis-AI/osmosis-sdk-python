@@ -12,6 +12,7 @@ from osmosis_ai.platform.api.models import (
     STATUSES_SUCCESS,
 )
 from osmosis_ai.platform.auth import (
+    AuthenticationExpiredError,
     PlatformAPIError,
     get_active_workspace,
     get_all_workspaces,
@@ -24,9 +25,8 @@ from osmosis_ai.platform.auth.local_config import (
     set_default_project,
 )
 
+from .constants import BACK, MSG_NOT_LOGGED_IN, MSG_SESSION_EXPIRED
 from .utils import format_size
-
-_BACK = "__back__"
 
 
 class WorkspaceCommand:
@@ -43,7 +43,7 @@ class WorkspaceCommand:
         workspaces = get_all_workspaces()
 
         if not workspaces:
-            raise CLIError("Not logged in. Run 'osmosis login' first.")
+            raise CLIError(MSG_NOT_LOGGED_IN)
 
         active_ws = get_active_workspace()
         ws_name = active_ws
@@ -174,13 +174,13 @@ class WorkspaceCommand:
         while True:
             if step == "workspace":
                 ws_name = self._select_workspace(workspaces, active_ws)
-                if ws_name is None or ws_name == _BACK:
+                if ws_name is None or ws_name == BACK:
                     return None
                 step = "project"
 
             elif step == "project":
                 result = self._select_project(ws_name)
-                if result == _BACK or result is None:
+                if result == BACK or result is None:
                     step = "workspace"
                     continue
                 step = "confirm"
@@ -211,7 +211,7 @@ class WorkspaceCommand:
         workspaces: list[tuple],
         active_ws: str | None,
     ) -> str | None:
-        """Prompt the user to select a workspace. Returns _BACK or None to go back."""
+        """Prompt the user to select a workspace. Returns BACK or None to go back."""
         choices = []
         for name, creds, is_active in workspaces:
             marker = " (current)" if is_active else ""
@@ -219,7 +219,7 @@ class WorkspaceCommand:
             title = f"{name}{marker}{expired}"
             choices.append(Choice(title, value=name))
         choices.append(Separator())
-        choices.append(Choice("Back", value=_BACK))
+        choices.append(Choice("Back", value=BACK))
 
         console.separator()
         return select("Select workspace:", choices=choices)
@@ -229,7 +229,7 @@ class WorkspaceCommand:
 
         Returns:
             dict: Selected project with 'id' and 'project_name'.
-            _BACK: User chose to go back to workspace selection.
+            BACK: User chose to go back to workspace selection.
             None: User cancelled or skipped.
         """
         from .project import select_project_interactive
@@ -241,8 +241,8 @@ class WorkspaceCommand:
             ws_name, current_project_id=current_id, allow_back=True
         )
 
-        if result == _BACK:
-            return _BACK
+        if result == BACK:
+            return BACK
         if result is None:
             return None
         return result
@@ -258,6 +258,8 @@ class WorkspaceCommand:
         project_id = project.get("project_id")
         try:
             result = client.list_datasets(project_id)
+        except AuthenticationExpiredError:
+            raise CLIError(MSG_SESSION_EXPIRED) from None
         except PlatformAPIError as e:
             if e.status_code == 404:
                 clear_default_project(ws_name)
@@ -282,7 +284,7 @@ class WorkspaceCommand:
                 label = f"{d.file_name} ({format_size(d.file_size)}) {status_str}"
                 choices.append(Choice(label, value=d))
             choices.append(Separator())
-            choices.append(Choice("Back", value=_BACK))
+            choices.append(Choice("Back", value=BACK))
 
             console.separator()
             selected = select(
@@ -290,7 +292,7 @@ class WorkspaceCommand:
                 choices=choices,
             )
 
-            if selected is None or selected == _BACK:
+            if selected is None or selected == BACK:
                 return True
 
             # Show dataset detail
@@ -355,6 +357,8 @@ class WorkspaceCommand:
         project_id = project.get("project_id")
         try:
             detail = client.get_project(project_id)
+        except AuthenticationExpiredError:
+            raise CLIError(MSG_SESSION_EXPIRED) from None
         except PlatformAPIError as e:
             if e.status_code == 404:
                 clear_default_project(ws_name)

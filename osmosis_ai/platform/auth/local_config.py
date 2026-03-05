@@ -106,8 +106,16 @@ def get_default_project(workspace_name: str) -> dict[str, str] | None:
     config = _load_config()
     defaults = config.get("defaults", {})
     entry = defaults.get(workspace_name)
-    if entry and isinstance(entry, dict) and "project_id" in entry:
+    if (
+        entry
+        and isinstance(entry, dict)
+        and "project_id" in entry
+        and "project_name" in entry
+    ):
         return entry
+    # Corrupted entry (missing required keys) — treat as unset and clean up.
+    if entry is not None:
+        clear_default_project(workspace_name)
     return None
 
 
