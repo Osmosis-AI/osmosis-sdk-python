@@ -36,17 +36,6 @@ class OsmosisClient:
         data = platform_request(f"/api/cli/projects/{project_id}")
         return ProjectDetail.from_dict(data)
 
-    def rename_project(self, project_id: str, new_name: str) -> Project:
-        data = platform_request(
-            f"/api/cli/projects/{project_id}",
-            method="PATCH",
-            data={"name": new_name},
-        )
-        return Project.from_dict(data)
-
-    def delete_project(self, project_id: str) -> None:
-        platform_request(f"/api/cli/projects/{project_id}", method="DELETE")
-
     # ── Datasets ─────────────────────────────────────────────────────
 
     def create_dataset(

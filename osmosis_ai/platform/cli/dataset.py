@@ -19,22 +19,11 @@ from osmosis_ai.platform.auth import PlatformAPIError, get_active_workspace
 from osmosis_ai.platform.auth.config import PLATFORM_URL
 
 from .project import _require_auth, _require_subscription, _resolve_project
+from .utils import format_size as _format_size
 
 VALID_EXTENSIONS = {"csv", "jsonl", "parquet"}
 MAX_FILE_SIZE = 5 * 1024 * 1024 * 1024  # 5GB
 REQUIRED_COLUMNS = {"system_prompt", "user_prompt", "ground_truth"}
-
-
-def _format_size(size_bytes: int | float) -> str:
-    for unit in ("B", "KB", "MB", "GB"):
-        if size_bytes < 1024:
-            return (
-                f"{size_bytes:.1f} {unit}"
-                if unit != "B"
-                else f"{int(size_bytes)} {unit}"
-            )
-        size_bytes /= 1024
-    return f"{size_bytes:.1f} TB"
 
 
 def _resolve_project_id(args: argparse.Namespace) -> str:
@@ -82,14 +71,6 @@ class DatasetCommand:
             "--rows", type=int, default=5, help="Number of rows to show"
         )
         preview_parser.set_defaults(handler=self._run_preview)
-
-        # dataset delete
-        delete_parser = subparsers.add_parser("delete", help="Delete a dataset")
-        delete_parser.add_argument("id", help="Dataset ID")
-        delete_parser.add_argument(
-            "-y", "--yes", action="store_true", help="Skip confirmation"
-        )
-        delete_parser.set_defaults(handler=self._run_delete)
 
         # dataset validate
         validate_parser = subparsers.add_parser(
@@ -340,28 +321,6 @@ class DatasetCommand:
         else:
             console.print(str(rows))
 
-        return 0
-
-    def _run_delete(self, args: argparse.Namespace) -> int:
-        _require_auth()
-        from osmosis_ai.platform.api.client import OsmosisClient
-
-        if not args.yes:
-            proceed = confirm(
-                f"Delete dataset '{args.id}'? This cannot be undone.",
-                default=False,
-            )
-            if proceed is None or not proceed:
-                console.print("Cancelled.", style="dim")
-                return 0
-
-        client = OsmosisClient()
-        try:
-            client.delete_dataset(args.id)
-        except PlatformAPIError as e:
-            raise CLIError(str(e)) from e
-
-        console.print("Dataset deleted.", style="green")
         return 0
 
     def _run_validate(self, args: argparse.Namespace) -> int:

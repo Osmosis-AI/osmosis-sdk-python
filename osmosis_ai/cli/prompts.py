@@ -17,6 +17,8 @@ import sys
 from typing import Any
 
 import questionary
+from prompt_toolkit.key_binding import KeyBindings, merge_key_bindings
+from prompt_toolkit.keys import Keys
 from questionary import Choice, Separator, Style
 
 # ── Osmosis brand style ──────────────────────────────────────────
@@ -42,6 +44,30 @@ def is_interactive() -> bool:
     return sys.stdin.isatty()
 
 
+def _add_escape_binding(question: questionary.Question) -> questionary.Question:
+    """Add ESC key binding to cancel/go back (same as Ctrl+C)."""
+    app = question.application
+    kb = app.key_bindings
+
+    # select() gives a mutable KeyBindings; text()/autocomplete() give
+    # an immutable _MergedKeyBindings — handle both cases.
+    if hasattr(kb, "add"):
+
+        @kb.add(Keys.Escape, eager=True)
+        def _(event):
+            event.app.exit(exception=KeyboardInterrupt, style="class:aborting")
+    else:
+        extra = KeyBindings()
+
+        @extra.add(Keys.Escape, eager=True)
+        def _(event):
+            event.app.exit(exception=KeyboardInterrupt, style="class:aborting")
+
+        app.key_bindings = merge_key_bindings([kb, extra])
+
+    return question
+
+
 def select(
     message: str,
     choices: list[str | Choice | Separator],
@@ -51,17 +77,19 @@ def select(
 ) -> str | None:
     """Interactive single-selection prompt with arrow-key navigation.
 
-    Returns the selected value, or None if the user cancels (Ctrl+C).
+    Returns the selected value, or None if the user cancels (Ctrl+C / ESC).
     """
-    return questionary.select(
-        message,
-        choices=choices,
-        default=default,
-        style=OSMOSIS_STYLE,
-        qmark="?",
-        pointer="\u276f",
-        instruction=instruction or "(arrow keys to navigate)",
-        use_shortcuts=False,
+    return _add_escape_binding(
+        questionary.select(
+            message,
+            choices=choices,
+            default=default,
+            style=OSMOSIS_STYLE,
+            qmark="?",
+            pointer="\u276f",
+            instruction=instruction or "(Use arrow keys to select, ESC to go back)",
+            use_shortcuts=False,
+        )
     ).ask()
 
 
@@ -72,13 +100,15 @@ def confirm(
 ) -> bool | None:
     """Interactive yes/no confirmation prompt.
 
-    Returns True/False, or None if the user cancels (Ctrl+C).
+    Returns True/False, or None if the user cancels (Ctrl+C / ESC).
     """
-    return questionary.confirm(
-        message,
-        default=default,
-        style=OSMOSIS_STYLE,
-        qmark="?",
+    return _add_escape_binding(
+        questionary.confirm(
+            message,
+            default=default,
+            style=OSMOSIS_STYLE,
+            qmark="?",
+        )
     ).ask()
 
 
@@ -94,15 +124,17 @@ def text(
     The validate callable receives the input string and should return
     True if valid, or an error message string if invalid.
 
-    Returns the entered text, or None if the user cancels (Ctrl+C).
+    Returns the entered text, or None if the user cancels (Ctrl+C / ESC).
     """
-    return questionary.text(
-        message,
-        default=default,
-        validate=validate,
-        style=OSMOSIS_STYLE,
-        qmark="?",
-        instruction=instruction,
+    return _add_escape_binding(
+        questionary.text(
+            message,
+            default=default,
+            validate=validate,
+            style=OSMOSIS_STYLE,
+            qmark="?",
+            instruction=instruction,
+        )
     ).ask()
 
 
@@ -115,15 +147,17 @@ def autocomplete(
 ) -> str | None:
     """Interactive text input with autocomplete suggestions.
 
-    Returns the entered text, or None if the user cancels (Ctrl+C).
+    Returns the entered text, or None if the user cancels (Ctrl+C / ESC).
     """
-    return questionary.autocomplete(
-        message,
-        choices=choices,
-        default=default,
-        validate=validate,
-        style=OSMOSIS_STYLE,
-        qmark="?",
+    return _add_escape_binding(
+        questionary.autocomplete(
+            message,
+            choices=choices,
+            default=default,
+            validate=validate,
+            style=OSMOSIS_STYLE,
+            qmark="?",
+        )
     ).ask()
 
 

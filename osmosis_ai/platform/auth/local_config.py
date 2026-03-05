@@ -125,6 +125,15 @@ def set_default_project(
     _save_config(config)
 
 
+def clear_default_project(workspace_name: str) -> None:
+    """Remove the default project for a workspace."""
+    config = _load_config()
+    defaults = config.get("defaults", {})
+    if workspace_name in defaults:
+        del defaults[workspace_name]
+        _save_config(config)
+
+
 # ── Workspace cleanup ────────────────────────────────────────────
 
 

@@ -9,7 +9,14 @@ import time
 
 from osmosis_ai.cli.console import console
 from osmosis_ai.cli.errors import CLIError
-from osmosis_ai.cli.prompts import Choice, Separator, is_interactive, select, text
+from osmosis_ai.cli.prompts import (
+    Choice,
+    Separator,
+    confirm,
+    is_interactive,
+    select,
+    text,
+)
 from osmosis_ai.platform.api.client import OsmosisClient
 from osmosis_ai.platform.auth import (
     PlatformAPIError,
@@ -122,23 +129,24 @@ def select_project_interactive(
 
 def _prompt_create() -> dict | None:
     """Prompt to create a new project."""
+    while True:
+        name = text(
+            "Project name:",
+            instruction="lowercase letters, digits, and hyphens only",
+        )
 
-    def validate_input(value: str) -> bool | str:
-        """Validator for questionary text prompt."""
-        if not value:
-            return "Project name is required."
-        error = validate_project_name(value)
+        if name is None:
+            return None
+
+        error = validate_project_name(name)
         if error:
-            return error
-        return True
+            console.print_error(error)
+            continue
 
-    name = text(
-        "Project name:",
-        validate=validate_input,
-        instruction="lowercase letters, digits, and hyphens only",
-    )
+        break
 
-    if name is None:
+    ok = confirm(f"Create project '{name}'?")
+    if not ok:
         return None
 
     try:
@@ -177,6 +185,7 @@ def _prompt_select(
         choices.append(Choice("Back", value="__back__"))
 
     # Prompt user
+    console.separator()
     result = select(
         "Select a project:",
         choices=choices,
