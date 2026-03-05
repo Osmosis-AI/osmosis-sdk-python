@@ -154,7 +154,12 @@ def _http_put_with_backoff(
 
 
 class _ProgressReader:
-    """Wraps a file object to invoke a callback as httpx reads chunks."""
+    """Wraps a file object to invoke a callback as httpx reads chunks.
+
+    Implements __iter__ so httpx accepts it as streaming content.
+    """
+
+    _CHUNK_SIZE = 64 * 1024  # 64 KiB
 
     def __init__(
         self,
@@ -175,6 +180,17 @@ class _ProgressReader:
         if data:
             self._bytes_read += len(data)
             self._callback(self._bytes_read, self._total)
+        return data
+
+    def __iter__(self) -> _ProgressReader:
+        return self
+
+    def __next__(self) -> bytes:
+        data = self._fp.read(self._CHUNK_SIZE)
+        if not data:
+            raise StopIteration
+        self._bytes_read += len(data)
+        self._callback(self._bytes_read, self._total)
         return data
 
 
@@ -345,7 +361,7 @@ def make_progress_bar(
         progress = Progress(
             "[progress.percentage]{task.percentage:>3.0f}%",
             BarColumn(),
-            DownloadColumn(),
+            DownloadColumn(binary_units=True),
             _SpeedCol(),
         )
         task_id = progress.add_task("Uploading", total=file_size)

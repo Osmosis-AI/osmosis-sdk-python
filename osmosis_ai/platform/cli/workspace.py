@@ -280,7 +280,7 @@ class WorkspaceCommand:
         while True:
             choices: list[Choice | Separator] = []
             for d in result.datasets:
-                status_str = self._format_dataset_status(d)
+                status_str = self._format_dataset_status(d, for_prompt=True)
                 label = f"{d.file_name} ({format_size(d.file_size)}) {status_str}"
                 choices.append(Choice(label, value=d))
             choices.append(Separator())
@@ -327,8 +327,21 @@ class WorkspaceCommand:
         console.print()
 
     @staticmethod
-    def _format_dataset_status(d) -> str:
-        """Format a dataset status string with color styling."""
+    def _format_dataset_status(d, *, for_prompt: bool = False) -> str:
+        """Format a dataset status string with color styling.
+
+        Args:
+            d: Dataset object with status and processing_step.
+            for_prompt: If True, return plain text (for questionary prompts
+                        which don't understand rich/ANSI markup).
+        """
+        status_info = f"[{d.status}]"
+        if d.processing_step:
+            status_info = f"[{d.status}: {d.processing_step}]"
+
+        if for_prompt:
+            return status_info
+
         if d.status in STATUSES_SUCCESS:
             color = "green"
         elif d.status in STATUSES_IN_PROGRESS:
@@ -337,10 +350,6 @@ class WorkspaceCommand:
             color = "red"
         else:
             color = None
-
-        status_info = f"[{d.status}]"
-        if d.processing_step:
-            status_info = f"[{d.status}: {d.processing_step}]"
 
         if color:
             status_info = console.format_styled(status_info, color)
