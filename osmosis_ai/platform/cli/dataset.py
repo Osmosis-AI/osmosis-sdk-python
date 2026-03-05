@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import time
 from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
@@ -49,6 +50,73 @@ def _abort_multipart(client: Any, dataset_id: str, upload_id: str | None) -> Non
     if upload_id:
         with contextlib.suppress(Exception):
             client.abort_upload(dataset_id, upload_id)
+
+
+# ── Complete-upload retry (P0 reliability fix) ───────────────────────
+# Inspired by huggingface_hub's http_backoff pattern: exponential
+# backoff on transient errors (network/timeout/5xx).  This is the most
+# dangerous failure point — the file is already on S3, so a failed
+# complete call leaves an orphan that costs money and confuses users.
+
+_COMPLETE_MAX_RETRIES = 5
+_COMPLETE_BACKOFF_BASE = 1.0  # seconds
+_COMPLETE_BACKOFF_CAP = 8.0  # seconds
+
+
+def _complete_with_retry(
+    client: Any,
+    dataset_id: str,
+    s3_key: str,
+    extension: str | None = None,
+    upload_id: str | None = None,
+    parts: list[dict] | None = None,
+) -> Any:
+    """Call ``client.complete_upload`` with automatic retry on transient errors.
+
+    On final failure, prints recovery information so the user can retry
+    manually with ``osmosis dataset complete <id>``.
+    """
+    last_error: Exception | None = None
+    for attempt in range(_COMPLETE_MAX_RETRIES):
+        if attempt > 0:
+            delay = min(
+                _COMPLETE_BACKOFF_BASE * (2 ** (attempt - 1)), _COMPLETE_BACKOFF_CAP
+            )
+            console.print(
+                f"Retrying complete ({attempt}/{_COMPLETE_MAX_RETRIES - 1})...",
+                style="dim",
+            )
+            time.sleep(delay)
+        try:
+            return client.complete_upload(
+                dataset_id,
+                s3_key,
+                extension,
+                upload_id=upload_id,
+                parts=parts,
+            )
+        except AuthenticationExpiredError:
+            raise  # Not transient — surface immediately
+        except PlatformAPIError as e:
+            # Only retry on server errors (5xx) or no status code (network)
+            if e.status_code is not None and e.status_code < 500:
+                raise  # 4xx — not transient
+            last_error = e
+        except Exception as e:
+            # Network / timeout / unexpected — retryable
+            last_error = e
+
+    # All retries exhausted
+    console.print()
+    console.print(
+        "Upload succeeded but failed to notify server after "
+        f"{_COMPLETE_MAX_RETRIES} attempts.",
+        style="bold red",
+    )
+    console.print(f"  Dataset ID: {dataset_id}", style="yellow")
+    console.print("  Please try uploading the file again.", style="yellow")
+    console.print()
+    raise CLIError(f"Failed to complete upload: {last_error}") from last_error
 
 
 @app.command("upload")
@@ -152,29 +220,29 @@ def upload(
                 parts = upload_file_multipart(
                     file_path, upload_info, progress_callback=progress_cb
                 )
-            client.complete_upload(
-                dataset.id,
-                upload_info.s3_key,
-                ext,
-                upload_id=upload_info.upload_id,
-                parts=parts,
-            )
         except KeyboardInterrupt:
             _abort_multipart(client, dataset.id, upload_info.upload_id)
             raise CLIError("Upload cancelled by user.") from None
-        except (RuntimeError, PlatformAPIError) as e:
+        except RuntimeError as e:
             _abort_multipart(client, dataset.id, upload_info.upload_id)
             raise CLIError(f"Upload failed: {e}") from e
         except Exception:
             _abort_multipart(client, dataset.id, upload_info.upload_id)
             raise
+        _complete_with_retry(
+            client,
+            dataset.id,
+            upload_info.s3_key,
+            ext,
+            upload_id=upload_info.upload_id,
+            parts=parts,
+        )
     else:
         try:
             with ctx:
                 upload_file_simple(
                     file_path, upload_info, progress_callback=progress_cb
                 )
-            client.complete_upload(dataset.id, upload_info.s3_key, ext)
         except KeyboardInterrupt:
             console.print("\nUpload interrupted.")
             with contextlib.suppress(Exception):
@@ -182,8 +250,7 @@ def upload(
             raise CLIError("Upload cancelled by user.") from None
         except RuntimeError as e:
             raise CLIError(f"Upload failed: {e}") from e
-        except PlatformAPIError as e:
-            raise CLIError(f"Failed to complete upload: {e}") from e
+        _complete_with_retry(client, dataset.id, upload_info.s3_key, ext)
 
     console.print(f"Upload complete. Dataset ID: {dataset.id}", style="green")
     url = f"{PLATFORM_URL}/{ws_name}/{project_name}/training-data/{dataset.id}"
