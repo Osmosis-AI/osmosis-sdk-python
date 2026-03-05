@@ -782,19 +782,19 @@ class TestEvalCLIBatchSize:
             return None
 
         monkeypatch.setattr(
-            "osmosis_ai.rollout.eval.evaluation.cli.create_llm_client",
+            "osmosis_ai.rollout.eval.common.cli.create_llm_client",
             lambda **kwargs: (DummyLLMClient(), None),
         )
         monkeypatch.setattr(
-            "osmosis_ai.rollout.eval.evaluation.cli.verify_llm_client",
+            "osmosis_ai.rollout.eval.common.cli.verify_llm_client",
             _verify_llm_client,
         )
         monkeypatch.setattr(
-            "osmosis_ai.rollout.eval.evaluation.cli.load_agent",
+            "osmosis_ai.rollout.eval.common.cli.load_agent",
             lambda **kwargs: (MagicMock(), None),
         )
         monkeypatch.setattr(
-            "osmosis_ai.rollout.eval.evaluation.cli.load_dataset_rows",
+            "osmosis_ai.rollout.eval.common.cli.load_dataset_rows",
             lambda **kwargs: (
                 [{"user_prompt": "hi", "system_prompt": None, "ground_truth": "ok"}],
                 None,

@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-import argparse
 import time
 from collections.abc import Callable
 from pathlib import Path
+
+import typer
 
 from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.rubric.services import (
@@ -18,6 +19,8 @@ from osmosis_ai.rubric.services import (
     discover_rubric_config_path,
     load_rubric_suite,
 )
+
+app = typer.Typer(help="Evaluate JSONL conversations against a rubric.")
 
 
 class EvalRubricCommand:
@@ -51,76 +54,29 @@ class EvalRubricCommand:
                 identifier_factory=self._generate_output_identifier,
             )
 
-    def configure_parser(self, parser: argparse.ArgumentParser) -> None:
-        parser.set_defaults(handler=self.run)
-        parser.add_argument(
-            "-r",
-            "--rubric",
-            dest="rubric_id",
-            required=True,
-            help="Rubric identifier declared in the rubric config file.",
-        )
-        parser.add_argument(
-            "-d",
-            "--data",
-            dest="data_path",
-            required=True,
-            help="Path to the JSONL file containing evaluation records.",
-        )
-        parser.add_argument(
-            "-n",
-            "--number",
-            dest="number",
-            type=int,
-            default=1,
-            help="Run the evaluation multiple times to sample provider variance (default: 1).",
-        )
-        parser.add_argument(
-            "-c",
-            "--config",
-            dest="config_path",
-            help="Path to the rubric config YAML (defaults to searching near the data file).",
-        )
-        parser.add_argument(
-            "-o",
-            "--output",
-            dest="output_path",
-            help="Optional path to write evaluation results as JSON.",
-        )
-        parser.add_argument(
-            "-b",
-            "--baseline",
-            dest="baseline_path",
-            help="Optional path to a prior evaluation JSON to compare against.",
-        )
-
-    def run(self, args: argparse.Namespace) -> int:
-        rubric_id_raw = getattr(args, "rubric_id", "")
-        rubric_id = str(rubric_id_raw).strip()
+    def run(
+        self,
+        *,
+        rubric_id: str,
+        data_path: str,
+        number: int = 1,
+        config_path: str | None = None,
+        output_path: str | None = None,
+        baseline_path: str | None = None,
+    ) -> int:
+        rubric_id = str(rubric_id).strip()
         if not rubric_id:
             raise CLIError("Rubric identifier cannot be empty.")
 
-        data_path = Path(args.data_path).expanduser()
-        config_path_value = getattr(args, "config_path", None)
-        output_path_value = getattr(args, "output_path", None)
-        baseline_path_value = getattr(args, "baseline_path", None)
-
-        number_value = getattr(args, "number", None)
-        number = int(number_value) if number_value is not None else 1
+        data_path_obj = Path(data_path).expanduser()
 
         request = EvaluationSessionRequest(
             rubric_id=rubric_id,
-            data_path=data_path,
+            data_path=data_path_obj,
             number=number,
-            config_path=Path(config_path_value).expanduser()
-            if config_path_value
-            else None,
-            output_path=Path(output_path_value).expanduser()
-            if output_path_value
-            else None,
-            baseline_path=Path(baseline_path_value).expanduser()
-            if baseline_path_value
-            else None,
+            config_path=Path(config_path).expanduser() if config_path else None,
+            output_path=Path(output_path).expanduser() if output_path else None,
+            baseline_path=Path(baseline_path).expanduser() if baseline_path else None,
         )
 
         try:
@@ -138,3 +94,50 @@ class EvalRubricCommand:
     @staticmethod
     def _generate_output_identifier() -> str:
         return str(int(time.time()))
+
+
+@app.callback(invoke_without_command=True)
+def eval_rubric(
+    rubric_id: str = typer.Option(
+        ...,
+        "-r",
+        "--rubric",
+        help="Rubric identifier declared in the rubric config file.",
+    ),
+    data_path: str = typer.Option(
+        ...,
+        "-d",
+        "--data",
+        help="Path to the JSONL file containing evaluation records.",
+    ),
+    number: int = typer.Option(
+        1, "-n", "--number", help="Run the evaluation multiple times (default: 1)."
+    ),
+    config_path: str | None = typer.Option(
+        None, "-c", "--config", help="Path to the rubric config YAML."
+    ),
+    output_path: str | None = typer.Option(
+        None,
+        "-o",
+        "--output",
+        help="Optional path to write evaluation results as JSON.",
+    ),
+    baseline_path: str | None = typer.Option(
+        None,
+        "-b",
+        "--baseline",
+        help="Optional path to a prior evaluation JSON to compare against.",
+    ),
+) -> None:
+    """Evaluate JSONL conversations against a rubric."""
+    cmd = EvalRubricCommand()
+    rc = cmd.run(
+        rubric_id=rubric_id,
+        data_path=data_path,
+        number=number,
+        config_path=config_path,
+        output_path=output_path,
+        baseline_path=baseline_path,
+    )
+    if rc:
+        raise typer.Exit(rc)

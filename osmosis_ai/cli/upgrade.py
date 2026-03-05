@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-import argparse
 import json
 import shutil
 import subprocess
 import sys
 import urllib.request
+
+import typer
 
 from osmosis_ai.cli.console import console
 from osmosis_ai.consts import PACKAGE_VERSION, package_name
@@ -52,64 +53,57 @@ def _get_upgrade_commands(method: str) -> list[list[str]]:
     return commands.get(method, commands["pip"])
 
 
-class UpgradeCommand:
-    """Handler for `osmosis upgrade`."""
+def upgrade() -> None:
+    """Upgrade the Osmosis CLI to the latest version."""
+    installed = PACKAGE_VERSION
 
-    def configure_parser(self, parser: argparse.ArgumentParser) -> None:
-        parser.set_defaults(handler=self.run)
+    console.print(f"Installed version: {installed}")
+    console.print("Checking for updates...", style="dim")
 
-    def run(self, args: argparse.Namespace) -> int:
-        installed = PACKAGE_VERSION
+    latest = _fetch_latest_version()
+    if latest is None:
+        console.print_error("Failed to check for updates from PyPI.")
+        raise typer.Exit(1)
 
-        console.print(f"Installed version: {installed}")
-        console.print("Checking for updates...", style="dim")
+    console.print(f"Latest version:    {latest}")
+    console.print()
 
-        latest = _fetch_latest_version()
-        if latest is None:
-            console.print_error("Failed to check for updates from PyPI.")
-            return 1
+    if installed == latest:
+        console.print("Already up to date!", style="green")
+        return
 
-        console.print(f"Latest version:    {latest}")
-        console.print()
+    console.print(
+        f"A newer version is available: {latest}",
+        style="bold yellow",
+    )
+    console.print()
 
-        if installed == latest:
-            console.print("Already up to date!", style="green")
-            return 0
+    method = _detect_install_method()
+    cmds = _get_upgrade_commands(method)
 
-        console.print(
-            f"A newer version is available: {latest}",
-            style="bold yellow",
-        )
-        console.print()
+    console.print(f"Detected install method: {method}")
+    console.print()
 
-        method = _detect_install_method()
-        cmds = _get_upgrade_commands(method)
+    for cmd in cmds:
+        if shutil.which(cmd[0]) is None:
+            continue
 
-        console.print(f"Detected install method: {method}")
-        console.print()
+        console.print(f"Running: {' '.join(cmd)}", style="dim")
+        try:
+            result = subprocess.run(cmd, timeout=120)
+            if result.returncode == 0:
+                console.print()
+                console.print(f"Successfully upgraded to {latest}!", style="bold green")
+                return
+            console.print_error(f"Command failed (exit {result.returncode}).")
+        except subprocess.TimeoutExpired:
+            console.print_error("Upgrade command timed out.")
+        except Exception as exc:
+            console.print_error(f"Error running upgrade: {exc}")
 
-        for cmd in cmds:
-            if shutil.which(cmd[0]) is None:
-                continue
-
-            console.print(f"Running: {' '.join(cmd)}", style="dim")
-            try:
-                result = subprocess.run(cmd, timeout=120)
-                if result.returncode == 0:
-                    console.print()
-                    console.print(
-                        f"Successfully upgraded to {latest}!", style="bold green"
-                    )
-                    return 0
-                console.print_error(f"Command failed (exit {result.returncode}).")
-            except subprocess.TimeoutExpired:
-                console.print_error("Upgrade command timed out.")
-            except Exception as exc:
-                console.print_error(f"Error running upgrade: {exc}")
-
-        console.print()
-        console.print_error("Upgrade failed. You can try manually:")
-        console.print(f"  uv tool upgrade {package_name}", style="dim")
-        console.print(f"  pipx upgrade {package_name}", style="dim")
-        console.print(f"  pip install --upgrade {package_name}", style="dim")
-        return 1
+    console.print()
+    console.print_error("Upgrade failed. You can try manually:")
+    console.print(f"  uv tool upgrade {package_name}", style="dim")
+    console.print(f"  pipx upgrade {package_name}", style="dim")
+    console.print(f"  pip install --upgrade {package_name}", style="dim")
+    raise typer.Exit(1)

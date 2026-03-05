@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-import argparse
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
+
+import typer
 
 from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.rubric.services import (
@@ -27,31 +28,21 @@ class PreviewCommand:
         self._yaml_loader = yaml_loader
         self._json_loader = json_loader
 
-    def configure_parser(self, parser: argparse.ArgumentParser) -> None:
-        parser.set_defaults(handler=self.run)
-        parser.add_argument(
-            "-p",
-            "--path",
-            dest="path",
-            required=True,
-            help="Path to the YAML or JSONL file to inspect.",
-        )
+    def run(self, *, path: str) -> int:
+        p = Path(path).expanduser()
+        if not p.exists():
+            raise CLIError(f"Path '{p}' does not exist.")
+        if p.is_dir():
+            raise CLIError(f"Expected a file path but got directory '{p}'.")
 
-    def run(self, args: argparse.Namespace) -> int:
-        path = Path(args.path).expanduser()
-        if not path.exists():
-            raise CLIError(f"Path '{path}' does not exist.")
-        if path.is_dir():
-            raise CLIError(f"Expected a file path but got directory '{path}'.")
-
-        suffix = path.suffix.lower()
+        suffix = p.suffix.lower()
         if suffix in {".yaml", ".yml"}:
-            items = self._yaml_loader(path)
-            print(f"Loaded {len(items)} rubric config(s) from {path}")
+            items = self._yaml_loader(p)
+            print(f"Loaded {len(items)} rubric config(s) from {p}")
             print(render_yaml_items(items, label="Rubric config"))
         elif suffix == ".jsonl":
-            records = self._json_loader(path)
-            print(f"Loaded {len(records)} JSONL record(s) from {path}")
+            records = self._json_loader(p)
+            print(f"Loaded {len(records)} JSONL record(s) from {p}")
             print(render_json_records(records))
         else:
             raise CLIError(
@@ -59,3 +50,10 @@ class PreviewCommand:
             )
 
         return 0
+
+
+def preview(
+    path: str = typer.Argument(help="Path to the YAML or JSONL file to inspect."),
+) -> None:
+    """Preview a rubric YAML or test JSONL file."""
+    PreviewCommand().run(path=path)

@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
-import argparse
 import contextlib
 from collections.abc import Iterable
 from pathlib import Path
+from typing import Any
+
+import typer
 
 from osmosis_ai.cli.console import console
 from osmosis_ai.cli.errors import CLIError
@@ -31,346 +33,321 @@ from .constants import (
 from .project import _require_auth, _require_subscription, _resolve_project
 from .utils import format_size as _format_size
 
+app = typer.Typer(
+    help="Manage datasets (upload, list, status, preview, delete, validate)."
+)
 
-def _resolve_project_id(args: argparse.Namespace) -> str:
+
+def _resolve_project_id(project: str | None) -> str:
     """Get project ID from --project arg, env, or default."""
-    project_name = getattr(args, "project", None)
-    project = _resolve_project(project_name)
-    return project["id"]
+    proj = _resolve_project(project)
+    return proj["id"]
 
 
-class DatasetCommand:
-    """Handler for `osmosis dataset`."""
+def _abort_multipart(client: Any, dataset_id: str, upload_id: str | None) -> None:
+    """Best-effort abort of a multipart upload."""
+    if upload_id:
+        with contextlib.suppress(Exception):
+            client.abort_upload(dataset_id, upload_id)
 
-    def configure_parser(self, parser: argparse.ArgumentParser) -> None:
-        self._parser = parser
-        subparsers = parser.add_subparsers(
-            dest="dataset_action", help="Dataset management commands"
+
+@app.command("upload")
+def upload(
+    file: str = typer.Argument(..., help="Path to the file to upload."),
+    project: str | None = typer.Option(
+        None, "--project", help="Project name (default: current project)."
+    ),
+) -> None:
+    """Upload a dataset file."""
+    _require_auth()
+    _require_subscription()
+
+    from osmosis_ai.platform.api.client import OsmosisClient
+    from osmosis_ai.platform.api.upload import (
+        make_progress_bar,
+        upload_file_multipart,
+        upload_file_simple,
+    )
+
+    file_path = Path(file).resolve()
+    if not file_path.exists():
+        raise CLIError(f"File not found: {file_path}")
+
+    ext = file_path.suffix.lstrip(".").lower()
+    if ext not in VALID_EXTENSIONS:
+        raise CLIError(
+            f"Unsupported file type '.{ext}'. "
+            f"Supported: {', '.join(sorted(VALID_EXTENSIONS))}"
         )
 
-        # dataset upload
-        upload_parser = subparsers.add_parser("upload", help="Upload a dataset file")
-        upload_parser.add_argument("file", help="Path to the file to upload")
-        upload_parser.add_argument(
-            "--project", help="Project name (default: current project)"
+    file_size = file_path.stat().st_size
+    if file_size > MAX_FILE_SIZE:
+        raise CLIError(
+            f"File too large ({_format_size(file_size)}). Maximum: {_format_size(MAX_FILE_SIZE)}"
         )
-        upload_parser.set_defaults(handler=self._run_upload)
+    if file_size == 0:
+        raise CLIError("File is empty.")
 
-        # dataset list
-        list_parser = subparsers.add_parser("list", help="List datasets")
-        list_parser.add_argument(
-            "--project", help="Project name (default: current project)"
+    # Validate file contents before uploading
+    errors = _validate_file(file_path, ext)
+    if errors:
+        raise CLIError(
+            "File validation failed:\n" + "\n".join(f"  - {e}" for e in errors)
         )
-        list_parser.set_defaults(handler=self._run_list)
 
-        # dataset status
-        status_parser = subparsers.add_parser(
-            "status", help="Check dataset processing status"
+    proj = _resolve_project(project)
+    project_id = proj["id"]
+    project_name = proj.get("project_name", "")
+    ws_name = get_active_workspace()
+
+    # Confirm upload target
+    console.print()
+    console.table(
+        [
+            ("Workspace", ws_name or "unknown"),
+            ("Project", project_name or project_id),
+            ("File", f"{file_path.name} ({_format_size(file_size)})"),
+        ],
+        title="Upload Target",
+    )
+    console.print()
+    if is_interactive():
+        proceed = confirm("Proceed with upload?", default=True)
+        if proceed is None or not proceed:
+            console.print("Upload cancelled.", style="dim")
+            return
+
+    client = OsmosisClient()
+
+    # Step 1: Create dataset record + get upload instructions
+    try:
+        dataset = client.create_dataset(project_id, file_path.name, file_size, ext)
+    except AuthenticationExpiredError:
+        raise CLIError(MSG_SESSION_EXPIRED) from None
+    except PlatformAPIError as e:
+        raise CLIError(f"Failed to create dataset: {e}") from e
+
+    upload_info = dataset.upload
+    if upload_info is None:
+        raise CLIError("Server did not return upload instructions.")
+
+    # Step 2: Upload file to S3
+    is_multipart = upload_info.method == "multipart"
+    if is_multipart:
+        parts_label = (
+            f", {upload_info.total_parts} parts" if upload_info.total_parts else ""
         )
-        status_parser.add_argument("id", help="Dataset ID")
-        status_parser.set_defaults(handler=self._run_status)
-
-        # dataset preview
-        preview_parser = subparsers.add_parser("preview", help="Preview dataset rows")
-        preview_parser.add_argument("id", help="Dataset ID")
-        preview_parser.add_argument(
-            "--rows", type=int, default=5, help="Number of rows to show"
+        console.print(
+            f"Uploading {file_path.name} ({_format_size(file_size)}, multipart{parts_label})..."
         )
-        preview_parser.set_defaults(handler=self._run_preview)
+    else:
+        console.print(f"Uploading {file_path.name} ({_format_size(file_size)})...")
 
-        # dataset validate
-        validate_parser = subparsers.add_parser(
-            "validate", help="Validate a dataset file locally"
-        )
-        validate_parser.add_argument("file", help="Path to the file to validate")
-        validate_parser.set_defaults(handler=self._run_validate)
+    progress_ctx, progress_cb = make_progress_bar(file_size)
+    ctx = progress_ctx or contextlib.nullcontext()
 
-        parser.set_defaults(handler=self._run_default)
-
-    @staticmethod
-    def _abort_multipart(client, dataset_id: str, upload_id: str | None) -> None:
-        """Best-effort abort of a multipart upload."""
-        if upload_id:
+    if is_multipart:
+        try:
+            with ctx:
+                parts = upload_file_multipart(
+                    file_path, upload_info, progress_callback=progress_cb
+                )
+            client.complete_upload(
+                dataset.id,
+                upload_info.s3_key,
+                ext,
+                upload_id=upload_info.upload_id,
+                parts=parts,
+            )
+        except KeyboardInterrupt:
+            _abort_multipart(client, dataset.id, upload_info.upload_id)
+            raise CLIError("Upload cancelled by user.") from None
+        except (RuntimeError, PlatformAPIError) as e:
+            _abort_multipart(client, dataset.id, upload_info.upload_id)
+            raise CLIError(f"Upload failed: {e}") from e
+        except Exception:
+            _abort_multipart(client, dataset.id, upload_info.upload_id)
+            raise
+    else:
+        try:
+            with ctx:
+                upload_file_simple(
+                    file_path, upload_info, progress_callback=progress_cb
+                )
+            client.complete_upload(dataset.id, upload_info.s3_key, ext)
+        except KeyboardInterrupt:
+            console.print("\nUpload interrupted.")
             with contextlib.suppress(Exception):
-                client.abort_upload(dataset_id, upload_id)
-
-    def _run_default(self, _args: argparse.Namespace) -> int:
-        self._parser.print_help()
-        return 0
-
-    def _run_upload(self, args: argparse.Namespace) -> int:
-        _require_auth()
-        _require_subscription()
-
-        from osmosis_ai.platform.api.client import OsmosisClient
-        from osmosis_ai.platform.api.upload import (
-            make_progress_bar,
-            upload_file_multipart,
-            upload_file_simple,
-        )
-
-        file_path = Path(args.file).resolve()
-        if not file_path.exists():
-            raise CLIError(f"File not found: {file_path}")
-
-        ext = file_path.suffix.lstrip(".").lower()
-        if ext not in VALID_EXTENSIONS:
-            raise CLIError(
-                f"Unsupported file type '.{ext}'. "
-                f"Supported: {', '.join(sorted(VALID_EXTENSIONS))}"
-            )
-
-        file_size = file_path.stat().st_size
-        if file_size > MAX_FILE_SIZE:
-            raise CLIError(
-                f"File too large ({_format_size(file_size)}). Maximum: {_format_size(MAX_FILE_SIZE)}"
-            )
-        if file_size == 0:
-            raise CLIError("File is empty.")
-
-        # Validate file contents before uploading
-        errors = _validate_file(file_path, ext)
-        if errors:
-            raise CLIError(
-                "File validation failed:\n" + "\n".join(f"  - {e}" for e in errors)
-            )
-
-        project = _resolve_project(getattr(args, "project", None))
-        project_id = project["id"]
-        project_name = project.get("project_name", "")
-        ws_name = get_active_workspace()
-
-        # Confirm upload target
-        console.print()
-        console.table(
-            [
-                ("Workspace", ws_name or "unknown"),
-                ("Project", project_name or project_id),
-                ("File", f"{file_path.name} ({_format_size(file_size)})"),
-            ],
-            title="Upload Target",
-        )
-        console.print()
-        if is_interactive():
-            proceed = confirm("Proceed with upload?", default=True)
-            if proceed is None or not proceed:
-                console.print("Upload cancelled.", style="dim")
-                return 0
-
-        client = OsmosisClient()
-
-        # Step 1: Create dataset record + get upload instructions
-        try:
-            dataset = client.create_dataset(project_id, file_path.name, file_size, ext)
-        except AuthenticationExpiredError:
-            raise CLIError(MSG_SESSION_EXPIRED) from None
+                client.delete_dataset(dataset.id)
+            raise CLIError("Upload cancelled by user.") from None
+        except RuntimeError as e:
+            raise CLIError(f"Upload failed: {e}") from e
         except PlatformAPIError as e:
-            raise CLIError(f"Failed to create dataset: {e}") from e
+            raise CLIError(f"Failed to complete upload: {e}") from e
 
-        upload = dataset.upload
-        if upload is None:
-            raise CLIError("Server did not return upload instructions.")
+    console.print(f"Upload complete. Dataset ID: {dataset.id}", style="green")
+    url = f"{PLATFORM_URL}/{ws_name}/{project_name}/training-data/{dataset.id}"
+    console.print(f"Processing will continue on the platform. Check status at: {url}")
 
-        # Step 2: Upload file to S3
-        is_multipart = upload.method == "multipart"
-        if is_multipart:
-            parts_label = f", {upload.total_parts} parts" if upload.total_parts else ""
-            console.print(
-                f"Uploading {file_path.name} ({_format_size(file_size)}, multipart{parts_label})..."
-            )
+
+@app.command("list")
+def list_datasets(
+    project: str | None = typer.Option(
+        None, "--project", help="Project name (default: current project)."
+    ),
+) -> None:
+    """List datasets."""
+    _require_auth()
+    from osmosis_ai.platform.api.client import OsmosisClient
+
+    project_id = _resolve_project_id(project)
+    client = OsmosisClient()
+    try:
+        result = client.list_datasets(project_id)
+    except AuthenticationExpiredError:
+        raise CLIError(MSG_SESSION_EXPIRED) from None
+    except PlatformAPIError as e:
+        raise CLIError(str(e)) from e
+
+    if not result.datasets:
+        console.print("No datasets found.")
+        return
+
+    console.print(f"Datasets ({result.total_count}):", style="bold")
+    for d in result.datasets:
+        # Determine status color
+        if d.status in STATUSES_SUCCESS:
+            status_color = "green"
+        elif d.status in STATUSES_IN_PROGRESS:
+            status_color = "yellow"
+        elif d.status in STATUSES_ERROR:
+            status_color = "red"
         else:
-            console.print(f"Uploading {file_path.name} ({_format_size(file_size)})...")
+            status_color = None
 
-        progress_ctx, progress_cb = make_progress_bar(file_size)
-        ctx = progress_ctx or contextlib.nullcontext()
+        status_info = f"[{d.status}]"
+        if d.processing_step:
+            status_info = f"[{d.status}: {d.processing_step}]"
 
-        if is_multipart:
-            try:
-                with ctx:
-                    parts = upload_file_multipart(
-                        file_path, upload, progress_callback=progress_cb
-                    )
-                client.complete_upload(
-                    dataset.id,
-                    upload.s3_key,
-                    ext,
-                    upload_id=upload.upload_id,
-                    parts=parts,
-                )
-            except KeyboardInterrupt:
-                self._abort_multipart(client, dataset.id, upload.upload_id)
-                raise CLIError("Upload cancelled by user.") from None
-            except (RuntimeError, PlatformAPIError) as e:
-                self._abort_multipart(client, dataset.id, upload.upload_id)
-                raise CLIError(f"Upload failed: {e}") from e
-            except Exception:
-                self._abort_multipart(client, dataset.id, upload.upload_id)
-                raise
-        else:
-            try:
-                with ctx:
-                    upload_file_simple(file_path, upload, progress_callback=progress_cb)
-                client.complete_upload(dataset.id, upload.s3_key, ext)
-            except KeyboardInterrupt:
-                console.print("\nUpload interrupted.")
-                with contextlib.suppress(Exception):
-                    client.delete_dataset(dataset.id)
-                raise CLIError("Upload cancelled by user.") from None
-            except RuntimeError as e:
-                raise CLIError(f"Upload failed: {e}") from e
-            except PlatformAPIError as e:
-                raise CLIError(f"Failed to complete upload: {e}") from e
-
-        console.print(f"Upload complete. Dataset ID: {dataset.id}", style="green")
-        url = f"{PLATFORM_URL}/{ws_name}/{project_name}/training-data/{dataset.id}"
-        console.print(
-            f"Processing will continue on the platform. Check status at: {url}"
-        )
-
-        return 0
-
-    def _run_list(self, args: argparse.Namespace) -> int:
-        _require_auth()
-        from osmosis_ai.platform.api.client import OsmosisClient
-
-        project_id = _resolve_project_id(args)
-        client = OsmosisClient()
-        try:
-            result = client.list_datasets(project_id)
-        except AuthenticationExpiredError:
-            raise CLIError(MSG_SESSION_EXPIRED) from None
-        except PlatformAPIError as e:
-            raise CLIError(str(e)) from e
-
-        if not result.datasets:
-            console.print("No datasets found.")
-            return 0
-
-        console.print(f"Datasets ({result.total_count}):", style="bold")
-        for d in result.datasets:
-            # Determine status color
-            if d.status in STATUSES_SUCCESS:
-                status_color = "green"
-            elif d.status in STATUSES_IN_PROGRESS:
-                status_color = "yellow"
-            elif d.status in STATUSES_ERROR:
-                status_color = "red"
-            else:
-                status_color = None
-
-            status_info = f"[{d.status}]"
-            if d.processing_step:
-                status_info = f"[{d.status}: {d.processing_step}]"
-
-            if status_color:
-                status_info = console.format_styled(status_info, status_color)
-
-            console.print(
-                f"  {d.id[:8]}  {d.file_name}  {_format_size(d.file_size)}  {status_info}"
-            )
-
-        if result.has_more:
-            console.print(f"  ... and {result.total_count - len(result.datasets)} more")
-
-        return 0
-
-    def _run_status(self, args: argparse.Namespace) -> int:
-        _require_auth()
-        from osmosis_ai.platform.api.client import OsmosisClient
-
-        client = OsmosisClient()
-        try:
-            ds = client.get_dataset(args.id)
-        except AuthenticationExpiredError:
-            raise CLIError(MSG_SESSION_EXPIRED) from None
-        except PlatformAPIError as e:
-            raise CLIError(str(e)) from e
-
-        rows = [
-            ("File", ds.file_name),
-            ("ID", ds.id),
-            ("Size", _format_size(ds.file_size)),
-            ("Status", ds.status),
-        ]
-        if ds.processing_step:
-            pct = (
-                f" ({ds.processing_percent:.0f}%)"
-                if ds.processing_percent is not None
-                else ""
-            )
-            rows.append(("Step", f"{ds.processing_step}{pct}"))
-        if ds.error:
-            rows.append(("Error", ds.error))
-
-        console.table(rows, title="Dataset Status")
-        return 0
-
-    def _run_preview(self, args: argparse.Namespace) -> int:
-        _require_auth()
-        from osmosis_ai.platform.api.client import OsmosisClient
-
-        client = OsmosisClient()
-        try:
-            ds = client.get_dataset(args.id)
-        except AuthenticationExpiredError:
-            raise CLIError(MSG_SESSION_EXPIRED) from None
-        except PlatformAPIError as e:
-            raise CLIError(str(e)) from e
-
-        if ds.data_preview is None:
-            if ds.status in STATUSES_IN_PROGRESS:
-                console.print(
-                    f"Dataset is still processing (status: {ds.status}).",
-                    style="yellow",
-                )
-            else:
-                console.print("No preview available for this dataset.", style="dim")
-            return 0
-
-        rows = ds.data_preview
-        if isinstance(rows, list):
-            limit = min(args.rows, len(rows))
-            for row in rows[:limit]:
-                console.print(str(row))
-        else:
-            console.print(str(rows))
-
-        return 0
-
-    def _run_validate(self, args: argparse.Namespace) -> int:
-        file_path = Path(args.file).resolve()
-        if not file_path.exists():
-            raise CLIError(f"File not found: {file_path}")
-
-        ext = file_path.suffix.lstrip(".").lower()
-        if ext not in VALID_EXTENSIONS:
-            raise CLIError(
-                f"Unsupported file type '.{ext}'. "
-                f"Supported: {', '.join(sorted(VALID_EXTENSIONS))}"
-            )
-
-        file_size = file_path.stat().st_size
-        if file_size == 0:
-            raise CLIError("File is empty.")
-        if file_size > MAX_FILE_SIZE:
-            raise CLIError(
-                f"File too large ({_format_size(file_size)}). Maximum: {_format_size(MAX_FILE_SIZE)}"
-            )
-
-        # Format validation
-        errors = _validate_file(file_path, ext)
-
-        if errors:
-            console.print("Validation errors:")
-            for err in errors:
-                console.print(f"  - {err}")
-            return 1
+        if status_color:
+            status_info = console.format_styled(status_info, status_color)
 
         console.print(
-            f"Valid {ext} file: {file_path.name} ({_format_size(file_size)})",
-            style="green",
+            f"  {d.id[:8]}  {d.file_name}  {_format_size(d.file_size)}  {status_info}"
         )
-        return 0
+
+    if result.has_more:
+        console.print(f"  ... and {result.total_count - len(result.datasets)} more")
+
+
+@app.command("status")
+def status(
+    id: str = typer.Argument(..., help="Dataset ID."),
+) -> None:
+    """Check dataset processing status."""
+    _require_auth()
+    from osmosis_ai.platform.api.client import OsmosisClient
+
+    client = OsmosisClient()
+    try:
+        ds = client.get_dataset(id)
+    except AuthenticationExpiredError:
+        raise CLIError(MSG_SESSION_EXPIRED) from None
+    except PlatformAPIError as e:
+        raise CLIError(str(e)) from e
+
+    rows = [
+        ("File", ds.file_name),
+        ("ID", ds.id),
+        ("Size", _format_size(ds.file_size)),
+        ("Status", ds.status),
+    ]
+    if ds.processing_step:
+        pct = (
+            f" ({ds.processing_percent:.0f}%)"
+            if ds.processing_percent is not None
+            else ""
+        )
+        rows.append(("Step", f"{ds.processing_step}{pct}"))
+    if ds.error:
+        rows.append(("Error", ds.error))
+
+    console.table(rows, title="Dataset Status")
+
+
+@app.command("preview")
+def preview(
+    id: str = typer.Argument(..., help="Dataset ID."),
+    rows: int = typer.Option(5, "--rows", help="Number of rows to show."),
+) -> None:
+    """Preview dataset rows."""
+    _require_auth()
+    from osmosis_ai.platform.api.client import OsmosisClient
+
+    client = OsmosisClient()
+    try:
+        ds = client.get_dataset(id)
+    except AuthenticationExpiredError:
+        raise CLIError(MSG_SESSION_EXPIRED) from None
+    except PlatformAPIError as e:
+        raise CLIError(str(e)) from e
+
+    if ds.data_preview is None:
+        if ds.status in STATUSES_IN_PROGRESS:
+            console.print(
+                f"Dataset is still processing (status: {ds.status}).",
+                style="yellow",
+            )
+        else:
+            console.print("No preview available for this dataset.", style="dim")
+        return
+
+    data_rows = ds.data_preview
+    if isinstance(data_rows, list):
+        limit = min(rows, len(data_rows))
+        for row in data_rows[:limit]:
+            console.print(str(row))
+    else:
+        console.print(str(data_rows))
+
+
+@app.command("validate")
+def validate(
+    file: str = typer.Argument(..., help="Path to the file to validate."),
+) -> None:
+    """Validate a dataset file locally."""
+    file_path = Path(file).resolve()
+    if not file_path.exists():
+        raise CLIError(f"File not found: {file_path}")
+
+    ext = file_path.suffix.lstrip(".").lower()
+    if ext not in VALID_EXTENSIONS:
+        raise CLIError(
+            f"Unsupported file type '.{ext}'. "
+            f"Supported: {', '.join(sorted(VALID_EXTENSIONS))}"
+        )
+
+    file_size = file_path.stat().st_size
+    if file_size == 0:
+        raise CLIError("File is empty.")
+    if file_size > MAX_FILE_SIZE:
+        raise CLIError(
+            f"File too large ({_format_size(file_size)}). Maximum: {_format_size(MAX_FILE_SIZE)}"
+        )
+
+    # Format validation
+    errors = _validate_file(file_path, ext)
+
+    if errors:
+        console.print("Validation errors:")
+        for err in errors:
+            console.print(f"  - {err}")
+        raise typer.Exit(1)
+
+    console.print(
+        f"Valid {ext} file: {file_path.name} ({_format_size(file_size)})",
+        style="green",
+    )
 
 
 def _validate_file(file_path: Path, ext: str) -> list[str]:

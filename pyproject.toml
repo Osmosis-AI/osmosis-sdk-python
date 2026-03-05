@@ -35,13 +35,15 @@ dependencies = [
     "xxhash>=3.0.0",
     # Interactive CLI prompts
     "questionary>=2.1.0,<3.0.0",
+    # CLI framework
+    "typer>=0.9.0",
+    "rich>=13.0.0",
 ]
 
 [project.optional-dependencies]
-# Platform CLI (dataset upload/validate, rich progress bars)
+# Platform CLI (dataset upload/validate)
 platform = [
     "pyarrow>=14.0.0",      # Parquet file validation
-    "rich>=13.0.0",         # Beautiful terminal output
 ]
 
 # Server dependencies for create_app() with test mode support
@@ -131,6 +133,7 @@ select = [
 ignore = [
     "E501",    # line-too-long (handled by ruff format)
     "E402",    # module-import-not-at-top-of-file (intentional lazy/conditional imports)
+    "B008",    # function-call-in-default-argument (required by Typer for typer.Option/Argument)
     "SIM117",  # multiple-with-statements (nested with is often clearer in tests)
     "RUF012",  # mutable-class-default (common with Pydantic models)
 ]

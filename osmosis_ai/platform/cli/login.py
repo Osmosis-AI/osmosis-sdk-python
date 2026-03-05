@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-import argparse
 import os
+
+import typer
 
 from osmosis_ai.cli.console import console
 from osmosis_ai.platform.auth import (
@@ -11,27 +12,7 @@ from osmosis_ai.platform.auth import (
     login,
 )
 
-
-class LoginCommand:
-    """Handler for `osmosis login`."""
-
-    def configure_parser(self, parser: argparse.ArgumentParser) -> None:
-        parser.set_defaults(handler=self.run)
-        parser.add_argument(
-            "-f",
-            "--force",
-            dest="force",
-            action="store_true",
-            help="Force re-login, clearing existing credentials.",
-        )
-        parser.add_argument(
-            "--no-browser",
-            dest="no_browser",
-            action="store_true",
-            help="Don't open browser automatically, just print the URL.",
-        )
-
-    ASCII_ART = r"""
+ASCII_ART = r"""
                        ___           ___           ___           ___           ___                       ___
             ___       /\  \         /\  \         /\__\         /\  \         /\  \          ___        /\  \
       __   /\__\     /::\  \       /::\  \       /::|  |       /::\  \       /::\  \        /\  \      /::\  \
@@ -44,56 +25,63 @@ class LoginCommand:
                      \::/  /       \::/  /        /:/  /       \::/  /       \::/  /      \/__/        \::/  /
                       \/__/         \/__/         \/__/         \/__/         \/__/                     \/__/
 """
-    ASCII_ART_MIN_WIDTH = 113
+ASCII_ART_MIN_WIDTH = 113
 
-    def run(self, args: argparse.Namespace) -> int:
-        try:
-            term_width = os.get_terminal_size().columns
-        except OSError:
-            term_width = 80
 
-        if term_width >= self.ASCII_ART_MIN_WIDTH:
-            print(self.ASCII_ART)
-        else:
-            console.print()
-            console.print("  Osmosis AI", style="bold magenta")
-            console.print()
+def login_cmd(
+    force: bool = typer.Option(
+        False, "-f", "--force", help="Force re-login, clearing existing credentials."
+    ),
+    no_browser: bool = typer.Option(
+        False,
+        "--no-browser",
+        help="Don't open browser automatically, just print the URL.",
+    ),
+) -> None:
+    """Authenticate with Osmosis AI."""
+    try:
+        term_width = os.get_terminal_size().columns
+    except OSError:
+        term_width = 80
 
-        try:
-            # Clear existing credentials if forcing re-login
-            if args.force and load_credentials():
-                delete_credentials()
+    if term_width >= ASCII_ART_MIN_WIDTH:
+        print(ASCII_ART)
+    else:
+        console.print()
+        console.print("  Osmosis AI", style="bold magenta")
+        console.print()
 
-            result = login(no_browser=args.no_browser)
+    try:
+        # Clear existing credentials if forcing re-login
+        if force and load_credentials():
+            delete_credentials()
 
-            info_lines = [f"Email: {result.user.email}"]
-            if result.user.name:
-                info_lines.append(f"Name: {result.user.name}")
-            info_lines.append(
-                f"Workspace: {result.organization.name} ({result.organization.role})"
-            )
-            info_lines.append(f"Expires: {result.expires_at.strftime('%Y-%m-%d')}")
+        result = login(no_browser=no_browser)
 
-            console.panel("Login Successful", "\n".join(info_lines), style="green")
+        info_lines = [f"Email: {result.user.email}"]
+        if result.user.name:
+            info_lines.append(f"Name: {result.user.name}")
+        info_lines.append(
+            f"Workspace: {result.organization.name} ({result.organization.role})"
+        )
+        info_lines.append(f"Expires: {result.expires_at.strftime('%Y-%m-%d')}")
 
-            if result.revoked_previous_tokens > 0:
-                token_word = (
-                    "token" if result.revoked_previous_tokens == 1 else "tokens"
-                )
-                console.print(
-                    f"[Note] {result.revoked_previous_tokens} previous {token_word} for this device was revoked",
-                    style="dim",
-                )
+        console.panel("Login Successful", "\n".join(info_lines), style="green")
 
+        if result.revoked_previous_tokens > 0:
+            token_word = "token" if result.revoked_previous_tokens == 1 else "tokens"
             console.print(
-                "\nRun 'osmosis workspace' to select a default project.", style="dim"
+                f"[Note] {result.revoked_previous_tokens} previous {token_word} for this device was revoked",
+                style="dim",
             )
 
-            return 0
+        console.print(
+            "\nRun 'osmosis workspace' to select a default project.", style="dim"
+        )
 
-        except LoginError as e:
-            console.print_error(str(e))
-            return 1
-        except KeyboardInterrupt:
-            console.print("\n\nLogin cancelled.")
-            return 1
+    except LoginError as e:
+        console.print_error(str(e))
+        raise typer.Exit(1) from None
+    except KeyboardInterrupt:
+        console.print("\n\nLogin cancelled.")
+        raise typer.Exit(1) from None

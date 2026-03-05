@@ -25,7 +25,7 @@ default_model_info:
     path = tmp_path / "config.yaml"
     path.write_text(yaml_content, encoding="utf-8")
 
-    exit_code = cli.main(["preview", "--path", str(path)])
+    exit_code = cli.main(["preview", str(path)])
     out = capsys.readouterr().out
 
     assert exit_code == 0
@@ -45,7 +45,7 @@ def test_preview_yaml_multiple_configs(tmp_path, capsys):
     path = tmp_path / "multi.yaml"
     path.write_text(yaml_content, encoding="utf-8")
 
-    exit_code = cli.main(["preview", "--path", str(path)])
+    exit_code = cli.main(["preview", str(path)])
     out = capsys.readouterr().out
 
     assert exit_code == 0
@@ -80,7 +80,7 @@ def test_preview_jsonl(tmp_path, capsys):
     path = tmp_path / "data.jsonl"
     path.write_text(jsonl_content, encoding="utf-8")
 
-    exit_code = cli.main(["preview", "--path", str(path)])
+    exit_code = cli.main(["preview", str(path)])
     out = capsys.readouterr().out
 
     assert exit_code == 0
@@ -397,7 +397,7 @@ def test_eval_command_output_json_custom_file_path(tmp_path, monkeypatch, capsys
 
 def test_preview_missing_file(tmp_path, capsys):
     missing_path = tmp_path / "missing.yaml"
-    exit_code = cli.main(["preview", "--path", str(missing_path)])
+    exit_code = cli.main(["preview", str(missing_path)])
     captured = capsys.readouterr()
 
     assert exit_code == 1
@@ -405,7 +405,7 @@ def test_preview_missing_file(tmp_path, capsys):
 
 
 def test_preview_path_is_directory(tmp_path, capsys):
-    exit_code = cli.main(["preview", "--path", str(tmp_path)])
+    exit_code = cli.main(["preview", str(tmp_path)])
     captured = capsys.readouterr()
 
     assert exit_code == 1
@@ -416,7 +416,7 @@ def test_preview_unsupported_extension(tmp_path, capsys):
     bad_path = tmp_path / "config.txt"
     bad_path.write_text("rubric: test", encoding="utf-8")
 
-    exit_code = cli.main(["preview", "--path", str(bad_path)])
+    exit_code = cli.main(["preview", str(bad_path)])
     captured = capsys.readouterr()
 
     assert exit_code == 1
@@ -428,7 +428,7 @@ def test_main_without_subcommand_shows_help(capsys):
     captured = capsys.readouterr()
 
     assert exit_code == 1
-    assert "usage: osmosis" in captured.out
+    assert "osmosis" in captured.out.lower()
 
 
 def test_eval_command_empty_rubric_id_rejected(tmp_path, capsys):
@@ -617,6 +617,13 @@ def test_rollout_eval_accepts_any_model_with_base_url(capsys):
     assert "Invalid model/provider format" not in captured.err
     # Model should be displayed without openai/ prefix
     assert "Model: Qwen/Qwen3-0.6B" in captured.out
+
+
+def test_fuzzy_suggestion(capsys):
+    exit_code = cli.main(["logi"])  # typo for "login"
+    captured = capsys.readouterr()
+    assert exit_code != 0
+    assert "Did you mean 'login'?" in captured.err
 
 
 def test_rollout_test_accepts_any_model_with_base_url(capsys):

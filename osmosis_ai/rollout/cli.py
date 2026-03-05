@@ -1,7 +1,7 @@
 """CLI commands for Osmosis rollout SDK.
 
 This module provides CLI command handlers for the rollout subsystem,
-including the 'serve' command.
+including the 'serve' and 'validate' commands.
 
 Example:
     osmosis serve --module my_agent:agent_loop --port 9000
@@ -9,275 +9,86 @@ Example:
 
 from __future__ import annotations
 
-import argparse
 import sys
-from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
-    from osmosis_ai.rollout.eval.evaluation.cli import (
-        EvalCommand as _EvalCommandImpl,
-    )
-    from osmosis_ai.rollout.eval.test_mode.cli import (
-        TestCommand as _TestCommandImpl,
-    )
+import typer
 
 from osmosis_ai.cli.errors import CLIError
-from osmosis_ai.rollout.cli_utils import load_agent_loop
-from osmosis_ai.rollout.server.serve import (
-    DEFAULT_HOST,
-    DEFAULT_PORT,
-    serve_agent_loop,
-    validate_and_report,
-)
-
-# Re-export CLIError for backwards compatibility
-# (load_agent_loop is private, renamed from _load_agent_loop)
-_load_agent_loop = load_agent_loop
 
 
-class ServeCommand:
-    """Handler for `osmosis serve`."""
+def serve(
+    module: str = typer.Option(
+        ..., "-m", "--module", help="Module path 'module:attribute'."
+    ),
+    port: int = typer.Option(9000, "-p", "--port", help="Port to bind to."),
+    host: str = typer.Option("0.0.0.0", "-H", "--host", help="Host to bind to."),
+    no_validate: bool = typer.Option(
+        False, "--no-validate", help="Skip agent loop validation."
+    ),
+    reload: bool = typer.Option(
+        False, "--reload", help="Enable auto-reload for development."
+    ),
+    log_level: str = typer.Option("info", "--log-level", help="Uvicorn log level."),
+    skip_register: bool = typer.Option(
+        False, "--skip-register", help="Skip registering with Platform."
+    ),
+    local_debug: bool = typer.Option(
+        False, "--local", "--local-debug", help="Local debug mode."
+    ),
+    api_key: str | None = typer.Option(
+        None, "--api-key", help="API key for TrainGate authentication."
+    ),
+    debug_dir: str | None = typer.Option(
+        None, "--log", metavar="DIR", help="Write execution traces to DIR."
+    ),
+) -> None:
+    """Start a RolloutServer for an agent loop."""
+    from osmosis_ai.rollout.cli_utils import load_agent_loop
+    from osmosis_ai.rollout.server.serve import serve_agent_loop
 
-    def configure_parser(self, parser: argparse.ArgumentParser) -> None:
-        """Configure argument parser for serve command."""
-        parser.set_defaults(handler=self.run)
+    try:
+        agent_loop = load_agent_loop(module)
+    except CLIError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        raise typer.Exit(1) from None
 
-        parser.add_argument(
-            "-m",
-            "--module",
-            dest="module",
-            required=True,
-            help=(
-                "Module path to the agent loop in format 'module:attribute'. "
-                "Example: 'my_agent:agent_loop' or 'mypackage.agents:MyAgentClass'"
-            ),
+    try:
+        serve_agent_loop(
+            agent_loop,
+            host=host,
+            port=port,
+            validate=not no_validate,
+            log_level=log_level,
+            reload=reload,
+            skip_register=skip_register,
+            api_key=api_key,
+            local_debug=local_debug,
+            debug_dir=debug_dir,
         )
-
-        parser.add_argument(
-            "-p",
-            "--port",
-            dest="port",
-            type=int,
-            default=DEFAULT_PORT,
-            help=f"Port to bind to (default: {DEFAULT_PORT})",
-        )
-
-        parser.add_argument(
-            "-H",
-            "--host",
-            dest="host",
-            default=DEFAULT_HOST,
-            help=f"Host to bind to (default: {DEFAULT_HOST})",
-        )
-
-        parser.add_argument(
-            "--no-validate",
-            dest="no_validate",
-            action="store_true",
-            default=False,
-            help="Skip agent loop validation before starting",
-        )
-
-        parser.add_argument(
-            "--reload",
-            dest="reload",
-            action="store_true",
-            default=False,
-            help="Enable auto-reload for development",
-        )
-
-        parser.add_argument(
-            "--log-level",
-            dest="log_level",
-            default="info",
-            choices=["debug", "info", "warning", "error", "critical"],
-            help="Uvicorn log level (default: info)",
-        )
-
-        parser.add_argument(
-            "--skip-register",
-            dest="skip_register",
-            action="store_true",
-            default=False,
-            help="Skip registering with Osmosis Platform (for local testing)",
-        )
-
-        parser.add_argument(
-            "--local",
-            "--local-debug",
-            dest="local_debug",
-            action="store_true",
-            default=False,
-            help=(
-                "Local debug mode: disable API key authentication and skip registering "
-                "with Osmosis Platform (NOT for production)"
-            ),
-        )
-
-        parser.add_argument(
-            "--api-key",
-            dest="api_key",
-            default=None,
-            help=(
-                "API key used by TrainGate to authenticate when calling this RolloutServer "
-                "(sent as 'Authorization: Bearer <api_key>'). "
-                "If not provided, one is generated. (NOT related to `osmosis login` token.)"
-            ),
-        )
-
-        parser.add_argument(
-            "--log",
-            dest="debug_dir",
-            default=None,
-            metavar="DIR",
-            help=(
-                "Enable logging and write execution traces to DIR. "
-                "Each rollout will create a {rollout_id}.jsonl file with "
-                "detailed event logs (pre-LLM state, responses, tool results, etc.)."
-            ),
-        )
-
-    def run(self, args: argparse.Namespace) -> int:
-        """Run the serve command."""
-        module_path = args.module
-        port = args.port
-        host = args.host
-        validate = not args.no_validate
-        reload = args.reload
-        log_level = args.log_level
-        skip_register = args.skip_register
-        api_key = args.api_key
-        local_debug = args.local_debug
-        debug_dir = args.debug_dir
-
-        # Load agent loop
-        try:
-            agent_loop = _load_agent_loop(module_path)
-        except CLIError as e:
-            print(f"Error: {e}", file=sys.stderr)
-            return 1
-
-        # Serve
-        try:
-            serve_agent_loop(
-                agent_loop,
-                host=host,
-                port=port,
-                validate=validate,
-                log_level=log_level,
-                reload=reload,
-                skip_register=skip_register,
-                api_key=api_key,
-                local_debug=local_debug,
-                debug_dir=debug_dir,
-            )
-        except ImportError as e:
-            print(f"Error: {e}", file=sys.stderr)
-            return 1
-        except Exception as e:
-            print(f"Error: {e}", file=sys.stderr)
-            return 1
-
-        return 0
+    except Exception as e:
+        print(f"Error: {e}", file=sys.stderr)
+        raise typer.Exit(1) from None
 
 
-class ValidateCommand:
-    """Handler for `osmosis validate`."""
+def validate(
+    module: str = typer.Option(
+        ..., "-m", "--module", help="Module path 'module:attribute'."
+    ),
+    verbose: bool = typer.Option(
+        False, "-v", "--verbose", help="Show detailed validation output."
+    ),
+) -> None:
+    """Validate a RolloutAgentLoop implementation."""
+    from osmosis_ai.rollout.cli_utils import load_agent_loop
+    from osmosis_ai.rollout.server.serve import validate_and_report
 
-    def configure_parser(self, parser: argparse.ArgumentParser) -> None:
-        """Configure argument parser for validate command."""
-        parser.set_defaults(handler=self.run)
+    try:
+        agent_loop = load_agent_loop(module)
+    except CLIError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        raise typer.Exit(1) from None
 
-        parser.add_argument(
-            "-m",
-            "--module",
-            dest="module",
-            required=True,
-            help=(
-                "Module path to the agent loop in format 'module:attribute'. "
-                "Example: 'my_agent:agent_loop' or 'mypackage.agents:MyAgentClass'"
-            ),
-        )
+    result = validate_and_report(agent_loop, verbose=verbose)
 
-        parser.add_argument(
-            "-v",
-            "--verbose",
-            dest="verbose",
-            action="store_true",
-            default=False,
-            help="Show detailed validation output including warnings",
-        )
-
-    def run(self, args: argparse.Namespace) -> int:
-        """Run the validate command."""
-        module_path = args.module
-        verbose = args.verbose
-
-        # Load agent loop
-        try:
-            agent_loop = _load_agent_loop(module_path)
-        except CLIError as e:
-            print(f"Error: {e}", file=sys.stderr)
-            return 1
-
-        # Validate
-        result = validate_and_report(agent_loop, verbose=verbose)
-
-        return 0 if result.valid else 1
-
-
-class TestCommand:
-    """Handler for `osmosis test` (delegates to eval.test_mode.cli).
-
-    This class acts as a proxy to avoid circular imports and keep the main CLI
-    module lightweight. The actual implementation lives in eval.test_mode.cli.
-    """
-
-    def __init__(self) -> None:
-        """Initialize with lazy-loaded implementation."""
-        self._impl: _TestCommandImpl | None = None
-
-    def _get_impl(self) -> _TestCommandImpl:
-        """Lazily load the actual TestCommand implementation."""
-        if self._impl is None:
-            from osmosis_ai.rollout.eval.test_mode.cli import (
-                TestCommand as _TestCommandImpl,
-            )
-
-            self._impl = _TestCommandImpl()
-        return self._impl
-
-    def configure_parser(self, parser: argparse.ArgumentParser) -> None:
-        """Configure argument parser for test command."""
-        self._get_impl().configure_parser(parser)
-
-
-class EvalCommand:
-    """Handler for `osmosis eval` (delegates to eval.evaluation.cli).
-
-    Proxy class following the same lazy-loading pattern as TestCommand.
-    """
-
-    def __init__(self) -> None:
-        self._impl: _EvalCommandImpl | None = None
-
-    def _get_impl(self) -> _EvalCommandImpl:
-        if self._impl is None:
-            from osmosis_ai.rollout.eval.evaluation.cli import (
-                EvalCommand as _EvalCommandImpl,
-            )
-
-            self._impl = _EvalCommandImpl()
-        return self._impl
-
-    def configure_parser(self, parser: argparse.ArgumentParser) -> None:
-        self._get_impl().configure_parser(parser)
-
-
-__all__ = [
-    "CLIError",
-    "EvalCommand",
-    "ServeCommand",
-    "TestCommand",
-    "ValidateCommand",
-]
+    if not result.valid:
+        raise typer.Exit(1)

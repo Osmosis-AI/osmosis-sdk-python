@@ -1,52 +1,124 @@
-from __future__ import annotations
+"""Osmosis AI CLI — built with Typer."""
 
-import argparse
 import difflib
 import sys
 import warnings
 
+import click
+import typer
+import typer.core
 from dotenv import find_dotenv, load_dotenv
 
 from osmosis_ai.cli.errors import CLIError
-from osmosis_ai.cli.upgrade import UpgradeCommand
 from osmosis_ai.consts import PACKAGE_VERSION, package_name
-from osmosis_ai.platform.cli import (
-    DatasetCommand,
-    LoginCommand,
-    LogoutCommand,
-    WhoamiCommand,
-    WorkspaceCommand,
+
+
+class OsmosisGroup(typer.core.TyperGroup):
+    """Typer group with fuzzy command suggestion."""
+
+    def resolve_command(self, ctx, args):
+        try:
+            return super().resolve_command(ctx, args)
+        except click.UsageError:
+            if args:
+                cmd_name = args[0]
+                matches = difflib.get_close_matches(
+                    cmd_name, self.list_commands(ctx), n=1, cutoff=0.5
+                )
+                if matches:
+                    raise click.UsageError(
+                        f"No such command '{cmd_name}'. Did you mean '{matches[0]}'?"
+                    ) from None
+            raise
+
+
+app = typer.Typer(
+    name="osmosis",
+    cls=OsmosisGroup,
+    no_args_is_help=True,
+    context_settings={"help_option_names": ["-h", "--help"]},
 )
-from osmosis_ai.rubric.cli import (
-    EvalRubricCommand,
-    PreviewCommand,
-)
+
+
+@app.callback(invoke_without_command=True)
+def _callback(
+    ctx: typer.Context,
+    version: bool = typer.Option(
+        False,
+        "-V",
+        "--version",
+        help="Show version and exit.",
+        is_eager=True,
+    ),
+) -> None:
+    """Osmosis AI CLI"""
+    warnings.filterwarnings("ignore")
+    load_dotenv(find_dotenv(usecwd=True))
+    if version:
+        typer.echo(f"{package_name} {PACKAGE_VERSION}")
+        raise typer.Exit()
+
+
+_registered = False
+
+
+def _register_commands() -> None:
+    """Register all subcommands. Called once before app() runs."""
+    global _registered
+    if _registered:
+        return
+    _registered = True
+
+    # ── Platform (leaf commands) ──
+    from osmosis_ai.platform.cli.login import login_cmd
+    from osmosis_ai.platform.cli.logout import logout
+    from osmosis_ai.platform.cli.whoami import whoami
+
+    app.command("login", rich_help_panel="Platform")(login_cmd)
+    app.command("whoami", rich_help_panel="Platform")(whoami)
+    app.command("logout", rich_help_panel="Platform")(logout)
+
+    # ── Platform (sub-command groups) ──
+    from osmosis_ai.platform.cli.dataset import app as dataset_app
+    from osmosis_ai.platform.cli.workspace import app as workspace_app
+
+    app.add_typer(workspace_app, name="workspace", rich_help_panel="Platform")
+    app.add_typer(dataset_app, name="dataset", rich_help_panel="Platform")
+
+    # ── Evaluation ──
+    from osmosis_ai.rollout.eval.evaluation.cli import app as eval_app
+    from osmosis_ai.rubric.cli.eval_rubric import app as eval_rubric_app
+    from osmosis_ai.rubric.cli.preview import preview
+
+    app.command("preview", rich_help_panel="Evaluation")(preview)
+    app.add_typer(eval_rubric_app, name="eval-rubric", rich_help_panel="Evaluation")
+    app.add_typer(eval_app, name="eval", rich_help_panel="Evaluation")
+
+    # ── Rollout ──
+    from osmosis_ai.rollout.cli import serve, validate
+    from osmosis_ai.rollout.eval.test_mode.cli import app as test_app
+
+    app.command("serve", rich_help_panel="Rollout")(serve)
+    app.command("validate", rich_help_panel="Rollout")(validate)
+    app.add_typer(test_app, name="test", rich_help_panel="Rollout")
+
+    # ── Tools (leaf) ──
+    from osmosis_ai.cli.upgrade import upgrade
+
+    app.command("upgrade", rich_help_panel="Tools")(upgrade)
 
 
 def main(argv: list[str] | None = None) -> int:
     """Entry point for the osmosis CLI."""
-    # Suppress all Python warnings for a clean CLI experience.
-    # This only affects the CLI process; library consumers are not impacted.
-    # Meaningful user-facing messages should use logging or print instead.
-    warnings.filterwarnings("ignore")
-
-    # Load environment variables from .env file in current working directory.
-    # find_dotenv(usecwd=True) is required because the default find_dotenv()
-    # walks up from the caller's file path (site-packages or editable source),
-    # which never reaches the user's project directory.
-    load_dotenv(find_dotenv(usecwd=True))
-
-    parser = _build_parser()
-    args = parser.parse_args(argv)
-
-    handler = getattr(args, "handler", None)
-    if handler is None:
-        parser.print_help()
-        return 1
-
+    _register_commands()
     try:
-        exit_code: int = handler(args)
-        return exit_code
+        result = app(argv, standalone_mode=False)
+        # standalone_mode=False makes typer.Exit() return the code instead of raising SystemExit
+        if isinstance(result, int) and result != 0:
+            return result
+        return 0
+    except SystemExit as e:
+        return int(e.code) if e.code is not None else 0
     except CLIError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
@@ -55,135 +127,6 @@ def main(argv: list[str] | None = None) -> int:
     except Exception as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
-
-
-class _OsmosisArgumentParser(argparse.ArgumentParser):
-    """ArgumentParser with fuzzy 'did you mean?' suggestions for subcommands."""
-
-    def error(self, message: str) -> None:  # type: ignore[override]
-        # Intercept "invalid choice" errors to suggest similar commands
-        if "invalid choice:" in message and hasattr(self, "_subparsers"):
-            # Extract the invalid command from the error message
-            # Format: "argument command: invalid choice: 'foo' (choose from ...)"
-            try:
-                invalid = message.split("invalid choice: ")[1].split("'")[1]
-            except (IndexError, KeyError):
-                invalid = None
-
-            if invalid:
-                # Collect all registered subcommand names
-                choices: list[str] = []
-                for action in self._subparsers._actions:
-                    if isinstance(action, argparse._SubParsersAction):
-                        choices.extend(action.choices.keys())
-
-                matches = difflib.get_close_matches(invalid, choices, n=1, cutoff=0.5)
-                if matches:
-                    self.exit(
-                        2,
-                        f"No such command '{invalid}'. Did you mean '{matches[0]}'?\n",
-                    )
-
-        super().error(message)
-
-
-def _build_parser() -> _OsmosisArgumentParser:
-    parser = _OsmosisArgumentParser(
-        prog="osmosis",
-        description="Osmosis AI SDK - rubric evaluation and remote rollout server.",
-    )
-
-    parser.add_argument(
-        "-V",
-        "--version",
-        action="version",
-        version=f"{package_name} {PACKAGE_VERSION}",
-        help="Show version number.",
-    )
-
-    subparsers = parser.add_subparsers(dest="command")
-
-    login_parser = subparsers.add_parser(
-        "login",
-        help="Authenticate with Osmosis AI.",
-    )
-    LoginCommand().configure_parser(login_parser)
-
-    whoami_parser = subparsers.add_parser(
-        "whoami",
-        help="Show current authenticated user and workspace.",
-    )
-    WhoamiCommand().configure_parser(whoami_parser)
-
-    logout_parser = subparsers.add_parser(
-        "logout",
-        help="Logout and revoke CLI token.",
-    )
-    LogoutCommand().configure_parser(logout_parser)
-
-    workspace_parser = subparsers.add_parser(
-        "workspace",
-        help="Switch workspace and default project.",
-    )
-    WorkspaceCommand().configure_parser(workspace_parser)
-
-    dataset_parser = subparsers.add_parser(
-        "dataset",
-        help="Manage datasets (upload, list, status, preview, delete, validate).",
-    )
-    DatasetCommand().configure_parser(dataset_parser)
-
-    preview_parser = subparsers.add_parser(
-        "preview",
-        help="Preview a rubric YAML file or test JSONL file and print its parsed contents.",
-    )
-    PreviewCommand().configure_parser(preview_parser)
-
-    eval_rubric_parser = subparsers.add_parser(
-        "eval-rubric",
-        help="Evaluate JSONL conversations against a rubric using remote providers.",
-    )
-    EvalRubricCommand().configure_parser(eval_rubric_parser)
-
-    # Rollout server commands
-    from osmosis_ai.rollout.cli import (
-        EvalCommand,
-        ServeCommand,
-        TestCommand,
-        ValidateCommand,
-    )
-
-    serve_parser = subparsers.add_parser(
-        "serve",
-        help="Start a RolloutServer for an agent loop implementation.",
-    )
-    ServeCommand().configure_parser(serve_parser)
-
-    validate_parser = subparsers.add_parser(
-        "validate",
-        help="Validate a RolloutAgentLoop implementation without starting the server.",
-    )
-    ValidateCommand().configure_parser(validate_parser)
-
-    test_parser = subparsers.add_parser(
-        "test",
-        help="Test a RolloutAgentLoop against a dataset using cloud LLM providers.",
-    )
-    TestCommand().configure_parser(test_parser)
-
-    eval_parser = subparsers.add_parser(
-        "eval",
-        help="Evaluate agent against dataset with eval functions.",
-    )
-    EvalCommand().configure_parser(eval_parser)
-
-    upgrade_parser = subparsers.add_parser(
-        "upgrade",
-        help="Upgrade the Osmosis CLI to the latest version.",
-    )
-    UpgradeCommand().configure_parser(upgrade_parser)
-
-    return parser
 
 
 if __name__ == "__main__":

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import argparse
 import json
 import types
 from pathlib import Path
@@ -1331,10 +1330,7 @@ class TestCacheLs:
             lambda: tmp_path,
         )
         cmd = self._make_command()
-        args = argparse.Namespace(
-            cache_model=None, cache_dataset=None, cache_status=None
-        )
-        ret = cmd._run_cache_ls(args)
+        ret = cmd._run_cache_ls()
         assert ret == 0
 
     def test_ls_lists_entries(self, tmp_path: Path, monkeypatch):
@@ -1354,10 +1350,7 @@ class TestCacheLs:
         )
 
         cmd = self._make_command()
-        args = argparse.Namespace(
-            cache_model=None, cache_dataset=None, cache_status=None
-        )
-        ret = cmd._run_cache_ls(args)
+        ret = cmd._run_cache_ls()
         assert ret == 0
 
     def test_ls_filter_by_model(self, tmp_path: Path):
@@ -1469,15 +1462,7 @@ class TestCacheRm:
             lambda: tmp_path,
         )
         cmd = self._make_command()
-        args = argparse.Namespace(
-            task_id=None,
-            rm_all=False,
-            cache_model=None,
-            cache_dataset=None,
-            cache_status=None,
-            yes=False,
-        )
-        ret = cmd._run_cache_rm(args)
+        ret = cmd._run_cache_rm()
         assert ret == 1
 
     def test_rm_by_task_id(self, tmp_path: Path, monkeypatch):
@@ -1492,15 +1477,7 @@ class TestCacheRm:
             lambda: tmp_path,
         )
         cmd = self._make_command()
-        args = argparse.Namespace(
-            task_id="abc123",
-            rm_all=False,
-            cache_model=None,
-            cache_dataset=None,
-            cache_status=None,
-            yes=False,
-        )
-        ret = cmd._run_cache_rm(args)
+        ret = cmd._run_cache_rm(task_id="abc123")
         assert ret == 0
         assert not cache_path.exists()
         assert not jsonl_path.exists()
@@ -1512,15 +1489,7 @@ class TestCacheRm:
             lambda: tmp_path,
         )
         cmd = self._make_command()
-        args = argparse.Namespace(
-            task_id="nonexistent",
-            rm_all=False,
-            cache_model=None,
-            cache_dataset=None,
-            cache_status=None,
-            yes=False,
-        )
-        ret = cmd._run_cache_rm(args)
+        ret = cmd._run_cache_rm(task_id="nonexistent")
         assert ret == 1
 
     def test_rm_all_with_yes(self, tmp_path: Path, monkeypatch):
@@ -1533,15 +1502,7 @@ class TestCacheRm:
             lambda: tmp_path,
         )
         cmd = self._make_command()
-        args = argparse.Namespace(
-            task_id=None,
-            rm_all=True,
-            cache_model=None,
-            cache_dataset=None,
-            cache_status=None,
-            yes=True,
-        )
-        ret = cmd._run_cache_rm(args)
+        ret = cmd._run_cache_rm(rm_all=True, yes=True)
         assert ret == 0
         assert not p1.exists()
         assert not p2.exists()
@@ -1555,16 +1516,8 @@ class TestCacheRm:
             lambda: tmp_path,
         )
         cmd = self._make_command()
-        args = argparse.Namespace(
-            task_id=None,
-            rm_all=True,
-            cache_model=None,
-            cache_dataset=None,
-            cache_status=None,
-            yes=False,
-        )
         with patch("builtins.input", return_value="y"):
-            ret = cmd._run_cache_rm(args)
+            ret = cmd._run_cache_rm(rm_all=True)
         assert ret == 0
 
     def test_rm_all_confirm_no(self, tmp_path: Path, monkeypatch):
@@ -1576,16 +1529,8 @@ class TestCacheRm:
             lambda: tmp_path,
         )
         cmd = self._make_command()
-        args = argparse.Namespace(
-            task_id=None,
-            rm_all=True,
-            cache_model=None,
-            cache_dataset=None,
-            cache_status=None,
-            yes=False,
-        )
         with patch("builtins.input", return_value="n"):
-            ret = cmd._run_cache_rm(args)
+            ret = cmd._run_cache_rm(rm_all=True)
         assert ret == 0
         assert p1.exists()  # Not deleted
 
@@ -1603,15 +1548,7 @@ class TestCacheRm:
             lambda: tmp_path,
         )
         cmd = self._make_command()
-        args = argparse.Namespace(
-            task_id=None,
-            rm_all=False,
-            cache_model=None,
-            cache_dataset=None,
-            cache_status="in_progress",
-            yes=True,
-        )
-        ret = cmd._run_cache_rm(args)
+        ret = cmd._run_cache_rm(cache_status="in_progress", yes=True)
         assert ret == 0
         assert p_completed.exists()
         assert not p_progress.exists()
@@ -1626,15 +1563,7 @@ class TestCacheRm:
             lambda: tmp_path,
         )
         cmd = self._make_command()
-        args = argparse.Namespace(
-            task_id="abc123",
-            rm_all=False,
-            cache_model=None,
-            cache_dataset=None,
-            cache_status=None,
-            yes=False,
-        )
-        ret = cmd._run_cache_rm(args)
+        ret = cmd._run_cache_rm(task_id="abc123")
         assert ret == 0
         assert not parent_dir.exists()
 
@@ -1647,14 +1576,6 @@ class TestCacheRm:
             lambda: tmp_path,
         )
         cmd = self._make_command()
-        args = argparse.Namespace(
-            task_id=None,
-            rm_all=True,
-            cache_model=None,
-            cache_dataset=None,
-            cache_status=None,
-            yes=False,
-        )
         with patch("builtins.input", side_effect=EOFError):
-            ret = cmd._run_cache_rm(args)
+            ret = cmd._run_cache_rm(rm_all=True)
         assert ret == 130
