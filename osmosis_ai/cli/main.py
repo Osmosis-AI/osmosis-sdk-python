@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import argparse
+import difflib
 import sys
 import warnings
 
 from dotenv import find_dotenv, load_dotenv
 
 from osmosis_ai.cli.errors import CLIError
+from osmosis_ai.cli.upgrade import UpgradeCommand
 from osmosis_ai.consts import PACKAGE_VERSION, package_name
 from osmosis_ai.platform.cli import (
     DatasetCommand,
@@ -55,8 +57,38 @@ def main(argv: list[str] | None = None) -> int:
         return 1
 
 
-def _build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
+class _OsmosisArgumentParser(argparse.ArgumentParser):
+    """ArgumentParser with fuzzy 'did you mean?' suggestions for subcommands."""
+
+    def error(self, message: str) -> None:  # type: ignore[override]
+        # Intercept "invalid choice" errors to suggest similar commands
+        if "invalid choice:" in message and hasattr(self, "_subparsers"):
+            # Extract the invalid command from the error message
+            # Format: "argument command: invalid choice: 'foo' (choose from ...)"
+            try:
+                invalid = message.split("invalid choice: ")[1].split("'")[1]
+            except (IndexError, KeyError):
+                invalid = None
+
+            if invalid:
+                # Collect all registered subcommand names
+                choices: list[str] = []
+                for action in self._subparsers._actions:
+                    if isinstance(action, argparse._SubParsersAction):
+                        choices.extend(action.choices.keys())
+
+                matches = difflib.get_close_matches(invalid, choices, n=1, cutoff=0.5)
+                if matches:
+                    self.exit(
+                        2,
+                        f"No such command '{invalid}'. Did you mean '{matches[0]}'?\n",
+                    )
+
+        super().error(message)
+
+
+def _build_parser() -> _OsmosisArgumentParser:
+    parser = _OsmosisArgumentParser(
         prog="osmosis",
         description="Osmosis AI SDK - rubric evaluation and remote rollout server.",
     )
@@ -144,6 +176,12 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Evaluate agent against dataset with eval functions.",
     )
     EvalCommand().configure_parser(eval_parser)
+
+    upgrade_parser = subparsers.add_parser(
+        "upgrade",
+        help="Upgrade the Osmosis CLI to the latest version.",
+    )
+    UpgradeCommand().configure_parser(upgrade_parser)
 
     return parser
 
