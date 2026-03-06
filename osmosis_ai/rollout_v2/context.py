@@ -1,4 +1,4 @@
-from typing import List, Optional, Dict, Any
+from typing import Any, Dict, Generic, List, Optional, TypeVar
 from dataclasses import dataclass, field
 from contextvars import ContextVar
 
@@ -12,6 +12,7 @@ from osmosis_ai.rollout_v2.types import (
 from osmosis_ai.rollout_v2.rollout_sample import RolloutSampleSource
 
 rollout_contextvar: ContextVar = ContextVar("rollout_contextvar", default=None)
+TConfig = TypeVar("TConfig", bound=AgentWorkflowConfig)
 
 @dataclass
 class RolloutContext:
@@ -68,15 +69,15 @@ class GraderContext:
         )
 
 @dataclass
-class AgentWorkflowContext[TConfig: AgentWorkflowConfig]:
+class AgentWorkflowContext(Generic[TConfig]):
     '''
     General context for an agent, agnostic of the rollout context.
     '''
     prompt: List[Dict[str, Any]]
     config: TConfig
 
-    def __init__(self, 
-        prompt: List[Dict[str, Any]], 
+    def __init__(self,
+        prompt: List[Dict[str, Any]],
         config: TConfig,
     ):
         self.prompt = prompt
