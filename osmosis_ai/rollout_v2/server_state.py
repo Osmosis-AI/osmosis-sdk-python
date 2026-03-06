@@ -4,9 +4,9 @@ from contextlib import asynccontextmanager
 from typing import Any
 
 from osmosis_ai.rollout_v2.types import (
-    GraderConcurrencyConfig,
-    RolloutServerConfig,
-    WorkflowConcurrencyConfig,
+    AgentWorkflowConfig,
+    ConcurrencyConfig,
+    GraderConfig,
 )
 
 
@@ -53,17 +53,22 @@ class ConcurrencyLimiter:
 
 
 class RolloutServerState:
-    def __init__(self, config: RolloutServerConfig) -> None:
+    def __init__(
+        self,
+        *,
+        agent_workflow_config: AgentWorkflowConfig,
+        grader_config: GraderConfig,
+    ) -> None:
         self.agent_workflow_concurrency_limiter = self._build_concurrency_limiter(
-            config.workflow
+            agent_workflow_config.concurrency
         )
         self.grader_concurrency_limiter = self._build_concurrency_limiter(
-            config.grader
+            grader_config.concurrency
         )
 
     @staticmethod
     def _build_concurrency_limiter(
-        config: WorkflowConcurrencyConfig | GraderConcurrencyConfig,
+        config: ConcurrencyConfig,
     ) -> ConcurrencyLimiter:
         return ConcurrencyLimiter(max_concurrent=config.max_concurrent)
 

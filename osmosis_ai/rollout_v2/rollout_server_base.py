@@ -14,11 +14,11 @@ from osmosis_ai.rollout_v2.agent_workflow import (
     AgentWorkflowContext,
 )
 from osmosis_ai.rollout_v2.types import (
+    GraderConfig,
     GraderStatus,
     RolloutErrorCategory,
     RolloutInitRequest,
     RolloutInitResponse,
-    RolloutServerConfig,
     RolloutStatus,
     GraderInitRequest,
     GraderInitResponse,
@@ -95,9 +95,12 @@ def create_app(
     agent_workflow_cls: Type[AgentWorkflow],
     grader_cls: Type[Grader],
     agent_workflow_config: AgentWorkflowConfig,
-    server_config: RolloutServerConfig | None = None,
+    grader_config: GraderConfig,
 ) -> FastAPI:
-    rollout_server_state = RolloutServerState(server_config or RolloutServerConfig())
+    rollout_server_state = RolloutServerState(
+        agent_workflow_config=agent_workflow_config,
+        grader_config=grader_config,
+    )
     app = FastAPI()
     app.state.rollout_server_state = rollout_server_state
 
@@ -143,7 +146,7 @@ def create_app(
                 completion_callback_url=request.completion_callback_url, 
                 samples=request.samples,
             )
-            grader = grader_cls()
+            grader = grader_cls(grader_config)
             background_tasks.add_task(
                 run_grader_with_callback,
                 grader,
