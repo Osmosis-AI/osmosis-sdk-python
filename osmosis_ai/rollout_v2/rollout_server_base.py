@@ -36,7 +36,7 @@ def _categorize_exception(exc: Exception) -> RolloutErrorCategory:
 
 async def run_grader_with_callback(
     grader: Grader,
-    ctx: GraderContext
+    ctx: GraderContext,
 ) -> None:
     try:
         await grader.grade(ctx)
@@ -62,7 +62,7 @@ async def run_grader_with_callback(
 async def run_agent_workflow_with_callback(
     agent_workflow: AgentWorkflow,
     agent_workflow_ctx: AgentWorkflowContext,
-    rollout_ctx: RolloutContext
+    rollout_ctx: RolloutContext,
 ) -> None:
     # Run the agent and set the final status
     with rollout_ctx:
@@ -113,7 +113,10 @@ def create_app(
             )
             
             background_tasks.add_task(
-                run_agent_workflow_with_callback, agent_workflow, agent_workflow_ctx, rollout_ctx
+                run_agent_workflow_with_callback,
+                agent_workflow,
+                agent_workflow_ctx,
+                rollout_ctx,
             )
             return RolloutInitResponse()
         except Exception as e:
@@ -127,11 +130,13 @@ def create_app(
         try:
             grader_ctx = GraderContext(rollout_id=request.rollout_id, 
                 completion_callback_url=request.completion_callback_url, 
-                samples=request.samples
+                samples=request.samples,
             )
             grader = grader_cls()
             background_tasks.add_task(
-                run_grader_with_callback, grader, grader_ctx
+                run_grader_with_callback,
+                grader,
+                grader_ctx,
             )
             return GraderInitResponse()
         except Exception as e:

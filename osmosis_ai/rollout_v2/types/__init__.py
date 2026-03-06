@@ -1,4 +1,8 @@
-from .config import AgentWorkflowConfig, BaseConfig, GraderConfig
+from .config import (
+    AgentWorkflowConfig,
+    BaseConfig,
+    GraderConfig,
+)
 from .grader import (
     GraderCompleteRequest,
     GraderInitRequest,
