@@ -14,7 +14,7 @@ from osmosis_ai.rollout_v2.context import GraderContext
 
 from osmosis_ai.rollout_v2.rollout_server_base import create_app
 from osmosis_ai.rollout_v2.agent_workflow import AgentWorkflow, AgentWorkflowContext
-from osmosis_ai.rollout_v2.types import AgentWorkflowConfig
+from osmosis_ai.rollout_v2.types import AgentWorkflowConfig, GraderConfig
 from osmosis_ai.rollout_v2.integrations.strands import OsmosisStrandsAgent as StrandsAgent, OsmosisRolloutModel
 
 # import litellm
@@ -64,6 +64,11 @@ class MultiplyGrader(Grader):
         else:
             for sample_id, _ in rollout_samples.items():
                 ctx.set_sample_reward(sample_id, 0)
+
+
+class MultiplyGraderConfig(GraderConfig):
+    name: str = "MultiplyGrader"
+    description: str = "Grades multiplication rollouts"
 
 @tool(name="multiply")
 def multiply_tool(a: float, b: float) -> float:
@@ -125,7 +130,7 @@ class MultiplyAgentWorkflowConfig(AgentWorkflowConfig):
     tools: Any
 
 def multiply():
-    config = MultiplyAgentWorkflowConfig(
+    agent_workflow_config = MultiplyAgentWorkflowConfig(
         name="MultiplyAgentWorkflow",
         description="Multiply two numbers",
         tools=[multiply_tool],
@@ -137,7 +142,16 @@ def multiply():
             }
         )
     )
-    app = create_app(agent_workflow_cls=MultiplyAgentWorkflow, grader_cls=MultiplyGrader, agent_workflow_config=config)
+    grader_config = MultiplyGraderConfig(
+        name="MultiplyGrader",
+        description="Grades multiplication rollouts",
+    )
+    app = create_app(
+        agent_workflow_cls=MultiplyAgentWorkflow,
+        grader_cls=MultiplyGrader,
+        agent_workflow_config=agent_workflow_config,
+        grader_config=grader_config,
+    )
     uvicorn.run(app, host="0.0.0.0", port=8000)
 
 if __name__ == "__main__":
