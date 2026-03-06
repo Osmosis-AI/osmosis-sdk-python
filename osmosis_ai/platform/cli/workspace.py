@@ -46,7 +46,7 @@ def _validate_default_project(
     if not project_id:
         return default_project
 
-    projects = _get_cached_projects(max_age=0)
+    projects = _get_cached_projects(workspace_name=ws_name, max_age=0)
     if not projects:
         return default_project
 
@@ -209,10 +209,13 @@ def _browse_datasets(ws_name: str, project: dict) -> bool:
     """
     from osmosis_ai.platform.api.client import OsmosisClient
 
+    from .project import _get_workspace_credentials
+
     client = OsmosisClient()
     project_id = project.get("project_id")
     try:
-        result = client.list_datasets(project_id)
+        credentials = _get_workspace_credentials(ws_name)
+        result = client.list_datasets(project_id, credentials=credentials)
     except AuthenticationExpiredError:
         raise CLIError(MSG_SESSION_EXPIRED) from None
     except PlatformAPIError as e:
@@ -301,6 +304,8 @@ def _format_dataset_status(d: Any, *, for_prompt: bool = False) -> str:
 
     if color:
         status_info = console.format_styled(status_info, color)
+    else:
+        status_info = console.escape(status_info)
     return status_info
 
 
@@ -311,10 +316,13 @@ def _show_project_info(ws_name: str, project: dict) -> bool:
     """
     from osmosis_ai.platform.api.client import OsmosisClient
 
+    from .project import _get_workspace_credentials
+
     client = OsmosisClient()
     project_id = project.get("project_id")
     try:
-        detail = client.get_project(project_id)
+        credentials = _get_workspace_credentials(ws_name)
+        detail = client.get_project(project_id, credentials=credentials)
     except AuthenticationExpiredError:
         raise CLIError(MSG_SESSION_EXPIRED) from None
     except PlatformAPIError as e:

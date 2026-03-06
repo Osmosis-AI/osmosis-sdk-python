@@ -8,10 +8,8 @@ from __future__ import annotations
 
 import pytest
 
-from osmosis_ai.platform.cli.project import (
-    _RESERVED_PROJECT_NAMES,
-    validate_project_name,
-)
+from osmosis_ai.platform.cli.constants import RESERVED_PROJECT_NAMES
+from osmosis_ai.platform.cli.project import validate_project_name
 
 # ---------------------------------------------------------------------------
 # Valid names (should return None)
@@ -87,8 +85,8 @@ class TestValidateProjectName:
 
     @pytest.mark.parametrize(
         "name",
-        sorted(_RESERVED_PROJECT_NAMES),
-        ids=sorted(_RESERVED_PROJECT_NAMES),
+        sorted(RESERVED_PROJECT_NAMES),
+        ids=sorted(RESERVED_PROJECT_NAMES),
     )
     def test_reserved_names(self, name: str) -> None:
         result = validate_project_name(name)

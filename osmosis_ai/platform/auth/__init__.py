@@ -12,6 +12,7 @@ from .credentials import (
     get_all_workspaces,
     get_valid_credentials,
     load_credentials,
+    load_workspace_credentials,
     save_credentials,
     set_active_workspace,
 )
@@ -47,6 +48,7 @@ __all__ = [
     "get_all_workspaces",
     "get_valid_credentials",
     "load_credentials",
+    "load_workspace_credentials",
     "load_workspace_projects",
     "login",
     "platform_request",

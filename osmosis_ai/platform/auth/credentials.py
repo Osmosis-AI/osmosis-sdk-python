@@ -215,6 +215,14 @@ def load_credentials() -> WorkspaceCredentials | None:
     return store.get_active_credentials()
 
 
+def load_workspace_credentials(workspace_name: str) -> WorkspaceCredentials | None:
+    """Load credentials for a specific workspace."""
+    store = _load_store()
+    if store is None:
+        return None
+    return store.workspaces.get(workspace_name)
+
+
 def delete_credentials() -> bool:
     """Delete all stored credentials.
 

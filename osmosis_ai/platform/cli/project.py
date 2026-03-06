@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import os
 import time
+from typing import TYPE_CHECKING
 
 from osmosis_ai.cli.console import console
 from osmosis_ai.cli.errors import CLIError
@@ -21,7 +22,7 @@ from osmosis_ai.platform.auth import (
     AuthenticationExpiredError,
     PlatformAPIError,
     get_active_workspace,
-    get_valid_credentials,
+    load_workspace_credentials,
     load_workspace_projects,
     save_workspace_projects,
 )
@@ -41,6 +42,9 @@ from osmosis_ai.platform.cli.constants import (
     PROJECT_NAME_RE,
     RESERVED_PROJECT_NAMES,
 )
+
+if TYPE_CHECKING:
+    from osmosis_ai.platform.auth.credentials import WorkspaceCredentials
 
 
 def validate_project_name(name: str) -> str | None:
@@ -62,6 +66,25 @@ def validate_project_name(name: str) -> str | None:
     if name in RESERVED_PROJECT_NAMES:
         return f"'{name}' is a reserved name and cannot be used."
     return None
+
+
+def _get_active_workspace_name() -> str:
+    """Return the active workspace name, or raise if none is selected."""
+    workspace_name = get_active_workspace()
+    if workspace_name is None:
+        raise CLIError(MSG_NOT_LOGGED_IN)
+    return workspace_name
+
+
+def _get_workspace_credentials(workspace_name: str) -> WorkspaceCredentials:
+    """Load valid credentials for a specific workspace."""
+    credentials = load_workspace_credentials(workspace_name)
+    if credentials is None or credentials.is_expired():
+        raise AuthenticationExpiredError(
+            "No valid credentials found. Please run 'osmosis login' first."
+        )
+
+    return credentials
 
 
 # ── Interactive selection ──────────────────────────────────────────
@@ -91,11 +114,11 @@ def select_project_interactive(
     """
     if projects is None:
         try:
-            projects = _refresh_projects()
+            projects = _refresh_projects(workspace_name=ws_name)
         except AuthenticationExpiredError:
             raise CLIError(MSG_SESSION_EXPIRED) from None
         except Exception:
-            projects = _get_cached_projects(max_age=None)
+            projects = _get_cached_projects(workspace_name=ws_name, max_age=None)
             if projects:
                 console.print(
                     "Warning: Failed to refresh projects, using cached data.",
@@ -110,12 +133,12 @@ def select_project_interactive(
 
     if not projects:
         console.print(f"No projects in '{ws_name}'.")
-        return _prompt_create()
+        return _prompt_create(ws_name)
 
-    return _prompt_select(projects, current_project_id, allow_back=allow_back)
+    return _prompt_select(ws_name, projects, current_project_id, allow_back=allow_back)
 
 
-def _prompt_create() -> dict | None:
+def _prompt_create(ws_name: str) -> dict | None:
     """Prompt to create a new project."""
     while True:
         name = text(
@@ -138,21 +161,23 @@ def _prompt_create() -> dict | None:
         return None
 
     try:
+        credentials = _get_workspace_credentials(ws_name)
         client = OsmosisClient()
-        project = client.create_project(name)
+        project = client.create_project(name, credentials=credentials)
     except AuthenticationExpiredError:
         raise CLIError(MSG_SESSION_EXPIRED) from None
     except PlatformAPIError as e:
         raise CLIError(f"Failed to create project: {e}") from e
 
     with contextlib.suppress(Exception):
-        _refresh_projects()
+        _refresh_projects(workspace_name=ws_name)
 
     console.print(f"Created project '{project.project_name}'.")
     return {"id": project.id, "project_name": project.project_name}
 
 
 def _prompt_select(
+    ws_name: str,
     projects: list[dict],
     current_project_id: str | None,
     allow_back: bool = False,
@@ -188,7 +213,7 @@ def _prompt_select(
     if result == BACK:
         return BACK
     if result == CREATE:
-        return _prompt_create()
+        return _prompt_create(ws_name)
 
     # Otherwise result is the project dict
     return result
@@ -197,18 +222,19 @@ def _prompt_select(
 # ── Caching ────────────────────────────────────────────────────────
 
 
-def _get_cached_projects(*, max_age: float | None = CACHE_TTL_SECONDS) -> list[dict]:
+def _get_cached_projects(
+    *,
+    workspace_name: str,
+    max_age: float | None = CACHE_TTL_SECONDS,
+) -> list[dict]:
     """Load cached projects, auto-refreshing if stale."""
-    ws_name = get_active_workspace()
-    if ws_name is None:
-        return []
-    projects, refreshed_at = load_workspace_projects(ws_name)
+    projects, refreshed_at = load_workspace_projects(workspace_name)
 
     if max_age is not None and projects:
         is_stale = refreshed_at is None or (time.time() - refreshed_at) > max_age
         if is_stale:
             try:
-                return _refresh_projects()
+                return _refresh_projects(workspace_name=workspace_name)
             except AuthenticationExpiredError:
                 raise CLIError(MSG_SESSION_EXPIRED) from None
             except Exception:
@@ -220,24 +246,28 @@ def _get_cached_projects(*, max_age: float | None = CACHE_TTL_SECONDS) -> list[d
     return projects
 
 
-def _refresh_projects() -> list[dict]:
+def _refresh_projects(*, workspace_name: str) -> list[dict]:
     """Refresh project list from platform and update cache."""
+    credentials = _get_workspace_credentials(workspace_name)
     client = OsmosisClient()
-    info = client.refresh_workspace_info()
+    info = client.refresh_workspace_info(credentials=credentials)
     projects = info.get("projects", [])
-    ws_name = get_active_workspace()
-    if ws_name:
-        save_workspace_projects(ws_name, projects)
-        has_subscription = info.get("has_subscription")
-        if has_subscription is not None:
-            save_subscription_status(ws_name, bool(has_subscription))
+    save_workspace_projects(workspace_name, projects)
+    has_subscription = info.get("has_subscription")
+    if has_subscription is not None:
+        save_subscription_status(workspace_name, bool(has_subscription))
     return projects
 
 
 # ── Resolution (non-interactive, for commands like dataset) ────────
 
 
-def _resolve_project(name_or_id: str | None, *, refresh: bool = False) -> dict:
+def _resolve_project(
+    name_or_id: str | None,
+    *,
+    workspace_name: str,
+    refresh: bool = False,
+) -> dict:
     """Resolve a project by name or ID, using cache first.
 
     Priority: --project arg > $OSMOSIS_PROJECT > config.json default > error
@@ -246,14 +276,12 @@ def _resolve_project(name_or_id: str | None, *, refresh: bool = False) -> dict:
         name_or_id = os.environ.get("OSMOSIS_PROJECT")
 
     if name_or_id is None:
-        ws = get_active_workspace()
-        if ws:
-            default = get_default_project(ws)
-            if default:
-                name_or_id = default.get("project_name")
+        default = get_default_project(workspace_name)
+        if default:
+            name_or_id = default.get("project_name")
 
     if name_or_id is None:
-        available = _get_cached_projects(max_age=None)
+        available = _get_cached_projects(workspace_name=workspace_name, max_age=None)
         hint = (
             "No project specified.\n\n"
             "Specify a project in one of these ways:\n"
@@ -267,9 +295,9 @@ def _resolve_project(name_or_id: str | None, *, refresh: bool = False) -> dict:
         raise CLIError(hint)
 
     try:
-        projects = _get_cached_projects()
+        projects = _get_cached_projects(workspace_name=workspace_name)
         if refresh or not projects:
-            projects = _refresh_projects()
+            projects = _refresh_projects(workspace_name=workspace_name)
     except AuthenticationExpiredError:
         raise CLIError(MSG_SESSION_EXPIRED) from None
 
@@ -280,7 +308,7 @@ def _resolve_project(name_or_id: str | None, *, refresh: bool = False) -> dict:
 
     if not refresh:
         try:
-            projects = _refresh_projects()
+            projects = _refresh_projects(workspace_name=workspace_name)
         except AuthenticationExpiredError:
             raise CLIError(MSG_SESSION_EXPIRED) from None
         for p in projects:
@@ -290,35 +318,42 @@ def _resolve_project(name_or_id: str | None, *, refresh: bool = False) -> dict:
     raise CLIError(f"Project '{name_or_id}' not found in this workspace.")
 
 
-def _require_auth() -> None:
-    """Check that user is authenticated."""
-    creds = get_valid_credentials()
-    if creds is None:
-        raise CLIError(MSG_NOT_LOGGED_IN)
+def _require_auth(
+    *,
+    workspace_name: str | None = None,
+) -> tuple[str, WorkspaceCredentials]:
+    """Check that user is authenticated for a workspace."""
+    if workspace_name is None:
+        workspace_name = _get_active_workspace_name()
+
+    try:
+        credentials = _get_workspace_credentials(workspace_name)
+    except AuthenticationExpiredError:
+        raise CLIError(MSG_SESSION_EXPIRED) from None
+
+    return workspace_name, credentials
 
 
-def _require_subscription() -> None:
-    """Check that the active workspace has an active subscription.
+def _require_subscription(*, workspace_name: str) -> None:
+    """Check that a workspace has an active subscription.
 
     Uses cached status with TTL. If the cache is expired, stale, or False,
     refreshes from the platform to avoid blocking users who just subscribed.
     """
-    ws_name = get_active_workspace()
-    if not ws_name:
-        return  # Will be caught by _require_auth
-
-    cached = load_subscription_status(ws_name, max_age=CACHE_TTL_SECONDS)
+    cached = load_subscription_status(workspace_name, max_age=CACHE_TTL_SECONDS)
     if cached is True:
         return
 
     # Cached status is False, None, or expired — refresh to get the latest
     with contextlib.suppress(Exception):
-        _refresh_projects()  # Also updates subscription cache
+        _refresh_projects(
+            workspace_name=workspace_name
+        )  # Also updates subscription cache
 
     # Re-check after refresh (no TTL — we just refreshed)
-    status = load_subscription_status(ws_name)
+    status = load_subscription_status(workspace_name)
     if status is not True:
         raise CLIError(
             "Your workspace requires an active subscription for this action.\n"
-            f"  Upgrade at: {PLATFORM_URL}/{ws_name}/settings/billing"
+            f"  Upgrade at: {PLATFORM_URL}/{workspace_name}/settings/billing"
         )

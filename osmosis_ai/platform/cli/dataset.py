@@ -21,7 +21,6 @@ from osmosis_ai.platform.api.models import (
 from osmosis_ai.platform.auth import (
     AuthenticationExpiredError,
     PlatformAPIError,
-    get_active_workspace,
 )
 from osmosis_ai.platform.auth.config import PLATFORM_URL
 
@@ -39,17 +38,23 @@ app = typer.Typer(
 )
 
 
-def _resolve_project_id(project: str | None) -> str:
+def _resolve_project_id(project: str | None, *, workspace_name: str) -> str:
     """Get project ID from --project arg, env, or default."""
-    proj = _resolve_project(project)
+    proj = _resolve_project(project, workspace_name=workspace_name)
     return proj["id"]
 
 
-def _abort_multipart(client: Any, dataset_id: str, upload_id: str | None) -> None:
+def _abort_multipart(
+    client: Any,
+    dataset_id: str,
+    upload_id: str | None,
+    *,
+    credentials: Any | None = None,
+) -> None:
     """Best-effort abort of a multipart upload."""
     if upload_id:
         with contextlib.suppress(Exception):
-            client.abort_upload(dataset_id, upload_id)
+            client.abort_upload(dataset_id, upload_id, credentials=credentials)
 
 
 # ── Complete-upload retry (P0 reliability fix) ───────────────────────
@@ -70,6 +75,7 @@ def _complete_with_retry(
     extension: str | None = None,
     upload_id: str | None = None,
     parts: list[dict] | None = None,
+    credentials: Any | None = None,
 ) -> Any:
     """Call ``client.complete_upload`` with automatic retry on transient errors.
 
@@ -94,6 +100,7 @@ def _complete_with_retry(
                 extension,
                 upload_id=upload_id,
                 parts=parts,
+                credentials=credentials,
             )
         except AuthenticationExpiredError:
             raise  # Not transient — surface immediately
@@ -127,8 +134,8 @@ def upload(
     ),
 ) -> None:
     """Upload a dataset file."""
-    _require_auth()
-    _require_subscription()
+    ws_name, credentials = _require_auth()
+    _require_subscription(workspace_name=ws_name)
 
     from osmosis_ai.platform.api.client import OsmosisClient
     from osmosis_ai.platform.api.upload import (
@@ -163,10 +170,9 @@ def upload(
             "File validation failed:\n" + "\n".join(f"  - {e}" for e in errors)
         )
 
-    proj = _resolve_project(project)
+    proj = _resolve_project(project, workspace_name=ws_name)
     project_id = proj["id"]
     project_name = proj.get("project_name", "")
-    ws_name = get_active_workspace()
 
     # Confirm upload target
     console.print()
@@ -189,7 +195,13 @@ def upload(
 
     # Step 1: Create dataset record + get upload instructions
     try:
-        dataset = client.create_dataset(project_id, file_path.name, file_size, ext)
+        dataset = client.create_dataset(
+            project_id,
+            file_path.name,
+            file_size,
+            ext,
+            credentials=credentials,
+        )
     except AuthenticationExpiredError:
         raise CLIError(MSG_SESSION_EXPIRED) from None
     except PlatformAPIError as e:
@@ -221,13 +233,28 @@ def upload(
                     file_path, upload_info, progress_callback=progress_cb
                 )
         except KeyboardInterrupt:
-            _abort_multipart(client, dataset.id, upload_info.upload_id)
+            _abort_multipart(
+                client,
+                dataset.id,
+                upload_info.upload_id,
+                credentials=credentials,
+            )
             raise CLIError("Upload cancelled by user.") from None
         except RuntimeError as e:
-            _abort_multipart(client, dataset.id, upload_info.upload_id)
+            _abort_multipart(
+                client,
+                dataset.id,
+                upload_info.upload_id,
+                credentials=credentials,
+            )
             raise CLIError(f"Upload failed: {e}") from e
         except Exception:
-            _abort_multipart(client, dataset.id, upload_info.upload_id)
+            _abort_multipart(
+                client,
+                dataset.id,
+                upload_info.upload_id,
+                credentials=credentials,
+            )
             raise
         _complete_with_retry(
             client,
@@ -236,6 +263,7 @@ def upload(
             ext,
             upload_id=upload_info.upload_id,
             parts=parts,
+            credentials=credentials,
         )
     else:
         try:
@@ -246,11 +274,17 @@ def upload(
         except KeyboardInterrupt:
             console.print("\nUpload interrupted.")
             with contextlib.suppress(Exception):
-                client.delete_dataset(dataset.id)
+                client.delete_dataset(dataset.id, credentials=credentials)
             raise CLIError("Upload cancelled by user.") from None
         except RuntimeError as e:
             raise CLIError(f"Upload failed: {e}") from e
-        _complete_with_retry(client, dataset.id, upload_info.s3_key, ext)
+        _complete_with_retry(
+            client,
+            dataset.id,
+            upload_info.s3_key,
+            ext,
+            credentials=credentials,
+        )
 
     console.print(f"Upload complete. Dataset ID: {dataset.id}", style="green")
     url = f"{PLATFORM_URL}/{ws_name}/{project_name}/training-data/{dataset.id}"
@@ -264,13 +298,13 @@ def list_datasets(
     ),
 ) -> None:
     """List datasets."""
-    _require_auth()
+    ws_name, credentials = _require_auth()
     from osmosis_ai.platform.api.client import OsmosisClient
 
-    project_id = _resolve_project_id(project)
+    project_id = _resolve_project_id(project, workspace_name=ws_name)
     client = OsmosisClient()
     try:
-        result = client.list_datasets(project_id)
+        result = client.list_datasets(project_id, credentials=credentials)
     except AuthenticationExpiredError:
         raise CLIError(MSG_SESSION_EXPIRED) from None
     except PlatformAPIError as e:
@@ -298,6 +332,8 @@ def list_datasets(
 
         if status_color:
             status_info = console.format_styled(status_info, status_color)
+        else:
+            status_info = console.escape(status_info)
 
         console.print(
             f"  {d.id[:8]}  {d.file_name}  {_format_size(d.file_size)}  {status_info}"
@@ -312,12 +348,12 @@ def status(
     id: str = typer.Argument(..., help="Dataset ID."),
 ) -> None:
     """Check dataset processing status."""
-    _require_auth()
+    _, credentials = _require_auth()
     from osmosis_ai.platform.api.client import OsmosisClient
 
     client = OsmosisClient()
     try:
-        ds = client.get_dataset(id)
+        ds = client.get_dataset(id, credentials=credentials)
     except AuthenticationExpiredError:
         raise CLIError(MSG_SESSION_EXPIRED) from None
     except PlatformAPIError as e:
@@ -348,12 +384,12 @@ def preview(
     rows: int = typer.Option(5, "--rows", help="Number of rows to show."),
 ) -> None:
     """Preview dataset rows."""
-    _require_auth()
+    _, credentials = _require_auth()
     from osmosis_ai.platform.api.client import OsmosisClient
 
     client = OsmosisClient()
     try:
-        ds = client.get_dataset(id)
+        ds = client.get_dataset(id, credentials=credentials)
     except AuthenticationExpiredError:
         raise CLIError(MSG_SESSION_EXPIRED) from None
     except PlatformAPIError as e:

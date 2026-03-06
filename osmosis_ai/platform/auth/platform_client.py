@@ -45,11 +45,14 @@ class SubscriptionRequiredError(PlatformAPIError):
         )
 
 
-def _handle_401_and_cleanup() -> None:
-    """Handle 401 by deleting current workspace credentials and raising error."""
-    active_workspace = get_active_workspace()
-    if active_workspace:
-        delete_workspace_credentials(active_workspace)
+def _handle_401_and_cleanup(workspace_name: str | None = None) -> None:
+    """Handle 401 by deleting workspace credentials and raising error."""
+    # platform_request always passes the workspace name from the request
+    # credentials. Keep the fallback for direct helper callers and tests.
+    if workspace_name is None:
+        workspace_name = get_active_workspace()
+    if workspace_name:
+        delete_workspace_credentials(workspace_name)
 
     raise AuthenticationExpiredError(
         "Your session has expired or been revoked. "
@@ -91,6 +94,7 @@ def platform_request(
         raise AuthenticationExpiredError(
             "No valid credentials found. Please run 'osmosis login' first."
         )
+    workspace_name = credentials.organization.name
 
     url = f"{PLATFORM_URL}{endpoint}"
 
@@ -111,7 +115,7 @@ def platform_request(
             return result
     except HTTPError as e:
         if e.code == 401:
-            _handle_401_and_cleanup()
+            _handle_401_and_cleanup(workspace_name)
 
         # Best-effort capture of response body for debugging (truncate to avoid huge logs)
         detail = ""

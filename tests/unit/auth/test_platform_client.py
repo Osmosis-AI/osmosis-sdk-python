@@ -320,7 +320,25 @@ class TestPlatformRequest:
         with pytest.raises(AuthenticationExpiredError):
             platform_request("/api/test", credentials=creds)
 
-        mock_cleanup.assert_called_once()
+        mock_cleanup.assert_called_once_with("TestOrg")
+
+    @patch("osmosis_ai.platform.auth.platform_client.delete_workspace_credentials")
+    @patch("osmosis_ai.platform.auth.platform_client.urlopen")
+    @patch("osmosis_ai.platform.auth.platform_client.load_credentials")
+    def test_loaded_credentials_401_cleans_up_loaded_workspace(
+        self,
+        mock_load: MagicMock,
+        mock_urlopen: MagicMock,
+        mock_delete: MagicMock,
+    ) -> None:
+        """Verify 401 cleanup uses the workspace from loaded credentials."""
+        mock_load.return_value = _make_credentials(org_name="LoadedWorkspace")
+        mock_urlopen.side_effect = _make_http_error(401, "Unauthorized")
+
+        with pytest.raises(AuthenticationExpiredError):
+            platform_request("/api/test", credentials=None)
+
+        mock_delete.assert_called_once_with("LoadedWorkspace")
 
     @patch("osmosis_ai.platform.auth.platform_client.urlopen")
     def test_non_401_http_error_raises_platform_api_error(
