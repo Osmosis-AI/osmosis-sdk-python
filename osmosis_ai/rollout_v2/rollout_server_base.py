@@ -1,15 +1,16 @@
-from typing import Type, Any, Dict
 import logging
 import traceback
+from typing import Any, Dict, Type
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException
 
 from osmosis_ai.rollout_v2.grader import Grader
+from osmosis_ai.rollout_v2.server_state import ConcurrencyLimiter, RolloutServerState
 from osmosis_ai.rollout_v2.context import RolloutContext, GraderContext
 from osmosis_ai.rollout_v2.utils.http_utils import post_json_with_retry
 from osmosis_ai.rollout_v2.utils.misc import map_initial_messages_to_content_blocks
 from osmosis_ai.rollout_v2.agent_workflow import (
-    AgentWorkflow, 
+    AgentWorkflow,
     AgentWorkflowContext,
 )
 from osmosis_ai.rollout_v2.types import (
@@ -17,12 +18,14 @@ from osmosis_ai.rollout_v2.types import (
     RolloutErrorCategory,
     RolloutInitRequest,
     RolloutInitResponse,
+    RolloutServerConfig,
     RolloutStatus,
     GraderInitRequest,
     GraderInitResponse,
     AgentWorkflowConfig,
 )
 
+logger = logging.getLogger(__name__)
 
 def _categorize_exception(exc: Exception) -> RolloutErrorCategory:
     if isinstance(exc, TimeoutError):
@@ -37,63 +40,70 @@ def _categorize_exception(exc: Exception) -> RolloutErrorCategory:
 async def run_grader_with_callback(
     grader: Grader,
     ctx: GraderContext,
+    limiter: ConcurrencyLimiter,
 ) -> None:
-    try:
-        await grader.grade(ctx)
+    async with limiter.acquire():
+        try:
+            await grader.grade(ctx)
 
-        graded_samples = ctx.get_samples()
-        assert all(sample.reward is not None for sample in graded_samples.values()), "All samples must have a reward"
-        ctx.set_grader_status(GraderStatus.SUCCESS)
-    except Exception as e:
-        logging.error(traceback.format_exc())
-        ctx.set_grader_status(GraderStatus.FAILURE)
-        ctx.set_grader_error(
-            message=str(e),
-            category=_categorize_exception(e),
+            graded_samples = ctx.get_samples()
+            assert all(sample.reward is not None for sample in graded_samples.values()), "All samples must have a reward"
+            ctx.set_grader_status(GraderStatus.SUCCESS)
+        except Exception as e:
+            logging.error(traceback.format_exc())
+            ctx.set_grader_status(GraderStatus.FAILURE)
+            ctx.set_grader_error(
+                message=str(e),
+                category=_categorize_exception(e),
+            )
+
+        # Run callback to notify the rollout server that the grader is complete.
+        await post_json_with_retry(
+            url=ctx.completion_callback_url,
+            payload=ctx.make_grader_complete_request().model_dump(),
         )
-
-    # Run callback to notify the rollout server that the grader is complete.
-    await post_json_with_retry(
-        url=ctx.completion_callback_url,
-        payload=ctx.make_grader_complete_request().model_dump(),
-    )
 
 
 async def run_agent_workflow_with_callback(
     agent_workflow: AgentWorkflow,
     agent_workflow_ctx: AgentWorkflowContext,
     rollout_ctx: RolloutContext,
+    limiter: ConcurrencyLimiter,
 ) -> None:
-    # Run the agent and set the final status
-    with rollout_ctx:
-        try:
-            await agent_workflow.run(agent_workflow_ctx)
-            rollout_ctx.set_rollout_status(RolloutStatus.SUCCESS)
-        except Exception as e:
-            logging.error(traceback.format_exc())
-            rollout_ctx.set_rollout_status(RolloutStatus.FAILURE)
-            rollout_ctx.set_rollout_error(
-                message=str(e),
-                category=_categorize_exception(e),
-            )
+    async with limiter.acquire():
+        # Run the agent and set the final status
+        with rollout_ctx:
+            try:
+                await agent_workflow.run(agent_workflow_ctx)
+                rollout_ctx.set_rollout_status(RolloutStatus.SUCCESS)
+            except Exception as e:
+                logging.error(traceback.format_exc())
+                rollout_ctx.set_rollout_status(RolloutStatus.FAILURE)
+                rollout_ctx.set_rollout_error(
+                    message=str(e),
+                    category=_categorize_exception(e),
+                )
 
-    # Run callback to notify the rollout server that the rollout is complete.
-    await post_json_with_retry(
-        url=rollout_ctx.completion_callback_url,
-        payload=rollout_ctx.make_rollout_complete_request().model_dump(),
-    )
+        # Run callback to notify the rollout server that the rollout is complete.
+        await post_json_with_retry(
+            url=rollout_ctx.completion_callback_url,
+            payload=rollout_ctx.make_rollout_complete_request().model_dump(),
+        )
 
 def create_app(
     *,
     agent_workflow_cls: Type[AgentWorkflow],
     grader_cls: Type[Grader],
     agent_workflow_config: AgentWorkflowConfig,
+    server_config: RolloutServerConfig | None = None,
 ) -> FastAPI:
+    rollout_server_state = RolloutServerState(server_config or RolloutServerConfig())
     app = FastAPI()
+    app.state.rollout_server_state = rollout_server_state
 
     @app.get("/health")
-    async def health() -> Dict[str, str]:
-        return {"status": "ok"}
+    async def health() -> Dict[str, Any]:
+        return rollout_server_state.health_payload()
 
     @app.post("/rollout")
     async def rollout(
@@ -117,6 +127,7 @@ def create_app(
                 agent_workflow,
                 agent_workflow_ctx,
                 rollout_ctx,
+                rollout_server_state.agent_workflow_concurrency_limiter,
             )
             return RolloutInitResponse()
         except Exception as e:
@@ -137,6 +148,7 @@ def create_app(
                 run_grader_with_callback,
                 grader,
                 grader_ctx,
+                rollout_server_state.grader_concurrency_limiter,
             )
             return GraderInitResponse()
         except Exception as e:

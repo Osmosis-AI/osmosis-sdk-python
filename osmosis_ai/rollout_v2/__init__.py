@@ -22,6 +22,7 @@ from osmosis_ai.rollout_v2.types import (
     AgentWorkflowConfig,
     GraderCompleteRequest,
     GraderConfig,
+    GraderConcurrencyConfig,
     GraderInitRequest,
     GraderInitResponse,
     GraderStatus,
@@ -31,7 +32,9 @@ from osmosis_ai.rollout_v2.types import (
     RolloutInitRequest,
     RolloutInitResponse,
     RolloutSample,
+    RolloutServerConfig,
     RolloutStatus,
+    WorkflowConcurrencyConfig,
 )
 
 __all__ = [
@@ -41,6 +44,7 @@ __all__ = [
     "Grader",
     "GraderCompleteRequest",
     "GraderConfig",
+    "GraderConcurrencyConfig",
     "GraderContext",
     "GraderInitRequest",
     "GraderInitResponse",
@@ -54,9 +58,11 @@ __all__ = [
     "RolloutInitRequest",
     "RolloutInitResponse",
     "RolloutSample",
+    "RolloutServerConfig",
     "RolloutSampleSource",
     "RolloutStatus",
     "StrandsRolloutSampleSource",
+    "WorkflowConcurrencyConfig",
     "create_app",
     "get_rollout_context",
 ]
