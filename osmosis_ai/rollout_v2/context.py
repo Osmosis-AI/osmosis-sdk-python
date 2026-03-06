@@ -1,0 +1,83 @@
+from typing import List, Optional, Dict, Any
+from dataclasses import dataclass, field
+from contextvars import ContextVar
+
+from osmosis_ai.rollout_v2.types import (
+    RolloutCompleteRequest,
+    RolloutSample,
+    RolloutStatus,
+    GraderCompleteRequest,
+    AgentWorkflowConfig,
+)
+from osmosis_ai.rollout_v2.rollout_sample import RolloutSampleSource
+
+rollout_contextvar: ContextVar = ContextVar("rollout_contextvar", default=None)
+
+@dataclass
+class RolloutContext:
+    rollout_id: str
+    completion_callback_url: str
+    chat_completions_url: str
+    rollout_sample_sources: List[RolloutSampleSource] = field(default_factory=list)
+    status: RolloutStatus = RolloutStatus.PENDING
+
+    def __enter__(self):
+        rollout_contextvar.set(self)
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        rollout_contextvar.set(None)
+
+    def set_rollout_status(self, status: RolloutStatus):
+        self.status = status
+
+    def make_rollout_complete_request(self) -> RolloutCompleteRequest:
+        # TODO: in the future, maybe we want to extract some metadata from agents that we are using
+        # samples = [source.make_rollout_sample() for source in self.rollout_sample_sources]
+        return RolloutCompleteRequest(
+            rollout_id=self.rollout_id,
+            status=self.status,
+        )
+
+def get_rollout_context() -> Optional[RolloutContext]:
+    return rollout_contextvar.get()
+
+@dataclass
+class GraderContext:
+    rollout_id: str
+    completion_callback_url: str
+    samples: Dict[str, RolloutSample] = field(default_factory=dict)
+
+    def get_samples(self) -> Dict[str, RolloutSample]:
+        '''
+        Returns a dictionary of sample ids to samples
+
+        Sample ids are usually the name/id of the agent, but if unspecified is a uuid string.
+        '''
+        return self.samples
+
+    def set_sample_reward(self, sample_id: str, reward: float):
+        if sample_id not in self.samples:
+            raise ValueError(f"Sample {sample_id} not found")
+        self.samples[sample_id].reward = reward
+        return self.samples
+
+    def make_grader_complete_request(self) -> GraderCompleteRequest:
+        return GraderCompleteRequest(
+            rollout_id=self.rollout_id,
+            samples=self.samples,
+        )
+
+@dataclass
+class AgentWorkflowContext[TConfig: AgentWorkflowConfig]:
+    '''
+    General context for an agent, agnostic of the rollout context.
+    '''
+    prompt: List[Dict[str, Any]]
+    config: TConfig
+
+    def __init__(self, 
+        prompt: List[Dict[str, Any]], 
+        config: TConfig,
+    ):
+        self.prompt = prompt
+        self.config = config
