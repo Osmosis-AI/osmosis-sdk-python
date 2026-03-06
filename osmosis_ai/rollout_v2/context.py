@@ -8,6 +8,7 @@ from osmosis_ai.rollout_v2.types import (
     RolloutSample,
     RolloutStatus,
     GraderCompleteRequest,
+    GraderStatus,
     AgentWorkflowConfig,
 )
 from osmosis_ai.rollout_v2.rollout_sample import RolloutSampleSource
@@ -58,6 +59,9 @@ class GraderContext:
     rollout_id: str
     completion_callback_url: str
     samples: Dict[str, RolloutSample] = field(default_factory=dict)
+    status: GraderStatus = GraderStatus.PENDING
+    err_message: str | None = None
+    err_category: RolloutErrorCategory | None = None
 
     def get_samples(self) -> Dict[str, RolloutSample]:
         '''
@@ -73,10 +77,22 @@ class GraderContext:
         self.samples[sample_id].reward = reward
         return self.samples
 
+    def set_grader_status(self, status: GraderStatus) -> None:
+        self.status = status
+
+    def set_grader_error(
+        self, *, message: str, category: RolloutErrorCategory
+    ) -> None:
+        self.err_message = message
+        self.err_category = category
+
     def make_grader_complete_request(self) -> GraderCompleteRequest:
         return GraderCompleteRequest(
             rollout_id=self.rollout_id,
+            status=self.status,
             samples=self.samples,
+            err_message=self.err_message,
+            err_category=self.err_category,
         )
 
 @dataclass

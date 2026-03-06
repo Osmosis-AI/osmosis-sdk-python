@@ -13,6 +13,7 @@ from osmosis_ai.rollout_v2.agent_workflow import (
     AgentWorkflowContext,
 )
 from osmosis_ai.rollout_v2.types import (
+    GraderStatus,
     RolloutErrorCategory,
     RolloutInitRequest,
     RolloutInitResponse,
@@ -23,7 +24,7 @@ from osmosis_ai.rollout_v2.types import (
 )
 
 
-def _categorize_rollout_exception(exc: Exception) -> RolloutErrorCategory:
+def _categorize_exception(exc: Exception) -> RolloutErrorCategory:
     if isinstance(exc, TimeoutError):
         return RolloutErrorCategory.TIMEOUT
     if isinstance(exc, (ValueError, TypeError, AssertionError)):
@@ -42,10 +43,14 @@ async def run_grader_with_callback(
 
         graded_samples = ctx.get_samples()
         assert all(sample.reward is not None for sample in graded_samples.values()), "All samples must have a reward"
-        
+        ctx.set_grader_status(GraderStatus.SUCCESS)
     except Exception as e:
         logging.error(traceback.format_exc())
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        ctx.set_grader_status(GraderStatus.FAILURE)
+        ctx.set_grader_error(
+            message=str(e),
+            category=_categorize_exception(e),
+        )
 
     # Run callback to notify the rollout server that the grader is complete.
     await post_json_with_retry(
@@ -69,7 +74,7 @@ async def run_agent_workflow_with_callback(
             rollout_ctx.set_rollout_status(RolloutStatus.FAILURE)
             rollout_ctx.set_rollout_error(
                 message=str(e),
-                category=_categorize_rollout_exception(e),
+                category=_categorize_exception(e),
             )
 
     # Run callback to notify the rollout server that the rollout is complete.
