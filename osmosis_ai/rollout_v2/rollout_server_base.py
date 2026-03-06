@@ -13,6 +13,7 @@ from osmosis_ai.rollout_v2.agent_workflow import (
     AgentWorkflowContext,
 )
 from osmosis_ai.rollout_v2.types import (
+    RolloutErrorCategory,
     RolloutInitRequest,
     RolloutInitResponse,
     RolloutStatus,
@@ -20,6 +21,17 @@ from osmosis_ai.rollout_v2.types import (
     GraderInitResponse,
     AgentWorkflowConfig,
 )
+
+
+def _categorize_rollout_exception(exc: Exception) -> RolloutErrorCategory:
+    if isinstance(exc, TimeoutError):
+        return RolloutErrorCategory.TIMEOUT
+    if isinstance(exc, (ValueError, TypeError, AssertionError)):
+        return RolloutErrorCategory.VALIDATION_ERROR
+    if isinstance(exc, HTTPException):
+        return RolloutErrorCategory.HTTP_ERROR
+    return RolloutErrorCategory.AGENT_ERROR
+
 
 async def run_grader_with_callback(
     grader: Grader,
@@ -55,6 +67,10 @@ async def run_agent_workflow_with_callback(
         except Exception as e:
             logging.error(traceback.format_exc())
             rollout_ctx.set_rollout_status(RolloutStatus.FAILURE)
+            rollout_ctx.set_rollout_error(
+                message=str(e),
+                category=_categorize_rollout_exception(e),
+            )
 
     # Run callback to notify the rollout server that the rollout is complete.
     await post_json_with_retry(

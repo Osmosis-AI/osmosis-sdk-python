@@ -4,6 +4,7 @@ from contextvars import ContextVar
 
 from osmosis_ai.rollout_v2.types import (
     RolloutCompleteRequest,
+    RolloutErrorCategory,
     RolloutSample,
     RolloutStatus,
     GraderCompleteRequest,
@@ -21,6 +22,8 @@ class RolloutContext:
     chat_completions_url: str
     rollout_sample_sources: List[RolloutSampleSource] = field(default_factory=list)
     status: RolloutStatus = RolloutStatus.PENDING
+    err_message: str | None = None
+    err_category: RolloutErrorCategory | None = None
 
     def __enter__(self):
         rollout_contextvar.set(self)
@@ -31,12 +34,20 @@ class RolloutContext:
     def set_rollout_status(self, status: RolloutStatus):
         self.status = status
 
+    def set_rollout_error(
+        self, *, message: str, category: RolloutErrorCategory
+    ) -> None:
+        self.err_message = message
+        self.err_category = category
+
     def make_rollout_complete_request(self) -> RolloutCompleteRequest:
         # TODO: in the future, maybe we want to extract some metadata from agents that we are using
         # samples = [source.make_rollout_sample() for source in self.rollout_sample_sources]
         return RolloutCompleteRequest(
             rollout_id=self.rollout_id,
             status=self.status,
+            err_message=self.err_message,
+            err_category=self.err_category,
         )
 
 def get_rollout_context() -> Optional[RolloutContext]:

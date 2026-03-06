@@ -24,6 +24,13 @@ class RolloutStatus(str, Enum):
     FAILURE = "failure"
 
 
+class RolloutErrorCategory(str, Enum):
+    TIMEOUT = "timeout"
+    VALIDATION_ERROR = "validation_error"
+    HTTP_ERROR = "http_error"
+    AGENT_ERROR = "agent_error"
+
+
 class RolloutInitRequest(BaseModel):
     initial_messages: List[MessageDict]
     rollout_id: str
@@ -43,7 +50,7 @@ class RolloutCompleteRequest(BaseModel):
     extra_fields: Optional[Dict[str, Any]] = None
 
     err_message: str | None = None
-    err_category: str | None = None
+    err_category: RolloutErrorCategory | None = None
 
 
 class MultiTurnMode(str, Enum):

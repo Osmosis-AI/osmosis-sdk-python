@@ -3,6 +3,7 @@ from .grader import GraderCompleteRequest, GraderInitRequest, GraderInitResponse
 from .rollout import (
     MultiTurnMode,
     RolloutCompleteRequest,
+    RolloutErrorCategory,
     RolloutInitRequest,
     RolloutInitResponse,
     RolloutSample,
@@ -15,6 +16,7 @@ __all__ = [
     "GraderConfig",
     "RolloutSample",
     "RolloutStatus",
+    "RolloutErrorCategory",
     "RolloutInitRequest",
     "RolloutInitResponse",
     "RolloutCompleteRequest",
