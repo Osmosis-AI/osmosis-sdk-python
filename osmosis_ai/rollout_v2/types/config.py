@@ -1,5 +1,4 @@
 from pydantic import BaseModel, ConfigDict, Field
-from typing import Optional
 
 
 class ConcurrencyConfig(BaseModel):
@@ -14,10 +13,12 @@ class BaseConfig(BaseModel):
     )
 
     name: str
-    description: Optional[str] = None
+    description: str | None = None
+
 
 class AgentWorkflowConfig(BaseConfig):
     concurrency: ConcurrencyConfig = Field(default_factory=ConcurrencyConfig)
+
 
 class GraderConfig(BaseConfig):
     concurrency: ConcurrencyConfig = Field(default_factory=ConcurrencyConfig)

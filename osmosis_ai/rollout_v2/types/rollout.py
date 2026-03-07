@@ -1,21 +1,21 @@
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from pydantic import BaseModel, Field
 
-MessageDict = Dict[str, List | str]
+MessageDict = dict[str, list | str]
 
 
 class RolloutSample(BaseModel):
     id: str
-    messages: List[MessageDict] = Field(default_factory=list)
+    messages: list[MessageDict] = Field(default_factory=list)
     label: str | None = None
     reward: float | None = None
 
     remove_sample: bool = False
 
-    metrics: Dict[str, Any] = Field(default_factory=dict)
-    extra_fields: Dict[str, Any] = Field(default_factory=dict)
+    metrics: dict[str, Any] = Field(default_factory=dict)
+    extra_fields: dict[str, Any] = Field(default_factory=dict)
 
 
 class RolloutStatus(str, Enum):
@@ -32,22 +32,21 @@ class RolloutErrorCategory(str, Enum):
 
 
 class RolloutInitRequest(BaseModel):
-    initial_messages: List[MessageDict]
+    initial_messages: list[MessageDict]
     rollout_id: str
 
     chat_completions_url: str
     completion_callback_url: str
 
 
-class RolloutInitResponse(BaseModel):
-    ...
+class RolloutInitResponse(BaseModel): ...
 
 
 class RolloutCompleteRequest(BaseModel):
     rollout_id: str
     status: RolloutStatus
 
-    extra_fields: Optional[Dict[str, Any]] = None
+    extra_fields: dict[str, Any] | None = None
 
     err_message: str | None = None
     err_category: RolloutErrorCategory | None = None

@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Any, Dict, Optional
+from typing import Any
 
 from pydantic import BaseModel
 
@@ -8,14 +8,13 @@ from osmosis_ai.rollout_v2.types.rollout import RolloutErrorCategory, RolloutSam
 
 class GraderInitRequest(BaseModel):
     rollout_id: str
-    samples: Dict[str, RolloutSample]
+    samples: dict[str, RolloutSample]
     completion_callback_url: str
 
-    extra_fields: Optional[Dict[str, Any]] = None
+    extra_fields: dict[str, Any] | None = None
 
 
-class GraderInitResponse(BaseModel):
-    ...
+class GraderInitResponse(BaseModel): ...
 
 
 class GraderStatus(str, Enum):
@@ -27,6 +26,6 @@ class GraderStatus(str, Enum):
 class GraderCompleteRequest(BaseModel):
     rollout_id: str
     status: GraderStatus
-    samples: Dict[str, RolloutSample]
+    samples: dict[str, RolloutSample]
     err_message: str | None = None
     err_category: RolloutErrorCategory | None = None

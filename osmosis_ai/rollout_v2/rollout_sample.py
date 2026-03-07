@@ -1,7 +1,7 @@
 from abc import ABC, abstractmethod
-from typing import List
 
 from osmosis_ai.rollout_v2.types import RolloutSample
+
 
 class RolloutSampleSource(ABC):
     @abstractmethod
@@ -9,5 +9,5 @@ class RolloutSampleSource(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def get_messages(self) -> List:
+    def get_messages(self) -> list:
         raise NotImplementedError

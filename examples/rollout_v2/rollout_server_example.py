@@ -1,21 +1,22 @@
-import uvicorn
 import logging
 import re
 from typing import Any
 
+import uvicorn
 from rich import print
-
-from strands.models.model import Model
 from strands import tool
 from strands.agent.agent_result import AgentResult
+from strands.models.model import Model
 
-from osmosis_ai.rollout_v2.grader import Grader
-from osmosis_ai.rollout_v2.context import GraderContext
-
-from osmosis_ai.rollout_v2.rollout_server_base import create_app
 from osmosis_ai.rollout_v2.agent_workflow import AgentWorkflow, AgentWorkflowContext
+from osmosis_ai.rollout_v2.context import GraderContext
+from osmosis_ai.rollout_v2.grader import Grader
+from osmosis_ai.rollout_v2.integrations.strands import OsmosisRolloutModel
+from osmosis_ai.rollout_v2.integrations.strands import (
+    OsmosisStrandsAgent as StrandsAgent,
+)
+from osmosis_ai.rollout_v2.rollout_server_base import create_app
 from osmosis_ai.rollout_v2.types import AgentWorkflowConfig, GraderConfig
-from osmosis_ai.rollout_v2.integrations.strands import OsmosisStrandsAgent as StrandsAgent, OsmosisRolloutModel
 
 # import litellm
 # litellm._turn_on_debug()
@@ -31,27 +32,29 @@ from osmosis_ai.rollout_v2.integrations.strands import OsmosisStrandsAgent as St
 
 logger = logging.getLogger(__name__)
 
+
 def extract_solution(solution_str):
-    solution = re.search(r'####\s*([-+]?\d*\.?\d+)', solution_str)
-    if(not solution or solution is None):
+    solution = re.search(r"####\s*([-+]?\d*\.?\d+)", solution_str)
+    if not solution or solution is None:
         return None
     final_solution = solution.group(1)
     return final_solution
 
+
 class MultiplyGrader(Grader):
-    def compute_reward(self, solution_str: str, ground_truth: str, extra_info: dict=None, **kwargs):
+    def compute_reward(self, solution_str: str, ground_truth: str):
         extracted = extract_solution(solution_str)
         try:
             sol_val = float(extracted)
-        except:
+        except Exception:
             return 0.0
 
         gt_val = float(ground_truth)
 
-        if(sol_val is None):
+        if sol_val is None:
             return 0.0
 
-        if(abs(gt_val - sol_val) < 1e-2):
+        if abs(gt_val - sol_val) < 1e-2:
             return 1.0
         return 0.0
 
@@ -59,7 +62,10 @@ class MultiplyGrader(Grader):
         rollout_samples = ctx.get_samples()
 
         if "multiply" in rollout_samples:
-            reward = self.compute_reward(rollout_samples["multiply"].messages[-1]["content"], rollout_samples["multiply"].label)
+            reward = self.compute_reward(
+                rollout_samples["multiply"].messages[-1]["content"],
+                rollout_samples["multiply"].label,
+            )
             ctx.set_sample_reward("multiply", reward)
         else:
             for sample_id, _ in rollout_samples.items():
@@ -69,6 +75,7 @@ class MultiplyGrader(Grader):
 class MultiplyGraderConfig(GraderConfig):
     name: str = "MultiplyGrader"
     description: str = "Grades multiplication rollouts"
+
 
 @tool(name="multiply")
 def multiply_tool(a: float, b: float) -> float:
@@ -83,6 +90,7 @@ def multiply_tool(a: float, b: float) -> float:
     - The product of the two numbers
     """
     return a * b
+
 
 class MultiplyAgentWorkflow(AgentWorkflow):
     async def check_done(self, result: AgentResult) -> bool:
@@ -99,7 +107,7 @@ class MultiplyAgentWorkflow(AgentWorkflow):
             solution = extract_solution(text_content.get("text", ""))
             if solution:
                 return True
-        
+
         return False
 
     async def run(self, ctx: AgentWorkflowContext):
@@ -123,11 +131,13 @@ class MultiplyAgentWorkflow(AgentWorkflow):
             if await self.check_done(result):
                 break
 
+
 class MultiplyAgentWorkflowConfig(AgentWorkflowConfig):
     name: str = "MultiplyAgentWorkflow"
     description: str = "Multiply two numbers"
     model: Model
     tools: Any
+
 
 def multiply():
     agent_workflow_config = MultiplyAgentWorkflowConfig(
@@ -140,7 +150,7 @@ def multiply():
                 "top_p": 1.0,
                 "max_tokens": 4096,
             }
-        )
+        ),
     )
     grader_config = MultiplyGraderConfig(
         name="MultiplyGrader",
@@ -153,6 +163,7 @@ def multiply():
         grader_config=grader_config,
     )
     uvicorn.run(app, host="0.0.0.0", port=8000)
+
 
 if __name__ == "__main__":
     multiply()

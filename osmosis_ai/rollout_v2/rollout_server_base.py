@@ -1,31 +1,32 @@
 import logging
 import traceback
-from typing import Any, Dict, Type
+from typing import Any
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException
 
-from osmosis_ai.rollout_v2.grader import Grader
-from osmosis_ai.rollout_v2.server_state import ConcurrencyLimiter, RolloutServerState
-from osmosis_ai.rollout_v2.context import RolloutContext, GraderContext
-from osmosis_ai.rollout_v2.utils.http_utils import post_json_with_retry
-from osmosis_ai.rollout_v2.utils.misc import map_initial_messages_to_content_blocks
 from osmosis_ai.rollout_v2.agent_workflow import (
     AgentWorkflow,
     AgentWorkflowContext,
 )
+from osmosis_ai.rollout_v2.context import GraderContext, RolloutContext
+from osmosis_ai.rollout_v2.grader import Grader
+from osmosis_ai.rollout_v2.server_state import ConcurrencyLimiter, RolloutServerState
 from osmosis_ai.rollout_v2.types import (
+    AgentWorkflowConfig,
     GraderConfig,
+    GraderInitRequest,
+    GraderInitResponse,
     GraderStatus,
     RolloutErrorCategory,
     RolloutInitRequest,
     RolloutInitResponse,
     RolloutStatus,
-    GraderInitRequest,
-    GraderInitResponse,
-    AgentWorkflowConfig,
 )
+from osmosis_ai.rollout_v2.utils.http_utils import post_json_with_retry
+from osmosis_ai.rollout_v2.utils.misc import map_initial_messages_to_content_blocks
 
 logger = logging.getLogger(__name__)
+
 
 def _categorize_exception(exc: Exception) -> RolloutErrorCategory:
     if isinstance(exc, TimeoutError):
@@ -47,7 +48,9 @@ async def run_grader_with_callback(
             await grader.grade(ctx)
 
             graded_samples = ctx.get_samples()
-            assert all(sample.reward is not None for sample in graded_samples.values()), "All samples must have a reward"
+            assert all(
+                sample.reward is not None for sample in graded_samples.values()
+            ), "All samples must have a reward"
             ctx.set_grader_status(GraderStatus.SUCCESS)
         except Exception as e:
             logging.error(traceback.format_exc())
@@ -90,10 +93,11 @@ async def run_agent_workflow_with_callback(
             payload=rollout_ctx.make_rollout_complete_request().model_dump(),
         )
 
+
 def create_app(
     *,
-    agent_workflow_cls: Type[AgentWorkflow],
-    grader_cls: Type[Grader],
+    agent_workflow_cls: type[AgentWorkflow],
+    grader_cls: type[Grader],
     agent_workflow_config: AgentWorkflowConfig,
     grader_config: GraderConfig,
 ) -> FastAPI:
@@ -105,7 +109,7 @@ def create_app(
     app.state.rollout_server_state = rollout_server_state
 
     @app.get("/health")
-    async def health() -> Dict[str, Any]:
+    async def health() -> dict[str, Any]:
         return rollout_server_state.health_payload()
 
     @app.post("/rollout")
@@ -113,18 +117,17 @@ def create_app(
         request: RolloutInitRequest, background_tasks: BackgroundTasks
     ) -> RolloutInitResponse:
         try:
-
             rollout_ctx = RolloutContext(
-                rollout_id=request.rollout_id, 
+                rollout_id=request.rollout_id,
                 completion_callback_url=request.completion_callback_url,
                 chat_completions_url=request.chat_completions_url,
             )
             agent_workflow = agent_workflow_cls(agent_workflow_config)
             agent_workflow_ctx = AgentWorkflowContext(
-                prompt=map_initial_messages_to_content_blocks(request.initial_messages), 
-                config=agent_workflow_config
+                prompt=map_initial_messages_to_content_blocks(request.initial_messages),
+                config=agent_workflow_config,
             )
-            
+
             background_tasks.add_task(
                 run_agent_workflow_with_callback,
                 agent_workflow,
@@ -142,8 +145,9 @@ def create_app(
         request: GraderInitRequest, background_tasks: BackgroundTasks
     ) -> GraderInitResponse:
         try:
-            grader_ctx = GraderContext(rollout_id=request.rollout_id, 
-                completion_callback_url=request.completion_callback_url, 
+            grader_ctx = GraderContext(
+                rollout_id=request.rollout_id,
+                completion_callback_url=request.completion_callback_url,
                 samples=request.samples,
             )
             grader = grader_cls(grader_config)
@@ -157,5 +161,5 @@ def create_app(
         except Exception as e:
             logging.error(traceback.format_exc())
             raise HTTPException(status_code=500, detail=str(e)) from e
-    return app
 
+    return app

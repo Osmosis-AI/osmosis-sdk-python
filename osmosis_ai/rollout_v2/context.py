@@ -1,27 +1,28 @@
-from typing import Any, Dict, Generic, List, Optional, TypeVar
-from dataclasses import dataclass, field
 from contextvars import ContextVar
+from dataclasses import dataclass, field
+from typing import Any, Generic, TypeVar
 
+from osmosis_ai.rollout_v2.rollout_sample import RolloutSampleSource
 from osmosis_ai.rollout_v2.types import (
+    AgentWorkflowConfig,
+    GraderCompleteRequest,
+    GraderStatus,
     RolloutCompleteRequest,
     RolloutErrorCategory,
     RolloutSample,
     RolloutStatus,
-    GraderCompleteRequest,
-    GraderStatus,
-    AgentWorkflowConfig,
 )
-from osmosis_ai.rollout_v2.rollout_sample import RolloutSampleSource
 
 rollout_contextvar: ContextVar = ContextVar("rollout_contextvar", default=None)
 TConfig = TypeVar("TConfig", bound=AgentWorkflowConfig)
+
 
 @dataclass
 class RolloutContext:
     rollout_id: str
     completion_callback_url: str
     chat_completions_url: str
-    rollout_sample_sources: List[RolloutSampleSource] = field(default_factory=list)
+    rollout_sample_sources: list[RolloutSampleSource] = field(default_factory=list)
     status: RolloutStatus = RolloutStatus.PENDING
     err_message: str | None = None
     err_category: RolloutErrorCategory | None = None
@@ -51,24 +52,26 @@ class RolloutContext:
             err_category=self.err_category,
         )
 
-def get_rollout_context() -> Optional[RolloutContext]:
+
+def get_rollout_context() -> RolloutContext | None:
     return rollout_contextvar.get()
+
 
 @dataclass
 class GraderContext:
     rollout_id: str
     completion_callback_url: str
-    samples: Dict[str, RolloutSample] = field(default_factory=dict)
+    samples: dict[str, RolloutSample] = field(default_factory=dict)
     status: GraderStatus = GraderStatus.PENDING
     err_message: str | None = None
     err_category: RolloutErrorCategory | None = None
 
-    def get_samples(self) -> Dict[str, RolloutSample]:
-        '''
+    def get_samples(self) -> dict[str, RolloutSample]:
+        """
         Returns a dictionary of sample ids to samples
 
         Sample ids are usually the name/id of the agent, but if unspecified is a uuid string.
-        '''
+        """
         return self.samples
 
     def set_sample_reward(self, sample_id: str, reward: float):
@@ -80,9 +83,7 @@ class GraderContext:
     def set_grader_status(self, status: GraderStatus) -> None:
         self.status = status
 
-    def set_grader_error(
-        self, *, message: str, category: RolloutErrorCategory
-    ) -> None:
+    def set_grader_error(self, *, message: str, category: RolloutErrorCategory) -> None:
         self.err_message = message
         self.err_category = category
 
@@ -95,16 +96,19 @@ class GraderContext:
             err_category=self.err_category,
         )
 
+
 @dataclass
 class AgentWorkflowContext(Generic[TConfig]):
-    '''
+    """
     General context for an agent, agnostic of the rollout context.
-    '''
-    prompt: List[Dict[str, Any]]
+    """
+
+    prompt: list[dict[str, Any]]
     config: TConfig
 
-    def __init__(self,
-        prompt: List[Dict[str, Any]],
+    def __init__(
+        self,
+        prompt: list[dict[str, Any]],
         config: TConfig,
     ):
         self.prompt = prompt
