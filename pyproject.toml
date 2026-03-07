@@ -34,6 +34,7 @@ dependencies = [
     "filelock>=3.0.0,<4.0.0",
     "xxhash>=3.0.0",
     "strands-agents[litellm]>=1.29.0",
+    "rich>=14.2.0",
 ]
 
 [project.optional-dependencies]
