@@ -48,7 +48,7 @@ class OsmosisRolloutModel(LiteLLMModel):
 
 class OsmosisStrandsAgent(StrandsAgent):
     def __init__(self, *args, model: Model | str | None = None, **kwargs):
-        if rollout_context := get_rollout_context() and isinstance(
+        if (rollout_context := get_rollout_context()) and isinstance(
             model, OsmosisRolloutModel
         ):
             # Substitute the dummy OsmosisRolloutModel with the real litellm rollout model
