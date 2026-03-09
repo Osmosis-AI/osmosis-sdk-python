@@ -345,15 +345,36 @@ def list_datasets(
 
 @app.command("status")
 def status(
-    id: str = typer.Argument(..., help="Dataset ID."),
+    id: str = typer.Argument(
+        ..., help="Dataset ID (or short prefix from 'dataset list')."
+    ),
+    project: str | None = typer.Option(
+        None, "--project", help="Project name (used for short ID lookup)."
+    ),
 ) -> None:
     """Check dataset processing status."""
-    _, credentials = _require_auth()
+    ws_name, credentials = _require_auth()
     from osmosis_ai.platform.api.client import OsmosisClient
 
+    from .utils import resolve_id_prefix
+
     client = OsmosisClient()
+
+    dataset_id = id
+    if len(id) < 32:
+        project_id = _resolve_project_id(project, workspace_name=ws_name)
+        try:
+            result = client.list_datasets(project_id, credentials=credentials)
+        except AuthenticationExpiredError:
+            raise CLIError(MSG_SESSION_EXPIRED) from None
+        except PlatformAPIError as e:
+            raise CLIError(str(e)) from e
+        dataset_id = resolve_id_prefix(
+            id, result.datasets, entity_name="dataset", has_more=result.has_more
+        )
+
     try:
-        ds = client.get_dataset(id, credentials=credentials)
+        ds = client.get_dataset(dataset_id, credentials=credentials)
     except AuthenticationExpiredError:
         raise CLIError(MSG_SESSION_EXPIRED) from None
     except PlatformAPIError as e:
@@ -380,16 +401,37 @@ def status(
 
 @app.command("preview")
 def preview(
-    id: str = typer.Argument(..., help="Dataset ID."),
+    id: str = typer.Argument(
+        ..., help="Dataset ID (or short prefix from 'dataset list')."
+    ),
     rows: int = typer.Option(5, "--rows", help="Number of rows to show."),
+    project: str | None = typer.Option(
+        None, "--project", help="Project name (used for short ID lookup)."
+    ),
 ) -> None:
     """Preview dataset rows."""
-    _, credentials = _require_auth()
+    ws_name, credentials = _require_auth()
     from osmosis_ai.platform.api.client import OsmosisClient
 
+    from .utils import resolve_id_prefix
+
     client = OsmosisClient()
+
+    dataset_id = id
+    if len(id) < 32:
+        project_id = _resolve_project_id(project, workspace_name=ws_name)
+        try:
+            result = client.list_datasets(project_id, credentials=credentials)
+        except AuthenticationExpiredError:
+            raise CLIError(MSG_SESSION_EXPIRED) from None
+        except PlatformAPIError as e:
+            raise CLIError(str(e)) from e
+        dataset_id = resolve_id_prefix(
+            id, result.datasets, entity_name="dataset", has_more=result.has_more
+        )
+
     try:
-        ds = client.get_dataset(id, credentials=credentials)
+        ds = client.get_dataset(dataset_id, credentials=credentials)
     except AuthenticationExpiredError:
         raise CLIError(MSG_SESSION_EXPIRED) from None
     except PlatformAPIError as e:

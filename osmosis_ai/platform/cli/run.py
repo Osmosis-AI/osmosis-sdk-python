@@ -105,15 +105,41 @@ def list_runs(
 
 @app.command("status")
 def status(
-    id: str = typer.Argument(..., help="Training run ID."),
+    id: str = typer.Argument(
+        ..., help="Training run ID (or short prefix from 'run list')."
+    ),
+    project: str | None = typer.Option(
+        None, "--project", help="Project name (used for short ID lookup)."
+    ),
 ) -> None:
     """Show training run details."""
-    _, credentials = _require_auth()
+    ws_name, credentials = _require_auth()
     from osmosis_ai.platform.api.client import OsmosisClient
 
+    from .utils import resolve_id_prefix
+
     client = OsmosisClient()
+
+    run_id = id
+    if len(id) < 32:
+        project_id = _resolve_project_id(project, workspace_name=ws_name)
+        try:
+            result = client.list_training_runs(
+                project_id, limit=50, credentials=credentials
+            )
+        except AuthenticationExpiredError:
+            raise CLIError(MSG_SESSION_EXPIRED) from None
+        except PlatformAPIError as e:
+            raise CLIError(str(e)) from e
+        run_id = resolve_id_prefix(
+            id,
+            result.training_runs,
+            entity_name="training run",
+            has_more=result.has_more,
+        )
+
     try:
-        run = client.get_training_run(id, credentials=credentials)
+        run = client.get_training_run(run_id, credentials=credentials)
     except AuthenticationExpiredError:
         raise CLIError(MSG_SESSION_EXPIRED) from None
     except PlatformAPIError as e:
