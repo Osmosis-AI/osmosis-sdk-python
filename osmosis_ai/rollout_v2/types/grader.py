@@ -12,6 +12,7 @@ class GraderInitRequest(BaseModel):
     completion_callback_url: str
 
     extra_fields: dict[str, Any] | None = None
+    controller_api_key: str | None = None
 
 
 class GraderInitResponse(BaseModel): ...

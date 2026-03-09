@@ -8,7 +8,7 @@ from osmosis_ai.rollout_v2.agent_workflow import (
     AgentWorkflow,
     AgentWorkflowContext,
 )
-from osmosis_ai.rollout_v2.context import GraderContext, RolloutContext
+from osmosis_ai.rollout_v2.context import ControllerAuth, GraderContext, RolloutContext
 from osmosis_ai.rollout_v2.grader import Grader
 from osmosis_ai.rollout_v2.server_state import ConcurrencyLimiter, RolloutServerState
 from osmosis_ai.rollout_v2.types import (
@@ -64,6 +64,9 @@ async def run_grader_with_callback(
         await post_json_with_retry(
             url=ctx.completion_callback_url,
             payload=ctx.make_grader_complete_request().model_dump(),
+            headers=ctx.controller_auth.as_bearer_headers()
+            if ctx.controller_auth
+            else None,
         )
 
 
@@ -91,6 +94,11 @@ async def run_agent_workflow_with_callback(
         await post_json_with_retry(
             url=rollout_ctx.completion_callback_url,
             payload=rollout_ctx.make_rollout_complete_request().model_dump(),
+            headers=(
+                rollout_ctx.controller_auth.as_bearer_headers()
+                if rollout_ctx.controller_auth
+                else None
+            ),
         )
 
 
@@ -121,6 +129,7 @@ def create_app(
                 rollout_id=request.rollout_id,
                 completion_callback_url=request.completion_callback_url,
                 chat_completions_url=request.chat_completions_url,
+                controller_auth=ControllerAuth(api_key=request.controller_api_key),
             )
             agent_workflow = agent_workflow_cls(agent_workflow_config)
             agent_workflow_ctx = AgentWorkflowContext(
@@ -148,6 +157,7 @@ def create_app(
             grader_ctx = GraderContext(
                 rollout_id=request.rollout_id,
                 completion_callback_url=request.completion_callback_url,
+                controller_auth=ControllerAuth(api_key=request.controller_api_key),
                 samples=request.samples,
             )
             grader = grader_cls(grader_config)

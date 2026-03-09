@@ -37,6 +37,7 @@ class RolloutInitRequest(BaseModel):
 
     chat_completions_url: str
     completion_callback_url: str
+    controller_api_key: str | None = None
 
 
 class RolloutInitResponse(BaseModel): ...

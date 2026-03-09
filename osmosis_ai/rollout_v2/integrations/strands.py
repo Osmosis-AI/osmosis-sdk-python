@@ -59,8 +59,11 @@ class OsmosisStrandsAgent(StrandsAgent):
             }
             client_args = {
                 "api_base": rollout_context.chat_completions_url,
-                # TODO: support API key
-                "api_key": "<api key not supported yet>",
+                "api_key": (
+                    rollout_context.controller_auth.api_key
+                    if rollout_context.controller_auth
+                    else None
+                ),
                 "extra_headers": headers,
             }
             model = LiteLLMModel(

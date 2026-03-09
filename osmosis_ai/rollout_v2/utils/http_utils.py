@@ -9,6 +9,7 @@ async def post_json_with_retry(
     *,
     url: str,
     payload: dict[str, Any],
+    headers: dict[str, str] | None = None,
     max_attempts: int = 5,
     base_delay_seconds: float = 0.5,
     max_delay_seconds: float = 8.0,
@@ -23,7 +24,7 @@ async def post_json_with_retry(
     async with httpx.AsyncClient(timeout=timeout_seconds) as client:
         for attempt in range(1, max_attempts + 1):
             try:
-                response = await client.post(url, json=payload)
+                response = await client.post(url, json=payload, headers=headers)
                 if response.status_code in {429, 500, 502, 503, 504}:
                     raise httpx.HTTPStatusError(
                         f"Retryable status code: {response.status_code}",
@@ -40,7 +41,9 @@ async def post_json_with_retry(
                 if is_last_attempt or not should_retry:
                     raise
 
-                delay = min(base_delay_seconds * (2 ** (attempt - 1)), max_delay_seconds)
+                delay = min(
+                    base_delay_seconds * (2 ** (attempt - 1)), max_delay_seconds
+                )
                 logging.warning(
                     "POST callback failed (attempt %s/%s): %s. Retrying in %.2fs",
                     attempt,
@@ -51,7 +54,9 @@ async def post_json_with_retry(
                 await asyncio.sleep(delay)
 
     # This should be unreachable, but keeps type-checkers satisfied.
-    raise RuntimeError("POST request failed without raising an exception") from last_exception
+    raise RuntimeError(
+        "POST request failed without raising an exception"
+    ) from last_exception
 
 
 def _is_retryable_exception(exc: Exception) -> bool:
