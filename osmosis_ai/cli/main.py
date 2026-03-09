@@ -80,10 +80,14 @@ def _register_commands() -> None:
 
     # ── Platform (sub-command groups) ──
     from osmosis_ai.platform.cli.dataset import app as dataset_app
+    from osmosis_ai.platform.cli.model import app as model_app
+    from osmosis_ai.platform.cli.run import app as run_app
     from osmosis_ai.platform.cli.workspace import app as workspace_app
 
     app.add_typer(workspace_app, name="workspace", rich_help_panel="Platform")
     app.add_typer(dataset_app, name="dataset", rich_help_panel="Platform")
+    app.add_typer(run_app, name="run", rich_help_panel="Platform")
+    app.add_typer(model_app, name="model", rich_help_panel="Platform")
 
     # ── Evaluation ──
     from osmosis_ai.rollout.eval.evaluation.cli import app as eval_app

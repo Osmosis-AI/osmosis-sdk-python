@@ -99,6 +99,8 @@ def _main_menu(has_project: bool) -> str | None:
     if has_project:
         choices.extend(
             [
+                Choice("Browse training runs", value="runs"),
+                Choice("Browse models", value="models"),
                 Choice("Browse datasets", value="datasets"),
                 Choice("View project info", value="info"),
                 Choice("Open in browser", value="browser"),
@@ -309,6 +311,179 @@ def _format_dataset_status(d: Any, *, for_prompt: bool = False) -> str:
     return status_info
 
 
+def _browse_runs(ws_name: str, project: dict) -> bool:
+    """List training runs and allow selecting one for details.
+
+    Returns False if the project was found to be stale (404).
+    """
+    from osmosis_ai.platform.api.client import OsmosisClient
+
+    from .project import _get_workspace_credentials
+
+    client = OsmosisClient()
+    project_id = project.get("project_id")
+    try:
+        credentials = _get_workspace_credentials(ws_name)
+        result = client.list_training_runs(project_id, credentials=credentials)
+    except AuthenticationExpiredError:
+        raise CLIError(MSG_SESSION_EXPIRED) from None
+    except PlatformAPIError as e:
+        if e.status_code == 404:
+            clear_default_project(ws_name)
+            console.print_error(
+                f"Project '{project.get('project_name', project_id)}' "
+                "no longer exists. Default project has been cleared."
+            )
+            return False
+        else:
+            console.print_error(f"Failed to load training runs: {e}")
+        return True
+
+    if not result.training_runs:
+        console.print("No training runs found.", style="dim")
+        console.print()
+        return True
+
+    while True:
+        choices: list[Choice | Separator] = []
+        for r in result.training_runs:
+            status_str = _format_run_status_prompt(r)
+            name = r.name or "(unnamed)"
+            model = r.model_name or ""
+            label = f"{name}  {status_str}  {model}"
+            choices.append(Choice(label, value=r))
+        choices.append(Separator())
+        choices.append(Choice("Back", value=BACK))
+
+        console.separator()
+        selected = select(
+            f"Training Runs ({result.total_count}):",
+            choices=choices,
+        )
+
+        if selected is None or selected == BACK:
+            return True
+
+        # Show run detail
+        _show_run_detail(selected, ws_name, project)
+
+
+def _format_run_status_prompt(r: Any) -> str:
+    """Format a training run status for interactive prompt (no color)."""
+    status_info = f"[{r.status}]"
+    if r.processing_step:
+        pct = f" {r.processing_percent:.0f}%" if r.processing_percent else ""
+        status_info = f"[{r.status}: {r.processing_step}{pct}]"
+    return status_info
+
+
+def _show_run_detail(r: Any, ws_name: str, project: dict) -> None:
+    """Display detailed info for a single training run."""
+    rows = [
+        ("Name", r.name or "(unnamed)"),
+        ("ID", r.id),
+        ("Status", r.status),
+    ]
+    if r.processing_step:
+        pct = (
+            f" ({r.processing_percent:.0f}%)"
+            if r.processing_percent is not None
+            else ""
+        )
+        rows.append(("Step", f"{r.processing_step}{pct}"))
+    if r.model_name:
+        rows.append(("Model", r.model_name))
+    if r.eval_accuracy is not None:
+        rows.append(("Accuracy", f"{r.eval_accuracy:.4f}"))
+    if r.reward_increase_delta is not None:
+        rows.append(("Reward Delta", f"{r.reward_increase_delta:+.4f}"))
+    if r.error_message:
+        rows.append(("Error", r.error_message))
+    if r.creator_name:
+        rows.append(("Creator", r.creator_name))
+    if r.created_at:
+        rows.append(("Created", r.created_at[:10]))
+
+    url = f"{PLATFORM_URL}/{ws_name}/{project['project_name']}/training/{r.id}"
+    rows.append(("URL", url))
+
+    console.table(rows, title="Training Run")
+    console.print()
+
+
+def _browse_models(ws_name: str, project: dict) -> bool:
+    """List models and allow selecting one for details.
+
+    Returns False if the project was found to be stale (404).
+    """
+    from osmosis_ai.platform.api.client import OsmosisClient
+
+    from .project import _get_workspace_credentials
+
+    client = OsmosisClient()
+    project_id = project.get("project_id")
+    try:
+        credentials = _get_workspace_credentials(ws_name)
+        result = client.list_models(project_id, credentials=credentials)
+    except AuthenticationExpiredError:
+        raise CLIError(MSG_SESSION_EXPIRED) from None
+    except PlatformAPIError as e:
+        if e.status_code == 404:
+            clear_default_project(ws_name)
+            console.print_error(
+                f"Project '{project.get('project_name', project_id)}' "
+                "no longer exists. Default project has been cleared."
+            )
+            return False
+        else:
+            console.print_error(f"Failed to load models: {e}")
+        return True
+
+    if not result.models:
+        console.print("No models found.", style="dim")
+        console.print()
+        return True
+
+    while True:
+        choices: list[Choice | Separator] = []
+        for m in result.models:
+            base = f"  ({m.base_model})" if m.base_model else ""
+            label = f"{m.model_name}  [{m.status}]{base}"
+            choices.append(Choice(label, value=m))
+        choices.append(Separator())
+        choices.append(Choice("Back", value=BACK))
+
+        console.separator()
+        selected = select(
+            f"Models ({result.total_count}):",
+            choices=choices,
+        )
+
+        if selected is None or selected == BACK:
+            return True
+
+        # Show model detail
+        _show_model_detail(selected)
+
+
+def _show_model_detail(m: Any) -> None:
+    """Display detailed info for a single model."""
+    rows = [
+        ("Model", m.model_name),
+        ("ID", m.id),
+        ("Status", m.status),
+    ]
+    if m.base_model:
+        rows.append(("Base Model", m.base_model))
+    if m.description:
+        rows.append(("Description", m.description))
+    if m.created_at:
+        rows.append(("Created", m.created_at[:10]))
+
+    console.table(rows, title="Model Detail")
+    console.print()
+
+
 def _show_project_info(ws_name: str, project: dict) -> bool:
     """Fetch and display project details.
 
@@ -395,6 +570,14 @@ def workspace() -> None:
                 ws_name, default_project = result
                 active_ws = ws_name
                 console.print()
+                _show_context(ws_name, default_project)
+        elif action == "runs":
+            if not _browse_runs(ws_name, default_project):
+                default_project = None
+                _show_context(ws_name, default_project)
+        elif action == "models":
+            if not _browse_models(ws_name, default_project):
+                default_project = None
                 _show_context(ws_name, default_project)
         elif action == "datasets":
             if not _browse_datasets(ws_name, default_project):

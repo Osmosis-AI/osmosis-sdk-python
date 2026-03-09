@@ -10,8 +10,11 @@ from osmosis_ai.platform.auth.platform_client import platform_request
 from .models import (
     DatasetFile,
     PaginatedDatasets,
+    PaginatedModels,
+    PaginatedTrainingRuns,
     Project,
     ProjectDetail,
+    TrainingRunDetail,
 )
 
 if TYPE_CHECKING:
@@ -167,3 +170,42 @@ class OsmosisClient:
             credentials=credentials,
         )
         return True
+
+    # ── Training Runs ─────────────────────────────────────────────
+
+    def list_training_runs(
+        self,
+        project_id: str,
+        limit: int = 20,
+        offset: int = 0,
+        *,
+        credentials: WorkspaceCredentials | None = None,
+    ) -> PaginatedTrainingRuns:
+        qs = urlencode({"projectId": project_id, "limit": limit, "offset": offset})
+        data = platform_request(f"/api/cli/training-runs?{qs}", credentials=credentials)
+        return PaginatedTrainingRuns.from_dict(data)
+
+    def get_training_run(
+        self,
+        run_id: str,
+        *,
+        credentials: WorkspaceCredentials | None = None,
+    ) -> TrainingRunDetail:
+        data = platform_request(
+            f"/api/cli/training-runs/{run_id}", credentials=credentials
+        )
+        return TrainingRunDetail.from_dict(data)
+
+    # ── Models ────────────────────────────────────────────────────
+
+    def list_models(
+        self,
+        project_id: str,
+        limit: int = 50,
+        offset: int = 0,
+        *,
+        credentials: WorkspaceCredentials | None = None,
+    ) -> PaginatedModels:
+        qs = urlencode({"projectId": project_id, "limit": limit, "offset": offset})
+        data = platform_request(f"/api/cli/models?{qs}", credentials=credentials)
+        return PaginatedModels.from_dict(data)
