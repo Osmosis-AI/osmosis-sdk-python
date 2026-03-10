@@ -123,6 +123,13 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     except SystemExit as e:
         return int(e.code) if e.code is not None else 0
+    except click.UsageError as exc:
+        # NoArgsIsHelpError (from no_args_is_help=True) has an empty message
+        # after help is already printed — just exit cleanly.
+        if not str(exc):
+            return 0
+        print(f"Error: {exc}", file=sys.stderr)
+        return exc.exit_code
     except CLIError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
