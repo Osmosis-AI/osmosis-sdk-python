@@ -318,6 +318,12 @@ def _resolve_project(
     raise CLIError(f"Project '{name_or_id}' not found in this workspace.")
 
 
+def _resolve_project_id(project: str | None, *, workspace_name: str) -> str:
+    """Get project ID from --project arg, env, or default."""
+    proj = _resolve_project(project, workspace_name=workspace_name)
+    return proj["id"]
+
+
 def _require_auth(
     *,
     workspace_name: str | None = None,

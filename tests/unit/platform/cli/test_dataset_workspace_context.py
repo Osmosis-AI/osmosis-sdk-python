@@ -5,6 +5,7 @@ from __future__ import annotations
 import osmosis_ai.platform.api.client as api_client_module
 import osmosis_ai.platform.api.upload as upload_module
 import osmosis_ai.platform.cli.dataset as dataset_module
+import osmosis_ai.platform.cli.project as project_module
 from osmosis_ai.platform.api.models import DatasetFile, PaginatedDatasets, UploadInfo
 
 
@@ -37,7 +38,7 @@ def test_list_datasets_resolves_project_in_active_workspace(monkeypatch) -> None
             calls["credentials"] = credentials
             return PaginatedDatasets(datasets=[], total_count=0, has_more=False)
 
-    monkeypatch.setattr(dataset_module, "_resolve_project", fake_resolve_project)
+    monkeypatch.setattr(project_module, "_resolve_project", fake_resolve_project)
     monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
 
     dataset_module.list_datasets(project=None)
@@ -79,10 +80,12 @@ def test_upload_passes_active_workspace_context_to_subscription_and_api_calls(
             "project_name": "target-project",
         },
     )
+    from contextlib import nullcontext
+
     monkeypatch.setattr(
         upload_module,
         "make_progress_bar",
-        lambda _size: (None, lambda _done, _total: None),
+        lambda _size: (nullcontext(), lambda _done, _total: None),
     )
     monkeypatch.setattr(
         upload_module,

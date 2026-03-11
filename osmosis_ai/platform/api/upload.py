@@ -9,7 +9,7 @@ from __future__ import annotations
 import sys
 import time
 from collections.abc import Callable
-from contextlib import AbstractContextManager
+from contextlib import AbstractContextManager, nullcontext
 from io import RawIOBase
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -110,11 +110,15 @@ def _http_put_with_backoff(
     headers: dict[str, str] | None = None,
     timeout: float = PART_UPLOAD_TIMEOUT,
     max_retries: int = MAX_RETRIES,
+    client: httpx.Client | None = None,
 ) -> httpx.Response:
     """PUT *data* to *url* with exponential backoff on transient errors.
 
     If *data* is file-like (has ``seek``), it is rewound before each retry
     so the same slice can be re-uploaded.
+
+    An optional *client* can be passed to reuse a single httpx.Client across
+    multiple calls (e.g. multipart upload parts), avoiding per-call overhead.
     """
     initial_pos: int | None = None
     if hasattr(data, "seek") and hasattr(data, "tell"):
@@ -130,8 +134,13 @@ def _http_put_with_backoff(
                 data.seek(initial_pos)
 
         try:
-            with httpx.Client(timeout=httpx.Timeout(timeout, connect=30.0)) as client:
+            if client is not None:
                 resp = client.put(url, headers=headers, content=data)
+            else:
+                with httpx.Client(
+                    timeout=httpx.Timeout(timeout, connect=30.0)
+                ) as _client:
+                    resp = _client.put(url, headers=headers, content=data)
 
             if resp.status_code < 300:
                 return resp
@@ -294,7 +303,12 @@ def upload_file_multipart(
     completed_parts: list[dict] = []
     bytes_uploaded = 0
 
-    with open(file_path, "rb") as f:
+    with (
+        open(file_path, "rb") as f,
+        httpx.Client(
+            timeout=httpx.Timeout(PART_UPLOAD_TIMEOUT, connect=30.0)
+        ) as client,
+    ):
         for i in range(info.total_parts):
             part_number = i + 1
             offset = i * part_size
@@ -305,6 +319,7 @@ def upload_file_multipart(
                     url_map[part_number],
                     data=slice_obj,
                     timeout=PART_UPLOAD_TIMEOUT,
+                    client=client,
                 )
 
             etag = resp.headers.get("etag", "").strip('"')
@@ -327,19 +342,17 @@ def upload_file_multipart(
 
 def make_progress_bar(
     file_size: int,
-) -> tuple[AbstractContextManager[Any] | None, ProgressCallback]:
+) -> tuple[AbstractContextManager[Any], ProgressCallback]:
     """Create a progress bar and a matching callback.
 
     Returns (progress_context, callback) where progress_context is a
-    context manager wrapping a rich Progress bar (or None for plain text).
+    context manager wrapping a rich Progress bar (or a no-op nullcontext
+    for plain-text fallback).
 
     The caller should use::
 
         ctx, cb = make_progress_bar(size)
-        if ctx:
-            with ctx:
-                upload_fn(..., progress_callback=cb)
-        else:
+        with ctx:
             upload_fn(..., progress_callback=cb)
     """
     try:
@@ -381,4 +394,4 @@ def make_progress_bar(
         if uploaded >= total:
             sys.stdout.write("\n")
 
-    return None, _plain_cb
+    return nullcontext(), _plain_cb

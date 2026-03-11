@@ -18,15 +18,9 @@ from osmosis_ai.platform.auth import (
 )
 
 from .constants import MSG_SESSION_EXPIRED
-from .project import _require_auth, _resolve_project
+from .project import _require_auth, _resolve_project_id
 
 app = typer.Typer(help="Manage training runs.")
-
-
-def _resolve_project_id(project: str | None, *, workspace_name: str) -> str:
-    """Get project ID from --project arg, env, or default."""
-    proj = _resolve_project(project, workspace_name=workspace_name)
-    return proj["id"]
 
 
 def _format_run_status(status: str, *, for_prompt: bool = False) -> str:

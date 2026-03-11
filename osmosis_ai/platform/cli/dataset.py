@@ -30,18 +30,17 @@ from .constants import (
     REQUIRED_COLUMNS,
     VALID_EXTENSIONS,
 )
-from .project import _require_auth, _require_subscription, _resolve_project
+from .project import (
+    _require_auth,
+    _require_subscription,
+    _resolve_project,
+    _resolve_project_id,
+)
 from .utils import format_size as _format_size
 
 app = typer.Typer(
     help="Manage datasets (upload, list, status, preview, delete, validate)."
 )
-
-
-def _resolve_project_id(project: str | None, *, workspace_name: str) -> str:
-    """Get project ID from --project arg, env, or default."""
-    proj = _resolve_project(project, workspace_name=workspace_name)
-    return proj["id"]
 
 
 def _abort_multipart(
@@ -223,8 +222,7 @@ def upload(
     else:
         console.print(f"Uploading {file_path.name} ({_format_size(file_size)})...")
 
-    progress_ctx, progress_cb = make_progress_bar(file_size)
-    ctx = progress_ctx or contextlib.nullcontext()
+    ctx, progress_cb = make_progress_bar(file_size)
 
     if is_multipart:
         try:

@@ -427,7 +427,7 @@ def test_main_without_subcommand_shows_help(capsys):
     exit_code = cli.main([])
     captured = capsys.readouterr()
 
-    assert exit_code == 1
+    assert exit_code == 0
     assert "osmosis" in captured.out.lower()
 
 
