@@ -97,10 +97,6 @@ class WorkspaceCredentials:
 
     def is_expired(self) -> bool:
         """Check if the token has expired."""
-        if self.expires_at.tzinfo is None:
-            raise ValueError(
-                "expires_at must be timezone-aware (ISO8601 with timezone offset)"
-            )
         return datetime.now(timezone.utc) >= self.expires_at.astimezone(timezone.utc)
 
 

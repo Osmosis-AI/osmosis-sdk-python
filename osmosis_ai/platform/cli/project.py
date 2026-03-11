@@ -149,6 +149,7 @@ def _prompt_create(ws_name: str) -> dict | None:
         error = validate_project_name(name)
         if error:
             console.print_error(error)
+            console.print("  Press ESC or Ctrl+C to cancel.", style="dim")
             continue
 
         break

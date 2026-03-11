@@ -102,7 +102,7 @@ class OsmosisClient:
         if extension is not None:
             payload["extension"] = extension
         if upload_id is not None or parts is not None:
-            if not upload_id or not parts:
+            if upload_id is None or parts is None:
                 raise ValueError(
                     "upload_id and parts must both be provided for multipart completion"
                 )

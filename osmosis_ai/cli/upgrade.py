@@ -110,7 +110,7 @@ def upgrade() -> None:
 
         console.print(f"Running: {' '.join(cmd)}", style="dim")
         try:
-            result = subprocess.run(cmd, timeout=120)
+            result = subprocess.run(cmd, timeout=120, stdin=subprocess.DEVNULL)
             if result.returncode == 0:
                 console.print()
                 console.print(f"Successfully upgraded to {latest}!", style="bold green")

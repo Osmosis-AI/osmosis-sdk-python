@@ -124,7 +124,8 @@ def main(argv: list[str] | None = None) -> int:
     _register_commands()
     try:
         result = app(argv, standalone_mode=False)
-        # standalone_mode=False makes typer.Exit() return the code instead of raising SystemExit
+        # standalone_mode=False returns None on normal completion;
+        # typer.Exit() still raises SystemExit, caught by the except block below.
         if isinstance(result, int) and result != 0:
             return result
         return 0
