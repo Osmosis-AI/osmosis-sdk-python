@@ -22,7 +22,12 @@ from osmosis_ai.platform.auth.local_config import (
 )
 
 from .constants import BACK, MSG_NOT_LOGGED_IN
-from .utils import format_dataset_status, format_run_status, format_size
+from .utils import (
+    format_dataset_status,
+    format_processing_step,
+    format_run_status,
+    format_size,
+)
 
 app = typer.Typer(help="Switch workspace and default project.")
 
@@ -198,6 +203,17 @@ def _switch_context(
             }
 
 
+def _handle_stale_project(ws_name: str, project: dict) -> bool:
+    """Handle a 404 by clearing the stale default project. Always returns False."""
+    project_id = project.get("project_id")
+    clear_default_project(ws_name)
+    console.print_error(
+        f"Project '{project.get('project_name', project_id)}' "
+        "no longer exists. Default project has been cleared."
+    )
+    return False
+
+
 def _browse_datasets(ws_name: str, project: dict) -> bool:
     """List datasets and allow selecting one for details.
 
@@ -214,14 +230,8 @@ def _browse_datasets(ws_name: str, project: dict) -> bool:
         result = client.list_datasets(project_id, credentials=credentials)
     except PlatformAPIError as e:
         if e.status_code == 404:
-            clear_default_project(ws_name)
-            console.print_error(
-                f"Project '{project.get('project_name', project_id)}' "
-                "no longer exists. Default project has been cleared."
-            )
-            return False
-        else:
-            console.print_error(f"Failed to load datasets: {e}")
+            return _handle_stale_project(ws_name, project)
+        console.print_error(f"Failed to load datasets: {e}")
         return True
 
     if not result.datasets:
@@ -259,13 +269,9 @@ def _show_dataset_detail(ds: Any, ws_name: str, project: dict) -> None:
         ("Size", format_size(ds.file_size)),
         ("Status", ds.status),
     ]
-    if ds.processing_step:
-        pct = (
-            f" ({ds.processing_percent:.0f}%)"
-            if ds.processing_percent is not None
-            else ""
-        )
-        rows.append(("Step", f"{ds.processing_step}{pct}"))
+    step = format_processing_step(ds)
+    if step:
+        rows.append(("Step", step))
     if ds.error:
         rows.append(("Error", ds.error))
     if ds.created_at:
@@ -294,14 +300,8 @@ def _browse_runs(ws_name: str, project: dict) -> bool:
         result = client.list_training_runs(project_id, credentials=credentials)
     except PlatformAPIError as e:
         if e.status_code == 404:
-            clear_default_project(ws_name)
-            console.print_error(
-                f"Project '{project.get('project_name', project_id)}' "
-                "no longer exists. Default project has been cleared."
-            )
-            return False
-        else:
-            console.print_error(f"Failed to load training runs: {e}")
+            return _handle_stale_project(ws_name, project)
+        console.print_error(f"Failed to load training runs: {e}")
         return True
 
     if not result.training_runs:
@@ -340,13 +340,9 @@ def _show_run_detail(r: Any, ws_name: str, project: dict) -> None:
         ("ID", r.id),
         ("Status", r.status),
     ]
-    if r.processing_step:
-        pct = (
-            f" ({r.processing_percent:.0f}%)"
-            if r.processing_percent is not None
-            else ""
-        )
-        rows.append(("Step", f"{r.processing_step}{pct}"))
+    step = format_processing_step(r)
+    if step:
+        rows.append(("Step", step))
     if r.model_name:
         rows.append(("Model", r.model_name))
     if r.eval_accuracy is not None:
@@ -383,14 +379,8 @@ def _browse_models(ws_name: str, project: dict) -> bool:
         result = client.list_models(project_id, credentials=credentials)
     except PlatformAPIError as e:
         if e.status_code == 404:
-            clear_default_project(ws_name)
-            console.print_error(
-                f"Project '{project.get('project_name', project_id)}' "
-                "no longer exists. Default project has been cleared."
-            )
-            return False
-        else:
-            console.print_error(f"Failed to load models: {e}")
+            return _handle_stale_project(ws_name, project)
+        console.print_error(f"Failed to load models: {e}")
         return True
 
     if not result.models:
@@ -454,14 +444,8 @@ def _show_project_info(ws_name: str, project: dict) -> bool:
         detail = client.get_project(project_id, credentials=credentials)
     except PlatformAPIError as e:
         if e.status_code == 404:
-            clear_default_project(ws_name)
-            console.print_error(
-                f"Project '{project.get('project_name', project_id)}' "
-                "no longer exists. Default project has been cleared."
-            )
-            return False
-        else:
-            console.print_error(f"Failed to load project info: {e}")
+            return _handle_stale_project(ws_name, project)
+        console.print_error(f"Failed to load project info: {e}")
         return True
 
     url = f"{PLATFORM_URL}/{ws_name}/{detail.project_name}"

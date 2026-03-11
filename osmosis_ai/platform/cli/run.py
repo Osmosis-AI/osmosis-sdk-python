@@ -7,7 +7,7 @@ import typer
 from osmosis_ai.cli.console import console
 
 from .project import _require_auth, _resolve_project_id
-from .utils import format_run_status
+from .utils import format_processing_step, format_run_status
 
 app = typer.Typer(help="Manage training runs.")
 
@@ -83,13 +83,9 @@ def status(
         ("ID", run.id),
         ("Status", run.status),
     ]
-    if run.processing_step:
-        pct = (
-            f" ({run.processing_percent:.0f}%)"
-            if run.processing_percent is not None
-            else ""
-        )
-        rows.append(("Step", f"{run.processing_step}{pct}"))
+    step = format_processing_step(run)
+    if step:
+        rows.append(("Step", step))
     rows.append(("Model", run.model_name or "—"))
     if run.output_model_id:
         rows.append(("Output Model", run.output_model_id))

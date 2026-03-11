@@ -31,7 +31,7 @@ from .project import (
     _resolve_project,
     _resolve_project_id,
 )
-from .utils import format_dataset_status, format_size
+from .utils import format_dataset_status, format_processing_step, format_size
 
 app = typer.Typer(
     help="Manage datasets (upload, list, status, preview, delete, validate)."
@@ -341,13 +341,9 @@ def status(
         ("Size", format_size(ds.file_size)),
         ("Status", ds.status),
     ]
-    if ds.processing_step:
-        pct = (
-            f" ({ds.processing_percent:.0f}%)"
-            if ds.processing_percent is not None
-            else ""
-        )
-        rows.append(("Step", f"{ds.processing_step}{pct}"))
+    step = format_processing_step(ds)
+    if step:
+        rows.append(("Step", step))
     if ds.error:
         rows.append(("Error", ds.error))
 

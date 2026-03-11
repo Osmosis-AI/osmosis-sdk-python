@@ -58,10 +58,10 @@ def _callback(
 ) -> None:
     """Osmosis AI CLI"""
     warnings.filterwarnings("ignore")
-    load_dotenv(find_dotenv(usecwd=True))
     if version:
         typer.echo(f"{package_name} {PACKAGE_VERSION}")
         raise typer.Exit()
+    load_dotenv(find_dotenv(usecwd=True))
 
 
 _registered = False

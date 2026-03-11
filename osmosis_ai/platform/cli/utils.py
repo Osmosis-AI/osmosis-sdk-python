@@ -103,6 +103,18 @@ def format_run_status(r: Any, *, for_prompt: bool = False) -> str:
     return console.escape(status_info)
 
 
+def format_processing_step(obj: Any) -> str | None:
+    """Format processing step with optional percentage, or None if no step."""
+    if not obj.processing_step:
+        return None
+    pct = (
+        f" ({obj.processing_percent:.0f}%)"
+        if obj.processing_percent is not None
+        else ""
+    )
+    return f"{obj.processing_step}{pct}"
+
+
 def format_size(size_bytes: int | float) -> str:
     """Format file size as human-readable string."""
     for unit in ("B", "KB", "MB", "GB"):
