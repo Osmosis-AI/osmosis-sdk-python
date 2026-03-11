@@ -181,7 +181,7 @@ class OsmosisClient:
         *,
         credentials: WorkspaceCredentials | None = None,
     ) -> PaginatedTrainingRuns:
-        qs = urlencode({"projectId": project_id, "limit": limit, "offset": offset})
+        qs = urlencode({"project_id": project_id, "limit": limit, "offset": offset})
         data = platform_request(f"/api/cli/training-runs?{qs}", credentials=credentials)
         return PaginatedTrainingRuns.from_dict(data)
 
@@ -206,6 +206,6 @@ class OsmosisClient:
         *,
         credentials: WorkspaceCredentials | None = None,
     ) -> PaginatedModels:
-        qs = urlencode({"projectId": project_id, "limit": limit, "offset": offset})
+        qs = urlencode({"project_id": project_id, "limit": limit, "offset": offset})
         data = platform_request(f"/api/cli/models?{qs}", credentials=credentials)
         return PaginatedModels.from_dict(data)
