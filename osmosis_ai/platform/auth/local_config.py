@@ -219,7 +219,7 @@ def load_subscription_status(
     safe = _safe_ws_name(workspace_name)
     path = CACHE_DIR / f"subscription_{safe}.json"
     data = _read_cache(path)
-    if data is None:
+    if not isinstance(data, dict):
         return None
     if max_age is not None:
         refreshed_at = data.get("refreshed_at")

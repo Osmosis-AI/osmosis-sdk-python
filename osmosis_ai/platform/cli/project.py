@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import contextlib
 import os
 import time
 from typing import TYPE_CHECKING, Any
@@ -339,10 +338,14 @@ def _require_subscription(*, workspace_name: str) -> None:
         return
 
     # Cached status is False, None, or expired — refresh to get the latest
-    with contextlib.suppress(Exception):
+    try:
         _refresh_projects(
             workspace_name=workspace_name
         )  # Also updates subscription cache
+    except AuthenticationExpiredError:
+        raise
+    except Exception:
+        pass
 
     # Re-check after refresh (no TTL — we just refreshed)
     status = load_subscription_status(workspace_name)
