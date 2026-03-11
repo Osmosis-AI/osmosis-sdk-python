@@ -518,6 +518,9 @@ def _show_project_info(ws_name: str, project: dict) -> bool:
         ("ID", detail.id),
         ("Role", detail.role),
         ("Datasets", str(detail.dataset_count)),
+        ("Training Runs", str(detail.training_run_count)),
+        ("Base Models", str(detail.base_model_count)),
+        ("Output Models", str(detail.output_model_count)),
     ]
     if detail.created_at:
         rows.append(("Created", detail.created_at[:10]))

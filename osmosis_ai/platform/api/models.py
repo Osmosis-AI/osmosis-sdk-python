@@ -50,7 +50,7 @@ class DatasetSummary:
 
 @dataclass
 class ProjectDetail:
-    """Detailed project info including recent datasets."""
+    """Detailed project info including recent datasets and summary counts."""
 
     id: str
     project_name: str
@@ -59,6 +59,9 @@ class ProjectDetail:
     updated_at: str
     dataset_count: int = 0
     recent_datasets: list[DatasetSummary] = field(default_factory=list)
+    training_run_count: int = 0
+    base_model_count: int = 0
+    output_model_count: int = 0
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> ProjectDetail:
@@ -73,6 +76,8 @@ class ProjectDetail:
             )
             for d in datasets_data.get("recent", [])
         ]
+        runs_data = data.get("training_runs", {})
+        models_data = data.get("models", {})
         return cls(
             id=data["id"],
             project_name=data["project_name"],
@@ -81,6 +86,9 @@ class ProjectDetail:
             updated_at=data.get("updated_at", ""),
             dataset_count=datasets_data.get("total_count", 0),
             recent_datasets=recent,
+            training_run_count=runs_data.get("total_count", 0),
+            base_model_count=models_data.get("base_count", 0),
+            output_model_count=models_data.get("output_count", 0),
         )
 
 
