@@ -26,7 +26,6 @@ from osmosis_ai.platform.auth.config import PLATFORM_URL
 
 from .constants import (
     MAX_FILE_SIZE,
-    MSG_SESSION_EXPIRED,
     REQUIRED_COLUMNS,
     VALID_EXTENSIONS,
 )
@@ -193,18 +192,13 @@ def upload(
     client = OsmosisClient()
 
     # Step 1: Create dataset record + get upload instructions
-    try:
-        dataset = client.create_dataset(
-            project_id,
-            file_path.name,
-            file_size,
-            ext,
-            credentials=credentials,
-        )
-    except AuthenticationExpiredError:
-        raise CLIError(MSG_SESSION_EXPIRED) from None
-    except PlatformAPIError as e:
-        raise CLIError(f"Failed to create dataset: {e}") from e
+    dataset = client.create_dataset(
+        project_id,
+        file_path.name,
+        file_size,
+        ext,
+        credentials=credentials,
+    )
 
     upload_info = dataset.upload
     if upload_info is None:
@@ -301,12 +295,7 @@ def list_datasets(
 
     project_id = _resolve_project_id(project, workspace_name=ws_name)
     client = OsmosisClient()
-    try:
-        result = client.list_datasets(project_id, credentials=credentials)
-    except AuthenticationExpiredError:
-        raise CLIError(MSG_SESSION_EXPIRED) from None
-    except PlatformAPIError as e:
-        raise CLIError(str(e)) from e
+    result = client.list_datasets(project_id, credentials=credentials)
 
     if not result.datasets:
         console.print("No datasets found.")
@@ -361,22 +350,12 @@ def status(
     dataset_id = id
     if len(id) < 32:
         project_id = _resolve_project_id(project, workspace_name=ws_name)
-        try:
-            result = client.list_datasets(project_id, credentials=credentials)
-        except AuthenticationExpiredError:
-            raise CLIError(MSG_SESSION_EXPIRED) from None
-        except PlatformAPIError as e:
-            raise CLIError(str(e)) from e
+        result = client.list_datasets(project_id, credentials=credentials)
         dataset_id = resolve_id_prefix(
             id, result.datasets, entity_name="dataset", has_more=result.has_more
         )
 
-    try:
-        ds = client.get_dataset(dataset_id, credentials=credentials)
-    except AuthenticationExpiredError:
-        raise CLIError(MSG_SESSION_EXPIRED) from None
-    except PlatformAPIError as e:
-        raise CLIError(str(e)) from e
+    ds = client.get_dataset(dataset_id, credentials=credentials)
 
     rows = [
         ("File", ds.file_name),
@@ -418,22 +397,12 @@ def preview(
     dataset_id = id
     if len(id) < 32:
         project_id = _resolve_project_id(project, workspace_name=ws_name)
-        try:
-            result = client.list_datasets(project_id, credentials=credentials)
-        except AuthenticationExpiredError:
-            raise CLIError(MSG_SESSION_EXPIRED) from None
-        except PlatformAPIError as e:
-            raise CLIError(str(e)) from e
+        result = client.list_datasets(project_id, credentials=credentials)
         dataset_id = resolve_id_prefix(
             id, result.datasets, entity_name="dataset", has_more=result.has_more
         )
 
-    try:
-        ds = client.get_dataset(dataset_id, credentials=credentials)
-    except AuthenticationExpiredError:
-        raise CLIError(MSG_SESSION_EXPIRED) from None
-    except PlatformAPIError as e:
-        raise CLIError(str(e)) from e
+    ds = client.get_dataset(dataset_id, credentials=credentials)
 
     if ds.data_preview is None:
         if ds.status in STATUSES_IN_PROGRESS:

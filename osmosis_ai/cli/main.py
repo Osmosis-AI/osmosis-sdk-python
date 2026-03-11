@@ -11,6 +11,11 @@ from dotenv import find_dotenv, load_dotenv
 
 from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.consts import PACKAGE_VERSION, package_name
+from osmosis_ai.platform.auth.platform_client import (
+    AuthenticationExpiredError,
+    PlatformAPIError,
+)
+from osmosis_ai.platform.cli.constants import MSG_SESSION_EXPIRED
 
 
 class OsmosisGroup(typer.core.TyperGroup):
@@ -130,6 +135,12 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         print(f"Error: {exc}", file=sys.stderr)
         return exc.exit_code
+    except AuthenticationExpiredError:
+        print(f"Error: {MSG_SESSION_EXPIRED}", file=sys.stderr)
+        return 1
+    except PlatformAPIError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 1
     except CLIError as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1

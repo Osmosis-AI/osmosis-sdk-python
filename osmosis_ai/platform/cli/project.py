@@ -20,7 +20,6 @@ from osmosis_ai.cli.prompts import (
 from osmosis_ai.platform.api.client import OsmosisClient
 from osmosis_ai.platform.auth import (
     AuthenticationExpiredError,
-    PlatformAPIError,
     get_active_workspace,
     load_workspace_credentials,
     load_workspace_projects,
@@ -37,7 +36,6 @@ from osmosis_ai.platform.cli.constants import (
     CACHE_TTL_SECONDS,
     CREATE,
     MSG_NOT_LOGGED_IN,
-    MSG_SESSION_EXPIRED,
     PROJECT_NAME_MAX,
     PROJECT_NAME_RE,
     RESERVED_PROJECT_NAMES,
@@ -116,7 +114,7 @@ def select_project_interactive(
         try:
             projects = _refresh_projects(workspace_name=ws_name)
         except AuthenticationExpiredError:
-            raise CLIError(MSG_SESSION_EXPIRED) from None
+            raise
         except Exception:
             projects = _get_cached_projects(workspace_name=ws_name, max_age=None)
             if projects:
@@ -160,14 +158,9 @@ def _prompt_create(ws_name: str) -> dict | None:
     if not ok:
         return None
 
-    try:
-        credentials = _get_workspace_credentials(ws_name)
-        client = OsmosisClient()
-        project = client.create_project(name, credentials=credentials)
-    except AuthenticationExpiredError:
-        raise CLIError(MSG_SESSION_EXPIRED) from None
-    except PlatformAPIError as e:
-        raise CLIError(f"Failed to create project: {e}") from e
+    credentials = _get_workspace_credentials(ws_name)
+    client = OsmosisClient()
+    project = client.create_project(name, credentials=credentials)
 
     with contextlib.suppress(Exception):
         _refresh_projects(workspace_name=ws_name)
@@ -236,7 +229,7 @@ def _get_cached_projects(
             try:
                 return _refresh_projects(workspace_name=workspace_name)
             except AuthenticationExpiredError:
-                raise CLIError(MSG_SESSION_EXPIRED) from None
+                raise
             except Exception:
                 console.print_error(
                     "Warning: Could not refresh project list, using cached data."
@@ -294,12 +287,9 @@ def _resolve_project(
             hint += f"\n\nAvailable projects: {names}"
         raise CLIError(hint)
 
-    try:
-        projects = _get_cached_projects(workspace_name=workspace_name)
-        if refresh or not projects:
-            projects = _refresh_projects(workspace_name=workspace_name)
-    except AuthenticationExpiredError:
-        raise CLIError(MSG_SESSION_EXPIRED) from None
+    projects = _get_cached_projects(workspace_name=workspace_name)
+    if refresh or not projects:
+        projects = _refresh_projects(workspace_name=workspace_name)
 
     target = name_or_id.lower()
     for p in projects:
@@ -307,10 +297,7 @@ def _resolve_project(
             return p
 
     if not refresh:
-        try:
-            projects = _refresh_projects(workspace_name=workspace_name)
-        except AuthenticationExpiredError:
-            raise CLIError(MSG_SESSION_EXPIRED) from None
+        projects = _refresh_projects(workspace_name=workspace_name)
         for p in projects:
             if p.get("project_name", "").lower() == target or p.get("id") == name_or_id:
                 return p
@@ -332,10 +319,7 @@ def _require_auth(
     if workspace_name is None:
         workspace_name = _get_active_workspace_name()
 
-    try:
-        credentials = _get_workspace_credentials(workspace_name)
-    except AuthenticationExpiredError:
-        raise CLIError(MSG_SESSION_EXPIRED) from None
+    credentials = _get_workspace_credentials(workspace_name)
 
     return workspace_name, credentials
 

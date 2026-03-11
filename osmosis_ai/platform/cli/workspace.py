@@ -14,7 +14,6 @@ from osmosis_ai.platform.api.models import (
     STATUSES_SUCCESS,
 )
 from osmosis_ai.platform.auth import (
-    AuthenticationExpiredError,
     PlatformAPIError,
     get_active_workspace,
     get_all_workspaces,
@@ -27,7 +26,7 @@ from osmosis_ai.platform.auth.local_config import (
     set_default_project,
 )
 
-from .constants import BACK, MSG_NOT_LOGGED_IN, MSG_SESSION_EXPIRED
+from .constants import BACK, MSG_NOT_LOGGED_IN
 from .utils import format_size
 
 app = typer.Typer(help="Switch workspace and default project.")
@@ -218,8 +217,6 @@ def _browse_datasets(ws_name: str, project: dict) -> bool:
     try:
         credentials = _get_workspace_credentials(ws_name)
         result = client.list_datasets(project_id, credentials=credentials)
-    except AuthenticationExpiredError:
-        raise CLIError(MSG_SESSION_EXPIRED) from None
     except PlatformAPIError as e:
         if e.status_code == 404:
             clear_default_project(ws_name)
@@ -325,8 +322,6 @@ def _browse_runs(ws_name: str, project: dict) -> bool:
     try:
         credentials = _get_workspace_credentials(ws_name)
         result = client.list_training_runs(project_id, credentials=credentials)
-    except AuthenticationExpiredError:
-        raise CLIError(MSG_SESSION_EXPIRED) from None
     except PlatformAPIError as e:
         if e.status_code == 404:
             clear_default_project(ws_name)
@@ -425,8 +420,6 @@ def _browse_models(ws_name: str, project: dict) -> bool:
     try:
         credentials = _get_workspace_credentials(ws_name)
         result = client.list_models(project_id, credentials=credentials)
-    except AuthenticationExpiredError:
-        raise CLIError(MSG_SESSION_EXPIRED) from None
     except PlatformAPIError as e:
         if e.status_code == 404:
             clear_default_project(ws_name)
@@ -498,8 +491,6 @@ def _show_project_info(ws_name: str, project: dict) -> bool:
     try:
         credentials = _get_workspace_credentials(ws_name)
         detail = client.get_project(project_id, credentials=credentials)
-    except AuthenticationExpiredError:
-        raise CLIError(MSG_SESSION_EXPIRED) from None
     except PlatformAPIError as e:
         if e.status_code == 404:
             clear_default_project(ws_name)

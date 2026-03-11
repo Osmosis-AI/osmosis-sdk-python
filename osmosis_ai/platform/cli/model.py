@@ -5,13 +5,7 @@ from __future__ import annotations
 import typer
 
 from osmosis_ai.cli.console import console
-from osmosis_ai.cli.errors import CLIError
-from osmosis_ai.platform.auth import (
-    AuthenticationExpiredError,
-    PlatformAPIError,
-)
 
-from .constants import MSG_SESSION_EXPIRED
 from .project import _require_auth, _resolve_project_id
 
 app = typer.Typer(help="Manage models.")
@@ -30,12 +24,7 @@ def list_models(
 
     project_id = _resolve_project_id(project, workspace_name=ws_name)
     client = OsmosisClient()
-    try:
-        result = client.list_models(project_id, limit=limit, credentials=credentials)
-    except AuthenticationExpiredError:
-        raise CLIError(MSG_SESSION_EXPIRED) from None
-    except PlatformAPIError as e:
-        raise CLIError(str(e)) from e
+    result = client.list_models(project_id, limit=limit, credentials=credentials)
 
     if not result.models:
         console.print("No models found.")

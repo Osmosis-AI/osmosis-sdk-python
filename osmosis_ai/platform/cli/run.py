@@ -5,19 +5,13 @@ from __future__ import annotations
 import typer
 
 from osmosis_ai.cli.console import console
-from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.platform.api.models import (
     RUN_STATUSES_ERROR,
     RUN_STATUSES_IN_PROGRESS,
     RUN_STATUSES_STOPPED,
     RUN_STATUSES_SUCCESS,
 )
-from osmosis_ai.platform.auth import (
-    AuthenticationExpiredError,
-    PlatformAPIError,
-)
 
-from .constants import MSG_SESSION_EXPIRED
 from .project import _require_auth, _resolve_project_id
 
 app = typer.Typer(help="Manage training runs.")
@@ -52,14 +46,7 @@ def list_runs(
 
     project_id = _resolve_project_id(project, workspace_name=ws_name)
     client = OsmosisClient()
-    try:
-        result = client.list_training_runs(
-            project_id, limit=limit, credentials=credentials
-        )
-    except AuthenticationExpiredError:
-        raise CLIError(MSG_SESSION_EXPIRED) from None
-    except PlatformAPIError as e:
-        raise CLIError(str(e)) from e
+    result = client.list_training_runs(project_id, limit=limit, credentials=credentials)
 
     if not result.training_runs:
         console.print("No training runs found.")
@@ -117,14 +104,9 @@ def status(
     run_id = id
     if len(id) < 32:
         project_id = _resolve_project_id(project, workspace_name=ws_name)
-        try:
-            result = client.list_training_runs(
-                project_id, limit=50, credentials=credentials
-            )
-        except AuthenticationExpiredError:
-            raise CLIError(MSG_SESSION_EXPIRED) from None
-        except PlatformAPIError as e:
-            raise CLIError(str(e)) from e
+        result = client.list_training_runs(
+            project_id, limit=50, credentials=credentials
+        )
         run_id = resolve_id_prefix(
             id,
             result.training_runs,
@@ -132,12 +114,7 @@ def status(
             has_more=result.has_more,
         )
 
-    try:
-        run = client.get_training_run(run_id, credentials=credentials)
-    except AuthenticationExpiredError:
-        raise CLIError(MSG_SESSION_EXPIRED) from None
-    except PlatformAPIError as e:
-        raise CLIError(str(e)) from e
+    run = client.get_training_run(run_id, credentials=credentials)
 
     rows: list[tuple[str, str]] = [
         ("Name", run.name or "(unnamed)"),
