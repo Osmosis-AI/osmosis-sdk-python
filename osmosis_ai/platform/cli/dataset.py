@@ -13,11 +13,7 @@ import typer
 from osmosis_ai.cli.console import console
 from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.cli.prompts import confirm, is_interactive
-from osmosis_ai.platform.api.models import (
-    STATUSES_ERROR,
-    STATUSES_IN_PROGRESS,
-    STATUSES_SUCCESS,
-)
+from osmosis_ai.platform.api.models import STATUSES_IN_PROGRESS
 from osmosis_ai.platform.auth import (
     AuthenticationExpiredError,
     PlatformAPIError,
@@ -35,7 +31,7 @@ from .project import (
     _resolve_project,
     _resolve_project_id,
 )
-from .utils import format_size as _format_size
+from .utils import format_dataset_status, format_size
 
 app = typer.Typer(
     help="Manage datasets (upload, list, status, preview, delete, validate)."
@@ -156,7 +152,7 @@ def upload(
     file_size = file_path.stat().st_size
     if file_size > MAX_FILE_SIZE:
         raise CLIError(
-            f"File too large ({_format_size(file_size)}). Maximum: {_format_size(MAX_FILE_SIZE)}"
+            f"File too large ({format_size(file_size)}). Maximum: {format_size(MAX_FILE_SIZE)}"
         )
     if file_size == 0:
         raise CLIError("File is empty.")
@@ -178,7 +174,7 @@ def upload(
         [
             ("Workspace", ws_name or "unknown"),
             ("Project", project_name or project_id),
-            ("File", f"{file_path.name} ({_format_size(file_size)})"),
+            ("File", f"{file_path.name} ({format_size(file_size)})"),
         ],
         title="Upload Target",
     )
@@ -211,10 +207,10 @@ def upload(
             f", {upload_info.total_parts} parts" if upload_info.total_parts else ""
         )
         console.print(
-            f"Uploading {file_path.name} ({_format_size(file_size)}, multipart{parts_label})..."
+            f"Uploading {file_path.name} ({format_size(file_size)}, multipart{parts_label})..."
         )
     else:
-        console.print(f"Uploading {file_path.name} ({_format_size(file_size)})...")
+        console.print(f"Uploading {file_path.name} ({format_size(file_size)})...")
 
     ctx, progress_cb = make_progress_bar(file_size)
 
@@ -303,27 +299,9 @@ def list_datasets(
 
     console.print(f"Datasets ({result.total_count}):", style="bold")
     for d in result.datasets:
-        # Determine status color
-        if d.status in STATUSES_SUCCESS:
-            status_color = "green"
-        elif d.status in STATUSES_IN_PROGRESS:
-            status_color = "yellow"
-        elif d.status in STATUSES_ERROR:
-            status_color = "red"
-        else:
-            status_color = None
-
-        status_info = f"[{d.status}]"
-        if d.processing_step:
-            status_info = f"[{d.status}: {d.processing_step}]"
-
-        if status_color:
-            status_info = console.format_styled(status_info, status_color)
-        else:
-            status_info = console.escape(status_info)
-
+        status_info = format_dataset_status(d)
         console.print(
-            f"  {d.id[:8]}  {d.file_name}  {_format_size(d.file_size)}  {status_info}"
+            f"  {d.id[:8]}  {d.file_name}  {format_size(d.file_size)}  {status_info}"
         )
 
     if result.has_more:
@@ -360,7 +338,7 @@ def status(
     rows = [
         ("File", ds.file_name),
         ("ID", ds.id),
-        ("Size", _format_size(ds.file_size)),
+        ("Size", format_size(ds.file_size)),
         ("Status", ds.status),
     ]
     if ds.processing_step:
@@ -444,7 +422,7 @@ def validate(
         raise CLIError("File is empty.")
     if file_size > MAX_FILE_SIZE:
         raise CLIError(
-            f"File too large ({_format_size(file_size)}). Maximum: {_format_size(MAX_FILE_SIZE)}"
+            f"File too large ({format_size(file_size)}). Maximum: {format_size(MAX_FILE_SIZE)}"
         )
 
     # Format validation
@@ -457,7 +435,7 @@ def validate(
         raise typer.Exit(1)
 
     console.print(
-        f"Valid {ext} file: {file_path.name} ({_format_size(file_size)})",
+        f"Valid {ext} file: {file_path.name} ({format_size(file_size)})",
         style="green",
     )
 

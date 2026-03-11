@@ -5,32 +5,11 @@ from __future__ import annotations
 import typer
 
 from osmosis_ai.cli.console import console
-from osmosis_ai.platform.api.models import (
-    RUN_STATUSES_ERROR,
-    RUN_STATUSES_IN_PROGRESS,
-    RUN_STATUSES_STOPPED,
-    RUN_STATUSES_SUCCESS,
-)
 
 from .project import _require_auth, _resolve_project_id
+from .utils import format_run_status
 
 app = typer.Typer(help="Manage training runs.")
-
-
-def _format_run_status(status: str, *, for_prompt: bool = False) -> str:
-    """Format a training run status string with color styling."""
-    if for_prompt:
-        return f"[{status}]"
-
-    if status in RUN_STATUSES_SUCCESS:
-        return console.format_styled(f"[{status}]", "green")
-    elif status in RUN_STATUSES_IN_PROGRESS:
-        return console.format_styled(f"[{status}]", "yellow")
-    elif status in RUN_STATUSES_ERROR:
-        return console.format_styled(f"[{status}]", "red")
-    elif status in RUN_STATUSES_STOPPED:
-        return console.format_styled(f"[{status}]", "dim")
-    return console.escape(f"[{status}]")
 
 
 @app.command("list")
@@ -54,24 +33,7 @@ def list_runs(
 
     console.print(f"Training Runs ({result.total_count}):", style="bold")
     for r in result.training_runs:
-        # Status with processing step
-        status_info = f"[{r.status}]"
-        if r.processing_step:
-            pct = f" {r.processing_percent:.0f}%" if r.processing_percent else ""
-            status_info = f"[{r.status}: {r.processing_step}{pct}]"
-
-        # Colorize
-        if r.status in RUN_STATUSES_SUCCESS:
-            status_str = console.format_styled(status_info, "green")
-        elif r.status in RUN_STATUSES_IN_PROGRESS:
-            status_str = console.format_styled(status_info, "yellow")
-        elif r.status in RUN_STATUSES_ERROR:
-            status_str = console.format_styled(status_info, "red")
-        elif r.status in RUN_STATUSES_STOPPED:
-            status_str = console.format_styled(status_info, "dim")
-        else:
-            status_str = console.escape(status_info)
-
+        status_str = format_run_status(r)
         name = r.name or console.format_styled("(unnamed)", "dim")
         model = r.model_name or "—"
         acc = f"acc:{r.eval_accuracy:.2f}" if r.eval_accuracy is not None else ""

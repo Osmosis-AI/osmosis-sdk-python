@@ -10,7 +10,7 @@ import pytest
 
 import osmosis_ai.platform.api.client as api_client_module
 import osmosis_ai.platform.cli.dataset as dataset_module
-import osmosis_ai.platform.cli.workspace as workspace_module
+import osmosis_ai.platform.cli.utils as utils_module
 from osmosis_ai.cli.console import Console
 from osmosis_ai.platform.api.models import DatasetFile, PaginatedDatasets
 
@@ -38,6 +38,7 @@ def test_list_datasets_preserves_uncategorized_status_brackets(
     fake_credentials = object()
 
     monkeypatch.setattr(dataset_module, "console", console)
+    monkeypatch.setattr(utils_module, "console", console)
     monkeypatch.setattr(
         dataset_module, "_require_auth", lambda: ("ws-b", fake_credentials)
     )
@@ -82,7 +83,7 @@ def test_workspace_status_format_preserves_uncategorized_status_brackets(
     status: str,
 ) -> None:
     console, output = _make_rich_console()
-    monkeypatch.setattr(workspace_module, "console", console)
+    monkeypatch.setattr(utils_module, "console", console)
 
     dataset = SimpleNamespace(
         status=status,
@@ -90,7 +91,7 @@ def test_workspace_status_format_preserves_uncategorized_status_brackets(
         processing_percent=None,
     )
 
-    console.print(workspace_module._format_dataset_status(dataset))
+    console.print(utils_module.format_dataset_status(dataset))
 
     assert f"[{status}]" in _strip_ansi(output.getvalue())
 
@@ -103,9 +104,9 @@ def test_workspace_status_format_preserves_plain_text_brackets() -> None:
         processing_percent=None,
     )
 
-    original_console = workspace_module.console
-    workspace_module.console = console
+    original_console = utils_module.console
+    utils_module.console = console
     try:
-        assert workspace_module._format_dataset_status(dataset) == "[deleted]"
+        assert utils_module.format_dataset_status(dataset) == "[deleted]"
     finally:
-        workspace_module.console = original_console
+        utils_module.console = original_console

@@ -8,11 +8,6 @@ import typer
 from osmosis_ai.cli.console import console
 from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.cli.prompts import Choice, Separator, confirm, is_interactive, select
-from osmosis_ai.platform.api.models import (
-    STATUSES_ERROR,
-    STATUSES_IN_PROGRESS,
-    STATUSES_SUCCESS,
-)
 from osmosis_ai.platform.auth import (
     PlatformAPIError,
     get_active_workspace,
@@ -27,7 +22,7 @@ from osmosis_ai.platform.auth.local_config import (
 )
 
 from .constants import BACK, MSG_NOT_LOGGED_IN
-from .utils import format_size
+from .utils import format_dataset_status, format_run_status, format_size
 
 app = typer.Typer(help="Switch workspace and default project.")
 
@@ -237,7 +232,7 @@ def _browse_datasets(ws_name: str, project: dict) -> bool:
     while True:
         choices: list[Choice | Separator] = []
         for d in result.datasets:
-            status_str = _format_dataset_status(d, for_prompt=True)
+            status_str = format_dataset_status(d, for_prompt=True)
             label = f"{d.file_name} ({format_size(d.file_size)}) {status_str}"
             choices.append(Choice(label, value=d))
         choices.append(Separator())
@@ -283,31 +278,6 @@ def _show_dataset_detail(ds: Any, ws_name: str, project: dict) -> None:
     console.print()
 
 
-def _format_dataset_status(d: Any, *, for_prompt: bool = False) -> str:
-    """Format a dataset status string with color styling."""
-    status_info = f"[{d.status}]"
-    if d.processing_step:
-        status_info = f"[{d.status}: {d.processing_step}]"
-
-    if for_prompt:
-        return status_info
-
-    if d.status in STATUSES_SUCCESS:
-        color = "green"
-    elif d.status in STATUSES_IN_PROGRESS:
-        color = "yellow"
-    elif d.status in STATUSES_ERROR:
-        color = "red"
-    else:
-        color = None
-
-    if color:
-        status_info = console.format_styled(status_info, color)
-    else:
-        status_info = console.escape(status_info)
-    return status_info
-
-
 def _browse_runs(ws_name: str, project: dict) -> bool:
     """List training runs and allow selecting one for details.
 
@@ -342,7 +312,7 @@ def _browse_runs(ws_name: str, project: dict) -> bool:
     while True:
         choices: list[Choice | Separator] = []
         for r in result.training_runs:
-            status_str = _format_run_status_prompt(r)
+            status_str = format_run_status(r, for_prompt=True)
             name = r.name or "(unnamed)"
             model = r.model_name or ""
             label = f"{name}  {status_str}  {model}"
@@ -361,15 +331,6 @@ def _browse_runs(ws_name: str, project: dict) -> bool:
 
         # Show run detail
         _show_run_detail(selected, ws_name, project)
-
-
-def _format_run_status_prompt(r: Any) -> str:
-    """Format a training run status for interactive prompt (no color)."""
-    status_info = f"[{r.status}]"
-    if r.processing_step:
-        pct = f" {r.processing_percent:.0f}%" if r.processing_percent else ""
-        status_info = f"[{r.status}: {r.processing_step}{pct}]"
-    return status_info
 
 
 def _show_run_detail(r: Any, ws_name: str, project: dict) -> None:

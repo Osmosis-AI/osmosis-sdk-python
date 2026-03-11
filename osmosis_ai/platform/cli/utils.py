@@ -4,7 +4,17 @@ from __future__ import annotations
 
 from typing import Any
 
+from osmosis_ai.cli.console import console
 from osmosis_ai.cli.errors import CLIError
+from osmosis_ai.platform.api.models import (
+    RUN_STATUSES_ERROR,
+    RUN_STATUSES_IN_PROGRESS,
+    RUN_STATUSES_STOPPED,
+    RUN_STATUSES_SUCCESS,
+    STATUSES_ERROR,
+    STATUSES_IN_PROGRESS,
+    STATUSES_SUCCESS,
+)
 
 
 def resolve_id_prefix(
@@ -39,6 +49,58 @@ def resolve_id_prefix(
             "Please provide a longer prefix."
         )
     return matches[0].id
+
+
+def format_dataset_status(d: Any, *, for_prompt: bool = False) -> str:
+    """Format a dataset status string with optional color styling.
+
+    When *for_prompt* is True, returns a plain text string suitable for
+    interactive prompt choices.
+    """
+    status_info = f"[{d.status}]"
+    if d.processing_step:
+        status_info = f"[{d.status}: {d.processing_step}]"
+
+    if for_prompt:
+        return status_info
+
+    if d.status in STATUSES_SUCCESS:
+        color = "green"
+    elif d.status in STATUSES_IN_PROGRESS:
+        color = "yellow"
+    elif d.status in STATUSES_ERROR:
+        color = "red"
+    else:
+        color = None
+
+    if color:
+        return console.format_styled(status_info, color)
+    return console.escape(status_info)
+
+
+def format_run_status(r: Any, *, for_prompt: bool = False) -> str:
+    """Format a training run status string with optional color styling.
+
+    When *for_prompt* is True, returns a plain text string suitable for
+    interactive prompt choices.
+    """
+    status_info = f"[{r.status}]"
+    if r.processing_step:
+        pct = f" {r.processing_percent:.0f}%" if r.processing_percent else ""
+        status_info = f"[{r.status}: {r.processing_step}{pct}]"
+
+    if for_prompt:
+        return status_info
+
+    if r.status in RUN_STATUSES_SUCCESS:
+        return console.format_styled(status_info, "green")
+    if r.status in RUN_STATUSES_IN_PROGRESS:
+        return console.format_styled(status_info, "yellow")
+    if r.status in RUN_STATUSES_ERROR:
+        return console.format_styled(status_info, "red")
+    if r.status in RUN_STATUSES_STOPPED:
+        return console.format_styled(status_info, "dim")
+    return console.escape(status_info)
 
 
 def format_size(size_bytes: int | float) -> str:
