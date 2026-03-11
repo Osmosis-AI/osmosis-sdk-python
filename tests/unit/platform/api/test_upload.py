@@ -60,11 +60,7 @@ class TestSliceFileObj:
 
     def _make_file(self, size: int = 100) -> BytesIO:
         """Create a BytesIO filled with sequential byte values."""
-        return (
-            BytesIO(bytes(range(size)) * ((size // 256) + 1))[:size]
-            if size > 256
-            else BytesIO(bytes(range(size)))
-        )
+        return BytesIO((bytes(range(256)) * ((size // 256) + 1))[:size])
 
     def test_read_full_slice(self) -> None:
         """read() with no argument returns exactly read_limit bytes from the offset."""

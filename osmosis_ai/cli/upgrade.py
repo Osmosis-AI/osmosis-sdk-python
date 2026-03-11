@@ -16,6 +16,14 @@ from osmosis_ai.consts import PACKAGE_VERSION, package_name
 PYPI_URL = f"https://pypi.org/pypi/{package_name}/json"
 
 
+def _parse_version(v: str) -> tuple[int, ...]:
+    """Parse a version string like '1.2.3' into a comparable tuple."""
+    try:
+        return tuple(int(x) for x in v.split("."))
+    except (ValueError, AttributeError):
+        return (0,)
+
+
 def _fetch_latest_version() -> str | None:
     """Fetch the latest version from PyPI."""
     try:
@@ -68,7 +76,7 @@ def upgrade() -> None:
     console.print(f"Latest version:    {latest}")
     console.print()
 
-    if installed == latest:
+    if _parse_version(installed) >= _parse_version(latest):
         console.print("Already up to date!", style="green")
         return
 

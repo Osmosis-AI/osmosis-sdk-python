@@ -479,7 +479,7 @@ def _read_tail_lines(
     try:
         text = data.decode("utf-8")
     except UnicodeDecodeError:
-        return []  # can't decode tail — skip tail validation
+        raise
 
     lines = text.split("\n")
     # If we didn't read from the start, the first "line" may be partial
@@ -545,7 +545,11 @@ def _validate_jsonl(file_path: Path) -> list[str]:
         return errors
 
     # Validate last 100 lines
-    tail_lines = _read_tail_lines(file_path, 100)
+    try:
+        tail_lines = _read_tail_lines(file_path, 100)
+    except UnicodeDecodeError:
+        errors.append("File contains invalid UTF-8 encoding near end of file")
+        return errors
     for line in tail_lines:
         stripped = line.strip()
         if not stripped:
@@ -597,12 +601,19 @@ def _validate_csv(file_path: Path) -> list[str]:
     except UnicodeDecodeError as e:
         errors.append(f"File encoding error: {e}")
         return errors
+    except csv.Error as e:
+        errors.append(f"CSV parse error: {e}")
+        return errors
 
     if file_fully_read or len(errors) >= 5:
         return errors
 
     # Validate last 100 rows
-    tail_lines = _read_tail_lines(file_path, 100)
+    try:
+        tail_lines = _read_tail_lines(file_path, 100)
+    except UnicodeDecodeError:
+        errors.append("File contains invalid UTF-8 encoding near end of file")
+        return errors
     try:
         reader = csv.reader(tail_lines)
         for row in reader:

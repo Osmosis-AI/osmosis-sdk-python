@@ -136,7 +136,7 @@ def platform_request(
         # Detect subscription-required responses (403 with subscription message)
         if e.code == 403:
             error_msg = error_body.get("error", "")
-            if "subscription" in error_msg.lower():
+            if isinstance(error_msg, str) and "subscription" in error_msg.lower():
                 raise SubscriptionRequiredError(error_msg) from e
 
         raise PlatformAPIError(f"API error: HTTP {e.code}.{detail}", e.code) from e

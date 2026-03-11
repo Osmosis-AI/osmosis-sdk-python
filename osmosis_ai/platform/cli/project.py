@@ -162,8 +162,12 @@ def _prompt_create(ws_name: str) -> dict | None:
     client = OsmosisClient()
     project = client.create_project(name, credentials=credentials)
 
-    with contextlib.suppress(Exception):
+    try:
         _refresh_projects(workspace_name=ws_name)
+    except AuthenticationExpiredError:
+        raise
+    except Exception:
+        pass
 
     console.print(f"Created project '{project.project_name}'.")
     return {"id": project.id, "project_name": project.project_name}

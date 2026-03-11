@@ -86,7 +86,9 @@ def format_run_status(r: Any, *, for_prompt: bool = False) -> str:
     """
     status_info = f"[{r.status}]"
     if r.processing_step:
-        pct = f" {r.processing_percent:.0f}%" if r.processing_percent else ""
+        pct = (
+            f" {r.processing_percent:.0f}%" if r.processing_percent is not None else ""
+        )
         status_info = f"[{r.status}: {r.processing_step}{pct}]"
 
     if for_prompt:

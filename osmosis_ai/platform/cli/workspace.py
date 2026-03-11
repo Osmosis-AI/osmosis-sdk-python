@@ -92,7 +92,7 @@ def _show_context(ws_name: str | None, default_project: dict | None) -> None:
 
 def _main_menu(has_project: bool) -> str | None:
     """Show main menu and return the selected action."""
-    choices: list[Choice | Separator] = [
+    choices: list[str | Choice | Separator] = [
         Choice("Switch workspace / project", value="switch"),
     ]
     if has_project:
@@ -118,8 +118,8 @@ def _select_workspace(
 ) -> str | None:
     """Prompt the user to select a workspace. Returns BACK or None to go back."""
     choices = []
-    for name, creds, is_active in workspaces:
-        marker = " (current)" if is_active else ""
+    for name, creds, _is_active in workspaces:
+        marker = " (current)" if name == active_ws else ""
         expired = " [expired]" if creds.is_expired() else ""
         title = f"{name}{marker}{expired}"
         choices.append(Choice(title, value=name))
@@ -175,13 +175,17 @@ def _switch_context(
             step = "project"
 
         elif step == "project":
+            assert ws_name is not None
             result = _select_project(ws_name)
             if result == BACK or result is None:
                 step = "workspace"
                 continue
+            assert isinstance(result, dict)
             step = "confirm"
 
         elif step == "confirm":
+            assert ws_name is not None
+            assert isinstance(result, dict)
             ok = confirm(f"Set context to {ws_name} / {result['project_name']}?")
             if ok is None or not ok:
                 step = "project"
@@ -224,7 +228,7 @@ def _browse_datasets(ws_name: str, project: dict) -> bool:
     from .project import _get_workspace_credentials
 
     client = OsmosisClient()
-    project_id = project.get("project_id")
+    project_id: str = project["project_id"]
     try:
         credentials = _get_workspace_credentials(ws_name)
         result = client.list_datasets(project_id, credentials=credentials)
@@ -240,7 +244,7 @@ def _browse_datasets(ws_name: str, project: dict) -> bool:
         return True
 
     while True:
-        choices: list[Choice | Separator] = []
+        choices: list[str | Choice | Separator] = []
         for d in result.datasets:
             status_str = format_dataset_status(d, for_prompt=True)
             label = f"{d.file_name} ({format_size(d.file_size)}) {status_str}"
@@ -294,7 +298,7 @@ def _browse_runs(ws_name: str, project: dict) -> bool:
     from .project import _get_workspace_credentials
 
     client = OsmosisClient()
-    project_id = project.get("project_id")
+    project_id: str = project["project_id"]
     try:
         credentials = _get_workspace_credentials(ws_name)
         result = client.list_training_runs(project_id, credentials=credentials)
@@ -310,7 +314,7 @@ def _browse_runs(ws_name: str, project: dict) -> bool:
         return True
 
     while True:
-        choices: list[Choice | Separator] = []
+        choices: list[str | Choice | Separator] = []
         for r in result.training_runs:
             status_str = format_run_status(r, for_prompt=True)
             name = r.name or "(unnamed)"
@@ -373,7 +377,7 @@ def _browse_models(ws_name: str, project: dict) -> bool:
     from .project import _get_workspace_credentials
 
     client = OsmosisClient()
-    project_id = project.get("project_id")
+    project_id: str = project["project_id"]
     try:
         credentials = _get_workspace_credentials(ws_name)
         result = client.list_models(project_id, credentials=credentials)
@@ -389,7 +393,7 @@ def _browse_models(ws_name: str, project: dict) -> bool:
         return True
 
     while True:
-        choices: list[Choice | Separator] = []
+        choices: list[str | Choice | Separator] = []
         for m in result.models:
             base = f"  ({m.base_model})" if m.base_model else ""
             label = f"{m.model_name}  [{m.status}]{base}"
@@ -438,7 +442,7 @@ def _show_project_info(ws_name: str, project: dict) -> bool:
     from .project import _get_workspace_credentials
 
     client = OsmosisClient()
-    project_id = project.get("project_id")
+    project_id: str = project["project_id"]
     try:
         credentials = _get_workspace_credentials(ws_name)
         detail = client.get_project(project_id, credentials=credentials)
@@ -511,20 +515,25 @@ def workspace() -> None:
                 console.print()
                 _show_context(ws_name, default_project)
         elif action == "runs":
+            assert ws_name is not None and default_project is not None
             if not _browse_runs(ws_name, default_project):
                 default_project = None
                 _show_context(ws_name, default_project)
         elif action == "models":
+            assert ws_name is not None and default_project is not None
             if not _browse_models(ws_name, default_project):
                 default_project = None
                 _show_context(ws_name, default_project)
         elif action == "datasets":
+            assert ws_name is not None and default_project is not None
             if not _browse_datasets(ws_name, default_project):
                 default_project = None
                 _show_context(ws_name, default_project)
         elif action == "info":
+            assert ws_name is not None and default_project is not None
             if not _show_project_info(ws_name, default_project):
                 default_project = None
                 _show_context(ws_name, default_project)
         elif action == "browser":
+            assert ws_name is not None and default_project is not None
             _open_in_browser(ws_name, default_project)

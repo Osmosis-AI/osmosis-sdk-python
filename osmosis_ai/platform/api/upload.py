@@ -184,6 +184,10 @@ class _ProgressReader:
     def __getattr__(self, name: str) -> Any:
         return getattr(self._fp, name)
 
+    def seek(self, pos: int, *args: Any) -> Any:
+        self._bytes_read = 0
+        return self._fp.seek(pos, *args)
+
     def read(self, size: int = -1) -> bytes:
         data = self._fp.read(size)
         if data:

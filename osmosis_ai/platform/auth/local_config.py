@@ -183,7 +183,7 @@ def load_workspace_projects(
     safe = _safe_ws_name(workspace_name)
     path = CACHE_DIR / f"projects_{safe}.json"
     data = _read_cache(path)
-    if data is None:
+    if not isinstance(data, dict):
         return [], None
     return data.get("projects", []), data.get("refreshed_at")
 

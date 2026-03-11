@@ -17,7 +17,7 @@ import sys
 from typing import Any
 
 import questionary
-from prompt_toolkit.key_binding import KeyBindings, merge_key_bindings
+from prompt_toolkit.key_binding import KeyBindings, KeyBindingsBase, merge_key_bindings
 from prompt_toolkit.keys import Keys
 from questionary import Choice, Separator, Style
 
@@ -51,7 +51,7 @@ def _add_escape_binding(question: questionary.Question) -> questionary.Question:
 
     # select() gives a mutable KeyBindings; text()/autocomplete() give
     # an immutable _MergedKeyBindings — handle both cases.
-    if hasattr(kb, "add"):
+    if isinstance(kb, KeyBindings):
 
         @kb.add(Keys.Escape, eager=True)
         def _(event):
@@ -63,7 +63,10 @@ def _add_escape_binding(question: questionary.Question) -> questionary.Question:
         def _(event):
             event.app.exit(exception=KeyboardInterrupt, style="class:aborting")
 
-        app.key_bindings = merge_key_bindings([kb, extra])
+        bindings: list[KeyBindingsBase] = [extra]
+        if kb is not None:
+            bindings.insert(0, kb)
+        app.key_bindings = merge_key_bindings(bindings)
 
     return question
 

@@ -133,10 +133,14 @@ select = [
 ignore = [
     "E501",    # line-too-long (handled by ruff format)
     "E402",    # module-import-not-at-top-of-file (intentional lazy/conditional imports)
-    "B008",    # function-call-in-default-argument (required by Typer for typer.Option/Argument)
     "SIM117",  # multiple-with-statements (nested with is often clearer in tests)
     "RUF012",  # mutable-class-default (common with Pydantic models)
 ]
+
+[tool.ruff.lint.per-file-ignores]
+# B008: function-call-in-default-argument — required by Typer for typer.Option/Argument
+"**/cli/*.py" = ["B008"]
+"**/cli.py" = ["B008"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["osmosis_ai"]
