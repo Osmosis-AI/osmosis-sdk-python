@@ -8,7 +8,7 @@ from osmosis_ai.cli.console import console
 
 from .project import _require_auth, _resolve_project_id
 
-app = typer.Typer(help="Manage models.")
+app: typer.Typer = typer.Typer(help="Manage models.")
 
 
 @app.command("list")

@@ -33,7 +33,7 @@ from .project import (
 )
 from .utils import format_dataset_status, format_processing_step, format_size
 
-app = typer.Typer(
+app: typer.Typer = typer.Typer(
     help="Manage datasets (upload, list, status, preview, delete, validate)."
 )
 
@@ -475,6 +475,16 @@ def _read_tail_lines(
         read_size = min(chunk_size, file_size)
         f.seek(file_size - read_size)
         data = f.read(read_size)
+
+    # If we read a chunk that doesn't start at the beginning of the file,
+    # it may begin mid-way through a multi-byte UTF-8 character.  Strip
+    # leading continuation bytes (10xxxxxx, i.e. 0x80-0xBF) so the
+    # decode doesn't fail on a perfectly valid UTF-8 file.
+    if read_size < file_size:
+        start = 0
+        while start < len(data) and 0x80 <= data[start] <= 0xBF:
+            start += 1
+        data = data[start:]
 
     try:
         text = data.decode("utf-8")

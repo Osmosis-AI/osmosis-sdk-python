@@ -21,7 +21,9 @@ from osmosis_ai.platform.cli.constants import MSG_SESSION_EXPIRED
 class OsmosisGroup(typer.core.TyperGroup):
     """Typer group with fuzzy command suggestion."""
 
-    def resolve_command(self, ctx, args):
+    def resolve_command(
+        self, ctx: click.Context, args: list[str]
+    ) -> tuple[str | None, click.Command | None, list[str]]:
         try:
             return super().resolve_command(ctx, args)
         except click.UsageError:
@@ -37,7 +39,7 @@ class OsmosisGroup(typer.core.TyperGroup):
             raise
 
 
-app = typer.Typer(
+app: typer.Typer = typer.Typer(
     name="osmosis",
     cls=OsmosisGroup,
     no_args_is_help=True,

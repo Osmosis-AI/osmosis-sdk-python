@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlencode
 
 from osmosis_ai.platform.auth.platform_client import platform_request
@@ -32,7 +32,7 @@ class OsmosisClient:
 
     def refresh_workspace_info(
         self, *, credentials: WorkspaceCredentials | None = None
-    ) -> dict:
+    ) -> dict[str, Any]:
         """GET /api/cli/verify — refresh cached workspace info (user, org, projects)."""
         return platform_request("/api/cli/verify", credentials=credentials)
 
@@ -94,7 +94,7 @@ class OsmosisClient:
         s3_key: str,
         extension: str | None = None,
         upload_id: str | None = None,
-        parts: list[dict] | None = None,
+        parts: list[dict[str, Any]] | None = None,
         *,
         credentials: WorkspaceCredentials | None = None,
     ) -> DatasetFile:

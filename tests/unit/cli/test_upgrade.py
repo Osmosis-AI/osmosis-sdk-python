@@ -7,30 +7,32 @@ import pytest
 from osmosis_ai.cli.upgrade import (
     _detect_install_method,
     _get_upgrade_commands,
-    _parse_version,
+    _is_up_to_date,
 )
 
-# ── _parse_version ───────────────────────────────────────────────────
+# ── _is_up_to_date ──────────────────────────────────────────────────
 
 
-@pytest.mark.parametrize(
-    "version, expected",
-    [
-        ("1.2.3", (1, 2, 3)),
-        ("0.1.0", (0, 1, 0)),
-        ("10.20.30", (10, 20, 30)),
-        ("bad", (0,)),
-        ("", (0,)),
-    ],
-)
-def test_parse_version(version: str, expected: tuple[int, ...]) -> None:
-    assert _parse_version(version) == expected
+def test_is_up_to_date_simple_versions() -> None:
+    assert _is_up_to_date("1.2.4", "1.2.3")
+    assert _is_up_to_date("1.0.0", "1.0.0")
+    assert not _is_up_to_date("1.2.3", "1.2.4")
+    assert _is_up_to_date("2.0.0", "1.9.9")
+    assert not _is_up_to_date("1.9.9", "2.0.0")
 
 
-def test_parse_version_comparison() -> None:
-    assert _parse_version("1.2.3") < _parse_version("1.2.4")
-    assert _parse_version("2.0.0") > _parse_version("1.9.9")
-    assert _parse_version("1.0.0") == _parse_version("1.0.0")
+def test_is_up_to_date_prerelease_versions() -> None:
+    # Pre-release is less than the release
+    assert not _is_up_to_date("2.0.0a1", "2.0.0")
+    assert not _is_up_to_date("2.0.0rc1", "2.0.0")
+    assert not _is_up_to_date("2.0.0.dev1", "2.0.0")
+    # Pre-release of a higher version is still greater than older release
+    assert _is_up_to_date("2.0.0a1", "1.0.0")
+
+
+def test_is_up_to_date_unparseable_assumes_upgrade_needed() -> None:
+    # When versions can't be parsed at all, assume upgrade is needed
+    assert not _is_up_to_date("bad", "1.0.0")
 
 
 # ── _detect_install_method ───────────────────────────────────────────

@@ -147,7 +147,9 @@ def test_table_rich_with_headers() -> None:
 def test_table_rich_without_headers() -> None:
     c, buf = _rich_console()
     c.table([("Key", "Val")])
-    assert "Key" in output if (output := buf.getvalue()) else True
+    output = buf.getvalue()
+    assert output, "Expected non-empty table output from rich console"
+    assert "Key" in output
 
 
 # ── escape ───────────────────────────────────────────────────────────

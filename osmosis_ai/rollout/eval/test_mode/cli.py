@@ -26,7 +26,7 @@ if TYPE_CHECKING:
         LocalTestRunResult,
     )
 
-app = typer.Typer(help="Test a RolloutAgentLoop against a dataset.")
+app: typer.Typer = typer.Typer(help="Test a RolloutAgentLoop against a dataset.")
 
 
 @dataclass
@@ -45,7 +45,7 @@ class TestCommand:
     def __init__(self) -> None:
         self.console: Console = Console()
 
-    def run(self, **kwargs) -> int:
+    def run(self, **kwargs: Any) -> int:
         args = SimpleNamespace(**kwargs)
         return asyncio.run(self._run_async(args))
 

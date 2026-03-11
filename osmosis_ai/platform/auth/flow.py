@@ -7,6 +7,7 @@ import socket
 import webbrowser
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from typing import Any
 from urllib.parse import urlencode
 
 from osmosis_ai.consts import PACKAGE_VERSION
@@ -36,7 +37,7 @@ class VerifyResult:
     organization: OrganizationInfo
     expires_at: datetime
     token_id: str | None
-    projects: list[dict] | None
+    projects: list[dict[str, Any]] | None
 
 
 @dataclass
@@ -47,7 +48,7 @@ class LoginResult:
     organization: OrganizationInfo
     expires_at: datetime
     revoked_previous_tokens: int = 0
-    projects: list[dict] | None = None
+    projects: list[dict[str, Any]] | None = None
 
 
 def _generate_state() -> str:

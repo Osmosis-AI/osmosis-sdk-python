@@ -259,7 +259,7 @@ def upload_file_multipart(
     file_path: Path,
     upload_info: UploadInfo,
     progress_callback: ProgressCallback | None = None,
-) -> list[dict]:
+) -> list[dict[str, Any]]:
     """Sequential multipart upload to S3 using a single file handle.
 
     Each part is streamed via SliceFileObj — no full-part buffer in memory.

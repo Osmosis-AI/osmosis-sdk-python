@@ -165,7 +165,9 @@ def clear_workspace_data(workspace_name: str) -> None:
 # ── Project cache ────────────────────────────────────────────────
 
 
-def save_workspace_projects(workspace_name: str, projects: list[dict]) -> None:
+def save_workspace_projects(
+    workspace_name: str, projects: list[dict[str, Any]]
+) -> None:
     """Cache the project list for a workspace."""
     safe = _safe_ws_name(workspace_name)
     path = CACHE_DIR / f"projects_{safe}.json"
@@ -174,7 +176,7 @@ def save_workspace_projects(workspace_name: str, projects: list[dict]) -> None:
 
 def load_workspace_projects(
     workspace_name: str,
-) -> tuple[list[dict], float | None]:
+) -> tuple[list[dict[str, Any]], float | None]:
     """Load cached projects and their refresh timestamp for a workspace.
 
     Returns:

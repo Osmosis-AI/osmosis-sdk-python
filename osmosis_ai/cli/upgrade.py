@@ -16,12 +16,24 @@ from osmosis_ai.consts import PACKAGE_VERSION, package_name
 PYPI_URL = f"https://pypi.org/pypi/{package_name}/json"
 
 
-def _parse_version(v: str) -> tuple[int, ...]:
-    """Parse a version string like '1.2.3' into a comparable tuple."""
+def _is_up_to_date(installed: str, latest: str) -> bool:
+    """Return True if installed >= latest using PEP 440 version comparison."""
     try:
-        return tuple(int(x) for x in v.split("."))
+        from packaging.version import Version
+
+        return Version(installed) >= Version(latest)
+    except Exception:
+        # If packaging is unavailable or versions are unparseable,
+        # fall back to simple numeric tuple comparison.
+        pass
+
+    try:
+        installed_t = tuple(int(x) for x in installed.split("."))
+        latest_t = tuple(int(x) for x in latest.split("."))
+        return installed_t >= latest_t
     except (ValueError, AttributeError):
-        return (0,)
+        # Cannot reliably compare — assume an upgrade is needed.
+        return False
 
 
 def _fetch_latest_version() -> str | None:
@@ -76,7 +88,7 @@ def upgrade() -> None:
     console.print(f"Latest version:    {latest}")
     console.print()
 
-    if _parse_version(installed) >= _parse_version(latest):
+    if _is_up_to_date(installed, latest):
         console.print("Already up to date!", style="green")
         return
 

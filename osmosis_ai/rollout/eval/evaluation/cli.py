@@ -24,13 +24,13 @@ if TYPE_CHECKING:
     from osmosis_ai.rollout.eval.evaluation.eval_fn import EvalFnWrapper
     from osmosis_ai.rollout.eval.evaluation.runner import EvalRunResult
 
-app = typer.Typer(
+app: typer.Typer = typer.Typer(
     help="Evaluate agent against dataset with eval functions.",
     invoke_without_command=True,
     no_args_is_help=False,
 )
 
-cache_app = typer.Typer(help="Manage eval cache.")
+cache_app: typer.Typer = typer.Typer(help="Manage eval cache.")
 app.add_typer(cache_app, name="cache")
 
 
@@ -246,7 +246,7 @@ class EvalCommand:
         self.console.print(f"Deleted {deleted} cached evaluation(s).")
         return 0
 
-    def run(self, **kwargs) -> int:
+    def run(self, **kwargs: Any) -> int:
         args = SimpleNamespace(**kwargs)
         return asyncio.run(self._run_async(args))
 

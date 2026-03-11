@@ -20,7 +20,7 @@ from osmosis_ai.rubric.services import (
     load_rubric_suite,
 )
 
-app = typer.Typer(help="Evaluate JSONL conversations against a rubric.")
+app: typer.Typer = typer.Typer(help="Evaluate JSONL conversations against a rubric.")
 
 
 class EvalRubricCommand:

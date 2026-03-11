@@ -29,7 +29,7 @@ from .utils import (
     format_size,
 )
 
-app = typer.Typer(help="Switch workspace and default project.")
+app: typer.Typer = typer.Typer(help="Switch workspace and default project.")
 
 
 def _validate_default_project(

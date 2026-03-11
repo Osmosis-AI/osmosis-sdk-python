@@ -9,7 +9,7 @@ from osmosis_ai.cli.console import console
 from .project import _require_auth, _resolve_project_id
 from .utils import format_processing_step, format_run_status
 
-app = typer.Typer(help="Manage training runs.")
+app: typer.Typer = typer.Typer(help="Manage training runs.")
 
 
 @app.command("list")

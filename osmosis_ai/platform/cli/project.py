@@ -5,7 +5,7 @@ from __future__ import annotations
 import contextlib
 import os
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from osmosis_ai.cli.console import console
 from osmosis_ai.cli.errors import CLIError
@@ -90,10 +90,10 @@ def _get_workspace_credentials(workspace_name: str) -> WorkspaceCredentials:
 
 def select_project_interactive(
     ws_name: str,
-    projects: list[dict] | None = None,
+    projects: list[dict[str, Any]] | None = None,
     current_project_id: str | None = None,
     allow_back: bool = False,
-) -> dict | str | None:
+) -> dict[str, Any] | str | None:
     """Interactively select or create a project.
 
     - 0 projects: prompt to create (TTY only)
