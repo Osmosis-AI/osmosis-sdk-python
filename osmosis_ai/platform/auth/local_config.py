@@ -29,7 +29,7 @@ CONFIG_FILE = CONFIG_DIR / "config.json"
 def _load_config() -> dict[str, Any]:
     try:
         with open(CONFIG_FILE, encoding="utf-8") as f:
-            return json.load(f)
+            data = json.load(f)
     except FileNotFoundError:
         return {}
     except json.JSONDecodeError:
@@ -49,6 +49,11 @@ def _load_config() -> dict[str, Any]:
         )
         return {}
 
+    if not isinstance(data, dict):
+        return {}
+
+    return data
+
 
 def _get_defaults() -> tuple[dict[str, Any], dict[str, Any]]:
     """Load config and safely extract the 'defaults' dict.
@@ -56,8 +61,6 @@ def _get_defaults() -> tuple[dict[str, Any], dict[str, Any]]:
     Returns (config, defaults) where defaults is guaranteed to be a dict.
     """
     config = _load_config()
-    if not isinstance(config, dict):
-        return {}, {}
     defaults = config.get("defaults", {})
     if not isinstance(defaults, dict):
         return config, {}
