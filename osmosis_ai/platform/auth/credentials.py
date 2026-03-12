@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
-import stat
+import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any
 
 from .config import CONFIG_DIR, CREDENTIALS_FILE, CREDENTIALS_VERSION
@@ -144,11 +144,6 @@ def _ensure_config_dir() -> None:
             os.chmod(CONFIG_DIR, 0o700)
 
 
-def _set_file_permissions(path: Path) -> None:
-    """Set restrictive permissions on credentials file."""
-    os.chmod(path, stat.S_IRUSR | stat.S_IWUSR)  # 0o600
-
-
 def _load_store() -> CredentialsStore | None:
     """Load the credentials store from file."""
     if not CREDENTIALS_FILE.exists():
@@ -163,22 +158,23 @@ def _load_store() -> CredentialsStore | None:
 
 
 def _save_store(store: CredentialsStore) -> None:
-    """Save the credentials store to file."""
+    """Save the credentials store to file.
+
+    Uses mkstemp so the temp file is created with 0o600 from the start,
+    avoiding a permission window where credentials could be world-readable.
+    """
     _ensure_config_dir()
 
     data = store.to_dict()
 
-    # Write to a temporary file first, then rename for atomicity
-    temp_file = CREDENTIALS_FILE.with_suffix(".tmp")
+    fd, tmp = tempfile.mkstemp(dir=CONFIG_DIR, suffix=".tmp")
     try:
-        with open(temp_file, "w", encoding="utf-8") as f:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
-        _set_file_permissions(temp_file)
-        temp_file.rename(CREDENTIALS_FILE)
-    except Exception:
-        # Clean up temp file if something went wrong
-        if temp_file.exists():
-            temp_file.unlink()
+        os.replace(tmp, CREDENTIALS_FILE)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp)
         raise
 
 

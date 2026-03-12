@@ -318,8 +318,7 @@ class TestLogin:
         mock_server = MagicMock()
         mock_server.wait_for_callback.return_value = ("test-token-123", None)
         mock_server.revoked_count = 0
-        mock_server._verification_event = MagicMock()
-        mock_server._verification_event.is_set.return_value = True
+        mock_server.is_verification_pending.return_value = False
 
         with (
             patch(
@@ -347,8 +346,7 @@ class TestLogin:
         mock_server = MagicMock()
         mock_server.wait_for_callback.return_value = ("test-token", None)
         mock_server.revoked_count = 0
-        mock_server._verification_event = MagicMock()
-        mock_server._verification_event.is_set.return_value = True
+        mock_server.is_verification_pending.return_value = False
 
         with (
             patch(
@@ -370,8 +368,7 @@ class TestLogin:
         mock_server = MagicMock()
         mock_server.wait_for_callback.return_value = (None, "User denied")
         mock_server.revoked_count = 0
-        mock_server._verification_event = MagicMock()
-        mock_server._verification_event.is_set.return_value = False
+        mock_server.is_verification_pending.return_value = True
 
         with (
             patch(
@@ -390,8 +387,7 @@ class TestLogin:
         mock_server = MagicMock()
         mock_server.wait_for_callback.return_value = (None, None)
         mock_server.revoked_count = 0
-        mock_server._verification_event = MagicMock()
-        mock_server._verification_event.is_set.return_value = False
+        mock_server.is_verification_pending.return_value = True
 
         with (
             patch(
@@ -411,8 +407,7 @@ class TestLogin:
         mock_server = MagicMock()
         mock_server.wait_for_callback.return_value = ("bad-token", None)
         mock_server.revoked_count = 0
-        mock_server._verification_event = MagicMock()
-        mock_server._verification_event.is_set.return_value = True
+        mock_server.is_verification_pending.return_value = False
 
         verify_error = HTTPError(
             url="http://test",
@@ -446,9 +441,7 @@ class TestLogin:
         mock_server = MagicMock()
         mock_server.wait_for_callback.return_value = (None, "error")
         mock_server.revoked_count = 0
-        mock_server._verification_event = MagicMock()
-        mock_server._verification_event.is_set.return_value = False
-        mock_server._shutdown_event = MagicMock()
+        mock_server.is_verification_pending.return_value = True
 
         with (
             patch(
@@ -463,6 +456,7 @@ class TestLogin:
             with pytest.raises(LoginError):
                 login()
 
+        mock_server.signal_shutdown.assert_called_once()
         mock_server.server_close.assert_called_once()
 
     def test_browser_open_failure_does_not_raise(self) -> None:
@@ -472,8 +466,7 @@ class TestLogin:
         mock_server = MagicMock()
         mock_server.wait_for_callback.return_value = ("test-token", None)
         mock_server.revoked_count = 0
-        mock_server._verification_event = MagicMock()
-        mock_server._verification_event.is_set.return_value = True
+        mock_server.is_verification_pending.return_value = False
 
         with (
             patch(
@@ -499,8 +492,7 @@ class TestLogin:
         mock_server = MagicMock()
         mock_server.wait_for_callback.return_value = ("test-token", None)
         mock_server.revoked_count = 3
-        mock_server._verification_event = MagicMock()
-        mock_server._verification_event.is_set.return_value = True
+        mock_server.is_verification_pending.return_value = False
 
         with (
             patch(
@@ -526,8 +518,7 @@ class TestLogin:
         mock_server = MagicMock()
         mock_server.wait_for_callback.return_value = ("the-real-token", None)
         mock_server.revoked_count = 0
-        mock_server._verification_event = MagicMock()
-        mock_server._verification_event.is_set.return_value = True
+        mock_server.is_verification_pending.return_value = False
 
         with (
             patch(

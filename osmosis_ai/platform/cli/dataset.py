@@ -56,6 +56,10 @@ def _abort_multipart(
 # backoff on transient errors (network/timeout/5xx).  This is the most
 # dangerous failure point — the file is already on S3, so a failed
 # complete call leaves an orphan that costs money and confuses users.
+#
+# Note: the platform has server-side safety nets for orphaned S3 objects
+# (weekly cron Lambda + S3 lifecycle rules), so this retry is the
+# primary client-side defense, not the only one.
 
 _COMPLETE_MAX_RETRIES = 5
 _COMPLETE_BACKOFF_BASE = 1.0  # seconds
@@ -115,7 +119,10 @@ def _complete_with_retry(
         style="bold red",
     )
     console.print(f"  Dataset ID: {dataset_id}", style="yellow")
-    console.print("  Please try uploading the file again.", style="yellow")
+    console.print(
+        "  The file may need to be re-uploaded. Please run the upload command again.",
+        style="yellow",
+    )
     console.print()
     raise CLIError(f"Failed to complete upload: {last_error}") from last_error
 

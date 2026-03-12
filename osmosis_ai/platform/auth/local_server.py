@@ -193,6 +193,14 @@ class LocalAuthServer(HTTPServer):
 
         return self.received_token, self.error
 
+    def is_verification_pending(self) -> bool:
+        """Check whether the verification result has been set yet."""
+        return not self._verification_event.is_set()
+
+    def signal_shutdown(self) -> None:
+        """Signal the server loop to stop accepting requests."""
+        self._shutdown_event.set()
+
     def shutdown(self) -> None:
         """Shutdown the server."""
         self._shutdown_event.set()

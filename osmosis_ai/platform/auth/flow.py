@@ -176,11 +176,11 @@ def login(
 
     finally:
         # Ensure the callback handler is unblocked if verification wasn't reached
-        if not server._verification_event.is_set():
+        if server.is_verification_pending():
             server.set_verification_result(
                 success=False, error="Login failed unexpectedly"
             )
-        server._shutdown_event.set()
+        server.signal_shutdown()
         server.server_close()
 
 
