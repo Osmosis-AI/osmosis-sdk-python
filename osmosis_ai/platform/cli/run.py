@@ -34,8 +34,12 @@ def list_runs(
     console.print(f"Training Runs ({result.total_count}):", style="bold")
     for r in result.training_runs:
         status_str = format_run_status(r)
-        name = r.name or console.format_styled("(unnamed)", "dim")
-        model = r.model_name or "—"
+        name = (
+            console.escape(r.name)
+            if r.name
+            else console.format_styled("(unnamed)", "dim")
+        )
+        model = console.escape(r.model_name) if r.model_name else "—"
         acc = f"acc:{r.eval_accuracy:.2f}" if r.eval_accuracy is not None else ""
         date = format_date(r.created_at)
 
@@ -72,7 +76,7 @@ def status(
     if run.examples_processed_count is not None:
         rows.append(("Examples", str(run.examples_processed_count)))
     if run.notes:
-        rows.append(("Notes", run.notes))
+        rows.append(("Notes", console.escape(run.notes)))
     if run.hf_status:
         rows.append(("HF Status", run.hf_status))
     if run.started_at:

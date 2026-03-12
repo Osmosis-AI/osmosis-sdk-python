@@ -21,7 +21,7 @@ def ensure_secure_dir(directory: Path) -> None:
         if current_mode & 0o077:  # group or others have permissions
             os.chmod(directory, 0o700)
     except FileNotFoundError:
-        directory.mkdir(parents=True, mode=0o700)
+        directory.mkdir(parents=True, mode=0o700, exist_ok=True)
 
 
 def atomic_write_json(

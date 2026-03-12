@@ -58,11 +58,12 @@ def login_cmd(
 
         result = login(no_browser=no_browser)
 
-        info_lines = [f"Email: {result.user.email}"]
+        esc = console.escape
+        info_lines = [f"Email: {esc(result.user.email)}"]
         if result.user.name:
-            info_lines.append(f"Name: {result.user.name}")
+            info_lines.append(f"Name: {esc(result.user.name)}")
         info_lines.append(
-            f"Workspace: {result.organization.name} ({result.organization.role})"
+            f"Workspace: {esc(result.organization.name)} ({esc(result.organization.role)})"
         )
         info_lines.append(f"Expires: {result.expires_at.strftime('%Y-%m-%d')}")
 
@@ -71,7 +72,7 @@ def login_cmd(
         if result.revoked_previous_tokens > 0:
             token_word = "token" if result.revoked_previous_tokens == 1 else "tokens"
             console.print(
-                f"[Note] {result.revoked_previous_tokens} previous {token_word} for this device was revoked",
+                f"{esc('[Note]')} {result.revoked_previous_tokens} previous {token_word} for this device was revoked",
                 style="dim",
             )
 

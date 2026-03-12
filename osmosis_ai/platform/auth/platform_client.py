@@ -130,7 +130,12 @@ def platform_request(
 
     try:
         with urlopen(request, timeout=timeout) as response:
-            result: dict[str, Any] = json.loads(response.read().decode())
+            if response.status == 204:
+                return {}
+            raw = response.read()
+            if not raw:
+                return {}
+            result: dict[str, Any] = json.loads(raw.decode())
             return result
     except HTTPError as e:
         if e.code == 401:

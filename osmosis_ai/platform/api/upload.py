@@ -305,13 +305,21 @@ def upload_file_multipart(
         )
     part_size = info.part_size
 
-    # Validate file size is sufficient for the part configuration
+    # Validate file size fits the part configuration (lower + upper bound)
     min_required_size = part_size * (info.total_parts - 1) + 1
+    max_covered_size = part_size * info.total_parts
     if file_size < min_required_size:
         raise RuntimeError(
             f"File size ({file_size} bytes) is too small for multipart upload "
             f"configuration (part_size={part_size}, total_parts={info.total_parts}). "
             f"Minimum required: {min_required_size} bytes."
+        )
+    if file_size > max_covered_size:
+        raise RuntimeError(
+            f"File size ({file_size} bytes) exceeds multipart upload "
+            f"configuration capacity (part_size={part_size}, total_parts={info.total_parts}). "
+            f"Maximum covered: {max_covered_size} bytes. "
+            "The file would be silently truncated."
         )
 
     # Build part_number → presigned_url mapping

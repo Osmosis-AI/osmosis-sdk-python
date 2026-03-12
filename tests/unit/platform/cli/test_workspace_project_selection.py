@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import pytest
+
 import osmosis_ai.platform.cli.project as project_module
+from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.platform.auth.platform_client import PlatformAPIError
 
 
@@ -56,6 +59,30 @@ def test_select_project_interactive_uses_selected_workspace_cache_on_refresh_fai
     assert calls["workspace_name"] == "ws-b"
     assert calls["max_age"] is None
     assert result == target_project
+
+
+def test_select_project_interactive_raises_when_refresh_fails_and_no_cache(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(project_module, "is_interactive", lambda: False)
+
+    def fake_refresh_projects(*, workspace_name: str) -> list[dict]:
+        raise PlatformAPIError("network error")
+
+    def fake_get_cached_projects(
+        *,
+        workspace_name: str,
+        max_age: float | None = project_module.CACHE_TTL_SECONDS,
+    ) -> list[dict]:
+        return []
+
+    monkeypatch.setattr(project_module, "_refresh_projects", fake_refresh_projects)
+    monkeypatch.setattr(
+        project_module, "_get_cached_projects", fake_get_cached_projects
+    )
+
+    with pytest.raises(CLIError, match="Could not load project list"):
+        project_module.select_project_interactive("ws-b")
 
 
 def test_get_cached_projects_reads_selected_workspace_cache(monkeypatch) -> None:
@@ -130,6 +157,7 @@ def test_resolve_project_uses_selected_workspace_default_and_cache(
 ) -> None:
     calls: dict[str, str | float] = {}
     target_project = {"id": "proj-b", "project_name": "target-project"}
+    monkeypatch.delenv("OSMOSIS_PROJECT", raising=False)
     monkeypatch.setattr(
         project_module,
         "get_default_project",

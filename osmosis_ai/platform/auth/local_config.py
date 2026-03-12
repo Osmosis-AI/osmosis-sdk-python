@@ -50,6 +50,18 @@ def _load_config() -> dict[str, Any]:
         return {}
 
 
+def _get_defaults() -> tuple[dict[str, Any], dict[str, Any]]:
+    """Load config and safely extract the 'defaults' dict.
+
+    Returns (config, defaults) where defaults is guaranteed to be a dict.
+    """
+    config = _load_config()
+    defaults = config.get("defaults", {})
+    if not isinstance(defaults, dict):
+        return config, {}
+    return config, defaults
+
+
 def _save_config(data: dict[str, Any]) -> None:
     atomic_write_json(CONFIG_FILE, data, mode=0o600)
 
@@ -82,8 +94,7 @@ def get_default_project(workspace_name: str) -> dict[str, str] | None:
     Returns:
         Dict with 'project_id' and 'project_name', or None.
     """
-    config = _load_config()
-    defaults = config.get("defaults", {})
+    _config, defaults = _get_defaults()
     entry = defaults.get(workspace_name)
     if (
         entry
@@ -114,8 +125,7 @@ def set_default_project(
 
 def clear_default_project(workspace_name: str) -> None:
     """Remove the default project for a workspace."""
-    config = _load_config()
-    defaults = config.get("defaults", {})
+    config, defaults = _get_defaults()
     if workspace_name in defaults:
         del defaults[workspace_name]
         _save_config(config)
@@ -127,8 +137,7 @@ def clear_default_project(workspace_name: str) -> None:
 def clear_workspace_data(workspace_name: str) -> None:
     """Remove all local data for a workspace (defaults + cache files)."""
     # Clear default project from config.json
-    config = _load_config()
-    defaults = config.get("defaults", {})
+    config, defaults = _get_defaults()
     if workspace_name in defaults:
         del defaults[workspace_name]
         _save_config(config)
@@ -202,6 +211,9 @@ def load_subscription_status(
         return None
     if max_age is not None:
         refreshed_at = data.get("refreshed_at")
-        if refreshed_at is None or (time.time() - refreshed_at) > max_age:
+        if (
+            not isinstance(refreshed_at, (int, float))
+            or (time.time() - refreshed_at) > max_age
+        ):
             return None
     return data.get("has_subscription")

@@ -22,7 +22,7 @@ CACHE_TTL_SECONDS = 300
 # ── Project name validation ───────────────────────────────────────
 # Must match the frontend validation rules.
 
-PROJECT_NAME_RE = re.compile(r"^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$")
+PROJECT_NAME_RE = re.compile(r"^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?\Z")
 PROJECT_NAME_MAX = 64
 RESERVED_PROJECT_NAMES = frozenset(
     {

@@ -281,7 +281,7 @@ def upload(
             with contextlib.suppress(Exception):
                 client.delete_dataset(dataset.id, credentials=credentials)
             raise CLIError("Upload cancelled by user.") from None
-        except RuntimeError as e:
+        except Exception as e:
             raise CLIError(f"Upload failed: {e}") from e
         _complete_with_retry(
             client,

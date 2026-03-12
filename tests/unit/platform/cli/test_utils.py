@@ -150,7 +150,7 @@ def test_format_dataset_status_unknown_uses_escape(
 ) -> None:
     import osmosis_ai.platform.cli.utils as mod
 
-    c = Console(file=StringIO(), force_terminal=False)
+    c = Console(file=StringIO(), force_terminal=True)
     monkeypatch.setattr(mod, "console", c)
     result = format_dataset_status(_dataset("unknown_status"))
     assert "[unknown_status]" in result
@@ -213,7 +213,7 @@ def test_format_run_status_stopped(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_format_run_status_unknown(monkeypatch: pytest.MonkeyPatch) -> None:
     import osmosis_ai.platform.cli.utils as mod
 
-    c = Console(file=StringIO(), force_terminal=False)
+    c = Console(file=StringIO(), force_terminal=True)
     monkeypatch.setattr(mod, "console", c)
     result = format_run_status(_run("weird"))
     assert "[weird]" in result

@@ -71,7 +71,15 @@ def _get_upgrade_commands(method: str) -> list[list[str]]:
         "uv_tool": [["uv", "tool", "upgrade", package_name]],
         "pipx": [["pipx", "upgrade", package_name]],
         "pip": [
-            ["uv", "pip", "install", "--upgrade", package_name],
+            [
+                "uv",
+                "pip",
+                "install",
+                "--python",
+                sys.executable,
+                "--upgrade",
+                package_name,
+            ],
             [sys.executable, "-m", "pip", "install", "--upgrade", package_name],
         ],
     }

@@ -121,6 +121,11 @@ def select_project_interactive(
                     "Warning: Failed to refresh projects, using cached data.",
                     style="yellow",
                 )
+            else:
+                raise CLIError(
+                    "Could not load project list and no cached data is available.\n"
+                    "  Please check your network connection and try again."
+                ) from None
 
     if not is_interactive():
         # Non-interactive: auto-select if exactly one, otherwise skip
@@ -224,7 +229,10 @@ def _get_cached_projects(
     projects, refreshed_at = load_workspace_projects(workspace_name)
 
     if max_age is not None and projects:
-        is_stale = refreshed_at is None or (time.time() - refreshed_at) > max_age
+        is_stale = (
+            not isinstance(refreshed_at, (int, float))
+            or (time.time() - refreshed_at) > max_age
+        )
         if is_stale:
             try:
                 return _refresh_projects(workspace_name=workspace_name)
@@ -335,16 +343,23 @@ def _require_subscription(*, workspace_name: str) -> None:
         return
 
     # Cached status is False, None, or expired — refresh to get the latest
+    refreshed = False
     with contextlib.suppress(PlatformAPIError, OSError):
         _refresh_projects(
             workspace_name=workspace_name
         )  # Also updates subscription cache
+        refreshed = True
 
-    # Re-check: always use TTL to ensure we only accept fresh data
-    # (refresh may not update has_subscription if the field is missing from API response)
+    # Re-check after refresh attempt
     status = load_subscription_status(workspace_name, max_age=CACHE_TTL_SECONDS)
-    if status is not True:
-        raise CLIError(
-            "Your workspace requires an active subscription for this action.\n"
-            f"  Upgrade at: {PLATFORM_URL}/{workspace_name}/settings/billing"
-        )
+    if status is True:
+        return
+
+    # If refresh failed and status is still unknown, don't block the user
+    if not refreshed and status is None:
+        return
+
+    raise CLIError(
+        "Your workspace requires an active subscription for this action.\n"
+        f"  Upgrade at: {PLATFORM_URL}/{workspace_name}/settings/billing"
+    )

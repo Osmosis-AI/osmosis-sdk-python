@@ -187,9 +187,23 @@ def _switch_context(
                 step = "workspace"
                 continue
             result = _select_project(ws_name)
-            if result == BACK or result is None:
+            if result == BACK:
                 step = "workspace"
                 continue
+            if result is None:
+                # Allow switching workspace without selecting a project
+                # (e.g. empty workspaces with no projects yet)
+                ok = confirm(f"Switch to '{ws_name}' without selecting a project?")
+                if not ok:
+                    step = "workspace"
+                    continue
+                if ws_name != active_ws:
+                    set_active_workspace(ws_name)
+                console.print(
+                    f"{console.format_styled('Switched to:', 'bold')} "
+                    f"{console.format_styled(ws_name, 'cyan')}"
+                )
+                return ws_name, None
             if not isinstance(result, dict):
                 step = "workspace"
                 continue

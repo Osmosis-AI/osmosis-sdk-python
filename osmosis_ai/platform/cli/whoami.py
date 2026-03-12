@@ -33,12 +33,14 @@ def whoami() -> None:
     for name, creds, is_active in workspaces:
         url = f"{PLATFORM_URL}/{name}"
         if creds.is_expired():
-            # Expired workspace: dim/red + name + role + [expired]
-            # Show expired indicator regardless of active status
-            line = console.format_styled("●", "red dim")
+            # Expired: yellow bullet if active, red if inactive
+            bullet_style = "yellow" if is_active else "red dim"
+            line = console.format_styled("●", bullet_style)
             line += console.format_styled(
                 f" {name} ({creds.organization.role}) [expired]", "dim"
             )
+            if is_active:
+                line += f"  {console.format_styled(url, 'dim')}"
             console.print(line)
         elif is_active:
             # Active workspace: green bullet + name + role
