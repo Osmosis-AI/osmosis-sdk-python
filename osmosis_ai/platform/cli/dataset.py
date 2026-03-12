@@ -47,8 +47,13 @@ def _abort_multipart(
 ) -> None:
     """Best-effort abort of a multipart upload."""
     if upload_id:
-        with contextlib.suppress(Exception):
+        try:
             client.abort_upload(dataset_id, upload_id, credentials=credentials)
+        except Exception as exc:
+            console.print(
+                f"Warning: failed to abort multipart upload: {exc}",
+                style="dim yellow",
+            )
 
 
 # ── Complete-upload retry (P0 reliability fix) ───────────────────────
@@ -87,7 +92,7 @@ def _complete_with_retry(
                 _COMPLETE_BACKOFF_BASE * (2 ** (attempt - 1)), _COMPLETE_BACKOFF_CAP
             )
             console.print(
-                f"Retrying complete ({attempt}/{_COMPLETE_MAX_RETRIES - 1})...",
+                f"Retrying complete (attempt {attempt} of {_COMPLETE_MAX_RETRIES - 1})...",
                 style="dim",
             )
             time.sleep(delay)

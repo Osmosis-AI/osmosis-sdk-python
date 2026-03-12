@@ -27,6 +27,16 @@ CONFIG_FILE = CONFIG_DIR / "config.json"
 # ── Internal helpers ────────────────────────────────────────────────
 
 
+def _ensure_dir(directory: Path) -> None:
+    """Ensure directory exists with 0o700 permissions (owner-only access)."""
+    if not directory.exists():
+        directory.mkdir(parents=True, mode=0o700)
+    else:
+        current_mode = directory.stat().st_mode
+        if current_mode & 0o077:
+            os.chmod(directory, 0o700)
+
+
 def _load_config() -> dict[str, Any]:
     if not CONFIG_FILE.exists():
         return {}
@@ -52,15 +62,16 @@ def _load_config() -> dict[str, Any]:
 
 
 def _save_config(data: dict[str, Any]) -> None:
-    CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-    temp = CONFIG_FILE.with_suffix(".tmp")
+    _ensure_dir(CONFIG_DIR)
+
+    fd, tmp = tempfile.mkstemp(dir=CONFIG_DIR, suffix=".tmp")
     try:
-        with open(temp, "w", encoding="utf-8") as f:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
-        temp.rename(CONFIG_FILE)
-    except Exception:
-        if temp.exists():
-            temp.unlink()
+        os.replace(tmp, CONFIG_FILE)
+    except BaseException:
+        with contextlib.suppress(OSError):
+            os.unlink(tmp)
         raise
 
 
@@ -71,7 +82,7 @@ def _safe_ws_name(name: str) -> str:
 
 def _write_cache(path: Path, data: Any) -> None:
     """Atomically write *data* as JSON to *path* (tempfile + os.replace)."""
-    CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    _ensure_dir(CACHE_DIR)
     fd, tmp = tempfile.mkstemp(dir=CACHE_DIR, suffix=".tmp")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:

@@ -47,6 +47,10 @@ def _validate_default_project(
 
     projects = _get_cached_projects(workspace_name=ws_name, max_age=0)
     if not projects:
+        # If refresh failed or workspace has no projects, we can't confirm
+        # whether the default still exists. Keep it to avoid clearing a valid
+        # default due to a transient network issue. The browse functions
+        # (_browse_runs, etc.) handle actual 404s via _handle_stale_project.
         return default_project
 
     for p in projects:
@@ -517,22 +521,22 @@ def workspace() -> None:
         elif action == "runs":
             assert ws_name is not None and default_project is not None
             if not _browse_runs(ws_name, default_project):
-                default_project = None
+                default_project = None  # Already cleared by _handle_stale_project
                 _show_context(ws_name, default_project)
         elif action == "models":
             assert ws_name is not None and default_project is not None
             if not _browse_models(ws_name, default_project):
-                default_project = None
+                default_project = None  # Already cleared by _handle_stale_project
                 _show_context(ws_name, default_project)
         elif action == "datasets":
             assert ws_name is not None and default_project is not None
             if not _browse_datasets(ws_name, default_project):
-                default_project = None
+                default_project = None  # Already cleared by _handle_stale_project
                 _show_context(ws_name, default_project)
         elif action == "info":
             assert ws_name is not None and default_project is not None
             if not _show_project_info(ws_name, default_project):
-                default_project = None
+                default_project = None  # Already cleared by _handle_stale_project
                 _show_context(ws_name, default_project)
         elif action == "browser":
             assert ws_name is not None and default_project is not None

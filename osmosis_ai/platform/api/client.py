@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 
 from osmosis_ai.platform.auth.platform_client import platform_request
 
@@ -19,6 +19,11 @@ from .models import (
 
 if TYPE_CHECKING:
     from osmosis_ai.platform.auth.credentials import WorkspaceCredentials
+
+
+def _safe_path(segment: str) -> str:
+    """URL-encode a path segment to prevent path traversal."""
+    return quote(segment, safe="")
 
 
 class OsmosisClient:
@@ -59,7 +64,7 @@ class OsmosisClient:
         credentials: WorkspaceCredentials | None = None,
     ) -> ProjectDetail:
         data = platform_request(
-            f"/api/cli/projects/{project_id}",
+            f"/api/cli/projects/{_safe_path(project_id)}",
             credentials=credentials,
         )
         return ProjectDetail.from_dict(data)
@@ -112,7 +117,7 @@ class OsmosisClient:
         # all parts), so use a longer timeout than the default 30s.
         timeout = 120.0 if upload_id else 30.0
         data = platform_request(
-            f"/api/cli/datasets/{file_id}/complete",
+            f"/api/cli/datasets/{_safe_path(file_id)}/complete",
             method="POST",
             data=payload,
             timeout=timeout,
@@ -128,7 +133,7 @@ class OsmosisClient:
         credentials: WorkspaceCredentials | None = None,
     ) -> None:
         platform_request(
-            f"/api/cli/datasets/{file_id}/abort",
+            f"/api/cli/datasets/{_safe_path(file_id)}/abort",
             method="POST",
             data={"upload_id": upload_id},
             credentials=credentials,
@@ -153,7 +158,7 @@ class OsmosisClient:
         credentials: WorkspaceCredentials | None = None,
     ) -> DatasetFile:
         data = platform_request(
-            f"/api/cli/datasets/{file_id}",
+            f"/api/cli/datasets/{_safe_path(file_id)}",
             credentials=credentials,
         )
         return DatasetFile.from_dict(data)
@@ -165,7 +170,7 @@ class OsmosisClient:
         credentials: WorkspaceCredentials | None = None,
     ) -> bool:
         platform_request(
-            f"/api/cli/datasets/{file_id}",
+            f"/api/cli/datasets/{_safe_path(file_id)}",
             method="DELETE",
             credentials=credentials,
         )
@@ -192,7 +197,7 @@ class OsmosisClient:
         credentials: WorkspaceCredentials | None = None,
     ) -> TrainingRunDetail:
         data = platform_request(
-            f"/api/cli/training-runs/{run_id}", credentials=credentials
+            f"/api/cli/training-runs/{_safe_path(run_id)}", credentials=credentials
         )
         return TrainingRunDetail.from_dict(data)
 

@@ -1,4 +1,4 @@
-"""Tests for osmosis_ai.platform.api.client.OsmosisClient.complete_upload validation."""
+"""Tests for osmosis_ai.platform.api.client.OsmosisClient."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from osmosis_ai.platform.api.client import OsmosisClient
+from osmosis_ai.platform.api.client import OsmosisClient, _safe_path
 
 
 class TestCompleteUploadValidation:
@@ -88,3 +88,94 @@ class TestCompleteUploadValidation:
         # Verify multipart timeout (120s)
         timeout = call_kwargs.kwargs.get("timeout") or call_kwargs[1].get("timeout")
         assert timeout == 120.0
+
+
+class TestSafePath:
+    """Tests for the _safe_path helper used to prevent path traversal."""
+
+    def test_normal_id_unchanged(self) -> None:
+        assert _safe_path("abc-123") == "abc-123"
+
+    def test_uuid_unchanged(self) -> None:
+        assert (
+            _safe_path("550e8400-e29b-41d4-a716-446655440000")
+            == "550e8400-e29b-41d4-a716-446655440000"
+        )
+
+    def test_slash_encoded(self) -> None:
+        assert _safe_path("../etc/passwd") == "..%2Fetc%2Fpasswd"
+
+    def test_dot_dot_slash_encoded(self) -> None:
+        result = _safe_path("../../secret")
+        assert "/" not in result
+        assert result == "..%2F..%2Fsecret"
+
+    def test_space_encoded(self) -> None:
+        assert _safe_path("my file") == "my%20file"
+
+
+class TestURLPathSafety:
+    """Verify that OsmosisClient methods apply _safe_path to URL path segments."""
+
+    @patch("osmosis_ai.platform.api.client.platform_request")
+    def test_get_project_encodes_id(self, mock_request: MagicMock) -> None:
+        mock_request.return_value = {
+            "id": "p1",
+            "project_name": "test",
+        }
+        client = OsmosisClient()
+        client.get_project("../admin")
+        path = mock_request.call_args[0][0]
+        assert path == "/api/cli/projects/..%2Fadmin"
+
+    @patch("osmosis_ai.platform.api.client.platform_request")
+    def test_complete_upload_encodes_id(self, mock_request: MagicMock) -> None:
+        mock_request.return_value = {
+            "id": "f1",
+            "file_name": "f.jsonl",
+            "file_size": 100,
+            "status": "uploaded",
+        }
+        client = OsmosisClient()
+        client.complete_upload(file_id="a/b", s3_key="key")
+        path = mock_request.call_args[0][0]
+        assert path == "/api/cli/datasets/a%2Fb/complete"
+
+    @patch("osmosis_ai.platform.api.client.platform_request")
+    def test_abort_upload_encodes_id(self, mock_request: MagicMock) -> None:
+        mock_request.return_value = None
+        client = OsmosisClient()
+        client.abort_upload(file_id="a/b", upload_id="uid")
+        path = mock_request.call_args[0][0]
+        assert path == "/api/cli/datasets/a%2Fb/abort"
+
+    @patch("osmosis_ai.platform.api.client.platform_request")
+    def test_get_dataset_encodes_id(self, mock_request: MagicMock) -> None:
+        mock_request.return_value = {
+            "id": "f1",
+            "file_name": "f.jsonl",
+            "file_size": 100,
+            "status": "uploaded",
+        }
+        client = OsmosisClient()
+        client.get_dataset("a/b")
+        path = mock_request.call_args[0][0]
+        assert path == "/api/cli/datasets/a%2Fb"
+
+    @patch("osmosis_ai.platform.api.client.platform_request")
+    def test_delete_dataset_encodes_id(self, mock_request: MagicMock) -> None:
+        mock_request.return_value = None
+        client = OsmosisClient()
+        client.delete_dataset("a/b")
+        path = mock_request.call_args[0][0]
+        assert path == "/api/cli/datasets/a%2Fb"
+
+    @patch("osmosis_ai.platform.api.client.platform_request")
+    def test_get_training_run_encodes_id(self, mock_request: MagicMock) -> None:
+        mock_request.return_value = {
+            "training_run": {"id": "r1", "status": "running"},
+        }
+        client = OsmosisClient()
+        client.get_training_run("a/b")
+        path = mock_request.call_args[0][0]
+        assert path == "/api/cli/training-runs/a%2Fb"
