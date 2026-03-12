@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import contextlib
 import json
-import os
 import re
 import time
 from pathlib import Path
@@ -25,13 +24,6 @@ CONFIG_FILE = CONFIG_DIR / "config.json"
 
 
 # ── Internal helpers ────────────────────────────────────────────────
-
-
-def _ensure_dir(directory: Path) -> None:
-    """Ensure directory exists with 0o700 permissions (owner-only access)."""
-    directory.mkdir(parents=True, mode=0o700, exist_ok=True)
-    if directory.stat().st_mode & 0o077:
-        os.chmod(directory, 0o700)
 
 
 def _load_config() -> dict[str, Any]:
@@ -59,7 +51,6 @@ def _load_config() -> dict[str, Any]:
 
 
 def _save_config(data: dict[str, Any]) -> None:
-    _ensure_dir(CONFIG_DIR)
     atomic_write_json(CONFIG_FILE, data, mode=0o600)
 
 
@@ -70,7 +61,6 @@ def _safe_ws_name(name: str) -> str:
 
 def _write_cache(path: Path, data: Any) -> None:
     """Atomically write *data* as JSON to *path* (tempfile + os.replace)."""
-    _ensure_dir(CACHE_DIR)
     atomic_write_json(path, data, mode=0o600)
 
 

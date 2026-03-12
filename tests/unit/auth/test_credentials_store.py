@@ -109,7 +109,6 @@ def _patch_creds_file(monkeypatch: pytest.MonkeyPatch, tmp_path: Path):
 
     import osmosis_ai.platform.auth.credentials as mod
 
-    monkeypatch.setattr(mod, "CONFIG_DIR", config_dir)
     monkeypatch.setattr(mod, "CREDENTIALS_FILE", creds_file)
     return creds_file
 

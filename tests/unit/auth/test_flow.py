@@ -241,12 +241,45 @@ class TestVerifyAndGetUserInfo:
             with pytest.raises(LoginError, match="expected timezone-aware"):
                 _verify_and_get_user_info("token")
 
-    def test_missing_user_fields_fallback_to_defaults(self) -> None:
-        """Missing user/org fields should fall back to empty strings."""
+    @pytest.mark.parametrize(
+        "user_data, org_data, expected_match",
+        [
+            (
+                {},
+                {"id": "o1", "name": "TestOrg", "role": "owner"},
+                "incomplete user information",
+            ),
+            (
+                {"id": "u1", "email": "u@test.com", "name": "Test"},
+                {},
+                "incomplete organization information",
+            ),
+            (
+                {"id": "", "email": "u@test.com", "name": "Test"},
+                {"id": "o1", "name": "TestOrg", "role": "owner"},
+                "incomplete user information",
+            ),
+            (
+                {"id": "u1", "email": "u@test.com", "name": "Test"},
+                {"id": "o1", "name": "", "role": "owner"},
+                "incomplete organization information",
+            ),
+        ],
+        ids=[
+            "missing_user_fields",
+            "missing_org_fields",
+            "empty_user_id",
+            "empty_org_name",
+        ],
+    )
+    def test_incomplete_fields_raise_login_error(
+        self, user_data: dict, org_data: dict, expected_match: str
+    ) -> None:
+        """Incomplete user/org fields should raise LoginError."""
         expires_str = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
         body = _make_verify_response(
-            user={},
-            organization={},
+            user=user_data,
+            organization=org_data,
             expires_at=expires_str,
         )
         mock_resp = MagicMock()
@@ -255,14 +288,8 @@ class TestVerifyAndGetUserInfo:
         mock_resp.__exit__ = MagicMock(return_value=False)
 
         with patch("urllib.request.urlopen", return_value=mock_resp):
-            result = _verify_and_get_user_info("token")
-
-        assert result.user.id == ""
-        assert result.user.email == ""
-        assert result.user.name is None
-        assert result.organization.id == ""
-        assert result.organization.name == ""
-        assert result.organization.role == "member"
+            with pytest.raises(LoginError, match=expected_match):
+                _verify_and_get_user_info("token")
 
     def test_no_token_id_in_response(self) -> None:
         expires_str = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()

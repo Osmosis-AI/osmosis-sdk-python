@@ -245,6 +245,38 @@ class TestValidateCsv:
 
 
 class TestValidateParquet:
+    def test_missing_pyarrow_prints_warning(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        """When pyarrow is not installed, a warning is printed and [] is returned."""
+        import builtins
+        from io import StringIO
+
+        from osmosis_ai.cli.console import Console
+
+        real_import = builtins.__import__
+
+        def _block_pyarrow(name: str, *args, **kwargs):
+            if name == "pyarrow.parquet" or name == "pyarrow":
+                raise ImportError("mocked missing pyarrow")
+            return real_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", _block_pyarrow)
+
+        import osmosis_ai.platform.cli.dataset as dataset_mod
+
+        buf = StringIO()
+        fake_console = Console(file=buf, force_terminal=False)
+        monkeypatch.setattr(dataset_mod, "console", fake_console)
+
+        f = tmp_path / "test.parquet"
+        f.write_bytes(b"fake parquet data")
+        result = _validate_parquet(f)
+        assert result == []
+        output = buf.getvalue()
+        assert "pyarrow not installed" in output
+        assert "pip install" in output
+
     @pytest.fixture()
     def _has_pyarrow(self):
         pytest.importorskip("pyarrow")

@@ -329,18 +329,10 @@ def status(
     ws_name, credentials = _require_auth()
     from osmosis_ai.platform.api.client import OsmosisClient
 
-    from .utils import resolve_id_prefix
+    from .utils import resolve_dataset_id
 
     client = OsmosisClient()
-
-    dataset_id = id
-    if len(id) < 32:
-        project_id = _resolve_project_id(project, workspace_name=ws_name)
-        result = client.list_datasets(project_id, credentials=credentials)
-        dataset_id = resolve_id_prefix(
-            id, result.datasets, entity_name="dataset", has_more=result.has_more
-        )
-
+    dataset_id = resolve_dataset_id(id, project, ws_name, credentials, client=client)
     ds = client.get_dataset(dataset_id, credentials=credentials)
 
     rows = [
@@ -372,18 +364,10 @@ def preview(
     ws_name, credentials = _require_auth()
     from osmosis_ai.platform.api.client import OsmosisClient
 
-    from .utils import resolve_id_prefix
+    from .utils import resolve_dataset_id
 
     client = OsmosisClient()
-
-    dataset_id = id
-    if len(id) < 32:
-        project_id = _resolve_project_id(project, workspace_name=ws_name)
-        result = client.list_datasets(project_id, credentials=credentials)
-        dataset_id = resolve_id_prefix(
-            id, result.datasets, entity_name="dataset", has_more=result.has_more
-        )
-
+    dataset_id = resolve_dataset_id(id, project, ws_name, credentials, client=client)
     ds = client.get_dataset(dataset_id, credentials=credentials)
 
     if ds.data_preview is None:
@@ -514,7 +498,12 @@ def _validate_parquet(file_path: Path) -> list[str]:
     try:
         import pyarrow.parquet as pq
     except ImportError:
-        return []  # pyarrow not installed, skip content validation
+        console.print(
+            "Note: pyarrow not installed — parquet content validation skipped. "
+            "Install with: pip install 'osmosis-ai[platform]'",
+            style="dim yellow",
+        )
+        return []
 
     errors = []
     try:

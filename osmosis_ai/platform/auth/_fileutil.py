@@ -10,6 +10,20 @@ from pathlib import Path
 from typing import Any
 
 
+def ensure_secure_dir(directory: Path) -> None:
+    """Ensure *directory* exists with 0o700 permissions (owner-only access).
+
+    Creates the directory (and parents) if missing, and tightens permissions
+    if group/other bits are set.
+    """
+    try:
+        current_mode = directory.stat().st_mode
+        if current_mode & 0o077:  # group or others have permissions
+            os.chmod(directory, 0o700)
+    except FileNotFoundError:
+        directory.mkdir(parents=True, mode=0o700)
+
+
 def atomic_write_json(
     path: Path,
     data: Any,
@@ -28,15 +42,7 @@ def atomic_write_json(
         indent: JSON indentation (default: 2).
     """
     parent = path.parent
-
-    # Ensure parent directory exists with secure permissions
-    if not parent.exists():
-        parent.mkdir(parents=True, mode=0o700)
-    else:
-        # Fix permissions if needed
-        current_mode = parent.stat().st_mode
-        if current_mode & 0o077:  # If group or others have any permissions
-            os.chmod(parent, 0o700)
+    ensure_secure_dir(parent)
 
     # Create temp file in same directory for atomic rename
     fd, tmp = tempfile.mkstemp(dir=parent, suffix=".tmp")

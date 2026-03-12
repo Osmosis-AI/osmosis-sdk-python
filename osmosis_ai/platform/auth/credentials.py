@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import json
-import os
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
 from ._fileutil import atomic_write_json
-from .config import CONFIG_DIR, CREDENTIALS_FILE, CREDENTIALS_VERSION
+from .config import CREDENTIALS_FILE, CREDENTIALS_VERSION
 
 
 @dataclass
@@ -132,17 +131,6 @@ class CredentialsStore:
         return self.workspaces.get(self.active_workspace)
 
 
-def _ensure_config_dir() -> None:
-    """Ensure the config directory exists with proper permissions."""
-    if not CONFIG_DIR.exists():
-        CONFIG_DIR.mkdir(parents=True, mode=0o700)
-    else:
-        # Ensure permissions are correct
-        current_mode = CONFIG_DIR.stat().st_mode
-        if current_mode & 0o077:  # If group or others have any permissions
-            os.chmod(CONFIG_DIR, 0o700)
-
-
 def _load_store() -> CredentialsStore | None:
     """Load the credentials store from file."""
     if not CREDENTIALS_FILE.exists():
@@ -169,7 +157,6 @@ def _save_store(store: CredentialsStore) -> None:
     permissions from the start, avoiding a permission window where
     credentials could be world-readable.
     """
-    _ensure_config_dir()
     data = store.to_dict()
     atomic_write_json(CREDENTIALS_FILE, data, mode=0o600)
 

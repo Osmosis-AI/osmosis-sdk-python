@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import webbrowser
+from collections.abc import Callable, Sequence
 from typing import Any
 
 import typer
@@ -179,17 +180,22 @@ def _switch_context(
             step = "project"
 
         elif step == "project":
-            assert ws_name is not None
+            if ws_name is None:
+                step = "workspace"
+                continue
             result = _select_project(ws_name)
             if result == BACK or result is None:
                 step = "workspace"
                 continue
-            assert isinstance(result, dict)
+            if not isinstance(result, dict):
+                step = "workspace"
+                continue
             step = "confirm"
 
         elif step == "confirm":
-            assert ws_name is not None
-            assert isinstance(result, dict)
+            if ws_name is None or not isinstance(result, dict):
+                step = "workspace"
+                continue
             ok = confirm(f"Set context to {ws_name} / {result['project_name']}?")
             if ok is None or not ok:
                 step = "project"
@@ -222,51 +228,85 @@ def _handle_stale_project(ws_name: str, project: dict) -> bool:
     return False
 
 
-def _browse_datasets(ws_name: str, project: dict) -> bool:
-    """List datasets and allow selecting one for details.
+def _browse_entities(
+    ws_name: str,
+    project: dict,
+    *,
+    fetch: Callable,
+    extract_items: Callable[[Any], Sequence],
+    format_choice: Callable[[Any], str],
+    show_detail: Callable[[Any], None],
+    title: str,
+) -> bool:
+    """Generic browse helper for datasets, runs, and models.
+
+    Args:
+        ws_name: Active workspace name.
+        project: Default project dict with 'project_id' and 'project_name'.
+        fetch: Callable(project_id, credentials=...) that returns an API result.
+        extract_items: Extracts the entity list from the API result.
+        format_choice: Formats an entity into a Choice label string.
+        show_detail: Displays detailed info for a selected entity.
+        title: Display title (e.g. "Datasets", "Training Runs", "Models").
 
     Returns False if the project was found to be stale (404).
     """
-    from osmosis_ai.platform.api.client import OsmosisClient
-
     from .project import _get_workspace_credentials
 
-    client = OsmosisClient()
     project_id: str = project["project_id"]
     try:
         credentials = _get_workspace_credentials(ws_name)
-        result = client.list_datasets(project_id, credentials=credentials)
+        result = fetch(project_id, credentials=credentials)
     except PlatformAPIError as e:
         if e.status_code == 404:
             return _handle_stale_project(ws_name, project)
-        console.print_error(f"Failed to load datasets: {e}")
+        console.print_error(f"Failed to load {title.lower()}: {e}")
         return True
 
-    if not result.datasets:
-        console.print("No datasets found.", style="dim")
+    items = extract_items(result)
+    if not items:
+        console.print(f"No {title.lower()} found.", style="dim")
         console.print()
         return True
 
-    while True:
-        choices: list[str | Choice | Separator] = []
-        for d in result.datasets:
-            status_str = format_dataset_status(d, for_prompt=True)
-            label = f"{d.file_name} ({format_size(d.file_size)}) {status_str}"
-            choices.append(Choice(label, value=d))
-        choices.append(Separator())
-        choices.append(Choice("Back", value=BACK))
+    choices: list[str | Choice | Separator] = [
+        Choice(format_choice(item), value=item) for item in items
+    ]
+    choices.append(Separator())
+    choices.append(Choice("Back", value=BACK))
 
+    while True:
         console.separator()
         selected = select(
-            f"Datasets ({result.total_count}):",
+            f"{title} ({result.total_count}):",
             choices=choices,
         )
 
         if selected is None or selected == BACK:
             return True
 
-        # Show dataset detail
-        _show_dataset_detail(selected, ws_name, project)
+        show_detail(selected)
+
+
+def _browse_datasets(ws_name: str, project: dict) -> bool:
+    """List datasets and allow selecting one for details."""
+    from osmosis_ai.platform.api.client import OsmosisClient
+
+    client = OsmosisClient()
+
+    def _format(d: Any) -> str:
+        status_str = format_dataset_status(d, for_prompt=True)
+        return f"{d.file_name} ({format_size(d.file_size)}) {status_str}"
+
+    return _browse_entities(
+        ws_name,
+        project,
+        fetch=client.list_datasets,
+        extract_items=lambda r: r.datasets,
+        format_choice=_format,
+        show_detail=lambda d: _show_dataset_detail(d, ws_name, project),
+        title="Datasets",
+    )
 
 
 def _show_dataset_detail(ds: Any, ws_name: str, project: dict) -> None:
@@ -293,52 +333,26 @@ def _show_dataset_detail(ds: Any, ws_name: str, project: dict) -> None:
 
 
 def _browse_runs(ws_name: str, project: dict) -> bool:
-    """List training runs and allow selecting one for details.
-
-    Returns False if the project was found to be stale (404).
-    """
+    """List training runs and allow selecting one for details."""
     from osmosis_ai.platform.api.client import OsmosisClient
 
-    from .project import _get_workspace_credentials
-
     client = OsmosisClient()
-    project_id: str = project["project_id"]
-    try:
-        credentials = _get_workspace_credentials(ws_name)
-        result = client.list_training_runs(project_id, credentials=credentials)
-    except PlatformAPIError as e:
-        if e.status_code == 404:
-            return _handle_stale_project(ws_name, project)
-        console.print_error(f"Failed to load training runs: {e}")
-        return True
 
-    if not result.training_runs:
-        console.print("No training runs found.", style="dim")
-        console.print()
-        return True
+    def _format(r: Any) -> str:
+        status_str = format_run_status(r, for_prompt=True)
+        name = r.name or "(unnamed)"
+        model = r.model_name or ""
+        return f"{name}  {status_str}  {model}"
 
-    while True:
-        choices: list[str | Choice | Separator] = []
-        for r in result.training_runs:
-            status_str = format_run_status(r, for_prompt=True)
-            name = r.name or "(unnamed)"
-            model = r.model_name or ""
-            label = f"{name}  {status_str}  {model}"
-            choices.append(Choice(label, value=r))
-        choices.append(Separator())
-        choices.append(Choice("Back", value=BACK))
-
-        console.separator()
-        selected = select(
-            f"Training Runs ({result.total_count}):",
-            choices=choices,
-        )
-
-        if selected is None or selected == BACK:
-            return True
-
-        # Show run detail
-        _show_run_detail(selected, ws_name, project)
+    return _browse_entities(
+        ws_name,
+        project,
+        fetch=client.list_training_runs,
+        extract_items=lambda r: r.training_runs,
+        format_choice=_format,
+        show_detail=lambda r: _show_run_detail(r, ws_name, project),
+        title="Training Runs",
+    )
 
 
 def _show_run_detail(r: Any, ws_name: str, project: dict) -> None:
@@ -372,50 +386,24 @@ def _show_run_detail(r: Any, ws_name: str, project: dict) -> None:
 
 
 def _browse_models(ws_name: str, project: dict) -> bool:
-    """List models and allow selecting one for details.
-
-    Returns False if the project was found to be stale (404).
-    """
+    """List models and allow selecting one for details."""
     from osmosis_ai.platform.api.client import OsmosisClient
 
-    from .project import _get_workspace_credentials
-
     client = OsmosisClient()
-    project_id: str = project["project_id"]
-    try:
-        credentials = _get_workspace_credentials(ws_name)
-        result = client.list_models(project_id, credentials=credentials)
-    except PlatformAPIError as e:
-        if e.status_code == 404:
-            return _handle_stale_project(ws_name, project)
-        console.print_error(f"Failed to load models: {e}")
-        return True
 
-    if not result.models:
-        console.print("No models found.", style="dim")
-        console.print()
-        return True
+    def _format(m: Any) -> str:
+        base = f"  ({m.base_model})" if m.base_model else ""
+        return f"{m.model_name}  [{m.status}]{base}"
 
-    while True:
-        choices: list[str | Choice | Separator] = []
-        for m in result.models:
-            base = f"  ({m.base_model})" if m.base_model else ""
-            label = f"{m.model_name}  [{m.status}]{base}"
-            choices.append(Choice(label, value=m))
-        choices.append(Separator())
-        choices.append(Choice("Back", value=BACK))
-
-        console.separator()
-        selected = select(
-            f"Models ({result.total_count}):",
-            choices=choices,
-        )
-
-        if selected is None or selected == BACK:
-            return True
-
-        # Show model detail
-        _show_model_detail(selected)
+    return _browse_entities(
+        ws_name,
+        project,
+        fetch=client.list_models,
+        extract_items=lambda r: r.models,
+        format_choice=_format,
+        show_detail=_show_model_detail,
+        title="Models",
+    )
 
 
 def _show_model_detail(m: Any) -> None:
@@ -518,26 +506,22 @@ def workspace() -> None:
                 active_ws = ws_name
                 console.print()
                 _show_context(ws_name, default_project)
-        elif action == "runs":
-            assert ws_name is not None and default_project is not None
-            if not _browse_runs(ws_name, default_project):
+        elif action in ("runs", "models", "datasets", "info", "browser"):
+            if ws_name is None or default_project is None:
+                continue
+
+            if action == "runs":
+                ok = _browse_runs(ws_name, default_project)
+            elif action == "models":
+                ok = _browse_models(ws_name, default_project)
+            elif action == "datasets":
+                ok = _browse_datasets(ws_name, default_project)
+            elif action == "info":
+                ok = _show_project_info(ws_name, default_project)
+            else:
+                _open_in_browser(ws_name, default_project)
+                ok = True
+
+            if not ok:
                 default_project = None  # Already cleared by _handle_stale_project
                 _show_context(ws_name, default_project)
-        elif action == "models":
-            assert ws_name is not None and default_project is not None
-            if not _browse_models(ws_name, default_project):
-                default_project = None  # Already cleared by _handle_stale_project
-                _show_context(ws_name, default_project)
-        elif action == "datasets":
-            assert ws_name is not None and default_project is not None
-            if not _browse_datasets(ws_name, default_project):
-                default_project = None  # Already cleared by _handle_stale_project
-                _show_context(ws_name, default_project)
-        elif action == "info":
-            assert ws_name is not None and default_project is not None
-            if not _show_project_info(ws_name, default_project):
-                default_project = None  # Already cleared by _handle_stale_project
-                _show_context(ws_name, default_project)
-        elif action == "browser":
-            assert ws_name is not None and default_project is not None
-            _open_in_browser(ws_name, default_project)

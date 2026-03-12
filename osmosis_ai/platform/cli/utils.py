@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from osmosis_ai.cli.console import console
 from osmosis_ai.cli.errors import CLIError
@@ -15,6 +15,9 @@ from osmosis_ai.platform.api.models import (
     STATUSES_IN_PROGRESS,
     STATUSES_SUCCESS,
 )
+
+if TYPE_CHECKING:
+    from osmosis_ai.platform.auth.credentials import WorkspaceCredentials
 
 
 def resolve_id_prefix(
@@ -49,6 +52,79 @@ def resolve_id_prefix(
             "Please provide a longer prefix."
         )
     return matches[0].id
+
+
+def _resolve_entity_id(
+    id: str,
+    project: str | None,
+    workspace_name: str,
+    credentials: WorkspaceCredentials,
+    *,
+    list_fn: Any,
+    items_attr: str,
+    entity_name: str,
+) -> str:
+    """Resolve a short ID prefix to a full entity ID via API listing."""
+    if len(id) >= 32:
+        return id
+    from .project import _resolve_project_id
+
+    project_id = _resolve_project_id(project, workspace_name=workspace_name)
+    result = list_fn(project_id, credentials=credentials)
+    return resolve_id_prefix(
+        id,
+        getattr(result, items_attr),
+        entity_name=entity_name,
+        has_more=result.has_more,
+    )
+
+
+def resolve_dataset_id(
+    id: str,
+    project: str | None,
+    workspace_name: str,
+    credentials: WorkspaceCredentials,
+    *,
+    client: Any = None,
+) -> str:
+    """Resolve a short ID prefix to a full dataset ID."""
+    if client is None:
+        from osmosis_ai.platform.api.client import OsmosisClient
+
+        client = OsmosisClient()
+    return _resolve_entity_id(
+        id,
+        project,
+        workspace_name,
+        credentials,
+        list_fn=client.list_datasets,
+        items_attr="datasets",
+        entity_name="dataset",
+    )
+
+
+def resolve_run_id(
+    id: str,
+    project: str | None,
+    workspace_name: str,
+    credentials: WorkspaceCredentials,
+    *,
+    client: Any = None,
+) -> str:
+    """Resolve a short ID prefix to a full training run ID."""
+    if client is None:
+        from osmosis_ai.platform.api.client import OsmosisClient
+
+        client = OsmosisClient()
+    return _resolve_entity_id(
+        id,
+        project,
+        workspace_name,
+        credentials,
+        list_fn=lambda pid, **kw: client.list_training_runs(pid, limit=50, **kw),
+        items_attr="training_runs",
+        entity_name="training run",
+    )
 
 
 def format_dataset_status(d: Any, *, for_prompt: bool = False) -> str:

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import sys
 from typing import TYPE_CHECKING, Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -75,7 +76,8 @@ def revoke_cli_token(credentials: WorkspaceCredentials) -> bool:
             credentials=credentials,
         )
         return True
-    except Exception:
+    except Exception as exc:
+        sys.stderr.write(f"Warning: failed to revoke CLI token server-side: {exc}\n")
         return False
 
 

@@ -59,23 +59,10 @@ def status(
     ws_name, credentials = _require_auth()
     from osmosis_ai.platform.api.client import OsmosisClient
 
-    from .utils import resolve_id_prefix
+    from .utils import resolve_run_id
 
     client = OsmosisClient()
-
-    run_id = id
-    if len(id) < 32:
-        project_id = _resolve_project_id(project, workspace_name=ws_name)
-        result = client.list_training_runs(
-            project_id, limit=50, credentials=credentials
-        )
-        run_id = resolve_id_prefix(
-            id,
-            result.training_runs,
-            entity_name="training run",
-            has_more=result.has_more,
-        )
-
+    run_id = resolve_run_id(id, project, ws_name, credentials, client=client)
     run = client.get_training_run(run_id, credentials=credentials)
 
     rows: list[tuple[str, str]] = [

@@ -236,6 +236,11 @@ def _verify_and_get_user_info(token: str) -> VerifyResult:
                 role=org_data.get("role", "member"),
             )
 
+            if not user_info.id or not user_info.email:
+                raise LoginError("Server returned incomplete user information")
+            if not org_info.id or not org_info.name:
+                raise LoginError("Server returned incomplete organization information")
+
             expires_at_str = data.get("expires_at")
             if expires_at_str:
                 expires_at = datetime.fromisoformat(

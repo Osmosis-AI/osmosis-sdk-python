@@ -16,6 +16,18 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 
+# ── URL validation ────────────────────────────────────────────────────
+
+
+def _require_https(url: str, context: str = "Upload URL") -> None:
+    """Reject non-HTTPS presigned URLs to prevent plaintext data transmission."""
+    if not url.lower().startswith("https://"):
+        raise RuntimeError(
+            f"{context} must use HTTPS (got {url[:60]!r}). "
+            "Refusing to upload over an insecure connection."
+        )
+
+
 if TYPE_CHECKING:
     from typing import IO
 
@@ -231,6 +243,7 @@ def upload_file_simple(
 
     file_size = file_path.stat().st_size
     url = info.presigned_url
+    _require_https(url, "Simple upload presigned URL")
 
     headers = dict(info.upload_headers or {})
     # S3 presigned PUT requires Content-Length (does not support chunked encoding)
@@ -303,6 +316,7 @@ def upload_file_multipart(
         url = entry.get("presignedUrl")
         if pn is None or url is None:
             raise RuntimeError(f"Malformed presigned URL entry from server: {entry!r}")
+        _require_https(url, f"Multipart presigned URL (part {pn})")
         url_map[pn] = url
 
     # Verify server returned URLs for every expected part
