@@ -66,9 +66,7 @@ def _abort_multipart(
 # (weekly cron Lambda + S3 lifecycle rules), so this retry is the
 # primary client-side defense, not the only one.
 
-_COMPLETE_MAX_RETRIES = 5
-_COMPLETE_BACKOFF_BASE = 1.0  # seconds
-_COMPLETE_BACKOFF_CAP = 8.0  # seconds
+from osmosis_ai.platform.api.upload import BACKOFF_BASE, BACKOFF_CAP, MAX_RETRIES
 
 
 def _complete_with_retry(
@@ -86,13 +84,11 @@ def _complete_with_retry(
     manually with ``osmosis dataset complete <id>``.
     """
     last_error: Exception | None = None
-    for attempt in range(_COMPLETE_MAX_RETRIES):
+    for attempt in range(MAX_RETRIES):
         if attempt > 0:
-            delay = min(
-                _COMPLETE_BACKOFF_BASE * (2 ** (attempt - 1)), _COMPLETE_BACKOFF_CAP
-            )
+            delay = min(BACKOFF_BASE * (2 ** (attempt - 1)), BACKOFF_CAP)
             console.print(
-                f"Retrying complete (attempt {attempt} of {_COMPLETE_MAX_RETRIES - 1})...",
+                f"Retrying complete (attempt {attempt} of {MAX_RETRIES - 1})...",
                 style="dim",
             )
             time.sleep(delay)
@@ -123,8 +119,7 @@ def _complete_with_retry(
     # All retries exhausted
     console.print()
     console.print(
-        "Upload succeeded but failed to notify server after "
-        f"{_COMPLETE_MAX_RETRIES} attempts.",
+        f"Upload succeeded but failed to notify server after {MAX_RETRIES} attempts.",
         style="bold red",
     )
     console.print(f"  Dataset ID: {dataset_id}", style="yellow")

@@ -46,7 +46,7 @@ def _validate_default_project(
     if not project_id:
         return default_project
 
-    projects = _get_cached_projects(workspace_name=ws_name, max_age=0)
+    projects = _get_cached_projects(workspace_name=ws_name)
     if not projects:
         # If refresh failed or workspace has no projects, we can't confirm
         # whether the default still exists. Keep it to avoid clearing a valid

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 # ── Dataset status constants ─────────────────────────────────────
 # Single source of truth for status classification.
@@ -96,7 +96,7 @@ class ProjectDetail:
 class UploadInfo:
     """Upload instructions returned by the create-dataset endpoint."""
 
-    method: str  # "simple" | "multipart"
+    method: Literal["simple", "multipart"]
     s3_key: str
     # simple upload fields
     presigned_url: str | None = None

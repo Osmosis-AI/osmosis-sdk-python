@@ -14,6 +14,8 @@ from osmosis_ai.platform.auth import (
 from osmosis_ai.platform.auth.local_config import clear_workspace_data
 from osmosis_ai.platform.auth.platform_client import revoke_cli_token
 
+from .constants import LOGOUT_ALL
+
 
 def _revoke_and_delete(name: str) -> bool:
     """Revoke token server-side (best-effort), then delete local credentials."""
@@ -91,13 +93,13 @@ def _logout_interactive(
         choices.append(Choice(title=title, value=name))
 
     choices.append(Separator())
-    choices.append(Choice(title="All workspaces", value="__all__"))
+    choices.append(Choice(title="All workspaces", value=LOGOUT_ALL))
 
     selected = select("Select workspace to logout from:", choices=choices)
     if selected is None:  # User cancelled with Ctrl+C
         return
 
-    if selected == "__all__":
+    if selected == LOGOUT_ALL:
         _logout_all(workspaces, skip_confirm)
     else:
         # Selected a specific workspace

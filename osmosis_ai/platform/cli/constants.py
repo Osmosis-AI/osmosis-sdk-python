@@ -6,6 +6,7 @@ import re
 
 BACK = "__back__"
 CREATE = "__create__"
+LOGOUT_ALL = "__all__"
 
 # ── Common error messages ─────────────────────────────────────────
 
@@ -19,8 +20,7 @@ MSG_NOT_LOGGED_IN = "Not logged in. Run 'osmosis login' first."
 CACHE_TTL_SECONDS = 300
 
 # ── Project name validation ───────────────────────────────────────
-# Must match the frontend validation in osmosis-monolith:
-# platform-app/src/constants/projects.ts + org-routes.ts
+# Must match the frontend validation rules.
 
 PROJECT_NAME_RE = re.compile(r"^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?$")
 PROJECT_NAME_MAX = 64

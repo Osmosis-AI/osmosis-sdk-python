@@ -23,10 +23,11 @@ def _is_loopback(hostname: str) -> bool:
         return False
 
 
+_parsed_platform_url = urlparse(PLATFORM_URL)
 if (
     PLATFORM_URL != DEFAULT_PLATFORM_URL
-    and urlparse(PLATFORM_URL).scheme.lower() != "https"
-    and not _is_loopback(urlparse(PLATFORM_URL).hostname or "")
+    and _parsed_platform_url.scheme.lower() != "https"
+    and not _is_loopback(_parsed_platform_url.hostname or "")
 ):
     warnings.warn(
         f"OSMOSIS_PLATFORM_URL is not HTTPS ({PLATFORM_URL}). "
