@@ -20,10 +20,15 @@ def _revoke_and_delete(name: str) -> bool:
     creds = load_workspace_credentials(name)
     if creds and not creds.is_expired():
         revoke_cli_token(creds)
-    if delete_workspace_credentials(name):
-        clear_workspace_data(name)
-        return True
-    return False
+    # Always attempt both cleanup steps: a 401 during revocation may have
+    # already deleted the credentials via _handle_401_and_cleanup, causing
+    # delete_workspace_credentials to return False.  We must still clear
+    # cached workspace data regardless.
+    deleted = delete_workspace_credentials(name)
+    clear_workspace_data(name)
+    # Report success if credentials were present — even if delete returned False,
+    # they may have been removed during revocation by _handle_401_and_cleanup.
+    return deleted or creds is not None
 
 
 def _logout_all(
