@@ -14,11 +14,11 @@ import contextlib
 import json
 import os
 import re
-import tempfile
 import time
 from pathlib import Path
 from typing import Any
 
+from ._fileutil import atomic_write_json
 from .config import CACHE_DIR, CONFIG_DIR
 
 CONFIG_FILE = CONFIG_DIR / "config.json"
@@ -60,16 +60,7 @@ def _load_config() -> dict[str, Any]:
 
 def _save_config(data: dict[str, Any]) -> None:
     _ensure_dir(CONFIG_DIR)
-
-    fd, tmp = tempfile.mkstemp(dir=CONFIG_DIR, suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2)
-        os.replace(tmp, CONFIG_FILE)
-    except BaseException:
-        with contextlib.suppress(OSError):
-            os.unlink(tmp)
-        raise
+    atomic_write_json(CONFIG_FILE, data, mode=0o600)
 
 
 def _safe_ws_name(name: str) -> str:
@@ -80,15 +71,7 @@ def _safe_ws_name(name: str) -> str:
 def _write_cache(path: Path, data: Any) -> None:
     """Atomically write *data* as JSON to *path* (tempfile + os.replace)."""
     _ensure_dir(CACHE_DIR)
-    fd, tmp = tempfile.mkstemp(dir=CACHE_DIR, suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2)
-        os.replace(tmp, path)
-    except BaseException:
-        with contextlib.suppress(OSError):
-            os.unlink(tmp)
-        raise
+    atomic_write_json(path, data, mode=0o600)
 
 
 def _read_cache(path: Path) -> Any | None:

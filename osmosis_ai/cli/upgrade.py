@@ -110,12 +110,12 @@ def upgrade() -> None:
 
         console.print(f"Running: {' '.join(cmd)}", style="dim")
         try:
-            result = subprocess.run(cmd, timeout=120, stdin=subprocess.DEVNULL)
+            result = subprocess.run(cmd, timeout=120)
             if result.returncode == 0:
                 console.print()
                 console.print(f"Successfully upgraded to {latest}!", style="bold green")
                 return
-            console.print_error(f"Command failed (exit {result.returncode}).")
+            console.print()
         except subprocess.TimeoutExpired:
             console.print_error("Upgrade command timed out.")
         except Exception as exc:

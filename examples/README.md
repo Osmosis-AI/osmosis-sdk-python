@@ -65,7 +65,7 @@ The helper uses [LiteLLM](https://github.com/BerriAI/litellm) under the hood; ea
 
 ### Rubric Configs and Dataset
 
-Use `rubric_configs.yaml` for a pair of ready-to-run rubric configurations (OpenAI and Anthropic) and `sample_data.jsonl` for two matching solution strings that exercise those rubrics. They are designed to work with `osmosis preview --path examples/<file>` and can be adapted when building your own evaluation suites.
+Use `rubric_configs.yaml` for a pair of ready-to-run rubric configurations (OpenAI and Anthropic) and `sample_data.jsonl` for two matching solution strings that exercise those rubrics. They are designed to work with `osmosis preview examples/<file>` and can be adapted when building your own evaluation suites.
 
 ### Prerequisites
 

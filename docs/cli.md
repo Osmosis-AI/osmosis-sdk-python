@@ -209,8 +209,8 @@ osmosis validate -m server:agent_loop -v  # Verbose with warnings
 Preview a rubric file or dataset:
 
 ```bash
-osmosis preview --path path/to/rubric.yaml
-osmosis preview --path path/to/data.jsonl
+osmosis preview path/to/rubric.yaml
+osmosis preview path/to/data.jsonl
 ```
 
 Both formats validate the file, echo a short summary, and pretty-print the parsed records.

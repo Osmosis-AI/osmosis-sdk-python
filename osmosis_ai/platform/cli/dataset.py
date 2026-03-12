@@ -526,13 +526,13 @@ def _validate_parquet(file_path: Path) -> list[str]:
 
     errors = []
     try:
-        pf = pq.ParquetFile(file_path)
-        if len(pf.schema) == 0:
-            errors.append("Parquet file has no columns")
-        elif pf.metadata.num_rows == 0:
-            errors.append("Parquet file has no rows")
-        else:
-            errors.extend(_check_required_columns(pf.schema_arrow.names))
+        with pq.ParquetFile(file_path) as pf:
+            if len(pf.schema) == 0:
+                errors.append("Parquet file has no columns")
+            elif pf.metadata.num_rows == 0:
+                errors.append("Parquet file has no rows")
+            else:
+                errors.extend(_check_required_columns(pf.schema_arrow.names))
     except Exception as e:
         errors.append(f"Invalid parquet file: {e}")
     return errors

@@ -2,14 +2,13 @@
 
 from __future__ import annotations
 
-import contextlib
 import json
 import os
-import tempfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
 
+from ._fileutil import atomic_write_json
 from .config import CONFIG_DIR, CREDENTIALS_FILE, CREDENTIALS_VERSION
 
 
@@ -166,23 +165,13 @@ def _load_store() -> CredentialsStore | None:
 def _save_store(store: CredentialsStore) -> None:
     """Save the credentials store to file.
 
-    Uses mkstemp so the temp file is created with 0o600 from the start,
-    avoiding a permission window where credentials could be world-readable.
+    Uses atomic_write_json to ensure credentials are written with 0o600
+    permissions from the start, avoiding a permission window where
+    credentials could be world-readable.
     """
     _ensure_config_dir()
-
     data = store.to_dict()
-
-    fd, tmp = tempfile.mkstemp(dir=CONFIG_DIR, suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2)
-        os.replace(tmp, CREDENTIALS_FILE)
-        os.chmod(CREDENTIALS_FILE, 0o600)
-    except BaseException:
-        with contextlib.suppress(OSError):
-            os.unlink(tmp)
-        raise
+    atomic_write_json(CREDENTIALS_FILE, data, mode=0o600)
 
 
 def save_credentials(credentials: WorkspaceCredentials) -> None:

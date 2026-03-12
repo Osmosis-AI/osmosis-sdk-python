@@ -120,7 +120,7 @@ class UploadInfo:
             )
         return cls(
             method=method,
-            s3_key=data.get("s3_key", ""),
+            s3_key=data["s3_key"],
             presigned_url=data.get("presigned_url"),
             expires_in=data.get("expires_in"),
             upload_headers=data.get("upload_headers"),

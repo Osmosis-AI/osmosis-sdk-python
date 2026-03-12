@@ -142,7 +142,7 @@ def _http_put_with_backoff(
                 ) as _client:
                     resp = _client.put(url, headers=headers, content=data)
 
-            if resp.status_code < 300:
+            if 200 <= resp.status_code < 300:
                 return resp
 
             if resp.status_code in _RETRY_STATUS_CODES:
@@ -286,6 +286,15 @@ def upload_file_multipart(
             "cannot safely compute byte offsets"
         )
     part_size = info.part_size
+
+    # Validate file size is sufficient for the part configuration
+    min_required_size = part_size * (info.total_parts - 1) + 1
+    if file_size < min_required_size:
+        raise RuntimeError(
+            f"File size ({file_size} bytes) is too small for multipart upload "
+            f"configuration (part_size={part_size}, total_parts={info.total_parts}). "
+            f"Minimum required: {min_required_size} bytes."
+        )
 
     # Build part_number → presigned_url mapping
     url_map: dict[int, str] = {}
