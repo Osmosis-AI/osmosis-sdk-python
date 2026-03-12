@@ -200,7 +200,7 @@ def platform_entity_url(ws_name: str, project_name: str, *segments: str) -> str:
 def build_dataset_detail_rows(ds: Any) -> list[tuple[str, str]]:
     """Build common detail rows for a dataset."""
     rows: list[tuple[str, str]] = [
-        ("File", ds.file_name),
+        ("File", console.escape(ds.file_name)),
         ("ID", ds.id),
         ("Size", format_size(ds.file_size)),
         ("Status", ds.status),
@@ -209,29 +209,29 @@ def build_dataset_detail_rows(ds: Any) -> list[tuple[str, str]]:
     if step:
         rows.append(("Step", step))
     if ds.error:
-        rows.append(("Error", ds.error))
+        rows.append(("Error", console.escape(ds.error)))
     return rows
 
 
 def build_run_detail_rows(r: Any) -> list[tuple[str, str]]:
     """Build common detail rows for a training run."""
     rows: list[tuple[str, str]] = [
-        ("Name", r.name or "(unnamed)"),
+        ("Name", console.escape(r.name) if r.name else "(unnamed)"),
         ("ID", r.id),
         ("Status", r.status),
     ]
     step = format_processing_step(r)
     if step:
         rows.append(("Step", step))
-    rows.append(("Model", r.model_name or "—"))
+    rows.append(("Model", console.escape(r.model_name) if r.model_name else "—"))
     if r.eval_accuracy is not None:
         rows.append(("Accuracy", f"{r.eval_accuracy:.4f}"))
     if r.reward_increase_delta is not None:
         rows.append(("Reward Delta", f"{r.reward_increase_delta:+.4f}"))
     if r.error_message:
-        rows.append(("Error", r.error_message))
+        rows.append(("Error", console.escape(r.error_message)))
     if r.creator_name:
-        rows.append(("Creator", r.creator_name))
+        rows.append(("Creator", console.escape(r.creator_name)))
     if r.created_at:
         rows.append(("Created", format_date(r.created_at)))
     return rows

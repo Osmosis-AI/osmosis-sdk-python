@@ -119,7 +119,7 @@ def set_default_project(
 ) -> None:
     """Set the default project for a workspace."""
     config = _load_config()
-    if "defaults" not in config:
+    if not isinstance(config.get("defaults"), dict):
         config["defaults"] = {}
     config["defaults"][workspace_name] = {
         "project_id": project_id,

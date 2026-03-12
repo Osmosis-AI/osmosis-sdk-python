@@ -142,17 +142,17 @@ def _check_file_basics(file: str) -> tuple[Path, str, int]:
     """
     file_path = Path(file).resolve()
 
+    try:
+        file_size = file_path.stat().st_size
+    except FileNotFoundError:
+        raise CLIError(f"File not found: {file_path}") from None
+
     ext = file_path.suffix.lstrip(".").lower()
     if ext not in VALID_EXTENSIONS:
         raise CLIError(
             f"Unsupported file type '.{ext}'. "
             f"Supported: {', '.join(sorted(VALID_EXTENSIONS))}"
         )
-
-    try:
-        file_size = file_path.stat().st_size
-    except FileNotFoundError:
-        raise CLIError(f"File not found: {file_path}") from None
     if file_size == 0:
         raise CLIError("File is empty.")
     if file_size > MAX_FILE_SIZE:

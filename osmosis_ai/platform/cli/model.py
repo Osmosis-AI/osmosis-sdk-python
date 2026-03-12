@@ -34,10 +34,11 @@ def list_models(
     console.print(f"Models ({result.total_count}):", style="bold")
     for m in result.models:
         status_str = console.format_styled(f"[{m.status}]", "dim")
-        base = m.base_model or ""
+        name = console.escape(m.model_name)
+        base = console.escape(m.base_model) if m.base_model else ""
         date = format_date(m.created_at)
 
-        console.print(f"  {m.id[:8]}  {m.model_name}  {status_str}  {base}  {date}")
+        console.print(f"  {m.id[:8]}  {name}  {status_str}  {base}  {date}")
 
     if result.has_more:
         remaining = result.total_count - len(result.models)
