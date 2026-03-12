@@ -133,13 +133,12 @@ class CredentialsStore:
 
 def _load_store() -> CredentialsStore | None:
     """Load the credentials store from file."""
-    if not CREDENTIALS_FILE.exists():
-        return None
-
     try:
         with open(CREDENTIALS_FILE, encoding="utf-8") as f:
             data = json.load(f)
         return CredentialsStore.from_dict(data)
+    except FileNotFoundError:
+        return None
     except (json.JSONDecodeError, KeyError, ValueError) as exc:
         import sys
 

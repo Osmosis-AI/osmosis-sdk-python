@@ -136,37 +136,42 @@ def _http_put_with_backoff(
     if hasattr(data, "seek") and hasattr(data, "tell"):
         initial_pos = data.tell()
 
+    # Create a client once if none was provided, to reuse TCP+TLS across retries
+    owns_client = client is None
+    if owns_client:
+        client = httpx.Client(timeout=httpx.Timeout(timeout, connect=30.0))
+
     last_error: Exception | None = None
-    for attempt in range(max_retries):
-        if attempt > 0:
-            delay = min(BACKOFF_BASE * (2 ** (attempt - 1)), BACKOFF_CAP)
-            time.sleep(delay)
-            # Rewind file-like data for retry
-            if initial_pos is not None:
-                data.seek(initial_pos)
+    try:
+        for attempt in range(max_retries):
+            if attempt > 0:
+                delay = min(BACKOFF_BASE * (2 ** (attempt - 1)), BACKOFF_CAP)
+                time.sleep(delay)
+                # Rewind file-like data for retry
+                if initial_pos is not None:
+                    data.seek(initial_pos)
 
-        try:
-            if client is not None:
+            try:
                 resp = client.put(url, headers=headers, content=data)
-            else:
-                with httpx.Client(
-                    timeout=httpx.Timeout(timeout, connect=30.0)
-                ) as _client:
-                    resp = _client.put(url, headers=headers, content=data)
 
-            if 200 <= resp.status_code < 300:
-                return resp
+                if 200 <= resp.status_code < 300:
+                    return resp
 
-            if resp.status_code in _RETRY_STATUS_CODES:
-                last_error = RuntimeError(f"HTTP {resp.status_code}: {resp.text[:200]}")
-                continue
+                if resp.status_code in _RETRY_STATUS_CODES:
+                    last_error = RuntimeError(
+                        f"HTTP {resp.status_code}: {resp.text[:200]}"
+                    )
+                    continue
 
-            # Non-retryable HTTP error
-            raise RuntimeError(
-                f"Upload failed: HTTP {resp.status_code}. {resp.text[:500]}"
-            )
-        except (httpx.TimeoutException, httpx.NetworkError) as exc:
-            last_error = exc
+                # Non-retryable HTTP error
+                raise RuntimeError(
+                    f"Upload failed: HTTP {resp.status_code}. {resp.text[:500]}"
+                )
+            except (httpx.TimeoutException, httpx.NetworkError) as exc:
+                last_error = exc
+    finally:
+        if owns_client:
+            client.close()
 
     raise RuntimeError(f"Upload failed after {max_retries} attempts: {last_error}")
 

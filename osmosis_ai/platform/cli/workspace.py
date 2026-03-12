@@ -24,10 +24,13 @@ from osmosis_ai.platform.auth.local_config import (
 
 from .constants import BACK, MSG_NOT_LOGGED_IN
 from .utils import (
+    build_dataset_detail_rows,
+    build_run_detail_rows,
     format_dataset_status,
-    format_processing_step,
+    format_date,
     format_run_status,
     format_size,
+    platform_entity_url,
 )
 
 app: typer.Typer = typer.Typer(help="Switch workspace and default project.")
@@ -85,9 +88,10 @@ def _show_context(ws_name: str | None, default_project: dict | None) -> None:
         f"{console.format_styled('Current:', 'bold')} "
         f"{console.format_styled(ws_name, 'cyan')} / {project_name}"
     )
-    url = f"{PLATFORM_URL}/{ws_name}"
     if default_project:
-        url += f"/{default_project['project_name']}"
+        url = platform_entity_url(ws_name, default_project["project_name"])
+    else:
+        url = f"{PLATFORM_URL}/{ws_name}"
     console.print(
         f"{console.format_styled('URL:', 'bold')}     "
         f"{console.format_styled(url, 'dim')}"
@@ -311,21 +315,10 @@ def _browse_datasets(ws_name: str, project: dict) -> bool:
 
 def _show_dataset_detail(ds: Any, ws_name: str, project: dict) -> None:
     """Display detailed info for a single dataset."""
-    rows = [
-        ("File", ds.file_name),
-        ("ID", ds.id),
-        ("Size", format_size(ds.file_size)),
-        ("Status", ds.status),
-    ]
-    step = format_processing_step(ds)
-    if step:
-        rows.append(("Step", step))
-    if ds.error:
-        rows.append(("Error", ds.error))
+    rows = build_dataset_detail_rows(ds)
     if ds.created_at:
-        rows.append(("Created", ds.created_at[:10]))
-
-    url = f"{PLATFORM_URL}/{ws_name}/{project['project_name']}/training-data/{ds.id}"
+        rows.append(("Created", format_date(ds.created_at)))
+    url = platform_entity_url(ws_name, project["project_name"], "training-data", ds.id)
     rows.append(("URL", url))
 
     console.table(rows, title="Dataset Detail")
@@ -357,28 +350,8 @@ def _browse_runs(ws_name: str, project: dict) -> bool:
 
 def _show_run_detail(r: Any, ws_name: str, project: dict) -> None:
     """Display detailed info for a single training run."""
-    rows = [
-        ("Name", r.name or "(unnamed)"),
-        ("ID", r.id),
-        ("Status", r.status),
-    ]
-    step = format_processing_step(r)
-    if step:
-        rows.append(("Step", step))
-    if r.model_name:
-        rows.append(("Model", r.model_name))
-    if r.eval_accuracy is not None:
-        rows.append(("Accuracy", f"{r.eval_accuracy:.4f}"))
-    if r.reward_increase_delta is not None:
-        rows.append(("Reward Delta", f"{r.reward_increase_delta:+.4f}"))
-    if r.error_message:
-        rows.append(("Error", r.error_message))
-    if r.creator_name:
-        rows.append(("Creator", r.creator_name))
-    if r.created_at:
-        rows.append(("Created", r.created_at[:10]))
-
-    url = f"{PLATFORM_URL}/{ws_name}/{project['project_name']}/training/{r.id}"
+    rows = build_run_detail_rows(r)
+    url = platform_entity_url(ws_name, project["project_name"], "training", r.id)
     rows.append(("URL", url))
 
     console.table(rows, title="Training Run")
@@ -418,7 +391,7 @@ def _show_model_detail(m: Any) -> None:
     if m.description:
         rows.append(("Description", m.description))
     if m.created_at:
-        rows.append(("Created", m.created_at[:10]))
+        rows.append(("Created", format_date(m.created_at)))
 
     console.table(rows, title="Model Detail")
     console.print()
@@ -444,7 +417,7 @@ def _show_project_info(ws_name: str, project: dict) -> bool:
         console.print_error(f"Failed to load project info: {e}")
         return True
 
-    url = f"{PLATFORM_URL}/{ws_name}/{detail.project_name}"
+    url = platform_entity_url(ws_name, detail.project_name)
     rows = [
         ("Project", detail.project_name),
         ("ID", detail.id),
@@ -455,7 +428,7 @@ def _show_project_info(ws_name: str, project: dict) -> bool:
         ("Output Models", str(detail.output_model_count)),
     ]
     if detail.created_at:
-        rows.append(("Created", detail.created_at[:10]))
+        rows.append(("Created", format_date(detail.created_at)))
     rows.append(("URL", url))
 
     console.table(rows, title="Project Info")
@@ -465,7 +438,7 @@ def _show_project_info(ws_name: str, project: dict) -> bool:
 
 def _open_in_browser(ws_name: str, project: dict) -> None:
     """Open the current workspace/project URL in the default browser."""
-    url = f"{PLATFORM_URL}/{ws_name}/{project['project_name']}"
+    url = platform_entity_url(ws_name, project["project_name"])
     console.print(f"Opening {console.format_styled(url, 'dim')} ...")
     webbrowser.open(url)
     console.print()

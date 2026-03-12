@@ -18,7 +18,6 @@ from osmosis_ai.platform.auth import (
     AuthenticationExpiredError,
     PlatformAPIError,
 )
-from osmosis_ai.platform.auth.config import PLATFORM_URL
 
 from .constants import (
     MAX_FILE_SIZE,
@@ -31,7 +30,12 @@ from .project import (
     _resolve_project,
     _resolve_project_id,
 )
-from .utils import format_dataset_status, format_processing_step, format_size
+from .utils import (
+    build_dataset_detail_rows,
+    format_dataset_status,
+    format_size,
+    platform_entity_url,
+)
 
 app: typer.Typer = typer.Typer(
     help="Manage datasets (upload, list, status, preview, delete, validate)."
@@ -131,6 +135,32 @@ def _complete_with_retry(
     raise CLIError(f"Failed to complete upload: {last_error}") from last_error
 
 
+def _check_file_basics(file: str) -> tuple[Path, str, int]:
+    """Validate file existence, extension, and size.
+
+    Returns (resolved_path, extension, file_size) or raises CLIError.
+    """
+    file_path = Path(file).resolve()
+    if not file_path.exists():
+        raise CLIError(f"File not found: {file_path}")
+
+    ext = file_path.suffix.lstrip(".").lower()
+    if ext not in VALID_EXTENSIONS:
+        raise CLIError(
+            f"Unsupported file type '.{ext}'. "
+            f"Supported: {', '.join(sorted(VALID_EXTENSIONS))}"
+        )
+
+    file_size = file_path.stat().st_size
+    if file_size == 0:
+        raise CLIError("File is empty.")
+    if file_size > MAX_FILE_SIZE:
+        raise CLIError(
+            f"File too large ({format_size(file_size)}). Maximum: {format_size(MAX_FILE_SIZE)}"
+        )
+    return file_path, ext, file_size
+
+
 @app.command("upload")
 def upload(
     file: str = typer.Argument(..., help="Path to the file to upload."),
@@ -149,24 +179,7 @@ def upload(
         upload_file_simple,
     )
 
-    file_path = Path(file).resolve()
-    if not file_path.exists():
-        raise CLIError(f"File not found: {file_path}")
-
-    ext = file_path.suffix.lstrip(".").lower()
-    if ext not in VALID_EXTENSIONS:
-        raise CLIError(
-            f"Unsupported file type '.{ext}'. "
-            f"Supported: {', '.join(sorted(VALID_EXTENSIONS))}"
-        )
-
-    file_size = file_path.stat().st_size
-    if file_size > MAX_FILE_SIZE:
-        raise CLIError(
-            f"File too large ({format_size(file_size)}). Maximum: {format_size(MAX_FILE_SIZE)}"
-        )
-    if file_size == 0:
-        raise CLIError("File is empty.")
+    file_path, ext, file_size = _check_file_basics(file)
 
     # Validate file contents before uploading
     errors = _validate_file(file_path, ext)
@@ -278,7 +291,7 @@ def upload(
         )
 
     console.print(f"Upload complete. Dataset ID: {dataset.id}", style="green")
-    url = f"{PLATFORM_URL}/{ws_name}/{project_name}/training-data/{dataset.id}"
+    url = platform_entity_url(ws_name, project_name, "training-data", dataset.id)
     console.print(f"Processing will continue on the platform. Check status at: {url}")
 
 
@@ -330,18 +343,7 @@ def status(
     dataset_id = resolve_dataset_id(id, project, ws_name, credentials, client=client)
     ds = client.get_dataset(dataset_id, credentials=credentials)
 
-    rows = [
-        ("File", ds.file_name),
-        ("ID", ds.id),
-        ("Size", format_size(ds.file_size)),
-        ("Status", ds.status),
-    ]
-    step = format_processing_step(ds)
-    if step:
-        rows.append(("Step", step))
-    if ds.error:
-        rows.append(("Error", ds.error))
-
+    rows = build_dataset_detail_rows(ds)
     console.table(rows, title="Dataset Status")
 
 
@@ -389,24 +391,7 @@ def validate(
     file: str = typer.Argument(..., help="Path to the file to validate."),
 ) -> None:
     """Validate a dataset file locally."""
-    file_path = Path(file).resolve()
-    if not file_path.exists():
-        raise CLIError(f"File not found: {file_path}")
-
-    ext = file_path.suffix.lstrip(".").lower()
-    if ext not in VALID_EXTENSIONS:
-        raise CLIError(
-            f"Unsupported file type '.{ext}'. "
-            f"Supported: {', '.join(sorted(VALID_EXTENSIONS))}"
-        )
-
-    file_size = file_path.stat().st_size
-    if file_size == 0:
-        raise CLIError("File is empty.")
-    if file_size > MAX_FILE_SIZE:
-        raise CLIError(
-            f"File too large ({format_size(file_size)}). Maximum: {format_size(MAX_FILE_SIZE)}"
-        )
+    file_path, ext, file_size = _check_file_basics(file)
 
     # Format validation
     errors = _validate_file(file_path, ext)

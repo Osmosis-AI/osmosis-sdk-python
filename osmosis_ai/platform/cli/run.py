@@ -7,7 +7,7 @@ import typer
 from osmosis_ai.cli.console import console
 
 from .project import _require_auth, _resolve_project_id
-from .utils import format_processing_step, format_run_status
+from .utils import build_run_detail_rows, format_date, format_run_status
 
 app: typer.Typer = typer.Typer(help="Manage training runs.")
 
@@ -37,7 +37,7 @@ def list_runs(
         name = r.name or console.format_styled("(unnamed)", "dim")
         model = r.model_name or "—"
         acc = f"acc:{r.eval_accuracy:.2f}" if r.eval_accuracy is not None else ""
-        date = r.created_at[:10] if r.created_at else ""
+        date = format_date(r.created_at)
 
         console.print(f"  {r.id[:8]}  {name}  {status_str}  {model}  {acc}  {date}")
 
@@ -65,36 +65,19 @@ def status(
     run_id = resolve_run_id(id, project, ws_name, credentials, client=client)
     run = client.get_training_run(run_id, credentials=credentials)
 
-    rows: list[tuple[str, str]] = [
-        ("Name", run.name or "(unnamed)"),
-        ("ID", run.id),
-        ("Status", run.status),
-    ]
-    step = format_processing_step(run)
-    if step:
-        rows.append(("Step", step))
-    rows.append(("Model", run.model_name or "—"))
+    rows = build_run_detail_rows(run)
+    # Additional fields only shown in the detailed status view
     if run.output_model_id:
         rows.append(("Output Model", run.output_model_id))
-    if run.eval_accuracy is not None:
-        rows.append(("Accuracy", f"{run.eval_accuracy:.4f}"))
-    if run.reward_increase_delta is not None:
-        rows.append(("Reward Delta", f"{run.reward_increase_delta:+.4f}"))
     if run.examples_processed_count is not None:
         rows.append(("Examples", str(run.examples_processed_count)))
-    if run.error_message:
-        rows.append(("Error", run.error_message))
     if run.notes:
         rows.append(("Notes", run.notes))
     if run.hf_status:
         rows.append(("HF Status", run.hf_status))
-    if run.creator_name:
-        rows.append(("Creator", run.creator_name))
-    if run.created_at:
-        rows.append(("Created", run.created_at[:10]))
     if run.started_at:
-        rows.append(("Started", run.started_at[:10]))
+        rows.append(("Started", format_date(run.started_at)))
     if run.completed_at:
-        rows.append(("Completed", run.completed_at[:10]))
+        rows.append(("Completed", format_date(run.completed_at)))
 
     console.table(rows, title="Training Run")

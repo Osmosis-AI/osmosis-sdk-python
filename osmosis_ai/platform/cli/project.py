@@ -286,15 +286,17 @@ def _resolve_project(
         raise CLIError(hint)
 
     projects = _get_cached_projects(workspace_name=workspace_name)
+    refreshed = False
     if refresh or not projects:
         projects = _refresh_projects(workspace_name=workspace_name)
+        refreshed = True
 
     target = name_or_id.lower()
     for p in projects:
         if p.get("project_name", "").lower() == target or p.get("id") == name_or_id:
             return p
 
-    if not refresh:
+    if not refreshed:
         projects = _refresh_projects(workspace_name=workspace_name)
         for p in projects:
             if p.get("project_name", "").lower() == target or p.get("id") == name_or_id:

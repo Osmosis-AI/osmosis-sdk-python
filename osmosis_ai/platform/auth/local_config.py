@@ -27,11 +27,11 @@ CONFIG_FILE = CONFIG_DIR / "config.json"
 
 
 def _load_config() -> dict[str, Any]:
-    if not CONFIG_FILE.exists():
-        return {}
     try:
         with open(CONFIG_FILE, encoding="utf-8") as f:
             return json.load(f)
+    except FileNotFoundError:
+        return {}
     except json.JSONDecodeError:
         import sys
 
@@ -66,12 +66,10 @@ def _write_cache(path: Path, data: Any) -> None:
 
 def _read_cache(path: Path) -> Any | None:
     """Read a single JSON cache file. Returns None on missing / corrupt."""
-    if not path.exists():
-        return None
     try:
         with open(path, encoding="utf-8") as f:
             return json.load(f)
-    except (json.JSONDecodeError, OSError):
+    except (OSError, json.JSONDecodeError):
         return None
 
 

@@ -15,6 +15,7 @@ from osmosis_ai.platform.api.models import (
     STATUSES_IN_PROGRESS,
     STATUSES_SUCCESS,
 )
+from osmosis_ai.platform.auth.config import PLATFORM_URL
 
 if TYPE_CHECKING:
     from osmosis_ai.platform.auth.credentials import WorkspaceCredentials
@@ -179,6 +180,61 @@ def format_run_status(r: Any, *, for_prompt: bool = False) -> str:
     if r.status in RUN_STATUSES_STOPPED:
         return console.format_styled(status_info, "dim")
     return console.escape(status_info)
+
+
+def format_date(iso_str: str | None) -> str:
+    """Extract YYYY-MM-DD from an ISO 8601 string, or return '' if empty."""
+    if not iso_str:
+        return ""
+    return iso_str[:10]
+
+
+def platform_entity_url(ws_name: str, project_name: str, *segments: str) -> str:
+    """Build a platform URL for a workspace/project entity."""
+    base = f"{PLATFORM_URL}/{ws_name}/{project_name}"
+    if segments:
+        base += "/" + "/".join(segments)
+    return base
+
+
+def build_dataset_detail_rows(ds: Any) -> list[tuple[str, str]]:
+    """Build common detail rows for a dataset."""
+    rows: list[tuple[str, str]] = [
+        ("File", ds.file_name),
+        ("ID", ds.id),
+        ("Size", format_size(ds.file_size)),
+        ("Status", ds.status),
+    ]
+    step = format_processing_step(ds)
+    if step:
+        rows.append(("Step", step))
+    if ds.error:
+        rows.append(("Error", ds.error))
+    return rows
+
+
+def build_run_detail_rows(r: Any) -> list[tuple[str, str]]:
+    """Build common detail rows for a training run."""
+    rows: list[tuple[str, str]] = [
+        ("Name", r.name or "(unnamed)"),
+        ("ID", r.id),
+        ("Status", r.status),
+    ]
+    step = format_processing_step(r)
+    if step:
+        rows.append(("Step", step))
+    rows.append(("Model", r.model_name or "—"))
+    if r.eval_accuracy is not None:
+        rows.append(("Accuracy", f"{r.eval_accuracy:.4f}"))
+    if r.reward_increase_delta is not None:
+        rows.append(("Reward Delta", f"{r.reward_increase_delta:+.4f}"))
+    if r.error_message:
+        rows.append(("Error", r.error_message))
+    if r.creator_name:
+        rows.append(("Creator", r.creator_name))
+    if r.created_at:
+        rows.append(("Created", format_date(r.created_at)))
+    return rows
 
 
 def format_processing_step(obj: Any) -> str | None:

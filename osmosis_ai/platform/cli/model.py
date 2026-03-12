@@ -7,6 +7,7 @@ import typer
 from osmosis_ai.cli.console import console
 
 from .project import _require_auth, _resolve_project_id
+from .utils import format_date
 
 app: typer.Typer = typer.Typer(help="Manage models.")
 
@@ -34,7 +35,7 @@ def list_models(
     for m in result.models:
         status_str = console.format_styled(f"[{m.status}]", "dim")
         base = m.base_model or ""
-        date = m.created_at[:10] if m.created_at else ""
+        date = format_date(m.created_at)
 
         console.print(f"  {m.id[:8]}  {m.model_name}  {status_str}  {base}  {date}")
 
