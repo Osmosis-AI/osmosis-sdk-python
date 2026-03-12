@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import osmosis_ai.platform.cli.project as project_module
+from osmosis_ai.platform.auth.platform_client import PlatformAPIError
 
 
 def test_select_project_interactive_refreshes_selected_workspace_projects(
@@ -34,7 +35,7 @@ def test_select_project_interactive_uses_selected_workspace_cache_on_refresh_fai
     monkeypatch.setattr(project_module, "is_interactive", lambda: False)
 
     def fake_refresh_projects(*, workspace_name: str) -> list[dict]:
-        raise RuntimeError(f"boom for {workspace_name}")
+        raise PlatformAPIError(f"boom for {workspace_name}")
 
     def fake_get_cached_projects(
         *,

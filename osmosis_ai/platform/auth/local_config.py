@@ -29,12 +29,9 @@ CONFIG_FILE = CONFIG_DIR / "config.json"
 
 def _ensure_dir(directory: Path) -> None:
     """Ensure directory exists with 0o700 permissions (owner-only access)."""
-    if not directory.exists():
-        directory.mkdir(parents=True, mode=0o700)
-    else:
-        current_mode = directory.stat().st_mode
-        if current_mode & 0o077:
-            os.chmod(directory, 0o700)
+    directory.mkdir(parents=True, mode=0o700, exist_ok=True)
+    if directory.stat().st_mode & 0o077:
+        os.chmod(directory, 0o700)
 
 
 def _load_config() -> dict[str, Any]:

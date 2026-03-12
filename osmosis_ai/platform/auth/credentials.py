@@ -153,7 +153,13 @@ def _load_store() -> CredentialsStore | None:
         with open(CREDENTIALS_FILE, encoding="utf-8") as f:
             data = json.load(f)
         return CredentialsStore.from_dict(data)
-    except (json.JSONDecodeError, KeyError, ValueError):
+    except (json.JSONDecodeError, KeyError, ValueError) as exc:
+        import sys
+
+        sys.stderr.write(
+            f"Warning: could not parse credentials file ({type(exc).__name__}); "
+            "run 'osmosis login' to re-authenticate.\n"
+        )
         return None
 
 
@@ -172,6 +178,7 @@ def _save_store(store: CredentialsStore) -> None:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2)
         os.replace(tmp, CREDENTIALS_FILE)
+        os.chmod(CREDENTIALS_FILE, 0o600)
     except BaseException:
         with contextlib.suppress(OSError):
             os.unlink(tmp)

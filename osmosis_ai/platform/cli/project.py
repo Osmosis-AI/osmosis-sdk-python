@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
 import time
 from typing import TYPE_CHECKING, Any
@@ -19,6 +20,7 @@ from osmosis_ai.cli.prompts import (
 from osmosis_ai.platform.api.client import OsmosisClient
 from osmosis_ai.platform.auth import (
     AuthenticationExpiredError,
+    PlatformAPIError,
     get_active_workspace,
     load_workspace_credentials,
     load_workspace_projects,
@@ -112,9 +114,7 @@ def select_project_interactive(
     if projects is None:
         try:
             projects = _refresh_projects(workspace_name=ws_name)
-        except AuthenticationExpiredError:
-            raise
-        except Exception:
+        except (PlatformAPIError, OSError):
             projects = _get_cached_projects(workspace_name=ws_name, max_age=None)
             if projects:
                 console.print(
@@ -162,12 +162,8 @@ def _prompt_create(ws_name: str) -> dict | None:
     client = OsmosisClient()
     project = client.create_project(name, credentials=credentials)
 
-    try:
+    with contextlib.suppress(PlatformAPIError, OSError):
         _refresh_projects(workspace_name=ws_name)
-    except AuthenticationExpiredError:
-        raise
-    except Exception:
-        pass
 
     console.print(f"Created project '{project.project_name}'.")
     return {"id": project.id, "project_name": project.project_name}
@@ -232,9 +228,7 @@ def _get_cached_projects(
         if is_stale:
             try:
                 return _refresh_projects(workspace_name=workspace_name)
-            except AuthenticationExpiredError:
-                raise
-            except Exception:
+            except (PlatformAPIError, OSError):
                 console.print_error(
                     "Warning: Could not refresh project list, using cached data."
                 )
@@ -345,9 +339,7 @@ def _require_subscription(*, workspace_name: str) -> None:
             workspace_name=workspace_name
         )  # Also updates subscription cache
         refresh_ok = True
-    except AuthenticationExpiredError:
-        raise
-    except Exception:
+    except (PlatformAPIError, OSError):
         pass
 
     # Re-check: use strict max_age when refresh failed so we don't trust stale data

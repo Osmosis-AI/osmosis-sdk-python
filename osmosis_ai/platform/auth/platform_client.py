@@ -60,6 +60,25 @@ def _handle_401_and_cleanup(workspace_name: str | None = None) -> None:
     )
 
 
+def revoke_cli_token(credentials: WorkspaceCredentials) -> bool:
+    """Best-effort server-side revocation of a CLI token.
+
+    Returns True if revoked, False if revocation failed or was skipped.
+    The caller should still delete local credentials regardless.
+    """
+    if not credentials.token_id:
+        return False
+    try:
+        platform_request(
+            f"/api/cli/tokens/{credentials.token_id}",
+            method="DELETE",
+            credentials=credentials,
+        )
+        return True
+    except Exception:
+        return False
+
+
 def platform_request(
     endpoint: str,
     method: str = "GET",
@@ -117,7 +136,7 @@ def platform_request(
         if e.code == 401:
             _handle_401_and_cleanup(workspace_name)
 
-        # Best-effort capture of response body for debugging (truncate to avoid huge logs)
+        # Best-effort capture of structured error message from response body
         detail = ""
         error_body: dict[str, Any] = {}
         try:
@@ -126,11 +145,15 @@ def platform_request(
             if text:
                 with contextlib.suppress(json.JSONDecodeError, ValueError):
                     error_body = json.loads(text)
-                if len(text) > 500:
-                    text = text[:500] + "...(truncated)"
-                detail = f" Response: {text}"
+                # Prefer structured error/message field over raw body
+                error_msg = error_body.get("error") or error_body.get("message")
+                if error_msg and isinstance(error_msg, str):
+                    detail = f" {error_msg}"
+                elif text:
+                    if len(text) > 200:
+                        text = text[:200] + "...(truncated)"
+                    detail = f" Response: {text}"
         except Exception:
-            # Ignore body read/decoding failures; keep the original status code context.
             pass
 
         # Detect subscription-required responses (403 with subscription message)

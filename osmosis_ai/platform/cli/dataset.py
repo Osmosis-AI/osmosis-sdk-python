@@ -108,9 +108,13 @@ def _complete_with_retry(
         except AuthenticationExpiredError:
             raise  # Not transient — surface immediately
         except PlatformAPIError as e:
-            # Only retry on server errors (5xx) or no status code (network)
-            if e.status_code is not None and e.status_code < 500:
-                raise  # 4xx — not transient
+            # Retry on server errors (5xx), rate limits (429), or no status code (network)
+            if (
+                e.status_code is not None
+                and e.status_code < 500
+                and e.status_code != 429
+            ):
+                raise  # 4xx (except 429) — not transient
             last_error = e
         except Exception as e:
             # Network / timeout / unexpected — retryable
@@ -248,14 +252,14 @@ def upload(
                 credentials=credentials,
             )
             raise CLIError(f"Upload failed: {e}") from e
-        except Exception:
+        except Exception as e:
             _abort_multipart(
                 client,
                 dataset.id,
                 upload_info.upload_id,
                 credentials=credentials,
             )
-            raise
+            raise CLIError(f"Upload failed: {e}") from e
         _complete_with_retry(
             client,
             dataset.id,

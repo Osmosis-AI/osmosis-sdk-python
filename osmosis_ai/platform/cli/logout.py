@@ -9,8 +9,21 @@ from osmosis_ai.cli.prompts import Choice, Separator, confirm, select
 from osmosis_ai.platform.auth import (
     delete_workspace_credentials,
     get_all_workspaces,
+    load_workspace_credentials,
 )
 from osmosis_ai.platform.auth.local_config import clear_workspace_data
+from osmosis_ai.platform.auth.platform_client import revoke_cli_token
+
+
+def _revoke_and_delete(name: str) -> bool:
+    """Revoke token server-side (best-effort), then delete local credentials."""
+    creds = load_workspace_credentials(name)
+    if creds and not creds.is_expired():
+        revoke_cli_token(creds)
+    if delete_workspace_credentials(name):
+        clear_workspace_data(name)
+        return True
+    return False
 
 
 def _logout_all(
@@ -36,8 +49,7 @@ def _logout_all(
 
     success_count = 0
     for name, _, _ in workspaces:
-        if delete_workspace_credentials(name):
-            clear_workspace_data(name)
+        if _revoke_and_delete(name):
             success_count += 1
 
     console.print(
@@ -61,8 +73,7 @@ def _logout_interactive(
             if not result:
                 console.print("Cancelled.")
                 return
-        if delete_workspace_credentials(name):
-            clear_workspace_data(name)
+        if _revoke_and_delete(name):
             console.print(f"Logged out from '{name}'.", style="green")
         return
 
@@ -93,8 +104,7 @@ def _logout_interactive(
             if not result:
                 console.print("Cancelled.")
                 return
-        if delete_workspace_credentials(name):
-            clear_workspace_data(name)
+        if _revoke_and_delete(name):
             console.print(f"Logged out from '{name}'.", style="green")
 
 
@@ -104,7 +114,7 @@ def logout(
         False, "-y", "--yes", help="Skip confirmation prompt."
     ),
 ) -> None:
-    """Logout and revoke CLI token."""
+    """Logout from Osmosis AI CLI."""
     workspaces = get_all_workspaces()
 
     if not workspaces:

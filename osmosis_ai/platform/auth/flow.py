@@ -245,6 +245,11 @@ def _verify_and_get_user_info(token: str) -> VerifyResult:
                     raise LoginError(
                         "Invalid expires_at from platform: expected timezone-aware ISO8601 timestamp"
                     )
+                if datetime.now(timezone.utc) >= expires_at:
+                    raise LoginError(
+                        "Received token is already expired. "
+                        "Please check system clock or try again."
+                    )
             else:
                 expires_at = datetime.now(timezone.utc) + timedelta(days=90)
 

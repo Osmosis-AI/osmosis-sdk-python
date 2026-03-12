@@ -9,6 +9,16 @@ from pathlib import Path
 DEFAULT_PLATFORM_URL = "https://platform.osmosis.ai"
 PLATFORM_URL = os.environ.get("OSMOSIS_PLATFORM_URL", DEFAULT_PLATFORM_URL)
 
+if PLATFORM_URL != DEFAULT_PLATFORM_URL and not PLATFORM_URL.startswith("https://"):
+    _host = PLATFORM_URL.split("://")[-1].split("/")[0].split(":")[0]
+    if _host not in ("localhost", "127.0.0.1", "::1"):
+        import sys
+
+        sys.stderr.write(
+            f"Warning: OSMOSIS_PLATFORM_URL is not HTTPS ({PLATFORM_URL}). "
+            "Tokens will be transmitted in plaintext.\n"
+        )
+
 # Configuration directory and credentials file
 CONFIG_DIR = Path.home() / ".config" / "osmosis"
 CREDENTIALS_FILE = CONFIG_DIR / "credentials.json"
