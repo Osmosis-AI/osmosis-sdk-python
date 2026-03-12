@@ -25,7 +25,7 @@ def _is_loopback(hostname: str) -> bool:
 
 if (
     PLATFORM_URL != DEFAULT_PLATFORM_URL
-    and not PLATFORM_URL.startswith("https://")
+    and urlparse(PLATFORM_URL).scheme.lower() != "https"
     and not _is_loopback(urlparse(PLATFORM_URL).hostname or "")
 ):
     warnings.warn(

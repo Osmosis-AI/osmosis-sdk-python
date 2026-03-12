@@ -144,7 +144,10 @@ def platform_request(
             text = raw.decode("utf-8", errors="replace").strip() if raw else ""
             if text:
                 with contextlib.suppress(json.JSONDecodeError, ValueError):
-                    error_body = json.loads(text)
+                    parsed = json.loads(text)
+                    # Only treat as error_body if it's actually a dict
+                    if isinstance(parsed, dict):
+                        error_body = parsed
                 # Prefer structured error/message field over raw body
                 error_msg = error_body.get("error") or error_body.get("message")
                 if error_msg and isinstance(error_msg, str):
@@ -157,7 +160,7 @@ def platform_request(
             pass
 
         # Detect subscription-required responses (403 with subscription message)
-        if e.code == 403:
+        if e.code == 403 and isinstance(error_body, dict):
             error_msg = error_body.get("error", "")
             if isinstance(error_msg, str) and "subscription" in error_msg.lower():
                 raise SubscriptionRequiredError(error_msg) from e

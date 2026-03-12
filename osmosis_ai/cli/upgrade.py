@@ -30,6 +30,11 @@ def _is_up_to_date(installed: str, latest: str) -> bool:
     try:
         installed_t = tuple(int(x) for x in installed.split("."))
         latest_t = tuple(int(x) for x in latest.split("."))
+        # Pad shorter tuple with zeros to ensure correct comparison
+        # (e.g., "1.2" == "1.2.0")
+        max_len = max(len(installed_t), len(latest_t))
+        installed_t += (0,) * (max_len - len(installed_t))
+        latest_t += (0,) * (max_len - len(latest_t))
         return installed_t >= latest_t
     except (ValueError, AttributeError):
         # Cannot reliably compare — assume an upgrade is needed.

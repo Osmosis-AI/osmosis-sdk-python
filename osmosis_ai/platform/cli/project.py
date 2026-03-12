@@ -333,18 +333,14 @@ def _require_subscription(*, workspace_name: str) -> None:
         return
 
     # Cached status is False, None, or expired — refresh to get the latest
-    refresh_ok = False
-    try:
+    with contextlib.suppress(PlatformAPIError, OSError):
         _refresh_projects(
             workspace_name=workspace_name
         )  # Also updates subscription cache
-        refresh_ok = True
-    except (PlatformAPIError, OSError):
-        pass
 
-    # Re-check: use strict max_age when refresh failed so we don't trust stale data
-    max_age = None if refresh_ok else CACHE_TTL_SECONDS
-    status = load_subscription_status(workspace_name, max_age=max_age)
+    # Re-check: always use TTL to ensure we only accept fresh data
+    # (refresh may not update has_subscription if the field is missing from API response)
+    status = load_subscription_status(workspace_name, max_age=CACHE_TTL_SECONDS)
     if status is not True:
         raise CLIError(
             "Your workspace requires an active subscription for this action.\n"

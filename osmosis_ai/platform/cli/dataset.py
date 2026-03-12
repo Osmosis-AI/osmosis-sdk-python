@@ -244,14 +244,6 @@ def upload(
                 credentials=credentials,
             )
             raise CLIError("Upload cancelled by user.") from None
-        except RuntimeError as e:
-            _abort_multipart(
-                client,
-                dataset.id,
-                upload_info.upload_id,
-                credentials=credentials,
-            )
-            raise CLIError(f"Upload failed: {e}") from e
         except Exception as e:
             _abort_multipart(
                 client,

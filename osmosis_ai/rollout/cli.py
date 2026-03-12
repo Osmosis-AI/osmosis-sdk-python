@@ -10,10 +10,14 @@ Example:
 from __future__ import annotations
 
 import sys
+from typing import Literal
 
 import typer
 
 from osmosis_ai.cli.errors import CLIError
+
+# Valid log levels for uvicorn
+LogLevel = Literal["critical", "error", "warning", "info", "debug", "trace"]
 
 
 def serve(
@@ -28,7 +32,9 @@ def serve(
     reload: bool = typer.Option(
         False, "--reload", help="Enable auto-reload for development."
     ),
-    log_level: str = typer.Option("info", "--log-level", help="Uvicorn log level."),
+    log_level: LogLevel = typer.Option(
+        "info", "--log-level", help="Uvicorn log level."
+    ),
     skip_register: bool = typer.Option(
         False, "--skip-register", help="Skip registering with Platform."
     ),

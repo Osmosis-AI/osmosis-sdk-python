@@ -164,12 +164,17 @@ def test_require_subscription_refreshes_selected_workspace(monkeypatch) -> None:
     load_calls: list[tuple[str, float | None]] = []
     refresh_calls: list[str] = []
 
+    call_count = 0
+
     def fake_load_subscription_status(
         workspace_name: str,
         max_age: float | None = None,
     ) -> bool | None:
+        nonlocal call_count
+        call_count += 1
         load_calls.append((workspace_name, max_age))
-        return None if max_age is not None else True
+        # First call: cache miss/expired; second call: refresh wrote fresh data
+        return None if call_count == 1 else True
 
     def fake_refresh_projects(*, workspace_name: str) -> list[dict]:
         refresh_calls.append(workspace_name)
@@ -184,6 +189,6 @@ def test_require_subscription_refreshes_selected_workspace(monkeypatch) -> None:
 
     assert load_calls == [
         ("ws-b", project_module.CACHE_TTL_SECONDS),
-        ("ws-b", None),
+        ("ws-b", project_module.CACHE_TTL_SECONDS),
     ]
     assert refresh_calls == ["ws-b"]

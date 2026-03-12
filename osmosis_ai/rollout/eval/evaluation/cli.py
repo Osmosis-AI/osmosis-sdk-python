@@ -13,7 +13,7 @@ import shutil
 import time
 from pathlib import Path
 from types import SimpleNamespace
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 import typer
 
@@ -994,7 +994,7 @@ def eval_cache_ls(
     cache_dataset: str | None = typer.Option(
         None, "--dataset", help="Filter by dataset path."
     ),
-    cache_status: str | None = typer.Option(
+    cache_status: Literal["in_progress", "completed"] | None = typer.Option(
         None, "--status", help="Filter by status (in_progress, completed)."
     ),
 ) -> None:
@@ -1020,7 +1020,7 @@ def eval_cache_rm(
     cache_dataset: str | None = typer.Option(
         None, "--dataset", help="Filter by dataset path."
     ),
-    cache_status: str | None = typer.Option(
+    cache_status: Literal["in_progress", "completed"] | None = typer.Option(
         None, "--status", help="Filter by status (in_progress, completed)."
     ),
     yes: bool = typer.Option(False, "-y", "--yes", help="Skip confirmation prompt."),
