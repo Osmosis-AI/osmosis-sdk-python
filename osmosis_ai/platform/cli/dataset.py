@@ -397,10 +397,7 @@ def validate(
     errors = _validate_file(file_path, ext)
 
     if errors:
-        console.print("Validation errors:")
-        for err in errors:
-            console.print(f"  - {err}")
-        raise typer.Exit(1)
+        raise CLIError("Validation failed:\n" + "\n".join(f"  - {e}" for e in errors))
 
     console.print(
         f"Valid {ext} file: {file_path.name} ({format_size(file_size)})",

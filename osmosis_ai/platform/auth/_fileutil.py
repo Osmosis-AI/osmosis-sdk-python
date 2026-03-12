@@ -44,13 +44,16 @@ def atomic_write_json(
     parent = path.parent
     ensure_secure_dir(parent)
 
-    # Create temp file in same directory for atomic rename
+    # Create temp file in same directory for atomic rename.
+    # Set permissions on the fd BEFORE os.replace() so the file already has
+    # the desired mode when it appears at the final path — no race window.
     fd, tmp = tempfile.mkstemp(dir=parent, suffix=".tmp")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=indent)
+            f.flush()
+            os.fchmod(f.fileno(), mode)
         os.replace(tmp, path)
-        os.chmod(path, mode)
     except BaseException:
         with contextlib.suppress(OSError):
             os.unlink(tmp)

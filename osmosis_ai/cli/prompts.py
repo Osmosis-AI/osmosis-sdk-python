@@ -49,19 +49,16 @@ def _add_escape_binding(question: questionary.Question) -> questionary.Question:
     app = question.application
     kb = app.key_bindings
 
+    def _handle_escape(event):
+        event.app.exit(exception=KeyboardInterrupt, style="class:aborting")
+
     # select() gives a mutable KeyBindings; text()/autocomplete() give
     # an immutable _MergedKeyBindings — handle both cases.
     if isinstance(kb, KeyBindings):
-
-        @kb.add(Keys.Escape, eager=True)
-        def _(event):
-            event.app.exit(exception=KeyboardInterrupt, style="class:aborting")
+        kb.add(Keys.Escape, eager=True)(_handle_escape)
     else:
         extra = KeyBindings()
-
-        @extra.add(Keys.Escape, eager=True)
-        def _(event):
-            event.app.exit(exception=KeyboardInterrupt, style="class:aborting")
+        extra.add(Keys.Escape, eager=True)(_handle_escape)
 
         bindings: list[KeyBindingsBase] = [extra]
         if kb is not None:

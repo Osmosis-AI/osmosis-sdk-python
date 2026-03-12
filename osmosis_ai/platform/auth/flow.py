@@ -26,8 +26,6 @@ from .local_server import LocalAuthServer, find_available_port
 class LoginError(Exception):
     """Error during login flow."""
 
-    pass
-
 
 @dataclass
 class VerifyResult:

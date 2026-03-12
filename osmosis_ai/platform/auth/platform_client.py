@@ -25,8 +25,6 @@ if TYPE_CHECKING:
 class AuthenticationExpiredError(Exception):
     """Raised when the stored credentials are invalid, expired, or revoked."""
 
-    pass
-
 
 class PlatformAPIError(Exception):
     """Raised when a Platform API call fails."""

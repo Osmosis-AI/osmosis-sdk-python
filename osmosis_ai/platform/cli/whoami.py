@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import typer
-
 from osmosis_ai.cli.console import console
+from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.platform.auth import get_all_workspaces
 from osmosis_ai.platform.auth.config import PLATFORM_URL
+from osmosis_ai.platform.cli.constants import MSG_NOT_LOGGED_IN
 
 
 def whoami() -> None:
@@ -12,10 +12,7 @@ def whoami() -> None:
     workspaces = get_all_workspaces()
 
     if not workspaces:
-        console.print(
-            "Not logged in. Run 'osmosis login' to authenticate.", style="yellow"
-        )
-        raise typer.Exit(1)
+        raise CLIError(MSG_NOT_LOGGED_IN)
 
     # Find active workspace for user info
     active_creds = None
