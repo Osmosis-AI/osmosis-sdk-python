@@ -5,7 +5,6 @@ Run agent loop evaluations against datasets with eval functions and pass@n suppo
 
 from __future__ import annotations
 
-import argparse
 import asyncio
 import importlib
 import json
@@ -13,23 +12,26 @@ import logging
 import shutil
 import time
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from types import SimpleNamespace
+from typing import TYPE_CHECKING, Any, Literal
+
+import typer
 
 from osmosis_ai.cli.console import Console
-from osmosis_ai.rollout.eval.common.cli import (
-    build_completion_params,
-    create_llm_client,
-    format_duration,
-    load_agent,
-    load_dataset_rows,
-    load_mcp_agent,
-    verify_llm_client,
-)
 
 if TYPE_CHECKING:
     from osmosis_ai.rollout.eval.evaluation.cache import BuildSummaryResult
     from osmosis_ai.rollout.eval.evaluation.eval_fn import EvalFnWrapper
     from osmosis_ai.rollout.eval.evaluation.runner import EvalRunResult
+
+app: typer.Typer = typer.Typer(
+    help="Evaluate agent against dataset with eval functions.",
+    invoke_without_command=True,
+    no_args_is_help=False,
+)
+
+cache_app: typer.Typer = typer.Typer(help="Manage eval cache.")
+app.add_typer(cache_app, name="cache")
 
 
 class EvalCommand:
@@ -38,312 +40,11 @@ class EvalCommand:
     def __init__(self) -> None:
         self.console: Console = Console()
 
-    def configure_parser(self, parser: argparse.ArgumentParser) -> None:
-        # Create subparsers for cache management commands
-        subparsers = parser.add_subparsers(dest="eval_subcommand")
-
-        cache_parser = subparsers.add_parser("cache", help="Cache management commands")
-        cache_subparsers = cache_parser.add_subparsers(
-            dest="cache_action", help="Cache actions"
-        )
-
-        dir_parser = cache_subparsers.add_parser(
-            "dir", help="Print cache root directory path"
-        )
-        dir_parser.set_defaults(handler=self._run_cache_dir)
-
-        # cache ls
-        ls_parser = cache_subparsers.add_parser("ls", help="List cached evaluations")
-        ls_parser.add_argument(
-            "--model",
-            dest="cache_model",
-            default=None,
-            help="Filter by model name (case-insensitive substring match).",
-        )
-        ls_parser.add_argument(
-            "--dataset",
-            dest="cache_dataset",
-            default=None,
-            help="Filter by dataset path (case-insensitive substring match).",
-        )
-        ls_parser.add_argument(
-            "--status",
-            dest="cache_status",
-            default=None,
-            choices=["in_progress", "completed"],
-            help="Filter by status.",
-        )
-        ls_parser.set_defaults(handler=self._run_cache_ls)
-
-        # cache rm
-        rm_parser = cache_subparsers.add_parser("rm", help="Remove cached evaluations")
-        rm_parser.add_argument(
-            "task_id",
-            nargs="?",
-            default=None,
-            help="Task ID of the cache entry to delete.",
-        )
-        rm_parser.add_argument(
-            "--all",
-            dest="rm_all",
-            action="store_true",
-            default=False,
-            help="Delete all cached evaluations.",
-        )
-        rm_parser.add_argument(
-            "--model",
-            dest="cache_model",
-            default=None,
-            help="Filter by model name (case-insensitive substring match).",
-        )
-        rm_parser.add_argument(
-            "--dataset",
-            dest="cache_dataset",
-            default=None,
-            help="Filter by dataset path (case-insensitive substring match).",
-        )
-        rm_parser.add_argument(
-            "--status",
-            dest="cache_status",
-            default=None,
-            choices=["in_progress", "completed"],
-            help="Filter by status.",
-        )
-        rm_parser.add_argument(
-            "-y",
-            "--yes",
-            dest="yes",
-            action="store_true",
-            default=False,
-            help="Skip confirmation prompt.",
-        )
-        rm_parser.set_defaults(handler=self._run_cache_rm)
-
-        cache_parser.set_defaults(handler=self._run_cache_default)
-
-        # Default handler: run evaluation
-        parser.set_defaults(handler=self.run)
-
-        parser.add_argument(
-            "-m",
-            "--module",
-            dest="module",
-            default=None,
-            help=(
-                "Module path to the agent loop in format 'module:attribute'. "
-                "Example: 'my_agent:MyAgentLoop'."
-            ),
-        )
-
-        parser.add_argument(
-            "--mcp",
-            dest="mcp",
-            default=None,
-            help=(
-                "Path to MCP tools directory (must contain main.py with a FastMCP instance). "
-                "Mutually exclusive with -m/--module."
-            ),
-        )
-
-        parser.add_argument(
-            "-d",
-            "--dataset",
-            dest="dataset",
-            required=False,
-            default=None,
-            help="Path to dataset file (.parquet recommended, .jsonl, or .csv).",
-        )
-
-        parser.add_argument(
-            "--model",
-            dest="model",
-            required=False,
-            default=None,
-            help=(
-                "Model to evaluate. Use with --base-url for trained model "
-                "endpoints (e.g., 'my-finetuned-model'), or LiteLLM provider "
-                "format for comparison baselines (e.g., 'openai/gpt-5-mini')."
-            ),
-        )
-
-        parser.add_argument(
-            "--eval-fn",
-            dest="eval_fns",
-            action="append",
-            required=False,
-            default=None,
-            metavar="MODULE:FN",
-            help=(
-                "Eval function in 'module:function' format. "
-                "Can be specified multiple times."
-            ),
-        )
-
-        parser.add_argument(
-            "--n",
-            dest="n_runs",
-            type=int,
-            default=1,
-            help="Number of runs per row for pass@n (default: 1).",
-        )
-
-        parser.add_argument(
-            "--pass-threshold",
-            dest="pass_threshold",
-            type=float,
-            default=1.0,
-            help="Score >= threshold counts as pass for pass@k (default: 1.0).",
-        )
-
-        parser.add_argument(
-            "--max-turns",
-            dest="max_turns",
-            type=int,
-            default=10,
-            help="Maximum agent turns per run (default: 10).",
-        )
-
-        parser.add_argument(
-            "--temperature",
-            dest="temperature",
-            type=float,
-            default=None,
-            help="LLM sampling temperature.",
-        )
-
-        parser.add_argument(
-            "--max-tokens",
-            dest="max_tokens",
-            type=int,
-            default=None,
-            help="Maximum tokens per completion.",
-        )
-
-        parser.add_argument(
-            "--api-key",
-            dest="api_key",
-            default=None,
-            help="API key for the LLM provider (or use env var).",
-        )
-
-        parser.add_argument(
-            "--base-url",
-            dest="base_url",
-            default=None,
-            help="Base URL for OpenAI-compatible APIs.",
-        )
-
-        parser.add_argument(
-            "--baseline-model",
-            dest="baseline_model",
-            default=None,
-            help=(
-                "Baseline model for comparison. Runs the same evaluation with "
-                "a second model and reports per-model statistics."
-            ),
-        )
-
-        parser.add_argument(
-            "--baseline-base-url",
-            dest="baseline_base_url",
-            default=None,
-            help="Base URL for the baseline model's API endpoint.",
-        )
-
-        parser.add_argument(
-            "--baseline-api-key",
-            dest="baseline_api_key",
-            default=None,
-            help="API key for the baseline model provider.",
-        )
-
-        parser.add_argument(
-            "--debug",
-            dest="debug",
-            action="store_true",
-            default=False,
-            help="Enable debug logging.",
-        )
-
-        parser.add_argument(
-            "--quiet",
-            "-q",
-            dest="quiet",
-            action="store_true",
-            default=False,
-            help="Suppress progress output.",
-        )
-
-        parser.add_argument(
-            "--limit",
-            dest="limit",
-            type=int,
-            default=None,
-            help="Maximum number of rows to evaluate.",
-        )
-
-        parser.add_argument(
-            "--offset",
-            dest="offset",
-            type=int,
-            default=0,
-            help="Number of rows to skip.",
-        )
-
-        parser.add_argument(
-            "--batch-size",
-            dest="batch_size",
-            type=int,
-            default=1,
-            help="Number of concurrent runs (default: 1).",
-        )
-
-        parser.add_argument(
-            "--fresh",
-            dest="fresh",
-            action="store_true",
-            default=False,
-            help="Force restart evaluation from scratch, discarding any cached results.",
-        )
-
-        parser.add_argument(
-            "--log-samples",
-            dest="log_samples",
-            action="store_true",
-            default=False,
-            help="Store conversation messages to a JSONL file alongside the cache.",
-        )
-
-        parser.add_argument(
-            "--output-path",
-            "-o",
-            dest="output_path",
-            default=None,
-            help="Directory path for structured output (results JSON and optional samples JSONL).",
-        )
-
-        parser.add_argument(
-            "--retry-failed",
-            dest="retry_failed",
-            action="store_true",
-            default=False,
-            help="Re-execute only failed runs from a previous evaluation. Mutually exclusive with --fresh.",
-        )
-
-    def _run_cache_dir(self, args: argparse.Namespace) -> int:
+    def _run_cache_dir(self) -> int:
         from osmosis_ai.rollout.eval.evaluation.cache import JsonFileCacheBackend
 
         backend = JsonFileCacheBackend()
         self.console.print(str(backend.cache_root))
-        return 0
-
-    def _run_cache_default(self, args: argparse.Namespace) -> int:
-        self.console.print("Usage: osmosis eval cache <command>")
-        self.console.print("")
-        self.console.print("Commands:")
-        self.console.print("  dir     Print cache root directory path")
-        self.console.print("  ls      List cached evaluations")
-        self.console.print("  rm      Remove cached evaluations")
         return 0
 
     @staticmethod
@@ -373,16 +74,22 @@ class EvalCommand:
             result = [e for e in result if e.get("status") == status]
         return result
 
-    def _run_cache_ls(self, args: argparse.Namespace) -> int:
+    def _run_cache_ls(
+        self,
+        *,
+        cache_model: str | None = None,
+        cache_dataset: str | None = None,
+        cache_status: str | None = None,
+    ) -> int:
         from osmosis_ai.rollout.eval.evaluation.cache import JsonFileCacheBackend
 
         backend = JsonFileCacheBackend()
         entries = backend.list_caches()
         entries = self._filter_caches(
             entries,
-            model=getattr(args, "cache_model", None),
-            dataset=getattr(args, "cache_dataset", None),
-            status=getattr(args, "cache_status", None),
+            model=cache_model,
+            dataset=cache_dataset,
+            status=cache_status,
         )
 
         # Sort by created_at descending (newest first)
@@ -455,17 +162,19 @@ class EvalCommand:
 
         return 0
 
-    def _run_cache_rm(self, args: argparse.Namespace) -> int:
+    def _run_cache_rm(
+        self,
+        *,
+        task_id: str | None = None,
+        rm_all: bool = False,
+        cache_model: str | None = None,
+        cache_dataset: str | None = None,
+        cache_status: str | None = None,
+        yes: bool = False,
+    ) -> int:
         from osmosis_ai.rollout.eval.evaluation.cache import JsonFileCacheBackend
 
-        task_id = getattr(args, "task_id", None)
-        rm_all = getattr(args, "rm_all", False)
-        model_filter = getattr(args, "cache_model", None)
-        dataset_filter = getattr(args, "cache_dataset", None)
-        status_filter = getattr(args, "cache_status", None)
-        skip_confirm = getattr(args, "yes", False)
-
-        has_filter = any([model_filter, dataset_filter, status_filter])
+        has_filter = any([cache_model, cache_dataset, cache_status])
 
         if not task_id and not rm_all and not has_filter:
             self.console.print_error(
@@ -484,7 +193,7 @@ class EvalCommand:
             targets = all_entries
         else:
             targets = self._filter_caches(
-                all_entries, model_filter, dataset_filter, status_filter
+                all_entries, cache_model, cache_dataset, cache_status
             )
 
         if not targets:
@@ -493,7 +202,7 @@ class EvalCommand:
 
         # Single task_id deletion: no confirmation needed
         is_batch = not task_id
-        if is_batch and not skip_confirm:
+        if is_batch and not yes:
             self.console.print(f"Will delete {len(targets)} cached evaluation(s):")
             for e in targets:
                 config = e.get("config", {})
@@ -537,25 +246,11 @@ class EvalCommand:
         self.console.print(f"Deleted {deleted} cached evaluation(s).")
         return 0
 
-    def run(self, args: argparse.Namespace) -> int:
-        # If a subcommand like "cache" was used, the handler is already set
-        # to the subcommand handler, so this method is only called for the
-        # default eval run path.
-
-        # For the default eval path, dataset/model/eval_fns are required
-        if not getattr(args, "dataset", None):
-            self.console.print_error("Error: --dataset (-d) is required.")
-            return 1
-        if not getattr(args, "model", None):
-            self.console.print_error("Error: --model is required.")
-            return 1
-        if not getattr(args, "eval_fns", None):
-            self.console.print_error("Error: --eval-fn is required.")
-            return 1
-
+    def run(self, **kwargs: Any) -> int:
+        args = SimpleNamespace(**kwargs)
         return asyncio.run(self._run_async(args))
 
-    def _validate_args(self, args: argparse.Namespace) -> str | None:
+    def _validate_args(self, args: Any) -> str | None:
         if args.module and args.mcp:
             return "--module and --mcp are mutually exclusive."
         if not args.module and not args.mcp:
@@ -578,7 +273,7 @@ class EvalCommand:
             return "--fresh and --retry-failed are mutually exclusive."
         return None
 
-    def _print_header(self, args: argparse.Namespace) -> None:
+    def _print_header(self, args: Any) -> None:
         if args.quiet:
             return
         from osmosis_ai.consts import PACKAGE_VERSION
@@ -596,7 +291,7 @@ class EvalCommand:
         self.console.print()
 
     def _load_eval_fns(
-        self, args: argparse.Namespace
+        self, args: Any
     ) -> tuple[list[EvalFnWrapper] | None, str | None]:
         from osmosis_ai.rollout.eval.evaluation.eval_fn import (
             EvalFnError,
@@ -626,16 +321,7 @@ class EvalCommand:
         samples_path: Path | None,
         task_id: str,
     ) -> Path:
-        """Write structured orchestrator output to the specified directory.
-
-        Creates {output_path}/{model_sanitized}/{dataset_sanitized}/ directory
-        structure and writes results JSON and optional samples JSONL.
-
-        The output file uses the same JSON schema as the cache file, with
-        status always set to "completed".
-
-        Returns the path to the written results JSON file.
-        """
+        """Write structured orchestrator output to the specified directory."""
         from osmosis_ai.rollout.eval.evaluation.cache import (
             atomic_write_json,
             sanitize_path_part,
@@ -671,6 +357,8 @@ class EvalCommand:
         total_expected: int,
     ) -> None:
         """Print a summary from an OrchestratorResult."""
+        from osmosis_ai.rollout.eval.common.cli import format_duration
+
         if summary is None:
             self.console.print(f"\nCompleted {total_completed}/{total_expected} runs.")
             return
@@ -738,7 +426,6 @@ class EvalCommand:
 
         status = cache_data.get("status", "in_progress")
         if status == "completed":
-            # Will be handled as "already_completed" by the orchestrator
             return
 
         completed = len(completed_runs)
@@ -748,7 +435,6 @@ class EvalCommand:
             scope = f"MCP directory {module_spec}"
         else:
             module_name = module_spec.partition(":")[0]
-            # Check if the module resolves to a package (__init__.py)
             try:
                 mod = importlib.import_module(module_name)
                 source_file = getattr(mod, "__file__", None)
@@ -776,7 +462,17 @@ class EvalCommand:
                     "Use --fresh to re-run all with full logging."
                 )
 
-    async def _run_async(self, args: argparse.Namespace) -> int:
+    async def _run_async(self, args: Any) -> int:
+        from osmosis_ai.rollout.eval.common.cli import (
+            build_completion_params,
+            create_llm_client,
+            format_duration,
+            load_agent,
+            load_dataset_rows,
+            load_mcp_agent,
+            verify_llm_client,
+        )
+
         if args.debug:
             logging.basicConfig(level=logging.DEBUG)
 
@@ -1159,6 +855,187 @@ class EvalCommand:
                 self.console.print(f"Output written to: {results_path}")
 
         return 0
+
+
+@app.callback(invoke_without_command=True)
+def eval_main(
+    ctx: typer.Context,
+    module: str | None = typer.Option(
+        None, "-m", "--module", help="Module path 'module:attribute'."
+    ),
+    mcp: str | None = typer.Option(None, "--mcp", help="Path to MCP tools directory."),
+    dataset: str | None = typer.Option(
+        None, "-d", "--dataset", help="Path to dataset file."
+    ),
+    model: str | None = typer.Option(None, "--model", help="Model to evaluate."),
+    eval_fns: list[str] | None = typer.Option(
+        None, "--eval-fn", help="Eval function 'module:function'. Can be repeated."
+    ),
+    n_runs: int = typer.Option(1, "--n", help="Number of runs per row for pass@n."),
+    pass_threshold: float = typer.Option(
+        1.0, "--pass-threshold", help="Score >= threshold counts as pass."
+    ),
+    max_turns: int = typer.Option(
+        10, "--max-turns", help="Maximum agent turns per run."
+    ),
+    temperature: float | None = typer.Option(
+        None, "--temperature", help="LLM sampling temperature."
+    ),
+    max_tokens: int | None = typer.Option(
+        None, "--max-tokens", help="Maximum tokens per completion."
+    ),
+    api_key: str | None = typer.Option(
+        None, "--api-key", help="API key for the LLM provider."
+    ),
+    base_url: str | None = typer.Option(
+        None, "--base-url", help="Base URL for OpenAI-compatible APIs."
+    ),
+    baseline_model: str | None = typer.Option(
+        None, "--baseline-model", help="Baseline model for comparison."
+    ),
+    baseline_base_url: str | None = typer.Option(
+        None, "--baseline-base-url", help="Base URL for the baseline model."
+    ),
+    baseline_api_key: str | None = typer.Option(
+        None, "--baseline-api-key", help="API key for the baseline model."
+    ),
+    debug: bool = typer.Option(False, "--debug", help="Enable debug logging."),
+    quiet: bool = typer.Option(
+        False, "-q", "--quiet", help="Suppress progress output."
+    ),
+    limit: int | None = typer.Option(
+        None, "--limit", help="Maximum number of rows to evaluate."
+    ),
+    offset: int = typer.Option(0, "--offset", help="Number of rows to skip."),
+    batch_size: int = typer.Option(
+        1, "--batch-size", help="Number of concurrent runs."
+    ),
+    fresh: bool = typer.Option(
+        False, "--fresh", help="Force restart, discarding cached results."
+    ),
+    log_samples: bool = typer.Option(
+        False, "--log-samples", help="Store conversation messages to JSONL."
+    ),
+    output_path: str | None = typer.Option(
+        None, "-o", "--output-path", help="Directory for structured output."
+    ),
+    retry_failed: bool = typer.Option(
+        False, "--retry-failed", help="Re-execute only failed runs."
+    ),
+) -> None:
+    """Evaluate agent against dataset with eval functions."""
+    if ctx.invoked_subcommand is not None:
+        return
+
+    # No meaningful args -> show help
+    if not any([module, mcp, dataset, model, eval_fns]):
+        typer.echo(ctx.get_help())
+        raise typer.Exit(1)
+
+    # Convert empty list to None for compatibility
+    eval_fns_val = eval_fns if eval_fns else None
+
+    cmd = EvalCommand()
+
+    # Validate required args for eval run
+    if not dataset:
+        cmd.console.print_error("Error: --dataset (-d) is required.")
+        raise typer.Exit(1)
+    if not model:
+        cmd.console.print_error("Error: --model is required.")
+        raise typer.Exit(1)
+    if not eval_fns_val:
+        cmd.console.print_error("Error: --eval-fn is required.")
+        raise typer.Exit(1)
+
+    rc = cmd.run(
+        module=module,
+        mcp=mcp,
+        dataset=dataset,
+        model=model,
+        eval_fns=eval_fns_val,
+        n_runs=n_runs,
+        pass_threshold=pass_threshold,
+        max_turns=max_turns,
+        temperature=temperature,
+        max_tokens=max_tokens,
+        api_key=api_key,
+        base_url=base_url,
+        baseline_model=baseline_model,
+        baseline_base_url=baseline_base_url,
+        baseline_api_key=baseline_api_key,
+        debug=debug,
+        quiet=quiet,
+        limit=limit,
+        offset=offset,
+        batch_size=batch_size,
+        fresh=fresh,
+        log_samples=log_samples,
+        output_path=output_path,
+        retry_failed=retry_failed,
+    )
+    if rc:
+        raise typer.Exit(rc)
+
+
+@cache_app.command("dir")
+def eval_cache_dir() -> None:
+    """Print cache root directory path."""
+    rc = EvalCommand()._run_cache_dir()
+    if rc:
+        raise typer.Exit(rc)
+
+
+@cache_app.command("ls")
+def eval_cache_ls(
+    cache_model: str | None = typer.Option(
+        None, "--model", help="Filter by model name."
+    ),
+    cache_dataset: str | None = typer.Option(
+        None, "--dataset", help="Filter by dataset path."
+    ),
+    cache_status: Literal["in_progress", "completed"] | None = typer.Option(
+        None, "--status", help="Filter by status (in_progress, completed)."
+    ),
+) -> None:
+    """List cached evaluations."""
+    rc = EvalCommand()._run_cache_ls(
+        cache_model=cache_model,
+        cache_dataset=cache_dataset,
+        cache_status=cache_status,
+    )
+    if rc:
+        raise typer.Exit(rc)
+
+
+@cache_app.command("rm")
+def eval_cache_rm(
+    task_id: str | None = typer.Argument(
+        None, help="Task ID of the cache entry to delete."
+    ),
+    rm_all: bool = typer.Option(False, "--all", help="Delete all cached evaluations."),
+    cache_model: str | None = typer.Option(
+        None, "--model", help="Filter by model name."
+    ),
+    cache_dataset: str | None = typer.Option(
+        None, "--dataset", help="Filter by dataset path."
+    ),
+    cache_status: Literal["in_progress", "completed"] | None = typer.Option(
+        None, "--status", help="Filter by status (in_progress, completed)."
+    ),
+    yes: bool = typer.Option(False, "-y", "--yes", help="Skip confirmation prompt."),
+) -> None:
+    """Remove cached evaluations."""
+    rc = EvalCommand()._run_cache_rm(
+        task_id=task_id,
+        rm_all=rm_all,
+        cache_model=cache_model,
+        cache_dataset=cache_dataset,
+        cache_status=cache_status,
+        yes=yes,
+    )
+    if rc:
+        raise typer.Exit(rc)
 
 
 __all__ = ["EvalCommand"]

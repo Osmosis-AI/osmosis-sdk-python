@@ -24,8 +24,6 @@ from typing import Any
 class EvalFnError(Exception):
     """Error raised when eval function loading or execution fails."""
 
-    pass
-
 
 class EvalFnWrapper:
     """Normalizes both simple and full eval function signatures into a unified async interface.

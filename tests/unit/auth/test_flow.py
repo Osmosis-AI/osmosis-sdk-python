@@ -21,6 +21,7 @@ from osmosis_ai.platform.auth.credentials import (
 from osmosis_ai.platform.auth.flow import (
     LoginError,
     LoginResult,
+    VerifyResult,
     _build_login_url,
     _generate_state,
     _get_device_name,
@@ -150,14 +151,16 @@ class TestVerifyAndGetUserInfo:
         mock_resp.__exit__ = MagicMock(return_value=False)
 
         with patch("urllib.request.urlopen", return_value=mock_resp):
-            user, org, exp, tid = _verify_and_get_user_info("test-token")
+            result = _verify_and_get_user_info("test-token")
 
-        assert isinstance(user, UserInfo)
-        assert user.email == "u@test.com"
-        assert isinstance(org, OrganizationInfo)
-        assert org.name == "TestOrg"
-        assert exp.tzinfo is not None
-        assert tid == "tok_abc"
+        assert isinstance(result, VerifyResult)
+        assert isinstance(result.user, UserInfo)
+        assert result.user.email == "u@test.com"
+        assert isinstance(result.organization, OrganizationInfo)
+        assert result.organization.name == "TestOrg"
+        assert result.expires_at.tzinfo is not None
+        assert result.token_id == "tok_abc"
+        assert result.projects is None
 
     def test_verification_with_no_expires_at_defaults_to_90_days(self) -> None:
         body = _make_verify_response(expires_at=None)
@@ -168,11 +171,11 @@ class TestVerifyAndGetUserInfo:
 
         before = datetime.now(timezone.utc)
         with patch("urllib.request.urlopen", return_value=mock_resp):
-            _, _, exp, _ = _verify_and_get_user_info("token")
+            result = _verify_and_get_user_info("token")
         after = datetime.now(timezone.utc)
 
-        assert exp >= before + timedelta(days=89)
-        assert exp <= after + timedelta(days=91)
+        assert result.expires_at >= before + timedelta(days=89)
+        assert result.expires_at <= after + timedelta(days=91)
 
     def test_invalid_token_raises_login_error(self) -> None:
         body = _make_verify_response(valid=False)
@@ -238,12 +241,45 @@ class TestVerifyAndGetUserInfo:
             with pytest.raises(LoginError, match="expected timezone-aware"):
                 _verify_and_get_user_info("token")
 
-    def test_missing_user_fields_fallback_to_defaults(self) -> None:
-        """Missing user/org fields should fall back to empty strings."""
+    @pytest.mark.parametrize(
+        "user_data, org_data, expected_match",
+        [
+            (
+                {},
+                {"id": "o1", "name": "TestOrg", "role": "owner"},
+                "incomplete user information",
+            ),
+            (
+                {"id": "u1", "email": "u@test.com", "name": "Test"},
+                {},
+                "incomplete organization information",
+            ),
+            (
+                {"id": "", "email": "u@test.com", "name": "Test"},
+                {"id": "o1", "name": "TestOrg", "role": "owner"},
+                "incomplete user information",
+            ),
+            (
+                {"id": "u1", "email": "u@test.com", "name": "Test"},
+                {"id": "o1", "name": "", "role": "owner"},
+                "incomplete organization information",
+            ),
+        ],
+        ids=[
+            "missing_user_fields",
+            "missing_org_fields",
+            "empty_user_id",
+            "empty_org_name",
+        ],
+    )
+    def test_incomplete_fields_raise_login_error(
+        self, user_data: dict, org_data: dict, expected_match: str
+    ) -> None:
+        """Incomplete user/org fields should raise LoginError."""
         expires_str = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
         body = _make_verify_response(
-            user={},
-            organization={},
+            user=user_data,
+            organization=org_data,
             expires_at=expires_str,
         )
         mock_resp = MagicMock()
@@ -252,14 +288,8 @@ class TestVerifyAndGetUserInfo:
         mock_resp.__exit__ = MagicMock(return_value=False)
 
         with patch("urllib.request.urlopen", return_value=mock_resp):
-            user, org, _, _ = _verify_and_get_user_info("token")
-
-        assert user.id == ""
-        assert user.email == ""
-        assert user.name is None
-        assert org.id == ""
-        assert org.name == ""
-        assert org.role == "member"
+            with pytest.raises(LoginError, match=expected_match):
+                _verify_and_get_user_info("token")
 
     def test_no_token_id_in_response(self) -> None:
         expires_str = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
@@ -278,9 +308,9 @@ class TestVerifyAndGetUserInfo:
         mock_resp.__exit__ = MagicMock(return_value=False)
 
         with patch("urllib.request.urlopen", return_value=mock_resp):
-            _, _, _, tid = _verify_and_get_user_info("token")
+            result = _verify_and_get_user_info("token")
 
-        assert tid is None
+        assert result.token_id is None
 
 
 # ---------------------------------------------------------------------------
@@ -315,8 +345,7 @@ class TestLogin:
         mock_server = MagicMock()
         mock_server.wait_for_callback.return_value = ("test-token-123", None)
         mock_server.revoked_count = 0
-        mock_server._verification_event = MagicMock()
-        mock_server._verification_event.is_set.return_value = True
+        mock_server.is_verification_pending.return_value = False
 
         with (
             patch(
@@ -344,8 +373,7 @@ class TestLogin:
         mock_server = MagicMock()
         mock_server.wait_for_callback.return_value = ("test-token", None)
         mock_server.revoked_count = 0
-        mock_server._verification_event = MagicMock()
-        mock_server._verification_event.is_set.return_value = True
+        mock_server.is_verification_pending.return_value = False
 
         with (
             patch(
@@ -367,8 +395,7 @@ class TestLogin:
         mock_server = MagicMock()
         mock_server.wait_for_callback.return_value = (None, "User denied")
         mock_server.revoked_count = 0
-        mock_server._verification_event = MagicMock()
-        mock_server._verification_event.is_set.return_value = False
+        mock_server.is_verification_pending.return_value = True
 
         with (
             patch(
@@ -387,8 +414,7 @@ class TestLogin:
         mock_server = MagicMock()
         mock_server.wait_for_callback.return_value = (None, None)
         mock_server.revoked_count = 0
-        mock_server._verification_event = MagicMock()
-        mock_server._verification_event.is_set.return_value = False
+        mock_server.is_verification_pending.return_value = True
 
         with (
             patch(
@@ -408,8 +434,7 @@ class TestLogin:
         mock_server = MagicMock()
         mock_server.wait_for_callback.return_value = ("bad-token", None)
         mock_server.revoked_count = 0
-        mock_server._verification_event = MagicMock()
-        mock_server._verification_event.is_set.return_value = True
+        mock_server.is_verification_pending.return_value = False
 
         verify_error = HTTPError(
             url="http://test",
@@ -443,9 +468,7 @@ class TestLogin:
         mock_server = MagicMock()
         mock_server.wait_for_callback.return_value = (None, "error")
         mock_server.revoked_count = 0
-        mock_server._verification_event = MagicMock()
-        mock_server._verification_event.is_set.return_value = False
-        mock_server._shutdown_event = MagicMock()
+        mock_server.is_verification_pending.return_value = True
 
         with (
             patch(
@@ -460,6 +483,7 @@ class TestLogin:
             with pytest.raises(LoginError):
                 login()
 
+        mock_server.signal_shutdown.assert_called_once()
         mock_server.server_close.assert_called_once()
 
     def test_browser_open_failure_does_not_raise(self) -> None:
@@ -469,8 +493,7 @@ class TestLogin:
         mock_server = MagicMock()
         mock_server.wait_for_callback.return_value = ("test-token", None)
         mock_server.revoked_count = 0
-        mock_server._verification_event = MagicMock()
-        mock_server._verification_event.is_set.return_value = True
+        mock_server.is_verification_pending.return_value = False
 
         with (
             patch(
@@ -496,8 +519,7 @@ class TestLogin:
         mock_server = MagicMock()
         mock_server.wait_for_callback.return_value = ("test-token", None)
         mock_server.revoked_count = 3
-        mock_server._verification_event = MagicMock()
-        mock_server._verification_event.is_set.return_value = True
+        mock_server.is_verification_pending.return_value = False
 
         with (
             patch(
@@ -523,8 +545,7 @@ class TestLogin:
         mock_server = MagicMock()
         mock_server.wait_for_callback.return_value = ("the-real-token", None)
         mock_server.revoked_count = 0
-        mock_server._verification_event = MagicMock()
-        mock_server._verification_event.is_set.return_value = True
+        mock_server.is_verification_pending.return_value = False
 
         with (
             patch(

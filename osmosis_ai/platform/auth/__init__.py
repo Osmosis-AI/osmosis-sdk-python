@@ -12,13 +12,16 @@ from .credentials import (
     get_all_workspaces,
     get_valid_credentials,
     load_credentials,
+    load_workspace_credentials,
     save_credentials,
     set_active_workspace,
 )
 from .flow import LoginError, LoginResult, login
+from .local_config import load_workspace_projects, save_workspace_projects
 from .platform_client import (
     AuthenticationExpiredError,
     PlatformAPIError,
+    SubscriptionRequiredError,
     platform_request,
 )
 
@@ -36,6 +39,7 @@ __all__ = [
     "LoginResult",
     "OrganizationInfo",
     "PlatformAPIError",
+    "SubscriptionRequiredError",
     "UserInfo",
     "WorkspaceCredentials",
     "delete_credentials",
@@ -44,8 +48,11 @@ __all__ = [
     "get_all_workspaces",
     "get_valid_credentials",
     "load_credentials",
+    "load_workspace_credentials",
+    "load_workspace_projects",
     "login",
     "platform_request",
     "save_credentials",
+    "save_workspace_projects",
     "set_active_workspace",
 ]

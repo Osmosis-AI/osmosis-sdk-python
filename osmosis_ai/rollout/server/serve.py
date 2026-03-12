@@ -18,7 +18,7 @@ Example:
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from osmosis_ai.cli.console import Console
 from osmosis_ai.rollout._compat import FASTAPI_AVAILABLE, UVICORN_AVAILABLE
@@ -38,11 +38,12 @@ logger: logging.Logger = logging.getLogger(__name__)
 DEFAULT_PORT = 9000
 DEFAULT_HOST = "0.0.0.0"
 
+# Valid log levels for uvicorn
+LogLevel = Literal["critical", "error", "warning", "info", "debug", "trace"]
+
 
 class ServeError(Exception):
     """Raised when server cannot be started."""
-
-    pass
 
 
 def serve_agent_loop(
@@ -51,7 +52,7 @@ def serve_agent_loop(
     host: str = DEFAULT_HOST,
     port: int = DEFAULT_PORT,
     validate: bool = True,
-    log_level: str = "info",
+    log_level: LogLevel = "info",
     reload: bool = False,
     settings: RolloutSettings | None = None,
     skip_register: bool = False,

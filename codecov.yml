@@ -8,6 +8,19 @@ coverage:
       default:
         target: 70%
 
+ignore:
+  # CLI command handlers — platform API calls, OAuth flows, interactive prompts, subprocess.
+  # Tested via manual/integration testing, not unit tests.
+  - "osmosis_ai/platform/cli/login.py"
+  - "osmosis_ai/platform/cli/logout.py"
+  - "osmosis_ai/platform/cli/whoami.py"
+  - "osmosis_ai/platform/cli/workspace.py"
+  - "osmosis_ai/platform/cli/run.py"
+  - "osmosis_ai/platform/cli/model.py"
+  - "osmosis_ai/platform/cli/dataset.py"
+  - "osmosis_ai/platform/cli/project.py"
+  - "osmosis_ai/cli/upgrade.py"
+
 comment:
   layout: "diff, flags, files"
   require_changes: true
