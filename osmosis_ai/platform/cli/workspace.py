@@ -199,6 +199,7 @@ def _switch_context(
                     continue
                 if ws_name != active_ws:
                     set_active_workspace(ws_name)
+                clear_default_project(ws_name)
                 console.print(
                     f"{console.format_styled('Switched to:', 'bold')} "
                     f"{console.format_styled(ws_name, 'cyan')}"

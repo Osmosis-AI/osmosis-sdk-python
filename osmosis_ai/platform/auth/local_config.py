@@ -56,6 +56,8 @@ def _get_defaults() -> tuple[dict[str, Any], dict[str, Any]]:
     Returns (config, defaults) where defaults is guaranteed to be a dict.
     """
     config = _load_config()
+    if not isinstance(config, dict):
+        return {}, {}
     defaults = config.get("defaults", {})
     if not isinstance(defaults, dict):
         return config, {}
