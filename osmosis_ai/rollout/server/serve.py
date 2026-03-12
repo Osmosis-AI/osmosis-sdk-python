@@ -45,8 +45,6 @@ LogLevel = Literal["critical", "error", "warning", "info", "debug", "trace"]
 class ServeError(Exception):
     """Raised when server cannot be started."""
 
-    pass
-
 
 def serve_agent_loop(
     agent_loop: RolloutAgentLoop,

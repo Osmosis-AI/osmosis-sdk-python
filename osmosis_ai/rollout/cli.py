@@ -16,7 +16,8 @@ import typer
 
 from osmosis_ai.cli.errors import CLIError
 
-# Valid log levels for uvicorn
+# Valid log levels for uvicorn (defined locally to avoid importing the heavy
+# serve module at CLI parse time - FastAPI/uvicorn would add ~1s to every command).
 LogLevel = Literal["critical", "error", "warning", "info", "debug", "trace"]
 
 

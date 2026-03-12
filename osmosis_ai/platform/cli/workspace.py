@@ -11,7 +11,6 @@ from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.cli.prompts import Choice, Separator, confirm, is_interactive, select
 from osmosis_ai.platform.auth import (
     PlatformAPIError,
-    get_active_workspace,
     get_all_workspaces,
     set_active_workspace,
 )
@@ -452,7 +451,7 @@ def workspace() -> None:
     if not workspaces:
         raise CLIError(MSG_NOT_LOGGED_IN)
 
-    active_ws = get_active_workspace()
+    active_ws = next((name for name, _, is_active in workspaces if is_active), None)
     ws_name = active_ws
     default_project = get_default_project(active_ws) if active_ws else None
 

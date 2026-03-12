@@ -54,8 +54,6 @@ _CLOUD_DETECTION_TIMEOUT_SECONDS = _METADATA_REQUEST_TIMEOUT_SECONDS * 2 + 2.0
 class PublicIPDetectionError(Exception):
     """Raised when public IP detection fails and no fallback is available."""
 
-    pass
-
 
 # ============================================================================
 # Validation Helpers

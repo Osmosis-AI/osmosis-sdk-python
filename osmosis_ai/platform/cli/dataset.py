@@ -141,8 +141,6 @@ def _check_file_basics(file: str) -> tuple[Path, str, int]:
     Returns (resolved_path, extension, file_size) or raises CLIError.
     """
     file_path = Path(file).resolve()
-    if not file_path.exists():
-        raise CLIError(f"File not found: {file_path}")
 
     ext = file_path.suffix.lstrip(".").lower()
     if ext not in VALID_EXTENSIONS:
@@ -151,7 +149,10 @@ def _check_file_basics(file: str) -> tuple[Path, str, int]:
             f"Supported: {', '.join(sorted(VALID_EXTENSIONS))}"
         )
 
-    file_size = file_path.stat().st_size
+    try:
+        file_size = file_path.stat().st_size
+    except FileNotFoundError:
+        raise CLIError(f"File not found: {file_path}") from None
     if file_size == 0:
         raise CLIError("File is empty.")
     if file_size > MAX_FILE_SIZE:
@@ -455,10 +456,7 @@ def _read_tail_lines(
             start += 1
         data = data[start:]
 
-    try:
-        text = data.decode("utf-8")
-    except UnicodeDecodeError:
-        raise
+    text = data.decode("utf-8")
 
     lines = text.split("\n")
     # If we didn't read from the start, the first "line" may be partial
