@@ -249,10 +249,21 @@ def _refresh_projects(*, workspace_name: str) -> list[dict]:
     """Refresh project list from platform and update cache."""
     credentials = _get_workspace_credentials(workspace_name)
     client = OsmosisClient()
-    result = client.list_projects(limit=100, offset=0, credentials=credentials)
-    projects = [p.to_dict() for p in result.projects]
-    save_workspace_projects(workspace_name, projects)
-    return projects
+    all_projects: list[dict] = []
+    offset = 0
+    page_size = 100
+
+    while True:
+        result = client.list_projects(
+            limit=page_size, offset=offset, credentials=credentials
+        )
+        all_projects.extend(p.to_dict() for p in result.projects)
+        if not result.has_more:
+            break
+        offset += page_size
+
+    save_workspace_projects(workspace_name, all_projects)
+    return all_projects
 
 
 # ── Resolution (non-interactive, for commands like dataset) ────────

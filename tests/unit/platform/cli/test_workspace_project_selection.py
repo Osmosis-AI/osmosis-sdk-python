@@ -135,6 +135,7 @@ def test_refresh_projects_uses_selected_workspace_credentials_and_cache(
     class FakePaginatedProjects:
         def __init__(self, projects: list[dict]) -> None:
             self.projects = [FakeProject(p) for p in projects]
+            self.has_more = False
 
     class FakeClient:
         def list_projects(self, limit: int = 50, offset: int = 0, *, credentials=None):
@@ -213,10 +214,16 @@ def test_require_subscription_refreshes_selected_workspace(monkeypatch) -> None:
         def is_expired(self) -> bool:
             return False
 
+    credential_calls: list[str] = []
+
+    def fake_load_workspace_credentials(workspace_name: str):
+        credential_calls.append(workspace_name)
+        return FakeCredentials()
+
     monkeypatch.setattr(
         project_module,
         "load_workspace_credentials",
-        lambda workspace_name: FakeCredentials(),
+        fake_load_workspace_credentials,
         raising=False,
     )
 
@@ -240,3 +247,4 @@ def test_require_subscription_refreshes_selected_workspace(monkeypatch) -> None:
         ("ws-b", project_module.CACHE_TTL_SECONDS),
     ]
     assert verify_calls == ["called"]
+    assert credential_calls == ["ws-b"]

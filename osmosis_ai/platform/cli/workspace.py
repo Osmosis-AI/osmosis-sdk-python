@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import webbrowser
 from collections.abc import Callable, Sequence
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 import typer
 
@@ -422,7 +422,9 @@ def _browse_models(ws_name: str, project: dict) -> bool:
             return True
 
         kind, model = selected
-        _show_model_detail(kind, model, ws_name, project)
+        _show_model_detail(
+            cast(Literal["base", "output"], kind), model, ws_name, project
+        )
 
 
 def _show_model_detail(

@@ -16,20 +16,26 @@ app: typer.Typer = typer.Typer(help="Manage models.")
 
 
 def _print_model_section(
-    result: Any, title: str, metadata_fn: Callable[[Any], str]
+    result: Any,
+    title: str,
+    metadata_fn: Callable[[Any], str],
+    max_display: int | None = None,
 ) -> None:
     """Print a section of models (base or output) with consistent formatting."""
     if not result.models:
         return
+    models = result.models if max_display is None else result.models[:max_display]
+    if not models:
+        return
     console.print(f"{title} ({result.total_count}):", style="bold")
-    for m in result.models:
+    for m in models:
         status_str = console.format_styled(f"[{m.status}]", "dim")
         name = console.escape(m.model_name)
         meta = metadata_fn(m)
         date = format_date(m.created_at)
         console.print(f"  {m.id[:8]}  {name}  {status_str}  {meta}  {date}")
-    if result.has_more:
-        remaining = result.total_count - len(result.models)
+    if len(models) < result.total_count:
+        remaining = result.total_count - len(models)
         console.print(f"  ... and {remaining} more")
     console.print()
 
@@ -55,15 +61,8 @@ def list_models(
         console.print("No models found.")
         return
 
-    _print_model_section(
-        base_result,
-        "Base Models",
-        lambda m: (
-            console.format_styled(f"by {m.creator_name}", "dim")
-            if m.creator_name
-            else ""
-        ),
-    )
+    remaining = limit
+
     _print_model_section(
         output_result,
         "Output Models",
@@ -72,4 +71,17 @@ def list_models(
             if m.training_run_name
             else ""
         ),
+        max_display=remaining,
+    )
+    remaining -= min(len(output_result.models), remaining)
+
+    _print_model_section(
+        base_result,
+        "Base Models",
+        lambda m: (
+            console.format_styled(f"by {m.creator_name}", "dim")
+            if m.creator_name
+            else ""
+        ),
+        max_display=remaining,
     )
