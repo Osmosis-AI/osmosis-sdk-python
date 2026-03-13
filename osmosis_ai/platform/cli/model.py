@@ -45,7 +45,9 @@ def list_models(
     project: str | None = typer.Option(
         None, "--project", help="Project name (default: current project)."
     ),
-    limit: int = typer.Option(50, "--limit", help="Maximum number of models to show."),
+    limit: int = typer.Option(
+        50, "--limit", help="Maximum number of models to show per category."
+    ),
 ) -> None:
     """List models in a project."""
     ws_name, credentials = _require_auth()
@@ -61,8 +63,6 @@ def list_models(
         console.print("No models found.")
         return
 
-    remaining = limit
-
     _print_model_section(
         output_result,
         "Output Models",
@@ -71,9 +71,8 @@ def list_models(
             if m.training_run_name
             else ""
         ),
-        max_display=remaining,
+        max_display=limit,
     )
-    remaining -= min(len(output_result.models), remaining)
 
     _print_model_section(
         base_result,
@@ -83,5 +82,5 @@ def list_models(
             if m.creator_name
             else ""
         ),
-        max_display=remaining,
+        max_display=limit,
     )
