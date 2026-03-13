@@ -123,7 +123,7 @@ class UploadInfo:
     upload_id: str | None = None
     part_size: int | None = None
     total_parts: int | None = None
-    presigned_urls: list[dict[str, Any]] | None = None  # [{partNumber, presignedUrl}]
+    presigned_urls: list[dict[str, Any]] | None = None  # [{part_number, presigned_url}]
 
     VALID_METHODS = {"simple", "multipart"}
 

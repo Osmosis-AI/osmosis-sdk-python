@@ -325,8 +325,8 @@ def upload_file_multipart(
     # Build part_number → presigned_url mapping
     url_map: dict[int, str] = {}
     for entry in info.presigned_urls:
-        pn = entry.get("partNumber")
-        url = entry.get("presignedUrl")
+        pn = entry.get("part_number")
+        url = entry.get("presigned_url")
         if pn is None or url is None:
             raise RuntimeError(f"Malformed presigned URL entry from server: {entry!r}")
         _require_https(url, f"Multipart presigned URL (part {pn})")
