@@ -10,6 +10,7 @@ from strands.models.model import Model
 
 from osmosis_ai.rollout_v2.agent_workflow import AgentWorkflow, AgentWorkflowContext
 from osmosis_ai.rollout_v2.context import GraderContext
+from osmosis_ai.rollout_v2.execution_backend import LocalBackend
 from osmosis_ai.rollout_v2.grader import Grader
 from osmosis_ai.rollout_v2.integrations.strands import OsmosisRolloutModel
 from osmosis_ai.rollout_v2.integrations.strands import (
@@ -17,18 +18,6 @@ from osmosis_ai.rollout_v2.integrations.strands import (
 )
 from osmosis_ai.rollout_v2.rollout_server_base import create_app
 from osmosis_ai.rollout_v2.types import AgentWorkflowConfig, GraderConfig
-
-# import litellm
-# litellm._turn_on_debug()
-
-# # Configure the root strands logger
-# logging.getLogger("strands").setLevel(logging.DEBUG)
-
-# # Add a handler to see the logs
-# logging.basicConfig(
-#     format="%(levelname)s | %(name)s | %(message)s",
-#     handlers=[logging.StreamHandler()]
-# )
 
 logger = logging.getLogger(__name__)
 
@@ -62,10 +51,12 @@ class MultiplyGrader(Grader):
         rollout_samples = ctx.get_samples()
 
         if "multiply" in rollout_samples:
-            reward = self.compute_reward(
-                rollout_samples["multiply"].messages[-1]["content"],
-                rollout_samples["multiply"].label,
-            )
+            content = rollout_samples["multiply"].messages[-1]["content"]
+            if isinstance(content, list):
+                content = next(
+                    (block["text"] for block in content if "text" in block), ""
+                )
+            reward = self.compute_reward(content, ctx.label)
             ctx.set_sample_reward("multiply", reward)
         else:
             for sample_id, _ in rollout_samples.items():
@@ -156,12 +147,13 @@ def multiply():
         name="MultiplyGrader",
         description="Grades multiplication rollouts",
     )
-    app = create_app(
+    backend = LocalBackend(
         agent_workflow_cls=MultiplyAgentWorkflow,
-        grader_cls=MultiplyGrader,
         agent_workflow_config=agent_workflow_config,
+        grader_cls=MultiplyGrader,
         grader_config=grader_config,
     )
+    app = create_app(backend=backend)
     uvicorn.run(app, host="0.0.0.0", port=8000)
 
 

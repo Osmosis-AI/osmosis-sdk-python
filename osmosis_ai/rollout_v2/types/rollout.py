@@ -39,6 +39,9 @@ class RolloutInitRequest(BaseModel):
     completion_callback_url: str
     controller_api_key: str | None = None
 
+    label: str | None = None
+    grader_callback_url: str | None = None
+
 
 class RolloutInitResponse(BaseModel): ...
 
