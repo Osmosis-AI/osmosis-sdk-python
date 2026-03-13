@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from typing import TYPE_CHECKING, Any
 from urllib.parse import quote, urlencode
 
@@ -9,8 +10,10 @@ from osmosis_ai.platform.auth.platform_client import platform_request
 
 from .models import (
     DatasetFile,
+    PaginatedBaseModels,
     PaginatedDatasets,
-    PaginatedModels,
+    PaginatedOutputModels,
+    PaginatedProjects,
     PaginatedTrainingRuns,
     Project,
     ProjectDetail,
@@ -38,10 +41,21 @@ class OsmosisClient:
     def refresh_workspace_info(
         self, *, credentials: WorkspaceCredentials | None = None
     ) -> dict[str, Any]:
-        """GET /api/cli/verify — refresh cached workspace info (user, org, projects)."""
+        """GET /api/cli/verify — refresh cached workspace info (user, org, subscription)."""
         return platform_request("/api/cli/verify", credentials=credentials)
 
     # ── Projects ─────────────────────────────────────────────────────
+
+    def list_projects(
+        self,
+        limit: int = 50,
+        offset: int = 0,
+        *,
+        credentials: WorkspaceCredentials | None = None,
+    ) -> PaginatedProjects:
+        qs = urlencode({"limit": limit, "offset": offset})
+        data = platform_request(f"/api/cli/projects?{qs}", credentials=credentials)
+        return PaginatedProjects.from_dict(data)
 
     def create_project(
         self,
@@ -203,14 +217,52 @@ class OsmosisClient:
 
     # ── Models ────────────────────────────────────────────────────
 
-    def list_models(
+    def list_base_models(
         self,
         project_id: str,
         limit: int = 50,
         offset: int = 0,
         *,
         credentials: WorkspaceCredentials | None = None,
-    ) -> PaginatedModels:
+    ) -> PaginatedBaseModels:
         qs = urlencode({"project_id": project_id, "limit": limit, "offset": offset})
-        data = platform_request(f"/api/cli/models?{qs}", credentials=credentials)
-        return PaginatedModels.from_dict(data)
+        data = platform_request(f"/api/cli/models/base?{qs}", credentials=credentials)
+        return PaginatedBaseModels.from_dict(data)
+
+    def list_output_models(
+        self,
+        project_id: str,
+        limit: int = 50,
+        offset: int = 0,
+        *,
+        credentials: WorkspaceCredentials | None = None,
+    ) -> PaginatedOutputModels:
+        qs = urlencode({"project_id": project_id, "limit": limit, "offset": offset})
+        data = platform_request(f"/api/cli/models/output?{qs}", credentials=credentials)
+        return PaginatedOutputModels.from_dict(data)
+
+    def fetch_all_models(
+        self,
+        project_id: str,
+        limit: int = 50,
+        offset: int = 0,
+        *,
+        credentials: WorkspaceCredentials | None = None,
+    ) -> tuple[PaginatedBaseModels, PaginatedOutputModels]:
+        """Fetch base and output models in parallel."""
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            base_fut = pool.submit(
+                self.list_base_models,
+                project_id,
+                limit,
+                offset,
+                credentials=credentials,
+            )
+            output_fut = pool.submit(
+                self.list_output_models,
+                project_id,
+                limit,
+                offset,
+                credentials=credentials,
+            )
+            return base_fut.result(), output_fut.result()

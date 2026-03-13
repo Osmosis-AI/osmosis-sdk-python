@@ -249,12 +249,9 @@ def _refresh_projects(*, workspace_name: str) -> list[dict]:
     """Refresh project list from platform and update cache."""
     credentials = _get_workspace_credentials(workspace_name)
     client = OsmosisClient()
-    info = client.refresh_workspace_info(credentials=credentials)
-    projects = info.get("projects", [])
+    result = client.list_projects(limit=100, offset=0, credentials=credentials)
+    projects = [p.to_dict() for p in result.projects]
     save_workspace_projects(workspace_name, projects)
-    has_subscription = info.get("has_subscription")
-    if has_subscription is not None:
-        save_subscription_status(workspace_name, bool(has_subscription))
     return projects
 
 
@@ -345,9 +342,12 @@ def _require_subscription(*, workspace_name: str) -> None:
     # Cached status is False, None, or expired — refresh to get the latest
     refreshed = False
     with contextlib.suppress(PlatformAPIError, OSError):
-        _refresh_projects(
-            workspace_name=workspace_name
-        )  # Also updates subscription cache
+        credentials = _get_workspace_credentials(workspace_name)
+        client = OsmosisClient()
+        info = client.refresh_workspace_info(credentials=credentials)
+        has_subscription = info.get("has_subscription")
+        if has_subscription is not None:
+            save_subscription_status(workspace_name, bool(has_subscription))
         refreshed = True
 
     # Re-check after refresh attempt

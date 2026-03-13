@@ -7,7 +7,6 @@ import socket
 import webbrowser
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any
 from urllib.parse import urlencode
 
 from osmosis_ai.consts import PACKAGE_VERSION
@@ -19,7 +18,7 @@ from .credentials import (
     WorkspaceCredentials,
     save_credentials,
 )
-from .local_config import save_subscription_status, save_workspace_projects
+from .local_config import save_subscription_status
 from .local_server import LocalAuthServer, find_available_port
 
 
@@ -35,7 +34,6 @@ class VerifyResult:
     organization: OrganizationInfo
     expires_at: datetime
     token_id: str | None
-    projects: list[dict[str, Any]] | None
 
 
 @dataclass
@@ -46,7 +44,6 @@ class LoginResult:
     organization: OrganizationInfo
     expires_at: datetime
     revoked_previous_tokens: int = 0
-    projects: list[dict[str, Any]] | None = None
 
 
 def _generate_state() -> str:
@@ -169,7 +166,6 @@ def login(
             organization=verified.organization,
             expires_at=verified.expires_at,
             revoked_previous_tokens=revoked_count,
-            projects=verified.projects,
         )
 
     finally:
@@ -256,10 +252,7 @@ def _verify_and_get_user_info(token: str) -> VerifyResult:
             else:
                 expires_at = datetime.now(timezone.utc) + timedelta(days=90)
 
-            projects = data.get("projects")
             if org_info.name:
-                if projects is not None:
-                    save_workspace_projects(org_info.name, projects)
                 has_subscription = data.get("has_subscription")
                 if has_subscription is not None:
                     save_subscription_status(org_info.name, bool(has_subscription))
@@ -269,7 +262,6 @@ def _verify_and_get_user_info(token: str) -> VerifyResult:
                 organization=org_info,
                 expires_at=expires_at,
                 token_id=token_id,
-                projects=projects,
             )
 
     except HTTPError as e:
