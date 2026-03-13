@@ -108,7 +108,9 @@ def test_refresh_projects_uses_selected_workspace_credentials_and_cache(
     monkeypatch,
 ) -> None:
     calls: dict[str, object] = {}
-    target_projects = [{"id": "proj-b", "project_name": "target-project"}]
+    target_projects = [
+        {"id": "proj-b", "project_name": "target-project", "role": "member"}
+    ]
 
     class FakeCredentials:
         def is_expired(self) -> bool:
@@ -123,10 +125,22 @@ def test_refresh_projects_uses_selected_workspace_credentials_and_cache(
         raising=False,
     )
 
+    class FakeProject:
+        def __init__(self, data: dict) -> None:
+            self._data = data
+
+        def to_dict(self) -> dict:
+            return self._data
+
+    class FakePaginatedProjects:
+        def __init__(self, projects: list[dict]) -> None:
+            self.projects = [FakeProject(p) for p in projects]
+            self.has_more = False
+
     class FakeClient:
-        def refresh_workspace_info(self, *, credentials=None) -> dict:
+        def list_projects(self, limit: int = 50, offset: int = 0, *, credentials=None):
             calls["credentials"] = credentials
-            return {"projects": target_projects, "has_subscription": True}
+            return FakePaginatedProjects(target_projects)
 
     monkeypatch.setattr(project_module, "OsmosisClient", FakeClient)
     monkeypatch.setattr(
@@ -136,19 +150,11 @@ def test_refresh_projects_uses_selected_workspace_credentials_and_cache(
             (workspace_name, projects)
         ),
     )
-    monkeypatch.setattr(
-        project_module,
-        "save_subscription_status",
-        lambda workspace_name, has_subscription: calls.setdefault(
-            "subscription_saves", []
-        ).append((workspace_name, has_subscription)),
-    )
 
     projects = project_module._refresh_projects(workspace_name="ws-b")
 
     assert calls["credentials"] is fake_credentials
     assert calls["project_saves"] == [("ws-b", target_projects)]
-    assert calls["subscription_saves"] == [("ws-b", True)]
     assert projects == target_projects
 
 
@@ -190,7 +196,7 @@ def test_resolve_project_uses_selected_workspace_default_and_cache(
 
 def test_require_subscription_refreshes_selected_workspace(monkeypatch) -> None:
     load_calls: list[tuple[str, float | None]] = []
-    refresh_calls: list[str] = []
+    verify_calls: list[str] = []
 
     call_count = 0
 
@@ -204,14 +210,35 @@ def test_require_subscription_refreshes_selected_workspace(monkeypatch) -> None:
         # First call: cache miss/expired; second call: refresh wrote fresh data
         return None if call_count == 1 else True
 
-    def fake_refresh_projects(*, workspace_name: str) -> list[dict]:
-        refresh_calls.append(workspace_name)
-        return []
+    class FakeCredentials:
+        def is_expired(self) -> bool:
+            return False
 
+    credential_calls: list[str] = []
+
+    def fake_load_workspace_credentials(workspace_name: str):
+        credential_calls.append(workspace_name)
+        return FakeCredentials()
+
+    monkeypatch.setattr(
+        project_module,
+        "load_workspace_credentials",
+        fake_load_workspace_credentials,
+        raising=False,
+    )
+
+    class FakeClient:
+        def refresh_workspace_info(self, *, credentials=None) -> dict:
+            verify_calls.append("called")
+            return {"has_subscription": True}
+
+    monkeypatch.setattr(project_module, "OsmosisClient", FakeClient)
     monkeypatch.setattr(
         project_module, "load_subscription_status", fake_load_subscription_status
     )
-    monkeypatch.setattr(project_module, "_refresh_projects", fake_refresh_projects)
+    monkeypatch.setattr(
+        project_module, "save_subscription_status", lambda ws, status: None
+    )
 
     project_module._require_subscription(workspace_name="ws-b")
 
@@ -219,4 +246,5 @@ def test_require_subscription_refreshes_selected_workspace(monkeypatch) -> None:
         ("ws-b", project_module.CACHE_TTL_SECONDS),
         ("ws-b", project_module.CACHE_TTL_SECONDS),
     ]
-    assert refresh_calls == ["ws-b"]
+    assert verify_calls == ["called"]
+    assert credential_calls == ["ws-b"]

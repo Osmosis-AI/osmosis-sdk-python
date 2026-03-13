@@ -38,6 +38,23 @@ class Project:
 
 
 @dataclass
+class PaginatedProjects:
+    """Paginated list of projects."""
+
+    projects: list[Project]
+    total_count: int
+    has_more: bool
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> PaginatedProjects:
+        return cls(
+            projects=[Project.from_dict(p) for p in data.get("projects", [])],
+            total_count=data.get("total_count", 0),
+            has_more=data.get("has_more", False),
+        )
+
+
+@dataclass
 class DatasetSummary:
     """Summary of a dataset file (used in project detail)."""
 
@@ -106,7 +123,7 @@ class UploadInfo:
     upload_id: str | None = None
     part_size: int | None = None
     total_parts: int | None = None
-    presigned_urls: list[dict[str, Any]] | None = None  # [{partNumber, presignedUrl}]
+    presigned_urls: list[dict[str, Any]] | None = None  # [{part_number, presigned_url}]
 
     VALID_METHODS = {"simple", "multipart"}
 
@@ -310,42 +327,90 @@ class PaginatedTrainingRuns:
 
 
 @dataclass
-class ModelInfo:
-    """A model record."""
+class BaseModelInfo:
+    """A base (foundation) model record."""
 
     id: str
     model_name: str
     base_model: str | None = None
     status: str = ""
     description: str | None = None
+    creator_name: str | None = None
     created_at: str = ""
     updated_at: str = ""
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> ModelInfo:
+    def from_dict(cls, data: dict[str, Any]) -> BaseModelInfo:
         return cls(
             id=data["id"],
             model_name=data.get("model_name", ""),
             base_model=data.get("base_model"),
             status=data.get("status", ""),
             description=data.get("description"),
+            creator_name=data.get("creator_name"),
             created_at=data.get("created_at", ""),
             updated_at=data.get("updated_at", ""),
         )
 
 
 @dataclass
-class PaginatedModels:
-    """Paginated list of models."""
+class OutputModelInfo:
+    """An output model created by a training run."""
 
-    models: list[ModelInfo]
+    id: str
+    model_name: str
+    base_model: str | None = None
+    status: str = ""
+    description: str | None = None
+    training_run_id: str | None = None
+    training_run_name: str | None = None
+    created_at: str = ""
+    updated_at: str = ""
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> OutputModelInfo:
+        return cls(
+            id=data["id"],
+            model_name=data.get("model_name", ""),
+            base_model=data.get("base_model"),
+            status=data.get("status", ""),
+            description=data.get("description"),
+            training_run_id=data.get("training_run_id"),
+            training_run_name=data.get("training_run_name"),
+            created_at=data.get("created_at", ""),
+            updated_at=data.get("updated_at", ""),
+        )
+
+
+@dataclass
+class PaginatedBaseModels:
+    """Paginated list of base models."""
+
+    models: list[BaseModelInfo]
     total_count: int
     has_more: bool
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> PaginatedModels:
+    def from_dict(cls, data: dict[str, Any]) -> PaginatedBaseModels:
         return cls(
-            models=[ModelInfo.from_dict(m) for m in data.get("models", [])],
+            models=[BaseModelInfo.from_dict(m) for m in data.get("models", [])],
+            total_count=data.get("total_count", 0),
+            has_more=data.get("has_more", False),
+        )
+
+
+@dataclass
+class PaginatedOutputModels:
+    """Paginated list of output models."""
+
+    models: list[OutputModelInfo]
+    total_count: int
+    has_more: bool
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> PaginatedOutputModels:
+        return cls(
+            models=[OutputModelInfo.from_dict(m) for m in data.get("models", [])],
             total_count=data.get("total_count", 0),
             has_more=data.get("has_more", False),
         )

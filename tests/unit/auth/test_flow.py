@@ -160,7 +160,6 @@ class TestVerifyAndGetUserInfo:
         assert result.organization.name == "TestOrg"
         assert result.expires_at.tzinfo is not None
         assert result.token_id == "tok_abc"
-        assert result.projects is None
 
     def test_verification_with_no_expires_at_defaults_to_90_days(self) -> None:
         body = _make_verify_response(expires_at=None)

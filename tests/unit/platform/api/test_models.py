@@ -46,9 +46,9 @@ class TestUploadInfo:
     def test_from_dict_multipart(self) -> None:
         """Verify multipart upload with upload_id, part_size, total_parts, presigned_urls."""
         urls = [
-            {"partNumber": 1, "presignedUrl": "https://s3.example.com/part1"},
-            {"partNumber": 2, "presignedUrl": "https://s3.example.com/part2"},
-            {"partNumber": 3, "presignedUrl": "https://s3.example.com/part3"},
+            {"part_number": 1, "presigned_url": "https://s3.example.com/part1"},
+            {"part_number": 2, "presigned_url": "https://s3.example.com/part2"},
+            {"part_number": 3, "presigned_url": "https://s3.example.com/part3"},
         ]
         data = {
             "method": "multipart",

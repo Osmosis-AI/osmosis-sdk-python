@@ -304,7 +304,7 @@ class TestUploadFileMultipart:
         info = _make_upload_info(
             method="multipart",
             presigned_urls=[
-                {"partNumber": 1, "presignedUrl": "https://s3/part1"},
+                {"part_number": 1, "presigned_url": "https://s3/part1"},
             ],
             total_parts=1,
             part_size=None,
@@ -321,10 +321,10 @@ class TestUploadFileMultipart:
     def test_malformed_url_entry_raises(
         self, mock_put: MagicMock, tmp_path: Path
     ) -> None:
-        """RuntimeError when a presigned URL entry is missing presignedUrl."""
+        """RuntimeError when a presigned URL entry is missing presigned_url."""
         info = _make_upload_info(
             method="multipart",
-            presigned_urls=[{"partNumber": 1}],  # missing presignedUrl
+            presigned_urls=[{"part_number": 1}],  # missing presigned_url
             total_parts=1,
             part_size=1024,
         )
@@ -342,8 +342,8 @@ class TestUploadFileMultipart:
         info = _make_upload_info(
             method="multipart",
             presigned_urls=[
-                {"partNumber": 2, "presignedUrl": "https://s3/part2"},
-                {"partNumber": 1, "presignedUrl": "https://s3/part1"},
+                {"part_number": 2, "presigned_url": "https://s3/part2"},
+                {"part_number": 1, "presigned_url": "https://s3/part1"},
             ],
             total_parts=2,
             part_size=10,
@@ -368,7 +368,7 @@ class TestUploadFileMultipart:
         info = _make_upload_info(
             method="multipart",
             presigned_urls=[
-                {"partNumber": 1, "presignedUrl": "https://s3/part1"},
+                {"part_number": 1, "presigned_url": "https://s3/part1"},
             ],
             total_parts=1,
             part_size=1024,

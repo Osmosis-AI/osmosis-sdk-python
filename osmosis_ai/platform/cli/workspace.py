@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import webbrowser
 from collections.abc import Callable, Sequence
-from typing import Any
+from typing import Any, Literal, cast
 
 import typer
 
@@ -373,39 +373,82 @@ def _show_run_detail(r: Any, ws_name: str, project: dict) -> None:
 
 
 def _browse_models(ws_name: str, project: dict) -> bool:
-    """List models and allow selecting one for details."""
+    """List base and output models and allow selecting one for details."""
     from osmosis_ai.platform.api.client import OsmosisClient
 
+    from .project import _get_workspace_credentials
+
     client = OsmosisClient()
+    project_id: str = project["project_id"]
 
-    def _format(m: Any) -> str:
-        base = f"  ({m.base_model})" if m.base_model else ""
-        return f"{m.model_name}  [{m.status}]{base}"
+    try:
+        credentials = _get_workspace_credentials(ws_name)
+        base_result, output_result = client.fetch_all_models(
+            project_id, credentials=credentials
+        )
+    except PlatformAPIError as e:
+        if e.status_code == 404:
+            return _handle_stale_project(ws_name, project)
+        console.print_error(f"Failed to load models: {e}")
+        return True
 
-    return _browse_entities(
-        ws_name,
-        project,
-        fetch=client.list_models,
-        extract_items=lambda r: r.models,
-        format_choice=_format,
-        show_detail=_show_model_detail,
-        title="Models",
-    )
+    if not base_result.models and not output_result.models:
+        console.print("No models found.", style="dim")
+        console.print()
+        return True
+
+    choices: list[str | Choice | Separator] = []
+    if base_result.models:
+        choices.append(Separator("── Base Models ──"))
+        for m in base_result.models:
+            creator = f"  by {m.creator_name}" if m.creator_name else ""
+            label = f"{m.model_name}  [{m.status}]{creator}"
+            choices.append(Choice(label, value=("base", m)))
+    if output_result.models:
+        choices.append(Separator("── Output Models ──"))
+        for m in output_result.models:
+            run = f"  from {m.training_run_name}" if m.training_run_name else ""
+            label = f"{m.model_name}  [{m.status}]{run}"
+            choices.append(Choice(label, value=("output", m)))
+    choices.append(Separator())
+    choices.append(Choice("Back", value=BACK))
+
+    total = base_result.total_count + output_result.total_count
+    while True:
+        console.separator()
+        selected = select(f"Models ({total}):", choices=choices)
+
+        if selected is None or selected == BACK:
+            return True
+
+        kind, model = selected
+        _show_model_detail(
+            cast(Literal["base", "output"], kind), model, ws_name, project
+        )
 
 
-def _show_model_detail(m: Any) -> None:
+def _show_model_detail(
+    kind: Literal["base", "output"], m: Any, ws_name: str, project: dict
+) -> None:
     """Display detailed info for a single model."""
-    rows = [
+    rows: list[tuple[str, str]] = [
         ("Model", m.model_name),
         ("ID", m.id),
+        ("Type", "Base Model" if kind == "base" else "Output Model"),
         ("Status", m.status),
     ]
     if m.base_model:
         rows.append(("Base Model", m.base_model))
     if m.description:
         rows.append(("Description", m.description))
+    if kind == "base" and m.creator_name:
+        rows.append(("Creator", m.creator_name))
+    if kind == "output" and m.training_run_name:
+        rows.append(("Training Run", m.training_run_name))
     if m.created_at:
         rows.append(("Created", format_date(m.created_at)))
+    url = platform_entity_url(ws_name, project["project_name"], "models", m.id)
+    rows.append(("URL", url))
 
     console.table(rows, title="Model Detail")
     console.print()
