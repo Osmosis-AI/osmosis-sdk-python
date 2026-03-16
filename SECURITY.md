@@ -4,10 +4,10 @@
 
 | Version | Supported          |
 |---------|--------------------|
-| Latest   | Yes |
-| < Latest | No  |
+| 0.2.x   | :white_check_mark: |
+| < 0.2.0 | :x:                |
 
-Only the latest published version of `osmosis-ai` receives security updates.
+Only the latest published version of `osmosis-ai` receives security updates. Users should upgrade to the newest patch release within the supported series.
 
 ## Reporting a Vulnerability
 
