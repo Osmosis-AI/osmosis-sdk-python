@@ -39,7 +39,7 @@ from .utils import (
     platform_entity_url,
 )
 
-app: typer.Typer = typer.Typer(help="Switch workspace and default project.")
+app: typer.Typer = typer.Typer(help="Manage workspace and project context.")
 
 
 def _validate_default_project(
@@ -108,15 +108,15 @@ def _show_context(ws_name: str | None, default_project: dict | None) -> None:
 def _main_menu(has_project: bool) -> str | None:
     """Show main menu and return the selected action."""
     choices: list[str | Choice | Separator] = [
-        Choice("Switch workspace / project", value="switch"),
+        Choice("Change workspace or project", value="switch"),
     ]
     if has_project:
         choices.extend(
             [
-                Choice("Browse training runs", value="runs"),
-                Choice("Browse models", value="models"),
-                Choice("Browse datasets", value="datasets"),
-                Choice("View project info", value="info"),
+                Choice("Training runs", value="runs"),
+                Choice("Models", value="models"),
+                Choice("Datasets", value="datasets"),
+                Choice("Project details", value="info"),
                 Choice("Open in browser", value="browser"),
             ]
         )
@@ -124,7 +124,7 @@ def _main_menu(has_project: bool) -> str | None:
     choices.append(Choice("Exit", value="exit"))
 
     console.separator()
-    return select("Select an action", choices=choices)
+    return select("What would you like to do?", choices=choices)
 
 
 def _select_workspace(
@@ -142,7 +142,7 @@ def _select_workspace(
     choices.append(Choice("Back", value=BACK))
 
     console.separator()
-    return select("Select workspace:", choices=choices)
+    return select("Choose a workspace", choices=choices)
 
 
 def _select_project(ws_name: str) -> dict | str | None:
@@ -200,7 +200,7 @@ def _switch_context(
             if result is None:
                 # Allow switching workspace without selecting a project
                 # (e.g. empty workspaces with no projects yet)
-                ok = confirm(f"Switch to '{ws_name}' without selecting a project?")
+                ok = confirm(f"Switch to {ws_name}? (no project will be selected)")
                 if not ok:
                     step = "workspace"
                     continue
@@ -221,7 +221,7 @@ def _switch_context(
             if ws_name is None or not isinstance(result, dict):
                 step = "workspace"
                 continue
-            ok = confirm(f"Set context to {ws_name} / {result['project_name']}?")
+            ok = confirm(f"Switch to {ws_name} / {result['project_name']}?")
             if ok is None or not ok:
                 step = "project"
                 continue
@@ -513,7 +513,7 @@ def _open_in_browser(ws_name: str, project: dict) -> None:
 
 @app.callback(invoke_without_command=True)
 def workspace() -> None:
-    """Switch workspace and default project."""
+    """Manage workspace and project context."""
     workspaces = get_all_workspaces()
 
     if not workspaces:

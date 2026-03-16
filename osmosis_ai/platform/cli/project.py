@@ -197,7 +197,7 @@ def _prompt_select(
 
     console.separator()
     result = select_list(
-        "Select a project:",
+        "Choose a project",
         items=items,
         actions=actions,
         default=default_value,

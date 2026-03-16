@@ -224,7 +224,7 @@ def _create_select_question(
             style=OSMOSIS_STYLE,
             qmark="?",
             pointer="\u276f",
-            instruction=instruction or "(Use arrow keys to select, ESC to go back)",
+            instruction=instruction or "(↑↓ select, ESC back)",
             use_shortcuts=False,
         )
     )
