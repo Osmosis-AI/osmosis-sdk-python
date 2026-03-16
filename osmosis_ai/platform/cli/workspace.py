@@ -8,7 +8,14 @@ import typer
 
 from osmosis_ai.cli.console import console
 from osmosis_ai.cli.errors import CLIError
-from osmosis_ai.cli.prompts import Choice, Separator, confirm, is_interactive, select
+from osmosis_ai.cli.prompts import (
+    Choice,
+    Separator,
+    confirm,
+    is_interactive,
+    select,
+    select_list,
+)
 from osmosis_ai.platform.auth import (
     PlatformAPIError,
     get_all_workspaces,
@@ -21,7 +28,7 @@ from osmosis_ai.platform.auth.local_config import (
     set_default_project,
 )
 
-from .constants import BACK, MSG_NOT_LOGGED_IN
+from .constants import BACK, DEFAULT_VISIBLE_CHOICES, MSG_NOT_LOGGED_IN
 from .utils import (
     build_dataset_detail_rows,
     build_run_detail_rows,
@@ -287,17 +294,17 @@ def _browse_entities(
         console.print()
         return True
 
-    choices: list[str | Choice | Separator] = [
+    data_choices: list[str | Choice | Separator] = [
         Choice(format_choice(item), value=item) for item in items
     ]
-    choices.append(Separator())
-    choices.append(Choice("Back", value=BACK))
 
     while True:
         console.separator()
-        selected = select(
+        selected = select_list(
             f"{title} ({result.total_count}):",
-            choices=choices,
+            items=data_choices,
+            actions=[Choice("Back", value=BACK)],
+            max_visible=DEFAULT_VISIBLE_CHOICES,
         )
 
         if selected is None or selected == BACK:
@@ -397,26 +404,29 @@ def _browse_models(ws_name: str, project: dict) -> bool:
         console.print()
         return True
 
-    choices: list[str | Choice | Separator] = []
+    model_items: list[str | Choice | Separator] = []
     if base_result.models:
-        choices.append(Separator("── Base Models ──"))
+        model_items.append(Separator("── Base Models ──"))
         for m in base_result.models:
             creator = f"  by {m.creator_name}" if m.creator_name else ""
             label = f"{m.model_name}  [{m.status}]{creator}"
-            choices.append(Choice(label, value=("base", m)))
+            model_items.append(Choice(label, value=("base", m)))
     if output_result.models:
-        choices.append(Separator("── Output Models ──"))
+        model_items.append(Separator("── Output Models ──"))
         for m in output_result.models:
             run = f"  from {m.training_run_name}" if m.training_run_name else ""
             label = f"{m.model_name}  [{m.status}]{run}"
-            choices.append(Choice(label, value=("output", m)))
-    choices.append(Separator())
-    choices.append(Choice("Back", value=BACK))
+            model_items.append(Choice(label, value=("output", m)))
 
     total = base_result.total_count + output_result.total_count
     while True:
         console.separator()
-        selected = select(f"Models ({total}):", choices=choices)
+        selected = select_list(
+            f"Models ({total}):",
+            items=model_items,
+            actions=[Choice("Back", value=BACK)],
+            max_visible=DEFAULT_VISIBLE_CHOICES,
+        )
 
         if selected is None or selected == BACK:
             return True
