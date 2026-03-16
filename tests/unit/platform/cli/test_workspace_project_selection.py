@@ -136,6 +136,7 @@ def test_refresh_projects_uses_selected_workspace_credentials_and_cache(
         def __init__(self, projects: list[dict]) -> None:
             self.projects = [FakeProject(p) for p in projects]
             self.has_more = False
+            self.next_offset = None
 
     class FakeClient:
         def list_projects(self, limit: int = 50, offset: int = 0, *, credentials=None):

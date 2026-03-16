@@ -44,6 +44,7 @@ class PaginatedProjects:
     projects: list[Project]
     total_count: int
     has_more: bool
+    next_offset: int | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> PaginatedProjects:
@@ -51,6 +52,7 @@ class PaginatedProjects:
             projects=[Project.from_dict(p) for p in data.get("projects", [])],
             total_count=data.get("total_count", 0),
             has_more=data.get("has_more", False),
+            next_offset=data.get("next_offset"),
         )
 
 
@@ -200,6 +202,7 @@ class PaginatedDatasets:
     datasets: list[DatasetFile]
     total_count: int
     has_more: bool
+    next_offset: int | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> PaginatedDatasets:
@@ -207,6 +210,7 @@ class PaginatedDatasets:
             datasets=[DatasetFile.from_dict(d) for d in data.get("datasets", [])],
             total_count=data.get("total_count", 0),
             has_more=data.get("has_more", False),
+            next_offset=data.get("next_offset"),
         )
 
 
@@ -314,6 +318,7 @@ class PaginatedTrainingRuns:
     training_runs: list[TrainingRun]
     total_count: int
     has_more: bool
+    next_offset: int | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> PaginatedTrainingRuns:
@@ -323,6 +328,7 @@ class PaginatedTrainingRuns:
             ],
             total_count=data.get("total_count", 0),
             has_more=data.get("has_more", False),
+            next_offset=data.get("next_offset"),
         )
 
 
@@ -389,6 +395,7 @@ class PaginatedBaseModels:
     models: list[BaseModelInfo]
     total_count: int
     has_more: bool
+    next_offset: int | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> PaginatedBaseModels:
@@ -396,6 +403,7 @@ class PaginatedBaseModels:
             models=[BaseModelInfo.from_dict(m) for m in data.get("models", [])],
             total_count=data.get("total_count", 0),
             has_more=data.get("has_more", False),
+            next_offset=data.get("next_offset"),
         )
 
 
@@ -406,6 +414,7 @@ class PaginatedOutputModels:
     models: list[OutputModelInfo]
     total_count: int
     has_more: bool
+    next_offset: int | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> PaginatedOutputModels:
@@ -413,4 +422,5 @@ class PaginatedOutputModels:
             models=[OutputModelInfo.from_dict(m) for m in data.get("models", [])],
             total_count=data.get("total_count", 0),
             has_more=data.get("has_more", False),
+            next_offset=data.get("next_offset"),
         )
