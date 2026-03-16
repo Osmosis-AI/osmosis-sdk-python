@@ -258,9 +258,9 @@ def _refresh_projects(*, workspace_name: str) -> list[dict]:
             limit=page_size, offset=offset, credentials=credentials
         )
         all_projects.extend(p.to_dict() for p in result.projects)
-        if not result.has_more:
+        if result.next_offset is None:
             break
-        offset += page_size
+        offset = result.next_offset
 
     save_workspace_projects(workspace_name, all_projects)
     return all_projects
