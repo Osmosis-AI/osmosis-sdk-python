@@ -13,6 +13,8 @@ from osmosis_ai.platform.api.models import UploadInfo
 from osmosis_ai.platform.api.upload import (
     SliceFileObj,
     _http_put_with_backoff,
+    _is_loopback_url,
+    _require_https,
     upload_file_multipart,
     upload_file_simple,
 )
@@ -48,6 +50,47 @@ def _make_response(
     resp.text = text
     resp.headers = headers or {}
     return resp
+
+
+# =============================================================================
+# TestRequireHttps
+# =============================================================================
+
+
+class TestRequireHttps:
+    """Tests for _require_https and _is_loopback_url."""
+
+    def test_https_url_passes(self) -> None:
+        _require_https("https://s3.amazonaws.com/bucket/key")
+
+    def test_http_non_loopback_raises(self) -> None:
+        with pytest.raises(RuntimeError, match="must use HTTPS"):
+            _require_https("http://s3.amazonaws.com/bucket/key")
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "http://localhost:4566/bucket/key",
+            "http://127.0.0.1:4566/bucket/key",
+            "http://[::1]:4566/bucket/key",
+        ],
+    )
+    def test_http_loopback_allowed(self, url: str) -> None:
+        """HTTP is allowed for loopback addresses (local development)."""
+        _require_https(url)  # should not raise
+
+    @pytest.mark.parametrize(
+        "url,expected",
+        [
+            ("http://localhost:4566/x", True),
+            ("http://127.0.0.1:4566/x", True),
+            ("http://[::1]:4566/x", True),
+            ("http://s3.amazonaws.com/x", False),
+            ("http://192.168.1.1:4566/x", False),
+        ],
+    )
+    def test_is_loopback_url(self, url: str, expected: bool) -> None:
+        assert _is_loopback_url(url) is expected
 
 
 # =============================================================================

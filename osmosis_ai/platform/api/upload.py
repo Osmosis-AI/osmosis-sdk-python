@@ -19,9 +19,28 @@ import httpx
 # ── URL validation ────────────────────────────────────────────────────
 
 
+def _is_loopback_url(url: str) -> bool:
+    """Return True if *url* points to a loopback address (safe without HTTPS)."""
+    from ipaddress import ip_address
+    from urllib.parse import urlparse
+
+    hostname = urlparse(url).hostname or ""
+    if hostname == "localhost":
+        return True
+    try:
+        return ip_address(hostname).is_loopback
+    except ValueError:
+        return False
+
+
 def _require_https(url: str, context: str = "Upload URL") -> None:
-    """Reject non-HTTPS presigned URLs to prevent plaintext data transmission."""
-    if not url.lower().startswith("https://"):
+    """Reject non-HTTPS presigned URLs to prevent plaintext data transmission.
+
+    Loopback addresses (localhost, 127.0.0.1, ::1) are exempt because data
+    never leaves the machine — this allows local development with tools like
+    LocalStack.
+    """
+    if not url.lower().startswith("https://") and not _is_loopback_url(url):
         raise RuntimeError(
             f"{context} must use HTTPS (got {url[:60]!r}). "
             "Refusing to upload over an insecure connection."
