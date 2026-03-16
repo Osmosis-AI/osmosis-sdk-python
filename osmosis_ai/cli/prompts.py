@@ -166,7 +166,8 @@ def _add_tab_jump(
             break
 
     if first_action is not None:
-        state = {"saved_data_pos": 0}
+        first_data = next((i for i in range(split_at) if not ic.choices[i].disabled), 0)
+        state = {"saved_data_pos": first_data}
 
         extra = KeyBindings()
 

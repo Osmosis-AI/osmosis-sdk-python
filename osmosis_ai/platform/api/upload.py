@@ -21,16 +21,11 @@ import httpx
 
 def _is_loopback_url(url: str) -> bool:
     """Return True if *url* points to a loopback address (safe without HTTPS)."""
-    from ipaddress import ip_address
     from urllib.parse import urlparse
 
-    hostname = urlparse(url).hostname or ""
-    if hostname == "localhost":
-        return True
-    try:
-        return ip_address(hostname).is_loopback
-    except ValueError:
-        return False
+    from osmosis_ai.platform.auth.config import _is_loopback
+
+    return _is_loopback(urlparse(url).hostname or "")
 
 
 def _require_https(url: str, context: str = "Upload URL") -> None:
