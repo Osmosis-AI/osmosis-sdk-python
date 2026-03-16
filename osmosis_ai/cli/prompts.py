@@ -14,6 +14,7 @@ Usage:
 from __future__ import annotations
 
 import sys
+from collections.abc import Sequence
 from typing import Any
 
 import questionary
@@ -82,17 +83,21 @@ def _add_escape_binding(question: questionary.Question) -> questionary.Question:
     return _add_extra_keys(question, extra)
 
 
+def _get_choices_container(question: questionary.Question):
+    """Return the ConditionalContainer holding the choices window.
+
+    Questionary builds its select layout as:
+    ``HSplit → [prompt_row, ConditionalContainer(Window(InquirerControl)), ...]``
+    """
+    return question.application.layout.container.children[1]  # type: ignore[union-attr]
+
+
 def _apply_max_height(
     question: questionary.Question,
     max_height: int,
 ) -> questionary.Question:
-    """Cap the visible choice list to *max_height* rows with scrolling.
-
-    Accesses the prompt_toolkit layout created by questionary:
-    ``HSplit → [prompt, ConditionalContainer(Window(ic)), ...]``
-    """
-    choices_window = question.application.layout.container.children[1].content
-    choices_window.height = Dimension(max=max_height)
+    """Cap the visible choice list to *max_height* rows with scrolling."""
+    _get_choices_container(question).content.height = Dimension(max=max_height)
     return question
 
 
@@ -114,7 +119,7 @@ class _SlicedView(UIControl):
         # when the cursor leaves this slice (UIContent coerces None → (0,0)).
         self._last_cursor: Point | None = None
 
-    def create_content(self, width: int, height: int | None) -> UIContent:
+    def create_content(self, width: int, height: int) -> UIContent:
         full = self._source.create_content(width, height)
         count = min(self._end, full.line_count) - self._start
         if count <= 0:
@@ -156,7 +161,7 @@ def _add_tab_jump(
     Must be called **before** ``_apply_split_scroll`` because it navigates
     the original questionary layout to find the InquirerControl.
     """
-    conditional = question.application.layout.container.children[1]
+    conditional = _get_choices_container(question)
     ic = conditional.content.content  # Window → InquirerControl
 
     first_action = None
@@ -196,7 +201,7 @@ def _apply_split_scroll(
     with two Windows: a height-limited data view that scrolls, and an
     unconstrained action view that is always visible below it.
     """
-    conditional = question.application.layout.container.children[1]
+    conditional = _get_choices_container(question)
     ic = conditional.content.content  # Window → InquirerControl
 
     conditional.content = _HSplit(
@@ -261,7 +266,7 @@ def select_list(
     message: str,
     items: list[str | Choice | Separator],
     *,
-    actions: list[str | Choice | Separator] | None = None,
+    actions: Sequence[str | Choice | Separator] | None = None,
     default: Any = None,
     instruction: str | None = None,
     max_visible: int | None = None,
