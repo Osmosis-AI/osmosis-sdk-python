@@ -20,6 +20,9 @@ ignore:
   - "osmosis_ai/platform/cli/dataset.py"
   - "osmosis_ai/platform/cli/project.py"
   - "osmosis_ai/cli/upgrade.py"
+  # Interactive prompt helpers (questionary/prompt_toolkit UI) and static constants.
+  - "osmosis_ai/cli/prompts.py"
+  - "osmosis_ai/platform/cli/constants.py"
 
 comment:
   layout: "diff, flags, files"

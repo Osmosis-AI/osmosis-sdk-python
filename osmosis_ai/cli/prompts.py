@@ -323,43 +323,6 @@ def select_list(
     return question.ask()
 
 
-def select_paged(
-    message: str,
-    choices: list[str | Choice | Separator],
-    *,
-    default: str | None = None,
-    instruction: str | None = None,
-    prev_result: Any = None,
-    next_result: Any = None,
-) -> Any | None:
-    """Interactive select with optional ←/→ page navigation.
-
-    When *prev_result* or *next_result* is not None, the corresponding
-    arrow key is bound so that pressing it immediately returns that value.
-
-    Returns the selected value, prev_result, next_result, or None on cancel.
-    """
-    question = _create_select_question(
-        message,
-        choices,
-        default=default,
-        instruction=instruction or "(↑↓ select, ESC back)",
-    )
-
-    extra = KeyBindings()
-    if prev_result is not None:
-        _prev = prev_result  # bind for closure
-        extra.add(Keys.Left, eager=True)(lambda event: event.app.exit(result=_prev))
-    if next_result is not None:
-        _next = next_result  # bind for closure
-        extra.add(Keys.Right, eager=True)(lambda event: event.app.exit(result=_next))
-
-    if extra.bindings:
-        _add_extra_keys(question, extra)
-
-    return question.ask()
-
-
 def confirm(
     message: str,
     *,
@@ -405,38 +368,13 @@ def text(
     ).ask()
 
 
-def autocomplete(
-    message: str,
-    choices: list[str],
-    *,
-    default: str = "",
-    validate: Any = None,
-) -> str | None:
-    """Interactive text input with autocomplete suggestions.
-
-    Returns the entered text, or None if the user cancels (Ctrl+C / ESC).
-    """
-    return _add_escape_binding(
-        questionary.autocomplete(
-            message,
-            choices=choices,
-            default=default,
-            validate=validate,
-            style=OSMOSIS_STYLE,
-            qmark="?",
-        )
-    ).ask()
-
-
 __all__ = [
     "OSMOSIS_STYLE",
     "Choice",
     "Separator",
-    "autocomplete",
     "confirm",
     "is_interactive",
     "select",
     "select_list",
-    "select_paged",
     "text",
 ]
