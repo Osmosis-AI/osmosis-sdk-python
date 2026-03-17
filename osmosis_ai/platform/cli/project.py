@@ -11,10 +11,9 @@ from osmosis_ai.cli.console import console
 from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.cli.prompts import (
     Choice,
-    Separator,
     confirm,
     is_interactive,
-    select,
+    select_list,
     text,
 )
 from osmosis_ai.platform.api.client import OsmosisClient
@@ -36,6 +35,7 @@ from osmosis_ai.platform.cli.constants import (
     BACK,
     CACHE_TTL_SECONDS,
     CREATE,
+    DEFAULT_VISIBLE_CHOICES,
     MSG_NOT_LOGGED_IN,
     PROJECT_NAME_MAX,
     PROJECT_NAME_RE,
@@ -142,22 +142,14 @@ def select_project_interactive(
 
 def _prompt_create(ws_name: str) -> dict | None:
     """Prompt to create a new project."""
-    while True:
-        name = text(
-            "Project name:",
-            instruction="lowercase letters, digits, and hyphens only",
-        )
+    name = text(
+        "Project name:",
+        instruction="lowercase letters, digits, and hyphens only",
+        validate=lambda v: validate_project_name(v) or True,
+    )
 
-        if name is None:
-            return None
-
-        error = validate_project_name(name)
-        if error:
-            console.print_error(error)
-            console.print("  Press ESC or Ctrl+C to cancel.", style="dim")
-            continue
-
-        break
+    if name is None:
+        return None
 
     ok = confirm(f"Create project '{name}'?")
     if not ok:
@@ -180,40 +172,37 @@ def _prompt_select(
     current_project_id: str | None,
     allow_back: bool = False,
 ) -> dict | str | None:
-    """Display project list with arrow-key selection and create option."""
-    # Build choices for ALL projects (no DISPLAY_LIMIT cap)
-    choices = []
-
+    """Display scrollable project list with pinned action items."""
+    items = []
+    default_value = None
     for p in projects:
         is_current = p.get("id") == current_project_id
         title = p["project_name"]
         if is_current:
             title += " (current)"
-        choices.append(Choice(title, value=p))
+            default_value = p
+        items.append(Choice(title, value=p))
 
-    # Add separator + create option + optional back
-    choices.append(Separator())
-    choices.append(Choice("Create new project", value=CREATE))
+    actions: list[Choice] = [Choice("Create new project", value=CREATE)]
     if allow_back:
-        choices.append(Choice("Back", value=BACK))
+        actions.append(Choice("Back", value=BACK))
 
-    # Prompt user
     console.separator()
-    result = select(
-        "Select a project:",
-        choices=choices,
+    result = select_list(
+        "Choose a project",
+        items=items,
+        actions=actions,
+        default=default_value,
+        max_visible=DEFAULT_VISIBLE_CHOICES,
     )
 
     if result is None:
         return None
-
-    # Handle special options
     if result == BACK:
         return BACK
     if result == CREATE:
         return _prompt_create(ws_name)
 
-    # Otherwise result is the project dict
     return result
 
 
@@ -251,7 +240,7 @@ def _refresh_projects(*, workspace_name: str) -> list[dict]:
     client = OsmosisClient()
     all_projects: list[dict] = []
     offset = 0
-    page_size = 100
+    page_size = 50
 
     while True:
         result = client.list_projects(

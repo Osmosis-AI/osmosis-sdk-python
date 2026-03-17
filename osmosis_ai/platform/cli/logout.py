@@ -95,7 +95,7 @@ def _logout_interactive(
     choices.append(Separator())
     choices.append(Choice(title="All workspaces", value=LOGOUT_ALL))
 
-    selected = select("Select workspace to logout from:", choices=choices)
+    selected = select("Choose a workspace to logout from", choices=choices)
     if selected is None:  # User cancelled with Ctrl+C
         return
 

@@ -13,15 +13,28 @@ from contextlib import AbstractContextManager, nullcontext
 from io import RawIOBase
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlparse
 
 import httpx
+
+from osmosis_ai.platform.auth.config import _is_loopback
 
 # ── URL validation ────────────────────────────────────────────────────
 
 
+def _is_loopback_url(url: str) -> bool:
+    """Return True if *url* points to a loopback address (safe without HTTPS)."""
+    return _is_loopback(urlparse(url).hostname or "")
+
+
 def _require_https(url: str, context: str = "Upload URL") -> None:
-    """Reject non-HTTPS presigned URLs to prevent plaintext data transmission."""
-    if not url.lower().startswith("https://"):
+    """Reject non-HTTPS presigned URLs to prevent plaintext data transmission.
+
+    Loopback addresses (localhost, 127.0.0.1, ::1) are exempt because data
+    never leaves the machine — this allows local development with tools like
+    LocalStack.
+    """
+    if not url.lower().startswith("https://") and not _is_loopback_url(url):
         raise RuntimeError(
             f"{context} must use HTTPS (got {url[:60]!r}). "
             "Refusing to upload over an insecure connection."

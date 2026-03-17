@@ -13,6 +13,8 @@ from osmosis_ai.platform.api.models import UploadInfo
 from osmosis_ai.platform.api.upload import (
     SliceFileObj,
     _http_put_with_backoff,
+    _is_loopback_url,
+    _require_https,
     upload_file_multipart,
     upload_file_simple,
 )
@@ -48,6 +50,47 @@ def _make_response(
     resp.text = text
     resp.headers = headers or {}
     return resp
+
+
+# =============================================================================
+# TestRequireHttps
+# =============================================================================
+
+
+class TestRequireHttps:
+    """Tests for _require_https and _is_loopback_url."""
+
+    def test_https_url_passes(self) -> None:
+        _require_https("https://s3.amazonaws.com/bucket/key")
+
+    def test_http_non_loopback_raises(self) -> None:
+        with pytest.raises(RuntimeError, match="must use HTTPS"):
+            _require_https("http://s3.amazonaws.com/bucket/key")
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "http://localhost:4566/bucket/key",
+            "http://127.0.0.1:4566/bucket/key",
+            "http://[::1]:4566/bucket/key",
+        ],
+    )
+    def test_http_loopback_allowed(self, url: str) -> None:
+        """HTTP is allowed for loopback addresses (local development)."""
+        _require_https(url)  # should not raise
+
+    @pytest.mark.parametrize(
+        "url,expected",
+        [
+            ("http://localhost:4566/x", True),
+            ("http://127.0.0.1:4566/x", True),
+            ("http://[::1]:4566/x", True),
+            ("http://s3.amazonaws.com/x", False),
+            ("http://192.168.1.1:4566/x", False),
+        ],
+    )
+    def test_is_loopback_url(self, url: str, expected: bool) -> None:
+        assert _is_loopback_url(url) is expected
 
 
 # =============================================================================
@@ -149,6 +192,14 @@ class TestSliceFileObj:
 class TestHttpPutWithBackoff:
     """Tests for _http_put_with_backoff retry logic."""
 
+    @staticmethod
+    def _make_mock_client() -> MagicMock:
+        """Create a mock httpx.Client."""
+        client = MagicMock()
+        client.__enter__ = MagicMock(return_value=client)
+        client.__exit__ = MagicMock(return_value=False)
+        return client
+
     @patch("osmosis_ai.platform.api.upload.time.sleep")
     @patch("osmosis_ai.platform.api.upload.httpx.Client")
     def test_success_first_attempt(
@@ -156,9 +207,7 @@ class TestHttpPutWithBackoff:
     ) -> None:
         """Successful 200 on the first attempt returns the response."""
         resp = _make_response(200)
-        ctx = MagicMock()
-        ctx.__enter__ = MagicMock(return_value=ctx)
-        ctx.__exit__ = MagicMock(return_value=False)
+        ctx = self._make_mock_client()
         ctx.put.return_value = resp
         mock_client_cls.return_value = ctx
 
@@ -176,9 +225,7 @@ class TestHttpPutWithBackoff:
         resp_503 = _make_response(503, text="Service Unavailable")
         resp_200 = _make_response(200)
 
-        ctx = MagicMock()
-        ctx.__enter__ = MagicMock(return_value=ctx)
-        ctx.__exit__ = MagicMock(return_value=False)
+        ctx = self._make_mock_client()
         ctx.put.side_effect = [resp_503, resp_200]
         mock_client_cls.return_value = ctx
 
@@ -195,9 +242,7 @@ class TestHttpPutWithBackoff:
         """A 403 response raises RuntimeError immediately without retries."""
         resp_403 = _make_response(403, text="Forbidden")
 
-        ctx = MagicMock()
-        ctx.__enter__ = MagicMock(return_value=ctx)
-        ctx.__exit__ = MagicMock(return_value=False)
+        ctx = self._make_mock_client()
         ctx.put.return_value = resp_403
         mock_client_cls.return_value = ctx
 
@@ -214,9 +259,7 @@ class TestHttpPutWithBackoff:
         """Repeated 500 responses exhaust retries and raise RuntimeError."""
         resp_500 = _make_response(500, text="Internal Server Error")
 
-        ctx = MagicMock()
-        ctx.__enter__ = MagicMock(return_value=ctx)
-        ctx.__exit__ = MagicMock(return_value=False)
+        ctx = self._make_mock_client()
         ctx.put.return_value = resp_500
         mock_client_cls.return_value = ctx
 
@@ -234,9 +277,7 @@ class TestHttpPutWithBackoff:
         resp_503 = _make_response(503, text="Retry")
         resp_200 = _make_response(200)
 
-        ctx = MagicMock()
-        ctx.__enter__ = MagicMock(return_value=ctx)
-        ctx.__exit__ = MagicMock(return_value=False)
+        ctx = self._make_mock_client()
         ctx.put.side_effect = [resp_503, resp_200]
         mock_client_cls.return_value = ctx
 
@@ -257,9 +298,7 @@ class TestHttpPutWithBackoff:
         """httpx.NetworkError triggers a retry."""
         resp_200 = _make_response(200)
 
-        ctx = MagicMock()
-        ctx.__enter__ = MagicMock(return_value=ctx)
-        ctx.__exit__ = MagicMock(return_value=False)
+        ctx = self._make_mock_client()
         ctx.put.side_effect = [httpx.NetworkError("connection reset"), resp_200]
         mock_client_cls.return_value = ctx
 

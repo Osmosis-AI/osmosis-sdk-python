@@ -8,7 +8,14 @@ import typer
 
 from osmosis_ai.cli.console import console
 from osmosis_ai.cli.errors import CLIError
-from osmosis_ai.cli.prompts import Choice, Separator, confirm, is_interactive, select
+from osmosis_ai.cli.prompts import (
+    Choice,
+    Separator,
+    confirm,
+    is_interactive,
+    select,
+    select_list,
+)
 from osmosis_ai.platform.auth import (
     PlatformAPIError,
     get_all_workspaces,
@@ -21,7 +28,7 @@ from osmosis_ai.platform.auth.local_config import (
     set_default_project,
 )
 
-from .constants import BACK, MSG_NOT_LOGGED_IN
+from .constants import BACK, DEFAULT_VISIBLE_CHOICES, MSG_NOT_LOGGED_IN
 from .utils import (
     build_dataset_detail_rows,
     build_run_detail_rows,
@@ -32,7 +39,7 @@ from .utils import (
     platform_entity_url,
 )
 
-app: typer.Typer = typer.Typer(help="Switch workspace and default project.")
+app: typer.Typer = typer.Typer(help="Manage workspace and project context.")
 
 
 def _validate_default_project(
@@ -101,15 +108,15 @@ def _show_context(ws_name: str | None, default_project: dict | None) -> None:
 def _main_menu(has_project: bool) -> str | None:
     """Show main menu and return the selected action."""
     choices: list[str | Choice | Separator] = [
-        Choice("Switch workspace / project", value="switch"),
+        Choice("Change workspace or project", value="switch"),
     ]
     if has_project:
         choices.extend(
             [
-                Choice("Browse training runs", value="runs"),
-                Choice("Browse models", value="models"),
-                Choice("Browse datasets", value="datasets"),
-                Choice("View project info", value="info"),
+                Choice("Training runs", value="runs"),
+                Choice("Models", value="models"),
+                Choice("Datasets", value="datasets"),
+                Choice("Project details", value="info"),
                 Choice("Open in browser", value="browser"),
             ]
         )
@@ -117,7 +124,7 @@ def _main_menu(has_project: bool) -> str | None:
     choices.append(Choice("Exit", value="exit"))
 
     console.separator()
-    return select("Select an action", choices=choices)
+    return select("What would you like to do?", choices=choices)
 
 
 def _select_workspace(
@@ -135,7 +142,7 @@ def _select_workspace(
     choices.append(Choice("Back", value=BACK))
 
     console.separator()
-    return select("Select workspace:", choices=choices)
+    return select("Choose a workspace", choices=choices)
 
 
 def _select_project(ws_name: str) -> dict | str | None:
@@ -183,9 +190,7 @@ def _switch_context(
             step = "project"
 
         elif step == "project":
-            if ws_name is None:
-                step = "workspace"
-                continue
+            assert ws_name is not None
             result = _select_project(ws_name)
             if result == BACK:
                 step = "workspace"
@@ -193,7 +198,7 @@ def _switch_context(
             if result is None:
                 # Allow switching workspace without selecting a project
                 # (e.g. empty workspaces with no projects yet)
-                ok = confirm(f"Switch to '{ws_name}' without selecting a project?")
+                ok = confirm(f"Switch to {ws_name}? (no project will be selected)")
                 if not ok:
                     step = "workspace"
                     continue
@@ -211,10 +216,8 @@ def _switch_context(
             step = "confirm"
 
         elif step == "confirm":
-            if ws_name is None or not isinstance(result, dict):
-                step = "workspace"
-                continue
-            ok = confirm(f"Set context to {ws_name} / {result['project_name']}?")
+            assert ws_name is not None and isinstance(result, dict)
+            ok = confirm(f"Switch to {ws_name} / {result['project_name']}?")
             if ok is None or not ok:
                 step = "project"
                 continue
@@ -287,17 +290,17 @@ def _browse_entities(
         console.print()
         return True
 
-    choices: list[str | Choice | Separator] = [
+    data_choices: list[str | Choice | Separator] = [
         Choice(format_choice(item), value=item) for item in items
     ]
-    choices.append(Separator())
-    choices.append(Choice("Back", value=BACK))
 
     while True:
         console.separator()
-        selected = select(
+        selected = select_list(
             f"{title} ({result.total_count}):",
-            choices=choices,
+            items=data_choices,
+            actions=[Choice("Back", value=BACK)],
+            max_visible=DEFAULT_VISIBLE_CHOICES,
         )
 
         if selected is None or selected == BACK:
@@ -397,26 +400,29 @@ def _browse_models(ws_name: str, project: dict) -> bool:
         console.print()
         return True
 
-    choices: list[str | Choice | Separator] = []
+    model_items: list[str | Choice | Separator] = []
     if base_result.models:
-        choices.append(Separator("── Base Models ──"))
+        model_items.append(Separator("── Base Models ──"))
         for m in base_result.models:
             creator = f"  by {m.creator_name}" if m.creator_name else ""
             label = f"{m.model_name}  [{m.status}]{creator}"
-            choices.append(Choice(label, value=("base", m)))
+            model_items.append(Choice(label, value=("base", m)))
     if output_result.models:
-        choices.append(Separator("── Output Models ──"))
+        model_items.append(Separator("── Output Models ──"))
         for m in output_result.models:
             run = f"  from {m.training_run_name}" if m.training_run_name else ""
             label = f"{m.model_name}  [{m.status}]{run}"
-            choices.append(Choice(label, value=("output", m)))
-    choices.append(Separator())
-    choices.append(Choice("Back", value=BACK))
+            model_items.append(Choice(label, value=("output", m)))
 
     total = base_result.total_count + output_result.total_count
     while True:
         console.separator()
-        selected = select(f"Models ({total}):", choices=choices)
+        selected = select_list(
+            f"Models ({total}):",
+            items=model_items,
+            actions=[Choice("Back", value=BACK)],
+            max_visible=DEFAULT_VISIBLE_CHOICES,
+        )
 
         if selected is None or selected == BACK:
             return True
@@ -503,7 +509,7 @@ def _open_in_browser(ws_name: str, project: dict) -> None:
 
 @app.callback(invoke_without_command=True)
 def workspace() -> None:
-    """Switch workspace and default project."""
+    """Manage workspace and project context."""
     workspaces = get_all_workspaces()
 
     if not workspaces:
