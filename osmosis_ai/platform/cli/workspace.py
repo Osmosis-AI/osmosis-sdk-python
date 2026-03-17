@@ -190,9 +190,7 @@ def _switch_context(
             step = "project"
 
         elif step == "project":
-            if ws_name is None:
-                step = "workspace"
-                continue
+            assert ws_name is not None
             result = _select_project(ws_name)
             if result == BACK:
                 step = "workspace"
@@ -218,9 +216,7 @@ def _switch_context(
             step = "confirm"
 
         elif step == "confirm":
-            if ws_name is None or not isinstance(result, dict):
-                step = "workspace"
-                continue
+            assert ws_name is not None and isinstance(result, dict)
             ok = confirm(f"Switch to {ws_name} / {result['project_name']}?")
             if ok is None or not ok:
                 step = "project"

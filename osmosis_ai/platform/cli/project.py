@@ -142,22 +142,14 @@ def select_project_interactive(
 
 def _prompt_create(ws_name: str) -> dict | None:
     """Prompt to create a new project."""
-    while True:
-        name = text(
-            "Project name:",
-            instruction="lowercase letters, digits, and hyphens only",
-        )
+    name = text(
+        "Project name:",
+        instruction="lowercase letters, digits, and hyphens only",
+        validate=lambda v: validate_project_name(v) or True,
+    )
 
-        if name is None:
-            return None
-
-        error = validate_project_name(name)
-        if error:
-            console.print_error(error)
-            console.print("  Press ESC or Ctrl+C to cancel.", style="dim")
-            continue
-
-        break
+    if name is None:
+        return None
 
     ok = confirm(f"Create project '{name}'?")
     if not ok:

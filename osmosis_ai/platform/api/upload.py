@@ -13,18 +13,17 @@ from contextlib import AbstractContextManager, nullcontext
 from io import RawIOBase
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
+from urllib.parse import urlparse
 
 import httpx
+
+from osmosis_ai.platform.auth.config import _is_loopback
 
 # ── URL validation ────────────────────────────────────────────────────
 
 
 def _is_loopback_url(url: str) -> bool:
     """Return True if *url* points to a loopback address (safe without HTTPS)."""
-    from urllib.parse import urlparse
-
-    from osmosis_ai.platform.auth.config import _is_loopback
-
     return _is_loopback(urlparse(url).hostname or "")
 
 

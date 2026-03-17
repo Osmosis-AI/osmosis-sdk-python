@@ -192,6 +192,14 @@ class TestSliceFileObj:
 class TestHttpPutWithBackoff:
     """Tests for _http_put_with_backoff retry logic."""
 
+    @staticmethod
+    def _make_mock_client() -> MagicMock:
+        """Create a mock httpx.Client."""
+        client = MagicMock()
+        client.__enter__ = MagicMock(return_value=client)
+        client.__exit__ = MagicMock(return_value=False)
+        return client
+
     @patch("osmosis_ai.platform.api.upload.time.sleep")
     @patch("osmosis_ai.platform.api.upload.httpx.Client")
     def test_success_first_attempt(
@@ -199,9 +207,7 @@ class TestHttpPutWithBackoff:
     ) -> None:
         """Successful 200 on the first attempt returns the response."""
         resp = _make_response(200)
-        ctx = MagicMock()
-        ctx.__enter__ = MagicMock(return_value=ctx)
-        ctx.__exit__ = MagicMock(return_value=False)
+        ctx = self._make_mock_client()
         ctx.put.return_value = resp
         mock_client_cls.return_value = ctx
 
@@ -219,9 +225,7 @@ class TestHttpPutWithBackoff:
         resp_503 = _make_response(503, text="Service Unavailable")
         resp_200 = _make_response(200)
 
-        ctx = MagicMock()
-        ctx.__enter__ = MagicMock(return_value=ctx)
-        ctx.__exit__ = MagicMock(return_value=False)
+        ctx = self._make_mock_client()
         ctx.put.side_effect = [resp_503, resp_200]
         mock_client_cls.return_value = ctx
 
@@ -238,9 +242,7 @@ class TestHttpPutWithBackoff:
         """A 403 response raises RuntimeError immediately without retries."""
         resp_403 = _make_response(403, text="Forbidden")
 
-        ctx = MagicMock()
-        ctx.__enter__ = MagicMock(return_value=ctx)
-        ctx.__exit__ = MagicMock(return_value=False)
+        ctx = self._make_mock_client()
         ctx.put.return_value = resp_403
         mock_client_cls.return_value = ctx
 
@@ -257,9 +259,7 @@ class TestHttpPutWithBackoff:
         """Repeated 500 responses exhaust retries and raise RuntimeError."""
         resp_500 = _make_response(500, text="Internal Server Error")
 
-        ctx = MagicMock()
-        ctx.__enter__ = MagicMock(return_value=ctx)
-        ctx.__exit__ = MagicMock(return_value=False)
+        ctx = self._make_mock_client()
         ctx.put.return_value = resp_500
         mock_client_cls.return_value = ctx
 
@@ -277,9 +277,7 @@ class TestHttpPutWithBackoff:
         resp_503 = _make_response(503, text="Retry")
         resp_200 = _make_response(200)
 
-        ctx = MagicMock()
-        ctx.__enter__ = MagicMock(return_value=ctx)
-        ctx.__exit__ = MagicMock(return_value=False)
+        ctx = self._make_mock_client()
         ctx.put.side_effect = [resp_503, resp_200]
         mock_client_cls.return_value = ctx
 
@@ -300,9 +298,7 @@ class TestHttpPutWithBackoff:
         """httpx.NetworkError triggers a retry."""
         resp_200 = _make_response(200)
 
-        ctx = MagicMock()
-        ctx.__enter__ = MagicMock(return_value=ctx)
-        ctx.__exit__ = MagicMock(return_value=False)
+        ctx = self._make_mock_client()
         ctx.put.side_effect = [httpx.NetworkError("connection reset"), resp_200]
         mock_client_cls.return_value = ctx
 

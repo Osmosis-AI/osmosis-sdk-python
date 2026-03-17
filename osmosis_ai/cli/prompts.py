@@ -89,7 +89,13 @@ def _get_choices_container(question: questionary.Question):
     Questionary builds its select layout as:
     ``HSplit → [prompt_row, ConditionalContainer(Window(InquirerControl)), ...]``
     """
-    return question.application.layout.container.children[1]  # type: ignore[union-attr]
+    children = question.application.layout.container.children  # type: ignore[union-attr]
+    if len(children) < 2 or not hasattr(children[1], "content"):
+        raise RuntimeError(
+            "Unexpected questionary select layout. "
+            "The internal structure may have changed — update prompts.py."
+        )
+    return children[1]
 
 
 def _apply_max_height(
@@ -172,17 +178,18 @@ def _add_tab_jump(
 
     if first_action is not None:
         first_data = next((i for i in range(split_at) if not ic.choices[i].disabled), 0)
-        state = {"saved_data_pos": first_data}
+        saved_data_pos = first_data
 
         extra = KeyBindings()
 
         @extra.add(Keys.Tab, eager=True)
         def _toggle_section(event: Any) -> None:
+            nonlocal saved_data_pos
             if ic.pointed_at < split_at:
-                state["saved_data_pos"] = ic.pointed_at
+                saved_data_pos = ic.pointed_at
                 ic.pointed_at = first_action
             else:
-                ic.pointed_at = state["saved_data_pos"]
+                ic.pointed_at = saved_data_pos
 
         _add_extra_keys(question, extra)
 
@@ -298,6 +305,9 @@ def select_list(
     # Auto-default to first selectable data item
     if default is None:
         for c in items:
+            if isinstance(c, str):
+                default = c
+                break
             if isinstance(c, Choice) and not isinstance(c, Separator):
                 default = c.value
                 break
