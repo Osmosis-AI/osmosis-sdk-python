@@ -9,11 +9,11 @@ permissions:
 
 jobs:
   check-title:
-    if: github.actor != 'dependabot[bot]' && (github.event.action != 'edited' || github.event.changes.title)
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - name: Validate PR title format
+        if: ${{ !endsWith(github.actor, '[bot]') && (github.event.action != 'edited' || github.event.changes.title) }}
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
         run: |
