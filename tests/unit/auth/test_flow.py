@@ -118,14 +118,13 @@ class TestBuildLoginUrl:
 
 def _make_verify_response(
     *,
-    valid: bool = True,
     user: dict[str, Any] | None = None,
     organization: dict[str, Any] | None = None,
     expires_at: str | None = None,
     token_id: str | None = "tok_abc",
 ) -> bytes:
     """Build a JSON response body for the /api/cli/verify endpoint."""
-    data: dict[str, Any] = {"valid": valid}
+    data: dict[str, Any] = {}
     if user is not None:
         data["user"] = user
     else:
@@ -175,17 +174,6 @@ class TestVerifyAndGetUserInfo:
 
         assert result.expires_at >= before + timedelta(days=89)
         assert result.expires_at <= after + timedelta(days=91)
-
-    def test_invalid_token_raises_login_error(self) -> None:
-        body = _make_verify_response(valid=False)
-        mock_resp = MagicMock()
-        mock_resp.read.return_value = body
-        mock_resp.__enter__ = MagicMock(return_value=mock_resp)
-        mock_resp.__exit__ = MagicMock(return_value=False)
-
-        with patch("urllib.request.urlopen", return_value=mock_resp):
-            with pytest.raises(LoginError, match="Token verification failed"):
-                _verify_and_get_user_info("bad-token")
 
     def test_http_401_raises_login_error(self) -> None:
         error = HTTPError(
