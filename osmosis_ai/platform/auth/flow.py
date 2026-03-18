@@ -210,10 +210,6 @@ def _verify_and_get_user_info(token: str) -> VerifyResult:
         with urlopen(request, timeout=30) as response:
             data = json.loads(response.read().decode())
 
-            if not data.get("valid"):
-                reason = data.get("reason") or data.get("error") or "unknown reason"
-                raise LoginError(f"Token verification failed: {reason}")
-
             token_id = data.get("token_id")
 
             user_data = data.get("user", {})
