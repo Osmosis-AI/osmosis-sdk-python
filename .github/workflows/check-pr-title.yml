@@ -2,22 +2,18 @@ name: Check PR Title
 
 on:
   pull_request:
-    types: [opened, edited, synchronize]
+    types: [opened, edited, reopened, synchronize]
 
 permissions:
-  contents: read
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  pull-requests: read
 
 jobs:
   check-title:
-    if: github.actor != 'dependabot[bot]' && (github.event.action != 'edited' || github.event.changes.title)
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - name: Validate PR title format
+        if: ${{ !endsWith(github.actor, '[bot]') && (github.event.action != 'edited' || github.event.changes.title) }}
         env:
           PR_TITLE: ${{ github.event.pull_request.title }}
         run: |
