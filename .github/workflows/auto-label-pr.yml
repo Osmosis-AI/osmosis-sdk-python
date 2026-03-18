@@ -1,16 +1,12 @@
 name: Auto Label PR
 
 on:
-  pull_request:
-    types: [opened, edited]
-
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  pull_request_target:
+    types: [opened, edited, reopened]
 
 jobs:
   label:
-    if: github.event.action == 'opened' || github.event.changes.title
+    if: github.event.action != 'edited' || github.event.changes.title
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
