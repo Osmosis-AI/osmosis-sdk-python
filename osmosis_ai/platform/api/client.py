@@ -110,26 +110,28 @@ class OsmosisClient:
     def complete_upload(
         self,
         file_id: str,
-        s3_key: str,
-        extension: str | None = None,
-        upload_id: str | None = None,
         parts: list[dict[str, Any]] | None = None,
         *,
         credentials: WorkspaceCredentials | None = None,
     ) -> DatasetFile:
-        payload: dict = {"s3_key": s3_key}
-        if extension is not None:
-            payload["extension"] = extension
-        if upload_id is not None or parts is not None:
-            if upload_id is None or parts is None:
+        """Complete an upload.
+
+        The server reads s3_key and upload_id from the DB record.
+        For multipart uploads, provide the list of completed parts.
+        For simple uploads, no parts needed.
+        """
+        payload: dict = {}
+        if parts is not None:
+            # Validate no duplicate part numbers before sending
+            part_numbers = [p["PartNumber"] for p in parts]
+            if len(part_numbers) != len(set(part_numbers)):
                 raise ValueError(
-                    "upload_id and parts must both be provided for multipart completion"
+                    f"Duplicate part numbers detected in {len(parts)} parts"
                 )
-            payload["upload_id"] = upload_id
             payload["parts"] = parts
         # Completing a multipart upload can take a while (S3 must assemble
         # all parts), so use a longer timeout than the default 30s.
-        timeout = 120.0 if upload_id else 30.0
+        timeout = 120.0 if parts else 30.0
         data = platform_request(
             f"/api/cli/datasets/{_safe_path(file_id)}/complete",
             method="POST",
@@ -142,14 +144,18 @@ class OsmosisClient:
     def abort_upload(
         self,
         file_id: str,
-        upload_id: str,
         *,
         credentials: WorkspaceCredentials | None = None,
     ) -> None:
+        """Abort an in-progress upload.
+
+        The server reads upload_id from the DB record and handles both
+        multipart (abort S3 + cancel) and simple (cancel only) uploads.
+        """
         platform_request(
             f"/api/cli/datasets/{_safe_path(file_id)}/abort",
             method="POST",
-            data={"upload_id": upload_id},
+            data={},
             credentials=credentials,
         )
 

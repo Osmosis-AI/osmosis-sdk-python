@@ -12,35 +12,9 @@ from osmosis_ai.platform.api.client import OsmosisClient, _safe_path
 class TestCompleteUploadValidation:
     """Tests for parameter validation in OsmosisClient.complete_upload."""
 
-    def test_upload_id_without_parts_raises(self) -> None:
-        """Verify ValueError when upload_id is provided but parts is None."""
-        client = OsmosisClient()
-        with pytest.raises(
-            ValueError, match="upload_id and parts must both be provided"
-        ):
-            client.complete_upload(
-                file_id="file-1",
-                s3_key="uploads/file.jsonl",
-                upload_id="abc",
-                parts=None,
-            )
-
-    def test_parts_without_upload_id_raises(self) -> None:
-        """Verify ValueError when parts is provided but upload_id is None."""
-        client = OsmosisClient()
-        with pytest.raises(
-            ValueError, match="upload_id and parts must both be provided"
-        ):
-            client.complete_upload(
-                file_id="file-1",
-                s3_key="uploads/file.jsonl",
-                upload_id=None,
-                parts=[{"PartNumber": 1, "ETag": "etag-1"}],
-            )
-
     @patch("osmosis_ai.platform.api.client.platform_request")
-    def test_both_none_ok(self, mock_request: MagicMock) -> None:
-        """Verify no error when both upload_id and parts are None (simple upload)."""
+    def test_no_parts_ok(self, mock_request: MagicMock) -> None:
+        """Verify no error when parts is None (simple upload)."""
         mock_request.return_value = {
             "id": "file-1",
             "file_name": "file.jsonl",
@@ -48,19 +22,18 @@ class TestCompleteUploadValidation:
             "status": "uploaded",
         }
         client = OsmosisClient()
-        result = client.complete_upload(
-            file_id="file-1",
-            s3_key="uploads/file.jsonl",
-            upload_id=None,
-            parts=None,
-        )
+        result = client.complete_upload(file_id="file-1", parts=None)
         assert result.id == "file-1"
         assert result.status == "uploaded"
         mock_request.assert_called_once()
+        # Simple upload uses short timeout
+        call_kwargs = mock_request.call_args
+        timeout = call_kwargs.kwargs.get("timeout") or call_kwargs[1].get("timeout")
+        assert timeout == 30.0
 
     @patch("osmosis_ai.platform.api.client.platform_request")
-    def test_both_provided_ok(self, mock_request: MagicMock) -> None:
-        """Verify no error when both upload_id and parts are provided (multipart)."""
+    def test_with_parts_ok(self, mock_request: MagicMock) -> None:
+        """Verify no error when parts are provided (multipart)."""
         mock_request.return_value = {
             "id": "file-2",
             "file_name": "large.jsonl",
@@ -72,22 +45,42 @@ class TestCompleteUploadValidation:
             {"PartNumber": 2, "ETag": "etag-bbb"},
         ]
         client = OsmosisClient()
-        result = client.complete_upload(
-            file_id="file-2",
-            s3_key="uploads/large.jsonl",
-            upload_id="abc",
-            parts=parts,
-        )
+        result = client.complete_upload(file_id="file-2", parts=parts)
         assert result.id == "file-2"
         assert result.status == "uploaded"
-        # Verify multipart payload was passed correctly
+        # Verify parts payload was passed correctly
         call_kwargs = mock_request.call_args
         payload = call_kwargs.kwargs.get("data") or call_kwargs[1].get("data")
-        assert payload["upload_id"] == "abc"
         assert payload["parts"] == parts
+        assert "s3_key" not in payload
+        assert "upload_id" not in payload
         # Verify multipart timeout (120s)
         timeout = call_kwargs.kwargs.get("timeout") or call_kwargs[1].get("timeout")
         assert timeout == 120.0
+
+    def test_duplicate_part_numbers_raises(self) -> None:
+        """Verify ValueError when duplicate part numbers are provided."""
+        client = OsmosisClient()
+        parts = [
+            {"PartNumber": 1, "ETag": "etag-1"},
+            {"PartNumber": 1, "ETag": "etag-2"},
+        ]
+        with pytest.raises(ValueError, match="Duplicate part numbers"):
+            client.complete_upload(file_id="file-1", parts=parts)
+
+
+class TestAbortUpload:
+    """Tests for OsmosisClient.abort_upload."""
+
+    @patch("osmosis_ai.platform.api.client.platform_request")
+    def test_abort_sends_empty_body(self, mock_request: MagicMock) -> None:
+        """Verify abort sends empty body (server reads upload_id from DB)."""
+        mock_request.return_value = None
+        client = OsmosisClient()
+        client.abort_upload(file_id="file-1")
+        call_kwargs = mock_request.call_args
+        payload = call_kwargs.kwargs.get("data") or call_kwargs[1].get("data")
+        assert payload == {}
 
 
 class TestSafePath:
@@ -137,7 +130,7 @@ class TestURLPathSafety:
             "status": "uploaded",
         }
         client = OsmosisClient()
-        client.complete_upload(file_id="a/b", s3_key="key")
+        client.complete_upload(file_id="a/b")
         path = mock_request.call_args[0][0]
         assert path == "/api/cli/datasets/a%2Fb/complete"
 
@@ -145,7 +138,7 @@ class TestURLPathSafety:
     def test_abort_upload_encodes_id(self, mock_request: MagicMock) -> None:
         mock_request.return_value = None
         client = OsmosisClient()
-        client.abort_upload(file_id="a/b", upload_id="uid")
+        client.abort_upload(file_id="a/b")
         path = mock_request.call_args[0][0]
         assert path == "/api/cli/datasets/a%2Fb/abort"
 

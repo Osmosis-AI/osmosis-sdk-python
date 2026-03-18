@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import contextlib
 import time
 from collections.abc import Iterable
 from pathlib import Path
@@ -42,22 +41,20 @@ app: typer.Typer = typer.Typer(
 )
 
 
-def _abort_multipart(
+def _abort_upload(
     client: Any,
     dataset_id: str,
-    upload_id: str | None,
     *,
     credentials: Any | None = None,
 ) -> None:
-    """Best-effort abort of a multipart upload."""
-    if upload_id:
-        try:
-            client.abort_upload(dataset_id, upload_id, credentials=credentials)
-        except Exception as exc:
-            console.print(
-                f"Warning: failed to abort multipart upload: {exc}",
-                style="dim yellow",
-            )
+    """Best-effort abort of an in-progress upload."""
+    try:
+        client.abort_upload(dataset_id, credentials=credentials)
+    except Exception as exc:
+        console.print(
+            f"Warning: failed to abort upload: {exc}",
+            style="dim yellow",
+        )
 
 
 # ── Complete-upload retry (P0 reliability fix) ───────────────────────
@@ -76,9 +73,6 @@ from osmosis_ai.platform.api.upload import BACKOFF_BASE, BACKOFF_CAP, MAX_RETRIE
 def _complete_with_retry(
     client: Any,
     dataset_id: str,
-    s3_key: str,
-    extension: str | None = None,
-    upload_id: str | None = None,
     parts: list[dict] | None = None,
     credentials: Any | None = None,
 ) -> Any:
@@ -99,9 +93,6 @@ def _complete_with_retry(
         try:
             return client.complete_upload(
                 dataset_id,
-                s3_key,
-                extension,
-                upload_id=upload_id,
                 parts=parts,
                 credentials=credentials,
             )
@@ -246,27 +237,14 @@ def upload(
                     file_path, upload_info, progress_callback=progress_cb
                 )
         except KeyboardInterrupt:
-            _abort_multipart(
-                client,
-                dataset.id,
-                upload_info.upload_id,
-                credentials=credentials,
-            )
+            _abort_upload(client, dataset.id, credentials=credentials)
             raise CLIError("Upload cancelled by user.") from None
         except Exception as e:
-            _abort_multipart(
-                client,
-                dataset.id,
-                upload_info.upload_id,
-                credentials=credentials,
-            )
+            _abort_upload(client, dataset.id, credentials=credentials)
             raise CLIError(f"Upload failed: {e}") from e
         _complete_with_retry(
             client,
             dataset.id,
-            upload_info.s3_key,
-            ext,
-            upload_id=upload_info.upload_id,
             parts=parts,
             credentials=credentials,
         )
@@ -278,16 +256,14 @@ def upload(
                 )
         except KeyboardInterrupt:
             console.print("\nUpload interrupted.")
-            with contextlib.suppress(Exception):
-                client.delete_dataset(dataset.id, credentials=credentials)
+            _abort_upload(client, dataset.id, credentials=credentials)
             raise CLIError("Upload cancelled by user.") from None
         except Exception as e:
+            _abort_upload(client, dataset.id, credentials=credentials)
             raise CLIError(f"Upload failed: {e}") from e
         _complete_with_retry(
             client,
             dataset.id,
-            upload_info.s3_key,
-            ext,
             credentials=credentials,
         )
 
