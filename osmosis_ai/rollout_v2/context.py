@@ -1,3 +1,4 @@
+import os
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any, Generic, TypeVar
@@ -10,40 +11,42 @@ from osmosis_ai.rollout_v2.types import (
 rollout_contextvar: ContextVar = ContextVar("rollout_contextvar", default=None)
 TConfig = TypeVar("TConfig", bound=AgentWorkflowConfig)
 
-
-@dataclass
-class ControllerAuth:
-    api_key: str | None = field(default=None, repr=False)
-
-    def __repr__(self) -> str:
-        return (
-            "ControllerAuth(api_key=<redacted>)"
-            if self.api_key
-            else "ControllerAuth(api_key=None)"
-        )
-
-    def as_bearer_headers(self) -> dict[str, str] | None:
-        if not self.api_key:
-            return None
-        return {"Authorization": f"Bearer {self.api_key}"}
+# Env var names used by the container-side runners
+CHAT_COMPLETIONS_URL_ENV = "OSMOSIS_CHAT_COMPLETIONS_URL"
+API_KEY_ENV = "OSMOSIS_API_KEY"
+ROLLOUT_ID_ENV = "OSMOSIS_ROLLOUT_ID"
 
 
 @dataclass
 class RolloutContext:
-    rollout_id: str
-    chat_completions_url: str
+    """Ambient context for a rollout execution.
+
+    For local backends, pass URL/key directly.
+    For container runners, leave empty and they'll be read from env vars.
+    """
+
+    chat_completions_url: str = ""
     api_key: str | None = None
-    _registered_agents: dict[str, Any] = field(default_factory=dict)
+    rollout_id: str = ""
+    registered_agents: dict[str, Any] = field(default_factory=dict)
+
+    def __post_init__(self):
+        if not self.chat_completions_url:
+            self.chat_completions_url = os.environ.get(CHAT_COMPLETIONS_URL_ENV, "")
+        if not self.api_key:
+            self.api_key = os.environ.get(API_KEY_ENV)
+        if not self.rollout_id:
+            self.rollout_id = os.environ.get(ROLLOUT_ID_ENV, "")
 
     def __enter__(self):
         rollout_contextvar.set(self)
         return self
 
-    def __exit__(self, _exc_type, _exc_value, _traceback):
+    def __exit__(self, *_):
         rollout_contextvar.set(None)
 
     def register_agent(self, sample_id: str, agent: Any) -> None:
-        self._registered_agents[sample_id] = agent
+        self.registered_agents[sample_id] = agent
 
     def get_samples(self) -> dict[str, RolloutSample]:
         return {
@@ -51,7 +54,7 @@ class RolloutContext:
                 id=sample_id,
                 messages=agent.messages,
             )
-            for sample_id, agent in self._registered_agents.items()
+            for sample_id, agent in self.registered_agents.items()
         }
 
 
@@ -61,8 +64,9 @@ def get_rollout_context() -> RolloutContext | None:
 
 @dataclass
 class GraderContext:
-    label: str
+    label: str | None = None
     samples: dict[str, RolloutSample] = field(default_factory=dict)
+    workspace_path: str | None = None
 
     def get_samples(self) -> dict[str, RolloutSample]:
         return self.samples
@@ -75,15 +79,34 @@ class GraderContext:
 
 @dataclass
 class AgentWorkflowContext(Generic[TConfig]):
-    """General context for an agent, agnostic of the rollout context."""
-
     prompt: list[dict[str, Any]]
-    config: TConfig
+    config: TConfig | None = None
+
+    def __init__(
+        self,
+        prompt: list[dict[str, Any]],
+        config: TConfig | None = None,
+    ):
+        self.prompt = prompt
+        self.config = config
+
+
+@dataclass
+class HarborAgentWorkflowContext(AgentWorkflowContext[TConfig]):
+    """Context for agent workflow execution under HarborBackend.
+
+    Extends AgentWorkflowContext with the Harbor ``BaseEnvironment``,
+    allowing the workflow to interact with the container via
+    ``environment.exec()``, ``environment.upload_file()``, etc.
+    """
+
+    environment: Any = None
 
     def __init__(
         self,
         prompt: list[dict[str, Any]],
         config: TConfig,
+        environment: Any = None,
     ):
-        self.prompt = prompt
-        self.config = config
+        super().__init__(prompt=prompt, config=config)
+        self.environment = environment

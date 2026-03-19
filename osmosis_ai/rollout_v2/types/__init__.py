@@ -4,18 +4,21 @@ from .config import (
     ConcurrencyConfig,
     GraderConfig,
 )
-from .grader import (
+from .protocol import (
     GraderCompleteRequest,
     GraderInitRequest,
     GraderInitResponse,
     GraderStatus,
-)
-from .rollout import (
-    MultiTurnMode,
     RolloutCompleteRequest,
-    RolloutErrorCategory,
     RolloutInitRequest,
     RolloutInitResponse,
+)
+from .sample import (
+    ExecutionRequest,
+    ExecutionResult,
+    MessageDict,
+    MultiTurnMode,
+    RolloutErrorCategory,
     RolloutSample,
     RolloutStatus,
 )
@@ -24,11 +27,14 @@ __all__ = [
     "AgentWorkflowConfig",
     "BaseConfig",
     "ConcurrencyConfig",
+    "ExecutionRequest",
+    "ExecutionResult",
     "GraderCompleteRequest",
     "GraderConfig",
     "GraderInitRequest",
     "GraderInitResponse",
     "GraderStatus",
+    "MessageDict",
     "MultiTurnMode",
     "RolloutCompleteRequest",
     "RolloutErrorCategory",

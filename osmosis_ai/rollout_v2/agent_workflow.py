@@ -8,7 +8,7 @@ TConfig = TypeVar("TConfig", bound=AgentWorkflowConfig)
 
 
 class AgentWorkflow(Generic[TConfig], ABC):
-    def __init__(self, config: TConfig):
+    def __init__(self, config: TConfig | None = None):
         self.config = config
 
     @abstractmethod

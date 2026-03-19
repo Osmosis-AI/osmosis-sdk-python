@@ -6,7 +6,7 @@ from osmosis_ai.rollout_v2.types import GraderConfig
 
 
 class Grader(ABC):
-    def __init__(self, config: GraderConfig):
+    def __init__(self, config: GraderConfig | None = None):
         self.config = config
 
     @abstractmethod

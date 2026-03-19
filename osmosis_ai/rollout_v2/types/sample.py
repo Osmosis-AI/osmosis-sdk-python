@@ -31,31 +31,19 @@ class RolloutErrorCategory(str, Enum):
     AGENT_ERROR = "agent_error"
 
 
-class RolloutInitRequest(BaseModel):
-    initial_messages: list[MessageDict]
-    rollout_id: str
-
-    chat_completions_url: str
-    completion_callback_url: str
-    controller_api_key: str | None = None
-
-    label: str | None = None
-    grader_callback_url: str | None = None
-
-
-class RolloutInitResponse(BaseModel): ...
-
-
-class RolloutCompleteRequest(BaseModel):
-    rollout_id: str
-    status: RolloutStatus
-
-    extra_fields: dict[str, Any] | None = None
-
-    err_message: str | None = None
-    err_category: RolloutErrorCategory | None = None
-
-
 class MultiTurnMode(str, Enum):
     MULTI_SAMPLE = "multi_sample"
     SINGLE_SAMPLE = "single_sample"
+
+
+class ExecutionRequest(BaseModel):
+    id: str
+    prompt: list[MessageDict]
+    label: str | None = None
+
+
+class ExecutionResult(BaseModel):
+    status: RolloutStatus
+    samples: dict[str, RolloutSample] = Field(default_factory=dict)
+    err_message: str | None = None
+    err_category: RolloutErrorCategory | None = None
