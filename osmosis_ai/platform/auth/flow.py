@@ -8,8 +8,12 @@ from __future__ import annotations
 
 import contextlib
 import json
+import platform
 import socket
+import subprocess
+import sys
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from urllib.error import HTTPError, URLError
@@ -94,6 +98,24 @@ def _get_device_name() -> str:
         return socket.gethostname()
     except Exception:
         return "Unknown"
+
+
+def _copy_to_clipboard(text: str) -> bool:
+    """Try to copy text to system clipboard. Returns True on success."""
+    system = platform.system()
+    try:
+        if system == "Darwin":
+            cmd = ["pbcopy"]
+        elif system == "Linux":
+            cmd = ["xclip", "-selection", "clipboard"]
+        elif system == "Windows":
+            cmd = ["clip"]
+        else:
+            return False
+        subprocess.run(cmd, input=text.encode(), check=True, timeout=3)
+        return True
+    except Exception:
+        return False
 
 
 # ---------------------------------------------------------------------------
@@ -204,6 +226,7 @@ def poll_device_token(
     device_code: str,
     interval: int,
     timeout: float,
+    on_poll: Callable[[], None] | None = None,
 ) -> dict:
     """Poll for device authorization completion. Returns token response dict."""
     url = f"{PLATFORM_URL}/api/cli/device/token"
@@ -230,10 +253,14 @@ def poll_device_token(
                 raise LoginError(f"Polling failed: HTTP {e.code}") from e
 
             if error_code == "authorization_pending":
+                if on_poll:
+                    on_poll()
                 time.sleep(current_interval)
                 continue
             elif error_code == "slow_down":
                 current_interval = min(current_interval + 5, 30)
+                if on_poll:
+                    on_poll()
                 time.sleep(current_interval)
                 continue
             elif error_code == "expired_token":
@@ -261,7 +288,11 @@ def device_login(timeout: float = 600.0) -> tuple[LoginResult, Credentials]:
     device_code_resp = request_device_code()
 
     console.print()
-    console.print("First, copy your one-time code:", style="dim")
+    copied = _copy_to_clipboard(device_code_resp.user_code)
+    if copied:
+        console.print("Your one-time code (copied to clipboard):", style="dim")
+    else:
+        console.print("Your one-time code:", style="dim")
     console.print()
     console.print(f"  {device_code_resp.user_code}", style="bold cyan")
     console.print()
@@ -269,37 +300,51 @@ def device_login(timeout: float = 600.0) -> tuple[LoginResult, Credentials]:
     console.print(f"Code expires in {expires_minutes} minutes.", style="dim")
     console.print()
 
-    import sys
+    verification_url = device_code_resp.verification_uri
+    console.print(
+        f"Open this URL in your browser: {verification_url}",
+        style="yellow",
+    )
 
     if sys.stdin.isatty():
-        with contextlib.suppress(EOFError):
-            input(
-                f"Press Enter to open {device_code_resp.verification_uri} in your browser..."
-            )
-
         import webbrowser
 
-        if not webbrowser.open(device_code_resp.verification_uri):
-            console.print(
-                f"Failed to open browser. Please visit: {device_code_resp.verification_uri}",
-                style="yellow",
-            )
-    else:
-        console.print(
-            f"Open this URL in your browser: {device_code_resp.verification_uri}",
-            style="yellow",
-        )
+        with contextlib.suppress(Exception):
+            webbrowser.open(verification_url)
 
     console.print()
-    console.print("Waiting for authorization...", style="dim")
-
     effective_timeout = min(timeout, float(device_code_resp.expires_in))
 
-    token_response = poll_device_token(
+    poll_kwargs = dict(
         device_code=device_code_resp.device_code,
         interval=device_code_resp.interval,
         timeout=effective_timeout,
     )
+    token_response: dict | None = None
+
+    def _poll_with_spinner(rich_console: object) -> None:
+        nonlocal token_response
+        from rich.status import Status
+
+        with Status(
+            "Waiting for authorization...", console=rich_console, spinner="dots"
+        ):
+            token_response = poll_device_token(**poll_kwargs)
+
+    if not console.run_rich(_poll_with_spinner):
+        sys.stdout.write("Waiting for authorization")
+        sys.stdout.flush()
+
+        def _print_dot() -> None:
+            sys.stdout.write(".")
+            sys.stdout.flush()
+
+        token_response = poll_device_token(**poll_kwargs, on_poll=_print_dot)
+        sys.stdout.write("\n")
+        sys.stdout.flush()
+
+    if token_response is None:
+        raise LoginError("Failed to obtain token response from authorization flow")
 
     token = token_response["token"]
     user_data = token_response.get("user", {})

@@ -18,6 +18,7 @@ from osmosis_ai.platform.auth.credentials import (
 )
 from osmosis_ai.platform.auth.flow import LoginResult
 from osmosis_ai.platform.auth.local_config import clear_all_local_data
+from osmosis_ai.platform.auth.platform_client import revoke_cli_token
 
 ASCII_ART = r"""
                        ___           ___           ___           ___           ___                       ___
@@ -79,7 +80,16 @@ def login_cmd(
         else:
             result, creds = device_login()
 
-        store = save_credentials(creds)
+        # Revoke old token server-side before overwriting local credentials,
+        # so it doesn't become an unmanageable orphan on the platform.
+        if (
+            old_credentials
+            and not old_credentials.is_expired()
+            and old_credentials.token_id
+        ):
+            revoke_cli_token(old_credentials)
+
+        save_credentials(creds)
 
         # Clear stale workspace/project context when user identity changes
         # or when explicitly forcing a fresh start, to prevent subsequent
@@ -94,7 +104,6 @@ def login_cmd(
         if result.user.name:
             info_lines.append(f"Name: {esc(result.user.name)}")
         info_lines.append(f"Expires: {result.expires_at.strftime('%Y-%m-%d')}")
-        info_lines.append(f"Token stored in: {store}")
 
         console.panel("Login Successful", "\n".join(info_lines), style="green")
 

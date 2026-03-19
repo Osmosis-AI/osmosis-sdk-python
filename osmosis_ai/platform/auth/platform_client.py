@@ -53,21 +53,41 @@ def _handle_401_and_cleanup() -> None:
 def revoke_cli_token(credentials: Credentials) -> bool:
     """Best-effort server-side revocation of a CLI token.
 
-    Returns True if revoked, False if revocation failed or was skipped.
+    Returns True if revoked (or already expired/revoked), False on error.
     The caller should still delete local credentials regardless.
+
+    Uses a direct HTTP call instead of ``platform_request`` to avoid its
+    automatic 401 handler, which would call ``reset_session()`` and nuke
+    local workspace state — an unwanted side-effect during login/logout.
+    A 401 here simply means the token is already gone, which is success.
     """
     if not credentials.token_id:
         return False
+
+    url = f"{PLATFORM_URL}/api/cli/tokens/{credentials.token_id}"
+    request = Request(
+        url,
+        headers={
+            "Authorization": f"Bearer {credentials.access_token}",
+            "Content-Type": "application/json",
+            "User-Agent": f"osmosis-cli/{PACKAGE_VERSION}",
+        },
+        method="DELETE",
+    )
+
     try:
-        platform_request(
-            f"/api/cli/tokens/{credentials.token_id}",
-            method="DELETE",
-            credentials=credentials,
-            require_workspace=False,
+        with urlopen(request, timeout=5):
+            return True
+    except HTTPError as e:
+        if e.code == 401:
+            # Token already expired/revoked — goal achieved.
+            return True
+        sys.stderr.write(
+            f"Warning: failed to revoke CLI token server-side: HTTP {e.code}\n"
         )
-        return True
-    except Exception as exc:
-        sys.stderr.write(f"Warning: failed to revoke CLI token server-side: {exc}\n")
+        return False
+    except (URLError, OSError):
+        # Network errors are not critical for best-effort revocation.
         return False
 
 
