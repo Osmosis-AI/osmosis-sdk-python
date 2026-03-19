@@ -8,17 +8,14 @@ Log in to Osmosis AI and manage credentials. Credentials are saved to `~/.config
 
 ### osmosis login
 
-Open a browser-based authentication flow to log in to Osmosis AI:
+Authenticate with Osmosis AI using a device code flow. You will be given a one-time code to enter in your browser:
 
 ```bash
-# Log in (opens browser for authentication)
+# Log in
 osmosis login
 
 # Force re-login, clearing existing credentials
 osmosis login --force
-
-# Print the authentication URL without opening browser
-osmosis login --no-browser
 ```
 
 ### osmosis logout

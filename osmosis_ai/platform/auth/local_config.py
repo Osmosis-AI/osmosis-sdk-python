@@ -222,3 +222,89 @@ def load_subscription_status(
         ):
             return None
     return data.get("has_subscription")
+
+
+# ── Active workspace management ──────────────────────────────────────
+
+
+def get_active_workspace() -> dict[str, str] | None:
+    """Get the active workspace.
+
+    Returns:
+        Dict with 'id' and 'name' keys, or None if no active workspace.
+    """
+    config = _load_config()
+    workspace = config.get("active_workspace")
+    if (
+        workspace
+        and isinstance(workspace, dict)
+        and "id" in workspace
+        and "name" in workspace
+    ):
+        return workspace
+    return None
+
+
+def get_active_workspace_id() -> str | None:
+    """Get the active workspace ID from config file.
+
+    Returns:
+        The workspace ID, or None if no active workspace.
+    """
+    workspace = get_active_workspace()
+    return workspace["id"] if workspace else None
+
+
+def get_active_workspace_name() -> str | None:
+    """Get the active workspace name from config file.
+
+    Returns:
+        The workspace name, or None if no active workspace.
+    """
+    workspace = get_active_workspace()
+    return workspace["name"] if workspace else None
+
+
+def set_active_workspace(workspace_id: str, workspace_name: str) -> None:
+    """Set the active workspace.
+
+    Args:
+        workspace_id: The workspace ID.
+        workspace_name: The workspace name.
+    """
+    config = _load_config()
+    config["active_workspace"] = {"id": workspace_id, "name": workspace_name}
+    _save_config(config)
+
+
+def clear_active_workspace() -> None:
+    """Remove the active workspace from config."""
+    config = _load_config()
+    if "active_workspace" in config:
+        del config["active_workspace"]
+        _save_config(config)
+
+
+def clear_all_local_data() -> None:
+    """Remove all local state: config.json and all cache files.
+
+    Called on logout to prevent stale workspace/project context from
+    leaking into a subsequent login (possibly as a different user).
+    """
+    with contextlib.suppress(OSError):
+        CONFIG_FILE.unlink()
+    with contextlib.suppress(OSError):
+        for path in CACHE_DIR.iterdir():
+            path.unlink()
+
+
+def reset_session() -> None:
+    """Complete session teardown: credentials + workspace/project context.
+
+    Single entry point for all "end session" paths (logout, login --force,
+    401 expiry, user identity change) to ensure no stale state remains.
+    """
+    from .credentials import delete_credentials
+
+    delete_credentials()
+    clear_all_local_data()

@@ -18,13 +18,15 @@ from osmosis_ai.cli.prompts import (
 )
 from osmosis_ai.platform.auth import (
     PlatformAPIError,
-    get_all_workspaces,
-    set_active_workspace,
+    load_credentials,
+    platform_request,
 )
 from osmosis_ai.platform.auth.config import PLATFORM_URL
 from osmosis_ai.platform.auth.local_config import (
     clear_default_project,
+    get_active_workspace,
     get_default_project,
+    set_active_workspace,
     set_default_project,
 )
 
@@ -128,16 +130,27 @@ def _main_menu(has_project: bool) -> str | None:
 
 
 def _select_workspace(
-    workspaces: list[tuple],
-    active_ws: str | None,
-) -> str | None:
-    """Prompt the user to select a workspace. Returns BACK or None to go back."""
+    active_ws_name: str | None,
+) -> tuple[str, str] | str | None:
+    """Prompt the user to select a workspace. Returns (ws_id, ws_name), BACK, or None."""
+    try:
+        result = platform_request("/api/cli/workspaces", require_workspace=False)
+        workspaces = result.get("workspaces", [])
+    except PlatformAPIError as e:
+        console.print_error(f"Failed to load workspaces: {e}")
+        return BACK
+
+    if not workspaces:
+        console.print("No workspaces found.", style="dim")
+        return BACK
+
     choices = []
-    for name, creds, _is_active in workspaces:
-        marker = " (current)" if name == active_ws else ""
-        expired = " [expired]" if creds.is_expired() else ""
-        title = f"{name}{marker}{expired}"
-        choices.append(Choice(title, value=name))
+    for ws in workspaces:
+        name = ws.get("name", "")
+        ws_id = ws.get("id", "")
+        marker = " (current)" if name == active_ws_name else ""
+        title = f"{name}{marker}"
+        choices.append(Choice(title, value=(ws_id, name)))
     choices.append(Separator())
     choices.append(Choice("Back", value=BACK))
 
@@ -145,7 +158,7 @@ def _select_workspace(
     return select("Choose a workspace", choices=choices)
 
 
-def _select_project(ws_name: str) -> dict | str | None:
+def _select_project(ws_name: str, ws_id: str | None = None) -> dict | str | None:
     """Prompt the user to select a default project.
 
     Returns:
@@ -159,7 +172,10 @@ def _select_project(ws_name: str) -> dict | str | None:
     current_id = default.get("project_id") if default else None
 
     result = select_project_interactive(
-        ws_name, current_project_id=current_id, allow_back=True
+        ws_name,
+        current_project_id=current_id,
+        allow_back=True,
+        workspace_id=ws_id,
     )
 
     if result == BACK:
@@ -170,7 +186,7 @@ def _select_project(ws_name: str) -> dict | str | None:
 
 
 def _switch_context(
-    workspaces: list[tuple], active_ws: str | None
+    active_ws_name: str | None,
 ) -> tuple[str, dict | None] | None:
     """Run the workspace -> project -> confirm flow.
 
@@ -180,18 +196,20 @@ def _switch_context(
     Returns (ws_name, project_dict) on success, or None if backed out to main menu.
     """
     step = "workspace"
+    ws_id = None
     ws_name = None
     result = None
     while True:
         if step == "workspace":
-            ws_name = _select_workspace(workspaces, active_ws)
-            if ws_name is None or ws_name == BACK:
+            selected = _select_workspace(active_ws_name)
+            if selected is None or selected == BACK:
                 return None
+            ws_id, ws_name = selected
             step = "project"
 
         elif step == "project":
             assert ws_name is not None
-            result = _select_project(ws_name)
+            result = _select_project(ws_name, ws_id)
             if result == BACK:
                 step = "workspace"
                 continue
@@ -202,8 +220,8 @@ def _switch_context(
                 if not ok:
                     step = "workspace"
                     continue
-                if ws_name != active_ws:
-                    set_active_workspace(ws_name)
+                if ws_name != active_ws_name:
+                    set_active_workspace(ws_id, ws_name)
                 clear_default_project(ws_name)
                 console.print(
                     f"{console.format_styled('Switched to:', 'bold')} "
@@ -223,8 +241,8 @@ def _switch_context(
                 continue
 
             # Apply changes
-            if ws_name != active_ws:
-                set_active_workspace(ws_name)
+            if ws_name != active_ws_name:
+                set_active_workspace(ws_id, ws_name)
 
             set_default_project(ws_name, result["id"], result["project_name"])
             console.print(
@@ -272,11 +290,11 @@ def _browse_entities(
 
     Returns False if the project was found to be stale (404).
     """
-    from .project import _get_workspace_credentials
+    from .project import _require_credentials
 
     project_id: str = project["project_id"]
     try:
-        credentials = _get_workspace_credentials(ws_name)
+        credentials = _require_credentials()
         result = fetch(project_id, credentials=credentials)
     except PlatformAPIError as e:
         if e.status_code == 404:
@@ -379,13 +397,13 @@ def _browse_models(ws_name: str, project: dict) -> bool:
     """List base and output models and allow selecting one for details."""
     from osmosis_ai.platform.api.client import OsmosisClient
 
-    from .project import _get_workspace_credentials
+    from .project import _require_credentials
 
     client = OsmosisClient()
     project_id: str = project["project_id"]
 
     try:
-        credentials = _get_workspace_credentials(ws_name)
+        credentials = _require_credentials()
         base_result, output_result = client.fetch_all_models(
             project_id, credentials=credentials
         )
@@ -467,12 +485,12 @@ def _show_project_info(ws_name: str, project: dict) -> bool:
     """
     from osmosis_ai.platform.api.client import OsmosisClient
 
-    from .project import _get_workspace_credentials
+    from .project import _require_credentials
 
     client = OsmosisClient()
     project_id: str = project["project_id"]
     try:
-        credentials = _get_workspace_credentials(ws_name)
+        credentials = _require_credentials()
         detail = client.get_project(project_id, credentials=credentials)
     except PlatformAPIError as e:
         if e.status_code == 404:
@@ -510,14 +528,14 @@ def _open_in_browser(ws_name: str, project: dict) -> None:
 @app.callback(invoke_without_command=True)
 def workspace() -> None:
     """Manage workspace and project context."""
-    workspaces = get_all_workspaces()
+    credentials = load_credentials()
 
-    if not workspaces:
+    if credentials is None:
         raise CLIError(MSG_NOT_LOGGED_IN)
 
-    active_ws = next((name for name, _, is_active in workspaces if is_active), None)
-    ws_name = active_ws
-    default_project = get_default_project(active_ws) if active_ws else None
+    active_ws = get_active_workspace()  # returns dict or None
+    ws_name = active_ws["name"] if active_ws else None
+    default_project = get_default_project(ws_name) if ws_name else None
 
     # Validate the default project still exists
     default_project = _validate_default_project(ws_name, default_project)
@@ -536,10 +554,9 @@ def workspace() -> None:
         if action is None or action == "exit":
             return
         elif action == "switch":
-            result = _switch_context(workspaces, active_ws)
+            result = _switch_context(ws_name)
             if result:
                 ws_name, default_project = result
-                active_ws = ws_name
                 console.print()
                 _show_context(ws_name, default_project)
         elif action in ("runs", "models", "datasets", "info", "browser"):

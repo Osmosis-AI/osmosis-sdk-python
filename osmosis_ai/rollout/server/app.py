@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from fastapi import FastAPI, HTTPException, Request
 
-    from osmosis_ai.platform.auth.credentials import WorkspaceCredentials
+    from osmosis_ai.platform.auth.credentials import Credentials
 
 from osmosis_ai.rollout._compat import FASTAPI_AVAILABLE
 from osmosis_ai.rollout.client import OsmosisLLMClient
@@ -74,7 +74,7 @@ class LifecycleManager:
         state: AppState,
         *,
         debug_dir: str | None = None,
-        credentials: WorkspaceCredentials | None = None,
+        credentials: Credentials | None = None,
         server_host: str | None = None,
         server_port: int | None = None,
         api_key: str | None = None,
@@ -164,7 +164,7 @@ class LifecycleManager:
         assert self._credentials is not None
         host: str = self._server_host
         port: int = self._server_port
-        credentials: WorkspaceCredentials = self._credentials
+        credentials: Credentials = self._credentials
 
         await self._wait_for_server_ready(port)
 
@@ -466,7 +466,7 @@ def create_app(
     max_concurrent: int | None = None,
     record_ttl_seconds: float | None = None,
     settings: RolloutSettings | None = None,
-    credentials: WorkspaceCredentials | None = None,
+    credentials: Credentials | None = None,
     server_host: str | None = None,
     server_port: int | None = None,
     api_key: str | None = None,

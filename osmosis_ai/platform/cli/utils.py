@@ -18,7 +18,7 @@ from osmosis_ai.platform.api.models import (
 from osmosis_ai.platform.auth.config import PLATFORM_URL
 
 if TYPE_CHECKING:
-    from osmosis_ai.platform.auth.credentials import WorkspaceCredentials
+    from osmosis_ai.platform.auth.credentials import Credentials
 
 
 def resolve_id_prefix(
@@ -59,7 +59,7 @@ def _resolve_entity_id(
     id: str,
     project: str | None,
     workspace_name: str,
-    credentials: WorkspaceCredentials,
+    credentials: Credentials,
     *,
     list_fn: Any,
     items_attr: str,
@@ -84,7 +84,7 @@ def resolve_dataset_id(
     id: str,
     project: str | None,
     workspace_name: str,
-    credentials: WorkspaceCredentials,
+    credentials: Credentials,
     *,
     client: Any = None,
 ) -> str:
@@ -108,7 +108,7 @@ def resolve_run_id(
     id: str,
     project: str | None,
     workspace_name: str,
-    credentials: WorkspaceCredentials,
+    credentials: Credentials,
     *,
     client: Any = None,
 ) -> str:

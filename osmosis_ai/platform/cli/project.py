@@ -20,13 +20,13 @@ from osmosis_ai.platform.api.client import OsmosisClient
 from osmosis_ai.platform.auth import (
     AuthenticationExpiredError,
     PlatformAPIError,
-    get_active_workspace,
-    load_workspace_credentials,
+    get_valid_credentials,
     load_workspace_projects,
     save_workspace_projects,
 )
 from osmosis_ai.platform.auth.config import PLATFORM_URL
 from osmosis_ai.platform.auth.local_config import (
+    get_active_workspace_name,
     get_default_project,
     load_subscription_status,
     save_subscription_status,
@@ -43,7 +43,7 @@ from osmosis_ai.platform.cli.constants import (
 )
 
 if TYPE_CHECKING:
-    from osmosis_ai.platform.auth.credentials import WorkspaceCredentials
+    from osmosis_ai.platform.auth.credentials import Credentials
 
 
 def validate_project_name(name: str) -> str | None:
@@ -69,20 +69,19 @@ def validate_project_name(name: str) -> str | None:
 
 def _get_active_workspace_name() -> str:
     """Return the active workspace name, or raise if none is selected."""
-    workspace_name = get_active_workspace()
+    workspace_name = get_active_workspace_name()
     if workspace_name is None:
         raise CLIError(MSG_NOT_LOGGED_IN)
     return workspace_name
 
 
-def _get_workspace_credentials(workspace_name: str) -> WorkspaceCredentials:
-    """Load valid credentials for a specific workspace."""
-    credentials = load_workspace_credentials(workspace_name)
-    if credentials is None or credentials.is_expired():
+def _require_credentials() -> Credentials:
+    """Load valid credentials, raising if not available."""
+    credentials = get_valid_credentials()
+    if credentials is None:
         raise AuthenticationExpiredError(
             "No valid credentials found. Please run 'osmosis login' first."
         )
-
     return credentials
 
 
@@ -94,6 +93,7 @@ def select_project_interactive(
     projects: list[dict[str, Any]] | None = None,
     current_project_id: str | None = None,
     allow_back: bool = False,
+    workspace_id: str | None = None,
 ) -> dict[str, Any] | str | None:
     """Interactively select or create a project.
 
@@ -106,6 +106,8 @@ def select_project_interactive(
         projects: Pre-fetched project list, or None to fetch from API.
         current_project_id: ID of the current default (for "current" marker).
         allow_back: If True, show a "Back" option to return to previous step.
+        workspace_id: Explicit workspace ID for API calls (used before workspace
+            is persisted as active).
 
     Returns:
         Dict with 'id' and 'project_name', BACK if back selected,
@@ -113,7 +115,9 @@ def select_project_interactive(
     """
     if projects is None:
         try:
-            projects = _refresh_projects(workspace_name=ws_name)
+            projects = _refresh_projects(
+                workspace_name=ws_name, workspace_id=workspace_id
+            )
         except (PlatformAPIError, OSError):
             projects = _get_cached_projects(workspace_name=ws_name, max_age=None)
             if projects:
@@ -155,7 +159,7 @@ def _prompt_create(ws_name: str) -> dict | None:
     if not ok:
         return None
 
-    credentials = _get_workspace_credentials(ws_name)
+    credentials = _require_credentials()
     client = OsmosisClient()
     project = client.create_project(name, credentials=credentials)
 
@@ -234,9 +238,11 @@ def _get_cached_projects(
     return projects
 
 
-def _refresh_projects(*, workspace_name: str) -> list[dict]:
+def _refresh_projects(
+    *, workspace_name: str, workspace_id: str | None = None
+) -> list[dict]:
     """Refresh project list from platform and update cache."""
-    credentials = _get_workspace_credentials(workspace_name)
+    credentials = _require_credentials()
     client = OsmosisClient()
     all_projects: list[dict] = []
     offset = 0
@@ -244,7 +250,10 @@ def _refresh_projects(*, workspace_name: str) -> list[dict]:
 
     while True:
         result = client.list_projects(
-            limit=page_size, offset=offset, credentials=credentials
+            limit=page_size,
+            offset=offset,
+            credentials=credentials,
+            workspace_id=workspace_id,
         )
         all_projects.extend(p.to_dict() for p in result.projects)
         if result.next_offset is None:
@@ -319,13 +328,11 @@ def _resolve_project_id(project: str | None, *, workspace_name: str) -> str:
 def _require_auth(
     *,
     workspace_name: str | None = None,
-) -> tuple[str, WorkspaceCredentials]:
-    """Check that user is authenticated for a workspace."""
+) -> tuple[str, Credentials]:
+    """Check that user is authenticated."""
     if workspace_name is None:
         workspace_name = _get_active_workspace_name()
-
-    credentials = _get_workspace_credentials(workspace_name)
-
+    credentials = _require_credentials()
     return workspace_name, credentials
 
 
@@ -342,9 +349,11 @@ def _require_subscription(*, workspace_name: str) -> None:
     # Cached status is False, None, or expired — refresh to get the latest
     refreshed = False
     with contextlib.suppress(PlatformAPIError, OSError):
-        credentials = _get_workspace_credentials(workspace_name)
+        credentials = _require_credentials()
         client = OsmosisClient()
-        info = client.refresh_workspace_info(credentials=credentials)
+        info = client.refresh_workspace_info(
+            credentials=credentials, workspace_name=workspace_name
+        )
         has_subscription = info.get("has_subscription")
         if has_subscription is not None:
             save_subscription_status(workspace_name, bool(has_subscription))

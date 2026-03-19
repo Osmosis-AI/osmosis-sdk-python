@@ -13,9 +13,8 @@ from urllib.error import HTTPError, URLError
 import pytest
 
 from osmosis_ai.platform.auth.credentials import (
-    OrganizationInfo,
+    Credentials,
     UserInfo,
-    WorkspaceCredentials,
 )
 from osmosis_ai.platform.auth.platform_client import (
     AuthenticationExpiredError,
@@ -26,22 +25,20 @@ from osmosis_ai.platform.auth.platform_client import (
 )
 
 # =============================================================================
-# Helper: Create real WorkspaceCredentials for testing
+# Helper: Create real Credentials for testing
 # =============================================================================
 
 
 def _make_credentials(
     access_token: str = "test-token-abc123",
-    org_name: str = "TestOrg",
-) -> WorkspaceCredentials:
-    """Create valid WorkspaceCredentials for testing."""
+) -> Credentials:
+    """Create valid Credentials for testing."""
     now = datetime.now(timezone.utc)
-    return WorkspaceCredentials(
+    return Credentials(
         access_token=access_token,
         token_type="Bearer",
         expires_at=now + timedelta(days=30),
         user=UserInfo(id="user_1", email="user@example.com", name="Test User"),
-        organization=OrganizationInfo(id="org_1", name=org_name, role="member"),
         created_at=now,
     )
 
@@ -101,43 +98,13 @@ class TestExceptionClasses:
 class TestHandle401AndCleanup:
     """Tests for the _handle_401_and_cleanup function."""
 
-    @patch("osmosis_ai.platform.auth.platform_client.delete_workspace_credentials")
-    @patch("osmosis_ai.platform.auth.platform_client.get_active_workspace")
-    def test_deletes_active_workspace_credentials(
-        self, mock_get_ws: MagicMock, mock_delete: MagicMock
-    ) -> None:
-        """Verify 401 handler deletes credentials for the active workspace."""
-        mock_get_ws.return_value = "MyWorkspace"
-
+    @patch("osmosis_ai.platform.auth.platform_client.reset_session")
+    def test_resets_session_and_raises(self, mock_reset: MagicMock) -> None:
+        """Verify 401 handler resets full session (credentials + workspace) and raises."""
         with pytest.raises(AuthenticationExpiredError, match="expired or been revoked"):
             _handle_401_and_cleanup()
 
-        mock_delete.assert_called_once_with("MyWorkspace")
-
-    @patch("osmosis_ai.platform.auth.platform_client.delete_workspace_credentials")
-    @patch("osmosis_ai.platform.auth.platform_client.get_active_workspace")
-    def test_no_active_workspace_skips_delete(
-        self, mock_get_ws: MagicMock, mock_delete: MagicMock
-    ) -> None:
-        """Verify 401 handler does not call delete when no workspace is active."""
-        mock_get_ws.return_value = None
-
-        with pytest.raises(AuthenticationExpiredError, match="osmosis login"):
-            _handle_401_and_cleanup()
-
-        mock_delete.assert_not_called()
-
-    @patch("osmosis_ai.platform.auth.platform_client.delete_workspace_credentials")
-    @patch("osmosis_ai.platform.auth.platform_client.get_active_workspace")
-    def test_always_raises_even_after_cleanup(
-        self, mock_get_ws: MagicMock, mock_delete: MagicMock
-    ) -> None:
-        """Verify 401 handler always raises AuthenticationExpiredError."""
-        mock_get_ws.return_value = "SomeWorkspace"
-        mock_delete.return_value = True
-
-        with pytest.raises(AuthenticationExpiredError):
-            _handle_401_and_cleanup()
+        mock_reset.assert_called_once()
 
 
 # =============================================================================
@@ -147,6 +114,15 @@ class TestHandle401AndCleanup:
 
 class TestPlatformRequest:
     """Tests for the platform_request function."""
+
+    @pytest.fixture(autouse=True)
+    def _mock_active_workspace(self) -> Any:
+        """Provide a default workspace ID so require_workspace=True doesn't fail."""
+        with patch(
+            "osmosis_ai.platform.auth.platform_client.get_active_workspace_id",
+            return_value="default_ws_test",
+        ):
+            yield
 
     # -------------------------------------------------------------------------
     # Credential Loading
@@ -240,6 +216,57 @@ class TestPlatformRequest:
         assert request_obj.get_header("X-custom") == "value123"
 
     @patch("osmosis_ai.platform.auth.platform_client.urlopen")
+    def test_adds_workspace_header_when_workspace_id_provided(
+        self, mock_urlopen: MagicMock
+    ) -> None:
+        """Verify X-Osmosis-Org header uses explicit workspace_id over active workspace."""
+        mock_urlopen.return_value = _make_http_response({"ok": True})
+        creds = _make_credentials()
+
+        platform_request("/api/test", credentials=creds, workspace_id="ws_123")
+
+        request_obj = mock_urlopen.call_args[0][0]
+        assert request_obj.get_header("X-osmosis-org") == "ws_123"
+
+    @patch("osmosis_ai.platform.auth.platform_client.urlopen")
+    def test_adds_workspace_header_from_active_workspace(
+        self, mock_urlopen: MagicMock
+    ) -> None:
+        """Verify X-Osmosis-Org header uses active workspace when no workspace_id provided."""
+        mock_urlopen.return_value = _make_http_response({"ok": True})
+        creds = _make_credentials()
+
+        # The autouse fixture provides "default_ws_test" as the active workspace
+        platform_request("/api/test", credentials=creds)
+
+        request_obj = mock_urlopen.call_args[0][0]
+        assert request_obj.get_header("X-osmosis-org") == "default_ws_test"
+
+    @patch("osmosis_ai.platform.auth.platform_client.urlopen")
+    def test_no_workspace_header_when_require_workspace_false(
+        self, mock_urlopen: MagicMock
+    ) -> None:
+        """Verify X-Osmosis-Org header is omitted when require_workspace=False."""
+        mock_urlopen.return_value = _make_http_response({"ok": True})
+        creds = _make_credentials()
+
+        platform_request("/api/test", credentials=creds, require_workspace=False)
+
+        request_obj = mock_urlopen.call_args[0][0]
+        assert "X-osmosis-org" not in request_obj.headers
+
+    def test_raises_when_require_workspace_true_but_no_workspace(self) -> None:
+        """Verify PlatformAPIError when require_workspace=True but no workspace is available."""
+        creds = _make_credentials()
+
+        with patch(
+            "osmosis_ai.platform.auth.platform_client.get_active_workspace_id",
+            return_value=None,
+        ):
+            with pytest.raises(PlatformAPIError, match="No active workspace"):
+                platform_request("/api/test", credentials=creds)
+
+    @patch("osmosis_ai.platform.auth.platform_client.urlopen")
     def test_get_request_has_no_body(self, mock_urlopen: MagicMock) -> None:
         """Verify GET requests send no request body."""
         mock_urlopen.return_value = _make_http_response({"ok": True})
@@ -321,25 +348,7 @@ class TestPlatformRequest:
         with pytest.raises(AuthenticationExpiredError):
             platform_request("/api/test", credentials=creds)
 
-        mock_cleanup.assert_called_once_with("TestOrg")
-
-    @patch("osmosis_ai.platform.auth.platform_client.delete_workspace_credentials")
-    @patch("osmosis_ai.platform.auth.platform_client.urlopen")
-    @patch("osmosis_ai.platform.auth.platform_client.load_credentials")
-    def test_loaded_credentials_401_cleans_up_loaded_workspace(
-        self,
-        mock_load: MagicMock,
-        mock_urlopen: MagicMock,
-        mock_delete: MagicMock,
-    ) -> None:
-        """Verify 401 cleanup uses the workspace from loaded credentials."""
-        mock_load.return_value = _make_credentials(org_name="LoadedWorkspace")
-        mock_urlopen.side_effect = _make_http_error(401, "Unauthorized")
-
-        with pytest.raises(AuthenticationExpiredError):
-            platform_request("/api/test", credentials=None)
-
-        mock_delete.assert_called_once_with("LoadedWorkspace")
+        mock_cleanup.assert_called_once()
 
     @patch("osmosis_ai.platform.auth.platform_client.urlopen")
     def test_non_401_http_error_raises_platform_api_error(
@@ -515,6 +524,7 @@ class TestRevokeCLIToken:
             "/api/cli/tokens/tok_123",
             method="DELETE",
             credentials=creds,
+            require_workspace=False,
         )
 
     @patch("osmosis_ai.platform.auth.platform_client.platform_request")

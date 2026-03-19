@@ -16,12 +16,12 @@ from osmosis_ai.rollout.server.registration import (
 )
 
 # =============================================================================
-# Helper: Create mock WorkspaceCredentials
+# Helper: Create mock Credentials
 # =============================================================================
 
 
 def _make_mock_credentials() -> MagicMock:
-    """Create a mock WorkspaceCredentials with a fake access_token."""
+    """Create a mock Credentials with a fake access_token."""
     creds = MagicMock()
     creds.access_token = "fake-token-abc123"
     return creds

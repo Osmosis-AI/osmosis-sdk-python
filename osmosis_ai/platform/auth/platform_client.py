@@ -12,14 +12,11 @@ from urllib.request import Request, urlopen
 from osmosis_ai.consts import PACKAGE_VERSION
 
 from .config import PLATFORM_URL
-from .credentials import (
-    delete_workspace_credentials,
-    get_active_workspace,
-    load_credentials,
-)
+from .credentials import load_credentials
+from .local_config import get_active_workspace_id, reset_session
 
 if TYPE_CHECKING:
-    from .credentials import WorkspaceCredentials
+    from .credentials import Credentials
 
 
 class AuthenticationExpiredError(Exception):
@@ -44,22 +41,16 @@ class SubscriptionRequiredError(PlatformAPIError):
         )
 
 
-def _handle_401_and_cleanup(workspace_name: str | None = None) -> None:
-    """Handle 401 by deleting workspace credentials and raising error."""
-    # platform_request always passes the workspace name from the request
-    # credentials. Keep the fallback for direct helper callers and tests.
-    if workspace_name is None:
-        workspace_name = get_active_workspace()
-    if workspace_name:
-        delete_workspace_credentials(workspace_name)
-
+def _handle_401_and_cleanup() -> None:
+    """Handle 401 by clearing credentials and workspace context."""
+    reset_session()
     raise AuthenticationExpiredError(
         "Your session has expired or been revoked. "
         "Please run 'osmosis login' to re-authenticate."
     )
 
 
-def revoke_cli_token(credentials: WorkspaceCredentials) -> bool:
+def revoke_cli_token(credentials: Credentials) -> bool:
     """Best-effort server-side revocation of a CLI token.
 
     Returns True if revoked, False if revocation failed or was skipped.
@@ -72,6 +63,7 @@ def revoke_cli_token(credentials: WorkspaceCredentials) -> bool:
             f"/api/cli/tokens/{credentials.token_id}",
             method="DELETE",
             credentials=credentials,
+            require_workspace=False,
         )
         return True
     except Exception as exc:
@@ -85,7 +77,9 @@ def platform_request(
     data: dict[str, Any] | None = None,
     headers: dict[str, str] | None = None,
     timeout: float = 30.0,
-    credentials: WorkspaceCredentials | None = None,
+    credentials: Credentials | None = None,
+    workspace_id: str | None = None,
+    require_workspace: bool = True,
 ) -> dict[str, Any]:
     """Make an authenticated request to the Osmosis Platform API.
 
@@ -99,6 +93,10 @@ def platform_request(
         timeout: Request timeout in seconds
         credentials: Optional explicit credentials override. If not provided,
             uses the active workspace credentials from local storage.
+        workspace_id: Optional workspace ID for X-Osmosis-Org header. If not
+            provided and require_workspace is True, uses the active workspace.
+        require_workspace: If True, requires a workspace context and adds
+            X-Osmosis-Org header. If False, omits workspace context.
 
     Returns:
         Parsed JSON response
@@ -113,7 +111,6 @@ def platform_request(
         raise AuthenticationExpiredError(
             "No valid credentials found. Please run 'osmosis login' first."
         )
-    workspace_name = credentials.organization.name
 
     url = f"{PLATFORM_URL}{endpoint}"
 
@@ -122,10 +119,20 @@ def platform_request(
         "Content-Type": "application/json",
         "User-Agent": f"osmosis-cli/{PACKAGE_VERSION}",
     }
+
+    # Add workspace context if required
+    if require_workspace:
+        resolved_workspace_id = workspace_id or get_active_workspace_id()
+        if not resolved_workspace_id:
+            raise PlatformAPIError(
+                "No active workspace. Run 'osmosis workspace switch' to select one."
+            )
+        req_headers["X-Osmosis-Org"] = resolved_workspace_id
+
     if headers:
         req_headers.update(headers)
 
-    body = json.dumps(data).encode() if data else None
+    body = json.dumps(data).encode() if data is not None else None
     request = Request(url, data=body, headers=req_headers, method=method)
 
     try:
@@ -139,7 +146,7 @@ def platform_request(
             return result
     except HTTPError as e:
         if e.code == 401:
-            _handle_401_and_cleanup(workspace_name)
+            _handle_401_and_cleanup()
 
         # Best-effort capture of structured error message from response body
         detail = ""
