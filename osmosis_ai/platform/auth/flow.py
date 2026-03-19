@@ -18,13 +18,22 @@ from .credentials import (
     WorkspaceCredentials,
     save_credentials,
 )
+from .local_config import save_subscription_status
 from .local_server import LocalAuthServer, find_available_port
 
 
 class LoginError(Exception):
     """Error during login flow."""
 
-    pass
+
+@dataclass
+class VerifyResult:
+    """Result of token verification against the platform."""
+
+    user: UserInfo
+    organization: OrganizationInfo
+    expires_at: datetime
+    token_id: str | None
 
 
 @dataclass
@@ -105,7 +114,7 @@ def login(
     login_url = _build_login_url(state, port)
 
     # Start the local server
-    server = LocalAuthServer(port, state)
+    server = LocalAuthServer(port, expected_state=state)
 
     try:
         # Always print the URL so users can copy/paste if browser doesn't open
@@ -133,7 +142,7 @@ def login(
 
         # Verify token and get user info from platform
         try:
-            user_info, org_info, expires_at, token_id = _verify_and_get_user_info(token)
+            verified = _verify_and_get_user_info(token)
         except LoginError as e:
             server.set_verification_result(success=False, error=str(e))
             raise
@@ -143,42 +152,40 @@ def login(
         credentials = WorkspaceCredentials(
             access_token=token,
             token_type="Bearer",
-            expires_at=expires_at,
-            user=user_info,
-            organization=org_info,
+            expires_at=verified.expires_at,
+            user=verified.user,
+            organization=verified.organization,
             created_at=datetime.now(timezone.utc),
-            token_id=token_id,
+            token_id=verified.token_id,
         )
 
         save_credentials(credentials)
 
         return LoginResult(
-            user=user_info,
-            organization=org_info,
-            expires_at=expires_at,
+            user=verified.user,
+            organization=verified.organization,
+            expires_at=verified.expires_at,
             revoked_previous_tokens=revoked_count,
         )
 
     finally:
         # Ensure the callback handler is unblocked if verification wasn't reached
-        if not server._verification_event.is_set():
+        if server.is_verification_pending():
             server.set_verification_result(
                 success=False, error="Login failed unexpectedly"
             )
-        server._shutdown_event.set()
+        server.signal_shutdown()
         server.server_close()
 
 
-def _verify_and_get_user_info(
-    token: str,
-) -> tuple[UserInfo, OrganizationInfo, datetime, str | None]:
+def _verify_and_get_user_info(token: str) -> VerifyResult:
     """Verify token and get user info from the platform.
 
     Args:
         token: The access token to verify.
 
     Returns:
-        Tuple of (UserInfo, OrganizationInfo, expiration datetime, token_id).
+        VerifyResult with user, organization, expiration, token_id, and projects.
 
     Raises:
         LoginError: If verification fails.
@@ -203,10 +210,6 @@ def _verify_and_get_user_info(
         with urlopen(request, timeout=30) as response:
             data = json.loads(response.read().decode())
 
-            if not data.get("valid"):
-                raise LoginError("Token verification failed")
-
-            # Get token_id for revocation
             token_id = data.get("token_id")
 
             user_data = data.get("user", {})
@@ -216,7 +219,6 @@ def _verify_and_get_user_info(
                 name=user_data.get("name"),
             )
 
-            # Parse organization info
             org_data = data.get("organization", {})
             org_info = OrganizationInfo(
                 id=org_data.get("id", ""),
@@ -224,7 +226,11 @@ def _verify_and_get_user_info(
                 role=org_data.get("role", "member"),
             )
 
-            # Parse expiration - default to 90 days if not provided
+            if not user_info.id or not user_info.email:
+                raise LoginError("Server returned incomplete user information")
+            if not org_info.id or not org_info.name:
+                raise LoginError("Server returned incomplete organization information")
+
             expires_at_str = data.get("expires_at")
             if expires_at_str:
                 expires_at = datetime.fromisoformat(
@@ -234,10 +240,25 @@ def _verify_and_get_user_info(
                     raise LoginError(
                         "Invalid expires_at from platform: expected timezone-aware ISO8601 timestamp"
                     )
+                if datetime.now(timezone.utc) >= expires_at:
+                    raise LoginError(
+                        "Received token is already expired. "
+                        "Please check system clock or try again."
+                    )
             else:
                 expires_at = datetime.now(timezone.utc) + timedelta(days=90)
 
-            return user_info, org_info, expires_at, token_id
+            if org_info.name:
+                has_subscription = data.get("has_subscription")
+                if has_subscription is not None:
+                    save_subscription_status(org_info.name, bool(has_subscription))
+
+            return VerifyResult(
+                user=user_info,
+                organization=org_info,
+                expires_at=expires_at,
+                token_id=token_id,
+            )
 
     except HTTPError as e:
         if e.code == 401:

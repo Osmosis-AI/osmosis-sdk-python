@@ -5,25 +5,17 @@ Run agent loop tests against datasets using LLM providers via LiteLLM.
 
 from __future__ import annotations
 
-import argparse
 import asyncio
 import json
 import logging
 from dataclasses import dataclass
 from pathlib import Path
+from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
+import typer
+
 from osmosis_ai.cli.console import Console
-from osmosis_ai.rollout.eval.common.cli import (
-    build_completion_params,
-    create_llm_client,
-    format_duration,
-    format_tokens,
-    load_agent,
-    load_dataset_rows,
-    load_mcp_agent,
-    verify_llm_client,
-)
 
 if TYPE_CHECKING:
     from osmosis_ai.rollout.core.base import RolloutAgentLoop
@@ -33,6 +25,8 @@ if TYPE_CHECKING:
         LocalTestBatchResult,
         LocalTestRunResult,
     )
+
+app: typer.Typer = typer.Typer(help="Test a RolloutAgentLoop against a dataset.")
 
 
 @dataclass
@@ -51,156 +45,11 @@ class TestCommand:
     def __init__(self) -> None:
         self.console: Console = Console()
 
-    def configure_parser(self, parser: argparse.ArgumentParser) -> None:
-        """Configure argument parser for test command."""
-        parser.set_defaults(handler=self.run)
-
-        parser.add_argument(
-            "-m",
-            "--module",
-            "--agent",
-            dest="module",
-            default=None,
-            help=(
-                "Module path to the agent loop in format 'module:attribute'. "
-                "Example: 'my_agent:MyAgentLoop'."
-            ),
-        )
-
-        parser.add_argument(
-            "--mcp",
-            dest="mcp",
-            default=None,
-            help=(
-                "Path to MCP tools directory (must contain main.py with a FastMCP instance). "
-                "Mutually exclusive with -m/--module."
-            ),
-        )
-
-        parser.add_argument(
-            "-d",
-            "--dataset",
-            dest="dataset",
-            required=True,
-            help="Path to dataset file (.parquet recommended, .jsonl, or .csv).",
-        )
-
-        parser.add_argument(
-            "--model",
-            dest="model",
-            default="gpt-5-mini",
-            help=(
-                "Model name to use. Can be:\n"
-                "  - Simple name: 'gpt-5-mini'\n"
-                "  - LiteLLM format: 'provider/model' (e.g., 'anthropic/claude-sonnet-4-5')\n"
-                "  - Any name with --base-url (e.g., 'Qwen/Qwen3-0.6B')\n"
-                "Default: gpt-5-mini"
-            ),
-        )
-
-        parser.add_argument(
-            "--limit",
-            dest="limit",
-            type=int,
-            default=None,
-            help="Maximum number of rows to test",
-        )
-
-        parser.add_argument(
-            "--offset",
-            dest="offset",
-            type=int,
-            default=0,
-            help="Number of rows to skip",
-        )
-
-        parser.add_argument(
-            "--api-key",
-            dest="api_key",
-            default=None,
-            help="API key for the LLM provider (or use env var)",
-        )
-
-        parser.add_argument(
-            "--base-url",
-            dest="base_url",
-            default=None,
-            help="Base URL for OpenAI-compatible APIs (e.g., http://localhost:8000/v1)",
-        )
-
-        parser.add_argument(
-            "--max-turns",
-            dest="max_turns",
-            type=int,
-            default=10,
-            help="Maximum agent turns per row (default: 10)",
-        )
-
-        parser.add_argument(
-            "--max-tokens",
-            dest="max_tokens",
-            type=int,
-            default=None,
-            help="Maximum tokens per completion",
-        )
-
-        parser.add_argument(
-            "--temperature",
-            dest="temperature",
-            type=float,
-            default=None,
-            help="LLM temperature",
-        )
-
-        parser.add_argument(
-            "--debug",
-            dest="debug",
-            action="store_true",
-            default=False,
-            help="Enable debug output",
-        )
-
-        parser.add_argument(
-            "--output",
-            "-o",
-            dest="output",
-            default=None,
-            help="Output results to JSON file",
-        )
-
-        parser.add_argument(
-            "--quiet",
-            "-q",
-            dest="quiet",
-            action="store_true",
-            default=False,
-            help="Suppress progress output",
-        )
-
-        parser.add_argument(
-            "--interactive",
-            "-i",
-            dest="interactive",
-            action="store_true",
-            default=False,
-            help="Enable interactive mode for step-by-step execution",
-        )
-
-        parser.add_argument(
-            "--row",
-            dest="row",
-            type=int,
-            default=None,
-            help=(
-                "Initial row to test in interactive mode (absolute index in dataset). "
-                "With --offset 50 --limit 10, valid range is 50-59."
-            ),
-        )
-
-    def run(self, args: argparse.Namespace) -> int:
+    def run(self, **kwargs: Any) -> int:
+        args = SimpleNamespace(**kwargs)
         return asyncio.run(self._run_async(args))
 
-    def _validate_args(self, args: argparse.Namespace) -> str | None:
+    def _validate_args(self, args: Any) -> str | None:
         if args.module and args.mcp:
             return "--module and --mcp are mutually exclusive."
         if not args.module and not args.mcp:
@@ -209,7 +58,7 @@ class TestCommand:
             return "--row can only be used with --interactive mode"
         return None
 
-    def _print_header(self, args: argparse.Namespace) -> None:
+    def _print_header(self, args: Any) -> None:
         if args.quiet:
             return
 
@@ -223,7 +72,7 @@ class TestCommand:
 
     async def _run_interactive_mode(
         self,
-        args: argparse.Namespace,
+        args: Any,
         setup: _SetupResult,
     ) -> int:
         from osmosis_ai.rollout.eval.test_mode.interactive import InteractiveRunner
@@ -258,7 +107,7 @@ class TestCommand:
 
     async def _run_batch_mode(
         self,
-        args: argparse.Namespace,
+        args: Any,
         setup: _SetupResult,
     ) -> LocalTestBatchResult:
         from osmosis_ai.rollout.eval.test_mode.runner import LocalTestRunner
@@ -268,6 +117,8 @@ class TestCommand:
             llm_client=setup.llm_client,
             debug=args.debug,
         )
+
+        from osmosis_ai.rollout.eval.common.cli import format_duration, format_tokens
 
         def on_progress(current: int, total: int, result: LocalTestRunResult) -> None:
             if args.quiet:
@@ -310,6 +161,8 @@ class TestCommand:
         return batch_result
 
     def _print_summary(self, batch_result: LocalTestBatchResult) -> None:
+        from osmosis_ai.rollout.eval.common.cli import format_duration, format_tokens
+
         self.console.print()
         self.console.print("Summary:", style="bold")
         self.console.print(f"  Total: {batch_result.total}")
@@ -348,9 +201,7 @@ class TestCommand:
                 style="red",
             )
 
-    def _write_output(
-        self, args: argparse.Namespace, batch_result: LocalTestBatchResult
-    ) -> None:
+    def _write_output(self, args: Any, batch_result: LocalTestBatchResult) -> None:
         if not args.output:
             return
 
@@ -385,7 +236,16 @@ class TestCommand:
         if not args.quiet:
             self.console.print(f"\nResults written to: {args.output}")
 
-    async def _run_async(self, args: argparse.Namespace) -> int:
+    async def _run_async(self, args: Any) -> int:
+        from osmosis_ai.rollout.eval.common.cli import (
+            build_completion_params,
+            create_llm_client,
+            load_agent,
+            load_dataset_rows,
+            load_mcp_agent,
+            verify_llm_client,
+        )
+
         if args.debug:
             logging.basicConfig(level=logging.DEBUG)
 
@@ -476,6 +336,70 @@ class TestCommand:
 
         self._write_output(args, batch_result)
         return 1 if batch_result.failed > 0 else 0
+
+
+@app.callback(invoke_without_command=True)
+def test(
+    module: str | None = typer.Option(
+        None, "-m", "--module", "--agent", help="Module path 'module:attribute'."
+    ),
+    mcp: str | None = typer.Option(None, "--mcp", help="Path to MCP tools directory."),
+    dataset: str = typer.Option(..., "-d", "--dataset", help="Path to dataset file."),
+    model: str = typer.Option("gpt-5-mini", "--model", help="Model name to use."),
+    limit: int | None = typer.Option(
+        None, "--limit", help="Maximum number of rows to test."
+    ),
+    offset: int = typer.Option(0, "--offset", help="Number of rows to skip."),
+    api_key: str | None = typer.Option(
+        None, "--api-key", help="API key for the LLM provider."
+    ),
+    base_url: str | None = typer.Option(
+        None, "--base-url", help="Base URL for OpenAI-compatible APIs."
+    ),
+    max_turns: int = typer.Option(
+        10, "--max-turns", help="Maximum agent turns per row."
+    ),
+    max_tokens: int | None = typer.Option(
+        None, "--max-tokens", help="Maximum tokens per completion."
+    ),
+    temperature: float | None = typer.Option(
+        None, "--temperature", help="LLM temperature."
+    ),
+    debug: bool = typer.Option(False, "--debug", help="Enable debug output."),
+    output: str | None = typer.Option(
+        None, "-o", "--output", help="Output results to JSON file."
+    ),
+    quiet: bool = typer.Option(
+        False, "-q", "--quiet", help="Suppress progress output."
+    ),
+    interactive: bool = typer.Option(
+        False, "-i", "--interactive", help="Interactive mode."
+    ),
+    row: int | None = typer.Option(
+        None, "--row", help="Initial row in interactive mode."
+    ),
+) -> None:
+    """Test a RolloutAgentLoop against a dataset."""
+    rc = TestCommand().run(
+        module=module,
+        mcp=mcp,
+        dataset=dataset,
+        model=model,
+        limit=limit,
+        offset=offset,
+        api_key=api_key,
+        base_url=base_url,
+        max_turns=max_turns,
+        max_tokens=max_tokens,
+        temperature=temperature,
+        debug=debug,
+        output=output,
+        quiet=quiet,
+        interactive=interactive,
+        row=row,
+    )
+    if rc:
+        raise typer.Exit(rc)
 
 
 __all__ = ["TestCommand"]

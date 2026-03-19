@@ -19,8 +19,6 @@ from typing import Any
 class MCPLoadError(Exception):
     """Error raised when loading an MCP server fails."""
 
-    pass
-
 
 def _clear_module_tree(prefix: str) -> None:
     """Remove modules under ``prefix`` from ``sys.modules``."""

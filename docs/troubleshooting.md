@@ -75,12 +75,7 @@ osmosis whoami
 ### Multiple workspaces
 
 If you are logged in to the wrong workspace, commands may fail with permission
-errors. List and switch workspaces with:
-
-```bash
-osmosis workspace list
-osmosis workspace switch <workspace-name>
-```
+errors. Run `osmosis workspace` to view your current context and switch to a different workspace.
 
 ## Reward Function Errors
 

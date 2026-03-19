@@ -36,8 +36,6 @@ class OsmosisRolloutError(Exception):
     allowing you to catch all rollout errors with a single except clause.
     """
 
-    pass
-
 
 class OsmosisTransportError(OsmosisRolloutError):
     """Network/transport level error.
@@ -47,8 +45,6 @@ class OsmosisTransportError(OsmosisRolloutError):
 
     These errors may be transient and retrying could succeed.
     """
-
-    pass
 
 
 class OsmosisServerError(OsmosisRolloutError):
@@ -105,8 +101,6 @@ class OsmosisTimeoutError(OsmosisRolloutError):
     Consider increasing timeout or implementing retry logic.
     """
 
-    pass
-
 
 class AgentLoopNotFoundError(OsmosisRolloutError):
     """Agent loop not found in registry.
@@ -152,5 +146,3 @@ class ToolExecutionError(OsmosisRolloutError):
 
 class ToolArgumentError(ToolExecutionError):
     """Error parsing tool arguments."""
-
-    pass

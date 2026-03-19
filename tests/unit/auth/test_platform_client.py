@@ -22,6 +22,7 @@ from osmosis_ai.platform.auth.platform_client import (
     PlatformAPIError,
     _handle_401_and_cleanup,
     platform_request,
+    revoke_cli_token,
 )
 
 # =============================================================================
@@ -320,7 +321,25 @@ class TestPlatformRequest:
         with pytest.raises(AuthenticationExpiredError):
             platform_request("/api/test", credentials=creds)
 
-        mock_cleanup.assert_called_once()
+        mock_cleanup.assert_called_once_with("TestOrg")
+
+    @patch("osmosis_ai.platform.auth.platform_client.delete_workspace_credentials")
+    @patch("osmosis_ai.platform.auth.platform_client.urlopen")
+    @patch("osmosis_ai.platform.auth.platform_client.load_credentials")
+    def test_loaded_credentials_401_cleans_up_loaded_workspace(
+        self,
+        mock_load: MagicMock,
+        mock_urlopen: MagicMock,
+        mock_delete: MagicMock,
+    ) -> None:
+        """Verify 401 cleanup uses the workspace from loaded credentials."""
+        mock_load.return_value = _make_credentials(org_name="LoadedWorkspace")
+        mock_urlopen.side_effect = _make_http_error(401, "Unauthorized")
+
+        with pytest.raises(AuthenticationExpiredError):
+            platform_request("/api/test", credentials=None)
+
+        mock_delete.assert_called_once_with("LoadedWorkspace")
 
     @patch("osmosis_ai.platform.auth.platform_client.urlopen")
     def test_non_401_http_error_raises_platform_api_error(
@@ -466,3 +485,57 @@ class TestPlatformRequest:
 
         with pytest.raises(AuthenticationExpiredError, match="No valid credentials"):
             platform_request("/api/test", credentials=None)
+
+
+# =============================================================================
+# revoke_cli_token Tests
+# =============================================================================
+
+
+class TestRevokeCLIToken:
+    """Tests for the revoke_cli_token function."""
+
+    def test_returns_false_when_no_token_id(self) -> None:
+        """Verify revoke_cli_token returns False when credentials have no token_id."""
+        creds = _make_credentials()
+        creds.token_id = None
+        assert revoke_cli_token(creds) is False
+
+    @patch("osmosis_ai.platform.auth.platform_client.platform_request")
+    def test_returns_true_on_successful_revocation(
+        self, mock_request: MagicMock
+    ) -> None:
+        """Verify revoke_cli_token returns True when the API call succeeds."""
+        creds = _make_credentials()
+        creds.token_id = "tok_123"
+        mock_request.return_value = {}
+
+        assert revoke_cli_token(creds) is True
+        mock_request.assert_called_once_with(
+            "/api/cli/tokens/tok_123",
+            method="DELETE",
+            credentials=creds,
+        )
+
+    @patch("osmosis_ai.platform.auth.platform_client.platform_request")
+    def test_logs_warning_to_stderr_on_failure(self, mock_request: MagicMock) -> None:
+        """Verify revoke_cli_token writes a warning to stderr when revocation fails."""
+        creds = _make_credentials()
+        creds.token_id = "tok_456"
+        mock_request.side_effect = PlatformAPIError("API error: HTTP 500", 500)
+
+        import io
+        import sys
+
+        captured = io.StringIO()
+        old_stderr = sys.stderr
+        sys.stderr = captured
+        try:
+            result = revoke_cli_token(creds)
+        finally:
+            sys.stderr = old_stderr
+
+        assert result is False
+        warning = captured.getvalue()
+        assert "Warning: failed to revoke CLI token server-side" in warning
+        assert "HTTP 500" in warning

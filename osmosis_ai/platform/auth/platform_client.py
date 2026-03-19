@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
+import sys
 from typing import TYPE_CHECKING, Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -23,8 +25,6 @@ if TYPE_CHECKING:
 class AuthenticationExpiredError(Exception):
     """Raised when the stored credentials are invalid, expired, or revoked."""
 
-    pass
-
 
 class PlatformAPIError(Exception):
     """Raised when a Platform API call fails."""
@@ -34,16 +34,49 @@ class PlatformAPIError(Exception):
         self.status_code = status_code
 
 
-def _handle_401_and_cleanup() -> None:
-    """Handle 401 by deleting current workspace credentials and raising error."""
-    active_workspace = get_active_workspace()
-    if active_workspace:
-        delete_workspace_credentials(active_workspace)
+class SubscriptionRequiredError(PlatformAPIError):
+    """Raised when the workspace requires an active subscription for the requested action."""
+
+    def __init__(self, message: str | None = None):
+        super().__init__(
+            message or "Active subscription required",
+            status_code=403,
+        )
+
+
+def _handle_401_and_cleanup(workspace_name: str | None = None) -> None:
+    """Handle 401 by deleting workspace credentials and raising error."""
+    # platform_request always passes the workspace name from the request
+    # credentials. Keep the fallback for direct helper callers and tests.
+    if workspace_name is None:
+        workspace_name = get_active_workspace()
+    if workspace_name:
+        delete_workspace_credentials(workspace_name)
 
     raise AuthenticationExpiredError(
         "Your session has expired or been revoked. "
         "Please run 'osmosis login' to re-authenticate."
     )
+
+
+def revoke_cli_token(credentials: WorkspaceCredentials) -> bool:
+    """Best-effort server-side revocation of a CLI token.
+
+    Returns True if revoked, False if revocation failed or was skipped.
+    The caller should still delete local credentials regardless.
+    """
+    if not credentials.token_id:
+        return False
+    try:
+        platform_request(
+            f"/api/cli/tokens/{credentials.token_id}",
+            method="DELETE",
+            credentials=credentials,
+        )
+        return True
+    except Exception as exc:
+        sys.stderr.write(f"Warning: failed to revoke CLI token server-side: {exc}\n")
+        return False
 
 
 def platform_request(
@@ -80,6 +113,7 @@ def platform_request(
         raise AuthenticationExpiredError(
             "No valid credentials found. Please run 'osmosis login' first."
         )
+    workspace_name = credentials.organization.name
 
     url = f"{PLATFORM_URL}{endpoint}"
 
@@ -96,23 +130,45 @@ def platform_request(
 
     try:
         with urlopen(request, timeout=timeout) as response:
-            result: dict[str, Any] = json.loads(response.read().decode())
+            if response.status == 204:
+                return {}
+            raw = response.read()
+            if not raw:
+                return {}
+            result: dict[str, Any] = json.loads(raw.decode())
             return result
     except HTTPError as e:
         if e.code == 401:
-            _handle_401_and_cleanup()
-        # Best-effort capture of response body for debugging (truncate to avoid huge logs)
+            _handle_401_and_cleanup(workspace_name)
+
+        # Best-effort capture of structured error message from response body
         detail = ""
+        error_body: dict[str, Any] = {}
         try:
             raw = e.read()
             text = raw.decode("utf-8", errors="replace").strip() if raw else ""
             if text:
-                if len(text) > 500:
-                    text = text[:500] + "...(truncated)"
-                detail = f" Response: {text}"
+                with contextlib.suppress(json.JSONDecodeError, ValueError):
+                    parsed = json.loads(text)
+                    # Only treat as error_body if it's actually a dict
+                    if isinstance(parsed, dict):
+                        error_body = parsed
+                # Prefer structured error/message field over raw body
+                error_msg = error_body.get("error") or error_body.get("message")
+                if error_msg and isinstance(error_msg, str):
+                    detail = f" {error_msg}"
+                elif text:
+                    if len(text) > 200:
+                        text = text[:200] + "...(truncated)"
+                    detail = f" Response: {text}"
         except Exception:
-            # Ignore body read/decoding failures; keep the original status code context.
             pass
+
+        # Detect subscription-required responses (403 with subscription message)
+        if e.code == 403 and isinstance(error_body, dict):
+            error_msg = error_body.get("error", "")
+            if isinstance(error_msg, str) and "subscription" in error_msg.lower():
+                raise SubscriptionRequiredError(error_msg) from e
 
         raise PlatformAPIError(f"API error: HTTP {e.code}.{detail}", e.code) from e
     except URLError as e:

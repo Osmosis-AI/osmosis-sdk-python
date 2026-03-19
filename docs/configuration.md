@@ -85,7 +85,7 @@ Use `reset_settings()` in tests to clear the singleton.
 
 ## Credential File Location
 
-Authentication tokens from `osmosis login` are stored at `~/.config/osmosis/credentials.json` with owner-only permissions (`0600`). The file uses a multi-workspace format -- use `osmosis workspace list` and `osmosis workspace switch <name>` to manage stored workspaces.
+Authentication tokens from `osmosis login` are stored at `~/.config/osmosis/credentials.json` with owner-only permissions (`0600`). The file uses a multi-workspace format -- use `osmosis workspace` to manage stored workspaces.
 
 ## `.env` File Support
 

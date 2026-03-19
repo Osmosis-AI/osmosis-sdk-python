@@ -46,18 +46,14 @@ osmosis whoami
 
 ### osmosis workspace
 
-Manage multiple workspaces after logging in. You can log in to multiple workspaces and switch between them.
+Manage workspaces and projects interactively. Launches a TUI that shows your current workspace/project context and lets you switch workspace, select a default project, browse training runs, datasets, and models.
 
 ```bash
-# List all logged-in workspaces
-osmosis workspace list
-
-# Show the current active workspace
-osmosis workspace current
-
-# Switch to a different workspace
-osmosis workspace switch <workspace-name>
+# Launch interactive workspace manager
+osmosis workspace
 ```
+
+In non-interactive environments (e.g. CI), `osmosis workspace` prints the current context and exits.
 
 ## Testing Your Agent
 
@@ -209,8 +205,8 @@ osmosis validate -m server:agent_loop -v  # Verbose with warnings
 Preview a rubric file or dataset:
 
 ```bash
-osmosis preview --path path/to/rubric.yaml
-osmosis preview --path path/to/data.jsonl
+osmosis preview path/to/rubric.yaml
+osmosis preview path/to/data.jsonl
 ```
 
 Both formats validate the file, echo a short summary, and pretty-print the parsed records.
