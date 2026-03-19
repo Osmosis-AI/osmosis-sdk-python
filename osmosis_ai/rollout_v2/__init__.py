@@ -14,7 +14,7 @@ from osmosis_ai.rollout_v2.integrations.agents.strands import (
     OsmosisRolloutModel,
     OsmosisStrandsAgent,
 )
-from osmosis_ai.rollout_v2.server import ControllerAuth, create_app
+from osmosis_ai.rollout_v2.server import ControllerAuth, create_rollout_server
 from osmosis_ai.rollout_v2.types import (
     AgentWorkflowConfig,
     ConcurrencyConfig,
@@ -58,6 +58,6 @@ __all__ = [
     "RolloutInitResponse",
     "RolloutSample",
     "RolloutStatus",
-    "create_app",
+    "create_rollout_server",
     "get_rollout_context",
 ]
