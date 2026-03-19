@@ -3,14 +3,19 @@ from __future__ import annotations
 from osmosis_ai.cli.console import console
 from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.platform.auth import load_credentials
-from osmosis_ai.platform.auth.credentials import get_credential_store
+from osmosis_ai.platform.auth.credentials import (
+    TOKEN_STORE_ENV,
+    TOKEN_STORE_FILE,
+    TOKEN_STORE_KEYRING,
+    get_credential_store,
+)
 from osmosis_ai.platform.auth.local_config import get_active_workspace_name
 from osmosis_ai.platform.cli.constants import MSG_NOT_LOGGED_IN
 
 _STORE_LABELS = {
-    "env": "environment variable",
-    "keyring": "keyring",
-    "file": "plain text",
+    TOKEN_STORE_ENV: "environment variable",
+    TOKEN_STORE_KEYRING: "keyring",
+    TOKEN_STORE_FILE: "plain text",
 }
 
 

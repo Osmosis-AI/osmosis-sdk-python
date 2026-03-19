@@ -290,11 +290,11 @@ def _browse_entities(
 
     Returns False if the project was found to be stale (404).
     """
-    from .project import _require_credentials
+    from .utils import require_credentials
 
     project_id: str = project["project_id"]
     try:
-        credentials = _require_credentials()
+        credentials = require_credentials()
         result = fetch(project_id, credentials=credentials)
     except PlatformAPIError as e:
         if e.status_code == 404:
@@ -397,13 +397,13 @@ def _browse_models(ws_name: str, project: dict) -> bool:
     """List base and output models and allow selecting one for details."""
     from osmosis_ai.platform.api.client import OsmosisClient
 
-    from .project import _require_credentials
+    from .utils import require_credentials
 
     client = OsmosisClient()
     project_id: str = project["project_id"]
 
     try:
-        credentials = _require_credentials()
+        credentials = require_credentials()
         base_result, output_result = client.fetch_all_models(
             project_id, credentials=credentials
         )
@@ -485,12 +485,12 @@ def _show_project_info(ws_name: str, project: dict) -> bool:
     """
     from osmosis_ai.platform.api.client import OsmosisClient
 
-    from .project import _require_credentials
+    from .utils import require_credentials
 
     client = OsmosisClient()
     project_id: str = project["project_id"]
     try:
-        credentials = _require_credentials()
+        credentials = require_credentials()
         detail = client.get_project(project_id, credentials=credentials)
     except PlatformAPIError as e:
         if e.status_code == 404:

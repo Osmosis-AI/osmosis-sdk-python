@@ -8,6 +8,9 @@ from unittest.mock import patch
 
 from osmosis_ai.platform.auth.credentials import (
     KEYRING_ACCOUNT,
+    TOKEN_STORE_ENV,
+    TOKEN_STORE_FILE,
+    TOKEN_STORE_KEYRING,
     Credentials,
     UserInfo,
     get_credential_store,
@@ -84,12 +87,12 @@ def test_save_uses_keyring_when_available(tmp_path, monkeypatch) -> None:
 
         store = save_credentials(_make_credentials())
 
-    assert store == "keyring"
+    assert store == TOKEN_STORE_KEYRING
     # Token should be stored under the fixed KEYRING_ACCOUNT, not the email
     assert stored.get(KEYRING_ACCOUNT) == "test-token"
     data = json.loads(creds_file.read_text())
     assert "access_token" not in data
-    assert data["token_store"] == "keyring"
+    assert data["token_store"] == TOKEN_STORE_KEYRING
 
 
 def test_save_cleans_up_old_keyring_on_account_change(tmp_path, monkeypatch) -> None:
@@ -102,7 +105,7 @@ def test_save_cleans_up_old_keyring_on_account_change(tmp_path, monkeypatch) -> 
     # Simulate existing credentials for alice (legacy email-based keyring)
     old_data = _make_credentials().to_dict()
     old_data.pop("access_token")
-    old_data["token_store"] = "keyring"
+    old_data["token_store"] = TOKEN_STORE_KEYRING
     old_data["user"]["email"] = "alice@example.com"
     creds_file.write_text(json.dumps(old_data))
 
@@ -153,7 +156,7 @@ def test_save_always_cleans_up_keyring_before_saving(tmp_path, monkeypatch) -> N
     # Simulate existing credentials with legacy email-based keyring
     old_data = _make_credentials().to_dict()
     old_data.pop("access_token")
-    old_data["token_store"] = "keyring"
+    old_data["token_store"] = TOKEN_STORE_KEYRING
     creds_file.write_text(json.dumps(old_data))
 
     deleted_accounts: list[str] = []
@@ -200,10 +203,10 @@ def test_save_falls_back_to_file(tmp_path, monkeypatch, capsys) -> None:
 
         store = save_credentials(_make_credentials())
 
-    assert store == "file"
+    assert store == TOKEN_STORE_FILE
     data = json.loads(creds_file.read_text())
     assert data["access_token"] == "test-token"
-    assert data["token_store"] == "file"
+    assert data["token_store"] == TOKEN_STORE_FILE
     captured = capsys.readouterr()
     assert "keyring unavailable" in captured.err
 
@@ -219,7 +222,7 @@ def test_load_from_keyring(tmp_path, monkeypatch) -> None:
     creds = _make_credentials()
     data = creds.to_dict()
     data.pop("access_token")
-    data["token_store"] = "keyring"
+    data["token_store"] = TOKEN_STORE_KEYRING
     creds_file.write_text(json.dumps(data))
 
     def fake_get(account: str) -> str | None:
@@ -252,7 +255,7 @@ def test_load_returns_none_when_keyring_entry_missing(
     creds = _make_credentials()
     data = creds.to_dict()
     data.pop("access_token")
-    data["token_store"] = "keyring"
+    data["token_store"] = TOKEN_STORE_KEYRING
     creds_file.write_text(json.dumps(data))
 
     # Both fixed account and legacy email return None
@@ -275,7 +278,7 @@ def test_load_from_file_fallback(tmp_path, monkeypatch) -> None:
 
     creds = _make_credentials(token_id="tok_abc")
     data = creds.to_dict()
-    data["token_store"] = "file"
+    data["token_store"] = TOKEN_STORE_FILE
     creds_file.write_text(json.dumps(data))
 
     from osmosis_ai.platform.auth.credentials import load_credentials
@@ -361,7 +364,7 @@ def test_delete_clears_keyring_and_file(tmp_path, monkeypatch) -> None:
     creds = _make_credentials()
     data = creds.to_dict()
     data.pop("access_token")
-    data["token_store"] = "keyring"
+    data["token_store"] = TOKEN_STORE_KEYRING
     creds_file.write_text(json.dumps(data))
 
     deleted_accounts: list[str] = []
@@ -394,7 +397,7 @@ def test_delete_warns_when_keyring_delete_fails(tmp_path, monkeypatch, capsys) -
     creds = _make_credentials()
     data = creds.to_dict()
     data.pop("access_token")
-    data["token_store"] = "keyring"
+    data["token_store"] = TOKEN_STORE_KEYRING
     creds_file.write_text(json.dumps(data))
 
     with patch(
@@ -446,7 +449,7 @@ def test_delete_file_only(tmp_path, monkeypatch) -> None:
 
     creds = _make_credentials()
     data = creds.to_dict()
-    data["token_store"] = "file"
+    data["token_store"] = TOKEN_STORE_FILE
     creds_file.write_text(json.dumps(data))
 
     with patch(
@@ -474,7 +477,7 @@ def test_save_fallback_to_file_cleans_up_old_keyring(tmp_path, monkeypatch) -> N
     # Simulate existing keyring-based credentials
     old_data = _make_credentials().to_dict()
     old_data.pop("access_token")
-    old_data["token_store"] = "keyring"
+    old_data["token_store"] = TOKEN_STORE_KEYRING
     creds_file.write_text(json.dumps(old_data))
 
     deleted_accounts: list[str] = []
@@ -497,7 +500,7 @@ def test_save_fallback_to_file_cleans_up_old_keyring(tmp_path, monkeypatch) -> N
 
         store = save_credentials(_make_credentials())
 
-    assert store == "file"
+    assert store == TOKEN_STORE_FILE
     # Old keyring entry must have been cleaned up before fallback
     assert KEYRING_ACCOUNT in deleted_accounts
 
@@ -518,7 +521,7 @@ def test_load_falls_back_to_legacy_email_keyring(tmp_path, monkeypatch) -> None:
     creds = _make_credentials()
     data = creds.to_dict()
     data.pop("access_token")
-    data["token_store"] = "keyring"
+    data["token_store"] = TOKEN_STORE_KEYRING
     creds_file.write_text(json.dumps(data))
 
     def fake_get(account: str) -> str | None:
@@ -612,7 +615,7 @@ def test_to_dict_excludes_token_id_when_none() -> None:
 
 def test_get_credential_store_env(monkeypatch) -> None:
     monkeypatch.setenv("OSMOSIS_TOKEN", "tok")
-    assert get_credential_store() == "env"
+    assert get_credential_store() == TOKEN_STORE_ENV
 
 
 def test_get_credential_store_keyring(tmp_path, monkeypatch) -> None:
@@ -621,8 +624,8 @@ def test_get_credential_store_keyring(tmp_path, monkeypatch) -> None:
         "osmosis_ai.platform.auth.credentials.CREDENTIALS_FILE", creds_file
     )
     monkeypatch.delenv("OSMOSIS_TOKEN", raising=False)
-    creds_file.write_text(json.dumps({"token_store": "keyring"}))
-    assert get_credential_store() == "keyring"
+    creds_file.write_text(json.dumps({"token_store": TOKEN_STORE_KEYRING}))
+    assert get_credential_store() == TOKEN_STORE_KEYRING
 
 
 def test_get_credential_store_file(tmp_path, monkeypatch) -> None:
@@ -631,8 +634,8 @@ def test_get_credential_store_file(tmp_path, monkeypatch) -> None:
         "osmosis_ai.platform.auth.credentials.CREDENTIALS_FILE", creds_file
     )
     monkeypatch.delenv("OSMOSIS_TOKEN", raising=False)
-    creds_file.write_text(json.dumps({"token_store": "file"}))
-    assert get_credential_store() == "file"
+    creds_file.write_text(json.dumps({"token_store": TOKEN_STORE_FILE}))
+    assert get_credential_store() == TOKEN_STORE_FILE
 
 
 def test_get_credential_store_none(tmp_path, monkeypatch) -> None:

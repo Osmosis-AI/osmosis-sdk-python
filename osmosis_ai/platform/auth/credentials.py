@@ -38,23 +38,35 @@ if TYPE_CHECKING:
 KEYRING_SERVICE = "osmosis-cli"
 KEYRING_ACCOUNT = "default"
 
+# Token store backend identifiers (persisted in credentials.json)
+TOKEN_STORE_KEYRING = "keyring"
+TOKEN_STORE_FILE = "file"
+TOKEN_STORE_ENV = "env"
 
-def _cleanup_legacy_keyring_entries() -> None:
+
+def _cleanup_legacy_keyring_entries(metadata: dict | None = None) -> None:
     """Delete any legacy email-based keyring entry from a previous version.
 
-    Reads the metadata file to discover the old account name.
+    Args:
+        metadata: Pre-parsed metadata dict. If ``None``, reads the credentials
+            file from disk to discover the old account name.
+
     Silently does nothing if the file is missing, corrupt, or
     no legacy entry exists.
     """
-    try:
-        with open(CREDENTIALS_FILE, encoding="utf-8") as f:
-            old_data = json.load(f)
-        if old_data.get("token_store") == "keyring":
-            old_account = old_data.get("user", {}).get("email", "")
-            if old_account and old_account != KEYRING_ACCOUNT:
-                _keyring_delete(old_account)
-    except (OSError, json.JSONDecodeError, ValueError):
-        pass
+    if metadata is None:
+        try:
+            with open(CREDENTIALS_FILE, encoding="utf-8") as f:
+                metadata = json.load(f)
+        except (OSError, json.JSONDecodeError, ValueError):
+            return
+        if not isinstance(metadata, dict):
+            return
+
+    if metadata.get("token_store") == TOKEN_STORE_KEYRING:
+        old_account = metadata.get("user", {}).get("email", "")
+        if old_account and old_account != KEYRING_ACCOUNT:
+            _keyring_delete(old_account)
 
 
 def _keyring_set(account: str, token: str) -> bool:
@@ -194,26 +206,35 @@ def save_credentials(credentials: Credentials) -> str:
     #   - The user re-logs as a different account
     #   - The storage backend switches from keyring to file
     #   - A previous login used an email-based account name (legacy)
+    # Read existing metadata once to pass to _cleanup_legacy_keyring_entries,
+    # avoiding a redundant file read inside that function.
+    old_metadata: dict | None = None
+    try:
+        with open(CREDENTIALS_FILE, encoding="utf-8") as f:
+            old_metadata = json.load(f)
+    except (OSError, json.JSONDecodeError, ValueError):
+        pass
+
     _keyring_delete(KEYRING_ACCOUNT)
-    _cleanup_legacy_keyring_entries()
+    _cleanup_legacy_keyring_entries(old_metadata)
 
     data = credentials.to_dict()
 
     # Try keyring first
     if _keyring_set(KEYRING_ACCOUNT, credentials.access_token):
         data.pop("access_token", None)
-        data["token_store"] = "keyring"
+        data["token_store"] = TOKEN_STORE_KEYRING
         atomic_write_json(CREDENTIALS_FILE, data, mode=0o600)
-        return "keyring"
+        return TOKEN_STORE_KEYRING
 
     # Fallback: store everything in the JSON file
-    data["token_store"] = "file"
+    data["token_store"] = TOKEN_STORE_FILE
     atomic_write_json(CREDENTIALS_FILE, data, mode=0o600)
     sys.stderr.write(
         "Warning: keyring unavailable — token stored in plain text at "
         f"{CREDENTIALS_FILE}\n"
     )
-    return "file"
+    return TOKEN_STORE_FILE
 
 
 def load_credentials() -> Credentials | None:
@@ -254,10 +275,10 @@ def load_credentials() -> Credentials | None:
         )
         return None
 
-    token_store = data.get("token_store", "file")
+    token_store = data.get("token_store", TOKEN_STORE_FILE)
 
     # 3. Resolve token
-    if token_store == "keyring":
+    if token_store == TOKEN_STORE_KEYRING:
         # Try the fixed account name first, then fall back to legacy
         # email-based account for backward compatibility.
         token = _keyring_get(KEYRING_ACCOUNT)
@@ -298,13 +319,21 @@ def delete_credentials() -> bool:
         ``save_credentials`` always writes it, so its presence indicates
         that credentials were stored.
     """
-    # 1. Always attempt keyring cleanup with the fixed account name.
+    # 1. Read metadata once for legacy cleanup (before we delete the file).
+    old_metadata: dict | None = None
+    try:
+        with open(CREDENTIALS_FILE, encoding="utf-8") as f:
+            old_metadata = json.load(f)
+    except (OSError, json.JSONDecodeError, ValueError):
+        pass
+
+    # 2. Always attempt keyring cleanup with the fixed account name.
     #    This does not depend on metadata — it works even if the file
     #    is missing or corrupt.
     keyring_cleaned = _keyring_delete(KEYRING_ACCOUNT)
 
-    # 2. Also clean up any legacy email-based keyring entry.
-    _cleanup_legacy_keyring_entries()
+    # 3. Also clean up any legacy email-based keyring entry.
+    _cleanup_legacy_keyring_entries(old_metadata)
 
     if not keyring_cleaned:
         sys.stderr.write(
@@ -312,7 +341,7 @@ def delete_credentials() -> bool:
             "You may want to remove it manually.\n"
         )
 
-    # 3. Remove the metadata file — this is the canonical indicator of
+    # 4. Remove the metadata file — this is the canonical indicator of
     #    whether credentials existed, since save_credentials() always
     #    writes this file regardless of keyring availability.
     try:
@@ -340,10 +369,10 @@ def get_credential_store() -> str | None:
         based on the metadata file, or ``None`` if not logged in.
     """
     if os.environ.get("OSMOSIS_TOKEN"):
-        return "env"
+        return TOKEN_STORE_ENV
     try:
         with open(CREDENTIALS_FILE, encoding="utf-8") as f:
             data = json.load(f)
-        return data.get("token_store", "file")
+        return data.get("token_store", TOKEN_STORE_FILE)
     except Exception:
         return None

@@ -233,7 +233,7 @@ def poll_device_token(
                 time.sleep(current_interval)
                 continue
             elif error_code == "slow_down":
-                current_interval += 5
+                current_interval = min(current_interval + 5, 30)
                 time.sleep(current_interval)
                 continue
             elif error_code == "expired_token":

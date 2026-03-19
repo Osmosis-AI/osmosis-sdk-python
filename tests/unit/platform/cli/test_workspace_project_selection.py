@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 import osmosis_ai.platform.cli.project as project_module
+import osmosis_ai.platform.cli.utils as utils_module
 from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.platform.auth.platform_client import PlatformAPIError
 
@@ -125,7 +126,7 @@ def test_refresh_projects_uses_selected_workspace_credentials_and_cache(
     fake_credentials = FakeCredentials()
 
     monkeypatch.setattr(
-        project_module,
+        utils_module,
         "get_valid_credentials",
         lambda: fake_credentials,
     )
@@ -228,7 +229,7 @@ def test_require_subscription_refreshes_selected_workspace(monkeypatch) -> None:
             return False
 
     monkeypatch.setattr(
-        project_module,
+        utils_module,
         "get_valid_credentials",
         lambda: FakeCredentials(),
     )

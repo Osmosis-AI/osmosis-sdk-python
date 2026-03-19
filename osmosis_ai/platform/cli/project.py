@@ -18,9 +18,7 @@ from osmosis_ai.cli.prompts import (
 )
 from osmosis_ai.platform.api.client import OsmosisClient
 from osmosis_ai.platform.auth import (
-    AuthenticationExpiredError,
     PlatformAPIError,
-    get_valid_credentials,
     load_workspace_projects,
     save_workspace_projects,
 )
@@ -76,13 +74,14 @@ def _get_active_workspace_name() -> str:
 
 
 def _require_credentials() -> Credentials:
-    """Load valid credentials, raising if not available."""
-    credentials = get_valid_credentials()
-    if credentials is None:
-        raise AuthenticationExpiredError(
-            "No valid credentials found. Please run 'osmosis login' first."
-        )
-    return credentials
+    """Load valid credentials, raising if not available.
+
+    Delegates to the shared :func:`~osmosis_ai.platform.cli.utils.require_credentials`.
+    Kept as a private alias so existing intra-module callers are unaffected.
+    """
+    from .utils import require_credentials
+
+    return require_credentials()
 
 
 # ── Interactive selection ──────────────────────────────────────────
