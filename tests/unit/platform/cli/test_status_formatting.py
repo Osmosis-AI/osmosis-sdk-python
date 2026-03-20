@@ -20,7 +20,7 @@ ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*m")
 def _make_rich_console() -> tuple[Console, StringIO]:
     output = StringIO()
     console = Console(file=output, force_terminal=True)
-    assert console.use_rich is True
+    assert console.is_tty is True
     return console, output
 
 
@@ -107,6 +107,6 @@ def test_workspace_status_format_preserves_plain_text_brackets() -> None:
     original_console = utils_module.console
     utils_module.console = console
     try:
-        assert utils_module.format_dataset_status(dataset) == "[deleted]"
+        assert utils_module.format_dataset_status(dataset) == "\\[deleted]"
     finally:
         utils_module.console = original_console

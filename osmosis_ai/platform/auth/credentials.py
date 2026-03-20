@@ -1,14 +1,112 @@
-"""Credential storage and retrieval for Osmosis CLI authentication."""
+"""Credential storage and retrieval for Osmosis CLI authentication.
+
+Supports three token sources with descending priority:
+
+    1. ``OSMOSIS_TOKEN`` environment variable  (CI / headless)
+    2. System keyring  (macOS Keychain, GNOME Keyring, …)
+    3. Plain-text JSON file  (``~/.config/osmosis/credentials.json``)
+
+When *saving*, the module tries the keyring first.  If successful the
+JSON metadata file is written **without** the token.  If the keyring is
+unavailable the token is stored in the JSON file and a warning is
+emitted so the user knows the secret is on disk in clear text.
+"""
 
 from __future__ import annotations
 
 import json
+import os
+import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+import keyring
+from keyring.backends.fail import Keyring as FailKeyring
+from keyring.errors import PasswordDeleteError
 
 from ._fileutil import atomic_write_json
 from .config import CREDENTIALS_FILE, CREDENTIALS_VERSION
+
+if TYPE_CHECKING:
+    from .flow import VerifyResult
+
+# ---------------------------------------------------------------------------
+# Keyring helpers
+# ---------------------------------------------------------------------------
+
+KEYRING_SERVICE = "osmosis-cli"
+KEYRING_ACCOUNT = "default"
+
+# Token store backend identifiers (persisted in credentials.json)
+TOKEN_STORE_KEYRING = "keyring"
+TOKEN_STORE_FILE = "file"
+TOKEN_STORE_ENV = "env"
+
+
+def _cleanup_legacy_keyring_entries(metadata: dict | None = None) -> None:
+    """Delete any legacy email-based keyring entry from a previous version.
+
+    Args:
+        metadata: Pre-parsed metadata dict. If ``None``, reads the credentials
+            file from disk to discover the old account name.
+
+    Silently does nothing if the file is missing, corrupt, or
+    no legacy entry exists.
+    """
+    if metadata is None:
+        try:
+            with open(CREDENTIALS_FILE, encoding="utf-8") as f:
+                metadata = json.load(f)
+        except (OSError, json.JSONDecodeError, ValueError):
+            return
+
+    if not isinstance(metadata, dict):
+        return
+
+    if metadata.get("token_store") == TOKEN_STORE_KEYRING:
+        old_account = metadata.get("user", {}).get("email", "")
+        if old_account and old_account != KEYRING_ACCOUNT:
+            _keyring_delete(old_account)
+
+
+def _keyring_set(account: str, token: str) -> bool:
+    """Store *token* in the system keyring. Returns ``True`` on success."""
+    try:
+        if isinstance(keyring.get_keyring(), FailKeyring):
+            return False
+        keyring.set_password(KEYRING_SERVICE, account, token)
+        return True
+    except Exception:
+        return False
+
+
+def _keyring_get(account: str) -> str | None:
+    """Retrieve a token from the system keyring."""
+    try:
+        return keyring.get_password(KEYRING_SERVICE, account)
+    except Exception:
+        return None
+
+
+def _keyring_delete(account: str) -> bool:
+    """Delete a token from the system keyring. Returns ``True`` on success."""
+    try:
+        keyring.delete_password(KEYRING_SERVICE, account)
+        return True
+    except PasswordDeleteError:
+        # Entry does not exist — nothing to clean up.
+        return True
+    except Exception:
+        sys.stderr.write(
+            f"Warning: failed to remove token from keyring for {account}\n"
+        )
+        return False
+
+
+# ---------------------------------------------------------------------------
+# Data classes
+# ---------------------------------------------------------------------------
 
 
 @dataclass
@@ -32,65 +130,56 @@ class UserInfo:
 
 
 @dataclass
-class OrganizationInfo:
-    """Organization (workspace) information from authentication."""
-
-    id: str
-    name: str
-    role: str  # "owner", "admin", or "member"
-
-    def to_dict(self) -> dict[str, Any]:
-        return {"id": self.id, "name": self.name, "role": self.role}
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> OrganizationInfo:
-        return cls(
-            id=data["id"],
-            name=data["name"],
-            role=data.get("role", "member"),
-        )
-
-
-@dataclass
-class WorkspaceCredentials:
-    """Credentials for a single workspace."""
+class Credentials:
+    """User-scoped credentials (single token for all workspaces)."""
 
     access_token: str
     token_type: str
     expires_at: datetime
-    user: UserInfo
-    organization: OrganizationInfo
     created_at: datetime
-    token_id: str | None = None  # Platform token ID for revocation
+    user: UserInfo
+    token_id: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
-        result = {
+        result: dict[str, Any] = {
+            "version": CREDENTIALS_VERSION,
             "access_token": self.access_token,
             "token_type": self.token_type,
             "expires_at": self.expires_at.isoformat(),
-            "user": self.user.to_dict(),
-            "organization": self.organization.to_dict(),
             "created_at": self.created_at.isoformat(),
+            "user": self.user.to_dict(),
         }
         if self.token_id:
             result["token_id"] = self.token_id
         return result
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> WorkspaceCredentials:
+    def from_dict(cls, data: dict[str, Any]) -> Credentials:
         expires_at = datetime.fromisoformat(data["expires_at"])
         if expires_at.tzinfo is None:
             raise ValueError(
                 "expires_at must be timezone-aware (ISO8601 with timezone offset)"
             )
+        created_at = datetime.fromisoformat(data["created_at"])
         return cls(
             access_token=data["access_token"],
             token_type=data["token_type"],
             expires_at=expires_at,
+            created_at=created_at,
             user=UserInfo.from_dict(data["user"]),
-            organization=OrganizationInfo.from_dict(data["organization"]),
-            created_at=datetime.fromisoformat(data["created_at"]),
             token_id=data.get("token_id"),
+        )
+
+    @classmethod
+    def from_verify_result(cls, token: str, verified: VerifyResult) -> Credentials:
+        """Build Credentials from a raw token and its verification result."""
+        return cls(
+            access_token=token,
+            token_type="Bearer",
+            expires_at=verified.expires_at,
+            created_at=datetime.now(timezone.utc),
+            user=verified.user,
+            token_id=verified.token_id,
         )
 
     def is_expired(self) -> bool:
@@ -98,149 +187,173 @@ class WorkspaceCredentials:
         return datetime.now(timezone.utc) >= self.expires_at.astimezone(timezone.utc)
 
 
-@dataclass
-class CredentialsStore:
-    """Multi-workspace credentials storage."""
+# ---------------------------------------------------------------------------
+# Save / Load / Delete
+# ---------------------------------------------------------------------------
 
-    active_workspace: str | None  # workspace name
-    workspaces: dict[str, WorkspaceCredentials]  # keyed by workspace name
 
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "version": CREDENTIALS_VERSION,
-            "active_workspace": self.active_workspace,
-            "workspaces": {
-                name: creds.to_dict() for name, creds in self.workspaces.items()
-            },
-        }
+def save_credentials(credentials: Credentials) -> str:
+    """Save user credentials.
 
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> CredentialsStore:
-        workspaces = {}
-        for name, creds_data in data.get("workspaces", {}).items():
-            workspaces[name] = WorkspaceCredentials.from_dict(creds_data)
-        return cls(
-            active_workspace=data.get("active_workspace"),
-            workspaces=workspaces,
+    Tries the system keyring first; falls back to plain-text JSON.
+    Always cleans up any previous keyring entries to avoid orphaned tokens
+    (e.g. when re-logging, switching accounts, or falling back to file storage).
+
+    Returns:
+        The storage backend used: ``"keyring"`` or ``"file"``.
+    """
+    # Always clean up previous keyring entries before saving new credentials.
+    # This prevents orphaned tokens when:
+    #   - The user re-logs as a different account
+    #   - The storage backend switches from keyring to file
+    #   - A previous login used an email-based account name (legacy)
+    # Read existing metadata once to pass to _cleanup_legacy_keyring_entries,
+    # avoiding a redundant file read inside that function.
+    old_metadata: dict | None = None
+    try:
+        with open(CREDENTIALS_FILE, encoding="utf-8") as f:
+            old_metadata = json.load(f)
+    except (OSError, json.JSONDecodeError, ValueError):
+        pass
+
+    _keyring_delete(KEYRING_ACCOUNT)
+    _cleanup_legacy_keyring_entries(old_metadata)
+
+    data = credentials.to_dict()
+
+    # Try keyring first
+    if _keyring_set(KEYRING_ACCOUNT, credentials.access_token):
+        data.pop("access_token", None)
+        data["token_store"] = TOKEN_STORE_KEYRING
+        atomic_write_json(CREDENTIALS_FILE, data, mode=0o600)
+        return TOKEN_STORE_KEYRING
+
+    # Fallback: store everything in the JSON file
+    data["token_store"] = TOKEN_STORE_FILE
+    atomic_write_json(CREDENTIALS_FILE, data, mode=0o600)
+    sys.stderr.write(
+        "Warning: keyring unavailable — token stored in plain text at "
+        f"{CREDENTIALS_FILE}\n"
+    )
+    return TOKEN_STORE_FILE
+
+
+def load_credentials() -> Credentials | None:
+    """Load credentials with priority: env var → keyring → plain-text file.
+
+    Returns:
+        The loaded credentials, or ``None`` if no credentials exist.
+    """
+    # 1. Environment variable
+    env_token = os.environ.get("OSMOSIS_TOKEN")
+    if env_token:
+        return Credentials(
+            access_token=env_token,
+            token_type="Bearer",
+            expires_at=datetime.max.replace(tzinfo=timezone.utc),
+            created_at=datetime.now(timezone.utc),
+            user=UserInfo(id="", email="", name=None),
+            token_id=None,
         )
 
-    def get_active_credentials(self) -> WorkspaceCredentials | None:
-        """Get credentials for the active workspace."""
-        if not self.active_workspace:
-            return None
-        return self.workspaces.get(self.active_workspace)
-
-
-def _load_store() -> CredentialsStore | None:
-    """Load the credentials store from file."""
+    # 2. Load metadata file
     try:
         with open(CREDENTIALS_FILE, encoding="utf-8") as f:
             data = json.load(f)
-        return CredentialsStore.from_dict(data)
     except FileNotFoundError:
         return None
     except (json.JSONDecodeError, KeyError, ValueError) as exc:
-        import sys
-
         sys.stderr.write(
             f"Warning: could not parse credentials file ({type(exc).__name__}); "
             "run 'osmosis login' to re-authenticate.\n"
         )
         return None
 
-
-def _save_store(store: CredentialsStore) -> None:
-    """Save the credentials store to file.
-
-    Uses atomic_write_json to ensure credentials are written with 0o600
-    permissions from the start, avoiding a permission window where
-    credentials could be world-readable.
-    """
-    data = store.to_dict()
-    atomic_write_json(CREDENTIALS_FILE, data, mode=0o600)
-
-
-def save_credentials(credentials: WorkspaceCredentials) -> None:
-    """Save credentials for a workspace, adding it to the store.
-
-    This will also set the workspace as active.
-
-    Args:
-        credentials: The credentials to save.
-    """
-    store = _load_store() or CredentialsStore(active_workspace=None, workspaces={})
-
-    workspace_name = credentials.organization.name
-    store.workspaces[workspace_name] = credentials
-    store.active_workspace = workspace_name
-
-    _save_store(store)
-
-
-def load_credentials() -> WorkspaceCredentials | None:
-    """Load credentials for the active workspace.
-
-    Returns:
-        The loaded credentials, or None if no active workspace exists.
-    """
-    store = _load_store()
-    if store is None:
+    if data.get("version") != CREDENTIALS_VERSION:
+        sys.stderr.write(
+            "Credentials format has changed. "
+            "Please run 'osmosis login' to re-authenticate.\n"
+        )
         return None
-    return store.get_active_credentials()
 
+    token_store = data.get("token_store", TOKEN_STORE_FILE)
 
-def load_workspace_credentials(workspace_name: str) -> WorkspaceCredentials | None:
-    """Load credentials for a specific workspace."""
-    store = _load_store()
-    if store is None:
+    # 3. Resolve token
+    if token_store == TOKEN_STORE_KEYRING:
+        # Try the fixed account name first, then fall back to legacy
+        # email-based account for backward compatibility.
+        token = _keyring_get(KEYRING_ACCOUNT)
+        if token is None:
+            legacy_account = data.get("user", {}).get("email", "")
+            if legacy_account and legacy_account != KEYRING_ACCOUNT:
+                token = _keyring_get(legacy_account)
+        if token is None:
+            sys.stderr.write(
+                "Token not found in keyring. "
+                "Please run 'osmosis login' to re-authenticate.\n"
+            )
+            return None
+        data["access_token"] = token
+
+    # 4. Parse into Credentials
+    try:
+        return Credentials.from_dict(data)
+    except (KeyError, ValueError) as exc:
+        sys.stderr.write(
+            f"Warning: could not parse credentials ({type(exc).__name__}); "
+            "run 'osmosis login' to re-authenticate.\n"
+        )
         return None
-    return store.workspaces.get(workspace_name)
 
 
 def delete_credentials() -> bool:
-    """Delete all stored credentials.
+    """Delete all stored credentials (keyring entry + file).
+
+    Always attempts to clean up the keyring entry using the fixed account
+    name, regardless of metadata state.  Also cleans up any legacy
+    email-based keyring entries if the metadata file is readable.
+    A corrupt or missing JSON file cannot prevent keyring cleanup.
 
     Returns:
-        True if credentials were deleted, False if none existed.
+        ``True`` if credentials were found and removed, ``False`` if no
+        credentials existed.  The metadata file is the source of truth:
+        ``save_credentials`` always writes it, so its presence indicates
+        that credentials were stored.
     """
-    if CREDENTIALS_FILE.exists():
+    # 1. Read metadata once for legacy cleanup (before we delete the file).
+    old_metadata: dict | None = None
+    try:
+        with open(CREDENTIALS_FILE, encoding="utf-8") as f:
+            old_metadata = json.load(f)
+    except (OSError, json.JSONDecodeError, ValueError):
+        pass
+
+    # 2. Always attempt keyring cleanup with the fixed account name.
+    #    This does not depend on metadata — it works even if the file
+    #    is missing or corrupt.
+    keyring_cleaned = _keyring_delete(KEYRING_ACCOUNT)
+
+    # 3. Also clean up any legacy email-based keyring entry.
+    _cleanup_legacy_keyring_entries(old_metadata)
+
+    if not keyring_cleaned:
+        sys.stderr.write(
+            "Warning: could not remove token from system keyring. "
+            "You may want to remove it manually.\n"
+        )
+
+    # 4. Remove the metadata file — this is the canonical indicator of
+    #    whether credentials existed, since save_credentials() always
+    #    writes this file regardless of keyring availability.
+    try:
         CREDENTIALS_FILE.unlink()
         return True
-    return False
-
-
-def delete_workspace_credentials(workspace_name: str) -> bool:
-    """Delete credentials for a specific workspace.
-
-    Args:
-        workspace_name: The name of the workspace to remove.
-
-    Returns:
-        True if the workspace was removed, False if it didn't exist.
-    """
-    store = _load_store()
-    if store is None or workspace_name not in store.workspaces:
+    except FileNotFoundError:
         return False
 
-    del store.workspaces[workspace_name]
 
-    # If we deleted the active workspace, set a new one or None
-    if store.active_workspace == workspace_name:
-        if store.workspaces:
-            store.active_workspace = next(iter(store.workspaces.keys()))
-        else:
-            store.active_workspace = None
-
-    _save_store(store)
-    return True
-
-
-def get_valid_credentials() -> WorkspaceCredentials | None:
-    """Get credentials for the active workspace if they exist and are not expired.
-
-    Returns:
-        Valid credentials, or None if no valid credentials exist.
-    """
+def get_valid_credentials() -> Credentials | None:
+    """Get credentials if they exist and are not expired."""
     credentials = load_credentials()
     if credentials is None:
         return None
@@ -249,48 +362,18 @@ def get_valid_credentials() -> WorkspaceCredentials | None:
     return credentials
 
 
-def get_all_workspaces() -> list[tuple[str, WorkspaceCredentials, bool]]:
-    """Get all stored workspaces with their credentials.
+def get_credential_store() -> str | None:
+    """Return the active storage backend.
 
     Returns:
-        List of (workspace_name, credentials, is_active) tuples.
+        ``"env"`` if ``OSMOSIS_TOKEN`` is set, ``"keyring"`` or ``"file"``
+        based on the metadata file, or ``None`` if not logged in.
     """
-    store = _load_store()
-    if store is None:
-        return []
-
-    result = []
-    for name, creds in store.workspaces.items():
-        is_active = name == store.active_workspace
-        result.append((name, creds, is_active))
-    return result
-
-
-def get_active_workspace() -> str | None:
-    """Get the name of the active workspace.
-
-    Returns:
-        The active workspace name, or None if no workspace is active.
-    """
-    store = _load_store()
-    if store is None:
+    if os.environ.get("OSMOSIS_TOKEN"):
+        return TOKEN_STORE_ENV
+    try:
+        with open(CREDENTIALS_FILE, encoding="utf-8") as f:
+            data = json.load(f)
+        return data.get("token_store", TOKEN_STORE_FILE)
+    except Exception:
         return None
-    return store.active_workspace
-
-
-def set_active_workspace(workspace_name: str) -> bool:
-    """Set the active workspace.
-
-    Args:
-        workspace_name: The name of the workspace to make active.
-
-    Returns:
-        True if successful, False if the workspace doesn't exist.
-    """
-    store = _load_store()
-    if store is None or workspace_name not in store.workspaces:
-        return False
-
-    store.active_workspace = workspace_name
-    _save_store(store)
-    return True

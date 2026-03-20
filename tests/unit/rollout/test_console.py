@@ -1,19 +1,16 @@
-"""Tests for rollout console fallback behavior."""
+"""Tests for Console behavior in TTY and non-TTY modes."""
 
 from __future__ import annotations
 
 from io import StringIO
 
-import osmosis_ai.cli.console as console_module
+from osmosis_ai.cli.console import Console
 
 
-def test_print_fallback_ignores_rich_only_kwargs(monkeypatch) -> None:
-    """Fallback print should ignore rich-only kwargs and still render output."""
-    monkeypatch.setattr(console_module, "RICH_AVAILABLE", False)
+def test_print_passes_rich_kwargs_through() -> None:
+    """Console.print forwards kwargs like markup and highlight to Rich."""
     output = StringIO()
-    console = console_module.Console(file=output, force_terminal=True)
-
-    assert console.use_rich is False
+    console = Console(file=output, force_terminal=True)
 
     console.print(
         "hello",
@@ -21,51 +18,30 @@ def test_print_fallback_ignores_rich_only_kwargs(monkeypatch) -> None:
         style="green",
         markup=True,
         highlight=False,
-        justify="center",
-        overflow="fold",
     )
 
     text = output.getvalue()
-    assert "hello world" in text
-    assert "\033[32m" in text
+    assert "hello" in text
+    assert "world" in text
 
 
-def test_print_fallback_respects_sep(monkeypatch) -> None:
-    """Fallback print should preserve built-in print separator behavior."""
-    monkeypatch.setattr(console_module, "RICH_AVAILABLE", False)
+def test_print_respects_sep() -> None:
+    """Console.print preserves separator behavior via Rich."""
     output = StringIO()
-    console = console_module.Console(file=output, force_terminal=False)
+    console = Console(file=output, force_terminal=True)
 
-    console.print("a", "b", "c", sep="|", markup=True, highlight=False)
+    console.print("a", "b", "c", sep="|")
 
-    assert output.getvalue() == "a|b|c\n"
+    assert "a|b|c" in output.getvalue()
 
 
-def test_run_rich_executes_renderer_when_available() -> None:
-    """run_rich should execute renderer and return True when rich backend exists."""
+def test_non_tty_output_has_no_ansi() -> None:
+    """Non-TTY output should not contain ANSI escape codes."""
     output = StringIO()
-    console = console_module.Console(file=output, force_terminal=False)
-    sentinel = object()
-    console._use_rich = True
-    console._rich = sentinel
+    console = Console(file=output, force_terminal=False)
 
-    captured = {"value": None}
+    console.print("styled text", style="bold green")
 
-    def _renderer(rich_console: object) -> None:
-        captured["value"] = rich_console
-
-    assert console.run_rich(_renderer) is True
-    assert captured["value"] is sentinel
-
-
-def test_run_rich_returns_false_on_import_error() -> None:
-    """run_rich should return False when renderer raises ImportError."""
-    output = StringIO()
-    console = console_module.Console(file=output, force_terminal=False)
-    console._use_rich = True
-    console._rich = object()
-
-    def _renderer(_rich_console: object) -> None:
-        raise ImportError("rich unavailable")
-
-    assert console.run_rich(_renderer) is False
+    text = output.getvalue()
+    assert "styled text" in text
+    assert "\033[" not in text

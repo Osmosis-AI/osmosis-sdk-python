@@ -1,25 +1,30 @@
-"""Login flow orchestration for Osmosis CLI authentication."""
+"""Authentication flows for Osmosis CLI.
+
+Provides device code flow (RFC 8628) for interactive login and
+token verification for CI/headless authentication.
+"""
 
 from __future__ import annotations
 
-import secrets
+import contextlib
+import json
+import platform
 import socket
-import webbrowser
+import subprocess
+import sys
+import time
+from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime, timezone
-from urllib.parse import urlencode
+from datetime import datetime, timedelta, timezone
+from typing import Any
+from urllib.error import HTTPError, URLError
+from urllib.request import Request, urlopen
 
+from osmosis_ai.cli.console import console
 from osmosis_ai.consts import PACKAGE_VERSION
 
 from .config import PLATFORM_URL
-from .credentials import (
-    OrganizationInfo,
-    UserInfo,
-    WorkspaceCredentials,
-    save_credentials,
-)
-from .local_config import save_subscription_status
-from .local_server import LocalAuthServer, find_available_port
+from .credentials import Credentials, UserInfo
 
 
 class LoginError(Exception):
@@ -31,7 +36,6 @@ class VerifyResult:
     """Result of token verification against the platform."""
 
     user: UserInfo
-    organization: OrganizationInfo
     expires_at: datetime
     token_id: str | None
 
@@ -41,160 +45,140 @@ class LoginResult:
     """Result of a successful login."""
 
     user: UserInfo
-    organization: OrganizationInfo
     expires_at: datetime
-    revoked_previous_tokens: int = 0
+
+    @classmethod
+    def from_verify_result(cls, verified: VerifyResult) -> LoginResult:
+        """Build a LoginResult from a VerifyResult."""
+        return cls(
+            user=verified.user,
+            expires_at=verified.expires_at,
+        )
 
 
-def _generate_state() -> str:
-    """Generate a cryptographically secure state parameter."""
-    return secrets.token_urlsafe(32)
+@dataclass
+class DeviceCodeResponse:
+    device_code: str
+    user_code: str
+    verification_uri: str
+    expires_in: int
+    interval: int
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+
+
+def _parse_expires_at(raw: str | None) -> datetime:
+    """Parse an ISO 8601 expires_at string into a timezone-aware datetime.
+
+    Falls back to 90 days from now if the value is missing.
+
+    Raises:
+        LoginError: If the timestamp is naive (no timezone) or already expired.
+    """
+    if not raw:
+        return datetime.now(timezone.utc) + timedelta(days=90)
+
+    expires_at = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    if expires_at.tzinfo is None:
+        raise LoginError(
+            "Invalid expires_at from platform: expected timezone-aware ISO8601 timestamp"
+        )
+    if datetime.now(timezone.utc) >= expires_at:
+        raise LoginError(
+            "Received token is already expired. Please check system clock or try again."
+        )
+    return expires_at
 
 
 def _get_device_name() -> str:
-    """Get the current device name (hostname).
-
-    Returns:
-        The hostname of the current machine.
-    """
+    """Get the current device name (hostname)."""
     try:
         return socket.gethostname()
     except Exception:
         return "Unknown"
 
 
-def _build_login_url(state: str, port: int) -> str:
-    """Build the login URL for the browser.
-
-    Args:
-        state: The state parameter for CSRF protection.
-        port: The local server port for callback.
-
-    Returns:
-        The full login URL.
-    """
-    device_name = _get_device_name()
-    params = {
-        "state": state,
-        "port": str(port),
-        "device_name": device_name,
-        "redirect_uri": f"http://localhost:{port}/callback",
-    }
-    return f"{PLATFORM_URL}/cli-auth?{urlencode(params)}"
-
-
-def login(
-    no_browser: bool = False,
-    timeout: float = 300.0,
-) -> LoginResult:
-    """Execute the login flow.
-
-    Args:
-        no_browser: If True, print the URL instead of opening browser.
-        timeout: Timeout in seconds for waiting for callback.
-
-    Returns:
-        LoginResult with user information.
-
-    Raises:
-        LoginError: If login fails.
-    """
-    # Find an available port
-    port = find_available_port()
-    if port is None:
-        raise LoginError(
-            "No available port found in range 8976-8985. "
-            "Please close any applications using these ports."
-        )
-
-    # Generate state for CSRF protection
-    state = _generate_state()
-
-    # Build the login URL
-    login_url = _build_login_url(state, port)
-
-    # Start the local server
-    server = LocalAuthServer(port, expected_state=state)
-
+def _copy_to_clipboard(text: str) -> bool:
+    """Try to copy text to system clipboard. Returns True on success."""
+    system = platform.system()
     try:
-        # Always print the URL so users can copy/paste if browser doesn't open
-        print("Please open this URL in your browser to log in:")
-        print(f"\n{login_url}\n")
-
-        if not no_browser:
-            print("Attempting to open browser automatically...")
-            if webbrowser.open(login_url):
-                print("Browser opened successfully.")
-            else:
-                print("Could not open browser automatically. Please use the URL above.")
-
-        print("\nWaiting for authentication...")
-
-        # Wait for callback
-        token, error = server.wait_for_callback(timeout=timeout)
-        revoked_count = server.revoked_count
-
-        if error:
-            raise LoginError(f"Authentication failed: {error}")
-
-        if not token:
-            raise LoginError("No token received from authentication")
-
-        # Verify token and get user info from platform
-        try:
-            verified = _verify_and_get_user_info(token)
-        except LoginError as e:
-            server.set_verification_result(success=False, error=str(e))
-            raise
-
-        server.set_verification_result(success=True)
-
-        credentials = WorkspaceCredentials(
-            access_token=token,
-            token_type="Bearer",
-            expires_at=verified.expires_at,
-            user=verified.user,
-            organization=verified.organization,
-            created_at=datetime.now(timezone.utc),
-            token_id=verified.token_id,
-        )
-
-        save_credentials(credentials)
-
-        return LoginResult(
-            user=verified.user,
-            organization=verified.organization,
-            expires_at=verified.expires_at,
-            revoked_previous_tokens=revoked_count,
-        )
-
-    finally:
-        # Ensure the callback handler is unblocked if verification wasn't reached
-        if server.is_verification_pending():
-            server.set_verification_result(
-                success=False, error="Login failed unexpectedly"
-            )
-        server.signal_shutdown()
-        server.server_close()
+        if system == "Darwin":
+            cmd = ["pbcopy"]
+        elif system == "Linux":
+            cmd = ["xclip", "-selection", "clipboard"]
+        elif system == "Windows":
+            cmd = ["clip"]
+        else:
+            return False
+        subprocess.run(cmd, input=text.encode(), check=True, timeout=3)
+        return True
+    except Exception:
+        return False
 
 
-def _verify_and_get_user_info(token: str) -> VerifyResult:
+def _read_error_detail(e: HTTPError) -> str:
+    """Extract error message from an HTTPError JSON response body."""
+    try:
+        body = json.loads(e.read().decode())
+        if isinstance(body, dict):
+            return body.get("error", "") or body.get("message", "")
+    except Exception:
+        pass
+    return ""
+
+
+# User-friendly messages keyed by HTTP status code.
+_HTTP_ERROR_MESSAGES: dict[int, str] = {
+    401: "Authentication failed.",
+    403: "Access denied by the platform.",
+    429: "Too many requests. Please wait a few minutes and try again.",
+    500: "Osmosis platform encountered an internal error. Please try again later.",
+    502: "Osmosis platform is temporarily unavailable. Please try again later.",
+    503: "Osmosis platform is temporarily unavailable. Please try again later.",
+    504: "Osmosis platform is temporarily unavailable. Please try again later.",
+}
+
+
+def _login_error_from_http(
+    e: HTTPError, fallback_prefix: str = "Request failed"
+) -> LoginError:
+    """Build a LoginError with a user-friendly message from an HTTPError.
+
+    Uses the platform's error detail when it adds meaningful context,
+    otherwise falls back to a status-code-specific message or a generic one.
+    """
+    detail = _read_error_detail(e)
+    friendly = _HTTP_ERROR_MESSAGES.get(e.code)
+
+    if detail and friendly:
+        return LoginError(f"{friendly} ({detail})")
+    if friendly:
+        return LoginError(friendly)
+    if detail:
+        return LoginError(f"{fallback_prefix}: {detail} (HTTP {e.code})")
+    return LoginError(f"{fallback_prefix}: HTTP {e.code}")
+
+
+# ---------------------------------------------------------------------------
+# Token verification (--token path)
+# ---------------------------------------------------------------------------
+
+
+def verify_token(token: str) -> VerifyResult:
     """Verify token and get user info from the platform.
 
     Args:
         token: The access token to verify.
 
     Returns:
-        VerifyResult with user, organization, expiration, token_id, and projects.
+        VerifyResult with user, expiration, and token_id.
 
     Raises:
         LoginError: If verification fails.
     """
-    import json
-    from datetime import timedelta, timezone
-    from urllib.error import HTTPError, URLError
-    from urllib.request import Request, urlopen
-
     verify_url = f"{PLATFORM_URL}/api/cli/verify"
 
     request = Request(
@@ -219,43 +203,13 @@ def _verify_and_get_user_info(token: str) -> VerifyResult:
                 name=user_data.get("name"),
             )
 
-            org_data = data.get("organization", {})
-            org_info = OrganizationInfo(
-                id=org_data.get("id", ""),
-                name=org_data.get("name", ""),
-                role=org_data.get("role", "member"),
-            )
-
             if not user_info.id or not user_info.email:
                 raise LoginError("Server returned incomplete user information")
-            if not org_info.id or not org_info.name:
-                raise LoginError("Server returned incomplete organization information")
 
-            expires_at_str = data.get("expires_at")
-            if expires_at_str:
-                expires_at = datetime.fromisoformat(
-                    expires_at_str.replace("Z", "+00:00")
-                )
-                if expires_at.tzinfo is None:
-                    raise LoginError(
-                        "Invalid expires_at from platform: expected timezone-aware ISO8601 timestamp"
-                    )
-                if datetime.now(timezone.utc) >= expires_at:
-                    raise LoginError(
-                        "Received token is already expired. "
-                        "Please check system clock or try again."
-                    )
-            else:
-                expires_at = datetime.now(timezone.utc) + timedelta(days=90)
-
-            if org_info.name:
-                has_subscription = data.get("has_subscription")
-                if has_subscription is not None:
-                    save_subscription_status(org_info.name, bool(has_subscription))
+            expires_at = _parse_expires_at(data.get("expires_at"))
 
             return VerifyResult(
                 user=user_info,
-                organization=org_info,
                 expires_at=expires_at,
                 token_id=token_id,
             )
@@ -263,8 +217,185 @@ def _verify_and_get_user_info(token: str) -> VerifyResult:
     except HTTPError as e:
         if e.code == 401:
             raise LoginError("Invalid or expired token") from e
-        raise LoginError(f"Verification failed: HTTP {e.code}") from e
+        raise _login_error_from_http(e, "Verification failed") from e
     except URLError as e:
         raise LoginError(f"Could not connect to platform: {e.reason}") from e
     except json.JSONDecodeError as e:
         raise LoginError("Invalid response from platform") from e
+
+
+# ---------------------------------------------------------------------------
+# Device code flow (RFC 8628)
+# ---------------------------------------------------------------------------
+
+
+def request_device_code(device_name: str | None = None) -> DeviceCodeResponse:
+    """Request a device code from the platform."""
+    url = f"{PLATFORM_URL}/api/cli/device/authorize"
+    body = json.dumps(
+        {
+            "deviceName": device_name or _get_device_name(),
+        }
+    ).encode()
+
+    request = Request(
+        url,
+        data=body,
+        headers={
+            "Content-Type": "application/json",
+            "User-Agent": f"osmosis-cli/{PACKAGE_VERSION}",
+        },
+        method="POST",
+    )
+
+    try:
+        with urlopen(request, timeout=30) as response:
+            data = json.loads(response.read().decode())
+            return DeviceCodeResponse(
+                device_code=data["device_code"],
+                user_code=data["user_code"],
+                verification_uri=data["verification_uri"],
+                expires_in=data["expires_in"],
+                interval=data["interval"],
+            )
+    except HTTPError as e:
+        raise _login_error_from_http(e, "Failed to request device code") from e
+    except URLError as e:
+        raise LoginError(f"Could not connect to platform: {e.reason}") from e
+    except (json.JSONDecodeError, KeyError) as e:
+        raise LoginError("Invalid response from platform") from e
+
+
+def poll_device_token(
+    device_code: str,
+    interval: int,
+    timeout: float,
+    on_poll: Callable[[], None] | None = None,
+) -> dict[str, Any]:
+    """Poll for device authorization completion. Returns token response dict."""
+    url = f"{PLATFORM_URL}/api/cli/device/token"
+    body = json.dumps({"device_code": device_code}).encode()
+    req_headers = {
+        "Content-Type": "application/json",
+        "User-Agent": f"osmosis-cli/{PACKAGE_VERSION}",
+    }
+    deadline = time.monotonic() + timeout
+    current_interval = interval
+
+    while time.monotonic() < deadline:
+        request = Request(url, data=body, headers=req_headers, method="POST")
+
+        try:
+            with urlopen(request, timeout=30) as response:
+                data = json.loads(response.read().decode())
+                return data
+        except HTTPError as e:
+            if e.code in (429, 500, 502, 503, 504):
+                raise _login_error_from_http(e, "Polling failed") from e
+            try:
+                error_data = json.loads(e.read().decode())
+                error_code = error_data.get("error", "")
+            except Exception:
+                raise LoginError(f"Polling failed: HTTP {e.code}") from e
+
+            if error_code == "authorization_pending":
+                if on_poll:
+                    on_poll()
+                time.sleep(current_interval)
+                continue
+            elif error_code == "slow_down":
+                current_interval = min(current_interval + 5, 30)
+                if on_poll:
+                    on_poll()
+                time.sleep(current_interval)
+                continue
+            elif error_code == "expired_token":
+                raise LoginError("Device code expired. Please try again.") from e
+            elif error_code == "access_denied":
+                raise LoginError("Authorization was denied.") from e
+            else:
+                raise LoginError(
+                    f"Polling failed: {error_code or f'HTTP {e.code}'}"
+                ) from e
+        except URLError as e:
+            raise LoginError(f"Could not connect to platform: {e.reason}") from e
+        except (json.JSONDecodeError, KeyError) as e:
+            raise LoginError("Invalid response from platform") from e
+
+    raise LoginError("Device authorization timed out. Please try again.")
+
+
+def device_login(timeout: float = 600.0) -> tuple[LoginResult, Credentials]:
+    """Execute the device code login flow for headless environments.
+
+    Returns:
+        Tuple of (LoginResult, Credentials). Caller is responsible for saving credentials.
+    """
+    device_code_resp = request_device_code()
+
+    console.print()
+    copied = _copy_to_clipboard(device_code_resp.user_code)
+    if copied:
+        console.print("Your one-time code (copied to clipboard):", style="dim")
+    else:
+        console.print("Your one-time code:", style="dim")
+    console.print()
+    console.print(f"  {device_code_resp.user_code}", style="bold cyan")
+    console.print()
+    expires_minutes = device_code_resp.expires_in // 60
+    console.print(f"Code expires in {expires_minutes} minutes.", style="dim")
+    console.print()
+
+    verification_url = device_code_resp.verification_uri
+    console.print(
+        f"Open this URL in your browser: {verification_url}",
+        style="yellow",
+    )
+
+    if sys.stdin.isatty():
+        import webbrowser
+
+        with contextlib.suppress(Exception):
+            webbrowser.open(verification_url)
+
+    console.print()
+    effective_timeout = min(timeout, float(device_code_resp.expires_in))
+
+    with console.spinner("Waiting for authorization..."):
+        token_response = poll_device_token(
+            device_code=device_code_resp.device_code,
+            interval=device_code_resp.interval,
+            timeout=effective_timeout,
+        )
+
+    if token_response is None:
+        raise LoginError("Failed to obtain token response from authorization flow")
+
+    token = token_response.get("token")
+    if not token:
+        raise LoginError("Server response missing token")
+
+    user_data = token_response.get("user", {})
+    user = UserInfo(
+        id=user_data.get("id", ""),
+        email=user_data.get("email", ""),
+        name=user_data.get("name"),
+    )
+
+    if not user.id or not user.email:
+        raise LoginError("Server returned incomplete user information")
+
+    expires_at = _parse_expires_at(token_response.get("expires_at"))
+    token_id = token_response.get("token_id")
+
+    creds = Credentials(
+        access_token=token,
+        token_type="Bearer",
+        expires_at=expires_at,
+        created_at=datetime.now(timezone.utc),
+        user=user,
+        token_id=token_id,
+    )
+    result = LoginResult(user=user, expires_at=expires_at)
+
+    return result, creds

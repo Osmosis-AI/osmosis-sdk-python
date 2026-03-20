@@ -99,7 +99,8 @@ class EvalCommand:
             self.console.print("No cached evaluations found.")
             return 0
 
-        def _render_rich(rc: Any) -> None:
+        if self.console.is_tty:
+            # Rich table for interactive terminals
             from rich.table import Table as RichTable
 
             table = RichTable(show_header=True, header_style="bold")
@@ -122,43 +123,25 @@ class EvalCommand:
                     str(e.get("runs_count", 0)),
                     created,
                 )
-            rc.print(table)
-
-        if not self.console.run_rich(_render_rich):
-            # Plain text fallback (tab-separated for piping)
-            is_tty = self.console.is_tty
-            if is_tty:
-                header = (
-                    f"{'TASK ID':<14} {'MODEL':<20} {'DATASET':<20} "
-                    f"{'STATUS':<14} {'RUNS':>5}  {'CREATED'}"
-                )
-                self.console.print(header)
+            self.console.rich.print(table)
+        else:
+            # Tab-separated output for piping
             for e in entries:
                 config = e.get("config", {})
                 created = e.get("created_at", "")
                 if created and len(created) >= 16:
                     created = created[:16].replace("T", " ")
-                if is_tty:
-                    line = (
-                        f"{e.get('task_id', ''):<14} "
-                        f"{config.get('model', ''):<20} "
-                        f"{config.get('dataset', ''):<20} "
-                        f"{e.get('status', ''):<14} "
-                        f"{e.get('runs_count', 0):>5}  "
-                        f"{created}"
-                    )
-                else:
-                    line = "\t".join(
-                        [
-                            e.get("task_id", ""),
-                            config.get("model", ""),
-                            config.get("dataset", ""),
-                            e.get("status", ""),
-                            str(e.get("runs_count", 0)),
-                            created,
-                        ]
-                    )
-                self.console.print(line)
+                line = "\t".join(
+                    [
+                        e.get("task_id", ""),
+                        config.get("model", ""),
+                        config.get("dataset", ""),
+                        e.get("status", ""),
+                        str(e.get("runs_count", 0)),
+                        created,
+                    ]
+                )
+                self.console.print(line, markup=False, highlight=False)
 
         return 0
 

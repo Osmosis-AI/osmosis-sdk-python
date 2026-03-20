@@ -30,7 +30,7 @@ from osmosis_ai.rollout.validator import (
 )
 
 if TYPE_CHECKING:
-    from osmosis_ai.platform.auth.credentials import WorkspaceCredentials
+    from osmosis_ai.platform.auth.credentials import Credentials
     from osmosis_ai.rollout.config.settings import RolloutSettings
 
 logger: logging.Logger = logging.getLogger(__name__)
@@ -138,7 +138,7 @@ def serve_agent_loop(
             )
 
     # Check login status if registration is enabled
-    credentials: WorkspaceCredentials | None = None
+    credentials: Credentials | None = None
     if not skip_register:
         from osmosis_ai.platform.auth.credentials import get_valid_credentials
 

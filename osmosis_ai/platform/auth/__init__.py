@@ -2,22 +2,23 @@
 
 from .config import CONFIG_DIR, CREDENTIALS_FILE, PLATFORM_URL
 from .credentials import (
-    CredentialsStore,
-    OrganizationInfo,
+    Credentials,
     UserInfo,
-    WorkspaceCredentials,
     delete_credentials,
-    delete_workspace_credentials,
-    get_active_workspace,
-    get_all_workspaces,
+    get_credential_store,
     get_valid_credentials,
     load_credentials,
-    load_workspace_credentials,
     save_credentials,
+)
+from .flow import LoginError, LoginResult, device_login, verify_token
+from .local_config import (
+    get_active_workspace,
+    get_active_workspace_id,
+    load_workspace_projects,
+    reset_session,
+    save_workspace_projects,
     set_active_workspace,
 )
-from .flow import LoginError, LoginResult, login
-from .local_config import load_workspace_projects, save_workspace_projects
 from .platform_client import (
     AuthenticationExpiredError,
     PlatformAPIError,
@@ -26,33 +27,28 @@ from .platform_client import (
 )
 
 __all__ = [
-    # Config
     "CONFIG_DIR",
     "CREDENTIALS_FILE",
     "PLATFORM_URL",
-    # Platform Client
     "AuthenticationExpiredError",
-    # Credentials
-    "CredentialsStore",
-    # Flow
+    "Credentials",
     "LoginError",
     "LoginResult",
-    "OrganizationInfo",
     "PlatformAPIError",
     "SubscriptionRequiredError",
     "UserInfo",
-    "WorkspaceCredentials",
     "delete_credentials",
-    "delete_workspace_credentials",
+    "device_login",
     "get_active_workspace",
-    "get_all_workspaces",
+    "get_active_workspace_id",
+    "get_credential_store",
     "get_valid_credentials",
     "load_credentials",
-    "load_workspace_credentials",
     "load_workspace_projects",
-    "login",
     "platform_request",
+    "reset_session",
     "save_credentials",
     "save_workspace_projects",
     "set_active_workspace",
+    "verify_token",
 ]

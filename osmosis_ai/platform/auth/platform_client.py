@@ -12,14 +12,11 @@ from urllib.request import Request, urlopen
 from osmosis_ai.consts import PACKAGE_VERSION
 
 from .config import PLATFORM_URL
-from .credentials import (
-    delete_workspace_credentials,
-    get_active_workspace,
-    load_credentials,
-)
+from .credentials import load_credentials
+from .local_config import get_active_workspace_id, reset_session
 
 if TYPE_CHECKING:
-    from .credentials import WorkspaceCredentials
+    from .credentials import Credentials
 
 
 class AuthenticationExpiredError(Exception):
@@ -44,38 +41,44 @@ class SubscriptionRequiredError(PlatformAPIError):
         )
 
 
-def _handle_401_and_cleanup(workspace_name: str | None = None) -> None:
-    """Handle 401 by deleting workspace credentials and raising error."""
-    # platform_request always passes the workspace name from the request
-    # credentials. Keep the fallback for direct helper callers and tests.
-    if workspace_name is None:
-        workspace_name = get_active_workspace()
-    if workspace_name:
-        delete_workspace_credentials(workspace_name)
-
-    raise AuthenticationExpiredError(
-        "Your session has expired or been revoked. "
-        "Please run 'osmosis login' to re-authenticate."
-    )
-
-
-def revoke_cli_token(credentials: WorkspaceCredentials) -> bool:
+def revoke_cli_token(credentials: Credentials) -> bool:
     """Best-effort server-side revocation of a CLI token.
 
-    Returns True if revoked, False if revocation failed or was skipped.
+    Returns True if revoked (or already expired/revoked), False on error.
     The caller should still delete local credentials regardless.
+
+    Uses a direct HTTP call instead of ``platform_request`` to avoid its
+    automatic 401 handler, which would call ``reset_session()`` and nuke
+    local workspace state — an unwanted side-effect during login/logout.
+    A 401 here simply means the token is already gone, which is success.
     """
     if not credentials.token_id:
         return False
+
+    url = f"{PLATFORM_URL}/api/cli/tokens/{credentials.token_id}"
+    request = Request(
+        url,
+        headers={
+            "Authorization": f"Bearer {credentials.access_token}",
+            "Content-Type": "application/json",
+            "User-Agent": f"osmosis-cli/{PACKAGE_VERSION}",
+        },
+        method="DELETE",
+    )
+
     try:
-        platform_request(
-            f"/api/cli/tokens/{credentials.token_id}",
-            method="DELETE",
-            credentials=credentials,
+        with urlopen(request, timeout=5):
+            return True
+    except HTTPError as e:
+        if e.code == 401:
+            # Token already expired/revoked — goal achieved.
+            return True
+        sys.stderr.write(
+            f"Warning: failed to revoke CLI token server-side: HTTP {e.code}\n"
         )
-        return True
-    except Exception as exc:
-        sys.stderr.write(f"Warning: failed to revoke CLI token server-side: {exc}\n")
+        return False
+    except (URLError, OSError):
+        # Network errors are not critical for best-effort revocation.
         return False
 
 
@@ -85,7 +88,10 @@ def platform_request(
     data: dict[str, Any] | None = None,
     headers: dict[str, str] | None = None,
     timeout: float = 30.0,
-    credentials: WorkspaceCredentials | None = None,
+    credentials: Credentials | None = None,
+    workspace_id: str | None = None,
+    require_workspace: bool = True,
+    cleanup_on_401: bool = True,
 ) -> dict[str, Any]:
     """Make an authenticated request to the Osmosis Platform API.
 
@@ -99,12 +105,21 @@ def platform_request(
         timeout: Request timeout in seconds
         credentials: Optional explicit credentials override. If not provided,
             uses the active workspace credentials from local storage.
+        workspace_id: Optional workspace ID for X-Osmosis-Org header. If not
+            provided and require_workspace is True, uses the active workspace.
+        require_workspace: If True, requires a workspace context and adds
+            X-Osmosis-Org header. If False, omits workspace context.
+        cleanup_on_401: If True (default), a 401 response triggers
+            ``reset_session()`` which deletes credentials and local config.
+            Set to False for non-critical calls (e.g. post-login validation)
+            where a transient 401 should not wipe freshly saved state.
 
     Returns:
         Parsed JSON response
 
     Raises:
-        AuthenticationExpiredError: If 401 received (credentials auto-deleted)
+        AuthenticationExpiredError: If 401 received (credentials auto-deleted
+            when cleanup_on_401 is True)
         PlatformAPIError: For other API errors
     """
     if credentials is None:
@@ -113,7 +128,6 @@ def platform_request(
         raise AuthenticationExpiredError(
             "No valid credentials found. Please run 'osmosis login' first."
         )
-    workspace_name = credentials.organization.name
 
     url = f"{PLATFORM_URL}{endpoint}"
 
@@ -122,10 +136,20 @@ def platform_request(
         "Content-Type": "application/json",
         "User-Agent": f"osmosis-cli/{PACKAGE_VERSION}",
     }
+
+    # Add workspace context if required
+    if require_workspace:
+        resolved_workspace_id = workspace_id or get_active_workspace_id()
+        if not resolved_workspace_id:
+            raise PlatformAPIError(
+                "No active workspace. Run 'osmosis workspace switch' to select one."
+            )
+        req_headers["X-Osmosis-Org"] = resolved_workspace_id
+
     if headers:
         req_headers.update(headers)
 
-    body = json.dumps(data).encode() if data else None
+    body = json.dumps(data).encode() if data is not None else None
     request = Request(url, data=body, headers=req_headers, method=method)
 
     try:
@@ -139,7 +163,12 @@ def platform_request(
             return result
     except HTTPError as e:
         if e.code == 401:
-            _handle_401_and_cleanup(workspace_name)
+            if cleanup_on_401:
+                reset_session()
+            raise AuthenticationExpiredError(
+                "Your session has expired or been revoked. "
+                "Please run 'osmosis login' to re-authenticate."
+            ) from e
 
         # Best-effort capture of structured error message from response body
         detail = ""
@@ -167,8 +196,16 @@ def platform_request(
         # Detect subscription-required responses (403 with subscription message)
         if e.code == 403 and isinstance(error_body, dict):
             error_msg = error_body.get("error", "")
-            if isinstance(error_msg, str) and "subscription" in error_msg.lower():
-                raise SubscriptionRequiredError(error_msg) from e
+            if isinstance(error_msg, str):
+                if "subscription" in error_msg.lower():
+                    raise SubscriptionRequiredError(error_msg) from e
+                if "workspace" in error_msg.lower() and "access" in error_msg.lower():
+                    raise PlatformAPIError(
+                        f"{error_msg}\n"
+                        "Your workspace context may be stale. "
+                        "Run 'osmosis login' or 'osmosis workspace' to re-select.",
+                        e.code,
+                    ) from e
 
         raise PlatformAPIError(f"API error: HTTP {e.code}.{detail}", e.code) from e
     except URLError as e:

@@ -34,23 +34,10 @@ def _make_eval_result() -> EvalResult:
     )
 
 
-def test_format_eval_report_falls_back_when_rich_render_fails(monkeypatch) -> None:
-    """Report formatting should degrade to plain output when rich rendering fails."""
+def test_format_eval_report_renders_results() -> None:
+    """Report formatting should render eval results with Rich."""
     output = StringIO()
-    console = Console(file=output, force_terminal=False)
-
-    class _FakeRichConsole:
-        def print(self, *args: object, end: str = "\n", **kwargs: object) -> None:
-            text = " ".join(str(arg) for arg in args)
-            output.write(f"{text}{end}")
-
-    console._use_rich = True
-    console._rich = _FakeRichConsole()
-
-    def _raise_import_error(*args: object, **kwargs: object) -> None:
-        raise ImportError("rich unavailable")
-
-    monkeypatch.setattr(report_module, "_format_tables_rich", _raise_import_error)
+    console = Console(file=output, force_terminal=True)
 
     report_module.format_eval_report(_make_eval_result(), console, model="test-model")
 
@@ -59,6 +46,18 @@ def test_format_eval_report_falls_back_when_rich_render_fails(monkeypatch) -> No
     assert "Eval Function" in text
     assert "accuracy" in text
     assert "Median" in text
-    assert "Min" not in text
-    assert "Max" not in text
     assert "pass@1" in text
+
+
+def test_format_eval_report_non_tty() -> None:
+    """Report formatting should work in non-TTY mode (Rich strips ANSI)."""
+    output = StringIO()
+    console = Console(file=output, force_terminal=False)
+
+    report_module.format_eval_report(_make_eval_result(), console, model="test-model")
+
+    text = output.getvalue()
+    assert "Evaluation Results:" in text
+    assert "accuracy" in text
+    # Non-TTY output should not contain ANSI escape codes
+    assert "\033[" not in text

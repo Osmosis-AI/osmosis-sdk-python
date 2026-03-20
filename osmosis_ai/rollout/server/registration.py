@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any
 from osmosis_ai.rollout.network import PublicIPDetectionError, detect_public_ip
 
 if TYPE_CHECKING:
-    from osmosis_ai.platform.auth.credentials import WorkspaceCredentials
+    from osmosis_ai.platform.auth.credentials import Credentials
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -72,7 +72,7 @@ def register_with_platform(
     host: str,
     port: int,
     agent_loop_name: str,
-    credentials: WorkspaceCredentials,
+    credentials: Credentials,
     api_key: str | None = None,
 ) -> RegistrationResult:
     """Register the rollout server with Osmosis Platform.

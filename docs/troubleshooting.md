@@ -41,11 +41,9 @@ successful `osmosis login`.
 
 ### `osmosis login` fails
 
-1. **Browser does not open** -- pass `--no-browser` to print the authentication
-   URL so you can open it manually.
-2. **Network / firewall** -- the login flow requires outbound HTTPS to the
+1. **Network / firewall** -- the login flow requires outbound HTTPS to the
    Osmosis platform. Ensure your network allows it.
-3. **Force re-login** -- if your session is in an inconsistent state, run:
+2. **Force re-login** -- if your session is in an inconsistent state, run:
 
    ```bash
    osmosis login --force
