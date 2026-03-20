@@ -119,7 +119,7 @@ class TestVerifyAndGetUserInfo:
             fp=None,  # type: ignore[arg-type]
         )
         with patch("osmosis_ai.platform.auth.flow.urlopen", side_effect=error):
-            with pytest.raises(LoginError, match="Verification failed: HTTP 500"):
+            with pytest.raises(LoginError, match="internal error"):
                 verify_token("token")
 
     def test_network_error_raises_login_error(self) -> None:

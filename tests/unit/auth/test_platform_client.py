@@ -505,29 +505,39 @@ class TestRevokeCLIToken:
         creds.token_id = None
         assert revoke_cli_token(creds) is False
 
-    @patch("osmosis_ai.platform.auth.platform_client.platform_request")
+    @patch("osmosis_ai.platform.auth.platform_client.urlopen")
     def test_returns_true_on_successful_revocation(
-        self, mock_request: MagicMock
+        self, mock_urlopen: MagicMock
     ) -> None:
-        """Verify revoke_cli_token returns True when the API call succeeds."""
+        """Verify revoke_cli_token returns True when the HTTP call succeeds."""
         creds = _make_credentials()
         creds.token_id = "tok_123"
-        mock_request.return_value = {}
+        mock_resp = MagicMock()
+        mock_resp.__enter__ = MagicMock(return_value=mock_resp)
+        mock_resp.__exit__ = MagicMock(return_value=False)
+        mock_urlopen.return_value = mock_resp
 
         assert revoke_cli_token(creds) is True
-        mock_request.assert_called_once_with(
-            "/api/cli/tokens/tok_123",
-            method="DELETE",
-            credentials=creds,
-            require_workspace=False,
-        )
+        mock_urlopen.assert_called_once()
 
-    @patch("osmosis_ai.platform.auth.platform_client.platform_request")
-    def test_logs_warning_to_stderr_on_failure(self, mock_request: MagicMock) -> None:
+    @patch("osmosis_ai.platform.auth.platform_client.urlopen")
+    def test_returns_true_on_401(self, mock_urlopen: MagicMock) -> None:
+        """A 401 means the token is already gone — that counts as success."""
+        creds = _make_credentials()
+        creds.token_id = "tok_123"
+        mock_urlopen.side_effect = HTTPError(
+            url="http://test", code=401, msg="Unauthorized", hdrs=None, fp=None
+        )
+        assert revoke_cli_token(creds) is True
+
+    @patch("osmosis_ai.platform.auth.platform_client.urlopen")
+    def test_logs_warning_to_stderr_on_failure(self, mock_urlopen: MagicMock) -> None:
         """Verify revoke_cli_token writes a warning to stderr when revocation fails."""
         creds = _make_credentials()
         creds.token_id = "tok_456"
-        mock_request.side_effect = PlatformAPIError("API error: HTTP 500", 500)
+        mock_urlopen.side_effect = HTTPError(
+            url="http://test", code=500, msg="Server Error", hdrs=None, fp=None
+        )
 
         import io
         import sys

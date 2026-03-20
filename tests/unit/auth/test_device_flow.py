@@ -63,7 +63,7 @@ class TestRequestDeviceCode:
             url="http://test", code=500, msg="Server Error", hdrs=None, fp=None
         )
         with patch("osmosis_ai.platform.auth.flow.urlopen", side_effect=error):
-            with pytest.raises(LoginError, match="Failed to request device code"):
+            with pytest.raises(LoginError, match="internal error"):
                 request_device_code()
 
     def test_network_error_raises_login_error(self) -> None:

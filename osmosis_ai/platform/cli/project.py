@@ -39,6 +39,7 @@ from osmosis_ai.platform.cli.constants import (
     PROJECT_NAME_RE,
     RESERVED_PROJECT_NAMES,
 )
+from osmosis_ai.platform.cli.utils import require_credentials
 
 if TYPE_CHECKING:
     from osmosis_ai.platform.auth.credentials import Credentials
@@ -71,17 +72,6 @@ def _get_active_workspace_name() -> str:
     if workspace_name is None:
         raise CLIError(MSG_NOT_LOGGED_IN)
     return workspace_name
-
-
-def _require_credentials() -> Credentials:
-    """Load valid credentials, raising if not available.
-
-    Delegates to the shared :func:`~osmosis_ai.platform.cli.utils.require_credentials`.
-    Kept as a private alias so existing intra-module callers are unaffected.
-    """
-    from .utils import require_credentials
-
-    return require_credentials()
 
 
 # ── Interactive selection ──────────────────────────────────────────
@@ -159,7 +149,7 @@ def _prompt_create(ws_name: str) -> dict | None:
     if not ok:
         return None
 
-    credentials = _require_credentials()
+    credentials = require_credentials()
     client = OsmosisClient()
     project = client.create_project(name, credentials=credentials)
 
@@ -242,7 +232,7 @@ def _refresh_projects(
     *, workspace_name: str, workspace_id: str | None = None
 ) -> list[dict]:
     """Refresh project list from platform and update cache."""
-    credentials = _require_credentials()
+    credentials = require_credentials()
     client = OsmosisClient()
     all_projects: list[dict] = []
     offset = 0
@@ -332,7 +322,7 @@ def _require_auth(
     """Check that user is authenticated."""
     if workspace_name is None:
         workspace_name = _get_active_workspace_name()
-    credentials = _require_credentials()
+    credentials = require_credentials()
     return workspace_name, credentials
 
 
@@ -349,7 +339,7 @@ def _require_subscription(*, workspace_name: str) -> None:
     # Cached status is False, None, or expired — refresh to get the latest
     refreshed = False
     with contextlib.suppress(PlatformAPIError, OSError):
-        credentials = _require_credentials()
+        credentials = require_credentials()
         client = OsmosisClient()
         info = client.refresh_workspace_info(
             credentials=credentials, workspace_name=workspace_name
