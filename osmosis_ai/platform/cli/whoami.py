@@ -15,12 +15,13 @@ def whoami() -> None:
         raise CLIError(MSG_NOT_LOGGED_IN)
 
     ws_name = get_active_workspace_name()
+    esc = console.escape
 
-    rows = [("Email", credentials.user.email)]
+    rows = [("Email", esc(credentials.user.email))]
     if credentials.user.name:
-        rows.append(("Name", credentials.user.name))
+        rows.append(("Name", esc(credentials.user.name)))
     if ws_name:
-        rows.append(("Workspace", ws_name))
+        rows.append(("Workspace", esc(ws_name)))
     rows.append(("Expires", credentials.expires_at.strftime("%Y-%m-%d")))
 
     console.table(rows)

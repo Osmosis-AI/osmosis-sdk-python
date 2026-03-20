@@ -60,8 +60,9 @@ def _cleanup_legacy_keyring_entries(metadata: dict | None = None) -> None:
                 metadata = json.load(f)
         except (OSError, json.JSONDecodeError, ValueError):
             return
-        if not isinstance(metadata, dict):
-            return
+
+    if not isinstance(metadata, dict):
+        return
 
     if metadata.get("token_store") == TOKEN_STORE_KEYRING:
         old_account = metadata.get("user", {}).get("email", "")

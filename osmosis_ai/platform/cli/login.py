@@ -134,10 +134,13 @@ def login_cmd(
 
         # Revoke old token server-side before overwriting local credentials,
         # so it doesn't become an unmanageable orphan on the platform.
+        # Skip when re-logging with the same PAT to avoid revoking the
+        # token we just verified.
         if (
             old_credentials
             and not old_credentials.is_expired()
             and old_credentials.token_id
+            and old_credentials.token_id != creds.token_id
         ):
             revoke_cli_token(old_credentials)
 

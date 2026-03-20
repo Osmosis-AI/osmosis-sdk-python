@@ -129,12 +129,18 @@ def select_project_interactive(
 
     if not projects:
         console.print(f"No projects in '{ws_name}'.")
-        return _prompt_create(ws_name)
+        return _prompt_create(ws_name, workspace_id=workspace_id)
 
-    return _prompt_select(ws_name, projects, current_project_id, allow_back=allow_back)
+    return _prompt_select(
+        ws_name,
+        projects,
+        current_project_id,
+        allow_back=allow_back,
+        workspace_id=workspace_id,
+    )
 
 
-def _prompt_create(ws_name: str) -> dict | None:
+def _prompt_create(ws_name: str, workspace_id: str | None = None) -> dict | None:
     """Prompt to create a new project."""
     name = text(
         "Project name:",
@@ -151,10 +157,12 @@ def _prompt_create(ws_name: str) -> dict | None:
 
     credentials = require_credentials()
     client = OsmosisClient()
-    project = client.create_project(name, credentials=credentials)
+    project = client.create_project(
+        name, credentials=credentials, workspace_id=workspace_id
+    )
 
     with contextlib.suppress(PlatformAPIError, OSError):
-        _refresh_projects(workspace_name=ws_name)
+        _refresh_projects(workspace_name=ws_name, workspace_id=workspace_id)
 
     console.print(f"Created project '{project.project_name}'.")
     return {"id": project.id, "project_name": project.project_name}
@@ -165,6 +173,7 @@ def _prompt_select(
     projects: list[dict],
     current_project_id: str | None,
     allow_back: bool = False,
+    workspace_id: str | None = None,
 ) -> dict | str | None:
     """Display scrollable project list with pinned action items."""
     items = []
@@ -195,7 +204,7 @@ def _prompt_select(
     if result == BACK:
         return BACK
     if result == CREATE:
-        return _prompt_create(ws_name)
+        return _prompt_create(ws_name, workspace_id=workspace_id)
 
     return result
 

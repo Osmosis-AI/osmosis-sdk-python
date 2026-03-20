@@ -82,12 +82,14 @@ class OsmosisClient:
         name: str,
         *,
         credentials: Credentials | None = None,
+        workspace_id: str | None = None,
     ) -> Project:
         data = platform_request(
             "/api/cli/projects",
             method="POST",
             data={"name": name},
             credentials=credentials,
+            workspace_id=workspace_id,
         )
         return Project.from_dict(data)
 

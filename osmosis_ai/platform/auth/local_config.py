@@ -293,8 +293,8 @@ def clear_all_local_data() -> None:
     """
     with contextlib.suppress(OSError):
         CONFIG_FILE.unlink()
-    with contextlib.suppress(OSError):
-        for path in CACHE_DIR.iterdir():
+    for path in CACHE_DIR.iterdir():
+        with contextlib.suppress(OSError):
             path.unlink()
 
 

@@ -371,13 +371,19 @@ def device_login(timeout: float = 600.0) -> tuple[LoginResult, Credentials]:
     if token_response is None:
         raise LoginError("Failed to obtain token response from authorization flow")
 
-    token = token_response["token"]
+    token = token_response.get("token")
+    if not token:
+        raise LoginError("Server response missing token")
+
     user_data = token_response.get("user", {})
     user = UserInfo(
         id=user_data.get("id", ""),
         email=user_data.get("email", ""),
         name=user_data.get("name"),
     )
+
+    if not user.id or not user.email:
+        raise LoginError("Server returned incomplete user information")
 
     expires_at = _parse_expires_at(token_response.get("expires_at"))
     token_id = token_response.get("token_id")
