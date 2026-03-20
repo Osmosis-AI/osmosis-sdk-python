@@ -293,9 +293,10 @@ def clear_all_local_data() -> None:
     """
     with contextlib.suppress(OSError):
         CONFIG_FILE.unlink()
-    for path in CACHE_DIR.iterdir():
-        with contextlib.suppress(OSError):
-            path.unlink()
+    with contextlib.suppress(FileNotFoundError):
+        for path in CACHE_DIR.iterdir():
+            with contextlib.suppress(OSError):
+                path.unlink()
 
 
 def reset_session() -> None:
