@@ -17,8 +17,54 @@ from osmosis_ai.platform.auth.credentials import (
     save_credentials,
 )
 from osmosis_ai.platform.auth.flow import LoginResult
-from osmosis_ai.platform.auth.local_config import clear_all_local_data
-from osmosis_ai.platform.auth.platform_client import revoke_cli_token
+from osmosis_ai.platform.auth.local_config import (
+    clear_all_local_data,
+    get_active_workspace,
+    set_active_workspace,
+)
+from osmosis_ai.platform.auth.platform_client import platform_request, revoke_cli_token
+
+
+def _validate_workspace_context(creds: Credentials) -> None:
+    """Validate the stored workspace is still accessible with new credentials.
+
+    After login, the workspace ID in config.json may be stale (e.g. the user
+    switched between local dev and production, or the local DB was recreated).
+    This check prevents confusing 403 errors on subsequent commands.
+    """
+    ws = get_active_workspace()
+    if not ws:
+        return
+
+    try:
+        data = platform_request(
+            "/api/cli/workspaces",
+            credentials=creds,
+            require_workspace=False,
+        )
+        workspaces = data.get("workspaces", [])
+        ws_by_id = {w["id"]: w for w in workspaces if "id" in w}
+        ws_by_name = {w["name"]: w for w in workspaces if "name" in w}
+
+        if ws["id"] in ws_by_id:
+            return  # Still valid
+
+        # ID is stale — try to fix by matching workspace name
+        if ws["name"] in ws_by_name:
+            correct = ws_by_name[ws["name"]]
+            set_active_workspace(correct["id"], correct["name"])
+            return
+
+        # Workspace no longer accessible at all
+        clear_all_local_data()
+        console.print(
+            "\nPrevious workspace is no longer accessible. "
+            "Run 'osmosis workspace' to select a workspace.",
+            style="yellow",
+        )
+    except Exception:
+        pass  # Don't block login for validation errors
+
 
 ASCII_ART = r"""
                        ___           ___           ___           ___           ___                       ___
@@ -94,8 +140,13 @@ def login_cmd(
         # Clear stale workspace/project context when user identity changes
         # or when explicitly forcing a fresh start, to prevent subsequent
         # commands from sending the old workspace ID in X-Osmosis-Org.
-        if force or (old_credentials and old_credentials.user.id != creds.user.id):
+        local_data_cleared = force or (
+            old_credentials and old_credentials.user.id != creds.user.id
+        )
+        if local_data_cleared:
             clear_all_local_data()
+        else:
+            _validate_workspace_context(creds)
 
         # Display login success
         esc = console.escape

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import webbrowser
 from collections.abc import Callable, Sequence
 from typing import Any, Literal, cast
@@ -15,6 +16,7 @@ from osmosis_ai.cli.prompts import (
     is_interactive,
     select,
     select_list,
+    text,
 )
 from osmosis_ai.platform.auth import (
     PlatformAPIError,
@@ -80,6 +82,20 @@ def _validate_default_project(
     return None
 
 
+def _clean_file_path(raw: str) -> str:
+    """Normalize a file path from drag-and-drop input.
+
+    Handles: surrounding whitespace, single/double quotes, backslash-escaped spaces.
+    """
+    path = raw.strip()
+    if (path.startswith("'") and path.endswith("'")) or (
+        path.startswith('"') and path.endswith('"')
+    ):
+        path = path[1:-1]
+    path = path.replace("\\ ", " ")
+    return path
+
+
 def _show_context(ws_name: str | None, default_project: dict | None) -> None:
     """Display current workspace/project context."""
     if not ws_name:
@@ -134,7 +150,8 @@ def _select_workspace(
 ) -> tuple[str, str] | str | None:
     """Prompt the user to select a workspace. Returns (ws_id, ws_name), BACK, or None."""
     try:
-        result = platform_request("/api/cli/workspaces", require_workspace=False)
+        with console.spinner("Loading workspaces..."):
+            result = platform_request("/api/cli/workspaces", require_workspace=False)
         workspaces = result.get("workspaces", [])
     except PlatformAPIError as e:
         console.print_error(f"Failed to load workspaces: {e}")
@@ -295,7 +312,8 @@ def _browse_entities(
     project_id: str = project["project_id"]
     try:
         credentials = require_credentials()
-        result = fetch(project_id, credentials=credentials)
+        with console.spinner(f"Loading {title.lower()}..."):
+            result = fetch(project_id, credentials=credentials)
     except PlatformAPIError as e:
         if e.status_code == 404:
             return _handle_stale_project(ws_name, project)
@@ -327,25 +345,120 @@ def _browse_entities(
         show_detail(selected)
 
 
+def _upload_dataset_interactive(
+    ws_name: str,
+    project: dict,
+    credentials: Any,
+) -> bool:
+    """Prompt for a file path and upload it as a dataset.
+
+    Returns True on success, False on cancel/error.
+    """
+    from osmosis_ai.platform.cli.dataset import (
+        _check_file_basics,
+        _perform_upload,
+        _validate_file,
+    )
+
+    raw = text("Drop a file here or enter path:")
+    if not raw:
+        return False
+
+    file_str = _clean_file_path(raw)
+
+    try:
+        file_path, ext, file_size = _check_file_basics(file_str)
+    except CLIError as e:
+        console.print_error(str(e))
+        return False
+
+    errors = _validate_file(file_path, ext)
+    if errors:
+        console.print_error(
+            "Validation failed:\n" + "\n".join(f"  - {e}" for e in errors)
+        )
+        return False
+
+    console.print(f"  File: {file_path.name} ({format_size(file_path.stat().st_size)})")
+    ok = confirm("Upload to this project?", default=True)
+    if not ok:
+        return False
+
+    try:
+        dataset = _perform_upload(
+            file_path=file_path,
+            ext=ext,
+            file_size=file_size,
+            project_id=project["project_id"],
+            credentials=credentials,
+        )
+    except CLIError as e:
+        console.print_error(str(e))
+        return False
+
+    console.print(f"Upload complete. Dataset ID: {dataset.id}", style="green")
+    url = platform_entity_url(
+        ws_name, project["project_name"], "training-data", dataset.id
+    )
+    console.print(f"Check status at: {url}")
+    return True
+
+
+_UPLOAD = "__upload__"
+
+
 def _browse_datasets(ws_name: str, project: dict) -> bool:
-    """List datasets and allow selecting one for details."""
+    """List datasets and allow selecting one for details or uploading."""
     from osmosis_ai.platform.api.client import OsmosisClient
 
+    from .utils import require_credentials
+
     client = OsmosisClient()
+    project_id: str = project["project_id"]
 
-    def _format(d: Any) -> str:
-        status_str = format_dataset_status(d, for_prompt=True)
-        return f"{d.file_name} ({format_size(d.file_size)}) {status_str}"
+    try:
+        credentials = require_credentials()
+        with console.spinner("Loading datasets..."):
+            result = client.list_datasets(project_id, credentials=credentials)
+    except PlatformAPIError as e:
+        if e.status_code == 404:
+            return _handle_stale_project(ws_name, project)
+        console.print_error(f"Failed to load datasets: {e}")
+        return True
 
-    return _browse_entities(
-        ws_name,
-        project,
-        fetch=client.list_datasets,
-        extract_items=lambda r: r.datasets,
-        format_choice=_format,
-        show_detail=lambda d: _show_dataset_detail(d, ws_name, project),
-        title="Datasets",
-    )
+    while True:
+        items: list[str | Choice | Separator] = [
+            Choice(
+                f"{d.file_name} ({format_size(d.file_size)}) "
+                f"{format_dataset_status(d, for_prompt=True)}",
+                value=d,
+            )
+            for d in result.datasets
+        ]
+
+        console.separator()
+        selected = select_list(
+            f"Datasets ({result.total_count}):",
+            items=items,
+            actions=[
+                Choice("Upload dataset", value=_UPLOAD),
+                Choice("Back", value=BACK),
+            ],
+            max_visible=DEFAULT_VISIBLE_CHOICES,
+        )
+
+        if selected is None or selected == BACK:
+            return True
+
+        if selected == _UPLOAD:
+            uploaded = _upload_dataset_interactive(ws_name, project, credentials)
+            if uploaded:
+                # Refresh the list after successful upload
+                with contextlib.suppress(PlatformAPIError):
+                    result = client.list_datasets(project_id, credentials=credentials)
+            continue
+
+        _show_dataset_detail(selected, ws_name, project)
 
 
 def _show_dataset_detail(ds: Any, ws_name: str, project: dict) -> None:
@@ -404,9 +517,10 @@ def _browse_models(ws_name: str, project: dict) -> bool:
 
     try:
         credentials = require_credentials()
-        base_result, output_result = client.fetch_all_models(
-            project_id, credentials=credentials
-        )
+        with console.spinner("Loading models..."):
+            base_result, output_result = client.fetch_all_models(
+                project_id, credentials=credentials
+            )
     except PlatformAPIError as e:
         if e.status_code == 404:
             return _handle_stale_project(ws_name, project)
@@ -491,7 +605,8 @@ def _show_project_info(ws_name: str, project: dict) -> bool:
     project_id: str = project["project_id"]
     try:
         credentials = require_credentials()
-        detail = client.get_project(project_id, credentials=credentials)
+        with console.spinner("Loading project info..."):
+            detail = client.get_project(project_id, credentials=credentials)
     except PlatformAPIError as e:
         if e.status_code == 404:
             return _handle_stale_project(ws_name, project)

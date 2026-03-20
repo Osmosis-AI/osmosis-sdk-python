@@ -153,17 +153,19 @@ def _check_file_basics(file: str) -> tuple[Path, str, int]:
     return file_path, ext, file_size
 
 
-@app.command("upload")
-def upload(
-    file: str = typer.Argument(..., help="Path to the file to upload."),
-    project: str | None = typer.Option(
-        None, "--project", help="Project name (default: current project)."
-    ),
-) -> None:
-    """Upload a dataset file."""
-    ws_name, credentials = _require_auth()
-    _require_subscription(workspace_name=ws_name)
+def _perform_upload(
+    *,
+    file_path: Path,
+    ext: str,
+    file_size: int,
+    project_id: str,
+    credentials: Any | None = None,
+) -> Any:
+    """Core upload: create dataset record → S3 upload → complete.
 
+    Returns the completed DatasetFile. Raises CLIError on failure.
+    Shared by the ``upload`` CLI command and the workspace interactive flow.
+    """
     from osmosis_ai.platform.api.client import OsmosisClient
     from osmosis_ai.platform.api.upload import (
         make_progress_bar,
@@ -171,39 +173,8 @@ def upload(
         upload_file_simple,
     )
 
-    file_path, ext, file_size = _check_file_basics(file)
-
-    # Validate file contents before uploading
-    errors = _validate_file(file_path, ext)
-    if errors:
-        raise CLIError(
-            "File validation failed:\n" + "\n".join(f"  - {e}" for e in errors)
-        )
-
-    proj = _resolve_project(project, workspace_name=ws_name)
-    project_id = proj["id"]
-    project_name = proj.get("project_name", "")
-
-    # Confirm upload target
-    console.print()
-    console.table(
-        [
-            ("Workspace", ws_name or "unknown"),
-            ("Project", project_name or project_id),
-            ("File", f"{file_path.name} ({format_size(file_size)})"),
-        ],
-        title="Upload Target",
-    )
-    console.print()
-    if is_interactive():
-        proceed = confirm("Proceed with upload?", default=True)
-        if proceed is None or not proceed:
-            console.print("Upload cancelled.", style="dim")
-            return
-
     client = OsmosisClient()
 
-    # Step 1: Create dataset record + get upload instructions
     dataset = client.create_dataset(
         project_id,
         file_path.name,
@@ -216,7 +187,6 @@ def upload(
     if upload_info is None:
         raise CLIError("Server did not return upload instructions.")
 
-    # Step 2: Upload file to S3
     is_multipart = upload_info.method == "multipart"
     if is_multipart:
         parts_label = (
@@ -266,6 +236,58 @@ def upload(
             dataset.id,
             credentials=credentials,
         )
+
+    return dataset
+
+
+@app.command("upload")
+def upload(
+    file: str = typer.Argument(..., help="Path to the file to upload."),
+    project: str | None = typer.Option(
+        None, "--project", help="Project name (default: current project)."
+    ),
+) -> None:
+    """Upload a dataset file."""
+    ws_name, credentials = _require_auth()
+    _require_subscription(workspace_name=ws_name)
+
+    file_path, ext, file_size = _check_file_basics(file)
+
+    # Validate file contents before uploading
+    errors = _validate_file(file_path, ext)
+    if errors:
+        raise CLIError(
+            "File validation failed:\n" + "\n".join(f"  - {e}" for e in errors)
+        )
+
+    proj = _resolve_project(project, workspace_name=ws_name)
+    project_id = proj["id"]
+    project_name = proj.get("project_name", "")
+
+    # Confirm upload target
+    console.print()
+    console.table(
+        [
+            ("Workspace", ws_name or "unknown"),
+            ("Project", project_name or project_id),
+            ("File", f"{file_path.name} ({format_size(file_size)})"),
+        ],
+        title="Upload Target",
+    )
+    console.print()
+    if is_interactive():
+        proceed = confirm("Proceed with upload?", default=True)
+        if proceed is None or not proceed:
+            console.print("Upload cancelled.", style="dim")
+            return
+
+    dataset = _perform_upload(
+        file_path=file_path,
+        ext=ext,
+        file_size=file_size,
+        project_id=project_id,
+        credentials=credentials,
+    )
 
     console.print(f"Upload complete. Dataset ID: {dataset.id}", style="green")
     url = platform_entity_url(ws_name, project_name, "training-data", dataset.id)

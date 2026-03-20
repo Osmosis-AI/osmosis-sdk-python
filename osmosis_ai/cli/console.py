@@ -16,7 +16,8 @@ Usage:
 from __future__ import annotations
 
 import sys
-from collections.abc import Callable
+from collections.abc import Callable, Generator
+from contextlib import contextmanager
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -350,6 +351,27 @@ class Console:
             if ansi_style:
                 return f"{ansi_style}{text}{_AnsiColors.RESET}"
             return text
+
+    @contextmanager
+    def spinner(self, message: str) -> Generator[None, None, None]:
+        """Show a spinner animation while work is in progress.
+
+        Usage::
+
+            with console.spinner("Loading workspaces..."):
+                result = api_call()
+        """
+        if self._use_rich and self._rich:
+            from rich.status import Status
+
+            with Status(message, console=self._rich, spinner="dots"):
+                yield
+        else:
+            sys.stdout.write(message)
+            sys.stdout.flush()
+            yield
+            sys.stdout.write("\n")
+            sys.stdout.flush()
 
     def input(self, prompt: str = "", style: str | None = None) -> str:
         """Get user input with optional styled prompt.

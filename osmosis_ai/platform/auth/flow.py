@@ -320,28 +320,8 @@ def device_login(timeout: float = 600.0) -> tuple[LoginResult, Credentials]:
         interval=device_code_resp.interval,
         timeout=effective_timeout,
     )
-    token_response: dict | None = None
-
-    def _poll_with_spinner(rich_console: object) -> None:
-        nonlocal token_response
-        from rich.status import Status
-
-        with Status(
-            "Waiting for authorization...", console=rich_console, spinner="dots"
-        ):
-            token_response = poll_device_token(**poll_kwargs)
-
-    if not console.run_rich(_poll_with_spinner):
-        sys.stdout.write("Waiting for authorization")
-        sys.stdout.flush()
-
-        def _print_dot() -> None:
-            sys.stdout.write(".")
-            sys.stdout.flush()
-
-        token_response = poll_device_token(**poll_kwargs, on_poll=_print_dot)
-        sys.stdout.write("\n")
-        sys.stdout.flush()
+    with console.spinner("Waiting for authorization..."):
+        token_response = poll_device_token(**poll_kwargs)
 
     if token_response is None:
         raise LoginError("Failed to obtain token response from authorization flow")

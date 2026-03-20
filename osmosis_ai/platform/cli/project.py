@@ -114,9 +114,10 @@ def select_project_interactive(
     """
     if projects is None:
         try:
-            projects = _refresh_projects(
-                workspace_name=ws_name, workspace_id=workspace_id
-            )
+            with console.spinner("Loading projects..."):
+                projects = _refresh_projects(
+                    workspace_name=ws_name, workspace_id=workspace_id
+                )
         except (PlatformAPIError, OSError):
             projects = _get_cached_projects(workspace_name=ws_name, max_age=None)
             if projects:

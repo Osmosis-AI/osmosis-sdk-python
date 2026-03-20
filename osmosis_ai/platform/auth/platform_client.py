@@ -194,8 +194,16 @@ def platform_request(
         # Detect subscription-required responses (403 with subscription message)
         if e.code == 403 and isinstance(error_body, dict):
             error_msg = error_body.get("error", "")
-            if isinstance(error_msg, str) and "subscription" in error_msg.lower():
-                raise SubscriptionRequiredError(error_msg) from e
+            if isinstance(error_msg, str):
+                if "subscription" in error_msg.lower():
+                    raise SubscriptionRequiredError(error_msg) from e
+                if "workspace" in error_msg.lower() and "access" in error_msg.lower():
+                    raise PlatformAPIError(
+                        f"{error_msg}\n"
+                        "Your workspace context may be stale. "
+                        "Run 'osmosis login' or 'osmosis workspace' to re-select.",
+                        e.code,
+                    ) from e
 
         raise PlatformAPIError(f"API error: HTTP {e.code}.{detail}", e.code) from e
     except URLError as e:
