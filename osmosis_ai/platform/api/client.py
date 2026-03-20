@@ -21,7 +21,7 @@ from .models import (
 )
 
 if TYPE_CHECKING:
-    from osmosis_ai.platform.auth.credentials import WorkspaceCredentials
+    from osmosis_ai.platform.auth.credentials import Credentials
 
 
 def _safe_path(segment: str) -> str:
@@ -39,10 +39,25 @@ class OsmosisClient:
     # ── Workspace ────────────────────────────────────────────────────
 
     def refresh_workspace_info(
-        self, *, credentials: WorkspaceCredentials | None = None
+        self,
+        *,
+        credentials: Credentials | None = None,
+        workspace_name: str | None = None,
     ) -> dict[str, Any]:
-        """GET /api/cli/verify — refresh cached workspace info (user, org, subscription)."""
-        return platform_request("/api/cli/verify", credentials=credentials)
+        """Fetch subscription status for a workspace via /api/cli/workspaces.
+
+        Returns a dict with ``has_subscription`` for the matched workspace,
+        or an empty dict if the workspace is not found.
+        """
+        data = platform_request(
+            "/api/cli/workspaces",
+            credentials=credentials,
+            require_workspace=False,
+        )
+        for ws in data.get("workspaces", []):
+            if workspace_name and ws.get("name") == workspace_name:
+                return {"has_subscription": ws.get("has_subscription")}
+        return {}
 
     # ── Projects ─────────────────────────────────────────────────────
 
@@ -51,23 +66,30 @@ class OsmosisClient:
         limit: int = 50,
         offset: int = 0,
         *,
-        credentials: WorkspaceCredentials | None = None,
+        credentials: Credentials | None = None,
+        workspace_id: str | None = None,
     ) -> PaginatedProjects:
         qs = urlencode({"limit": limit, "offset": offset})
-        data = platform_request(f"/api/cli/projects?{qs}", credentials=credentials)
+        data = platform_request(
+            f"/api/cli/projects?{qs}",
+            credentials=credentials,
+            workspace_id=workspace_id,
+        )
         return PaginatedProjects.from_dict(data)
 
     def create_project(
         self,
         name: str,
         *,
-        credentials: WorkspaceCredentials | None = None,
+        credentials: Credentials | None = None,
+        workspace_id: str | None = None,
     ) -> Project:
         data = platform_request(
             "/api/cli/projects",
             method="POST",
             data={"name": name},
             credentials=credentials,
+            workspace_id=workspace_id,
         )
         return Project.from_dict(data)
 
@@ -75,7 +97,7 @@ class OsmosisClient:
         self,
         project_id: str,
         *,
-        credentials: WorkspaceCredentials | None = None,
+        credentials: Credentials | None = None,
     ) -> ProjectDetail:
         data = platform_request(
             f"/api/cli/projects/{_safe_path(project_id)}",
@@ -92,7 +114,7 @@ class OsmosisClient:
         file_size: int,
         extension: str,
         *,
-        credentials: WorkspaceCredentials | None = None,
+        credentials: Credentials | None = None,
     ) -> DatasetFile:
         data = platform_request(
             "/api/cli/datasets",
@@ -110,26 +132,28 @@ class OsmosisClient:
     def complete_upload(
         self,
         file_id: str,
-        s3_key: str,
-        extension: str | None = None,
-        upload_id: str | None = None,
         parts: list[dict[str, Any]] | None = None,
         *,
-        credentials: WorkspaceCredentials | None = None,
+        credentials: Credentials | None = None,
     ) -> DatasetFile:
-        payload: dict = {"s3_key": s3_key}
-        if extension is not None:
-            payload["extension"] = extension
-        if upload_id is not None or parts is not None:
-            if upload_id is None or parts is None:
+        """Complete an upload.
+
+        The server reads s3_key and upload_id from the DB record.
+        For multipart uploads, provide the list of completed parts.
+        For simple uploads, no parts needed.
+        """
+        payload: dict = {}
+        if parts is not None:
+            # Validate no duplicate part numbers before sending
+            part_numbers = [p["PartNumber"] for p in parts]
+            if len(part_numbers) != len(set(part_numbers)):
                 raise ValueError(
-                    "upload_id and parts must both be provided for multipart completion"
+                    f"Duplicate part numbers detected in {len(parts)} parts"
                 )
-            payload["upload_id"] = upload_id
             payload["parts"] = parts
         # Completing a multipart upload can take a while (S3 must assemble
         # all parts), so use a longer timeout than the default 30s.
-        timeout = 120.0 if upload_id else 30.0
+        timeout = 120.0 if parts else 30.0
         data = platform_request(
             f"/api/cli/datasets/{_safe_path(file_id)}/complete",
             method="POST",
@@ -142,14 +166,18 @@ class OsmosisClient:
     def abort_upload(
         self,
         file_id: str,
-        upload_id: str,
         *,
-        credentials: WorkspaceCredentials | None = None,
+        credentials: Credentials | None = None,
     ) -> None:
+        """Abort an in-progress upload.
+
+        The server reads upload_id from the DB record and handles both
+        multipart (abort S3 + cancel) and simple (cancel only) uploads.
+        """
         platform_request(
             f"/api/cli/datasets/{_safe_path(file_id)}/abort",
             method="POST",
-            data={"upload_id": upload_id},
+            data={},
             credentials=credentials,
         )
 
@@ -159,7 +187,7 @@ class OsmosisClient:
         limit: int = 50,
         offset: int = 0,
         *,
-        credentials: WorkspaceCredentials | None = None,
+        credentials: Credentials | None = None,
     ) -> PaginatedDatasets:
         qs = urlencode({"project_id": project_id, "limit": limit, "offset": offset})
         data = platform_request(f"/api/cli/datasets?{qs}", credentials=credentials)
@@ -169,7 +197,7 @@ class OsmosisClient:
         self,
         file_id: str,
         *,
-        credentials: WorkspaceCredentials | None = None,
+        credentials: Credentials | None = None,
     ) -> DatasetFile:
         data = platform_request(
             f"/api/cli/datasets/{_safe_path(file_id)}",
@@ -181,7 +209,7 @@ class OsmosisClient:
         self,
         file_id: str,
         *,
-        credentials: WorkspaceCredentials | None = None,
+        credentials: Credentials | None = None,
     ) -> bool:
         platform_request(
             f"/api/cli/datasets/{_safe_path(file_id)}",
@@ -198,7 +226,7 @@ class OsmosisClient:
         limit: int = 20,
         offset: int = 0,
         *,
-        credentials: WorkspaceCredentials | None = None,
+        credentials: Credentials | None = None,
     ) -> PaginatedTrainingRuns:
         qs = urlencode({"project_id": project_id, "limit": limit, "offset": offset})
         data = platform_request(f"/api/cli/training-runs?{qs}", credentials=credentials)
@@ -208,7 +236,7 @@ class OsmosisClient:
         self,
         run_id: str,
         *,
-        credentials: WorkspaceCredentials | None = None,
+        credentials: Credentials | None = None,
     ) -> TrainingRunDetail:
         data = platform_request(
             f"/api/cli/training-runs/{_safe_path(run_id)}", credentials=credentials
@@ -223,7 +251,7 @@ class OsmosisClient:
         limit: int = 50,
         offset: int = 0,
         *,
-        credentials: WorkspaceCredentials | None = None,
+        credentials: Credentials | None = None,
     ) -> PaginatedBaseModels:
         qs = urlencode({"project_id": project_id, "limit": limit, "offset": offset})
         data = platform_request(f"/api/cli/models/base?{qs}", credentials=credentials)
@@ -235,7 +263,7 @@ class OsmosisClient:
         limit: int = 50,
         offset: int = 0,
         *,
-        credentials: WorkspaceCredentials | None = None,
+        credentials: Credentials | None = None,
     ) -> PaginatedOutputModels:
         qs = urlencode({"project_id": project_id, "limit": limit, "offset": offset})
         data = platform_request(f"/api/cli/models/output?{qs}", credentials=credentials)
@@ -247,7 +275,7 @@ class OsmosisClient:
         limit: int = 50,
         offset: int = 0,
         *,
-        credentials: WorkspaceCredentials | None = None,
+        credentials: Credentials | None = None,
     ) -> tuple[PaginatedBaseModels, PaginatedOutputModels]:
         """Fetch base and output models in parallel."""
         with ThreadPoolExecutor(max_workers=2) as pool:

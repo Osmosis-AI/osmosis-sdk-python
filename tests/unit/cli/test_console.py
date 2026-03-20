@@ -1,4 +1,4 @@
-"""Tests for the Console class (fallback/plain-text and rich modes)."""
+"""Tests for the Console class (Rich-based TTY and non-TTY modes)."""
 
 from __future__ import annotations
 
@@ -33,22 +33,19 @@ def _no_color_console() -> tuple[Console, StringIO]:
 def test_plain_console_properties() -> None:
     c, _ = _plain_console()
     assert c.is_tty is False
-    assert c.use_rich is False
 
 
 def test_rich_console_properties() -> None:
     c, _ = _rich_console()
     assert c.is_tty is True
-    assert c.use_rich is True
 
 
-def test_no_color_console_disables_rich() -> None:
+def test_no_color_console_properties() -> None:
     c, _ = _no_color_console()
     assert c.is_tty is True
-    assert c.use_rich is False
 
 
-# ── print (fallback) ────────────────────────────────────────────────
+# ── print ───────────────────────────────────────────────────────────
 
 
 def test_plain_print_basic() -> None:
@@ -65,7 +62,7 @@ def test_plain_print_no_ansi_when_not_tty() -> None:
     assert "\033[" not in output  # no ANSI codes in non-TTY
 
 
-# ── separator (fallback) ────────────────────────────────────────────
+# ── separator ───────────────────────────────────────────────────────
 
 
 def test_separator_plain_no_title() -> None:
@@ -73,7 +70,6 @@ def test_separator_plain_no_title() -> None:
     c.separator()
     output = buf.getvalue().strip()
     assert "─" in output
-    assert len(output) == 60
 
 
 def test_separator_plain_with_title() -> None:
@@ -90,7 +86,7 @@ def test_separator_rich() -> None:
     assert "Title" in buf.getvalue()
 
 
-# ── panel (fallback) ────────────────────────────────────────────────
+# ── panel ───────────────────────────────────────────────────────────
 
 
 def test_panel_plain_with_title() -> None:
@@ -120,7 +116,7 @@ def test_panel_rich() -> None:
     assert "content" in output
 
 
-# ── table (fallback) ────────────────────────────────────────────────
+# ── table ───────────────────────────────────────────────────────────
 
 
 def test_table_plain_basic() -> None:
@@ -157,7 +153,8 @@ def test_table_rich_without_headers() -> None:
 
 def test_escape_plain() -> None:
     c, _ = _plain_console()
-    assert c.escape("[bold]text[/bold]") == "[bold]text[/bold]"
+    result = c.escape("[bold]text[/bold]")
+    assert "\\[" in result  # brackets are escaped via rich_escape
 
 
 def test_escape_rich() -> None:
@@ -168,42 +165,20 @@ def test_escape_rich() -> None:
 
 def test_escape_none() -> None:
     c, _ = _plain_console()
-    assert c.escape(None) == ""  # type: ignore[arg-type]
+    assert c.escape(None) == ""
 
 
 # ── format_styled ────────────────────────────────────────────────────
 
 
-def test_format_styled_plain_with_tty() -> None:
-    buf = StringIO()
-    # force_terminal=True but no_color=True → uses ANSI fallback path
-    c = Console(file=buf, force_terminal=True, no_color=True)
-    # no_color disables ANSI too, so plain text
-    result = c.format_styled("hello", "green")
-    assert "hello" in result
-
-
-def test_format_styled_plain_no_tty() -> None:
+def test_format_styled_returns_rich_markup() -> None:
     c, _ = _plain_console()
     result = c.format_styled("hello", "green")
-    assert result == "hello"
+    assert result == "[green]hello[/green]"
 
 
-def test_format_styled_rich() -> None:
-    c, _ = _rich_console()
-    result = c.format_styled("hello", "cyan")
-    assert "[cyan]" in result
-    assert "hello" in result
-
-
-# ── run_rich ─────────────────────────────────────────────────────────
-
-
-def test_run_rich_returns_false_in_plain() -> None:
+def test_format_styled_escapes_brackets() -> None:
     c, _ = _plain_console()
-    assert c.run_rich(lambda rc: rc.print("test")) is False
-
-
-def test_run_rich_returns_true_in_rich() -> None:
-    c, _ = _rich_console()
-    assert c.run_rich(lambda rc: rc.print("test")) is True
+    result = c.format_styled("[bold]text", "cyan")
+    assert "\\[bold]" in result  # opening bracket escaped
+    assert "cyan" in result

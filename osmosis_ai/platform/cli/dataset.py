@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import contextlib
 import time
 from collections.abc import Iterable
 from pathlib import Path
@@ -42,22 +41,20 @@ app: typer.Typer = typer.Typer(
 )
 
 
-def _abort_multipart(
+def _abort_upload(
     client: Any,
     dataset_id: str,
-    upload_id: str | None,
     *,
     credentials: Any | None = None,
 ) -> None:
-    """Best-effort abort of a multipart upload."""
-    if upload_id:
-        try:
-            client.abort_upload(dataset_id, upload_id, credentials=credentials)
-        except Exception as exc:
-            console.print(
-                f"Warning: failed to abort multipart upload: {exc}",
-                style="dim yellow",
-            )
+    """Best-effort abort of an in-progress upload."""
+    try:
+        client.abort_upload(dataset_id, credentials=credentials)
+    except Exception as exc:
+        console.print(
+            f"Warning: failed to abort upload: {exc}",
+            style="dim yellow",
+        )
 
 
 # ── Complete-upload retry (P0 reliability fix) ───────────────────────
@@ -76,9 +73,6 @@ from osmosis_ai.platform.api.upload import BACKOFF_BASE, BACKOFF_CAP, MAX_RETRIE
 def _complete_with_retry(
     client: Any,
     dataset_id: str,
-    s3_key: str,
-    extension: str | None = None,
-    upload_id: str | None = None,
     parts: list[dict] | None = None,
     credentials: Any | None = None,
 ) -> Any:
@@ -99,9 +93,6 @@ def _complete_with_retry(
         try:
             return client.complete_upload(
                 dataset_id,
-                s3_key,
-                extension,
-                upload_id=upload_id,
                 parts=parts,
                 credentials=credentials,
             )
@@ -162,6 +153,93 @@ def _check_file_basics(file: str) -> tuple[Path, str, int]:
     return file_path, ext, file_size
 
 
+def _perform_upload(
+    *,
+    file_path: Path,
+    ext: str,
+    file_size: int,
+    project_id: str,
+    credentials: Any | None = None,
+) -> Any:
+    """Core upload: create dataset record → S3 upload → complete.
+
+    Returns the completed DatasetFile. Raises CLIError on failure.
+    Shared by the ``upload`` CLI command and the workspace interactive flow.
+    """
+    from osmosis_ai.platform.api.client import OsmosisClient
+    from osmosis_ai.platform.api.upload import (
+        make_progress_bar,
+        upload_file_multipart,
+        upload_file_simple,
+    )
+
+    client = OsmosisClient()
+
+    dataset = client.create_dataset(
+        project_id,
+        file_path.name,
+        file_size,
+        ext,
+        credentials=credentials,
+    )
+
+    upload_info = dataset.upload
+    if upload_info is None:
+        raise CLIError("Server did not return upload instructions.")
+
+    is_multipart = upload_info.method == "multipart"
+    if is_multipart:
+        parts_label = (
+            f", {upload_info.total_parts} parts" if upload_info.total_parts else ""
+        )
+        console.print(
+            f"Uploading {file_path.name} ({format_size(file_size)}, multipart{parts_label})..."
+        )
+    else:
+        console.print(f"Uploading {file_path.name} ({format_size(file_size)})...")
+
+    ctx, progress_cb = make_progress_bar(file_size)
+
+    if is_multipart:
+        try:
+            with ctx:
+                parts = upload_file_multipart(
+                    file_path, upload_info, progress_callback=progress_cb
+                )
+        except KeyboardInterrupt:
+            _abort_upload(client, dataset.id, credentials=credentials)
+            raise CLIError("Upload cancelled by user.") from None
+        except Exception as e:
+            _abort_upload(client, dataset.id, credentials=credentials)
+            raise CLIError(f"Upload failed: {e}") from e
+        _complete_with_retry(
+            client,
+            dataset.id,
+            parts=parts,
+            credentials=credentials,
+        )
+    else:
+        try:
+            with ctx:
+                upload_file_simple(
+                    file_path, upload_info, progress_callback=progress_cb
+                )
+        except KeyboardInterrupt:
+            console.print("\nUpload interrupted.")
+            _abort_upload(client, dataset.id, credentials=credentials)
+            raise CLIError("Upload cancelled by user.") from None
+        except Exception as e:
+            _abort_upload(client, dataset.id, credentials=credentials)
+            raise CLIError(f"Upload failed: {e}") from e
+        _complete_with_retry(
+            client,
+            dataset.id,
+            credentials=credentials,
+        )
+
+    return dataset
+
+
 @app.command("upload")
 def upload(
     file: str = typer.Argument(..., help="Path to the file to upload."),
@@ -172,13 +250,6 @@ def upload(
     """Upload a dataset file."""
     ws_name, credentials = _require_auth()
     _require_subscription(workspace_name=ws_name)
-
-    from osmosis_ai.platform.api.client import OsmosisClient
-    from osmosis_ai.platform.api.upload import (
-        make_progress_bar,
-        upload_file_multipart,
-        upload_file_simple,
-    )
 
     file_path, ext, file_size = _check_file_basics(file)
 
@@ -210,86 +281,13 @@ def upload(
             console.print("Upload cancelled.", style="dim")
             return
 
-    client = OsmosisClient()
-
-    # Step 1: Create dataset record + get upload instructions
-    dataset = client.create_dataset(
-        project_id,
-        file_path.name,
-        file_size,
-        ext,
+    dataset = _perform_upload(
+        file_path=file_path,
+        ext=ext,
+        file_size=file_size,
+        project_id=project_id,
         credentials=credentials,
     )
-
-    upload_info = dataset.upload
-    if upload_info is None:
-        raise CLIError("Server did not return upload instructions.")
-
-    # Step 2: Upload file to S3
-    is_multipart = upload_info.method == "multipart"
-    if is_multipart:
-        parts_label = (
-            f", {upload_info.total_parts} parts" if upload_info.total_parts else ""
-        )
-        console.print(
-            f"Uploading {file_path.name} ({format_size(file_size)}, multipart{parts_label})..."
-        )
-    else:
-        console.print(f"Uploading {file_path.name} ({format_size(file_size)})...")
-
-    ctx, progress_cb = make_progress_bar(file_size)
-
-    if is_multipart:
-        try:
-            with ctx:
-                parts = upload_file_multipart(
-                    file_path, upload_info, progress_callback=progress_cb
-                )
-        except KeyboardInterrupt:
-            _abort_multipart(
-                client,
-                dataset.id,
-                upload_info.upload_id,
-                credentials=credentials,
-            )
-            raise CLIError("Upload cancelled by user.") from None
-        except Exception as e:
-            _abort_multipart(
-                client,
-                dataset.id,
-                upload_info.upload_id,
-                credentials=credentials,
-            )
-            raise CLIError(f"Upload failed: {e}") from e
-        _complete_with_retry(
-            client,
-            dataset.id,
-            upload_info.s3_key,
-            ext,
-            upload_id=upload_info.upload_id,
-            parts=parts,
-            credentials=credentials,
-        )
-    else:
-        try:
-            with ctx:
-                upload_file_simple(
-                    file_path, upload_info, progress_callback=progress_cb
-                )
-        except KeyboardInterrupt:
-            console.print("\nUpload interrupted.")
-            with contextlib.suppress(Exception):
-                client.delete_dataset(dataset.id, credentials=credentials)
-            raise CLIError("Upload cancelled by user.") from None
-        except Exception as e:
-            raise CLIError(f"Upload failed: {e}") from e
-        _complete_with_retry(
-            client,
-            dataset.id,
-            upload_info.s3_key,
-            ext,
-            credentials=credentials,
-        )
 
     console.print(f"Upload complete. Dataset ID: {dataset.id}", style="green")
     url = platform_entity_url(ws_name, project_name, "training-data", dataset.id)

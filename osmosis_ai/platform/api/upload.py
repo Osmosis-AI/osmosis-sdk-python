@@ -387,6 +387,19 @@ def upload_file_multipart(
                 progress_callback(bytes_uploaded, file_size)
 
     completed_parts.sort(key=lambda p: p["PartNumber"])
+
+    # Validate all parts were uploaded before returning
+    if len(completed_parts) != info.total_parts:
+        raise RuntimeError(
+            f"Incomplete upload: expected {info.total_parts} parts, "
+            f"but only {len(completed_parts)} were completed"
+        )
+    uploaded_numbers = {p["PartNumber"] for p in completed_parts}
+    expected_numbers = set(range(1, info.total_parts + 1))
+    missing = sorted(expected_numbers - uploaded_numbers)
+    if missing:
+        raise RuntimeError(f"Missing part numbers after upload: {missing[:10]}")
+
     return completed_parts
 
 

@@ -8,6 +8,8 @@ from typing import TYPE_CHECKING, Any
 from osmosis_ai.rollout.eval.common.cli import format_duration
 
 if TYPE_CHECKING:
+    from rich.console import Console as RichConsole
+
     from osmosis_ai.cli.console import Console
     from osmosis_ai.rollout.eval.evaluation.runner import EvalResult
 
@@ -151,22 +153,12 @@ def format_eval_report(result: EvalResult, console: Console, model: str = "") ->
                     pass_k_values.append(k)
         pass_k_values.sort()
 
-    if console.run_rich(
-        lambda rich_console: _format_tables_rich(
-            eval_fn_names,
-            model_data,
-            pass_k_values,
-            rich_console,
-        )
-    ):
-        pass
-    else:
-        _format_tables_plain(
-            eval_fn_names,
-            model_data,
-            pass_k_values,
-            console,
-        )
+    _format_tables_rich(
+        eval_fn_names,
+        model_data,
+        pass_k_values,
+        console.rich,
+    )
 
     console.print()
     console.print()
@@ -176,7 +168,7 @@ def _format_tables_rich(
     eval_fn_names: list[str],
     model_data: list[dict[str, Any]],
     pass_k_values: list[int],
-    rich_console: Any,
+    rich_console: RichConsole,
 ) -> None:
     """Render the performance and eval results tables using rich."""
     from rich import box
@@ -249,81 +241,6 @@ def _format_tables_rich(
             table.add_row(*row)
 
     rich_console.print(table)
-
-
-def _format_tables_plain(
-    eval_fn_names: list[str],
-    model_data: list[dict[str, Any]],
-    pass_k_values: list[int],
-    console: Console,
-) -> None:
-    """Render the performance and eval results tables as plain text."""
-    # --- Performance table ---
-    perf_header_parts = [
-        f"{'Model':<15}",
-        f"{'Avg Latency':>12}",
-        f"{'Avg Tokens':>11}",
-    ]
-    perf_header = " | ".join(perf_header_parts)
-    console.print("Performance:", style="bold")
-    console.print(perf_header, style="bold")
-    console.print("-" * len(perf_header))
-    for md in model_data:
-        perf_row = " | ".join(
-            [
-                f"{md['name']:<15}",
-                f"{format_duration(md['avg_latency_ms']):>12}",
-                f"{md['avg_tokens']:>11,.0f}",
-            ]
-        )
-        console.print(perf_row)
-    console.print()
-
-    # --- Eval results table ---
-    header_parts = [
-        f"{'Eval Function':<20}",
-        f"{'Model':<15}",
-        f"{'Mean':>6}",
-        f"{'Median':>8}",
-        f"{'Std':>6}",
-    ]
-    for k in pass_k_values:
-        header_parts.append(f"{'pass@' + str(k):>8}")
-    header = " | ".join(header_parts)
-
-    console.print(header, style="bold")
-    console.print("-" * len(header))
-
-    for fn_idx, fn_name in enumerate(eval_fn_names):
-        for m_idx, md in enumerate(model_data):
-            summary = md["eval_summaries"].get(fn_name)
-            if summary is None:
-                continue
-
-            display_fn = fn_name
-
-            row_parts = [
-                f"{display_fn:<20}",
-                f"{md['name']:<15}",
-                f"{summary.mean:>6.3f}",
-                f"{summary.median:>8.3f}",
-                f"{summary.std:>6.3f}",
-            ]
-
-            for k in pass_k_values:
-                val = summary.pass_at_k.get(k)
-                if val is not None:
-                    row_parts.append(f"{val * 100:>7.1f}%")
-                else:
-                    row_parts.append(f"{'N/A':>8}")
-
-            console.print(" | ".join(row_parts))
-
-            # Separator after every row except the very last
-            is_last_model = m_idx == len(model_data) - 1
-            is_last_fn = fn_idx == len(eval_fn_names) - 1
-            if not (is_last_model and is_last_fn):
-                console.print("-" * len(header))
 
 
 __all__ = [

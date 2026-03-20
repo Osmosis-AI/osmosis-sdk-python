@@ -278,19 +278,19 @@ class TrainingRunDetail(TrainingRun):
 
     output_model_id: str | None = None
     project_id: str | None = None
+    examples_processed_count: int | None = None
     notes: str | None = None
     hf_status: str | None = None
-    examples_processed_count: int | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> TrainingRunDetail:
-        # Detail API returns { training_run: {...}, model: {...}, enhanced_status: "..." }
+        # Detail API returns { training_run: {..., enhanced_status}, model: {...} }
         run = data["training_run"]
         model = data.get("model") or {}
         return cls(
             id=run["id"],
             name=run.get("name"),
-            status=data.get("enhanced_status") or run.get("status", ""),
+            status=run.get("enhanced_status") or run.get("status", ""),
             model_id=run.get("model_id"),
             model_name=model.get("model_name"),
             created_at=run.get("created_at", ""),
@@ -305,9 +305,9 @@ class TrainingRunDetail(TrainingRun):
             creator_email=run.get("creator_email"),
             output_model_id=run.get("output_model_id"),
             project_id=run.get("project_id"),
+            examples_processed_count=run.get("examples_processed_count"),
             notes=run.get("notes"),
             hf_status=run.get("hf_status"),
-            examples_processed_count=run.get("examples_processed_count"),
         )
 
 

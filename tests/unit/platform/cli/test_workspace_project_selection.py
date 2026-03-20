@@ -5,6 +5,7 @@ from __future__ import annotations
 import pytest
 
 import osmosis_ai.platform.cli.project as project_module
+import osmosis_ai.platform.cli.utils as utils_module
 from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.platform.auth.platform_client import PlatformAPIError
 
@@ -17,7 +18,9 @@ def test_select_project_interactive_refreshes_selected_workspace_projects(
 
     monkeypatch.setattr(project_module, "is_interactive", lambda: False)
 
-    def fake_refresh_projects(*, workspace_name: str) -> list[dict[str, str]]:
+    def fake_refresh_projects(
+        *, workspace_name: str, workspace_id: str | None = None
+    ) -> list[dict[str, str]]:
         calls["workspace_name"] = workspace_name
         return [target_project]
 
@@ -37,7 +40,9 @@ def test_select_project_interactive_uses_selected_workspace_cache_on_refresh_fai
 
     monkeypatch.setattr(project_module, "is_interactive", lambda: False)
 
-    def fake_refresh_projects(*, workspace_name: str) -> list[dict]:
+    def fake_refresh_projects(
+        *, workspace_name: str, workspace_id: str | None = None
+    ) -> list[dict]:
         raise PlatformAPIError(f"boom for {workspace_name}")
 
     def fake_get_cached_projects(
@@ -66,7 +71,9 @@ def test_select_project_interactive_raises_when_refresh_fails_and_no_cache(
 ) -> None:
     monkeypatch.setattr(project_module, "is_interactive", lambda: False)
 
-    def fake_refresh_projects(*, workspace_name: str) -> list[dict]:
+    def fake_refresh_projects(
+        *, workspace_name: str, workspace_id: str | None = None
+    ) -> list[dict]:
         raise PlatformAPIError("network error")
 
     def fake_get_cached_projects(
@@ -119,10 +126,9 @@ def test_refresh_projects_uses_selected_workspace_credentials_and_cache(
     fake_credentials = FakeCredentials()
 
     monkeypatch.setattr(
-        project_module,
-        "load_workspace_credentials",
-        lambda workspace_name: fake_credentials if workspace_name == "ws-b" else None,
-        raising=False,
+        utils_module,
+        "get_valid_credentials",
+        lambda: fake_credentials,
     )
 
     class FakeProject:
@@ -139,7 +145,14 @@ def test_refresh_projects_uses_selected_workspace_credentials_and_cache(
             self.next_offset = None
 
     class FakeClient:
-        def list_projects(self, limit: int = 50, offset: int = 0, *, credentials=None):
+        def list_projects(
+            self,
+            limit: int = 50,
+            offset: int = 0,
+            *,
+            credentials=None,
+            workspace_id=None,
+        ):
             calls["credentials"] = credentials
             return FakePaginatedProjects(target_projects)
 
@@ -215,21 +228,16 @@ def test_require_subscription_refreshes_selected_workspace(monkeypatch) -> None:
         def is_expired(self) -> bool:
             return False
 
-    credential_calls: list[str] = []
-
-    def fake_load_workspace_credentials(workspace_name: str):
-        credential_calls.append(workspace_name)
-        return FakeCredentials()
-
     monkeypatch.setattr(
-        project_module,
-        "load_workspace_credentials",
-        fake_load_workspace_credentials,
-        raising=False,
+        utils_module,
+        "get_valid_credentials",
+        lambda: FakeCredentials(),
     )
 
     class FakeClient:
-        def refresh_workspace_info(self, *, credentials=None) -> dict:
+        def refresh_workspace_info(
+            self, *, credentials=None, workspace_name=None
+        ) -> dict:
             verify_calls.append("called")
             return {"has_subscription": True}
 
@@ -248,4 +256,3 @@ def test_require_subscription_refreshes_selected_workspace(monkeypatch) -> None:
         ("ws-b", project_module.CACHE_TTL_SECONDS),
     ]
     assert verify_calls == ["called"]
-    assert credential_calls == ["ws-b"]

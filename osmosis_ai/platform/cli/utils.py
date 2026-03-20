@@ -15,10 +15,21 @@ from osmosis_ai.platform.api.models import (
     STATUSES_IN_PROGRESS,
     STATUSES_SUCCESS,
 )
+from osmosis_ai.platform.auth import AuthenticationExpiredError, get_valid_credentials
 from osmosis_ai.platform.auth.config import PLATFORM_URL
 
 if TYPE_CHECKING:
-    from osmosis_ai.platform.auth.credentials import WorkspaceCredentials
+    from osmosis_ai.platform.auth.credentials import Credentials
+
+
+def require_credentials() -> Credentials:
+    """Load valid credentials, raising if not available."""
+    credentials = get_valid_credentials()
+    if credentials is None:
+        raise AuthenticationExpiredError(
+            "No valid credentials found. Please run 'osmosis login' first."
+        )
+    return credentials
 
 
 def resolve_id_prefix(
@@ -59,7 +70,7 @@ def _resolve_entity_id(
     id: str,
     project: str | None,
     workspace_name: str,
-    credentials: WorkspaceCredentials,
+    credentials: Credentials,
     *,
     list_fn: Any,
     items_attr: str,
@@ -84,7 +95,7 @@ def resolve_dataset_id(
     id: str,
     project: str | None,
     workspace_name: str,
-    credentials: WorkspaceCredentials,
+    credentials: Credentials,
     *,
     client: Any = None,
 ) -> str:
@@ -108,7 +119,7 @@ def resolve_run_id(
     id: str,
     project: str | None,
     workspace_name: str,
-    credentials: WorkspaceCredentials,
+    credentials: Credentials,
     *,
     client: Any = None,
 ) -> str:

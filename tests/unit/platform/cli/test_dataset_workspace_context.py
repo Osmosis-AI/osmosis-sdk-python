@@ -123,17 +123,11 @@ def test_upload_passes_active_workspace_context_to_subscription_and_api_calls(
         def complete_upload(
             self,
             file_id: str,
-            s3_key: str,
-            extension: str | None = None,
-            upload_id: str | None = None,
             parts: list[dict] | None = None,
             *,
             credentials=None,
         ) -> DatasetFile:
             assert file_id == "dataset-1"
-            assert s3_key == "uploads/data.jsonl"
-            assert extension == "jsonl"
-            assert upload_id is None
             assert parts is None
             calls["complete_credentials"] = credentials
             return DatasetFile(

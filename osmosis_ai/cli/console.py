@@ -1,8 +1,8 @@
-"""Unified console output with rich support and graceful degradation.
+"""Console output with Rich and automatic TTY-aware rendering.
 
-This module provides a Console class that uses rich for beautiful terminal output
-when available, with automatic fallback to plain text when rich is not installed
-or when output is redirected to a non-TTY.
+Rich automatically strips ANSI control codes when output is not directed
+to a terminal (e.g., piped to a file), and respects the NO_COLOR
+environment variable.
 
 Usage:
     from osmosis_ai.cli.console import console
@@ -16,67 +16,22 @@ Usage:
 from __future__ import annotations
 
 import sys
-from collections.abc import Callable
-from typing import TYPE_CHECKING, Any
+from collections.abc import Generator
+from contextlib import contextmanager
+from typing import Any
 
-if TYPE_CHECKING:
-    from rich import box as box
-    from rich.console import Console as RichConsole
-    from rich.markup import escape as rich_escape
-    from rich.panel import Panel
-    from rich.table import Table
-
-# Try to import rich, gracefully degrade if not available
-try:
-    from rich import box
-    from rich.console import Console as RichConsole
-    from rich.markup import escape as rich_escape
-    from rich.panel import Panel
-    from rich.table import Table
-
-    RICH_AVAILABLE = True
-except ImportError:
-    RICH_AVAILABLE = False
-
-
-class _AnsiColors:
-    """ANSI color codes for fallback mode."""
-
-    RESET = "\033[0m"
-    BOLD = "\033[1m"
-    DIM = "\033[2m"
-    RED = "\033[31m"
-    GREEN = "\033[32m"
-    YELLOW = "\033[33m"
-    BLUE = "\033[34m"
-    MAGENTA = "\033[35m"
-    CYAN = "\033[36m"
-
-    # Style name to ANSI code mapping
-    STYLE_MAP = {
-        "bold": BOLD,
-        "dim": DIM,
-        "red": RED,
-        "green": GREEN,
-        "yellow": YELLOW,
-        "blue": BLUE,
-        "magenta": MAGENTA,
-        "cyan": CYAN,
-        "bold red": BOLD + RED,
-        "bold green": BOLD + GREEN,
-        "bold yellow": BOLD + YELLOW,
-        "bold blue": BOLD + BLUE,
-        "bold magenta": BOLD + MAGENTA,
-        "bold cyan": BOLD + CYAN,
-    }
+from rich import box
+from rich.console import Console as RichConsole
+from rich.markup import escape as rich_escape
+from rich.panel import Panel
+from rich.table import Table
 
 
 class Console:
-    """Unified console output with rich support and graceful degradation.
+    """Console output using Rich with automatic TTY-aware rendering.
 
-    When rich is available and output is to a TTY, uses rich for beautiful
-    formatted output. Otherwise, falls back to plain text with optional
-    ANSI colors (only when writing to a TTY).
+    Rich handles terminal detection, color stripping for non-TTY output,
+    and NO_COLOR environment variable support natively.
     """
 
     def __init__(
@@ -93,65 +48,27 @@ class Console:
             force_terminal: Force terminal mode (for testing). None = auto-detect.
             no_color: Disable all colors, even in TTY mode.
         """
-        self._file = file or sys.stdout
-        self._no_color = no_color
+        file = file or sys.stdout
 
-        # Determine if we're writing to a TTY
-        if force_terminal is not None:
-            self._is_tty = force_terminal
-        else:
-            self._is_tty = getattr(self._file, "isatty", lambda: False)()
-
-        # Use rich if available and writing to TTY
-        self._use_rich = RICH_AVAILABLE and self._is_tty and not no_color
-
-        self._rich: RichConsole | None
-        self._rich_stderr: RichConsole | None
-        if self._use_rich:
-            self._rich = RichConsole(file=self._file, force_terminal=force_terminal)
-            self._rich_stderr = RichConsole(file=sys.stderr)
-        else:
-            self._rich = None
-            self._rich_stderr = None
+        self._rich = RichConsole(
+            file=file,
+            force_terminal=force_terminal,
+            no_color=no_color,
+        )
+        self._rich_stderr = RichConsole(
+            file=sys.stderr,
+            no_color=no_color,
+        )
 
     @property
     def is_tty(self) -> bool:
         """Whether output is to a TTY."""
-        return self._is_tty
+        return self._rich.is_terminal
 
     @property
-    def use_rich(self) -> bool:
-        """Whether rich formatting is being used."""
-        return self._use_rich
-
-    def run_rich(self, render_fn: Callable[[Any], None]) -> bool:
-        """Run a rich renderer when available, with graceful fallback.
-
-        Args:
-            render_fn: Callable that receives the rich console instance.
-
-        Returns:
-            True if rich rendering was executed successfully, else False.
-        """
-        if not self._use_rich or self._rich is None:
-            return False
-
-        try:
-            render_fn(self._rich)
-            return True
-        except ImportError:
-            return False
-
-    def _get_ansi_style(self, style: str | None) -> str:
-        """Get ANSI escape code for a style name."""
-        if not style or self._no_color or not self._is_tty:
-            return ""
-        return _AnsiColors.STYLE_MAP.get(style.lower(), "")
-
-    def _filter_plain_print_kwargs(self, kwargs: dict[str, Any]) -> dict[str, Any]:
-        """Keep only kwargs supported by built-in print in fallback mode."""
-        allowed_kwargs = {"sep", "flush"}
-        return {key: value for key, value in kwargs.items() if key in allowed_kwargs}
+    def rich(self) -> RichConsole:
+        """The underlying Rich Console instance."""
+        return self._rich
 
     def print(
         self,
@@ -166,21 +83,9 @@ class Console:
             *args: Values to print.
             style: Style name (e.g., "green", "bold red", "dim").
             end: String to print at end. Defaults to newline.
-            **kwargs: Additional arguments passed to print/rich.print.
+            **kwargs: Additional arguments passed to rich.print.
         """
-        if self._use_rich and self._rich:
-            self._rich.print(*args, style=style, end=end, **kwargs)
-        else:
-            plain_kwargs = self._filter_plain_print_kwargs(kwargs)
-            sep = plain_kwargs.pop("sep", " ")
-            ansi_style = self._get_ansi_style(style)
-
-            if ansi_style:
-                text = sep.join(str(arg) for arg in args)
-                text = f"{ansi_style}{text}{_AnsiColors.RESET}"
-                print(text, end=end, file=self._file, **plain_kwargs)
-            else:
-                print(*args, end=end, sep=sep, file=self._file, **plain_kwargs)
+        self._rich.print(*args, style=style, end=end, **kwargs)
 
     def print_error(self, message: str) -> None:
         """Print an error message to stderr.
@@ -188,42 +93,17 @@ class Console:
         Args:
             message: Error message to print.
         """
-        if self._use_rich and self._rich_stderr:
-            self._rich_stderr.print(message, style="bold red")
-        else:
-            is_stderr_tty = getattr(sys.stderr, "isatty", lambda: False)()
-            if is_stderr_tty and not self._no_color:
-                print(
-                    f"{_AnsiColors.BOLD}{_AnsiColors.RED}{message}{_AnsiColors.RESET}",
-                    file=sys.stderr,
-                )
-            else:
-                print(message, file=sys.stderr)
+        self._rich_stderr.print(message, style="bold red")
 
-    def separator(self, title: str = "", width: int = 60) -> None:
+    def separator(self, title: str = "") -> None:
         """Print a separator line with optional title.
 
         Args:
             title: Optional title to display in the separator.
-            width: Width of the separator line.
         """
-        if self._use_rich and self._rich:
-            from rich.rule import Rule
+        from rich.rule import Rule
 
-            self._rich.print(Rule(title, style="dim"))
-        else:
-            if title:
-                padding = (width - len(title) - 2) // 2
-                line = "─" * padding + f" {title} " + "─" * padding
-                if len(line) < width:
-                    line += "─"
-            else:
-                line = "─" * width
-
-            style = self._get_ansi_style("dim")
-            if style:
-                line = f"{style}{line}{_AnsiColors.RESET}"
-            print(line, file=self._file)
+        self._rich.print(Rule(title, style="dim"))
 
     def panel(
         self,
@@ -241,40 +121,8 @@ class Console:
             style: Border style color.
             padding: Padding (vertical, horizontal).
         """
-        if self._use_rich and self._rich:
-            panel = Panel(content, title=title, border_style=style, padding=padding)
-            self._rich.print(panel)
-        else:
-            # Fallback: simple bordered box
-            lines = content.split("\n")
-            max_width = max(len(line) for line in lines) if lines else 0
-            title_width = len(title) + 2 if title else 0
-            box_width = max(max_width + 4, title_width + 4)
-
-            style_code = self._get_ansi_style(style)
-            reset = _AnsiColors.RESET if style_code else ""
-
-            # Top border with title
-            if title:
-                padding_left = (box_width - len(title) - 2) // 2
-                padding_right = box_width - len(title) - 2 - padding_left
-                top = f"╭{'─' * padding_left} {title} {'─' * padding_right}╮"
-            else:
-                top = f"╭{'─' * (box_width - 2)}╮"
-
-            print(f"{style_code}{top}{reset}", file=self._file)
-
-            # Content lines
-            for line in lines:
-                padded = line.ljust(box_width - 4)
-                print(
-                    f"{style_code}│{reset}  {padded}  {style_code}│{reset}",
-                    file=self._file,
-                )
-
-            # Bottom border
-            bottom = f"╰{'─' * (box_width - 2)}╯"
-            print(f"{style_code}{bottom}{reset}", file=self._file)
+        panel = Panel(content, title=title, border_style=style, padding=padding)
+        self._rich.print(panel)
 
     def table(
         self,
@@ -290,49 +138,36 @@ class Console:
             title: Optional table title.
             headers: Optional column headers.
         """
-        if self._use_rich and self._rich:
-            table = Table(
-                title=title,
-                box=box.ROUNDED,
-                show_header=headers is not None,
-            )
-            if headers:
-                table.add_column(headers[0], style="cyan")
-                table.add_column(headers[1])
-            else:
-                table.add_column("", style="cyan")
-                table.add_column("")
-            for key, value in rows:
-                table.add_row(key, value)
-            self._rich.print(table)
+        table = Table(
+            title=title,
+            box=box.ROUNDED,
+            show_header=headers is not None,
+        )
+        if headers:
+            table.add_column(headers[0], style="cyan")
+            table.add_column(headers[1])
         else:
-            # Fallback: aligned text
-            if title:
-                print(f"\n{title}:", file=self._file)
-            key_width = max(len(row[0]) for row in rows) if rows else 0
-            for key, value in rows:
-                print(f"  {key.ljust(key_width)}  {value}", file=self._file)
+            table.add_column("", style="cyan")
+            table.add_column("")
+        for key, value in rows:
+            table.add_row(key, value)
+        self._rich.print(table)
 
-    def escape(self, text: str) -> str:
+    def escape(self, text: str | None) -> str:
         """Escape text so it is not interpreted as Rich markup.
 
-        In Rich mode, square brackets are escaped. In plain mode, returns
-        the text unchanged.
-
         Args:
-            text: Text to escape.
+            text: Text to escape. Returns empty string for None.
 
         Returns:
             Escaped text safe for embedding in Rich markup strings.
         """
         if text is None:
             return ""
-        if self._use_rich:
-            return rich_escape(str(text))
-        return str(text)
+        return rich_escape(str(text))
 
     def format_styled(self, text: str, style: str) -> str:
-        """Return text with inline style markup (for rich) or ANSI codes.
+        """Return text with inline Rich markup.
 
         This is useful for building complex strings with mixed styles.
 
@@ -341,15 +176,27 @@ class Console:
             style: Style name.
 
         Returns:
-            Styled text string.
+            Styled text string with Rich markup.
         """
-        if self._use_rich:
-            return f"[{style}]{rich_escape(text)}[/{style}]"
+        return f"[{style}]{rich_escape(text)}[/{style}]"
+
+    @contextmanager
+    def spinner(self, message: str) -> Generator[None, None, None]:
+        """Show a spinner animation while work is in progress.
+
+        Usage::
+
+            with console.spinner("Loading workspaces..."):
+                result = api_call()
+        """
+        if self.is_tty:
+            from rich.status import Status
+
+            with Status(message, console=self._rich, spinner="dots"):
+                yield
         else:
-            ansi_style = self._get_ansi_style(style)
-            if ansi_style:
-                return f"{ansi_style}{text}{_AnsiColors.RESET}"
-            return text
+            self._rich.print(message)
+            yield
 
     def input(self, prompt: str = "", style: str | None = None) -> str:
         """Get user input with optional styled prompt.
@@ -361,15 +208,10 @@ class Console:
         Returns:
             User input string.
         """
-        if self._use_rich and self._rich and style:
+        if style:
             self._rich.print(prompt, style=style, end="")
             return input()
-        else:
-            if style:
-                ansi_style = self._get_ansi_style(style)
-                if ansi_style:
-                    prompt = f"{ansi_style}{prompt}{_AnsiColors.RESET}"
-            return input(prompt)
+        return input(prompt)
 
 
 # Default console instance for convenient access
@@ -377,7 +219,6 @@ console: Console = Console()
 
 
 __all__ = [
-    "RICH_AVAILABLE",
     "Console",
     "console",
 ]
