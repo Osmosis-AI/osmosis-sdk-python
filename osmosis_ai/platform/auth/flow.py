@@ -16,6 +16,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
+from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -270,7 +271,7 @@ def poll_device_token(
     interval: int,
     timeout: float,
     on_poll: Callable[[], None] | None = None,
-) -> dict:
+) -> dict[str, Any]:
     """Poll for device authorization completion. Returns token response dict."""
     url = f"{PLATFORM_URL}/api/cli/device/token"
     body = json.dumps({"device_code": device_code}).encode()
