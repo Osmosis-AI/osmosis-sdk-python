@@ -19,7 +19,6 @@ from osmosis_ai.platform.auth.credentials import (
 from osmosis_ai.platform.auth.platform_client import (
     AuthenticationExpiredError,
     PlatformAPIError,
-    _handle_401_and_cleanup,
     platform_request,
     revoke_cli_token,
 )
@@ -88,23 +87,6 @@ class TestExceptionClasses:
         err = PlatformAPIError("not found", status_code=404)
         assert err.status_code == 404
         assert "not found" in str(err)
-
-
-# =============================================================================
-# _handle_401_and_cleanup Tests
-# =============================================================================
-
-
-class TestHandle401AndCleanup:
-    """Tests for the _handle_401_and_cleanup function."""
-
-    @patch("osmosis_ai.platform.auth.platform_client.reset_session")
-    def test_resets_session_and_raises(self, mock_reset: MagicMock) -> None:
-        """Verify 401 handler resets full session (credentials + workspace) and raises."""
-        with pytest.raises(AuthenticationExpiredError, match="expired or been revoked"):
-            _handle_401_and_cleanup()
-
-        mock_reset.assert_called_once()
 
 
 # =============================================================================
@@ -335,20 +317,33 @@ class TestPlatformRequest:
     # HTTP Error Handling
     # -------------------------------------------------------------------------
 
-    @patch("osmosis_ai.platform.auth.platform_client._handle_401_and_cleanup")
+    @patch("osmosis_ai.platform.auth.platform_client.reset_session")
     @patch("osmosis_ai.platform.auth.platform_client.urlopen")
     def test_401_triggers_cleanup_and_raises(
-        self, mock_urlopen: MagicMock, mock_cleanup: MagicMock
+        self, mock_urlopen: MagicMock, mock_reset: MagicMock
     ) -> None:
-        """Verify 401 response triggers credential cleanup."""
+        """Verify 401 response triggers session reset and raises."""
         mock_urlopen.side_effect = _make_http_error(401, "Unauthorized")
-        mock_cleanup.side_effect = AuthenticationExpiredError("expired")
         creds = _make_credentials()
 
-        with pytest.raises(AuthenticationExpiredError):
+        with pytest.raises(AuthenticationExpiredError, match="expired or been revoked"):
             platform_request("/api/test", credentials=creds)
 
-        mock_cleanup.assert_called_once()
+        mock_reset.assert_called_once()
+
+    @patch("osmosis_ai.platform.auth.platform_client.reset_session")
+    @patch("osmosis_ai.platform.auth.platform_client.urlopen")
+    def test_401_with_cleanup_disabled_skips_reset(
+        self, mock_urlopen: MagicMock, mock_reset: MagicMock
+    ) -> None:
+        """Verify 401 with cleanup_on_401=False raises without calling reset_session."""
+        mock_urlopen.side_effect = _make_http_error(401, "Unauthorized")
+        creds = _make_credentials()
+
+        with pytest.raises(AuthenticationExpiredError, match="expired or been revoked"):
+            platform_request("/api/test", credentials=creds, cleanup_on_401=False)
+
+        mock_reset.assert_not_called()
 
     @patch("osmosis_ai.platform.auth.platform_client.urlopen")
     def test_non_401_http_error_raises_platform_api_error(

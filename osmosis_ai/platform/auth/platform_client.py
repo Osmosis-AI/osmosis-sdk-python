@@ -41,15 +41,6 @@ class SubscriptionRequiredError(PlatformAPIError):
         )
 
 
-def _handle_401_and_cleanup() -> None:
-    """Handle 401 by clearing credentials and workspace context."""
-    reset_session()
-    raise AuthenticationExpiredError(
-        "Your session has expired or been revoked. "
-        "Please run 'osmosis login' to re-authenticate."
-    )
-
-
 def revoke_cli_token(credentials: Credentials) -> bool:
     """Best-effort server-side revocation of a CLI token.
 
@@ -100,6 +91,7 @@ def platform_request(
     credentials: Credentials | None = None,
     workspace_id: str | None = None,
     require_workspace: bool = True,
+    cleanup_on_401: bool = True,
 ) -> dict[str, Any]:
     """Make an authenticated request to the Osmosis Platform API.
 
@@ -117,12 +109,17 @@ def platform_request(
             provided and require_workspace is True, uses the active workspace.
         require_workspace: If True, requires a workspace context and adds
             X-Osmosis-Org header. If False, omits workspace context.
+        cleanup_on_401: If True (default), a 401 response triggers
+            ``reset_session()`` which deletes credentials and local config.
+            Set to False for non-critical calls (e.g. post-login validation)
+            where a transient 401 should not wipe freshly saved state.
 
     Returns:
         Parsed JSON response
 
     Raises:
-        AuthenticationExpiredError: If 401 received (credentials auto-deleted)
+        AuthenticationExpiredError: If 401 received (credentials auto-deleted
+            when cleanup_on_401 is True)
         PlatformAPIError: For other API errors
     """
     if credentials is None:
@@ -166,7 +163,12 @@ def platform_request(
             return result
     except HTTPError as e:
         if e.code == 401:
-            _handle_401_and_cleanup()
+            if cleanup_on_401:
+                reset_session()
+            raise AuthenticationExpiredError(
+                "Your session has expired or been revoked. "
+                "Please run 'osmosis login' to re-authenticate."
+            ) from e
 
         # Best-effort capture of structured error message from response body
         detail = ""

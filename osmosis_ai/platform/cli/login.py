@@ -41,6 +41,7 @@ def _validate_workspace_context(creds: Credentials) -> None:
             "/api/cli/workspaces",
             credentials=creds,
             require_workspace=False,
+            cleanup_on_401=False,
         )
         workspaces = data.get("workspaces", [])
         ws_by_id = {w["id"]: w for w in workspaces if "id" in w}
