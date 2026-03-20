@@ -213,8 +213,8 @@ def _switch_context(
     Returns (ws_name, project_dict) on success, or None if backed out to main menu.
     """
     step = "workspace"
-    ws_id = None
-    ws_name = None
+    ws_id: str | None = None
+    ws_name: str | None = None
     result = None
     while True:
         if step == "workspace":
@@ -237,6 +237,7 @@ def _switch_context(
                 if not ok:
                     step = "workspace"
                     continue
+                assert ws_id is not None
                 if ws_name != active_ws_name:
                     set_active_workspace(ws_id, ws_name)
                 clear_default_project(ws_name)
@@ -258,6 +259,7 @@ def _switch_context(
                 continue
 
             # Apply changes
+            assert ws_id is not None
             if ws_name != active_ws_name:
                 set_active_workspace(ws_id, ws_name)
 

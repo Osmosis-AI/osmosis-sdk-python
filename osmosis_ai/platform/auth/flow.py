@@ -360,13 +360,12 @@ def device_login(timeout: float = 600.0) -> tuple[LoginResult, Credentials]:
     console.print()
     effective_timeout = min(timeout, float(device_code_resp.expires_in))
 
-    poll_kwargs = dict(
-        device_code=device_code_resp.device_code,
-        interval=device_code_resp.interval,
-        timeout=effective_timeout,
-    )
     with console.spinner("Waiting for authorization..."):
-        token_response = poll_device_token(**poll_kwargs)
+        token_response = poll_device_token(
+            device_code=device_code_resp.device_code,
+            interval=device_code_resp.interval,
+            timeout=effective_timeout,
+        )
 
     if token_response is None:
         raise LoginError("Failed to obtain token response from authorization flow")
