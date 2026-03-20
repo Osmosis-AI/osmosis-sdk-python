@@ -1,0 +1,23 @@
+osmosis_ai/platform/auth/flow.py
+  46597f1ceecf9305 121-133,135-163,219,261,292-293
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.15",
+  "base_commit_sha": "06af5af1157e71d565e216fecb07959d5afe2766",
+  "prompts": {
+    "46597f1ceecf9305": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "89b5be67-065b-4957-b8a6-e1b2128e5cfa",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>",
+      "messages": [],
+      "total_additions": 80,
+      "total_deletions": 37,
+      "accepted_lines": 46,
+      "overriden_lines": 1
+    }
+  }
+}
