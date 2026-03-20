@@ -1,10 +1,10 @@
-import re
 from typing import Any
 
 from strands.agent.agent_result import AgentResult
 from strands.models.model import Model
 
 from multiply_rollout.tools import multiply_tool
+from multiply_rollout.utils import extract_solution
 from osmosis_ai.rollout_v2.agent_workflow import AgentWorkflow
 from osmosis_ai.rollout_v2.context import AgentWorkflowContext
 from osmosis_ai.rollout_v2.integrations.agents.strands import (
@@ -14,13 +14,6 @@ from osmosis_ai.rollout_v2.integrations.agents.strands import (
     OsmosisStrandsAgent as StrandsAgent,
 )
 from osmosis_ai.rollout_v2.types import AgentWorkflowConfig
-
-
-def extract_solution(solution_str):
-    solution = re.search(r"####\s*([-+]?\d*\.?\d+)", solution_str)
-    if not solution:
-        return None
-    return solution.group(1)
 
 
 class MultiplyAgentWorkflowConfig(AgentWorkflowConfig):

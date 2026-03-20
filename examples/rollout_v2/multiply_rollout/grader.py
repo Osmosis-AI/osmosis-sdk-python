@@ -1,5 +1,4 @@
-import re
-
+from multiply_rollout.utils import extract_solution
 from osmosis_ai.rollout_v2.context import GraderContext
 from osmosis_ai.rollout_v2.grader import Grader
 from osmosis_ai.rollout_v2.types import GraderConfig
@@ -11,13 +10,6 @@ class MultiplyGraderConfig(GraderConfig):
 
 
 multiply_grader_config = MultiplyGraderConfig()
-
-
-def extract_solution(solution_str):
-    solution = re.search(r"####\s*([-+]?\d*\.?\d+)", solution_str)
-    if not solution:
-        return None
-    return solution.group(1)
 
 
 class MultiplyGrader(Grader):
