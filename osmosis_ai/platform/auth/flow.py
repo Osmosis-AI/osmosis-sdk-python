@@ -118,6 +118,49 @@ def _copy_to_clipboard(text: str) -> bool:
         return False
 
 
+def _read_error_detail(e: HTTPError) -> str:
+    """Extract error message from an HTTPError JSON response body."""
+    try:
+        body = json.loads(e.read().decode())
+        if isinstance(body, dict):
+            return body.get("error", "") or body.get("message", "")
+    except Exception:
+        pass
+    return ""
+
+
+# User-friendly messages keyed by HTTP status code.
+_HTTP_ERROR_MESSAGES: dict[int, str] = {
+    401: "Authentication failed.",
+    403: "Access denied by the platform.",
+    429: "Too many requests. Please wait a few minutes and try again.",
+    500: "Osmosis platform encountered an internal error. Please try again later.",
+    502: "Osmosis platform is temporarily unavailable. Please try again later.",
+    503: "Osmosis platform is temporarily unavailable. Please try again later.",
+    504: "Osmosis platform is temporarily unavailable. Please try again later.",
+}
+
+
+def _login_error_from_http(
+    e: HTTPError, fallback_prefix: str = "Request failed"
+) -> LoginError:
+    """Build a LoginError with a user-friendly message from an HTTPError.
+
+    Uses the platform's error detail when it adds meaningful context,
+    otherwise falls back to a status-code-specific message or a generic one.
+    """
+    detail = _read_error_detail(e)
+    friendly = _HTTP_ERROR_MESSAGES.get(e.code)
+
+    if detail and friendly:
+        return LoginError(f"{friendly} ({detail})")
+    if friendly:
+        return LoginError(friendly)
+    if detail:
+        return LoginError(f"{fallback_prefix}: {detail} (HTTP {e.code})")
+    return LoginError(f"{fallback_prefix}: HTTP {e.code}")
+
+
 # ---------------------------------------------------------------------------
 # Token verification (--token path)
 # ---------------------------------------------------------------------------
@@ -173,7 +216,7 @@ def verify_token(token: str) -> VerifyResult:
     except HTTPError as e:
         if e.code == 401:
             raise LoginError("Invalid or expired token") from e
-        raise LoginError(f"Verification failed: HTTP {e.code}") from e
+        raise _login_error_from_http(e, "Verification failed") from e
     except URLError as e:
         raise LoginError(f"Could not connect to platform: {e.reason}") from e
     except json.JSONDecodeError as e:
@@ -215,7 +258,7 @@ def request_device_code(device_name: str | None = None) -> DeviceCodeResponse:
                 interval=data["interval"],
             )
     except HTTPError as e:
-        raise LoginError(f"Failed to request device code: HTTP {e.code}") from e
+        raise _login_error_from_http(e, "Failed to request device code") from e
     except URLError as e:
         raise LoginError(f"Could not connect to platform: {e.reason}") from e
     except (json.JSONDecodeError, KeyError) as e:
@@ -246,6 +289,8 @@ def poll_device_token(
                 data = json.loads(response.read().decode())
                 return data
         except HTTPError as e:
+            if e.code in (429, 500, 502, 503, 504):
+                raise _login_error_from_http(e, "Polling failed") from e
             try:
                 error_data = json.loads(e.read().decode())
                 error_code = error_data.get("error", "")
