@@ -347,7 +347,7 @@ def _require_subscription(*, workspace_name: str) -> None:
         has_subscription = info.get("has_subscription")
         if has_subscription is not None:
             save_subscription_status(workspace_name, bool(has_subscription))
-        refreshed = True
+            refreshed = True
 
     # Re-check after refresh attempt
     status = load_subscription_status(workspace_name, max_age=CACHE_TTL_SECONDS)
