@@ -265,14 +265,14 @@ def load_credentials() -> Credentials | None:
     except (json.JSONDecodeError, KeyError, ValueError) as exc:
         sys.stderr.write(
             f"Warning: could not parse credentials file ({type(exc).__name__}); "
-            "run 'osmosis login' to re-authenticate.\n"
+            "run 'osmosis auth login' to re-authenticate.\n"
         )
         return None
 
     if data.get("version") != CREDENTIALS_VERSION:
         sys.stderr.write(
             "Credentials format has changed. "
-            "Please run 'osmosis login' to re-authenticate.\n"
+            "Please run 'osmosis auth login' to re-authenticate.\n"
         )
         return None
 
@@ -290,7 +290,7 @@ def load_credentials() -> Credentials | None:
         if token is None:
             sys.stderr.write(
                 "Token not found in keyring. "
-                "Please run 'osmosis login' to re-authenticate.\n"
+                "Please run 'osmosis auth login' to re-authenticate.\n"
             )
             return None
         data["access_token"] = token
@@ -301,7 +301,7 @@ def load_credentials() -> Credentials | None:
     except (KeyError, ValueError) as exc:
         sys.stderr.write(
             f"Warning: could not parse credentials ({type(exc).__name__}); "
-            "run 'osmosis login' to re-authenticate.\n"
+            "run 'osmosis auth login' to re-authenticate.\n"
         )
         return None
 

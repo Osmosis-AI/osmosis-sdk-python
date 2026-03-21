@@ -142,9 +142,7 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 # B008: function-call-in-default-argument — required by Typer for typer.Option/Argument
 "**/cli/*.py" = ["B008"]
-"osmosis_ai/rollout/cli.py" = ["B008"]
-"osmosis_ai/rollout/eval/test_mode/cli.py" = ["B008"]
-"osmosis_ai/rollout/eval/evaluation/cli.py" = ["B008"]
+"**/cli/**/*.py" = ["B008"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["osmosis_ai"]

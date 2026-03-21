@@ -27,7 +27,7 @@ def require_credentials() -> Credentials:
     credentials = get_valid_credentials()
     if credentials is None:
         raise AuthenticationExpiredError(
-            "No valid credentials found. Please run 'osmosis login' first."
+            "No valid credentials found. Please run 'osmosis auth login' first."
         )
     return credentials
 

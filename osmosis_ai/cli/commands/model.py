@@ -1,4 +1,4 @@
-"""Handler for `osmosis model` commands."""
+"""Model management commands."""
 
 from __future__ import annotations
 
@@ -8,11 +8,9 @@ from typing import Any
 import typer
 
 from osmosis_ai.cli.console import console
+from osmosis_ai.cli.errors import not_implemented
 
-from .project import _require_auth, _resolve_project_id
-from .utils import format_date
-
-app: typer.Typer = typer.Typer(help="Manage models.")
+app: typer.Typer = typer.Typer(help="Manage models.", no_args_is_help=True)
 
 
 def _print_model_section(
@@ -22,6 +20,8 @@ def _print_model_section(
     max_display: int | None = None,
 ) -> None:
     """Print a section of models (base or output) with consistent formatting."""
+    from osmosis_ai.platform.cli.utils import format_date
+
     if not result.models:
         return
     models = result.models if max_display is None else result.models[:max_display]
@@ -50,7 +50,10 @@ def list_models(
     ),
 ) -> None:
     """List models in a project."""
+    from osmosis_ai.platform.cli.project import _require_auth, _resolve_project_id
+
     ws_name, credentials = _require_auth()
+
     from osmosis_ai.platform.api.client import OsmosisClient
 
     project_id = _resolve_project_id(project, workspace_name=ws_name)
@@ -84,3 +87,27 @@ def list_models(
         ),
         max_display=limit,
     )
+
+
+@app.command("deploy")
+def deploy() -> None:
+    """Deploy a model."""
+    not_implemented("model", "deploy")
+
+
+@app.command("export")
+def export() -> None:
+    """Export a model."""
+    not_implemented("model", "export")
+
+
+@app.command("build")
+def build() -> None:
+    """Build a model."""
+    not_implemented("model", "build")
+
+
+@app.command("delete")
+def delete() -> None:
+    """Delete a model."""
+    not_implemented("model", "delete")

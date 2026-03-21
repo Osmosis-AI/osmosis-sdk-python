@@ -126,7 +126,7 @@ def platform_request(
         credentials = load_credentials()
     if credentials is None:
         raise AuthenticationExpiredError(
-            "No valid credentials found. Please run 'osmosis login' first."
+            "No valid credentials found. Please run 'osmosis auth login' first."
         )
 
     url = f"{PLATFORM_URL}{endpoint}"
@@ -167,7 +167,7 @@ def platform_request(
                 reset_session()
             raise AuthenticationExpiredError(
                 "Your session has expired or been revoked. "
-                "Please run 'osmosis login' to re-authenticate."
+                "Please run 'osmosis auth login' to re-authenticate."
             ) from e
 
         # Best-effort capture of structured error message from response body
@@ -203,7 +203,7 @@ def platform_request(
                     raise PlatformAPIError(
                         f"{error_msg}\n"
                         "Your workspace context may be stale. "
-                        "Run 'osmosis login' or 'osmosis workspace' to re-select.",
+                        "Run 'osmosis auth login' or 'osmosis workspace' to re-select.",
                         e.code,
                     ) from e
 
