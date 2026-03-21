@@ -1,0 +1,116 @@
+osmosis_ai/platform/auth/credentials.py
+  ff7d2fd5fd702583 268,275,293,304
+tests/unit/test_cli.py
+  ff7d2fd5fd702583 513,516,523
+osmosis_ai/rollout/eval/evaluation/cli.py
+  ff7d2fd5fd702583 16
+osmosis_ai/platform/cli/utils.py
+  ff7d2fd5fd702583 30
+osmosis_ai/__init__.py
+  ff7d2fd5fd702583 13-19,38-52,56-58,62-66,69-70
+  c1c2e08fba8eb59d 53-55,59-61
+osmosis_ai/cli/commands/workspace.py
+  db6f285b0dd85ed6 7-8,28,34,40,46
+  ff7d2fd5fd702583 1-6,9-27,29-33,35-39,41-45
+osmosis_ai/cli/commands/model.py
+  ff7d2fd5fd702583 1-10,12-94,96-100,102-106,108-112
+  db6f285b0dd85ed6 11,95,101,107,113
+osmosis_ai/cli/commands/environment.py
+  db6f285b0dd85ed6 9,170
+  c1c2e08fba8eb59d 66
+  ff7d2fd5fd702583 2-8,10-65,67-78,99-169
+osmosis_ai/cli/commands/eval.py
+  ff7d2fd5fd702583 1-205
+osmosis_ai/cli/main.py
+  ff7d2fd5fd702583 79-87,96-97,99,101-104,106-108,110-111
+osmosis_ai/platform/cli/constants.py
+  ff7d2fd5fd702583 18,20
+osmosis_ai/rollout/server/serve.py
+  ff7d2fd5fd702583 148
+tests/unit/platform/cli/test_login.py
+  ff7d2fd5fd702583 7,44-50,53,59-60,63,80-83,85,91-92,95,112-115,117,123-124,127,143-146,148,154-155,158
+osmosis_ai/platform/cli/dataset.py
+  db6f285b0dd85ed6 239,289,316,334-335
+osmosis_ai/cli/commands/dataset.py
+  ff7d2fd5fd702583 1-6,9-70,81-83
+  db6f285b0dd85ed6 7-8,84
+tests/unit/cli/test_lazy_loading.py
+  ff7d2fd5fd702583 1-94
+tests/unit/auth/test_credentials.py
+  ff7d2fd5fd702583 350
+osmosis_ai/cli/commands/auth.py
+  ff7d2fd5fd702583 1-56,59-104,106-115,117-248
+  7a34a86de477c978 57-58,105
+  db6f285b0dd85ed6 116
+osmosis_ai/cli/errors.py
+  db6f285b0dd85ed6 6-15
+osmosis_ai/cli/commands/train.py
+  7a34a86de477c978 44
+  ff7d2fd5fd702583 1-7,9-43,45-57,59-100,102-106,108-112,114-118,120-124
+  db6f285b0dd85ed6 8,58,101,107,113,119,125
+pyproject.toml
+  ff7d2fd5fd702583 145
+tests/unit/cli/test_command_groups.py
+  ff7d2fd5fd702583 1,3-75,77-78
+osmosis_ai/platform/auth/platform_client.py
+  ff7d2fd5fd702583 129,170,206
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.17",
+  "base_commit_sha": "f20fdeafc0b76c756d26ec414fbd83de13fdc9c0",
+  "prompts": {
+    "7a34a86de477c978": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5133134f-a896-480e-abc7-2895292bbdec",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>",
+      "messages": [],
+      "total_additions": 4,
+      "total_deletions": 14,
+      "accepted_lines": 4,
+      "overriden_lines": 0
+    },
+    "c1c2e08fba8eb59d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "1cc09d3e-3c45-49ae-bfd5-69e93ab6b570",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>",
+      "messages": [],
+      "total_additions": 23,
+      "total_deletions": 33,
+      "accepted_lines": 7,
+      "overriden_lines": 0
+    },
+    "db6f285b0dd85ed6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "4797cf24-2c91-47b6-a212-13c69f2a0d34",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>",
+      "messages": [],
+      "total_additions": 43,
+      "total_deletions": 75,
+      "accepted_lines": 39,
+      "overriden_lines": 0
+    },
+    "ff7d2fd5fd702583": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "939ce6fb-6170-40d9-8000-ced14851f155",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>",
+      "messages": [],
+      "total_additions": 1368,
+      "total_deletions": 568,
+      "accepted_lines": 1207,
+      "overriden_lines": 5
+    }
+  }
+}
