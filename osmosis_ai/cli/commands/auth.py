@@ -9,7 +9,7 @@ import typer
 from osmosis_ai.cli.console import console
 from osmosis_ai.cli.errors import CLIError
 
-app: typer.Typer = typer.Typer(help="Manage authentication.", no_args_is_help=True)
+app: typer.Typer = typer.Typer(help="Manage authentication (login, logout, whoami).", no_args_is_help=True)
 
 
 ASCII_ART = r"""

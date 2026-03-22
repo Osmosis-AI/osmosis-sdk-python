@@ -85,18 +85,22 @@ def _register_commands() -> None:
     from osmosis_ai.cli.commands.train import app as train_app
     from osmosis_ai.cli.commands.workspace import app as workspace_app
 
-    app.add_typer(auth_app, name="auth", rich_help_panel="Platform")
-    app.add_typer(workspace_app, name="workspace", rich_help_panel="Platform")
-    app.add_typer(dataset_app, name="dataset", rich_help_panel="Platform")
-    app.add_typer(train_app, name="train", rich_help_panel="Platform")
-    app.add_typer(model_app, name="model", rich_help_panel="Platform")
-    app.add_typer(environment_app, name="environment", rich_help_panel="Rollout")
-    app.add_typer(eval_app, name="eval", rich_help_panel="Evaluation")
+    _WORKFLOW = "Workflow Commands"
+    _PLATFORM = "Platform Commands"
+
+    app.add_typer(dataset_app, name="dataset", rich_help_panel=_WORKFLOW)
+    app.add_typer(train_app, name="train", rich_help_panel=_WORKFLOW)
+    app.add_typer(model_app, name="model", rich_help_panel=_WORKFLOW)
+    app.add_typer(eval_app, name="eval", rich_help_panel=_WORKFLOW)
+    app.add_typer(environment_app, name="environment", rich_help_panel=_WORKFLOW)
+
+    app.add_typer(auth_app, name="auth", rich_help_panel=_PLATFORM)
+    app.add_typer(workspace_app, name="workspace", rich_help_panel=_PLATFORM)
 
     # -- Top-level commands --
     from osmosis_ai.cli.upgrade import upgrade
 
-    app.command("upgrade", rich_help_panel="Tools")(upgrade)
+    app.command("upgrade", rich_help_panel=_PLATFORM)(upgrade)
 
     # -- Transitional: deprecated aliases (hidden from help) --
     from osmosis_ai.cli.commands.auth import login as auth_login
@@ -110,7 +114,7 @@ def _register_commands() -> None:
     # -- Transitional: eval-rubric kept temporarily --
     from osmosis_ai.rubric.cli.eval_rubric import app as eval_rubric_app
 
-    app.add_typer(eval_rubric_app, name="eval-rubric", rich_help_panel="Evaluation")
+    app.add_typer(eval_rubric_app, name="eval-rubric", rich_help_panel=_WORKFLOW)
 
 
 def main(argv: list[str] | None = None) -> int:

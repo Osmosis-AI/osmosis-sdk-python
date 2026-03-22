@@ -9,7 +9,7 @@ import typer
 from osmosis_ai.cli.errors import not_implemented
 
 app: typer.Typer = typer.Typer(
-    help="Manage rollout environments.", no_args_is_help=True
+    help="Manage rollout environments (serve, validate, test, list).", no_args_is_help=True
 )
 
 # Valid log levels for uvicorn (defined locally to avoid importing the heavy

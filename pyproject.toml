@@ -38,7 +38,7 @@ dependencies = [
     # Interactive CLI prompts
     "questionary>=2.1.0,<3.0.0",
     # CLI framework
-    "typer>=0.9.0",
+    "typer>=0.16.0",
     "rich>=13.0.0",
 ]
 

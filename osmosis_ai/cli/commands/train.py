@@ -7,7 +7,7 @@ import typer
 from osmosis_ai.cli.console import console
 from osmosis_ai.cli.errors import not_implemented
 
-app: typer.Typer = typer.Typer(help="Manage training runs.", no_args_is_help=True)
+app: typer.Typer = typer.Typer(help="Manage training runs (list, status, submit, metrics, stop, delete).", no_args_is_help=True)
 
 
 @app.command("list")

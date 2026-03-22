@@ -7,7 +7,7 @@ import typer
 from osmosis_ai.cli.errors import not_implemented
 
 app: typer.Typer = typer.Typer(
-    help="Manage workspaces.",
+    help="Manage workspaces (list, create, delete, switch).",
     invoke_without_command=True,
     no_args_is_help=False,
 )

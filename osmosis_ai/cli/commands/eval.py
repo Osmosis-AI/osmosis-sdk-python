@@ -7,7 +7,7 @@ from typing import Literal
 import typer
 
 app: typer.Typer = typer.Typer(
-    help="Evaluate agent against dataset.",
+    help="Evaluate agent against dataset (cache).",
     invoke_without_command=True,
     no_args_is_help=False,
 )
