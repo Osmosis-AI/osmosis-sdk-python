@@ -46,7 +46,7 @@ _RUBRIC_EXPORTS: set[str] = {
 }
 
 
-def __getattr__(name: str):
+def __getattr__(name: str) -> object:
     if name in _ROLLOUT_EXPORTS:
         from . import rollout
 
