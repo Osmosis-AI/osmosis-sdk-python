@@ -1,0 +1,38 @@
+osmosis_ai/__init__.py
+  0a7d09f427af2d1c 49
+codecov.yml
+  0a7d09f427af2d1c 12,14-15,17-23
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.17",
+  "base_commit_sha": "95e4c07b89345b55de3231e25ceca19da40c926a",
+  "prompts": {
+    "0a7d09f427af2d1c": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f05e7c74-962a-4f96-a1fd-cc322acd79fb",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>",
+      "messages": [],
+      "total_additions": 12,
+      "total_deletions": 13,
+      "accepted_lines": 11,
+      "overriden_lines": 0
+    },
+    "7c70d754c5ed14a8": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "95afdd1d-ca22-4752-a23c-1962023dcc7b",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>",
+      "messages": [],
+      "total_additions": 1,
+      "total_deletions": 1,
+      "accepted_lines": 0,
+      "overriden_lines": 0
+    }
+  }
+}
