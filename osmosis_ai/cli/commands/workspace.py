@@ -25,7 +25,9 @@ def workspace_default(ctx: typer.Context) -> None:
 @app.command("list")
 def list_workspaces() -> None:
     """List available workspaces."""
-    not_implemented("workspace", "list")
+    from osmosis_ai.platform.cli.workspace import list_workspaces as _list_workspaces
+
+    _list_workspaces()
 
 
 @app.command("create")
@@ -41,6 +43,13 @@ def delete() -> None:
 
 
 @app.command("switch")
-def switch() -> None:
+def switch(
+    workspace: str = typer.Argument(..., help="Workspace name to switch to."),
+    project: str | None = typer.Option(
+        None, "--project", help="Also set the default project."
+    ),
+) -> None:
     """Switch to a different workspace."""
-    not_implemented("workspace", "switch")
+    from osmosis_ai.platform.cli.workspace import switch_workspace
+
+    switch_workspace(workspace=workspace, project=project)

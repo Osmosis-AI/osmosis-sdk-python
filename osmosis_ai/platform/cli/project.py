@@ -329,10 +329,14 @@ def _require_auth(
     *,
     workspace_name: str | None = None,
 ) -> tuple[str, Credentials]:
-    """Check that user is authenticated."""
+    """Check that user is authenticated and has a workspace selected.
+
+    Checks credentials first so that unauthenticated users see "Not logged in"
+    instead of the misleading "No workspace selected".
+    """
+    credentials = require_credentials()
     if workspace_name is None:
         workspace_name = _get_active_workspace_name()
-    credentials = require_credentials()
     return workspace_name, credentials
 
 

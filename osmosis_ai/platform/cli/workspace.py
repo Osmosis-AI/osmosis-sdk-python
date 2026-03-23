@@ -41,6 +41,7 @@ from .utils import (
     format_run_status,
     format_size,
     platform_entity_url,
+    require_credentials,
 )
 
 app: typer.Typer = typer.Typer(help="Manage workspace and project context.")
@@ -640,6 +641,65 @@ def _open_in_browser(ws_name: str, project: dict) -> None:
     console.print(f"Opening {console.format_styled(url, 'dim')} ...")
     webbrowser.open(url)
     console.print()
+
+
+def list_workspaces() -> None:
+    """List all workspaces (non-interactive)."""
+    credentials = require_credentials()
+    result = platform_request(
+        "/api/cli/workspaces", require_workspace=False, credentials=credentials
+    )
+    workspaces = result.get("workspaces", [])
+
+    if not workspaces:
+        console.print("No workspaces found.")
+        return
+
+    active_ws = get_active_workspace()
+    active_name = active_ws["name"] if active_ws else None
+
+    console.print(f"Workspaces ({len(workspaces)}):", style="bold")
+    for ws in workspaces:
+        name = ws.get("name", "")
+        marker = " (current)" if name == active_name else ""
+        sub_label = "active" if ws.get("has_subscription") else "no subscription"
+        console.print(f"  {name}{marker}  [{sub_label}]")
+
+
+def switch_workspace(
+    workspace: str,
+    project: str | None = None,
+) -> None:
+    """Switch to a different workspace and optionally set a default project."""
+    credentials = require_credentials()
+    result = platform_request(
+        "/api/cli/workspaces", require_workspace=False, credentials=credentials
+    )
+    workspaces = result.get("workspaces", [])
+
+    target = workspace.lower()
+    matched = [ws for ws in workspaces if ws.get("name", "").lower() == target]
+    if not matched:
+        available = ", ".join(ws.get("name", "") for ws in workspaces) or "(none)"
+        raise CLIError(
+            f"Workspace '{workspace}' not found.\n  Available workspaces: {available}"
+        )
+
+    ws = matched[0]
+    ws_id = ws["id"]
+    ws_name = ws["name"]
+
+    set_active_workspace(ws_id, ws_name)
+    console.print(f"Switched to workspace: {console.format_styled(ws_name, 'cyan')}")
+
+    if project is not None:
+        from .project import _resolve_project
+
+        proj = _resolve_project(project, workspace_name=ws_name, refresh=True)
+        set_default_project(ws_name, proj["id"], proj["project_name"])
+        console.print(
+            f"Default project: {console.format_styled(proj['project_name'], 'cyan')}"
+        )
 
 
 @app.callback(invoke_without_command=True)

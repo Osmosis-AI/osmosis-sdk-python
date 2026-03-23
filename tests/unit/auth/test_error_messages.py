@@ -18,7 +18,6 @@ from osmosis_ai.platform.auth.platform_client import (
     AuthenticationExpiredError,
     PlatformAPIError,
 )
-from osmosis_ai.platform.cli.constants import MSG_NOT_LOGGED_IN, MSG_SESSION_EXPIRED
 
 
 def _make_credentials(*, expired: bool = False) -> Credentials:
@@ -91,10 +90,46 @@ class TestGetActiveWorkspaceMessages:
         assert "login" not in str(exc_info.value).lower()
 
 
+class TestRequireAuthMessages:
+    """Test _require_auth() checks credentials before workspace."""
+
+    @patch("osmosis_ai.platform.cli.utils.load_credentials", return_value=None)
+    @patch(
+        "osmosis_ai.platform.cli.project.get_active_workspace_name",
+        return_value=None,
+    )
+    def test_no_login_says_not_logged_in_not_no_workspace(
+        self, _ws_mock: object, _cred_mock: object
+    ) -> None:
+        """When both credentials and workspace are missing, error should say 'Not logged in'."""
+        from osmosis_ai.platform.cli.project import _require_auth
+
+        with pytest.raises(CLIError, match="Not logged in"):
+            _require_auth()
+
+    @patch("osmosis_ai.platform.cli.utils.load_credentials")
+    @patch(
+        "osmosis_ai.platform.cli.project.get_active_workspace_name",
+        return_value=None,
+    )
+    def test_logged_in_but_no_workspace_says_no_workspace(
+        self, _ws_mock: object, mock_load: object
+    ) -> None:
+        """When logged in but no workspace, error should say 'No workspace selected'."""
+        from osmosis_ai.platform.cli.project import _require_auth
+
+        mock_load.return_value = _make_credentials()
+
+        with pytest.raises(CLIError, match="No workspace selected"):
+            _require_auth()
+
+
 class TestPlatformRequestMessages:
     """Test platform_request() error messages for each failure mode."""
 
-    @patch("osmosis_ai.platform.auth.platform_client.load_credentials", return_value=None)
+    @patch(
+        "osmosis_ai.platform.auth.platform_client.load_credentials", return_value=None
+    )
     def test_no_credentials_does_not_say_expired(self, _mock: object) -> None:
         from osmosis_ai.platform.auth.platform_client import platform_request
 
@@ -118,12 +153,16 @@ class TestMainExceptionHandlerMessages:
     """Test that main() maps exceptions to the correct stderr output."""
 
     @patch("osmosis_ai.cli.main._registered", True)
-    def test_cli_error_shows_message_directly(self, capsys: pytest.CaptureFixture[str]) -> None:
+    def test_cli_error_shows_message_directly(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
         from osmosis_ai.cli.main import main
 
         with patch(
             "osmosis_ai.cli.main.app",
-            side_effect=CLIError("No workspace selected. Run 'osmosis workspace' to select a workspace."),
+            side_effect=CLIError(
+                "No workspace selected. Run 'osmosis workspace' to select a workspace."
+            ),
         ):
             code = main([])
 
@@ -131,7 +170,9 @@ class TestMainExceptionHandlerMessages:
         assert "No workspace selected" in capsys.readouterr().err
 
     @patch("osmosis_ai.cli.main._registered", True)
-    def test_auth_expired_shows_session_expired(self, capsys: pytest.CaptureFixture[str]) -> None:
+    def test_auth_expired_shows_session_expired(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
         from osmosis_ai.cli.main import main
 
         with patch(
@@ -142,4 +183,6 @@ class TestMainExceptionHandlerMessages:
 
         assert code == 1
         captured = capsys.readouterr().err
-        assert "session has expired" in captured.lower() or "expired" in captured.lower()
+        assert (
+            "session has expired" in captured.lower() or "expired" in captured.lower()
+        )

@@ -41,12 +41,9 @@ def test_help_exits_zero(args, capfd):
         ["train", "traces"],
         ["train", "stop"],
         ["train", "delete"],
-        ["workspace", "list"],
         ["workspace", "create"],
         ["workspace", "delete"],
-        ["workspace", "switch"],
         ["environment", "list"],
-        ["dataset", "delete"],
     ],
 )
 def test_placeholder_commands_exit_one(args):

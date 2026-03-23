@@ -363,6 +363,35 @@ def preview(
         console.print(str(data_rows))
 
 
+def delete(
+    id: str,
+    project: str | None = None,
+    yes: bool = False,
+) -> None:
+    """Delete a dataset."""
+    ws_name, credentials = _require_auth()
+    from osmosis_ai.platform.api.client import OsmosisClient
+
+    from .utils import resolve_dataset_id
+
+    client = OsmosisClient()
+    dataset_id = resolve_dataset_id(id, project, ws_name, credentials, client=client)
+
+    if not yes:
+        ds = client.get_dataset(dataset_id, credentials=credentials)
+        console.print(f"  Dataset: {ds.file_name} ({format_size(ds.file_size)})")
+        console.print(f"  ID:      {ds.id}")
+        if not is_interactive():
+            raise CLIError("Use --yes to confirm deletion in non-interactive mode.")
+        proceed = confirm("Delete this dataset? This cannot be undone.")
+        if not proceed:
+            console.print("Cancelled.", style="dim")
+            return
+
+    client.delete_dataset(dataset_id, credentials=credentials)
+    console.print("Dataset deleted.", style="green")
+
+
 def validate(
     file: str,
 ) -> None:

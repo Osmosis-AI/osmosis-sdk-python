@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import typer
 
-from osmosis_ai.cli.errors import not_implemented
-
 app: typer.Typer = typer.Typer(
     help="Manage datasets (upload, list, status, preview, validate, delete).",
     no_args_is_help=True,
@@ -79,6 +77,16 @@ def validate(
 
 
 @app.command("delete")
-def delete() -> None:
+def delete(
+    id: str = typer.Argument(
+        ..., help="Dataset ID (or short prefix from 'dataset list')."
+    ),
+    project: str | None = typer.Option(
+        None, "--project", help="Project name (used for short ID lookup)."
+    ),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
+) -> None:
     """Delete a dataset."""
-    not_implemented("dataset", "delete")
+    from osmosis_ai.platform.cli.dataset import delete as _delete
+
+    _delete(id=id, project=project, yes=yes)
