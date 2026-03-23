@@ -10,7 +10,9 @@ import typer
 from osmosis_ai.cli.console import console
 from osmosis_ai.cli.errors import not_implemented
 
-app: typer.Typer = typer.Typer(help="Manage models (list, deploy, export, build, delete).", no_args_is_help=True)
+app: typer.Typer = typer.Typer(
+    help="Manage models (list, deploy, export, build, delete).", no_args_is_help=True
+)
 
 
 def _print_model_section(

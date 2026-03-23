@@ -15,7 +15,7 @@ from osmosis_ai.platform.api.models import (
     STATUSES_IN_PROGRESS,
     STATUSES_SUCCESS,
 )
-from osmosis_ai.platform.auth import AuthenticationExpiredError, get_valid_credentials, load_credentials
+from osmosis_ai.platform.auth import AuthenticationExpiredError, load_credentials
 from osmosis_ai.platform.auth.config import PLATFORM_URL
 
 if TYPE_CHECKING:

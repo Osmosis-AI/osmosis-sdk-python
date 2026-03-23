@@ -12,11 +12,11 @@ from urllib.error import HTTPError, URLError
 
 import pytest
 
+from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.platform.auth.credentials import (
     Credentials,
     UserInfo,
 )
-from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.platform.auth.platform_client import (
     AuthenticationExpiredError,
     PlatformAPIError,

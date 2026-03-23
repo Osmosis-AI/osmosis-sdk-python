@@ -3,13 +3,19 @@
 from __future__ import annotations
 
 import os
+from typing import TYPE_CHECKING
 
 import typer
 
 from osmosis_ai.cli.console import console
 from osmosis_ai.cli.errors import CLIError
 
-app: typer.Typer = typer.Typer(help="Manage authentication (login, logout, whoami).", no_args_is_help=True)
+if TYPE_CHECKING:
+    from osmosis_ai.platform.auth.credentials import Credentials
+
+app: typer.Typer = typer.Typer(
+    help="Manage authentication (login, logout, whoami).", no_args_is_help=True
+)
 
 
 ASCII_ART = r"""
@@ -28,7 +34,7 @@ ASCII_ART = r"""
 ASCII_ART_MIN_WIDTH = 113
 
 
-def _validate_workspace_context(creds: object) -> None:
+def _validate_workspace_context(creds: Credentials) -> None:
     """Validate the stored workspace is still accessible with new credentials.
 
     After login, the workspace ID in config.json may be stale (e.g. the user
