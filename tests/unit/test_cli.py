@@ -11,88 +11,6 @@ if str(PROJECT_ROOT) not in sys.path:
 from osmosis_ai.cli import main as cli
 
 
-def test_preview_yaml_single_config(tmp_path, capsys):
-    yaml_content = """rubric: >
-  Score how well the assistant resolves a smart appliance troubleshooting request.
-score_min: 0.0
-score_max: 1.0
-ground_truth: >
-  The assistant should verify the warranty and gather error diagnostics.
-default_model_info:
-  provider: openai
-  model: gpt-5-mini
-"""
-    path = tmp_path / "config.yaml"
-    path.write_text(yaml_content, encoding="utf-8")
-
-    exit_code = cli.main(["preview", str(path)])
-    out = capsys.readouterr().out
-
-    assert exit_code == 0
-    assert "Loaded 1 rubric config(s)" in out
-    assert "Rubric config #1" in out
-    assert "default_model_info" in out
-
-
-def test_preview_yaml_multiple_configs(tmp_path, capsys):
-    yaml_content = """- rubric: First rubric description.
-  score_min: 0
-  score_max: 1
-- rubric: Second rubric description.
-  score_min: 1
-  score_max: 5
-"""
-    path = tmp_path / "multi.yaml"
-    path.write_text(yaml_content, encoding="utf-8")
-
-    exit_code = cli.main(["preview", str(path)])
-    out = capsys.readouterr().out
-
-    assert exit_code == 0
-    assert "Loaded 2 rubric config(s)" in out
-    assert "Rubric config #2" in out
-    assert "Second rubric description." in out
-
-
-def test_preview_jsonl(tmp_path, capsys):
-    record_one = {
-        "conversation_id": "ticket-001",
-        "rubric_id": "support_followup",
-        "original_input": "My AirPure X2 purifier keeps flashing a red light and refuses to start.",
-        "solution_str": "I'm sorry the purifier is down. Could you share the order number so I can confirm the warranty?",
-        "ground_truth": "Assistant verifies warranty information, gathers diagnostics, and suggests safe troubleshooting steps.",
-        "metadata": {"customer_tier": "gold", "language": "en"},
-    }
-    record_two = {
-        "conversation_id": "ticket-047",
-        "rubric_id": "policy_grounding",
-        "original_input": "Can I switch from Essential to Premium mid-cycle and still keep my existing discounts?",
-        "solution_str": "Absolutely—you can upgrade anytime and the discounts roll over automatically.",
-        "ground_truth": "Assistant cites the subscription policy, clarifies prorated billing, and avoids promising unauthorized discounts.",
-        "metadata": {"policy_version": "2024-05-01"},
-    }
-    jsonl_content = "\n".join(
-        [
-            json.dumps(record_one, ensure_ascii=False),
-            json.dumps(record_two, ensure_ascii=False),
-        ]
-    )
-    path = tmp_path / "data.jsonl"
-    path.write_text(jsonl_content, encoding="utf-8")
-
-    exit_code = cli.main(["preview", str(path)])
-    out = capsys.readouterr().out
-
-    assert exit_code == 0
-    assert "Loaded 2 JSONL record(s)" in out
-    assert "JSONL record #1" in out
-    assert '"rubric_id": "support_followup"' in out
-    assert (
-        '"ground_truth": "Assistant verifies warranty information, gathers diagnostics, and suggests safe troubleshooting steps."'
-        in out
-    )
-
-
 def test_eval_command_output_json(tmp_path, monkeypatch, capsys):
     config_content = """rubrics:
   - id: support_followup
@@ -395,34 +313,6 @@ def test_eval_command_output_json_custom_file_path(tmp_path, monkeypatch, capsys
     assert payload["records"][0]["id"] == "conv-001"
 
 
-def test_preview_missing_file(tmp_path, capsys):
-    missing_path = tmp_path / "missing.yaml"
-    exit_code = cli.main(["preview", str(missing_path)])
-    captured = capsys.readouterr()
-
-    assert exit_code == 1
-    assert f"Path '{missing_path}' does not exist." in captured.err
-
-
-def test_preview_path_is_directory(tmp_path, capsys):
-    exit_code = cli.main(["preview", str(tmp_path)])
-    captured = capsys.readouterr()
-
-    assert exit_code == 1
-    assert f"Expected a file path but got directory '{tmp_path}'." in captured.err
-
-
-def test_preview_unsupported_extension(tmp_path, capsys):
-    bad_path = tmp_path / "config.txt"
-    bad_path.write_text("rubric: test", encoding="utf-8")
-
-    exit_code = cli.main(["preview", str(bad_path)])
-    captured = capsys.readouterr()
-
-    assert exit_code == 1
-    assert "Unsupported file extension '.txt'." in captured.err
-
-
 def test_main_without_subcommand_shows_help(capsys):
     exit_code = cli.main([])
     captured = capsys.readouterr()
@@ -620,16 +510,17 @@ def test_rollout_eval_accepts_any_model_with_base_url(capsys):
 
 
 def test_fuzzy_suggestion(capsys):
-    exit_code = cli.main(["logi"])  # typo for "login"
+    exit_code = cli.main(["auht"])  # typo for "auth"
     captured = capsys.readouterr()
     assert exit_code != 0
-    assert "Did you mean 'login'?" in captured.err
+    assert "Did you mean 'auth'?" in captured.err
 
 
 def test_rollout_test_accepts_any_model_with_base_url(capsys):
     """With --base-url, any model name should be accepted and displayed as-is."""
     cli.main(
         [
+            "environment",
             "test",
             "-m",
             "my_agent:MyAgentLoop",

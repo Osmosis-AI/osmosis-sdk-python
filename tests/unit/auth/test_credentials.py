@@ -347,7 +347,7 @@ def test_load_returns_none_for_version_mismatch(tmp_path, monkeypatch, capsys) -
 
     assert load_credentials() is None
     captured = capsys.readouterr()
-    assert "osmosis login" in captured.err
+    assert "osmosis auth login" in captured.err
 
 
 # ---------------------------------------------------------------------------

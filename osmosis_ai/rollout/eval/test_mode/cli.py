@@ -13,8 +13,6 @@ from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
-import typer
-
 from osmosis_ai.cli.console import Console
 
 if TYPE_CHECKING:
@@ -25,8 +23,6 @@ if TYPE_CHECKING:
         LocalTestBatchResult,
         LocalTestRunResult,
     )
-
-app: typer.Typer = typer.Typer(help="Test a RolloutAgentLoop against a dataset.")
 
 
 @dataclass
@@ -336,70 +332,6 @@ class TestCommand:
 
         self._write_output(args, batch_result)
         return 1 if batch_result.failed > 0 else 0
-
-
-@app.callback(invoke_without_command=True)
-def test(
-    module: str | None = typer.Option(
-        None, "-m", "--module", "--agent", help="Module path 'module:attribute'."
-    ),
-    mcp: str | None = typer.Option(None, "--mcp", help="Path to MCP tools directory."),
-    dataset: str = typer.Option(..., "-d", "--dataset", help="Path to dataset file."),
-    model: str = typer.Option("gpt-5-mini", "--model", help="Model name to use."),
-    limit: int | None = typer.Option(
-        None, "--limit", help="Maximum number of rows to test."
-    ),
-    offset: int = typer.Option(0, "--offset", help="Number of rows to skip."),
-    api_key: str | None = typer.Option(
-        None, "--api-key", help="API key for the LLM provider."
-    ),
-    base_url: str | None = typer.Option(
-        None, "--base-url", help="Base URL for OpenAI-compatible APIs."
-    ),
-    max_turns: int = typer.Option(
-        10, "--max-turns", help="Maximum agent turns per row."
-    ),
-    max_tokens: int | None = typer.Option(
-        None, "--max-tokens", help="Maximum tokens per completion."
-    ),
-    temperature: float | None = typer.Option(
-        None, "--temperature", help="LLM temperature."
-    ),
-    debug: bool = typer.Option(False, "--debug", help="Enable debug output."),
-    output: str | None = typer.Option(
-        None, "-o", "--output", help="Output results to JSON file."
-    ),
-    quiet: bool = typer.Option(
-        False, "-q", "--quiet", help="Suppress progress output."
-    ),
-    interactive: bool = typer.Option(
-        False, "-i", "--interactive", help="Interactive mode."
-    ),
-    row: int | None = typer.Option(
-        None, "--row", help="Initial row in interactive mode."
-    ),
-) -> None:
-    """Test a RolloutAgentLoop against a dataset."""
-    rc = TestCommand().run(
-        module=module,
-        mcp=mcp,
-        dataset=dataset,
-        model=model,
-        limit=limit,
-        offset=offset,
-        api_key=api_key,
-        base_url=base_url,
-        max_turns=max_turns,
-        max_tokens=max_tokens,
-        temperature=temperature,
-        debug=debug,
-        output=output,
-        quiet=quiet,
-        interactive=interactive,
-        row=row,
-    )
-    if rc:
-        raise typer.Exit(rc)
 
 
 __all__ = ["TestCommand"]

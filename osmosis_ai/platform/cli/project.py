@@ -34,7 +34,6 @@ from osmosis_ai.platform.cli.constants import (
     CACHE_TTL_SECONDS,
     CREATE,
     DEFAULT_VISIBLE_CHOICES,
-    MSG_NOT_LOGGED_IN,
     PROJECT_NAME_MAX,
     PROJECT_NAME_RE,
     RESERVED_PROJECT_NAMES,
@@ -70,7 +69,9 @@ def _get_active_workspace_name() -> str:
     """Return the active workspace name, or raise if none is selected."""
     workspace_name = get_active_workspace_name()
     if workspace_name is None:
-        raise CLIError(MSG_NOT_LOGGED_IN)
+        raise CLIError(
+            "No workspace selected. Run 'osmosis workspace' to select a workspace."
+        )
     return workspace_name
 
 
@@ -328,10 +329,14 @@ def _require_auth(
     *,
     workspace_name: str | None = None,
 ) -> tuple[str, Credentials]:
-    """Check that user is authenticated."""
+    """Check that user is authenticated and has a workspace selected.
+
+    Checks credentials first so that unauthenticated users see "Not logged in"
+    instead of the misleading "No workspace selected".
+    """
+    credentials = require_credentials()
     if workspace_name is None:
         workspace_name = _get_active_workspace_name()
-    credentials = require_credentials()
     return workspace_name, credentials
 
 

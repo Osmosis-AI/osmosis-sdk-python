@@ -1,15 +1,13 @@
-"""Handler for `osmosis run` commands."""
+"""Training run management commands."""
 
 from __future__ import annotations
 
 import typer
 
 from osmosis_ai.cli.console import console
+from osmosis_ai.cli.errors import not_implemented
 
-from .project import _require_auth, _resolve_project_id
-from .utils import build_run_detail_rows, format_date, format_run_status
-
-app: typer.Typer = typer.Typer(help="Manage training runs.")
+app: typer.Typer = typer.Typer(help="Manage training runs.", no_args_is_help=True)
 
 
 @app.command("list")
@@ -20,7 +18,11 @@ def list_runs(
     limit: int = typer.Option(20, "--limit", help="Maximum number of runs to show."),
 ) -> None:
     """List training runs for a project."""
+    from osmosis_ai.platform.cli.project import _require_auth, _resolve_project_id
+    from osmosis_ai.platform.cli.utils import format_date, format_run_status
+
     ws_name, credentials = _require_auth()
+
     from osmosis_ai.platform.api.client import OsmosisClient
 
     project_id = _resolve_project_id(project, workspace_name=ws_name)
@@ -53,17 +55,23 @@ def list_runs(
 @app.command("status")
 def status(
     id: str = typer.Argument(
-        ..., help="Training run ID (or short prefix from 'run list')."
+        ..., help="Training run ID (or short prefix from 'train list')."
     ),
     project: str | None = typer.Option(
         None, "--project", help="Project name (used for short ID lookup)."
     ),
 ) -> None:
     """Show training run details."""
-    ws_name, credentials = _require_auth()
-    from osmosis_ai.platform.api.client import OsmosisClient
+    from osmosis_ai.platform.cli.project import _require_auth
+    from osmosis_ai.platform.cli.utils import (
+        build_run_detail_rows,
+        format_date,
+        resolve_run_id,
+    )
 
-    from .utils import resolve_run_id
+    ws_name, credentials = _require_auth()
+
+    from osmosis_ai.platform.api.client import OsmosisClient
 
     client = OsmosisClient()
     run_id = resolve_run_id(id, project, ws_name, credentials, client=client)
@@ -85,3 +93,33 @@ def status(
         rows.append(("Completed", format_date(run.completed_at)))
 
     console.table(rows, title="Training Run")
+
+
+@app.command("submit")
+def submit() -> None:
+    """Submit a new training run."""
+    not_implemented("train", "submit")
+
+
+@app.command("metrics")
+def metrics() -> None:
+    """Show training run metrics."""
+    not_implemented("train", "metrics")
+
+
+@app.command("traces")
+def traces() -> None:
+    """Show training run traces."""
+    not_implemented("train", "traces")
+
+
+@app.command("stop")
+def stop() -> None:
+    """Stop a training run."""
+    not_implemented("train", "stop")
+
+
+@app.command("delete")
+def delete() -> None:
+    """Delete a training run."""
+    not_implemented("train", "delete")

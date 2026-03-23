@@ -145,7 +145,7 @@ def serve_agent_loop(
         credentials = get_valid_credentials()
         if credentials is None:
             raise ServeError(
-                "Not logged in. Please run 'osmosis login' first, "
+                "Not logged in. Please run 'osmosis auth login' first, "
                 "or use skip_register=True for local testing."
             )
 

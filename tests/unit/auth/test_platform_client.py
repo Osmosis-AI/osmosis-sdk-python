@@ -12,6 +12,7 @@ from urllib.error import HTTPError, URLError
 
 import pytest
 
+from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.platform.auth.credentials import (
     Credentials,
     UserInfo,
@@ -112,10 +113,10 @@ class TestPlatformRequest:
 
     @patch("osmosis_ai.platform.auth.platform_client.load_credentials")
     def test_raises_when_no_credentials_found(self, mock_load: MagicMock) -> None:
-        """Verify AuthenticationExpiredError when no credentials exist."""
+        """Verify CLIError when no credentials exist."""
         mock_load.return_value = None
 
-        with pytest.raises(AuthenticationExpiredError, match="No valid credentials"):
+        with pytest.raises(CLIError, match="Not logged in"):
             platform_request("/api/test")
 
     @patch("osmosis_ai.platform.auth.platform_client.urlopen")
@@ -245,7 +246,7 @@ class TestPlatformRequest:
             "osmosis_ai.platform.auth.platform_client.get_active_workspace_id",
             return_value=None,
         ):
-            with pytest.raises(PlatformAPIError, match="No active workspace"):
+            with pytest.raises(PlatformAPIError, match="No workspace selected"):
                 platform_request("/api/test", credentials=creds)
 
     @patch("osmosis_ai.platform.auth.platform_client.urlopen")
@@ -483,11 +484,11 @@ class TestPlatformRequest:
         mock_load.assert_called_once()
 
     @patch("osmosis_ai.platform.auth.platform_client.load_credentials")
-    def test_load_returns_none_raises_auth_error(self, mock_load: MagicMock) -> None:
-        """Verify AuthenticationExpiredError when load_credentials returns None."""
+    def test_load_returns_none_raises_cli_error(self, mock_load: MagicMock) -> None:
+        """Verify CLIError when load_credentials returns None."""
         mock_load.return_value = None
 
-        with pytest.raises(AuthenticationExpiredError, match="No valid credentials"):
+        with pytest.raises(CLIError, match="Not logged in"):
             platform_request("/api/test", credentials=None)
 
 

@@ -4,8 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-# Module under test
-import osmosis_ai.platform.cli.login as login_module
+import osmosis_ai.cli.commands.auth as auth_module
 from osmosis_ai.platform.auth.credentials import Credentials, UserInfo
 from osmosis_ai.platform.auth.flow import LoginResult
 
@@ -42,22 +41,26 @@ def test_force_login_clears_workspace_data(monkeypatch) -> None:
     result = _make_login_result()
 
     monkeypatch.delenv("OSMOSIS_TOKEN", raising=False)
-    monkeypatch.setattr(login_module, "load_credentials", lambda: old_creds)
-    monkeypatch.setattr(login_module, "delete_credentials", lambda: True)
-    monkeypatch.setattr(login_module, "save_credentials", lambda c: "keyring")
+    monkeypatch.setattr("osmosis_ai.platform.auth.load_credentials", lambda: old_creds)
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.credentials.delete_credentials", lambda: True
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.credentials.save_credentials", lambda c: "keyring"
+    )
 
     monkeypatch.setattr(
-        login_module,
-        "device_login",
+        "osmosis_ai.platform.auth.device_login",
         lambda **kw: (result, new_creds),
     )
 
     clear_calls: list[bool] = []
     monkeypatch.setattr(
-        login_module, "clear_all_local_data", lambda: clear_calls.append(True)
+        "osmosis_ai.platform.auth.local_config.clear_all_local_data",
+        lambda: clear_calls.append(True),
     )
 
-    login_module.login_cmd(force=True, token=None)
+    auth_module.login(force=True, token=None)
 
     assert clear_calls, "clear_all_local_data must be called when --force is used"
 
@@ -74,20 +77,22 @@ def test_login_clears_workspace_when_user_changes(monkeypatch) -> None:
     result = _make_login_result(email="b@example.com")
 
     monkeypatch.delenv("OSMOSIS_TOKEN", raising=False)
-    monkeypatch.setattr(login_module, "load_credentials", lambda: old_creds)
-    monkeypatch.setattr(login_module, "save_credentials", lambda c: "keyring")
+    monkeypatch.setattr("osmosis_ai.platform.auth.load_credentials", lambda: old_creds)
     monkeypatch.setattr(
-        login_module,
-        "device_login",
+        "osmosis_ai.platform.auth.credentials.save_credentials", lambda c: "keyring"
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.device_login",
         lambda **kw: (result, new_creds),
     )
 
     clear_calls: list[bool] = []
     monkeypatch.setattr(
-        login_module, "clear_all_local_data", lambda: clear_calls.append(True)
+        "osmosis_ai.platform.auth.local_config.clear_all_local_data",
+        lambda: clear_calls.append(True),
     )
 
-    login_module.login_cmd(force=False, token=None)
+    auth_module.login(force=False, token=None)
 
     assert clear_calls, "clear_all_local_data must be called when user identity changes"
 
@@ -104,20 +109,22 @@ def test_login_preserves_workspace_when_same_user(monkeypatch) -> None:
     result = _make_login_result()
 
     monkeypatch.delenv("OSMOSIS_TOKEN", raising=False)
-    monkeypatch.setattr(login_module, "load_credentials", lambda: old_creds)
-    monkeypatch.setattr(login_module, "save_credentials", lambda c: "keyring")
+    monkeypatch.setattr("osmosis_ai.platform.auth.load_credentials", lambda: old_creds)
     monkeypatch.setattr(
-        login_module,
-        "device_login",
+        "osmosis_ai.platform.auth.credentials.save_credentials", lambda c: "keyring"
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.device_login",
         lambda **kw: (result, new_creds),
     )
 
     clear_calls: list[bool] = []
     monkeypatch.setattr(
-        login_module, "clear_all_local_data", lambda: clear_calls.append(True)
+        "osmosis_ai.platform.auth.local_config.clear_all_local_data",
+        lambda: clear_calls.append(True),
     )
 
-    login_module.login_cmd(force=False, token=None)
+    auth_module.login(force=False, token=None)
 
     assert not clear_calls, "workspace context should be preserved for same user"
 
@@ -133,19 +140,21 @@ def test_first_login_does_not_clear_workspace(monkeypatch) -> None:
     result = _make_login_result()
 
     monkeypatch.delenv("OSMOSIS_TOKEN", raising=False)
-    monkeypatch.setattr(login_module, "load_credentials", lambda: None)
-    monkeypatch.setattr(login_module, "save_credentials", lambda c: "keyring")
+    monkeypatch.setattr("osmosis_ai.platform.auth.load_credentials", lambda: None)
     monkeypatch.setattr(
-        login_module,
-        "device_login",
+        "osmosis_ai.platform.auth.credentials.save_credentials", lambda c: "keyring"
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.device_login",
         lambda **kw: (result, new_creds),
     )
 
     clear_calls: list[bool] = []
     monkeypatch.setattr(
-        login_module, "clear_all_local_data", lambda: clear_calls.append(True)
+        "osmosis_ai.platform.auth.local_config.clear_all_local_data",
+        lambda: clear_calls.append(True),
     )
 
-    login_module.login_cmd(force=False, token=None)
+    auth_module.login(force=False, token=None)
 
     assert not clear_calls, "no cleanup needed for first-time login"

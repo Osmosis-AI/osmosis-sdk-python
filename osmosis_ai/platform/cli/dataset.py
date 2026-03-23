@@ -7,8 +7,6 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
-import typer
-
 from osmosis_ai.cli.console import console
 from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.cli.prompts import confirm, is_interactive
@@ -34,10 +32,6 @@ from .utils import (
     format_dataset_status,
     format_size,
     platform_entity_url,
-)
-
-app: typer.Typer = typer.Typer(
-    help="Manage datasets (upload, list, status, preview, delete, validate)."
 )
 
 
@@ -240,12 +234,9 @@ def _perform_upload(
     return dataset
 
 
-@app.command("upload")
 def upload(
-    file: str = typer.Argument(..., help="Path to the file to upload."),
-    project: str | None = typer.Option(
-        None, "--project", help="Project name (default: current project)."
-    ),
+    file: str,
+    project: str | None = None,
 ) -> None:
     """Upload a dataset file."""
     ws_name, credentials = _require_auth()
@@ -294,11 +285,8 @@ def upload(
     console.print(f"Processing will continue on the platform. Check status at: {url}")
 
 
-@app.command("list")
 def list_datasets(
-    project: str | None = typer.Option(
-        None, "--project", help="Project name (default: current project)."
-    ),
+    project: str | None = None,
 ) -> None:
     """List datasets."""
     ws_name, credentials = _require_auth()
@@ -323,14 +311,9 @@ def list_datasets(
         console.print(f"  ... and {result.total_count - len(result.datasets)} more")
 
 
-@app.command("status")
 def status(
-    id: str = typer.Argument(
-        ..., help="Dataset ID (or short prefix from 'dataset list')."
-    ),
-    project: str | None = typer.Option(
-        None, "--project", help="Project name (used for short ID lookup)."
-    ),
+    id: str,
+    project: str | None = None,
 ) -> None:
     """Check dataset processing status."""
     ws_name, credentials = _require_auth()
@@ -346,15 +329,10 @@ def status(
     console.table(rows, title="Dataset Status")
 
 
-@app.command("preview")
 def preview(
-    id: str = typer.Argument(
-        ..., help="Dataset ID (or short prefix from 'dataset list')."
-    ),
-    rows: int = typer.Option(5, "--rows", help="Number of rows to show."),
-    project: str | None = typer.Option(
-        None, "--project", help="Project name (used for short ID lookup)."
-    ),
+    id: str,
+    rows: int = 5,
+    project: str | None = None,
 ) -> None:
     """Preview dataset rows."""
     ws_name, credentials = _require_auth()
@@ -385,9 +363,37 @@ def preview(
         console.print(str(data_rows))
 
 
-@app.command("validate")
+def delete(
+    id: str,
+    project: str | None = None,
+    yes: bool = False,
+) -> None:
+    """Delete a dataset."""
+    ws_name, credentials = _require_auth()
+    from osmosis_ai.platform.api.client import OsmosisClient
+
+    from .utils import resolve_dataset_id
+
+    client = OsmosisClient()
+    dataset_id = resolve_dataset_id(id, project, ws_name, credentials, client=client)
+
+    if not yes:
+        ds = client.get_dataset(dataset_id, credentials=credentials)
+        console.print(f"  Dataset: {ds.file_name} ({format_size(ds.file_size)})")
+        console.print(f"  ID:      {ds.id}")
+        if not is_interactive():
+            raise CLIError("Use --yes to confirm deletion in non-interactive mode.")
+        proceed = confirm("Delete this dataset? This cannot be undone.")
+        if not proceed:
+            console.print("Cancelled.", style="dim")
+            return
+
+    client.delete_dataset(dataset_id, credentials=credentials)
+    console.print("Dataset deleted.", style="green")
+
+
 def validate(
-    file: str = typer.Argument(..., help="Path to the file to validate."),
+    file: str,
 ) -> None:
     """Validate a dataset file locally."""
     file_path, ext, file_size = _check_file_basics(file)
