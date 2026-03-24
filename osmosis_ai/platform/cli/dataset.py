@@ -304,7 +304,7 @@ def list_datasets(
     for d in result.datasets:
         status_info = format_dataset_status(d)
         console.print(
-            f"  {d.id[:8]}  {d.file_name}  {format_size(d.file_size)}  {status_info}"
+            f"  {d.id}  {d.file_name}  {format_size(d.file_size)}  {status_info}"
         )
 
     if result.has_more:
@@ -377,16 +377,30 @@ def delete(
     client = OsmosisClient()
     dataset_id = resolve_dataset_id(id, project, ws_name, credentials, client=client)
 
+    # Blocking preflight: abort if active training runs use this dataset
+    try:
+        affected = client.get_dataset_affected_resources(
+            dataset_id, credentials=credentials
+        )
+    except Exception as e:
+        raise CLIError(f"Unable to verify dataset dependencies: {e}") from e
+
+    if affected.has_blocking_runs:
+        lines = ["Cannot delete — active training runs depend on this dataset:"]
+        for run in affected.affected_training_runs:
+            name = console.escape(run.name) if run.name else "(unnamed)"
+            lines.append(f"  {run.id[:8]}  {name}")
+        lines.append("\nStop these training runs first, then retry.")
+        raise CLIError("\n".join(lines))
+
     if not yes:
         ds = client.get_dataset(dataset_id, credentials=credentials)
         console.print(f"  Dataset: {ds.file_name} ({format_size(ds.file_size)})")
         console.print(f"  ID:      {ds.id}")
-        if not is_interactive():
-            raise CLIError("Use --yes to confirm deletion in non-interactive mode.")
-        proceed = confirm("Delete this dataset? This cannot be undone.")
-        if not proceed:
-            console.print("Cancelled.", style="dim")
-            return
+
+    from osmosis_ai.cli.prompts import require_confirmation
+
+    require_confirmation("Delete this dataset? This cannot be undone.", yes=yes)
 
     client.delete_dataset(dataset_id, credentials=credentials)
     console.print("Dataset deleted.", style="green")

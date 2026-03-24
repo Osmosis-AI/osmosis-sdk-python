@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 from urllib.parse import quote, urlencode
 
 from osmosis_ai.platform.auth.platform_client import platform_request
 
 from .models import (
+    DatasetAffectedResources,
     DatasetFile,
+    DeleteTrainingRunResult,
+    ModelAffectedResources,
     PaginatedBaseModels,
     PaginatedDatasets,
     PaginatedOutputModels,
@@ -17,7 +20,9 @@ from .models import (
     PaginatedTrainingRuns,
     Project,
     ProjectDetail,
+    TrainingRunAffectedResources,
     TrainingRunDetail,
+    WorkspaceDeletionStatus,
 )
 
 if TYPE_CHECKING:
@@ -58,6 +63,63 @@ class OsmosisClient:
             if workspace_name and ws.get("name") == workspace_name:
                 return {"has_subscription": ws.get("has_subscription")}
         return {}
+
+    def list_workspaces(
+        self,
+        *,
+        credentials: Credentials | None = None,
+    ) -> dict[str, Any]:
+        """List all workspaces the user belongs to."""
+        return platform_request(
+            "/api/cli/workspaces",
+            credentials=credentials,
+            require_workspace=False,
+        )
+
+    def create_workspace(
+        self,
+        name: str,
+        timezone: str = "UTC",
+        *,
+        credentials: Credentials | None = None,
+    ) -> dict[str, Any]:
+        """Create a new workspace (organization)."""
+        return platform_request(
+            "/api/cli/workspaces",
+            method="POST",
+            data={"name": name, "timezone": timezone},
+            credentials=credentials,
+            require_workspace=False,
+        )
+
+    def delete_workspace(
+        self,
+        workspace_id: str,
+        *,
+        credentials: Credentials | None = None,
+    ) -> bool:
+        """Delete a workspace (organization)."""
+        platform_request(
+            f"/api/cli/workspaces/{_safe_path(workspace_id)}",
+            method="DELETE",
+            credentials=credentials,
+            require_workspace=False,
+        )
+        return True
+
+    def get_workspace_deletion_status(
+        self,
+        workspace_id: str,
+        *,
+        credentials: Credentials | None = None,
+    ) -> WorkspaceDeletionStatus:
+        """Get workspace deletion readiness status."""
+        data = platform_request(
+            f"/api/cli/workspaces/{_safe_path(workspace_id)}/deletion-status",
+            credentials=credentials,
+            require_workspace=False,
+        )
+        return WorkspaceDeletionStatus.from_dict(data)
 
     # ── Projects ─────────────────────────────────────────────────────
 
@@ -218,6 +280,19 @@ class OsmosisClient:
         )
         return True
 
+    def get_dataset_affected_resources(
+        self,
+        file_id: str,
+        *,
+        credentials: Credentials | None = None,
+    ) -> DatasetAffectedResources:
+        """Get affected resources for a dataset deletion confirmation."""
+        data = platform_request(
+            f"/api/cli/datasets/{_safe_path(file_id)}/affected-resources",
+            credentials=credentials,
+        )
+        return DatasetAffectedResources.from_dict(data)
+
     # ── Training Runs ─────────────────────────────────────────────
 
     def list_training_runs(
@@ -242,6 +317,47 @@ class OsmosisClient:
             f"/api/cli/training-runs/{_safe_path(run_id)}", credentials=credentials
         )
         return TrainingRunDetail.from_dict(data)
+
+    def stop_training_run(
+        self,
+        run_id: str,
+        *,
+        credentials: Credentials | None = None,
+    ) -> dict[str, Any]:
+        """Stop a pending or running training run."""
+        return platform_request(
+            f"/api/cli/training-runs/{_safe_path(run_id)}/stop",
+            method="POST",
+            data={},
+            credentials=credentials,
+        )
+
+    def delete_training_run(
+        self,
+        run_id: str,
+        *,
+        credentials: Credentials | None = None,
+    ) -> DeleteTrainingRunResult:
+        """Delete a training run (stops it first if active)."""
+        data = platform_request(
+            f"/api/cli/training-runs/{_safe_path(run_id)}",
+            method="DELETE",
+            credentials=credentials,
+        )
+        return DeleteTrainingRunResult.from_dict(data)
+
+    def get_training_run_affected_resources(
+        self,
+        run_id: str,
+        *,
+        credentials: Credentials | None = None,
+    ) -> TrainingRunAffectedResources:
+        """Get affected resources for a training run deletion confirmation."""
+        data = platform_request(
+            f"/api/cli/training-runs/{_safe_path(run_id)}/affected-resources",
+            credentials=credentials,
+        )
+        return TrainingRunAffectedResources.from_dict(data)
 
     # ── Models ────────────────────────────────────────────────────
 
@@ -268,6 +384,44 @@ class OsmosisClient:
         qs = urlencode({"project_id": project_id, "limit": limit, "offset": offset})
         data = platform_request(f"/api/cli/models/output?{qs}", credentials=credentials)
         return PaginatedOutputModels.from_dict(data)
+
+    def delete_model(
+        self,
+        model_id: str,
+        project_id: str,
+        *,
+        credentials: Credentials | None = None,
+    ) -> bool:
+        """Delete a model with full cascade cleanup."""
+        qs = urlencode({"project_id": project_id})
+        platform_request(
+            f"/api/cli/models/{_safe_path(model_id)}?{qs}",
+            method="DELETE",
+            credentials=credentials,
+        )
+        return True
+
+    def get_model_affected_resources(
+        self,
+        model_id: str,
+        project_id: str,
+        model_type: Literal["base", "output"] = "base",
+        *,
+        credentials: Credentials | None = None,
+    ) -> ModelAffectedResources:
+        """Get affected resources for a model deletion.
+
+        Args:
+            model_id: The model ID.
+            project_id: The project ID.
+            model_type: "base" or "output".
+        """
+        qs = urlencode({"project_id": project_id, "type": model_type})
+        data = platform_request(
+            f"/api/cli/models/{_safe_path(model_id)}/affected-resources?{qs}",
+            credentials=credentials,
+        )
+        return ModelAffectedResources.from_dict(data)
 
     def fetch_all_models(
         self,
