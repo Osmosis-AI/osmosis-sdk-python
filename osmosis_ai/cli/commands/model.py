@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any
+from typing import Any, Literal
 
 import typer
 
@@ -116,7 +116,7 @@ def delete(
         None, "--project", help="Project name (default: current project)."
     ),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
-    model_type: str = typer.Option(
+    model_type: Literal["base", "output"] = typer.Option(
         "base", "--type", help="Model type: 'base' or 'output'."
     ),
 ) -> None:

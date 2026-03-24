@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 from urllib.parse import quote, urlencode
 
 from osmosis_ai.platform.auth.platform_client import platform_request
@@ -377,7 +377,7 @@ class OsmosisClient:
         self,
         model_id: str,
         project_id: str,
-        model_type: str = "base",
+        model_type: Literal["base", "output"] = "base",
         *,
         credentials: Credentials | None = None,
     ) -> ModelAffectedResources:
