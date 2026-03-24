@@ -123,6 +123,8 @@ async def _handle_rollout(
                     id=request.rollout_id,
                     prompt=request.initial_messages,
                     label=request.label,
+                    agent_timeout_sec=request.agent_timeout_sec,
+                    grader_timeout_sec=request.grader_timeout_sec,
                 ),
                 on_workflow_complete=on_workflow_complete,
                 on_grader_complete=on_grader_complete

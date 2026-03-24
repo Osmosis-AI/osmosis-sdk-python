@@ -40,6 +40,8 @@ class ExecutionRequest(BaseModel):
     id: str
     prompt: list[MessageDict]
     label: str | None = None
+    agent_timeout_sec: float | None = None
+    grader_timeout_sec: float | None = None
 
 
 class ExecutionResult(BaseModel):

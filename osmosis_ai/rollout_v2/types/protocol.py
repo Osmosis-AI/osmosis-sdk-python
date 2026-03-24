@@ -22,6 +22,9 @@ class RolloutInitRequest(BaseModel):
     label: str | None = None
     grader_callback_url: str | None = None
 
+    agent_timeout_sec: float | None = None
+    grader_timeout_sec: float | None = None
+
 
 class RolloutInitResponse(BaseModel): ...
 
