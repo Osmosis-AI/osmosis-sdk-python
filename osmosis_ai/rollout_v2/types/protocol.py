@@ -12,18 +12,24 @@ from osmosis_ai.rollout_v2.types.sample import (
 
 
 class RolloutInitRequest(BaseModel):
-    initial_messages: list[MessageDict]
     rollout_id: str
 
-    chat_completions_url: str
-    completion_callback_url: str
-    controller_api_key: str | None = None
-
+    # These come from slime samples
+    initial_messages: list[MessageDict]
     label: str | None = None
+    metadata: dict[str, Any] | None = None
+
+    # These come from the rollout controller
+    chat_completions_url: str
+    controller_api_key: str | None = None
+    completion_callback_url: str
     grader_callback_url: str | None = None
 
+    # Per agent and grader timeout
     agent_timeout_sec: float | None = None
     grader_timeout_sec: float | None = None
+
+    extra_fields: dict[str, Any] | None = None
 
 
 class RolloutInitResponse(BaseModel): ...
