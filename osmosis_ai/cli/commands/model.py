@@ -35,7 +35,7 @@ def _print_model_section(
         name = console.escape(m.model_name)
         meta = metadata_fn(m)
         date = format_date(m.created_at)
-        console.print(f"  {m.id[:8]}  {name}  {status_str}  {meta}  {date}")
+        console.print(f"  {m.id}  {name}  {status_str}  {meta}  {date}")
     if len(models) < result.total_count:
         remaining = result.total_count - len(models)
         console.print(f"  ... and {remaining} more")
@@ -110,6 +110,53 @@ def build() -> None:
 
 
 @app.command("delete")
-def delete() -> None:
+def delete(
+    id: str = typer.Argument(..., help="Model ID to delete."),
+    project: str | None = typer.Option(
+        None, "--project", help="Project name (default: current project)."
+    ),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
+    model_type: str = typer.Option(
+        "base", "--type", help="Model type: 'base' or 'output'."
+    ),
+) -> None:
     """Delete a model."""
-    not_implemented("model", "delete")
+    from osmosis_ai.platform.cli.project import _require_auth, _resolve_project_id
+
+    ws_name, credentials = _require_auth()
+
+    from osmosis_ai.platform.api.client import OsmosisClient
+
+    project_id = _resolve_project_id(project, workspace_name=ws_name)
+    client = OsmosisClient()
+
+    try:
+        affected = client.get_model_affected_resources(
+            id, project_id, model_type, credentials=credentials
+        )
+    except Exception:
+        affected = None
+
+    if affected and affected.has_blocking_runs:
+        console.print(
+            "Cannot delete this model — the following training runs depend on it:",
+            style="red",
+        )
+        for run in affected.training_runs_using_model:
+            name = console.escape(run.name) if run.name else "(unnamed)"
+            console.print(f"  {run.id[:8]}  {name}  [{run.project_name}]")
+        console.print("\nDelete these training runs first, then retry.", style="dim")
+        raise typer.Exit(1)
+
+    msg = f"Delete model {id[:8]}...? This cannot be undone."
+    if affected and affected.creator_training_run:
+        r = affected.creator_training_run
+        name = r.name or "(unnamed)"
+        msg += f"\n  Note: this model was created by training run '{name}' ({r.id[:8]})"
+
+    from osmosis_ai.cli.prompts import require_confirmation
+
+    require_confirmation(msg, yes=yes)
+
+    client.delete_model(id, project_id, credentials=credentials)
+    console.print(f"Model {id[:8]} deleted.", style="green")

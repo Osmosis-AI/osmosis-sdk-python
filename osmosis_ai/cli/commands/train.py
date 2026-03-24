@@ -45,7 +45,7 @@ def list_runs(
         acc = f"acc:{r.eval_accuracy:.2f}" if r.eval_accuracy is not None else ""
         date = format_date(r.created_at)
 
-        console.print(f"  {r.id[:8]}  {name}  {status_str}  {model}  {acc}  {date}")
+        console.print(f"  {r.id}  {name}  {status_str}  {model}  {acc}  {date}")
 
     if result.has_more:
         remaining = result.total_count - len(result.training_runs)
@@ -114,12 +114,67 @@ def traces() -> None:
 
 
 @app.command("stop")
-def stop() -> None:
+def stop(
+    id: str = typer.Argument(
+        ..., help="Training run ID (or short prefix from 'train list')."
+    ),
+    project: str | None = typer.Option(
+        None, "--project", help="Project name (used for short ID lookup)."
+    ),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
+) -> None:
     """Stop a training run."""
-    not_implemented("train", "stop")
+    from osmosis_ai.platform.cli.project import _require_auth
+    from osmosis_ai.platform.cli.utils import resolve_run_id
+
+    ws_name, credentials = _require_auth()
+
+    from osmosis_ai.platform.api.client import OsmosisClient
+
+    client = OsmosisClient()
+    run_id = resolve_run_id(id, project, ws_name, credentials, client=client)
+
+    from osmosis_ai.cli.prompts import require_confirmation
+
+    require_confirmation(f"Stop training run {run_id[:8]}...?", yes=yes)
+
+    client.stop_training_run(run_id, credentials=credentials)
+    console.print(f"Training run {run_id[:8]} stopped.", style="green")
 
 
 @app.command("delete")
-def delete() -> None:
+def delete(
+    id: str = typer.Argument(
+        ..., help="Training run ID (or short prefix from 'train list')."
+    ),
+    project: str | None = typer.Option(
+        None, "--project", help="Project name (used for short ID lookup)."
+    ),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
+) -> None:
     """Delete a training run."""
-    not_implemented("train", "delete")
+    from osmosis_ai.platform.cli.project import _require_auth
+    from osmosis_ai.platform.cli.utils import resolve_run_id
+
+    ws_name, credentials = _require_auth()
+
+    from osmosis_ai.platform.api.client import OsmosisClient
+
+    client = OsmosisClient()
+    run_id = resolve_run_id(id, project, ws_name, credentials, client=client)
+
+    from osmosis_ai.cli.prompts import require_confirmation
+
+    require_confirmation(
+        f"Delete training run {run_id[:8]}...? This cannot be undone.", yes=yes
+    )
+
+    result = client.delete_training_run(run_id, credentials=credentials)
+    console.print(f"Training run {run_id[:8]} deleted.", style="green")
+
+    if result.preserved_output_model:
+        m = result.preserved_output_model
+        console.print(
+            f"  Output model preserved: {console.escape(m.name)} ({m.id[:8]})",
+            style="dim",
+        )

@@ -10,9 +10,12 @@ from osmosis_ai.platform.api.models import (
     STATUSES_INACTIVE,
     STATUSES_SUCCESS,
     STATUSES_TERMINAL,
+    AffectedTrainingRun,
     DatasetFile,
+    ModelAffectedResources,
     ProjectDetail,
     UploadInfo,
+    WorkspaceDeletionStatus,
 )
 
 # =============================================================================
@@ -228,3 +231,118 @@ class TestStatusConstants:
                 assert overlap == frozenset(), (
                     f"Overlap found between categories: {overlap}"
                 )
+
+
+class TestAffectedTrainingRun:
+    """Tests for AffectedTrainingRun.from_dict."""
+
+    def test_from_dict(self) -> None:
+        data = {"id": "run-1", "name": "My Run", "project_name": "proj-a"}
+        run = AffectedTrainingRun.from_dict(data)
+        assert run.id == "run-1"
+        assert run.name == "My Run"
+        assert run.project_name == "proj-a"
+
+    def test_from_dict_null_name(self) -> None:
+        data = {"id": "run-2", "project_name": "proj-b"}
+        run = AffectedTrainingRun.from_dict(data)
+        assert run.name is None
+
+
+class TestModelAffectedResources:
+    """Tests for ModelAffectedResources.from_dict."""
+
+    def test_empty(self) -> None:
+        data = {"training_runs_using_model": [], "creator_training_run": None}
+        res = ModelAffectedResources.from_dict(data)
+        assert res.training_runs_using_model == []
+        assert res.creator_training_run is None
+        assert res.has_blocking_runs is False
+
+    def test_with_blocking_runs(self) -> None:
+        data = {
+            "training_runs_using_model": [
+                {"id": "r1", "name": "Run 1", "project_name": "proj"},
+                {"id": "r2", "name": None, "project_name": "proj"},
+            ],
+            "creator_training_run": None,
+        }
+        res = ModelAffectedResources.from_dict(data)
+        assert len(res.training_runs_using_model) == 2
+        assert res.has_blocking_runs is True
+
+    def test_with_creator_run(self) -> None:
+        data = {
+            "training_runs_using_model": [],
+            "creator_training_run": {
+                "id": "r3",
+                "name": "Creator",
+                "project_name": "proj",
+            },
+        }
+        res = ModelAffectedResources.from_dict(data)
+        assert res.creator_training_run is not None
+        assert res.creator_training_run.id == "r3"
+        assert res.has_blocking_runs is False
+
+
+class TestWorkspaceDeletionStatus:
+    """Tests for WorkspaceDeletionStatus.from_dict."""
+
+    def test_can_delete(self) -> None:
+        data = {
+            "can_delete": True,
+            "is_owner": True,
+            "is_last_workspace": False,
+            "projects": [],
+        }
+        status = WorkspaceDeletionStatus.from_dict(data)
+        assert status.can_delete is True
+        assert status.is_owner is True
+        assert status.is_last_workspace is False
+        assert status.projects == []
+        assert status.projects_with_running_processes == []
+
+    def test_with_running_processes(self) -> None:
+        data = {
+            "can_delete": False,
+            "is_owner": True,
+            "is_last_workspace": False,
+            "projects": [
+                {
+                    "project_id": "p1",
+                    "project_name": "Project A",
+                    "has_running_processes": True,
+                    "feature_pipelines": {"count": 2, "valid": False},
+                    "training_runs": {"count": 0, "valid": True},
+                    "models": {"count": 1, "valid": False},
+                },
+                {
+                    "project_id": "p2",
+                    "project_name": "Project B",
+                    "has_running_processes": False,
+                    "feature_pipelines": {"count": 0, "valid": True},
+                    "training_runs": {"count": 0, "valid": True},
+                    "models": {"count": 0, "valid": True},
+                },
+            ],
+        }
+        status = WorkspaceDeletionStatus.from_dict(data)
+        assert status.can_delete is False
+        assert len(status.projects) == 2
+        blocking = status.projects_with_running_processes
+        assert len(blocking) == 1
+        assert blocking[0].project_name == "Project A"
+        assert blocking[0].feature_pipelines.count == 2
+        assert blocking[0].feature_pipelines.valid is False
+
+    def test_not_owner(self) -> None:
+        data = {
+            "can_delete": False,
+            "is_owner": False,
+            "is_last_workspace": False,
+            "projects": [],
+        }
+        status = WorkspaceDeletionStatus.from_dict(data)
+        assert status.can_delete is False
+        assert status.is_owner is False

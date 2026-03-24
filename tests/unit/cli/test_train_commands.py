@@ -11,7 +11,9 @@ import osmosis_ai.platform.api.client as api_client_module
 import osmosis_ai.platform.cli.utils as utils_module
 from osmosis_ai.cli.console import Console
 from osmosis_ai.platform.api.models import (
+    DeleteTrainingRunResult,
     PaginatedTrainingRuns,
+    PreservedModel,
     TrainingRun,
     TrainingRunDetail,
 )
@@ -193,3 +195,55 @@ class TestStatus:
         assert "uploaded" in out
         assert "2026-01-01" in out
         assert "2026-01-02" in out
+
+
+# ---------------------------------------------------------------------------
+# delete
+# ---------------------------------------------------------------------------
+
+
+class TestDelete:
+    RUN_ID = "abcdef1234567890abcdef1234567890"
+
+    def test_delete_without_output_model(
+        self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
+    ) -> None:
+        class FakeClient:
+            def list_training_runs(self, pid, *, limit=50, credentials=None):
+                return PaginatedTrainingRuns(
+                    training_runs=[], total_count=0, has_more=False
+                )
+
+            def delete_training_run(self, run_id, *, credentials=None):
+                return DeleteTrainingRunResult(deleted=True)
+
+        monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        train_module.delete(id=self.RUN_ID, project=None, yes=True)
+        out = console_capture.getvalue()
+        assert "deleted" in out
+        assert "Output model preserved" not in out
+
+    def test_delete_with_preserved_output_model(
+        self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
+    ) -> None:
+        class FakeClient:
+            def list_training_runs(self, pid, *, limit=50, credentials=None):
+                return PaginatedTrainingRuns(
+                    training_runs=[], total_count=0, has_more=False
+                )
+
+            def delete_training_run(self, run_id, *, credentials=None):
+                return DeleteTrainingRunResult(
+                    deleted=True,
+                    preserved_output_model=PreservedModel(
+                        id="model123456789012345678901234",
+                        name="my-output-model",
+                    ),
+                )
+
+        monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        train_module.delete(id=self.RUN_ID, project=None, yes=True)
+        out = console_capture.getvalue()
+        assert "deleted" in out
+        assert "Output model preserved" in out
+        assert "my-output-model" in out

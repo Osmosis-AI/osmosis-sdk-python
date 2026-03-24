@@ -304,7 +304,7 @@ def list_datasets(
     for d in result.datasets:
         status_info = format_dataset_status(d)
         console.print(
-            f"  {d.id[:8]}  {d.file_name}  {format_size(d.file_size)}  {status_info}"
+            f"  {d.id}  {d.file_name}  {format_size(d.file_size)}  {status_info}"
         )
 
     if result.has_more:
@@ -381,12 +381,10 @@ def delete(
         ds = client.get_dataset(dataset_id, credentials=credentials)
         console.print(f"  Dataset: {ds.file_name} ({format_size(ds.file_size)})")
         console.print(f"  ID:      {ds.id}")
-        if not is_interactive():
-            raise CLIError("Use --yes to confirm deletion in non-interactive mode.")
-        proceed = confirm("Delete this dataset? This cannot be undone.")
-        if not proceed:
-            console.print("Cancelled.", style="dim")
-            return
+
+    from osmosis_ai.cli.prompts import require_confirmation
+
+    require_confirmation("Delete this dataset? This cannot be undone.", yes=yes)
 
     client.delete_dataset(dataset_id, credentials=credentials)
     console.print("Dataset deleted.", style="green")

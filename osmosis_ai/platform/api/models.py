@@ -333,6 +333,142 @@ class PaginatedTrainingRuns:
 
 
 @dataclass
+class PreservedModel:
+    """A model that was preserved after its training run was deleted."""
+
+    id: str
+    name: str
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> PreservedModel:
+        return cls(id=data["id"], name=data["name"])
+
+
+@dataclass
+class DeleteTrainingRunResult:
+    """Result of deleting a training run."""
+
+    deleted: bool
+    preserved_output_model: PreservedModel | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> DeleteTrainingRunResult:
+        preserved = data.get("preservedOutputModel")
+        return cls(
+            deleted=data.get("deleted", True),
+            preserved_output_model=PreservedModel.from_dict(preserved)
+            if preserved
+            else None,
+        )
+
+
+@dataclass
+class AffectedTrainingRun:
+    """A training run affected by a model deletion."""
+
+    id: str
+    name: str | None
+    project_name: str
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> AffectedTrainingRun:
+        return cls(
+            id=data["id"],
+            name=data.get("name"),
+            project_name=data["project_name"],
+        )
+
+
+@dataclass
+class ModelAffectedResources:
+    """Affected resources for a model deletion."""
+
+    training_runs_using_model: list[AffectedTrainingRun]
+    creator_training_run: AffectedTrainingRun | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> ModelAffectedResources:
+        creator = data.get("creator_training_run")
+        return cls(
+            training_runs_using_model=[
+                AffectedTrainingRun.from_dict(r)
+                for r in data.get("training_runs_using_model", [])
+            ],
+            creator_training_run=AffectedTrainingRun.from_dict(creator)
+            if creator
+            else None,
+        )
+
+    @property
+    def has_blocking_runs(self) -> bool:
+        """Whether there are training runs that block deletion."""
+        return len(self.training_runs_using_model) > 0
+
+
+@dataclass
+class ProjectProcessCount:
+    """Running process counts for a project."""
+
+    count: int
+    valid: bool
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> ProjectProcessCount:
+        return cls(count=data.get("count", 0), valid=data.get("valid", True))
+
+
+@dataclass
+class ProjectDeletionStatus:
+    """Deletion readiness status for a single project."""
+
+    project_id: str
+    project_name: str
+    has_running_processes: bool
+    feature_pipelines: ProjectProcessCount
+    training_runs: ProjectProcessCount
+    models: ProjectProcessCount
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> ProjectDeletionStatus:
+        return cls(
+            project_id=data["project_id"],
+            project_name=data["project_name"],
+            has_running_processes=data.get("has_running_processes", False),
+            feature_pipelines=ProjectProcessCount.from_dict(
+                data.get("feature_pipelines", {})
+            ),
+            training_runs=ProjectProcessCount.from_dict(data.get("training_runs", {})),
+            models=ProjectProcessCount.from_dict(data.get("models", {})),
+        )
+
+
+@dataclass
+class WorkspaceDeletionStatus:
+    """Workspace deletion readiness status."""
+
+    can_delete: bool
+    is_owner: bool
+    is_last_workspace: bool
+    projects: list[ProjectDeletionStatus]
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> WorkspaceDeletionStatus:
+        return cls(
+            can_delete=data.get("can_delete", False),
+            is_owner=data.get("is_owner", False),
+            is_last_workspace=data.get("is_last_workspace", False),
+            projects=[
+                ProjectDeletionStatus.from_dict(p) for p in data.get("projects", [])
+            ],
+        )
+
+    @property
+    def projects_with_running_processes(self) -> list[ProjectDeletionStatus]:
+        """Projects that have running processes blocking deletion."""
+        return [p for p in self.projects if p.has_running_processes]
+
+
+@dataclass
 class BaseModelInfo:
     """A base (foundation) model record."""
 
