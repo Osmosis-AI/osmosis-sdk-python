@@ -44,6 +44,7 @@ logger = logging.getLogger(__name__)
 AGENT_IMPORT_PATH = (
     "osmosis_ai.rollout_v2.backend.harbor.agent_adapter:OsmosisInstalledAgent"
 )
+TRIAL_NAME_PREFIX = "trial-"
 
 TEST_SH_TEMPLATE = """\
 #!/bin/bash
@@ -326,30 +327,51 @@ class HarborBackend(ExecutionBackend):
     def _build_trial_config(
         self, task_dir: Path, request: ExecutionRequest
     ) -> TrialConfig:
+        agent_config = HarborAgentConfig(
+            import_path=AGENT_IMPORT_PATH,
+            kwargs={
+                "rollout_config_path": str(task_dir / "rollout_config.json"),
+            },
+        )
+        if request.agent_timeout_sec is not None:
+            agent_config.override_timeout_sec = request.agent_timeout_sec
+
+        verifier_config = VerifierConfig(disable=not self.grading)
+        if request.grader_timeout_sec is not None:
+            verifier_config.override_timeout_sec = request.grader_timeout_sec
+
         return TrialConfig(
             task=TaskConfig(path=task_dir),
-            trial_name=f"trial-{request.id}",
+            trial_name=f"{TRIAL_NAME_PREFIX}{request.id}",
             trials_dir=self.trials_dir,
-            agent=HarborAgentConfig(
-                import_path=AGENT_IMPORT_PATH,
-                kwargs={
-                    "rollout_config_path": str(task_dir / "rollout_config.json"),
-                },
-            ),
+            agent=agent_config,
             environment=self.environment_config,
-            verifier=VerifierConfig(disable=not self.grading),
+            verifier=verifier_config,
         )
 
     # -- Hooks --
 
     async def _on_verification_start(self, event: TrialHookEvent) -> None:
-        metadata = _get_agent_metadata(event)
-        if not metadata:
-            return
-
-        rollout_id = metadata.get("id", "")
+        rollout_id = _parse_rollout_id(event)
         pending = self.pending.get(rollout_id)
         if not pending:
+            logger.error("No pending trial found for rollout %s", rollout_id)
+            return
+
+        # Trial failed before agent ran
+        if event.result and event.result.exception_info:
+            err = event.result.exception_info
+            await pending.on_workflow_complete(
+                ExecutionResult(
+                    status=RolloutStatus.FAILURE,
+                    err_message=err.exception_message,
+                    err_category=RolloutErrorCategory.AGENT_ERROR,
+                )
+            )
+            return
+
+        metadata = _get_agent_metadata(event)
+        if not metadata:
             return
 
         status = metadata.get("status", "failure")
@@ -366,16 +388,28 @@ class HarborBackend(ExecutionBackend):
         await pending.on_workflow_complete(result)
 
     async def _on_trial_end(self, event: TrialHookEvent) -> None:
-        metadata = _get_agent_metadata(event)
-        if not metadata:
-            return
-
-        rollout_id = metadata.get("id", "")
+        rollout_id = _parse_rollout_id(event)
         pending = self.pending.pop(rollout_id, None)
         if not pending:
+            logger.error("No pending trial found for rollout %s", rollout_id)
             return
 
-        if pending.on_grader_complete and self.grading:
+        # Trial failed before agent ran — fire workflow callback and resolve
+        if event.result and event.result.exception_info and not pending.done.done():
+            err = event.result.exception_info
+            await pending.on_workflow_complete(
+                ExecutionResult(
+                    status=RolloutStatus.FAILURE,
+                    err_message=err.exception_message,
+                    err_category=RolloutErrorCategory.AGENT_ERROR,
+                )
+            )
+            pending.done.set_result(None)
+            return
+
+        metadata = _get_agent_metadata(event)
+
+        if pending.on_grader_complete and self.grading and metadata:
             samples = _parse_samples(metadata.get("samples", {}))
 
             if event.result and event.result.verifier_result:
@@ -396,6 +430,10 @@ def _ensure_import_path(ref: Any) -> str:
     if isinstance(ref, str):
         return ref
     return to_import_path(ref)
+
+
+def _parse_rollout_id(event: TrialHookEvent) -> str:
+    return event.config.trial_name.removeprefix(TRIAL_NAME_PREFIX)
 
 
 def _get_agent_metadata(event: TrialHookEvent) -> dict[str, Any] | None:
