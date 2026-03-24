@@ -80,16 +80,16 @@ def delete(
         status = client.get_workspace_deletion_status(
             workspace["id"], credentials=credentials
         )
-    except Exception:
-        status = None
+    except Exception as e:
+        raise CLIError(f"Unable to verify workspace deletion safety: {e}") from e
 
-    if status and not status.is_owner:
+    if not status.is_owner:
         raise CLIError("Only workspace owners can delete a workspace.")
 
-    if status and status.is_last_workspace:
+    if status.is_last_workspace:
         raise CLIError("Cannot delete your only workspace.")
 
-    if status and status.projects_with_running_processes:
+    if status.projects_with_running_processes:
         console.print(
             "Cannot delete workspace — the following projects have running processes:",
             style="red",

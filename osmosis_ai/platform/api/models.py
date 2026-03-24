@@ -353,9 +353,9 @@ class DeleteTrainingRunResult:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> DeleteTrainingRunResult:
-        preserved = data.get("preservedOutputModel")
+        preserved = data.get("preserved_output_model")
         return cls(
-            deleted=data.get("deleted", True),
+            deleted=data["deleted"],
             preserved_output_model=PreservedModel.from_dict(preserved)
             if preserved
             else None,
@@ -363,20 +363,54 @@ class DeleteTrainingRunResult:
 
 
 @dataclass
+class TrainingRunAffectedResources:
+    """Affected resources for a training run deletion."""
+
+    output_model: PreservedModel | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> TrainingRunAffectedResources:
+        om = data.get("output_model")
+        return cls(
+            output_model=PreservedModel.from_dict(om) if om else None,
+        )
+
+
+@dataclass
 class AffectedTrainingRun:
-    """A training run affected by a model deletion."""
+    """A training run affected by a resource deletion."""
 
     id: str
     name: str | None
-    project_name: str
+    project_name: str | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> AffectedTrainingRun:
         return cls(
             id=data["id"],
             name=data.get("name"),
-            project_name=data["project_name"],
+            project_name=data.get("project_name"),
         )
+
+
+@dataclass
+class DatasetAffectedResources:
+    """Affected resources for a dataset deletion."""
+
+    affected_training_runs: list[AffectedTrainingRun]
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> DatasetAffectedResources:
+        return cls(
+            affected_training_runs=[
+                AffectedTrainingRun.from_dict(r)
+                for r in data.get("affected_training_runs", [])
+            ],
+        )
+
+    @property
+    def has_blocking_runs(self) -> bool:
+        return len(self.affected_training_runs) > 0
 
 
 @dataclass

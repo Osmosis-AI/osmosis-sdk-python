@@ -377,6 +377,22 @@ def delete(
     client = OsmosisClient()
     dataset_id = resolve_dataset_id(id, project, ws_name, credentials, client=client)
 
+    # Blocking preflight: abort if active training runs use this dataset
+    try:
+        affected = client.get_dataset_affected_resources(
+            dataset_id, credentials=credentials
+        )
+    except Exception as e:
+        raise CLIError(f"Unable to verify dataset dependencies: {e}") from e
+
+    if affected.has_blocking_runs:
+        lines = ["Cannot delete — active training runs depend on this dataset:"]
+        for run in affected.affected_training_runs:
+            name = console.escape(run.name) if run.name else "(unnamed)"
+            lines.append(f"  {run.id[:8]}  {name}")
+        lines.append("\nStop these training runs first, then retry.")
+        raise CLIError("\n".join(lines))
+
     if not yes:
         ds = client.get_dataset(dataset_id, credentials=credentials)
         console.print(f"  Dataset: {ds.file_name} ({format_size(ds.file_size)})")

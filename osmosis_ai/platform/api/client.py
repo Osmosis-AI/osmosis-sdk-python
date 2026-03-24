@@ -9,6 +9,7 @@ from urllib.parse import quote, urlencode
 from osmosis_ai.platform.auth.platform_client import platform_request
 
 from .models import (
+    DatasetAffectedResources,
     DatasetFile,
     DeleteTrainingRunResult,
     ModelAffectedResources,
@@ -19,6 +20,7 @@ from .models import (
     PaginatedTrainingRuns,
     Project,
     ProjectDetail,
+    TrainingRunAffectedResources,
     TrainingRunDetail,
     WorkspaceDeletionStatus,
 )
@@ -278,6 +280,19 @@ class OsmosisClient:
         )
         return True
 
+    def get_dataset_affected_resources(
+        self,
+        file_id: str,
+        *,
+        credentials: Credentials | None = None,
+    ) -> DatasetAffectedResources:
+        """Get affected resources for a dataset deletion confirmation."""
+        data = platform_request(
+            f"/api/cli/datasets/{_safe_path(file_id)}/affected-resources",
+            credentials=credentials,
+        )
+        return DatasetAffectedResources.from_dict(data)
+
     # ── Training Runs ─────────────────────────────────────────────
 
     def list_training_runs(
@@ -330,6 +345,19 @@ class OsmosisClient:
             credentials=credentials,
         )
         return DeleteTrainingRunResult.from_dict(data)
+
+    def get_training_run_affected_resources(
+        self,
+        run_id: str,
+        *,
+        credentials: Credentials | None = None,
+    ) -> TrainingRunAffectedResources:
+        """Get affected resources for a training run deletion confirmation."""
+        data = platform_request(
+            f"/api/cli/training-runs/{_safe_path(run_id)}/affected-resources",
+            credentials=credentials,
+        )
+        return TrainingRunAffectedResources.from_dict(data)
 
     # ── Models ────────────────────────────────────────────────────
 

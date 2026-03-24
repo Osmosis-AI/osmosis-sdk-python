@@ -121,6 +121,7 @@ def delete(
     ),
 ) -> None:
     """Delete a model."""
+    from osmosis_ai.cli.errors import CLIError
     from osmosis_ai.platform.cli.project import _require_auth, _resolve_project_id
 
     ws_name, credentials = _require_auth()
@@ -134,10 +135,10 @@ def delete(
         affected = client.get_model_affected_resources(
             id, project_id, model_type, credentials=credentials
         )
-    except Exception:
-        affected = None
+    except Exception as e:
+        raise CLIError(f"Unable to verify model dependencies: {e}") from e
 
-    if affected and affected.has_blocking_runs:
+    if affected.has_blocking_runs:
         console.print(
             "Cannot delete this model — the following training runs depend on it:",
             style="red",
@@ -149,7 +150,7 @@ def delete(
         raise typer.Exit(1)
 
     msg = f"Delete model {id[:8]}...? This cannot be undone."
-    if affected and affected.creator_training_run:
+    if affected.creator_training_run:
         r = affected.creator_training_run
         name = r.name or "(unnamed)"
         msg += f"\n  Note: this model was created by training run '{name}' ({r.id[:8]})"

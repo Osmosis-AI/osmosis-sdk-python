@@ -163,11 +163,24 @@ def delete(
     client = OsmosisClient()
     run_id = resolve_run_id(id, project, ws_name, credentials, client=client)
 
+    # Non-blocking preflight: inform user about preserved output model
+    msg = f"Delete training run {run_id[:8]}...? This cannot be undone."
+    try:
+        affected = client.get_training_run_affected_resources(
+            run_id, credentials=credentials
+        )
+        if affected.output_model:
+            m = affected.output_model
+            msg += (
+                f"\n  Note: output model '{console.escape(m.name)}'"
+                f" ({m.id[:8]}) will be preserved."
+            )
+    except Exception:
+        console.print("  Warning: unable to check affected resources.", style="dim")
+
     from osmosis_ai.cli.prompts import require_confirmation
 
-    require_confirmation(
-        f"Delete training run {run_id[:8]}...? This cannot be undone.", yes=yes
-    )
+    require_confirmation(msg, yes=yes)
 
     result = client.delete_training_run(run_id, credentials=credentials)
     console.print(f"Training run {run_id[:8]} deleted.", style="green")
