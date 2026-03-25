@@ -55,7 +55,7 @@ PYTHONPATH=/workspace python -m osmosis_ai.rollout_v2.backend.harbor.grader_runn
 """
 
 
-class _PendingTrial:
+class PendingTrial:
     def __init__(
         self,
         on_workflow_complete: ResultCallback,
@@ -93,13 +93,13 @@ class HarborBackend(ExecutionBackend):
         self.orchestrator = orchestrator
         self.task_dir = task_dir
         self.user_code_dir = user_code_dir
-        self.workflow_path = _ensure_import_path(workflow)
+        self.workflow_path = ensure_import_path(workflow)
         self.workflow_config_path = (
-            _ensure_import_path(workflow_config) if workflow_config else None
+            ensure_import_path(workflow_config) if workflow_config else None
         )
-        self.grader_path = _ensure_import_path(grader) if grader else None
+        self.grader_path = ensure_import_path(grader) if grader else None
         self.grader_config_path = (
-            _ensure_import_path(grader_config) if grader_config else None
+            ensure_import_path(grader_config) if grader_config else None
         )
         self.grading = self.grader_path is not None
         self.trials_dir = trials_dir
@@ -108,18 +108,18 @@ class HarborBackend(ExecutionBackend):
         self._sdk_source_dir = _sdk_source_dir
         self.cache_image = cache_image
 
-        self.pending: dict[str, _PendingTrial] = {}
+        self.pending: dict[str, PendingTrial] = {}
 
         if self.cache_image:
             self.shared_env_dir = Path(f"/tmp/harbor-shared-env-{self.task_dir.name}")
-            self._prepare_shared_env()
+            self.prepare_shared_env()
 
         self.orchestrator.add_hook(
-            TrialEvent.VERIFICATION_START, self._on_verification_start
+            TrialEvent.VERIFICATION_START, self.on_verification_start
         )
-        self.orchestrator.add_hook(TrialEvent.END, self._on_trial_end)
+        self.orchestrator.add_hook(TrialEvent.END, self.on_trial_end)
 
-    def _prepare_shared_env(self) -> None:
+    def prepare_shared_env(self) -> None:
         """Build the shared environment dir with SDK + user code.
         Only done once — Docker caches the resulting image."""
         if self.shared_env_dir.exists():
@@ -159,7 +159,7 @@ class HarborBackend(ExecutionBackend):
             ),
         )
 
-    def _prepare_env_dir(self, task_dir: Path) -> None:
+    def prepare_env_dir(self, task_dir: Path) -> None:
         """Prepare the environment dir for a task dir.
         If cache_image is on, symlink to the shared env. Otherwise copy fresh."""
         if self.cache_image:
@@ -212,12 +212,12 @@ class HarborBackend(ExecutionBackend):
         on_workflow_complete: ResultCallback,
         on_grader_complete: ResultCallback | None = None,
     ) -> None:
-        pending = _PendingTrial(on_workflow_complete, on_grader_complete)
+        pending = PendingTrial(on_workflow_complete, on_grader_complete)
         self.pending[request.id] = pending
 
         try:
-            task_dir = self._prepare_task_dir(request)
-            trial_config = self._build_trial_config(task_dir, request)
+            task_dir = self.prepare_task_dir(request)
+            trial_config = self.build_trial_config(task_dir, request)
             await self.orchestrator.submit(trial_config)
             await pending.done
         except Exception as e:
@@ -231,9 +231,7 @@ class HarborBackend(ExecutionBackend):
                 )
             )
 
-    # -- Per-rollout task dir --
-
-    def _prepare_task_dir(self, request: ExecutionRequest) -> Path:
+    def prepare_task_dir(self, request: ExecutionRequest) -> Path:
         task_dir = Path(f"/tmp/harbor-{request.id}")
         task_dir.mkdir(parents=True, exist_ok=True)
 
@@ -247,25 +245,25 @@ class HarborBackend(ExecutionBackend):
                 else:
                     shutil.copy2(item, dest)
 
-        self._prepare_env_dir(task_dir)
-        self._write_instruction(task_dir, request)
-        self._prepare_tests_dir(task_dir)
-        self._inject_verifier_env(task_dir)
+        self.prepare_env_dir(task_dir)
+        self.write_instruction(task_dir, request)
+        self.prepare_tests_dir(task_dir)
+        self.inject_verifier_env(task_dir)
 
         return task_dir
 
-    def _write_instruction(self, task_dir: Path, request: ExecutionRequest) -> None:
+    def write_instruction(self, task_dir: Path, request: ExecutionRequest) -> None:
         """Write instruction.md (prompt) and rollout_config.json as separate files."""
         (task_dir / "instruction.md").write_text(
             json.dumps(request.prompt, default=str)
         )
 
-        rollout_config = self._build_rollout_config(request)
+        rollout_config = self.build_rollout_config(request)
         (task_dir / "rollout_config.json").write_text(
             json.dumps(rollout_config, default=str)
         )
 
-    def _build_rollout_config(self, request: ExecutionRequest) -> dict[str, Any]:
+    def build_rollout_config(self, request: ExecutionRequest) -> dict[str, Any]:
         from osmosis_ai.rollout_v2.context import get_rollout_context
 
         config: dict[str, Any] = {
@@ -286,7 +284,7 @@ class HarborBackend(ExecutionBackend):
             if ctx.chat_completions_url:
                 url = ctx.chat_completions_url
                 if self.environment_config.type == EnvironmentType.DOCKER:
-                    url = _rewrite_url_for_docker(url)
+                    url = rewrite_url_for_docker(url)
                 config["chat_completions_url"] = url
             if ctx.api_key:
                 config["api_key"] = ctx.api_key
@@ -295,7 +293,7 @@ class HarborBackend(ExecutionBackend):
 
         return config
 
-    def _prepare_tests_dir(self, task_dir: Path) -> None:
+    def prepare_tests_dir(self, task_dir: Path) -> None:
         if self.custom_tests_dir and self.custom_tests_dir.exists():
             shutil.copytree(
                 self.custom_tests_dir, task_dir / "tests", dirs_exist_ok=True
@@ -307,7 +305,7 @@ class HarborBackend(ExecutionBackend):
             test_sh.write_text(TEST_SH_TEMPLATE)
             test_sh.chmod(0o755)
 
-    def _inject_verifier_env(self, task_dir: Path) -> None:
+    def inject_verifier_env(self, task_dir: Path) -> None:
         task_toml_path = task_dir / "task.toml"
         if task_toml_path.exists():
             with open(task_toml_path, "rb") as f:
@@ -322,9 +320,7 @@ class HarborBackend(ExecutionBackend):
         with open(task_toml_path, "w") as f:
             toml.dump(config, f)
 
-    # -- Trial config --
-
-    def _build_trial_config(
+    def build_trial_config(
         self, task_dir: Path, request: ExecutionRequest
     ) -> TrialConfig:
         agent_config = HarborAgentConfig(
@@ -349,107 +345,93 @@ class HarborBackend(ExecutionBackend):
             verifier=verifier_config,
         )
 
-    # -- Hooks --
-
-    async def _on_verification_start(self, event: TrialHookEvent) -> None:
-        rollout_id = _parse_rollout_id(event)
+    async def on_verification_start(self, event: TrialHookEvent) -> None:
+        rollout_id = parse_rollout_id(event)
         pending = self.pending.get(rollout_id)
         if not pending:
             logger.error("No pending trial found for rollout %s", rollout_id)
             return
 
-        # Trial failed before agent ran
-        if event.result and event.result.exception_info:
-            err = event.result.exception_info
-            await pending.on_workflow_complete(
-                ExecutionResult(
-                    status=RolloutStatus.FAILURE,
-                    err_message=err.exception_message,
-                    err_category=RolloutErrorCategory.AGENT_ERROR,
-                )
-            )
-            return
-
-        metadata = _get_agent_metadata(event)
-        if not metadata:
-            return
-
-        status = metadata.get("status", "failure")
-        if status == "success":
-            samples = _parse_samples(metadata.get("samples", {}))
+        metadata = get_agent_metadata(event)
+        if metadata and metadata.get("status") == "success":
+            samples = parse_samples(metadata.get("samples", {}))
             result = ExecutionResult(status=RolloutStatus.SUCCESS, samples=samples)
-        else:
+        elif event.result and event.result.exception_info:
+            err = event.result.exception_info
             result = ExecutionResult(
                 status=RolloutStatus.FAILURE,
-                err_message=metadata.get("err_message"),
+                err_message=err.exception_message,
+                err_category=RolloutErrorCategory.AGENT_ERROR,
+            )
+        else:
+            err_message = metadata.get("err_message") if metadata else "Unknown error"
+            result = ExecutionResult(
+                status=RolloutStatus.FAILURE,
+                err_message=err_message,
                 err_category=RolloutErrorCategory.AGENT_ERROR,
             )
 
         await pending.on_workflow_complete(result)
 
-    async def _on_trial_end(self, event: TrialHookEvent) -> None:
-        rollout_id = _parse_rollout_id(event)
+    async def on_trial_end(self, event: TrialHookEvent) -> None:
+        rollout_id = parse_rollout_id(event)
         pending = self.pending.pop(rollout_id, None)
         if not pending:
             logger.error("No pending trial found for rollout %s", rollout_id)
             return
 
-        # Trial failed before agent ran — fire workflow callback and resolve
-        if event.result and event.result.exception_info and not pending.done.done():
-            err = event.result.exception_info
-            await pending.on_workflow_complete(
-                ExecutionResult(
-                    status=RolloutStatus.FAILURE,
-                    err_message=err.exception_message,
-                    err_category=RolloutErrorCategory.AGENT_ERROR,
-                )
-            )
-            pending.done.set_result(None)
-            return
-
-        metadata = _get_agent_metadata(event)
-
-        if pending.on_grader_complete and self.grading and metadata:
-            samples = _parse_samples(metadata.get("samples", {}))
+        if pending.on_grader_complete:
+            metadata = get_agent_metadata(event)
+            samples = parse_samples(metadata.get("samples", {})) if metadata else {}
 
             if event.result and event.result.verifier_result:
                 rewards = event.result.verifier_result.rewards or {}
                 for sid, reward in rewards.items():
                     if sid in samples:
                         samples[sid].reward = float(reward)
+                result = ExecutionResult(status=RolloutStatus.SUCCESS, samples=samples)
+            elif event.result and event.result.exception_info:
+                err = event.result.exception_info
+                result = ExecutionResult(
+                    status=RolloutStatus.FAILURE,
+                    samples=samples,
+                    err_message=err.exception_message,
+                    err_category=RolloutErrorCategory.AGENT_ERROR,
+                )
+            else:
+                result = ExecutionResult(status=RolloutStatus.SUCCESS, samples=samples)
 
-            result = ExecutionResult(status=RolloutStatus.SUCCESS, samples=samples)
             await pending.on_grader_complete(result)
 
         if not pending.done.done():
             pending.done.set_result(None)
 
 
-def _ensure_import_path(ref: Any) -> str:
+def ensure_import_path(ref: Any) -> str:
     """Convert a Python object or string to an import path string."""
     if isinstance(ref, str):
         return ref
     return to_import_path(ref)
 
 
-def _parse_rollout_id(event: TrialHookEvent) -> str:
+def parse_rollout_id(event: TrialHookEvent) -> str:
     return event.config.trial_name.removeprefix(TRIAL_NAME_PREFIX)
 
 
-def _get_agent_metadata(event: TrialHookEvent) -> dict[str, Any] | None:
+def get_agent_metadata(event: TrialHookEvent) -> dict[str, Any] | None:
     if event.result and event.result.agent_result:
         return event.result.agent_result.metadata
     return None
 
 
-def _parse_samples(raw: dict[str, Any]) -> dict[str, RolloutSample]:
+def parse_samples(raw: dict[str, Any]) -> dict[str, RolloutSample]:
     return {
         sid: RolloutSample.model_validate(data) if isinstance(data, dict) else data
         for sid, data in raw.items()
     }
 
 
-def _rewrite_url_for_docker(url: str) -> str:
+def rewrite_url_for_docker(url: str) -> str:
     if platform.system() != "Darwin":
         return url
     from urllib.parse import urlparse, urlunparse
