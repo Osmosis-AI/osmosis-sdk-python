@@ -87,8 +87,8 @@ class HarborBackend(ExecutionBackend):
         trials_dir: Path = Path("trials"),
         custom_tests_dir: Path | None = None,
         environment_config: HarborEnvironmentConfig | None = None,
-        _sdk_source_dir: Path | None = None,  # local dev only
         cache_image: bool = True,
+        _sdk_source_dir: Path | None = None,  # local dev only
     ) -> None:
         self.orchestrator = orchestrator
         self.task_dir = task_dir
@@ -102,16 +102,22 @@ class HarborBackend(ExecutionBackend):
             ensure_import_path(grader_config) if grader_config else None
         )
         self.grading = self.grader_path is not None
-        self.trials_dir = trials_dir
         self.custom_tests_dir = custom_tests_dir
         self.environment_config = environment_config or HarborEnvironmentConfig()
         self._sdk_source_dir = _sdk_source_dir
         self.cache_image = cache_image
 
+        self.root_dir = Path(f"/tmp/osmosis-harbor-{self.task_dir.name}")
+        self.rollouts_dir = self.root_dir / "rollouts"
+        self.rollouts_dir.mkdir(parents=True, exist_ok=True)
+        self.shared_env_dir = self.root_dir / "shared-env"
+        self.trials_dir = (
+            trials_dir if trials_dir != Path("trials") else self.root_dir / "trials"
+        )
+
         self.pending: dict[str, PendingTrial] = {}
 
         if self.cache_image:
-            self.shared_env_dir = Path(f"/tmp/harbor-shared-env-{self.task_dir.name}")
             self.prepare_shared_env()
 
         self.orchestrator.add_hook(
@@ -232,7 +238,8 @@ class HarborBackend(ExecutionBackend):
             )
 
     def prepare_task_dir(self, request: ExecutionRequest) -> Path:
-        task_dir = Path(f"/tmp/harbor-{request.id}")
+        rollout_dir = self.rollouts_dir / request.id
+        task_dir = rollout_dir / self.task_dir.name
         task_dir.mkdir(parents=True, exist_ok=True)
 
         if self.task_dir.exists():
