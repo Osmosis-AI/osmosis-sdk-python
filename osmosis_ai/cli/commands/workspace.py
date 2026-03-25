@@ -89,10 +89,12 @@ def delete(
     if status.is_last_workspace:
         raise CLIError("Cannot delete your only workspace.")
 
+    from osmosis_ai.cli.prompts import require_confirmation
+
     if status.projects_with_running_processes:
         console.print(
-            "Cannot delete workspace — the following projects have running processes:",
-            style="red",
+            "This workspace has projects with running processes:",
+            style="yellow",
         )
         for p in status.projects_with_running_processes:
             processes = []
@@ -103,15 +105,12 @@ def delete(
             if not p.models.valid:
                 processes.append(f"{p.models.count} active model(s)")
             console.print(f"  {console.escape(p.project_name)}: {', '.join(processes)}")
-        console.print("\nStop all running processes first, then retry.", style="dim")
-        raise typer.Exit(1)
-
-    from osmosis_ai.cli.prompts import require_confirmation
+        console.print()
 
     require_confirmation(
         f"Delete workspace '{workspace['name']}'? "
-        "This will delete all projects, datasets, and training runs. "
-        "This cannot be undone.",
+        "This will stop all running processes and delete all projects, datasets, "
+        "and training runs. This cannot be undone.",
         yes=yes,
     )
 
