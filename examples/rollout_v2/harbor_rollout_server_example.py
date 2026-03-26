@@ -15,7 +15,7 @@ import logging
 from pathlib import Path
 
 import uvicorn
-from harbor.orchestrators.queue import QueueOrchestrator
+from harbor.trial.queue import TrialQueue
 from multiply_rollout.grader import MultiplyGrader, multiply_grader_config
 from multiply_rollout.workflow import MultiplyWorkflow, multiply_workflow_config
 
@@ -29,11 +29,7 @@ SDK_ROOT = EXAMPLES_DIR.parents[1]
 
 
 def main():
-    orchestrator = QueueOrchestrator(
-        trial_configs=[],
-        n_concurrent_trials=4,
-        metrics={},
-    )
+    orchestrator = TrialQueue(n_concurrent=4)
 
     backend = HarborBackend(
         orchestrator=orchestrator,
