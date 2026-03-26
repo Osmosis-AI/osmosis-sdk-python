@@ -52,7 +52,7 @@ coverage.xml
 todo.md
 .DS_Store
 
-CLAUDE.md
+/CLAUDE.md
 
 .claude/
 .cursor/
