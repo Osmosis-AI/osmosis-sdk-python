@@ -5,7 +5,6 @@ import json
 import logging
 import platform
 import shutil
-import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -111,7 +110,6 @@ class HarborBackend(ExecutionBackend):
         if self.cache_image:
             self.environment_config.delete = False
 
-        self.image_name = f"hb__{self.task_dir.name.lower()}"
         self.root_dir = Path(f"/tmp/osmosis-harbor-{self.task_dir.name}")
         self.rollouts_dir = self.root_dir / "rollouts"
         self.rollouts_dir.mkdir(parents=True, exist_ok=True)
@@ -317,13 +315,6 @@ class HarborBackend(ExecutionBackend):
             test_sh.write_text(TEST_SH_TEMPLATE)
             test_sh.chmod(0o755)
 
-    def image_exists(self) -> bool:
-        result = subprocess.run(
-            ["docker", "image", "inspect", self.image_name],
-            capture_output=True,
-        )
-        return result.returncode == 0
-
     def inject_verifier_env(self, task_dir: Path) -> None:
         task_toml_path = task_dir / "task.toml"
         if task_toml_path.exists():
@@ -335,10 +326,6 @@ class HarborBackend(ExecutionBackend):
         config.setdefault("verifier", {})
         config["verifier"].setdefault("env", {})
         config["verifier"]["env"]["PYTHONPATH"] = "/workspace"
-
-        if self.cache_image and self.image_exists():
-            config.setdefault("environment", {})
-            config["environment"]["docker_image"] = self.image_name
 
         with open(task_toml_path, "w") as f:
             toml.dump(config, f)
