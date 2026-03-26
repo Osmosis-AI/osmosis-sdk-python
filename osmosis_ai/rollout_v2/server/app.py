@@ -1,6 +1,5 @@
 import logging
 import traceback
-from contextlib import asynccontextmanager
 from typing import Any
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException
@@ -23,40 +22,10 @@ from osmosis_ai.rollout_v2.utils.http import post_json_with_retry
 logger = logging.getLogger(__name__)
 
 
-def _build_lifespan(backend: ExecutionBackend, user_lifespan: Any = None) -> Any:
-    """Build a lifespan that auto-manages HarborBackend's orchestrator.
-
-    If the backend is a HarborBackend, wraps the orchestrator start/shutdown
-    around any user-provided lifespan. For other backends, returns the
-    user lifespan as-is.
-    """
-    try:
-        from osmosis_ai.rollout_v2.backend.harbor import HarborBackend
-    except ImportError:
-        return user_lifespan
-
-    if not isinstance(backend, HarborBackend):
-        return user_lifespan
-
-    @asynccontextmanager
-    async def lifespan(app: FastAPI):
-        await backend.orchestrator.start()
-        try:
-            if user_lifespan:
-                async with user_lifespan(app):
-                    yield
-            else:
-                yield
-        finally:
-            await backend.orchestrator.shutdown()
-
-    return lifespan
-
-
 def create_rollout_server(
     *, backend: ExecutionBackend, lifespan: Any = None
 ) -> FastAPI:
-    app = FastAPI(lifespan=_build_lifespan(backend, lifespan))
+    app = FastAPI(lifespan=lifespan)
 
     @app.get("/health")
     async def health() -> dict[str, Any]:
