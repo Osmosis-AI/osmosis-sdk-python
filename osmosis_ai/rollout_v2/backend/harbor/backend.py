@@ -22,8 +22,8 @@ from harbor.models.trial.config import (
     TrialConfig,
     VerifierConfig,
 )
-from harbor.orchestrators.queue import QueueOrchestrator
 from harbor.trial.hooks import TrialEvent, TrialHookEvent
+from harbor.trial.queue import TrialQueue
 
 from osmosis_ai.rollout_v2.agent_workflow import AgentWorkflow
 from osmosis_ai.rollout_v2.backend.base import ExecutionBackend, ResultCallback
@@ -77,7 +77,7 @@ class HarborBackend(ExecutionBackend):
     def __init__(
         self,
         *,
-        orchestrator: QueueOrchestrator,
+        orchestrator: TrialQueue,
         task_dir: Path,
         user_code_dir: Path,
         workflow: type[AgentWorkflow] | str,
