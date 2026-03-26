@@ -63,6 +63,7 @@ class PendingTrial:
     ):
         self.on_workflow_complete = on_workflow_complete
         self.on_grader_complete = on_grader_complete
+        self.workflow_complete_called = False
         self.done: asyncio.Future[None] = asyncio.get_event_loop().create_future()
 
 
@@ -381,6 +382,7 @@ class HarborBackend(ExecutionBackend):
                 err_category=RolloutErrorCategory.AGENT_ERROR,
             )
 
+        pending.workflow_complete_called = True
         await pending.on_workflow_complete(result)
 
     async def on_trial_end(self, event: TrialHookEvent) -> None:
@@ -389,6 +391,22 @@ class HarborBackend(ExecutionBackend):
         if not pending:
             logger.error("No pending trial found for rollout %s", rollout_id)
             return
+
+        if not pending.workflow_complete_called:
+            if event.result and event.result.exception_info:
+                err = event.result.exception_info
+                result = ExecutionResult(
+                    status=RolloutStatus.FAILURE,
+                    err_message=err.exception_message,
+                    err_category=RolloutErrorCategory.AGENT_ERROR,
+                )
+            else:
+                result = ExecutionResult(
+                    status=RolloutStatus.FAILURE,
+                    err_message="Trial ended before agent completed",
+                    err_category=RolloutErrorCategory.AGENT_ERROR,
+                )
+            await pending.on_workflow_complete(result)
 
         if pending.on_grader_complete:
             metadata = get_agent_metadata(event)
