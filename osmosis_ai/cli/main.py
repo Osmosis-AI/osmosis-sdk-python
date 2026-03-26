@@ -99,6 +99,10 @@ def _register_commands() -> None:
     app.add_typer(workspace_app, name="workspace", rich_help_panel=_PLATFORM)
 
     # -- Top-level commands --
+    from osmosis_ai.cli.commands.init import init
+
+    app.command("init", rich_help_panel=_WORKFLOW)(init)
+
     from osmosis_ai.cli.upgrade import upgrade
 
     app.command("upgrade", rich_help_panel=_PLATFORM)(upgrade)
