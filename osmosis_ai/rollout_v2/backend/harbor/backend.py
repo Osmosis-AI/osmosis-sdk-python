@@ -104,6 +104,7 @@ class HarborBackend(ExecutionBackend):
         self.grading = self.grader_path is not None
         self.custom_tests_dir = custom_tests_dir
         self.environment_config = environment_config or HarborEnvironmentConfig()
+        self.environment_config.delete = False
         self._sdk_source_dir = _sdk_source_dir
         self.cache_image = cache_image
 
