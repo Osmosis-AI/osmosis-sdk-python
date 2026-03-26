@@ -62,19 +62,19 @@ SCAFFOLD: list[ScaffoldEntry] = [
     ScaffoldEntry("README.md.tpl", "README.md", render=True),
     # Static files
     ScaffoldEntry("gitignore.tpl", ".gitignore"),
-    ScaffoldEntry("AGENTS.md", "AGENTS.md"),
-    ScaffoldEntry("CLAUDE.md", "CLAUDE.md"),
-    ScaffoldEntry("configs/AGENTS.md", "configs/AGENTS.md"),
+    ScaffoldEntry("AGENTS.md.tpl", "AGENTS.md"),
+    ScaffoldEntry("CLAUDE.md.tpl", "CLAUDE.md"),
+    ScaffoldEntry("configs/AGENTS.md.tpl", "configs/AGENTS.md"),
     ScaffoldEntry(
-        "skills/create-environment/SKILL.md",
+        "skills/create-environment/SKILL.md.tpl",
         ".osmosis/skills/create-environment/SKILL.md",
     ),
     ScaffoldEntry(
-        "skills/evaluate-environment/SKILL.md",
+        "skills/evaluate-environment/SKILL.md.tpl",
         ".osmosis/skills/evaluate-environment/SKILL.md",
     ),
     ScaffoldEntry(
-        "skills/submit-training/SKILL.md",
+        "skills/submit-training/SKILL.md.tpl",
         ".osmosis/skills/submit-training/SKILL.md",
     ),
 ]
