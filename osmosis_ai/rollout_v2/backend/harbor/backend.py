@@ -108,9 +108,6 @@ class HarborBackend(ExecutionBackend):
         self._sdk_source_dir = _sdk_source_dir
         self.cache_image = cache_image
 
-        if self.cache_image:
-            self.environment_config.delete = False
-
         self.root_dir = Path(f"/tmp/osmosis-harbor-{self.task_dir.name}")
         self.rollouts_dir = self.root_dir / "rollouts"
         self.rollouts_dir.mkdir(parents=True, exist_ok=True)
