@@ -183,9 +183,11 @@ class TestWriteScaffold:
 
         # .gitkeep markers
         assert (target / "environments" / ".gitkeep").is_file()
-        assert (target / "configs" / "training" / ".gitkeep").is_file()
         assert (target / "configs" / "eval" / ".gitkeep").is_file()
         assert (target / "data" / ".gitkeep").is_file()
+
+        # Training config template (replaces configs/training/.gitkeep)
+        assert (target / "configs" / "training" / "default.toml").is_file()
 
         # Static templates (formerly downloaded)
         assert (target / "AGENTS.md").is_file()

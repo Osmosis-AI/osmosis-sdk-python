@@ -53,7 +53,6 @@ class ScaffoldEntry:
 SCAFFOLD: list[ScaffoldEntry] = [
     # Directory placeholders
     ScaffoldEntry("", "environments/.gitkeep"),
-    ScaffoldEntry("", "configs/training/.gitkeep"),
     ScaffoldEntry("", "configs/eval/.gitkeep"),
     ScaffoldEntry("", "data/.gitkeep"),
     # Rendered templates
@@ -65,6 +64,7 @@ SCAFFOLD: list[ScaffoldEntry] = [
     ScaffoldEntry("AGENTS.md.tpl", "AGENTS.md"),
     ScaffoldEntry("CLAUDE.md.tpl", "CLAUDE.md"),
     ScaffoldEntry("configs/AGENTS.md.tpl", "configs/AGENTS.md"),
+    ScaffoldEntry("configs/training/default.toml.tpl", "configs/training/default.toml"),
     ScaffoldEntry(
         "skills/create-environment/SKILL.md.tpl",
         ".osmosis/skills/create-environment/SKILL.md",
