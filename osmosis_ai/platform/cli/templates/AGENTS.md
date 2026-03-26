@@ -40,6 +40,6 @@ osmosis eval <env_name> -d data/test.jsonl      # Batch evaluation
 osmosis serve <env_name>                        # Start rollout server
 
 # Training (workspace-scoped)
-osmosis run submit configs/training/qwen3-4b.toml
-osmosis run status <run-id>
+osmosis train submit configs/training/qwen3-4b.toml
+osmosis train status <run-id>
 ```

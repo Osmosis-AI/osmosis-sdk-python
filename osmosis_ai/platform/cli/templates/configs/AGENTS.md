@@ -47,6 +47,6 @@ temperature = 0.7
 ## Commands
 
 ```bash
-osmosis run submit configs/training/qwen3-4b.toml
+osmosis train submit configs/training/qwen3-4b.toml
 osmosis eval calculator -c configs/eval/default.toml -m gpt-4.1-mini
 ```

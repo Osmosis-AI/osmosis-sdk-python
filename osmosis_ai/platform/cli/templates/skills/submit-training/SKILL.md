@@ -10,8 +10,8 @@ Help the user configure and submit a training run on the Osmosis Platform.
 3. Choose or create a training config in `configs/training/`
 4. Ensure the config has `environment = "<env_name>"` at the top level
 5. Verify dataset is available (workspace-scoped or local file)
-6. Submit: `osmosis run submit configs/training/<config>.toml`
-7. Monitor: `osmosis run status <run-id>`
+6. Submit: `osmosis train submit configs/training/<config>.toml`
+7. Monitor: `osmosis train status <run-id>`
 
 ## Training Config Checklist
 
