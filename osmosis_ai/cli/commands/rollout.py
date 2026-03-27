@@ -1,4 +1,4 @@
-"""Environment commands: serve, validate, test."""
+"""Rollout commands: serve, validate, test."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ import typer
 from osmosis_ai.cli.errors import not_implemented
 
 app: typer.Typer = typer.Typer(
-    help="Manage rollout environments (serve, validate, test, list).",
+    help="Manage rollouts (serve, validate, test, list).",
     no_args_is_help=True,
 )
 
@@ -166,6 +166,6 @@ def test(
 
 
 @app.command("list")
-def list_environments() -> None:
-    """List registered rollout environments."""
-    not_implemented("environment", "list")
+def list_rollouts() -> None:
+    """List registered rollouts."""
+    not_implemented("rollout", "list")

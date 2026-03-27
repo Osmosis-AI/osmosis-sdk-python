@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from io import StringIO
 from types import SimpleNamespace
 
@@ -13,8 +12,7 @@ import osmosis_ai.platform.cli.dataset as dataset_module
 import osmosis_ai.platform.cli.utils as utils_module
 from osmosis_ai.cli.console import Console
 from osmosis_ai.platform.api.models import DatasetFile, PaginatedDatasets
-
-ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*m")
+from tests.unit.platform.cli.conftest import strip_ansi
 
 
 def _make_rich_console() -> tuple[Console, StringIO]:
@@ -22,11 +20,6 @@ def _make_rich_console() -> tuple[Console, StringIO]:
     console = Console(file=output, force_terminal=True)
     assert console.is_tty is True
     return console, output
-
-
-def _strip_ansi(text: str) -> str:
-    """Normalize Rich-rendered output for version-independent assertions."""
-    return ANSI_ESCAPE_RE.sub("", text)
 
 
 @pytest.mark.parametrize("status", ["cancelled", "deleted"])
@@ -67,7 +60,7 @@ def test_list_datasets_preserves_uncategorized_status_brackets(
 
     dataset_module.list_datasets()
 
-    assert f"[{status}]" in _strip_ansi(output.getvalue())
+    assert f"[{status}]" in strip_ansi(output.getvalue())
 
 
 @pytest.mark.parametrize("status", ["cancelled", "deleted"])
@@ -86,7 +79,7 @@ def test_workspace_status_format_preserves_uncategorized_status_brackets(
 
     console.print(utils_module.format_dataset_status(dataset))
 
-    assert f"[{status}]" in _strip_ansi(output.getvalue())
+    assert f"[{status}]" in strip_ansi(output.getvalue())
 
 
 def test_workspace_status_format_preserves_plain_text_brackets() -> None:
