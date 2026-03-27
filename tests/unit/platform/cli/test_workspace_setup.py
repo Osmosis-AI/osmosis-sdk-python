@@ -51,6 +51,7 @@ def _stub_scaffold_fns(monkeypatch, module) -> None:
         "_write_scaffold",
         "_git_init",
         "_git_initial_commit",
+        "_update_workspace_metadata",
         "_print_next_steps",
     ):
         monkeypatch.setattr(module, fn_name, lambda *a, **kw: None)
@@ -307,6 +308,121 @@ class TestWriteScaffold:
         assert (target / "AGENTS.md").read_text(encoding="utf-8") == original_agents
 
 
+# ── _write_scaffold update mode ──────────────────────────────────
+
+
+class TestWriteScaffoldUpdate:
+    def test_update_overwrites_agents_and_skills(self, tmp_path: Path) -> None:
+        """update=True overwrites AGENTS.md, CLAUDE.md, and skills."""
+        from osmosis_ai.platform.cli.init import _write_scaffold
+
+        target = tmp_path / "ws"
+        target.mkdir()
+        _write_scaffold(target, "ws")
+
+        # Tamper with overwrite-on-update files
+        (target / "AGENTS.md").write_text("custom agents", encoding="utf-8")
+        (target / "CLAUDE.md").write_text("custom claude", encoding="utf-8")
+        (target / "configs" / "AGENTS.md").write_text(
+            "custom cfg agents", encoding="utf-8"
+        )
+        skill = target / ".osmosis" / "skills" / "create-rollout" / "SKILL.md"
+        skill.write_text("custom skill", encoding="utf-8")
+
+        _write_scaffold(target, "ws", update=True)
+
+        assert (target / "AGENTS.md").read_text(encoding="utf-8") != "custom agents"
+        assert (target / "CLAUDE.md").read_text(encoding="utf-8") != "custom claude"
+        assert (target / "configs" / "AGENTS.md").read_text(
+            encoding="utf-8"
+        ) != "custom cfg agents"
+        assert skill.read_text(encoding="utf-8") != "custom skill"
+
+    def test_update_preserves_configs(self, tmp_path: Path) -> None:
+        """update=True does NOT overwrite pyproject.toml, .gitignore, README, or training config."""
+        from osmosis_ai.platform.cli.init import _write_scaffold
+
+        target = tmp_path / "ws"
+        target.mkdir()
+        _write_scaffold(target, "ws")
+
+        custom = {
+            "pyproject.toml": "custom pyproject",
+            ".gitignore": "custom gitignore",
+            "README.md": "custom readme",
+        }
+        for rel, content in custom.items():
+            (target / rel).write_text(content, encoding="utf-8")
+        (target / "configs" / "training" / "default.toml").write_text(
+            "custom training", encoding="utf-8"
+        )
+
+        _write_scaffold(target, "ws", update=True)
+
+        for rel, content in custom.items():
+            assert (target / rel).read_text(encoding="utf-8") == content
+        assert (target / "configs" / "training" / "default.toml").read_text(
+            encoding="utf-8"
+        ) == "custom training"
+
+    def test_update_does_not_overwrite_workspace_toml(self, tmp_path: Path) -> None:
+        """update=True leaves workspace.toml alone (handled by _update_workspace_metadata)."""
+        from osmosis_ai.platform.cli.init import _write_scaffold
+
+        target = tmp_path / "ws"
+        target.mkdir()
+        _write_scaffold(target, "ws")
+
+        original = "custom workspace toml"
+        (target / ".osmosis" / "workspace.toml").write_text(original, encoding="utf-8")
+
+        _write_scaffold(target, "ws", update=True)
+
+        assert (target / ".osmosis" / "workspace.toml").read_text(
+            encoding="utf-8"
+        ) == original
+
+
+# ── _update_workspace_metadata ───────────────────────────────────
+
+
+class TestUpdateWorkspaceMetadata:
+    def test_preserves_created_at_and_adds_updated_at(self, tmp_path: Path) -> None:
+        """_update_workspace_metadata keeps original created_at and adds updated_at."""
+        from osmosis_ai.consts import PACKAGE_VERSION
+        from osmosis_ai.platform.cli.init import _update_workspace_metadata
+
+        ws_dir = tmp_path / ".osmosis"
+        ws_dir.mkdir()
+        (ws_dir / "workspace.toml").write_text(
+            "[workspace]\n"
+            'sdk_version = "0.0.1"\n'
+            'created_at = "2025-01-01T00:00:00+00:00"\n'
+            'setup_source = "osmosis init"\n',
+            encoding="utf-8",
+        )
+
+        _update_workspace_metadata(tmp_path)
+
+        content = (ws_dir / "workspace.toml").read_text(encoding="utf-8")
+        assert 'created_at = "2025-01-01T00:00:00+00:00"' in content
+        assert "updated_at = " in content
+        assert f'sdk_version = "{PACKAGE_VERSION}"' in content
+
+    def test_handles_missing_workspace_toml(self, tmp_path: Path) -> None:
+        """_update_workspace_metadata works even if workspace.toml doesn't exist yet."""
+        from osmosis_ai.platform.cli.init import _update_workspace_metadata
+
+        ws_dir = tmp_path / ".osmosis"
+        ws_dir.mkdir()
+
+        _update_workspace_metadata(tmp_path)
+
+        content = (ws_dir / "workspace.toml").read_text(encoding="utf-8")
+        assert "created_at = " in content
+        assert "updated_at = " in content
+
+
 # ── _git_init ─────────────────────────────────────────────────────
 
 
@@ -358,90 +474,6 @@ class TestGitInitialCommit:
             check=True,
         )
         assert "Initial workspace setup" in result.stdout
-
-    def test_git_initial_commit_update_no_changes(self, tmp_path: Path) -> None:
-        """update=True skips the commit when there are no staged changes."""
-        from osmosis_ai.platform.cli.init import _git_initial_commit
-
-        subprocess.run(["git", "init", str(tmp_path)], capture_output=True, check=True)
-        subprocess.run(
-            ["git", "config", "user.email", "test@test.com"],
-            cwd=tmp_path,
-            capture_output=True,
-            check=True,
-        )
-        subprocess.run(
-            ["git", "config", "user.name", "Test"],
-            cwd=tmp_path,
-            capture_output=True,
-            check=True,
-        )
-        (tmp_path / "test.txt").write_text("hello")
-        # Create an initial commit so the repo is not empty.
-        subprocess.run(
-            ["git", "add", "-A"], cwd=tmp_path, capture_output=True, check=True
-        )
-        subprocess.run(
-            ["git", "commit", "-m", "seed"],
-            cwd=tmp_path,
-            capture_output=True,
-            check=True,
-        )
-
-        # Now call with update=True — nothing has changed, should NOT raise.
-        _git_initial_commit(tmp_path, update=True)
-
-        result = subprocess.run(
-            ["git", "log", "--oneline"],
-            cwd=tmp_path,
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        # Only the seed commit should exist; no extra commit was created.
-        assert result.stdout.strip().count("\n") == 0
-        assert "seed" in result.stdout
-
-    def test_git_initial_commit_update_with_changes(self, tmp_path: Path) -> None:
-        """update=True creates a commit when there are staged changes."""
-        from osmosis_ai.platform.cli.init import _git_initial_commit
-
-        subprocess.run(["git", "init", str(tmp_path)], capture_output=True, check=True)
-        subprocess.run(
-            ["git", "config", "user.email", "test@test.com"],
-            cwd=tmp_path,
-            capture_output=True,
-            check=True,
-        )
-        subprocess.run(
-            ["git", "config", "user.name", "Test"],
-            cwd=tmp_path,
-            capture_output=True,
-            check=True,
-        )
-        (tmp_path / "test.txt").write_text("hello")
-        subprocess.run(
-            ["git", "add", "-A"], cwd=tmp_path, capture_output=True, check=True
-        )
-        subprocess.run(
-            ["git", "commit", "-m", "seed"],
-            cwd=tmp_path,
-            capture_output=True,
-            check=True,
-        )
-
-        # Add a new file, then call with update=True.
-        (tmp_path / "new.txt").write_text("new")
-        _git_initial_commit(tmp_path, update=True)
-
-        result = subprocess.run(
-            ["git", "log", "--oneline"],
-            cwd=tmp_path,
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        assert "Update workspace scaffold" in result.stdout
 
 
 # ── _print_next_steps ──────────────────────────────────────────────
@@ -522,6 +554,60 @@ def test_full_init_flow(monkeypatch, tmp_path: Path) -> None:
         check=True,
     )
     assert "Initial workspace setup" in result.stdout
+
+
+def test_full_init_update_flow(monkeypatch, tmp_path: Path) -> None:
+    """Update mode: overwrites agents/skills, updates metadata, does NOT commit."""
+    import io
+
+    import osmosis_ai.platform.cli.init as init_module
+    from osmosis_ai.cli.console import Console
+
+    monkeypatch.setattr(init_module.shutil, "which", lambda cmd: "git")
+
+    buf = io.StringIO()
+    test_console = Console(file=buf, force_terminal=False, no_color=True)
+    monkeypatch.setattr(init_module, "console", test_console)
+
+    monkeypatch.chdir(tmp_path)
+
+    # First run — fresh init
+    init_module.init(name="test-ws")
+    target = tmp_path / "test-ws"
+
+    # Record initial state
+    commit_count_before = subprocess.run(
+        ["git", "rev-list", "--count", "HEAD"],
+        cwd=target,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+
+    # Tamper with AGENTS.md and a config
+    (target / "AGENTS.md").write_text("user edits", encoding="utf-8")
+    (target / "pyproject.toml").write_text("user pyproject", encoding="utf-8")
+
+    # Second run — update mode
+    init_module.init(name="test-ws")
+
+    # AGENTS.md was overwritten
+    assert (target / "AGENTS.md").read_text(encoding="utf-8") != "user edits"
+    # pyproject.toml was preserved
+    assert (target / "pyproject.toml").read_text(encoding="utf-8") == "user pyproject"
+    # workspace.toml has updated_at
+    ws_content = (target / ".osmosis" / "workspace.toml").read_text(encoding="utf-8")
+    assert "updated_at = " in ws_content
+
+    # No new git commit was created
+    commit_count_after = subprocess.run(
+        ["git", "rev-list", "--count", "HEAD"],
+        cwd=target,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    assert commit_count_before == commit_count_after
 
 
 # ── CLI command registration ──────────────────────────────────────
