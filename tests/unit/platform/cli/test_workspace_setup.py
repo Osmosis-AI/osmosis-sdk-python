@@ -532,11 +532,13 @@ def test_init_command_registered() -> None:
     from typer.testing import CliRunner
 
     from osmosis_ai.cli.main import _register_commands, app
+    from tests.unit.platform.cli.conftest import strip_ansi
 
     _register_commands()
     runner = CliRunner()
     result = runner.invoke(app, ["init", "--help"])
     assert result.exit_code == 0
-    assert "Initialize" in result.output
-    assert "--here" in result.output
-    assert "NAME" in result.output
+    output = strip_ansi(result.output)
+    assert "Initialize" in output
+    assert "--here" in output
+    assert "NAME" in output

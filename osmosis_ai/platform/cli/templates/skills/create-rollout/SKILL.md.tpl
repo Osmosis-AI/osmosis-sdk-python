@@ -11,7 +11,7 @@ Help the user create a new rollout in this Osmosis workspace.
 4. Design tools the agent will need (as plain Python functions)
 5. Design grader functions (how to score agent performance)
 6. Decide on system prompt and max_turns
-7. Implement in `rollouts/<rollout_name>/main.py` with `load_environment()`
+7. Implement in `rollouts/<rollout_name>/main.py` exporting a `RolloutAgentLoop` instance as `agent`
 8. Validate: `osmosis rollout test -m rollouts.<rollout_name>.main:agent -d data/dataset.jsonl --model gpt-4.1-mini`
 
 ## Rollout Structure
@@ -19,7 +19,7 @@ Help the user create a new rollout in this Osmosis workspace.
 Each rollout must have:
 ```
 rollouts/<rollout_name>/
-├── main.py          # Must export load_environment() -> Environment
+├── main.py          # Must export a RolloutAgentLoop instance (e.g. `agent`)
 ├── pyproject.toml   # Per-rollout dependencies
 └── README.md        # Description
 ```

@@ -55,5 +55,5 @@ temperature = 0.7
 
 ```bash
 osmosis train submit configs/training/<config>.toml
-osmosis eval <env_name> -c configs/eval/default.toml -m gpt-4.1-mini
+osmosis eval -m rollouts.<rollout_name>.main:agent -d data/dataset.jsonl --eval-fn rewards:fn --model gpt-4.1-mini
 ```

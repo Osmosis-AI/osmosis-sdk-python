@@ -6,7 +6,7 @@ Help the user configure and submit a training run on the Osmosis Platform.
 ## Steps
 
 1. Identify which rollout to train (check `rollouts/` directory)
-2. Ensure rollout is validated (`osmosis test <env_name>` passes)
+2. Ensure rollout is validated (`osmosis rollout test -m rollouts.<rollout_name>.main:agent -d data/dataset.jsonl --model gpt-4.1-mini` passes)
 3. Copy the default template: `cp configs/training/default.toml configs/training/<run_name>.toml`
 4. Fill in the required `[experiment]` fields (`rollout`, `model_path`, `dataset_id`)
 5. Adjust optional hyperparameters based on the scenario (see guidance below)
@@ -58,4 +58,4 @@ Parameters below are in `[training]` unless noted otherwise.
 ## Execution Modes
 
 - **Platform-managed**: Push code via Git Sync, platform hosts the rollout
-- **Remote rollout**: User runs `osmosis serve <env_name>`, platform connects to it
+- **Remote rollout**: User runs `osmosis rollout serve -m rollouts.<rollout_name>.main:agent`, platform connects to it

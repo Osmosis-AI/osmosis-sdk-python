@@ -7,6 +7,7 @@ bundled templates, initialise git, and print next steps.
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess as _subprocess
 from dataclasses import dataclass
@@ -16,6 +17,7 @@ from pathlib import Path
 from osmosis_ai.cli.console import console
 from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.platform.auth.config import PLATFORM_URL
+from osmosis_ai.platform.cli.constants import validate_name
 
 # ── Prerequisites ────────────────────────────────────────────────
 
@@ -162,11 +164,19 @@ def _git_initial_commit(target: Path, *, update: bool = False) -> None:
             return
 
     msg = "Update workspace scaffold" if update else "Initial workspace setup"
+    # Set committer identity via env so the commit succeeds even when
+    # the user has no global git config (e.g. CI, fresh containers).
+    env = {
+        **os.environ,
+        "GIT_COMMITTER_NAME": "Osmosis",
+        "GIT_COMMITTER_EMAIL": "noreply@osmosis.ai",
+    }
     _subprocess.run(
         ["git", "commit", "-m", msg, "--author", "Osmosis <noreply@osmosis.ai>"],
         cwd=target,
         capture_output=True,
         check=True,
+        env=env,
     )
 
 
@@ -251,6 +261,10 @@ def init(name: str, here: bool = False) -> None:
     This is the main entry point for ``osmosis init <name>``.
     """
     _check_git_installed()
+
+    name_error = validate_name(name, label="Workspace name")
+    if name_error:
+        raise CLIError(name_error)
 
     # Determine target directory
     created_dir = False
