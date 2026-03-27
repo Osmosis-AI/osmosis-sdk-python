@@ -42,20 +42,13 @@ def test_list_datasets_preserves_uncategorized_status_brackets(
     monkeypatch.setattr(
         dataset_module, "_require_auth", lambda: ("ws-b", fake_credentials)
     )
-    monkeypatch.setattr(
-        dataset_module,
-        "_resolve_project_id",
-        lambda _project, *, workspace_name: "proj_123",
-    )
 
     class FakeClient:
         def list_datasets(
             self,
-            project_id: str,
             *,
             credentials=None,
         ) -> PaginatedDatasets:
-            assert project_id == "proj_123"
             assert credentials is fake_credentials
             return PaginatedDatasets(
                 datasets=[
@@ -72,7 +65,7 @@ def test_list_datasets_preserves_uncategorized_status_brackets(
 
     monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
 
-    dataset_module.list_datasets(project=None)
+    dataset_module.list_datasets()
 
     assert f"[{status}]" in _strip_ansi(output.getvalue())
 

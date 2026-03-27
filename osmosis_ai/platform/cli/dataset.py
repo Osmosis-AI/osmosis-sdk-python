@@ -24,8 +24,6 @@ from .constants import (
 from .project import (
     _require_auth,
     _require_subscription,
-    _resolve_project,
-    _resolve_project_id,
 )
 from .utils import (
     build_dataset_detail_rows,
@@ -152,7 +150,6 @@ def _perform_upload(
     file_path: Path,
     ext: str,
     file_size: int,
-    project_id: str,
     credentials: Any | None = None,
 ) -> Any:
     """Core upload: create dataset record → S3 upload → complete.
@@ -170,7 +167,6 @@ def _perform_upload(
     client = OsmosisClient()
 
     dataset = client.create_dataset(
-        project_id,
         file_path.name,
         file_size,
         ext,
@@ -236,7 +232,6 @@ def _perform_upload(
 
 def upload(
     file: str,
-    project: str | None = None,
 ) -> None:
     """Upload a dataset file."""
     ws_name, credentials = _require_auth()
@@ -251,16 +246,11 @@ def upload(
             "File validation failed:\n" + "\n".join(f"  - {e}" for e in errors)
         )
 
-    proj = _resolve_project(project, workspace_name=ws_name)
-    project_id = proj["id"]
-    project_name = proj.get("project_name", "")
-
     # Confirm upload target
     console.print()
     console.table(
         [
             ("Workspace", ws_name or "unknown"),
-            ("Project", project_name or project_id),
             ("File", f"{file_path.name} ({format_size(file_size)})"),
         ],
         title="Upload Target",
@@ -276,25 +266,21 @@ def upload(
         file_path=file_path,
         ext=ext,
         file_size=file_size,
-        project_id=project_id,
         credentials=credentials,
     )
 
     console.print(f"Upload complete. Dataset ID: {dataset.id}", style="green")
-    url = platform_entity_url(ws_name, project_name, "training-data", dataset.id)
+    url = platform_entity_url(ws_name, None, "datasets", dataset.id)
     console.print(f"Processing will continue on the platform. Check status at: {url}")
 
 
-def list_datasets(
-    project: str | None = None,
-) -> None:
+def list_datasets() -> None:
     """List datasets."""
-    ws_name, credentials = _require_auth()
+    _ws_name, credentials = _require_auth()
     from osmosis_ai.platform.api.client import OsmosisClient
 
-    project_id = _resolve_project_id(project, workspace_name=ws_name)
     client = OsmosisClient()
-    result = client.list_datasets(project_id, credentials=credentials)
+    result = client.list_datasets(credentials=credentials)
 
     if not result.datasets:
         console.print("No datasets found.")
@@ -313,16 +299,15 @@ def list_datasets(
 
 def status(
     id: str,
-    project: str | None = None,
 ) -> None:
     """Check dataset processing status."""
-    ws_name, credentials = _require_auth()
+    _ws_name, credentials = _require_auth()
     from osmosis_ai.platform.api.client import OsmosisClient
 
     from .utils import resolve_dataset_id
 
     client = OsmosisClient()
-    dataset_id = resolve_dataset_id(id, project, ws_name, credentials, client=client)
+    dataset_id = resolve_dataset_id(id, credentials, client=client)
     ds = client.get_dataset(dataset_id, credentials=credentials)
 
     rows = build_dataset_detail_rows(ds)
@@ -332,16 +317,15 @@ def status(
 def preview(
     id: str,
     rows: int = 5,
-    project: str | None = None,
 ) -> None:
     """Preview dataset rows."""
-    ws_name, credentials = _require_auth()
+    _ws_name, credentials = _require_auth()
     from osmosis_ai.platform.api.client import OsmosisClient
 
     from .utils import resolve_dataset_id
 
     client = OsmosisClient()
-    dataset_id = resolve_dataset_id(id, project, ws_name, credentials, client=client)
+    dataset_id = resolve_dataset_id(id, credentials, client=client)
     ds = client.get_dataset(dataset_id, credentials=credentials)
 
     if ds.data_preview is None:
@@ -365,17 +349,16 @@ def preview(
 
 def delete(
     id: str,
-    project: str | None = None,
     yes: bool = False,
 ) -> None:
     """Delete a dataset."""
-    ws_name, credentials = _require_auth()
+    _ws_name, credentials = _require_auth()
     from osmosis_ai.platform.api.client import OsmosisClient
 
     from .utils import resolve_dataset_id
 
     client = OsmosisClient()
-    dataset_id = resolve_dataset_id(id, project, ws_name, credentials, client=client)
+    dataset_id = resolve_dataset_id(id, credentials, client=client)
 
     # Blocking preflight: abort if active training runs use this dataset
     try:

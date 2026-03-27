@@ -94,11 +94,8 @@ class TestPerformUpload:
         fake_dataset = _make_fake_dataset(file_size=file_size)
 
         class FakeClient:
-            def create_dataset(
-                self, project_id, file_name, file_size, ext, *, credentials=None
-            ):
+            def create_dataset(self, file_name, file_size, ext, *, credentials=None):
                 calls["create"] = True
-                assert project_id == "proj-1"
                 assert file_name == "data.jsonl"
                 assert ext == "jsonl"
                 assert credentials is fake_credentials
@@ -136,7 +133,6 @@ class TestPerformUpload:
             file_path=file_path,
             ext="jsonl",
             file_size=file_size,
-            project_id="proj-1",
             credentials=fake_credentials,
         )
 
@@ -172,7 +168,6 @@ class TestPerformUpload:
                 file_path=file_path,
                 ext="jsonl",
                 file_size=2,
-                project_id="proj-1",
                 credentials=None,
             )
 
@@ -219,7 +214,6 @@ class TestPerformUpload:
                 file_path=file_path,
                 ext="jsonl",
                 file_size=file_size,
-                project_id="proj-1",
                 credentials=None,
             )
 
@@ -258,9 +252,8 @@ class TestUploadDatasetInteractive:
 
         uploaded = {}
 
-        def fake_perform_upload(*, file_path, ext, file_size, project_id, credentials):
+        def fake_perform_upload(*, file_path, ext, file_size, credentials):
             uploaded["called"] = True
-            uploaded["project_id"] = project_id
             return DatasetFile(
                 id="ds-1", file_name="data.jsonl", file_size=2, status="uploaded"
             )
@@ -271,13 +264,11 @@ class TestUploadDatasetInteractive:
 
         result = _upload_dataset_interactive(
             ws_name="my-ws",
-            project={"project_id": "proj-1", "project_name": "my-project"},
             credentials=object(),
         )
 
         assert result is True
         assert uploaded["called"]
-        assert uploaded["project_id"] == "proj-1"
 
     def test_returns_false_on_cancelled_input(self, monkeypatch, tmp_path):
         """Returns False when user cancels the file path prompt."""
@@ -289,7 +280,6 @@ class TestUploadDatasetInteractive:
 
         result = _upload_dataset_interactive(
             ws_name="my-ws",
-            project={"project_id": "proj-1", "project_name": "my-project"},
             credentials=object(),
         )
 
@@ -307,7 +297,6 @@ class TestUploadDatasetInteractive:
 
         result = _upload_dataset_interactive(
             ws_name="my-ws",
-            project={"project_id": "proj-1", "project_name": "my-project"},
             credentials=object(),
         )
 
@@ -326,7 +315,6 @@ class TestUploadDatasetInteractive:
 
         result = _upload_dataset_interactive(
             ws_name="my-ws",
-            project={"project_id": "proj-1", "project_name": "my-project"},
             credentials=object(),
         )
 
@@ -349,7 +337,6 @@ class TestUploadDatasetInteractive:
 
         result = _upload_dataset_interactive(
             ws_name="my-ws",
-            project={"project_id": "proj-1", "project_name": "my-project"},
             credentials=object(),
         )
 

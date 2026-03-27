@@ -152,7 +152,7 @@ class UploadInfo:
 
 @dataclass
 class DatasetFile:
-    """A training data file record."""
+    """A dataset record."""
 
     id: str
     file_name: str
@@ -163,7 +163,7 @@ class DatasetFile:
     error: str | None = None
     data_preview: Any = None
     df_stats: Any = None
-    project_id: str | None = None
+    organization_id: str | None = None
     created_at: str = ""
     updated_at: str = ""
     # Upload info — only present in create_dataset response
@@ -183,7 +183,7 @@ class DatasetFile:
             error=data.get("error"),
             data_preview=data.get("data_preview"),
             df_stats=data.get("df_stats"),
-            project_id=data.get("project_id"),
+            organization_id=data.get("organization_id"),
             created_at=data.get("created_at", ""),
             updated_at=data.get("updated_at", ""),
             upload=upload,
