@@ -152,7 +152,7 @@ class UploadInfo:
 
 @dataclass
 class DatasetFile:
-    """A training data file record."""
+    """A dataset record."""
 
     id: str
     file_name: str

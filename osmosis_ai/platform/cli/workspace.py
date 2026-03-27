@@ -396,7 +396,7 @@ def _upload_dataset_interactive(
         return False
 
     console.print(f"Upload complete. Dataset ID: {dataset.id}", style="green")
-    url = platform_entity_url(ws_name, None, "training-data", dataset.id)
+    url = platform_entity_url(ws_name, None, "datasets", dataset.id)
     console.print(f"Check status at: {url}")
     return True
 
@@ -460,7 +460,7 @@ def _show_dataset_detail(ds: Any, ws_name: str) -> None:
     rows = build_dataset_detail_rows(ds)
     if ds.created_at:
         rows.append(("Created", format_date(ds.created_at)))
-    url = platform_entity_url(ws_name, None, "training-data", ds.id)
+    url = platform_entity_url(ws_name, None, "datasets", ds.id)
     rows.append(("URL", url))
 
     console.table(rows, title="Dataset Detail")

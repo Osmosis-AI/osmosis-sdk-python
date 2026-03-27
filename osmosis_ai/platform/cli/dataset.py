@@ -270,7 +270,7 @@ def upload(
     )
 
     console.print(f"Upload complete. Dataset ID: {dataset.id}", style="green")
-    url = platform_entity_url(ws_name, None, "training-data", dataset.id)
+    url = platform_entity_url(ws_name, None, "datasets", dataset.id)
     console.print(f"Processing will continue on the platform. Check status at: {url}")
 
 
