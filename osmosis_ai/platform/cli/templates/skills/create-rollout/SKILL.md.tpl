@@ -7,18 +7,18 @@ Help the user create a new rollout in this Osmosis workspace.
 
 1. Understand the user's task/domain (what should the agent learn to do?)
 2. Choose a rollout name (lowercase, hyphens or underscores)
-3. Create `rollouts/<env_name>/` via `osmosis env init <env_name>` or manually
+3. Create `rollouts/<rollout_name>/` manually
 4. Design tools the agent will need (as plain Python functions)
 5. Design grader functions (how to score agent performance)
 6. Decide on system prompt and max_turns
-7. Implement in `rollouts/<env_name>/main.py` with `load_environment()`
-8. Validate: `osmosis test <env_name> -m gpt-4.1-mini`
+7. Implement in `rollouts/<rollout_name>/main.py` with `load_environment()`
+8. Validate: `osmosis rollout test -m rollouts.<rollout_name>.main:agent -d data/dataset.jsonl --model gpt-4.1-mini`
 
 ## Rollout Structure
 
 Each rollout must have:
 ```
-rollouts/<env_name>/
+rollouts/<rollout_name>/
 ├── main.py          # Must export load_environment() -> Environment
 ├── pyproject.toml   # Per-rollout dependencies
 └── README.md        # Description
@@ -43,5 +43,5 @@ rollouts/<env_name>/
 
 After creating the rollout, always run:
 ```bash
-osmosis test <env_name> -m gpt-4.1-mini
+osmosis rollout test -m rollouts.<rollout_name>.main:agent -d data/dataset.jsonl --model gpt-4.1-mini
 ```
