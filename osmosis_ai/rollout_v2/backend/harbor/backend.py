@@ -131,6 +131,9 @@ class HarborBackend(ExecutionBackend):
         if self.prebuild_local_image:
             self.prebuilt_image_tag = self.build_image()
             self.write_compose_pull_policy(self.shared_env_dir)
+            # Prevent Harbor from deleting the shared prebuilt image after each trial.
+            # delete=True causes `docker compose down --rmi all` which nukes it.
+            self.environment_config.delete = False
 
         self.orchestrator.add_hook(
             TrialEvent.VERIFICATION_START, self.on_verification_start
