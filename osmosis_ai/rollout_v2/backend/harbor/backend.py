@@ -428,6 +428,13 @@ class HarborBackend(ExecutionBackend):
 
             await pending.on_grader_complete(result)
 
+        rollout_dir = self.rollouts_dir / rollout_id
+        shutil.rmtree(rollout_dir, ignore_errors=True)
+
+        if event.result and not event.result.exception_info:
+            trial_dir = self.trials_dir / f"{TRIAL_NAME_PREFIX}{rollout_id}"
+            shutil.rmtree(trial_dir, ignore_errors=True)
+
         if not pending.done.done():
             pending.done.set_result(None)
 
