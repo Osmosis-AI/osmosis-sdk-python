@@ -5,11 +5,10 @@ from __future__ import annotations
 import osmosis_ai.platform.api.client as api_client_module
 import osmosis_ai.platform.api.upload as upload_module
 import osmosis_ai.platform.cli.dataset as dataset_module
-import osmosis_ai.platform.cli.project as project_module
 from osmosis_ai.platform.api.models import DatasetFile, PaginatedDatasets, UploadInfo
 
 
-def test_list_datasets_resolves_project_in_active_workspace(monkeypatch) -> None:
+def test_list_datasets_uses_active_workspace(monkeypatch) -> None:
     calls: dict[str, object | None] = {}
     fake_credentials = object()
 
@@ -17,35 +16,20 @@ def test_list_datasets_resolves_project_in_active_workspace(monkeypatch) -> None
         dataset_module, "_require_auth", lambda: ("ws-b", fake_credentials)
     )
 
-    def fake_resolve_project(
-        name_or_id: str | None,
-        *,
-        workspace_name: str,
-        refresh: bool = False,
-    ) -> dict[str, str]:
-        calls["workspace_name"] = workspace_name
-        calls["name_or_id"] = name_or_id
-        return {"id": "proj-b", "project_name": "target-project"}
-
     class FakeClient:
         def list_datasets(
             self,
-            project_id: str,
             *,
             credentials=None,
         ) -> PaginatedDatasets:
-            assert project_id == "proj-b"
             calls["credentials"] = credentials
             return PaginatedDatasets(datasets=[], total_count=0, has_more=False)
 
-    monkeypatch.setattr(project_module, "_resolve_project", fake_resolve_project)
     monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
 
-    dataset_module.list_datasets(project=None)
+    dataset_module.list_datasets()
 
     assert calls == {
-        "workspace_name": "ws-b",
-        "name_or_id": None,
         "credentials": fake_credentials,
     }
 
@@ -72,14 +56,6 @@ def test_upload_passes_active_workspace_context_to_subscription_and_api_calls(
     )
     monkeypatch.setattr(dataset_module, "_validate_file", lambda _path, _ext: [])
     monkeypatch.setattr(dataset_module, "is_interactive", lambda: False)
-    monkeypatch.setattr(
-        dataset_module,
-        "_resolve_project",
-        lambda _project, *, workspace_name: {
-            "id": "proj-b",
-            "project_name": "target-project",
-        },
-    )
     from contextlib import nullcontext
 
     monkeypatch.setattr(
@@ -96,14 +72,12 @@ def test_upload_passes_active_workspace_context_to_subscription_and_api_calls(
     class FakeClient:
         def create_dataset(
             self,
-            project_id: str,
             file_name: str,
             file_size: int,
             extension: str,
             *,
             credentials=None,
         ) -> DatasetFile:
-            assert project_id == "proj-b"
             assert file_name == "data.jsonl"
             assert file_size > 0
             assert extension == "jsonl"
@@ -139,7 +113,7 @@ def test_upload_passes_active_workspace_context_to_subscription_and_api_calls(
 
     monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
 
-    dataset_module.upload(str(file_path), project=None)
+    dataset_module.upload(str(file_path))
 
     assert calls == {
         "workspace_name": "ws-b",

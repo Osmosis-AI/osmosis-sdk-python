@@ -23,7 +23,6 @@ from osmosis_ai.platform.auth import (
     load_credentials,
     platform_request,
 )
-from osmosis_ai.platform.auth.config import PLATFORM_URL
 from osmosis_ai.platform.auth.local_config import (
     clear_default_project,
     get_active_workspace,
@@ -113,10 +112,8 @@ def _show_context(ws_name: str | None, default_project: dict | None) -> None:
         f"{console.format_styled('Current:', 'bold')} "
         f"{console.format_styled(ws_name, 'cyan')} / {project_name}"
     )
-    if default_project:
-        url = platform_entity_url(ws_name, default_project["project_name"])
-    else:
-        url = f"{PLATFORM_URL}/{ws_name}"
+    project_name_for_url = default_project["project_name"] if default_project else None
+    url = platform_entity_url(ws_name, project_name_for_url)
     console.print(
         f"{console.format_styled('URL:', 'bold')}     "
         f"{console.format_styled(url, 'dim')}"
@@ -124,17 +121,18 @@ def _show_context(ws_name: str | None, default_project: dict | None) -> None:
     console.print()
 
 
-def _main_menu(has_project: bool) -> str | None:
+def _main_menu(has_project: bool, has_workspace: bool) -> str | None:
     """Show main menu and return the selected action."""
     choices: list[str | Choice | Separator] = [
         Choice("Change workspace or project", value="switch"),
     ]
+    if has_workspace:
+        choices.append(Choice("Datasets", value="datasets"))
     if has_project:
         choices.extend(
             [
                 Choice("Training runs", value="runs"),
                 Choice("Models", value="models"),
-                Choice("Datasets", value="datasets"),
                 Choice("Project details", value="info"),
                 Choice("Open in browser", value="browser"),
             ]
@@ -350,7 +348,6 @@ def _browse_entities(
 
 def _upload_dataset_interactive(
     ws_name: str,
-    project: dict,
     credentials: Any,
 ) -> bool:
     """Prompt for a file path and upload it as a dataset.
@@ -382,8 +379,8 @@ def _upload_dataset_interactive(
         )
         return False
 
-    console.print(f"  File: {file_path.name} ({format_size(file_path.stat().st_size)})")
-    ok = confirm("Upload to this project?", default=True)
+    console.print(f"  File: {file_path.name} ({format_size(file_size)})")
+    ok = confirm("Upload to this workspace?", default=True)
     if not ok:
         return False
 
@@ -392,7 +389,6 @@ def _upload_dataset_interactive(
             file_path=file_path,
             ext=ext,
             file_size=file_size,
-            project_id=project["project_id"],
             credentials=credentials,
         )
     except CLIError as e:
@@ -400,9 +396,7 @@ def _upload_dataset_interactive(
         return False
 
     console.print(f"Upload complete. Dataset ID: {dataset.id}", style="green")
-    url = platform_entity_url(
-        ws_name, project["project_name"], "training-data", dataset.id
-    )
+    url = platform_entity_url(ws_name, None, "training-data", dataset.id)
     console.print(f"Check status at: {url}")
     return True
 
@@ -410,22 +404,19 @@ def _upload_dataset_interactive(
 _UPLOAD = "__upload__"
 
 
-def _browse_datasets(ws_name: str, project: dict) -> bool:
+def _browse_datasets(ws_name: str) -> bool:
     """List datasets and allow selecting one for details or uploading."""
     from osmosis_ai.platform.api.client import OsmosisClient
 
     from .utils import require_credentials
 
     client = OsmosisClient()
-    project_id: str = project["project_id"]
 
     try:
         credentials = require_credentials()
         with console.spinner("Loading datasets..."):
-            result = client.list_datasets(project_id, credentials=credentials)
+            result = client.list_datasets(credentials=credentials)
     except PlatformAPIError as e:
-        if e.status_code == 404:
-            return _handle_stale_project(ws_name, project)
         console.print_error(f"Failed to load datasets: {e}")
         return True
 
@@ -454,22 +445,22 @@ def _browse_datasets(ws_name: str, project: dict) -> bool:
             return True
 
         if selected == _UPLOAD:
-            uploaded = _upload_dataset_interactive(ws_name, project, credentials)
+            uploaded = _upload_dataset_interactive(ws_name, credentials)
             if uploaded:
                 # Refresh the list after successful upload
                 with contextlib.suppress(PlatformAPIError):
-                    result = client.list_datasets(project_id, credentials=credentials)
+                    result = client.list_datasets(credentials=credentials)
             continue
 
-        _show_dataset_detail(selected, ws_name, project)
+        _show_dataset_detail(selected, ws_name)
 
 
-def _show_dataset_detail(ds: Any, ws_name: str, project: dict) -> None:
+def _show_dataset_detail(ds: Any, ws_name: str) -> None:
     """Display detailed info for a single dataset."""
     rows = build_dataset_detail_rows(ds)
     if ds.created_at:
         rows.append(("Created", format_date(ds.created_at)))
-    url = platform_entity_url(ws_name, project["project_name"], "training-data", ds.id)
+    url = platform_entity_url(ws_name, None, "training-data", ds.id)
     rows.append(("URL", url))
 
     console.table(rows, title="Dataset Detail")
@@ -726,7 +717,9 @@ def workspace() -> None:
 
     # Interactive main menu loop
     while True:
-        action = _main_menu(has_project=bool(default_project))
+        action = _main_menu(
+            has_project=bool(default_project), has_workspace=bool(ws_name)
+        )
 
         if action is None or action == "exit":
             return
@@ -736,7 +729,11 @@ def workspace() -> None:
                 ws_name, default_project = result
                 console.print()
                 _show_context(ws_name, default_project)
-        elif action in ("runs", "models", "datasets", "info", "browser"):
+        elif action == "datasets":
+            if ws_name is None:
+                continue
+            _browse_datasets(ws_name)
+        elif action in ("runs", "models", "info", "browser"):
             if ws_name is None or default_project is None:
                 continue
 
@@ -744,8 +741,6 @@ def workspace() -> None:
                 ok = _browse_runs(ws_name, default_project)
             elif action == "models":
                 ok = _browse_models(ws_name, default_project)
-            elif action == "datasets":
-                ok = _browse_datasets(ws_name, default_project)
             elif action == "info":
                 ok = _show_project_info(ws_name, default_project)
             else:

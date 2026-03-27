@@ -95,25 +95,23 @@ def _resolve_entity_id(
 
 def resolve_dataset_id(
     id: str,
-    project: str | None,
-    workspace_name: str,
     credentials: Credentials,
     *,
     client: Any = None,
 ) -> str:
     """Resolve a short ID prefix to a full dataset ID."""
+    if len(id) >= 32:
+        return id
     if client is None:
         from osmosis_ai.platform.api.client import OsmosisClient
 
         client = OsmosisClient()
-    return _resolve_entity_id(
+    result = client.list_datasets(credentials=credentials)
+    return resolve_id_prefix(
         id,
-        project,
-        workspace_name,
-        credentials,
-        list_fn=client.list_datasets,
-        items_attr="datasets",
+        result.datasets,
         entity_name="dataset",
+        has_more=result.has_more,
     )
 
 
@@ -202,9 +200,13 @@ def format_date(iso_str: str | None) -> str:
     return iso_str[:10]
 
 
-def platform_entity_url(ws_name: str, project_name: str, *segments: str) -> str:
-    """Build a platform URL for a workspace/project entity."""
-    base = f"{PLATFORM_URL}/{ws_name}/{project_name}"
+def platform_entity_url(
+    ws_name: str, project_name: str | None = None, *segments: str
+) -> str:
+    """Build a platform URL for a workspace or workspace/project entity."""
+    base = f"{PLATFORM_URL}/{ws_name}"
+    if project_name:
+        base += f"/{project_name}"
     if segments:
         base += "/" + "/".join(segments)
     return base
