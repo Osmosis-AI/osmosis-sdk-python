@@ -13,26 +13,19 @@ app: typer.Typer = typer.Typer(
 @app.command("upload")
 def upload(
     file: str = typer.Argument(..., help="Path to the file to upload."),
-    project: str | None = typer.Option(
-        None, "--project", help="Project name (default: current project)."
-    ),
 ) -> None:
     """Upload a dataset file."""
     from osmosis_ai.platform.cli.dataset import upload as _upload
 
-    _upload(file=file, project=project)
+    _upload(file=file)
 
 
 @app.command("list")
-def list_datasets(
-    project: str | None = typer.Option(
-        None, "--project", help="Project name (default: current project)."
-    ),
-) -> None:
+def list_datasets() -> None:
     """List datasets."""
     from osmosis_ai.platform.cli.dataset import list_datasets as _list_datasets
 
-    _list_datasets(project=project)
+    _list_datasets()
 
 
 @app.command("status")
@@ -40,14 +33,11 @@ def status(
     id: str = typer.Argument(
         ..., help="Dataset ID (or short prefix from 'dataset list')."
     ),
-    project: str | None = typer.Option(
-        None, "--project", help="Project name (used for short ID lookup)."
-    ),
 ) -> None:
     """Check dataset processing status."""
     from osmosis_ai.platform.cli.dataset import status as _status
 
-    _status(id=id, project=project)
+    _status(id=id)
 
 
 @app.command("preview")
@@ -56,14 +46,11 @@ def preview(
         ..., help="Dataset ID (or short prefix from 'dataset list')."
     ),
     rows: int = typer.Option(5, "--rows", help="Number of rows to show."),
-    project: str | None = typer.Option(
-        None, "--project", help="Project name (used for short ID lookup)."
-    ),
 ) -> None:
     """Preview dataset rows."""
     from osmosis_ai.platform.cli.dataset import preview as _preview
 
-    _preview(id=id, rows=rows, project=project)
+    _preview(id=id, rows=rows)
 
 
 @app.command("validate")
@@ -81,12 +68,9 @@ def delete(
     id: str = typer.Argument(
         ..., help="Dataset ID (or short prefix from 'dataset list')."
     ),
-    project: str | None = typer.Option(
-        None, "--project", help="Project name (used for short ID lookup)."
-    ),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
 ) -> None:
     """Delete a dataset."""
     from osmosis_ai.platform.cli.dataset import delete as _delete
 
-    _delete(id=id, project=project, yes=yes)
+    _delete(id=id, yes=yes)

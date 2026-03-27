@@ -171,7 +171,6 @@ class OsmosisClient:
 
     def create_dataset(
         self,
-        project_id: str,
         file_name: str,
         file_size: int,
         extension: str,
@@ -182,7 +181,6 @@ class OsmosisClient:
             "/api/cli/datasets",
             method="POST",
             data={
-                "project_id": project_id,
                 "file_name": file_name,
                 "file_size": file_size,
                 "extension": extension,
@@ -245,13 +243,12 @@ class OsmosisClient:
 
     def list_datasets(
         self,
-        project_id: str,
         limit: int = 50,
         offset: int = 0,
         *,
         credentials: Credentials | None = None,
     ) -> PaginatedDatasets:
-        qs = urlencode({"project_id": project_id, "limit": limit, "offset": offset})
+        qs = urlencode({"limit": limit, "offset": offset})
         data = platform_request(f"/api/cli/datasets?{qs}", credentials=credentials)
         return PaginatedDatasets.from_dict(data)
 
