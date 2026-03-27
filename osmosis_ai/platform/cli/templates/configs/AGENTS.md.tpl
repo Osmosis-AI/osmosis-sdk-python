@@ -1,6 +1,6 @@
 # Training & Evaluation Configs
 
-Configs are workspace-scoped and reference specific environments by name.
+Configs are workspace-scoped and reference specific rollouts by name.
 
 ## Training Configs (`training/*.toml`)
 
@@ -16,7 +16,7 @@ Then fill in required fields and adjust parameters as needed. See the template f
 
 ```toml
 [experiment]
-environment = "calculator"
+rollout = "calculator"
 model_path = "Qwen/Qwen3.5-35B-A3B"  # or "Qwen/Qwen3.5-122B-A10B"
 dataset_id = "my-dataset-abc123"
 
@@ -40,7 +40,7 @@ dataset_id = "my-dataset-abc123"
 ## Eval Configs (`eval/*.toml`)
 
 ```toml
-environment = "calculator"            # Required: target environment name
+rollout = "calculator"            # Required: target rollout name
 
 [eval]
 num_examples = 20

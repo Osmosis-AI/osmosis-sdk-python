@@ -520,7 +520,7 @@ def test_rollout_test_accepts_any_model_with_base_url(capsys):
     """With --base-url, any model name should be accepted and displayed as-is."""
     cli.main(
         [
-            "environment",
+            "rollout",
             "test",
             "-m",
             "my_agent:MyAgentLoop",

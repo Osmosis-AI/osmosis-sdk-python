@@ -8,7 +8,7 @@
 #   - Qwen/Qwen3.5-122B-A10B
 
 [experiment]
-environment = "<your-environment>"   # Environment name (directory under environments/)
+rollout = "<your-rollout>"        # Rollout name (directory under rollouts/)
 model_path = "<your-model-path>"     # Must be a supported model (see above)
 dataset_id = "<your-dataset-id>"     # Platform dataset ID
 # commit_sha =                       # Pin to a specific commit (default: latest on default branch)

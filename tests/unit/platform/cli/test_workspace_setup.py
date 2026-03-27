@@ -182,7 +182,7 @@ class TestWriteScaffold:
         assert (target / "README.md").is_file()
 
         # .gitkeep markers
-        assert (target / "environments" / ".gitkeep").is_file()
+        assert (target / "rollouts" / ".gitkeep").is_file()
         assert (target / "configs" / "eval" / ".gitkeep").is_file()
         assert (target / "data" / ".gitkeep").is_file()
 
@@ -194,10 +194,10 @@ class TestWriteScaffold:
         assert (target / "CLAUDE.md").is_file()
         assert (target / "configs" / "AGENTS.md").is_file()
         assert (
-            target / ".osmosis" / "skills" / "create-environment" / "SKILL.md"
+            target / ".osmosis" / "skills" / "create-rollout" / "SKILL.md"
         ).is_file()
         assert (
-            target / ".osmosis" / "skills" / "evaluate-environment" / "SKILL.md"
+            target / ".osmosis" / "skills" / "evaluate-rollout" / "SKILL.md"
         ).is_file()
         assert (
             target / ".osmosis" / "skills" / "submit-training" / "SKILL.md"
@@ -205,7 +205,7 @@ class TestWriteScaffold:
 
         # Directories exist
         assert (target / ".osmosis").is_dir()
-        assert (target / "environments").is_dir()
+        assert (target / "rollouts").is_dir()
         assert (target / "configs" / "training").is_dir()
         assert (target / "configs" / "eval").is_dir()
         assert (target / "data").is_dir()
@@ -285,7 +285,7 @@ class TestWriteScaffold:
         original_readme = "custom readme"
         (target / "README.md").write_text(original_readme, encoding="utf-8")
         original_gitkeep = "custom gitkeep"
-        (target / "environments" / ".gitkeep").write_text(
+        (target / "rollouts" / ".gitkeep").write_text(
             original_gitkeep, encoding="utf-8"
         )
         original_agents = "custom agents"
@@ -301,7 +301,7 @@ class TestWriteScaffold:
         ) == original_pyproject
         assert (target / ".gitignore").read_text(encoding="utf-8") == original_gitignore
         assert (target / "README.md").read_text(encoding="utf-8") == original_readme
-        assert (target / "environments" / ".gitkeep").read_text(
+        assert (target / "rollouts" / ".gitkeep").read_text(
             encoding="utf-8"
         ) == original_gitkeep
         assert (target / "AGENTS.md").read_text(encoding="utf-8") == original_agents

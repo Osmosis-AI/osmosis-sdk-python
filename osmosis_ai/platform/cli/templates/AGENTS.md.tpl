@@ -2,24 +2,24 @@
 
 ## Overview
 
-This is an Osmosis workspace. It contains training environments for reinforcement learning, synced to the Osmosis Platform via Git.
+This is an Osmosis workspace. It contains training rollouts for reinforcement learning, synced to the Osmosis Platform via Git.
 
 ## Structure
 
-- `environments/<env_name>/` — Each environment is self-contained
+- `rollouts/<env_name>/` — Each rollout is self-contained
   - `main.py` — **Entry point** (required). Must export `load_environment()`.
-  - `pyproject.toml` — Per-environment dependencies.
-  - `README.md` — Environment description.
-- `configs/training/` — Training configurations (TOML, workspace-scoped). Each config references an environment by name.
+  - `pyproject.toml` — Per-rollout dependencies.
+  - `README.md` — Rollout description.
+- `configs/training/` — Training configurations (TOML, workspace-scoped). Each config references a rollout by name.
 - `configs/eval/` — Evaluation configurations (TOML).
 - `data/` — Local test data (JSONL).
 - `.osmosis/workspace.toml` — Workspace metadata. Do not edit manually.
 
 ## Conventions
 
-### Environment Definition
+### Rollout Definition
 
-Each environment lives in `environments/<env_name>/` and must have a `main.py` with a `load_environment()` function.
+Each rollout lives in `rollouts/<env_name>/` and must have a `main.py` with a `load_environment()` function.
 
 ### Tools
 

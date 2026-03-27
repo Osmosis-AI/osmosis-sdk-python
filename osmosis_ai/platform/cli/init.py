@@ -52,7 +52,7 @@ class ScaffoldEntry:
 
 SCAFFOLD: list[ScaffoldEntry] = [
     # Directory placeholders
-    ScaffoldEntry("", "environments/.gitkeep"),
+    ScaffoldEntry("", "rollouts/.gitkeep"),
     ScaffoldEntry("", "configs/eval/.gitkeep"),
     ScaffoldEntry("", "data/.gitkeep"),
     # Rendered templates
@@ -66,12 +66,12 @@ SCAFFOLD: list[ScaffoldEntry] = [
     ScaffoldEntry("configs/AGENTS.md.tpl", "configs/AGENTS.md"),
     ScaffoldEntry("configs/training/default.toml.tpl", "configs/training/default.toml"),
     ScaffoldEntry(
-        "skills/create-environment/SKILL.md.tpl",
-        ".osmosis/skills/create-environment/SKILL.md",
+        "skills/create-rollout/SKILL.md.tpl",
+        ".osmosis/skills/create-rollout/SKILL.md",
     ),
     ScaffoldEntry(
-        "skills/evaluate-environment/SKILL.md.tpl",
-        ".osmosis/skills/evaluate-environment/SKILL.md",
+        "skills/evaluate-rollout/SKILL.md.tpl",
+        ".osmosis/skills/evaluate-rollout/SKILL.md",
     ),
     ScaffoldEntry(
         "skills/submit-training/SKILL.md.tpl",
@@ -205,7 +205,7 @@ def _print_next_steps(ws_name: str, *, here: bool = False) -> None:
 
     prompt_body = (
         "I want to train a model for <my task domain>. "
-        "Create an initial environment with tools and a grader, "
+        "Create an initial rollout with tools and a grader, "
         "then run a quick eval baseline."
     )
 

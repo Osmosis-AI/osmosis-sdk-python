@@ -18,7 +18,7 @@ from osmosis_ai.cli.main import main
         ["dataset", "--help"],
         ["train", "--help"],
         ["model", "--help"],
-        ["environment", "--help"],
+        ["rollout", "--help"],
         ["eval", "--help"],
         ["upgrade", "--help"],
     ],
@@ -38,7 +38,7 @@ def test_help_exits_zero(args, capfd):
         ["train", "submit"],
         ["train", "metrics"],
         ["train", "traces"],
-        ["environment", "list"],
+        ["rollout", "list"],
     ],
 )
 def test_placeholder_commands_exit_one(args):
@@ -64,7 +64,7 @@ def test_all_groups_in_help_output(capfd):
         "dataset",
         "train",
         "model",
-        "environment",
+        "rollout",
         "eval",
     ]:
         assert group in output, f"'{group}' not found in --help output"

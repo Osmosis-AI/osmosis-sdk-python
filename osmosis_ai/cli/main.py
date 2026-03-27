@@ -80,9 +80,9 @@ def _register_commands() -> None:
     # -- Command groups --
     from osmosis_ai.cli.commands.auth import app as auth_app
     from osmosis_ai.cli.commands.dataset import app as dataset_app
-    from osmosis_ai.cli.commands.environment import app as environment_app
     from osmosis_ai.cli.commands.eval import app as eval_app
     from osmosis_ai.cli.commands.model import app as model_app
+    from osmosis_ai.cli.commands.rollout import app as rollout_app
     from osmosis_ai.cli.commands.train import app as train_app
     from osmosis_ai.cli.commands.workspace import app as workspace_app
 
@@ -93,7 +93,7 @@ def _register_commands() -> None:
     app.add_typer(train_app, name="train", rich_help_panel=_WORKFLOW)
     app.add_typer(model_app, name="model", rich_help_panel=_WORKFLOW)
     app.add_typer(eval_app, name="eval", rich_help_panel=_WORKFLOW)
-    app.add_typer(environment_app, name="environment", rich_help_panel=_WORKFLOW)
+    app.add_typer(rollout_app, name="rollout", rich_help_panel=_WORKFLOW)
 
     app.add_typer(auth_app, name="auth", rich_help_panel=_PLATFORM)
     app.add_typer(workspace_app, name="workspace", rich_help_panel=_PLATFORM)
