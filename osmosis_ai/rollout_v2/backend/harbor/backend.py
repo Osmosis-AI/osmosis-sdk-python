@@ -71,9 +71,10 @@ class PendingTrial:
 class HarborBackend(ExecutionBackend):
     """Execution backend that runs workflows inside Harbor containers.
 
-    The Docker image is built once at init (SDK + user code baked in).
-    Per-rollout task dirs symlink to the shared environment dir so
-    Harbor reuses the cached image.
+    With prebuild_image (default), the Docker image is built once at init
+    and Harbor skips docker compose build on every trial. With
+    symlink_environment (default), per-rollout task dirs symlink to a
+    shared environment dir instead of copying.
     """
 
     def __init__(
@@ -89,8 +90,9 @@ class HarborBackend(ExecutionBackend):
         trials_dir: Path = Path("trials"),
         custom_tests_dir: Path | None = None,
         environment_config: HarborEnvironmentConfig | None = None,
-        cache_image: bool = True,
-        cleanup_trials: bool = True,
+        prebuild_image: bool = True,
+        symlink_environment: bool = True,
+        cleanup_successful_trials: bool = True,
         _sdk_source_dir: Path | None = None,  # local dev only
     ) -> None:
         self.orchestrator = orchestrator
@@ -108,23 +110,26 @@ class HarborBackend(ExecutionBackend):
         self.custom_tests_dir = custom_tests_dir
         self.environment_config = environment_config or HarborEnvironmentConfig()
         self._sdk_source_dir = _sdk_source_dir
-        self.cache_image = cache_image
-        self.cleanup_trials = cleanup_trials
+        self.prebuild_image = prebuild_image
+        self.symlink_environment = symlink_environment
+        self.cleanup_successful_trials = cleanup_successful_trials
 
         self.root_dir = Path(f"/tmp/osmosis-harbor-{self.task_dir.name}")
         self.rollouts_dir = self.root_dir / "rollouts"
         self.rollouts_dir.mkdir(parents=True, exist_ok=True)
-        self.shared_env_dir = self.root_dir / "shared-env"
+        self.shared_env_dir = self.root_dir / "shared-env" / self.task_dir.name
         self.trials_dir = (
             trials_dir if trials_dir != Path("trials") else self.root_dir / "trials"
         )
 
         self.pending: dict[str, PendingTrial] = {}
-        self.prebuilt_image: str | None = None
+        self.prebuilt_image_tag: str | None = None
 
-        if self.cache_image:
+        if self.prebuild_image or self.symlink_environment:
             self.prepare_shared_env()
-            self.prebuilt_image = self.build_image()
+
+        if self.prebuild_image:
+            self.prebuilt_image_tag = self.build_image()
 
         self.orchestrator.add_hook(
             TrialEvent.VERIFICATION_START, self.on_verification_start
@@ -185,8 +190,11 @@ class HarborBackend(ExecutionBackend):
 
     def prepare_env_dir(self, task_dir: Path) -> None:
         """Prepare the environment dir for a task dir.
-        If cache_image is on, symlink to the shared env. Otherwise copy fresh."""
-        if self.cache_image:
+
+        With prebuild_image or symlink_environment, symlinks to the shared env.
+        Otherwise copies fresh from the original task environment dir.
+        """
+        if self.prebuild_image or self.symlink_environment:
             (task_dir / "environment").symlink_to(self.shared_env_dir)
         else:
             env_dir = task_dir / "environment"
@@ -342,9 +350,9 @@ class HarborBackend(ExecutionBackend):
         config["verifier"].setdefault("env", {})
         config["verifier"]["env"]["PYTHONPATH"] = "/workspace"
 
-        if self.prebuilt_image:
+        if self.prebuilt_image_tag:
             config.setdefault("environment", {})
-            config["environment"]["docker_image"] = self.prebuilt_image
+            config["environment"]["docker_image"] = self.prebuilt_image_tag
 
         with open(task_toml_path, "w") as f:
             toml.dump(config, f)
@@ -449,7 +457,7 @@ class HarborBackend(ExecutionBackend):
 
             await pending.on_grader_complete(result)
 
-        if self.cleanup_trials:
+        if self.cleanup_successful_trials:
             rollout_dir = self.rollouts_dir / rollout_id
             shutil.rmtree(rollout_dir, ignore_errors=True)
 
