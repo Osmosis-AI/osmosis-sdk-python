@@ -131,7 +131,7 @@ def _git_init(target: Path) -> None:
         return
 
     _subprocess.run(
-        ["git", "init", str(target)],
+        ["git", "init", "-b", "main", str(target)],
         capture_output=True,
         check=True,
     )
@@ -163,7 +163,7 @@ def _git_initial_commit(target: Path, *, update: bool = False) -> None:
 
     msg = "Update workspace scaffold" if update else "Initial workspace setup"
     _subprocess.run(
-        ["git", "commit", "-m", msg, "--author", "Osmosis Init <noreply@osmosis.ai>"],
+        ["git", "commit", "-m", msg, "--author", "Osmosis <noreply@osmosis.ai>"],
         cwd=target,
         capture_output=True,
         check=True,
