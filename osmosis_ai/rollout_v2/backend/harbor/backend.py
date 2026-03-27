@@ -5,6 +5,7 @@ import json
 import logging
 import platform
 import shutil
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -89,6 +90,7 @@ class HarborBackend(ExecutionBackend):
         custom_tests_dir: Path | None = None,
         environment_config: HarborEnvironmentConfig | None = None,
         cache_image: bool = True,
+        cleanup_trials: bool = True,
         _sdk_source_dir: Path | None = None,  # local dev only
     ) -> None:
         self.orchestrator = orchestrator
@@ -107,6 +109,7 @@ class HarborBackend(ExecutionBackend):
         self.environment_config = environment_config or HarborEnvironmentConfig()
         self._sdk_source_dir = _sdk_source_dir
         self.cache_image = cache_image
+        self.cleanup_trials = cleanup_trials
 
         self.root_dir = Path(f"/tmp/osmosis-harbor-{self.task_dir.name}")
         self.rollouts_dir = self.root_dir / "rollouts"
@@ -117,9 +120,11 @@ class HarborBackend(ExecutionBackend):
         )
 
         self.pending: dict[str, PendingTrial] = {}
+        self.prebuilt_image: str | None = None
 
         if self.cache_image:
             self.prepare_shared_env()
+            self.prebuilt_image = self.build_image()
 
         self.orchestrator.add_hook(
             TrialEvent.VERIFICATION_START, self.on_verification_start
@@ -165,6 +170,18 @@ class HarborBackend(ExecutionBackend):
                 "node_modules",
             ),
         )
+
+    def build_image(self) -> str:
+        """Build the Docker image once from the shared env dir and return the tag."""
+        image_tag = f"osmosis-harbor-{self.task_dir.name}:latest"
+        logger.info(
+            "Building prebuilt image %s from %s", image_tag, self.shared_env_dir
+        )
+        subprocess.run(
+            ["docker", "build", "-t", image_tag, str(self.shared_env_dir)],
+            check=True,
+        )
+        return image_tag
 
     def prepare_env_dir(self, task_dir: Path) -> None:
         """Prepare the environment dir for a task dir.
@@ -325,6 +342,10 @@ class HarborBackend(ExecutionBackend):
         config["verifier"].setdefault("env", {})
         config["verifier"]["env"]["PYTHONPATH"] = "/workspace"
 
+        if self.prebuilt_image:
+            config.setdefault("environment", {})
+            config["environment"]["docker_image"] = self.prebuilt_image
+
         with open(task_toml_path, "w") as f:
             toml.dump(config, f)
 
@@ -428,12 +449,13 @@ class HarborBackend(ExecutionBackend):
 
             await pending.on_grader_complete(result)
 
-        rollout_dir = self.rollouts_dir / rollout_id
-        shutil.rmtree(rollout_dir, ignore_errors=True)
+        if self.cleanup_trials:
+            rollout_dir = self.rollouts_dir / rollout_id
+            shutil.rmtree(rollout_dir, ignore_errors=True)
 
-        if event.result and not event.result.exception_info:
-            trial_dir = self.trials_dir / f"{TRIAL_NAME_PREFIX}{rollout_id}"
-            shutil.rmtree(trial_dir, ignore_errors=True)
+            if event.result and not event.result.exception_info:
+                trial_dir = self.trials_dir / f"{TRIAL_NAME_PREFIX}{rollout_id}"
+                shutil.rmtree(trial_dir, ignore_errors=True)
 
         if not pending.done.done():
             pending.done.set_result(None)
