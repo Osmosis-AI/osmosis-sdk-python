@@ -39,7 +39,7 @@ def main():
         workflow_config=multiply_workflow_config,
         grader=MultiplyGrader,
         grader_config=multiply_grader_config,
-        prebuild_image=True,
+        prebuild_local_image=True,
         cleanup_successful_trials=True,
         _sdk_source_dir=SDK_ROOT,  # local dev only
     )

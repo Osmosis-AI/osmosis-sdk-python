@@ -71,7 +71,7 @@ class PendingTrial:
 class HarborBackend(ExecutionBackend):
     """Execution backend that runs workflows inside Harbor containers.
 
-    With prebuild_image (default), the Docker image is built once at init
+    With prebuild_local_image (default), the Docker image is built once at init
     and Harbor skips docker compose build on every trial. With
     symlink_environment (default), per-rollout task dirs symlink to a
     shared environment dir instead of copying.
@@ -90,7 +90,7 @@ class HarborBackend(ExecutionBackend):
         trials_dir: Path = Path("trials"),
         custom_tests_dir: Path | None = None,
         environment_config: HarborEnvironmentConfig | None = None,
-        prebuild_image: bool = True,
+        prebuild_local_image: bool = True,
         symlink_environment: bool = True,
         cleanup_successful_trials: bool = True,
         _sdk_source_dir: Path | None = None,  # local dev only
@@ -110,7 +110,7 @@ class HarborBackend(ExecutionBackend):
         self.custom_tests_dir = custom_tests_dir
         self.environment_config = environment_config or HarborEnvironmentConfig()
         self._sdk_source_dir = _sdk_source_dir
-        self.prebuild_image = prebuild_image
+        self.prebuild_local_image = prebuild_local_image
         self.symlink_environment = symlink_environment
         self.cleanup_successful_trials = cleanup_successful_trials
 
@@ -125,11 +125,12 @@ class HarborBackend(ExecutionBackend):
         self.pending: dict[str, PendingTrial] = {}
         self.prebuilt_image_tag: str | None = None
 
-        if self.prebuild_image or self.symlink_environment:
+        if self.prebuild_local_image or self.symlink_environment:
             self.prepare_shared_env()
 
-        if self.prebuild_image:
+        if self.prebuild_local_image:
             self.prebuilt_image_tag = self.build_image()
+            self.write_compose_pull_policy(self.shared_env_dir)
 
         self.orchestrator.add_hook(
             TrialEvent.VERIFICATION_START, self.on_verification_start
@@ -188,13 +189,19 @@ class HarborBackend(ExecutionBackend):
         )
         return image_tag
 
+    def write_compose_pull_policy(self, env_dir: Path) -> None:
+        """Write a docker-compose.yaml override so Harbor uses the local image
+        instead of trying to pull from a registry."""
+        compose_path = env_dir / "docker-compose.yaml"
+        compose_path.write_text("services:\n  main:\n    pull_policy: never\n")
+
     def prepare_env_dir(self, task_dir: Path) -> None:
         """Prepare the environment dir for a task dir.
 
-        With prebuild_image or symlink_environment, symlinks to the shared env.
+        With prebuild_local_image or symlink_environment, symlinks to the shared env.
         Otherwise copies fresh from the original task environment dir.
         """
-        if self.prebuild_image or self.symlink_environment:
+        if self.prebuild_local_image or self.symlink_environment:
             (task_dir / "environment").symlink_to(self.shared_env_dir)
         else:
             env_dir = task_dir / "environment"
