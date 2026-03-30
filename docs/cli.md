@@ -197,33 +197,29 @@ osmosis validate -m server:agent_loop -v  # Verbose with warnings
 
 ## Rubric Tools
 
-### osmosis preview
+### osmosis eval rubric
 
-Preview a rubric file or dataset:
-
-```bash
-osmosis preview path/to/rubric.yaml
-osmosis preview path/to/data.jsonl
-```
-
-Both formats validate the file, echo a short summary, and pretty-print the parsed records.
-
-### osmosis eval-rubric
-
-Evaluate a dataset against a hosted rubric configuration:
+Evaluate conversations against a rubric using LLM-as-judge:
 
 ```bash
-osmosis eval-rubric --rubric support_followup --data examples/sample_data.jsonl
+osmosis eval rubric -d data.jsonl \
+  --rubric "Evaluate the assistant's helpfulness..." \
+  --model openai/gpt-4o
 ```
 
 **Options:**
 
-- `-d`/`--data path/to/data.jsonl` -- Supply the dataset
-- `--config path/to/rubric_configs.yaml` -- Provide rubric definitions
-- `-n`/`--number` -- Sample multiple times per record with aggregate statistics
-- `--output path/to/dir` -- Write results to a file or directory
-
-**Command split** (development-stage breaking change): `osmosis eval-rubric` evaluates JSONL conversations against hosted rubrics, while `osmosis eval` runs rollout eval functions against agent datasets.
+| Flag | Description |
+|---|---|
+| `-d`/`--data` | Path to JSONL file with conversations (required) |
+| `-r`/`--rubric` | Rubric text (inline) or `@file.txt` to read from file (required) |
+| `--model` | Judge model in LiteLLM format, e.g. `openai/gpt-4o` (required) |
+| `-n`/`--number` | Number of evaluation runs per record |
+| `-o`/`--output` | Path to write evaluation results as JSON |
+| `--api-key` | API key for the judge model |
+| `--timeout` | Request timeout in seconds |
+| `--score-min` | Minimum score (default: 0.0) |
+| `--score-max` | Maximum score (default: 1.0) |
 
 ## See Also
 
