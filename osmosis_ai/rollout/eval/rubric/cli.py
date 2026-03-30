@@ -74,9 +74,10 @@ class RubricCommand:
 
         if output_path:
             out = Path(output_path).expanduser()
-            if out.is_dir() or not out.suffix:
-                out.mkdir(parents=True, exist_ok=True)
+            if out.is_dir():
                 out = out / "rubric_eval_result.json"
+            else:
+                out.parent.mkdir(parents=True, exist_ok=True)
             written = JsonReportWriter().write(report, out)
             print(f"Wrote results to {written}")
 
