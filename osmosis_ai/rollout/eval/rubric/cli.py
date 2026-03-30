@@ -34,7 +34,7 @@ class RubricCommand:
         timeout: float | None = None,
         score_min: float = 0.0,
         score_max: float = 1.0,
-    ) -> None:
+    ) -> int:
         if number < 1:
             raise CLIError("--number must be at least 1.")
 
@@ -80,6 +80,9 @@ class RubricCommand:
                 out.parent.mkdir(parents=True, exist_ok=True)
             written = JsonReportWriter().write(report, out)
             print(f"Wrote results to {written}")
+
+        has_errors = any(r.errors for r in results)
+        return 1 if has_errors else 0
 
     @staticmethod
     def _resolve_rubric_text(rubric: str) -> str:

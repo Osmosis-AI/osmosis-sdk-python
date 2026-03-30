@@ -161,7 +161,7 @@ def eval_rubric(
     """Evaluate conversations against a rubric using LLM-as-judge."""
     from osmosis_ai.rollout.eval.rubric.cli import RubricCommand
 
-    RubricCommand().run(
+    rc = RubricCommand().run(
         data=data,
         rubric=rubric,
         model=model,
@@ -172,6 +172,8 @@ def eval_rubric(
         score_min=score_min,
         score_max=score_max,
     )
+    if rc:
+        raise typer.Exit(rc)
 
 
 @cache_app.command("dir")
