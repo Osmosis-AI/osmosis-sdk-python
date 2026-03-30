@@ -1,16 +1,11 @@
 """
-Reward function examples using the @osmosis_reward decorator.
+Reward function examples.
 
-This file demonstrates correct and incorrect usage of the decorator,
-which enforces the signature: (solution_str: str, ground_truth: str, extra_info: dict | None = None) -> float
+These functions follow the simple eval signature:
+    (solution_str: str, ground_truth: str, extra_info: dict | None = None) -> float
 """
 
-from osmosis_ai import osmosis_reward
 
-# CORRECT USAGE EXAMPLES
-
-
-@osmosis_reward
 def simple_exact_match(
     solution_str: str, ground_truth: str, extra_info: dict | None = None
 ) -> float:
@@ -18,7 +13,6 @@ def simple_exact_match(
     return 1.0 if solution_str.strip() == ground_truth.strip() else 0.0
 
 
-@osmosis_reward
 def case_insensitive_match(
     solution_str: str, ground_truth: str, extra_info: dict | None = None
 ) -> float:
@@ -40,7 +34,6 @@ def case_insensitive_match(
     return 1.0 if match else 0.0
 
 
-@osmosis_reward
 def numeric_tolerance(
     solution_str: str, ground_truth: str, extra_info: dict | None = None
 ) -> float:
@@ -58,7 +51,6 @@ def numeric_tolerance(
         return 0.0
 
 
-@osmosis_reward
 def minimal_reward(
     solution_str: str, ground_truth: str, extra_info: dict | None = None
 ) -> float:

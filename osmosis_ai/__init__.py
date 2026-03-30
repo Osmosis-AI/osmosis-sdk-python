@@ -2,13 +2,12 @@
 osmosis-ai: A Python library for LLM training workflows.
 
 Features:
-- Reward function validation with @osmosis_reward and @osmosis_rubric decorators
 - Remote rollout SDK for integrating agent frameworks with Osmosis training
+- Rubric evaluation via LLM-as-judge (evaluate_rubric)
 - Type-safe interfaces for LLM-centric workflows
 """
 
 from .consts import PACKAGE_VERSION as __version__
-from .utils import osmosis_reward, osmosis_rubric
 
 # ---------------------------------------------------------------------------
 # Lazy-loaded exports: these names are resolved on first access so that
@@ -42,6 +41,7 @@ _RUBRIC_EXPORTS: set[str] = {
     "MissingAPIKeyError",
     "ModelNotFoundError",
     "ProviderRequestError",
+    "RubricResult",
     "evaluate_rubric",
 }
 
@@ -54,7 +54,7 @@ def __getattr__(name: str) -> object:
         globals()[name] = value  # cache so future access skips __getattr__
         return value
     if name in _RUBRIC_EXPORTS:
-        from . import rubric
+        from .rollout.eval import rubric
 
         value = getattr(rubric, name)
         globals()[name] = value
@@ -64,8 +64,6 @@ def __getattr__(name: str) -> object:
 
 __all__ = [
     "__version__",
-    "osmosis_reward",
-    "osmosis_rubric",
     *sorted(_ROLLOUT_EXPORTS),
     *sorted(_RUBRIC_EXPORTS),
 ]

@@ -1,22 +1,13 @@
 from __future__ import annotations
 
-from typing import Any, TypedDict
+from dataclasses import dataclass
+from typing import Any
 
 
-class ModelInfo(TypedDict, total=False):
-    provider: str
-    model: str
-    api_key: str
-    api_key_env: str
-    score_min: float
-    score_max: float
-    system_prompt: str | None
-    original_input: str | None
-    timeout: float
-    reasoning_effort: str | None
+@dataclass
+class RubricResult:
+    """Result from a single rubric evaluation."""
 
-
-class RewardRubricRunResult(TypedDict):
     score: float
     explanation: str
     raw: Any
@@ -49,8 +40,7 @@ class ModelNotFoundError(ProviderRequestError):
 
 __all__ = [
     "MissingAPIKeyError",
-    "ModelInfo",
     "ModelNotFoundError",
     "ProviderRequestError",
-    "RewardRubricRunResult",
+    "RubricResult",
 ]

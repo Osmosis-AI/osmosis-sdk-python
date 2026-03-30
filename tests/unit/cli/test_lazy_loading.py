@@ -79,10 +79,8 @@ def test_all_exports_accessible():
 
 
 def test_eager_exports_present():
-    """__version__, osmosis_reward, and osmosis_rubric are available without lazy lookup."""
+    """__version__ is available without lazy lookup."""
     assert isinstance(osmosis_ai.__version__, str)
-    assert callable(osmosis_ai.osmosis_reward)
-    assert callable(osmosis_ai.osmosis_rubric)
 
 
 # -- __getattr__ is defined ---------------------------------------------------
