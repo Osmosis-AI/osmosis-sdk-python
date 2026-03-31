@@ -53,6 +53,7 @@ todo.md
 .DS_Store
 
 /CLAUDE.md
+**/superpowers/
 
 .claude/
 .cursor/

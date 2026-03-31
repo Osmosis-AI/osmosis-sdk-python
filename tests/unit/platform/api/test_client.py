@@ -273,3 +273,60 @@ class TestGetWorkspaceDeletionStatus:
         client.get_workspace_deletion_status("ws-1")
         call_kwargs = mock_request.call_args
         assert call_kwargs.kwargs.get("require_workspace") is False
+
+
+class TestGetTrainingRunMetrics:
+    """Tests for OsmosisClient.get_training_run_metrics."""
+
+    @patch("osmosis_ai.platform.api.client.platform_request")
+    def test_returns_parsed_metrics(self, mock_request: MagicMock) -> None:
+        mock_request.return_value = {
+            "training_run_id": "run-1",
+            "status": "finished",
+            "overview": {
+                "mlflow_run_id": "mlflow-1",
+                "mlflow_status": "FINISHED",
+                "duration_ms": 3600000,
+                "duration_formatted": "1h",
+                "reward": 0.85,
+                "reward_increase_delta": 0.15,
+                "examples_processed_count": 5000,
+            },
+            "metrics": [
+                {
+                    "metric_key": "rollout/raw_reward",
+                    "title": "Training Reward",
+                    "data_points": [
+                        {"step": 0, "value": 0.5, "timestamp": 1711800000000},
+                    ],
+                },
+            ],
+        }
+        client = OsmosisClient()
+        result = client.get_training_run_metrics("run-1")
+        assert result.training_run_id == "run-1"
+        assert result.overview.reward == 0.85
+        assert len(result.metrics) == 1
+        path = mock_request.call_args[0][0]
+        assert path == "/api/cli/training-runs/run-1/metrics"
+
+    @patch("osmosis_ai.platform.api.client.platform_request")
+    def test_encodes_run_id(self, mock_request: MagicMock) -> None:
+        mock_request.return_value = {
+            "training_run_id": "a/b",
+            "status": "finished",
+            "overview": {
+                "mlflow_run_id": "m",
+                "mlflow_status": "FINISHED",
+                "duration_ms": None,
+                "duration_formatted": None,
+                "reward": None,
+                "reward_increase_delta": None,
+                "examples_processed_count": None,
+            },
+            "metrics": [],
+        }
+        client = OsmosisClient()
+        client.get_training_run_metrics("a/b")
+        path = mock_request.call_args[0][0]
+        assert path == "/api/cli/training-runs/a%2Fb/metrics"

@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import re
+from pathlib import Path
+
 import typer
 
 from osmosis_ai.cli.console import console
-from osmosis_ai.cli.errors import not_implemented
+from osmosis_ai.cli.errors import CLIError, not_implemented
 
 app: typer.Typer = typer.Typer(help="Manage training runs.", no_args_is_help=True)
 
@@ -101,10 +104,97 @@ def submit() -> None:
     not_implemented("train", "submit")
 
 
+def _safe_name(name: str) -> str:
+    """Sanitise a run name for use as a filename component."""
+    return re.sub(r"[^a-zA-Z0-9_-]", "_", name)
+
+
+def _resolve_default_output(
+    run_name: str | None, run_id: str, *, cwd: Path | None = None
+) -> Path:
+    """Resolve the default output path under .osmosis/metrics/."""
+    if cwd is None:
+        cwd = Path.cwd()
+    workspace_toml = cwd / ".osmosis" / "workspace.toml"
+    if not workspace_toml.is_file():
+        raise CLIError(
+            "Not in an Osmosis workspace directory.\n"
+            "  Run from a directory created by 'osmosis init',"
+            " or use -o to specify an output path."
+        )
+    metrics_dir = cwd / ".osmosis" / "metrics"
+    metrics_dir.mkdir(exist_ok=True)
+    short_id = run_id[:8]
+    safe = _safe_name(run_name) if run_name else None
+    filename = f"{safe}_{short_id}.json" if safe else f"{short_id}.json"
+    return metrics_dir / filename
+
+
 @app.command("metrics")
-def metrics() -> None:
-    """Show training run metrics."""
-    not_implemented("train", "metrics")
+def metrics(
+    id: str = typer.Argument(
+        ..., help="Training run ID (or short prefix from 'train list')."
+    ),
+    output: str | None = typer.Option(
+        None, "--output", "-o", help="Output file path (default: .osmosis/metrics/)."
+    ),
+) -> None:
+    """Export training run metrics to a JSON file."""
+    import json
+
+    from osmosis_ai.cli.metrics_export import build_export_dict
+    from osmosis_ai.platform.api.client import OsmosisClient
+    from osmosis_ai.platform.api.models import RUN_STATUSES_TERMINAL
+    from osmosis_ai.platform.cli.project import _require_auth
+
+    _, credentials = _require_auth()
+    client = OsmosisClient()
+
+    run = client.get_training_run(id, credentials=credentials)
+
+    if run.status not in RUN_STATUSES_TERMINAL:
+        raise CLIError(
+            f"Metrics are only available for terminal training runs "
+            f"(current status: {run.status})."
+        )
+
+    metrics_data = client.get_training_run_metrics(run.id, credentials=credentials)
+    export = build_export_dict(run, metrics_data)
+
+    if output:
+        out_path = Path(output)
+        if not out_path.parent.exists():
+            raise CLIError(f"Output directory does not exist: {out_path.parent}")
+    else:
+        out_path = _resolve_default_output(run.name, run.id)
+
+    out_path.write_text(json.dumps(export, indent=2, ensure_ascii=False) + "\n")
+
+    console.print(f"Saved to {out_path}", style="green")
+    console.print()
+
+    rows: list[tuple[str, str]] = []
+    if run.name:
+        rows.append(("Name", console.escape(run.name)))
+    rows.append(("Status", run.status))
+    if run.model_name:
+        rows.append(("Model", console.escape(run.model_name)))
+    if metrics_data.overview.duration_formatted:
+        rows.append(("Duration", metrics_data.overview.duration_formatted))
+    if metrics_data.overview.reward is not None:
+        rows.append(("Final Reward", f"{metrics_data.overview.reward:.4f}"))
+    if metrics_data.overview.reward_delta is not None:
+        rows.append(("Reward Delta", f"{metrics_data.overview.reward_delta:+.4f}"))
+    if metrics_data.overview.examples_processed_count is not None:
+        rows.append(("Examples", f"{metrics_data.overview.examples_processed_count:,}"))
+    total_steps = export["summary"]["total_steps"]
+    if total_steps:
+        rows.append(("Steps", f"{total_steps:,}"))
+
+    if not metrics_data.metrics:
+        console.print("No metric data found.", style="dim")
+    else:
+        console.table(rows, title="Training Run Metrics")
 
 
 @app.command("traces")
