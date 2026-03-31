@@ -214,15 +214,28 @@ def metrics(
 
     is_in_progress = run.status in RUN_STATUSES_IN_PROGRESS
 
-    with console.spinner("Fetching metrics..."):
-        metrics_data = client.get_training_run_metrics(run.id, credentials=credentials)
-    export = build_export_dict(run, metrics_data)
-
-    # ── Platform URL ──────────────────────────────────────────────
+    # ── Platform URL (no metrics dependency) ─────────────────────
     if project_name:
         url = platform_entity_url(ws_name, project_name, "training", run.id)
         console.print()
         console.print(f"View full details: {url}", style="cyan")
+        console.print()
+
+    # ── Fetch metrics (best-effort) ──────────────────────────────
+    metrics_data = None
+    try:
+        with console.spinner("Fetching metrics..."):
+            metrics_data = client.get_training_run_metrics(
+                run.id, credentials=credentials
+            )
+    except Exception:
+        console.print("Could not fetch metrics data.", style="yellow")
+
+    if is_in_progress:
+        console.print(
+            "Note: training is in progress. Metrics shown are a snapshot.",
+            style="yellow",
+        )
         console.print()
 
     # ── Summary table ─────────────────────────────────────────────
@@ -232,29 +245,28 @@ def metrics(
     rows.append(("Status", run.status))
     if run.model_name:
         rows.append(("Model", console.escape(run.model_name)))
-    if metrics_data.overview.duration_formatted:
-        rows.append(("Duration", metrics_data.overview.duration_formatted))
-    if metrics_data.overview.reward is not None:
-        rows.append(("Final Reward", f"{metrics_data.overview.reward:.4f}"))
-    if metrics_data.overview.reward_delta is not None:
-        rows.append(("Reward Delta", f"{metrics_data.overview.reward_delta:+.4f}"))
-    if metrics_data.overview.examples_processed_count is not None:
-        rows.append(("Examples", f"{metrics_data.overview.examples_processed_count:,}"))
-    total_steps = export["summary"]["total_steps"]
-    if total_steps:
-        rows.append(("Steps", f"{total_steps:,}"))
 
-    if is_in_progress:
-        console.print(
-            "Note: training is in progress. Metrics shown are a snapshot.",
-            style="yellow",
-        )
-        console.print()
+    export = None
+    if metrics_data is not None:
+        if metrics_data.overview.duration_formatted:
+            rows.append(("Duration", metrics_data.overview.duration_formatted))
+        if metrics_data.overview.reward is not None:
+            rows.append(("Final Reward", f"{metrics_data.overview.reward:.4f}"))
+        if metrics_data.overview.reward_delta is not None:
+            rows.append(("Reward Delta", f"{metrics_data.overview.reward_delta:+.4f}"))
+        if metrics_data.overview.examples_processed_count is not None:
+            rows.append(
+                ("Examples", f"{metrics_data.overview.examples_processed_count:,}")
+            )
+        export = build_export_dict(run, metrics_data)
+        total_steps = export["summary"]["total_steps"]
+        if total_steps:
+            rows.append(("Steps", f"{total_steps:,}"))
 
-    if not metrics_data.metrics:
-        console.print("No metric data found.", style="dim")
-    else:
-        console.table(rows, title="Training Run Metrics")
+    console.table(rows, title="Training Run Metrics")
+
+    # ── Metric trends ─────────────────────────────────────────────
+    if metrics_data is not None and metrics_data.metrics:
         from osmosis_ai.cli.metrics_graph import (
             render_metric_trends,
             should_render_metric_trends,
@@ -272,19 +284,22 @@ def metrics(
                 console.print()
                 console.separator("Metric Trends")
                 console.print(trends)
+    elif metrics_data is not None:
+        console.print("No metric data found.", style="dim")
 
     # ── Save to file (best-effort) ────────────────────────────────
-    console.print()
-    try:
-        out_path = (
-            _resolve_output_path(output, run.name, run.id)
-            if output
-            else _resolve_default_output(run.name, run.id)
-        )
-        out_path.write_text(json.dumps(export, indent=2, ensure_ascii=False) + "\n")
-        console.print(f"Saved to {out_path}", style="green")
-    except (CLIError, OSError) as exc:
-        console.print(f"Could not save metrics: {exc}", style="yellow")
+    if export is not None:
+        console.print()
+        try:
+            out_path = (
+                _resolve_output_path(output, run.name, run.id)
+                if output
+                else _resolve_default_output(run.name, run.id)
+            )
+            out_path.write_text(json.dumps(export, indent=2, ensure_ascii=False) + "\n")
+            console.print(f"Saved to {out_path}", style="green")
+        except (CLIError, OSError) as exc:
+            console.print(f"Could not save metrics: {exc}", style="yellow")
 
 
 @app.command("traces")

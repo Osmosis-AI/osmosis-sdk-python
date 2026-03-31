@@ -331,7 +331,8 @@ class TestMetricsCommandTrendGraphs:
         text = buf.getvalue()
         assert "No metric data found." in text
         assert "Metric Trends" not in text
-        assert "Training Run Metrics" not in text
+        # Summary table is always shown (run metadata is valuable even without metrics)
+        assert "Training Run Metrics" in text
 
 
 class TestMetricsCommandWritesFile:
