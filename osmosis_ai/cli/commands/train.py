@@ -189,7 +189,7 @@ def metrics(
 
     from osmosis_ai.cli.metrics_export import build_export_dict
     from osmosis_ai.platform.api.client import OsmosisClient
-    from osmosis_ai.platform.api.models import RUN_STATUSES_TERMINAL
+    from osmosis_ai.platform.api.models import RUN_STATUSES_IN_PROGRESS
     from osmosis_ai.platform.cli.project import _require_auth
     from osmosis_ai.platform.cli.utils import platform_entity_url
 
@@ -209,11 +209,10 @@ def metrics(
             except Exception:
                 pass
 
-    if run.status not in RUN_STATUSES_TERMINAL:
-        raise CLIError(
-            f"Metrics are only available for terminal training runs "
-            f"(current status: {run.status})."
-        )
+    if run.status == "pending":
+        raise CLIError("Metrics are not yet available for pending training runs.")
+
+    is_in_progress = run.status in RUN_STATUSES_IN_PROGRESS
 
     with console.spinner("Fetching metrics..."):
         metrics_data = client.get_training_run_metrics(run.id, credentials=credentials)
@@ -244,6 +243,13 @@ def metrics(
     total_steps = export["summary"]["total_steps"]
     if total_steps:
         rows.append(("Steps", f"{total_steps:,}"))
+
+    if is_in_progress:
+        console.print(
+            "Note: training is in progress. Metrics shown are a snapshot.",
+            style="yellow",
+        )
+        console.print()
 
     if not metrics_data.metrics:
         console.print("No metric data found.", style="dim")

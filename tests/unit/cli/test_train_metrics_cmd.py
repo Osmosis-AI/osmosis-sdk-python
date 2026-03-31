@@ -465,21 +465,46 @@ class TestMetricsCommandErrors:
 
     @patch(_PATCH_CLIENT)
     @patch(_PATCH_AUTH)
-    def test_non_terminal_run_raises(
+    def test_pending_run_raises(
         self, mock_auth: MagicMock, mock_client_cls: MagicMock
     ) -> None:
         mock_auth.return_value = ("ws", MagicMock())
         client = mock_client_cls.return_value
-        client.get_training_run.return_value = _make_run_detail(status="running")
+        client.get_training_run.return_value = _make_run_detail(status="pending")
 
         from osmosis_ai.cli.commands.train import metrics
         from osmosis_ai.cli.errors import CLIError
 
-        with pytest.raises(CLIError, match="only available for terminal"):
+        with pytest.raises(CLIError, match="not yet available for pending"):
             metrics(
                 id="550e8400-e29b-41d4-a716-446655440000",
                 output="/tmp/out.json",
             )
+
+    @patch(_PATCH_CLIENT)
+    @patch(_PATCH_AUTH)
+    def test_running_run_shows_snapshot_note(
+        self, mock_auth: MagicMock, mock_client_cls: MagicMock, tmp_path: Path
+    ) -> None:
+        mock_auth.return_value = ("ws", MagicMock())
+        client = mock_client_cls.return_value
+        client.get_training_run.return_value = _make_run_detail(status="running")
+        client.get_project.return_value = _make_project_detail()
+        client.get_training_run_metrics.return_value = _make_metrics(status="running")
+
+        output = tmp_path / "m.json"
+        buf = io.StringIO()
+        with _patch_train_console(buf, force_terminal=False, width=120):
+            from osmosis_ai.cli.commands.train import metrics
+
+            metrics(
+                id="550e8400-e29b-41d4-a716-446655440000",
+                output=str(output),
+            )
+
+        text = buf.getvalue()
+        assert "training is in progress" in text
+        assert output.exists()
 
     def test_no_workspace_no_output_raises(self, tmp_path: Path) -> None:
         """Without .osmosis/workspace.toml and no -o flag, should error."""
