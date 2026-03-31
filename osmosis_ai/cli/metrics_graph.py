@@ -4,13 +4,26 @@ from __future__ import annotations
 
 import math
 
+from rich.table import Table
+from rich.text import Text
+
 from osmosis_ai.platform.api.models import MetricDataPoint, MetricHistory
 
 MIN_TREND_TERMINAL_WIDTH = 100
 MIN_SPARKLINE_WIDTH = 8
-# Two gaps: title/spark and spark/summary (each "  ").
-_SEP_BETWEEN_COLUMNS = 2 + 2
 SPARKLINE_BLOCKS = "▁▂▃▄▅▆▇█"
+
+# RGB color at each of the 8 block levels (dark-green → bright-green gradient).
+_LEVEL_COLORS: list[tuple[int, int, int]] = [
+    (11, 74, 28),
+    (14, 96, 36),
+    (18, 118, 45),
+    (23, 140, 54),
+    (30, 162, 62),
+    (40, 184, 70),
+    (55, 206, 78),
+    (72, 228, 86),
+]
 
 
 def should_render_metric_trends(
@@ -33,7 +46,7 @@ def _format_metric_value(v: float) -> str:
     if math.isinf(v):
         return "inf" if v > 0 else "-inf"
     av = abs(v)
-    # Huge magnitudes, ultra-tiny, or sub-milli where fixed .3f collapses (e.g. 1e-6 → "0.000").
+    # Huge magnitudes, ultra-tiny, or sub-milli where fixed .3f collapses (e.g. 1e-6 -> "0.000").
     if av >= 1e15 or (av > 0 and av < 1e-3):
         s = f"{v:.4g}"
         return s if len(s) <= 18 else f"{v:.3e}"
@@ -57,19 +70,8 @@ def _downsample_values(values: list[float], target_len: int) -> list[float]:
     return [values[round(i * last / (target_len - 1))] for i in range(target_len)]
 
 
-def _title_cell(title: str, width: int) -> str:
-    """Fit title to column width (truncate with ellipsis if needed)."""
-    if width <= 0:
-        return ""
-    if len(title) <= width:
-        return title.ljust(width)
-    if width == 1:
-        return "…"
-    return title[: width - 1] + "…"
-
-
 def _values_ordered_by_step(m: MetricHistory) -> list[float]:
-    """Values in ascending `MetricDataPoint.step` order (not list order)."""
+    """Values in ascending ``MetricDataPoint.step`` order (not list order)."""
     ordered: list[MetricDataPoint] = sorted(
         m.data_points, key=lambda dp: (dp.step, dp.timestamp)
     )
@@ -83,13 +85,14 @@ def _summary_pair(m: MetricHistory) -> tuple[str, str]:
     return lo, hi
 
 
+# Two gaps: title/spark and spark/summary (each "  ").
+_SEP_BETWEEN_COLUMNS = 2 + 2
+
+
 def _layout_columns(
     metrics: list[MetricHistory], terminal_width: int
 ) -> tuple[int, int, int]:
-    """Return (title_col_width, summary_col_width, sparkline_width).
-
-    Row layout: ``title | sparkline | summary`` (summary right-aligned in the last column).
-    """
+    """Return (title_col_width, summary_col_width, sparkline_width)."""
     max_title = max(len(m.title) for m in metrics)
     max_summary_len = 0
     for m in metrics:
@@ -98,7 +101,6 @@ def _layout_columns(
             max_summary_len = max(max_summary_len, len(f"{lo} -> {hi}"))
 
     if max_summary_len == 0:
-        # No series has points: only "title  No data" rows.
         title_col = min(
             max_title, max(1, terminal_width - _SEP_BETWEEN_COLUMNS - len("No data"))
         )
@@ -119,7 +121,6 @@ def _layout_columns(
         )
         spark_w = terminal_width - title_col - max_summary_len - _SEP_BETWEEN_COLUMNS
     spark_w = max(MIN_SPARKLINE_WIDTH, spark_w)
-    # If summary is pathological, re-clamp title so the row still fits.
     if title_col + max_summary_len + _SEP_BETWEEN_COLUMNS + spark_w > terminal_width:
         title_col = max(
             1, terminal_width - max_summary_len - _SEP_BETWEEN_COLUMNS - spark_w
@@ -128,67 +129,120 @@ def _layout_columns(
     return title_col, max_summary_len, spark_w
 
 
-def _sparkline_for_values(values: list[float]) -> str:
-    """Normalize values independently to block characters (flat → mid block)."""
-    if not values:
-        return ""
+def _sparkline_for_values(values: list[float], width: int) -> Text:
+    """Normalize values to colored block characters as a Rich Text object."""
     nblocks = len(SPARKLINE_BLOCKS)
-    mid = SPARKLINE_BLOCKS[nblocks // 2]
+    mid_idx = nblocks // 2
+
+    if not values:
+        return Text()
+
     finite = [v for v in values if math.isfinite(v)]
     if not finite:
-        return mid * len(values)
+        ch = SPARKLINE_BLOCKS[mid_idx]
+        r, g, b = _LEVEL_COLORS[mid_idx]
+        text = Text()
+        text.append(ch * len(values), style=f"rgb({r},{g},{b})")
+        return text
+
     vmin = min(finite)
     vmax = max(finite)
     if vmin == vmax:
-        return mid * len(values)
-    out: list[str] = []
+        ch = SPARKLINE_BLOCKS[mid_idx]
+        r, g, b = _LEVEL_COLORS[mid_idx]
+        text = Text()
+        text.append(ch * len(values), style=f"rgb({r},{g},{b})")
+        return text
+
     span = vmax - vmin
-    # Huge opposite-signed magnitudes can make span overflow to inf → NaN in t.
     if not math.isfinite(span) or span <= 0:
-        return mid * len(values)
+        ch = SPARKLINE_BLOCKS[mid_idx]
+        r, g, b = _LEVEL_COLORS[mid_idx]
+        text = Text()
+        text.append(ch * len(values), style=f"rgb({r},{g},{b})")
+        return text
+
+    text = Text()
     for v in values:
         if not math.isfinite(v):
-            out.append(mid)
-            continue
-        t = (v - vmin) / span
-        if not math.isfinite(t):
-            out.append(mid)
-            continue
-        idx = round(t * (nblocks - 1))
-        idx = max(0, min(nblocks - 1, idx))
-        out.append(SPARKLINE_BLOCKS[idx])
-    return "".join(out)
+            idx = mid_idx
+        else:
+            t = (v - vmin) / span
+            if not math.isfinite(t):
+                idx = mid_idx
+            else:
+                idx = round(t * (nblocks - 1))
+                idx = max(0, min(nblocks - 1, idx))
+        r, g, b = _LEVEL_COLORS[idx]
+        text.append(SPARKLINE_BLOCKS[idx], style=f"rgb({r},{g},{b})")
+
+    # Pad to target width if needed.
+    produced = len(values)
+    if produced < width:
+        text.append(" " * (width - produced))
+
+    return text
+
+
+def _title_cell(title: str, width: int) -> str:
+    """Fit title to column width (truncate with ellipsis if needed)."""
+    if width <= 0:
+        return ""
+    if len(title) <= width:
+        return title
+    if width == 1:
+        return "\u2026"
+    return title[: width - 1] + "\u2026"
 
 
 def render_metric_trends(
     metrics: list[MetricHistory],
     *,
     terminal_width: int = 120,
-) -> str | None:
-    """Render ordered metric trends as plain text, or None when there is nothing to show."""
+) -> Table | None:
+    """Render ordered metric trends as a Rich Table, or None when nothing to show."""
     if not metrics:
         return None
 
     title_col, summary_col, spark_w = _layout_columns(metrics, terminal_width)
-    lines: list[str] = []
+
+    table = Table(
+        box=None,
+        show_header=False,
+        padding=(0, 1),
+        pad_edge=False,
+        expand=False,
+    )
 
     if summary_col == 0:
+        table.add_column("metric", width=title_col, no_wrap=True, style="bold")
+        table.add_column("status", style="dim")
         for m in metrics:
-            lines.append(_title_cell(m.title, title_col) + "  No data")
-        return "\n".join(lines)
+            table.add_row(Text(_title_cell(m.title, title_col)), "No data")
+        return table
 
-    for m in metrics:
+    table.add_column("metric", width=title_col, no_wrap=True, style="bold")
+    table.add_column("trend", width=spark_w, no_wrap=True)
+    table.add_column(
+        "range", width=summary_col, justify="right", style="dim", no_wrap=True
+    )
+
+    for i, m in enumerate(metrics):
+        if i > 0:
+            table.add_row("", Text(), "")
+
         if not m.data_points:
-            lines.append(_title_cell(m.title, title_col) + "  No data")
+            table.add_row(
+                Text(_title_cell(m.title, title_col)),
+                Text("No data", style="dim"),
+                "",
+            )
             continue
+
         raw = _values_ordered_by_step(m)
         sampled = _downsample_values(raw, spark_w)
-        spark = _sparkline_for_values(sampled)
-        spark_cell = spark.ljust(spark_w)[:spark_w]
+        spark = _sparkline_for_values(sampled, spark_w)
         lo, hi = _summary_pair(m)
-        summ = f"{lo} -> {hi}"
-        summ_cell = summ.rjust(summary_col)
-        lines.append(
-            _title_cell(m.title, title_col) + "  " + spark_cell + "  " + summ_cell
-        )
-    return "\n".join(lines)
+        table.add_row(Text(_title_cell(m.title, title_col)), spark, f"{lo} -> {hi}")
+
+    return table

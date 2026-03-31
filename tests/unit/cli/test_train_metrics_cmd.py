@@ -14,10 +14,14 @@ from osmosis_ai.cli.metrics_graph import MIN_TREND_TERMINAL_WIDTH, SPARKLINE_BLO
 from osmosis_ai.platform.api.models import (
     MetricDataPoint,
     MetricHistory,
+    ProjectDetail,
     TrainingRunDetail,
     TrainingRunMetrics,
     TrainingRunMetricsOverview,
 )
+
+_PROJECT_ID = "proj-0001-0001-0001-000000000001"
+_PROJECT_NAME = "my-project"
 
 
 def _make_run_detail(**overrides) -> TrainingRunDetail:
@@ -29,9 +33,20 @@ def _make_run_detail(**overrides) -> TrainingRunDetail:
         started_at="2026-03-28T10:00:00Z",
         completed_at="2026-03-28T11:05:30Z",
         examples_processed_count=5000,
+        project_id=_PROJECT_ID,
     )
     defaults.update(overrides)
     return TrainingRunDetail(**defaults)
+
+
+def _make_project_detail() -> ProjectDetail:
+    return ProjectDetail(
+        id=_PROJECT_ID,
+        project_name=_PROJECT_NAME,
+        role="owner",
+        created_at="2026-01-01T00:00:00Z",
+        updated_at="2026-01-01T00:00:00Z",
+    )
 
 
 def _make_metrics(**overrides) -> TrainingRunMetrics:
@@ -88,6 +103,86 @@ def _patch_train_console(
     )
 
 
+class TestMetricsCommandPlatformUrl:
+    """Platform URL is printed at the top of output."""
+
+    @patch(_PATCH_CLIENT)
+    @patch(_PATCH_AUTH)
+    def test_platform_url_printed(
+        self, mock_auth: MagicMock, mock_client_cls: MagicMock, tmp_path: Path
+    ) -> None:
+        mock_auth.return_value = ("ws", MagicMock())
+        client = mock_client_cls.return_value
+        client.get_training_run.return_value = _make_run_detail()
+        client.get_project.return_value = _make_project_detail()
+        client.get_training_run_metrics.return_value = _make_metrics()
+
+        output = tmp_path / "m.json"
+        buf = io.StringIO()
+        with _patch_train_console(buf, force_terminal=False, width=120):
+            from osmosis_ai.cli.commands.train import metrics
+
+            metrics(
+                id="550e8400-e29b-41d4-a716-446655440000",
+                output=str(output),
+            )
+
+        text = buf.getvalue()
+        assert "View full details:" in text
+        assert f"ws/{_PROJECT_NAME}/training/" in text
+        assert "550e8400-e29b-41d4-a716-446655440000" in text
+
+    @patch(_PATCH_CLIENT)
+    @patch(_PATCH_AUTH)
+    def test_platform_url_skipped_when_project_lookup_fails(
+        self, mock_auth: MagicMock, mock_client_cls: MagicMock, tmp_path: Path
+    ) -> None:
+        mock_auth.return_value = ("ws", MagicMock())
+        client = mock_client_cls.return_value
+        client.get_training_run.return_value = _make_run_detail()
+        client.get_project.side_effect = Exception("network error")
+        client.get_training_run_metrics.return_value = _make_metrics()
+
+        output = tmp_path / "m.json"
+        buf = io.StringIO()
+        with _patch_train_console(buf, force_terminal=False, width=120):
+            from osmosis_ai.cli.commands.train import metrics
+
+            metrics(
+                id="550e8400-e29b-41d4-a716-446655440000",
+                output=str(output),
+            )
+
+        text = buf.getvalue()
+        # URL line should be absent, but the rest should work
+        assert "/training/" not in text
+        assert "Training Run Metrics" in text
+
+    @patch(_PATCH_CLIENT)
+    @patch(_PATCH_AUTH)
+    def test_platform_url_skipped_when_no_project_id(
+        self, mock_auth: MagicMock, mock_client_cls: MagicMock, tmp_path: Path
+    ) -> None:
+        mock_auth.return_value = ("ws", MagicMock())
+        client = mock_client_cls.return_value
+        client.get_training_run.return_value = _make_run_detail(project_id=None)
+        client.get_training_run_metrics.return_value = _make_metrics()
+
+        output = tmp_path / "m.json"
+        buf = io.StringIO()
+        with _patch_train_console(buf, force_terminal=False, width=120):
+            from osmosis_ai.cli.commands.train import metrics
+
+            metrics(
+                id="550e8400-e29b-41d4-a716-446655440000",
+                output=str(output),
+            )
+
+        text = buf.getvalue()
+        assert "/training/" not in text
+        assert "Training Run Metrics" in text
+
+
 class TestMetricsCommandTrendGraphs:
     """Trend graphs after the summary table when TTY + width allow."""
 
@@ -99,6 +194,7 @@ class TestMetricsCommandTrendGraphs:
         mock_auth.return_value = ("ws", MagicMock())
         client = mock_client_cls.return_value
         client.get_training_run.return_value = _make_run_detail()
+        client.get_project.return_value = _make_project_detail()
         client.get_training_run_metrics.return_value = _make_metrics()
 
         output = tmp_path / "m.json"
@@ -115,7 +211,7 @@ class TestMetricsCommandTrendGraphs:
 
         text = buf.getvalue()
         assert "Training Run Metrics" in text
-        assert "Metric Trends" in text
+        assert "Metric Trends" in text  # Rule separator header
         assert "Training Reward" in text
         assert any(c in text for c in SPARKLINE_BLOCKS)
 
@@ -129,6 +225,7 @@ class TestMetricsCommandTrendGraphs:
         mock_auth.return_value = ("ws", MagicMock())
         client = mock_client_cls.return_value
         client.get_training_run.return_value = _make_run_detail()
+        client.get_project.return_value = _make_project_detail()
         client.get_training_run_metrics.return_value = _make_metrics(
             metrics=[
                 MetricHistory(
@@ -166,6 +263,7 @@ class TestMetricsCommandTrendGraphs:
         mock_auth.return_value = ("ws", MagicMock())
         client = mock_client_cls.return_value
         client.get_training_run.return_value = _make_run_detail()
+        client.get_project.return_value = _make_project_detail()
         client.get_training_run_metrics.return_value = _make_metrics()
 
         output = tmp_path / "m.json"
@@ -190,6 +288,7 @@ class TestMetricsCommandTrendGraphs:
         mock_auth.return_value = ("ws", MagicMock())
         client = mock_client_cls.return_value
         client.get_training_run.return_value = _make_run_detail()
+        client.get_project.return_value = _make_project_detail()
         client.get_training_run_metrics.return_value = _make_metrics()
 
         output = tmp_path / "m.json"
@@ -214,6 +313,7 @@ class TestMetricsCommandTrendGraphs:
         mock_auth.return_value = ("ws", MagicMock())
         client = mock_client_cls.return_value
         client.get_training_run.return_value = _make_run_detail()
+        client.get_project.return_value = _make_project_detail()
         client.get_training_run_metrics.return_value = _make_metrics(metrics=[])
 
         output = tmp_path / "m.json"
@@ -245,6 +345,7 @@ class TestMetricsCommandWritesFile:
         mock_auth.return_value = ("ws", MagicMock())
         client = mock_client_cls.return_value
         client.get_training_run.return_value = _make_run_detail()
+        client.get_project.return_value = _make_project_detail()
         client.get_training_run_metrics.return_value = _make_metrics()
 
         output = tmp_path / "metrics.json"
@@ -274,6 +375,7 @@ class TestMetricsCommandWritesFile:
         mock_auth.return_value = ("ws", MagicMock())
         client = mock_client_cls.return_value
         client.get_training_run.return_value = _make_run_detail()
+        client.get_project.return_value = _make_project_detail()
         client.get_training_run_metrics.return_value = _make_metrics()
 
         # Create workspace marker
@@ -389,19 +491,55 @@ class TestMetricsCommandErrors:
 
     @patch(_PATCH_CLIENT)
     @patch(_PATCH_AUTH)
-    def test_output_unreachable_path_raises(
+    def test_output_unreachable_path_prints_warning(
         self, mock_auth: MagicMock, mock_client_cls: MagicMock
     ) -> None:
+        """Unreachable save path prints warning instead of crashing."""
         mock_auth.return_value = ("ws", MagicMock())
         client = mock_client_cls.return_value
         client.get_training_run.return_value = _make_run_detail()
+        client.get_project.return_value = _make_project_detail()
         client.get_training_run_metrics.return_value = _make_metrics()
 
-        from osmosis_ai.cli.commands.train import metrics
-        from osmosis_ai.cli.errors import CLIError
+        buf = io.StringIO()
+        with _patch_train_console(buf, force_terminal=False, width=80):
+            from osmosis_ai.cli.commands.train import metrics
 
-        with pytest.raises(CLIError, match="Cannot create output path"):
             metrics(
                 id="550e8400-e29b-41d4-a716-446655440000",
                 output="/nonexistent/dir/metrics.json",
             )
+
+        text = buf.getvalue()
+        assert "Could not save metrics" in text
+
+    @patch(_PATCH_CLIENT)
+    @patch(_PATCH_AUTH)
+    def test_no_output_outside_workspace_prints_warning(
+        self,
+        mock_auth: MagicMock,
+        mock_client_cls: MagicMock,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Without -o and outside a workspace dir, metrics still print."""
+        mock_auth.return_value = ("ws", MagicMock())
+        client = mock_client_cls.return_value
+        client.get_training_run.return_value = _make_run_detail()
+        client.get_project.return_value = _make_project_detail()
+        client.get_training_run_metrics.return_value = _make_metrics()
+
+        monkeypatch.chdir(tmp_path)  # no .osmosis/workspace.toml here
+
+        buf = io.StringIO()
+        with _patch_train_console(buf, force_terminal=False, width=80):
+            from osmosis_ai.cli.commands.train import metrics
+
+            metrics(
+                id="550e8400-e29b-41d4-a716-446655440000",
+                output=None,
+            )
+
+        text = buf.getvalue()
+        assert "Training Run Metrics" in text
+        assert "Could not save metrics" in text

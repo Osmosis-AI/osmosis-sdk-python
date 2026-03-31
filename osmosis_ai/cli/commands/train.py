@@ -29,9 +29,12 @@ def list_runs(
 
     from osmosis_ai.platform.api.client import OsmosisClient
 
-    project_id = _resolve_project_id(project, workspace_name=ws_name)
-    client = OsmosisClient()
-    result = client.list_training_runs(project_id, limit=limit, credentials=credentials)
+    with console.spinner("Fetching training runs..."):
+        project_id = _resolve_project_id(project, workspace_name=ws_name)
+        client = OsmosisClient()
+        result = client.list_training_runs(
+            project_id, limit=limit, credentials=credentials
+        )
 
     if not result.training_runs:
         console.print("No training runs found.")
@@ -188,22 +191,23 @@ def metrics(
     from osmosis_ai.platform.api.client import OsmosisClient
     from osmosis_ai.platform.api.models import RUN_STATUSES_TERMINAL
     from osmosis_ai.platform.cli.project import _require_auth
+    from osmosis_ai.platform.cli.utils import platform_entity_url
 
-    # Fail fast: validate output destination before any network calls
-    if not output:
-        workspace_toml = Path.cwd() / ".osmosis" / "workspace.toml"
-        if not workspace_toml.is_file():
-            raise CLIError(
-                "Not in an Osmosis workspace directory.\n"
-                "  Run from a directory created by 'osmosis init',"
-                " or use -o to specify an output path."
-            )
-
-    _, credentials = _require_auth()
+    ws_name, credentials = _require_auth()
     client = OsmosisClient()
 
     with console.spinner("Fetching training run..."):
         run = client.get_training_run(id, credentials=credentials)
+        # Best-effort: resolve project name for the platform URL.
+        project_name: str | None = None
+        if run.project_id:
+            try:
+                project_detail = client.get_project(
+                    run.project_id, credentials=credentials
+                )
+                project_name = project_detail.project_name
+            except Exception:
+                pass
 
     if run.status not in RUN_STATUSES_TERMINAL:
         raise CLIError(
@@ -215,17 +219,14 @@ def metrics(
         metrics_data = client.get_training_run_metrics(run.id, credentials=credentials)
     export = build_export_dict(run, metrics_data)
 
-    out_path = (
-        _resolve_output_path(output, run.name, run.id)
-        if output
-        else _resolve_default_output(run.name, run.id)
-    )
+    # ── Platform URL ──────────────────────────────────────────────
+    if project_name:
+        url = platform_entity_url(ws_name, project_name, "training", run.id)
+        console.print()
+        console.print(f"View full details: {url}", style="cyan")
+        console.print()
 
-    out_path.write_text(json.dumps(export, indent=2, ensure_ascii=False) + "\n")
-
-    console.print(f"Saved to {out_path}", style="green")
-    console.print()
-
+    # ── Summary table ─────────────────────────────────────────────
     rows: list[tuple[str, str]] = []
     if run.name:
         rows.append(("Name", console.escape(run.name)))
@@ -263,8 +264,21 @@ def metrics(
             )
             if trends:
                 console.print()
-                console.print("Metric Trends")
-                console.print(trends, markup=False)
+                console.separator("Metric Trends")
+                console.print(trends)
+
+    # ── Save to file (best-effort) ────────────────────────────────
+    console.print()
+    try:
+        out_path = (
+            _resolve_output_path(output, run.name, run.id)
+            if output
+            else _resolve_default_output(run.name, run.id)
+        )
+        out_path.write_text(json.dumps(export, indent=2, ensure_ascii=False) + "\n")
+        console.print(f"Saved to {out_path}", style="green")
+    except (CLIError, OSError) as exc:
+        console.print(f"Could not save metrics: {exc}", style="yellow")
 
 
 @app.command("traces")
