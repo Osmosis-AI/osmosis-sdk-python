@@ -40,6 +40,7 @@ class Console:
         file: Any = None,
         force_terminal: bool | None = None,
         no_color: bool = False,
+        width: int | None = None,
     ):
         """Initialize the console.
 
@@ -47,17 +48,27 @@ class Console:
             file: Output file. Defaults to sys.stdout.
             force_terminal: Force terminal mode (for testing). None = auto-detect.
             no_color: Disable all colors, even in TTY mode.
+            width: Fixed terminal width (for testing). None = auto-detect.
         """
         file = file or sys.stdout
+
+        # When TERM=dumb, Rich's Console.size short-circuits to 80x25 unless both width and
+        # height are set; width alone is ignored (see rich.console.Console.size).
+        rich_size: dict[str, Any] = {}
+        if width is not None:
+            rich_size["width"] = width
+            rich_size["height"] = 25
 
         self._rich = RichConsole(
             file=file,
             force_terminal=force_terminal,
             no_color=no_color,
+            **rich_size,
         )
         self._rich_stderr = RichConsole(
             file=sys.stderr,
             no_color=no_color,
+            **rich_size,
         )
 
     @property

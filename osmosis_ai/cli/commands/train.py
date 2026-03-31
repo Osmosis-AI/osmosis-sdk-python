@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 from pathlib import Path
 
@@ -109,6 +110,43 @@ def _safe_name(name: str) -> str:
     return re.sub(r"[^a-zA-Z0-9_-]", "_", name)
 
 
+def _default_filename(run_name: str | None, run_id: str) -> str:
+    """Build the default JSON filename from run metadata."""
+    short_id = run_id[:8]
+    safe = _safe_name(run_name) if run_name else None
+    return f"{safe}_{short_id}.json" if safe else f"{short_id}.json"
+
+
+def _resolve_output_path(output: str, run_name: str | None, run_id: str) -> Path:
+    """Resolve a user-supplied ``-o`` value into a concrete file path.
+
+    Rules:
+    * Trailing ``/`` or existing directory → directory mode (generate default
+      filename inside the directory).
+    * Has a file extension → use as-is.
+    * No extension → auto-append ``.json``.
+
+    Parent directories are created automatically.
+    """
+    path = Path(output)
+
+    try:
+        # Directory mode: trailing separator or existing directory
+        if output.endswith(("/", os.sep)) or path.is_dir():
+            path.mkdir(parents=True, exist_ok=True)
+            return path / _default_filename(run_name, run_id)
+
+        # Ensure .json extension (output is always JSON)
+        if path.suffix != ".json":
+            path = path.with_suffix(".json")
+
+        path.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        raise CLIError(f"Cannot create output path: {exc}") from exc
+
+    return path
+
+
 def _resolve_default_output(
     run_name: str | None, run_id: str, *, cwd: Path | None = None
 ) -> Path:
@@ -124,10 +162,7 @@ def _resolve_default_output(
         )
     metrics_dir = cwd / ".osmosis" / "metrics"
     metrics_dir.mkdir(exist_ok=True)
-    short_id = run_id[:8]
-    safe = _safe_name(run_name) if run_name else None
-    filename = f"{safe}_{short_id}.json" if safe else f"{short_id}.json"
-    return metrics_dir / filename
+    return metrics_dir / _default_filename(run_name, run_id)
 
 
 @app.command("metrics")
@@ -136,7 +171,14 @@ def metrics(
         ..., help="Training run ID (or short prefix from 'train list')."
     ),
     output: str | None = typer.Option(
-        None, "--output", "-o", help="Output file path (default: .osmosis/metrics/)."
+        None,
+        "--output",
+        "-o",
+        help=(
+            "Output path. Non-.json extensions are replaced with .json;"
+            " a trailing '/' or existing directory generates a default"
+            " filename inside it. (default: .osmosis/metrics/)"
+        ),
     ),
 ) -> None:
     """Export training run metrics to a JSON file."""
@@ -147,10 +189,21 @@ def metrics(
     from osmosis_ai.platform.api.models import RUN_STATUSES_TERMINAL
     from osmosis_ai.platform.cli.project import _require_auth
 
+    # Fail fast: validate output destination before any network calls
+    if not output:
+        workspace_toml = Path.cwd() / ".osmosis" / "workspace.toml"
+        if not workspace_toml.is_file():
+            raise CLIError(
+                "Not in an Osmosis workspace directory.\n"
+                "  Run from a directory created by 'osmosis init',"
+                " or use -o to specify an output path."
+            )
+
     _, credentials = _require_auth()
     client = OsmosisClient()
 
-    run = client.get_training_run(id, credentials=credentials)
+    with console.spinner("Fetching training run..."):
+        run = client.get_training_run(id, credentials=credentials)
 
     if run.status not in RUN_STATUSES_TERMINAL:
         raise CLIError(
@@ -158,15 +211,15 @@ def metrics(
             f"(current status: {run.status})."
         )
 
-    metrics_data = client.get_training_run_metrics(run.id, credentials=credentials)
+    with console.spinner("Fetching metrics..."):
+        metrics_data = client.get_training_run_metrics(run.id, credentials=credentials)
     export = build_export_dict(run, metrics_data)
 
-    if output:
-        out_path = Path(output)
-        if not out_path.parent.exists():
-            raise CLIError(f"Output directory does not exist: {out_path.parent}")
-    else:
-        out_path = _resolve_default_output(run.name, run.id)
+    out_path = (
+        _resolve_output_path(output, run.name, run.id)
+        if output
+        else _resolve_default_output(run.name, run.id)
+    )
 
     out_path.write_text(json.dumps(export, indent=2, ensure_ascii=False) + "\n")
 
@@ -195,6 +248,23 @@ def metrics(
         console.print("No metric data found.", style="dim")
     else:
         console.table(rows, title="Training Run Metrics")
+        from osmosis_ai.cli.metrics_graph import (
+            render_metric_trends,
+            should_render_metric_trends,
+        )
+
+        if should_render_metric_trends(
+            is_tty=console.is_tty,
+            terminal_width=console.rich.width,
+            metrics=metrics_data.metrics,
+        ):
+            trends = render_metric_trends(
+                metrics_data.metrics, terminal_width=console.rich.width
+            )
+            if trends:
+                console.print()
+                console.print("Metric Trends")
+                console.print(trends, markup=False)
 
 
 @app.command("traces")

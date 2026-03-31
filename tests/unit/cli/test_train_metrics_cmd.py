@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import io
 import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+from osmosis_ai.cli.console import Console
+from osmosis_ai.cli.metrics_graph import MIN_TREND_TERMINAL_WIDTH, SPARKLINE_BLOCKS
 from osmosis_ai.platform.api.models import (
     MetricDataPoint,
     MetricHistory,
@@ -62,6 +65,173 @@ def _make_metrics(**overrides) -> TrainingRunMetrics:
 # Patch at source modules since train.py uses function-level lazy imports.
 _PATCH_AUTH = "osmosis_ai.platform.cli.project._require_auth"
 _PATCH_CLIENT = "osmosis_ai.platform.api.client.OsmosisClient"
+
+
+def _patch_train_console(
+    buf: io.StringIO,
+    *,
+    force_terminal: bool = True,
+    width: int = 120,
+):
+    """Patch ``train`` module ``console`` for deterministic metrics output tests."""
+    import osmosis_ai.cli.commands.train as train_module
+
+    return patch.object(
+        train_module,
+        "console",
+        Console(
+            file=buf,
+            force_terminal=force_terminal,
+            no_color=True,
+            width=width,
+        ),
+    )
+
+
+class TestMetricsCommandTrendGraphs:
+    """Trend graphs after the summary table when TTY + width allow."""
+
+    @patch(_PATCH_CLIENT)
+    @patch(_PATCH_AUTH)
+    def test_graphs_render_after_summary_when_tty_and_width_sufficient(
+        self, mock_auth: MagicMock, mock_client_cls: MagicMock, tmp_path: Path
+    ) -> None:
+        mock_auth.return_value = ("ws", MagicMock())
+        client = mock_client_cls.return_value
+        client.get_training_run.return_value = _make_run_detail()
+        client.get_training_run_metrics.return_value = _make_metrics()
+
+        output = tmp_path / "m.json"
+        buf = io.StringIO()
+        with _patch_train_console(
+            buf, force_terminal=True, width=MIN_TREND_TERMINAL_WIDTH
+        ):
+            from osmosis_ai.cli.commands.train import metrics
+
+            metrics(
+                id="550e8400-e29b-41d4-a716-446655440000",
+                output=str(output),
+            )
+
+        text = buf.getvalue()
+        assert "Training Run Metrics" in text
+        assert "Metric Trends" in text
+        assert "Training Reward" in text
+        assert any(c in text for c in SPARKLINE_BLOCKS)
+
+    @patch(_PATCH_CLIENT)
+    @patch(_PATCH_AUTH)
+    def test_trend_block_prints_metric_title_with_brackets_literally(
+        self, mock_auth: MagicMock, mock_client_cls: MagicMock, tmp_path: Path
+    ) -> None:
+        """Bracket characters in metric titles must not be interpreted as Rich markup."""
+        bracket_title = "Loss [eval]"
+        mock_auth.return_value = ("ws", MagicMock())
+        client = mock_client_cls.return_value
+        client.get_training_run.return_value = _make_run_detail()
+        client.get_training_run_metrics.return_value = _make_metrics(
+            metrics=[
+                MetricHistory(
+                    metric_key="loss/eval",
+                    title=bracket_title,
+                    data_points=[
+                        MetricDataPoint(step=0, value=1.0, timestamp=0),
+                        MetricDataPoint(step=1, value=0.5, timestamp=1),
+                    ],
+                ),
+            ],
+        )
+
+        output = tmp_path / "m.json"
+        buf = io.StringIO()
+        with _patch_train_console(
+            buf, force_terminal=True, width=MIN_TREND_TERMINAL_WIDTH
+        ):
+            from osmosis_ai.cli.commands.train import metrics
+
+            metrics(
+                id="550e8400-e29b-41d4-a716-446655440000",
+                output=str(output),
+            )
+
+        text = buf.getvalue()
+        assert bracket_title in text
+        assert "Metric Trends" in text
+
+    @patch(_PATCH_CLIENT)
+    @patch(_PATCH_AUTH)
+    def test_graphs_skipped_when_not_tty(
+        self, mock_auth: MagicMock, mock_client_cls: MagicMock, tmp_path: Path
+    ) -> None:
+        mock_auth.return_value = ("ws", MagicMock())
+        client = mock_client_cls.return_value
+        client.get_training_run.return_value = _make_run_detail()
+        client.get_training_run_metrics.return_value = _make_metrics()
+
+        output = tmp_path / "m.json"
+        buf = io.StringIO()
+        with _patch_train_console(
+            buf, force_terminal=False, width=MIN_TREND_TERMINAL_WIDTH
+        ):
+            from osmosis_ai.cli.commands.train import metrics
+
+            metrics(
+                id="550e8400-e29b-41d4-a716-446655440000",
+                output=str(output),
+            )
+
+        assert "Metric Trends" not in buf.getvalue()
+
+    @patch(_PATCH_CLIENT)
+    @patch(_PATCH_AUTH)
+    def test_graphs_skipped_when_terminal_narrow(
+        self, mock_auth: MagicMock, mock_client_cls: MagicMock, tmp_path: Path
+    ) -> None:
+        mock_auth.return_value = ("ws", MagicMock())
+        client = mock_client_cls.return_value
+        client.get_training_run.return_value = _make_run_detail()
+        client.get_training_run_metrics.return_value = _make_metrics()
+
+        output = tmp_path / "m.json"
+        buf = io.StringIO()
+        with _patch_train_console(
+            buf, force_terminal=True, width=MIN_TREND_TERMINAL_WIDTH - 1
+        ):
+            from osmosis_ai.cli.commands.train import metrics
+
+            metrics(
+                id="550e8400-e29b-41d4-a716-446655440000",
+                output=str(output),
+            )
+
+        assert "Metric Trends" not in buf.getvalue()
+
+    @patch(_PATCH_CLIENT)
+    @patch(_PATCH_AUTH)
+    def test_no_metric_data_unchanged_no_graphs(
+        self, mock_auth: MagicMock, mock_client_cls: MagicMock, tmp_path: Path
+    ) -> None:
+        mock_auth.return_value = ("ws", MagicMock())
+        client = mock_client_cls.return_value
+        client.get_training_run.return_value = _make_run_detail()
+        client.get_training_run_metrics.return_value = _make_metrics(metrics=[])
+
+        output = tmp_path / "m.json"
+        buf = io.StringIO()
+        with _patch_train_console(
+            buf, force_terminal=True, width=MIN_TREND_TERMINAL_WIDTH
+        ):
+            from osmosis_ai.cli.commands.train import metrics
+
+            metrics(
+                id="550e8400-e29b-41d4-a716-446655440000",
+                output=str(output),
+            )
+
+        text = buf.getvalue()
+        assert "No metric data found." in text
+        assert "Metric Trends" not in text
+        assert "Training Run Metrics" not in text
 
 
 class TestMetricsCommandWritesFile:
@@ -125,6 +295,69 @@ class TestMetricsCommandWritesFile:
         assert data["training_run"]["id"] == "550e8400-e29b-41d4-a716-446655440000"
 
 
+class TestResolveOutputPath:
+    """Test _resolve_output_path smart path resolution."""
+
+    def test_explicit_json_extension_used_as_is(self, tmp_path: Path) -> None:
+        from osmosis_ai.cli.commands.train import _resolve_output_path
+
+        result = _resolve_output_path(
+            str(tmp_path / "my_metrics.json"), "run-name", "abcd1234"
+        )
+        assert result == tmp_path / "my_metrics.json"
+
+    def test_no_extension_appends_json(self, tmp_path: Path) -> None:
+        from osmosis_ai.cli.commands.train import _resolve_output_path
+
+        result = _resolve_output_path(
+            str(tmp_path / "my_metrics"), "run-name", "abcd1234"
+        )
+        assert result == tmp_path / "my_metrics.json"
+
+    def test_non_json_extension_replaced_with_json(self, tmp_path: Path) -> None:
+        from osmosis_ai.cli.commands.train import _resolve_output_path
+
+        result = _resolve_output_path(
+            str(tmp_path / "my_metrics.csv"), "run-name", "abcd1234"
+        )
+        assert result == tmp_path / "my_metrics.json"
+
+    def test_trailing_slash_uses_directory_mode(self, tmp_path: Path) -> None:
+        from osmosis_ai.cli.commands.train import _resolve_output_path
+
+        dir_path = tmp_path / "output"
+        result = _resolve_output_path(
+            str(dir_path) + "/", "reward-tuning", "abcd1234efgh5678"
+        )
+        assert result == dir_path / "reward-tuning_abcd1234.json"
+        assert dir_path.is_dir()
+
+    def test_existing_directory_uses_directory_mode(self, tmp_path: Path) -> None:
+        from osmosis_ai.cli.commands.train import _resolve_output_path
+
+        dir_path = tmp_path / "output"
+        dir_path.mkdir()
+        result = _resolve_output_path(str(dir_path), None, "abcd1234efgh5678")
+        assert result == dir_path / "abcd1234.json"
+
+    def test_auto_creates_parent_directories(self, tmp_path: Path) -> None:
+        from osmosis_ai.cli.commands.train import _resolve_output_path
+
+        result = _resolve_output_path(
+            str(tmp_path / "nested" / "deep" / "metrics"), "run", "abcd1234"
+        )
+        assert result == tmp_path / "nested" / "deep" / "metrics.json"
+        assert result.parent.is_dir()
+
+    def test_trailing_slash_auto_creates_directory(self, tmp_path: Path) -> None:
+        from osmosis_ai.cli.commands.train import _resolve_output_path
+
+        dir_path = tmp_path / "new_dir"
+        result = _resolve_output_path(str(dir_path) + "/", "my-run", "abcd1234efgh5678")
+        assert dir_path.is_dir()
+        assert result.parent == dir_path
+
+
 class TestMetricsCommandErrors:
     """Test error handling in the metrics command."""
 
@@ -156,7 +389,7 @@ class TestMetricsCommandErrors:
 
     @patch(_PATCH_CLIENT)
     @patch(_PATCH_AUTH)
-    def test_output_parent_dir_missing_raises(
+    def test_output_unreachable_path_raises(
         self, mock_auth: MagicMock, mock_client_cls: MagicMock
     ) -> None:
         mock_auth.return_value = ("ws", MagicMock())
@@ -167,7 +400,7 @@ class TestMetricsCommandErrors:
         from osmosis_ai.cli.commands.train import metrics
         from osmosis_ai.cli.errors import CLIError
 
-        with pytest.raises(CLIError, match="Output directory does not exist"):
+        with pytest.raises(CLIError, match="Cannot create output path"):
             metrics(
                 id="550e8400-e29b-41d4-a716-446655440000",
                 output="/nonexistent/dir/metrics.json",
