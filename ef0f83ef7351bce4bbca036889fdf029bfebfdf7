@@ -1,0 +1,73 @@
+osmosis_ai/cli/console.py
+  fbb6e9e4166c59c8 43,51,55-61,66,71
+osmosis_ai/cli/metrics_graph.py
+  426de01f0c49aba6 26
+  211ff4b975693f7e 1-10,12-25,27-194
+tests/unit/cli/test_train_metrics_cmd.py
+  d8548760d0929f66 5,12-13,70-236
+tests/unit/cli/test_metrics_graph.py
+  211ff4b975693f7e 1-9,12-48,50-218
+tests/unit/cli/test_console.py
+  fbb6e9e4166c59c8 5,49-85
+osmosis_ai/cli/commands/train.py
+  d8548760d0929f66 251-267
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.23",
+  "base_commit_sha": "ef0f83ef7351bce4bbca036889fdf029bfebfdf7",
+  "prompts": {
+    "211ff4b975693f7e": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "fe3d75ac-5650-4041-896f-bfa2e5c36359",
+        "model": "composer-2"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>",
+      "messages": [],
+      "total_additions": 494,
+      "total_deletions": 78,
+      "accepted_lines": 407,
+      "overriden_lines": 2
+    },
+    "426de01f0c49aba6": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "ea7caa8d-4065-417f-bf77-26b6d63062c1",
+        "model": "gpt-5.4-xhigh"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>",
+      "messages": [],
+      "total_additions": 1,
+      "total_deletions": 3,
+      "accepted_lines": 1,
+      "overriden_lines": 0
+    },
+    "d8548760d0929f66": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "95d84a09-7715-45bf-aaed-65a6131621b2",
+        "model": "composer-2"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>",
+      "messages": [],
+      "total_additions": 183,
+      "total_deletions": 3,
+      "accepted_lines": 188,
+      "overriden_lines": 0
+    },
+    "fbb6e9e4166c59c8": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "9068c070-8677-4831-ad13-8015e57d381d",
+        "model": "composer-2"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>",
+      "messages": [],
+      "total_additions": 53,
+      "total_deletions": 4,
+      "accepted_lines": 49,
+      "overriden_lines": 0
+    }
+  }
+}
