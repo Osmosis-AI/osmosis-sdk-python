@@ -1,0 +1,25 @@
+osmosis_ai/platform/cli/utils.py
+  7638b1a0449a38b2 302,304-306,318,320
+tests/unit/platform/cli/test_utils.py
+  7638b1a0449a38b2 223-226,231,236,252-253,268-270,272-273,286
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.3",
+  "base_commit_sha": "46ce8359d0f60e4aa24ef82a4c60cd4a03d62fa1",
+  "prompts": {
+    "7638b1a0449a38b2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "916cb961-446e-475f-8aa8-ef773067e6d6",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian",
+      "messages": [],
+      "total_additions": 20,
+      "total_deletions": 14,
+      "accepted_lines": 20,
+      "overriden_lines": 0
+    }
+  }
+}
