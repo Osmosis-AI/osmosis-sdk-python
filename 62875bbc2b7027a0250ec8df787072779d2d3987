@@ -1,0 +1,29 @@
+osmosis_ai/cli/console.py
+  fbe610fed92b43a1 80-83
+osmosis_ai/cli/metrics_graph.py
+  fbe610fed92b43a1 97
+tests/unit/cli/test_train_metrics_cmd.py
+  fbe610fed92b43a1 143-145
+osmosis_ai/cli/commands/train.py
+  fbe610fed92b43a1 193,195,201-202,211,233,262-265,280,284,294-295
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.23",
+  "base_commit_sha": "62875bbc2b7027a0250ec8df787072779d2d3987",
+  "prompts": {
+    "fbe610fed92b43a1": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ced1ec07-19c2-4159-863f-ea28f34008ed",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>",
+      "messages": [],
+      "total_additions": 27,
+      "total_deletions": 16,
+      "accepted_lines": 23,
+      "overriden_lines": 0
+    }
+  }
+}
