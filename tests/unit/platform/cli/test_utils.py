@@ -220,17 +220,20 @@ def test_format_run_status_unknown(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def _make_page(
-    items: list[str], *, has_more: bool, total_count: int
+    items: list[str],
+    *,
+    total_count: int,
+    next_offset: int | None = None,
 ) -> SimpleNamespace:
     return SimpleNamespace(
         things=[SimpleNamespace(id=i) for i in items],
-        has_more=has_more,
         total_count=total_count,
+        next_offset=next_offset,
     )
 
 
 def test_fetch_all_pages_single_page() -> None:
-    page = _make_page(["a", "b"], has_more=False, total_count=2)
+    page = _make_page(["a", "b"], total_count=2, next_offset=None)
     calls: list[tuple[int, int]] = []
 
     def fetch(limit: int, offset: int) -> SimpleNamespace:
@@ -246,8 +249,8 @@ def test_fetch_all_pages_single_page() -> None:
 
 def test_fetch_all_pages_multiple_pages() -> None:
     pages = [
-        _make_page(["a", "b", "c"], has_more=True, total_count=5),
-        _make_page(["d", "e"], has_more=False, total_count=5),
+        _make_page(["a", "b", "c"], total_count=5, next_offset=3),
+        _make_page(["d", "e"], total_count=5, next_offset=None),
     ]
     call_idx = 0
 
@@ -262,10 +265,12 @@ def test_fetch_all_pages_multiple_pages() -> None:
     assert total == 5
 
 
-def test_fetch_all_pages_passes_correct_offsets() -> None:
+def test_fetch_all_pages_uses_server_next_offset() -> None:
+    """Verify that fetch_all_pages uses next_offset from the server response,
+    not a client-computed value based on item count."""
     pages = [
-        _make_page(["a", "b"], has_more=True, total_count=4),
-        _make_page(["c", "d"], has_more=False, total_count=4),
+        _make_page(["a", "b"], total_count=4, next_offset=10),
+        _make_page(["c", "d"], total_count=4, next_offset=None),
     ]
     calls: list[tuple[int, int]] = []
     call_idx = 0
@@ -278,7 +283,7 @@ def test_fetch_all_pages_passes_correct_offsets() -> None:
         return page
 
     fetch_all_pages(fetch, items_attr="things", page_size=10)
-    assert calls == [(10, 0), (10, 2)]
+    assert calls == [(10, 0), (10, 10)]
 
 
 # ── validate_list_options ───────────────────────────────────────────

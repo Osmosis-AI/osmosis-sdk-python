@@ -299,10 +299,11 @@ def fetch_all_pages(
     items_attr: str,
     page_size: int = 50,
 ) -> tuple[list[Any], int]:
-    """Iterate through API pages until ``has_more`` is False.
+    """Iterate through API pages using server-provided ``next_offset``.
 
-    *fetch_fn(limit, offset)* must return an object with a ``has_more`` bool,
-    a ``total_count`` int, and an attribute named *items_attr* (a list).
+    *fetch_fn(limit, offset)* must return an object with a ``next_offset``
+    (int | None), a ``total_count`` int, and an attribute named *items_attr*
+    (a list).
 
     Returns ``(all_items, total_count)``.
     """
@@ -314,9 +315,9 @@ def fetch_all_pages(
         items = getattr(result, items_attr)
         all_items.extend(items)
         total_count = result.total_count
-        if not result.has_more or not items:
+        if result.next_offset is None or not items:
             break
-        offset += len(items)
+        offset = result.next_offset
     return all_items, total_count
 
 
