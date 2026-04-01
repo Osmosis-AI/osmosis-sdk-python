@@ -22,6 +22,7 @@ from .models import (
     ProjectDetail,
     TrainingRunAffectedResources,
     TrainingRunDetail,
+    TrainingRunMetrics,
     WorkspaceDeletionStatus,
 )
 
@@ -342,6 +343,19 @@ class OsmosisClient:
             credentials=credentials,
         )
         return DeleteTrainingRunResult.from_dict(data)
+
+    def get_training_run_metrics(
+        self,
+        run_id: str,
+        *,
+        credentials: Credentials | None = None,
+    ) -> TrainingRunMetrics:
+        """Fetch training run metrics (only available for terminal runs)."""
+        data = platform_request(
+            f"/api/cli/training-runs/{_safe_path(run_id)}/metrics",
+            credentials=credentials,
+        )
+        return TrainingRunMetrics.from_dict(data)
 
     def get_training_run_affected_resources(
         self,
