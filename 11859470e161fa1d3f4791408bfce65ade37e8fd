@@ -1,0 +1,85 @@
+osmosis_ai/platform/cli/utils.py
+  d4287a3597933507 63,66,68,71
+  b4142c09d5a0ab86 64-65,67,69-70,72-74
+  b9c2cbb115277afe 176-188,205-207
+osmosis_ai/cli/commands/train.py
+  b9c2cbb115277afe 26-30,50-51,61-64
+osmosis_ai/cli/commands/model.py
+  38f2901143f7134e 135-142,147
+  b9c2cbb115277afe 34,40-41
+  b4142c09d5a0ab86 143,145,150,166,176-177
+osmosis_ai/platform/cli/dataset.py
+  e9b19eed7ccafcbd 291,293,295-296
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.3",
+  "base_commit_sha": "11859470e161fa1d3f4791408bfce65ade37e8fd",
+  "prompts": {
+    "38f2901143f7134e": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "6fcc27b5-3c9e-4702-9a93-c98b24308f37",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian",
+      "messages": [],
+      "total_additions": 44,
+      "total_deletions": 35,
+      "accepted_lines": 9,
+      "overriden_lines": 1
+    },
+    "b4142c09d5a0ab86": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2d8fc376-3392-445c-ac75-307e6834dc66",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian",
+      "messages": [],
+      "total_additions": 14,
+      "total_deletions": 21,
+      "accepted_lines": 14,
+      "overriden_lines": 0
+    },
+    "b9c2cbb115277afe": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "e8ee66f1-9f84-4cf0-bbcf-c95bef014254",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian",
+      "messages": [],
+      "total_additions": 34,
+      "total_deletions": 13,
+      "accepted_lines": 30,
+      "overriden_lines": 0
+    },
+    "d4287a3597933507": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f298e1a7-bbc2-43ee-894c-35f2eea37037",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian",
+      "messages": [],
+      "total_additions": 29,
+      "total_deletions": 16,
+      "accepted_lines": 4,
+      "overriden_lines": 0
+    },
+    "e9b19eed7ccafcbd": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "d69639bf-0764-4ad8-b473-7ad7c0989856",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian",
+      "messages": [],
+      "total_additions": 4,
+      "total_deletions": 1,
+      "accepted_lines": 4,
+      "overriden_lines": 0
+    }
+  }
+}
