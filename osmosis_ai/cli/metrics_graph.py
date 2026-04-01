@@ -78,26 +78,22 @@ def _values_ordered_by_step(m: MetricHistory) -> list[float]:
     return [dp.value for dp in ordered]
 
 
-def _summary_pair(m: MetricHistory) -> tuple[str, str]:
-    raw = _values_ordered_by_step(m)
-    lo = _format_metric_value(raw[0])
-    hi = _format_metric_value(raw[-1])
-    return lo, hi
-
-
 # Two gaps: title/spark and spark/summary (each "  ").
 _SEP_BETWEEN_COLUMNS = 2 + 2
 
 
 def _layout_columns(
-    metrics: list[MetricHistory], terminal_width: int
+    metrics: list[MetricHistory],
+    terminal_width: int,
+    summary_pairs: dict[str, tuple[str, str]],
 ) -> tuple[int, int, int]:
     """Return (title_col_width, summary_col_width, sparkline_width)."""
     max_title = max(len(m.title) for m in metrics)
     max_summary_len = 0
     for m in metrics:
-        if m.data_points:
-            lo, hi = _summary_pair(m)
+        pair = summary_pairs.get(m.metric_key)
+        if pair is not None:
+            lo, hi = pair
             max_summary_len = max(max_summary_len, len(f"{lo} -> {hi}"))
 
     if max_summary_len == 0:
@@ -129,6 +125,17 @@ def _layout_columns(
     return title_col, max_summary_len, spark_w
 
 
+def _flat_sparkline(count: int) -> Text:
+    """A flat mid-level sparkline (used when values have no meaningful range)."""
+    nblocks = len(SPARKLINE_BLOCKS)
+    mid_idx = nblocks // 2
+    ch = SPARKLINE_BLOCKS[mid_idx]
+    r, g, b = _LEVEL_COLORS[mid_idx]
+    text = Text()
+    text.append(ch * count, style=f"rgb({r},{g},{b})")
+    return text
+
+
 def _sparkline_for_values(values: list[float], width: int) -> Text:
     """Normalize values to colored block characters as a Rich Text object."""
     nblocks = len(SPARKLINE_BLOCKS)
@@ -139,28 +146,13 @@ def _sparkline_for_values(values: list[float], width: int) -> Text:
 
     finite = [v for v in values if math.isfinite(v)]
     if not finite:
-        ch = SPARKLINE_BLOCKS[mid_idx]
-        r, g, b = _LEVEL_COLORS[mid_idx]
-        text = Text()
-        text.append(ch * len(values), style=f"rgb({r},{g},{b})")
-        return text
+        return _flat_sparkline(len(values))
 
     vmin = min(finite)
     vmax = max(finite)
-    if vmin == vmax:
-        ch = SPARKLINE_BLOCKS[mid_idx]
-        r, g, b = _LEVEL_COLORS[mid_idx]
-        text = Text()
-        text.append(ch * len(values), style=f"rgb({r},{g},{b})")
-        return text
-
     span = vmax - vmin
-    if not math.isfinite(span) or span <= 0:
-        ch = SPARKLINE_BLOCKS[mid_idx]
-        r, g, b = _LEVEL_COLORS[mid_idx]
-        text = Text()
-        text.append(ch * len(values), style=f"rgb({r},{g},{b})")
-        return text
+    if vmin == vmax or not math.isfinite(span) or span <= 0:
+        return _flat_sparkline(len(values))
 
     text = Text()
     for v in values:
@@ -204,7 +196,20 @@ def render_metric_trends(
     if not metrics:
         return None
 
-    title_col, summary_col, spark_w = _layout_columns(metrics, terminal_width)
+    # Precompute sorted values and summary pairs once per metric (avoids re-sorting).
+    ordered_cache: dict[str, list[float]] = {}
+    summary_pairs: dict[str, tuple[str, str]] = {}
+    for m in metrics:
+        if m.data_points:
+            raw = _values_ordered_by_step(m)
+            ordered_cache[m.metric_key] = raw
+            lo = _format_metric_value(raw[0])
+            hi = _format_metric_value(raw[-1])
+            summary_pairs[m.metric_key] = (lo, hi)
+
+    title_col, summary_col, spark_w = _layout_columns(
+        metrics, terminal_width, summary_pairs
+    )
 
     table = Table(
         box=None,
@@ -239,10 +244,10 @@ def render_metric_trends(
             )
             continue
 
-        raw = _values_ordered_by_step(m)
+        raw = ordered_cache[m.metric_key]
         sampled = _downsample_values(raw, spark_w)
         spark = _sparkline_for_values(sampled, spark_w)
-        lo, hi = _summary_pair(m)
+        lo, hi = summary_pairs[m.metric_key]
         table.add_row(Text(_title_cell(m.title, title_col)), spark, f"{lo} -> {hi}")
 
     return table
