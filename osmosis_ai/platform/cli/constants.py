@@ -12,6 +12,10 @@ LOGOUT_ALL = "__all__"
 
 DEFAULT_VISIBLE_CHOICES = 10
 
+# ── List command defaults ────────────────────────────────────────
+
+DEFAULT_LIST_LIMIT = 30
+
 # ── Common error messages ─────────────────────────────────────────
 
 MSG_SESSION_EXPIRED = (

@@ -28,6 +28,7 @@ from .project import (
 from .utils import (
     build_dataset_detail_rows,
     format_dataset_status,
+    format_dim_date,
     format_size,
     platform_entity_url,
 )
@@ -274,30 +275,47 @@ def upload(
     console.print(f"Processing will continue on the platform. Check status at: {url}")
 
 
-def list_datasets() -> None:
+def list_datasets(limit: int = 30, all_: bool = False) -> None:
     """List datasets."""
+    from osmosis_ai.platform.cli.utils import (
+        paginated_fetch,
+        print_pagination_footer,
+        validate_list_options,
+    )
+
+    effective_limit, fetch_all = validate_list_options(limit=limit, all_=all_)
+
     _ws_name, credentials = _require_auth()
     from osmosis_ai.platform.api.client import OsmosisClient
 
     client = OsmosisClient()
-    result = client.list_datasets(credentials=credentials)
 
-    if not result.datasets:
+    with console.spinner("Fetching datasets..."):
+        datasets, total_count, _has_more = paginated_fetch(
+            lambda lim, off: client.list_datasets(
+                limit=lim, offset=off, credentials=credentials
+            ),
+            items_attr="datasets",
+            limit=effective_limit,
+            fetch_all=fetch_all,
+        )
+
+    if not datasets:
         console.print("No datasets found.")
         return
 
-    console.print(f"Datasets ({result.total_count}):", style="bold")
-    for d in result.datasets:
+    console.print(f"Datasets ({total_count}):", style="bold")
+    for d in datasets:
         short_id = console.format_styled(d.id[:8], "dim")
         status_info = format_dataset_status(d)
         name = console.escape(d.file_name)
+        date = format_dim_date(d.created_at)
         console.print(
-            f"  {short_id}  {name}  {format_size(d.file_size)}  {status_info}",
+            f"  {short_id}  {name}  {format_size(d.file_size)}  {status_info}  {date}",
             highlight=False,
         )
 
-    if result.has_more:
-        console.print(f"  ... and {result.total_count - len(result.datasets)} more")
+    print_pagination_footer(len(datasets), total_count, "datasets")
 
 
 def status(

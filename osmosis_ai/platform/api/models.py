@@ -8,9 +8,9 @@ from typing import Any, Literal
 # ── Dataset status constants ─────────────────────────────────────
 # Single source of truth for status classification.
 
-STATUSES_SUCCESS: frozenset[str] = frozenset({"ready"})
-STATUSES_IN_PROGRESS: frozenset[str] = frozenset({"processing", "uploaded"})
-STATUSES_ERROR: frozenset[str] = frozenset({"failed", "error"})
+STATUSES_SUCCESS: frozenset[str] = frozenset({"uploaded"})
+STATUSES_IN_PROGRESS: frozenset[str] = frozenset({"pending", "uploading", "processing"})
+STATUSES_ERROR: frozenset[str] = frozenset({"error"})
 STATUSES_INACTIVE: frozenset[str] = frozenset({"cancelled", "deleted"})
 STATUSES_TERMINAL: frozenset[str] = (
     STATUSES_SUCCESS | STATUSES_ERROR | STATUSES_INACTIVE

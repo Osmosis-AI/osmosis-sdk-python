@@ -10,11 +10,13 @@ import pytest
 from osmosis_ai.cli.console import Console
 from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.platform.cli.utils import (
+    fetch_all_pages,
     format_dataset_status,
     format_processing_step,
     format_run_status,
     format_size,
     resolve_id_prefix,
+    validate_list_options,
 )
 
 # ── format_size ──────────────────────────────────────────────────────
@@ -60,12 +62,6 @@ def test_resolve_id_prefix_no_match_raises() -> None:
         resolve_id_prefix("zzz", items)
 
 
-def test_resolve_id_prefix_no_match_with_has_more_hint() -> None:
-    items = _make_items("abc123def456")
-    with pytest.raises(CLIError, match="too large to search"):
-        resolve_id_prefix("zzz", items, has_more=True)
-
-
 def test_resolve_id_prefix_ambiguous_raises() -> None:
     items = _make_items("abc111", "abc222", "abc333")
     with pytest.raises(CLIError, match="Ambiguous"):
@@ -104,25 +100,26 @@ def _dataset(status: str, step: str | None = None) -> SimpleNamespace:
 
 
 def test_format_dataset_status_for_prompt() -> None:
-    assert (
-        format_dataset_status(_dataset("completed"), for_prompt=True) == "[completed]"
-    )
+    assert format_dataset_status(_dataset("uploaded"), for_prompt=True) == "[uploaded]"
 
 
 def test_format_dataset_status_for_prompt_with_step() -> None:
+    """processing_step is not shown in list display — only [status]."""
     assert (
         format_dataset_status(_dataset("processing", "validating"), for_prompt=True)
-        == "[processing: validating]"
+        == "[processing]"
     )
 
 
-def test_format_dataset_status_success_styled(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_format_dataset_status_uploaded_is_green(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     import osmosis_ai.platform.cli.utils as mod
 
     c = Console(file=StringIO(), force_terminal=True)
     monkeypatch.setattr(mod, "console", c)
-    result = format_dataset_status(_dataset("completed"))
-    assert "completed" in result
+    result = format_dataset_status(_dataset("uploaded"))
+    assert "uploaded" in result
 
 
 def test_format_dataset_status_in_progress_styled(
@@ -141,8 +138,8 @@ def test_format_dataset_status_error_styled(monkeypatch: pytest.MonkeyPatch) -> 
 
     c = Console(file=StringIO(), force_terminal=True)
     monkeypatch.setattr(mod, "console", c)
-    result = format_dataset_status(_dataset("failed"))
-    assert "failed" in result
+    result = format_dataset_status(_dataset("error"))
+    assert "error" in result
 
 
 def test_format_dataset_status_unknown_uses_escape(
@@ -217,3 +214,93 @@ def test_format_run_status_unknown(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(mod, "console", c)
     result = format_run_status(_run("weird"))
     assert "[weird]" in result
+
+
+# ── fetch_all_pages ─────────────────────────────────────────────────
+
+
+def _make_page(
+    items: list[str], *, has_more: bool, total_count: int
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        things=[SimpleNamespace(id=i) for i in items],
+        has_more=has_more,
+        total_count=total_count,
+    )
+
+
+def test_fetch_all_pages_single_page() -> None:
+    page = _make_page(["a", "b"], has_more=False, total_count=2)
+    calls: list[tuple[int, int]] = []
+
+    def fetch(limit: int, offset: int) -> SimpleNamespace:
+        calls.append((limit, offset))
+        return page
+
+    items, total = fetch_all_pages(fetch, items_attr="things")
+    assert len(items) == 2
+    assert total == 2
+    assert len(calls) == 1
+    assert calls[0] == (50, 0)
+
+
+def test_fetch_all_pages_multiple_pages() -> None:
+    pages = [
+        _make_page(["a", "b", "c"], has_more=True, total_count=5),
+        _make_page(["d", "e"], has_more=False, total_count=5),
+    ]
+    call_idx = 0
+
+    def fetch(limit: int, offset: int) -> SimpleNamespace:
+        nonlocal call_idx
+        page = pages[call_idx]
+        call_idx += 1
+        return page
+
+    items, total = fetch_all_pages(fetch, items_attr="things")
+    assert [x.id for x in items] == ["a", "b", "c", "d", "e"]
+    assert total == 5
+
+
+def test_fetch_all_pages_passes_correct_offsets() -> None:
+    pages = [
+        _make_page(["a", "b"], has_more=True, total_count=4),
+        _make_page(["c", "d"], has_more=False, total_count=4),
+    ]
+    calls: list[tuple[int, int]] = []
+    call_idx = 0
+
+    def fetch(limit: int, offset: int) -> SimpleNamespace:
+        nonlocal call_idx
+        calls.append((limit, offset))
+        page = pages[call_idx]
+        call_idx += 1
+        return page
+
+    fetch_all_pages(fetch, items_attr="things", page_size=10)
+    assert calls == [(10, 0), (10, 2)]
+
+
+# ── validate_list_options ───────────────────────────────────────────
+
+
+def test_validate_list_options_default() -> None:
+    limit, fetch_all = validate_list_options(limit=30, all_=False)
+    assert limit == 30
+    assert fetch_all is False
+
+
+def test_validate_list_options_all_flag() -> None:
+    _limit, fetch_all = validate_list_options(limit=30, all_=True)
+    assert fetch_all is True
+
+
+def test_validate_list_options_custom_limit() -> None:
+    limit, fetch_all = validate_list_options(limit=10, all_=False)
+    assert limit == 10
+    assert fetch_all is False
+
+
+def test_validate_list_options_mutual_exclusion() -> None:
+    with pytest.raises(CLIError, match="mutually exclusive"):
+        validate_list_options(limit=10, all_=True)

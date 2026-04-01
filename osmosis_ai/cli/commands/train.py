@@ -10,6 +10,7 @@ import typer
 
 from osmosis_ai.cli.console import console
 from osmosis_ai.cli.errors import CLIError, not_implemented
+from osmosis_ai.platform.cli.constants import DEFAULT_LIST_LIMIT
 
 app: typer.Typer = typer.Typer(help="Manage training runs.", no_args_is_help=True)
 
@@ -19,15 +20,22 @@ def list_runs(
     project: str | None = typer.Option(
         None, "--project", help="Project name (default: current project)."
     ),
-    limit: int = typer.Option(20, "--limit", help="Maximum number of runs to show."),
+    limit: int = typer.Option(
+        DEFAULT_LIST_LIMIT, "--limit", help="Maximum number of runs to show."
+    ),
+    all_: bool = typer.Option(False, "--all", help="Show all training runs."),
 ) -> None:
     """List training runs for a project."""
     from osmosis_ai.platform.cli.project import _require_auth, _resolve_project_id
     from osmosis_ai.platform.cli.utils import (
-        format_date,
+        format_dim_date,
         format_run_status,
-        run_status_style,
+        paginated_fetch,
+        print_pagination_footer,
+        validate_list_options,
     )
+
+    effective_limit, fetch_all = validate_list_options(limit=limit, all_=all_)
 
     ws_name, credentials = _require_auth()
 
@@ -36,19 +44,23 @@ def list_runs(
     with console.spinner("Fetching training runs..."):
         project_id = _resolve_project_id(project, workspace_name=ws_name)
         client = OsmosisClient()
-        result = client.list_training_runs(
-            project_id, limit=limit, credentials=credentials
+        training_runs, total_count, _has_more = paginated_fetch(
+            lambda lim, off: client.list_training_runs(
+                project_id, limit=lim, offset=off, credentials=credentials
+            ),
+            items_attr="training_runs",
+            limit=effective_limit,
+            fetch_all=fetch_all,
         )
 
-    if not result.training_runs:
+    if not training_runs:
         console.print("No training runs found.")
         return
 
-    console.print(f"Training Runs ({result.total_count}):", style="bold")
-    for r in result.training_runs:
+    console.print(f"Training Runs ({total_count}):", style="bold")
+    for r in training_runs:
         status_str = format_run_status(r)
-        style = run_status_style(r.status)
-        short_id = console.format_styled(r.id[:8], style) if style else r.id[:8]
+        short_id = console.format_styled(r.id[:8], "dim")
         name = (
             console.escape(r.name)
             if r.name
@@ -56,16 +68,14 @@ def list_runs(
         )
         model = console.escape(r.model_name) if r.model_name else "—"
         acc = f"acc:{r.eval_accuracy:.2f}" if r.eval_accuracy is not None else ""
-        date = format_date(r.created_at)
+        date = format_dim_date(r.created_at)
 
         console.print(
             f"  {short_id}  {name}  {status_str}  {model}  {acc}  {date}",
             highlight=False,
         )
 
-    if result.has_more:
-        remaining = result.total_count - len(result.training_runs)
-        console.print(f"  ... and {remaining} more")
+    print_pagination_footer(len(training_runs), total_count, "training runs")
 
 
 @app.command("status")
