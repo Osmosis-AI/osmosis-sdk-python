@@ -190,14 +190,16 @@ def metrics(
     from osmosis_ai.cli.metrics_export import build_export_dict
     from osmosis_ai.platform.api.client import OsmosisClient
     from osmosis_ai.platform.api.models import RUN_STATUSES_IN_PROGRESS
+    from osmosis_ai.platform.auth.platform_client import PlatformAPIError
     from osmosis_ai.platform.cli.project import _require_auth
-    from osmosis_ai.platform.cli.utils import platform_entity_url
+    from osmosis_ai.platform.cli.utils import platform_entity_url, resolve_run_id
 
     ws_name, credentials = _require_auth()
     client = OsmosisClient()
 
     with console.spinner("Fetching training run..."):
-        run = client.get_training_run(id, credentials=credentials)
+        run_id = resolve_run_id(id, None, ws_name, credentials, client=client)
+        run = client.get_training_run(run_id, credentials=credentials)
         # Best-effort: resolve project name for the platform URL.
         project_name: str | None = None
         if run.project_id:
@@ -206,7 +208,7 @@ def metrics(
                     run.project_id, credentials=credentials
                 )
                 project_name = project_detail.project_name
-            except Exception:
+            except (PlatformAPIError, KeyError):
                 pass
 
     if run.status == "pending":
@@ -228,7 +230,7 @@ def metrics(
             metrics_data = client.get_training_run_metrics(
                 run.id, credentials=credentials
             )
-    except Exception:
+    except (PlatformAPIError, KeyError):
         console.print("Could not fetch metrics data.", style="yellow")
 
     if is_in_progress:
@@ -246,7 +248,6 @@ def metrics(
     if run.model_name:
         rows.append(("Model", console.escape(run.model_name)))
 
-    export = None
     if metrics_data is not None:
         if metrics_data.overview.duration_formatted:
             rows.append(("Duration", metrics_data.overview.duration_formatted))
@@ -258,8 +259,10 @@ def metrics(
             rows.append(
                 ("Examples", f"{metrics_data.overview.examples_processed_count:,}")
             )
-        export = build_export_dict(run, metrics_data)
-        total_steps = export["summary"]["total_steps"]
+        total_steps = max(
+            (dp.step for m in metrics_data.metrics for dp in m.data_points),
+            default=0,
+        )
         if total_steps:
             rows.append(("Steps", f"{total_steps:,}"))
 
@@ -274,11 +277,11 @@ def metrics(
 
         if should_render_metric_trends(
             is_tty=console.is_tty,
-            terminal_width=console.rich.width,
+            terminal_width=console.width,
             metrics=metrics_data.metrics,
         ):
             trends = render_metric_trends(
-                metrics_data.metrics, terminal_width=console.rich.width
+                metrics_data.metrics, terminal_width=console.width
             )
             if trends:
                 console.print()
@@ -288,7 +291,8 @@ def metrics(
         console.print("No metric data found.", style="dim")
 
     # ── Save to file (best-effort) ────────────────────────────────
-    if export is not None:
+    if metrics_data is not None:
+        export = build_export_dict(run, metrics_data)
         console.print()
         try:
             out_path = (

@@ -77,6 +77,11 @@ class Console:
         return self._rich.is_terminal
 
     @property
+    def width(self) -> int:
+        """Terminal width in characters."""
+        return self._rich.width
+
+    @property
     def rich(self) -> RichConsole:
         """The underlying Rich Console instance."""
         return self._rich

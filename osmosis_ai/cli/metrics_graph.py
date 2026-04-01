@@ -94,7 +94,7 @@ def _layout_columns(
         pair = summary_pairs.get(m.metric_key)
         if pair is not None:
             lo, hi = pair
-            max_summary_len = max(max_summary_len, len(f"{lo} -> {hi}"))
+            max_summary_len = max(max_summary_len, len(lo) + 4 + len(hi))
 
     if max_summary_len == 0:
         title_col = min(

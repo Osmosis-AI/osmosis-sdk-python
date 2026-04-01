@@ -140,7 +140,9 @@ class TestMetricsCommandPlatformUrl:
         mock_auth.return_value = ("ws", MagicMock())
         client = mock_client_cls.return_value
         client.get_training_run.return_value = _make_run_detail()
-        client.get_project.side_effect = Exception("network error")
+        from osmosis_ai.platform.auth.platform_client import PlatformAPIError
+
+        client.get_project.side_effect = PlatformAPIError("network error")
         client.get_training_run_metrics.return_value = _make_metrics()
 
         output = tmp_path / "m.json"
