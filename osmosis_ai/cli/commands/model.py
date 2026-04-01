@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any, Literal
+from typing import Any
 
 import typer
 
@@ -31,11 +31,15 @@ def _print_model_section(
         return
     console.print(f"{title} ({result.total_count}):", style="bold")
     for m in models:
+        short_id = console.format_styled(m.id[:8], "dim")
         status_str = console.format_styled(f"[{m.status}]", "dim")
         name = console.escape(m.model_name)
         meta = metadata_fn(m)
         date = format_date(m.created_at)
-        console.print(f"  {m.id}  {name}  {status_str}  {meta}  {date}")
+        console.print(
+            f"  {short_id}  {name}  {status_str}  {meta}  {date}",
+            highlight=False,
+        )
     if len(models) < result.total_count:
         remaining = result.total_count - len(models)
         console.print(f"  ... and {remaining} more")
@@ -116,9 +120,6 @@ def delete(
         None, "--project", help="Project name (default: current project)."
     ),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
-    model_type: Literal["base", "output"] = typer.Option(
-        "base", "--type", help="Model type: 'base' or 'output'."
-    ),
 ) -> None:
     """Delete a model."""
     from osmosis_ai.cli.errors import CLIError
@@ -131,9 +132,22 @@ def delete(
     project_id = _resolve_project_id(project, workspace_name=ws_name)
     client = OsmosisClient()
 
+    base_result, output_result = client.fetch_all_models(
+        project_id, limit=50, credentials=credentials
+    )
+
+    from osmosis_ai.platform.cli.utils import resolve_id_prefix
+
+    all_models = base_result.models + output_result.models
+    has_more = base_result.has_more or output_result.has_more
+    model_id = resolve_id_prefix(id, all_models, entity_name="model", has_more=has_more)
+    model_type = (
+        "base" if any(m.id == model_id for m in base_result.models) else "output"
+    )
+
     try:
         affected = client.get_model_affected_resources(
-            id, project_id, model_type, credentials=credentials
+            model_id, project_id, model_type, credentials=credentials
         )
     except Exception as e:
         raise CLIError(f"Unable to verify model dependencies: {e}") from e
@@ -149,7 +163,7 @@ def delete(
         console.print("\nDelete these training runs first, then retry.", style="dim")
         raise typer.Exit(1)
 
-    msg = f"Delete model {id[:8]}...? This cannot be undone."
+    msg = f"Delete model {model_id[:8]}...? This cannot be undone."
     if affected.creator_training_run:
         r = affected.creator_training_run
         name = r.name or "(unnamed)"
@@ -159,5 +173,5 @@ def delete(
 
     require_confirmation(msg, yes=yes)
 
-    client.delete_model(id, project_id, credentials=credentials)
-    console.print(f"Model {id[:8]} deleted.", style="green")
+    client.delete_model(model_id, project_id, credentials=credentials)
+    console.print(f"Model {model_id[:8]} deleted.", style="green")

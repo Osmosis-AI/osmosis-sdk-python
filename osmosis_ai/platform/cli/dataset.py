@@ -288,9 +288,12 @@ def list_datasets() -> None:
 
     console.print(f"Datasets ({result.total_count}):", style="bold")
     for d in result.datasets:
+        short_id = console.format_styled(d.id[:8], "dim")
         status_info = format_dataset_status(d)
+        name = console.escape(d.file_name)
         console.print(
-            f"  {d.id}  {d.file_name}  {format_size(d.file_size)}  {status_info}"
+            f"  {short_id}  {name}  {format_size(d.file_size)}  {status_info}",
+            highlight=False,
         )
 
     if result.has_more:

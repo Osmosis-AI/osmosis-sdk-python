@@ -60,11 +60,18 @@ def resolve_id_prefix(
             hint += " The full list was too large to search — try a longer prefix or the full ID."
         raise CLIError(hint)
     if len(matches) > 1:
-        ids = ", ".join(m.id[:12] for m in matches[:5])
-        raise CLIError(
-            f"Ambiguous ID prefix '{prefix}' — matches {len(matches)} {entity_name}s: {ids}\n"
-            "Please provide a longer prefix."
-        )
+        n = len(matches)
+        lines = [f"Ambiguous ID prefix '{prefix}' — matches {n} {entity_name}s:"]
+        for m in matches[:5]:
+            name = getattr(m, "name", None) or getattr(m, "file_name", None)
+            entry = f"  {m.id}"
+            if name:
+                entry += f"  ({name})"
+            lines.append(entry)
+        if n > 5:
+            lines.append(f"  … and {n - 5} more")
+        lines.append("Please provide a longer prefix or the full ID.")
+        raise CLIError("\n".join(lines))
     return matches[0].id
 
 
@@ -166,6 +173,19 @@ def format_dataset_status(d: Any, *, for_prompt: bool = False) -> str:
     return console.escape(status_info)
 
 
+def run_status_style(status: str) -> str | None:
+    """Return the Rich style name for a training run status, or None if unstyled."""
+    if status in RUN_STATUSES_SUCCESS:
+        return "green"
+    if status in RUN_STATUSES_IN_PROGRESS:
+        return "yellow"
+    if status in RUN_STATUSES_ERROR:
+        return "red"
+    if status in RUN_STATUSES_STOPPED:
+        return "dim"
+    return None
+
+
 def format_run_status(r: Any, *, for_prompt: bool = False) -> str:
     """Format a training run status string with optional color styling.
 
@@ -182,14 +202,9 @@ def format_run_status(r: Any, *, for_prompt: bool = False) -> str:
     if for_prompt:
         return status_info
 
-    if r.status in RUN_STATUSES_SUCCESS:
-        return console.format_styled(status_info, "green")
-    if r.status in RUN_STATUSES_IN_PROGRESS:
-        return console.format_styled(status_info, "yellow")
-    if r.status in RUN_STATUSES_ERROR:
-        return console.format_styled(status_info, "red")
-    if r.status in RUN_STATUSES_STOPPED:
-        return console.format_styled(status_info, "dim")
+    style = run_status_style(r.status)
+    if style:
+        return console.format_styled(status_info, style)
     return console.escape(status_info)
 
 

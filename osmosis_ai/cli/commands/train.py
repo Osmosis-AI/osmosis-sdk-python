@@ -23,7 +23,11 @@ def list_runs(
 ) -> None:
     """List training runs for a project."""
     from osmosis_ai.platform.cli.project import _require_auth, _resolve_project_id
-    from osmosis_ai.platform.cli.utils import format_date, format_run_status
+    from osmosis_ai.platform.cli.utils import (
+        format_date,
+        format_run_status,
+        run_status_style,
+    )
 
     ws_name, credentials = _require_auth()
 
@@ -43,6 +47,8 @@ def list_runs(
     console.print(f"Training Runs ({result.total_count}):", style="bold")
     for r in result.training_runs:
         status_str = format_run_status(r)
+        style = run_status_style(r.status)
+        short_id = console.format_styled(r.id[:8], style) if style else r.id[:8]
         name = (
             console.escape(r.name)
             if r.name
@@ -52,7 +58,10 @@ def list_runs(
         acc = f"acc:{r.eval_accuracy:.2f}" if r.eval_accuracy is not None else ""
         date = format_date(r.created_at)
 
-        console.print(f"  {r.id}  {name}  {status_str}  {model}  {acc}  {date}")
+        console.print(
+            f"  {short_id}  {name}  {status_str}  {model}  {acc}  {date}",
+            highlight=False,
+        )
 
     if result.has_more:
         remaining = result.total_count - len(result.training_runs)
