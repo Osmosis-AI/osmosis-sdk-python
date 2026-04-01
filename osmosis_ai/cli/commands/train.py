@@ -104,7 +104,6 @@ def status(
     run = client.get_training_run(run_id, credentials=credentials)
 
     rows = build_run_detail_rows(run)
-    # Additional fields only shown in the detailed status view
     if run.output_model_id:
         rows.append(("Output Model", run.output_model_id))
     if run.examples_processed_count is not None:

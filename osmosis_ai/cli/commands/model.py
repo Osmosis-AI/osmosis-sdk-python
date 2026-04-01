@@ -17,20 +17,17 @@ app: typer.Typer = typer.Typer(
 
 
 def _print_model_section(
-    result: Any,
+    models: list[Any],
+    total_count: int,
     title: str,
     metadata_fn: Callable[[Any], str],
-    max_display: int | None = None,
 ) -> None:
     """Print a section of models (base or output) with consistent formatting."""
     from osmosis_ai.platform.cli.utils import entity_status_style, format_dim_date
 
-    if not result.models:
-        return
-    models = result.models if max_display is None else result.models[:max_display]
     if not models:
         return
-    console.print(f"{title} ({result.total_count}):", style="bold")
+    console.print(f"{title} ({total_count}):", style="bold")
     for m in models:
         short_id = console.format_styled(m.id[:8], "dim")
         style = entity_status_style(m.status) or "dim"
@@ -43,6 +40,27 @@ def _print_model_section(
             highlight=False,
         )
     console.print()
+
+
+def _fetch_all_project_models(
+    client: Any, project_id: str, credentials: Any
+) -> tuple[list[Any], list[Any]]:
+    """Fetch all base and output models for a project via exhaustive pagination."""
+    from osmosis_ai.platform.cli.utils import fetch_all_pages
+
+    base_models, _ = fetch_all_pages(
+        lambda lim, off: client.list_base_models(
+            project_id, limit=lim, offset=off, credentials=credentials
+        ),
+        items_attr="models",
+    )
+    output_models, _ = fetch_all_pages(
+        lambda lim, off: client.list_output_models(
+            project_id, limit=lim, offset=off, credentials=credentials
+        ),
+        items_attr="models",
+    )
+    return base_models, output_models
 
 
 @app.command("list")
@@ -60,7 +78,6 @@ def list_models(
     """List models in a project."""
     from osmosis_ai.platform.cli.project import _require_auth, _resolve_project_id
     from osmosis_ai.platform.cli.utils import (
-        fetch_all_pages,
         print_pagination_footer,
         validate_list_options,
     )
@@ -70,73 +87,54 @@ def list_models(
     ws_name, credentials = _require_auth()
 
     from osmosis_ai.platform.api.client import OsmosisClient
-    from osmosis_ai.platform.api.models import (
-        PaginatedBaseModels,
-        PaginatedOutputModels,
-    )
 
     with console.spinner("Fetching models..."):
         project_id = _resolve_project_id(project, workspace_name=ws_name)
         client = OsmosisClient()
         if fetch_all:
-            base_models, base_total = fetch_all_pages(
-                lambda lim, off: client.list_base_models(
-                    project_id, limit=lim, offset=off, credentials=credentials
-                ),
-                items_attr="models",
+            base_models, output_models = _fetch_all_project_models(
+                client, project_id, credentials
             )
-            output_models, output_total = fetch_all_pages(
-                lambda lim, off: client.list_output_models(
-                    project_id, limit=lim, offset=off, credentials=credentials
-                ),
-                items_attr="models",
-            )
-            base_result = PaginatedBaseModels(
-                models=base_models, total_count=base_total, has_more=False
-            )
-            output_result = PaginatedOutputModels(
-                models=output_models, total_count=output_total, has_more=False
-            )
+            base_total = len(base_models)
+            output_total = len(output_models)
         else:
             base_result, output_result = client.fetch_all_models(
                 project_id, limit=effective_limit, credentials=credentials
             )
+            base_models = base_result.models
+            base_total = base_result.total_count
+            output_models = output_result.models
+            output_total = output_result.total_count
 
-    if not base_result.models and not output_result.models:
+    if not base_models and not output_models:
         console.print("No models found.")
         return
 
-    display_limit = None if fetch_all else effective_limit
-
     _print_model_section(
-        output_result,
+        output_models,
+        output_total,
         "Output Models",
         lambda m: (
             console.format_styled(f"from {m.training_run_name}", "dim")
             if m.training_run_name
             else ""
         ),
-        max_display=display_limit,
     )
 
     _print_model_section(
-        base_result,
+        base_models,
+        base_total,
         "Base Models",
         lambda m: (
             console.format_styled(f"by {m.creator_name}", "dim")
             if m.creator_name
             else ""
         ),
-        max_display=display_limit,
     )
 
     if not fetch_all:
-        total_shown = min(len(output_result.models), effective_limit) + min(
-            len(base_result.models), effective_limit
-        )
-        print_pagination_footer(
-            total_shown, output_result.total_count + base_result.total_count, "models"
-        )
+        total_shown = len(output_models) + len(base_models)
+        print_pagination_footer(total_shown, output_total + base_total, "models")
 
 
 @app.command("deploy")
@@ -176,23 +174,12 @@ def delete(
     project_id = _resolve_project_id(project, workspace_name=ws_name)
     client = OsmosisClient()
 
-    from osmosis_ai.platform.cli.utils import fetch_all_pages, resolve_id_prefix
+    from osmosis_ai.platform.cli.utils import resolve_id_prefix
 
-    base_models, _ = fetch_all_pages(
-        lambda lim, off: client.list_base_models(
-            project_id, limit=lim, offset=off, credentials=credentials
-        ),
-        items_attr="models",
+    base_models, output_models = _fetch_all_project_models(
+        client, project_id, credentials
     )
-    output_models, _ = fetch_all_pages(
-        lambda lim, off: client.list_output_models(
-            project_id, limit=lim, offset=off, credentials=credentials
-        ),
-        items_attr="models",
-    )
-
-    all_models = base_models + output_models
-    model_id = resolve_id_prefix(id, all_models, entity_name="model")
+    model_id = resolve_id_prefix(id, base_models + output_models, entity_name="model")
     model_type = "base" if any(m.id == model_id for m in base_models) else "output"
 
     try:
