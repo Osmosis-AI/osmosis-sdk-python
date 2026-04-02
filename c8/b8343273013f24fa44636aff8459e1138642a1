@@ -1,0 +1,25 @@
+.github/workflows/tests.yml
+  71436056fb6af331 51
+pyproject.toml
+  71436056fb6af331 152,160
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.5",
+  "base_commit_sha": "c8b8343273013f24fa44636aff8459e1138642a1",
+  "prompts": {
+    "71436056fb6af331": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "0e07b3e6-1677-41e8-8b73-e13e20542b11",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian",
+      "messages": [],
+      "total_additions": 3,
+      "total_deletions": 5,
+      "accepted_lines": 3,
+      "overriden_lines": 0
+    }
+  }
+}
