@@ -87,6 +87,8 @@ class RubricCommand:
             path = Path(rubric[1:]).expanduser()
             if not path.exists():
                 raise CLIError(f"Rubric file '{path}' does not exist.")
+            if path.is_dir():
+                raise CLIError(f"Expected a file but received directory '{path}'.")
             text = path.read_text(encoding="utf-8").strip()
             if not text:
                 raise CLIError(f"Rubric file '{path}' is empty.")
