@@ -1,15 +1,16 @@
 """
-Helpers for running rubric evaluations via LiteLLM.
+Async rubric evaluation engine using LiteLLM.
 
-This module provides rubric-based reward judging by delegating scoring to
-hosted LLM providers through LiteLLM's unified interface. It centralises
-prompt construction, response validation, and JSON parsing so callers can
-obtain a numeric rubric score with minimal setup.
+Delegates scoring to hosted LLM providers via LiteLLM's unified interface.
+Accepts either a plain string or a list of OpenAI-style chat messages as the
+candidate to be judged.
 """
 
 from __future__ import annotations
 
+import asyncio
 import json
+import math
 import os
 import re
 from typing import Any
@@ -38,16 +39,13 @@ from osmosis_ai._litellm_compat import (
 
 from .types import (
     MissingAPIKeyError,
-    ModelInfo,
     ModelNotFoundError,
     ProviderRequestError,
-    RewardRubricRunResult,
+    RubricResult,
 )
 
-# Default timeout for LLM requests
 DEFAULT_REQUEST_TIMEOUT_SECONDS = 30.0
 
-# API key environment variable names for each provider
 # LiteLLM uses these same environment variables internally
 DEFAULT_API_KEY_ENV = {
     "openai": "OPENAI_API_KEY",
@@ -64,29 +62,57 @@ DEFAULT_API_KEY_ENV = {
 
 
 # ============================================================================
-# Model format conversion for LiteLLM
+# Provider / model parsing
 # ============================================================================
 
 
-def _to_litellm_model(provider: str, model: str) -> str:
-    """
-    Convert provider/model pair to LiteLLM model string format.
+def _parse_provider(model: str) -> str | None:
+    """Extract or infer the provider from a model string.
+
+    First checks for an explicit ``provider/model`` prefix.  If absent,
+    infers from well-known model name patterns.
 
     Examples:
-        ("openai", "gpt-5-mini") -> "openai/responses/gpt-5-mini"
-        ("openai", "gpt-5.2") -> "openai/responses/gpt-5.2"
-        ("anthropic", "claude-sonnet-4-5-20250929") -> "anthropic/claude-sonnet-4-5-20250929"
+        "openai/gpt-4o"             -> "openai"
+        "anthropic/claude-sonnet-4-5-20250929" -> "anthropic"
+        "gpt-4o"                    -> "openai"
+        "claude-3-haiku"            -> "anthropic"
+        "unknown-model"             -> None
     """
-    provider_lower = provider.lower().strip()
+    if "/" in model:
+        return model.split("/", 1)[0].lower().strip() or None
+
     model_lower = model.lower().strip()
+    if model_lower.startswith(("gpt-", "o1-", "o3-", "o4-")):
+        return "openai"
+    if model_lower.startswith("claude"):
+        return "anthropic"
+    if model_lower.startswith("gemini"):
+        return "gemini"
+    if model_lower.startswith("grok"):
+        return "xai"
+    return None
 
-    # GPT-5 family requires the responses API prefix
-    if provider_lower == "openai" and model_lower.startswith("gpt-5"):
-        return f"openai/responses/{model}"
 
-    # Other providers use standard prefix
-    if provider_lower:
-        return f"{provider_lower}/{model}"
+def _to_litellm_model(model: str) -> str:
+    """Convert a model string to LiteLLM format.
+
+    If the string already contains a provider prefix (``/``), it is returned
+    as-is.  If there is no prefix, common model families are auto-detected so
+    the caller does not have to specify the provider explicitly.
+
+    Examples:
+        "openai/gpt-4o"       -> "openai/gpt-4o"
+        "anthropic/claude-3"  -> "anthropic/claude-3"
+        "gpt-4o"              -> "openai/gpt-4o"
+        "claude-3-haiku"      -> "claude-3-haiku"  (LiteLLM handles it)
+    """
+    if "/" in model:
+        return model
+
+    provider = _parse_provider(model)
+    if provider == "openai":
+        return f"openai/{model}"
 
     return model
 
@@ -99,8 +125,6 @@ def _default_timeout_for_model(provider: str, model: str) -> float:
     # Model-specific overrides
     if provider_lower == "xai" and model_lower.startswith("grok-4"):
         return 60.0
-    if provider_lower == "openai" and model_lower.startswith("gpt-5"):
-        return 45.0
 
     # Provider-level defaults
     provider_timeouts = {
@@ -117,21 +141,19 @@ def _default_timeout_for_model(provider: str, model: str) -> float:
 # ============================================================================
 
 
-def _reward_json_schema() -> dict[str, Any]:
-    """Return the JSON schema for rubric evaluation responses."""
-    return {
-        "name": "reward_rubric_response",
-        "strict": True,
-        "schema": {
-            "type": "object",
-            "properties": {
-                "score": {"type": "number"},
-                "explanation": {"type": "string"},
-            },
-            "required": ["score", "explanation"],
-            "additionalProperties": False,
+_RUBRIC_RESPONSE_SCHEMA: dict[str, Any] = {
+    "name": "rubric_response",
+    "strict": True,
+    "schema": {
+        "type": "object",
+        "properties": {
+            "score": {"type": "number"},
+            "explanation": {"type": "string"},
         },
-    }
+        "required": ["score", "explanation"],
+        "additionalProperties": False,
+    },
+}
 
 
 def _sanitize_json(raw: str) -> tuple[float, str]:
@@ -159,7 +181,7 @@ def _sanitize_json(raw: str) -> tuple[float, str]:
         raise ValueError("Model response must include a numeric 'score'.")
 
     score = float(score_raw)
-    if not float("-inf") < score < float("inf"):
+    if not math.isfinite(score):
         raise ValueError("Model response must include a finite numeric 'score'.")
 
     if not isinstance(explanation_raw, str) or not explanation_raw.strip():
@@ -222,15 +244,6 @@ def _format_metadata(metadata: dict[str, Any] | None) -> str | None:
     except (TypeError, ValueError):
         serialisable = {str(k): str(v) for k, v in metadata.items()}
         return json.dumps(serialisable, ensure_ascii=False, indent=2, sort_keys=True)
-
-
-def _select_text(*candidates: str | None) -> str | None:
-    for candidate in candidates:
-        if isinstance(candidate, str):
-            stripped = candidate.strip()
-            if stripped:
-                return stripped
-    return None
 
 
 def _build_user_prompt(
@@ -300,74 +313,36 @@ def _build_user_prompt(
 # ============================================================================
 
 
-def _get_api_key_env_name(provider: str, model_info: ModelInfo) -> str | None:
-    env_name = model_info.get("api_key_env")
-    if isinstance(env_name, str):
-        env_name = env_name.strip()
-    if env_name:
-        return env_name
-    return DEFAULT_API_KEY_ENV.get(provider.lower())
+def _resolve_api_key(provider: str, api_key_override: str | None) -> str | None:
+    """Resolve an API key for the given provider.
 
+    If *api_key_override* is supplied and non-empty it is returned directly.
+    Otherwise the provider-specific environment variable from
+    ``DEFAULT_API_KEY_ENV`` is looked up.  When the provider is unknown (empty
+    or not in the lookup table) and no override is given, returns ``None`` so
+    LiteLLM can attempt its own key resolution.
+    """
+    if isinstance(api_key_override, str) and api_key_override.strip():
+        return api_key_override.strip()
 
-def _format_api_key_hint(provider: str, env_name: str | None) -> str:
-    export_line: str | None = None
-
-    if env_name:
-        export_line = f'    export {env_name}="..."'
-    else:
-        default_env = DEFAULT_API_KEY_ENV.get(provider.lower())
-        if default_env:
-            export_line = f'    export {default_env}="..."'
-
-    if export_line:
-        return "Set the required API key before running:\n\n" + export_line
-
-    exports = "\n".join(
-        f'    export {name}="..."' for name in DEFAULT_API_KEY_ENV.values()
-    )
-    return "Set the required API key before running:\n\n" + exports
-
-
-def _resolve_api_key(provider: str, model_info: ModelInfo) -> str:
-    explicit = model_info.get("api_key")
-    if isinstance(explicit, str) and explicit.strip():
-        return explicit.strip()
-
-    env_name = _get_api_key_env_name(provider, model_info)
+    env_name = DEFAULT_API_KEY_ENV.get(provider.lower())
 
     if not env_name:
-        hint = _format_api_key_hint(provider, None)
-        raise MissingAPIKeyError(
-            f"Missing API key for provider '{provider}'. "
-            "Provide 'api_key_env' in model_info or set a default environment variable.\n"
-            f"{hint}"
-        )
+        if provider:
+            # Known-format but unlisted provider — try the conventional env var
+            env_name = f"{provider.upper()}_API_KEY"
+        else:
+            # Provider could not be determined from the model string.
+            # Let LiteLLM handle key resolution via its own provider detection.
+            return None
 
     api_key = os.getenv(env_name, "").strip()
     if not api_key:
-        hint = _format_api_key_hint(provider, env_name)
         raise MissingAPIKeyError(
             f"Environment variable '{env_name}' is not set. "
-            f"Export it with your {provider} API key before calling evaluate_rubric.\n"
-            f"{hint}"
+            f"Export it with your {provider} API key before calling evaluate_rubric."
         )
     return api_key
-
-
-def ensure_api_key_available(model_info: ModelInfo) -> None:
-    """
-    Validate that the provider specified in `model_info` has an accessible API key.
-
-    Raises:
-        MissingAPIKeyError: When the lookup fails or the environment variable is unset.
-        TypeError: When `model_info` is missing required fields.
-    """
-    provider_raw = model_info.get("provider")
-    if not isinstance(provider_raw, str) or not provider_raw.strip():
-        raise TypeError("'model_info' must include a 'provider' string")
-
-    provider = provider_raw.strip().lower()
-    _resolve_api_key(provider, model_info)
 
 
 # ============================================================================
@@ -375,18 +350,14 @@ def ensure_api_key_available(model_info: ModelInfo) -> None:
 # ============================================================================
 
 
-def _call_litellm(
-    provider: str,
-    model: str,
-    api_key: str,
-    system_content: str,
-    user_content: str,
-    score_min: float,
-    score_max: float,
-    timeout: float,
-    reasoning_effort: str | None = None,
-) -> RewardRubricRunResult:
-    """Call LiteLLM and return the rubric evaluation result."""
+_litellm_cache: Any = None
+
+
+def _ensure_litellm(provider: str, model: str):
+    """Import litellm and suppress debug output. Raises on missing dependency."""
+    global _litellm_cache
+    if _litellm_cache is not None:
+        return _litellm_cache
     try:
         import litellm
     except ImportError as e:
@@ -395,13 +366,24 @@ def _call_litellm(
             model,
             "LiteLLM is required. Install it via `pip install litellm`.",
         ) from e
-
-    # Suppress LiteLLM's "Provider List: ..." debug prints
     litellm.suppress_debug_info = True
+    _litellm_cache = litellm
+    return litellm
 
-    litellm_model = _to_litellm_model(provider, model)
-    schema = _reward_json_schema()
 
+def _call_litellm(
+    provider: str,
+    litellm_module: Any,
+    litellm_model: str,
+    bare_model: str,
+    api_key: str | None,
+    system_content: str,
+    user_content: str,
+    score_min: float,
+    score_max: float,
+    timeout: float,
+) -> RubricResult:
+    """Call LiteLLM synchronously and return a ``RubricResult``."""
     messages = [
         {"role": "system", "content": system_content},
         {"role": "user", "content": user_content},
@@ -409,8 +391,13 @@ def _call_litellm(
 
     # Use json_schema when the model supports it, otherwise fall back to
     # json_object (e.g. Cerebras models that only accept the simpler mode).
-    if litellm.supports_response_schema(model=litellm_model, custom_llm_provider=None):
-        response_format: dict[str, Any] = {"type": "json_schema", "json_schema": schema}
+    if litellm_module.supports_response_schema(
+        model=litellm_model, custom_llm_provider=None
+    ):
+        response_format: dict[str, Any] = {
+            "type": "json_schema",
+            "json_schema": _RUBRIC_RESPONSE_SCHEMA,
+        }
     else:
         response_format = {"type": "json_object"}
 
@@ -419,56 +406,57 @@ def _call_litellm(
         "messages": messages,
         "response_format": response_format,
         "timeout": timeout,
-        "api_key": api_key,
+        "temperature": 0,
     }
-
-    # GPT-5 doesn't support temperature
-    if not model.lower().strip().startswith("gpt-5"):
-        completion_kwargs["temperature"] = 0
-
-    if reasoning_effort is not None:
-        completion_kwargs["reasoning_effort"] = reasoning_effort
-        # Let LiteLLM silently drop the param for models that don't support it
-        completion_kwargs["drop_params"] = True
+    if api_key is not None:
+        completion_kwargs["api_key"] = api_key
 
     try:
         response = _litellm_completion(**completion_kwargs)
     except _LitellmNotFoundError as err:
         raise ModelNotFoundError(
             provider,
-            model,
-            f"Model '{model}' was not found. Confirm the model identifier is correct "
+            bare_model,
+            f"Model '{bare_model}' was not found. Confirm the model identifier is correct "
             f"and your {provider} account has access to it.",
+        ) from err
+    except _LitellmAuthenticationError as err:
+        if api_key is None:
+            # We couldn't determine the provider, so we let LiteLLM try.
+            # It also failed to find a key — surface as MissingAPIKeyError.
+            raise MissingAPIKeyError(
+                f"No API key found for model '{bare_model}'. "
+                "Pass --api-key explicitly or set the provider-specific "
+                "environment variable (e.g. OPENAI_API_KEY)."
+            ) from err
+        raise ProviderRequestError(
+            provider, bare_model, _extract_error_message(err)
         ) from err
     except (
         _LitellmAPIError,
         _LitellmRateLimitError,
-        _LitellmAuthenticationError,
         _LitellmTimeout,
         _LitellmAPIConnectionError,
     ) as err:
         raise ProviderRequestError(
-            provider, model, _extract_error_message(err)
+            provider, bare_model, _extract_error_message(err)
         ) from err
-    except Exception:
-        # Re-raise other unexpected exceptions to be handled by the caller.
-        raise
 
     raw = _dump_response(response)
     content = _extract_content(raw)
 
     if not content:
         raise ProviderRequestError(
-            provider, model, "Model response did not include any content."
+            provider, bare_model, "Model response did not include any content."
         )
 
     try:
         score, explanation = _sanitize_json(content)
     except ValueError as err:
-        raise ProviderRequestError(provider, model, str(err)) from err
+        raise ProviderRequestError(provider, bare_model, str(err)) from err
 
     bounded = max(score_min, min(score_max, score))
-    return {"score": bounded, "explanation": explanation, "raw": raw}
+    return RubricResult(score=bounded, explanation=explanation, raw=raw)
 
 
 def _extract_error_message(err: Exception) -> str:
@@ -529,126 +517,111 @@ def _extract_content(raw: Any) -> str | None:
 # ============================================================================
 
 
-def evaluate_rubric(
-    rubric: str,
-    solution_str: str,
-    model_info: ModelInfo,
+async def evaluate_rubric(
     *,
+    solution_str: str,
+    rubric: str,
+    model: str,
     ground_truth: str | None = None,
     original_input: str | None = None,
     metadata: dict[str, Any] | None = None,
-    score_min: float | None = None,
-    score_max: float | None = None,
+    score_min: float = 0.0,
+    score_max: float = 1.0,
+    api_key: str | None = None,
     timeout: float | None = None,
-    return_details: bool = False,
-) -> float | RewardRubricRunResult:
-    """
-    Evaluate a single model output against a rubric by delegating scoring to a hosted LLM.
-
-    Uses LiteLLM to support 100+ LLM providers with a unified interface.
+    system_prompt: str | None = None,
+) -> RubricResult:
+    """Evaluate a candidate output against a rubric using a hosted LLM judge.
 
     Args:
+        solution_str: The candidate model output to be scored.
         rubric: Natural language description of the evaluation criteria.
-        solution_str: The assistant/model output to be scored.
-        model_info: Provider configuration containing the provider/model identifiers and
-            optionally `api_key_env` (defaults to a provider-specific environment variable).
-        ground_truth: Optional reference answer to surface in the judging prompt.
-        original_input: Optional original user instruction supplied to the assistant.
-        metadata: Optional dict that will be serialised and quoted inside the prompt.
-        score_min: Override the minimum score the judge should return.
-        score_max: Override the maximum score the judge should return.
-        timeout: Optional timeout in seconds; defaults to provider-specific values.
-        return_details: When True, return the full provider response payload.
+        model: LiteLLM model string, e.g. ``"openai/gpt-4o"``.
+        ground_truth: Optional reference answer surfaced in the judging prompt.
+        original_input: Optional original user instruction supplied to the model.
+        metadata: Optional dict serialised and quoted in the prompt.
+        score_min: Minimum score the judge should return (default ``0.0``).
+        score_max: Maximum score the judge should return (default ``1.0``).
+        api_key: Explicit API key.  Falls back to a provider-specific env var.
+        timeout: Request timeout in seconds; defaults to a provider-specific
+            value.
+        system_prompt: Optional custom system prompt prepended to the default.
 
     Returns:
-        Either the numeric score or the full RewardRubricRunResult when return_details=True.
+        A :class:`RubricResult` dataclass with ``score``, ``explanation``, and
+        ``raw`` fields.
     """
-    provider_name_raw = model_info.get("provider")
-    if not isinstance(provider_name_raw, str) or not provider_name_raw.strip():
-        raise TypeError("'model_info' must include a 'provider' string")
-    provider_name = provider_name_raw.strip().lower()
-
-    model_raw = model_info.get("model")
-    if not isinstance(model_raw, str) or not model_raw.strip():
-        raise TypeError("'model_info' must include a 'model' string")
-    model = model_raw.strip()
-
-    api_key = _resolve_api_key(provider_name, model_info)
+    if not isinstance(solution_str, str) or not solution_str.strip():
+        raise TypeError("'solution_str' must be a non-empty string")
 
     if not isinstance(rubric, str) or not rubric.strip():
         raise TypeError("'rubric' must be a non-empty string")
 
-    if not isinstance(solution_str, str) or not solution_str.strip():
-        raise TypeError("'solution_str' must be a non-empty string")
-
-    resolved_score_min = float(
-        score_min if score_min is not None else model_info.get("score_min", 0.0)
-    )
-    resolved_score_max = float(
-        score_max if score_max is not None else model_info.get("score_max", 1.0)
-    )
-    if resolved_score_max <= resolved_score_min:
+    if score_max <= score_min:
         raise ValueError("'score_max' must be greater than 'score_min'")
 
-    resolved_system_prompt = _select_text(model_info.get("system_prompt"))
-    resolved_original_input = _select_text(
-        original_input, model_info.get("original_input")
-    )
+    # -- Resolve provider from model string --------------------------------
+    provider = _parse_provider(model) or ""
 
+    candidate_output = solution_str.strip()
+
+    # -- Resolve API key ---------------------------------------------------
+    resolved_api_key = _resolve_api_key(provider, api_key)
+
+    # -- Parse model identifiers once --------------------------------------
+    bare_model = model.split("/", 1)[-1] if "/" in model else model
+    litellm_model = _to_litellm_model(model)
+
+    # -- Resolve timeout ---------------------------------------------------
     if timeout is not None:
-        provider_timeout = float(timeout)
+        resolved_timeout = float(timeout)
     else:
-        model_timeout = model_info.get("timeout")
-        provider_timeout = (
-            float(model_timeout)
-            if model_timeout
-            else _default_timeout_for_model(provider_name, model)
-        )
+        resolved_timeout = _default_timeout_for_model(provider, bare_model)
 
-    system_content = _build_system_prompt(
-        resolved_score_min, resolved_score_max, resolved_system_prompt
-    )
+    # -- Ensure litellm is available ---------------------------------------
+    litellm_module = _ensure_litellm(provider, bare_model)
+
+    # -- Build prompts -----------------------------------------------------
+    system_content = _build_system_prompt(score_min, score_max, system_prompt)
     user_content = _build_user_prompt(
         rubric,
-        resolved_score_min,
-        resolved_score_max,
-        solution_str,
-        resolved_original_input,
+        score_min,
+        score_max,
+        candidate_output,
+        original_input,
         ground_truth,
         metadata,
     )
 
-    reasoning_effort = model_info.get("reasoning_effort")
-
+    # -- Call LiteLLM in a thread (blocking I/O) ---------------------------
     try:
-        result = _call_litellm(
-            provider=provider_name,
-            model=model,
-            api_key=api_key,
+        result = await asyncio.to_thread(
+            _call_litellm,
+            provider=provider,
+            litellm_module=litellm_module,
+            litellm_model=litellm_model,
+            bare_model=bare_model,
+            api_key=resolved_api_key,
             system_content=system_content,
             user_content=user_content,
-            score_min=resolved_score_min,
-            score_max=resolved_score_max,
-            timeout=provider_timeout,
-            reasoning_effort=reasoning_effort,
+            score_min=score_min,
+            score_max=score_max,
+            timeout=resolved_timeout,
         )
-    except ProviderRequestError:
-        raise
+    except (ProviderRequestError, MissingAPIKeyError, TypeError, ValueError):
+        raise  # Let known errors propagate unchanged
     except Exception as exc:
         detail = (
             str(exc).strip()
             or f"{exc.__class__.__name__} encountered while contacting provider."
         )
-        raise ProviderRequestError(provider_name, model, detail) from exc
+        raise ProviderRequestError(provider, bare_model, detail) from exc
 
-    return result if return_details else result["score"]
+    return result
 
 
 __all__ = [
+    "DEFAULT_API_KEY_ENV",
     "DEFAULT_REQUEST_TIMEOUT_SECONDS",
-    "MissingAPIKeyError",
-    "ModelInfo",
-    "RewardRubricRunResult",
-    "ensure_api_key_available",
     "evaluate_rubric",
 ]

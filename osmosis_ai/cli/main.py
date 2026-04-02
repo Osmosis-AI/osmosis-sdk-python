@@ -116,11 +116,6 @@ def _register_commands() -> None:
     app.command("logout", hidden=True)(auth_logout)
     app.command("whoami", hidden=True)(auth_whoami)
 
-    # -- Transitional: eval-rubric kept temporarily --
-    from osmosis_ai.rubric.cli.eval_rubric import app as eval_rubric_app
-
-    app.add_typer(eval_rubric_app, name="eval-rubric", rich_help_panel=_WORKFLOW)
-
 
 def main(argv: list[str] | None = None) -> int:
     """Entry point for the osmosis CLI."""

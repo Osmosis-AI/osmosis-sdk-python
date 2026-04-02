@@ -7,18 +7,16 @@ from typing import Literal
 import typer
 
 app: typer.Typer = typer.Typer(
-    help="Evaluate agent against dataset (cache).",
-    invoke_without_command=True,
-    no_args_is_help=False,
+    help="Evaluate agent against dataset (run, rubric, cache).",
+    no_args_is_help=True,
 )
 
 cache_app: typer.Typer = typer.Typer(help="Manage eval cache.")
 app.add_typer(cache_app, name="cache")
 
 
-@app.callback(invoke_without_command=True)
-def eval_main(
-    ctx: typer.Context,
+@app.command("run")
+def eval_run(
     module: str | None = typer.Option(
         None, "-m", "--module", help="Module path 'module:attribute'."
     ),
@@ -83,14 +81,6 @@ def eval_main(
     ),
 ) -> None:
     """Evaluate agent against dataset with eval functions."""
-    if ctx.invoked_subcommand is not None:
-        return
-
-    # No meaningful args -> show help
-    if not any([module, mcp, dataset, model, eval_fns]):
-        typer.echo(ctx.get_help())
-        raise typer.Exit(1)
-
     from osmosis_ai.rollout.eval.evaluation.cli import EvalCommand
 
     cmd = EvalCommand()
@@ -134,6 +124,53 @@ def eval_main(
         log_samples=log_samples,
         output_path=output_path,
         retry_failed=retry_failed,
+    )
+    if rc:
+        raise typer.Exit(rc)
+
+
+@app.command("rubric")
+def eval_rubric(
+    data: str = typer.Option(
+        ..., "-d", "--data", help="Path to JSONL file with conversations."
+    ),
+    rubric: str = typer.Option(
+        ...,
+        "-r",
+        "--rubric",
+        help="Rubric text (inline) or @file.txt to read from file.",
+    ),
+    model: str = typer.Option(
+        ..., "--model", help="Judge model (LiteLLM format, e.g. openai/gpt-4o)."
+    ),
+    number: int = typer.Option(
+        1, "-n", "--number", help="Number of evaluation runs per record."
+    ),
+    output_path: str | None = typer.Option(
+        None, "-o", "--output", help="Path to write evaluation results as JSON."
+    ),
+    api_key: str | None = typer.Option(
+        None, "--api-key", help="API key for the judge model."
+    ),
+    timeout: float | None = typer.Option(
+        None, "--timeout", help="Request timeout in seconds."
+    ),
+    score_min: float = typer.Option(0.0, "--score-min", help="Minimum score."),
+    score_max: float = typer.Option(1.0, "--score-max", help="Maximum score."),
+) -> None:
+    """Evaluate conversations against a rubric using LLM-as-judge."""
+    from osmosis_ai.rollout.eval.rubric.cli import RubricCommand
+
+    rc = RubricCommand().run(
+        data=data,
+        rubric=rubric,
+        model=model,
+        number=number,
+        output_path=output_path,
+        api_key=api_key,
+        timeout=timeout,
+        score_min=score_min,
+        score_max=score_max,
     )
     if rc:
         raise typer.Exit(rc)
