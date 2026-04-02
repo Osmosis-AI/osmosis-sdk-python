@@ -234,7 +234,7 @@ def whoami() -> None:
     """Show current authenticated user and workspace."""
     from osmosis_ai.platform.auth import load_credentials
     from osmosis_ai.platform.auth.local_config import get_active_workspace_name
-    from osmosis_ai.platform.cli.constants import MSG_NOT_LOGGED_IN
+    from osmosis_ai.platform.constants import MSG_NOT_LOGGED_IN
 
     credentials = load_credentials()
 

@@ -36,7 +36,6 @@ def test_help_exits_zero(args, capfd):
         ["model", "export"],
         ["model", "build"],
         ["train", "submit"],
-        ["train", "metrics"],
         ["train", "traces"],
         ["rollout", "list"],
     ],

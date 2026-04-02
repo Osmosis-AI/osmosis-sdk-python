@@ -11,7 +11,7 @@ from urllib.request import Request, urlopen
 
 from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.consts import PACKAGE_VERSION
-from osmosis_ai.platform.cli.constants import MSG_NOT_LOGGED_IN
+from osmosis_ai.platform.constants import MSG_NOT_LOGGED_IN
 
 from .config import PLATFORM_URL
 from .credentials import load_credentials

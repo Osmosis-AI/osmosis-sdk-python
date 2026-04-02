@@ -8,9 +8,9 @@ from typing import Any, Literal
 # ── Dataset status constants ─────────────────────────────────────
 # Single source of truth for status classification.
 
-STATUSES_SUCCESS: frozenset[str] = frozenset({"ready"})
-STATUSES_IN_PROGRESS: frozenset[str] = frozenset({"processing", "uploaded"})
-STATUSES_ERROR: frozenset[str] = frozenset({"failed", "error"})
+STATUSES_SUCCESS: frozenset[str] = frozenset({"uploaded"})
+STATUSES_IN_PROGRESS: frozenset[str] = frozenset({"pending", "uploading", "processing"})
+STATUSES_ERROR: frozenset[str] = frozenset({"error"})
 STATUSES_INACTIVE: frozenset[str] = frozenset({"cancelled", "deleted"})
 STATUSES_TERMINAL: frozenset[str] = (
     STATUSES_SUCCESS | STATUSES_ERROR | STATUSES_INACTIVE
@@ -437,6 +437,89 @@ class ModelAffectedResources:
     def has_blocking_runs(self) -> bool:
         """Whether there are training runs that block deletion."""
         return len(self.training_runs_using_model) > 0
+
+
+# ── Training run metrics ─────────────────────────────────────────
+
+
+@dataclass
+class MetricDataPoint:
+    """A single data point in a metric time series."""
+
+    step: int
+    value: float
+    timestamp: int  # epoch ms
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> MetricDataPoint:
+        return cls(
+            step=data["step"],
+            value=data["value"],
+            timestamp=data["timestamp"],
+        )
+
+
+@dataclass
+class MetricHistory:
+    """History of a single metric across training steps."""
+
+    metric_key: str
+    title: str
+    data_points: list[MetricDataPoint]
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> MetricHistory:
+        return cls(
+            metric_key=data["metric_key"],
+            title=data["title"],
+            data_points=[
+                MetricDataPoint.from_dict(dp) for dp in data.get("data_points", [])
+            ],
+        )
+
+
+@dataclass
+class TrainingRunMetricsOverview:
+    """Summary metrics for a training run."""
+
+    mlflow_run_id: str
+    mlflow_status: str
+    duration_ms: int | None
+    duration_formatted: str | None
+    reward: float | None
+    reward_delta: float | None
+    examples_processed_count: int | None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> TrainingRunMetricsOverview:
+        return cls(
+            mlflow_run_id=data["mlflow_run_id"],
+            mlflow_status=data["mlflow_status"],
+            duration_ms=data.get("duration_ms"),
+            duration_formatted=data.get("duration_formatted"),
+            reward=data.get("reward"),
+            reward_delta=data.get("reward_increase_delta"),
+            examples_processed_count=data.get("examples_processed_count"),
+        )
+
+
+@dataclass
+class TrainingRunMetrics:
+    """Complete metrics response for a training run."""
+
+    training_run_id: str
+    status: str
+    overview: TrainingRunMetricsOverview
+    metrics: list[MetricHistory]
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> TrainingRunMetrics:
+        return cls(
+            training_run_id=data["training_run_id"],
+            status=data["status"],
+            overview=TrainingRunMetricsOverview.from_dict(data["overview"]),
+            metrics=[MetricHistory.from_dict(m) for m in data.get("metrics", [])],
+        )
 
 
 @dataclass

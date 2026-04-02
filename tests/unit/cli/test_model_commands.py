@@ -44,14 +44,14 @@ class TestListModels:
         self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
     ) -> None:
         class FakeClient:
-            def fetch_all_models(self, pid, *, limit=50, credentials=None):
+            def fetch_all_models(self, pid, *, limit=30, credentials=None):
                 return (
                     PaginatedBaseModels(models=[], total_count=0, has_more=False),
                     PaginatedOutputModels(models=[], total_count=0, has_more=False),
                 )
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-        model_module.list_models(project=None, limit=50)
+        model_module.list_models(project=None, limit=30, all_=False)
         assert "No models found" in console_capture.getvalue()
 
     def test_list_with_output_models(
@@ -60,13 +60,13 @@ class TestListModels:
         out_model = OutputModelInfo(
             id="model_out_12345678901234567890",
             model_name="my-finetuned",
-            status="ready",
+            status="uploaded",
             training_run_name="run-1",
             created_at="2026-01-15T00:00:00Z",
         )
 
         class FakeClient:
-            def fetch_all_models(self, pid, *, limit=50, credentials=None):
+            def fetch_all_models(self, pid, *, limit=30, credentials=None):
                 return (
                     PaginatedBaseModels(models=[], total_count=0, has_more=False),
                     PaginatedOutputModels(
@@ -75,7 +75,7 @@ class TestListModels:
                 )
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-        model_module.list_models(project=None, limit=50)
+        model_module.list_models(project=None, limit=30, all_=False)
         out = console_capture.getvalue()
         assert "my-finetuned" in out
         assert "Output Models" in out
@@ -92,14 +92,14 @@ class TestListModels:
         )
 
         class FakeClient:
-            def fetch_all_models(self, pid, *, limit=50, credentials=None):
+            def fetch_all_models(self, pid, *, limit=30, credentials=None):
                 return (
                     PaginatedBaseModels(models=[base], total_count=1, has_more=False),
                     PaginatedOutputModels(models=[], total_count=0, has_more=False),
                 )
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-        model_module.list_models(project=None, limit=50)
+        model_module.list_models(project=None, limit=30, all_=False)
         out = console_capture.getvalue()
         assert "gpt-2" in out
         assert "Base Models" in out
@@ -122,5 +122,7 @@ class TestListModels:
                 )
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-        model_module.list_models(project=None, limit=1)
-        assert "4 more" in console_capture.getvalue()
+        model_module.list_models(project=None, limit=1, all_=False)
+        out = console_capture.getvalue()
+        assert "Showing 1 of 5 models" in out
+        assert "--all" in out

@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any, Literal
 from urllib.parse import quote, urlencode
 
 from osmosis_ai.platform.auth.platform_client import platform_request
+from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE
 
 from .models import (
     DatasetAffectedResources,
@@ -22,6 +23,7 @@ from .models import (
     ProjectDetail,
     TrainingRunAffectedResources,
     TrainingRunDetail,
+    TrainingRunMetrics,
     WorkspaceDeletionStatus,
 )
 
@@ -125,7 +127,7 @@ class OsmosisClient:
 
     def list_projects(
         self,
-        limit: int = 50,
+        limit: int = DEFAULT_PAGE_SIZE,
         offset: int = 0,
         *,
         credentials: Credentials | None = None,
@@ -243,7 +245,7 @@ class OsmosisClient:
 
     def list_datasets(
         self,
-        limit: int = 50,
+        limit: int = DEFAULT_PAGE_SIZE,
         offset: int = 0,
         *,
         credentials: Credentials | None = None,
@@ -295,7 +297,7 @@ class OsmosisClient:
     def list_training_runs(
         self,
         project_id: str,
-        limit: int = 20,
+        limit: int = DEFAULT_PAGE_SIZE,
         offset: int = 0,
         *,
         credentials: Credentials | None = None,
@@ -343,6 +345,19 @@ class OsmosisClient:
         )
         return DeleteTrainingRunResult.from_dict(data)
 
+    def get_training_run_metrics(
+        self,
+        run_id: str,
+        *,
+        credentials: Credentials | None = None,
+    ) -> TrainingRunMetrics:
+        """Fetch training run metrics (only available for terminal runs)."""
+        data = platform_request(
+            f"/api/cli/training-runs/{_safe_path(run_id)}/metrics",
+            credentials=credentials,
+        )
+        return TrainingRunMetrics.from_dict(data)
+
     def get_training_run_affected_resources(
         self,
         run_id: str,
@@ -361,7 +376,7 @@ class OsmosisClient:
     def list_base_models(
         self,
         project_id: str,
-        limit: int = 50,
+        limit: int = DEFAULT_PAGE_SIZE,
         offset: int = 0,
         *,
         credentials: Credentials | None = None,
@@ -373,7 +388,7 @@ class OsmosisClient:
     def list_output_models(
         self,
         project_id: str,
-        limit: int = 50,
+        limit: int = DEFAULT_PAGE_SIZE,
         offset: int = 0,
         *,
         credentials: Credentials | None = None,
@@ -423,7 +438,7 @@ class OsmosisClient:
     def fetch_all_models(
         self,
         project_id: str,
-        limit: int = 50,
+        limit: int = DEFAULT_PAGE_SIZE,
         offset: int = 0,
         *,
         credentials: Credentials | None = None,

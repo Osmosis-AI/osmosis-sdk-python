@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from io import StringIO
 
 from osmosis_ai.cli.console import Console
@@ -43,6 +44,43 @@ def test_rich_console_properties() -> None:
 def test_no_color_console_properties() -> None:
     c, _ = _no_color_console()
     assert c.is_tty is True
+
+
+def test_rich_console_width_override() -> None:
+    buf = StringIO()
+    console = Console(file=buf, force_terminal=True, width=120)
+    assert console.is_tty is True
+    assert console.rich.width == 120
+    assert console._rich_stderr.width == 120
+
+
+def test_print_error_stderr_wraps_using_width_override(monkeypatch) -> None:
+    """print_error writes via stderr; wrapping must follow the width override."""
+    # Stabilize Rich dumb-terminal + env so explicit width+height is the variable under test.
+    monkeypatch.setenv("TERM", "dumb")
+    monkeypatch.setenv("TTY_COMPATIBLE", "1")
+    for key in (
+        "NO_COLOR",
+        "FORCE_COLOR",
+        "COLUMNS",
+        "LINES",
+        "TTY_INTERACTIVE",
+        "JUPYTER_COLUMNS",
+        "JUPYTER_LINES",
+    ):
+        monkeypatch.delenv(key, raising=False)
+
+    err_narrow = StringIO()
+    monkeypatch.setattr(sys, "stderr", err_narrow)
+    narrow = Console(file=StringIO(), force_terminal=True, width=40, no_color=True)
+    narrow.print_error("x" * 200)
+
+    err_wide = StringIO()
+    monkeypatch.setattr(sys, "stderr", err_wide)
+    wide = Console(file=StringIO(), force_terminal=True, width=120, no_color=True)
+    wide.print_error("x" * 200)
+
+    assert err_narrow.getvalue().count("\n") > err_wide.getvalue().count("\n")
 
 
 # ── print ───────────────────────────────────────────────────────────
