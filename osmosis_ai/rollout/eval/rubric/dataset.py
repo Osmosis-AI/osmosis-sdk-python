@@ -7,7 +7,33 @@ from typing import Any
 
 from osmosis_ai.cli.errors import CLIError
 
-from .engine import extract_assistant_content
+
+def extract_assistant_content(messages: list[dict[str, Any]]) -> str:
+    """Extract the content of the last assistant message from a conversation.
+
+    Iterates in reverse so the *most recent* assistant turn is used.  Handles
+    both plain string content and structured content arrays (multimodal
+    messages with ``{"type": "text", "text": "..."}`` parts).
+
+    Returns an empty string when no assistant message is found.
+    """
+    for msg in reversed(messages):
+        if msg.get("role") == "assistant":
+            content = msg.get("content")
+            if isinstance(content, str) and content.strip():
+                return content.strip()
+            if isinstance(content, list):
+                text_parts = [
+                    part["text"].strip()
+                    for part in content
+                    if isinstance(part, dict)
+                    and part.get("type") == "text"
+                    and isinstance(part.get("text"), str)
+                    and part["text"].strip()
+                ]
+                if text_parts:
+                    return "\n".join(text_parts)
+    return ""
 
 
 @dataclass(frozen=True)

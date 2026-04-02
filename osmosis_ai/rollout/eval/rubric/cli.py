@@ -75,8 +75,6 @@ class RubricCommand:
             out = Path(output_path).expanduser()
             if out.is_dir():
                 out = out / "rubric_eval_result.json"
-            else:
-                out.parent.mkdir(parents=True, exist_ok=True)
             written = JsonReportWriter().write(report, out)
             print(f"Wrote results to {written}")
 
@@ -123,53 +121,56 @@ class RubricCommand:
         # Cap concurrency to avoid overwhelming the LLM provider.
         sem = asyncio.Semaphore(8)
 
-        async def _run_one(
+        async def _run_single(
             record: RubricRecord,
-        ) -> tuple[list[float], list[str], list[str]]:
-            scores: list[float] = []
-            explanations: list[str] = []
-            errors: list[str] = []
-            for _ in range(number):
-                async with sem:
-                    try:
-                        result = await evaluate_rubric(
-                            solution_str=record.solution_str,
-                            rubric=rubric_text,
-                            model=model,
-                            ground_truth=record.ground_truth,
-                            original_input=record.original_input,
-                            metadata=record.metadata,
-                            score_min=score_min,
-                            score_max=score_max,
-                            api_key=api_key,
-                            timeout=timeout,
-                        )
-                        scores.append(result.score)
-                        explanations.append(result.explanation)
-                    except (
-                        ProviderRequestError,
-                        MissingAPIKeyError,
-                        CLIError,
-                        TypeError,
-                        ValueError,
-                    ) as exc:
-                        errors.append(str(exc))
-                if progress:
-                    progress.update()
-            return scores, explanations, errors
+        ) -> tuple[float | None, str | None, str | None]:
+            async with sem:
+                try:
+                    result = await evaluate_rubric(
+                        solution_str=record.solution_str,
+                        rubric=rubric_text,
+                        model=model,
+                        ground_truth=record.ground_truth,
+                        original_input=record.original_input,
+                        metadata=record.metadata,
+                        score_min=score_min,
+                        score_max=score_max,
+                        api_key=api_key,
+                        timeout=timeout,
+                    )
+                    return result.score, result.explanation, None
+                except (
+                    ProviderRequestError,
+                    MissingAPIKeyError,
+                    CLIError,
+                    TypeError,
+                    ValueError,
+                ) as exc:
+                    return None, None, str(exc)
+                finally:
+                    if progress:
+                        progress.update()
+
+        # Flatten all (record, run_index) pairs into concurrent tasks so that
+        # number > 1 runs are truly parallel, not serialized per record.
+        tasks = [_run_single(record) for record in records for _ in range(number)]
 
         try:
-            gathered = await asyncio.gather(*[_run_one(r) for r in records])
+            flat_results = await asyncio.gather(*tasks)
         finally:
             if progress:
                 progress.close()
 
         results: list[RecordResult] = []
-        for idx, (scores, explanations, errors) in enumerate(gathered, start=1):
+        for idx, record in enumerate(records):
+            chunk = flat_results[idx * number : (idx + 1) * number]
+            scores = [s for s, _, _ in chunk if s is not None]
+            explanations = [e for _, e, _ in chunk if e is not None]
+            errors = [err for _, _, err in chunk if err is not None]
             results.append(
                 RecordResult(
-                    record_index=idx,
-                    label=records[idx - 1].label(idx),
+                    record_index=idx + 1,
+                    label=record.label(idx + 1),
                     scores=scores,
                     explanations=explanations,
                     errors=errors,

@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from osmosis_ai.rollout.eval.rubric.dataset import extract_assistant_content
 from osmosis_ai.rollout.eval.rubric.engine import (
     DEFAULT_REQUEST_TIMEOUT_SECONDS,
     _build_user_prompt,
@@ -14,7 +15,6 @@ from osmosis_ai.rollout.eval.rubric.engine import (
     _sanitize_json,
     _to_litellm_model,
     evaluate_rubric,
-    extract_assistant_content,
 )
 from osmosis_ai.rollout.eval.rubric.types import (
     MissingAPIKeyError,

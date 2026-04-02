@@ -112,9 +112,8 @@ def _to_litellm_model(model: str) -> str:
     if "/" in model:
         return model
 
-    # No provider prefix -- add one for well-known OpenAI model families
-    model_lower = model.lower().strip()
-    if model_lower.startswith(("gpt-", "o1-", "o3-", "o4-")):
+    provider = _parse_provider(model)
+    if provider == "openai":
         return f"openai/{model}"
 
     return model
@@ -312,39 +311,6 @@ def _build_user_prompt(
 
 
 # ============================================================================
-# Messages helpers
-# ============================================================================
-
-
-def extract_assistant_content(messages: list[dict[str, Any]]) -> str:
-    """Extract the content of the last assistant message from a conversation.
-
-    Iterates in reverse so the *most recent* assistant turn is used.  Handles
-    both plain string content and structured content arrays (multimodal
-    messages with ``{"type": "text", "text": "..."}`` parts).
-
-    Returns an empty string when no assistant message is found.
-    """
-    for msg in reversed(messages):
-        if msg.get("role") == "assistant":
-            content = msg.get("content")
-            if isinstance(content, str) and content.strip():
-                return content.strip()
-            if isinstance(content, list):
-                text_parts = [
-                    part["text"].strip()
-                    for part in content
-                    if isinstance(part, dict)
-                    and part.get("type") == "text"
-                    and isinstance(part.get("text"), str)
-                    and part["text"].strip()
-                ]
-                if text_parts:
-                    return "\n".join(text_parts)
-    return ""
-
-
-# ============================================================================
 # API key resolution
 # ============================================================================
 
@@ -386,8 +352,14 @@ def _resolve_api_key(provider: str, api_key_override: str | None) -> str | None:
 # ============================================================================
 
 
+_litellm_cache: Any = None
+
+
 def _ensure_litellm(provider: str, model: str):
     """Import litellm and suppress debug output. Raises on missing dependency."""
+    global _litellm_cache
+    if _litellm_cache is not None:
+        return _litellm_cache
     try:
         import litellm
     except ImportError as e:
@@ -397,6 +369,7 @@ def _ensure_litellm(provider: str, model: str):
             "LiteLLM is required. Install it via `pip install litellm`.",
         ) from e
     litellm.suppress_debug_info = True
+    _litellm_cache = litellm
     return litellm
 
 
