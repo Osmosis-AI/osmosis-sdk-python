@@ -15,6 +15,7 @@ from osmosis_ai.platform.auth import (
     AuthenticationExpiredError,
     PlatformAPIError,
 )
+from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE
 
 from .constants import (
     MAX_FILE_SIZE,
@@ -275,7 +276,7 @@ def upload(
     console.print(f"Processing will continue on the platform. Check status at: {url}")
 
 
-def list_datasets(limit: int = 30, all_: bool = False) -> None:
+def list_datasets(limit: int = DEFAULT_PAGE_SIZE, all_: bool = False) -> None:
     """List datasets."""
     from osmosis_ai.platform.cli.utils import (
         paginated_fetch,

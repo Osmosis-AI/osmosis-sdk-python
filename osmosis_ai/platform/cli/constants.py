@@ -12,17 +12,6 @@ LOGOUT_ALL = "__all__"
 
 DEFAULT_VISIBLE_CHOICES = 10
 
-# ── List command defaults ────────────────────────────────────────
-
-DEFAULT_LIST_LIMIT = 30
-
-# ── Common error messages ─────────────────────────────────────────
-
-MSG_SESSION_EXPIRED = (
-    "Your session has expired. Please run 'osmosis auth login' to re-authenticate."
-)
-MSG_NOT_LOGGED_IN = "Not logged in. Run 'osmosis auth login' first."
-
 # ── Cache ─────────────────────────────────────────────────────────
 
 CACHE_TTL_SECONDS = 300

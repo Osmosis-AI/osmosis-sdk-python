@@ -9,7 +9,7 @@ import typer
 
 from osmosis_ai.cli.console import console
 from osmosis_ai.cli.errors import not_implemented
-from osmosis_ai.platform.cli.constants import DEFAULT_LIST_LIMIT
+from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE
 
 app: typer.Typer = typer.Typer(
     help="Manage models (list, deploy, export, build, delete).", no_args_is_help=True
@@ -69,7 +69,7 @@ def list_models(
         None, "--project", help="Project name (default: current project)."
     ),
     limit: int = typer.Option(
-        DEFAULT_LIST_LIMIT,
+        DEFAULT_PAGE_SIZE,
         "--limit",
         help="Maximum number of models to show per category.",
     ),

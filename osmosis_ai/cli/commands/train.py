@@ -10,7 +10,7 @@ import typer
 
 from osmosis_ai.cli.console import console
 from osmosis_ai.cli.errors import CLIError, not_implemented
-from osmosis_ai.platform.cli.constants import DEFAULT_LIST_LIMIT
+from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE
 
 app: typer.Typer = typer.Typer(help="Manage training runs.", no_args_is_help=True)
 
@@ -21,7 +21,7 @@ def list_runs(
         None, "--project", help="Project name (default: current project)."
     ),
     limit: int = typer.Option(
-        DEFAULT_LIST_LIMIT, "--limit", help="Maximum number of runs to show."
+        DEFAULT_PAGE_SIZE, "--limit", help="Maximum number of runs to show."
     ),
     all_: bool = typer.Option(False, "--all", help="Show all training runs."),
 ) -> None:

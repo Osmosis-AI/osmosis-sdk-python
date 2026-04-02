@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import typer
 
-from osmosis_ai.platform.cli.constants import DEFAULT_LIST_LIMIT
+from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE
 
 app: typer.Typer = typer.Typer(
     help="Manage datasets (upload, list, status, preview, validate, delete).",
@@ -25,7 +25,7 @@ def upload(
 @app.command("list")
 def list_datasets(
     limit: int = typer.Option(
-        DEFAULT_LIST_LIMIT, "--limit", help="Maximum number of datasets to show."
+        DEFAULT_PAGE_SIZE, "--limit", help="Maximum number of datasets to show."
     ),
     all_: bool = typer.Option(False, "--all", help="Show all datasets."),
 ) -> None:

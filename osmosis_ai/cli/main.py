@@ -15,7 +15,7 @@ from osmosis_ai.platform.auth.platform_client import (
     AuthenticationExpiredError,
     PlatformAPIError,
 )
-from osmosis_ai.platform.cli.constants import MSG_SESSION_EXPIRED
+from osmosis_ai.platform.constants import MSG_SESSION_EXPIRED
 
 
 class OsmosisGroup(typer.core.TyperGroup):

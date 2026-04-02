@@ -30,8 +30,9 @@ from osmosis_ai.platform.auth.local_config import (
     set_active_workspace,
     set_default_project,
 )
+from osmosis_ai.platform.constants import MSG_NOT_LOGGED_IN
 
-from .constants import BACK, DEFAULT_VISIBLE_CHOICES, MSG_NOT_LOGGED_IN
+from .constants import BACK, DEFAULT_VISIBLE_CHOICES
 from .utils import (
     build_dataset_detail_rows,
     build_run_detail_rows,

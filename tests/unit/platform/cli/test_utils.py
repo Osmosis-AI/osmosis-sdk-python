@@ -18,6 +18,7 @@ from osmosis_ai.platform.cli.utils import (
     resolve_id_prefix,
     validate_list_options,
 )
+from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE
 
 # ── format_size ──────────────────────────────────────────────────────
 
@@ -290,13 +291,13 @@ def test_fetch_all_pages_uses_server_next_offset() -> None:
 
 
 def test_validate_list_options_default() -> None:
-    limit, fetch_all = validate_list_options(limit=30, all_=False)
-    assert limit == 30
+    limit, fetch_all = validate_list_options(limit=DEFAULT_PAGE_SIZE, all_=False)
+    assert limit == DEFAULT_PAGE_SIZE
     assert fetch_all is False
 
 
 def test_validate_list_options_all_flag() -> None:
-    _limit, fetch_all = validate_list_options(limit=30, all_=True)
+    _limit, fetch_all = validate_list_options(limit=DEFAULT_PAGE_SIZE, all_=True)
     assert fetch_all is True
 
 

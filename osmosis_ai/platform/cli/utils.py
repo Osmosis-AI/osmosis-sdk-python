@@ -18,7 +18,7 @@ from osmosis_ai.platform.api.models import (
 )
 from osmosis_ai.platform.auth import AuthenticationExpiredError, load_credentials
 from osmosis_ai.platform.auth.config import PLATFORM_URL
-from osmosis_ai.platform.cli.constants import DEFAULT_LIST_LIMIT
+from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE
 
 if TYPE_CHECKING:
     from osmosis_ai.platform.auth.credentials import Credentials
@@ -26,7 +26,7 @@ if TYPE_CHECKING:
 
 def require_credentials() -> Credentials:
     """Load valid credentials, raising if not available or expired."""
-    from osmosis_ai.platform.cli.constants import MSG_NOT_LOGGED_IN
+    from osmosis_ai.platform.constants import MSG_NOT_LOGGED_IN
 
     credentials = load_credentials()
     if credentials is None:
@@ -297,7 +297,7 @@ def fetch_all_pages(
     fetch_fn: Callable[[int, int], Any],
     *,
     items_attr: str,
-    page_size: int = 50,
+    page_size: int = DEFAULT_PAGE_SIZE,
 ) -> tuple[list[Any], int]:
     """Iterate through API pages using server-provided ``next_offset``.
 
@@ -362,6 +362,6 @@ def validate_list_options(
 
     Returns ``(limit, fetch_all)`` on success, or raises :class:`CLIError`.
     """
-    if all_ and limit != DEFAULT_LIST_LIMIT:
+    if all_ and limit != DEFAULT_PAGE_SIZE:
         raise CLIError("--all and --limit are mutually exclusive.")
     return limit, all_
