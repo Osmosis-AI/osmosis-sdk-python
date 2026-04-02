@@ -1,4 +1,3 @@
-# osmosis_ai/rollout/eval/rubric/dataset.py
 from __future__ import annotations
 
 import json
@@ -8,26 +7,7 @@ from typing import Any
 
 from osmosis_ai.cli.errors import CLIError
 
-
-def _extract_assistant_content(messages: list[dict[str, Any]]) -> str:
-    """Extract the content of the last assistant message from a conversation."""
-    for msg in reversed(messages):
-        if msg.get("role") == "assistant":
-            content = msg.get("content")
-            if isinstance(content, str) and content.strip():
-                return content.strip()
-            if isinstance(content, list):
-                text_parts = [
-                    part["text"].strip()
-                    for part in content
-                    if isinstance(part, dict)
-                    and part.get("type") == "text"
-                    and isinstance(part.get("text"), str)
-                    and part["text"].strip()
-                ]
-                if text_parts:
-                    return "\n".join(text_parts)
-    return ""
+from .engine import extract_assistant_content
 
 
 @dataclass(frozen=True)
@@ -82,7 +62,7 @@ def _parse_record(
     solution_str = payload.get("solution_str")
 
     if isinstance(messages, list) and messages:
-        extracted = _extract_assistant_content(messages)
+        extracted = extract_assistant_content(messages)
         if not extracted:
             raise CLIError(
                 f"Line {line_number} of '{path}': 'messages' list must contain "
