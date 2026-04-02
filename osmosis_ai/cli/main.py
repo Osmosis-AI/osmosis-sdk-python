@@ -15,7 +15,7 @@ from osmosis_ai.platform.auth.platform_client import (
     AuthenticationExpiredError,
     PlatformAPIError,
 )
-from osmosis_ai.platform.cli.constants import MSG_SESSION_EXPIRED
+from osmosis_ai.platform.constants import MSG_SESSION_EXPIRED
 
 
 class OsmosisGroup(typer.core.TyperGroup):
@@ -43,6 +43,7 @@ app: typer.Typer = typer.Typer(
     name="osmosis",
     cls=OsmosisGroup,
     no_args_is_help=True,
+    add_completion=False,
     context_settings={"help_option_names": ["-h", "--help"]},
 )
 
@@ -76,47 +77,44 @@ def _register_commands() -> None:
         return
     _registered = True
 
-    # ── Platform (leaf commands) ──
-    from osmosis_ai.platform.cli.login import login_cmd
-    from osmosis_ai.platform.cli.logout import logout
-    from osmosis_ai.platform.cli.whoami import whoami
+    # -- Command groups --
+    from osmosis_ai.cli.commands.auth import app as auth_app
+    from osmosis_ai.cli.commands.dataset import app as dataset_app
+    from osmosis_ai.cli.commands.eval import app as eval_app
+    from osmosis_ai.cli.commands.model import app as model_app
+    from osmosis_ai.cli.commands.rollout import app as rollout_app
+    from osmosis_ai.cli.commands.train import app as train_app
+    from osmosis_ai.cli.commands.workspace import app as workspace_app
 
-    app.command("login", rich_help_panel="Platform")(login_cmd)
-    app.command("whoami", rich_help_panel="Platform")(whoami)
-    app.command("logout", rich_help_panel="Platform")(logout)
+    _WORKFLOW = "Workflow Commands"
+    _PLATFORM = "Platform Commands"
 
-    # ── Platform (sub-command groups) ──
-    from osmosis_ai.platform.cli.dataset import app as dataset_app
-    from osmosis_ai.platform.cli.model import app as model_app
-    from osmosis_ai.platform.cli.run import app as run_app
-    from osmosis_ai.platform.cli.workspace import app as workspace_app
+    app.add_typer(dataset_app, name="dataset", rich_help_panel=_WORKFLOW)
+    app.add_typer(train_app, name="train", rich_help_panel=_WORKFLOW)
+    app.add_typer(model_app, name="model", rich_help_panel=_WORKFLOW)
+    app.add_typer(eval_app, name="eval", rich_help_panel=_WORKFLOW)
+    app.add_typer(rollout_app, name="rollout", rich_help_panel=_WORKFLOW)
 
-    app.add_typer(workspace_app, name="workspace", rich_help_panel="Platform")
-    app.add_typer(dataset_app, name="dataset", rich_help_panel="Platform")
-    app.add_typer(run_app, name="run", rich_help_panel="Platform")
-    app.add_typer(model_app, name="model", rich_help_panel="Platform")
+    app.add_typer(auth_app, name="auth", rich_help_panel=_PLATFORM)
+    app.add_typer(workspace_app, name="workspace", rich_help_panel=_PLATFORM)
 
-    # ── Evaluation ──
-    from osmosis_ai.rollout.eval.evaluation.cli import app as eval_app
-    from osmosis_ai.rubric.cli.eval_rubric import app as eval_rubric_app
-    from osmosis_ai.rubric.cli.preview import preview
+    # -- Top-level commands --
+    from osmosis_ai.cli.commands.init import init
 
-    app.command("preview", rich_help_panel="Evaluation")(preview)
-    app.add_typer(eval_rubric_app, name="eval-rubric", rich_help_panel="Evaluation")
-    app.add_typer(eval_app, name="eval", rich_help_panel="Evaluation")
+    app.command("init", rich_help_panel=_WORKFLOW)(init)
 
-    # ── Rollout ──
-    from osmosis_ai.rollout.cli import serve, validate
-    from osmosis_ai.rollout.eval.test_mode.cli import app as test_app
-
-    app.command("serve", rich_help_panel="Rollout")(serve)
-    app.command("validate", rich_help_panel="Rollout")(validate)
-    app.add_typer(test_app, name="test", rich_help_panel="Rollout")
-
-    # ── Tools (leaf) ──
     from osmosis_ai.cli.upgrade import upgrade
 
-    app.command("upgrade", rich_help_panel="Tools")(upgrade)
+    app.command("upgrade", rich_help_panel=_PLATFORM)(upgrade)
+
+    # -- Transitional: deprecated aliases (hidden from help) --
+    from osmosis_ai.cli.commands.auth import login as auth_login
+    from osmosis_ai.cli.commands.auth import logout as auth_logout
+    from osmosis_ai.cli.commands.auth import whoami as auth_whoami
+
+    app.command("login", hidden=True)(auth_login)
+    app.command("logout", hidden=True)(auth_logout)
+    app.command("whoami", hidden=True)(auth_whoami)
 
 
 def main(argv: list[str] | None = None) -> int:

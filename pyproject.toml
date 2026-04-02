@@ -40,7 +40,8 @@ dependencies = [
     # Interactive CLI prompts
     "questionary>=2.1.0,<3.0.0",
     # CLI framework
-    "typer>=0.9.0",
+    "typer>=0.16.0",
+    "rich>=13.0.0",
 ]
 
 [project.optional-dependencies]
@@ -70,7 +71,7 @@ dev = [
     "pytest-asyncio>=0.23.0,<2.0.0",
     "pytest-cov>=6.0.0",
     "anyio>=4.0.0",
-    "ruff==0.15.6",  # Keep in sync with pre-commit and CI
+    "ruff==0.15.8",  # Keep in sync with pre-commit and CI
     "pre-commit>=4.0.0,<5.0.0",
     "pyright[nodejs]==1.1.408",
     "mypy==1.19.1",
@@ -100,7 +101,7 @@ where = ["."]
 include = ["osmosis_ai*"]
 
 [tool.setuptools.package-data]
-osmosis_ai = ["py.typed", "platform/auth/templates/*.html"]
+osmosis_ai = ["py.typed", "platform/cli/templates/**"]
 
 [tool.setuptools.dynamic]
 version = {attr = "osmosis_ai.consts.PACKAGE_VERSION"}
@@ -143,9 +144,7 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 # B008: function-call-in-default-argument — required by Typer for typer.Option/Argument
 "**/cli/*.py" = ["B008"]
-"osmosis_ai/rollout/cli.py" = ["B008"]
-"osmosis_ai/rollout/eval/test_mode/cli.py" = ["B008"]
-"osmosis_ai/rollout/eval/evaluation/cli.py" = ["B008"]
+"**/cli/**/*.py" = ["B008"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["osmosis_ai"]

@@ -34,10 +34,8 @@ from osmosis_ai.platform.cli.constants import (
     CACHE_TTL_SECONDS,
     CREATE,
     DEFAULT_VISIBLE_CHOICES,
-    MSG_NOT_LOGGED_IN,
-    PROJECT_NAME_MAX,
-    PROJECT_NAME_RE,
     RESERVED_PROJECT_NAMES,
+    validate_name,
 )
 from osmosis_ai.platform.cli.utils import require_credentials
 
@@ -50,17 +48,9 @@ def validate_project_name(name: str) -> str | None:
 
     Returns None if valid, or an error message string if invalid.
     """
-    if not name:
-        return "Project name is required."
-    if len(name) > PROJECT_NAME_MAX:
-        return f"Project name must be {PROJECT_NAME_MAX} characters or less."
-    if name != name.lower():
-        return "Project name must be lowercase."
-    if not PROJECT_NAME_RE.match(name):
-        return (
-            "Project name must contain only lowercase letters, digits, and hyphens, "
-            "and cannot start or end with a hyphen."
-        )
+    error = validate_name(name, label="Project name")
+    if error:
+        return error
     if name in RESERVED_PROJECT_NAMES:
         return f"'{name}' is a reserved name and cannot be used."
     return None
@@ -70,7 +60,9 @@ def _get_active_workspace_name() -> str:
     """Return the active workspace name, or raise if none is selected."""
     workspace_name = get_active_workspace_name()
     if workspace_name is None:
-        raise CLIError(MSG_NOT_LOGGED_IN)
+        raise CLIError(
+            "No workspace selected. Run 'osmosis workspace' to select a workspace."
+        )
     return workspace_name
 
 
@@ -328,10 +320,14 @@ def _require_auth(
     *,
     workspace_name: str | None = None,
 ) -> tuple[str, Credentials]:
-    """Check that user is authenticated."""
+    """Check that user is authenticated and has a workspace selected.
+
+    Checks credentials first so that unauthenticated users see "Not logged in"
+    instead of the misleading "No workspace selected".
+    """
+    credentials = require_credentials()
     if workspace_name is None:
         workspace_name = _get_active_workspace_name()
-    credentials = require_credentials()
     return workspace_name, credentials
 
 

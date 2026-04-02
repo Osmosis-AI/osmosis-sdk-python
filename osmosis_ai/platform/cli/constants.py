@@ -12,13 +12,6 @@ LOGOUT_ALL = "__all__"
 
 DEFAULT_VISIBLE_CHOICES = 10
 
-# ── Common error messages ─────────────────────────────────────────
-
-MSG_SESSION_EXPIRED = (
-    "Your session has expired. Please run 'osmosis login' to re-authenticate."
-)
-MSG_NOT_LOGGED_IN = "Not logged in. Run 'osmosis login' first."
-
 # ── Cache ─────────────────────────────────────────────────────────
 
 CACHE_TTL_SECONDS = 300
@@ -45,6 +38,26 @@ RESERVED_PROJECT_NAMES = frozenset(
         "project",
     }
 )
+
+
+def validate_name(name: str, *, label: str = "Name") -> str | None:
+    """Validate a name against platform naming rules.
+
+    Returns None if valid, or an error message string if invalid.
+    """
+    if not name:
+        return f"{label} is required."
+    if len(name) > PROJECT_NAME_MAX:
+        return f"{label} must be {PROJECT_NAME_MAX} characters or less."
+    if name != name.lower():
+        return f"{label} must be lowercase."
+    if not PROJECT_NAME_RE.match(name):
+        return (
+            f"{label} must contain only lowercase letters, digits, and hyphens, "
+            "and cannot start or end with a hyphen."
+        )
+    return None
+
 
 # ── Dataset validation ────────────────────────────────────────────
 

@@ -127,7 +127,7 @@ def test_refresh_projects_uses_selected_workspace_credentials_and_cache(
 
     monkeypatch.setattr(
         utils_module,
-        "get_valid_credentials",
+        "load_credentials",
         lambda: fake_credentials,
     )
 
@@ -229,8 +229,8 @@ def test_require_subscription_refreshes_selected_workspace(monkeypatch) -> None:
             return False
 
     monkeypatch.setattr(
-        utils_module,
-        "get_valid_credentials",
+        project_module,
+        "require_credentials",
         lambda: FakeCredentials(),
     )
 

@@ -10,9 +10,16 @@ from osmosis_ai.platform.api.models import (
     STATUSES_INACTIVE,
     STATUSES_SUCCESS,
     STATUSES_TERMINAL,
+    AffectedTrainingRun,
     DatasetFile,
+    MetricDataPoint,
+    MetricHistory,
+    ModelAffectedResources,
     ProjectDetail,
+    TrainingRunMetrics,
+    TrainingRunMetricsOverview,
     UploadInfo,
+    WorkspaceDeletionStatus,
 )
 
 # =============================================================================
@@ -104,7 +111,7 @@ class TestProjectDetail:
                         "id": "ds-1",
                         "file_name": "train.jsonl",
                         "file_size": 1024,
-                        "status": "ready",
+                        "status": "uploaded",
                         "created_at": "2025-06-01T00:00:00Z",
                     },
                     {
@@ -179,7 +186,7 @@ class TestDatasetFileIsTerminal:
 
     @pytest.mark.parametrize(
         "status",
-        ["ready", "failed", "error", "cancelled", "deleted"],
+        ["uploaded", "error", "cancelled", "deleted"],
     )
     def test_terminal_statuses(self, status: str) -> None:
         """Verify terminal statuses return True."""
@@ -190,7 +197,7 @@ class TestDatasetFileIsTerminal:
 
     @pytest.mark.parametrize(
         "status",
-        ["processing", "uploaded", "pending", ""],
+        ["processing", "pending", "uploading", ""],
     )
     def test_non_terminal_statuses(self, status: str) -> None:
         """Verify non-terminal statuses return False."""
@@ -228,3 +235,244 @@ class TestStatusConstants:
                 assert overlap == frozenset(), (
                     f"Overlap found between categories: {overlap}"
                 )
+
+
+class TestAffectedTrainingRun:
+    """Tests for AffectedTrainingRun.from_dict."""
+
+    def test_from_dict(self) -> None:
+        data = {"id": "run-1", "name": "My Run", "project_name": "proj-a"}
+        run = AffectedTrainingRun.from_dict(data)
+        assert run.id == "run-1"
+        assert run.name == "My Run"
+        assert run.project_name == "proj-a"
+
+    def test_from_dict_null_name(self) -> None:
+        data = {"id": "run-2", "project_name": "proj-b"}
+        run = AffectedTrainingRun.from_dict(data)
+        assert run.name is None
+
+
+class TestModelAffectedResources:
+    """Tests for ModelAffectedResources.from_dict."""
+
+    def test_empty(self) -> None:
+        data = {"training_runs_using_model": [], "creator_training_run": None}
+        res = ModelAffectedResources.from_dict(data)
+        assert res.training_runs_using_model == []
+        assert res.creator_training_run is None
+        assert res.has_blocking_runs is False
+
+    def test_with_blocking_runs(self) -> None:
+        data = {
+            "training_runs_using_model": [
+                {"id": "r1", "name": "Run 1", "project_name": "proj"},
+                {"id": "r2", "name": None, "project_name": "proj"},
+            ],
+            "creator_training_run": None,
+        }
+        res = ModelAffectedResources.from_dict(data)
+        assert len(res.training_runs_using_model) == 2
+        assert res.has_blocking_runs is True
+
+    def test_with_creator_run(self) -> None:
+        data = {
+            "training_runs_using_model": [],
+            "creator_training_run": {
+                "id": "r3",
+                "name": "Creator",
+                "project_name": "proj",
+            },
+        }
+        res = ModelAffectedResources.from_dict(data)
+        assert res.creator_training_run is not None
+        assert res.creator_training_run.id == "r3"
+        assert res.has_blocking_runs is False
+
+
+class TestWorkspaceDeletionStatus:
+    """Tests for WorkspaceDeletionStatus.from_dict."""
+
+    def test_can_delete(self) -> None:
+        data = {
+            "can_delete": True,
+            "is_owner": True,
+            "is_last_workspace": False,
+            "projects": [],
+        }
+        status = WorkspaceDeletionStatus.from_dict(data)
+        assert status.can_delete is True
+        assert status.is_owner is True
+        assert status.is_last_workspace is False
+        assert status.projects == []
+        assert status.projects_with_running_processes == []
+
+    def test_with_running_processes(self) -> None:
+        data = {
+            "can_delete": False,
+            "is_owner": True,
+            "is_last_workspace": False,
+            "projects": [
+                {
+                    "project_id": "p1",
+                    "project_name": "Project A",
+                    "has_running_processes": True,
+                    "feature_pipelines": {"count": 2, "valid": False},
+                    "training_runs": {"count": 0, "valid": True},
+                    "models": {"count": 1, "valid": False},
+                },
+                {
+                    "project_id": "p2",
+                    "project_name": "Project B",
+                    "has_running_processes": False,
+                    "feature_pipelines": {"count": 0, "valid": True},
+                    "training_runs": {"count": 0, "valid": True},
+                    "models": {"count": 0, "valid": True},
+                },
+            ],
+        }
+        status = WorkspaceDeletionStatus.from_dict(data)
+        assert status.can_delete is False
+        assert len(status.projects) == 2
+        blocking = status.projects_with_running_processes
+        assert len(blocking) == 1
+        assert blocking[0].project_name == "Project A"
+        assert blocking[0].feature_pipelines.count == 2
+        assert blocking[0].feature_pipelines.valid is False
+
+    def test_not_owner(self) -> None:
+        data = {
+            "can_delete": False,
+            "is_owner": False,
+            "is_last_workspace": False,
+            "projects": [],
+        }
+        status = WorkspaceDeletionStatus.from_dict(data)
+        assert status.can_delete is False
+        assert status.is_owner is False
+
+
+# =============================================================================
+# Metric Data Model Tests
+# =============================================================================
+
+
+class TestMetricDataPoint:
+    def test_from_dict(self) -> None:
+        data = {"step": 10, "value": 0.85, "timestamp": 1711800060000}
+        point = MetricDataPoint.from_dict(data)
+        assert point.step == 10
+        assert point.value == 0.85
+        assert point.timestamp == 1711800060000
+
+
+class TestMetricHistory:
+    def test_from_dict(self) -> None:
+        data = {
+            "metric_key": "rollout/raw_reward",
+            "title": "Training Reward",
+            "data_points": [
+                {"step": 0, "value": 0.5, "timestamp": 1711800000000},
+                {"step": 10, "value": 0.65, "timestamp": 1711800060000},
+            ],
+        }
+        history = MetricHistory.from_dict(data)
+        assert history.metric_key == "rollout/raw_reward"
+        assert history.title == "Training Reward"
+        assert len(history.data_points) == 2
+        assert history.data_points[0].step == 0
+        assert history.data_points[1].value == 0.65
+
+    def test_from_dict_empty_data_points(self) -> None:
+        data = {
+            "metric_key": "rollout/raw_reward",
+            "title": "Training Reward",
+            "data_points": [],
+        }
+        history = MetricHistory.from_dict(data)
+        assert history.data_points == []
+
+
+class TestTrainingRunMetricsOverview:
+    def test_from_dict_full(self) -> None:
+        data = {
+            "mlflow_run_id": "mlflow-abc",
+            "mlflow_status": "FINISHED",
+            "duration_ms": 3600000,
+            "duration_formatted": "1h",
+            "reward": 0.85,
+            "reward_increase_delta": 0.15,
+            "examples_processed_count": 5000,
+        }
+        overview = TrainingRunMetricsOverview.from_dict(data)
+        assert overview.mlflow_run_id == "mlflow-abc"
+        assert overview.duration_ms == 3600000
+        assert overview.duration_formatted == "1h"
+        assert overview.reward == 0.85
+        assert overview.reward_delta == 0.15
+        assert overview.examples_processed_count == 5000
+
+    def test_from_dict_nulls(self) -> None:
+        data = {
+            "mlflow_run_id": "mlflow-xyz",
+            "mlflow_status": "FAILED",
+            "duration_ms": None,
+            "duration_formatted": None,
+            "reward": None,
+            "reward_increase_delta": None,
+            "examples_processed_count": None,
+        }
+        overview = TrainingRunMetricsOverview.from_dict(data)
+        assert overview.duration_ms is None
+        assert overview.reward is None
+        assert overview.reward_delta is None
+
+
+class TestTrainingRunMetrics:
+    def test_from_dict(self) -> None:
+        data = {
+            "training_run_id": "550e8400-e29b-41d4-a716-446655440000",
+            "status": "finished",
+            "overview": {
+                "mlflow_run_id": "mlflow-abc",
+                "mlflow_status": "FINISHED",
+                "duration_ms": 3600000,
+                "duration_formatted": "1h",
+                "reward": 0.85,
+                "reward_increase_delta": 0.15,
+                "examples_processed_count": 5000,
+            },
+            "metrics": [
+                {
+                    "metric_key": "rollout/raw_reward",
+                    "title": "Training Reward",
+                    "data_points": [
+                        {"step": 0, "value": 0.5, "timestamp": 1711800000000},
+                    ],
+                },
+            ],
+        }
+        result = TrainingRunMetrics.from_dict(data)
+        assert result.training_run_id == "550e8400-e29b-41d4-a716-446655440000"
+        assert result.status == "finished"
+        assert result.overview.reward == 0.85
+        assert len(result.metrics) == 1
+        assert result.metrics[0].metric_key == "rollout/raw_reward"
+
+    def test_from_dict_empty_metrics(self) -> None:
+        data = {
+            "training_run_id": "run-empty",
+            "status": "finished",
+            "overview": {
+                "mlflow_run_id": "mlflow-empty",
+                "mlflow_status": "FINISHED",
+                "duration_ms": None,
+                "duration_formatted": None,
+                "reward": None,
+                "reward_increase_delta": None,
+                "examples_processed_count": None,
+            },
+            "metrics": [],
+        }
+        result = TrainingRunMetrics.from_dict(data)
+        assert result.metrics == []

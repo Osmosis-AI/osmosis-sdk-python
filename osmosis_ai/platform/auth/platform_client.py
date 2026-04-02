@@ -9,7 +9,9 @@ from typing import TYPE_CHECKING, Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.consts import PACKAGE_VERSION
+from osmosis_ai.platform.constants import MSG_NOT_LOGGED_IN
 
 from .config import PLATFORM_URL
 from .credentials import load_credentials
@@ -125,9 +127,7 @@ def platform_request(
     if credentials is None:
         credentials = load_credentials()
     if credentials is None:
-        raise AuthenticationExpiredError(
-            "No valid credentials found. Please run 'osmosis login' first."
-        )
+        raise CLIError(MSG_NOT_LOGGED_IN)
 
     url = f"{PLATFORM_URL}{endpoint}"
 
@@ -142,7 +142,7 @@ def platform_request(
         resolved_workspace_id = workspace_id or get_active_workspace_id()
         if not resolved_workspace_id:
             raise PlatformAPIError(
-                "No active workspace. Run 'osmosis workspace switch' to select one."
+                "No workspace selected. Run 'osmosis workspace' to select a workspace."
             )
         req_headers["X-Osmosis-Org"] = resolved_workspace_id
 
@@ -167,7 +167,7 @@ def platform_request(
                 reset_session()
             raise AuthenticationExpiredError(
                 "Your session has expired or been revoked. "
-                "Please run 'osmosis login' to re-authenticate."
+                "Please run 'osmosis auth login' to re-authenticate."
             ) from e
 
         # Best-effort capture of structured error message from response body
@@ -203,7 +203,7 @@ def platform_request(
                     raise PlatformAPIError(
                         f"{error_msg}\n"
                         "Your workspace context may be stale. "
-                        "Run 'osmosis login' or 'osmosis workspace' to re-select.",
+                        "Run 'osmosis auth login' or 'osmosis workspace' to re-select.",
                         e.code,
                     ) from e
 

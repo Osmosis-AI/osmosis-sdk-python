@@ -8,9 +8,9 @@ from typing import Any, Literal
 # ── Dataset status constants ─────────────────────────────────────
 # Single source of truth for status classification.
 
-STATUSES_SUCCESS: frozenset[str] = frozenset({"ready"})
-STATUSES_IN_PROGRESS: frozenset[str] = frozenset({"processing", "uploaded"})
-STATUSES_ERROR: frozenset[str] = frozenset({"failed", "error"})
+STATUSES_SUCCESS: frozenset[str] = frozenset({"uploaded"})
+STATUSES_IN_PROGRESS: frozenset[str] = frozenset({"pending", "uploading", "processing"})
+STATUSES_ERROR: frozenset[str] = frozenset({"error"})
 STATUSES_INACTIVE: frozenset[str] = frozenset({"cancelled", "deleted"})
 STATUSES_TERMINAL: frozenset[str] = (
     STATUSES_SUCCESS | STATUSES_ERROR | STATUSES_INACTIVE
@@ -152,7 +152,7 @@ class UploadInfo:
 
 @dataclass
 class DatasetFile:
-    """A training data file record."""
+    """A dataset record."""
 
     id: str
     file_name: str
@@ -163,7 +163,7 @@ class DatasetFile:
     error: str | None = None
     data_preview: Any = None
     df_stats: Any = None
-    project_id: str | None = None
+    organization_id: str | None = None
     created_at: str = ""
     updated_at: str = ""
     # Upload info — only present in create_dataset response
@@ -183,7 +183,7 @@ class DatasetFile:
             error=data.get("error"),
             data_preview=data.get("data_preview"),
             df_stats=data.get("df_stats"),
-            project_id=data.get("project_id"),
+            organization_id=data.get("organization_id"),
             created_at=data.get("created_at", ""),
             updated_at=data.get("updated_at", ""),
             upload=upload,
@@ -330,6 +330,259 @@ class PaginatedTrainingRuns:
             has_more=data.get("has_more", False),
             next_offset=data.get("next_offset"),
         )
+
+
+@dataclass
+class PreservedModel:
+    """A model that was preserved after its training run was deleted."""
+
+    id: str
+    name: str
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> PreservedModel:
+        return cls(id=data["id"], name=data["name"])
+
+
+@dataclass
+class DeleteTrainingRunResult:
+    """Result of deleting a training run."""
+
+    deleted: bool
+    preserved_output_model: PreservedModel | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> DeleteTrainingRunResult:
+        preserved = data.get("preserved_output_model")
+        return cls(
+            deleted=data["deleted"],
+            preserved_output_model=PreservedModel.from_dict(preserved)
+            if preserved
+            else None,
+        )
+
+
+@dataclass
+class TrainingRunAffectedResources:
+    """Affected resources for a training run deletion."""
+
+    output_model: PreservedModel | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> TrainingRunAffectedResources:
+        om = data.get("output_model")
+        return cls(
+            output_model=PreservedModel.from_dict(om) if om else None,
+        )
+
+
+@dataclass
+class AffectedTrainingRun:
+    """A training run affected by a resource deletion."""
+
+    id: str
+    name: str | None
+    project_name: str | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> AffectedTrainingRun:
+        return cls(
+            id=data["id"],
+            name=data.get("name"),
+            project_name=data.get("project_name"),
+        )
+
+
+@dataclass
+class DatasetAffectedResources:
+    """Affected resources for a dataset deletion."""
+
+    affected_training_runs: list[AffectedTrainingRun]
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> DatasetAffectedResources:
+        return cls(
+            affected_training_runs=[
+                AffectedTrainingRun.from_dict(r)
+                for r in data.get("affected_training_runs", [])
+            ],
+        )
+
+    @property
+    def has_blocking_runs(self) -> bool:
+        return len(self.affected_training_runs) > 0
+
+
+@dataclass
+class ModelAffectedResources:
+    """Affected resources for a model deletion."""
+
+    training_runs_using_model: list[AffectedTrainingRun]
+    creator_training_run: AffectedTrainingRun | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> ModelAffectedResources:
+        creator = data.get("creator_training_run")
+        return cls(
+            training_runs_using_model=[
+                AffectedTrainingRun.from_dict(r)
+                for r in data.get("training_runs_using_model", [])
+            ],
+            creator_training_run=AffectedTrainingRun.from_dict(creator)
+            if creator
+            else None,
+        )
+
+    @property
+    def has_blocking_runs(self) -> bool:
+        """Whether there are training runs that block deletion."""
+        return len(self.training_runs_using_model) > 0
+
+
+# ── Training run metrics ─────────────────────────────────────────
+
+
+@dataclass
+class MetricDataPoint:
+    """A single data point in a metric time series."""
+
+    step: int
+    value: float
+    timestamp: int  # epoch ms
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> MetricDataPoint:
+        return cls(
+            step=data["step"],
+            value=data["value"],
+            timestamp=data["timestamp"],
+        )
+
+
+@dataclass
+class MetricHistory:
+    """History of a single metric across training steps."""
+
+    metric_key: str
+    title: str
+    data_points: list[MetricDataPoint]
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> MetricHistory:
+        return cls(
+            metric_key=data["metric_key"],
+            title=data["title"],
+            data_points=[
+                MetricDataPoint.from_dict(dp) for dp in data.get("data_points", [])
+            ],
+        )
+
+
+@dataclass
+class TrainingRunMetricsOverview:
+    """Summary metrics for a training run."""
+
+    mlflow_run_id: str
+    mlflow_status: str
+    duration_ms: int | None
+    duration_formatted: str | None
+    reward: float | None
+    reward_delta: float | None
+    examples_processed_count: int | None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> TrainingRunMetricsOverview:
+        return cls(
+            mlflow_run_id=data["mlflow_run_id"],
+            mlflow_status=data["mlflow_status"],
+            duration_ms=data.get("duration_ms"),
+            duration_formatted=data.get("duration_formatted"),
+            reward=data.get("reward"),
+            reward_delta=data.get("reward_increase_delta"),
+            examples_processed_count=data.get("examples_processed_count"),
+        )
+
+
+@dataclass
+class TrainingRunMetrics:
+    """Complete metrics response for a training run."""
+
+    training_run_id: str
+    status: str
+    overview: TrainingRunMetricsOverview
+    metrics: list[MetricHistory]
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> TrainingRunMetrics:
+        return cls(
+            training_run_id=data["training_run_id"],
+            status=data["status"],
+            overview=TrainingRunMetricsOverview.from_dict(data["overview"]),
+            metrics=[MetricHistory.from_dict(m) for m in data.get("metrics", [])],
+        )
+
+
+@dataclass
+class ProjectProcessCount:
+    """Running process counts for a project."""
+
+    count: int
+    valid: bool
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> ProjectProcessCount:
+        return cls(count=data.get("count", 0), valid=data.get("valid", True))
+
+
+@dataclass
+class ProjectDeletionStatus:
+    """Deletion readiness status for a single project."""
+
+    project_id: str
+    project_name: str
+    has_running_processes: bool
+    feature_pipelines: ProjectProcessCount
+    training_runs: ProjectProcessCount
+    models: ProjectProcessCount
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> ProjectDeletionStatus:
+        return cls(
+            project_id=data["project_id"],
+            project_name=data["project_name"],
+            has_running_processes=data.get("has_running_processes", False),
+            feature_pipelines=ProjectProcessCount.from_dict(
+                data.get("feature_pipelines", {})
+            ),
+            training_runs=ProjectProcessCount.from_dict(data.get("training_runs", {})),
+            models=ProjectProcessCount.from_dict(data.get("models", {})),
+        )
+
+
+@dataclass
+class WorkspaceDeletionStatus:
+    """Workspace deletion readiness status."""
+
+    can_delete: bool
+    is_owner: bool
+    is_last_workspace: bool
+    projects: list[ProjectDeletionStatus]
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> WorkspaceDeletionStatus:
+        return cls(
+            can_delete=data.get("can_delete", False),
+            is_owner=data.get("is_owner", False),
+            is_last_workspace=data.get("is_last_workspace", False),
+            projects=[
+                ProjectDeletionStatus.from_dict(p) for p in data.get("projects", [])
+            ],
+        )
+
+    @property
+    def projects_with_running_processes(self) -> list[ProjectDeletionStatus]:
+        """Projects that have running processes blocking deletion."""
+        return [p for p in self.projects if p.has_running_processes]
 
 
 @dataclass

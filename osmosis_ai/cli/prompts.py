@@ -378,12 +378,35 @@ def text(
     ).ask()
 
 
+def require_confirmation(message: str, *, yes: bool = False) -> None:
+    """Guard for destructive CLI commands that need user confirmation.
+
+    Does nothing when *yes* is True (``--yes`` flag).  In non-interactive
+    sessions raises :class:`CLIError`; otherwise prompts the user and
+    exits cleanly on decline.
+    """
+    if yes:
+        return
+    if not is_interactive():
+        from osmosis_ai.cli.errors import CLIError
+
+        raise CLIError("Use --yes to confirm in non-interactive mode.")
+    if not confirm(message):
+        import typer
+
+        from osmosis_ai.cli.console import console
+
+        console.print("Cancelled.", style="dim")
+        raise typer.Exit(0)
+
+
 __all__ = [
     "OSMOSIS_STYLE",
     "Choice",
     "Separator",
     "confirm",
     "is_interactive",
+    "require_confirmation",
     "select",
     "select_list",
     "text",

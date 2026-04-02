@@ -7,8 +7,6 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
-import typer
-
 from osmosis_ai.cli.console import console
 from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.cli.prompts import confirm, is_interactive
@@ -17,6 +15,7 @@ from osmosis_ai.platform.auth import (
     AuthenticationExpiredError,
     PlatformAPIError,
 )
+from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE
 
 from .constants import (
     MAX_FILE_SIZE,
@@ -26,18 +25,13 @@ from .constants import (
 from .project import (
     _require_auth,
     _require_subscription,
-    _resolve_project,
-    _resolve_project_id,
 )
 from .utils import (
     build_dataset_detail_rows,
     format_dataset_status,
+    format_dim_date,
     format_size,
     platform_entity_url,
-)
-
-app: typer.Typer = typer.Typer(
-    help="Manage datasets (upload, list, status, preview, delete, validate)."
 )
 
 
@@ -158,7 +152,6 @@ def _perform_upload(
     file_path: Path,
     ext: str,
     file_size: int,
-    project_id: str,
     credentials: Any | None = None,
 ) -> Any:
     """Core upload: create dataset record → S3 upload → complete.
@@ -176,7 +169,6 @@ def _perform_upload(
     client = OsmosisClient()
 
     dataset = client.create_dataset(
-        project_id,
         file_path.name,
         file_size,
         ext,
@@ -240,12 +232,8 @@ def _perform_upload(
     return dataset
 
 
-@app.command("upload")
 def upload(
-    file: str = typer.Argument(..., help="Path to the file to upload."),
-    project: str | None = typer.Option(
-        None, "--project", help="Project name (default: current project)."
-    ),
+    file: str,
 ) -> None:
     """Upload a dataset file."""
     ws_name, credentials = _require_auth()
@@ -260,16 +248,11 @@ def upload(
             "File validation failed:\n" + "\n".join(f"  - {e}" for e in errors)
         )
 
-    proj = _resolve_project(project, workspace_name=ws_name)
-    project_id = proj["id"]
-    project_name = proj.get("project_name", "")
-
     # Confirm upload target
     console.print()
     console.table(
         [
             ("Workspace", ws_name or "unknown"),
-            ("Project", project_name or project_id),
             ("File", f"{file_path.name} ({format_size(file_size)})"),
         ],
         title="Upload Target",
@@ -285,85 +268,86 @@ def upload(
         file_path=file_path,
         ext=ext,
         file_size=file_size,
-        project_id=project_id,
         credentials=credentials,
     )
 
     console.print(f"Upload complete. Dataset ID: {dataset.id}", style="green")
-    url = platform_entity_url(ws_name, project_name, "training-data", dataset.id)
+    url = platform_entity_url(ws_name, None, "datasets", dataset.id)
     console.print(f"Processing will continue on the platform. Check status at: {url}")
 
 
-@app.command("list")
-def list_datasets(
-    project: str | None = typer.Option(
-        None, "--project", help="Project name (default: current project)."
-    ),
-) -> None:
+def list_datasets(limit: int = DEFAULT_PAGE_SIZE, all_: bool = False) -> None:
     """List datasets."""
-    ws_name, credentials = _require_auth()
+    from osmosis_ai.platform.cli.utils import (
+        paginated_fetch,
+        print_pagination_footer,
+        validate_list_options,
+    )
+
+    effective_limit, fetch_all = validate_list_options(limit=limit, all_=all_)
+
+    _ws_name, credentials = _require_auth()
     from osmosis_ai.platform.api.client import OsmosisClient
 
-    project_id = _resolve_project_id(project, workspace_name=ws_name)
     client = OsmosisClient()
-    result = client.list_datasets(project_id, credentials=credentials)
 
-    if not result.datasets:
+    with console.spinner("Fetching datasets..."):
+        datasets, total_count, _has_more = paginated_fetch(
+            lambda lim, off: client.list_datasets(
+                limit=lim, offset=off, credentials=credentials
+            ),
+            items_attr="datasets",
+            limit=effective_limit,
+            fetch_all=fetch_all,
+        )
+
+    if not datasets:
         console.print("No datasets found.")
         return
 
-    console.print(f"Datasets ({result.total_count}):", style="bold")
-    for d in result.datasets:
+    console.print(f"Datasets ({total_count}):", style="bold")
+    for d in datasets:
+        short_id = console.format_styled(d.id[:8], "dim")
         status_info = format_dataset_status(d)
+        name = console.escape(d.file_name)
+        date = format_dim_date(d.created_at)
         console.print(
-            f"  {d.id[:8]}  {d.file_name}  {format_size(d.file_size)}  {status_info}"
+            f"  {short_id}  {name}  {format_size(d.file_size)}  {status_info}  {date}",
+            highlight=False,
         )
 
-    if result.has_more:
-        console.print(f"  ... and {result.total_count - len(result.datasets)} more")
+    print_pagination_footer(len(datasets), total_count, "datasets")
 
 
-@app.command("status")
 def status(
-    id: str = typer.Argument(
-        ..., help="Dataset ID (or short prefix from 'dataset list')."
-    ),
-    project: str | None = typer.Option(
-        None, "--project", help="Project name (used for short ID lookup)."
-    ),
+    id: str,
 ) -> None:
     """Check dataset processing status."""
-    ws_name, credentials = _require_auth()
+    _ws_name, credentials = _require_auth()
     from osmosis_ai.platform.api.client import OsmosisClient
 
     from .utils import resolve_dataset_id
 
     client = OsmosisClient()
-    dataset_id = resolve_dataset_id(id, project, ws_name, credentials, client=client)
+    dataset_id = resolve_dataset_id(id, credentials, client=client)
     ds = client.get_dataset(dataset_id, credentials=credentials)
 
     rows = build_dataset_detail_rows(ds)
     console.table(rows, title="Dataset Status")
 
 
-@app.command("preview")
 def preview(
-    id: str = typer.Argument(
-        ..., help="Dataset ID (or short prefix from 'dataset list')."
-    ),
-    rows: int = typer.Option(5, "--rows", help="Number of rows to show."),
-    project: str | None = typer.Option(
-        None, "--project", help="Project name (used for short ID lookup)."
-    ),
+    id: str,
+    rows: int = 5,
 ) -> None:
     """Preview dataset rows."""
-    ws_name, credentials = _require_auth()
+    _ws_name, credentials = _require_auth()
     from osmosis_ai.platform.api.client import OsmosisClient
 
     from .utils import resolve_dataset_id
 
     client = OsmosisClient()
-    dataset_id = resolve_dataset_id(id, project, ws_name, credentials, client=client)
+    dataset_id = resolve_dataset_id(id, credentials, client=client)
     ds = client.get_dataset(dataset_id, credentials=credentials)
 
     if ds.data_preview is None:
@@ -385,9 +369,50 @@ def preview(
         console.print(str(data_rows))
 
 
-@app.command("validate")
+def delete(
+    id: str,
+    yes: bool = False,
+) -> None:
+    """Delete a dataset."""
+    _ws_name, credentials = _require_auth()
+    from osmosis_ai.platform.api.client import OsmosisClient
+
+    from .utils import resolve_dataset_id
+
+    client = OsmosisClient()
+    dataset_id = resolve_dataset_id(id, credentials, client=client)
+
+    # Blocking preflight: abort if active training runs use this dataset
+    try:
+        affected = client.get_dataset_affected_resources(
+            dataset_id, credentials=credentials
+        )
+    except Exception as e:
+        raise CLIError(f"Unable to verify dataset dependencies: {e}") from e
+
+    if affected.has_blocking_runs:
+        lines = ["Cannot delete — active training runs depend on this dataset:"]
+        for run in affected.affected_training_runs:
+            name = console.escape(run.name) if run.name else "(unnamed)"
+            lines.append(f"  {run.id[:8]}  {name}")
+        lines.append("\nStop these training runs first, then retry.")
+        raise CLIError("\n".join(lines))
+
+    if not yes:
+        ds = client.get_dataset(dataset_id, credentials=credentials)
+        console.print(f"  Dataset: {ds.file_name} ({format_size(ds.file_size)})")
+        console.print(f"  ID:      {ds.id}")
+
+    from osmosis_ai.cli.prompts import require_confirmation
+
+    require_confirmation("Delete this dataset? This cannot be undone.", yes=yes)
+
+    client.delete_dataset(dataset_id, credentials=credentials)
+    console.print("Dataset deleted.", style="green")
+
+
 def validate(
-    file: str = typer.Argument(..., help="Path to the file to validate."),
+    file: str,
 ) -> None:
     """Validate a dataset file locally."""
     file_path, ext, file_size = _check_file_basics(file)

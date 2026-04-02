@@ -2,7 +2,7 @@
 
 Supports two eval function signatures, auto-detected via parameter inspection:
 
-Simple (compatible with @osmosis_reward):
+Simple:
     def my_eval(solution_str: str, ground_truth: str, extra_info: dict = None, **kwargs) -> float
 
 Full context:
@@ -58,10 +58,7 @@ class EvalFnWrapper:
             else:
                 raise EvalFnError(
                     f"Cannot detect eval function mode: first parameter is '{first_param}'. "
-                    f"Expected 'solution_str' (simple mode) or 'messages' (full mode). "
-                    f"Note: Custom signatures are supported by "
-                    f"@osmosis_reward/@osmosis_rubric decorators but cannot be used "
-                    f"with 'osmosis eval' directly."
+                    f"Expected 'solution_str' (simple mode) or 'messages' (full mode)."
                 )
         except (ValueError, TypeError) as e:
             raise EvalFnError(f"Cannot inspect eval function signature: {e}") from e
