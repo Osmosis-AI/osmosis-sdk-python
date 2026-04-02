@@ -44,10 +44,8 @@ from .types import (
     RubricResult,
 )
 
-# Default timeout for LLM requests
 DEFAULT_REQUEST_TIMEOUT_SECONDS = 30.0
 
-# API key environment variable names for each provider
 # LiteLLM uses these same environment variables internally
 DEFAULT_API_KEY_ENV = {
     "openai": "OPENAI_API_KEY",
@@ -408,11 +406,10 @@ def _call_litellm(
         "messages": messages,
         "response_format": response_format,
         "timeout": timeout,
+        "temperature": 0,
     }
     if api_key is not None:
         completion_kwargs["api_key"] = api_key
-
-    completion_kwargs["temperature"] = 0
 
     try:
         response = _litellm_completion(**completion_kwargs)
