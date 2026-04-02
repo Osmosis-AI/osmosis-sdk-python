@@ -51,13 +51,13 @@ class TestListRuns:
         self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
     ) -> None:
         class FakeClient:
-            def list_training_runs(self, pid, *, limit=20, credentials=None):
+            def list_training_runs(self, pid, limit=30, offset=0, *, credentials=None):
                 return PaginatedTrainingRuns(
                     training_runs=[], total_count=0, has_more=False
                 )
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-        train_module.list_runs(project=None, limit=20)
+        train_module.list_runs(project=None, limit=30, all_=False)
         assert "No training runs found" in console_capture.getvalue()
 
     def test_list_with_runs(
@@ -73,13 +73,13 @@ class TestListRuns:
         )
 
         class FakeClient:
-            def list_training_runs(self, pid, *, limit=20, credentials=None):
+            def list_training_runs(self, pid, limit=30, offset=0, *, credentials=None):
                 return PaginatedTrainingRuns(
                     training_runs=[run], total_count=1, has_more=False
                 )
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-        train_module.list_runs(project=None, limit=20)
+        train_module.list_runs(project=None, limit=30, all_=False)
         out = console_capture.getvalue()
         assert "my-run" in out
         assert "abcdef12" in out
@@ -96,13 +96,13 @@ class TestListRuns:
         )
 
         class FakeClient:
-            def list_training_runs(self, pid, *, limit=20, credentials=None):
+            def list_training_runs(self, pid, limit=30, offset=0, *, credentials=None):
                 return PaginatedTrainingRuns(
                     training_runs=[run], total_count=1, has_more=False
                 )
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-        train_module.list_runs(project=None, limit=20)
+        train_module.list_runs(project=None, limit=30, all_=False)
         assert "(unnamed)" in console_capture.getvalue()
 
     def test_list_has_more(
@@ -115,14 +115,16 @@ class TestListRuns:
         )
 
         class FakeClient:
-            def list_training_runs(self, pid, *, limit=20, credentials=None):
+            def list_training_runs(self, pid, limit=30, offset=0, *, credentials=None):
                 return PaginatedTrainingRuns(
                     training_runs=[run], total_count=5, has_more=True
                 )
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-        train_module.list_runs(project=None, limit=20)
-        assert "4 more" in console_capture.getvalue()
+        train_module.list_runs(project=None, limit=30, all_=False)
+        out = console_capture.getvalue()
+        assert "Showing 1 of 5 training runs" in out
+        assert "--all" in out
 
 
 # ---------------------------------------------------------------------------

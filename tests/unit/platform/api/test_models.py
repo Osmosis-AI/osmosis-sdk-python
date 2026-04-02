@@ -111,7 +111,7 @@ class TestProjectDetail:
                         "id": "ds-1",
                         "file_name": "train.jsonl",
                         "file_size": 1024,
-                        "status": "ready",
+                        "status": "uploaded",
                         "created_at": "2025-06-01T00:00:00Z",
                     },
                     {
@@ -186,7 +186,7 @@ class TestDatasetFileIsTerminal:
 
     @pytest.mark.parametrize(
         "status",
-        ["ready", "failed", "error", "cancelled", "deleted"],
+        ["uploaded", "error", "cancelled", "deleted"],
     )
     def test_terminal_statuses(self, status: str) -> None:
         """Verify terminal statuses return True."""
@@ -197,7 +197,7 @@ class TestDatasetFileIsTerminal:
 
     @pytest.mark.parametrize(
         "status",
-        ["processing", "uploaded", "pending", ""],
+        ["processing", "pending", "uploading", ""],
     )
     def test_non_terminal_statuses(self, status: str) -> None:
         """Verify non-terminal statuses return False."""

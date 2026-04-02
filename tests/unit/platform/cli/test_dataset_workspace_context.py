@@ -19,6 +19,8 @@ def test_list_datasets_uses_active_workspace(monkeypatch) -> None:
     class FakeClient:
         def list_datasets(
             self,
+            limit: int = 50,
+            offset: int = 0,
             *,
             credentials=None,
         ) -> PaginatedDatasets:
