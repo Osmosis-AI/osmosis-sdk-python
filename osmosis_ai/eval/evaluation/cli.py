@@ -223,10 +223,8 @@ class EvalCommand:
         return asyncio.run(self._run_async(args))
 
     def _validate_args(self, args: Any) -> str | None:
-        if args.module and args.mcp:
-            return "--module and --mcp are mutually exclusive."
-        if not args.module and not args.mcp:
-            return "Either --module (-m) or --mcp is required."
+        if not args.module:
+            return "--module (-m) is required."
         if args.n_runs < 1:
             return "--n must be >= 1."
         if args.batch_size < 1:
@@ -369,7 +367,6 @@ class EvalCommand:
         total_expected: int,
         log_samples: bool,
         module_spec: str,
-        is_mcp: bool,
     ) -> None:
         """Print informational messages when resuming from cached progress."""
         from osmosis_ai.eval.evaluation.cache import sanitize_path_part
@@ -403,19 +400,16 @@ class EvalCommand:
         completed = len(completed_runs)
 
         # Determine fingerprint scope description
-        if is_mcp:
-            scope = f"MCP directory {module_spec}"
-        else:
-            module_name = module_spec.partition(":")[0]
-            try:
-                mod = importlib.import_module(module_name)
-                source_file = getattr(mod, "__file__", None)
-                if source_file and Path(source_file).name == "__init__.py":
-                    scope = f"package {module_name}/"
-                else:
-                    scope = f"file {module_name}.py"
-            except Exception:
+        module_name = module_spec.partition(":")[0]
+        try:
+            mod = importlib.import_module(module_name)
+            source_file = getattr(mod, "__file__", None)
+            if source_file and Path(source_file).name == "__init__.py":
+                scope = f"package {module_name}/"
+            else:
                 scope = f"file {module_name}.py"
+        except Exception:
+            scope = f"file {module_name}.py"
 
         self.console.print(
             f"Resuming eval ({completed}/{total_expected} runs completed)"
@@ -439,9 +433,9 @@ class EvalCommand:
             build_completion_params,
             create_llm_client,
             format_duration,
-            load_agent,
             load_dataset_rows,
-            load_mcp_agent,
+            load_workflow,
+            truncate_error,
             verify_llm_client,
         )
 
@@ -472,23 +466,16 @@ class EvalCommand:
             await llm_client.close()
             return 1
 
-        if args.mcp:
-            agent_loop, error = load_mcp_agent(
-                mcp_path=args.mcp,
-                quiet=args.quiet,
-                console=self.console,
-            )
-        else:
-            agent_loop, error = load_agent(
-                module=args.module,
-                quiet=args.quiet,
-                console=self.console,
-            )
+        workflow_cls, workflow_config, error = load_workflow(
+            module=args.module,
+            quiet=args.quiet,
+            console=self.console,
+        )
         if error:
             self.console.print_error(f"Error: {error}")
             await llm_client.close()
             return 1
-        assert agent_loop is not None
+        assert workflow_cls is not None
 
         rows, error = load_dataset_rows(
             dataset_path=args.dataset,
@@ -542,16 +529,6 @@ class EvalCommand:
                 await llm_client.close()
                 return 1
 
-        from osmosis_ai.eval.evaluation.runner import EvalRunner
-
-        runner = EvalRunner(
-            agent_loop=agent_loop,
-            llm_client=llm_client,
-            eval_fns=eval_fns,
-            debug=args.debug,
-            baseline_llm_client=baseline_llm_client,
-        )
-
         def on_progress(current: int, total: int, result: EvalRunResult) -> None:
             if args.quiet:
                 return
@@ -571,11 +548,7 @@ class EvalCommand:
 
             error_suffix = ""
             if not result.success and result.error:
-                error_text = result.error.replace("\n", " ")
-                error_msg = (
-                    error_text[:47] + "..." if len(error_text) > 50 else error_text
-                )
-                error_suffix = f" - {error_msg}"
+                error_suffix = f" - {truncate_error(result.error)}"
 
             status_styled = self.console.format_styled(status, status_style)
             self.console.print(
@@ -605,7 +578,7 @@ class EvalCommand:
             compute_task_id,
         )
 
-        module_spec = f"mcp:{Path(args.mcp).resolve()!s}" if args.mcp else args.module
+        module_spec = args.module
         dataset_fingerprint = compute_dataset_fingerprint(args.dataset)
         module_fingerprint = compute_module_fingerprint(module_spec)
         eval_fns_fingerprint = compute_eval_fns_fingerprint(args.eval_fns)
@@ -692,8 +665,45 @@ class EvalCommand:
                 total_expected=total_expected,
                 log_samples=log_samples,
                 module_spec=module_spec,
-                is_mcp=bool(args.mcp),
             )
+
+        from osmosis_ai.eval.evaluation.runner import EvalRunner
+        from osmosis_ai.eval.executor import WorkflowExecutor
+        from osmosis_ai.eval.proxy import EvalProxy
+
+        trace_dir = str(Path("./eval_traces") / task_id) if args.debug else None
+
+        proxy = EvalProxy(client=llm_client, trace_dir=trace_dir)
+        baseline_proxy = None
+        if baseline_llm_client:
+            baseline_proxy = EvalProxy(client=baseline_llm_client, trace_dir=trace_dir)
+            await asyncio.gather(proxy.start(), baseline_proxy.start())
+        else:
+            await proxy.start()
+
+        executor = WorkflowExecutor(
+            workflow_cls=workflow_cls,
+            workflow_config=workflow_config,
+            proxy=proxy,
+        )
+
+        baseline_executor = None
+        if baseline_proxy:
+            baseline_executor = WorkflowExecutor(
+                workflow_cls=workflow_cls,
+                workflow_config=workflow_config,
+                proxy=baseline_proxy,
+            )
+
+        runner = EvalRunner(
+            executor=executor,
+            eval_fns=eval_fns,
+            baseline_executor=baseline_executor,
+            primary_model_name=llm_client.display_name,
+            baseline_model_name=baseline_llm_client.display_name
+            if baseline_llm_client
+            else "",
+        )
 
         from osmosis_ai.eval.evaluation.orchestrator import EvalOrchestrator
 
@@ -704,7 +714,6 @@ class EvalCommand:
             rows=rows,
             n_runs=args.n_runs,
             max_turns=args.max_turns,
-            completion_params=completion_params if completion_params else None,
             pass_threshold=args.pass_threshold,
             batch_size=args.batch_size,
             log_samples=log_samples,
@@ -731,6 +740,11 @@ class EvalCommand:
 
                 traceback.print_exc()
             return 1
+        finally:
+            if baseline_proxy:
+                await asyncio.gather(proxy.stop(), baseline_proxy.stop())
+            else:
+                await proxy.stop()
 
         # Handle OrchestratorResult status
         if orch_result.status == "already_completed":

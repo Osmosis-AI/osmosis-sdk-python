@@ -91,26 +91,33 @@ class MockRunner:
         self,
         work_items: list[tuple[dict, int, int, str | None]],
         max_turns: int = 10,
-        completion_params: dict | None = None,
+        batch_size: int = 4,
     ) -> tuple[list[EvalRunResult | None], str | None]:
         self.run_batch_calls.append(work_items)
         results: list[EvalRunResult | None] = []
-        for _row, row_index, run_idx, tag in work_items:
-            results.append(
-                EvalRunResult(
-                    run_index=run_idx,
-                    success=True,
-                    scores={"test_eval": 1.0},
-                    duration_ms=100.0,
-                    tokens=50,
-                    row_index=row_index,
-                    model_tag=tag,
-                    messages=[
-                        {"role": "assistant", "content": f"Answer for row {row_index}"}
-                    ],
+        systemic_error: str | None = None
+        for row, row_index, run_idx, tag in work_items:
+            try:
+                result = await self.run_single(
+                    row, row_index, run_idx, max_turns, model_tag=tag
                 )
-            )
-        return results, None
+                results.append(result)
+            except SystemicProviderError as e:
+                results.append(
+                    EvalRunResult(
+                        run_index=run_idx,
+                        success=False,
+                        error=str(e),
+                        duration_ms=0.0,
+                        tokens=0,
+                        row_index=row_index,
+                        model_tag=tag,
+                        messages=None,
+                    )
+                )
+                if systemic_error is None:
+                    systemic_error = str(e)
+        return results, systemic_error
 
 
 def _make_real_cache_backend(cache_root: Path) -> JsonFileCacheBackend:
@@ -589,28 +596,30 @@ class TestE2EDatasetModified:
         original_run = orch.run
 
         async def patched_run() -> OrchestratorResult:
-            original_seq = orch._run_sequential
+            original_run_all = orch._run_all
 
-            async def seq_with_forced_check(
+            async def run_all_with_forced_check(
                 work_items: list,
                 cache_data: dict,
                 flush_ctl: Any,
                 dataset_checker: Any,
                 prior_completed_count: int = 0,
+                total_expected: int = 0,
             ) -> tuple:
                 if dataset_checker is not None:
                     # Force immediate check
                     dataset_checker._runs_since_check = 100
                     dataset_checker._last_check_time = 0.0
-                return await original_seq(
+                return await original_run_all(
                     work_items,
                     cache_data,
                     flush_ctl,
                     dataset_checker,
                     prior_completed_count,
+                    total_expected,
                 )
 
-            orch._run_sequential = seq_with_forced_check  # type: ignore[assignment]
+            orch._run_all = run_all_with_forced_check  # type: ignore[assignment]
             return await original_run()
 
         result = await patched_run()
@@ -925,7 +934,7 @@ class TestE2EBatchMode:
         assert result.total_expected == 6
 
     async def test_batch_mode_uses_run_batch(self, tmp_path: Path) -> None:
-        """batch_size > 1 should call runner.run_batch, not run_single."""
+        """All execution goes through run_batch regardless of batch_size."""
         backend = _make_real_cache_backend(tmp_path / "eval")
         runner = MockRunner()
         rows = _make_rows(4)
@@ -940,7 +949,6 @@ class TestE2EBatchMode:
 
         assert result.status == "completed"
         assert len(runner.run_batch_calls) >= 1
-        assert len(runner.run_single_calls) == 0
 
     async def test_batch_mode_cache_correct(self, tmp_path: Path) -> None:
         """Batch mode produces correct cache data on disk."""

@@ -2,683 +2,158 @@
 
 from __future__ import annotations
 
-from typing import Any
-from unittest.mock import MagicMock, patch
-
-import pytest
+from unittest.mock import AsyncMock, MagicMock
 
 from osmosis_ai.eval.common.dataset import DatasetRow
-from osmosis_ai.eval.test_mode.runner import (
-    LocalTestBatchResult,
-    LocalTestRunner,
-    LocalTestRunResult,
-)
-from osmosis_ai.rollout import (
-    OpenAIFunctionParametersSchema,
-    OpenAIFunctionSchema,
-    OpenAIFunctionToolSchema,
-    RolloutAgentLoop,
-    RolloutContext,
-    RolloutRequest,
-    RolloutResult,
-)
-from osmosis_ai.rollout.client import CompletionsResult
-from osmosis_ai.rollout.core.schemas import RolloutMetrics
+from osmosis_ai.eval.executor import ExecutionResult, WorkflowExecutor
+from osmosis_ai.eval.proxy import RequestMetrics
+from osmosis_ai.eval.test_mode.runner import TestRunner, TestRunResult
 
 
-class MockTestLLMClient:
-    """Mock LLM client for testing.
-
-    Implements the same interface as ExternalLLMClient for testing purposes.
-    """
-
-    def __init__(self) -> None:
-        self._tools: list[dict[str, Any]] | None = None
-        self._llm_latency_ms: float = 0.0
-        self._num_llm_calls: int = 0
-        self._prompt_tokens: int = 0
-        self._response_tokens: int = 0
-        self.completions_calls: list[dict[str, Any]] = []
-        self.mock_response = CompletionsResult(
-            message={"role": "assistant", "content": "Test response"},
-            token_ids=[],
-            logprobs=[],
-            usage={"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
-            finish_reason="stop",
-        )
-
-    def set_tools(self, tools: list[Any]) -> None:
-        if tools:
-            self._tools = [
-                t.model_dump(exclude_none=True) if hasattr(t, "model_dump") else t
-                for t in tools
-            ]
-        else:
-            self._tools = None
-
-    def clear_tools(self) -> None:
-        self._tools = None
-
-    def reset_metrics(self) -> None:
-        self._llm_latency_ms = 0.0
-        self._num_llm_calls = 0
-        self._prompt_tokens = 0
-        self._response_tokens = 0
-
-    def get_metrics(self) -> RolloutMetrics:
-        return RolloutMetrics(
-            llm_latency_ms=self._llm_latency_ms,
-            num_llm_calls=self._num_llm_calls,
-            prompt_tokens=self._prompt_tokens,
-            response_tokens=self._response_tokens,
-        )
-
-    def _record_usage(
-        self, latency_ms: float, prompt_tokens: int, completion_tokens: int
-    ) -> None:
-        self._llm_latency_ms += latency_ms
-        self._num_llm_calls += 1
-        self._prompt_tokens += prompt_tokens
-        self._response_tokens += completion_tokens
-
-    async def chat_completions(
-        self, messages: list[dict[str, Any]], **kwargs: Any
-    ) -> CompletionsResult:
-        # Auto-inject tools if set
-        if self._tools is not None and "tools" not in kwargs:
-            kwargs["tools"] = self._tools
-        self.completions_calls.append({"messages": messages, "kwargs": kwargs})
-        self._record_usage(latency_ms=50.0, prompt_tokens=10, completion_tokens=5)
-        return self.mock_response
+def _make_row() -> DatasetRow:
+    return {"system_prompt": "Be helpful", "user_prompt": "Hi", "ground_truth": "hello"}
 
 
-class MockAgentLoop(RolloutAgentLoop):
-    """Mock agent loop for testing."""
-
-    name = "mock_test_agent"
-
-    def __init__(
-        self,
-        tools: list[OpenAIFunctionToolSchema] | None = None,
-        run_result: RolloutResult | None = None,
-        run_error: Exception | None = None,
-        call_llm: bool = False,
-    ):
-        self._tools = tools or []
-        self._run_result = run_result
-        self._run_error = run_error
-        self._call_llm = call_llm
-        self.get_tools_calls: list[RolloutRequest] = []
-        self.run_calls: list[RolloutContext] = []
-
-    def get_tools(self, request: RolloutRequest) -> list[OpenAIFunctionToolSchema]:
-        self.get_tools_calls.append(request)
-        return self._tools
-
-    async def run(self, ctx: RolloutContext) -> RolloutResult:
-        self.run_calls.append(ctx)
-        if self._run_error:
-            raise self._run_error
-        if self._run_result:
-            return self._run_result
-        # Optionally make an LLM call to trigger metrics recording
-        if self._call_llm:
-            messages = list(ctx.request.messages)
-            result = await ctx.chat(messages)
-            messages.append(result.message)
-            return ctx.complete(messages)
-        return ctx.complete(list(ctx.request.messages))
-
-
-def create_sample_tool() -> OpenAIFunctionToolSchema:
-    """Create a sample tool schema for testing."""
-    return OpenAIFunctionToolSchema(
-        type="function",
-        function=OpenAIFunctionSchema(
-            name="test_tool",
-            description="A test tool",
-            parameters=OpenAIFunctionParametersSchema(
-                type="object",
-                properties={},
-                required=[],
-            ),
-        ),
+async def test_run_single_success():
+    mock_executor = AsyncMock(spec=WorkflowExecutor)
+    mock_executor.run_single.return_value = ExecutionResult(
+        success=True,
+        samples={},
+        duration_ms=100.0,
+        metrics=RequestMetrics(prompt_tokens=10, completion_tokens=5, num_calls=1),
     )
-
-
-def create_sample_row(index: int = 0) -> DatasetRow:
-    """Create a sample dataset row."""
-    return {  # type: ignore[return-value]
-        "user_prompt": f"Question {index}",
-        "system_prompt": "You are a test assistant.",
-        "ground_truth": f"Answer {index}",
-    }
-
-
-class TestLocalTestRunner:
-    """Tests for LocalTestRunner class."""
-
-    @pytest.mark.asyncio
-    async def test_run_single_success(self) -> None:
-        """Test successful single row execution."""
-        client = MockTestLLMClient()
-        agent = MockAgentLoop(tools=[create_sample_tool()], call_llm=True)
-        runner = LocalTestRunner(agent_loop=agent, llm_client=client)
-
-        row = create_sample_row(0)
-        result = await runner.run_single(row, row_index=0)
-
-        assert result.success is True
-        assert result.row_index == 0
-        assert result.result is not None
-        assert result.result.status == "COMPLETED"
-        assert result.error is None
-        assert result.duration_ms > 0
-        assert result.token_usage["prompt_tokens"] == 10
-        assert result.token_usage["completion_tokens"] == 5
-
-    @pytest.mark.asyncio
-    async def test_run_single_calls_get_tools(self) -> None:
-        """Test that run_single calls agent.get_tools()."""
-        client = MockTestLLMClient()
-        agent = MockAgentLoop(tools=[create_sample_tool()])
-        runner = LocalTestRunner(agent_loop=agent, llm_client=client)
-
-        row = create_sample_row(0)
-        await runner.run_single(row, row_index=0)
-
-        assert len(agent.get_tools_calls) == 1
-        assert agent.get_tools_calls[0].rollout_id == "test-0"
-
-    @pytest.mark.asyncio
-    async def test_run_single_sets_tools_on_client(self) -> None:
-        """Test that run_single injects tools into the client."""
-        client = MockTestLLMClient()
-        tool = create_sample_tool()
-        agent = MockAgentLoop(tools=[tool])
-        runner = LocalTestRunner(agent_loop=agent, llm_client=client)
-
-        row = create_sample_row(0)
-        await runner.run_single(row, row_index=0)
-
-        # Tools should have been set during execution
-        # After execution, they should be cleared
-        assert client._tools is None  # cleared after completion
-
-    @pytest.mark.asyncio
-    async def test_run_single_clears_tools_on_error(self) -> None:
-        """Test that tools are cleared even on error."""
-        client = MockTestLLMClient()
-        agent = MockAgentLoop(
-            tools=[create_sample_tool()], run_error=RuntimeError("Test error")
-        )
-        runner = LocalTestRunner(agent_loop=agent, llm_client=client)
-
-        row = create_sample_row(0)
-        result = await runner.run_single(row, row_index=0)
-
-        assert result.success is False
-        assert "Test error" in result.error  # type: ignore[operator]
-        assert client._tools is None  # should be cleared
-
-    @pytest.mark.asyncio
-    async def test_run_single_logs_compact_error_without_traceback(self) -> None:
-        """Non-debug mode should log a compact error line only."""
-        client = MockTestLLMClient()
-        agent = MockAgentLoop(
-            tools=[create_sample_tool()],
-            run_error=RuntimeError("Test error"),
-        )
-        runner = LocalTestRunner(agent_loop=agent, llm_client=client)
-
-        with patch("osmosis_ai.eval.common.runner.logger") as mock_logger:
-            mock_logger.isEnabledFor.return_value = False
-            row = create_sample_row(0)
-            result = await runner.run_single(row, row_index=0)
-
-            assert result.success is False
-            mock_logger.exception.assert_not_called()
-            mock_logger.error.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_run_single_resets_metrics(self) -> None:
-        """Test that metrics are reset before each run."""
-        client = MockTestLLMClient()
-        agent = MockAgentLoop(tools=[create_sample_tool()], call_llm=True)
-        runner = LocalTestRunner(agent_loop=agent, llm_client=client)
-
-        # Simulate previous metrics
-        client._record_usage(latency_ms=1000.0, prompt_tokens=100, completion_tokens=50)
-
-        row = create_sample_row(0)
-        result = await runner.run_single(row, row_index=0)
-
-        # Metrics should be from this run only, not accumulated
-        assert result.token_usage["prompt_tokens"] == 10
-        assert result.token_usage["completion_tokens"] == 5
-
-    @pytest.mark.asyncio
-    async def test_run_single_with_max_turns(self) -> None:
-        """Test that max_turns is passed to request."""
-        client = MockTestLLMClient()
-        agent = MockAgentLoop(tools=[])
-        runner = LocalTestRunner(agent_loop=agent, llm_client=client)
-
-        row = create_sample_row(0)
-        await runner.run_single(row, row_index=0, max_turns=20)
-
-        assert len(agent.run_calls) == 1
-        assert agent.run_calls[0].request.max_turns == 20
-
-    @pytest.mark.asyncio
-    async def test_run_single_with_completion_params(self) -> None:
-        """Test that completion_params are passed through."""
-        client = MockTestLLMClient()
-        agent = MockAgentLoop(tools=[])
-        runner = LocalTestRunner(agent_loop=agent, llm_client=client)
-
-        row = create_sample_row(0)
-        await runner.run_single(
-            row, row_index=0, completion_params={"temperature": 0.5}
-        )
-
-        assert len(agent.run_calls) == 1
-        assert agent.run_calls[0].request.completion_params["temperature"] == 0.5
-
-    @pytest.mark.asyncio
-    async def test_run_batch(self) -> None:
-        """Test running multiple rows."""
-        client = MockTestLLMClient()
-        agent = MockAgentLoop(tools=[create_sample_tool()], call_llm=True)
-        runner = LocalTestRunner(agent_loop=agent, llm_client=client)
-
-        rows = [create_sample_row(i) for i in range(3)]
-        result = await runner.run_batch(rows)
-
-        assert isinstance(result, LocalTestBatchResult)
-        assert result.total == 3
-        assert result.passed == 3
-        assert result.failed == 0
-        assert len(result.results) == 3
-        assert result.total_tokens == 45  # 15 per row * 3
-        assert result.total_duration_ms > 0
-
-    @pytest.mark.asyncio
-    async def test_run_batch_with_failures(self) -> None:
-        """Test batch with some failures."""
-        client = MockTestLLMClient()
-
-        # Agent that fails on row 1
-        class FailingAgent(MockAgentLoop):
-            async def run(self, ctx: RolloutContext) -> RolloutResult:
-                if ctx.request.metadata.get("row_index") == 1:
-                    raise RuntimeError("Intentional failure")
-                return ctx.complete(list(ctx.request.messages))
-
-        agent = FailingAgent(tools=[create_sample_tool()])
-        runner = LocalTestRunner(agent_loop=agent, llm_client=client)
-
-        rows = [create_sample_row(i) for i in range(3)]
-        result = await runner.run_batch(rows)
-
-        assert result.total == 3
-        assert result.passed == 2
-        assert result.failed == 1
-        assert result.results[1].success is False
-        assert "Intentional failure" in result.results[1].error  # type: ignore[operator]
-
-    @pytest.mark.asyncio
-    async def test_run_batch_progress_callback(self) -> None:
-        """Test that progress callback is called."""
-        client = MockTestLLMClient()
-        agent = MockAgentLoop(tools=[create_sample_tool()])
-        runner = LocalTestRunner(agent_loop=agent, llm_client=client)
-
-        progress_calls: list[tuple] = []
-
-        def on_progress(current: int, total: int, result: LocalTestRunResult) -> None:
-            progress_calls.append((current, total, result))
-
-        rows = [create_sample_row(i) for i in range(3)]
-        await runner.run_batch(rows, on_progress=on_progress)
-
-        assert len(progress_calls) == 3
-        assert progress_calls[0][0] == 1  # current
-        assert progress_calls[0][1] == 3  # total
-        assert progress_calls[2][0] == 3
-
-    @pytest.mark.asyncio
-    async def test_run_batch_with_start_index(self) -> None:
-        """Test that start_index offsets row indices correctly."""
-        client = MockTestLLMClient()
-        agent = MockAgentLoop(tools=[create_sample_tool()], call_llm=True)
-        runner = LocalTestRunner(agent_loop=agent, llm_client=client)
-
-        rows = [create_sample_row(i) for i in range(3)]
-        result = await runner.run_batch(rows, start_index=50)
-
-        # Results should have offset row indices
-        assert result.results[0].row_index == 50
-        assert result.results[1].row_index == 51
-        assert result.results[2].row_index == 52
-
-        # Agent should have received requests with offset rollout IDs
-        assert len(agent.run_calls) == 3
-        assert agent.run_calls[0].request.rollout_id == "test-50"
-        assert agent.run_calls[1].request.rollout_id == "test-51"
-        assert agent.run_calls[2].request.rollout_id == "test-52"
-
-        # Metadata should also have correct row_index
-        assert agent.run_calls[0].request.metadata["row_index"] == 50
-        assert agent.run_calls[1].request.metadata["row_index"] == 51
-        assert agent.run_calls[2].request.metadata["row_index"] == 52
-
-    @pytest.mark.asyncio
-    async def test_run_batch_with_start_index_and_progress(self) -> None:
-        """Test that progress callback receives correct offset row indices."""
-        client = MockTestLLMClient()
-        agent = MockAgentLoop(tools=[create_sample_tool()])
-        runner = LocalTestRunner(agent_loop=agent, llm_client=client)
-
-        progress_calls: list[tuple] = []
-
-        def on_progress(current: int, total: int, result: LocalTestRunResult) -> None:
-            progress_calls.append((current, total, result.row_index))
-
-        rows = [create_sample_row(i) for i in range(3)]
-        await runner.run_batch(rows, on_progress=on_progress, start_index=100)
-
-        # Progress should report offset row indices
-        assert progress_calls[0][2] == 100  # row_index for first row
-        assert progress_calls[1][2] == 101
-        assert progress_calls[2][2] == 102
-
-
-class TestSystemicProviderError:
-    """Tests for SystemicProviderError propagation and early batch termination."""
-
-    @pytest.mark.asyncio
-    async def test_run_single_propagates_systemic_error(self) -> None:
-        """SystemicProviderError should propagate through run_single."""
-        from osmosis_ai.eval.common.errors import SystemicProviderError
-
-        class SystemicAgent(MockAgentLoop):
-            async def run(self, ctx: RolloutContext) -> RolloutResult:
-                raise SystemicProviderError("Authentication failed")
-
-        client = MockTestLLMClient()
-        agent = SystemicAgent(tools=[create_sample_tool()])
-        runner = LocalTestRunner(agent_loop=agent, llm_client=client)
-
-        row = create_sample_row(0)
-        with pytest.raises(SystemicProviderError):
-            await runner.run_single(row, row_index=0)
-
-    @pytest.mark.asyncio
-    async def test_run_batch_stops_early_on_systemic_error(self) -> None:
-        """Batch should stop early when SystemicProviderError occurs."""
-        from osmosis_ai.eval.common.errors import SystemicProviderError
-
-        call_count = {"n": 0}
-
-        class SystemicAgent(MockAgentLoop):
-            async def run(self, ctx: RolloutContext) -> RolloutResult:
-                call_count["n"] += 1
-                raise SystemicProviderError("Authentication failed. Invalid API key.")
-
-        client = MockTestLLMClient()
-        agent = SystemicAgent(tools=[create_sample_tool()])
-        runner = LocalTestRunner(agent_loop=agent, llm_client=client)
-
-        rows = [create_sample_row(i) for i in range(5)]
-        result = await runner.run_batch(rows)
-
-        # Should stop after first row
-        assert result.stopped_early is True
-        assert result.stop_reason is not None
-        assert "Authentication failed" in result.stop_reason
-        assert result.total == 1  # only 1 result recorded
-        assert result.failed == 1
-        assert call_count["n"] == 1  # only 1 row was attempted
-
-    @pytest.mark.asyncio
-    async def test_run_batch_systemic_error_duration_is_per_row(self) -> None:
-        """Systemic error duration should measure only the failing row."""
-        from osmosis_ai.eval.common.errors import SystemicProviderError
-
-        class SequencedRunner(LocalTestRunner):
-            def __init__(self, *args: Any, **kwargs: Any) -> None:
-                super().__init__(*args, **kwargs)
-                self._calls = 0
-
-            async def run_single(
-                self,
-                row: DatasetRow,
-                row_index: int,
-                max_turns: int = 10,
-                completion_params: dict[str, Any] | None = None,
-            ) -> LocalTestRunResult:
-                self._calls += 1
-                if self._calls == 1:
-                    return LocalTestRunResult(
-                        row_index=row_index,
-                        success=True,
-                        duration_ms=50.0,
-                        token_usage={"total_tokens": 0},
-                    )
-                raise SystemicProviderError("Authentication failed")
-
-        client = MockTestLLMClient()
-        agent = MockAgentLoop(tools=[create_sample_tool()])
-        runner = SequencedRunner(agent_loop=agent, llm_client=client)
-
-        rows = [create_sample_row(i) for i in range(3)]
-        with patch(
-            "osmosis_ai.eval.common.runner.time.monotonic",
-            side_effect=[100.0, 101.0, 105.0, 106.0, 110.0, 111.0],
-        ):
-            result = await runner.run_batch(rows)
-
-        assert result.stopped_early is True
-        assert len(result.results) == 2
-        assert result.results[1].duration_ms == pytest.approx(1000.0)
-
-    @pytest.mark.asyncio
-    async def test_run_batch_normal_errors_dont_stop_early(self) -> None:
-        """Regular exceptions should not stop the batch early."""
-
-        class FailingAgent(MockAgentLoop):
-            async def run(self, ctx: RolloutContext) -> RolloutResult:
-                raise RuntimeError("Transient error")
-
-        client = MockTestLLMClient()
-        agent = FailingAgent(tools=[create_sample_tool()])
-        runner = LocalTestRunner(agent_loop=agent, llm_client=client)
-
-        rows = [create_sample_row(i) for i in range(3)]
-        result = await runner.run_batch(rows)
-
-        # All rows should be attempted
-        assert result.stopped_early is False
-        assert result.stop_reason is None
-        assert result.total == 3
-        assert result.failed == 3
-
-    @pytest.mark.asyncio
-    async def test_run_batch_progress_called_on_systemic_error(self) -> None:
-        """Progress callback should be called even when stopping early."""
-        from osmosis_ai.eval.common.errors import SystemicProviderError
-
-        class SystemicAgent(MockAgentLoop):
-            async def run(self, ctx: RolloutContext) -> RolloutResult:
-                raise SystemicProviderError("Cannot connect")
-
-        client = MockTestLLMClient()
-        agent = SystemicAgent(tools=[create_sample_tool()])
-        runner = LocalTestRunner(agent_loop=agent, llm_client=client)
-
-        progress_calls: list = []
-
-        def on_progress(current: int, total: int, result: LocalTestRunResult) -> None:
-            progress_calls.append((current, total, result))
-
-        rows = [create_sample_row(i) for i in range(3)]
-        result = await runner.run_batch(rows, on_progress=on_progress)
-
-        assert result.stopped_early is True
-        assert len(progress_calls) == 1  # only one call before stopping
-
-
-class TestToolValidation:
-    """Tests for tool schema validation."""
-
-    @pytest.mark.asyncio
-    async def test_valid_tool_passes(self) -> None:
-        """Test that valid tool schema passes validation."""
-        client = MockTestLLMClient()
-        agent = MockAgentLoop(tools=[create_sample_tool()])
-        runner = LocalTestRunner(agent_loop=agent, llm_client=client)
-
-        row = create_sample_row(0)
-        result = await runner.run_single(row, row_index=0)
-
-        assert result.success is True
-
-    @pytest.mark.asyncio
-    async def test_tool_without_function_fails(self) -> None:
-        """Test that tool without function field fails."""
-        client = MockTestLLMClient()
-
-        # Create invalid tool
-        invalid_tool = MagicMock()
-        invalid_tool.function = None
-
-        agent = MockAgentLoop(tools=[invalid_tool])
-        runner = LocalTestRunner(agent_loop=agent, llm_client=client)
-
-        row = create_sample_row(0)
-        result = await runner.run_single(row, row_index=0)
-
-        assert result.success is False
-        assert "Tool validation error" in result.error  # type: ignore[operator]
-        assert "missing 'function'" in result.error  # type: ignore[operator]
-
-    @pytest.mark.asyncio
-    async def test_tool_without_name_fails(self) -> None:
-        """Test that tool without function name fails."""
-        client = MockTestLLMClient()
-
-        # Create invalid tool
-        invalid_tool = MagicMock()
-        invalid_tool.function = MagicMock()
-        invalid_tool.function.name = None
-
-        agent = MockAgentLoop(tools=[invalid_tool])
-        runner = LocalTestRunner(agent_loop=agent, llm_client=client)
-
-        row = create_sample_row(0)
-        result = await runner.run_single(row, row_index=0)
-
-        assert result.success is False
-        assert "Tool validation error" in result.error  # type: ignore[operator]
-
-    @pytest.mark.asyncio
-    async def test_tool_with_invalid_name_format_fails(self) -> None:
-        """Test that tool with invalid name format fails."""
-        client = MockTestLLMClient()
-
-        # Create tool with invalid name (starts with number)
-        invalid_tool = MagicMock()
-        invalid_tool.function = MagicMock()
-        invalid_tool.function.name = "123invalid"
-        invalid_tool.function.parameters = None
-
-        agent = MockAgentLoop(tools=[invalid_tool])
-        runner = LocalTestRunner(agent_loop=agent, llm_client=client)
-
-        row = create_sample_row(0)
-        result = await runner.run_single(row, row_index=0)
-
-        assert result.success is False
-        assert "Tool validation error" in result.error  # type: ignore[operator]
-        assert "must start with letter/underscore" in result.error  # type: ignore[operator]
-
-    @pytest.mark.asyncio
-    async def test_tool_with_invalid_parameters_type_fails(self) -> None:
-        """Test that tool with invalid parameters type fails."""
-        client = MockTestLLMClient()
-
-        # Create tool with invalid parameters type
-        invalid_tool = MagicMock()
-        invalid_tool.function = MagicMock()
-        invalid_tool.function.name = "valid_name"
-        invalid_tool.function.parameters = MagicMock()
-        invalid_tool.function.parameters.type = "array"  # should be "object"
-
-        agent = MockAgentLoop(tools=[invalid_tool])
-        runner = LocalTestRunner(agent_loop=agent, llm_client=client)
-
-        row = create_sample_row(0)
-        result = await runner.run_single(row, row_index=0)
-
-        assert result.success is False
-        assert "parameters.type must be 'object'" in result.error  # type: ignore[operator]
-
-
-class TestContextCreation:
-    """Tests for RolloutContext creation in runner."""
-
-    @pytest.mark.asyncio
-    async def test_context_has_correct_request(self) -> None:
-        """Test that context has correct request data."""
-        client = MockTestLLMClient()
-        agent = MockAgentLoop(tools=[])
-        runner = LocalTestRunner(agent_loop=agent, llm_client=client)
-
-        row: dict[str, Any] = {
-            "user_prompt": "Test question",
-            "system_prompt": "Test system",
-            "ground_truth": "Test answer",
-        }
-        await runner.run_single(row, row_index=5)  # type: ignore[arg-type]
-
-        assert len(agent.run_calls) == 1
-        ctx = agent.run_calls[0]
-
-        assert ctx.request.rollout_id == "test-5"
-        assert ctx.request.messages[0]["role"] == "system"
-        assert ctx.request.messages[0]["content"] == "Test system"
-        assert ctx.request.messages[1]["role"] == "user"
-        assert ctx.request.messages[1]["content"] == "Test question"
-        assert ctx.request.metadata["ground_truth"] == "Test answer"
-        assert ctx.request.metadata["test_mode"] is True
-
-    @pytest.mark.asyncio
-    async def test_context_has_tools(self) -> None:
-        """Test that context has tools from agent."""
-        client = MockTestLLMClient()
-        tool = create_sample_tool()
-        agent = MockAgentLoop(tools=[tool])
-        runner = LocalTestRunner(agent_loop=agent, llm_client=client)
-
-        row = create_sample_row(0)
-        await runner.run_single(row, row_index=0)
-
-        assert len(agent.run_calls) == 1
-        ctx = agent.run_calls[0]
-        assert len(ctx.tools) == 1
-        assert ctx.tools[0].function.name == "test_tool"
-
-    @pytest.mark.asyncio
-    async def test_context_has_llm_client(self) -> None:
-        """Test that context has the LLM client."""
-        client = MockTestLLMClient()
-        agent = MockAgentLoop(tools=[])
-        runner = LocalTestRunner(agent_loop=agent, llm_client=client)
-
-        row = create_sample_row(0)
-        await runner.run_single(row, row_index=0)
-
-        assert len(agent.run_calls) == 1
-        ctx = agent.run_calls[0]
-        assert ctx.llm is client
+    runner = TestRunner(executor=mock_executor)
+    result = await runner.run_single(_make_row(), row_index=0)
+    assert result.success
+    assert result.token_usage["total_tokens"] == 15
+
+
+async def test_run_single_failure():
+    mock_executor = AsyncMock(spec=WorkflowExecutor)
+    mock_executor.run_single.return_value = ExecutionResult(
+        success=False,
+        error="crashed",
+        duration_ms=50.0,
+        metrics=RequestMetrics(),
+    )
+    runner = TestRunner(executor=mock_executor)
+    result = await runner.run_single(_make_row(), row_index=0)
+    assert not result.success
+    assert result.error == "crashed"
+
+
+async def test_run_batch():
+    mock_executor = AsyncMock(spec=WorkflowExecutor)
+    mock_executor.proxy = MagicMock(systemic_error=None)
+    mock_executor.run_single.return_value = ExecutionResult(
+        success=True,
+        samples={},
+        duration_ms=50.0,
+        metrics=RequestMetrics(prompt_tokens=5, completion_tokens=3),
+    )
+    runner = TestRunner(executor=mock_executor)
+    batch = await runner.run_batch([_make_row(), _make_row()], start_index=0)
+    assert batch.total == 2
+    assert batch.passed == 2
+    assert batch.failed == 0
+    assert batch.total_tokens == 16
+
+
+async def test_run_single_row_index_passed_to_rollout_id():
+    mock_executor = AsyncMock(spec=WorkflowExecutor)
+    mock_executor.run_single.return_value = ExecutionResult(
+        success=True,
+        samples={},
+        duration_ms=10.0,
+        metrics=RequestMetrics(),
+    )
+    runner = TestRunner(executor=mock_executor)
+    await runner.run_single(_make_row(), row_index=42)
+    mock_executor.run_single.assert_called_once()
+    _, _kwargs = mock_executor.run_single.call_args
+    # positional args: prompt, rollout_id
+    args = mock_executor.run_single.call_args.args
+    assert args[1] == "test-42"
+
+
+async def test_run_batch_progress_callback():
+    mock_executor = AsyncMock(spec=WorkflowExecutor)
+    mock_executor.proxy = MagicMock(systemic_error=None)
+    mock_executor.run_single.return_value = ExecutionResult(
+        success=True,
+        samples={},
+        duration_ms=10.0,
+        metrics=RequestMetrics(prompt_tokens=1, completion_tokens=1),
+    )
+    runner = TestRunner(executor=mock_executor)
+    progress_calls: list[tuple[int, int, TestRunResult]] = []
+
+    def on_progress(current: int, total: int, result: TestRunResult) -> None:
+        progress_calls.append((current, total, result))
+
+    await runner.run_batch(
+        [_make_row(), _make_row(), _make_row()], on_progress=on_progress
+    )
+    assert len(progress_calls) == 3
+    assert progress_calls[0][0] == 1
+    assert progress_calls[0][1] == 3
+    assert progress_calls[2][0] == 3
+
+
+async def test_run_batch_with_start_index():
+    mock_executor = AsyncMock(spec=WorkflowExecutor)
+    mock_executor.proxy = MagicMock(systemic_error=None)
+    mock_executor.run_single.return_value = ExecutionResult(
+        success=True,
+        samples={},
+        duration_ms=10.0,
+        metrics=RequestMetrics(),
+    )
+    runner = TestRunner(executor=mock_executor)
+    batch = await runner.run_batch([_make_row(), _make_row()], start_index=50)
+    assert batch.results[0].row_index == 50
+    assert batch.results[1].row_index == 51
+
+
+async def test_run_batch_with_failures():
+    mock_executor = AsyncMock(spec=WorkflowExecutor)
+    mock_executor.proxy = MagicMock(systemic_error=None)
+    mock_executor.run_single.side_effect = [
+        ExecutionResult(
+            success=True,
+            samples={},
+            duration_ms=10.0,
+            metrics=RequestMetrics(prompt_tokens=2, completion_tokens=2),
+        ),
+        ExecutionResult(
+            success=False,
+            error="boom",
+            duration_ms=5.0,
+            metrics=RequestMetrics(prompt_tokens=1, completion_tokens=0),
+        ),
+    ]
+    runner = TestRunner(executor=mock_executor)
+    batch = await runner.run_batch([_make_row(), _make_row()])
+    assert batch.total == 2
+    assert batch.passed == 1
+    assert batch.failed == 1
+    assert batch.results[1].error == "boom"
+
+
+async def test_run_single_maps_all_metrics():
+    mock_executor = AsyncMock(spec=WorkflowExecutor)
+    mock_executor.run_single.return_value = ExecutionResult(
+        success=True,
+        samples={"key": "val"},
+        duration_ms=200.0,
+        metrics=RequestMetrics(prompt_tokens=20, completion_tokens=10, num_calls=3),
+    )
+    runner = TestRunner(executor=mock_executor)
+    result = await runner.run_single(_make_row(), row_index=7)
+    assert result.row_index == 7
+    assert result.duration_ms == 200.0
+    assert result.token_usage["prompt_tokens"] == 20
+    assert result.token_usage["completion_tokens"] == 10
+    assert result.token_usage["total_tokens"] == 30
+    assert result.token_usage["num_llm_calls"] == 3
+    assert result.samples == {"key": "val"}

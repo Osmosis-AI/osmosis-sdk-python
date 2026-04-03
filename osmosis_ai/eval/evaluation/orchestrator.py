@@ -17,7 +17,6 @@ from pathlib import Path
 from typing import Any
 
 from osmosis_ai.eval.common.dataset import DatasetRow
-from osmosis_ai.eval.common.errors import SystemicProviderError
 from osmosis_ai.eval.evaluation.cache import (
     BuildSummaryResult,
     CacheBackend,
@@ -79,7 +78,6 @@ class EvalOrchestrator:
         rows: list[DatasetRow],
         n_runs: int = 1,
         max_turns: int = 10,
-        completion_params: dict[str, Any] | None = None,
         pass_threshold: float = 1.0,
         batch_size: int = 1,
         log_samples: bool = False,
@@ -97,7 +95,6 @@ class EvalOrchestrator:
         self.rows = rows
         self.n_runs = n_runs
         self.max_turns = max_turns
-        self.completion_params = completion_params
         self.pass_threshold = pass_threshold
         self.batch_size = batch_size
         self.log_samples = log_samples
@@ -247,32 +244,19 @@ class EvalOrchestrator:
                 )
 
             try:
-                if self.batch_size > 1:
-                    (
-                        current,
-                        interrupted,
-                        dataset_modified,
-                        stop_reason,
-                    ) = await self._run_batched(
-                        work_items,
-                        cache_data,
-                        flush_ctl,
-                        dataset_checker,
-                        prior_completed_count,
-                    )
-                else:
-                    (
-                        current,
-                        interrupted,
-                        dataset_modified,
-                        stop_reason,
-                    ) = await self._run_sequential(
-                        work_items,
-                        cache_data,
-                        flush_ctl,
-                        dataset_checker,
-                        prior_completed_count,
-                    )
+                (
+                    current,
+                    interrupted,
+                    dataset_modified,
+                    stop_reason,
+                ) = await self._run_all(
+                    work_items,
+                    cache_data,
+                    flush_ctl,
+                    dataset_checker,
+                    prior_completed_count,
+                    total_expected,
+                )
             finally:
                 flush_ctl.force_flush()
 
@@ -339,15 +323,18 @@ class EvalOrchestrator:
                         work_items.append((row, row_index, run_idx, tag))
         return work_items
 
-    async def _run_sequential(
+    async def _run_all(
         self,
         work_items: list[tuple[DatasetRow, int, int, str | None]],
         cache_data: dict[str, Any],
         flush_ctl: CacheFlushController,
         dataset_checker: DatasetIntegrityChecker | None,
         prior_completed_count: int,
+        total_expected: int,
     ) -> tuple[int, bool, bool, str | None]:
-        """Execute work items one at a time.
+        """Execute work items using runner.run_batch with batch_size control.
+
+        Works for both sequential (batch_size=1) and concurrent execution.
 
         Returns:
             ``(current, interrupted, dataset_modified, stop_reason)``
@@ -356,92 +343,13 @@ class EvalOrchestrator:
         interrupted = False
         dataset_modified = False
         stop_reason: str | None = None
-        total_expected = len(self.rows) * self.n_runs * len(self.model_tags)
-
-        for row, row_index, run_idx, tag in work_items:
-            # Check for shutdown signal
-            if self._shutdown_event is not None and self._shutdown_event.is_set():
-                interrupted = True
-                break
-
-            # Check dataset integrity
-            if dataset_checker is not None:
-                ds_status = dataset_checker.maybe_check()
-                if ds_status != DatasetStatus.VALID:
-                    dataset_modified = True
-                    stop_reason = f"Dataset {ds_status.value}"
-                    break
-
-            try:
-                result = await self.runner.run_single(
-                    row=row,
-                    row_index=row_index,
-                    run_index=run_idx,
-                    max_turns=self.max_turns,
-                    completion_params=self.completion_params,
-                    model_tag=tag,
-                )
-            except SystemicProviderError as e:
-                result = EvalRunResult(
-                    run_index=run_idx,
-                    success=False,
-                    error=str(e),
-                    duration_ms=getattr(e, "duration_ms", None) or 0.0,
-                    tokens=getattr(e, "tokens", None) or 0,
-                    model_tag=tag,
-                    messages=None,
-                    row_index=row_index,
-                )
-                self._record_result(result, cache_data, row_index, run_idx)
-                current += 1
-                stop_reason = str(e)
-                if self.on_progress is not None:
-                    completed_so_far = prior_completed_count + len(
-                        cache_data.get("runs", [])
-                    )
-                    self.on_progress(completed_so_far, total_expected, result)
-                break
-
-            self._record_result(result, cache_data, row_index, run_idx)
-            current += 1
-
-            flush_ctl.maybe_flush()
-
-            if self.on_progress is not None:
-                completed_so_far = prior_completed_count + len(
-                    cache_data.get("runs", [])
-                )
-                self.on_progress(completed_so_far, total_expected, result)
-
-        return current, interrupted, dataset_modified, stop_reason
-
-    async def _run_batched(
-        self,
-        work_items: list[tuple[DatasetRow, int, int, str | None]],
-        cache_data: dict[str, Any],
-        flush_ctl: CacheFlushController,
-        dataset_checker: DatasetIntegrityChecker | None,
-        prior_completed_count: int,
-    ) -> tuple[int, bool, bool, str | None]:
-        """Execute work items in batches of ``self.batch_size``.
-
-        Returns:
-            ``(current, interrupted, dataset_modified, stop_reason)``
-        """
-        current = 0
-        interrupted = False
-        dataset_modified = False
-        stop_reason: str | None = None
-        total_expected = len(self.rows) * self.n_runs * len(self.model_tags)
         cursor = 0
 
         while cursor < len(work_items):
-            # Check for shutdown signal
             if self._shutdown_event is not None and self._shutdown_event.is_set():
                 interrupted = True
                 break
 
-            # Check dataset integrity
             if dataset_checker is not None:
                 ds_status = dataset_checker.maybe_check()
                 if ds_status != DatasetStatus.VALID:
@@ -453,8 +361,7 @@ class EvalOrchestrator:
 
             batch_results, systemic_error = await self.runner.run_batch(
                 work_items=batch,
-                max_turns=self.max_turns,
-                completion_params=self.completion_params,
+                batch_size=self.batch_size,
             )
 
             for i, result in enumerate(batch_results):
@@ -465,10 +372,9 @@ class EvalOrchestrator:
                 current += 1
 
                 if self.on_progress is not None:
-                    completed_so_far = prior_completed_count + len(
-                        cache_data.get("runs", [])
+                    self.on_progress(
+                        prior_completed_count + current, total_expected, result
                     )
-                    self.on_progress(completed_so_far, total_expected, result)
 
             completed_in_batch = sum(1 for r in batch_results if r is not None)
             flush_ctl.maybe_flush(runs_completed=completed_in_batch)

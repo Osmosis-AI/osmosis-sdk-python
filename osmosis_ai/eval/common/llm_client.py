@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import inspect
 import logging
-import time
 from typing import Any
 
 from osmosis_ai._litellm_compat import APIConnectionError as _APIConnectionError
@@ -19,8 +18,6 @@ from osmosis_ai._litellm_compat import (
 from osmosis_ai._litellm_compat import RateLimitError as _RateLimitError
 from osmosis_ai._litellm_compat import Timeout as _LitellmTimeout
 from osmosis_ai.eval.common.errors import ProviderError, SystemicProviderError
-from osmosis_ai.rollout.client import CompletionsResult
-from osmosis_ai.rollout.core.schemas import RolloutMetrics
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -165,12 +162,6 @@ class ExternalLLMClient:
         self._api_key = api_key
         self._api_base = api_base
 
-        self._tools: list[dict[str, Any]] | None = None
-
-        self._llm_latency_ms: float = 0.0
-        self._num_llm_calls: int = 0
-        self._prompt_tokens: int = 0
-        self._response_tokens: int = 0
         self._closed = False
 
     @property
@@ -183,35 +174,12 @@ class ExternalLLMClient:
         """The base URL for API requests."""
         return self._api_base
 
-    def set_tools(self, tools: list[Any]) -> None:
-        """Set tools for the current execution row."""
-        if tools:
-            self._tools = [
-                t.model_dump(exclude_none=True) if hasattr(t, "model_dump") else t
-                for t in tools
-            ]
-        else:
-            self._tools = None
-
-    def clear_tools(self) -> None:
-        """Clear tools after row completion."""
-        self._tools = None
-
-    def reset_metrics(self) -> None:
-        """Reset metrics before each row."""
-        self._llm_latency_ms = 0.0
-        self._num_llm_calls = 0
-        self._prompt_tokens = 0
-        self._response_tokens = 0
-
     async def chat_completions(
         self,
         messages: list[dict[str, Any]],
         **kwargs: Any,
-    ) -> CompletionsResult:
+    ) -> dict[str, Any]:
         """Make a chat completion request via LiteLLM."""
-        start_time = time.monotonic()
-
         request_kwargs: dict[str, Any] = {
             "model": self.model,
             "messages": messages,
@@ -221,8 +189,6 @@ class ExternalLLMClient:
             request_kwargs["api_key"] = self._api_key
         if self._api_base:
             request_kwargs["api_base"] = self._api_base
-        if self._tools is not None:
-            request_kwargs["tools"] = self._tools
 
         request_kwargs.update(kwargs)
 
@@ -261,29 +227,21 @@ class ExternalLLMClient:
         except Exception as e:
             raise self._classify_unknown_error(e) from e
 
-        latency_ms = (time.monotonic() - start_time) * 1000
         # litellm's ModelResponse stubs are incomplete — usage/choices/message
         # are valid at runtime but not fully reflected in the published types.
         usage = response.usage  # type: ignore[union-attr]
-        self._llm_latency_ms += latency_ms
-        self._num_llm_calls += 1
-        self._prompt_tokens += usage.prompt_tokens if usage else 0
-        self._response_tokens += usage.completion_tokens if usage else 0
-
         choice = response.choices[0]  # type: ignore[union-attr]
         message = choice.message.model_dump(exclude_none=True)  # type: ignore[union-attr]
 
-        return CompletionsResult(
-            message=message,
-            token_ids=[],
-            logprobs=[],
-            usage={
+        return {
+            "message": message,
+            "usage": {
                 "prompt_tokens": usage.prompt_tokens if usage else 0,
                 "completion_tokens": usage.completion_tokens if usage else 0,
                 "total_tokens": usage.total_tokens if usage else 0,
             },
-            finish_reason=choice.finish_reason or "stop",
-        )
+            "finish_reason": choice.finish_reason or "stop",
+        }
 
     async def preflight_check(self) -> None:
         """Send a minimal request to verify connectivity and authentication.
@@ -358,21 +316,11 @@ class ExternalLLMClient:
 
         return ProviderError(f"Unexpected error: {msg}")
 
-    def get_metrics(self) -> RolloutMetrics:
-        """Return accumulated metrics for the current row."""
-        return RolloutMetrics(
-            llm_latency_ms=self._llm_latency_ms,
-            num_llm_calls=self._num_llm_calls,
-            prompt_tokens=self._prompt_tokens,
-            response_tokens=self._response_tokens,
-        )
-
     async def close(self) -> None:
         """Release resources and explicitly close LiteLLM async clients."""
         if self._closed:
             return
         self._closed = True
-        self.clear_tools()
 
         cleanup = getattr(self._litellm, "close_litellm_async_clients", None)
         if not callable(cleanup):

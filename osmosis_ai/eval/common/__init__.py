@@ -5,30 +5,22 @@ from osmosis_ai.eval.common.cli import (
     create_llm_client,
     format_duration,
     format_tokens,
-    load_agent,
     load_dataset_rows,
+    load_workflow,
 )
 from osmosis_ai.eval.common.dataset import (
     REQUIRED_COLUMNS,
     DatasetReader,
     DatasetRow,
-    dataset_row_to_request,
+    dataset_row_to_prompt,
 )
 from osmosis_ai.eval.common.errors import (
     DatasetParseError,
     DatasetValidationError,
     LocalExecutionError,
     ProviderError,
-    ToolValidationError,
 )
 from osmosis_ai.eval.common.llm_client import ExternalLLMClient
-from osmosis_ai.eval.common.runner import (
-    LocalBatchResult,
-    LocalLLMClientProtocol,
-    LocalRolloutRunner,
-    LocalRunResult,
-    validate_tools,
-)
 
 __all__ = [
     "REQUIRED_COLUMNS",
@@ -37,19 +29,13 @@ __all__ = [
     "DatasetRow",
     "DatasetValidationError",
     "ExternalLLMClient",
-    "LocalBatchResult",
     "LocalExecutionError",
-    "LocalLLMClientProtocol",
-    "LocalRolloutRunner",
-    "LocalRunResult",
     "ProviderError",
-    "ToolValidationError",
     "build_completion_params",
     "create_llm_client",
-    "dataset_row_to_request",
+    "dataset_row_to_prompt",
     "format_duration",
     "format_tokens",
-    "load_agent",
     "load_dataset_rows",
-    "validate_tools",
+    "load_workflow",
 ]

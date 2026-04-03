@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
 
 import pytest
 
 from osmosis_ai.eval.common.dataset import (
     DatasetReader,
-    dataset_row_to_request,
+    DatasetRow,
+    dataset_row_to_prompt,
 )
 from osmosis_ai.eval.common.errors import (
     DatasetParseError,
@@ -419,99 +419,15 @@ class TestDatasetReader:
         assert "Expected object" in str(exc_info.value)
 
 
-class TestDatasetRowToRequest:
-    """Tests for dataset_row_to_request function."""
-
-    def test_basic_conversion(self) -> None:
-        """Test basic conversion from DatasetRow to RolloutRequest."""
-        row: dict[str, Any] = {
-            "user_prompt": "What is 2+2?",
-            "system_prompt": "You are a calculator.",
-            "ground_truth": "4",
-        }
-
-        request = dataset_row_to_request(row, row_index=0)  # type: ignore[arg-type]
-
-        assert request.rollout_id == "local-0"
-        assert request.server_url == "http://local-rollout.local"
-        assert len(request.messages) == 2
-        assert request.messages[0]["role"] == "system"
-        assert request.messages[0]["content"] == "You are a calculator."
-        assert request.messages[1]["role"] == "user"
-        assert request.messages[1]["content"] == "What is 2+2?"
-
-    def test_ground_truth_in_metadata(self) -> None:
-        """Test that ground_truth is stored in metadata."""
-        row: dict[str, Any] = {
-            "user_prompt": "Question",
-            "system_prompt": "System",
-            "ground_truth": "Expected Answer",
-        }
-
-        request = dataset_row_to_request(row, row_index=5)  # type: ignore[arg-type]
-
-        assert request.metadata["ground_truth"] == "Expected Answer"
-        assert request.metadata["row_index"] == 5
-
-    def test_extra_columns_in_metadata(self) -> None:
-        """Test that extra columns are preserved in metadata."""
-        row: dict[str, Any] = {
-            "user_prompt": "Question",
-            "system_prompt": "System",
-            "ground_truth": "Answer",
-            "difficulty": "hard",
-            "category": "science",
-        }
-
-        request = dataset_row_to_request(row, row_index=0)  # type: ignore[arg-type]
-
-        assert request.metadata["difficulty"] == "hard"
-        assert request.metadata["category"] == "science"
-
-    def test_max_turns_parameter(self) -> None:
-        """Test that max_turns is passed correctly."""
-        row: dict[str, Any] = {
-            "user_prompt": "Question",
-            "system_prompt": "System",
-            "ground_truth": "Answer",
-        }
-
-        request = dataset_row_to_request(row, row_index=0, max_turns=20)  # type: ignore[arg-type]
-
-        assert request.max_turns == 20
-
-    def test_completion_params(self) -> None:
-        """Test that completion_params are passed correctly."""
-        row: dict[str, Any] = {
-            "user_prompt": "Question",
-            "system_prompt": "System",
-            "ground_truth": "Answer",
-        }
-
-        request = dataset_row_to_request(
-            row,  # type: ignore[arg-type]
-            row_index=0,
-            completion_params={"temperature": 0.5, "max_tokens": 1000},
-        )
-
-        assert request.completion_params["temperature"] == 0.5
-        assert request.completion_params["max_tokens"] == 1000
-
-    def test_rollout_id_prefix_and_metadata_overrides(self) -> None:
-        """Test custom rollout_id_prefix and metadata overrides."""
-        row: dict[str, Any] = {
-            "user_prompt": "Question",
-            "system_prompt": "System",
-            "ground_truth": "Answer",
-        }
-
-        request = dataset_row_to_request(
-            row,  # type: ignore[arg-type]
-            row_index=3,
-            rollout_id_prefix="eval",
-            metadata_overrides={"execution_mode": "eval", "run_index": 2},
-        )
-
-        assert request.rollout_id == "eval-3"
-        assert request.metadata["execution_mode"] == "eval"
-        assert request.metadata["run_index"] == 2
+def test_dataset_row_to_prompt() -> None:
+    """Test conversion from DatasetRow to a plain prompt list."""
+    row: DatasetRow = {
+        "system_prompt": "You are a math tutor.",
+        "user_prompt": "What is 2+2?",
+        "ground_truth": "4",
+    }
+    prompt = dataset_row_to_prompt(row)
+    assert prompt == [
+        {"role": "system", "content": "You are a math tutor."},
+        {"role": "user", "content": "What is 2+2?"},
+    ]

@@ -20,7 +20,6 @@ def eval_run(
     module: str | None = typer.Option(
         None, "-m", "--module", help="Module path 'module:attribute'."
     ),
-    mcp: str | None = typer.Option(None, "--mcp", help="Path to MCP tools directory."),
     dataset: str | None = typer.Option(
         None, "-d", "--dataset", help="Path to dataset file."
     ),
@@ -101,7 +100,6 @@ def eval_run(
 
     rc = cmd.run(
         module=module,
-        mcp=mcp,
         dataset=dataset,
         model=model,
         eval_fns=eval_fns_val,

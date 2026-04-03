@@ -15,10 +15,6 @@ class DatasetParseError(LocalExecutionError):
     """Raised when dataset files cannot be parsed."""
 
 
-class ToolValidationError(LocalExecutionError):
-    """Raised when tool schemas are invalid for provider APIs."""
-
-
 class ProviderError(LocalExecutionError):
     """Raised when external provider calls fail."""
 
@@ -47,5 +43,4 @@ __all__ = [
     "LocalExecutionError",
     "ProviderError",
     "SystemicProviderError",
-    "ToolValidationError",
 ]

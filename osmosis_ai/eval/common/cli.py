@@ -14,7 +14,6 @@ from osmosis_ai.eval.common.errors import (
     ProviderError,
     SystemicProviderError,
 )
-from osmosis_ai.rollout.cli_utils import load_agent_loop
 
 # Mapping of LiteLLM provider prefixes to their expected environment variables.
 _PROVIDER_ENV_KEYS: dict[str, str] = {
@@ -42,7 +41,6 @@ _PROVIDER_ENV_KEYS: dict[str, str] = {
 if TYPE_CHECKING:
     from osmosis_ai.eval.common.dataset import DatasetRow
     from osmosis_ai.eval.common.llm_client import ExternalLLMClient
-    from osmosis_ai.rollout.core.base import RolloutAgentLoop
 
 
 def format_duration(ms: float) -> str:
@@ -61,60 +59,70 @@ def format_tokens(tokens: int) -> str:
     return f"{tokens:,}"
 
 
-def load_agent(
+def truncate_error(text: str, max_len: int = 50) -> str:
+    """Truncate a single-line error string with ellipsis if too long."""
+    flat = text.replace("\n", " ")
+    return flat[: max_len - 3] + "..." if len(flat) > max_len else flat
+
+
+def _resolve_workflow(module_path: str) -> tuple[type, Any]:
+    """Resolve a module:attribute path to an AgentWorkflow subclass and its config.
+
+    Returns (workflow_cls, config) where config may be None if no
+    AgentWorkflowConfig instance is found in the module namespace.
+    """
+    import sys
+
+    from osmosis_ai.rollout_v2.agent_workflow import AgentWorkflow
+    from osmosis_ai.rollout_v2.types import AgentWorkflowConfig
+    from osmosis_ai.rollout_v2.utils.imports import resolve_object
+
+    # Ensure cwd is on sys.path so local modules can be imported from CLI.
+    cwd = os.getcwd()
+    if cwd not in sys.path:
+        sys.path.insert(0, cwd)
+
+    obj = resolve_object(module_path)
+
+    if not (isinstance(obj, type) and issubclass(obj, AgentWorkflow)):
+        raise TypeError(
+            f"'{module_path}' must be an AgentWorkflow subclass, "
+            f"got {type(obj).__name__}"
+        )
+
+    # Auto-discover config: scan the module for AgentWorkflowConfig instances.
+    module_name = module_path.rsplit(":", 1)[0]
+    mod = sys.modules[module_name]
+    config = None
+    for val in vars(mod).values():
+        if isinstance(val, AgentWorkflowConfig):
+            config = val
+            break
+
+    return obj, config
+
+
+def load_workflow(
     module: str,
     quiet: bool,
     console: Console,
-) -> tuple[RolloutAgentLoop | None, str | None]:
-    """Load agent loop from module path."""
-    if not quiet:
-        console.print(f"Loading agent: {module}")
+) -> tuple[type | None, Any, str | None]:
+    """Load an AgentWorkflow class and its config from a module path.
 
-    try:
-        agent_loop = load_agent_loop(module)
-    except CLIError as e:
-        return None, str(e)
-
-    if not quiet:
-        console.print(f"  Agent name: {agent_loop.name}")
-
-    return agent_loop, None
-
-
-def load_mcp_agent(
-    mcp_path: str,
-    quiet: bool,
-    console: Console,
-) -> tuple[RolloutAgentLoop | None, str | None]:
-    """Load an MCPAgentLoop from an MCP directory.
-
-    The directory must contain a ``main.py`` with a FastMCP instance and
-    registered ``@mcp.tool()`` functions.
+    Returns (workflow_cls, workflow_config, error).
     """
-    try:
-        from osmosis_ai.rollout.mcp import MCPAgentLoop, MCPLoadError, load_mcp_server
-    except ImportError:
-        return None, (
-            "MCP support requires fastmcp. Install it with: pip install osmosis-ai[mcp]"
-        )
-
     if not quiet:
-        console.print(f"Loading MCP tools: {mcp_path}")
+        console.print(f"Loading workflow: {module}")
 
     try:
-        mcp_server = load_mcp_server(mcp_path)
-    except MCPLoadError as e:
-        return None, str(e)
-
-    agent_loop = MCPAgentLoop(mcp_server)
+        workflow_cls, workflow_config = _resolve_workflow(module)
+    except (CLIError, ImportError, ValueError, TypeError) as e:
+        return None, None, str(e)
 
     if not quiet:
-        tool_names = [t.function.name for t in agent_loop.get_default_tools()]
-        console.print(
-            f"  Discovered {len(tool_names)} tool(s): {', '.join(tool_names)}"
-        )
+        console.print(f"  Workflow: {workflow_cls.__name__}")
 
-    return agent_loop, None
+    return workflow_cls, workflow_config, None
 
 
 def load_dataset_rows(
@@ -177,15 +185,6 @@ def _check_api_key(
     return None
 
 
-def _first_line(message: str) -> str:
-    """Return first non-empty line for concise error details."""
-    for line in message.splitlines():
-        stripped = line.strip()
-        if stripped:
-            return stripped
-    return message.strip()
-
-
 def _format_model_error(model: str, base_url: str | None, detail: str) -> str:
     """Format a concise model validation error with actionable guidance."""
     if base_url:
@@ -201,6 +200,8 @@ def _format_model_error(model: str, base_url: str | None, detail: str) -> str:
 
 def _check_model(model: str, base_url: str | None) -> str | None:
     """Return an error message if model format is invalid, else None."""
+    from osmosis_ai.eval.common.llm_client import _first_line
+
     candidate = model.strip()
     if not candidate:
         return "Model cannot be empty. Pass a value with --model."
@@ -330,8 +331,8 @@ __all__ = [
     "create_llm_client",
     "format_duration",
     "format_tokens",
-    "load_agent",
     "load_dataset_rows",
-    "load_mcp_agent",
+    "load_workflow",
+    "truncate_error",
     "verify_llm_client",
 ]

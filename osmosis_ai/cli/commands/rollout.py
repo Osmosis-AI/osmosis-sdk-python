@@ -104,7 +104,6 @@ def test(
     module: str | None = typer.Option(
         None, "-m", "--module", "--agent", help="Module path 'module:attribute'."
     ),
-    mcp: str | None = typer.Option(None, "--mcp", help="Path to MCP tools directory."),
     dataset: str = typer.Option(..., "-d", "--dataset", help="Path to dataset file."),
     model: str = typer.Option("gpt-5-mini", "--model", help="Model name to use."),
     limit: int | None = typer.Option(
@@ -133,19 +132,12 @@ def test(
     quiet: bool = typer.Option(
         False, "-q", "--quiet", help="Suppress progress output."
     ),
-    interactive: bool = typer.Option(
-        False, "-i", "--interactive", help="Interactive mode."
-    ),
-    row: int | None = typer.Option(
-        None, "--row", help="Initial row in interactive mode."
-    ),
 ) -> None:
-    """Test a RolloutAgentLoop against a dataset."""
+    """Test an AgentWorkflow against a dataset."""
     from osmosis_ai.eval.test_mode.cli import TestCommand
 
     rc = TestCommand().run(
         module=module,
-        mcp=mcp,
         dataset=dataset,
         model=model,
         limit=limit,
@@ -158,8 +150,6 @@ def test(
         debug=debug,
         output=output,
         quiet=quiet,
-        interactive=interactive,
-        row=row,
     )
     if rc:
         raise typer.Exit(rc)

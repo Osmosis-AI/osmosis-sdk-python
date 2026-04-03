@@ -7,7 +7,6 @@ from typing import Any
 
 import pytest
 
-from osmosis_ai.eval.common.errors import SystemicProviderError
 from osmosis_ai.eval.evaluation.cache import CacheConfig, DatasetStatus
 from osmosis_ai.eval.evaluation.orchestrator import (
     EvalOrchestrator,
@@ -125,7 +124,7 @@ class MockRunner:
         self,
         work_items: list[tuple[dict, int, int, str | None]],
         max_turns: int = 10,
-        completion_params: dict | None = None,
+        batch_size: int = 4,
     ) -> tuple[list[EvalRunResult | None], str | None]:
         self.run_batch_calls.append(work_items)
         if self._run_batch_results:
@@ -227,7 +226,9 @@ class TestOrchestratorFreshEval:
         assert result.status == "completed"
         assert result.total_completed == 3
         assert result.total_expected == 3
-        assert len(runner.run_single_calls) == 3
+        # With unified path, all execution goes through run_batch (even batch_size=1)
+        total_items = sum(len(batch) for batch in runner.run_batch_calls)
+        assert total_items == 3
 
     @pytest.mark.asyncio
     async def test_fresh_eval_writes_cache_on_completion(self) -> None:
@@ -295,7 +296,7 @@ class TestOrchestratorAlreadyCompleted:
         result = await orch.run()
 
         assert result.status == "already_completed"
-        assert len(runner.run_single_calls) == 0
+        assert len(runner.run_batch_calls) == 0
         assert result.summary is not None
 
     @pytest.mark.asyncio
@@ -345,7 +346,8 @@ class TestOrchestratorResume:
 
         assert result.status == "completed"
         # Should only run 2 remaining items
-        assert len(runner.run_single_calls) == 2
+        total_items = sum(len(batch) for batch in runner.run_batch_calls)
+        assert total_items == 2
         # Total completed = 1 prior + 2 new
         assert result.total_completed == 3
 
@@ -384,7 +386,8 @@ class TestOrchestratorResume:
         result = await orch.run()
 
         assert result.total_completed == 3
-        assert len(runner.run_single_calls) == 1
+        total_items = sum(len(batch) for batch in runner.run_batch_calls)
+        assert total_items == 1
 
 
 # ---------------------------------------------------------------------------
@@ -435,8 +438,10 @@ class TestOrchestratorRetryFailed:
         result = await orch.run()
 
         assert result.status == "completed"
-        assert len(runner.run_single_calls) == 1
-        assert runner.run_single_calls[0][1] == 1
+        total_items = sum(len(batch) for batch in runner.run_batch_calls)
+        assert total_items == 1
+        # The single work item should be for row_index=1
+        assert runner.run_batch_calls[0][0][1] == 1  # row_index
         assert result.total_completed == 2
         assert all(run["success"] for run in result.cache_data.get("runs", []))
 
@@ -483,7 +488,7 @@ class TestOrchestratorRetryFailed:
         result = await orch.run()
 
         assert result.status == "completed"
-        assert len(runner.run_single_calls) == 0
+        assert len(runner.run_batch_calls) == 0
         assert len(result.cache_data.get("runs", [])) == 1
         assert result.cache_data["runs"][0]["success"] is True
 
@@ -514,41 +519,42 @@ class TestOrchestratorInterrupted:
         result = await orch.run()
 
         assert result.status == "interrupted"
-        # Since the event is set before the loop starts, 0 items should run.
-        assert len(runner.run_single_calls) == 0
+        # Since the event is set before the loop starts, 0 batches should run.
+        assert len(runner.run_batch_calls) == 0
 
     @pytest.mark.asyncio
     async def test_interrupted_records_completed_runs(self) -> None:
         """Runs completed before the interrupt should still be in cache_data."""
         # Verify the cache_data has runs after interrupt.
-        # We set the shutdown event from inside run_single.
+        # We set the shutdown event from inside run_batch.
         runner2 = MockRunner()
-        call_count2 = 0
+        batch_call_count = 0
 
-        async def run_single_with_interrupt(
-            row: dict,
-            row_index: int,
-            run_index: int,
+        async def run_batch_with_interrupt(
+            work_items: list,
             max_turns: int = 10,
-            completion_params: dict | None = None,
-            model_tag: str | None = None,
-        ) -> EvalRunResult:
-            nonlocal call_count2
-            call_count2 += 1
-            res = EvalRunResult(
-                run_index=run_index,
-                success=True,
-                scores={"test_eval": 1.0},
-                row_index=row_index,
-                model_tag=model_tag,
-                messages=[{"role": "assistant", "content": "ok"}],
-            )
-            # After first run, set shutdown
-            if call_count2 >= 1 and orch2._shutdown_event is not None:
+            batch_size: int = 4,
+        ) -> tuple[list[EvalRunResult | None], str | None]:
+            nonlocal batch_call_count
+            batch_call_count += 1
+            results: list[EvalRunResult | None] = []
+            for _row, row_index, run_idx, tag in work_items:
+                results.append(
+                    EvalRunResult(
+                        run_index=run_idx,
+                        success=True,
+                        scores={"test_eval": 1.0},
+                        row_index=row_index,
+                        model_tag=tag,
+                        messages=[{"role": "assistant", "content": "ok"}],
+                    )
+                )
+            # After first batch, set shutdown
+            if batch_call_count >= 1 and orch2._shutdown_event is not None:
                 orch2._shutdown_event.set()
-            return res
+            return results, None
 
-        runner2.run_single = run_single_with_interrupt  # type: ignore[assignment]
+        runner2.run_batch = run_batch_with_interrupt  # type: ignore[assignment]
 
         cache_backend2 = MockCacheBackend()
         rows2 = _make_rows(5)
@@ -586,26 +592,28 @@ class TestOrchestratorDatasetModified:
         original_run = orch.run
 
         async def patched_run() -> OrchestratorResult:
-            # We need to intercept _run_sequential to inject our mock checker.
-            original_seq = orch._run_sequential
+            # We need to intercept _run_all to inject our mock checker.
+            original_run_all = orch._run_all
 
-            async def seq_with_mock_checker(
+            async def run_all_with_mock_checker(
                 work_items: list,
                 cache_data: dict,
                 flush_ctl: Any,
                 dataset_checker: Any,
                 prior_completed_count: int,
+                total_expected: int,
             ) -> tuple:
                 mock_checker = MockDatasetChecker(DatasetStatus.MODIFIED)
-                return await original_seq(
+                return await original_run_all(
                     work_items,
                     cache_data,
                     flush_ctl,
                     mock_checker,
                     prior_completed_count,
+                    total_expected,
                 )
 
-            orch._run_sequential = seq_with_mock_checker  # type: ignore[assignment]
+            orch._run_all = run_all_with_mock_checker  # type: ignore[assignment]
             return await original_run()
 
         result = await patched_run()
@@ -625,8 +633,20 @@ class TestOrchestratorSystemicError:
     async def test_systemic_error_stops_eval(self) -> None:
         """SystemicProviderError should stop eval with status='systemic_error'."""
         runner = MockRunner()
-        runner._run_single_results = [
-            SystemicProviderError("Auth key expired"),
+        # Unified path uses run_batch; systemic errors are returned as strings.
+        runner._run_batch_results = [
+            (
+                [
+                    EvalRunResult(
+                        run_index=0,
+                        success=False,
+                        error="Auth key expired",
+                        row_index=0,
+                        model_tag=None,
+                    ),
+                ],
+                "Auth key expired",
+            ),
         ]
 
         orch = _make_orchestrator(runner=runner)
@@ -640,8 +660,19 @@ class TestOrchestratorSystemicError:
     async def test_systemic_error_records_failed_run(self) -> None:
         """The failed run should be recorded in cache_data."""
         runner = MockRunner()
-        runner._run_single_results = [
-            SystemicProviderError("Budget exceeded"),
+        runner._run_batch_results = [
+            (
+                [
+                    EvalRunResult(
+                        run_index=0,
+                        success=False,
+                        error="Budget exceeded",
+                        row_index=0,
+                        model_tag=None,
+                    ),
+                ],
+                "Budget exceeded",
+            ),
         ]
 
         cache_backend = MockCacheBackend()
@@ -658,8 +689,19 @@ class TestOrchestratorSystemicError:
     async def test_systemic_error_lock_released(self) -> None:
         """Lock should be released even on systemic error."""
         runner = MockRunner()
-        runner._run_single_results = [
-            SystemicProviderError("Connection refused"),
+        runner._run_batch_results = [
+            (
+                [
+                    EvalRunResult(
+                        run_index=0,
+                        success=False,
+                        error="Connection refused",
+                        row_index=0,
+                        model_tag=None,
+                    ),
+                ],
+                "Connection refused",
+            ),
         ]
 
         cache_backend = MockCacheBackend()
@@ -677,7 +719,7 @@ class TestOrchestratorSystemicError:
 class TestOrchestratorBatchMode:
     @pytest.mark.asyncio
     async def test_batch_mode_uses_run_batch(self) -> None:
-        """batch_size > 1 should use run_batch instead of run_single."""
+        """All execution goes through run_batch regardless of batch_size."""
         runner = MockRunner()
         rows = _make_rows(3)
 
@@ -686,7 +728,6 @@ class TestOrchestratorBatchMode:
 
         assert result.status == "completed"
         assert len(runner.run_batch_calls) >= 1
-        assert len(runner.run_single_calls) == 0
 
     @pytest.mark.asyncio
     async def test_batch_mode_records_all_results(self) -> None:
@@ -951,10 +992,10 @@ class TestLockRelease:
         """Lock.release() should be called even when runner raises unexpected error."""
         runner = MockRunner()
 
-        async def failing_run_single(*args: Any, **kwargs: Any) -> EvalRunResult:
+        async def failing_run_batch(*args: Any, **kwargs: Any) -> tuple:
             raise RuntimeError("Unexpected crash")
 
-        runner.run_single = failing_run_single  # type: ignore[assignment]
+        runner.run_batch = failing_run_batch  # type: ignore[assignment]
 
         cache_backend = MockCacheBackend()
         orch = _make_orchestrator(runner=runner, cache_backend=cache_backend)
@@ -1145,8 +1186,19 @@ class TestProgressCallback:
             progress_calls.append((current, total, result))
 
         runner = MockRunner()
-        runner._run_single_results = [
-            SystemicProviderError("Error"),
+        runner._run_batch_results = [
+            (
+                [
+                    EvalRunResult(
+                        run_index=0,
+                        success=False,
+                        error="Error",
+                        row_index=0,
+                        model_tag=None,
+                    ),
+                ],
+                "Error",
+            ),
         ]
 
         orch = _make_orchestrator(
@@ -1191,10 +1243,10 @@ class TestFlushController:
         """force_flush() should be called even when an error occurs."""
         runner = MockRunner()
 
-        async def failing_run(*args: Any, **kwargs: Any) -> EvalRunResult:
+        async def failing_run_batch(*args: Any, **kwargs: Any) -> tuple:
             raise RuntimeError("Boom")
 
-        runner.run_single = failing_run  # type: ignore[assignment]
+        runner.run_batch = failing_run_batch  # type: ignore[assignment]
 
         cache_backend = MockCacheBackend()
         orch = _make_orchestrator(runner=runner, cache_backend=cache_backend)
@@ -1256,7 +1308,7 @@ class TestEdgeCases:
         assert result.status == "completed"
         assert result.total_completed == 0
         assert result.total_expected == 0
-        assert len(runner.run_single_calls) == 0
+        assert len(runner.run_batch_calls) == 0
 
     @pytest.mark.asyncio
     async def test_all_runs_completed_but_status_not_completed(self) -> None:
@@ -1293,7 +1345,7 @@ class TestEdgeCases:
         result = await orch.run()
 
         assert result.status == "completed"
-        assert len(runner.run_single_calls) == 0
+        assert len(runner.run_batch_calls) == 0
         assert result.summary is not None
         # write_cache should be called to persist the completed status
         assert len(cache_backend.write_cache_calls) >= 1
@@ -1326,7 +1378,8 @@ class TestEdgeCases:
 
         assert result.total_expected == 6  # 2 rows * 3 runs
         assert result.total_completed == 6
-        assert len(runner.run_single_calls) == 6
+        total_items = sum(len(batch) for batch in runner.run_batch_calls)
+        assert total_items == 6
 
     @pytest.mark.asyncio
     async def test_batch_progress_callback(self) -> None:

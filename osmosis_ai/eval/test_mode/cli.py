@@ -1,6 +1,6 @@
 """CLI command for test mode.
 
-Run agent loop tests against datasets using LLM providers via LiteLLM.
+Run agent workflow tests against datasets using LLM providers via LiteLLM.
 """
 
 from __future__ import annotations
@@ -19,24 +19,23 @@ if TYPE_CHECKING:
     from osmosis_ai.eval.common.dataset import DatasetRow
     from osmosis_ai.eval.common.llm_client import ExternalLLMClient
     from osmosis_ai.eval.test_mode.runner import (
-        LocalTestBatchResult,
-        LocalTestRunResult,
+        TestBatchResult,
+        TestRunResult,
     )
-    from osmosis_ai.rollout.core.base import RolloutAgentLoop
 
 
 @dataclass
 class _SetupResult:
     """Result of setup phase containing initialized components."""
 
-    agent_loop: RolloutAgentLoop
+    workflow_cls: type
+    workflow_config: Any
     llm_client: ExternalLLMClient
     rows: list[DatasetRow]
-    completion_params: dict[str, Any]
 
 
 class TestCommand:
-    """Handler for `osmosis test`."""
+    """Handler for `osmosis rollout test`."""
 
     def __init__(self) -> None:
         self.console: Console = Console()
@@ -46,12 +45,8 @@ class TestCommand:
         return asyncio.run(self._run_async(args))
 
     def _validate_args(self, args: Any) -> str | None:
-        if args.module and args.mcp:
-            return "--module and --mcp are mutually exclusive."
-        if not args.module and not args.mcp:
-            return "Either --module (-m) or --mcp is required."
-        if args.row is not None and not args.interactive:
-            return "--row can only be used with --interactive mode"
+        if not args.module:
+            return "--module (-m) is required."
         return None
 
     def _print_header(self, args: Any) -> None:
@@ -60,103 +55,71 @@ class TestCommand:
 
         from osmosis_ai.consts import PACKAGE_VERSION
 
-        mode_suffix = " (Interactive Mode)" if args.interactive else ""
-        self.console.print(
-            f"osmosis-rollout-test v{PACKAGE_VERSION}{mode_suffix}", style="bold"
-        )
+        self.console.print(f"osmosis-rollout-test v{PACKAGE_VERSION}", style="bold")
         self.console.print()
-
-    async def _run_interactive_mode(
-        self,
-        args: Any,
-        setup: _SetupResult,
-    ) -> int:
-        from osmosis_ai.eval.test_mode.interactive import InteractiveRunner
-
-        interactive_runner = InteractiveRunner(
-            agent_loop=setup.agent_loop,
-            llm_client=setup.llm_client,
-            debug=args.debug,
-        )
-
-        self.console.print()
-        try:
-            async with setup.llm_client:
-                await interactive_runner.run_interactive_session(
-                    rows=setup.rows,
-                    max_turns=args.max_turns,
-                    completion_params=setup.completion_params
-                    if setup.completion_params
-                    else None,
-                    initial_row=args.row,
-                    row_offset=args.offset,
-                )
-        except Exception as e:
-            self.console.print_error(f"Error during interactive session: {e}")
-            if args.debug:
-                import traceback
-
-                traceback.print_exc()
-            return 1
-
-        return 0
 
     async def _run_batch_mode(
         self,
         args: Any,
         setup: _SetupResult,
-    ) -> LocalTestBatchResult:
-        from osmosis_ai.eval.test_mode.runner import LocalTestRunner
+    ) -> TestBatchResult:
+        from osmosis_ai.eval.executor import WorkflowExecutor
+        from osmosis_ai.eval.proxy import EvalProxy
+        from osmosis_ai.eval.test_mode.runner import TestRunner
 
-        runner = LocalTestRunner(
-            agent_loop=setup.agent_loop,
-            llm_client=setup.llm_client,
-            debug=args.debug,
-        )
+        trace_dir = "./test_traces" if args.debug else None
+        proxy = EvalProxy(client=setup.llm_client, trace_dir=trace_dir)
+        await proxy.start()
 
-        from osmosis_ai.eval.common.cli import format_duration, format_tokens
+        try:
+            executor = WorkflowExecutor(
+                workflow_cls=setup.workflow_cls,
+                workflow_config=setup.workflow_config,
+                proxy=proxy,
+            )
+            runner = TestRunner(executor=executor)
 
-        def on_progress(current: int, total: int, result: LocalTestRunResult) -> None:
-            if args.quiet:
-                return
+            from osmosis_ai.eval.common.cli import (
+                format_duration,
+                format_tokens,
+                truncate_error,
+            )
 
-            status_style = "green" if result.success else "red"
-            status = "OK" if result.success else "FAILED"
-            duration = format_duration(result.duration_ms)
-            tokens = result.token_usage.get("total_tokens", 0)
+            def on_progress(current: int, total: int, result: TestRunResult) -> None:
+                if args.quiet:
+                    return
 
-            error_suffix = ""
-            if not result.success and result.error:
-                error_text = result.error.replace("\n", " ")
-                error_msg = (
-                    error_text[:47] + "..." if len(error_text) > 50 else error_text
+                status_style = "green" if result.success else "red"
+                status = "OK" if result.success else "FAILED"
+                duration = format_duration(result.duration_ms)
+                tokens = result.token_usage.get("total_tokens", 0)
+
+                error_suffix = ""
+                if not result.success and result.error:
+                    error_suffix = f" - {truncate_error(result.error)}"
+
+                status_styled = self.console.format_styled(status, status_style)
+                self.console.print(
+                    f"[{current}/{total}] Row {result.row_index}: {status_styled} "
+                    f"({duration}, {format_tokens(tokens)} tokens){error_suffix}"
                 )
-                error_suffix = f" - {error_msg}"
 
-            status_styled = self.console.format_styled(status, status_style)
-            self.console.print(
-                f"[{current}/{total}] Row {result.row_index}: {status_styled} "
-                f"({duration}, {format_tokens(tokens)} tokens){error_suffix}"
-            )
+            if not args.quiet:
+                self.console.print()
+                self.console.print("Running tests...")
 
-        if not args.quiet:
-            self.console.print()
-            self.console.print("Running tests...")
-
-        async with setup.llm_client:
-            batch_result = await runner.run_batch(
-                rows=setup.rows,
-                max_turns=args.max_turns,
-                completion_params=setup.completion_params
-                if setup.completion_params
-                else None,
-                on_progress=on_progress,
-                start_index=args.offset,
-            )
+            async with setup.llm_client:
+                batch_result = await runner.run_batch(
+                    rows=setup.rows,
+                    on_progress=on_progress,
+                    start_index=args.offset,
+                )
+        finally:
+            await proxy.stop()
 
         return batch_result
 
-    def _print_summary(self, batch_result: LocalTestBatchResult) -> None:
+    def _print_summary(self, batch_result: TestBatchResult) -> None:
         from osmosis_ai.eval.common.cli import format_duration, format_tokens
 
         self.console.print()
@@ -187,17 +150,12 @@ class TestCommand:
         )
 
         if batch_result.stopped_early:
-            reason = (
-                f" Reason: {batch_result.stop_reason}"
-                if batch_result.stop_reason
-                else ""
-            )
             self.console.print(
-                f"  Stopped early due to systemic provider error.{reason}",
+                "  Stopped early: repeated failures detected.",
                 style="red",
             )
 
-    def _write_output(self, args: Any, batch_result: LocalTestBatchResult) -> None:
+    def _write_output(self, args: Any, batch_result: TestBatchResult) -> None:
         if not args.output:
             return
 
@@ -216,8 +174,6 @@ class TestCommand:
                     "error": r.error,
                     "duration_ms": r.duration_ms,
                     "token_usage": r.token_usage,
-                    "reward": r.result.reward if r.result else None,
-                    "finish_reason": r.result.finish_reason if r.result else None,
                 }
                 for r in batch_result.results
             ],
@@ -234,11 +190,9 @@ class TestCommand:
 
     async def _run_async(self, args: Any) -> int:
         from osmosis_ai.eval.common.cli import (
-            build_completion_params,
             create_llm_client,
-            load_agent,
             load_dataset_rows,
-            load_mcp_agent,
+            load_workflow,
             verify_llm_client,
         )
 
@@ -269,23 +223,16 @@ class TestCommand:
             await llm_client.close()
             return 1
 
-        if args.mcp:
-            agent_loop, error = load_mcp_agent(
-                mcp_path=args.mcp,
-                quiet=args.quiet,
-                console=self.console,
-            )
-        else:
-            agent_loop, error = load_agent(
-                module=args.module,
-                quiet=args.quiet,
-                console=self.console,
-            )
+        workflow_cls, workflow_config, error = load_workflow(
+            module=args.module,
+            quiet=args.quiet,
+            console=self.console,
+        )
         if error:
             self.console.print_error(f"Error: {error}")
             await llm_client.close()
             return 1
-        assert agent_loop is not None
+        assert workflow_cls is not None
 
         rows, error = load_dataset_rows(
             dataset_path=args.dataset,
@@ -302,20 +249,12 @@ class TestCommand:
             return 1
         assert rows is not None
 
-        completion_params = build_completion_params(
-            temperature=args.temperature,
-            max_tokens=args.max_tokens,
-        )
-
         setup = _SetupResult(
-            agent_loop=agent_loop,
+            workflow_cls=workflow_cls,
+            workflow_config=workflow_config,
             llm_client=llm_client,
             rows=rows,
-            completion_params=completion_params,
         )
-
-        if args.interactive:
-            return await self._run_interactive_mode(args, setup)
 
         try:
             batch_result = await self._run_batch_mode(args, setup)

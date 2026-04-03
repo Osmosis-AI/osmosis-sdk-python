@@ -29,8 +29,6 @@ from osmosis_ai._litellm_compat import (
 from osmosis_ai._litellm_compat import (
     Timeout as _LitellmTimeout,
 )
-from osmosis_ai.rollout.client import CompletionsResult
-from osmosis_ai.rollout.core.schemas import OpenAIFunctionToolSchema
 
 
 def _make_litellm_error(cls: type, message: str, **attrs: Any) -> Exception:
@@ -77,87 +75,6 @@ class TestExternalLLMClient:
             # Already prefixed model should not be changed
             client2 = ExternalLLMClient(model="anthropic/claude-sonnet-4-20250514")
             assert client2.model == "anthropic/claude-sonnet-4-20250514"
-
-    def test_set_and_clear_tools(self) -> None:
-        """Test setting and clearing tools."""
-        with patch("osmosis_ai.eval.common.llm_client._get_litellm") as mock:
-            mock.return_value = MagicMock()
-            from osmosis_ai.eval.common.llm_client import (
-                ExternalLLMClient,
-            )
-
-            client = ExternalLLMClient()
-
-            # Initially no tools
-            assert client._tools is None
-
-            # Set tools
-            tools = [
-                OpenAIFunctionToolSchema.model_validate(
-                    {
-                        "type": "function",
-                        "function": {
-                            "name": "test_tool",
-                            "description": "A test tool",
-                            "parameters": {
-                                "type": "object",
-                                "properties": {},
-                                "required": [],
-                            },
-                        },
-                    }
-                )
-            ]
-            client.set_tools(tools)
-            assert client._tools is not None
-            assert len(client._tools) == 1
-            assert client._tools[0]["function"]["name"] == "test_tool"
-
-            # Clear tools
-            client.clear_tools()
-            assert client._tools is None
-
-    def test_metrics_tracking(self) -> None:
-        """Test metrics tracking methods."""
-        with patch("osmosis_ai.eval.common.llm_client._get_litellm") as mock:
-            mock.return_value = MagicMock()
-            from osmosis_ai.eval.common.llm_client import (
-                ExternalLLMClient,
-            )
-
-            client = ExternalLLMClient()
-
-            # Initial metrics should be zero
-            metrics = client.get_metrics()
-            assert metrics.llm_latency_ms == 0.0
-            assert metrics.num_llm_calls == 0
-            assert metrics.prompt_tokens == 0
-            assert metrics.response_tokens == 0
-
-            # Simulate recording usage
-            client._llm_latency_ms = 100.0
-            client._num_llm_calls = 1
-            client._prompt_tokens = 50
-            client._response_tokens = 30
-
-            # Add more
-            client._llm_latency_ms += 150.0
-            client._num_llm_calls += 1
-            client._prompt_tokens += 60
-            client._response_tokens += 40
-
-            # Check accumulated metrics
-            metrics = client.get_metrics()
-            assert metrics.llm_latency_ms == 250.0
-            assert metrics.num_llm_calls == 2
-            assert metrics.prompt_tokens == 110
-            assert metrics.response_tokens == 70
-
-            # Reset metrics
-            client.reset_metrics()
-            metrics = client.get_metrics()
-            assert metrics.llm_latency_ms == 0.0
-            assert metrics.num_llm_calls == 0
 
     @pytest.mark.asyncio
     async def test_context_manager(self) -> None:
@@ -234,81 +151,12 @@ class TestExternalLLMClient:
             client = ExternalLLMClient(model="gpt-4o")
             result = await client.chat_completions([{"role": "user", "content": "Hi"}])
 
-            assert isinstance(result, CompletionsResult)
-            assert result.message["role"] == "assistant"
-            assert result.message["content"] == "Hello!"
-            assert result.finish_reason == "stop"
-            assert result.usage["prompt_tokens"] == 10
-            assert result.usage["completion_tokens"] == 5
-
-            # Check that metrics were recorded
-            metrics = client.get_metrics()
-            assert metrics.num_llm_calls == 1
-            assert metrics.prompt_tokens == 10
-            assert metrics.response_tokens == 5
-
-    @pytest.mark.asyncio
-    async def test_tools_auto_injection(self) -> None:
-        """Test that tools are auto-injected into chat_completions."""
-        mock_litellm = MagicMock()
-        mock_response = MagicMock()
-        mock_response.choices = [
-            MagicMock(
-                message=MagicMock(
-                    model_dump=MagicMock(
-                        return_value={"role": "assistant", "content": "test"}
-                    )
-                ),
-                finish_reason="stop",
-            )
-        ]
-        mock_response.usage = MagicMock(
-            prompt_tokens=10, completion_tokens=5, total_tokens=15
-        )
-
-        received_kwargs: dict[str, Any] = {}
-
-        async def capture_kwargs(**kwargs):
-            nonlocal received_kwargs
-            received_kwargs = kwargs
-            return mock_response
-
-        mock_litellm.acompletion = capture_kwargs
-
-        with patch(
-            "osmosis_ai.eval.common.llm_client._get_litellm",
-            return_value=mock_litellm,
-        ):
-            from osmosis_ai.eval.common.llm_client import (
-                ExternalLLMClient,
-            )
-
-            client = ExternalLLMClient()
-
-            # Set tools
-            tools = [
-                OpenAIFunctionToolSchema.model_validate(
-                    {
-                        "type": "function",
-                        "function": {
-                            "name": "my_tool",
-                            "description": "A tool",
-                            "parameters": {
-                                "type": "object",
-                                "properties": {},
-                                "required": [],
-                            },
-                        },
-                    }
-                )
-            ]
-            client.set_tools(tools)
-
-            # Call chat_completions - tools should be auto-injected
-            await client.chat_completions([{"role": "user", "content": "hello"}])
-
-            assert "tools" in received_kwargs
-            assert received_kwargs["tools"][0]["function"]["name"] == "my_tool"
+            assert isinstance(result, dict)
+            assert result["message"]["role"] == "assistant"
+            assert result["message"]["content"] == "Hello!"
+            assert result["finish_reason"] == "stop"
+            assert result["usage"]["prompt_tokens"] == 10
+            assert result["usage"]["completion_tokens"] == 5
 
     @pytest.mark.asyncio
     async def test_wraps_missing_provider_error_with_compact_hint(self) -> None:

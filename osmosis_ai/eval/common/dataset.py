@@ -18,7 +18,6 @@ from osmosis_ai.eval.common.errors import (
     DatasetParseError,
     DatasetValidationError,
 )
-from osmosis_ai.rollout.core.schemas import RolloutRequest
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -233,48 +232,17 @@ class DatasetReader:
         return cast(DatasetRow, result)
 
 
-def dataset_row_to_request(
-    row: DatasetRow,
-    row_index: int,
-    max_turns: int = 10,
-    max_tokens_total: int = 4096,
-    completion_params: dict[str, Any] | None = None,
-    rollout_id_prefix: str = "local",
-    rollout_id: str | None = None,
-    metadata_overrides: dict[str, Any] | None = None,
-) -> RolloutRequest:
-    """Convert a dataset row to a local RolloutRequest."""
-    metadata: dict[str, Any] = {
-        "ground_truth": row["ground_truth"],
-        "row_index": row_index,
-    }
-
-    for key, value in row.items():
-        if key.lower() not in REQUIRED_COLUMNS_SET:
-            metadata[key] = value
-
-    if metadata_overrides:
-        metadata.update(metadata_overrides)
-
-    resolved_rollout_id = rollout_id or f"{rollout_id_prefix}-{row_index}"
-
-    return RolloutRequest(
-        rollout_id=resolved_rollout_id,
-        server_url="http://local-rollout.local",
-        messages=[
-            {"role": "system", "content": row["system_prompt"]},
-            {"role": "user", "content": row["user_prompt"]},
-        ],
-        max_turns=max_turns,
-        max_tokens_total=max_tokens_total,
-        completion_params=completion_params or {},
-        metadata=metadata,
-    )
+def dataset_row_to_prompt(row: DatasetRow) -> list[dict[str, str]]:
+    """Convert a dataset row to a plain prompt list for v2 workflows."""
+    return [
+        {"role": "system", "content": row["system_prompt"]},
+        {"role": "user", "content": row["user_prompt"]},
+    ]
 
 
 __all__ = [
     "REQUIRED_COLUMNS",
     "DatasetReader",
     "DatasetRow",
-    "dataset_row_to_request",
+    "dataset_row_to_prompt",
 ]
