@@ -10,7 +10,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from osmosis_ai.cli import main as cli
-from osmosis_ai.rollout.eval.rubric.types import RubricResult
+from osmosis_ai.eval.rubric.types import RubricResult
 
 # =============================================================================
 # eval rubric — happy-path
@@ -33,7 +33,7 @@ def test_eval_rubric_basic(tmp_path, monkeypatch, capsys):
     mock_eval = AsyncMock(
         return_value=RubricResult(score=0.85, explanation="Good response", raw={})
     )
-    monkeypatch.setattr("osmosis_ai.rollout.eval.rubric.cli.evaluate_rubric", mock_eval)
+    monkeypatch.setattr("osmosis_ai.eval.rubric.cli.evaluate_rubric", mock_eval)
 
     exit_code = cli.main(
         [
@@ -69,7 +69,7 @@ def test_eval_rubric_with_output(tmp_path, monkeypatch, capsys):
     mock_eval = AsyncMock(
         return_value=RubricResult(score=0.85, explanation="Good response", raw={})
     )
-    monkeypatch.setattr("osmosis_ai.rollout.eval.rubric.cli.evaluate_rubric", mock_eval)
+    monkeypatch.setattr("osmosis_ai.eval.rubric.cli.evaluate_rubric", mock_eval)
 
     output_path = tmp_path / "results.json"
     exit_code = cli.main(
@@ -120,9 +120,7 @@ def test_eval_rubric_multiple_runs(tmp_path, monkeypatch, capsys):
             score=score, explanation=f"run-{call_count}", raw={"call": call_count}
         )
 
-    monkeypatch.setattr(
-        "osmosis_ai.rollout.eval.rubric.cli.evaluate_rubric", mock_eval_fn
-    )
+    monkeypatch.setattr("osmosis_ai.eval.rubric.cli.evaluate_rubric", mock_eval_fn)
 
     exit_code = cli.main(
         [

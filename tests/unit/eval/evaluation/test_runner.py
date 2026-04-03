@@ -7,6 +7,9 @@ from typing import Any
 
 import pytest
 
+from osmosis_ai.eval.common.dataset import DatasetRow
+from osmosis_ai.eval.evaluation.eval_fn import EvalFnWrapper
+from osmosis_ai.eval.evaluation.runner import EvalRunner
 from osmosis_ai.rollout import (
     OpenAIFunctionParametersSchema,
     OpenAIFunctionSchema,
@@ -18,9 +21,6 @@ from osmosis_ai.rollout import (
 )
 from osmosis_ai.rollout.client import CompletionsResult
 from osmosis_ai.rollout.core.schemas import RolloutMetrics
-from osmosis_ai.rollout.eval.common.dataset import DatasetRow
-from osmosis_ai.rollout.eval.evaluation.eval_fn import EvalFnWrapper
-from osmosis_ai.rollout.eval.evaluation.runner import EvalRunner
 
 
 class MockLLMClient:
@@ -276,7 +276,7 @@ class TestEvalRunner:
     @pytest.mark.asyncio
     async def test_run_eval_concurrent_stops_early_on_systemic_error(self) -> None:
         """Concurrent eval should cancel pending runs on systemic provider errors."""
-        from osmosis_ai.rollout.eval.common.errors import SystemicProviderError
+        from osmosis_ai.eval.common.errors import SystemicProviderError
 
         class SystemicAgent(MockAgentLoop):
             async def run(self, ctx: RolloutContext) -> RolloutResult:
@@ -317,7 +317,7 @@ class TestEvalRunner:
         self,
     ) -> None:
         """Systemic errors should not imply early-stop when no tasks were canceled."""
-        from osmosis_ai.rollout.eval.common.errors import SystemicProviderError
+        from osmosis_ai.eval.common.errors import SystemicProviderError
 
         class SystemicAgent(MockAgentLoop):
             async def run(self, ctx: RolloutContext) -> RolloutResult:
@@ -429,7 +429,7 @@ class TestEvalRunner:
     @pytest.mark.asyncio
     async def test_run_eval_stops_early_on_systemic_error(self) -> None:
         """SystemicProviderError should stop eval early."""
-        from osmosis_ai.rollout.eval.common.errors import SystemicProviderError
+        from osmosis_ai.eval.common.errors import SystemicProviderError
 
         call_count = {"n": 0}
 
@@ -469,7 +469,7 @@ class TestEvalRunner:
     @pytest.mark.asyncio
     async def test_run_eval_systemic_error_preserves_duration_and_tokens(self) -> None:
         """Systemic failures should keep per-run duration/token stats."""
-        from osmosis_ai.rollout.eval.common.errors import SystemicProviderError
+        from osmosis_ai.eval.common.errors import SystemicProviderError
 
         class SystemicAfterLLMAgent(MockAgentLoop):
             async def run(self, ctx: RolloutContext) -> RolloutResult:
@@ -509,7 +509,7 @@ class TestEvalRunner:
         self,
     ) -> None:
         """Concurrent systemic failures should keep per-run duration/token stats."""
-        from osmosis_ai.rollout.eval.common.errors import SystemicProviderError
+        from osmosis_ai.eval.common.errors import SystemicProviderError
 
         class SystemicAfterLLMAgent(MockAgentLoop):
             async def run(self, ctx: RolloutContext) -> RolloutResult:
@@ -844,7 +844,7 @@ class TestEvalRunnerBaseline:
 # _compute_summaries edge cases, _filter_runs_by_tag.
 # ---------------------------------------------------------------------------
 
-from osmosis_ai.rollout.eval.evaluation.runner import (
+from osmosis_ai.eval.evaluation.runner import (
     EvalRowResult,
     EvalRunResult,
     _extract_systemic_error_metrics,
@@ -855,7 +855,7 @@ class TestExtractSystemicErrorMetrics:
     """Tests for the _extract_systemic_error_metrics utility."""
 
     def test_uses_attributes_when_present(self) -> None:
-        from osmosis_ai.rollout.eval.common.errors import SystemicProviderError
+        from osmosis_ai.eval.common.errors import SystemicProviderError
 
         e = SystemicProviderError("test")
         e.duration_ms = 1234.5
@@ -867,7 +867,7 @@ class TestExtractSystemicErrorMetrics:
     def test_fallback_duration_when_missing(self) -> None:
         import time
 
-        from osmosis_ai.rollout.eval.common.errors import SystemicProviderError
+        from osmosis_ai.eval.common.errors import SystemicProviderError
 
         e = SystemicProviderError("test")
         # No duration_ms attribute
@@ -878,7 +878,7 @@ class TestExtractSystemicErrorMetrics:
         assert tok == 0
 
     def test_fallback_tokens_when_none(self) -> None:
-        from osmosis_ai.rollout.eval.common.errors import SystemicProviderError
+        from osmosis_ai.eval.common.errors import SystemicProviderError
 
         e = SystemicProviderError("test")
         e.duration_ms = 100.0

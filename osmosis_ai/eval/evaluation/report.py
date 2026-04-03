@@ -5,13 +5,13 @@ from __future__ import annotations
 from math import comb
 from typing import TYPE_CHECKING, Any
 
-from osmosis_ai.rollout.eval.common.cli import format_duration
+from osmosis_ai.eval.common.cli import format_duration
 
 if TYPE_CHECKING:
     from rich.console import Console as RichConsole
 
     from osmosis_ai.cli.console import Console
-    from osmosis_ai.rollout.eval.evaluation.runner import EvalResult
+    from osmosis_ai.eval.evaluation.runner import EvalResult
 
 
 def pass_at_k(n: int, c: int, k: int) -> float:

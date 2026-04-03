@@ -8,11 +8,11 @@ from typing import Any
 
 import pytest
 
-from osmosis_ai.rollout.eval.common.dataset import (
+from osmosis_ai.eval.common.dataset import (
     DatasetReader,
     dataset_row_to_request,
 )
-from osmosis_ai.rollout.eval.common.errors import (
+from osmosis_ai.eval.common.errors import (
     DatasetParseError,
     DatasetValidationError,
 )

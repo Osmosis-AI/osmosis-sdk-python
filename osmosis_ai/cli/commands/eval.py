@@ -81,7 +81,7 @@ def eval_run(
     ),
 ) -> None:
     """Evaluate agent against dataset with eval functions."""
-    from osmosis_ai.rollout.eval.evaluation.cli import EvalCommand
+    from osmosis_ai.eval.evaluation.cli import EvalCommand
 
     cmd = EvalCommand()
 
@@ -159,7 +159,7 @@ def eval_rubric(
     score_max: float = typer.Option(1.0, "--score-max", help="Maximum score."),
 ) -> None:
     """Evaluate conversations against a rubric using LLM-as-judge."""
-    from osmosis_ai.rollout.eval.rubric.cli import RubricCommand
+    from osmosis_ai.eval.rubric.cli import RubricCommand
 
     rc = RubricCommand().run(
         data=data,
@@ -179,7 +179,7 @@ def eval_rubric(
 @cache_app.command("dir")
 def eval_cache_dir() -> None:
     """Print cache root directory path."""
-    from osmosis_ai.rollout.eval.evaluation.cli import EvalCommand
+    from osmosis_ai.eval.evaluation.cli import EvalCommand
 
     rc = EvalCommand()._run_cache_dir()
     if rc:
@@ -199,7 +199,7 @@ def eval_cache_ls(
     ),
 ) -> None:
     """List cached evaluations."""
-    from osmosis_ai.rollout.eval.evaluation.cli import EvalCommand
+    from osmosis_ai.eval.evaluation.cli import EvalCommand
 
     rc = EvalCommand()._run_cache_ls(
         cache_model=cache_model,
@@ -228,7 +228,7 @@ def eval_cache_rm(
     yes: bool = typer.Option(False, "-y", "--yes", help="Skip confirmation prompt."),
 ) -> None:
     """Remove cached evaluations."""
-    from osmosis_ai.rollout.eval.evaluation.cli import EvalCommand
+    from osmosis_ai.eval.evaluation.cli import EvalCommand
 
     rc = EvalCommand()._run_cache_rm(
         task_id=task_id,

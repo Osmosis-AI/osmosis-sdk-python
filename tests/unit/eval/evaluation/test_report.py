@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from io import StringIO
 
-import osmosis_ai.rollout.eval.evaluation.report as report_module
+import osmosis_ai.eval.evaluation.report as report_module
 from osmosis_ai.cli.console import Console
-from osmosis_ai.rollout.eval.evaluation.runner import EvalEvalSummary, EvalResult
+from osmosis_ai.eval.evaluation.runner import EvalEvalSummary, EvalResult
 
 
 def _make_eval_result() -> EvalResult:

@@ -14,6 +14,10 @@ from dataclasses import dataclass
 from typing import Any
 
 from osmosis_ai.cli.console import Console
+from osmosis_ai.eval.common.dataset import DatasetRow, dataset_row_to_request
+from osmosis_ai.eval.common.errors import ToolValidationError
+from osmosis_ai.eval.common.llm_client import ExternalLLMClient
+from osmosis_ai.eval.common.runner import validate_tools
 from osmosis_ai.rollout.client import CompletionsResult
 from osmosis_ai.rollout.core.base import (
     RolloutAgentLoop,
@@ -21,10 +25,6 @@ from osmosis_ai.rollout.core.base import (
     RolloutResult,
 )
 from osmosis_ai.rollout.core.schemas import OpenAIFunctionToolSchema, RolloutMetrics
-from osmosis_ai.rollout.eval.common.dataset import DatasetRow, dataset_row_to_request
-from osmosis_ai.rollout.eval.common.errors import ToolValidationError
-from osmosis_ai.rollout.eval.common.llm_client import ExternalLLMClient
-from osmosis_ai.rollout.eval.common.runner import validate_tools
 
 
 @dataclass

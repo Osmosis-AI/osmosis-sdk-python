@@ -1,4 +1,4 @@
-"""Tests for osmosis_ai.rollout.eval.rubric.engine -- provider parsing, prompt building, JSON parsing, and evaluation."""
+"""Tests for osmosis_ai.eval.rubric.engine -- provider parsing, prompt building, JSON parsing, and evaluation."""
 
 import json
 import sys
@@ -6,8 +6,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from osmosis_ai.rollout.eval.rubric.dataset import extract_assistant_content
-from osmosis_ai.rollout.eval.rubric.engine import (
+from osmosis_ai.eval.rubric.dataset import extract_assistant_content
+from osmosis_ai.eval.rubric.engine import (
     DEFAULT_REQUEST_TIMEOUT_SECONDS,
     _build_user_prompt,
     _default_timeout_for_model,
@@ -16,7 +16,7 @@ from osmosis_ai.rollout.eval.rubric.engine import (
     _to_litellm_model,
     evaluate_rubric,
 )
-from osmosis_ai.rollout.eval.rubric.types import (
+from osmosis_ai.eval.rubric.types import (
     MissingAPIKeyError,
     RubricResult,
 )
@@ -247,7 +247,7 @@ def _create_mock_litellm_response(score: float, explanation: str) -> MagicMock:
     return mock_response
 
 
-_COMPLETION_PATCH = "osmosis_ai.rollout.eval.rubric.engine._litellm_completion"
+_COMPLETION_PATCH = "osmosis_ai.eval.rubric.engine._litellm_completion"
 
 
 class TestEvaluateRubric:

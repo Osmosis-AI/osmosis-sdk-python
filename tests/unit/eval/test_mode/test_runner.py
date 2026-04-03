@@ -7,6 +7,12 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from osmosis_ai.eval.common.dataset import DatasetRow
+from osmosis_ai.eval.test_mode.runner import (
+    LocalTestBatchResult,
+    LocalTestRunner,
+    LocalTestRunResult,
+)
 from osmosis_ai.rollout import (
     OpenAIFunctionParametersSchema,
     OpenAIFunctionSchema,
@@ -18,12 +24,6 @@ from osmosis_ai.rollout import (
 )
 from osmosis_ai.rollout.client import CompletionsResult
 from osmosis_ai.rollout.core.schemas import RolloutMetrics
-from osmosis_ai.rollout.eval.common.dataset import DatasetRow
-from osmosis_ai.rollout.eval.test_mode.runner import (
-    LocalTestBatchResult,
-    LocalTestRunner,
-    LocalTestRunResult,
-)
 
 
 class MockTestLLMClient:
@@ -231,7 +231,7 @@ class TestLocalTestRunner:
         )
         runner = LocalTestRunner(agent_loop=agent, llm_client=client)
 
-        with patch("osmosis_ai.rollout.eval.common.runner.logger") as mock_logger:
+        with patch("osmosis_ai.eval.common.runner.logger") as mock_logger:
             mock_logger.isEnabledFor.return_value = False
             row = create_sample_row(0)
             result = await runner.run_single(row, row_index=0)
@@ -400,7 +400,7 @@ class TestSystemicProviderError:
     @pytest.mark.asyncio
     async def test_run_single_propagates_systemic_error(self) -> None:
         """SystemicProviderError should propagate through run_single."""
-        from osmosis_ai.rollout.eval.common.errors import SystemicProviderError
+        from osmosis_ai.eval.common.errors import SystemicProviderError
 
         class SystemicAgent(MockAgentLoop):
             async def run(self, ctx: RolloutContext) -> RolloutResult:
@@ -417,7 +417,7 @@ class TestSystemicProviderError:
     @pytest.mark.asyncio
     async def test_run_batch_stops_early_on_systemic_error(self) -> None:
         """Batch should stop early when SystemicProviderError occurs."""
-        from osmosis_ai.rollout.eval.common.errors import SystemicProviderError
+        from osmosis_ai.eval.common.errors import SystemicProviderError
 
         call_count = {"n": 0}
 
@@ -444,7 +444,7 @@ class TestSystemicProviderError:
     @pytest.mark.asyncio
     async def test_run_batch_systemic_error_duration_is_per_row(self) -> None:
         """Systemic error duration should measure only the failing row."""
-        from osmosis_ai.rollout.eval.common.errors import SystemicProviderError
+        from osmosis_ai.eval.common.errors import SystemicProviderError
 
         class SequencedRunner(LocalTestRunner):
             def __init__(self, *args: Any, **kwargs: Any) -> None:
@@ -474,7 +474,7 @@ class TestSystemicProviderError:
 
         rows = [create_sample_row(i) for i in range(3)]
         with patch(
-            "osmosis_ai.rollout.eval.common.runner.time.monotonic",
+            "osmosis_ai.eval.common.runner.time.monotonic",
             side_effect=[100.0, 101.0, 105.0, 106.0, 110.0, 111.0],
         ):
             result = await runner.run_batch(rows)
@@ -507,7 +507,7 @@ class TestSystemicProviderError:
     @pytest.mark.asyncio
     async def test_run_batch_progress_called_on_systemic_error(self) -> None:
         """Progress callback should be called even when stopping early."""
-        from osmosis_ai.rollout.eval.common.errors import SystemicProviderError
+        from osmosis_ai.eval.common.errors import SystemicProviderError
 
         class SystemicAgent(MockAgentLoop):
             async def run(self, ctx: RolloutContext) -> RolloutResult:

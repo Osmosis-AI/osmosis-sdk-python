@@ -7,13 +7,13 @@ from typing import Any
 
 import pytest
 
-from osmosis_ai.rollout.eval.common.errors import SystemicProviderError
-from osmosis_ai.rollout.eval.evaluation.cache import CacheConfig, DatasetStatus
-from osmosis_ai.rollout.eval.evaluation.orchestrator import (
+from osmosis_ai.eval.common.errors import SystemicProviderError
+from osmosis_ai.eval.evaluation.cache import CacheConfig, DatasetStatus
+from osmosis_ai.eval.evaluation.orchestrator import (
     EvalOrchestrator,
     OrchestratorResult,
 )
-from osmosis_ai.rollout.eval.evaluation.runner import EvalRunResult
+from osmosis_ai.eval.evaluation.runner import EvalRunResult
 
 # ---------------------------------------------------------------------------
 # Mock helpers

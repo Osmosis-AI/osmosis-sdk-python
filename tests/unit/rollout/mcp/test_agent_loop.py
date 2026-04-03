@@ -616,7 +616,7 @@ class TestLoadMCPServer:
 
 class TestCLIMutualExclusion:
     def test_eval_both_module_and_tools_error(self):
-        from osmosis_ai.rollout.eval.evaluation.cli import EvalCommand
+        from osmosis_ai.eval.evaluation.cli import EvalCommand
 
         cmd = EvalCommand()
         args = argparse.Namespace(
@@ -636,7 +636,7 @@ class TestCLIMutualExclusion:
         assert "mutually exclusive" in error
 
     def test_eval_neither_module_nor_tools_error(self):
-        from osmosis_ai.rollout.eval.evaluation.cli import EvalCommand
+        from osmosis_ai.eval.evaluation.cli import EvalCommand
 
         cmd = EvalCommand()
         args = argparse.Namespace(
@@ -656,7 +656,7 @@ class TestCLIMutualExclusion:
         assert "required" in error
 
     def test_eval_module_only_ok(self):
-        from osmosis_ai.rollout.eval.evaluation.cli import EvalCommand
+        from osmosis_ai.eval.evaluation.cli import EvalCommand
 
         cmd = EvalCommand()
         args = argparse.Namespace(
@@ -674,7 +674,7 @@ class TestCLIMutualExclusion:
         assert cmd._validate_args(args) is None
 
     def test_eval_tools_only_ok(self):
-        from osmosis_ai.rollout.eval.evaluation.cli import EvalCommand
+        from osmosis_ai.eval.evaluation.cli import EvalCommand
 
         cmd = EvalCommand()
         args = argparse.Namespace(
@@ -692,7 +692,7 @@ class TestCLIMutualExclusion:
         assert cmd._validate_args(args) is None
 
     def test_test_both_module_and_tools_error(self):
-        from osmosis_ai.rollout.eval.test_mode.cli import TestCommand
+        from osmosis_ai.eval.test_mode.cli import TestCommand
 
         cmd = TestCommand()
         args = argparse.Namespace(
@@ -706,7 +706,7 @@ class TestCLIMutualExclusion:
         assert "mutually exclusive" in error
 
     def test_test_neither_module_nor_tools_error(self):
-        from osmosis_ai.rollout.eval.test_mode.cli import TestCommand
+        from osmosis_ai.eval.test_mode.cli import TestCommand
 
         cmd = TestCommand()
         args = argparse.Namespace(
@@ -720,7 +720,7 @@ class TestCLIMutualExclusion:
         assert "required" in error
 
     def test_test_tools_only_ok(self):
-        from osmosis_ai.rollout.eval.test_mode.cli import TestCommand
+        from osmosis_ai.eval.test_mode.cli import TestCommand
 
         cmd = TestCommand()
         args = argparse.Namespace(
@@ -738,7 +738,7 @@ class TestEvalCLIBatchSize:
         monkeypatch: pytest.MonkeyPatch,
         batch_size: int,
     ) -> dict[str, Any]:
-        from osmosis_ai.rollout.eval.evaluation.cli import EvalCommand
+        from osmosis_ai.eval.evaluation.cli import EvalCommand
 
         captured_kwargs: dict[str, Any] = {}
 
@@ -782,19 +782,19 @@ class TestEvalCLIBatchSize:
             return None
 
         monkeypatch.setattr(
-            "osmosis_ai.rollout.eval.common.cli.create_llm_client",
+            "osmosis_ai.eval.common.cli.create_llm_client",
             lambda **kwargs: (DummyLLMClient(), None),
         )
         monkeypatch.setattr(
-            "osmosis_ai.rollout.eval.common.cli.verify_llm_client",
+            "osmosis_ai.eval.common.cli.verify_llm_client",
             _verify_llm_client,
         )
         monkeypatch.setattr(
-            "osmosis_ai.rollout.eval.common.cli.load_agent",
+            "osmosis_ai.eval.common.cli.load_agent",
             lambda **kwargs: (MagicMock(), None),
         )
         monkeypatch.setattr(
-            "osmosis_ai.rollout.eval.common.cli.load_dataset_rows",
+            "osmosis_ai.eval.common.cli.load_dataset_rows",
             lambda **kwargs: (
                 [{"user_prompt": "hi", "system_prompt": None, "ground_truth": "ok"}],
                 None,
@@ -806,23 +806,23 @@ class TestEvalCLIBatchSize:
             lambda self, args: ([MagicMock(name="simple_eval")], None),
         )
         monkeypatch.setattr(
-            "osmosis_ai.rollout.eval.evaluation.runner.EvalRunner",
+            "osmosis_ai.eval.evaluation.runner.EvalRunner",
             FakeEvalRunner,
         )
         monkeypatch.setattr(
-            "osmosis_ai.rollout.eval.evaluation.cache.compute_dataset_fingerprint",
+            "osmosis_ai.eval.evaluation.cache.compute_dataset_fingerprint",
             lambda path: "fake_fingerprint",
         )
         monkeypatch.setattr(
-            "osmosis_ai.rollout.eval.evaluation.cache.compute_module_fingerprint",
+            "osmosis_ai.eval.evaluation.cache.compute_module_fingerprint",
             lambda module_path: "fake_module_fp",
         )
         monkeypatch.setattr(
-            "osmosis_ai.rollout.eval.evaluation.cache.compute_eval_fns_fingerprint",
+            "osmosis_ai.eval.evaluation.cache.compute_eval_fns_fingerprint",
             lambda eval_fn_paths: "fake_eval_fns_fp",
         )
         monkeypatch.setattr(
-            "osmosis_ai.rollout.eval.evaluation.orchestrator.EvalOrchestrator",
+            "osmosis_ai.eval.evaluation.orchestrator.EvalOrchestrator",
             FakeOrchestrator,
         )
 

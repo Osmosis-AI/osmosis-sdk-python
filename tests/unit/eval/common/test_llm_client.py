@@ -64,9 +64,9 @@ class TestExternalLLMClient:
 
     def test_model_auto_prefix(self) -> None:
         """Test that simple model names get auto-prefixed with openai/."""
-        with patch("osmosis_ai.rollout.eval.common.llm_client._get_litellm") as mock:
+        with patch("osmosis_ai.eval.common.llm_client._get_litellm") as mock:
             mock.return_value = MagicMock()
-            from osmosis_ai.rollout.eval.common.llm_client import (
+            from osmosis_ai.eval.common.llm_client import (
                 ExternalLLMClient,
             )
 
@@ -80,9 +80,9 @@ class TestExternalLLMClient:
 
     def test_set_and_clear_tools(self) -> None:
         """Test setting and clearing tools."""
-        with patch("osmosis_ai.rollout.eval.common.llm_client._get_litellm") as mock:
+        with patch("osmosis_ai.eval.common.llm_client._get_litellm") as mock:
             mock.return_value = MagicMock()
-            from osmosis_ai.rollout.eval.common.llm_client import (
+            from osmosis_ai.eval.common.llm_client import (
                 ExternalLLMClient,
             )
 
@@ -119,9 +119,9 @@ class TestExternalLLMClient:
 
     def test_metrics_tracking(self) -> None:
         """Test metrics tracking methods."""
-        with patch("osmosis_ai.rollout.eval.common.llm_client._get_litellm") as mock:
+        with patch("osmosis_ai.eval.common.llm_client._get_litellm") as mock:
             mock.return_value = MagicMock()
-            from osmosis_ai.rollout.eval.common.llm_client import (
+            from osmosis_ai.eval.common.llm_client import (
                 ExternalLLMClient,
             )
 
@@ -162,9 +162,9 @@ class TestExternalLLMClient:
     @pytest.mark.asyncio
     async def test_context_manager(self) -> None:
         """Test async context manager protocol."""
-        with patch("osmosis_ai.rollout.eval.common.llm_client._get_litellm") as mock:
+        with patch("osmosis_ai.eval.common.llm_client._get_litellm") as mock:
             mock.return_value = MagicMock()
-            from osmosis_ai.rollout.eval.common.llm_client import (
+            from osmosis_ai.eval.common.llm_client import (
                 ExternalLLMClient,
             )
 
@@ -178,10 +178,10 @@ class TestExternalLLMClient:
         mock_litellm.close_litellm_async_clients = AsyncMock()
 
         with patch(
-            "osmosis_ai.rollout.eval.common.llm_client._get_litellm",
+            "osmosis_ai.eval.common.llm_client._get_litellm",
             return_value=mock_litellm,
         ):
-            from osmosis_ai.rollout.eval.common.llm_client import (
+            from osmosis_ai.eval.common.llm_client import (
                 ExternalLLMClient,
             )
 
@@ -196,7 +196,7 @@ class TestExternalLLMClient:
         fake_litellm = types.SimpleNamespace(_async_client_cleanup_registered=False)
 
         with patch.dict("sys.modules", {"litellm": fake_litellm}):
-            from osmosis_ai.rollout.eval.common.llm_client import _get_litellm
+            from osmosis_ai.eval.common.llm_client import _get_litellm
 
             loaded = _get_litellm()
 
@@ -224,10 +224,10 @@ class TestExternalLLMClient:
         mock_litellm.acompletion = AsyncMock(return_value=mock_response)
 
         with patch(
-            "osmosis_ai.rollout.eval.common.llm_client._get_litellm",
+            "osmosis_ai.eval.common.llm_client._get_litellm",
             return_value=mock_litellm,
         ):
-            from osmosis_ai.rollout.eval.common.llm_client import (
+            from osmosis_ai.eval.common.llm_client import (
                 ExternalLLMClient,
             )
 
@@ -276,10 +276,10 @@ class TestExternalLLMClient:
         mock_litellm.acompletion = capture_kwargs
 
         with patch(
-            "osmosis_ai.rollout.eval.common.llm_client._get_litellm",
+            "osmosis_ai.eval.common.llm_client._get_litellm",
             return_value=mock_litellm,
         ):
-            from osmosis_ai.rollout.eval.common.llm_client import (
+            from osmosis_ai.eval.common.llm_client import (
                 ExternalLLMClient,
             )
 
@@ -323,11 +323,11 @@ class TestExternalLLMClient:
         )
 
         with patch(
-            "osmosis_ai.rollout.eval.common.llm_client._get_litellm",
+            "osmosis_ai.eval.common.llm_client._get_litellm",
             return_value=mock_litellm,
         ):
-            from osmosis_ai.rollout.eval.common.errors import SystemicProviderError
-            from osmosis_ai.rollout.eval.common.llm_client import (
+            from osmosis_ai.eval.common.errors import SystemicProviderError
+            from osmosis_ai.eval.common.llm_client import (
                 ExternalLLMClient,
             )
 
@@ -368,10 +368,10 @@ class TestPreflightCheck:
         mock_litellm.acompletion = AsyncMock(return_value=mock_response)
 
         with patch(
-            "osmosis_ai.rollout.eval.common.llm_client._get_litellm",
+            "osmosis_ai.eval.common.llm_client._get_litellm",
             return_value=mock_litellm,
         ):
-            from osmosis_ai.rollout.eval.common.llm_client import ExternalLLMClient
+            from osmosis_ai.eval.common.llm_client import ExternalLLMClient
 
             client = ExternalLLMClient(model="gpt-4o")
             # Should not raise
@@ -385,11 +385,11 @@ class TestPreflightCheck:
         mock_litellm.acompletion = AsyncMock(side_effect=auth_error)
 
         with patch(
-            "osmosis_ai.rollout.eval.common.llm_client._get_litellm",
+            "osmosis_ai.eval.common.llm_client._get_litellm",
             return_value=mock_litellm,
         ):
-            from osmosis_ai.rollout.eval.common.errors import SystemicProviderError
-            from osmosis_ai.rollout.eval.common.llm_client import ExternalLLMClient
+            from osmosis_ai.eval.common.errors import SystemicProviderError
+            from osmosis_ai.eval.common.llm_client import ExternalLLMClient
 
             client = ExternalLLMClient(model="gpt-4o")
             with pytest.raises(SystemicProviderError):
@@ -403,11 +403,11 @@ class TestPreflightCheck:
         mock_litellm.acompletion = AsyncMock(side_effect=conn_error)
 
         with patch(
-            "osmosis_ai.rollout.eval.common.llm_client._get_litellm",
+            "osmosis_ai.eval.common.llm_client._get_litellm",
             return_value=mock_litellm,
         ):
-            from osmosis_ai.rollout.eval.common.errors import SystemicProviderError
-            from osmosis_ai.rollout.eval.common.llm_client import ExternalLLMClient
+            from osmosis_ai.eval.common.errors import SystemicProviderError
+            from osmosis_ai.eval.common.llm_client import ExternalLLMClient
 
             client = ExternalLLMClient(model="gpt-4o")
             with pytest.raises(SystemicProviderError):
@@ -421,10 +421,10 @@ class TestPreflightCheck:
         mock_litellm.acompletion = AsyncMock(side_effect=rate_error)
 
         with patch(
-            "osmosis_ai.rollout.eval.common.llm_client._get_litellm",
+            "osmosis_ai.eval.common.llm_client._get_litellm",
             return_value=mock_litellm,
         ):
-            from osmosis_ai.rollout.eval.common.llm_client import ExternalLLMClient
+            from osmosis_ai.eval.common.llm_client import ExternalLLMClient
 
             client = ExternalLLMClient(model="gpt-4o")
             # Should not raise - rate limit means endpoint is reachable
@@ -441,11 +441,11 @@ class TestPreflightCheck:
         mock_litellm.acompletion = AsyncMock(side_effect=api_error)
 
         with patch(
-            "osmosis_ai.rollout.eval.common.llm_client._get_litellm",
+            "osmosis_ai.eval.common.llm_client._get_litellm",
             return_value=mock_litellm,
         ):
-            from osmosis_ai.rollout.eval.common.errors import SystemicProviderError
-            from osmosis_ai.rollout.eval.common.llm_client import ExternalLLMClient
+            from osmosis_ai.eval.common.errors import SystemicProviderError
+            from osmosis_ai.eval.common.llm_client import ExternalLLMClient
 
             client = ExternalLLMClient(model="gpt-4o")
             with pytest.raises(SystemicProviderError):
@@ -468,11 +468,11 @@ class TestPreflightCheck:
         mock_litellm.acompletion = AsyncMock(side_effect=api_error)
 
         with patch(
-            "osmosis_ai.rollout.eval.common.llm_client._get_litellm",
+            "osmosis_ai.eval.common.llm_client._get_litellm",
             return_value=mock_litellm,
         ):
-            from osmosis_ai.rollout.eval.common.errors import SystemicProviderError
-            from osmosis_ai.rollout.eval.common.llm_client import ExternalLLMClient
+            from osmosis_ai.eval.common.errors import SystemicProviderError
+            from osmosis_ai.eval.common.llm_client import ExternalLLMClient
 
             client = ExternalLLMClient(
                 model="gpt-4o", api_base="http://localhost:9999/v1"
@@ -494,11 +494,11 @@ class TestSystemicErrorClassification:
         )
 
         with patch(
-            "osmosis_ai.rollout.eval.common.llm_client._get_litellm",
+            "osmosis_ai.eval.common.llm_client._get_litellm",
             return_value=mock_litellm,
         ):
-            from osmosis_ai.rollout.eval.common.errors import SystemicProviderError
-            from osmosis_ai.rollout.eval.common.llm_client import ExternalLLMClient
+            from osmosis_ai.eval.common.errors import SystemicProviderError
+            from osmosis_ai.eval.common.llm_client import ExternalLLMClient
 
             client = ExternalLLMClient(model="gpt-4o")
             with pytest.raises(SystemicProviderError):
@@ -513,11 +513,11 @@ class TestSystemicErrorClassification:
         )
 
         with patch(
-            "osmosis_ai.rollout.eval.common.llm_client._get_litellm",
+            "osmosis_ai.eval.common.llm_client._get_litellm",
             return_value=mock_litellm,
         ):
-            from osmosis_ai.rollout.eval.common.errors import SystemicProviderError
-            from osmosis_ai.rollout.eval.common.llm_client import ExternalLLMClient
+            from osmosis_ai.eval.common.errors import SystemicProviderError
+            from osmosis_ai.eval.common.llm_client import ExternalLLMClient
 
             client = ExternalLLMClient(model="gpt-4o")
             with pytest.raises(SystemicProviderError):
@@ -532,14 +532,14 @@ class TestSystemicErrorClassification:
         )
 
         with patch(
-            "osmosis_ai.rollout.eval.common.llm_client._get_litellm",
+            "osmosis_ai.eval.common.llm_client._get_litellm",
             return_value=mock_litellm,
         ):
-            from osmosis_ai.rollout.eval.common.errors import (
+            from osmosis_ai.eval.common.errors import (
                 ProviderError,
                 SystemicProviderError,
             )
-            from osmosis_ai.rollout.eval.common.llm_client import ExternalLLMClient
+            from osmosis_ai.eval.common.llm_client import ExternalLLMClient
 
             client = ExternalLLMClient(model="gpt-4o")
             with pytest.raises(ProviderError) as exc_info:
@@ -559,11 +559,11 @@ class TestSystemicErrorClassification:
         mock_litellm.acompletion = AsyncMock(side_effect=api_error)
 
         with patch(
-            "osmosis_ai.rollout.eval.common.llm_client._get_litellm",
+            "osmosis_ai.eval.common.llm_client._get_litellm",
             return_value=mock_litellm,
         ):
-            from osmosis_ai.rollout.eval.common.errors import SystemicProviderError
-            from osmosis_ai.rollout.eval.common.llm_client import ExternalLLMClient
+            from osmosis_ai.eval.common.errors import SystemicProviderError
+            from osmosis_ai.eval.common.llm_client import ExternalLLMClient
 
             client = ExternalLLMClient(model="gpt-4o")
             with pytest.raises(SystemicProviderError):
@@ -583,11 +583,11 @@ class TestSystemicErrorClassification:
         mock_litellm.acompletion = AsyncMock(side_effect=api_error)
 
         with patch(
-            "osmosis_ai.rollout.eval.common.llm_client._get_litellm",
+            "osmosis_ai.eval.common.llm_client._get_litellm",
             return_value=mock_litellm,
         ):
-            from osmosis_ai.rollout.eval.common.errors import SystemicProviderError
-            from osmosis_ai.rollout.eval.common.llm_client import ExternalLLMClient
+            from osmosis_ai.eval.common.errors import SystemicProviderError
+            from osmosis_ai.eval.common.llm_client import ExternalLLMClient
 
             client = ExternalLLMClient(
                 model="gpt-4o", api_base="http://localhost:9999/v1"
@@ -607,14 +607,14 @@ class TestSystemicErrorClassification:
         mock_litellm.acompletion = AsyncMock(side_effect=api_error)
 
         with patch(
-            "osmosis_ai.rollout.eval.common.llm_client._get_litellm",
+            "osmosis_ai.eval.common.llm_client._get_litellm",
             return_value=mock_litellm,
         ):
-            from osmosis_ai.rollout.eval.common.errors import (
+            from osmosis_ai.eval.common.errors import (
                 ProviderError,
                 SystemicProviderError,
             )
-            from osmosis_ai.rollout.eval.common.llm_client import ExternalLLMClient
+            from osmosis_ai.eval.common.llm_client import ExternalLLMClient
 
             client = ExternalLLMClient(model="gpt-4o")
             with pytest.raises(ProviderError) as exc_info:
@@ -628,16 +628,16 @@ class TestLiteLLMImportError:
 
     def test_missing_litellm_raises_provider_error(self) -> None:
         """Test that missing LiteLLM raises ProviderError."""
-        from osmosis_ai.rollout.eval.common.errors import ProviderError
+        from osmosis_ai.eval.common.errors import ProviderError
 
         with (
             patch.dict("sys.modules", {"litellm": None}),
-            patch("osmosis_ai.rollout.eval.common.llm_client._get_litellm") as mock,
+            patch("osmosis_ai.eval.common.llm_client._get_litellm") as mock,
         ):
             mock.side_effect = ProviderError("LiteLLM is required")
 
             with pytest.raises(ProviderError) as exc_info:
-                from osmosis_ai.rollout.eval.common.llm_client import (
+                from osmosis_ai.eval.common.llm_client import (
                     ExternalLLMClient,
                 )
 

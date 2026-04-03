@@ -1,4 +1,4 @@
-"""Tests for osmosis_ai.rollout.eval.rubric — dataset loader, report, and RubricCommand."""
+"""Tests for osmosis_ai.eval.rubric — dataset loader, report, and RubricCommand."""
 
 from __future__ import annotations
 
@@ -9,19 +9,19 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from osmosis_ai.cli.errors import CLIError
-from osmosis_ai.rollout.eval.rubric.cli import RubricCommand
-from osmosis_ai.rollout.eval.rubric.dataset import (
+from osmosis_ai.eval.rubric.cli import RubricCommand
+from osmosis_ai.eval.rubric.dataset import (
     RubricRecord,
     load_rubric_dataset,
 )
-from osmosis_ai.rollout.eval.rubric.report import (
+from osmosis_ai.eval.rubric.report import (
     ConsoleReportRenderer,
     JsonReportWriter,
     RecordResult,
     RubricReport,
     calculate_statistics,
 )
-from osmosis_ai.rollout.eval.rubric.types import RubricResult
+from osmosis_ai.eval.rubric.types import RubricResult
 
 # =============================================================================
 # load_rubric_dataset Tests
@@ -424,7 +424,7 @@ class TestResolveRubricText:
 # =============================================================================
 
 
-_EVALUATE_RUBRIC_PATCH = "osmosis_ai.rollout.eval.rubric.cli.evaluate_rubric"
+_EVALUATE_RUBRIC_PATCH = "osmosis_ai.eval.rubric.cli.evaluate_rubric"
 
 
 class TestRubricCommandRun:

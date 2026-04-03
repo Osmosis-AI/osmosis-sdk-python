@@ -18,9 +18,9 @@ from typing import TYPE_CHECKING, Any
 from osmosis_ai.cli.console import Console
 
 if TYPE_CHECKING:
-    from osmosis_ai.rollout.eval.evaluation.cache import BuildSummaryResult
-    from osmosis_ai.rollout.eval.evaluation.eval_fn import EvalFnWrapper
-    from osmosis_ai.rollout.eval.evaluation.runner import EvalRunResult
+    from osmosis_ai.eval.evaluation.cache import BuildSummaryResult
+    from osmosis_ai.eval.evaluation.eval_fn import EvalFnWrapper
+    from osmosis_ai.eval.evaluation.runner import EvalRunResult
 
 
 class EvalCommand:
@@ -30,7 +30,7 @@ class EvalCommand:
         self.console: Console = Console()
 
     def _run_cache_dir(self) -> int:
-        from osmosis_ai.rollout.eval.evaluation.cache import JsonFileCacheBackend
+        from osmosis_ai.eval.evaluation.cache import JsonFileCacheBackend
 
         backend = JsonFileCacheBackend()
         self.console.print(str(backend.cache_root))
@@ -70,7 +70,7 @@ class EvalCommand:
         cache_dataset: str | None = None,
         cache_status: str | None = None,
     ) -> int:
-        from osmosis_ai.rollout.eval.evaluation.cache import JsonFileCacheBackend
+        from osmosis_ai.eval.evaluation.cache import JsonFileCacheBackend
 
         backend = JsonFileCacheBackend()
         entries = backend.list_caches()
@@ -144,7 +144,7 @@ class EvalCommand:
         cache_status: str | None = None,
         yes: bool = False,
     ) -> int:
-        from osmosis_ai.rollout.eval.evaluation.cache import JsonFileCacheBackend
+        from osmosis_ai.eval.evaluation.cache import JsonFileCacheBackend
 
         has_filter = any([cache_model, cache_dataset, cache_status])
 
@@ -265,7 +265,7 @@ class EvalCommand:
     def _load_eval_fns(
         self, args: Any
     ) -> tuple[list[EvalFnWrapper] | None, str | None]:
-        from osmosis_ai.rollout.eval.evaluation.eval_fn import (
+        from osmosis_ai.eval.evaluation.eval_fn import (
             EvalFnError,
             load_eval_fns,
         )
@@ -294,7 +294,7 @@ class EvalCommand:
         task_id: str,
     ) -> Path:
         """Write structured orchestrator output to the specified directory."""
-        from osmosis_ai.rollout.eval.evaluation.cache import (
+        from osmosis_ai.eval.evaluation.cache import (
             atomic_write_json,
             sanitize_path_part,
         )
@@ -329,7 +329,7 @@ class EvalCommand:
         total_expected: int,
     ) -> None:
         """Print a summary from an OrchestratorResult."""
-        from osmosis_ai.rollout.eval.common.cli import format_duration
+        from osmosis_ai.eval.common.cli import format_duration
 
         if summary is None:
             self.console.print(f"\nCompleted {total_completed}/{total_expected} runs.")
@@ -372,7 +372,7 @@ class EvalCommand:
         is_mcp: bool,
     ) -> None:
         """Print informational messages when resuming from cached progress."""
-        from osmosis_ai.rollout.eval.evaluation.cache import sanitize_path_part
+        from osmosis_ai.eval.evaluation.cache import sanitize_path_part
 
         # Peek at existing cache file to check for prior completed runs
         model_dir = sanitize_path_part(model)
@@ -435,7 +435,7 @@ class EvalCommand:
                 )
 
     async def _run_async(self, args: Any) -> int:
-        from osmosis_ai.rollout.eval.common.cli import (
+        from osmosis_ai.eval.common.cli import (
             build_completion_params,
             create_llm_client,
             format_duration,
@@ -542,7 +542,7 @@ class EvalCommand:
                 await llm_client.close()
                 return 1
 
-        from osmosis_ai.rollout.eval.evaluation.runner import EvalRunner
+        from osmosis_ai.eval.evaluation.runner import EvalRunner
 
         runner = EvalRunner(
             agent_loop=agent_loop,
@@ -595,7 +595,7 @@ class EvalCommand:
             )
 
         # Compute fingerprints and use orchestrator
-        from osmosis_ai.rollout.eval.evaluation.cache import (
+        from osmosis_ai.eval.evaluation.cache import (
             CacheConfig,
             JsonFileCacheBackend,
             _get_cache_root,
@@ -695,7 +695,7 @@ class EvalCommand:
                 is_mcp=bool(args.mcp),
             )
 
-        from osmosis_ai.rollout.eval.evaluation.orchestrator import EvalOrchestrator
+        from osmosis_ai.eval.evaluation.orchestrator import EvalOrchestrator
 
         orchestrator = EvalOrchestrator(
             runner=runner,

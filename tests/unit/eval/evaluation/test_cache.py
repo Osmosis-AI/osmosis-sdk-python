@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 import pytest
 
-from osmosis_ai.rollout.eval.evaluation.cache import (
+from osmosis_ai.eval.evaluation.cache import (
     _CACHE_VERSION,
     CacheConfig,
     CacheFlushController,
@@ -374,7 +374,7 @@ class TestComputeModuleFingerprint:
     def test_returns_string_for_real_module(self) -> None:
         """Fingerprinting a real importable module returns a string."""
         # Use a known module from this project
-        result = compute_module_fingerprint("osmosis_ai.rollout.eval.evaluation.cache")
+        result = compute_module_fingerprint("osmosis_ai.eval.evaluation.cache")
         assert result is not None
         assert isinstance(result, str)
         assert len(result) == 32
@@ -386,15 +386,15 @@ class TestComputeModuleFingerprint:
 
     def test_package_module_hashes_directory(self) -> None:
         """Package (with __init__.py) should hash entire directory tree."""
-        # osmosis_ai.rollout.eval.evaluation is a package
-        result = compute_module_fingerprint("osmosis_ai.rollout.eval.evaluation")
+        # osmosis_ai.eval.evaluation is a package
+        result = compute_module_fingerprint("osmosis_ai.eval.evaluation")
         assert result is not None
         assert isinstance(result, str)
 
     def test_colon_separated_path(self) -> None:
         """module_path with colon separator should work (module:attribute)."""
         result = compute_module_fingerprint(
-            "osmosis_ai.rollout.eval.evaluation.cache:compute_task_id"
+            "osmosis_ai.eval.evaluation.cache:compute_task_id"
         )
         assert result is not None
 
@@ -407,7 +407,7 @@ class TestComputeModuleFingerprint:
 class TestComputeEvalFnsFingerprint:
     def test_deterministic(self) -> None:
         """Same input produces same fingerprint."""
-        paths = ["osmosis_ai.rollout.eval.evaluation.cache:compute_task_id"]
+        paths = ["osmosis_ai.eval.evaluation.cache:compute_task_id"]
         h1 = compute_eval_fns_fingerprint(paths)
         h2 = compute_eval_fns_fingerprint(paths)
         assert h1 is not None
@@ -416,10 +416,10 @@ class TestComputeEvalFnsFingerprint:
     def test_dedup(self) -> None:
         """Two fns from the same module result in file hashed once."""
         # Both paths point to the same module file
-        paths_single = ["osmosis_ai.rollout.eval.evaluation.cache:fn1"]
+        paths_single = ["osmosis_ai.eval.evaluation.cache:fn1"]
         paths_double = [
-            "osmosis_ai.rollout.eval.evaluation.cache:fn1",
-            "osmosis_ai.rollout.eval.evaluation.cache:fn2",
+            "osmosis_ai.eval.evaluation.cache:fn1",
+            "osmosis_ai.eval.evaluation.cache:fn2",
         ]
         h1 = compute_eval_fns_fingerprint(paths_single)
         h2 = compute_eval_fns_fingerprint(paths_double)
@@ -431,7 +431,7 @@ class TestComputeEvalFnsFingerprint:
         result = compute_eval_fns_fingerprint(
             [
                 "nonexistent_module_xyz:fn1",
-                "osmosis_ai.rollout.eval.evaluation.cache:fn2",
+                "osmosis_ai.eval.evaluation.cache:fn2",
             ]
         )
         assert result is None
@@ -443,10 +443,10 @@ class TestComputeEvalFnsFingerprint:
 
     def test_different_modules_different_hash(self) -> None:
         """Functions from different modules produce different hash than single module."""
-        paths_one = ["osmosis_ai.rollout.eval.evaluation.cache:fn1"]
+        paths_one = ["osmosis_ai.eval.evaluation.cache:fn1"]
         paths_two = [
-            "osmosis_ai.rollout.eval.evaluation.cache:fn1",
-            "osmosis_ai.rollout.eval.evaluation.eval_fn:fn2",
+            "osmosis_ai.eval.evaluation.cache:fn1",
+            "osmosis_ai.eval.evaluation.eval_fn:fn2",
         ]
         h1 = compute_eval_fns_fingerprint(paths_one)
         h2 = compute_eval_fns_fingerprint(paths_two)
@@ -457,12 +457,12 @@ class TestComputeEvalFnsFingerprint:
     def test_order_independent(self) -> None:
         """Eval fn order doesn't affect the fingerprint (sorted internally)."""
         paths_a = [
-            "osmosis_ai.rollout.eval.evaluation.cache:fn1",
-            "osmosis_ai.rollout.eval.evaluation.eval_fn:fn2",
+            "osmosis_ai.eval.evaluation.cache:fn1",
+            "osmosis_ai.eval.evaluation.eval_fn:fn2",
         ]
         paths_b = [
-            "osmosis_ai.rollout.eval.evaluation.eval_fn:fn2",
-            "osmosis_ai.rollout.eval.evaluation.cache:fn1",
+            "osmosis_ai.eval.evaluation.eval_fn:fn2",
+            "osmosis_ai.eval.evaluation.cache:fn1",
         ]
         h1 = compute_eval_fns_fingerprint(paths_a)
         h2 = compute_eval_fns_fingerprint(paths_b)
@@ -1317,7 +1317,7 @@ def _make_cache_entry(
 class TestCacheLs:
     def _make_command(self):
         from osmosis_ai.cli.console import Console
-        from osmosis_ai.rollout.eval.evaluation.cli import EvalCommand
+        from osmosis_ai.eval.evaluation.cli import EvalCommand
 
         cmd = EvalCommand()
         cmd.console = Console(force_terminal=False, no_color=True)
@@ -1326,7 +1326,7 @@ class TestCacheLs:
     def test_ls_empty(self, tmp_path: Path, monkeypatch):
         """No caches prints 'No cached evaluations found.'."""
         monkeypatch.setattr(
-            "osmosis_ai.rollout.eval.evaluation.cache._get_cache_root",
+            "osmosis_ai.eval.evaluation.cache._get_cache_root",
             lambda: tmp_path,
         )
         cmd = self._make_command()
@@ -1345,7 +1345,7 @@ class TestCacheLs:
             runs_count=5,
         )
         monkeypatch.setattr(
-            "osmosis_ai.rollout.eval.evaluation.cache._get_cache_root",
+            "osmosis_ai.eval.evaluation.cache._get_cache_root",
             lambda: tmp_path,
         )
 
@@ -1361,7 +1361,7 @@ class TestCacheLs:
         backend = JsonFileCacheBackend(cache_root=tmp_path)
         entries = backend.list_caches()
 
-        from osmosis_ai.rollout.eval.evaluation.cli import EvalCommand
+        from osmosis_ai.eval.evaluation.cli import EvalCommand
 
         filtered = EvalCommand._filter_caches(
             entries, model="gpt-4", dataset=None, status=None
@@ -1379,7 +1379,7 @@ class TestCacheLs:
         backend = JsonFileCacheBackend(cache_root=tmp_path)
         entries = backend.list_caches()
 
-        from osmosis_ai.rollout.eval.evaluation.cli import EvalCommand
+        from osmosis_ai.eval.evaluation.cli import EvalCommand
 
         filtered = EvalCommand._filter_caches(
             entries, model=None, dataset=None, status="in_progress"
@@ -1395,7 +1395,7 @@ class TestCacheLs:
         backend = JsonFileCacheBackend(cache_root=tmp_path)
         entries = backend.list_caches()
 
-        from osmosis_ai.rollout.eval.evaluation.cli import EvalCommand
+        from osmosis_ai.eval.evaluation.cli import EvalCommand
 
         filtered = EvalCommand._filter_caches(
             entries, model=None, dataset="train", status=None
@@ -1410,7 +1410,7 @@ class TestCacheLs:
         backend = JsonFileCacheBackend(cache_root=tmp_path)
         entries = backend.list_caches()
 
-        from osmosis_ai.rollout.eval.evaluation.cli import EvalCommand
+        from osmosis_ai.eval.evaluation.cli import EvalCommand
 
         filtered = EvalCommand._filter_caches(
             entries, model="openai/gpt-4", dataset=None, status=None
@@ -1449,7 +1449,7 @@ class TestCacheLs:
 class TestCacheRm:
     def _make_command(self):
         from osmosis_ai.cli.console import Console
-        from osmosis_ai.rollout.eval.evaluation.cli import EvalCommand
+        from osmosis_ai.eval.evaluation.cli import EvalCommand
 
         cmd = EvalCommand()
         cmd.console = Console(force_terminal=False, no_color=True)
@@ -1458,7 +1458,7 @@ class TestCacheRm:
     def test_rm_no_args_errors(self, tmp_path: Path, monkeypatch):
         """No arguments prints error."""
         monkeypatch.setattr(
-            "osmosis_ai.rollout.eval.evaluation.cache._get_cache_root",
+            "osmosis_ai.eval.evaluation.cache._get_cache_root",
             lambda: tmp_path,
         )
         cmd = self._make_command()
@@ -1473,7 +1473,7 @@ class TestCacheRm:
         assert jsonl_path.exists()
 
         monkeypatch.setattr(
-            "osmosis_ai.rollout.eval.evaluation.cache._get_cache_root",
+            "osmosis_ai.eval.evaluation.cache._get_cache_root",
             lambda: tmp_path,
         )
         cmd = self._make_command()
@@ -1485,7 +1485,7 @@ class TestCacheRm:
     def test_rm_nonexistent_task_id(self, tmp_path: Path, monkeypatch):
         """Non-existent task_id prints message and returns 1."""
         monkeypatch.setattr(
-            "osmosis_ai.rollout.eval.evaluation.cache._get_cache_root",
+            "osmosis_ai.eval.evaluation.cache._get_cache_root",
             lambda: tmp_path,
         )
         cmd = self._make_command()
@@ -1498,7 +1498,7 @@ class TestCacheRm:
         p2 = _make_cache_entry(tmp_path, "def456", "gpt-3.5", "data2.jsonl")
 
         monkeypatch.setattr(
-            "osmosis_ai.rollout.eval.evaluation.cache._get_cache_root",
+            "osmosis_ai.eval.evaluation.cache._get_cache_root",
             lambda: tmp_path,
         )
         cmd = self._make_command()
@@ -1512,7 +1512,7 @@ class TestCacheRm:
         _make_cache_entry(tmp_path, "abc123", "gpt-4", "data.jsonl")
 
         monkeypatch.setattr(
-            "osmosis_ai.rollout.eval.evaluation.cache._get_cache_root",
+            "osmosis_ai.eval.evaluation.cache._get_cache_root",
             lambda: tmp_path,
         )
         cmd = self._make_command()
@@ -1525,7 +1525,7 @@ class TestCacheRm:
         p1 = _make_cache_entry(tmp_path, "abc123", "gpt-4", "data.jsonl")
 
         monkeypatch.setattr(
-            "osmosis_ai.rollout.eval.evaluation.cache._get_cache_root",
+            "osmosis_ai.eval.evaluation.cache._get_cache_root",
             lambda: tmp_path,
         )
         cmd = self._make_command()
@@ -1544,7 +1544,7 @@ class TestCacheRm:
         )
 
         monkeypatch.setattr(
-            "osmosis_ai.rollout.eval.evaluation.cache._get_cache_root",
+            "osmosis_ai.eval.evaluation.cache._get_cache_root",
             lambda: tmp_path,
         )
         cmd = self._make_command()
@@ -1559,7 +1559,7 @@ class TestCacheRm:
         parent_dir = p.parent
 
         monkeypatch.setattr(
-            "osmosis_ai.rollout.eval.evaluation.cache._get_cache_root",
+            "osmosis_ai.eval.evaluation.cache._get_cache_root",
             lambda: tmp_path,
         )
         cmd = self._make_command()
@@ -1572,7 +1572,7 @@ class TestCacheRm:
         _make_cache_entry(tmp_path, "abc123", "gpt-4", "data.jsonl")
 
         monkeypatch.setattr(
-            "osmosis_ai.rollout.eval.evaluation.cache._get_cache_root",
+            "osmosis_ai.eval.evaluation.cache._get_cache_root",
             lambda: tmp_path,
         )
         cmd = self._make_command()

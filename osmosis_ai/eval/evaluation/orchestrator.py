@@ -16,9 +16,9 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from osmosis_ai.rollout.eval.common.dataset import DatasetRow
-from osmosis_ai.rollout.eval.common.errors import SystemicProviderError
-from osmosis_ai.rollout.eval.evaluation.cache import (
+from osmosis_ai.eval.common.dataset import DatasetRow
+from osmosis_ai.eval.common.errors import SystemicProviderError
+from osmosis_ai.eval.evaluation.cache import (
     BuildSummaryResult,
     CacheBackend,
     CacheConfig,
@@ -27,7 +27,7 @@ from osmosis_ai.rollout.eval.evaluation.cache import (
     DatasetStatus,
     build_summary,
 )
-from osmosis_ai.rollout.eval.evaluation.runner import EvalRunner, EvalRunResult
+from osmosis_ai.eval.evaluation.runner import EvalRunner, EvalRunResult
 
 
 @dataclass

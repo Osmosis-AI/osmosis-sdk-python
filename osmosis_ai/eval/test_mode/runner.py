@@ -1,6 +1,6 @@
 """Local test runner facade for test mode.
 
-The shared execution logic now lives in `osmosis_ai.rollout.eval.common.runner`.
+The shared execution logic now lives in `osmosis_ai.eval.common.runner`.
 This module keeps test-mode naming conventions for readability.
 """
 
@@ -8,21 +8,21 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from osmosis_ai.rollout.eval.common.runner import (
+from osmosis_ai.eval.common.runner import (
     LocalBatchResult as LocalTestBatchResult,
 )
-from osmosis_ai.rollout.eval.common.runner import (
+from osmosis_ai.eval.common.runner import (
     LocalRolloutRunner,
     validate_tools,
 )
-from osmosis_ai.rollout.eval.common.runner import (
+from osmosis_ai.eval.common.runner import (
     LocalRunResult as LocalTestRunResult,
 )
 
 if TYPE_CHECKING:
+    from osmosis_ai.eval.common.dataset import DatasetRow
+    from osmosis_ai.eval.common.llm_client import ExternalLLMClient
     from osmosis_ai.rollout.core.base import RolloutAgentLoop
-    from osmosis_ai.rollout.eval.common.dataset import DatasetRow
-    from osmosis_ai.rollout.eval.common.llm_client import ExternalLLMClient
 
 
 class LocalTestRunner(LocalRolloutRunner):

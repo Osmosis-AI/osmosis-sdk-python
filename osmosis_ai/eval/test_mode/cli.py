@@ -16,13 +16,13 @@ from typing import TYPE_CHECKING, Any
 from osmosis_ai.cli.console import Console
 
 if TYPE_CHECKING:
-    from osmosis_ai.rollout.core.base import RolloutAgentLoop
-    from osmosis_ai.rollout.eval.common.dataset import DatasetRow
-    from osmosis_ai.rollout.eval.common.llm_client import ExternalLLMClient
-    from osmosis_ai.rollout.eval.test_mode.runner import (
+    from osmosis_ai.eval.common.dataset import DatasetRow
+    from osmosis_ai.eval.common.llm_client import ExternalLLMClient
+    from osmosis_ai.eval.test_mode.runner import (
         LocalTestBatchResult,
         LocalTestRunResult,
     )
+    from osmosis_ai.rollout.core.base import RolloutAgentLoop
 
 
 @dataclass
@@ -71,7 +71,7 @@ class TestCommand:
         args: Any,
         setup: _SetupResult,
     ) -> int:
-        from osmosis_ai.rollout.eval.test_mode.interactive import InteractiveRunner
+        from osmosis_ai.eval.test_mode.interactive import InteractiveRunner
 
         interactive_runner = InteractiveRunner(
             agent_loop=setup.agent_loop,
@@ -106,7 +106,7 @@ class TestCommand:
         args: Any,
         setup: _SetupResult,
     ) -> LocalTestBatchResult:
-        from osmosis_ai.rollout.eval.test_mode.runner import LocalTestRunner
+        from osmosis_ai.eval.test_mode.runner import LocalTestRunner
 
         runner = LocalTestRunner(
             agent_loop=setup.agent_loop,
@@ -114,7 +114,7 @@ class TestCommand:
             debug=args.debug,
         )
 
-        from osmosis_ai.rollout.eval.common.cli import format_duration, format_tokens
+        from osmosis_ai.eval.common.cli import format_duration, format_tokens
 
         def on_progress(current: int, total: int, result: LocalTestRunResult) -> None:
             if args.quiet:
@@ -157,7 +157,7 @@ class TestCommand:
         return batch_result
 
     def _print_summary(self, batch_result: LocalTestBatchResult) -> None:
-        from osmosis_ai.rollout.eval.common.cli import format_duration, format_tokens
+        from osmosis_ai.eval.common.cli import format_duration, format_tokens
 
         self.console.print()
         self.console.print("Summary:", style="bold")
@@ -233,7 +233,7 @@ class TestCommand:
             self.console.print(f"\nResults written to: {args.output}")
 
     async def _run_async(self, args: Any) -> int:
-        from osmosis_ai.rollout.eval.common.cli import (
+        from osmosis_ai.eval.common.cli import (
             build_completion_params,
             create_llm_client,
             load_agent,

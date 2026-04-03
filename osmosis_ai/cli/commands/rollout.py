@@ -141,7 +141,7 @@ def test(
     ),
 ) -> None:
     """Test a RolloutAgentLoop against a dataset."""
-    from osmosis_ai.rollout.eval.test_mode.cli import TestCommand
+    from osmosis_ai.eval.test_mode.cli import TestCommand
 
     rc = TestCommand().run(
         module=module,

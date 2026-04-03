@@ -7,6 +7,10 @@ from typing import Any
 
 import pytest
 
+from osmosis_ai.eval.common.dataset import DatasetRow
+from osmosis_ai.eval.common.errors import SystemicProviderError
+from osmosis_ai.eval.evaluation.eval_fn import EvalFnWrapper
+from osmosis_ai.eval.evaluation.runner import EvalRunner, EvalRunResult
 from osmosis_ai.rollout import (
     OpenAIFunctionParametersSchema,
     OpenAIFunctionSchema,
@@ -18,10 +22,6 @@ from osmosis_ai.rollout import (
 )
 from osmosis_ai.rollout.client import CompletionsResult
 from osmosis_ai.rollout.core.schemas import RolloutMetrics
-from osmosis_ai.rollout.eval.common.dataset import DatasetRow
-from osmosis_ai.rollout.eval.common.errors import SystemicProviderError
-from osmosis_ai.rollout.eval.evaluation.eval_fn import EvalFnWrapper
-from osmosis_ai.rollout.eval.evaluation.runner import EvalRunner, EvalRunResult
 
 # ---------------------------------------------------------------------------
 # Helpers (mirroring test_runner.py patterns)

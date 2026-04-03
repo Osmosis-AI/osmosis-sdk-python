@@ -12,18 +12,18 @@ from typing import Any
 
 import pytest
 
-from osmosis_ai.rollout.eval.common.errors import SystemicProviderError
-from osmosis_ai.rollout.eval.evaluation.cache import (
+from osmosis_ai.eval.common.errors import SystemicProviderError
+from osmosis_ai.eval.evaluation.cache import (
     _CACHE_VERSION,
     CacheConfig,
     JsonFileCacheBackend,
     compute_dataset_fingerprint,
 )
-from osmosis_ai.rollout.eval.evaluation.orchestrator import (
+from osmosis_ai.eval.evaluation.orchestrator import (
     EvalOrchestrator,
     OrchestratorResult,
 )
-from osmosis_ai.rollout.eval.evaluation.runner import EvalRunResult
+from osmosis_ai.eval.evaluation.runner import EvalRunResult
 
 # ---------------------------------------------------------------------------
 # Helpers

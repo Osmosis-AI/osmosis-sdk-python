@@ -14,12 +14,12 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+from osmosis_ai.eval.common.dataset import DatasetRow
+from osmosis_ai.eval.common.errors import SystemicProviderError
+from osmosis_ai.eval.common.llm_client import ExternalLLMClient
+from osmosis_ai.eval.common.runner import LocalRolloutRunner
+from osmosis_ai.eval.evaluation.eval_fn import EvalFnWrapper
 from osmosis_ai.rollout.core.base import RolloutAgentLoop
-from osmosis_ai.rollout.eval.common.dataset import DatasetRow
-from osmosis_ai.rollout.eval.common.errors import SystemicProviderError
-from osmosis_ai.rollout.eval.common.llm_client import ExternalLLMClient
-from osmosis_ai.rollout.eval.common.runner import LocalRolloutRunner
-from osmosis_ai.rollout.eval.evaluation.eval_fn import EvalFnWrapper
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -719,7 +719,7 @@ class EvalRunner:
         are treated as 0.0 so reliability issues are reflected in evaluation
         quality metrics.
         """
-        from osmosis_ai.rollout.eval.evaluation.cache import build_summary
+        from osmosis_ai.eval.evaluation.cache import build_summary
 
         # Convert dataclass rows → flat list[dict] expected by build_summary
         runs: list[dict[str, Any]] = []

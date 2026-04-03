@@ -7,14 +7,14 @@ from typing import TYPE_CHECKING, Any
 
 from osmosis_ai.cli.console import Console
 from osmosis_ai.cli.errors import CLIError
-from osmosis_ai.rollout.cli_utils import load_agent_loop
-from osmosis_ai.rollout.eval.common.dataset import DatasetReader
-from osmosis_ai.rollout.eval.common.errors import (
+from osmosis_ai.eval.common.dataset import DatasetReader
+from osmosis_ai.eval.common.errors import (
     DatasetParseError,
     DatasetValidationError,
     ProviderError,
     SystemicProviderError,
 )
+from osmosis_ai.rollout.cli_utils import load_agent_loop
 
 # Mapping of LiteLLM provider prefixes to their expected environment variables.
 _PROVIDER_ENV_KEYS: dict[str, str] = {
@@ -40,9 +40,9 @@ _PROVIDER_ENV_KEYS: dict[str, str] = {
 }
 
 if TYPE_CHECKING:
+    from osmosis_ai.eval.common.dataset import DatasetRow
+    from osmosis_ai.eval.common.llm_client import ExternalLLMClient
     from osmosis_ai.rollout.core.base import RolloutAgentLoop
-    from osmosis_ai.rollout.eval.common.dataset import DatasetRow
-    from osmosis_ai.rollout.eval.common.llm_client import ExternalLLMClient
 
 
 def format_duration(ms: float) -> str:
@@ -267,7 +267,7 @@ def create_llm_client(
     if error := _check_api_key(model, api_key, base_url):
         return None, error
 
-    from osmosis_ai.rollout.eval.common.llm_client import ExternalLLMClient
+    from osmosis_ai.eval.common.llm_client import ExternalLLMClient
 
     if not quiet:
         if base_url:

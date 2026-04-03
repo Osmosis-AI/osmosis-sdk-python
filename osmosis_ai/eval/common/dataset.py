@@ -14,11 +14,11 @@ from collections.abc import Iterator
 from pathlib import Path
 from typing import Any, TypedDict, cast
 
-from osmosis_ai.rollout.core.schemas import RolloutRequest
-from osmosis_ai.rollout.eval.common.errors import (
+from osmosis_ai.eval.common.errors import (
     DatasetParseError,
     DatasetValidationError,
 )
+from osmosis_ai.rollout.core.schemas import RolloutRequest
 
 logger: logging.Logger = logging.getLogger(__name__)
 

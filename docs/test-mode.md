@@ -20,8 +20,8 @@ The `--mcp` directory must contain a `main.py` with a `FastMCP` instance. See [L
 ### Programmatic Usage
 
 ```python
-from osmosis_ai.rollout.eval.common import DatasetReader, ExternalLLMClient
-from osmosis_ai.rollout.eval.test_mode import LocalTestRunner
+from osmosis_ai.eval.common import DatasetReader, ExternalLLMClient
+from osmosis_ai.eval.test_mode import LocalTestRunner
 
 reader = DatasetReader("./test_data.jsonl")
 rows = reader.read(limit=10)

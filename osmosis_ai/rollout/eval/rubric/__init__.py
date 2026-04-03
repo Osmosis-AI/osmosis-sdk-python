@@ -1,15 +1,4 @@
-from .engine import evaluate_rubric
-from .types import (
-    MissingAPIKeyError,
-    ModelNotFoundError,
-    ProviderRequestError,
-    RubricResult,
-)
+"""Shim — canonical source is now osmosis_ai.eval.rubric."""
 
-__all__ = [
-    "MissingAPIKeyError",
-    "ModelNotFoundError",
-    "ProviderRequestError",
-    "RubricResult",
-    "evaluate_rubric",
-]
+from osmosis_ai.eval.rubric import *  # noqa: F403
+from osmosis_ai.eval.rubric import __all__ as __all__

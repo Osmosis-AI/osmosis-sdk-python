@@ -14,13 +14,13 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any, Protocol
 
-from osmosis_ai.rollout.core.base import RolloutAgentLoop, RolloutContext, RolloutResult
-from osmosis_ai.rollout.core.schemas import OpenAIFunctionToolSchema
-from osmosis_ai.rollout.eval.common.dataset import DatasetRow, dataset_row_to_request
-from osmosis_ai.rollout.eval.common.errors import (
+from osmosis_ai.eval.common.dataset import DatasetRow, dataset_row_to_request
+from osmosis_ai.eval.common.errors import (
     SystemicProviderError,
     ToolValidationError,
 )
+from osmosis_ai.rollout.core.base import RolloutAgentLoop, RolloutContext, RolloutResult
+from osmosis_ai.rollout.core.schemas import OpenAIFunctionToolSchema
 
 logger: logging.Logger = logging.getLogger(__name__)
 

@@ -700,7 +700,7 @@ def build_summary(
 
         # pass@k computation for n_runs > 1
         if n_runs > 1:
-            from osmosis_ai.rollout.eval.evaluation.report import pass_at_k
+            from osmosis_ai.eval.evaluation.report import pass_at_k
 
             # Group runs by (row_index, model_tag)
             rows: dict[tuple[int, str | None], list[dict]] = defaultdict(list)
