@@ -271,7 +271,7 @@ class TestConsoleReportRenderer:
         renderer = ConsoleReportRenderer(printer=lines.append)
 
         report = RubricReport(
-            model="openai/gpt-4o",
+            model="openai/gpt-5.4",
             rubric_text="Score quality",
             data_path=tmp_path / "data.jsonl",
             number=1,
@@ -290,7 +290,7 @@ class TestConsoleReportRenderer:
         renderer.render(report)
 
         output = "\n".join(lines)
-        assert "Model: openai/gpt-4o" in output
+        assert "Model: openai/gpt-5.4" in output
         assert "Evaluated 1 record(s)" in output
         assert "[rec-1]" in output
         assert "score=0.8500" in output
@@ -302,7 +302,7 @@ class TestConsoleReportRenderer:
         renderer = ConsoleReportRenderer(printer=lines.append)
 
         report = RubricReport(
-            model="openai/gpt-4o",
+            model="openai/gpt-5.4",
             rubric_text="Score quality",
             data_path=tmp_path / "data.jsonl",
             number=2,
@@ -328,7 +328,7 @@ class TestConsoleReportRenderer:
         renderer = ConsoleReportRenderer(printer=lines.append)
 
         report = RubricReport(
-            model="openai/gpt-4o",
+            model="openai/gpt-5.4",
             rubric_text="Score quality",
             data_path=tmp_path / "data.jsonl",
             number=1,
@@ -363,7 +363,7 @@ class TestJsonReportWriter:
         output_path = tmp_path / "output" / "result.json"
 
         report = RubricReport(
-            model="openai/gpt-4o",
+            model="openai/gpt-5.4",
             rubric_text="Score quality",
             data_path=tmp_path / "data.jsonl",
             number=1,
@@ -386,7 +386,7 @@ class TestJsonReportWriter:
         assert output_path.exists()
 
         data = json.loads(output_path.read_text(encoding="utf-8"))
-        assert data["model"] == "openai/gpt-4o"
+        assert data["model"] == "openai/gpt-5.4"
         assert data["rubric"] == "Score quality"
         assert data["number"] == 1
         assert len(data["records"]) == 1
@@ -448,7 +448,7 @@ class TestRubricCommandRun:
             RubricCommand().run(
                 data=str(data_file),
                 rubric="Score accuracy",
-                model="openai/gpt-4o",
+                model="openai/gpt-5.4",
                 api_key="test-key",
             )
 
@@ -471,13 +471,13 @@ class TestRubricCommandRun:
             RubricCommand().run(
                 data=str(data_file),
                 rubric="Score quality",
-                model="openai/gpt-4o",
+                model="openai/gpt-5.4",
                 api_key="test-key",
                 output_path=str(output_json),
             )
         assert output_json.exists()
         data = json.loads(output_json.read_text(encoding="utf-8"))
-        assert data["model"] == "openai/gpt-4o"
+        assert data["model"] == "openai/gpt-5.4"
         assert len(data["records"]) == 1
         assert data["records"][0]["scores"] == [0.8]
 
@@ -497,7 +497,7 @@ class TestRubricCommandRun:
             RubricCommand().run(
                 data=str(data_file),
                 rubric="Score it",
-                model="openai/gpt-4o",
+                model="openai/gpt-5.4",
                 api_key="test-key",
                 number=3,
             )
@@ -522,7 +522,7 @@ class TestRubricCommandRun:
             RubricCommand().run(
                 data=str(data_file),
                 rubric=f"@{rubric_file}",
-                model="openai/gpt-4o",
+                model="openai/gpt-5.4",
                 api_key="test-key",
             )
         # Verify the rubric text from file was passed to evaluate_rubric
@@ -534,7 +534,7 @@ class TestRubricCommandRun:
             RubricCommand().run(
                 data="/nonexistent/data.jsonl",
                 rubric="Score it",
-                model="openai/gpt-4o",
+                model="openai/gpt-5.4",
                 api_key="test-key",
             )
 
@@ -543,7 +543,7 @@ class TestRubricCommandRun:
             RubricCommand().run(
                 data=str(tmp_path),
                 rubric="Score it",
-                model="openai/gpt-4o",
+                model="openai/gpt-5.4",
                 api_key="test-key",
             )
 
@@ -565,7 +565,7 @@ class TestRubricCommandRun:
             RubricCommand().run(
                 data=str(data_file),
                 rubric="Score quality",
-                model="openai/gpt-4o",
+                model="openai/gpt-5.4",
                 api_key="test-key",
                 output_path=str(output_dir),
             )
@@ -585,7 +585,7 @@ class TestRubricCommandRun:
             RubricCommand().run(
                 data=str(data_file),
                 rubric="Score accuracy",
-                model="openai/gpt-4o",
+                model="openai/gpt-5.4",
                 api_key="test-key",
             )
         call_kwargs = mock_eval.call_args.kwargs

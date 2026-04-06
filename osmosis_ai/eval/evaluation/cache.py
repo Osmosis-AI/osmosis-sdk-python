@@ -18,7 +18,6 @@ import sys
 import tempfile
 import time
 import unicodedata
-from collections import defaultdict
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
@@ -70,51 +69,31 @@ def _deterministic_json(obj: object) -> bytes:
 
 def compute_task_id(
     *,
-    model: str,
-    base_url: str | None = None,
-    baseline_model: str | None = None,
-    baseline_base_url: str | None = None,
-    module: str,
-    dataset: str,
-    eval_fns: list[str],
-    n_runs: int,
-    max_turns: int,
-    pass_threshold: float,
-    offset: int = 0,
-    limit: int | None = None,
-    completion_params: dict[str, object] | None = None,
-    module_fingerprint: str | None = None,
-    dataset_fingerprint: str | None = None,
-    eval_fns_fingerprint: str | None = None,
+    config: dict[str, Any],
+    workflow_fingerprint: str,
+    grader_fingerprint: str | None,
+    dataset_fingerprint: str,
 ) -> tuple[str, str]:
-    """Compute (task_id, config_hash) from full evaluation configuration.
+    """Compute (task_id, config_hash) from effective eval configuration.
 
-    task_id is the first 12 chars of config_hash (xxh3_128 hex digest).
-    None values are filtered before hashing.
-    eval_fns are sorted for determinism.
+    Returns a (task_id, config_hash) tuple where config_hash is the full
+    xxh3_128 hex digest and task_id is its first 12 characters.
+
+    Hash inputs:
+    - config: Dict containing EvalConfig fields that affect result semantics
+    - workflow_fingerprint: Hash of workflow module source code
+    - grader_fingerprint: Hash of grader module source code (None if no grader)
+    - dataset_fingerprint: Hash of dataset file content
     """
-    config: dict[str, object] = {
-        "model": model,
-        "base_url": base_url,
-        "baseline_model": baseline_model,
-        "baseline_base_url": baseline_base_url,
-        "module": module,
-        "module_fingerprint": module_fingerprint,
-        "dataset": dataset,
-        "dataset_fingerprint": dataset_fingerprint,
-        "eval_fns": sorted(eval_fns),
-        "eval_fns_fingerprint": eval_fns_fingerprint,
-        "n_runs": n_runs,
-        "max_turns": max_turns,
-        "pass_threshold": pass_threshold,
-        "offset": offset,
-        "limit": limit,
-        "completion_params": completion_params,
-    }
-    # Filter None values
-    config = {k: v for k, v in config.items() if v is not None}
-    config_json = _deterministic_json(config)
-    config_hash = xxhash.xxh3_128_hexdigest(config_json)
+    payload = _deterministic_json(
+        {
+            "config": config,
+            "workflow": workflow_fingerprint,
+            "grader": grader_fingerprint,
+            "dataset": dataset_fingerprint,
+        }
+    )
+    config_hash = xxhash.xxh3_128_hexdigest(payload)
     task_id = config_hash[:12]
     return task_id, config_hash
 
@@ -620,128 +599,135 @@ def _backup_corrupt_cache(cache_path: Path) -> Path | None:
 # ============================================================
 
 
-class EvalFnSummaryDict(TypedDict, total=False):
-    """Per-eval-function statistics returned by ``build_summary``."""
+class RewardStatsDict(TypedDict, total=False):
+    """Reward statistics returned by build_summary when kind == 'graded'."""
 
     mean: float
     median: float
     std: float
     min: float
     max: float
-    p25: float
-    p75: float
     pass_at_k: dict[int, float]
 
 
-class BuildSummaryResult(TypedDict):
-    """Return type of ``build_summary``."""
+class BuildSummaryResult(TypedDict, total=False):
+    """Return type of build_summary."""
 
-    eval_fns: dict[str, EvalFnSummaryDict]
+    kind: str  # "graded" or "smoke"
     total_runs: int
+    passed: int
+    failed: int
     total_tokens: int
     total_duration_ms: float
+    reward_stats: RewardStatsDict | None
 
 
 def build_summary(
     runs: list[dict[str, Any]],
-    eval_fn_names: list[str],
     pass_threshold: float,
     n_runs: int,
+    *,
+    has_grader: bool = False,
 ) -> BuildSummaryResult:
     """Compute aggregated statistics from runs list.
 
-    Returns a summary dict with per-eval-fn stats (mean, median, std, min, max,
-    p25, p75, pass_at_k).
+    ``kind`` is determined by configuration, not by result data:
+    - ``has_grader=True``  → ``kind='graded'`` (even if all rewards are None)
+    - ``has_grader=False`` → ``kind='smoke'`` (pass/fail only).
     """
     import statistics
 
-    eval_summaries: dict[str, EvalFnSummaryDict] = {}
-    for name in eval_fn_names:
-        all_scores = [r["scores"].get(name, 0.0) for r in runs]
+    total_runs = len(runs)
+    total_tokens = sum(r.get("tokens", 0) for r in runs)
+    total_duration_ms = sum(r.get("duration_ms", 0.0) for r in runs)
 
-        if not all_scores:
-            eval_summaries[name] = {
-                "mean": 0.0,
-                "median": 0.0,
-                "std": 0.0,
-                "min": 0.0,
-                "max": 0.0,
-                "p25": 0.0,
-                "p75": 0.0,
-            }
-            continue
+    rewards = [r["reward"] for r in runs if r.get("reward") is not None]
 
-        mean = sum(all_scores) / len(all_scores)
-        # Population std (not sample): we compute over all runs, not a sample.
-        variance = sum((s - mean) ** 2 for s in all_scores) / len(all_scores)
-        std = math.sqrt(variance)
+    if not has_grader:
+        # Smoke mode
+        passed = sum(1 for r in runs if r.get("success", True))
+        failed = total_runs - passed
+        return BuildSummaryResult(
+            kind="smoke",
+            total_runs=total_runs,
+            passed=passed,
+            failed=failed,
+            total_tokens=total_tokens,
+            total_duration_ms=total_duration_ms,
+            reward_stats=None,
+        )
 
-        sorted_scores = sorted(all_scores)
-        median = statistics.median(sorted_scores)
-        if len(sorted_scores) < 2:
-            p25 = p75 = sorted_scores[0]
-        else:
-            # Use "inclusive" method (R method 7) to avoid extrapolating
-            # outside the observed range, which the default "exclusive"
-            # method can do for small sample sizes (<=4).
-            quantiles = statistics.quantiles(sorted_scores, n=4, method="inclusive")
-            p25 = quantiles[0]
-            p75 = quantiles[2]
+    # Graded mode
+    if not rewards:
+        return BuildSummaryResult(
+            kind="graded",
+            total_runs=total_runs,
+            passed=0,
+            failed=total_runs,
+            total_tokens=total_tokens,
+            total_duration_ms=total_duration_ms,
+            reward_stats=None,
+        )
 
-        summary: EvalFnSummaryDict = {
-            "mean": mean,
-            "median": median,
-            "std": std,
-            "min": min(all_scores),
-            "max": max(all_scores),
-            "p25": p25,
-            "p75": p75,
-        }
+    mean = sum(rewards) / len(rewards)
+    variance = sum((s - mean) ** 2 for s in rewards) / len(rewards)
+    std = math.sqrt(variance)
+    sorted_rewards = sorted(rewards)
+    median = statistics.median(sorted_rewards)
 
-        # pass@k computation for n_runs > 1
-        if n_runs > 1:
-            from osmosis_ai.eval.evaluation.report import pass_at_k
+    passed = sum(1 for r in rewards if r >= pass_threshold)
+    failed = len(rewards) - passed
 
-            # Group runs by (row_index, model_tag)
-            rows: dict[tuple[int, str | None], list[dict]] = defaultdict(list)
-            for r in runs:
-                key = (r["row_index"], r.get("model_tag"))
-                rows[key].append(r)
+    reward_stats: RewardStatsDict = {
+        "mean": mean,
+        "median": median,
+        "std": std,
+        "min": min(rewards),
+        "max": max(rewards),
+    }
 
-            # Power-of-2 sequence up to n_runs, always including n_runs itself.
-            # e.g. n_runs=10 → [1, 2, 4, 8, 10]; n_runs=8 → [1, 2, 4, 8]
-            k_values = []
-            p = 1
-            while p < n_runs:
-                k_values.append(p)
-                p *= 2
-            if not k_values or k_values[-1] != n_runs:
-                k_values.append(n_runs)
+    # pass@k for n_runs > 1
+    if n_runs > 1:
+        from collections import defaultdict
 
-            pak: dict[int, float] = {}
-            for k in k_values:
-                row_pass_at_k: list[float] = []
-                for row_runs in rows.values():
-                    c = sum(
-                        1
-                        for r in row_runs
-                        if r["scores"].get(name, 0.0) >= pass_threshold
-                    )
-                    n = max(len(row_runs), n_runs)
-                    if n > 0 and k <= n:
-                        row_pass_at_k.append(pass_at_k(n, c, k))
-                if row_pass_at_k:
-                    pak[k] = sum(row_pass_at_k) / len(row_pass_at_k)
-            if pak:
-                summary["pass_at_k"] = pak
+        from osmosis_ai.eval.evaluation.report import pass_at_k
 
-        eval_summaries[name] = summary
+        rows: dict[tuple[int, str | None], list[dict]] = defaultdict(list)
+        for r in runs:
+            key = (r["row_index"], r.get("model_tag"))
+            rows[key].append(r)
+
+        k_values = []
+        p = 1
+        while p < n_runs:
+            k_values.append(p)
+            p *= 2
+        if not k_values or k_values[-1] != n_runs:
+            k_values.append(n_runs)
+
+        pak: dict[int, float] = {}
+        for k in k_values:
+            row_pass_at_k: list[float] = []
+            for row_runs in rows.values():
+                c = sum(
+                    1 for r in row_runs if (r.get("reward") or 0.0) >= pass_threshold
+                )
+                n = max(len(row_runs), n_runs)
+                if n > 0 and k <= n:
+                    row_pass_at_k.append(pass_at_k(n, c, k))
+            if row_pass_at_k:
+                pak[k] = sum(row_pass_at_k) / len(row_pass_at_k)
+        if pak:
+            reward_stats["pass_at_k"] = pak
 
     return BuildSummaryResult(
-        eval_fns=eval_summaries,
-        total_runs=len(runs),
-        total_tokens=sum(r.get("tokens", 0) for r in runs),
-        total_duration_ms=sum(r.get("duration_ms", 0.0) for r in runs),
+        kind="graded",
+        total_runs=total_runs,
+        passed=passed,
+        failed=total_runs - passed,
+        total_tokens=total_tokens,
+        total_duration_ms=total_duration_ms,
+        reward_stats=reward_stats,
     )
 
 
@@ -749,7 +735,7 @@ def build_summary(
 # JSON file cache backend
 # ============================================================
 
-_CACHE_VERSION = 1
+_CACHE_VERSION = 2
 
 
 class _FileLock:
@@ -912,6 +898,30 @@ class JsonFileCacheBackend:
                 f"Cache file created by a newer version of osmosis (v{file_version}). "
                 f"Upgrade osmosis or use --fresh."
             )
+
+        if file_version < _CACHE_VERSION:
+            logger.warning(
+                "Cache file uses older schema (v%d, current v%d). Starting fresh.",
+                file_version,
+                _CACHE_VERSION,
+            )
+            _backup_corrupt_cache(cache_path)
+            unix_ts = int(time.time())
+            cache_path = cache_dir / f"{unix_ts}_{task_id}.json"
+            now_iso = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+            cache_data = {
+                "version": _CACHE_VERSION,
+                "task_id": task_id,
+                "config_hash": config_hash,
+                "status": "in_progress",
+                "created_at": now_iso,
+                "updated_at": now_iso,
+                "config": config,
+                "runs": [],
+                "summary": None,
+            }
+            atomic_write_json(cache_path, cache_data)
+            return cache_path, cache_data, set()
 
         status = cache_data.get("status", "in_progress")
 

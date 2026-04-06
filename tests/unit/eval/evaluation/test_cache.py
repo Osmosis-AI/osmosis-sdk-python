@@ -93,93 +93,101 @@ class TestDeterministicJson:
 
 
 class TestComputeTaskId:
-    BASE_CONFIG = {
-        "model": "gpt-4",
-        "module": "my_agent:Agent",
-        "dataset": "data.jsonl",
-        "eval_fns": ["eval_mod:fn1", "eval_mod:fn2"],
-        "n_runs": 3,
-        "max_turns": 10,
-        "pass_threshold": 0.5,
+    BASE_KWARGS = {
+        "config": {
+            "model": "gpt-4",
+            "module": "my_agent:Agent",
+            "dataset": "data.jsonl",
+            "eval_fns": ["eval_mod:fn1", "eval_mod:fn2"],
+            "n_runs": 3,
+            "max_turns": 10,
+            "pass_threshold": 0.5,
+        },
+        "workflow_fingerprint": "wf_abc123",
+        "grader_fingerprint": "gr_def456",
+        "dataset_fingerprint": "ds_ghi789",
     }
 
     def test_deterministic(self) -> None:
         """Same config produces same task_id."""
-        tid1, hash1 = compute_task_id(**self.BASE_CONFIG)
-        tid2, hash2 = compute_task_id(**self.BASE_CONFIG)
-        assert tid1 == tid2
-        assert hash1 == hash2
-
-    def test_none_filtered(self) -> None:
-        """None fields don't affect hash — explicitly passing None for optional
-        fields should produce the same result as omitting them."""
-        tid1, hash1 = compute_task_id(**self.BASE_CONFIG)
-        tid2, hash2 = compute_task_id(
-            **self.BASE_CONFIG,
-            base_url=None,
-            baseline_model=None,
-            limit=None,
-            completion_params=None,
-            module_fingerprint=None,
-        )
+        tid1, hash1 = compute_task_id(**self.BASE_KWARGS)
+        tid2, hash2 = compute_task_id(**self.BASE_KWARGS)
         assert tid1 == tid2
         assert hash1 == hash2
 
     def test_different_config(self) -> None:
         """Changing any param changes task_id."""
-        tid_base, _ = compute_task_id(**self.BASE_CONFIG)
+        tid_base, _ = compute_task_id(**self.BASE_KWARGS)
 
-        # Change model
-        tid_diff, _ = compute_task_id(**{**self.BASE_CONFIG, "model": "gpt-3.5"})
+        # Change model in config
+        changed = {
+            **self.BASE_KWARGS,
+            "config": {**self.BASE_KWARGS["config"], "model": "gpt-3.5"},
+        }
+        tid_diff, _ = compute_task_id(**changed)
         assert tid_diff != tid_base
 
-        # Change n_runs
-        tid_diff2, _ = compute_task_id(**{**self.BASE_CONFIG, "n_runs": 5})
+        # Change n_runs in config
+        changed2 = {
+            **self.BASE_KWARGS,
+            "config": {**self.BASE_KWARGS["config"], "n_runs": 5},
+        }
+        tid_diff2, _ = compute_task_id(**changed2)
         assert tid_diff2 != tid_base
 
-        # Change pass_threshold
-        tid_diff3, _ = compute_task_id(**{**self.BASE_CONFIG, "pass_threshold": 0.9})
+        # Change pass_threshold in config
+        changed3 = {
+            **self.BASE_KWARGS,
+            "config": {**self.BASE_KWARGS["config"], "pass_threshold": 0.9},
+        }
+        tid_diff3, _ = compute_task_id(**changed3)
         assert tid_diff3 != tid_base
-
-    def test_eval_fns_sorted(self) -> None:
-        """eval_fns order doesn't matter."""
-        tid1, hash1 = compute_task_id(
-            **{**self.BASE_CONFIG, "eval_fns": ["b:fn", "a:fn"]}
-        )
-        tid2, hash2 = compute_task_id(
-            **{**self.BASE_CONFIG, "eval_fns": ["a:fn", "b:fn"]}
-        )
-        assert tid1 == tid2
-        assert hash1 == hash2
 
     def test_length(self) -> None:
         """task_id is 12 chars, config_hash is 32 chars."""
-        tid, config_hash = compute_task_id(**self.BASE_CONFIG)
+        tid, config_hash = compute_task_id(**self.BASE_KWARGS)
         assert len(tid) == 12
         assert len(config_hash) == 32
 
     def test_task_id_is_prefix_of_config_hash(self) -> None:
         """task_id should be the first 12 chars of config_hash."""
-        tid, config_hash = compute_task_id(**self.BASE_CONFIG)
+        tid, config_hash = compute_task_id(**self.BASE_KWARGS)
         assert config_hash.startswith(tid)
 
-    def test_with_optional_fields(self) -> None:
-        """Including optional fields changes the hash."""
-        tid_base, _ = compute_task_id(**self.BASE_CONFIG)
-        tid_with_url, _ = compute_task_id(
-            **self.BASE_CONFIG,
-            base_url="https://api.example.com",
+    def test_workflow_fingerprint_affects_hash(self) -> None:
+        """Changing workflow_fingerprint changes task_id."""
+        tid_base, _ = compute_task_id(**self.BASE_KWARGS)
+        tid_diff, _ = compute_task_id(
+            **{**self.BASE_KWARGS, "workflow_fingerprint": "different"}
         )
-        assert tid_with_url != tid_base
+        assert tid_diff != tid_base
 
-    def test_completion_params_affect_hash(self) -> None:
-        """completion_params should be included in the hash."""
-        tid_base, _ = compute_task_id(**self.BASE_CONFIG)
-        tid_with_params, _ = compute_task_id(
-            **self.BASE_CONFIG,
-            completion_params={"temperature": 0.7},
+    def test_grader_fingerprint_affects_hash(self) -> None:
+        """Changing grader_fingerprint changes task_id."""
+        tid_base, _ = compute_task_id(**self.BASE_KWARGS)
+        tid_diff, _ = compute_task_id(
+            **{**self.BASE_KWARGS, "grader_fingerprint": "different"}
         )
-        assert tid_with_params != tid_base
+        assert tid_diff != tid_base
+
+    def test_dataset_fingerprint_affects_hash(self) -> None:
+        """Changing dataset_fingerprint changes task_id."""
+        tid_base, _ = compute_task_id(**self.BASE_KWARGS)
+        tid_diff, _ = compute_task_id(
+            **{**self.BASE_KWARGS, "dataset_fingerprint": "different"}
+        )
+        assert tid_diff != tid_base
+
+    def test_none_grader_included_in_hash(self) -> None:
+        """None grader_fingerprint is part of the hash identity (not filtered)."""
+        tid_none, hash_none = compute_task_id(
+            **{**self.BASE_KWARGS, "grader_fingerprint": None}
+        )
+        tid_str, hash_str = compute_task_id(
+            **{**self.BASE_KWARGS, "grader_fingerprint": "some_grader"}
+        )
+        assert tid_none != tid_str
+        assert hash_none != hash_str
 
 
 # ============================================================
@@ -446,7 +454,7 @@ class TestComputeEvalFnsFingerprint:
         paths_one = ["osmosis_ai.eval.evaluation.cache:fn1"]
         paths_two = [
             "osmosis_ai.eval.evaluation.cache:fn1",
-            "osmosis_ai.eval.evaluation.eval_fn:fn2",
+            "osmosis_ai.eval.evaluation.report:fn2",
         ]
         h1 = compute_eval_fns_fingerprint(paths_one)
         h2 = compute_eval_fns_fingerprint(paths_two)
@@ -458,10 +466,10 @@ class TestComputeEvalFnsFingerprint:
         """Eval fn order doesn't affect the fingerprint (sorted internally)."""
         paths_a = [
             "osmosis_ai.eval.evaluation.cache:fn1",
-            "osmosis_ai.eval.evaluation.eval_fn:fn2",
+            "osmosis_ai.eval.evaluation.report:fn2",
         ]
         paths_b = [
-            "osmosis_ai.eval.evaluation.eval_fn:fn2",
+            "osmosis_ai.eval.evaluation.report:fn2",
             "osmosis_ai.eval.evaluation.cache:fn1",
         ]
         h1 = compute_eval_fns_fingerprint(paths_a)
@@ -507,7 +515,7 @@ class TestGetCacheRoot:
 
 class TestSanitizePathPart:
     def test_slash_to_dash(self):
-        assert sanitize_path_part("openai/gpt-4o") == "openai-gpt-4o"
+        assert sanitize_path_part("openai/gpt-5.4") == "openai-gpt-5.4"
 
     def test_cjk_preserved(self):
         assert sanitize_path_part("中文模型") == "中文模型"
@@ -799,12 +807,12 @@ class TestBackupCorruptCache:
 
 class TestBuildSummary:
     def test_basic_summary(self):
-        """Computes mean, median, std, min, max, p25, p75 correctly."""
+        """Computes mean, median, std, min, max correctly."""
         runs = [
             {
                 "row_index": 0,
                 "run_index": 0,
-                "scores": {"fn1": 0.8},
+                "reward": 0.8,
                 "success": True,
                 "tokens": 100,
                 "duration_ms": 50.0,
@@ -812,7 +820,7 @@ class TestBuildSummary:
             {
                 "row_index": 1,
                 "run_index": 0,
-                "scores": {"fn1": 0.6},
+                "reward": 0.6,
                 "success": True,
                 "tokens": 120,
                 "duration_ms": 60.0,
@@ -820,78 +828,72 @@ class TestBuildSummary:
             {
                 "row_index": 2,
                 "run_index": 0,
-                "scores": {"fn1": 1.0},
+                "reward": 1.0,
                 "success": True,
                 "tokens": 80,
                 "duration_ms": 40.0,
             },
         ]
-        result = build_summary(runs, ["fn1"], pass_threshold=0.5, n_runs=1)
-        assert "eval_fns" in result
-        fn1 = result["eval_fns"]["fn1"]
-        assert abs(fn1["mean"] - 0.8) < 1e-9
-        assert fn1["median"] == 0.8
-        assert fn1["min"] == 0.6
-        assert fn1["max"] == 1.0
-        # inclusive quantile method: Q1=0.7, Q3=0.9 for [0.6, 0.8, 1.0]
-        assert fn1["p25"] == 0.7
-        assert fn1["p75"] == 0.9
+        result = build_summary(runs, pass_threshold=0.5, n_runs=1, has_grader=True)
+        assert result["kind"] == "graded"
+        stats = result["reward_stats"]
+        assert abs(stats["mean"] - 0.8) < 1e-9
+        assert stats["median"] == 0.8
+        assert stats["min"] == 0.6
+        assert stats["max"] == 1.0
         assert result["total_runs"] == 3
         assert result["total_tokens"] == 300
         assert result["total_duration_ms"] == 150.0
 
     def test_empty_runs(self):
-        """Empty runs list produces zero summary."""
-        result = build_summary([], ["fn1"], pass_threshold=0.5, n_runs=1)
-        fn1 = result["eval_fns"]["fn1"]
-        assert fn1["mean"] == 0.0
-        assert fn1["median"] == 0.0
-        assert fn1["p25"] == 0.0
-        assert fn1["p75"] == 0.0
+        """Empty runs list produces graded summary with no reward_stats."""
+        result = build_summary([], pass_threshold=0.5, n_runs=1, has_grader=True)
+        assert result["kind"] == "graded"
         assert result["total_runs"] == 0
+        assert result["passed"] == 0
+        assert result["failed"] == 0
+        assert result.get("reward_stats") is None
 
-    def test_single_run_percentiles(self):
-        """Single run: median, p25, p75 all equal the single score."""
+    def test_single_run(self):
+        """Single run: median equals the single reward."""
         runs = [
             {
                 "row_index": 0,
                 "run_index": 0,
-                "scores": {"fn1": 0.7},
+                "reward": 0.7,
                 "success": True,
                 "tokens": 50,
                 "duration_ms": 25.0,
             },
         ]
-        result = build_summary(runs, ["fn1"], pass_threshold=0.5, n_runs=1)
-        fn1 = result["eval_fns"]["fn1"]
-        assert fn1["median"] == 0.7
-        assert fn1["p25"] == 0.7
-        assert fn1["p75"] == 0.7
+        result = build_summary(runs, pass_threshold=0.5, n_runs=1, has_grader=True)
+        stats = result["reward_stats"]
+        assert stats["median"] == 0.7
 
     def test_skewed_scores(self):
         """With skewed distribution, median differs from mean."""
         runs = [
-            {"row_index": i, "run_index": 0, "scores": {"fn1": 1.0}, "success": True}
+            {"row_index": i, "run_index": 0, "reward": 1.0, "success": True}
             for i in range(9)
         ] + [
-            {"row_index": 9, "run_index": 0, "scores": {"fn1": 0.0}, "success": True},
+            {"row_index": 9, "run_index": 0, "reward": 0.0, "success": True},
         ]
-        result = build_summary(runs, ["fn1"], pass_threshold=0.5, n_runs=1)
-        fn1 = result["eval_fns"]["fn1"]
-        assert fn1["mean"] == pytest.approx(0.9)
-        assert fn1["median"] == 1.0
-        assert fn1["median"] != fn1["mean"]
+        result = build_summary(runs, pass_threshold=0.5, n_runs=1, has_grader=True)
+        stats = result["reward_stats"]
+        assert stats["mean"] == pytest.approx(0.9)
+        assert stats["median"] == 1.0
+        assert stats["median"] != stats["mean"]
 
     def test_pass_at_k(self):
         """pass@k is computed when n_runs > 1 using power-of-2 + N sequence."""
         runs = [
-            {"row_index": 0, "run_index": 0, "scores": {"fn1": 1.0}, "success": True},
-            {"row_index": 0, "run_index": 1, "scores": {"fn1": 0.0}, "success": False},
-            {"row_index": 0, "run_index": 2, "scores": {"fn1": 1.0}, "success": True},
+            {"row_index": 0, "run_index": 0, "reward": 1.0, "success": True},
+            {"row_index": 0, "run_index": 1, "reward": 0.0, "success": False},
+            {"row_index": 0, "run_index": 2, "reward": 1.0, "success": True},
         ]
-        result = build_summary(runs, ["fn1"], pass_threshold=0.5, n_runs=3)
-        fn1 = result["eval_fns"]["fn1"]
-        pak = fn1.get("pass_at_k", {})
+        result = build_summary(runs, pass_threshold=0.5, n_runs=3, has_grader=True)
+        stats = result["reward_stats"]
+        pak = stats.get("pass_at_k", {})
         # n_runs=3 → k_values = [1, 2, 3]
         assert 1 in pak
         assert 2 in pak
@@ -902,15 +904,15 @@ class TestBuildSummary:
     def test_pass_at_k_with_fewer_passes_than_k(self):
         """pass@k uses the combinatorial estimator when c < k."""
         runs = [
-            {"row_index": 0, "run_index": 0, "scores": {"fn1": 1.0}, "success": True},
-            {"row_index": 0, "run_index": 1, "scores": {"fn1": 1.0}, "success": True},
-            {"row_index": 0, "run_index": 2, "scores": {"fn1": 0.0}, "success": False},
-            {"row_index": 0, "run_index": 3, "scores": {"fn1": 0.0}, "success": False},
-            {"row_index": 0, "run_index": 4, "scores": {"fn1": 0.0}, "success": False},
+            {"row_index": 0, "run_index": 0, "reward": 1.0, "success": True},
+            {"row_index": 0, "run_index": 1, "reward": 1.0, "success": True},
+            {"row_index": 0, "run_index": 2, "reward": 0.0, "success": False},
+            {"row_index": 0, "run_index": 3, "reward": 0.0, "success": False},
+            {"row_index": 0, "run_index": 4, "reward": 0.0, "success": False},
         ]
-        result = build_summary(runs, ["fn1"], pass_threshold=0.5, n_runs=5)
-        fn1 = result["eval_fns"]["fn1"]
-        pak = fn1.get("pass_at_k", {})
+        result = build_summary(runs, pass_threshold=0.5, n_runs=5, has_grader=True)
+        stats = result["reward_stats"]
+        pak = stats.get("pass_at_k", {})
 
         # n_runs=5 → k_values = [1, 2, 4, 5]
         assert 1 in pak
@@ -923,21 +925,31 @@ class TestBuildSummary:
         # n=5, c=2, k=2 => 1 - C(3,2)/C(5,2) = 1 - 3/10 = 0.7
         assert pak[2] == pytest.approx(0.7)
 
-    def test_multiple_eval_fns(self):
-        """Summary computed for each eval fn independently."""
+    def test_smoke_mode(self):
+        """Smoke mode summary without grader."""
         runs = [
             {
                 "row_index": 0,
                 "run_index": 0,
-                "scores": {"fn1": 1.0, "fn2": 0.5},
+                "reward": None,
                 "success": True,
                 "tokens": 10,
                 "duration_ms": 5.0,
             },
+            {
+                "row_index": 1,
+                "run_index": 0,
+                "reward": None,
+                "success": False,
+                "tokens": 10,
+                "duration_ms": 5.0,
+            },
         ]
-        result = build_summary(runs, ["fn1", "fn2"], pass_threshold=0.5, n_runs=1)
-        assert result["eval_fns"]["fn1"]["mean"] == 1.0
-        assert result["eval_fns"]["fn2"]["mean"] == 0.5
+        result = build_summary(runs, pass_threshold=0.5, n_runs=1, has_grader=False)
+        assert result["kind"] == "smoke"
+        assert result["passed"] == 1
+        assert result["failed"] == 1
+        assert result.get("reward_stats") is None
 
 
 # ============================================================
@@ -1579,3 +1591,203 @@ class TestCacheRm:
         with patch("builtins.input", side_effect=EOFError):
             ret = cmd._run_cache_rm(rm_all=True)
         assert ret == 130
+
+
+# ============================================================
+# V2 schema tests
+# ============================================================
+
+
+def test_build_summary_v2_reward_stats():
+    """build_summary computes reward stats from per-run reward field."""
+    runs = [
+        {
+            "row_index": 0,
+            "run_index": 0,
+            "reward": 0.8,
+            "tokens": 100,
+            "duration_ms": 500,
+        },
+        {
+            "row_index": 1,
+            "run_index": 0,
+            "reward": 0.6,
+            "tokens": 150,
+            "duration_ms": 600,
+        },
+        {
+            "row_index": 2,
+            "run_index": 0,
+            "reward": 1.0,
+            "tokens": 80,
+            "duration_ms": 400,
+        },
+    ]
+    summary = build_summary(runs, pass_threshold=0.8, n_runs=1, has_grader=True)
+    assert summary["kind"] == "graded"
+    assert summary["total_runs"] == 3
+    stats = summary["reward_stats"]
+    assert abs(stats["mean"] - 0.8) < 0.01
+    assert stats["min"] == 0.6
+    assert stats["max"] == 1.0
+
+
+def test_build_summary_v2_smoke_mode():
+    """Runs with no reward and no grader produce smoke-mode summary."""
+    runs = [
+        {
+            "row_index": 0,
+            "run_index": 0,
+            "reward": None,
+            "success": True,
+            "tokens": 100,
+            "duration_ms": 500,
+        },
+        {
+            "row_index": 1,
+            "run_index": 0,
+            "reward": None,
+            "success": False,
+            "tokens": 0,
+            "duration_ms": 200,
+        },
+    ]
+    summary = build_summary(runs, pass_threshold=1.0, n_runs=1, has_grader=False)
+    assert summary["kind"] == "smoke"
+    assert summary["total_runs"] == 2
+    assert summary["passed"] == 1
+    assert summary["failed"] == 1
+    assert summary.get("reward_stats") is None
+
+
+def test_build_summary_v2_grader_all_failed():
+    """Grader configured but all runs failed -> kind='graded', not 'smoke'."""
+    runs = [
+        {
+            "row_index": 0,
+            "run_index": 0,
+            "reward": None,
+            "success": False,
+            "tokens": 50,
+            "duration_ms": 300,
+        },
+        {
+            "row_index": 1,
+            "run_index": 0,
+            "reward": None,
+            "success": False,
+            "tokens": 40,
+            "duration_ms": 200,
+        },
+    ]
+    summary = build_summary(runs, pass_threshold=1.0, n_runs=1, has_grader=True)
+    assert summary["kind"] == "graded"
+    assert summary["passed"] == 0
+    assert summary["failed"] == 2
+    assert summary.get("reward_stats") is None
+
+
+def test_cache_version_2_rejects_v1():
+    """v2 cache rejects v1 cache files."""
+    from osmosis_ai.eval.evaluation.cache import _CACHE_VERSION
+
+    assert _CACHE_VERSION == 2
+
+
+# ============================================================
+# V2 compute_task_id tests (TOML config signature)
+# ============================================================
+
+
+def test_compute_task_id_changes_with_config():
+    """Different EvalConfig fields produce different task IDs."""
+    from osmosis_ai.eval.evaluation.cache import compute_task_id
+
+    tid1, hash1 = compute_task_id(
+        config={"llm_model": "openai/gpt-5.4", "runs_n": 1, "runs_batch_size": 1},
+        workflow_fingerprint="abc123",
+        grader_fingerprint=None,
+        dataset_fingerprint="ds_hash",
+    )
+    tid2, hash2 = compute_task_id(
+        config={"llm_model": "openai/gpt-5.4", "runs_n": 4, "runs_batch_size": 1},
+        workflow_fingerprint="abc123",
+        grader_fingerprint=None,
+        dataset_fingerprint="ds_hash",
+    )
+    assert tid1 != tid2
+    assert hash1 != hash2
+
+
+def test_compute_task_id_changes_with_grader_code():
+    """Grader code change invalidates cache."""
+    from osmosis_ai.eval.evaluation.cache import compute_task_id
+
+    tid1, hash1 = compute_task_id(
+        config={"llm_model": "openai/gpt-5.4"},
+        workflow_fingerprint="abc123",
+        grader_fingerprint="grader_v1",
+        dataset_fingerprint="ds_hash",
+    )
+    tid2, hash2 = compute_task_id(
+        config={"llm_model": "openai/gpt-5.4"},
+        workflow_fingerprint="abc123",
+        grader_fingerprint="grader_v2",
+        dataset_fingerprint="ds_hash",
+    )
+    assert tid1 != tid2
+    assert hash1 != hash2
+
+
+def test_compute_task_id_stable():
+    """Same inputs produce same (task_id, config_hash) tuple."""
+    from osmosis_ai.eval.evaluation.cache import compute_task_id
+
+    kwargs = dict(
+        config={"llm_model": "openai/gpt-5.4"},
+        workflow_fingerprint="abc123",
+        grader_fingerprint=None,
+        dataset_fingerprint="ds_hash",
+    )
+    assert compute_task_id(**kwargs) == compute_task_id(**kwargs)
+
+
+def test_compute_task_id_is_prefix_of_config_hash():
+    """task_id is the first 12 chars of config_hash."""
+    from osmosis_ai.eval.evaluation.cache import compute_task_id
+
+    tid, chash = compute_task_id(
+        config={"llm_model": "openai/gpt-5.4"},
+        workflow_fingerprint="abc123",
+        grader_fingerprint=None,
+        dataset_fingerprint="ds_hash",
+    )
+    assert tid == chash[:12]
+
+
+def test_compute_task_id_changes_with_offset_limit():
+    """Different offset/limit produce different task IDs."""
+    from osmosis_ai.eval.evaluation.cache import compute_task_id
+
+    base = {"llm_model": "openai/gpt-5.4", "runs_n": 1}
+
+    tid1, _ = compute_task_id(
+        config={**base, "offset": 0, "limit": 10},
+        workflow_fingerprint="abc",
+        grader_fingerprint=None,
+        dataset_fingerprint="ds",
+    )
+    tid2, _ = compute_task_id(
+        config={**base, "offset": 0, "limit": 50},
+        workflow_fingerprint="abc",
+        grader_fingerprint=None,
+        dataset_fingerprint="ds",
+    )
+    tid3, _ = compute_task_id(
+        config={**base, "offset": 10, "limit": 10},
+        workflow_fingerprint="abc",
+        grader_fingerprint=None,
+        dataset_fingerprint="ds",
+    )
+    assert tid1 != tid2  # different limit
+    assert tid1 != tid3  # different offset

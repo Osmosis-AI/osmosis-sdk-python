@@ -1,8 +1,8 @@
-"""Evaluation orchestrator sitting between CLI and EvalRunner.
+"""Evaluation orchestrator sitting between CLI and RolloutDriver.
 
 Manages cache lifecycle, signal handling, dataset integrity checking,
 periodic flushing, and progress reporting while delegating actual
-agent execution to EvalRunner.
+agent execution to RolloutDriver instances.
 """
 
 from __future__ import annotations
@@ -26,7 +26,16 @@ from osmosis_ai.eval.evaluation.cache import (
     DatasetStatus,
     build_summary,
 )
-from osmosis_ai.eval.evaluation.runner import EvalRunner, EvalRunResult
+from osmosis_ai.rollout_v2.driver import RolloutDriver
+from osmosis_ai.rollout_v2.types import RolloutSample, RolloutStatus
+
+
+def _extract_mean_reward(samples: dict[str, RolloutSample]) -> float | None:
+    """Compute the mean reward from a samples dict, ignoring None rewards."""
+    rewards = [s.reward for s in samples.values() if s.reward is not None]
+    if not rewards:
+        return None
+    return sum(rewards) / len(rewards)
 
 
 @dataclass
@@ -61,7 +70,7 @@ class OrchestratorResult:
 class EvalOrchestrator:
     """Orchestrates an evaluation run with caching, resumption, and signal handling.
 
-    Sits between the CLI layer and :class:`EvalRunner`, managing:
+    Sits between the CLI layer and :class:`RolloutDriver`, managing:
     - Cache acquisition and lock management
     - Work item construction (with resume support)
     - Signal-based graceful interruption
@@ -72,12 +81,11 @@ class EvalOrchestrator:
 
     def __init__(
         self,
-        runner: EvalRunner,
+        drivers: list[tuple[str | None, RolloutDriver]],
         cache_backend: CacheBackend,
         cache_config: CacheConfig,
         rows: list[DatasetRow],
         n_runs: int = 1,
-        max_turns: int = 10,
         pass_threshold: float = 1.0,
         batch_size: int = 1,
         log_samples: bool = False,
@@ -86,15 +94,15 @@ class EvalOrchestrator:
         dataset_path: Path | None = None,
         dataset_fingerprint: str | None = None,
         start_index: int = 0,
-        model_tags: list[str | None] | None = None,
-        on_progress: Callable[[int, int, EvalRunResult], None] | None = None,
+        has_grader: bool = False,
+        on_progress: Callable[[int, int, dict], None] | None = None,
     ):
-        self.runner = runner
+        self.drivers = drivers
+        self.model_tags: list[str | None] = [tag for tag, _ in self.drivers]
         self.cache_backend = cache_backend
         self.cache_config = cache_config
         self.rows = rows
         self.n_runs = n_runs
-        self.max_turns = max_turns
         self.pass_threshold = pass_threshold
         self.batch_size = batch_size
         self.log_samples = log_samples
@@ -103,9 +111,7 @@ class EvalOrchestrator:
         self.dataset_path = dataset_path
         self.dataset_fingerprint = dataset_fingerprint
         self.start_index = start_index
-        self.model_tags: list[str | None] = (
-            model_tags if model_tags is not None else [None]
-        )
+        self.has_grader = has_grader
         self.on_progress = on_progress
 
         # Runtime state (set during run())
@@ -124,7 +130,7 @@ class EvalOrchestrator:
             An :class:`OrchestratorResult` describing the outcome.
         """
         cfg = self.cache_config
-        total_expected = len(self.rows) * self.n_runs * len(self.model_tags)
+        total_expected = len(self.rows) * self.n_runs * len(self.drivers)
 
         lock = self.cache_backend.acquire_lock(cfg.task_id, cfg.model, cfg.dataset_path)
         try:
@@ -206,9 +212,11 @@ class EvalOrchestrator:
                     all_runs = disk_data.get("runs", [])
                 except (ValueError, OSError):
                     all_runs = prior_runs_snapshot
-                eval_fn_names = [fn.name for fn in self.runner.eval_fns]
                 summary = build_summary(
-                    all_runs, eval_fn_names, self.pass_threshold, self.n_runs
+                    all_runs,
+                    self.pass_threshold,
+                    self.n_runs,
+                    has_grader=self.has_grader,
                 )
                 cache_data["runs"] = all_runs
                 cache_data["status"] = "completed"
@@ -283,9 +291,11 @@ class EvalOrchestrator:
                     all_runs = disk_data.get("runs", [])
                 except (ValueError, OSError):
                     all_runs = prior_runs_snapshot + cache_data.get("runs", [])
-                eval_fn_names = [fn.name for fn in self.runner.eval_fns]
                 summary = build_summary(
-                    all_runs, eval_fn_names, self.pass_threshold, self.n_runs
+                    all_runs,
+                    self.pass_threshold,
+                    self.n_runs,
+                    has_grader=self.has_grader,
                 )
                 cache_data["runs"] = all_runs
                 cache_data["status"] = "completed"
@@ -308,33 +318,72 @@ class EvalOrchestrator:
 
     def _build_work_items(
         self, completed_runs: set[tuple[int, int, str | None]]
-    ) -> list[tuple[DatasetRow, int, int, str | None]]:
+    ) -> list[tuple[DatasetRow, int, int, str | None, RolloutDriver]]:
         """Build list of work items, skipping those already completed.
 
         Returns:
-            List of ``(row, row_index, run_index, model_tag)`` tuples.
+            List of ``(row, row_index, run_index, model_tag, driver)`` tuples.
         """
-        work_items: list[tuple[DatasetRow, int, int, str | None]] = []
+        items: list[tuple[DatasetRow, int, int, str | None, RolloutDriver]] = []
         for i, row in enumerate(self.rows):
             row_index = self.start_index + i
             for run_idx in range(self.n_runs):
-                for tag in self.model_tags:
+                for tag, driver in self.drivers:
                     if (row_index, run_idx, tag) not in completed_runs:
-                        work_items.append((row, row_index, run_idx, tag))
-        return work_items
+                        items.append((row, row_index, run_idx, tag, driver))
+        return items
+
+    async def _execute_one(
+        self,
+        row: DatasetRow,
+        row_index: int,
+        run_index: int,
+        model_tag: str | None,
+        driver: RolloutDriver,
+    ) -> dict[str, Any]:
+        """Execute a single rollout and return a result dict."""
+        from osmosis_ai.eval.common.dataset import dataset_row_to_prompt
+
+        rollout_id = f"eval-{row_index}-run-{run_index}"
+        if model_tag:
+            rollout_id += f"-{model_tag}"
+
+        outcome = await driver.run(
+            messages=dataset_row_to_prompt(row),
+            label=row.get("ground_truth"),
+            rollout_id=rollout_id,
+        )
+
+        reward = _extract_mean_reward(outcome.samples) if outcome.samples else None
+
+        return {
+            "row_index": row_index,
+            "run_index": run_index,
+            "success": outcome.status == RolloutStatus.SUCCESS,
+            "reward": reward,
+            "duration_ms": outcome.duration_ms,
+            "tokens": outcome.tokens,
+            "model_tag": model_tag,
+            "error": outcome.error,
+            "systemic_error": outcome.systemic_error,
+            "samples": outcome.samples,
+        }
 
     async def _run_all(
         self,
-        work_items: list[tuple[DatasetRow, int, int, str | None]],
+        work_items: list[tuple[DatasetRow, int, int, str | None, RolloutDriver]],
         cache_data: dict[str, Any],
         flush_ctl: CacheFlushController,
         dataset_checker: DatasetIntegrityChecker | None,
         prior_completed_count: int,
         total_expected: int,
     ) -> tuple[int, bool, bool, str | None]:
-        """Execute work items using runner.run_batch with batch_size control.
+        """Execute work items using driver.run() with semaphore-based concurrency.
 
-        Works for both sequential (batch_size=1) and concurrent execution.
+        Supports both sequential (batch_size<=1) and concurrent execution.
+        Includes zero-token fail-fast heuristic: stops after 2 consecutive
+        zero-token failures (sequential) or 2 consecutive all-zero-token
+        batches (concurrent).
 
         Returns:
             ``(current, interrupted, dataset_modified, stop_reason)``
@@ -343,80 +392,195 @@ class EvalOrchestrator:
         interrupted = False
         dataset_modified = False
         stop_reason: str | None = None
-        cursor = 0
 
-        while cursor < len(work_items):
-            if self._shutdown_event is not None and self._shutdown_event.is_set():
-                interrupted = True
-                break
+        # Compute effective batch size, respecting driver max_concurrency.
+        # Use the first driver's max_concurrency as representative.
+        _, first_driver = self.drivers[0]
+        driver_max = first_driver.max_concurrency
+        if driver_max > 0:
+            effective_batch = min(self.batch_size, driver_max)
+        else:
+            effective_batch = self.batch_size
 
-            if dataset_checker is not None:
-                ds_status = dataset_checker.maybe_check()
-                if ds_status != DatasetStatus.VALID:
-                    dataset_modified = True
-                    stop_reason = f"Dataset {ds_status.value}"
+        if effective_batch <= 1:
+            # ---------- Sequential path ----------
+            consecutive_zero_token = 0
+            for item in work_items:
+                if self._shutdown_event is not None and self._shutdown_event.is_set():
+                    interrupted = True
                     break
 
-            batch = work_items[cursor : cursor + self.batch_size]
+                if dataset_checker is not None:
+                    ds_status = dataset_checker.maybe_check()
+                    if ds_status != DatasetStatus.VALID:
+                        dataset_modified = True
+                        stop_reason = f"Dataset {ds_status.value}"
+                        break
 
-            batch_results, systemic_error = await self.runner.run_batch(
-                work_items=batch,
-                batch_size=self.batch_size,
-            )
+                row, row_index, run_idx, tag, driver = item
+                result_dict = await self._execute_one(
+                    row, row_index, run_idx, tag, driver
+                )
 
-            for i, result in enumerate(batch_results):
-                if result is None:
-                    continue
-                _row, row_index, run_idx, _tag = batch[i]
-                self._record_result(result, cache_data, row_index, run_idx)
+                self._record_result(result_dict, cache_data, row_index, run_idx)
                 current += 1
+                flush_ctl.maybe_flush(runs_completed=1)
 
                 if self.on_progress is not None:
                     self.on_progress(
-                        prior_completed_count + current, total_expected, result
+                        prior_completed_count + current, total_expected, result_dict
                     )
 
-            completed_in_batch = sum(1 for r in batch_results if r is not None)
-            flush_ctl.maybe_flush(runs_completed=completed_in_batch)
+                # Systemic error → stop immediately
+                if result_dict.get("systemic_error"):
+                    stop_reason = result_dict.get("error", "Systemic error")
+                    break
 
-            cursor += len(batch)
+                # Zero-token fail-fast heuristic
+                if result_dict.get("tokens", 0) == 0 and not result_dict["success"]:
+                    consecutive_zero_token += 1
+                    if consecutive_zero_token >= 2:
+                        stop_reason = (
+                            "Stopped after 2 consecutive zero-token failures. "
+                            "Check your LLM endpoint configuration."
+                        )
+                        break
+                else:
+                    consecutive_zero_token = 0
+        else:
+            # ---------- Concurrent path ----------
+            semaphore = asyncio.Semaphore(effective_batch)
+            cursor = 0
+            consecutive_zero_batches = 0
 
-            if systemic_error is not None:
-                stop_reason = systemic_error
-                break
+            while cursor < len(work_items):
+                if self._shutdown_event is not None and self._shutdown_event.is_set():
+                    interrupted = True
+                    break
+
+                if dataset_checker is not None:
+                    ds_status = dataset_checker.maybe_check()
+                    if ds_status != DatasetStatus.VALID:
+                        dataset_modified = True
+                        stop_reason = f"Dataset {ds_status.value}"
+                        break
+
+                batch = work_items[cursor : cursor + effective_batch]
+
+                batch_results: list[dict[str, Any] | None] = [None] * len(batch)
+
+                async def _run_with_semaphore(
+                    idx: int,
+                    row: DatasetRow,
+                    row_index: int,
+                    run_idx: int,
+                    tag: str | None,
+                    drv: RolloutDriver,
+                ) -> None:
+                    async with semaphore:
+                        result = await self._execute_one(
+                            row, row_index, run_idx, tag, drv
+                        )
+                        batch_results[idx] = result  # noqa: B023
+
+                tasks = [
+                    asyncio.create_task(
+                        _run_with_semaphore(idx, row, row_index, run_idx, tag, drv)
+                    )
+                    for idx, (row, row_index, run_idx, tag, drv) in enumerate(batch)
+                ]
+
+                try:
+                    await asyncio.gather(*tasks)
+                except Exception:
+                    for t in tasks:
+                        if not t.done():
+                            t.cancel()
+                    await asyncio.gather(*tasks, return_exceptions=True)
+                    raise
+
+                # Process batch results
+                batch_has_systemic = False
+                all_zero_tokens = True
+                completed_in_batch = 0
+
+                for result_dict in batch_results:
+                    if result_dict is None:
+                        continue
+                    row_index = result_dict["row_index"]
+                    run_idx = result_dict["run_index"]
+                    self._record_result(result_dict, cache_data, row_index, run_idx)
+                    current += 1
+                    completed_in_batch += 1
+
+                    if self.on_progress is not None:
+                        self.on_progress(
+                            prior_completed_count + current,
+                            total_expected,
+                            result_dict,
+                        )
+
+                    if result_dict.get("systemic_error"):
+                        batch_has_systemic = True
+                        stop_reason = result_dict.get("error", "Systemic error")
+
+                    # Track zero-token status for the batch
+                    if result_dict.get("tokens", 0) > 0 or result_dict["success"]:
+                        all_zero_tokens = False
+
+                flush_ctl.maybe_flush(runs_completed=completed_in_batch)
+                cursor += len(batch)
+
+                if batch_has_systemic:
+                    break
+
+                # Zero-token fail-fast at batch level
+                if all_zero_tokens and completed_in_batch > 0:
+                    consecutive_zero_batches += 1
+                    if consecutive_zero_batches >= 2:
+                        stop_reason = (
+                            "Stopped after 2 consecutive zero-token batches. "
+                            "Check your LLM endpoint configuration."
+                        )
+                        break
+                else:
+                    consecutive_zero_batches = 0
 
         return current, interrupted, dataset_modified, stop_reason
 
     def _record_result(
         self,
-        result: EvalRunResult,
+        result_dict: dict[str, Any],
         cache_data: dict[str, Any],
         row_index: int,
         run_index: int,
     ) -> None:
         """Record a single run result into cache data and optionally log samples."""
-        if (
-            self.log_samples
-            and result.messages is not None
-            and self._samples_path is not None
-        ):
-            sample = {
-                "row_index": row_index,
-                "run_index": run_index,
-                "model_tag": result.model_tag,
-                "messages": result.messages,
-            }
-            self.cache_backend.append_sample(self._samples_path, sample)
+        if self.log_samples and self._samples_path is not None:
+            samples = result_dict.get("samples", {})
+            if samples:
+                messages: list[Any] = []
+                for s in samples.values():
+                    msgs = s.messages if hasattr(s, "messages") else []
+                    messages.extend(msgs)
+                if messages:
+                    sample = {
+                        "row_index": row_index,
+                        "run_index": run_index,
+                        "model_tag": result_dict.get("model_tag"),
+                        "messages": messages,
+                    }
+                    self.cache_backend.append_sample(self._samples_path, sample)
 
         run_dict: dict[str, Any] = {
             "row_index": row_index,
             "run_index": run_index,
-            "success": result.success,
-            "scores": result.scores,
-            "duration_ms": result.duration_ms,
-            "tokens": result.tokens,
-            "model_tag": result.model_tag,
-            "error": result.error,
+            "success": result_dict["success"],
+            "reward": result_dict.get("reward"),
+            "duration_ms": result_dict.get("duration_ms", 0),
+            "tokens": result_dict.get("tokens", 0),
+            "model_tag": result_dict.get("model_tag"),
+            "error": result_dict.get("error"),
         }
 
         cache_data["runs"].append(run_dict)

@@ -99,58 +99,79 @@ def validate(
         raise typer.Exit(1)
 
 
-@app.command("test")
+@app.command("test", hidden=True)
 def test(
     module: str | None = typer.Option(
-        None, "-m", "--module", "--agent", help="Module path 'module:attribute'."
+        None, "-m", "--module", "--agent", help="Module path."
     ),
     dataset: str = typer.Option(..., "-d", "--dataset", help="Path to dataset file."),
-    model: str = typer.Option("gpt-5-mini", "--model", help="Model name to use."),
-    limit: int | None = typer.Option(
-        None, "--limit", help="Maximum number of rows to test."
-    ),
-    offset: int = typer.Option(0, "--offset", help="Number of rows to skip."),
-    api_key: str | None = typer.Option(
-        None, "--api-key", help="API key for the LLM provider."
-    ),
-    base_url: str | None = typer.Option(
-        None, "--base-url", help="Base URL for OpenAI-compatible APIs."
-    ),
-    max_turns: int = typer.Option(
-        10, "--max-turns", help="Maximum agent turns per row."
-    ),
-    max_tokens: int | None = typer.Option(
-        None, "--max-tokens", help="Maximum tokens per completion."
-    ),
-    temperature: float | None = typer.Option(
-        None, "--temperature", help="LLM temperature."
-    ),
-    debug: bool = typer.Option(False, "--debug", help="Enable debug output."),
-    output: str | None = typer.Option(
-        None, "-o", "--output", help="Output results to JSON file."
-    ),
-    quiet: bool = typer.Option(
-        False, "-q", "--quiet", help="Suppress progress output."
-    ),
+    model: str = typer.Option("gpt-5-mini", "--model", help="Model name."),
+    limit: int | None = typer.Option(None, "--limit", help="Max rows."),
+    offset: int = typer.Option(0, "--offset", help="Skip rows."),
+    api_key: str | None = typer.Option(None, "--api-key", help="API key."),
+    base_url: str | None = typer.Option(None, "--base-url", help="Base URL."),
+    debug: bool = typer.Option(False, "--debug", help="Debug output."),
+    quiet: bool = typer.Option(False, "-q", "--quiet", help="Suppress output."),
 ) -> None:
-    """Test an AgentWorkflow against a dataset."""
-    from osmosis_ai.eval.test_mode.cli import TestCommand
+    """Test an AgentWorkflow against a dataset (alias for eval run without grader)."""
+    import tempfile
+    from pathlib import Path
 
-    rc = TestCommand().run(
-        module=module,
-        dataset=dataset,
-        model=model,
-        limit=limit,
-        offset=offset,
-        api_key=api_key,
-        base_url=base_url,
-        max_turns=max_turns,
-        max_tokens=max_tokens,
-        temperature=temperature,
-        debug=debug,
-        output=output,
-        quiet=quiet,
-    )
+    from osmosis_ai.eval.evaluation.cli import EvalCommand
+
+    if not module:
+        from osmosis_ai.cli.console import Console
+
+        Console().print_error("Error: --module (-m) is required.")
+        raise typer.Exit(1)
+
+    # Normalize model for LiteLLM
+    llm_model = model if "/" in model else f"openai/{model}"
+
+    # Generate temporary TOML (no [grader] = smoke test mode)
+    toml_content = f'''[eval]
+module = "{module}"
+dataset = "{dataset}"
+
+[llm]
+model = "{llm_model}"
+'''
+    if base_url:
+        toml_content += f'base_url = "{base_url}"\n'
+
+    # --api-key → write to temp env var, reference in TOML via api_key_env
+    _tmp_env_key = "_OSMOSIS_EVAL_TMP_API_KEY"
+    if api_key:
+        import os
+
+        os.environ[_tmp_env_key] = api_key
+        toml_content += f'api_key_env = "{_tmp_env_key}"\n'
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".toml", delete=False) as f:
+        f.write(toml_content)
+        tmp_path = f.name
+
+    try:
+        cmd = EvalCommand()
+        rc = cmd.run(
+            config_path=tmp_path,
+            fresh=False,
+            retry_failed=False,
+            limit=limit,
+            offset=offset,
+            quiet=quiet,
+            debug=debug,
+            output_path=None,
+            batch_size_override=None,
+        )
+    finally:
+        Path(tmp_path).unlink(missing_ok=True)
+        # Clean up temp env var
+        if api_key:
+            import os
+
+            os.environ.pop(_tmp_env_key, None)
+
     if rc:
         raise typer.Exit(rc)
 

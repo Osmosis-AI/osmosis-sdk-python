@@ -204,7 +204,7 @@ Evaluate conversations against a rubric using LLM-as-judge:
 ```bash
 osmosis eval rubric -d data.jsonl \
   --rubric "Evaluate the assistant's helpfulness..." \
-  --model openai/gpt-4o
+  --model openai/gpt-5.4
 ```
 
 **Options:**
@@ -213,7 +213,7 @@ osmosis eval rubric -d data.jsonl \
 |---|---|
 | `-d`/`--data` | Path to JSONL file with conversations (required) |
 | `-r`/`--rubric` | Rubric text (inline) or `@file.txt` to read from file (required) |
-| `--model` | Judge model in LiteLLM format, e.g. `openai/gpt-4o` (required) |
+| `--model` | Judge model in LiteLLM format, e.g. `openai/gpt-5.4` (required) |
 | `-n`/`--number` | Number of evaluation runs per record |
 | `-o`/`--output` | Path to write evaluation results as JSON |
 | `--api-key` | API key for the judge model |

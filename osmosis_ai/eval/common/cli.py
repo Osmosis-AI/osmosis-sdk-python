@@ -11,36 +11,10 @@ from osmosis_ai.eval.common.dataset import DatasetReader
 from osmosis_ai.eval.common.errors import (
     DatasetParseError,
     DatasetValidationError,
-    ProviderError,
-    SystemicProviderError,
 )
-
-# Mapping of LiteLLM provider prefixes to their expected environment variables.
-_PROVIDER_ENV_KEYS: dict[str, str] = {
-    "openai": "OPENAI_API_KEY",
-    "anthropic": "ANTHROPIC_API_KEY",
-    "groq": "GROQ_API_KEY",
-    "mistral": "MISTRAL_API_KEY",
-    "cohere": "COHERE_API_KEY",
-    "together_ai": "TOGETHERAI_API_KEY",
-    "fireworks_ai": "FIREWORKS_API_KEY",
-    "deepseek": "DEEPSEEK_API_KEY",
-    "gemini": "GEMINI_API_KEY",
-    "xai": "XAI_API_KEY",
-    "openrouter": "OPENROUTER_API_KEY",
-    "perplexity": "PERPLEXITYAI_API_KEY",
-    "replicate": "REPLICATE_API_KEY",
-    "deepinfra": "DEEPINFRA_API_KEY",
-    "cerebras": "CEREBRAS_API_KEY",
-    "ai21": "AI21_API_KEY",
-    "sambanova": "SAMBANOVA_API_KEY",
-    "nvidia_nim": "NVIDIA_NIM_API_KEY",
-    "github": "GITHUB_API_KEY",
-}
 
 if TYPE_CHECKING:
     from osmosis_ai.eval.common.dataset import DatasetRow
-    from osmosis_ai.eval.common.llm_client import ExternalLLMClient
 
 
 def format_duration(ms: float) -> str:
@@ -159,160 +133,6 @@ def load_dataset_rows(
     return rows, None
 
 
-def _check_api_key(
-    model: str,
-    api_key: str | None,
-    base_url: str | None,
-) -> str | None:
-    """Return an error message if the required API key is missing, else None."""
-    if api_key or base_url:
-        return None
-
-    # LITELLM_API_KEY is a global fallback accepted by LiteLLM for any provider
-    if os.environ.get("LITELLM_API_KEY"):
-        return None
-
-    provider = model.split("/")[0].lower() if "/" in model else "openai"
-    env_var = _PROVIDER_ENV_KEYS.get(provider)
-    if env_var is None:
-        return None
-
-    if not os.environ.get(env_var):
-        return (
-            f"Missing API key for provider '{provider}'. "
-            f"Set {env_var} or LITELLM_API_KEY, or pass --api-key."
-        )
-    return None
-
-
-def _format_model_error(model: str, base_url: str | None, detail: str) -> str:
-    """Format a concise model validation error with actionable guidance."""
-    if base_url:
-        return (
-            f"Invalid model for --base-url. Received model='{model}'. Details: {detail}"
-        )
-    return (
-        "Invalid LiteLLM model format. Use 'provider/model' "
-        "(for example: openai/gpt-5-mini). "
-        f"Received model='{model}'. Details: {detail}"
-    )
-
-
-def _check_model(model: str, base_url: str | None) -> str | None:
-    """Return an error message if model format is invalid, else None."""
-    from osmosis_ai.eval.common.llm_client import _first_line
-
-    candidate = model.strip()
-    if not candidate:
-        return "Model cannot be empty. Pass a value with --model."
-
-    # When base_url is provided, any non-empty model name is valid.
-    # The ExternalLLMClient will route through openai/ provider internally.
-    if base_url:
-        return None
-
-    normalized_model = candidate if "/" in candidate else f"openai/{candidate}"
-    provider, model_name = normalized_model.split("/", 1)
-    if not provider.strip() or not model_name.strip():
-        return _format_model_error(
-            candidate, base_url, "missing provider or model name"
-        )
-
-    try:
-        import litellm
-    except ImportError:
-        # Dependency errors are handled by ExternalLLMClient initialization.
-        return None
-
-    # Prevent litellm from registering its buggy atexit cleanup handler
-    # before the first lazy-attribute access triggers __getattr__.
-    # We handle async client cleanup explicitly in ExternalLLMClient.close().
-    if hasattr(litellm, "_async_client_cleanup_registered"):
-        litellm._async_client_cleanup_registered = True
-
-    litellm.suppress_debug_info = True
-
-    try:
-        litellm.get_llm_provider(model=normalized_model, api_base=base_url)
-    except Exception as exc:
-        provider_message = getattr(exc, "message", str(exc))
-        normalized_message = provider_message.lower()
-        if (
-            "llm provider not provided" in normalized_message
-            or "pass in the llm provider you are trying to call" in normalized_message
-        ):
-            return _format_model_error(
-                candidate,
-                base_url,
-                _first_line(provider_message),
-            )
-        return (
-            "Invalid model configuration. "
-            f"Received model='{candidate}'. Details: {_first_line(provider_message)}"
-        )
-
-    return None
-
-
-def create_llm_client(
-    model: str,
-    api_key: str | None,
-    base_url: str | None,
-    quiet: bool,
-    console: Console,
-) -> tuple[ExternalLLMClient | None, str | None]:
-    """Initialize ExternalLLMClient with consistent messaging and errors."""
-    if error := _check_model(model, base_url):
-        return None, error
-
-    if error := _check_api_key(model, api_key, base_url):
-        return None, error
-
-    from osmosis_ai.eval.common.llm_client import ExternalLLMClient
-
-    if not quiet:
-        if base_url:
-            console.print(f"Connecting to endpoint: {base_url}")
-        else:
-            provider_name = model.split("/")[0].lower() if "/" in model else "openai"
-            console.print(f"Initializing provider: {provider_name}")
-
-    try:
-        llm_client = ExternalLLMClient(
-            model=model,
-            api_key=api_key,
-            api_base=base_url,
-        )
-    except ProviderError as e:
-        return None, str(e)
-
-    if not quiet:
-        model_name = getattr(llm_client, "display_name", model)
-        console.print(f"  Model: {model_name}")
-
-    return llm_client, None
-
-
-async def verify_llm_client(
-    llm_client: ExternalLLMClient,
-    quiet: bool,
-    console: Console,
-) -> str | None:
-    """Run a preflight check against the LLM provider.
-
-    Returns an error message string on failure, or None on success.
-    """
-    if not quiet:
-        console.print("Verifying provider connectivity...")
-
-    try:
-        await llm_client.preflight_check()
-    except SystemicProviderError as e:
-        return str(e)
-
-    return None
-
-
 def build_completion_params(
     temperature: float | None,
     max_tokens: int | None,
@@ -326,13 +146,47 @@ def build_completion_params(
     return params
 
 
+def _resolve_grader(
+    module_name: str,
+    explicit_grader: str | None = None,
+    explicit_config: str | None = None,
+) -> tuple[type | None, Any]:
+    """Resolve Grader from explicit path or auto-discover from workflow module.
+
+    Only called when [grader] is present in TOML. Returns (None, None) when
+    no grader is found.
+    """
+    import sys
+
+    from osmosis_ai.rollout_v2.grader import Grader
+    from osmosis_ai.rollout_v2.types import GraderConfig
+    from osmosis_ai.rollout_v2.utils.imports import resolve_object
+
+    if explicit_grader:
+        grader_cls = resolve_object(explicit_grader)
+        grader_config = resolve_object(explicit_config) if explicit_config else None
+        return grader_cls, grader_config
+
+    mod = sys.modules.get(module_name)
+    if mod is None:
+        return None, None
+
+    grader_cls = None
+    grader_config = None
+    for val in vars(mod).values():
+        if isinstance(val, type) and issubclass(val, Grader) and val is not Grader:
+            grader_cls = val
+        if isinstance(val, GraderConfig):
+            grader_config = val
+    return grader_cls, grader_config
+
+
 __all__ = [
+    "_resolve_grader",
     "build_completion_params",
-    "create_llm_client",
     "format_duration",
     "format_tokens",
     "load_dataset_rows",
     "load_workflow",
     "truncate_error",
-    "verify_llm_client",
 ]

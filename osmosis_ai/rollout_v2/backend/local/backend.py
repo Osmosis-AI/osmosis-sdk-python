@@ -54,6 +54,10 @@ class LocalBackend(ExecutionBackend):
         )
         self.limiter = ConcurrencyLimiter(max_concurrent=max_concurrent)
 
+    @property
+    def max_concurrency(self) -> int:
+        return self.limiter.max_concurrent or 0
+
     def health(self) -> dict[str, Any]:
         return {
             "status": "ok",

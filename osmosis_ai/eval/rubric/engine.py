@@ -73,9 +73,9 @@ def _parse_provider(model: str) -> str | None:
     infers from well-known model name patterns.
 
     Examples:
-        "openai/gpt-4o"             -> "openai"
+        "openai/gpt-5.4"             -> "openai"
         "anthropic/claude-sonnet-4-5-20250929" -> "anthropic"
-        "gpt-4o"                    -> "openai"
+        "gpt-5.4"                    -> "openai"
         "claude-3-haiku"            -> "anthropic"
         "unknown-model"             -> None
     """
@@ -102,9 +102,9 @@ def _to_litellm_model(model: str) -> str:
     the caller does not have to specify the provider explicitly.
 
     Examples:
-        "openai/gpt-4o"       -> "openai/gpt-4o"
+        "openai/gpt-5.4"       -> "openai/gpt-5.4"
         "anthropic/claude-3"  -> "anthropic/claude-3"
-        "gpt-4o"              -> "openai/gpt-4o"
+        "gpt-5.4"              -> "openai/gpt-5.4"
         "claude-3-haiku"      -> "claude-3-haiku"  (LiteLLM handles it)
     """
     if "/" in model:
@@ -536,7 +536,7 @@ async def evaluate_rubric(
     Args:
         solution_str: The candidate model output to be scored.
         rubric: Natural language description of the evaluation criteria.
-        model: LiteLLM model string, e.g. ``"openai/gpt-4o"``.
+        model: LiteLLM model string, e.g. ``"openai/gpt-5.4"``.
         ground_truth: Optional reference answer surfaced in the judging prompt.
         original_input: Optional original user instruction supplied to the model.
         metadata: Optional dict serialised and quoted in the prompt.

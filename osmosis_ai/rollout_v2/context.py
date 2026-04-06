@@ -29,6 +29,7 @@ class RolloutContext:
     api_key: str | None = None
     rollout_id: str = ""
     registered_agents: dict[str, Any] = field(default_factory=dict)
+    _token: Any = field(default=None, init=False, repr=False)
 
     def __post_init__(self):
         if not self.chat_completions_url:
@@ -39,11 +40,11 @@ class RolloutContext:
             self.rollout_id = os.environ.get(ROLLOUT_ID_ENV, "")
 
     def __enter__(self):
-        rollout_contextvar.set(self)
+        self._token = rollout_contextvar.set(self)
         return self
 
     def __exit__(self, *_):
-        rollout_contextvar.set(None)
+        rollout_contextvar.reset(self._token)
 
     def register_agent(self, sample_id: str, agent: Any) -> None:
         self.registered_agents[sample_id] = agent

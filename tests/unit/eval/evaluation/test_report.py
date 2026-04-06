@@ -1,63 +1,42 @@
-"""Tests for evaluation report formatting."""
+"""Tests for evaluation report utilities."""
 
 from __future__ import annotations
 
-from io import StringIO
-
-import osmosis_ai.eval.evaluation.report as report_module
-from osmosis_ai.cli.console import Console
-from osmosis_ai.eval.evaluation.runner import EvalEvalSummary, EvalResult
+from osmosis_ai.eval.evaluation.report import pass_at_k
 
 
-def _make_eval_result() -> EvalResult:
-    """Create a minimal eval result fixture for report formatting tests."""
-    return EvalResult(
-        rows=[],
-        eval_summaries={
-            "accuracy": EvalEvalSummary(
-                mean=0.75,
-                median=0.75,
-                std=0.2,
-                min=0.5,
-                max=1.0,
-                p25=0.625,
-                p75=0.875,
-                pass_at_k={1: 1.0},
-            )
-        },
-        total_rows=1,
-        total_runs=2,
-        total_tokens=123,
-        total_duration_ms=1500.0,
-        n_runs=2,
-        pass_threshold=0.5,
-    )
+def test_pass_at_k_all_correct() -> None:
+    """When all samples are correct, pass@k should be 1.0."""
+    assert pass_at_k(n=5, c=5, k=1) == 1.0
 
 
-def test_format_eval_report_renders_results() -> None:
-    """Report formatting should render eval results with Rich."""
-    output = StringIO()
-    console = Console(file=output, force_terminal=True)
-
-    report_module.format_eval_report(_make_eval_result(), console, model="test-model")
-
-    text = output.getvalue()
-    assert "Evaluation Results:" in text
-    assert "Eval Function" in text
-    assert "accuracy" in text
-    assert "Median" in text
-    assert "pass@1" in text
+def test_pass_at_k_none_correct() -> None:
+    """When no samples are correct, pass@k should be 0.0."""
+    assert pass_at_k(n=5, c=0, k=1) == 0.0
 
 
-def test_format_eval_report_non_tty() -> None:
-    """Report formatting should work in non-TTY mode (Rich strips ANSI)."""
-    output = StringIO()
-    console = Console(file=output, force_terminal=False)
+def test_pass_at_k_n_leq_k() -> None:
+    """When n <= k, pass@k should be 1.0 if any sample is correct."""
+    assert pass_at_k(n=3, c=1, k=3) == 1.0
+    assert pass_at_k(n=3, c=1, k=5) == 1.0
 
-    report_module.format_eval_report(_make_eval_result(), console, model="test-model")
 
-    text = output.getvalue()
-    assert "Evaluation Results:" in text
-    assert "accuracy" in text
-    # Non-TTY output should not contain ANSI escape codes
-    assert "\033[" not in text
+def test_pass_at_k_partial() -> None:
+    """Partial correctness should give a value between 0 and 1."""
+    result = pass_at_k(n=10, c=3, k=1)
+    assert 0.0 < result < 1.0
+
+
+def test_pass_at_k_high_k_few_failures() -> None:
+    """When k > n - c (more picks than failures), pass@k should be 1.0."""
+    # n=10, c=8, k=3 => n-c=2 < k=3, so pass@k = 1.0
+    assert pass_at_k(n=10, c=8, k=3) == 1.0
+
+
+def test_pass_at_k_exact_values() -> None:
+    """Verify exact computation for a known case.
+
+    n=4, c=2, k=2: 1 - C(2,2)/C(4,2) = 1 - 1/6 = 5/6
+    """
+    result = pass_at_k(n=4, c=2, k=2)
+    assert abs(result - 5 / 6) < 1e-10

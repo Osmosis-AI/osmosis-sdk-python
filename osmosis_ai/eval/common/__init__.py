@@ -2,7 +2,6 @@
 
 from osmosis_ai.eval.common.cli import (
     build_completion_params,
-    create_llm_client,
     format_duration,
     format_tokens,
     load_dataset_rows,
@@ -20,7 +19,6 @@ from osmosis_ai.eval.common.errors import (
     LocalExecutionError,
     ProviderError,
 )
-from osmosis_ai.eval.common.llm_client import ExternalLLMClient
 
 __all__ = [
     "REQUIRED_COLUMNS",
@@ -28,11 +26,9 @@ __all__ = [
     "DatasetReader",
     "DatasetRow",
     "DatasetValidationError",
-    "ExternalLLMClient",
     "LocalExecutionError",
     "ProviderError",
     "build_completion_params",
-    "create_llm_client",
     "dataset_row_to_prompt",
     "format_duration",
     "format_tokens",

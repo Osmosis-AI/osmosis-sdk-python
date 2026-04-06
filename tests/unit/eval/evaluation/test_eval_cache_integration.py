@@ -1,7 +1,7 @@
 """Integration tests for the eval cache system (Orchestrator + Cache).
 
 Uses REAL JsonFileCacheBackend with tmp_path for actual file I/O,
-while using MockRunner for the agent execution part.
+while using FakeDriver for the agent execution part.
 """
 
 from __future__ import annotations
@@ -12,7 +12,6 @@ from typing import Any
 
 import pytest
 
-from osmosis_ai.eval.common.errors import SystemicProviderError
 from osmosis_ai.eval.evaluation.cache import (
     _CACHE_VERSION,
     CacheConfig,
@@ -23,101 +22,55 @@ from osmosis_ai.eval.evaluation.orchestrator import (
     EvalOrchestrator,
     OrchestratorResult,
 )
-from osmosis_ai.eval.evaluation.runner import EvalRunResult
+from osmosis_ai.rollout_v2.driver import RolloutDriver, RolloutOutcome
+from osmosis_ai.rollout_v2.types import RolloutSample, RolloutStatus
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 
-class MockEvalFn:
-    """Lightweight stand-in for EvalFnWrapper (only .name is used by orchestrator)."""
-
-    def __init__(self, name: str = "test_eval") -> None:
-        self.name = name
-
-
-class MockRunner:
-    """Configurable mock for EvalRunner with real file I/O cache backend."""
+class FakeDriver(RolloutDriver):
+    """Configurable fake driver for integration tests."""
 
     def __init__(
         self,
-        results: list[EvalRunResult] | None = None,
         fail_after: int | None = None,
-        eval_fn_names: list[str] | None = None,
     ) -> None:
-        fn_names = eval_fn_names or ["test_eval"]
-        self.eval_fns = [MockEvalFn(n) for n in fn_names]
-        self.run_single_calls: list[tuple[dict, int, int, str | None]] = []
-        self.run_batch_calls: list[list[tuple[dict, int, int, str | None]]] = []
-        self.has_baseline = False
-        self._results = list(results) if results else []
-        self._fail_after = fail_after
         self._call_count = 0
+        self._fail_after = fail_after
 
-    async def run_single(
+    async def run(
         self,
-        row: dict,
-        row_index: int,
-        run_index: int,
-        max_turns: int = 10,
-        completion_params: dict | None = None,
-        model_tag: str | None = None,
-    ) -> EvalRunResult:
-        self.run_single_calls.append((row, row_index, run_index, model_tag))
+        messages: list[dict[str, Any]],
+        label: str | None = None,
+        rollout_id: str = "",
+    ) -> RolloutOutcome:
         self._call_count += 1
 
         if self._fail_after is not None and self._call_count > self._fail_after:
-            raise SystemicProviderError("Simulated provider failure")
+            return RolloutOutcome(
+                status=RolloutStatus.FAILURE,
+                error="Simulated provider failure",
+                systemic_error=True,
+                duration_ms=0.0,
+                tokens=0,
+            )
 
-        if self._results:
-            result = self._results.pop(0)
-            if isinstance(result, Exception):
-                raise result
-            return result
-
-        return EvalRunResult(
-            run_index=run_index,
-            success=True,
-            scores={"test_eval": 1.0},
+        return RolloutOutcome(
+            status=RolloutStatus.SUCCESS,
+            samples={
+                "s1": RolloutSample(
+                    id="s1",
+                    messages=[
+                        {"role": "assistant", "content": f"Answer for {rollout_id}"}
+                    ],
+                    reward=1.0,
+                )
+            },
             duration_ms=100.0,
             tokens=50,
-            row_index=row_index,
-            model_tag=model_tag,
-            messages=[{"role": "assistant", "content": f"Answer for row {row_index}"}],
         )
-
-    async def run_batch(
-        self,
-        work_items: list[tuple[dict, int, int, str | None]],
-        max_turns: int = 10,
-        batch_size: int = 4,
-    ) -> tuple[list[EvalRunResult | None], str | None]:
-        self.run_batch_calls.append(work_items)
-        results: list[EvalRunResult | None] = []
-        systemic_error: str | None = None
-        for row, row_index, run_idx, tag in work_items:
-            try:
-                result = await self.run_single(
-                    row, row_index, run_idx, max_turns, model_tag=tag
-                )
-                results.append(result)
-            except SystemicProviderError as e:
-                results.append(
-                    EvalRunResult(
-                        run_index=run_idx,
-                        success=False,
-                        error=str(e),
-                        duration_ms=0.0,
-                        tokens=0,
-                        row_index=row_index,
-                        model_tag=tag,
-                        messages=None,
-                    )
-                )
-                if systemic_error is None:
-                    systemic_error = str(e)
-        return results, systemic_error
 
 
 def _make_real_cache_backend(cache_root: Path) -> JsonFileCacheBackend:
@@ -156,7 +109,7 @@ def _make_rows(n: int = 3) -> list[dict]:
 
 
 def _make_orchestrator(
-    runner: MockRunner | None = None,
+    drivers: list[tuple[str | None, RolloutDriver]] | None = None,
     cache_backend: JsonFileCacheBackend | None = None,
     cache_config: CacheConfig | None = None,
     rows: list[dict] | None = None,
@@ -166,14 +119,16 @@ def _make_orchestrator(
     fresh: bool = False,
     pass_threshold: float = 1.0,
     start_index: int = 0,
-    model_tags: list[str | None] | None = None,
     dataset_path: Path | None = None,
     dataset_fingerprint: str | None = None,
     on_progress: Any = None,
+    has_grader: bool = True,
 ) -> EvalOrchestrator:
     cfg = cache_config or _make_cache_config()
+    if drivers is None:
+        drivers = [(None, FakeDriver())]
     return EvalOrchestrator(
-        runner=runner or MockRunner(),  # type: ignore[arg-type]
+        drivers=drivers,
         cache_backend=cache_backend or JsonFileCacheBackend(),  # type: ignore[arg-type]
         cache_config=cfg,
         rows=rows if rows is not None else _make_rows(),
@@ -183,10 +138,10 @@ def _make_orchestrator(
         fresh=fresh,
         pass_threshold=pass_threshold,
         start_index=start_index,
-        model_tags=model_tags,
         dataset_path=dataset_path,
         dataset_fingerprint=dataset_fingerprint,
         on_progress=on_progress,
+        has_grader=has_grader,
     )
 
 
@@ -199,10 +154,12 @@ class TestE2EFreshEval:
     async def test_creates_new_cache_file(self, tmp_path: Path) -> None:
         """Full eval with no prior cache creates a new cache file on disk."""
         backend = _make_real_cache_backend(tmp_path / "eval")
-        runner = MockRunner()
+        driver = FakeDriver()
         rows = _make_rows(3)
 
-        orch = _make_orchestrator(runner=runner, cache_backend=backend, rows=rows)
+        orch = _make_orchestrator(
+            drivers=[(None, driver)], cache_backend=backend, rows=rows
+        )
         result = await orch.run()
 
         assert result.status == "completed"
@@ -213,10 +170,12 @@ class TestE2EFreshEval:
     async def test_cache_file_has_correct_structure(self, tmp_path: Path) -> None:
         """Cache file has correct JSON structure with all required fields."""
         backend = _make_real_cache_backend(tmp_path / "eval")
-        runner = MockRunner()
+        driver = FakeDriver()
         rows = _make_rows(3)
 
-        orch = _make_orchestrator(runner=runner, cache_backend=backend, rows=rows)
+        orch = _make_orchestrator(
+            drivers=[(None, driver)], cache_backend=backend, rows=rows
+        )
         result = await orch.run()
 
         data = json.loads(result.cache_path.read_text())
@@ -227,8 +186,8 @@ class TestE2EFreshEval:
         assert isinstance(data["runs"], list)
         assert len(data["runs"]) == 3
         assert data["summary"] is not None
-        assert "eval_fns" in data["summary"]
-        assert "test_eval" in data["summary"]["eval_fns"]
+        assert data["summary"]["kind"] in ("graded", "smoke")
+        assert "reward_stats" in data["summary"]
         assert "created_at" in data
         assert "updated_at" in data
 
@@ -237,10 +196,12 @@ class TestE2EFreshEval:
     ) -> None:
         """Cache directory follows model/dataset_stem pattern."""
         backend = _make_real_cache_backend(tmp_path / "eval")
-        runner = MockRunner()
+        driver = FakeDriver()
         rows = _make_rows(2)
 
-        orch = _make_orchestrator(runner=runner, cache_backend=backend, rows=rows)
+        orch = _make_orchestrator(
+            drivers=[(None, driver)], cache_backend=backend, rows=rows
+        )
         result = await orch.run()
 
         # The cache_path should be under eval / <sanitized-model> / <sanitized-dataset>
@@ -253,10 +214,12 @@ class TestE2EFreshEval:
     async def test_orchestrator_result_status(self, tmp_path: Path) -> None:
         """OrchestratorResult has status='completed' and valid summary."""
         backend = _make_real_cache_backend(tmp_path / "eval")
-        runner = MockRunner()
+        driver = FakeDriver()
         rows = _make_rows(3)
 
-        orch = _make_orchestrator(runner=runner, cache_backend=backend, rows=rows)
+        orch = _make_orchestrator(
+            drivers=[(None, driver)], cache_backend=backend, rows=rows
+        )
         result = await orch.run()
 
         assert result.status == "completed"
@@ -278,9 +241,9 @@ class TestE2EResumeAfterInterruption:
         cfg = _make_cache_config(total_rows=5)
 
         # First run: fail after 2 successful runs
-        runner1 = MockRunner(fail_after=2)
+        driver1 = FakeDriver(fail_after=2)
         orch1 = _make_orchestrator(
-            runner=runner1,
+            drivers=[(None, driver1)],
             cache_backend=backend,
             cache_config=cfg,
             rows=rows,
@@ -297,10 +260,10 @@ class TestE2EResumeAfterInterruption:
         partial_runs = len(disk_data["runs"])
         assert partial_runs >= 2
 
-        # Second run: resume with a runner that succeeds on all
-        runner2 = MockRunner()
+        # Second run: resume with a driver that succeeds on all
+        driver2 = FakeDriver()
         orch2 = _make_orchestrator(
-            runner=runner2,
+            drivers=[(None, driver2)],
             cache_backend=backend,
             cache_config=cfg,
             rows=rows,
@@ -323,9 +286,9 @@ class TestE2EResumeAfterInterruption:
         cfg = _make_cache_config(total_rows=4)
 
         # First run: fail after 2
-        runner1 = MockRunner(fail_after=2)
+        driver1 = FakeDriver(fail_after=2)
         orch1 = _make_orchestrator(
-            runner=runner1,
+            drivers=[(None, driver1)],
             cache_backend=backend,
             cache_config=cfg,
             rows=rows,
@@ -333,9 +296,9 @@ class TestE2EResumeAfterInterruption:
         await orch1.run()
 
         # Second run: complete the rest
-        runner2 = MockRunner()
+        driver2 = FakeDriver()
         orch2 = _make_orchestrator(
-            runner=runner2,
+            drivers=[(None, driver2)],
             cache_backend=backend,
             cache_config=cfg,
             rows=rows,
@@ -343,9 +306,9 @@ class TestE2EResumeAfterInterruption:
         result2 = await orch2.run()
 
         assert result2.status == "completed"
-        # runner1 completed 2 runs then failed on the 3rd (which is also recorded).
-        # runner2 should only run the remaining items (4 - 3 recorded = 1).
-        assert len(runner2.run_single_calls) <= 2
+        # driver1 completed 2 runs then failed on the 3rd (which is also recorded).
+        # driver2 should only run the remaining items (4 - 3 recorded = 1).
+        assert driver2._call_count <= 2
 
 
 # ---------------------------------------------------------------------------
@@ -361,9 +324,9 @@ class TestE2EAlreadyCompleted:
         cfg = _make_cache_config(total_rows=3)
 
         # First run to completion
-        runner1 = MockRunner()
+        driver1 = FakeDriver()
         orch1 = _make_orchestrator(
-            runner=runner1,
+            drivers=[(None, driver1)],
             cache_backend=backend,
             cache_config=cfg,
             rows=rows,
@@ -372,9 +335,9 @@ class TestE2EAlreadyCompleted:
         assert result1.status == "completed"
 
         # Second run should return immediately
-        runner2 = MockRunner()
+        driver2 = FakeDriver()
         orch2 = _make_orchestrator(
-            runner=runner2,
+            drivers=[(None, driver2)],
             cache_backend=backend,
             cache_config=cfg,
             rows=rows,
@@ -382,7 +345,7 @@ class TestE2EAlreadyCompleted:
         result2 = await orch2.run()
 
         assert result2.status == "already_completed"
-        assert len(runner2.run_single_calls) == 0
+        assert driver2._call_count == 0
         assert result2.summary is not None
 
 
@@ -399,9 +362,9 @@ class TestE2EFreshFlag:
         cfg = _make_cache_config(total_rows=3)
 
         # First run to completion
-        runner1 = MockRunner()
+        driver1 = FakeDriver()
         orch1 = _make_orchestrator(
-            runner=runner1,
+            drivers=[(None, driver1)],
             cache_backend=backend,
             cache_config=cfg,
             rows=rows,
@@ -411,9 +374,9 @@ class TestE2EFreshFlag:
         old_cache_dir = result1.cache_path.parent
 
         # Second run with fresh=True
-        runner2 = MockRunner()
+        driver2 = FakeDriver()
         orch2 = _make_orchestrator(
-            runner=runner2,
+            drivers=[(None, driver2)],
             cache_backend=backend,
             cache_config=cfg,
             rows=rows,
@@ -422,8 +385,8 @@ class TestE2EFreshFlag:
         result2 = await orch2.run()
 
         assert result2.status == "completed"
-        # runner2 should have run all 3 items from scratch
-        assert len(runner2.run_single_calls) == 3
+        # driver2 should have run all 3 items from scratch
+        assert driver2._call_count == 3
 
         # Old cache should have been backed up
         backups = list(old_cache_dir.glob("*.backup.*"))
@@ -436,9 +399,9 @@ class TestE2EFreshFlag:
         cfg = _make_cache_config(total_rows=2)
 
         # First run with log_samples
-        runner1 = MockRunner()
+        driver1 = FakeDriver()
         orch1 = _make_orchestrator(
-            runner=runner1,
+            drivers=[(None, driver1)],
             cache_backend=backend,
             cache_config=cfg,
             rows=rows,
@@ -451,9 +414,9 @@ class TestE2EFreshFlag:
         assert result1.samples_path.exists()
 
         # Second run with fresh=True
-        runner2 = MockRunner()
+        driver2 = FakeDriver()
         orch2 = _make_orchestrator(
-            runner=runner2,
+            drivers=[(None, driver2)],
             cache_backend=backend,
             cache_config=cfg,
             rows=rows,
@@ -476,11 +439,11 @@ class TestE2ELogSamples:
     async def test_jsonl_file_created(self, tmp_path: Path) -> None:
         """With log_samples=True, a .jsonl file is created alongside .json cache."""
         backend = _make_real_cache_backend(tmp_path / "eval")
-        runner = MockRunner()
+        driver = FakeDriver()
         rows = _make_rows(3)
 
         orch = _make_orchestrator(
-            runner=runner,
+            drivers=[(None, driver)],
             cache_backend=backend,
             rows=rows,
             log_samples=True,
@@ -498,11 +461,11 @@ class TestE2ELogSamples:
     async def test_jsonl_content_format(self, tmp_path: Path) -> None:
         """JSONL content has correct format with row_index, run_index, messages."""
         backend = _make_real_cache_backend(tmp_path / "eval")
-        runner = MockRunner()
+        driver = FakeDriver()
         rows = _make_rows(3)
 
         orch = _make_orchestrator(
-            runner=runner,
+            drivers=[(None, driver)],
             cache_backend=backend,
             rows=rows,
             log_samples=True,
@@ -525,11 +488,11 @@ class TestE2ELogSamples:
     async def test_jsonl_not_created_when_disabled(self, tmp_path: Path) -> None:
         """With log_samples=False, no .jsonl file is created."""
         backend = _make_real_cache_backend(tmp_path / "eval")
-        runner = MockRunner()
+        driver = FakeDriver()
         rows = _make_rows(3)
 
         orch = _make_orchestrator(
-            runner=runner,
+            drivers=[(None, driver)],
             cache_backend=backend,
             rows=rows,
             log_samples=False,
@@ -560,31 +523,9 @@ class TestE2EDatasetModified:
         rows = _make_rows(5)
         cfg = _make_cache_config(total_rows=5)
 
-        # Give a mismatched fingerprint so the integrity check will fail
-        # We need the check to trigger, which requires 100 runs or 300s.
-        # Instead, modify the file after the first check window.
-        # We'll use a runner that modifies the file after a few runs.
-        call_count = 0
-
-        class DatasetModifyingRunner(MockRunner):
-            async def run_single(
-                self,
-                row: dict,
-                row_index: int,
-                run_index: int,
-                max_turns: int = 10,
-                completion_params: dict | None = None,
-                model_tag: str | None = None,
-            ) -> EvalRunResult:
-                nonlocal call_count
-                call_count += 1
-                return await super().run_single(
-                    row, row_index, run_index, max_turns, completion_params, model_tag
-                )
-
-        runner = DatasetModifyingRunner()
+        driver = FakeDriver()
         orch = _make_orchestrator(
-            runner=runner,
+            drivers=[(None, driver)],
             cache_backend=backend,
             cache_config=cfg,
             rows=rows,
@@ -642,25 +583,20 @@ class TestE2ESignalInterruption:
 
         call_count = 0
 
-        class InterruptingRunner(MockRunner):
+        class InterruptingDriver(FakeDriver):
             def __init__(self, orch_ref: list) -> None:
                 super().__init__()
                 self._orch_ref = orch_ref
 
-            async def run_single(
+            async def run(
                 self,
-                row: dict,
-                row_index: int,
-                run_index: int,
-                max_turns: int = 10,
-                completion_params: dict | None = None,
-                model_tag: str | None = None,
-            ) -> EvalRunResult:
+                messages: list[dict[str, Any]],
+                label: str | None = None,
+                rollout_id: str = "",
+            ) -> RolloutOutcome:
                 nonlocal call_count
+                result = await super().run(messages, label, rollout_id)
                 call_count += 1
-                result = await super().run_single(
-                    row, row_index, run_index, max_turns, completion_params, model_tag
-                )
                 # After 3 runs, set the shutdown event
                 if call_count >= 3 and self._orch_ref:
                     orch = self._orch_ref[0]
@@ -669,9 +605,9 @@ class TestE2ESignalInterruption:
                 return result
 
         orch_ref: list = []
-        runner = InterruptingRunner(orch_ref)
+        driver = InterruptingDriver(orch_ref)
         orch = _make_orchestrator(
-            runner=runner,
+            drivers=[(None, driver)],
             cache_backend=backend,
             cache_config=cfg,
             rows=rows,
@@ -696,13 +632,18 @@ class TestE2ESignalInterruption:
         rows = _make_rows(5)
         cfg = _make_cache_config(total_rows=5)
 
-        class ImmediateInterruptRunner(MockRunner):
+        class ImmediateInterruptDriver(FakeDriver):
             def __init__(self, orch_ref: list) -> None:
                 super().__init__()
                 self._orch_ref = orch_ref
 
-            async def run_single(self, *args: Any, **kwargs: Any) -> EvalRunResult:
-                result = await super().run_single(*args, **kwargs)
+            async def run(
+                self,
+                messages: list[dict[str, Any]],
+                label: str | None = None,
+                rollout_id: str = "",
+            ) -> RolloutOutcome:
+                result = await super().run(messages, label, rollout_id)
                 if self._orch_ref:
                     orch = self._orch_ref[0]
                     if orch._shutdown_event is not None:
@@ -710,9 +651,9 @@ class TestE2ESignalInterruption:
                 return result
 
         orch_ref: list = []
-        runner = ImmediateInterruptRunner(orch_ref)
+        driver = ImmediateInterruptDriver(orch_ref)
         orch = _make_orchestrator(
-            runner=runner,
+            drivers=[(None, driver)],
             cache_backend=backend,
             cache_config=cfg,
             rows=rows,
@@ -771,11 +712,11 @@ class TestE2ECacheCorruption:
         corrupt_path = cache_dir / f"9999999999_{cfg.task_id}.json"
         corrupt_path.write_text("this is not valid json{{{")
 
-        runner = MockRunner()
+        driver = FakeDriver()
         rows = _make_rows(3)
 
         orch = _make_orchestrator(
-            runner=runner,
+            drivers=[(None, driver)],
             cache_backend=backend,
             cache_config=cfg,
             rows=rows,
@@ -819,9 +760,9 @@ class TestE2EConfigHashCollision:
         )
 
         # Create an in_progress cache
-        runner3 = MockRunner(fail_after=1)
+        driver3 = FakeDriver(fail_after=1)
         orch3 = _make_orchestrator(
-            runner=runner3,
+            drivers=[(None, driver3)],
             cache_backend=backend,
             cache_config=cfg3,
             rows=_make_rows(5),
@@ -830,9 +771,9 @@ class TestE2EConfigHashCollision:
         assert result3.status == "systemic_error"
 
         # Now try with a different config_hash
-        runner4 = MockRunner()
+        driver4 = FakeDriver()
         orch4 = _make_orchestrator(
-            runner=runner4,
+            drivers=[(None, driver4)],
             cache_backend=backend,
             cache_config=cfg4,
             rows=_make_rows(5),
@@ -850,11 +791,11 @@ class TestE2EMultipleRuns:
     async def test_n_runs_executes_correct_total(self, tmp_path: Path) -> None:
         """With n_runs=3, each row is evaluated 3 times."""
         backend = _make_real_cache_backend(tmp_path / "eval")
-        runner = MockRunner()
+        driver = FakeDriver()
         rows = _make_rows(3)
 
         orch = _make_orchestrator(
-            runner=runner,
+            drivers=[(None, driver)],
             cache_backend=backend,
             rows=rows,
             n_runs=3,
@@ -864,16 +805,16 @@ class TestE2EMultipleRuns:
         assert result.status == "completed"
         assert result.total_expected == 9  # 3 rows * 3 runs
         assert result.total_completed == 9
-        assert len(runner.run_single_calls) == 9
+        assert driver._call_count == 9
 
     async def test_n_runs_summary_correct(self, tmp_path: Path) -> None:
         """Summary is computed correctly for n_runs > 1."""
         backend = _make_real_cache_backend(tmp_path / "eval")
-        runner = MockRunner()
+        driver = FakeDriver()
         rows = _make_rows(2)
 
         orch = _make_orchestrator(
-            runner=runner,
+            drivers=[(None, driver)],
             cache_backend=backend,
             rows=rows,
             n_runs=3,
@@ -892,11 +833,11 @@ class TestE2EMultipleRuns:
     async def test_n_runs_all_row_run_combinations(self, tmp_path: Path) -> None:
         """All (row_index, run_index) combinations are present in the cache."""
         backend = _make_real_cache_backend(tmp_path / "eval")
-        runner = MockRunner()
+        driver = FakeDriver()
         rows = _make_rows(2)
 
         orch = _make_orchestrator(
-            runner=runner,
+            drivers=[(None, driver)],
             cache_backend=backend,
             rows=rows,
             n_runs=3,
@@ -918,11 +859,11 @@ class TestE2EBatchMode:
     async def test_batch_mode_completes_all(self, tmp_path: Path) -> None:
         """batch_size > 1 runs all work items to completion."""
         backend = _make_real_cache_backend(tmp_path / "eval")
-        runner = MockRunner()
+        driver = FakeDriver()
         rows = _make_rows(6)
 
         orch = _make_orchestrator(
-            runner=runner,
+            drivers=[(None, driver)],
             cache_backend=backend,
             rows=rows,
             batch_size=2,
@@ -933,14 +874,14 @@ class TestE2EBatchMode:
         assert result.total_completed == 6
         assert result.total_expected == 6
 
-    async def test_batch_mode_uses_run_batch(self, tmp_path: Path) -> None:
-        """All execution goes through run_batch regardless of batch_size."""
+    async def test_batch_mode_calls_driver(self, tmp_path: Path) -> None:
+        """All items are executed via the driver."""
         backend = _make_real_cache_backend(tmp_path / "eval")
-        runner = MockRunner()
+        driver = FakeDriver()
         rows = _make_rows(4)
 
         orch = _make_orchestrator(
-            runner=runner,
+            drivers=[(None, driver)],
             cache_backend=backend,
             rows=rows,
             batch_size=2,
@@ -948,16 +889,16 @@ class TestE2EBatchMode:
         result = await orch.run()
 
         assert result.status == "completed"
-        assert len(runner.run_batch_calls) >= 1
+        assert driver._call_count == 4
 
     async def test_batch_mode_cache_correct(self, tmp_path: Path) -> None:
         """Batch mode produces correct cache data on disk."""
         backend = _make_real_cache_backend(tmp_path / "eval")
-        runner = MockRunner()
+        driver = FakeDriver()
         rows = _make_rows(4)
 
         orch = _make_orchestrator(
-            runner=runner,
+            drivers=[(None, driver)],
             cache_backend=backend,
             rows=rows,
             batch_size=3,

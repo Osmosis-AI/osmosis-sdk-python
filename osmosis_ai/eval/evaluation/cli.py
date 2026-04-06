@@ -1,13 +1,11 @@
 """CLI command for eval mode.
 
-Run agent loop evaluations against datasets with eval functions and pass@n support.
+Run agent loop evaluations against datasets using TOML config.
 """
 
 from __future__ import annotations
 
 import asyncio
-import importlib
-import json
 import logging
 import shutil
 import time
@@ -19,8 +17,6 @@ from osmosis_ai.cli.console import Console
 
 if TYPE_CHECKING:
     from osmosis_ai.eval.evaluation.cache import BuildSummaryResult
-    from osmosis_ai.eval.evaluation.eval_fn import EvalFnWrapper
-    from osmosis_ai.eval.evaluation.runner import EvalRunResult
 
 
 class EvalCommand:
@@ -222,65 +218,21 @@ class EvalCommand:
         args = SimpleNamespace(**kwargs)
         return asyncio.run(self._run_async(args))
 
-    def _validate_args(self, args: Any) -> str | None:
-        if not args.module:
-            return "--module (-m) is required."
-        if args.n_runs < 1:
-            return "--n must be >= 1."
-        if args.batch_size < 1:
-            return "--batch-size must be >= 1."
-        if args.max_turns < 1:
-            return "--max-turns must be >= 1."
-        if args.offset < 0:
-            return "--offset must be >= 0."
-        if args.limit is not None and args.limit < 1:
-            return "--limit must be >= 1."
-        if args.baseline_base_url and not args.baseline_model:
-            return "--baseline-base-url requires --baseline-model."
-        if args.baseline_api_key and not args.baseline_model:
-            return "--baseline-api-key requires --baseline-model."
-        if getattr(args, "fresh", False) and getattr(args, "retry_failed", False):
-            return "--fresh and --retry-failed are mutually exclusive."
-        return None
+    @staticmethod
+    def _resolve_api_key(config: Any) -> str | None:
+        import os
 
-    def _print_header(self, args: Any) -> None:
-        if args.quiet:
-            return
-        from osmosis_ai.consts import PACKAGE_VERSION
+        if not config.llm_api_key_env:
+            return None
+        value = os.environ.get(config.llm_api_key_env)
+        if not value:
+            from osmosis_ai.cli.errors import CLIError
 
-        self.console.print(f"osmosis-eval v{PACKAGE_VERSION}", style="bold")
-        if args.base_url:
-            self.console.print(f"Endpoint: {args.base_url}")
-            self.console.print(f"Model: {args.model}")
-        else:
-            self.console.print(f"Model: {args.model}")
-        if args.baseline_model:
-            if args.baseline_base_url:
-                self.console.print(f"Baseline endpoint: {args.baseline_base_url}")
-            self.console.print(f"Baseline model: {args.baseline_model}")
-        self.console.print()
-
-    def _load_eval_fns(
-        self, args: Any
-    ) -> tuple[list[EvalFnWrapper] | None, str | None]:
-        from osmosis_ai.eval.evaluation.eval_fn import (
-            EvalFnError,
-            load_eval_fns,
-        )
-
-        if not args.quiet:
-            self.console.print(f"Loading eval functions: {', '.join(args.eval_fns)}")
-
-        try:
-            eval_fns = load_eval_fns(args.eval_fns)
-        except EvalFnError as e:
-            return None, str(e)
-
-        if not args.quiet:
-            for fn in eval_fns:
-                self.console.print(f"  {fn.name} ({fn._mode} mode)")
-
-        return eval_fns, None
+            raise CLIError(
+                f"Environment variable '{config.llm_api_key_env}' "
+                f"(from [llm].api_key_env) is not set or empty."
+            )
+        return value
 
     def _write_orchestrator_output(
         self,
@@ -344,141 +296,87 @@ class EvalCommand:
         self.console.print(f"  Duration: {format_duration(total_duration_ms)}")
         self.console.print(f"  Total tokens: {total_tokens:,}")
 
-        eval_fns = summary.get("eval_fns", {})
-        if eval_fns:
-            self.console.print()
-            for fn_name, stats in eval_fns.items():
-                mean = stats.get("mean", 0.0)
-                median = stats.get("median", 0.0)
-                std = stats.get("std", 0.0)
+        kind = summary.get("kind", "smoke")
+        passed = summary.get("passed", 0)
+        failed = summary.get("failed", 0)
+
+        if kind == "smoke":
+            self.console.print(f"  Passed: {passed}/{total_runs}")
+            if failed:
+                self.console.print(f"  Failed: {failed}")
+        else:
+            # Graded mode
+            reward_stats = summary.get("reward_stats")
+            if reward_stats:
+                self.console.print()
+                mean = reward_stats.get("mean", 0.0)
+                median = reward_stats.get("median", 0.0)
+                std = reward_stats.get("std", 0.0)
                 self.console.print(
-                    f"  {fn_name}: mean={mean:.3f} median={median:.3f} std={std:.3f}"
+                    f"  reward: mean={mean:.3f} median={median:.3f} std={std:.3f}"
                 )
-                # Print pass@k if present
-                for k_val, val in sorted(stats.get("pass_at_k", {}).items()):
+                self.console.print(
+                    f"  range: [{reward_stats.get('min', 0.0):.3f}, {reward_stats.get('max', 0.0):.3f}]"
+                )
+                self.console.print(f"  Passed: {passed}/{total_runs}")
+                for k_val, val in sorted(reward_stats.get("pass_at_k", {}).items()):
                     self.console.print(f"    pass@{k_val}: {float(val) * 100:.1f}%")
-
-    def _print_resume_hints(
-        self,
-        cache_backend: Any,
-        task_id: str,
-        model: str,
-        dataset_path: str,
-        total_expected: int,
-        log_samples: bool,
-        module_spec: str,
-    ) -> None:
-        """Print informational messages when resuming from cached progress."""
-        from osmosis_ai.eval.evaluation.cache import sanitize_path_part
-
-        # Peek at existing cache file to check for prior completed runs
-        model_dir = sanitize_path_part(model)
-        dataset_dir = sanitize_path_part(Path(dataset_path).stem)
-        cache_dir = cache_backend.cache_root / model_dir / dataset_dir
-
-        if not cache_dir.exists():
-            return
-
-        pattern = f"*_{task_id}.json"
-        matches = sorted(cache_dir.glob(pattern), reverse=True)
-        if not matches:
-            return
-
-        try:
-            cache_data = json.loads(matches[0].read_text())
-        except (json.JSONDecodeError, OSError):
-            return
-
-        completed_runs = cache_data.get("runs", [])
-        if not completed_runs:
-            return
-
-        status = cache_data.get("status", "in_progress")
-        if status == "completed":
-            return
-
-        completed = len(completed_runs)
-
-        # Determine fingerprint scope description
-        module_name = module_spec.partition(":")[0]
-        try:
-            mod = importlib.import_module(module_name)
-            source_file = getattr(mod, "__file__", None)
-            if source_file and Path(source_file).name == "__init__.py":
-                scope = f"package {module_name}/"
             else:
-                scope = f"file {module_name}.py"
-        except Exception:
-            scope = f"file {module_name}.py"
-
-        self.console.print(
-            f"Resuming eval ({completed}/{total_expected} runs completed)"
-        )
-        self.console.print(
-            f"Note: Module fingerprint covers {scope}. External dependency changes\n"
-            f"      are not detected. Use --fresh if you changed external imports."
-        )
-
-        # Check --log-samples with missing prior samples
-        if log_samples:
-            samples_path = matches[0].with_suffix(".jsonl")
-            if not samples_path.exists() or samples_path.stat().st_size == 0:
-                self.console.print(
-                    "Note: Only new runs will be logged. "
-                    "Use --fresh to re-run all with full logging."
-                )
+                self.console.print(f"  Passed: {passed}/{total_runs}")
+                if failed:
+                    self.console.print(f"  Failed: {failed}")
 
     async def _run_async(self, args: Any) -> int:
+        from osmosis_ai.cli.errors import CLIError
         from osmosis_ai.eval.common.cli import (
-            build_completion_params,
-            create_llm_client,
+            _resolve_grader,
             format_duration,
             load_dataset_rows,
             load_workflow,
             truncate_error,
-            verify_llm_client,
         )
+        from osmosis_ai.eval.config import load_eval_config
 
         if args.debug:
             logging.basicConfig(level=logging.DEBUG)
 
-        if error := self._validate_args(args):
-            self.console.print_error(f"Error: {error}")
+        if getattr(args, "fresh", False) and getattr(args, "retry_failed", False):
+            self.console.print_error(
+                "Error: --fresh and --retry-failed are mutually exclusive."
+            )
             return 1
 
-        self._print_header(args)
-
-        llm_client, error = create_llm_client(
-            model=args.model,
-            api_key=args.api_key,
-            base_url=args.base_url,
-            quiet=args.quiet,
-            console=self.console,
-        )
-        if error:
-            self.console.print_error(f"Error: {error}")
-            return 1
-        assert llm_client is not None
-
-        error = await verify_llm_client(llm_client, args.quiet, self.console)
-        if error:
-            self.console.print_error(f"Error: {error}")
-            await llm_client.close()
+        # 1. Load TOML config
+        config_path = Path(args.config_path)
+        try:
+            config = load_eval_config(config_path)
+        except CLIError as e:
+            self.console.print_error(f"Error: {e}")
             return 1
 
-        workflow_cls, workflow_config, error = load_workflow(
-            module=args.module,
-            quiet=args.quiet,
-            console=self.console,
-        )
-        if error:
-            self.console.print_error(f"Error: {error}")
-            await llm_client.close()
-            return 1
-        assert workflow_cls is not None
+        # Apply CLI overrides
+        batch_size = args.batch_size_override or config.runs_batch_size
 
+        if not args.quiet:
+            from osmosis_ai.consts import PACKAGE_VERSION
+
+            self.console.print(f"osmosis-eval v{PACKAGE_VERSION}", style="bold")
+            self.console.print(f"Config: {config_path}")
+            self.console.print(f"Model: {config.llm_model}")
+            if config.baseline_model:
+                self.console.print(f"Baseline: {config.baseline_model}")
+            self.console.print()
+
+        # 2. Resolve API key
+        try:
+            api_key = self._resolve_api_key(config)
+        except CLIError as e:
+            self.console.print_error(f"Error: {e}")
+            return 1
+
+        # 3. Load dataset
         rows, error = load_dataset_rows(
-            dataset_path=args.dataset,
+            dataset_path=config.eval_dataset,
             limit=args.limit,
             offset=args.offset,
             quiet=args.quiet,
@@ -488,152 +386,163 @@ class EvalCommand:
         )
         if error:
             self.console.print_error(f"Error: {error}")
-            await llm_client.close()
             return 1
         assert rows is not None
 
-        eval_fns, error = self._load_eval_fns(args)
+        # 4. Load workflow
+        workflow_cls, workflow_config, error = load_workflow(
+            module=config.eval_module,
+            quiet=args.quiet,
+            console=self.console,
+        )
         if error:
             self.console.print_error(f"Error: {error}")
-            await llm_client.close()
             return 1
-        assert eval_fns is not None
+        assert workflow_cls is not None
 
-        completion_params = build_completion_params(
-            temperature=args.temperature,
-            max_tokens=args.max_tokens,
+        # 5. Resolve grader (only if [grader] section present)
+        grader_cls, grader_config = None, None
+        if config.has_grader:
+            module_name = config.eval_module.rsplit(":", 1)[0]
+            grader_cls, grader_config = _resolve_grader(
+                module_name,
+                explicit_grader=config.grader_module,
+                explicit_config=config.grader_config,
+            )
+            if grader_cls is None:
+                self.console.print_error(
+                    f"Error: [grader] section is present but no Grader subclass found in '{module_name}'.\n"
+                    f"  Either add a Grader subclass to your module, or specify [grader].module explicitly."
+                )
+                return 1
+            if not args.quiet:
+                self.console.print(f"  Grader: {grader_cls.__name__}")
+
+        # 6. Create proxy and start
+        from osmosis_ai.eval.llm_proxy import LiteLLMProxy
+
+        trace_dir = None
+        if args.debug:
+            trace_dir = str(Path("./eval_traces") / "debug")
+
+        proxy = LiteLLMProxy(
+            model=config.llm_model,
+            api_key=api_key,
+            base_url=config.llm_base_url,
+            trace_dir=trace_dir,
         )
 
-        # Create optional baseline LLM client
-        baseline_llm_client = None
-        if args.baseline_model:
-            baseline_llm_client, error = create_llm_client(
-                model=args.baseline_model,
-                api_key=args.baseline_api_key,
-                base_url=args.baseline_base_url,
-                quiet=args.quiet,
-                console=self.console,
+        # 7. Preflight check
+        try:
+            await proxy.preflight_check()
+        except CLIError as e:
+            self.console.print_error(f"Error: {e}")
+            return 1
+
+        # 8. Start proxy
+        await proxy.start()
+
+        # 9. Construct backend + driver
+        from osmosis_ai.rollout_v2.backend.local.backend import LocalBackend
+        from osmosis_ai.rollout_v2.driver import InProcessDriver
+
+        backend = LocalBackend(
+            workflow=workflow_cls,
+            workflow_config=workflow_config,
+            grader=grader_cls,
+            grader_config=grader_config,
+        )
+        driver = InProcessDriver(backend=backend, proxy=proxy)
+
+        # 10. Build drivers list
+        drivers: list[tuple[str | None, InProcessDriver]] = []
+        baseline_proxy = None
+        if config.baseline_model:
+            drivers.append(("primary", driver))
+
+            # Resolve baseline API key
+            baseline_api_key = None
+            if config.baseline_api_key_env:
+                import os
+
+                baseline_api_key = os.environ.get(config.baseline_api_key_env)
+                if not baseline_api_key:
+                    self.console.print_error(
+                        f"Error: Environment variable '{config.baseline_api_key_env}' is not set."
+                    )
+                    await proxy.stop()
+                    return 1
+
+            baseline_proxy = LiteLLMProxy(
+                model=config.baseline_model,
+                api_key=baseline_api_key,
+                base_url=config.baseline_base_url,
+                trace_dir=trace_dir,
             )
-            if error:
-                self.console.print_error(f"Error (baseline): {error}")
-                await llm_client.close()
+            try:
+                await baseline_proxy.preflight_check()
+            except CLIError as e:
+                self.console.print_error(f"Error (baseline): {e}")
+                await proxy.stop()
                 return 1
-            assert baseline_llm_client is not None
 
-            error = await verify_llm_client(
-                baseline_llm_client, args.quiet, self.console
-            )
-            if error:
-                self.console.print_error(f"Error (baseline): {error}")
-                await baseline_llm_client.close()
-                await llm_client.close()
-                return 1
+            await baseline_proxy.start()
+            baseline_driver = InProcessDriver(backend=backend, proxy=baseline_proxy)
+            drivers.append(("baseline", baseline_driver))
+        else:
+            drivers.append((None, driver))
 
-        def on_progress(current: int, total: int, result: EvalRunResult) -> None:
-            if args.quiet:
-                return
-
-            status_style = "green" if result.success else "red"
-            status = "OK" if result.success else "FAILED"
-            duration = format_duration(result.duration_ms)
-
-            tag_prefix = ""
-            if result.model_tag:
-                tag_prefix = f"[{result.model_tag}] "
-
-            scores_str = ""
-            if result.success and result.scores:
-                score_parts = [f"{k}={v:.3f}" for k, v in result.scores.items()]
-                scores_str = f" [{', '.join(score_parts)}]"
-
-            error_suffix = ""
-            if not result.success and result.error:
-                error_suffix = f" - {truncate_error(result.error)}"
-
-            status_styled = self.console.format_styled(status, status_style)
-            self.console.print(
-                f"[{current}/{total}] {tag_prefix}{status_styled} "
-                f"({duration}, {result.tokens:,} tokens){scores_str}{error_suffix}"
-            )
-
-        if not args.quiet:
-            self.console.print()
-            n_info = f" x{args.n_runs} runs" if args.n_runs > 1 else ""
-            batch_info = (
-                f", batch_size={args.batch_size}" if args.batch_size > 1 else ""
-            )
-            model_info = " x2 models" if args.baseline_model else ""
-            self.console.print(
-                f"Running evaluation ({len(rows)} rows{n_info}{model_info}{batch_info})..."
-            )
-
-        # Compute fingerprints and use orchestrator
+        # 11. Compute cache config
         from osmosis_ai.eval.evaluation.cache import (
             CacheConfig,
             JsonFileCacheBackend,
             _get_cache_root,
             compute_dataset_fingerprint,
-            compute_eval_fns_fingerprint,
             compute_module_fingerprint,
             compute_task_id,
         )
 
-        module_spec = args.module
-        dataset_fingerprint = compute_dataset_fingerprint(args.dataset)
-        module_fingerprint = compute_module_fingerprint(module_spec)
-        eval_fns_fingerprint = compute_eval_fns_fingerprint(args.eval_fns)
+        dataset_fingerprint = compute_dataset_fingerprint(config.eval_dataset)
+        module_fingerprint = compute_module_fingerprint(config.eval_module) or ""
 
-        task_id, config_hash = compute_task_id(
-            model=args.model,
-            base_url=args.base_url,
-            baseline_model=args.baseline_model,
-            baseline_base_url=args.baseline_base_url,
-            module=module_spec,
-            dataset=args.dataset,
-            eval_fns=args.eval_fns,
-            n_runs=args.n_runs,
-            max_turns=args.max_turns,
-            pass_threshold=args.pass_threshold,
-            offset=args.offset,
-            limit=args.limit,
-            completion_params=completion_params if completion_params else None,
-            module_fingerprint=module_fingerprint,
-            dataset_fingerprint=dataset_fingerprint,
-            eval_fns_fingerprint=eval_fns_fingerprint,
-        )
+        grader_fingerprint = None
+        if grader_cls and config.has_grader:
+            grader_module = config.grader_module or config.eval_module
+            grader_fingerprint = compute_module_fingerprint(grader_module)
 
-        config_dict: dict[str, object] = {
-            "model": args.model,
-            "base_url": args.base_url,
-            "baseline_model": args.baseline_model,
-            "baseline_base_url": args.baseline_base_url,
-            "module": module_spec,
-            "dataset": args.dataset,
-            "eval_fns": sorted(args.eval_fns),
-            "n_runs": args.n_runs,
-            "max_turns": args.max_turns,
-            "pass_threshold": args.pass_threshold,
+        # Merge CLI overrides into config for cache identity
+        config_for_hash = {
+            **config.model_dump(),
             "offset": args.offset,
             "limit": args.limit,
-            "completion_params": completion_params,
+        }
+
+        task_id, config_hash = compute_task_id(
+            config=config_for_hash,
+            workflow_fingerprint=module_fingerprint,
+            grader_fingerprint=grader_fingerprint,
+            dataset_fingerprint=dataset_fingerprint,
+        )
+
+        config_dict = {
+            **config_for_hash,
             "dataset_fingerprint": dataset_fingerprint,
             "module_fingerprint": module_fingerprint,
-            "eval_fns_fingerprint": eval_fns_fingerprint,
+            "grader_fingerprint": grader_fingerprint,
         }
-        config_dict = {k: v for k, v in config_dict.items() if v is not None}
 
         cache_config = CacheConfig(
             task_id=task_id,
             config_hash=config_hash,
-            model=args.model,
-            dataset_path=args.dataset,
+            model=config.llm_model,
+            dataset_path=config.eval_dataset,
             config=config_dict,
             total_rows=len(rows),
         )
 
         cache_backend = JsonFileCacheBackend()
 
-        # Validate --output-path is not the cache root
+        # Validate --output-path
         output_path = getattr(args, "output_path", None)
         if output_path is not None:
             output_path_resolved = Path(output_path).resolve()
@@ -642,97 +551,73 @@ class EvalCommand:
                 self.console.print_error(
                     "Error: --output-path cannot be the same as the cache root directory."
                 )
-                await llm_client.close()
-                if baseline_llm_client is not None:
-                    await baseline_llm_client.close()
+                await proxy.stop()
+                if baseline_proxy:
+                    await baseline_proxy.stop()
                 return 1
 
-        model_tags: list[str | None] = (
-            ["primary", "baseline"] if args.baseline_model else [None]
-        )
-
         fresh = getattr(args, "fresh", False)
-        log_samples = getattr(args, "log_samples", False)
+        log_samples = config.output_log_samples
 
-        # Print resume hints if resuming from cached progress
-        if not args.quiet and not fresh:
-            total_expected = len(rows) * args.n_runs * len(model_tags)
-            self._print_resume_hints(
-                cache_backend=cache_backend,
-                task_id=task_id,
-                model=args.model,
-                dataset_path=args.dataset,
-                total_expected=total_expected,
-                log_samples=log_samples,
-                module_spec=module_spec,
+        def on_progress(current: int, total: int, result: dict) -> None:
+            if args.quiet:
+                return
+
+            status_style = "green" if result["success"] else "red"
+            status = "OK" if result["success"] else "FAILED"
+            duration = format_duration(result.get("duration_ms", 0))
+
+            tag_prefix = ""
+            if result.get("model_tag"):
+                tag_prefix = f"[{result['model_tag']}] "
+
+            reward_str = ""
+            if result["success"] and result.get("reward") is not None:
+                reward_str = f" [reward={result['reward']:.3f}]"
+
+            error_suffix = ""
+            if not result["success"] and result.get("error"):
+                error_suffix = f" - {truncate_error(result['error'])}"
+
+            tokens = result.get("tokens", 0)
+            status_styled = self.console.format_styled(status, status_style)
+            self.console.print(
+                f"[{current}/{total}] {tag_prefix}{status_styled} "
+                f"({duration}, {tokens:,} tokens){reward_str}{error_suffix}"
             )
 
-        from osmosis_ai.eval.evaluation.runner import EvalRunner
-        from osmosis_ai.eval.executor import WorkflowExecutor
-        from osmosis_ai.eval.proxy import EvalProxy
-
-        trace_dir = str(Path("./eval_traces") / task_id) if args.debug else None
-
-        proxy = EvalProxy(client=llm_client, trace_dir=trace_dir)
-        baseline_proxy = None
-        if baseline_llm_client:
-            baseline_proxy = EvalProxy(client=baseline_llm_client, trace_dir=trace_dir)
-            await asyncio.gather(proxy.start(), baseline_proxy.start())
-        else:
-            await proxy.start()
-
-        executor = WorkflowExecutor(
-            workflow_cls=workflow_cls,
-            workflow_config=workflow_config,
-            proxy=proxy,
-        )
-
-        baseline_executor = None
-        if baseline_proxy:
-            baseline_executor = WorkflowExecutor(
-                workflow_cls=workflow_cls,
-                workflow_config=workflow_config,
-                proxy=baseline_proxy,
+        if not args.quiet:
+            self.console.print()
+            n_info = f" x{config.runs_n} runs" if config.runs_n > 1 else ""
+            batch_info = f", batch_size={batch_size}" if batch_size > 1 else ""
+            model_info = " x2 models" if config.baseline_model else ""
+            self.console.print(
+                f"Running evaluation ({len(rows)} rows{n_info}{model_info}{batch_info})..."
             )
 
-        runner = EvalRunner(
-            executor=executor,
-            eval_fns=eval_fns,
-            baseline_executor=baseline_executor,
-            primary_model_name=llm_client.display_name,
-            baseline_model_name=baseline_llm_client.display_name
-            if baseline_llm_client
-            else "",
-        )
-
+        # 12. Run orchestrator
         from osmosis_ai.eval.evaluation.orchestrator import EvalOrchestrator
 
         orchestrator = EvalOrchestrator(
-            runner=runner,
+            drivers=drivers,
             cache_backend=cache_backend,
             cache_config=cache_config,
             rows=rows,
-            n_runs=args.n_runs,
-            max_turns=args.max_turns,
-            pass_threshold=args.pass_threshold,
-            batch_size=args.batch_size,
+            n_runs=config.runs_n,
+            pass_threshold=config.runs_pass_threshold,
+            batch_size=batch_size,
             log_samples=log_samples,
             fresh=fresh,
             retry_failed=getattr(args, "retry_failed", False),
-            dataset_path=Path(args.dataset),
+            dataset_path=Path(config.eval_dataset),
             dataset_fingerprint=dataset_fingerprint,
             start_index=args.offset,
-            model_tags=model_tags,
             on_progress=on_progress,
+            has_grader=config.has_grader,
         )
 
         try:
-            async with llm_client:
-                if baseline_llm_client is not None:
-                    async with baseline_llm_client:
-                        orch_result = await orchestrator.run()
-                else:
-                    orch_result = await orchestrator.run()
+            orch_result = await orchestrator.run()
         except Exception as e:
             self.console.print_error(f"Error during evaluation: {e}")
             if args.debug:
@@ -741,17 +626,15 @@ class EvalCommand:
                 traceback.print_exc()
             return 1
         finally:
+            await proxy.stop()
             if baseline_proxy:
-                await asyncio.gather(proxy.stop(), baseline_proxy.stop())
-            else:
-                await proxy.stop()
+                await baseline_proxy.stop()
 
-        # Handle OrchestratorResult status
+        # 13. Handle result status
         if orch_result.status == "already_completed":
             if not args.quiet:
                 self.console.print(
-                    "\nEvaluation already completed (cached).",
-                    style="bold",
+                    "\nEvaluation already completed (cached).", style="bold"
                 )
                 if orch_result.dataset_fingerprint_warning:
                     self.console.print(orch_result.dataset_fingerprint_warning)
@@ -765,8 +648,8 @@ class EvalCommand:
             if output_path:
                 results_path = self._write_orchestrator_output(
                     output_path=output_path,
-                    model=args.model,
-                    dataset_path=args.dataset,
+                    model=config.llm_model,
+                    dataset_path=config.eval_dataset,
                     cache_data=orch_result.cache_data,
                     samples_path=orch_result.samples_path,
                     task_id=task_id,
@@ -783,9 +666,7 @@ class EvalCommand:
                     style="yellow",
                 )
                 self.console.print(f"Cache: {orch_result.cache_path}")
-                self.console.print(
-                    "Re-run the same command to resume from where you left off."
-                )
+                self.console.print("Re-run the same command to resume.")
             return 130
 
         if orch_result.status == "dataset_modified":
@@ -799,8 +680,7 @@ class EvalCommand:
         if orch_result.status == "systemic_error":
             if not args.quiet:
                 self.console.print(
-                    f"\nEvaluation stopped due to systemic error: "
-                    f"{orch_result.stop_reason}",
+                    f"\nEvaluation stopped due to systemic error: {orch_result.stop_reason}",
                     style="red",
                 )
                 self._print_orchestrator_summary(
@@ -813,7 +693,7 @@ class EvalCommand:
                 )
             return 1
 
-        # status == "completed"
+        # completed
         if not args.quiet:
             self._print_orchestrator_summary(
                 orch_result.summary,
@@ -823,16 +703,12 @@ class EvalCommand:
             self.console.print(f"\nCache: {orch_result.cache_path}")
             if orch_result.samples_path:
                 self.console.print(f"Samples: {orch_result.samples_path}")
-            if not args.log_samples:
-                self.console.print(
-                    "Tip: Use --log-samples to save full conversation logs for debugging."
-                )
 
         if output_path:
             results_path = self._write_orchestrator_output(
                 output_path=output_path,
-                model=args.model,
-                dataset_path=args.dataset,
+                model=config.llm_model,
+                dataset_path=config.eval_dataset,
                 cache_data=orch_result.cache_data,
                 samples_path=orch_result.samples_path,
                 task_id=task_id,
