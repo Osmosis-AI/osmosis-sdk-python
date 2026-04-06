@@ -14,6 +14,8 @@ from osmosis_ai.cli.errors import CLIError
 class _EvalSection(BaseModel):
     module: str
     dataset: str
+    limit: Annotated[int, Field(ge=1)] | None = None
+    offset: Annotated[int, Field(ge=0)] = 0
 
 
 class _LLMSection(BaseModel):
@@ -50,6 +52,8 @@ class EvalConfig(BaseModel):
     # [eval]
     eval_module: str
     eval_dataset: str
+    eval_limit: Annotated[int, Field(ge=1)] | None = None
+    eval_offset: Annotated[int, Field(ge=0)] = 0
 
     # [llm]
     llm_model: str
@@ -108,7 +112,7 @@ def load_eval_config(path: Path) -> EvalConfig:
     baseline_section = raw.get("baseline", {})
 
     try:
-        _EvalSection(**eval_section)
+        eval_parsed = _EvalSection(**eval_section)
         _LLMSection(**llm_section)
         if grader_section:
             _GraderSection(**grader_section)
@@ -122,6 +126,8 @@ def load_eval_config(path: Path) -> EvalConfig:
     return EvalConfig(
         eval_module=eval_section["module"],
         eval_dataset=eval_section["dataset"],
+        eval_limit=eval_parsed.limit,
+        eval_offset=eval_parsed.offset,
         llm_model=llm_section["model"],
         llm_base_url=llm_section.get("base_url"),
         llm_api_key_env=llm_section.get("api_key_env"),

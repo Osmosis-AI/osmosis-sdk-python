@@ -354,8 +354,10 @@ class EvalCommand:
             self.console.print_error(f"Error: {e}")
             return 1
 
-        # Apply CLI overrides
+        # Apply CLI overrides (CLI flags take precedence over TOML)
         batch_size = args.batch_size_override or config.runs_batch_size
+        limit = args.limit if args.limit is not None else config.eval_limit
+        offset = args.offset if args.offset else config.eval_offset
 
         if not args.quiet:
             from osmosis_ai.consts import PACKAGE_VERSION
@@ -377,8 +379,8 @@ class EvalCommand:
         # 3. Load dataset
         rows, error = load_dataset_rows(
             dataset_path=config.eval_dataset,
-            limit=args.limit,
-            offset=args.offset,
+            limit=limit,
+            offset=offset,
             quiet=args.quiet,
             console=self.console,
             empty_error="No rows to evaluate",
@@ -513,8 +515,8 @@ class EvalCommand:
         # Merge CLI overrides into config for cache identity
         config_for_hash = {
             **config.model_dump(),
-            "offset": args.offset,
-            "limit": args.limit,
+            "offset": offset,
+            "limit": limit,
         }
 
         task_id, config_hash = compute_task_id(

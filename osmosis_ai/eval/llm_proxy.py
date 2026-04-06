@@ -7,8 +7,6 @@ Responsibilities:
 4. (Optional) Write per-request JSONL traces when trace_dir is set (--debug)
 """
 
-from __future__ import annotations
-
 import asyncio
 import contextlib
 import json
@@ -136,10 +134,8 @@ class LiteLLMProxy:
                 raise CLIError(f"LLM preflight check failed: {msg}") from e
             logger.debug("Preflight non-fatal error: %s", e)
 
-    async def _handle_request(self, rollout_id: str, body: dict) -> dict:
-        """Forward request to LLM, accumulate token usage, optionally write trace."""
-        litellm = _get_litellm()
-
+    def _build_litellm_kwargs(self, body: dict) -> dict[str, Any]:
+        """Build kwargs for litellm.acompletion from the incoming request body."""
         kwargs: dict[str, Any] = {
             "model": self.model,
             "messages": body.get("messages", []),
@@ -152,6 +148,12 @@ class LiteLLMProxy:
         for key in ("tools", "tool_choice"):
             if key in body:
                 kwargs[key] = body[key]
+        return kwargs
+
+    async def _handle_request(self, rollout_id: str, body: dict) -> dict:
+        """Forward non-streaming request to LLM, accumulate token usage."""
+        litellm = _get_litellm()
+        kwargs = self._build_litellm_kwargs(body)
 
         start = time.monotonic()
         try:
@@ -184,6 +186,34 @@ class LiteLLMProxy:
             },
         }
 
+    async def _stream_response(self, rollout_id: str, body: dict):
+        """Forward streaming request to LLM, yield SSE chunks, count tokens."""
+        litellm = _get_litellm()
+        kwargs = self._build_litellm_kwargs(body)
+        kwargs["stream"] = True
+        kwargs["stream_options"] = {"include_usage": True}
+
+        try:
+            response = await litellm.acompletion(**kwargs)
+        except Exception as e:
+            if type(e).__name__ in self.SYSTEMIC_EXCEPTIONS:
+                self.systemic_error = str(e)
+            error_data = {"error": {"message": str(e), "type": type(e).__name__}}
+            yield f"data: {json.dumps(error_data)}\n\n"
+            yield "data: [DONE]\n\n"
+            return
+
+        async for chunk in response:
+            if hasattr(chunk, "usage") and chunk.usage:
+                total = chunk.usage.total_tokens or 0
+                if total > 0:
+                    self._tokens[rollout_id] = self._tokens.get(rollout_id, 0) + total
+
+            chunk_data = chunk.model_dump(exclude_none=True)
+            yield f"data: {json.dumps(chunk_data, ensure_ascii=False)}\n\n"
+
+        yield "data: [DONE]\n\n"
+
     def _write_trace(
         self, rollout_id: str, request: dict, response: Any, latency_ms: float
     ) -> None:
@@ -208,14 +238,21 @@ class LiteLLMProxy:
 
     def _build_app(self) -> Any:
         from fastapi import FastAPI, Request
-        from fastapi.responses import JSONResponse
+        from fastapi.responses import JSONResponse, StreamingResponse
 
         app = FastAPI(title="LiteLLMProxy", docs_url=None, redoc_url=None)
 
         @app.post("/v1/chat/completions")
-        async def chat_completions(request: Request) -> JSONResponse:
+        async def chat_completions(request: Request):
             rollout_id = request.headers.get("x-rollout-id", "unknown")
             body = await request.json()
+
+            if body.get("stream"):
+                return StreamingResponse(
+                    self._stream_response(rollout_id, body),
+                    media_type="text/event-stream",
+                )
+
             try:
                 result = await self._handle_request(rollout_id, body)
             except Exception as exc:
