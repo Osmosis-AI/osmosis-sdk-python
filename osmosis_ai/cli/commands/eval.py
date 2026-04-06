@@ -23,13 +23,16 @@ def eval_run(
         False, "--retry-failed", help="Re-run only failed."
     ),
     limit: int | None = typer.Option(None, "--limit", help="Max rows to evaluate."),
-    offset: int = typer.Option(0, "--offset", help="Skip first N rows."),
+    offset: int | None = typer.Option(None, "--offset", help="Skip first N rows."),
     quiet: bool = typer.Option(
         False, "-q", "--quiet", help="Suppress progress output."
     ),
     debug: bool = typer.Option(False, "--debug", help="Enable debug logging + trace."),
     output_path: str | None = typer.Option(
         None, "-o", "--output-path", help="Override output directory."
+    ),
+    log_samples: bool = typer.Option(
+        False, "--log-samples", help="Save full conversation logs to JSONL."
     ),
     batch_size: int | None = typer.Option(
         None, "--batch-size", help="Override concurrent batch size."
@@ -48,6 +51,7 @@ def eval_run(
         quiet=quiet,
         debug=debug,
         output_path=output_path,
+        log_samples=log_samples,
         batch_size_override=batch_size,
     )
     if rc:

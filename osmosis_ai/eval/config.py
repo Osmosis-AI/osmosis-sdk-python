@@ -12,10 +12,13 @@ from osmosis_ai.cli.errors import CLIError
 
 
 class _EvalSection(BaseModel):
-    module: str
     dataset: str
+    rollout: str
+    entrypoint: str
     limit: Annotated[int, Field(ge=1)] | None = None
     offset: Annotated[int, Field(ge=0)] = 0
+    fresh: bool = False
+    retry_failed: bool = False
 
 
 class _LLMSection(BaseModel):
@@ -38,6 +41,8 @@ class _RunsSection(BaseModel):
 class _OutputSection(BaseModel):
     log_samples: bool = False
     output_path: str | None = None
+    quiet: bool = False
+    debug: bool = False
 
 
 class _BaselineSection(BaseModel):
@@ -50,17 +55,20 @@ class EvalConfig(BaseModel):
     """Parsed eval TOML configuration."""
 
     # [eval]
-    eval_module: str
     eval_dataset: str
+    eval_rollout: str
+    eval_entrypoint: str
     eval_limit: Annotated[int, Field(ge=1)] | None = None
     eval_offset: Annotated[int, Field(ge=0)] = 0
+    eval_fresh: bool = False
+    eval_retry_failed: bool = False
 
     # [llm]
     llm_model: str
     llm_base_url: str | None = None
     llm_api_key_env: str | None = None
 
-    # [grader]
+    # [grader] (legacy — auto-discovered when using rollout+entrypoint)
     has_grader: bool = False
     grader_module: str | None = None
     grader_config: str | None = None
@@ -73,6 +81,8 @@ class EvalConfig(BaseModel):
     # [output]
     output_log_samples: bool = False
     output_path: str | None = None
+    output_quiet: bool = False
+    output_debug: bool = False
 
     # [baseline]
     baseline_model: str | None = None
@@ -95,10 +105,10 @@ def load_eval_config(path: Path) -> EvalConfig:
         raise CLIError(f"Missing [eval] section in {path}")
 
     eval_section = raw["eval"]
-    if "module" not in eval_section:
-        raise CLIError(f"Missing 'module' in [eval] section of {path}")
-    if "dataset" not in eval_section:
-        raise CLIError(f"Missing 'dataset' in [eval] section of {path}")
+
+    for required_key in ("rollout", "entrypoint", "dataset"):
+        if required_key not in eval_section:
+            raise CLIError(f"Missing '{required_key}' in [eval] section of {path}")
 
     llm_section = raw.get("llm", {})
     if "model" not in llm_section:
@@ -124,10 +134,13 @@ def load_eval_config(path: Path) -> EvalConfig:
         raise CLIError(f"Invalid config in {path}: {e}") from e
 
     return EvalConfig(
-        eval_module=eval_section["module"],
         eval_dataset=eval_section["dataset"],
+        eval_rollout=eval_section["rollout"],
+        eval_entrypoint=eval_section["entrypoint"],
         eval_limit=eval_parsed.limit,
         eval_offset=eval_parsed.offset,
+        eval_fresh=eval_parsed.fresh,
+        eval_retry_failed=eval_parsed.retry_failed,
         llm_model=llm_section["model"],
         llm_base_url=llm_section.get("base_url"),
         llm_api_key_env=llm_section.get("api_key_env"),
@@ -139,6 +152,8 @@ def load_eval_config(path: Path) -> EvalConfig:
         runs_pass_threshold=runs.pass_threshold,
         output_log_samples=output.log_samples,
         output_path=output.output_path,
+        output_quiet=output.quiet,
+        output_debug=output.debug,
         baseline_model=baseline_section.get("model") if baseline_section else None,
         baseline_base_url=baseline_section.get("base_url")
         if baseline_section

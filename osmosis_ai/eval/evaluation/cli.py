@@ -329,22 +329,13 @@ class EvalCommand:
     async def _run_async(self, args: Any) -> int:
         from osmosis_ai.cli.errors import CLIError
         from osmosis_ai.eval.common.cli import (
-            _resolve_grader,
+            auto_discover_grader,
             format_duration,
             load_dataset_rows,
             load_workflow,
             truncate_error,
         )
         from osmosis_ai.eval.config import load_eval_config
-
-        if args.debug:
-            logging.basicConfig(level=logging.DEBUG)
-
-        if getattr(args, "fresh", False) and getattr(args, "retry_failed", False):
-            self.console.print_error(
-                "Error: --fresh and --retry-failed are mutually exclusive."
-            )
-            return 1
 
         # 1. Load TOML config
         config_path = Path(args.config_path)
@@ -354,12 +345,35 @@ class EvalCommand:
             self.console.print_error(f"Error: {e}")
             return 1
 
-        # Apply CLI overrides (CLI flags take precedence over TOML)
-        batch_size = args.batch_size_override or config.runs_batch_size
+        # Apply CLI overrides (CLI flags take precedence over TOML).
+        # Optional values: CLI wins when not None.
+        # Booleans: CLI can enable (or), TOML sets default.
         limit = args.limit if args.limit is not None else config.eval_limit
-        offset = args.offset if args.offset else config.eval_offset
+        offset = args.offset if args.offset is not None else config.eval_offset
+        fresh = args.fresh or config.eval_fresh
+        retry_failed = args.retry_failed or config.eval_retry_failed
+        batch_size = (
+            args.batch_size_override
+            if args.batch_size_override is not None
+            else config.runs_batch_size
+        )
+        log_samples = args.log_samples or config.output_log_samples
+        output_path = (
+            args.output_path if args.output_path is not None else config.output_path
+        )
+        quiet = args.quiet or config.output_quiet
+        debug = args.debug or config.output_debug
 
-        if not args.quiet:
+        if debug:
+            logging.basicConfig(level=logging.DEBUG)
+
+        if fresh and retry_failed:
+            self.console.print_error(
+                "Error: --fresh and --retry-failed are mutually exclusive."
+            )
+            return 1
+
+        if not quiet:
             from osmosis_ai.consts import PACKAGE_VERSION
 
             self.console.print(f"osmosis-eval v{PACKAGE_VERSION}", style="bold")
@@ -381,7 +395,7 @@ class EvalCommand:
             dataset_path=config.eval_dataset,
             limit=limit,
             offset=offset,
-            quiet=args.quiet,
+            quiet=quiet,
             console=self.console,
             empty_error="No rows to evaluate",
             action_label="evaluating",
@@ -393,8 +407,9 @@ class EvalCommand:
 
         # 4. Load workflow
         workflow_cls, workflow_config, error = load_workflow(
-            module=config.eval_module,
-            quiet=args.quiet,
+            rollout=config.eval_rollout,
+            entrypoint=config.eval_entrypoint,
+            quiet=quiet,
             console=self.console,
         )
         if error:
@@ -402,29 +417,18 @@ class EvalCommand:
             return 1
         assert workflow_cls is not None
 
-        # 5. Resolve grader (only if [grader] section present)
-        grader_cls, grader_config = None, None
-        if config.has_grader:
-            module_name = config.eval_module.rsplit(":", 1)[0]
-            grader_cls, grader_config = _resolve_grader(
-                module_name,
-                explicit_grader=config.grader_module,
-                explicit_config=config.grader_config,
-            )
-            if grader_cls is None:
-                self.console.print_error(
-                    f"Error: [grader] section is present but no Grader subclass found in '{module_name}'.\n"
-                    f"  Either add a Grader subclass to your module, or specify [grader].module explicitly."
-                )
-                return 1
-            if not args.quiet:
-                self.console.print(f"  Grader: {grader_cls.__name__}")
+        # 5. Resolve grader (auto-discover from entrypoint)
+        grader_cls, grader_config = auto_discover_grader(config.eval_entrypoint)
+        has_grader = grader_cls is not None
+
+        if grader_cls and not quiet:
+            self.console.print(f"  Grader: {grader_cls.__name__}")
 
         # 6. Create proxy and start
         from osmosis_ai.eval.llm_proxy import LiteLLMProxy
 
         trace_dir = None
-        if args.debug:
+        if debug:
             trace_dir = str(Path("./eval_traces") / "debug")
 
         proxy = LiteLLMProxy(
@@ -505,12 +509,13 @@ class EvalCommand:
         )
 
         dataset_fingerprint = compute_dataset_fingerprint(config.eval_dataset)
-        module_fingerprint = compute_module_fingerprint(config.eval_module) or ""
+
+        ep_module = config.eval_entrypoint.replace("/", ".").removesuffix(".py")
+        module_fingerprint = compute_module_fingerprint(ep_module) or ""
 
         grader_fingerprint = None
-        if grader_cls and config.has_grader:
-            grader_module = config.grader_module or config.eval_module
-            grader_fingerprint = compute_module_fingerprint(grader_module)
+        if grader_cls:
+            grader_fingerprint = compute_module_fingerprint(grader_cls.__module__)
 
         # Merge CLI overrides into config for cache identity
         config_for_hash = {
@@ -545,7 +550,6 @@ class EvalCommand:
         cache_backend = JsonFileCacheBackend()
 
         # Validate --output-path
-        output_path = getattr(args, "output_path", None)
         if output_path is not None:
             output_path_resolved = Path(output_path).resolve()
             cache_root_resolved = _get_cache_root().resolve()
@@ -558,11 +562,8 @@ class EvalCommand:
                     await baseline_proxy.stop()
                 return 1
 
-        fresh = getattr(args, "fresh", False)
-        log_samples = config.output_log_samples
-
         def on_progress(current: int, total: int, result: dict) -> None:
-            if args.quiet:
+            if quiet:
                 return
 
             status_style = "green" if result["success"] else "red"
@@ -588,7 +589,7 @@ class EvalCommand:
                 f"({duration}, {tokens:,} tokens){reward_str}{error_suffix}"
             )
 
-        if not args.quiet:
+        if not quiet:
             self.console.print()
             n_info = f" x{config.runs_n} runs" if config.runs_n > 1 else ""
             batch_info = f", batch_size={batch_size}" if batch_size > 1 else ""
@@ -610,19 +611,19 @@ class EvalCommand:
             batch_size=batch_size,
             log_samples=log_samples,
             fresh=fresh,
-            retry_failed=getattr(args, "retry_failed", False),
+            retry_failed=retry_failed,
             dataset_path=Path(config.eval_dataset),
             dataset_fingerprint=dataset_fingerprint,
-            start_index=args.offset,
+            start_index=offset,
             on_progress=on_progress,
-            has_grader=config.has_grader,
+            has_grader=has_grader,
         )
 
         try:
             orch_result = await orchestrator.run()
         except Exception as e:
             self.console.print_error(f"Error during evaluation: {e}")
-            if args.debug:
+            if debug:
                 import traceback
 
                 traceback.print_exc()
@@ -634,7 +635,7 @@ class EvalCommand:
 
         # 13. Handle result status
         if orch_result.status == "already_completed":
-            if not args.quiet:
+            if not quiet:
                 self.console.print(
                     "\nEvaluation already completed (cached).", style="bold"
                 )
@@ -656,12 +657,12 @@ class EvalCommand:
                     samples_path=orch_result.samples_path,
                     task_id=task_id,
                 )
-                if not args.quiet:
+                if not quiet:
                     self.console.print(f"Output written to: {results_path}")
             return 0
 
         if orch_result.status == "interrupted":
-            if not args.quiet:
+            if not quiet:
                 self.console.print(
                     f"\nEvaluation interrupted. "
                     f"Progress: {orch_result.total_completed}/{orch_result.total_expected} runs.",
@@ -680,7 +681,7 @@ class EvalCommand:
             return 1
 
         if orch_result.status == "systemic_error":
-            if not args.quiet:
+            if not quiet:
                 self.console.print(
                     f"\nEvaluation stopped due to systemic error: {orch_result.stop_reason}",
                     style="red",
@@ -696,7 +697,7 @@ class EvalCommand:
             return 1
 
         # completed
-        if not args.quiet:
+        if not quiet:
             self._print_orchestrator_summary(
                 orch_result.summary,
                 orch_result.total_completed,
@@ -715,7 +716,7 @@ class EvalCommand:
                 samples_path=orch_result.samples_path,
                 task_id=task_id,
             )
-            if not args.quiet:
+            if not quiet:
                 self.console.print(f"Output written to: {results_path}")
 
         return 0

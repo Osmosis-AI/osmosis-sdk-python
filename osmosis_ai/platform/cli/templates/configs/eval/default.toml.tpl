@@ -2,19 +2,21 @@
 # Usage: osmosis eval run configs/eval/<your-config>.toml
 
 [eval]
-module = "<your-module>:<YourWorkflow>"    # AgentWorkflow class (required)
-dataset = "<your-dataset>.jsonl"           # Dataset path (required)
+rollout = "<your-rollout>"                 # Rollout name (directory under rollouts/)
+entrypoint = "<your-entrypoint-file>"      # Entrypoint file (relative to rollout dir)
+dataset = "<your-dataset>.jsonl"           # Dataset path (relative to workspace root)
+# limit =                                  # Max rows to evaluate
+# offset = 0                               # Skip first N rows
+# fresh = false                            # Discard cached results
+# retry_failed = false                     # Re-run only failed
 
 [llm]
 model = "openai/gpt-5.4"                   # LiteLLM model name (required)
 # base_url =                               # Custom OpenAI-compatible endpoint
 # api_key_env = "OPENAI_API_KEY"           # Env var name for API key
 
-# [grader]
-# Include this section to enable grading. Omit for smoke-test mode.
-# Grader is auto-discovered from the workflow module.
-# module = "<module>:<YourGrader>"         # Explicit grader (if auto-discovery fails)
-# config = "<module>:grader_config"        # Explicit grader config
+# Grader is auto-discovered from the rollout package.
+# No [grader] section needed — define a Grader subclass in your rollout.
 
 [runs]
 # n = 1                                    # Runs per row (for pass@n)
@@ -22,8 +24,10 @@ model = "openai/gpt-5.4"                   # LiteLLM model name (required)
 # pass_threshold = 1.0                     # Score threshold for pass@k
 
 [output]
-# log_samples = false                      # Save conversations to JSONL
+log_samples = false                        # Save conversations to JSONL (or use --log-samples flag)
 # output_path =                            # Structured output directory
+# quiet = false                            # Suppress progress output
+# debug = false                            # Enable debug logging + trace
 
 # [baseline]
 # model = "openai/gpt-3.5-turbo"          # Baseline model for comparison

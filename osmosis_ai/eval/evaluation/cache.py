@@ -346,7 +346,7 @@ def atomic_write_json(path: Path, data: dict[str, Any]) -> None:
             delete=False,
         ) as f:
             tmp_path = f.name
-            json.dump(data, f, ensure_ascii=False)
+            json.dump(data, f, ensure_ascii=False, indent=2)
             f.flush()
             _fsync(f.fileno())
         _replace_with_retry(tmp_path, path)

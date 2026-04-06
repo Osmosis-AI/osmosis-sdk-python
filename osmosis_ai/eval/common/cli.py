@@ -39,64 +39,145 @@ def truncate_error(text: str, max_len: int = 50) -> str:
     return flat[: max_len - 3] + "..." if len(flat) > max_len else flat
 
 
-def _resolve_workflow(module_path: str) -> tuple[type, Any]:
-    """Resolve a module:attribute path to an AgentWorkflow subclass and its config.
+def _ensure_rollout_on_path(rollout: str | None) -> str | None:
+    """Add rollouts/<name>/ to sys.path if rollout is specified.
 
-    Returns (workflow_cls, config) where config may be None if no
-    AgentWorkflowConfig instance is found in the module namespace.
+    Returns the rollout directory path, or None.
     """
+    if not rollout:
+        return None
+
+    import sys
+
+    cwd = os.getcwd()
+    rollout_dir = os.path.join(cwd, "rollouts", rollout)
+    if not os.path.isdir(rollout_dir):
+        raise CLIError(
+            f"Rollout directory not found: rollouts/{rollout}/\n"
+            f"  Expected at: {rollout_dir}"
+        )
+    if rollout_dir not in sys.path:
+        sys.path.insert(0, rollout_dir)
+    return rollout_dir
+
+
+def _entrypoint_to_module(entrypoint: str) -> str:
+    """Convert a file path to a Python module path.
+
+    "multiply_rollout/workflow.py" → "multiply_rollout.workflow"
+    "main.py"                      → "main"
+    """
+    return entrypoint.replace("/", ".").removesuffix(".py")
+
+
+def _resolve_workflow(
+    rollout: str,
+    entrypoint: str,
+) -> tuple[type, Any]:
+    """Resolve an AgentWorkflow subclass and its config.
+
+    Converts the entrypoint file path to a module, imports it,
+    and auto-discovers an AgentWorkflow subclass and optional config.
+
+    Returns (workflow_cls, config) where config may be None.
+    """
+    import importlib
     import sys
 
     from osmosis_ai.rollout_v2.agent_workflow import AgentWorkflow
     from osmosis_ai.rollout_v2.types import AgentWorkflowConfig
-    from osmosis_ai.rollout_v2.utils.imports import resolve_object
 
     # Ensure cwd is on sys.path so local modules can be imported from CLI.
     cwd = os.getcwd()
     if cwd not in sys.path:
         sys.path.insert(0, cwd)
 
-    obj = resolve_object(module_path)
+    # Add rollout directory to sys.path
+    _ensure_rollout_on_path(rollout)
 
-    if not (isinstance(obj, type) and issubclass(obj, AgentWorkflow)):
-        raise TypeError(
-            f"'{module_path}' must be an AgentWorkflow subclass, "
-            f"got {type(obj).__name__}"
-        )
+    module_name = _entrypoint_to_module(entrypoint)
+    mod = importlib.import_module(module_name)
 
-    # Auto-discover config: scan the module for AgentWorkflowConfig instances.
-    module_name = module_path.rsplit(":", 1)[0]
-    mod = sys.modules[module_name]
+    # Auto-discover AgentWorkflow subclass
+    workflow_cls = None
+    for val in vars(mod).values():
+        if (
+            isinstance(val, type)
+            and issubclass(val, AgentWorkflow)
+            and val is not AgentWorkflow
+        ):
+            workflow_cls = val
+            break
+
+    if workflow_cls is None:
+        raise CLIError(f"No AgentWorkflow subclass found in '{entrypoint}'")
+
+    # Auto-discover config
     config = None
     for val in vars(mod).values():
         if isinstance(val, AgentWorkflowConfig):
             config = val
             break
 
-    return obj, config
+    return workflow_cls, config
 
 
 def load_workflow(
-    module: str,
-    quiet: bool,
-    console: Console,
+    rollout: str,
+    entrypoint: str,
+    quiet: bool = False,
+    console: Console | None = None,
 ) -> tuple[type | None, Any, str | None]:
-    """Load an AgentWorkflow class and its config from a module path.
+    """Load an AgentWorkflow class and its config.
 
     Returns (workflow_cls, workflow_config, error).
     """
-    if not quiet:
-        console.print(f"Loading workflow: {module}")
+    if console and not quiet:
+        console.print(f"Loading workflow: {entrypoint}")
 
     try:
-        workflow_cls, workflow_config = _resolve_workflow(module)
+        workflow_cls, workflow_config = _resolve_workflow(
+            rollout=rollout, entrypoint=entrypoint
+        )
     except (CLIError, ImportError, ValueError, TypeError) as e:
         return None, None, str(e)
 
-    if not quiet:
+    if console and not quiet:
         console.print(f"  Workflow: {workflow_cls.__name__}")
 
     return workflow_cls, workflow_config, None
+
+
+def auto_discover_grader(
+    entrypoint: str,
+) -> tuple[type | None, Any]:
+    """Discover a Grader subclass and its config from the entrypoint module.
+
+    The entrypoint file (e.g., ``local_rollout_server_example.py``) typically
+    imports the Grader alongside the Workflow, so scanning its namespace is
+    sufficient — no need to walk the entire package.
+
+    Returns (grader_cls, grader_config) or (None, None) if not found.
+    """
+    import sys
+
+    from osmosis_ai.rollout_v2.grader import Grader
+    from osmosis_ai.rollout_v2.types import GraderConfig
+
+    module_name = _entrypoint_to_module(entrypoint)
+    mod = sys.modules.get(module_name)
+    if mod is None:
+        return None, None
+
+    grader_cls = None
+    grader_config = None
+    for val in vars(mod).values():
+        if isinstance(val, type) and issubclass(val, Grader) and val is not Grader:
+            grader_cls = val
+        if isinstance(val, GraderConfig):
+            grader_config = val
+
+    return grader_cls, grader_config
 
 
 def load_dataset_rows(
@@ -183,6 +264,7 @@ def _resolve_grader(
 
 __all__ = [
     "_resolve_grader",
+    "auto_discover_grader",
     "build_completion_params",
     "format_duration",
     "format_tokens",

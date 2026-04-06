@@ -20,26 +20,42 @@ def tmp_toml(tmp_path):
 def test_load_minimal_config(tmp_toml):
     path = tmp_toml("""
 [eval]
-module = "my_rollout:MyWorkflow"
+rollout = "my_rollout"
+entrypoint = "workflow.py"
 dataset = "data.jsonl"
 
 [llm]
 model = "openai/gpt-5.4"
 """)
     config = load_eval_config(path)
-    assert config.eval_module == "my_rollout:MyWorkflow"
+    assert config.eval_rollout == "my_rollout"
+    assert config.eval_entrypoint == "workflow.py"
     assert config.eval_dataset == "data.jsonl"
     assert config.llm_model == "openai/gpt-5.4"
     assert config.has_grader is False
     assert config.runs_n == 1
     assert config.runs_batch_size == 1
+    # Defaults for all CLI-overridable flags
+    assert config.eval_limit is None
+    assert config.eval_offset == 0
+    assert config.eval_fresh is False
+    assert config.eval_retry_failed is False
+    assert config.output_log_samples is False
+    assert config.output_path is None
+    assert config.output_quiet is False
+    assert config.output_debug is False
 
 
 def test_load_full_config(tmp_toml):
     path = tmp_toml("""
 [eval]
-module = "my_rollout:MyWorkflow"
+rollout = "my_rollout"
+entrypoint = "workflow.py"
 dataset = "data.jsonl"
+limit = 10
+offset = 5
+fresh = true
+retry_failed = true
 
 [llm]
 model = "openai/gpt-5.4"
@@ -55,6 +71,9 @@ pass_threshold = 0.8
 
 [output]
 log_samples = true
+output_path = "/tmp/eval_output"
+quiet = true
+debug = true
 
 [baseline]
 model = "openai/gpt-3.5-turbo"
@@ -68,6 +87,14 @@ model = "openai/gpt-3.5-turbo"
     assert config.runs_pass_threshold == 0.8
     assert config.output_log_samples is True
     assert config.baseline_model == "openai/gpt-3.5-turbo"
+    # CLI-overridable flags from TOML
+    assert config.eval_limit == 10
+    assert config.eval_offset == 5
+    assert config.eval_fresh is True
+    assert config.eval_retry_failed is True
+    assert config.output_path == "/tmp/eval_output"
+    assert config.output_quiet is True
+    assert config.output_debug is True
 
 
 def test_load_config_missing_file():
@@ -96,17 +123,33 @@ model = "openai/gpt-5.4"
         load_eval_config(path)
 
 
-def test_load_config_missing_module(tmp_toml):
+def test_load_config_missing_rollout(tmp_toml):
     from osmosis_ai.cli.errors import CLIError
 
     path = tmp_toml("""
 [eval]
+entrypoint = "workflow.py"
 dataset = "data.jsonl"
 
 [llm]
 model = "openai/gpt-5.4"
 """)
-    with pytest.raises(CLIError, match="Missing 'module'"):
+    with pytest.raises(CLIError, match="Missing 'rollout'"):
+        load_eval_config(path)
+
+
+def test_load_config_missing_entrypoint(tmp_toml):
+    from osmosis_ai.cli.errors import CLIError
+
+    path = tmp_toml("""
+[eval]
+rollout = "my_rollout"
+dataset = "data.jsonl"
+
+[llm]
+model = "openai/gpt-5.4"
+""")
+    with pytest.raises(CLIError, match="Missing 'entrypoint'"):
         load_eval_config(path)
 
 
@@ -115,7 +158,8 @@ def test_load_config_missing_dataset(tmp_toml):
 
     path = tmp_toml("""
 [eval]
-module = "my_rollout:MyWorkflow"
+rollout = "my_rollout"
+entrypoint = "workflow.py"
 
 [llm]
 model = "openai/gpt-5.4"
@@ -129,7 +173,8 @@ def test_load_config_missing_llm_model(tmp_toml):
 
     path = tmp_toml("""
 [eval]
-module = "my_rollout:MyWorkflow"
+rollout = "my_rollout"
+entrypoint = "workflow.py"
 dataset = "data.jsonl"
 """)
     with pytest.raises(CLIError, match="Missing \\[llm\\]"):
@@ -139,7 +184,8 @@ dataset = "data.jsonl"
 def test_grader_with_explicit_module(tmp_toml):
     path = tmp_toml("""
 [eval]
-module = "my_rollout:MyWorkflow"
+rollout = "my_rollout"
+entrypoint = "workflow.py"
 dataset = "data.jsonl"
 
 [llm]
@@ -159,7 +205,8 @@ def test_smoke_test_mode_no_grader(tmp_toml):
     """No [grader] section = smoke test mode."""
     path = tmp_toml("""
 [eval]
-module = "my_rollout:MyWorkflow"
+rollout = "my_rollout"
+entrypoint = "workflow.py"
 dataset = "data.jsonl"
 
 [llm]
@@ -176,7 +223,8 @@ def test_load_config_invalid_runs_n_type(tmp_toml):
 
     path = tmp_toml("""
 [eval]
-module = "my_rollout:MyWorkflow"
+rollout = "my_rollout"
+entrypoint = "workflow.py"
 dataset = "data.jsonl"
 
 [llm]
@@ -195,7 +243,8 @@ def test_load_config_invalid_batch_size_zero(tmp_toml):
 
     path = tmp_toml("""
 [eval]
-module = "my_rollout:MyWorkflow"
+rollout = "my_rollout"
+entrypoint = "workflow.py"
 dataset = "data.jsonl"
 
 [llm]
@@ -214,7 +263,8 @@ def test_load_config_invalid_pass_threshold_range(tmp_toml):
 
     path = tmp_toml("""
 [eval]
-module = "my_rollout:MyWorkflow"
+rollout = "my_rollout"
+entrypoint = "workflow.py"
 dataset = "data.jsonl"
 
 [llm]
