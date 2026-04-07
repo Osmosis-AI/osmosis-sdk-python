@@ -328,6 +328,14 @@ class EvalCommand:
 
     async def _run_async(self, args: Any) -> int:
         from osmosis_ai.cli.errors import CLIError
+
+        # Reject conflicting CLI flags before config load so invalid fixtures cannot mask this error.
+        if args.fresh and args.retry_failed:
+            self.console.print_error(
+                "Error: --fresh and --retry-failed are mutually exclusive."
+            )
+            return 1
+
         from osmosis_ai.eval.common.cli import (
             auto_discover_grader,
             format_duration,
@@ -418,7 +426,11 @@ class EvalCommand:
         assert workflow_cls is not None
 
         # 5. Resolve grader (auto-discover from entrypoint)
-        grader_cls, grader_config = auto_discover_grader(config.eval_entrypoint)
+        try:
+            grader_cls, grader_config = auto_discover_grader(config.eval_entrypoint)
+        except CLIError as e:
+            self.console.print_error(f"Error: {e}")
+            return 1
         has_grader = grader_cls is not None
 
         if grader_cls and not quiet:
