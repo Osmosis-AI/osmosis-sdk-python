@@ -282,7 +282,7 @@ def sanitize_path_part(s: str, max_len: int = 60) -> str:
     """
     normalized = unicodedata.normalize("NFD", s)
     normalized = "".join(c for c in normalized if unicodedata.category(c) != "Mn")
-    clean = re.sub(r"[^\w-]", "-", normalized)
+    clean = re.sub(r"[^\w.\-]", "-", normalized)
     clean = re.sub(r"-+", "-", clean).strip("-")
     if not clean:
         return f"eval-{xxhash.xxh3_128_hexdigest(s.encode())[:8]}"
