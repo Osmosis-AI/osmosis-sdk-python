@@ -1,0 +1,23 @@
+osmosis_ai/eval/evaluation/cache.py
+  f39a6496e127aa3f 285
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.5",
+  "base_commit_sha": "ed393141de44d059dbf05d46aee4b86c8e64928b",
+  "prompts": {
+    "f39a6496e127aa3f": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "95c76d4c-7cec-4a8c-967b-1b70600408c4",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian",
+      "messages": [],
+      "total_additions": 1,
+      "total_deletions": 1,
+      "accepted_lines": 1,
+      "overriden_lines": 0
+    }
+  }
+}
