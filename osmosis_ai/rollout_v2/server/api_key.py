@@ -22,11 +22,6 @@ def generate_api_key() -> str:
 
     Returns:
         A secure, URL-safe API key string.
-
-    Example:
-        >>> key = generate_api_key()
-        >>> key.startswith("osm_rollout_")
-        True
     """
     random_part = secrets.token_urlsafe(API_KEY_RANDOM_BYTES)
     return f"{API_KEY_PREFIX}{random_part}"

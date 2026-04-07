@@ -1,8 +1,9 @@
 """Tests for lazy loading in osmosis_ai.__init__.
 
 Verifies that importing ``osmosis_ai`` does NOT eagerly pull in heavy
-dependencies (litellm, openai, fastapi) and that all public names remain
-accessible on demand.
+dependencies (litellm, openai, fastapi) and that rubric exports remain
+accessible on demand. Stage 4: v1 rollout symbols are not re-exported at
+package top level.
 """
 
 from __future__ import annotations
@@ -32,15 +33,28 @@ def test_import_osmosis_ai_does_not_load_litellm():
     assert result.returncode == 0, f"litellm was eagerly loaded: {result.stderr}"
 
 
-# -- Lazy rollout import ------------------------------------------------------
+# -- V1 rollout not re-exported ----------------------------------------------
 
 
-def test_lazy_rollout_import():
-    """Accessing a rollout export via osmosis_ai triggers lazy import."""
-    cls = osmosis_ai.RolloutAgentLoop
-    assert cls is not None
-    # RolloutAgentLoop is an ABC with abstract method ``run``
-    assert hasattr(cls, "run")
+@pytest.mark.parametrize(
+    "name",
+    [
+        "RolloutAgentLoop",
+        "create_app",
+        "RolloutContext",
+        "RolloutResult",
+    ],
+)
+def test_v1_rollout_export_not_on_package(name: str):
+    """Top-level osmosis_ai must not expose v1 rollout SDK names."""
+    with pytest.raises(AttributeError, match="no attribute"):
+        getattr(osmosis_ai, name)
+
+
+def test_v1_rollout_names_not_in_all():
+    """__all__ must not list v1 rollout exports."""
+    assert "RolloutAgentLoop" not in osmosis_ai.__all__
+    assert "create_app" not in osmosis_ai.__all__
 
 
 # -- Lazy rubric import -------------------------------------------------------
@@ -87,6 +101,6 @@ def test_eager_exports_present():
 
 
 def test_module_has_getattr():
-    """The module must define __getattr__ for lazy loading."""
+    """The module must define __getattr__ for rubric lazy loading."""
     assert hasattr(osmosis_ai, "__getattr__")
     assert callable(osmosis_ai.__getattr__)

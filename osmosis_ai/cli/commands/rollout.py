@@ -305,7 +305,7 @@ def _serve(
     if local:
         api_key = None
     else:
-        from osmosis_ai.rollout.server.api_key import generate_api_key
+        from osmosis_ai.rollout_v2.server.api_key import generate_api_key
 
         if config.registration_api_key is not None:
             api_key = config.registration_api_key
@@ -437,7 +437,7 @@ def _serve(
         from starlette.middleware.base import BaseHTTPMiddleware
         from starlette.requests import Request
 
-        from osmosis_ai.rollout.server.api_key import validate_api_key
+        from osmosis_ai.rollout_v2.server.api_key import validate_api_key
 
         class _APIKeyAuthMiddleware(BaseHTTPMiddleware):
             def __init__(self, app: object, *, expected_key: str) -> None:

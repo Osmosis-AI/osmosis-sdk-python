@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
@@ -98,10 +99,10 @@ def test_serve_help_shows_config_positional_and_no_module_flag(capsys):
     rc = main(["rollout", "serve", "--help"])
     out = capsys.readouterr().out
     assert rc == 0
+    assert "CONFIG_PATH" in out
+    assert "Path to serve TOML config file." in out
     assert "--module" not in out
-    assert (
-        "-m" not in out or "module" not in out
-    )  # -m may appear in unrelated help lines
+    assert re.search(r"(?<!\w)-m(?!\w)", out) is None
 
 
 @pytest.fixture
@@ -358,7 +359,7 @@ def serve_app_capture(monkeypatch, tmp_path):
         lambda *_a, **_kw: ValidationResult(valid=True, errors=[], warnings=[]),
     )
     monkeypatch.setattr(
-        "osmosis_ai.rollout.server.api_key.generate_api_key",
+        "osmosis_ai.rollout_v2.server.api_key.generate_api_key",
         lambda: "osm_rollout_generated_full_key_12345",
     )
     captured: dict = {}
@@ -542,7 +543,7 @@ def test_serve_with_trace_dir_creates_session_subdir(monkeypatch, tmp_path, caps
         lambda *_a, **_kw: ValidationResult(valid=True, errors=[], warnings=[]),
     )
     monkeypatch.setattr(
-        "osmosis_ai.rollout.server.api_key.generate_api_key",
+        "osmosis_ai.rollout_v2.server.api_key.generate_api_key",
         lambda: "osm_rollout_trace_test",
     )
     monkeypatch.setattr("uvicorn.run", MagicMock())
@@ -579,7 +580,7 @@ def test_api_key_panel_generated_shows_full_key(monkeypatch, tmp_path, capsys):
         lambda *_a, **_kw: ValidationResult(valid=True, errors=[], warnings=[]),
     )
     monkeypatch.setattr(
-        "osmosis_ai.rollout.server.api_key.generate_api_key",
+        "osmosis_ai.rollout_v2.server.api_key.generate_api_key",
         lambda: "osm_rollout_FULLDISPLAY",
     )
     monkeypatch.setattr("uvicorn.run", MagicMock())

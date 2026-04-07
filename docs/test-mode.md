@@ -1,137 +1,69 @@
-# Test Mode
+# Test mode
 
-Test your agent implementations locally without TrainGate using external LLM providers via [LiteLLM](https://docs.litellm.ai/docs/providers). Works with both **Local Rollout** (MCP tools) and **Remote Rollout** (RolloutAgentLoop) agents.
+Run your **AgentWorkflow** against a dataset using an external LLM via [LiteLLM](https://docs.litellm.ai/docs/providers). This is a **smoke test**: successes and failures only, unless your entrypoint also defines a grader (unusual for quick tests).
 
-## Quick Start
+Implementation-wise, `osmosis rollout test` delegates to the same engine as `osmosis eval run` with a generated TOML file.
+
+The command is currently hidden from standard help output, so you may need to invoke it directly by name as `osmosis rollout test ...`.
+
+## Project layout
+
+The generated config uses rollout name `_rollout_test` and entrypoint `workflow.py`. That implies:
+
+1. A file **`workflow.py`** in the **current working directory** (or importable on `sys.path`) containing exactly one concrete `AgentWorkflow` subclass.
+2. A directory **`rollouts/_rollout_test/`** (may be empty). The CLI prepends it to `sys.path` so imports from that pack resolve consistently with `osmosis eval run`.
+
+If either is missing, loading fails with a clear CLI error.
+
+## Quick start
 
 ```bash
-# Remote Rollout: batch test with OpenAI
-osmosis test -m server:agent_loop -d data.jsonl --model gpt-5-mini
-
-# Local Rollout: test MCP tools
-osmosis test --mcp ./mcp -d data.jsonl --model openai/gpt-5-mini
-
-# Interactive debugging (start at specific row)
-osmosis test -m server:agent_loop -d data.jsonl --interactive --row 5
+mkdir -p rollouts/_rollout_test
+osmosis rollout test -m _ -d data.jsonl --model gpt-5-mini
+osmosis rollout test -m _ -d data.jsonl --model openai/gpt-5-mini --limit 10
 ```
 
-The `--mcp` directory must contain a `main.py` with a `FastMCP` instance. See [Local Rollout MCP Tools](./local-rollout/mcp-tools.md). `--mcp` and `-m` are mutually exclusive.
+`-m` / `--module` is **required** by the CLI today; use any placeholder (e.g. `_`). The workflow is always resolved from `workflow.py` as above.
 
-### Programmatic Usage
+Optional:
 
-```python
-from osmosis_ai.eval.common import DatasetReader, ExternalLLMClient
-from osmosis_ai.eval.test_mode import LocalTestRunner
-
-reader = DatasetReader("./test_data.jsonl")
-rows = reader.read(limit=10)
-client = ExternalLLMClient("gpt-5-mini")
-
-runner = LocalTestRunner(agent_loop=CalculatorAgentLoop(), llm_client=client)
-async with client:
-    results = await runner.run_batch(rows=rows, max_turns=10)
-
-print(f"Passed: {results.passed}/{results.total}")
+```bash
+osmosis rollout test -m _ -d data.jsonl --model gpt-5-mini --base-url https://api.openai.com/v1
+osmosis rollout test -m _ -d data.jsonl --model gpt-5-mini --api-key sk-...
 ```
 
----
-
-## CLI Reference
+## CLI reference
 
 ```
-osmosis test [OPTIONS]
+osmosis rollout test [OPTIONS]
 ```
-
-### Required Options
-
-| Option | Description |
-|--------|-------------|
-| `-d, --dataset FILE` | Path to dataset file (.parquet recommended, .jsonl, .csv) |
-
-### Agent Options (one required, mutually exclusive)
-
-| Option | Description |
-|--------|-------------|
-| `-m, --module, --agent MODULE` | Module path to agent loop (format: `module:attribute`) |
-| `--mcp DIR` | Path to MCP tools directory. Requires `pip install osmosis-ai[mcp]`. |
-
-### Model Options
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--model MODEL` | `gpt-5-mini` | Model name (see [Model Format](#model-format)) |
-| `--api-key KEY` | env var | API key for the LLM provider |
-| `--base-url URL` | - | Base URL for OpenAI-compatible APIs |
+| `-m`, `--module`, `--agent` | (required) | Placeholder module flag (see above). |
+| `-d`, `--dataset` | (required) | Dataset path (`.parquet` recommended, `.jsonl`, `.csv`). |
+| `--model` | `gpt-5-mini` | Model id; if no `/`, prefixed as `openai/<model>`. |
+| `--api-key` | env | API key for the LLM call. |
+| `--base-url` | — | OpenAI-compatible base URL. |
+| `--limit` | all | Max rows. |
+| `--offset` | `0` | Rows to skip. |
+| `-q`, `--quiet` | off | Less output. |
+| `--debug` | off | Verbose / trace-friendly logging. |
 
-### Execution Options
+## When to use `osmosis eval run` instead
 
-| Option | Default | Description |
-|--------|---------|-------------|
-| `--max-turns N` | `10` | Maximum agent turns per row |
-| `--temperature FLOAT` | - | LLM sampling temperature |
-| `--max-tokens N` | - | Maximum tokens per completion |
-| `--limit N` | all | Maximum rows to test |
-| `--offset N` | `0` | Number of rows to skip |
+For graded metrics, pass@k, baselines, structured output, or explicit rollout packs, use a checked-in TOML and **`osmosis eval run`** — see [Eval mode](./eval-mode.md).
 
-### Mode Options
+## Interactive stepping
 
-| Option | Description |
-|--------|-------------|
-| `-i, --interactive` | Enable interactive step-by-step mode |
-| `--row N` | Initial row for interactive mode (requires `--interactive`) |
-
-### Output Options
-
-| Option | Description |
-|--------|-------------|
-| `-o, --output FILE` | Write results to JSON file |
-| `-q, --quiet` | Suppress progress output |
-| `--debug` | Enable debug output |
-
-### Model Format
-
-Models can be specified in two formats:
-
-- **Simple**: `gpt-5-mini` (auto-prefixed to `openai/gpt-5-mini`)
-- **LiteLLM format**: `provider/model` (e.g., `anthropic/claude-sonnet-4-5`)
-
-See [LiteLLM Providers](https://docs.litellm.ai/docs/providers) for supported providers.
-
----
-
-## Interactive Mode
-
-Interactive mode allows step-by-step debugging of agent execution.
-
-### Commands
-
-| Command | Description |
-|---------|-------------|
-| `n` / `next` | Execute next LLM call |
-| `c` / `continue` | Continue to completion (disable stepping) |
-| `m` / `messages` | Show current message history |
-| `t` / `tools` | Show available tools |
-| `q` / `quit` | Exit interactive session |
-| `r` / `row N` | Jump to row N |
-| `?` / `help` | Show help |
-
----
+Step-by-step debugging is not exposed on `rollout test` in the current CLI. Use `--debug` and smaller `--limit`, or integrate tests in Python against `osmosis_ai.rollout_v2` types directly.
 
 ## Exceptions
 
-All local workflow exceptions are shared by `test` and `eval` commands.
+Shared with eval: see [Eval mode — Exceptions](./eval-mode.md#exceptions) and [Troubleshooting](./troubleshooting.md).
 
-| Exception | Description |
-|-----------|-------------|
-| `DatasetValidationError` | Dataset missing required columns or invalid values |
-| `DatasetParseError` | Failed to parse dataset file |
-| `ProviderError` | LLM provider error (auth, rate limit, etc.) |
-| `ToolValidationError` | Invalid tool schema |
+## See also
 
----
-
-## See Also
-
-- [Eval Mode](./eval-mode.md) -- Evaluate agents with eval functions and pass@k
-- [Dataset Format](./datasets.md) -- Supported formats and required columns
-- [LiteLLM Providers](https://docs.litellm.ai/docs/providers) -- Supported LLM providers
+- [Eval mode](./eval-mode.md)
+- [Dataset format](./datasets.md)
+- [CLI reference](./cli.md)

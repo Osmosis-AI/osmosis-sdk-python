@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "osmosis-ai"
 dynamic = ["version"]
-description = "A Python SDK for Osmosis LLM training workflows: reward/rubric validation and remote rollout."
+description = "A Python SDK for Osmosis LLM training workflows: reward/rubric validation, rollout v2, platform CLI, and evaluation tools."
 readme = "README.md"
 authors = [
     {name = "Osmosis AI", email = "jake@osmosis.ai"}
@@ -49,7 +49,7 @@ platform = [
     "pyarrow>=14.0.0",      # Parquet file validation
 ]
 
-# Server dependencies for create_app() with test mode support
+# Server dependencies for rollout serving and test mode
 server = [
     "osmosis-ai[platform]",
     "fastapi>=0.100.0,<1.0.0",
@@ -57,15 +57,10 @@ server = [
     "pydantic-settings>=2.0.0,<3.0.0",
 ]
 
-# MCP tool support for git-sync users
-mcp = [
-    "fastmcp>=2.0.0",
-]
-
 # Development dependencies (testing, formatting, type checking, etc.)
-# Includes server + mcp extras so pyright/mypy can resolve all imports.
+# Includes server extra so pyright/mypy can resolve server-related imports.
 dev = [
-    "osmosis-ai[server,mcp]",
+    "osmosis-ai[server]",
     "pytest>=8.0.0,<10.0.0",
     "pytest-asyncio>=0.23.0,<2.0.0",
     "pytest-cov>=6.0.0",
@@ -80,7 +75,7 @@ dev = [
 
 # Full installation with all optional features
 full = [
-    "osmosis-ai[server,mcp]",
+    "osmosis-ai[server]",
 ]
 
 [project.urls]

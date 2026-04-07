@@ -1,205 +1,147 @@
-# CLI Reference
+# CLI reference
 
-Installing the SDK provides a lightweight CLI available as `osmosis` (aliases: `osmosis_ai`, `osmosis-ai`). The CLI automatically loads `.env` from the current working directory via `python-dotenv`.
+Installing the SDK provides a lightweight CLI as `osmosis` (aliases: `osmosis_ai`, `osmosis-ai`). The CLI loads `.env` from the current working directory via `python-dotenv`.
 
 ## Authentication
 
-Log in to Osmosis AI and manage credentials. Credentials are saved to `~/.config/osmosis/credentials.json` and include workspace information and token expiration.
+Credentials are stored at `~/.config/osmosis/credentials.json` (workspace-aware).
 
-### osmosis login
+### osmosis auth login
 
-Authenticate with Osmosis AI using a device code flow. You will be given a one-time code to enter in your browser:
-
-```bash
-# Log in
-osmosis login
-
-# Force re-login, clearing existing credentials
-osmosis login --force
-```
-
-### osmosis logout
-
-End your session and revoke stored credentials:
+Device code flow:
 
 ```bash
-# Logout (interactive workspace selection)
-osmosis logout
-
-# Logout from all workspaces
-osmosis logout --all
-
-# Skip confirmation prompt
-osmosis logout -y
+osmosis auth login
+osmosis auth login --force
 ```
 
-### osmosis whoami
-
-Display the current user and all workspaces:
+### osmosis auth logout
 
 ```bash
-osmosis whoami
+osmosis auth logout
+osmosis auth logout --all
+osmosis auth logout -y
 ```
+
+### osmosis auth whoami
+
+```bash
+osmosis auth whoami
+```
+
+> Top-level `osmosis login`, `osmosis logout`, and `osmosis whoami` still work as hidden aliases during the transition.
 
 ### osmosis workspace
 
-Manage workspaces and projects interactively. Launches a TUI that shows your current workspace/project context and lets you switch workspace, select a default project, browse training runs, datasets, and models.
+Interactive workspace and project context:
 
 ```bash
-# Launch interactive workspace manager
 osmosis workspace
 ```
 
-In non-interactive environments (e.g. CI), `osmosis workspace` prints the current context and exits.
+In non-interactive environments, prints current context and exits.
 
-## Testing Your Agent
+## Rollout
 
-### osmosis test
+### osmosis rollout serve
 
-Test your agent locally against a dataset using external LLMs. Works with both Local Rollout (MCP tools) and Remote Rollout (RolloutAgentLoop) agents.
+Start a v2 RolloutServer from a TOML file.
 
-```bash
-osmosis test -m server:agent_loop -d data.jsonl --model openai/gpt-5-mini
-osmosis test --mcp ./mcp -d data.jsonl --model openai/gpt-5-mini
-osmosis test -m server:agent_loop -d data.jsonl --interactive
-```
-
-See [Test Mode](./test-mode.md) for full documentation on dataset format, interactive mode, and all options.
-
-## Evaluating Models
-
-### osmosis eval
-
-Evaluate trained models with custom eval functions and pass@k metrics. Works with both Local Rollout (MCP tools) and Remote Rollout (RolloutAgentLoop) agents. Results are automatically cached to disk so interrupted evaluations can be resumed.
+`osmosis rollout serve` requires the entrypoint module to expose a concrete `AgentWorkflow` and a concrete `Grader`. In practice you will usually also define a `GraderConfig`. If no grader is discoverable, serve fails before startup.
 
 ```bash
-osmosis eval -m server:agent_loop -d data.jsonl \
-    --eval-fn rewards:compute_reward \
-    --model my-finetuned-model --base-url http://localhost:8000/v1
-
-osmosis eval --mcp ./mcp -d data.jsonl \
-    --eval-fn rewards:compute_reward --model openai/gpt-5-mini
-
-# Resume automatically — re-run the same command after interruption
-# Force fresh start, discarding cached results
-osmosis eval -m server:agent_loop -d data.jsonl \
-    --eval-fn rewards:compute_reward --model my-model --fresh
-
-# Re-run only failed runs from a previous evaluation
-osmosis eval -m server:agent_loop -d data.jsonl \
-    --eval-fn rewards:compute_reward --model my-model --retry-failed
-
-# Save conversation logs alongside results
-osmosis eval -m server:agent_loop -d data.jsonl \
-    --eval-fn rewards:compute_reward --model my-model --log-samples
+osmosis rollout serve serve.toml
+osmosis rollout serve serve.toml --local
+osmosis rollout serve serve.toml --skip-register
+osmosis rollout serve serve.toml -p 9100 -H 127.0.0.1
+osmosis rollout serve serve.toml --validate-only
 ```
 
-**Additional Options:**
+**`serve.toml` shape (minimal):**
+
+```toml
+[serve]
+rollout = "my_rollout"
+entrypoint = "workflow.py"
+
+[server]
+port = 9000
+host = "0.0.0.0"
+log_level = "info"
+
+[registration]
+skip = false
+# api_key = "optional-static-key"
+
+[debug]
+no_validate = false
+# trace_dir = "./traces"
+```
 
 | Option | Description |
 |--------|-------------|
-| `--fresh` | Force restart, discarding cached results |
-| `--retry-failed` | Re-execute only failed runs (mutually exclusive with `--fresh`) |
-| `--log-samples` | Save full conversation messages to JSONL |
-| `--output-path DIR` | Write results to structured directory |
+| `-p` / `--port` | Override `[server].port` |
+| `-H` / `--host` | Override `[server].host` |
+| `--no-validate` | Skip backend validation |
+| `--validate-only` | Validate the required workflow/grader pair and exit |
+| `--log-level` | Override Uvicorn log level |
+| `--skip-register` | Do not register with the platform |
+| `--local` | No API key auth, no platform registration |
+
+With `--local`, do not set `[registration].api_key` in the config file.
+
+### osmosis rollout test
+
+Smoke-test an `AgentWorkflow` against a dataset (no grader required). Uses the same execution path as `osmosis eval run`, with a generated config.
+
+This subcommand is currently hidden from standard help output, so invoke it directly by name as `osmosis rollout test ...`.
+
+```bash
+osmosis rollout test -m _ -d data.jsonl --model gpt-5-mini
+osmosis rollout test -m _ -d data.jsonl --model openai/gpt-5-mini --limit 5
+```
+
+See [Test mode](./test-mode.md) for required project layout and options.
+
+### osmosis rollout list
+
+Reserved; not implemented yet.
+
+## Evaluation
+
+### osmosis eval run
+
+Evaluate using a TOML config. The workflow is loaded from the entrypoint module, and the grader is usually auto-discovered from that same module, so most configs do not need a separate `[grader]` table.
+
+```bash
+osmosis eval run eval.toml
+osmosis eval run eval.toml --fresh
+osmosis eval run eval.toml --retry-failed
+osmosis eval run eval.toml --limit 20 --batch-size 4
+osmosis eval run eval.toml -o ./results --log-samples
+```
+
+See [Eval mode](./eval-mode.md) for the full `[eval]`, `[llm]`, `[runs]`, `[baseline]`, and `[output]` sections.
 
 ### osmosis eval cache
 
-Manage the eval result cache.
-
 ```bash
-# Print the cache root directory path
 osmosis eval cache dir
-
-# List cached evaluations
 osmosis eval cache ls
 osmosis eval cache ls --model gpt-4 --status completed
-
-# Remove cached evaluations
 osmosis eval cache rm <task_id>
 osmosis eval cache rm --all --yes
-osmosis eval cache rm --status in_progress --yes
 ```
 
-**`osmosis eval cache ls` options:**
-
-| Option | Description |
-|--------|-------------|
-| `--model NAME` | Filter by model name (case-insensitive substring) |
-| `--dataset NAME` | Filter by dataset path (case-insensitive substring) |
-| `--status STATUS` | Filter by status (`in_progress` or `completed`) |
-
-**`osmosis eval cache rm` options:**
-
-| Option | Description |
-|--------|-------------|
-| `TASK_ID` | Task ID of the cache entry to delete (no confirmation) |
-| `--all` | Delete all cached evaluations |
-| `--model NAME` | Filter by model name (case-insensitive substring) |
-| `--dataset NAME` | Filter by dataset path (case-insensitive substring) |
-| `--status STATUS` | Filter by status (`in_progress` or `completed`) |
-| `-y`, `--yes` | Skip confirmation prompt for batch deletions |
-
-See [Eval Mode](./eval-mode.md) for full documentation on eval functions, pass@k metrics, caching, and output formats.
-
-## Remote Rollout Server
-
-### osmosis serve
-
-Start a RolloutServer for an agent loop implementation. The module path format is `module:attribute`, e.g., `server:agent_loop` or `mypackage.agents:MyAgentClass`.
-
-```bash
-# Start server with Platform registration (requires `osmosis login`)
-osmosis serve -m server:agent_loop
-
-# Local debug mode: disable API key auth AND skip Platform registration
-osmosis serve -m server:agent_loop --local
-
-# Enable auto-reload for development
-osmosis serve -m server:agent_loop --local --reload
-
-# Set log level and write execution traces to a directory
-osmosis serve -m server:agent_loop --log-level debug --log ./traces
-```
-
-**Options:**
-
-| Option | Description |
-|--------|-------------|
-| `-m`/`--module` | Module path to the agent loop (required) |
-| `-p`/`--port` | Port to bind to (default: 9000) |
-| `-H`/`--host` | Host to bind to (default: 0.0.0.0) |
-| `--skip-register` | Skip registering with Osmosis Platform (for local testing) |
-| `--local` | Local debug mode: disable API key auth and skip Platform registration |
-| `--api-key` | API key used by TrainGate to authenticate requests to this server |
-| `--no-validate` | Skip agent loop validation before starting |
-| `--reload` | Enable auto-reload for development |
-| `--log-level` | Uvicorn log level: debug, info, warning, error, critical (default: info) |
-| `--log DIR` | Enable logging and write per-rollout execution traces to DIR |
-
-> **Note:** The `--api-key` option sets the API key for this RolloutServer. It is used by TrainGate to authenticate its requests *to* your server. This is **not** the same as your `osmosis login` token.
-
-See [Remote Rollout Overview](./remote-rollout/overview.md) for architecture details and the full agent lifecycle.
-
-### osmosis validate
-
-Validate an agent loop before starting the server:
-
-```bash
-osmosis validate -m server:agent_loop
-osmosis validate -m server:agent_loop -v  # Verbose with warnings
-```
-
-| Option | Description |
-|--------|-------------|
-| `-m`/`--module` | Module path to the agent loop (required) |
-| `-v`/`--verbose` | Show detailed validation output including warnings |
-
-## Rubric Tools
+| Subcommand / option | Description |
+|---------------------|-------------|
+| `dir` | Print cache root |
+| `ls` | List caches (`--model`, `--dataset`, `--status`) |
+| `rm` | Delete by `task_id`, `--all`, or filters (`-y` skips prompt) |
 
 ### osmosis eval rubric
 
-Evaluate conversations against a rubric using LLM-as-judge:
+LLM-as-judge on a JSONL conversation file:
 
 ```bash
 osmosis eval rubric -d data.jsonl \
@@ -207,23 +149,20 @@ osmosis eval rubric -d data.jsonl \
   --model openai/gpt-5.4
 ```
 
-**Options:**
-
 | Flag | Description |
-|---|---|
-| `-d`/`--data` | Path to JSONL file with conversations (required) |
-| `-r`/`--rubric` | Rubric text (inline) or `@file.txt` to read from file (required) |
-| `--model` | Judge model in LiteLLM format, e.g. `openai/gpt-5.4` (required) |
-| `-n`/`--number` | Number of evaluation runs per record |
-| `-o`/`--output` | Path to write evaluation results as JSON |
-| `--api-key` | API key for the judge model |
-| `--timeout` | Request timeout in seconds |
-| `--score-min` | Minimum score (default: 0.0) |
-| `--score-max` | Maximum score (default: 1.0) |
+|------|-------------|
+| `-d` / `--data` | JSONL path (required) |
+| `-r` / `--rubric` | Inline rubric or `@file.txt` (required) |
+| `--model` | Judge model, LiteLLM form (required) |
+| `-n` / `--number` | Runs per record |
+| `-o` / `--output` | JSON results path |
+| `--api-key` | Judge API key |
+| `--timeout` | Seconds |
+| `--score-min` / `--score-max` | Score range |
 
-## See Also
+## See also
 
-- [Test Mode](./test-mode.md) -- full `osmosis test` documentation
-- [Eval Mode](./eval-mode.md) -- full `osmosis eval` documentation
-- [Reward Rubrics](./local-rollout/reward-rubrics.md) -- `@osmosis_rubric`, `evaluate_rubric`
-- [Dataset Format](./datasets.md) -- supported formats and required columns
+- [Test mode](./test-mode.md)
+- [Eval mode](./eval-mode.md)
+- [Dataset format](./datasets.md)
+- [Troubleshooting](./troubleshooting.md)
