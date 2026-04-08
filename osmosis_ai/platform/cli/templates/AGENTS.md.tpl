@@ -35,8 +35,7 @@ Always include `**kwargs` for forward compatibility.
 
 ```bash
 # Local development
-osmosis test <env_name> -m gpt-4.1-mini        # Quick test with cloud LLM
-osmosis eval <env_name> -d data/test.jsonl      # Batch evaluation
+osmosis eval run configs/eval/<env_name>.toml   # Batch evaluation
 osmosis serve <env_name>                        # Start rollout server
 
 # Training (workspace-scoped)

@@ -594,7 +594,7 @@ def _backup_corrupt_cache(cache_path: Path) -> Path | None:
 
 
 class RewardStatsDict(TypedDict, total=False):
-    """Reward statistics returned by build_summary when kind == 'graded'."""
+    """Reward statistics returned by build_summary."""
 
     mean: float
     median: float
@@ -607,7 +607,6 @@ class RewardStatsDict(TypedDict, total=False):
 class BuildSummaryResult(TypedDict, total=False):
     """Return type of build_summary."""
 
-    kind: str  # "graded" or "smoke"
     total_runs: int
     passed: int
     failed: int
@@ -620,15 +619,8 @@ def build_summary(
     runs: list[dict[str, Any]],
     pass_threshold: float,
     n_runs: int,
-    *,
-    has_grader: bool = False,
 ) -> BuildSummaryResult:
-    """Compute aggregated statistics from runs list.
-
-    ``kind`` is determined by configuration, not by result data:
-    - ``has_grader=True``  → ``kind='graded'`` (even if all rewards are None)
-    - ``has_grader=False`` → ``kind='smoke'`` (pass/fail only).
-    """
+    """Compute aggregated statistics from runs list."""
     import statistics
 
     total_runs = len(runs)
@@ -637,24 +629,8 @@ def build_summary(
 
     rewards = [r["reward"] for r in runs if r.get("reward") is not None]
 
-    if not has_grader:
-        # Smoke mode
-        passed = sum(1 for r in runs if r.get("success", True))
-        failed = total_runs - passed
-        return BuildSummaryResult(
-            kind="smoke",
-            total_runs=total_runs,
-            passed=passed,
-            failed=failed,
-            total_tokens=total_tokens,
-            total_duration_ms=total_duration_ms,
-            reward_stats=None,
-        )
-
-    # Graded mode
     if not rewards:
         return BuildSummaryResult(
-            kind="graded",
             total_runs=total_runs,
             passed=0,
             failed=total_runs,
@@ -670,14 +646,13 @@ def build_summary(
     median = statistics.median(sorted_rewards)
 
     passed = sum(1 for r in rewards if r >= pass_threshold)
-    failed = len(rewards) - passed
 
     reward_stats: RewardStatsDict = {
         "mean": mean,
         "median": median,
         "std": std,
-        "min": min(rewards),
-        "max": max(rewards),
+        "min": sorted_rewards[0],
+        "max": sorted_rewards[-1],
     }
 
     # pass@k for n_runs > 1
@@ -715,7 +690,6 @@ def build_summary(
             reward_stats["pass_at_k"] = pak
 
     return BuildSummaryResult(
-        kind="graded",
         total_runs=total_runs,
         passed=passed,
         failed=total_runs - passed,

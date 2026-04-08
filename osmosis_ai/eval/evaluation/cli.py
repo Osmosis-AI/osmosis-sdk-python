@@ -296,35 +296,28 @@ class EvalCommand:
         self.console.print(f"  Duration: {format_duration(total_duration_ms)}")
         self.console.print(f"  Total tokens: {total_tokens:,}")
 
-        kind = summary.get("kind", "smoke")
         passed = summary.get("passed", 0)
         failed = summary.get("failed", 0)
 
-        if kind == "smoke":
+        reward_stats = summary.get("reward_stats")
+        if reward_stats:
+            self.console.print()
+            mean = reward_stats.get("mean", 0.0)
+            median = reward_stats.get("median", 0.0)
+            std = reward_stats.get("std", 0.0)
+            self.console.print(
+                f"  reward: mean={mean:.3f} median={median:.3f} std={std:.3f}"
+            )
+            self.console.print(
+                f"  range: [{reward_stats.get('min', 0.0):.3f}, {reward_stats.get('max', 0.0):.3f}]"
+            )
+            self.console.print(f"  Passed: {passed}/{total_runs}")
+            for k_val, val in sorted(reward_stats.get("pass_at_k", {}).items()):
+                self.console.print(f"    pass@{k_val}: {float(val) * 100:.1f}%")
+        else:
             self.console.print(f"  Passed: {passed}/{total_runs}")
             if failed:
                 self.console.print(f"  Failed: {failed}")
-        else:
-            # Graded mode
-            reward_stats = summary.get("reward_stats")
-            if reward_stats:
-                self.console.print()
-                mean = reward_stats.get("mean", 0.0)
-                median = reward_stats.get("median", 0.0)
-                std = reward_stats.get("std", 0.0)
-                self.console.print(
-                    f"  reward: mean={mean:.3f} median={median:.3f} std={std:.3f}"
-                )
-                self.console.print(
-                    f"  range: [{reward_stats.get('min', 0.0):.3f}, {reward_stats.get('max', 0.0):.3f}]"
-                )
-                self.console.print(f"  Passed: {passed}/{total_runs}")
-                for k_val, val in sorted(reward_stats.get("pass_at_k", {}).items()):
-                    self.console.print(f"    pass@{k_val}: {float(val) * 100:.1f}%")
-            else:
-                self.console.print(f"  Passed: {passed}/{total_runs}")
-                if failed:
-                    self.console.print(f"  Failed: {failed}")
 
     async def _run_async(self, args: Any) -> int:
         from osmosis_ai.cli.errors import CLIError
@@ -431,9 +424,16 @@ class EvalCommand:
         except CLIError as e:
             self.console.print_error(f"Error: {e}")
             return 1
-        has_grader = grader_cls is not None
 
-        if grader_cls and not quiet:
+        if grader_cls is None:
+            self.console.print_error(
+                "No Grader was found in the entrypoint module. "
+                "`osmosis eval run` requires a concrete Grader (and typically a "
+                "GraderConfig) alongside the workflow."
+            )
+            return 1
+
+        if not quiet:
             self.console.print(f"  Grader: {grader_cls.__name__}")
 
         # 6. Create proxy and start
@@ -525,9 +525,7 @@ class EvalCommand:
         ep_module = config.eval_entrypoint.replace("/", ".").removesuffix(".py")
         module_fingerprint = compute_module_fingerprint(ep_module) or ""
 
-        grader_fingerprint = None
-        if grader_cls:
-            grader_fingerprint = compute_module_fingerprint(grader_cls.__module__)
+        grader_fingerprint = compute_module_fingerprint(grader_cls.__module__)
 
         # Merge CLI overrides into config for cache identity
         config_for_hash = {
@@ -628,7 +626,6 @@ class EvalCommand:
             dataset_fingerprint=dataset_fingerprint,
             start_index=offset,
             on_progress=on_progress,
-            has_grader=has_grader,
         )
 
         try:

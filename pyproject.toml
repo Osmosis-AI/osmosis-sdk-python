@@ -49,7 +49,7 @@ platform = [
     "pyarrow>=14.0.0",      # Parquet file validation
 ]
 
-# Server dependencies for rollout serving and test mode
+# Server dependencies for rollout serving
 server = [
     "osmosis-ai[platform]",
     "fastapi>=0.100.0,<1.0.0",

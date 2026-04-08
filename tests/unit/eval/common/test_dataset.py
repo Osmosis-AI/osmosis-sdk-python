@@ -1,4 +1,4 @@
-"""Tests for test_mode dataset reading and validation."""
+"""Tests for eval dataset reading and validation."""
 
 from __future__ import annotations
 

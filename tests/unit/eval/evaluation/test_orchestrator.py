@@ -163,7 +163,6 @@ def _make_orchestrator(
     retry_failed: bool = False,
     pass_threshold: float = 1.0,
     start_index: int = 0,
-    has_grader: bool = True,
 ) -> EvalOrchestrator:
     if drivers is None:
         drivers = [(None, FakeDriver())]
@@ -182,7 +181,6 @@ def _make_orchestrator(
         retry_failed=retry_failed,
         pass_threshold=pass_threshold,
         start_index=start_index,
-        has_grader=has_grader,
     )
 
 
@@ -231,7 +229,6 @@ class TestOrchestratorFreshEval:
         result = await orch.run()
 
         assert result.summary is not None
-        assert result.summary["kind"] in ("graded", "smoke")
         assert "reward_stats" in result.summary
         assert result.summary["total_runs"] == 3
 
@@ -268,7 +265,7 @@ class TestOrchestratorAlreadyCompleted:
                     }
                     for i in range(3)
                 ],
-                "summary": {"kind": "graded", "reward_stats": {"mean": 1.0}},
+                "summary": {"reward_stats": {"mean": 1.0}},
             },
             completed_runs={(0, 0, None), (1, 0, None), (2, 0, None)},
         )
@@ -1278,7 +1275,7 @@ class TestOrchestratorResult:
             status="interrupted",
             cache_path=Path("/tmp/test.json"),
             samples_path=Path("/tmp/test.jsonl"),
-            summary={"kind": "smoke", "reward_stats": None},
+            summary={"reward_stats": None},
             total_completed=5,
             total_expected=10,
             cache_data={"runs": []},

@@ -12,7 +12,7 @@ Help the user create a new rollout in this Osmosis workspace.
 5. Design grader functions (how to score agent performance)
 6. Decide on system prompt and max_turns
 7. Implement in `rollouts/<rollout_name>/main.py` with a concrete `AgentWorkflow` and a concrete `Grader`
-8. Validate: `osmosis rollout test -m rollouts.<rollout_name>.main:Workflow -d data/dataset.jsonl --model gpt-4.1-mini`
+8. Validate: `osmosis eval run configs/eval/<rollout_name>.toml`
 
 ## Rollout Structure
 
@@ -43,5 +43,5 @@ rollouts/<rollout_name>/
 
 After creating the rollout, always run:
 ```bash
-osmosis rollout test -m rollouts.<rollout_name>.main:Workflow -d data/dataset.jsonl --model gpt-4.1-mini
+osmosis eval run configs/eval/<rollout_name>.toml
 ```

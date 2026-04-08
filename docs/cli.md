@@ -90,19 +90,6 @@ no_validate = false
 
 With `--local`, do not set `[registration].api_key` in the config file.
 
-### osmosis rollout test
-
-Smoke-test an `AgentWorkflow` against a dataset (no grader required). Uses the same execution path as `osmosis eval run`, with a generated config.
-
-This subcommand is currently hidden from standard help output, so invoke it directly by name as `osmosis rollout test ...`.
-
-```bash
-osmosis rollout test -m _ -d data.jsonl --model gpt-5-mini
-osmosis rollout test -m _ -d data.jsonl --model openai/gpt-5-mini --limit 5
-```
-
-See [Test mode](./test-mode.md) for required project layout and options.
-
 ### osmosis rollout list
 
 Reserved; not implemented yet.
@@ -162,7 +149,6 @@ osmosis eval rubric -d data.jsonl \
 
 ## See also
 
-- [Test mode](./test-mode.md)
 - [Eval mode](./eval-mode.md)
 - [Dataset format](./datasets.md)
 - [Troubleshooting](./troubleshooting.md)

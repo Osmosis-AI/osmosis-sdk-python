@@ -122,7 +122,6 @@ def _make_orchestrator(
     dataset_path: Path | None = None,
     dataset_fingerprint: str | None = None,
     on_progress: Any = None,
-    has_grader: bool = True,
 ) -> EvalOrchestrator:
     cfg = cache_config or _make_cache_config()
     if drivers is None:
@@ -141,7 +140,6 @@ def _make_orchestrator(
         dataset_path=dataset_path,
         dataset_fingerprint=dataset_fingerprint,
         on_progress=on_progress,
-        has_grader=has_grader,
     )
 
 
@@ -186,7 +184,6 @@ class TestE2EFreshEval:
         assert isinstance(data["runs"], list)
         assert len(data["runs"]) == 3
         assert data["summary"] is not None
-        assert data["summary"]["kind"] in ("graded", "smoke")
         assert "reward_stats" in data["summary"]
         assert "created_at" in data
         assert "updated_at" in data

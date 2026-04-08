@@ -1,6 +1,6 @@
 # Dataset format
 
-Datasets supply prompts and reference answers for **`osmosis rollout test`** and **`osmosis eval run`**. Each row becomes a short message list (system + user) plus optional extra fields carried on the row dict.
+Datasets supply prompts and reference answers for **`osmosis eval run`**. Each row becomes a short message list (system + user) plus optional extra fields carried on the row dict.
 
 ## Supported formats
 
@@ -55,5 +55,4 @@ Any other columns are kept on the normalized row dict. Downstream code (workflow
 
 ## See also
 
-- [Test mode](./test-mode.md)
 - [Eval mode](./eval-mode.md)

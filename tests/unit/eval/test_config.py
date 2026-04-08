@@ -32,7 +32,6 @@ model = "openai/gpt-5.4"
     assert config.eval_entrypoint == "workflow.py"
     assert config.eval_dataset == "data.jsonl"
     assert config.llm_model == "openai/gpt-5.4"
-    assert config.has_grader is False
     assert config.runs_n == 1
     assert config.runs_batch_size == 1
     # Defaults for all CLI-overridable flags
@@ -81,7 +80,6 @@ model = "openai/gpt-3.5-turbo"
     config = load_eval_config(path)
     assert config.llm_base_url == "http://localhost:8080"
     assert config.llm_api_key_env == "MY_KEY"
-    assert config.has_grader is True
     assert config.runs_n == 4
     assert config.runs_batch_size == 2
     assert config.runs_pass_threshold == 0.8
@@ -196,25 +194,8 @@ module = "my_rollout:MyGrader"
 config = "my_rollout:grader_config"
 """)
     config = load_eval_config(path)
-    assert config.has_grader is True
     assert config.grader_module == "my_rollout:MyGrader"
     assert config.grader_config == "my_rollout:grader_config"
-
-
-def test_smoke_test_mode_no_grader(tmp_toml):
-    """No [grader] section = smoke test mode."""
-    path = tmp_toml("""
-[eval]
-rollout = "my_rollout"
-entrypoint = "workflow.py"
-dataset = "data.jsonl"
-
-[llm]
-model = "openai/gpt-5.4"
-""")
-    config = load_eval_config(path)
-    assert config.has_grader is False
-    assert config.grader_module is None
 
 
 def test_load_config_invalid_runs_n_type(tmp_toml):

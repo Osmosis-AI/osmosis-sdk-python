@@ -223,27 +223,3 @@ def test_fuzzy_suggestion(capsys):
     captured = capsys.readouterr()
     assert exit_code != 0
     assert "Did you mean 'auth'?" in captured.err
-
-
-def test_rollout_test_accepts_any_model_with_base_url(capsys):
-    """With --base-url, any model name should be accepted and displayed as-is."""
-    cli.main(
-        [
-            "rollout",
-            "test",
-            "-m",
-            "my_agent:MyAgentLoop",
-            "-d",
-            "data.jsonl",
-            "--model",
-            "Qwen/Qwen3-0.6B",
-            "--base-url",
-            "http://localhost:1234/v1",
-        ]
-    )
-    captured = capsys.readouterr()
-
-    # Should pass model validation (may fail later at connectivity/auth)
-    assert "Invalid model/provider format" not in captured.err
-    # Model should be displayed without openai/ prefix
-    assert "Model: Qwen/Qwen3-0.6B" in captured.out

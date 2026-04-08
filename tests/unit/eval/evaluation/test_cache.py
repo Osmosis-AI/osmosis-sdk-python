@@ -834,8 +834,8 @@ class TestBuildSummary:
                 "duration_ms": 40.0,
             },
         ]
-        result = build_summary(runs, pass_threshold=0.5, n_runs=1, has_grader=True)
-        assert result["kind"] == "graded"
+        result = build_summary(runs, pass_threshold=0.5, n_runs=1)
+
         stats = result["reward_stats"]
         assert abs(stats["mean"] - 0.8) < 1e-9
         assert stats["median"] == 0.8
@@ -847,8 +847,8 @@ class TestBuildSummary:
 
     def test_empty_runs(self):
         """Empty runs list produces graded summary with no reward_stats."""
-        result = build_summary([], pass_threshold=0.5, n_runs=1, has_grader=True)
-        assert result["kind"] == "graded"
+        result = build_summary([], pass_threshold=0.5, n_runs=1)
+
         assert result["total_runs"] == 0
         assert result["passed"] == 0
         assert result["failed"] == 0
@@ -866,7 +866,7 @@ class TestBuildSummary:
                 "duration_ms": 25.0,
             },
         ]
-        result = build_summary(runs, pass_threshold=0.5, n_runs=1, has_grader=True)
+        result = build_summary(runs, pass_threshold=0.5, n_runs=1)
         stats = result["reward_stats"]
         assert stats["median"] == 0.7
 
@@ -878,7 +878,7 @@ class TestBuildSummary:
         ] + [
             {"row_index": 9, "run_index": 0, "reward": 0.0, "success": True},
         ]
-        result = build_summary(runs, pass_threshold=0.5, n_runs=1, has_grader=True)
+        result = build_summary(runs, pass_threshold=0.5, n_runs=1)
         stats = result["reward_stats"]
         assert stats["mean"] == pytest.approx(0.9)
         assert stats["median"] == 1.0
@@ -891,7 +891,7 @@ class TestBuildSummary:
             {"row_index": 0, "run_index": 1, "reward": 0.0, "success": False},
             {"row_index": 0, "run_index": 2, "reward": 1.0, "success": True},
         ]
-        result = build_summary(runs, pass_threshold=0.5, n_runs=3, has_grader=True)
+        result = build_summary(runs, pass_threshold=0.5, n_runs=3)
         stats = result["reward_stats"]
         pak = stats.get("pass_at_k", {})
         # n_runs=3 → k_values = [1, 2, 3]
@@ -910,7 +910,7 @@ class TestBuildSummary:
             {"row_index": 0, "run_index": 3, "reward": 0.0, "success": False},
             {"row_index": 0, "run_index": 4, "reward": 0.0, "success": False},
         ]
-        result = build_summary(runs, pass_threshold=0.5, n_runs=5, has_grader=True)
+        result = build_summary(runs, pass_threshold=0.5, n_runs=5)
         stats = result["reward_stats"]
         pak = stats.get("pass_at_k", {})
 
@@ -924,32 +924,6 @@ class TestBuildSummary:
         assert pak[4] == pytest.approx(1.0)
         # n=5, c=2, k=2 => 1 - C(3,2)/C(5,2) = 1 - 3/10 = 0.7
         assert pak[2] == pytest.approx(0.7)
-
-    def test_smoke_mode(self):
-        """Smoke mode summary without grader."""
-        runs = [
-            {
-                "row_index": 0,
-                "run_index": 0,
-                "reward": None,
-                "success": True,
-                "tokens": 10,
-                "duration_ms": 5.0,
-            },
-            {
-                "row_index": 1,
-                "run_index": 0,
-                "reward": None,
-                "success": False,
-                "tokens": 10,
-                "duration_ms": 5.0,
-            },
-        ]
-        result = build_summary(runs, pass_threshold=0.5, n_runs=1, has_grader=False)
-        assert result["kind"] == "smoke"
-        assert result["passed"] == 1
-        assert result["failed"] == 1
-        assert result.get("reward_stats") is None
 
 
 # ============================================================
@@ -1623,8 +1597,7 @@ def test_build_summary_v2_reward_stats():
             "duration_ms": 400,
         },
     ]
-    summary = build_summary(runs, pass_threshold=0.8, n_runs=1, has_grader=True)
-    assert summary["kind"] == "graded"
+    summary = build_summary(runs, pass_threshold=0.8, n_runs=1)
     assert summary["total_runs"] == 3
     stats = summary["reward_stats"]
     assert abs(stats["mean"] - 0.8) < 0.01
@@ -1632,36 +1605,8 @@ def test_build_summary_v2_reward_stats():
     assert stats["max"] == 1.0
 
 
-def test_build_summary_v2_smoke_mode():
-    """Runs with no reward and no grader produce smoke-mode summary."""
-    runs = [
-        {
-            "row_index": 0,
-            "run_index": 0,
-            "reward": None,
-            "success": True,
-            "tokens": 100,
-            "duration_ms": 500,
-        },
-        {
-            "row_index": 1,
-            "run_index": 0,
-            "reward": None,
-            "success": False,
-            "tokens": 0,
-            "duration_ms": 200,
-        },
-    ]
-    summary = build_summary(runs, pass_threshold=1.0, n_runs=1, has_grader=False)
-    assert summary["kind"] == "smoke"
-    assert summary["total_runs"] == 2
-    assert summary["passed"] == 1
-    assert summary["failed"] == 1
-    assert summary.get("reward_stats") is None
-
-
-def test_build_summary_v2_grader_all_failed():
-    """Grader configured but all runs failed -> kind='graded', not 'smoke'."""
+def test_build_summary_v2_all_failed():
+    """All runs failed with no rewards -> no reward_stats."""
     runs = [
         {
             "row_index": 0,
@@ -1680,8 +1625,7 @@ def test_build_summary_v2_grader_all_failed():
             "duration_ms": 200,
         },
     ]
-    summary = build_summary(runs, pass_threshold=1.0, n_runs=1, has_grader=True)
-    assert summary["kind"] == "graded"
+    summary = build_summary(runs, pass_threshold=1.0, n_runs=1)
     assert summary["passed"] == 0
     assert summary["failed"] == 2
     assert summary.get("reward_stats") is None

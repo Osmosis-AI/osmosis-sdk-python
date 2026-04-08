@@ -94,7 +94,6 @@ class EvalOrchestrator:
         dataset_path: Path | None = None,
         dataset_fingerprint: str | None = None,
         start_index: int = 0,
-        has_grader: bool = False,
         on_progress: Callable[[int, int, dict], None] | None = None,
     ):
         self.drivers = drivers
@@ -111,7 +110,6 @@ class EvalOrchestrator:
         self.dataset_path = dataset_path
         self.dataset_fingerprint = dataset_fingerprint
         self.start_index = start_index
-        self.has_grader = has_grader
         self.on_progress = on_progress
 
         # Runtime state (set during run())
@@ -216,7 +214,6 @@ class EvalOrchestrator:
                     all_runs,
                     self.pass_threshold,
                     self.n_runs,
-                    has_grader=self.has_grader,
                 )
                 cache_data["runs"] = all_runs
                 cache_data["status"] = "completed"
@@ -295,7 +292,6 @@ class EvalOrchestrator:
                     all_runs,
                     self.pass_threshold,
                     self.n_runs,
-                    has_grader=self.has_grader,
                 )
                 cache_data["runs"] = all_runs
                 cache_data["status"] = "completed"

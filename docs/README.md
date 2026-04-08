@@ -8,7 +8,6 @@
 ## Workflow commands
 
 - [Dataset format](./datasets.md) — Parquet / JSONL / CSV columns
-- [Test mode](./test-mode.md) — `osmosis rollout test`
 - [Eval mode](./eval-mode.md) — `osmosis eval run`, caching, pass@k
 - [CLI reference](./cli.md) — all `osmosis` commands and options
 - [Troubleshooting](./troubleshooting.md)

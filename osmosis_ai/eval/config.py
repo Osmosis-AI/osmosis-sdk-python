@@ -68,8 +68,7 @@ class EvalConfig(BaseModel):
     llm_base_url: str | None = None
     llm_api_key_env: str | None = None
 
-    # [grader] (legacy — auto-discovered when using rollout+entrypoint)
-    has_grader: bool = False
+    # [grader] (auto-discovered when using rollout+entrypoint)
     grader_module: str | None = None
     grader_config: str | None = None
 
@@ -115,8 +114,6 @@ def load_eval_config(path: Path) -> EvalConfig:
         raise CLIError(f"Missing [llm].model in {path}")
 
     grader_section = raw.get("grader")
-    has_grader = grader_section is not None
-
     runs_section = raw.get("runs", {})
     output_section = raw.get("output", {})
     baseline_section = raw.get("baseline", {})
@@ -144,7 +141,6 @@ def load_eval_config(path: Path) -> EvalConfig:
         llm_model=llm_section["model"],
         llm_base_url=llm_section.get("base_url"),
         llm_api_key_env=llm_section.get("api_key_env"),
-        has_grader=has_grader,
         grader_module=grader_section.get("module") if grader_section else None,
         grader_config=grader_section.get("config") if grader_section else None,
         runs_n=runs.n,

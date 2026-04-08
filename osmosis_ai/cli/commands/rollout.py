@@ -1,4 +1,4 @@
-"""Rollout commands: serve, test, list."""
+"""Rollout commands: serve, list."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from osmosis_ai.cli.console import Console
 
 app: typer.Typer = typer.Typer(
-    help="Manage rollouts (serve, test, list).",
+    help="Manage rollouts (serve, list).",
     no_args_is_help=True,
 )
 
@@ -379,86 +379,6 @@ def serve(
         local=local,
         console=Console(),
     )
-
-
-@app.command("test", hidden=True)
-def test(
-    module: str | None = typer.Option(
-        None, "-m", "--module", "--agent", help="Module path."
-    ),
-    dataset: str = typer.Option(..., "-d", "--dataset", help="Path to dataset file."),
-    model: str = typer.Option("gpt-5-mini", "--model", help="Model name."),
-    limit: int | None = typer.Option(None, "--limit", help="Max rows."),
-    offset: int = typer.Option(0, "--offset", help="Skip rows."),
-    api_key: str | None = typer.Option(None, "--api-key", help="API key."),
-    base_url: str | None = typer.Option(None, "--base-url", help="Base URL."),
-    debug: bool = typer.Option(False, "--debug", help="Debug output."),
-    quiet: bool = typer.Option(False, "-q", "--quiet", help="Suppress output."),
-) -> None:
-    """Test an AgentWorkflow against a dataset (alias for eval run without grader)."""
-    import tempfile
-    from pathlib import Path
-
-    from osmosis_ai.eval.evaluation.cli import EvalCommand
-
-    if not module:
-        from osmosis_ai.cli.console import Console
-
-        Console().print_error("Error: --module (-m) is required.")
-        raise typer.Exit(1)
-
-    # Normalize model for LiteLLM
-    llm_model = model if "/" in model else f"openai/{model}"
-
-    # Shape matches osmosis eval run (rollout + entrypoint + dataset); rollout test is a thin wrapper.
-    _ds = dataset.replace("\\", "/").replace('"', '\\"')
-    toml_content = f'''[eval]
-rollout = "_rollout_test"
-entrypoint = "workflow.py"
-dataset = "{_ds}"
-
-[llm]
-model = "{llm_model}"
-'''
-    if base_url:
-        toml_content += f'base_url = "{base_url}"\n'
-
-    # --api-key → write to temp env var, reference in TOML via api_key_env
-    _tmp_env_key = "_OSMOSIS_EVAL_TMP_API_KEY"
-    if api_key:
-        import os
-
-        os.environ[_tmp_env_key] = api_key
-        toml_content += f'api_key_env = "{_tmp_env_key}"\n'
-
-    with tempfile.NamedTemporaryFile(mode="w", suffix=".toml", delete=False) as f:
-        f.write(toml_content)
-        tmp_path = f.name
-
-    try:
-        cmd = EvalCommand()
-        rc = cmd.run(
-            config_path=tmp_path,
-            fresh=False,
-            retry_failed=False,
-            limit=limit,
-            offset=offset,
-            quiet=quiet,
-            debug=debug,
-            output_path=None,
-            log_samples=False,
-            batch_size_override=None,
-        )
-    finally:
-        Path(tmp_path).unlink(missing_ok=True)
-        # Clean up temp env var
-        if api_key:
-            import os
-
-            os.environ.pop(_tmp_env_key, None)
-
-    if rc:
-        raise typer.Exit(rc)
 
 
 @app.command("list")

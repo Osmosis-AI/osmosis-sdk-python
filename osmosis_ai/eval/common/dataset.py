@@ -1,7 +1,6 @@
 """Dataset loading and request conversion for local rollout commands.
 
 Shared by:
-- `osmosis test`
 - `osmosis eval`
 """
 

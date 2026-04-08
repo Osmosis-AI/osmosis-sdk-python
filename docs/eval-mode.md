@@ -1,6 +1,6 @@
 # Eval mode
 
-Run **`osmosis eval run`** with a TOML file to execute an **AgentWorkflow** against a dataset using an external or self-hosted LLM. A **Grader** in the same entrypoint module provides reward scores; if none is found, the run operates in **smoke** mode (pass/fail only).
+Run **`osmosis eval run`** with a TOML file to execute an **AgentWorkflow** against a dataset using an external or self-hosted LLM. A **Grader** in the same entrypoint module provides reward scores.
 
 Results are cached on disk so long runs can resume after interruption.
 
@@ -95,7 +95,7 @@ osmosis eval run eval.toml --limit 50 --batch-size 4 -o ./results
 
 - The **workflow** class is the single concrete `AgentWorkflow` subclass in the entrypoint module (plus optional `AgentWorkflowConfig`).
 - The **grader** is usually auto-discovered from that same module, along with an optional `GraderConfig`, so most users do not need to declare grader wiring in TOML.
-- If no grader is found, `osmosis eval run` falls back to smoke mode (no reward statistics).
+- A grader is **required**; if none is found, `osmosis eval run` exits with an error.
 
 ## Connecting to model endpoints
 
@@ -159,11 +159,10 @@ Flags on `osmosis eval run` override TOML when provided:
 | `TimeoutError` | Cache lock held by another process |
 | `RuntimeError` | Cache version mismatch, hash collision, dataset changed mid-run |
 
-Dataset and provider errors are shared with [Test mode](./test-mode.md) / [Troubleshooting](./troubleshooting.md).
+Dataset and provider errors are shared with [Troubleshooting](./troubleshooting.md).
 
 ## See also
 
-- [Test mode](./test-mode.md)
 - [Dataset format](./datasets.md)
 - [CLI reference](./cli.md)
 - [Troubleshooting](./troubleshooting.md)
