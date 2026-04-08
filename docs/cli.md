@@ -43,7 +43,7 @@ osmosis whoami
 
 ### osmosis workspace
 
-Manage workspaces and projects interactively. Launches a TUI that shows your current workspace/project context and lets you switch workspace, select a default project, browse training runs, datasets, and models.
+Manage workspaces interactively. Launches a TUI that shows your current workspace context and lets you switch workspace, browse training runs, datasets, and models.
 
 ```bash
 # Launch interactive workspace manager

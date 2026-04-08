@@ -1,11 +1,11 @@
-"""Local configuration for user preferences (default project, etc.).
+"""Local configuration for user preferences (e.g. active workspace).
 
 Stored separately from credentials to keep secrets and preferences apart.
 File: ~/.config/osmosis/config.json
 
-Cache data (project lists, subscription status) is stored as individual
-files under ~/.config/osmosis/cache/ so that concurrent writes to different
-workspaces never conflict.
+Cache data (subscription status) is stored as individual JSON files under
+~/.config/osmosis/cache/ so that concurrent writes to different workspaces
+never conflict.
 """
 
 from __future__ import annotations
@@ -55,18 +55,6 @@ def _load_config() -> dict[str, Any]:
     return data
 
 
-def _get_defaults() -> tuple[dict[str, Any], dict[str, Any]]:
-    """Load config and safely extract the 'defaults' dict.
-
-    Returns (config, defaults) where defaults is guaranteed to be a dict.
-    """
-    config = _load_config()
-    defaults = config.get("defaults", {})
-    if not isinstance(defaults, dict):
-        return config, {}
-    return config, defaults
-
-
 def _save_config(data: dict[str, Any]) -> None:
     atomic_write_json(CONFIG_FILE, data, mode=0o600)
 
@@ -90,97 +78,15 @@ def _read_cache(path: Path) -> Any | None:
         return None
 
 
-# ── Default project ──────────────────────────────────────────────
-
-
-def get_default_project(workspace_name: str) -> dict[str, str] | None:
-    """Get the default project for a workspace.
-
-    Returns:
-        Dict with 'project_id' and 'project_name', or None.
-    """
-    _config, defaults = _get_defaults()
-    entry = defaults.get(workspace_name)
-    if (
-        entry
-        and isinstance(entry, dict)
-        and "project_id" in entry
-        and "project_name" in entry
-    ):
-        return entry
-    # Corrupted entry (missing required keys) — treat as unset and clean up.
-    if entry is not None:
-        clear_default_project(workspace_name)
-    return None
-
-
-def set_default_project(
-    workspace_name: str, project_id: str, project_name: str
-) -> None:
-    """Set the default project for a workspace."""
-    config = _load_config()
-    if not isinstance(config.get("defaults"), dict):
-        config["defaults"] = {}
-    config["defaults"][workspace_name] = {
-        "project_id": project_id,
-        "project_name": project_name,
-    }
-    _save_config(config)
-
-
-def clear_default_project(workspace_name: str) -> None:
-    """Remove the default project for a workspace."""
-    config, defaults = _get_defaults()
-    if workspace_name in defaults:
-        del defaults[workspace_name]
-        _save_config(config)
-
-
 # ── Workspace cleanup ────────────────────────────────────────────
 
 
 def clear_workspace_data(workspace_name: str) -> None:
-    """Remove all local data for a workspace (defaults + cache files)."""
-    # Clear default project from config.json
-    config, defaults = _get_defaults()
-    if workspace_name in defaults:
-        del defaults[workspace_name]
-        _save_config(config)
-
-    # Remove cache files
+    """Remove cached subscription data for a workspace."""
     safe = _safe_ws_name(workspace_name)
-    for prefix in ("projects", "subscription"):
-        path = CACHE_DIR / f"{prefix}_{safe}.json"
-        with contextlib.suppress(OSError):
-            path.unlink()
-
-
-# ── Project cache ────────────────────────────────────────────────
-
-
-def save_workspace_projects(
-    workspace_name: str, projects: list[dict[str, Any]]
-) -> None:
-    """Cache the project list for a workspace."""
-    safe = _safe_ws_name(workspace_name)
-    path = CACHE_DIR / f"projects_{safe}.json"
-    _write_cache(path, {"projects": projects, "refreshed_at": time.time()})
-
-
-def load_workspace_projects(
-    workspace_name: str,
-) -> tuple[list[dict[str, Any]], float | None]:
-    """Load cached projects and their refresh timestamp for a workspace.
-
-    Returns:
-        Tuple of (projects list, refreshed_at timestamp or None).
-    """
-    safe = _safe_ws_name(workspace_name)
-    path = CACHE_DIR / f"projects_{safe}.json"
-    data = _read_cache(path)
-    if not isinstance(data, dict):
-        return [], None
-    return data.get("projects", []), data.get("refreshed_at")
+    path = CACHE_DIR / f"subscription_{safe}.json"
+    with contextlib.suppress(OSError):
+        path.unlink()
 
 
 # ── Subscription status cache ────────────────────────────────────
@@ -288,8 +194,8 @@ def clear_active_workspace() -> None:
 def clear_all_local_data() -> None:
     """Remove all local state: config.json and all cache files.
 
-    Called on logout to prevent stale workspace/project context from
-    leaking into a subsequent login (possibly as a different user).
+    Called on logout to prevent stale workspace context from leaking into a
+    subsequent login (possibly as a different user).
     """
     with contextlib.suppress(OSError):
         CONFIG_FILE.unlink()
@@ -300,7 +206,7 @@ def clear_all_local_data() -> None:
 
 
 def reset_session() -> None:
-    """Complete session teardown: credentials + workspace/project context.
+    """Complete session teardown: credentials and local preferences/cache.
 
     Single entry point for all "end session" paths (logout, login --force,
     401 expiry, user identity change) to ensure no stale state remains.

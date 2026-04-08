@@ -1,13 +1,11 @@
-"""Platform API client for project and dataset management."""
+"""Platform API client for workspace and dataset management."""
 
 from .client import OsmosisClient
-from .models import DatasetFile, PaginatedDatasets, Project, ProjectDetail, UploadInfo
+from .models import DatasetFile, PaginatedDatasets, UploadInfo
 
 __all__ = [
     "DatasetFile",
     "OsmosisClient",
     "PaginatedDatasets",
-    "Project",
-    "ProjectDetail",
     "UploadInfo",
 ]

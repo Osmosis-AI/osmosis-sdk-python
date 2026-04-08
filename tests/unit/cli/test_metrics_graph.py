@@ -37,7 +37,14 @@ _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 
 def _render(table: Table, *, width: int = 120) -> str:
     """Render a Rich Table to plain text for assertion checks."""
-    console = RichConsole(width=width, no_color=True, force_terminal=True)
+    # Rich 14.x derives max_width from terminal env when force_terminal=True.
+    # Pin COLUMNS so render width matches the table width under test.
+    console = RichConsole(
+        width=width,
+        no_color=True,
+        force_terminal=True,
+        _environ={"COLUMNS": str(width), "LINES": "25"},
+    )
     with console.capture() as capture:
         console.print(table, end="")
     return _ANSI_RE.sub("", capture.get())
