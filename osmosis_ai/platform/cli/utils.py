@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
@@ -16,8 +17,17 @@ from osmosis_ai.platform.api.models import (
     STATUSES_IN_PROGRESS,
     STATUSES_SUCCESS,
 )
-from osmosis_ai.platform.auth import AuthenticationExpiredError, load_credentials
+from osmosis_ai.platform.auth import (
+    AuthenticationExpiredError,
+    PlatformAPIError,
+    load_credentials,
+)
 from osmosis_ai.platform.auth.config import PLATFORM_URL
+from osmosis_ai.platform.auth.local_config import (
+    get_active_workspace_name,
+    load_subscription_status,
+    save_subscription_status,
+)
 from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE
 
 if TYPE_CHECKING:
@@ -70,31 +80,6 @@ def resolve_id_prefix(
     return matches[0].id
 
 
-def _resolve_entity_id(
-    id: str,
-    project: str | None,
-    workspace_name: str,
-    credentials: Credentials,
-    *,
-    list_fn: Any,
-    items_attr: str,
-    entity_name: str,
-) -> str:
-    """Resolve a short ID prefix to a full entity ID via API listing."""
-    if len(id) >= 32:
-        return id
-    from .project import _resolve_project_id
-
-    project_id = _resolve_project_id(project, workspace_name=workspace_name)
-    all_items, _ = fetch_all_pages(
-        lambda limit, offset: list_fn(
-            project_id, limit=limit, offset=offset, credentials=credentials
-        ),
-        items_attr=items_attr,
-    )
-    return resolve_id_prefix(id, all_items, entity_name=entity_name)
-
-
 def resolve_dataset_id(
     id: str,
     credentials: Credentials,
@@ -119,26 +104,24 @@ def resolve_dataset_id(
 
 def resolve_run_id(
     id: str,
-    project: str | None,
-    workspace_name: str,
     credentials: Credentials,
     *,
     client: Any = None,
 ) -> str:
     """Resolve a short ID prefix to a full training run ID."""
+    if len(id) >= 32:
+        return id
     if client is None:
         from osmosis_ai.platform.api.client import OsmosisClient
 
         client = OsmosisClient()
-    return _resolve_entity_id(
-        id,
-        project,
-        workspace_name,
-        credentials,
-        list_fn=client.list_training_runs,
+    all_runs, _ = fetch_all_pages(
+        lambda limit, offset: client.list_training_runs(
+            limit=limit, offset=offset, credentials=credentials
+        ),
         items_attr="training_runs",
-        entity_name="training run",
     )
+    return resolve_id_prefix(id, all_runs, entity_name="training run")
 
 
 def format_dataset_status(d: Any, *, for_prompt: bool = False) -> str:
@@ -216,13 +199,9 @@ def format_dim_date(iso_str: str | None) -> str:
     return console.format_styled(format_date(iso_str), "dim")
 
 
-def platform_entity_url(
-    ws_name: str, project_name: str | None = None, *segments: str
-) -> str:
-    """Build a platform URL for a workspace or workspace/project entity."""
+def platform_entity_url(ws_name: str, *segments: str) -> str:
+    """Build a platform URL for a workspace entity."""
     base = f"{PLATFORM_URL}/{ws_name}"
-    if project_name:
-        base += f"/{project_name}"
     if segments:
         base += "/" + "/".join(segments)
     return base
@@ -365,3 +344,67 @@ def validate_list_options(
     if all_ and limit != DEFAULT_PAGE_SIZE:
         raise CLIError("--all and --limit are mutually exclusive.")
     return limit, all_
+
+
+def _get_active_workspace_name() -> str:
+    """Return the active workspace name, or raise if none is selected."""
+    workspace_name = get_active_workspace_name()
+    if workspace_name is None:
+        raise CLIError(
+            "No workspace selected. Run 'osmosis workspace' to select a workspace."
+        )
+    return workspace_name
+
+
+def _require_auth(
+    *,
+    workspace_name: str | None = None,
+) -> tuple[str, Credentials]:
+    """Check that user is authenticated and has a workspace selected.
+
+    Checks credentials first so that unauthenticated users see "Not logged in"
+    instead of the misleading "No workspace selected".
+    """
+    credentials = require_credentials()
+    if workspace_name is None:
+        workspace_name = _get_active_workspace_name()
+    return workspace_name, credentials
+
+
+def _require_subscription(*, workspace_name: str) -> None:
+    """Check that a workspace has an active subscription.
+
+    Uses cached status with TTL. If the cache is expired, stale, or False,
+    refreshes from the platform to avoid blocking users who just subscribed.
+    """
+    from osmosis_ai.platform.cli.constants import CACHE_TTL_SECONDS
+
+    cached = load_subscription_status(workspace_name, max_age=CACHE_TTL_SECONDS)
+    if cached is True:
+        return
+
+    refreshed = False
+    with contextlib.suppress(PlatformAPIError, OSError):
+        credentials = require_credentials()
+        from osmosis_ai.platform.api.client import OsmosisClient
+
+        client = OsmosisClient()
+        info = client.refresh_workspace_info(
+            credentials=credentials, workspace_name=workspace_name
+        )
+        has_subscription = info.get("has_subscription")
+        if has_subscription is not None:
+            save_subscription_status(workspace_name, bool(has_subscription))
+            refreshed = True
+
+    status = load_subscription_status(workspace_name, max_age=CACHE_TTL_SECONDS)
+    if status is True:
+        return
+
+    if not refreshed and status is None:
+        return
+
+    raise CLIError(
+        "Your workspace requires an active subscription for this action.\n"
+        f"  Upgrade at: {PLATFORM_URL}/{workspace_name}/settings/billing"
+    )

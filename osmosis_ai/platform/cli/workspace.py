@@ -2,8 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import webbrowser
-from collections.abc import Callable, Sequence
-from typing import Any, Literal, cast
+from typing import Any
 
 import typer
 
@@ -24,11 +23,8 @@ from osmosis_ai.platform.auth import (
     platform_request,
 )
 from osmosis_ai.platform.auth.local_config import (
-    clear_default_project,
     get_active_workspace,
-    get_default_project,
     set_active_workspace,
-    set_default_project,
 )
 from osmosis_ai.platform.constants import MSG_NOT_LOGGED_IN
 
@@ -44,43 +40,7 @@ from .utils import (
     require_credentials,
 )
 
-app: typer.Typer = typer.Typer(help="Manage workspace and project context.")
-
-
-def _validate_default_project(
-    ws_name: str | None, default_project: dict | None
-) -> dict | None:
-    """Check the default project still exists; clear it if stale."""
-    if not ws_name or not default_project:
-        return default_project
-
-    from .project import _get_cached_projects
-
-    project_id = default_project.get("project_id")
-    if not project_id:
-        return default_project
-
-    projects = _get_cached_projects(workspace_name=ws_name)
-    if not projects:
-        # If refresh failed or workspace has no projects, we can't confirm
-        # whether the default still exists. Keep it to avoid clearing a valid
-        # default due to a transient network issue. The browse functions
-        # (_browse_runs, etc.) handle actual 404s via _handle_stale_project.
-        return default_project
-
-    for p in projects:
-        if p.get("id") == project_id:
-            return default_project
-
-    # Project not found in the list — stale default
-    clear_default_project(ws_name)
-    console.print(
-        f"Default project '{default_project.get('project_name', project_id)}' "
-        "no longer exists. Please select a new project.",
-        style="yellow",
-    )
-    console.print()
-    return None
+app: typer.Typer = typer.Typer(help="Manage workspace context.")
 
 
 def _clean_file_path(raw: str) -> str:
@@ -97,24 +57,18 @@ def _clean_file_path(raw: str) -> str:
     return path
 
 
-def _show_context(ws_name: str | None, default_project: dict | None) -> None:
-    """Display current workspace/project context."""
+def _show_context(ws_name: str | None) -> None:
+    """Display current workspace context."""
     if not ws_name:
         console.print(console.format_styled("No workspace selected.", "dim"))
         console.print()
         return
 
-    project_name = (
-        default_project["project_name"]
-        if default_project
-        else console.format_styled("(no project selected)", "dim")
-    )
     console.print(
         f"{console.format_styled('Current:', 'bold')} "
-        f"{console.format_styled(ws_name, 'cyan')} / {project_name}"
+        f"{console.format_styled(ws_name, 'cyan')}"
     )
-    project_name_for_url = default_project["project_name"] if default_project else None
-    url = platform_entity_url(ws_name, project_name_for_url)
+    url = platform_entity_url(ws_name)
     console.print(
         f"{console.format_styled('URL:', 'bold')}     "
         f"{console.format_styled(url, 'dim')}"
@@ -122,19 +76,17 @@ def _show_context(ws_name: str | None, default_project: dict | None) -> None:
     console.print()
 
 
-def _main_menu(has_project: bool, has_workspace: bool) -> str | None:
+def _main_menu(has_workspace: bool) -> str | None:
     """Show main menu and return the selected action."""
     choices: list[str | Choice | Separator] = [
-        Choice("Change workspace or project", value="switch"),
+        Choice("Change workspace", value="switch"),
     ]
     if has_workspace:
-        choices.append(Choice("Datasets", value="datasets"))
-    if has_project:
         choices.extend(
             [
+                Choice("Datasets", value="datasets"),
                 Choice("Training runs", value="runs"),
                 Choice("Models", value="models"),
-                Choice("Project details", value="info"),
                 Choice("Open in browser", value="browser"),
             ]
         )
@@ -175,176 +127,25 @@ def _select_workspace(
     return select("Choose a workspace", choices=choices)
 
 
-def _select_project(ws_name: str, ws_id: str | None = None) -> dict | str | None:
-    """Prompt the user to select a default project.
+def _switch_context(active_ws_name: str | None) -> str | None:
+    """Select a workspace, confirm, and set it active.
 
-    Returns:
-        dict: Selected project with 'id' and 'project_name'.
-        BACK: User chose to go back to workspace selection.
-        None: User cancelled or skipped.
+    Returns the new workspace name on success, or None if the user backs out.
     """
-    from .project import select_project_interactive
-
-    default = get_default_project(ws_name)
-    current_id = default.get("project_id") if default else None
-
-    result = select_project_interactive(
-        ws_name,
-        current_project_id=current_id,
-        allow_back=True,
-        workspace_id=ws_id,
-    )
-
-    if result == BACK:
-        return BACK
-    if result is None:
+    selected = _select_workspace(active_ws_name)
+    if selected is None or selected == BACK:
         return None
-    return result
-
-
-def _switch_context(
-    active_ws_name: str | None,
-) -> tuple[str, dict | None] | None:
-    """Run the workspace -> project -> confirm flow.
-
-    Each step has a Back option to return to the previous step.
-    Back from workspace selection returns to the main menu.
-
-    Returns (ws_name, project_dict) on success, or None if backed out to main menu.
-    """
-    step = "workspace"
-    ws_id: str | None = None
-    ws_name: str | None = None
-    result = None
-    while True:
-        if step == "workspace":
-            selected = _select_workspace(active_ws_name)
-            if selected is None or selected == BACK:
-                return None
-            ws_id, ws_name = selected
-            step = "project"
-
-        elif step == "project":
-            assert ws_name is not None
-            result = _select_project(ws_name, ws_id)
-            if result == BACK:
-                step = "workspace"
-                continue
-            if result is None:
-                # Allow switching workspace without selecting a project
-                # (e.g. empty workspaces with no projects yet)
-                ok = confirm(f"Switch to {ws_name}? (no project will be selected)")
-                if not ok:
-                    step = "workspace"
-                    continue
-                assert ws_id is not None
-                if ws_name != active_ws_name:
-                    set_active_workspace(ws_id, ws_name)
-                clear_default_project(ws_name)
-                console.print(
-                    f"{console.format_styled('Switched to:', 'bold')} "
-                    f"{console.format_styled(ws_name, 'cyan')}"
-                )
-                return ws_name, None
-            if not isinstance(result, dict):
-                step = "workspace"
-                continue
-            step = "confirm"
-
-        elif step == "confirm":
-            assert ws_name is not None and isinstance(result, dict)
-            ok = confirm(f"Switch to {ws_name} / {result['project_name']}?")
-            if ok is None or not ok:
-                step = "project"
-                continue
-
-            # Apply changes
-            assert ws_id is not None
-            if ws_name != active_ws_name:
-                set_active_workspace(ws_id, ws_name)
-
-            set_default_project(ws_name, result["id"], result["project_name"])
-            console.print(
-                f"{console.format_styled('Switched to:', 'bold')} "
-                f"{console.format_styled(ws_name, 'cyan')} / "
-                f"{console.format_styled(result['project_name'], 'cyan')}"
-            )
-            return ws_name, {
-                "project_name": result["project_name"],
-                "project_id": result["id"],
-            }
-
-
-def _handle_stale_project(ws_name: str, project: dict) -> bool:
-    """Handle a 404 by clearing the stale default project. Always returns False."""
-    project_id = project.get("project_id")
-    clear_default_project(ws_name)
-    console.print_error(
-        f"Project '{project.get('project_name', project_id)}' "
-        "no longer exists. Default project has been cleared."
+    ws_id, ws_name = selected
+    ok = confirm(f"Switch to workspace {ws_name}?")
+    if not ok:
+        return None
+    if ws_name != active_ws_name:
+        set_active_workspace(ws_id, ws_name)
+    console.print(
+        f"{console.format_styled('Switched to:', 'bold')} "
+        f"{console.format_styled(ws_name, 'cyan')}"
     )
-    return False
-
-
-def _browse_entities(
-    ws_name: str,
-    project: dict,
-    *,
-    fetch: Callable,
-    extract_items: Callable[[Any], Sequence],
-    format_choice: Callable[[Any], str],
-    show_detail: Callable[[Any], None],
-    title: str,
-) -> bool:
-    """Generic browse helper for datasets, runs, and models.
-
-    Args:
-        ws_name: Active workspace name.
-        project: Default project dict with 'project_id' and 'project_name'.
-        fetch: Callable(project_id, credentials=...) that returns an API result.
-        extract_items: Extracts the entity list from the API result.
-        format_choice: Formats an entity into a Choice label string.
-        show_detail: Displays detailed info for a selected entity.
-        title: Display title (e.g. "Datasets", "Training Runs", "Models").
-
-    Returns False if the project was found to be stale (404).
-    """
-    from .utils import require_credentials
-
-    project_id: str = project["project_id"]
-    try:
-        credentials = require_credentials()
-        with console.spinner(f"Loading {title.lower()}..."):
-            result = fetch(project_id, credentials=credentials)
-    except PlatformAPIError as e:
-        if e.status_code == 404:
-            return _handle_stale_project(ws_name, project)
-        console.print_error(f"Failed to load {title.lower()}: {e}")
-        return True
-
-    items = extract_items(result)
-    if not items:
-        console.print(f"No {title.lower()} found.", style="dim")
-        console.print()
-        return True
-
-    data_choices: list[str | Choice | Separator] = [
-        Choice(format_choice(item), value=item) for item in items
-    ]
-
-    while True:
-        console.separator()
-        selected = select_list(
-            f"{title} ({result.total_count}):",
-            items=data_choices,
-            actions=[Choice("Back", value=BACK)],
-            max_visible=DEFAULT_VISIBLE_CHOICES,
-        )
-
-        if selected is None or selected == BACK:
-            return True
-
-        show_detail(selected)
+    return ws_name
 
 
 def _upload_dataset_interactive(
@@ -397,7 +198,7 @@ def _upload_dataset_interactive(
         return False
 
     console.print(f"Upload complete. Dataset ID: {dataset.id}", style="green")
-    url = platform_entity_url(ws_name, None, "datasets", dataset.id)
+    url = platform_entity_url(ws_name, "datasets", dataset.id)
     console.print(f"Check status at: {url}")
     return True
 
@@ -461,14 +262,14 @@ def _show_dataset_detail(ds: Any, ws_name: str) -> None:
     rows = build_dataset_detail_rows(ds)
     if ds.created_at:
         rows.append(("Created", format_date(ds.created_at)))
-    url = platform_entity_url(ws_name, None, "datasets", ds.id)
+    url = platform_entity_url(ws_name, "datasets", ds.id)
     rows.append(("URL", url))
 
     console.table(rows, title="Dataset Detail")
     console.print()
 
 
-def _browse_runs(ws_name: str, project: dict) -> bool:
+def _browse_runs(ws_name: str) -> None:
     """List training runs and allow selecting one for details."""
     from osmosis_ai.platform.api.client import OsmosisClient
 
@@ -480,156 +281,114 @@ def _browse_runs(ws_name: str, project: dict) -> bool:
         model = r.model_name or ""
         return f"{name}  {status_str}  {model}"
 
-    return _browse_entities(
-        ws_name,
-        project,
-        fetch=client.list_training_runs,
-        extract_items=lambda r: r.training_runs,
-        format_choice=_format,
-        show_detail=lambda r: _show_run_detail(r, ws_name, project),
-        title="Training Runs",
-    )
+    try:
+        credentials = require_credentials()
+        with console.spinner("Loading training runs..."):
+            result = client.list_training_runs(credentials=credentials)
+    except PlatformAPIError as e:
+        console.print_error(f"Failed to load training runs: {e}")
+        return
+
+    items = result.training_runs
+    if not items:
+        console.print("No training runs found.", style="dim")
+        console.print()
+        return
+
+    data_choices: list[str | Choice | Separator] = [
+        Choice(_format(item), value=item) for item in items
+    ]
+
+    while True:
+        console.separator()
+        selected = select_list(
+            f"Training Runs ({result.total_count}):",
+            items=data_choices,
+            actions=[Choice("Back", value=BACK)],
+            max_visible=DEFAULT_VISIBLE_CHOICES,
+        )
+
+        if selected is None or selected == BACK:
+            return
+
+        _show_run_detail(selected, ws_name)
 
 
-def _show_run_detail(r: Any, ws_name: str, project: dict) -> None:
+def _show_run_detail(r: Any, ws_name: str) -> None:
     """Display detailed info for a single training run."""
     rows = build_run_detail_rows(r)
-    url = platform_entity_url(ws_name, project["project_name"], "training", r.id)
+    url = platform_entity_url(ws_name, "training", r.id)
     rows.append(("URL", url))
 
     console.table(rows, title="Training Run")
     console.print()
 
 
-def _browse_models(ws_name: str, project: dict) -> bool:
-    """List base and output models and allow selecting one for details."""
+def _browse_models(ws_name: str) -> None:
+    """List models and allow selecting one for details."""
     from osmosis_ai.platform.api.client import OsmosisClient
 
-    from .utils import require_credentials
-
     client = OsmosisClient()
-    project_id: str = project["project_id"]
 
     try:
         credentials = require_credentials()
         with console.spinner("Loading models..."):
-            base_result, output_result = client.fetch_all_models(
-                project_id, credentials=credentials
-            )
+            result = client.list_base_models(credentials=credentials)
     except PlatformAPIError as e:
-        if e.status_code == 404:
-            return _handle_stale_project(ws_name, project)
         console.print_error(f"Failed to load models: {e}")
-        return True
+        return
 
-    if not base_result.models and not output_result.models:
+    if not result.models:
         console.print("No models found.", style="dim")
         console.print()
-        return True
+        return
 
     model_items: list[str | Choice | Separator] = []
-    if base_result.models:
-        model_items.append(Separator("── Base Models ──"))
-        for m in base_result.models:
-            creator = f"  by {m.creator_name}" if m.creator_name else ""
-            label = f"{m.model_name}  [{m.status}]{creator}"
-            model_items.append(Choice(label, value=("base", m)))
-    if output_result.models:
-        model_items.append(Separator("── Output Models ──"))
-        for m in output_result.models:
-            run = f"  from {m.training_run_name}" if m.training_run_name else ""
-            label = f"{m.model_name}  [{m.status}]{run}"
-            model_items.append(Choice(label, value=("output", m)))
+    for m in result.models:
+        creator = f"  by {m.creator_name}" if m.creator_name else ""
+        label = f"{m.model_name}  [{m.status}]{creator}"
+        model_items.append(Choice(label, value=m))
 
-    total = base_result.total_count + output_result.total_count
     while True:
         console.separator()
         selected = select_list(
-            f"Models ({total}):",
+            f"Models ({result.total_count}):",
             items=model_items,
             actions=[Choice("Back", value=BACK)],
             max_visible=DEFAULT_VISIBLE_CHOICES,
         )
 
         if selected is None or selected == BACK:
-            return True
+            return
 
-        kind, model = selected
-        _show_model_detail(
-            cast(Literal["base", "output"], kind), model, ws_name, project
-        )
+        _show_model_detail(selected, ws_name)
 
 
-def _show_model_detail(
-    kind: Literal["base", "output"], m: Any, ws_name: str, project: dict
-) -> None:
+def _show_model_detail(m: Any, ws_name: str) -> None:
     """Display detailed info for a single model."""
     rows: list[tuple[str, str]] = [
         ("Model", m.model_name),
         ("ID", m.id),
-        ("Type", "Base Model" if kind == "base" else "Output Model"),
         ("Status", m.status),
     ]
     if m.base_model:
         rows.append(("Base Model", m.base_model))
     if m.description:
         rows.append(("Description", m.description))
-    if kind == "base" and m.creator_name:
+    if m.creator_name:
         rows.append(("Creator", m.creator_name))
-    if kind == "output" and m.training_run_name:
-        rows.append(("Training Run", m.training_run_name))
     if m.created_at:
         rows.append(("Created", format_date(m.created_at)))
-    url = platform_entity_url(ws_name, project["project_name"], "models", m.id)
+    url = platform_entity_url(ws_name, "models", m.id)
     rows.append(("URL", url))
 
     console.table(rows, title="Model Detail")
     console.print()
 
 
-def _show_project_info(ws_name: str, project: dict) -> bool:
-    """Fetch and display project details.
-
-    Returns False if the project was found to be stale (404).
-    """
-    from osmosis_ai.platform.api.client import OsmosisClient
-
-    from .utils import require_credentials
-
-    client = OsmosisClient()
-    project_id: str = project["project_id"]
-    try:
-        credentials = require_credentials()
-        with console.spinner("Loading project info..."):
-            detail = client.get_project(project_id, credentials=credentials)
-    except PlatformAPIError as e:
-        if e.status_code == 404:
-            return _handle_stale_project(ws_name, project)
-        console.print_error(f"Failed to load project info: {e}")
-        return True
-
-    url = platform_entity_url(ws_name, detail.project_name)
-    rows = [
-        ("Project", detail.project_name),
-        ("ID", detail.id),
-        ("Role", detail.role),
-        ("Datasets", str(detail.dataset_count)),
-        ("Training Runs", str(detail.training_run_count)),
-        ("Base Models", str(detail.base_model_count)),
-        ("Output Models", str(detail.output_model_count)),
-    ]
-    if detail.created_at:
-        rows.append(("Created", format_date(detail.created_at)))
-    rows.append(("URL", url))
-
-    console.table(rows, title="Project Info")
-    console.print()
-    return True
-
-
-def _open_in_browser(ws_name: str, project: dict) -> None:
-    """Open the current workspace/project URL in the default browser."""
-    url = platform_entity_url(ws_name, project["project_name"])
+def _open_in_browser(ws_name: str) -> None:
+    """Open the workspace URL in the default browser."""
+    url = platform_entity_url(ws_name)
     console.print(f"Opening {console.format_styled(url, 'dim')} ...")
     webbrowser.open(url)
     console.print()
@@ -658,11 +417,8 @@ def list_workspaces() -> None:
         console.print(f"  {name}{marker}  [{sub_label}]")
 
 
-def switch_workspace(
-    workspace: str,
-    project: str | None = None,
-) -> None:
-    """Switch to a different workspace and optionally set a default project."""
+def switch_workspace(workspace: str) -> None:
+    """Switch to a different workspace."""
     credentials = require_credentials()
     result = platform_request(
         "/api/cli/workspaces", require_workspace=False, credentials=credentials
@@ -684,70 +440,47 @@ def switch_workspace(
     set_active_workspace(ws_id, ws_name)
     console.print(f"Switched to workspace: {console.format_styled(ws_name, 'cyan')}")
 
-    if project is not None:
-        from .project import _resolve_project
-
-        proj = _resolve_project(project, workspace_name=ws_name, refresh=True)
-        set_default_project(ws_name, proj["id"], proj["project_name"])
-        console.print(
-            f"Default project: {console.format_styled(proj['project_name'], 'cyan')}"
-        )
-
 
 @app.callback(invoke_without_command=True)
 def workspace() -> None:
-    """Manage workspace and project context."""
+    """Manage workspace context."""
     credentials = load_credentials()
 
     if credentials is None:
         raise CLIError(MSG_NOT_LOGGED_IN)
 
-    active_ws = get_active_workspace()  # returns dict or None
+    active_ws = get_active_workspace()
     ws_name = active_ws["name"] if active_ws else None
-    default_project = get_default_project(ws_name) if ws_name else None
 
-    # Validate the default project still exists
-    default_project = _validate_default_project(ws_name, default_project)
+    _show_context(ws_name)
 
-    # Show current context
-    _show_context(ws_name, default_project)
-
-    # Non-interactive: just show current context
     if not is_interactive():
         return
 
-    # Interactive main menu loop
     while True:
-        action = _main_menu(
-            has_project=bool(default_project), has_workspace=bool(ws_name)
-        )
+        action = _main_menu(has_workspace=bool(ws_name))
 
         if action is None or action == "exit":
             return
-        elif action == "switch":
-            result = _switch_context(ws_name)
-            if result:
-                ws_name, default_project = result
+        if action == "switch":
+            new_ws = _switch_context(ws_name)
+            if new_ws is not None:
+                ws_name = new_ws
                 console.print()
-                _show_context(ws_name, default_project)
+                _show_context(ws_name)
         elif action == "datasets":
             if ws_name is None:
                 continue
             _browse_datasets(ws_name)
-        elif action in ("runs", "models", "info", "browser"):
-            if ws_name is None or default_project is None:
+        elif action == "runs":
+            if ws_name is None:
                 continue
-
-            if action == "runs":
-                ok = _browse_runs(ws_name, default_project)
-            elif action == "models":
-                ok = _browse_models(ws_name, default_project)
-            elif action == "info":
-                ok = _show_project_info(ws_name, default_project)
-            else:
-                _open_in_browser(ws_name, default_project)
-                ok = True
-
-            if not ok:
-                default_project = None  # Already cleared by _handle_stale_project
-                _show_context(ws_name, default_project)
+            _browse_runs(ws_name)
+        elif action == "models":
+            if ws_name is None:
+                continue
+            _browse_models(ws_name)
+        elif action == "browser":
+            if ws_name is None:
+                continue
+            _open_in_browser(ws_name)

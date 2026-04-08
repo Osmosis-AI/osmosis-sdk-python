@@ -35,7 +35,7 @@ def _make_login_result(email: str = "a@example.com") -> LoginResult:
 
 
 def test_force_login_clears_workspace_data(monkeypatch) -> None:
-    """--force must clear workspace/project context after successful login."""
+    """--force must clear workspace and local state after successful login."""
     old_creds = _make_credentials(user_id="user_1")
     new_creds = _make_credentials(user_id="user_1")  # same user
     result = _make_login_result()
@@ -71,7 +71,7 @@ def test_force_login_clears_workspace_data(monkeypatch) -> None:
 
 
 def test_login_clears_workspace_when_user_changes(monkeypatch) -> None:
-    """Logging in as a different user must clear stale workspace context."""
+    """Logging in as a different user must clear stale workspace/local state."""
     old_creds = _make_credentials(user_id="user_1")
     new_creds = _make_credentials(user_id="user_2", email="b@example.com")
     result = _make_login_result(email="b@example.com")
@@ -103,7 +103,7 @@ def test_login_clears_workspace_when_user_changes(monkeypatch) -> None:
 
 
 def test_login_preserves_workspace_when_same_user(monkeypatch) -> None:
-    """Re-login as the same user (no --force) should keep workspace context."""
+    """Re-login as the same user (no --force) should keep workspace/local state."""
     old_creds = _make_credentials(user_id="user_1")
     new_creds = _make_credentials(user_id="user_1")
     result = _make_login_result()
@@ -126,7 +126,7 @@ def test_login_preserves_workspace_when_same_user(monkeypatch) -> None:
 
     auth_module.login(force=False, token=None)
 
-    assert not clear_calls, "workspace context should be preserved for same user"
+    assert not clear_calls, "workspace/local state should be preserved for same user"
 
 
 # ---------------------------------------------------------------------------

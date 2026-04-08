@@ -8,7 +8,7 @@ Usage:
 
     choice = select("Pick a workspace:", choices=["ws-a", "ws-b"])
     ok = confirm("Proceed?")
-    name = text("Project name:", validate=my_validator)
+    name = text("Name:", validate=my_validator)
 """
 
 from __future__ import annotations

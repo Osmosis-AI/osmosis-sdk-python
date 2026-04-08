@@ -39,7 +39,7 @@ def create(
 ) -> None:
     """Create a new workspace."""
     from osmosis_ai.cli.console import console
-    from osmosis_ai.platform.cli.project import _require_auth
+    from osmosis_ai.platform.cli.utils import _require_auth
 
     _, credentials = _require_auth()
 
@@ -58,7 +58,7 @@ def delete(
     """Delete a workspace."""
     from osmosis_ai.cli.console import console
     from osmosis_ai.cli.errors import CLIError
-    from osmosis_ai.platform.cli.project import _require_auth
+    from osmosis_ai.platform.cli.utils import _require_auth
 
     _, credentials = _require_auth()
 
@@ -91,26 +91,26 @@ def delete(
 
     from osmosis_ai.cli.prompts import require_confirmation
 
-    if status.projects_with_running_processes:
+    if status.has_running_processes:
         console.print(
-            "This workspace has projects with running processes:",
+            "This workspace has running processes:",
             style="yellow",
         )
-        for p in status.projects_with_running_processes:
-            processes = []
-            if not p.feature_pipelines.valid:
-                processes.append(f"{p.feature_pipelines.count} pipeline(s)")
-            if not p.training_runs.valid:
-                processes.append(f"{p.training_runs.count} training run(s)")
-            if not p.models.valid:
-                processes.append(f"{p.models.count} active model(s)")
-            console.print(f"  {console.escape(p.project_name)}: {', '.join(processes)}")
+        processes: list[str] = []
+        if not status.feature_pipelines.valid:
+            processes.append(f"{status.feature_pipelines.count} pipeline(s)")
+        if not status.training_runs.valid:
+            processes.append(f"{status.training_runs.count} training run(s)")
+        if not status.models.valid:
+            processes.append(f"{status.models.count} active model(s)")
+        if processes:
+            console.print(f"  {', '.join(processes)}")
         console.print()
 
     require_confirmation(
         f"Delete workspace '{workspace['name']}'? "
-        "This will stop all running processes and delete all projects, datasets, "
-        "and training runs. This cannot be undone.",
+        "This will stop all running processes and delete all datasets and training "
+        "runs. This cannot be undone.",
         yes=yes,
     )
 
@@ -121,11 +121,8 @@ def delete(
 @app.command("switch")
 def switch(
     workspace: str = typer.Argument(..., help="Workspace name to switch to."),
-    project: str | None = typer.Option(
-        None, "--project", help="Also set the default project."
-    ),
 ) -> None:
     """Switch to a different workspace."""
     from osmosis_ai.platform.cli.workspace import switch_workspace
 
-    switch_workspace(workspace=workspace, project=project)
+    switch_workspace(workspace=workspace)
