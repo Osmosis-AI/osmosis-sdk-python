@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Annotated, Literal
 
 import tomllib
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
 
 from osmosis_ai.cli.errors import CLIError
 
@@ -24,21 +24,6 @@ class _ServerSection(BaseModel):
     log_level: LogLevel = "info"
 
 
-class _RegistrationSection(BaseModel):
-    skip: bool = False
-    api_key: str | None = None
-
-    @field_validator("api_key", mode="before")
-    @classmethod
-    def _normalize_registration_api_key(cls, v: object) -> str | None:
-        if v is None:
-            return None
-        if not isinstance(v, str):
-            raise ValueError("registration.api_key must be a string or null")
-        s = v.strip()
-        return s if s else None
-
-
 class _DebugSection(BaseModel):
     no_validate: bool = False
     trace_dir: str | None = None
@@ -52,8 +37,6 @@ class ServeConfig(BaseModel):
     server_port: Annotated[int, Field(ge=1, le=65535)]
     server_host: str
     server_log_level: LogLevel
-    registration_skip: bool
-    registration_api_key: str | None
     debug_no_validate: bool
     debug_trace_dir: str | None
 
@@ -82,13 +65,11 @@ def load_serve_config(path: Path) -> ServeConfig:
             raise CLIError(f"Missing '{required_key}' in [serve] section of {path}")
 
     server_section = raw.get("server", {})
-    registration_section = raw.get("registration", {})
     debug_section = raw.get("debug", {})
 
     try:
         serve_parsed = _ServeSection(**serve_section)
         server = _ServerSection(**server_section)
-        registration = _RegistrationSection(**registration_section)
         debug = _DebugSection(**debug_section)
     except Exception as e:
         raise CLIError(f"Invalid config in {path}: {e}") from e
@@ -99,8 +80,6 @@ def load_serve_config(path: Path) -> ServeConfig:
         server_port=server.port,
         server_host=server.host,
         server_log_level=server.log_level,
-        registration_skip=registration.skip,
-        registration_api_key=registration.api_key,
         debug_no_validate=debug.no_validate,
         debug_trace_dir=debug.trace_dir,
     )

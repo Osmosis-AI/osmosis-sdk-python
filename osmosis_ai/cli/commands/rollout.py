@@ -6,7 +6,6 @@ import hashlib
 import re
 import time
 import uuid
-from contextlib import suppress
 from functools import lru_cache
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
@@ -14,8 +13,6 @@ from typing import TYPE_CHECKING, Any, Literal
 import typer
 
 from osmosis_ai.cli.errors import CLIError, not_implemented
-
-ProbeOutcome = Literal["ready", "exhausted", "shutdown"]
 
 if TYPE_CHECKING:
     from osmosis_ai.cli.console import Console
@@ -28,18 +25,6 @@ app: typer.Typer = typer.Typer(
 # Valid log levels for uvicorn (defined locally to avoid importing the heavy
 # serve module at CLI parse time).
 LogLevel = Literal["critical", "error", "warning", "info", "debug", "trace"]
-
-
-def _extract_bearer_token(auth_header: str) -> str | None:
-    """Extract a bearer token from an Authorization header (Bearer scheme only)."""
-    auth_header = (auth_header or "").strip()
-    if not auth_header:
-        return None
-
-    parts = auth_header.split()
-    if len(parts) == 2 and parts[0].lower() == "bearer":
-        return parts[1]
-    return None
 
 
 def _json_error_response(*, status_code: int, detail: str):
@@ -61,49 +46,6 @@ def _format_http_origin(host: str, port: int) -> str:
         else:
             return f"http://[{h}]:{port}"
     return f"http://{h}:{port}"
-
-
-async def _probe_rollout_health_ready(
-    *,
-    probe_url: str,
-    max_attempts: int = 30,
-    sleep_sec: float = 0.5,
-    request_timeout_sec: float = 2.0,
-    shutdown_event: Any | None = None,
-) -> ProbeOutcome:
-    """Poll GET ``probe_url`` until 200, exhaustion, or shutdown."""
-    import asyncio
-
-    import httpx
-
-    async with httpx.AsyncClient() as client:
-        for _ in range(max_attempts):
-            if shutdown_event is not None and shutdown_event.is_set():
-                return "shutdown"
-            try:
-                r = await client.get(probe_url, timeout=request_timeout_sec)
-                if r.status_code == 200:
-                    return "ready"
-            except Exception:
-                pass
-            if shutdown_event is not None and shutdown_event.is_set():
-                return "shutdown"
-            if sleep_sec > 0:
-                if shutdown_event is not None:
-                    try:
-                        await asyncio.wait_for(
-                            shutdown_event.wait(),
-                            timeout=sleep_sec,
-                        )
-                        return "shutdown"
-                    except asyncio.TimeoutError:
-                        pass
-                else:
-                    await asyncio.sleep(sleep_sec)
-    return "exhausted"
-
-
-_REGISTRATION_TASK_AWAIT_TIMEOUT_SEC = 30.0
 
 
 def _trace_log_basename(rollout_id: str) -> str:
@@ -205,12 +147,9 @@ def _serve(
     no_validate: bool,
     validate_only: bool,
     log_level: LogLevel | None,
-    skip_register: bool,
     local: bool,
     console: Console,
 ) -> None:
-    from contextlib import asynccontextmanager
-
     if validate_only and no_validate:
         console.print_error(
             "Error: --validate-only and --no-validate are mutually exclusive."
@@ -238,13 +177,6 @@ def _serve(
     serve_host = config.server_host
     serve_port = config.server_port
     uvicorn_log_level = config.server_log_level
-
-    if local and config.registration_api_key is not None:
-        console.print_error(
-            "Error: --local cannot be used when [registration].api_key is set in the "
-            "config file."
-        )
-        raise typer.Exit(1)
 
     from osmosis_ai.eval.common.cli import auto_discover_grader, load_workflow
 
@@ -275,7 +207,6 @@ def _serve(
     do_validate = not (no_validate or config.debug_no_validate)
     if validate_only:
         do_validate = True
-    do_register = not (skip_register or local or config.registration_skip)
 
     from osmosis_ai.rollout_v2.validator import validate_backend
 
@@ -301,17 +232,6 @@ def _serve(
 
     agent_name = resolved_agent_name(workflow_cls, workflow_config)
 
-    api_key: str | None
-    if local:
-        api_key = None
-    else:
-        from osmosis_ai.rollout_v2.server.api_key import generate_api_key
-
-        if config.registration_api_key is not None:
-            api_key = config.registration_api_key
-        else:
-            api_key = generate_api_key()
-
     from osmosis_ai.rollout_v2.backend.local import LocalBackend
 
     backend = LocalBackend(
@@ -329,96 +249,9 @@ def _serve(
         )
         backend = _tracing_backend_proxy_cls()(backend, trace_session_path)
 
-    credentials = None
-    if do_register:
-        from osmosis_ai.platform.auth.credentials import load_credentials
-
-        credentials = load_credentials()
-        if credentials is None:
-            console.print_error(
-                "Not logged in. Run 'osmosis auth login' first, or use "
-                "--skip-register for local testing."
-            )
-            raise typer.Exit(1)
-
-    registration_lifespan = None
-    if do_register and credentials is not None:
-        import asyncio
-
-        from osmosis_ai.platform.cli.registration import (
-            probe_host,
-            register_with_platform,
-        )
-
-        @asynccontextmanager
-        async def _lifespan(_app: object):
-            shutdown_event = asyncio.Event()
-
-            async def _probe_and_register() -> None:
-                probe_target = probe_host(serve_host)
-                probe_url = f"{_format_http_origin(probe_target, serve_port)}/health"
-                outcome = await _probe_rollout_health_ready(
-                    probe_url=probe_url,
-                    shutdown_event=shutdown_event,
-                )
-                if outcome == "shutdown":
-                    return
-                if outcome == "exhausted":
-                    console.print(
-                        "Warning: /health probe did not return HTTP 200 before giving up; "
-                        "attempting platform registration anyway."
-                    )
-                if shutdown_event.is_set():
-                    return
-                loop = asyncio.get_running_loop()
-                result = await loop.run_in_executor(
-                    None,
-                    lambda: register_with_platform(
-                        host=serve_host,
-                        port=serve_port,
-                        agent_loop_name=agent_name,
-                        credentials=credentials,
-                        api_key=api_key,
-                    ),
-                )
-                if result.success:
-                    if result.is_healthy:
-                        console.print(
-                            f"Platform registration succeeded "
-                            f"(server_id={result.server_id})."
-                        )
-                    else:
-                        console.print(
-                            f"Warning: registration completed but server status is not "
-                            f"healthy: {result.error or result.status}"
-                        )
-                else:
-                    console.print_error(
-                        f"Platform registration failed: {result.error or 'unknown error'}"
-                    )
-
-            reg_task = asyncio.create_task(_probe_and_register())
-            try:
-                yield
-            finally:
-                shutdown_event.set()
-                try:
-                    await asyncio.wait_for(
-                        reg_task,
-                        timeout=_REGISTRATION_TASK_AWAIT_TIMEOUT_SEC,
-                    )
-                except asyncio.TimeoutError:
-                    reg_task.cancel()
-                    with suppress(asyncio.CancelledError):
-                        await reg_task
-                except Exception:
-                    pass
-
-        registration_lifespan = _lifespan
-
     from osmosis_ai.rollout_v2.server.app import create_rollout_server
 
-    fastapi_app = create_rollout_server(backend=backend, lifespan=registration_lifespan)
+    fastapi_app = create_rollout_server(backend=backend)
 
     if not local:
         from fastapi import FastAPI
@@ -436,27 +269,6 @@ def _serve(
 
         from starlette.middleware.base import BaseHTTPMiddleware
         from starlette.requests import Request
-
-        from osmosis_ai.rollout_v2.server.api_key import validate_api_key
-
-        class _APIKeyAuthMiddleware(BaseHTTPMiddleware):
-            def __init__(self, app: object, *, expected_key: str) -> None:
-                super().__init__(app)
-                self._expected_key = expected_key
-
-            async def dispatch(self, request: Request, call_next):
-                if request.method == "OPTIONS":
-                    return await call_next(request)
-                if request.method == "GET" and request.url.path == "/health":
-                    return await call_next(request)
-                auth_header = request.headers.get("authorization") or ""
-                token = _extract_bearer_token(auth_header)
-                if not validate_api_key(token, self._expected_key):
-                    return _json_error_response(
-                        status_code=401,
-                        detail="Invalid or missing API key",
-                    )
-                return await call_next(request)
 
         class _RolloutLabelMiddleware(BaseHTTPMiddleware):
             async def dispatch(self, request: Request, call_next):
@@ -487,25 +299,6 @@ def _serve(
                 return await call_next(Request(request.scope, receive_replay))
 
         fastapi_app.add_middleware(_RolloutLabelMiddleware)
-        fastapi_app.add_middleware(_APIKeyAuthMiddleware, expected_key=api_key)
-
-    if local:
-        api_key_display = "(disabled - local mode)"
-    elif config.registration_api_key is not None:
-        api_key_display = "(provided)"
-    else:
-        api_key_display = api_key or ""
-
-    if local:
-        reg_display = "Skipped (--local)"
-    elif skip_register:
-        reg_display = "Skipped (--skip-register)"
-    elif config.registration_skip:
-        reg_display = "Skipped ([registration].skip in config)"
-    elif do_register:
-        reg_display = "Enabled (after /health probe)"
-    else:
-        reg_display = "Skipped"
 
     grader_name = grader_cls.__name__ if grader_cls else "(none)"
 
@@ -518,9 +311,7 @@ def _serve(
             ("Agent", agent_name),
             ("Address", _format_http_origin(serve_host, serve_port)),
             ("Grader", grader_name),
-            ("API Key", api_key_display),
             ("Trace", trace_display),
-            ("Registration", reg_display),
         ],
         title="Rollout Server",
     )
@@ -569,13 +360,10 @@ def serve(
         "--log-level",
         help="Uvicorn log level (overrides config).",
     ),
-    skip_register: bool = typer.Option(
-        False, "--skip-register", help="Skip registering with Platform."
-    ),
     local: bool = typer.Option(
         False,
         "--local",
-        help="Local mode: no API key auth, no platform registration.",
+        help="Local mode: skip platform middleware (label validation, /platform/health).",
     ),
 ) -> None:
     """Start a v2 RolloutServer from a TOML config file."""
@@ -588,7 +376,6 @@ def serve(
         no_validate=no_validate,
         validate_only=validate_only,
         log_level=log_level,
-        skip_register=skip_register,
         local=local,
         console=Console(),
     )
@@ -676,5 +463,5 @@ model = "{llm_model}"
 
 @app.command("list")
 def list_rollouts() -> None:
-    """List registered rollouts."""
+    """List rollouts."""
     not_implemented("rollout", "list")

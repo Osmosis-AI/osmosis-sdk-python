@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import asyncio
 import json
 import re
 from pathlib import Path
@@ -11,9 +10,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from osmosis_ai.cli.commands.rollout import (
-    _extract_bearer_token,
     _format_http_origin,
-    _probe_rollout_health_ready,
     _trace_log_basename,
     _tracing_backend_proxy_cls,
 )
@@ -61,25 +58,6 @@ def test_validate_only_and_no_validate_mutually_exclusive(tmp_path, capsys):
     combined = captured.out + captured.err
     assert rc != 0
     assert "mutually exclusive" in combined.lower()
-
-
-def test_local_conflicts_with_registration_api_key_in_toml(tmp_path, capsys):
-    """--local is incompatible with [registration].api_key in TOML."""
-    cfg = tmp_path / "serve.toml"
-    cfg.write_text(
-        "[serve]\n"
-        'rollout = "dummy"\n'
-        'entrypoint = "dummy_entry.py"\n'
-        "\n"
-        "[registration]\n"
-        'api_key = "rk_test"\n',
-        encoding="utf-8",
-    )
-    rc = main(["rollout", "serve", str(cfg), "--local"])
-    captured = capsys.readouterr()
-    combined = captured.out + captured.err
-    assert rc != 0
-    assert "local" in combined.lower()
 
 
 def test_missing_config_file_exits_nonzero(tmp_path, capsys):
@@ -161,7 +139,7 @@ def test_serve_fails_without_grader_even_with_no_validate(
     monkeypatch.setattr("uvicorn.run", MagicMock())
 
     rc = main(
-        ["rollout", "serve", str(cfg), "--skip-register", "--no-validate"],
+        ["rollout", "serve", str(cfg), "--no-validate"],
     )
     assert rc != 0
     captured = capsys.readouterr()
@@ -200,7 +178,7 @@ def test_serve_fails_without_grader_with_debug_no_validate_in_config(
     )
     monkeypatch.setattr("uvicorn.run", MagicMock())
 
-    rc = main(["rollout", "serve", str(cfg), "--skip-register"])
+    rc = main(["rollout", "serve", str(cfg)])
     assert rc != 0
     captured = capsys.readouterr()
     combined = captured.out + captured.err
@@ -209,7 +187,7 @@ def test_serve_fails_without_grader_with_debug_no_validate_in_config(
 
 def test_validate_only_success_prints_and_exits(patch_serve_pipeline, capsys):
     cfg_path = patch_serve_pipeline
-    rc = main(["rollout", "serve", str(cfg_path), "--validate-only", "--skip-register"])
+    rc = main(["rollout", "serve", str(cfg_path), "--validate-only"])
     out = capsys.readouterr().out
     assert rc == 0
     assert "Validation passed" in out
@@ -248,86 +226,6 @@ def test_format_http_origin_brackets_ipv6(host: str, port: int, expected: str):
     assert _format_http_origin(host, port) == expected
 
 
-def test_extract_bearer_token_accepts_only_bearer_scheme():
-    assert _extract_bearer_token("") is None
-    assert _extract_bearer_token("Bearer abc.token") == "abc.token"
-    assert _extract_bearer_token("bearer low") == "low"
-    assert _extract_bearer_token("plain-token-without-scheme") is None
-    assert _extract_bearer_token("Basic dXNlcjpwYXNz") is None
-
-
-async def test_probe_rollout_health_ready_exhausted_when_never_200(monkeypatch):
-    import httpx
-
-    class FakeClient:
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *a):
-            return None
-
-        async def get(self, *a, **k):
-            class R:
-                status_code = 500
-
-            return R()
-
-    monkeypatch.setattr(httpx, "AsyncClient", lambda *a, **k: FakeClient())
-    out = await _probe_rollout_health_ready(
-        probe_url="http://127.0.0.1:1/health",
-        max_attempts=2,
-        sleep_sec=0,
-    )
-    assert out == "exhausted"
-
-
-async def test_probe_rollout_health_ready_shutdown_when_event_preset():
-    ev = asyncio.Event()
-    ev.set()
-    out = await _probe_rollout_health_ready(
-        probe_url="http://127.0.0.1:1/health",
-        max_attempts=5,
-        sleep_sec=0.1,
-        shutdown_event=ev,
-    )
-    assert out == "shutdown"
-
-
-async def test_probe_shutdown_interrupts_sleep_before_exhaustion(monkeypatch):
-    """Shutdown during sleep must stop probing without exhausting attempts."""
-    import httpx
-
-    class FakeClient:
-        async def __aenter__(self):
-            return self
-
-        async def __aexit__(self, *a):
-            return None
-
-        async def get(self, *a, **k):
-            class R:
-                status_code = 500
-
-            return R()
-
-    monkeypatch.setattr(httpx, "AsyncClient", lambda *a, **k: FakeClient())
-    ev = asyncio.Event()
-
-    async def fire():
-        await asyncio.sleep(0.05)
-        ev.set()
-
-    fire_task = asyncio.create_task(fire())
-    out = await _probe_rollout_health_ready(
-        probe_url="http://127.0.0.1:1/health",
-        max_attempts=100,
-        sleep_sec=10.0,
-        shutdown_event=ev,
-    )
-    await fire_task
-    assert out == "shutdown"
-
-
 @pytest.fixture
 def serve_app_capture(monkeypatch, tmp_path):
     """Build full serve path; capture FastAPI app passed to uvicorn.run."""
@@ -358,10 +256,6 @@ def serve_app_capture(monkeypatch, tmp_path):
         "osmosis_ai.rollout_v2.validator.validate_backend",
         lambda *_a, **_kw: ValidationResult(valid=True, errors=[], warnings=[]),
     )
-    monkeypatch.setattr(
-        "osmosis_ai.rollout_v2.server.api_key.generate_api_key",
-        lambda: "osm_rollout_generated_full_key_12345",
-    )
     captured: dict = {}
 
     def _capture_uvicorn(app, **_kwargs):
@@ -375,7 +269,7 @@ def test_non_local_health_is_public(serve_app_capture):
     from fastapi.testclient import TestClient
 
     cfg, captured = serve_app_capture
-    rc = main(["rollout", "serve", str(cfg), "--skip-register"])
+    rc = main(["rollout", "serve", str(cfg)])
     assert rc == 0
     app = captured["app"]
     client = TestClient(app)
@@ -384,31 +278,14 @@ def test_non_local_health_is_public(serve_app_capture):
     assert r.json().get("status") == "ok"
 
 
-def test_platform_health_requires_bearer_auth(serve_app_capture):
+def test_platform_health_accessible(serve_app_capture):
     from fastapi.testclient import TestClient
 
     cfg, captured = serve_app_capture
-    rc = main(["rollout", "serve", str(cfg), "--skip-register"])
+    rc = main(["rollout", "serve", str(cfg)])
     assert rc == 0
     client = TestClient(captured["app"])
     r = client.get("/platform/health")
-    assert r.status_code == 401
-    body = r.json()
-    assert "detail" in body
-    assert isinstance(body["detail"], str)
-
-
-def test_platform_health_with_valid_bearer(serve_app_capture):
-    from fastapi.testclient import TestClient
-
-    cfg, captured = serve_app_capture
-    rc = main(["rollout", "serve", str(cfg), "--skip-register"])
-    assert rc == 0
-    client = TestClient(captured["app"])
-    r = client.get(
-        "/platform/health",
-        headers={"Authorization": "Bearer osm_rollout_generated_full_key_12345"},
-    )
     assert r.status_code == 200
     data = r.json()
     assert data.get("agent_loop") == "wf_test"
@@ -419,7 +296,7 @@ def test_post_rollout_missing_label_returns_400_json(serve_app_capture):
     from fastapi.testclient import TestClient
 
     cfg, captured = serve_app_capture
-    rc = main(["rollout", "serve", str(cfg), "--skip-register"])
+    rc = main(["rollout", "serve", str(cfg)])
     assert rc == 0
     client = TestClient(captured["app"])
     payload = {
@@ -432,7 +309,6 @@ def test_post_rollout_missing_label_returns_400_json(serve_app_capture):
     r = client.post(
         "/rollout",
         json=payload,
-        headers={"Authorization": "Bearer osm_rollout_generated_full_key_12345"},
     )
     assert r.status_code == 400
     body = r.json()
@@ -542,117 +418,11 @@ def test_serve_with_trace_dir_creates_session_subdir(monkeypatch, tmp_path, caps
         "osmosis_ai.rollout_v2.validator.validate_backend",
         lambda *_a, **_kw: ValidationResult(valid=True, errors=[], warnings=[]),
     )
-    monkeypatch.setattr(
-        "osmosis_ai.rollout_v2.server.api_key.generate_api_key",
-        lambda: "osm_rollout_trace_test",
-    )
     monkeypatch.setattr("uvicorn.run", MagicMock())
 
-    rc = main(["rollout", "serve", str(cfg), "--skip-register"])
+    rc = main(["rollout", "serve", str(cfg)])
     assert rc == 0
     out = capsys.readouterr().out
     assert "Trace" in out
     subdirs = [p for p in trace_root.iterdir() if p.is_dir()]
     assert len(subdirs) == 1
-
-
-def test_api_key_panel_generated_shows_full_key(monkeypatch, tmp_path, capsys):
-    cfg = _minimal_serve_toml(tmp_path)
-    from osmosis_ai.rollout_v2.agent_workflow import AgentWorkflow
-    from osmosis_ai.rollout_v2.types import AgentWorkflowConfig
-
-    class _WF(AgentWorkflow):
-        async def run(self, ctx):
-            pass
-
-    wf_cfg = AgentWorkflowConfig(name="wf_test")
-
-    monkeypatch.setattr(
-        "osmosis_ai.eval.common.cli.load_workflow",
-        lambda **_: (_WF, wf_cfg, None),
-    )
-    monkeypatch.setattr(
-        "osmosis_ai.eval.common.cli.auto_discover_grader",
-        lambda _ep: (DummyGrader, DUMMY_GRADER_CONFIG),
-    )
-    monkeypatch.setattr(
-        "osmosis_ai.rollout_v2.validator.validate_backend",
-        lambda *_a, **_kw: ValidationResult(valid=True, errors=[], warnings=[]),
-    )
-    monkeypatch.setattr(
-        "osmosis_ai.rollout_v2.server.api_key.generate_api_key",
-        lambda: "osm_rollout_FULLDISPLAY",
-    )
-    monkeypatch.setattr("uvicorn.run", MagicMock())
-
-    main(["rollout", "serve", str(cfg), "--skip-register"])
-    out = capsys.readouterr().out
-    assert "osm_rollout_FULLDISPLAY" in out
-
-
-def test_api_key_panel_provided_label(monkeypatch, tmp_path, capsys):
-    cfg = tmp_path / "serve.toml"
-    cfg.write_text(
-        "[serve]\n"
-        'rollout = "dummy"\n'
-        'entrypoint = "dummy_entry.py"\n'
-        "\n[registration]\n"
-        'api_key = "osm_rollout_from_config"\n',
-        encoding="utf-8",
-    )
-    from osmosis_ai.rollout_v2.agent_workflow import AgentWorkflow
-    from osmosis_ai.rollout_v2.types import AgentWorkflowConfig
-
-    class _WF(AgentWorkflow):
-        async def run(self, ctx):
-            pass
-
-    wf_cfg = AgentWorkflowConfig(name="wf_test")
-
-    monkeypatch.setattr(
-        "osmosis_ai.eval.common.cli.load_workflow",
-        lambda **_: (_WF, wf_cfg, None),
-    )
-    monkeypatch.setattr(
-        "osmosis_ai.eval.common.cli.auto_discover_grader",
-        lambda _ep: (DummyGrader, DUMMY_GRADER_CONFIG),
-    )
-    monkeypatch.setattr(
-        "osmosis_ai.rollout_v2.validator.validate_backend",
-        lambda *_a, **_kw: ValidationResult(valid=True, errors=[], warnings=[]),
-    )
-    monkeypatch.setattr("uvicorn.run", MagicMock())
-
-    main(["rollout", "serve", str(cfg), "--skip-register"])
-    out = capsys.readouterr().out
-    assert "(provided)" in out
-
-
-def test_api_key_panel_local_mode_label(monkeypatch, tmp_path, capsys):
-    cfg = _minimal_serve_toml(tmp_path)
-    from osmosis_ai.rollout_v2.agent_workflow import AgentWorkflow
-    from osmosis_ai.rollout_v2.types import AgentWorkflowConfig
-
-    class _WF(AgentWorkflow):
-        async def run(self, ctx):
-            pass
-
-    wf_cfg = AgentWorkflowConfig(name="wf_test")
-
-    monkeypatch.setattr(
-        "osmosis_ai.eval.common.cli.load_workflow",
-        lambda **_: (_WF, wf_cfg, None),
-    )
-    monkeypatch.setattr(
-        "osmosis_ai.eval.common.cli.auto_discover_grader",
-        lambda _ep: (DummyGrader, DUMMY_GRADER_CONFIG),
-    )
-    monkeypatch.setattr(
-        "osmosis_ai.rollout_v2.validator.validate_backend",
-        lambda *_a, **_kw: ValidationResult(valid=True, errors=[], warnings=[]),
-    )
-    monkeypatch.setattr("uvicorn.run", MagicMock())
-
-    main(["rollout", "serve", str(cfg), "--skip-register", "--local"])
-    out = capsys.readouterr().out
-    assert "(disabled - local mode)" in out
