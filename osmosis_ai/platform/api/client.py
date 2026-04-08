@@ -17,10 +17,7 @@ from .models import (
     PaginatedBaseModels,
     PaginatedDatasets,
     PaginatedOutputModels,
-    PaginatedProjects,
     PaginatedTrainingRuns,
-    Project,
-    ProjectDetail,
     TrainingRunAffectedResources,
     TrainingRunDetail,
     TrainingRunMetrics,
@@ -122,52 +119,6 @@ class OsmosisClient:
             require_workspace=False,
         )
         return WorkspaceDeletionStatus.from_dict(data)
-
-    # ── Projects ─────────────────────────────────────────────────────
-
-    def list_projects(
-        self,
-        limit: int = DEFAULT_PAGE_SIZE,
-        offset: int = 0,
-        *,
-        credentials: Credentials | None = None,
-        workspace_id: str | None = None,
-    ) -> PaginatedProjects:
-        qs = urlencode({"limit": limit, "offset": offset})
-        data = platform_request(
-            f"/api/cli/projects?{qs}",
-            credentials=credentials,
-            workspace_id=workspace_id,
-        )
-        return PaginatedProjects.from_dict(data)
-
-    def create_project(
-        self,
-        name: str,
-        *,
-        credentials: Credentials | None = None,
-        workspace_id: str | None = None,
-    ) -> Project:
-        data = platform_request(
-            "/api/cli/projects",
-            method="POST",
-            data={"name": name},
-            credentials=credentials,
-            workspace_id=workspace_id,
-        )
-        return Project.from_dict(data)
-
-    def get_project(
-        self,
-        project_id: str,
-        *,
-        credentials: Credentials | None = None,
-    ) -> ProjectDetail:
-        data = platform_request(
-            f"/api/cli/projects/{_safe_path(project_id)}",
-            credentials=credentials,
-        )
-        return ProjectDetail.from_dict(data)
 
     # ── Datasets ─────────────────────────────────────────────────────
 
@@ -296,13 +247,12 @@ class OsmosisClient:
 
     def list_training_runs(
         self,
-        project_id: str,
         limit: int = DEFAULT_PAGE_SIZE,
         offset: int = 0,
         *,
         credentials: Credentials | None = None,
     ) -> PaginatedTrainingRuns:
-        qs = urlencode({"project_id": project_id, "limit": limit, "offset": offset})
+        qs = urlencode({"limit": limit, "offset": offset})
         data = platform_request(f"/api/cli/training-runs?{qs}", credentials=credentials)
         return PaginatedTrainingRuns.from_dict(data)
 
@@ -375,39 +325,35 @@ class OsmosisClient:
 
     def list_base_models(
         self,
-        project_id: str,
         limit: int = DEFAULT_PAGE_SIZE,
         offset: int = 0,
         *,
         credentials: Credentials | None = None,
     ) -> PaginatedBaseModels:
-        qs = urlencode({"project_id": project_id, "limit": limit, "offset": offset})
+        qs = urlencode({"limit": limit, "offset": offset})
         data = platform_request(f"/api/cli/models/base?{qs}", credentials=credentials)
         return PaginatedBaseModels.from_dict(data)
 
     def list_output_models(
         self,
-        project_id: str,
         limit: int = DEFAULT_PAGE_SIZE,
         offset: int = 0,
         *,
         credentials: Credentials | None = None,
     ) -> PaginatedOutputModels:
-        qs = urlencode({"project_id": project_id, "limit": limit, "offset": offset})
+        qs = urlencode({"limit": limit, "offset": offset})
         data = platform_request(f"/api/cli/models/output?{qs}", credentials=credentials)
         return PaginatedOutputModels.from_dict(data)
 
     def delete_model(
         self,
         model_id: str,
-        project_id: str,
         *,
         credentials: Credentials | None = None,
     ) -> bool:
         """Delete a model with full cascade cleanup."""
-        qs = urlencode({"project_id": project_id})
         platform_request(
-            f"/api/cli/models/{_safe_path(model_id)}?{qs}",
+            f"/api/cli/models/{_safe_path(model_id)}",
             method="DELETE",
             credentials=credentials,
         )
@@ -416,7 +362,6 @@ class OsmosisClient:
     def get_model_affected_resources(
         self,
         model_id: str,
-        project_id: str,
         model_type: Literal["base", "output"] = "base",
         *,
         credentials: Credentials | None = None,
@@ -425,10 +370,9 @@ class OsmosisClient:
 
         Args:
             model_id: The model ID.
-            project_id: The project ID.
             model_type: "base" or "output".
         """
-        qs = urlencode({"project_id": project_id, "type": model_type})
+        qs = urlencode({"type": model_type})
         data = platform_request(
             f"/api/cli/models/{_safe_path(model_id)}/affected-resources?{qs}",
             credentials=credentials,
@@ -437,7 +381,6 @@ class OsmosisClient:
 
     def fetch_all_models(
         self,
-        project_id: str,
         limit: int = DEFAULT_PAGE_SIZE,
         offset: int = 0,
         *,
@@ -447,14 +390,12 @@ class OsmosisClient:
         with ThreadPoolExecutor(max_workers=2) as pool:
             base_fut = pool.submit(
                 self.list_base_models,
-                project_id,
                 limit,
                 offset,
                 credentials=credentials,
             )
             output_fut = pool.submit(
                 self.list_output_models,
-                project_id,
                 limit,
                 offset,
                 credentials=credentials,

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Literal
 
 # ── Dataset status constants ─────────────────────────────────────
@@ -15,100 +15,6 @@ STATUSES_INACTIVE: frozenset[str] = frozenset({"cancelled", "deleted"})
 STATUSES_TERMINAL: frozenset[str] = (
     STATUSES_SUCCESS | STATUSES_ERROR | STATUSES_INACTIVE
 )
-
-
-@dataclass
-class Project:
-    """A project in a workspace."""
-
-    id: str
-    project_name: str
-    role: str
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> Project:
-        return cls(
-            id=data["id"],
-            project_name=data["project_name"],
-            role=data.get("role", "member"),
-        )
-
-    def to_dict(self) -> dict[str, Any]:
-        return {"id": self.id, "project_name": self.project_name, "role": self.role}
-
-
-@dataclass
-class PaginatedProjects:
-    """Paginated list of projects."""
-
-    projects: list[Project]
-    total_count: int
-    has_more: bool
-    next_offset: int | None = None
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> PaginatedProjects:
-        return cls(
-            projects=[Project.from_dict(p) for p in data.get("projects", [])],
-            total_count=data.get("total_count", 0),
-            has_more=data.get("has_more", False),
-            next_offset=data.get("next_offset"),
-        )
-
-
-@dataclass
-class DatasetSummary:
-    """Summary of a dataset file (used in project detail)."""
-
-    id: str
-    file_name: str
-    file_size: int
-    status: str
-    created_at: str
-
-
-@dataclass
-class ProjectDetail:
-    """Detailed project info including recent datasets and summary counts."""
-
-    id: str
-    project_name: str
-    role: str
-    created_at: str
-    updated_at: str
-    dataset_count: int = 0
-    recent_datasets: list[DatasetSummary] = field(default_factory=list)
-    training_run_count: int = 0
-    base_model_count: int = 0
-    output_model_count: int = 0
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> ProjectDetail:
-        datasets_data = data.get("datasets", {})
-        recent = [
-            DatasetSummary(
-                id=d["id"],
-                file_name=d["file_name"],
-                file_size=d["file_size"],
-                status=d["status"],
-                created_at=d["created_at"],
-            )
-            for d in datasets_data.get("recent", [])
-        ]
-        runs_data = data.get("training_runs", {})
-        models_data = data.get("models", {})
-        return cls(
-            id=data["id"],
-            project_name=data["project_name"],
-            role=data.get("role", "member"),
-            created_at=data.get("created_at", ""),
-            updated_at=data.get("updated_at", ""),
-            dataset_count=datasets_data.get("total_count", 0),
-            recent_datasets=recent,
-            training_run_count=runs_data.get("total_count", 0),
-            base_model_count=models_data.get("base_count", 0),
-            output_model_count=models_data.get("output_count", 0),
-        )
 
 
 @dataclass
@@ -227,7 +133,7 @@ RUN_STATUSES_TERMINAL: frozenset[str] = (
 
 @dataclass
 class TrainingRun:
-    """A training run in a project."""
+    """A training run in a workspace."""
 
     id: str
     name: str | None
@@ -277,7 +183,6 @@ class TrainingRunDetail(TrainingRun):
     """Detailed training run info with additional fields."""
 
     output_model_id: str | None = None
-    project_id: str | None = None
     examples_processed_count: int | None = None
     notes: str | None = None
     hf_status: str | None = None
@@ -304,7 +209,6 @@ class TrainingRunDetail(TrainingRun):
             creator_name=run.get("creator_name"),
             creator_email=run.get("creator_email"),
             output_model_id=run.get("output_model_id"),
-            project_id=run.get("project_id"),
             examples_processed_count=run.get("examples_processed_count"),
             notes=run.get("notes"),
             hf_status=run.get("hf_status"),
@@ -333,47 +237,23 @@ class PaginatedTrainingRuns:
 
 
 @dataclass
-class PreservedModel:
-    """A model that was preserved after its training run was deleted."""
-
-    id: str
-    name: str
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> PreservedModel:
-        return cls(id=data["id"], name=data["name"])
-
-
-@dataclass
 class DeleteTrainingRunResult:
     """Result of deleting a training run."""
 
     deleted: bool
-    preserved_output_model: PreservedModel | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> DeleteTrainingRunResult:
-        preserved = data.get("preserved_output_model")
-        return cls(
-            deleted=data["deleted"],
-            preserved_output_model=PreservedModel.from_dict(preserved)
-            if preserved
-            else None,
-        )
+        return cls(deleted=data["deleted"])
 
 
 @dataclass
 class TrainingRunAffectedResources:
     """Affected resources for a training run deletion."""
 
-    output_model: PreservedModel | None = None
-
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> TrainingRunAffectedResources:
-        om = data.get("output_model")
-        return cls(
-            output_model=PreservedModel.from_dict(om) if om else None,
-        )
+        return cls()
 
 
 @dataclass
@@ -381,15 +261,13 @@ class AffectedTrainingRun:
     """A training run affected by a resource deletion."""
 
     id: str
-    name: str | None
-    project_name: str | None = None
+    training_run_name: str | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> AffectedTrainingRun:
         return cls(
             id=data["id"],
-            name=data.get("name"),
-            project_name=data.get("project_name"),
+            training_run_name=data.get("training_run_name"),
         )
 
 
@@ -523,40 +401,15 @@ class TrainingRunMetrics:
 
 
 @dataclass
-class ProjectProcessCount:
-    """Running process counts for a project."""
+class ProcessCount:
+    """Running process counts for a workspace-scoped resource category."""
 
     count: int
     valid: bool
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> ProjectProcessCount:
+    def from_dict(cls, data: dict[str, Any]) -> ProcessCount:
         return cls(count=data.get("count", 0), valid=data.get("valid", True))
-
-
-@dataclass
-class ProjectDeletionStatus:
-    """Deletion readiness status for a single project."""
-
-    project_id: str
-    project_name: str
-    has_running_processes: bool
-    feature_pipelines: ProjectProcessCount
-    training_runs: ProjectProcessCount
-    models: ProjectProcessCount
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> ProjectDeletionStatus:
-        return cls(
-            project_id=data["project_id"],
-            project_name=data["project_name"],
-            has_running_processes=data.get("has_running_processes", False),
-            feature_pipelines=ProjectProcessCount.from_dict(
-                data.get("feature_pipelines", {})
-            ),
-            training_runs=ProjectProcessCount.from_dict(data.get("training_runs", {})),
-            models=ProjectProcessCount.from_dict(data.get("models", {})),
-        )
 
 
 @dataclass
@@ -566,7 +419,10 @@ class WorkspaceDeletionStatus:
     can_delete: bool
     is_owner: bool
     is_last_workspace: bool
-    projects: list[ProjectDeletionStatus]
+    has_running_processes: bool
+    feature_pipelines: ProcessCount
+    training_runs: ProcessCount
+    models: ProcessCount
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> WorkspaceDeletionStatus:
@@ -574,15 +430,11 @@ class WorkspaceDeletionStatus:
             can_delete=data.get("can_delete", False),
             is_owner=data.get("is_owner", False),
             is_last_workspace=data.get("is_last_workspace", False),
-            projects=[
-                ProjectDeletionStatus.from_dict(p) for p in data.get("projects", [])
-            ],
+            has_running_processes=data.get("has_running_processes", False),
+            feature_pipelines=ProcessCount.from_dict(data.get("feature_pipelines", {})),
+            training_runs=ProcessCount.from_dict(data.get("training_runs", {})),
+            models=ProcessCount.from_dict(data.get("models", {})),
         )
-
-    @property
-    def projects_with_running_processes(self) -> list[ProjectDeletionStatus]:
-        """Projects that have running processes blocking deletion."""
-        return [p for p in self.projects if p.has_running_processes]
 
 
 @dataclass

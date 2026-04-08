@@ -14,9 +14,7 @@ from .flow import LoginError, LoginResult, device_login, verify_token
 from .local_config import (
     get_active_workspace,
     get_active_workspace_id,
-    load_workspace_projects,
     reset_session,
-    save_workspace_projects,
     set_active_workspace,
 )
 from .platform_client import (
@@ -44,11 +42,9 @@ __all__ = [
     "get_credential_store",
     "get_valid_credentials",
     "load_credentials",
-    "load_workspace_projects",
     "platform_request",
     "reset_session",
     "save_credentials",
-    "save_workspace_projects",
     "set_active_workspace",
     "verify_token",
 ]

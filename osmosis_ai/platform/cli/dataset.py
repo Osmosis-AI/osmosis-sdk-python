@@ -22,11 +22,9 @@ from .constants import (
     REQUIRED_COLUMNS,
     VALID_EXTENSIONS,
 )
-from .project import (
+from .utils import (
     _require_auth,
     _require_subscription,
-)
-from .utils import (
     build_dataset_detail_rows,
     format_dataset_status,
     format_dim_date,
@@ -272,7 +270,7 @@ def upload(
     )
 
     console.print(f"Upload complete. Dataset ID: {dataset.id}", style="green")
-    url = platform_entity_url(ws_name, None, "datasets", dataset.id)
+    url = platform_entity_url(ws_name, "datasets", dataset.id)
     console.print(f"Processing will continue on the platform. Check status at: {url}")
 
 
@@ -393,7 +391,11 @@ def delete(
     if affected.has_blocking_runs:
         lines = ["Cannot delete — active training runs depend on this dataset:"]
         for run in affected.affected_training_runs:
-            name = console.escape(run.name) if run.name else "(unnamed)"
+            name = (
+                console.escape(run.training_run_name)
+                if run.training_run_name
+                else "(unnamed)"
+            )
             lines.append(f"  {run.id[:8]}  {name}")
         lines.append("\nStop these training runs first, then retry.")
         raise CLIError("\n".join(lines))

@@ -42,22 +42,16 @@ def _print_model_section(
     console.print()
 
 
-def _fetch_all_project_models(
-    client: Any, project_id: str, credentials: Any
-) -> tuple[list[Any], list[Any]]:
-    """Fetch all base and output models for a project via exhaustive pagination."""
+def _fetch_all_models(client: Any, credentials: Any) -> tuple[list[Any], list[Any]]:
+    """Fetch all base and output models via exhaustive pagination."""
     from osmosis_ai.platform.cli.utils import fetch_all_pages
 
     base_models, _ = fetch_all_pages(
-        lambda lim, off: client.list_base_models(
-            project_id, limit=lim, offset=off, credentials=credentials
-        ),
+        lambda lim, off: client.list_base_models(lim, off, credentials=credentials),
         items_attr="models",
     )
     output_models, _ = fetch_all_pages(
-        lambda lim, off: client.list_output_models(
-            project_id, limit=lim, offset=off, credentials=credentials
-        ),
+        lambda lim, off: client.list_output_models(lim, off, credentials=credentials),
         items_attr="models",
     )
     return base_models, output_models
@@ -65,9 +59,6 @@ def _fetch_all_project_models(
 
 @app.command("list")
 def list_models(
-    project: str | None = typer.Option(
-        None, "--project", help="Project name (default: current project)."
-    ),
     limit: int = typer.Option(
         DEFAULT_PAGE_SIZE,
         "--limit",
@@ -75,31 +66,28 @@ def list_models(
     ),
     all_: bool = typer.Option(False, "--all", help="Show all models."),
 ) -> None:
-    """List models in a project."""
-    from osmosis_ai.platform.cli.project import _require_auth, _resolve_project_id
+    """List models in the current workspace."""
     from osmosis_ai.platform.cli.utils import (
+        _require_auth,
         print_pagination_footer,
         validate_list_options,
     )
 
     effective_limit, fetch_all = validate_list_options(limit=limit, all_=all_)
 
-    ws_name, credentials = _require_auth()
+    _ws_name, credentials = _require_auth()
 
     from osmosis_ai.platform.api.client import OsmosisClient
 
     with console.spinner("Fetching models..."):
-        project_id = _resolve_project_id(project, workspace_name=ws_name)
         client = OsmosisClient()
         if fetch_all:
-            base_models, output_models = _fetch_all_project_models(
-                client, project_id, credentials
-            )
+            base_models, output_models = _fetch_all_models(client, credentials)
             base_total = len(base_models)
             output_total = len(output_models)
         else:
             base_result, output_result = client.fetch_all_models(
-                project_id, limit=effective_limit, credentials=credentials
+                limit=effective_limit, credentials=credentials
             )
             base_models = base_result.models
             base_total = base_result.total_count
@@ -158,33 +146,25 @@ def build() -> None:
 @app.command("delete")
 def delete(
     id: str = typer.Argument(..., help="Model ID to delete."),
-    project: str | None = typer.Option(
-        None, "--project", help="Project name (default: current project)."
-    ),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
 ) -> None:
     """Delete a model."""
     from osmosis_ai.cli.errors import CLIError
-    from osmosis_ai.platform.cli.project import _require_auth, _resolve_project_id
+    from osmosis_ai.platform.cli.utils import _require_auth, resolve_id_prefix
 
-    ws_name, credentials = _require_auth()
+    _ws_name, credentials = _require_auth()
 
     from osmosis_ai.platform.api.client import OsmosisClient
 
-    project_id = _resolve_project_id(project, workspace_name=ws_name)
     client = OsmosisClient()
 
-    from osmosis_ai.platform.cli.utils import resolve_id_prefix
-
-    base_models, output_models = _fetch_all_project_models(
-        client, project_id, credentials
-    )
+    base_models, output_models = _fetch_all_models(client, credentials)
     model_id = resolve_id_prefix(id, base_models + output_models, entity_name="model")
     model_type = "base" if any(m.id == model_id for m in base_models) else "output"
 
     try:
         affected = client.get_model_affected_resources(
-            model_id, project_id, model_type, credentials=credentials
+            model_id, model_type, credentials=credentials
         )
     except Exception as e:
         raise CLIError(f"Unable to verify model dependencies: {e}") from e
@@ -195,20 +175,28 @@ def delete(
             style="red",
         )
         for run in affected.training_runs_using_model:
-            name = console.escape(run.name) if run.name else "(unnamed)"
-            console.print(f"  {run.id[:8]}  {name}  [{run.project_name}]")
+            label = (
+                console.escape(run.training_run_name)
+                if run.training_run_name
+                else "(unnamed)"
+            )
+            console.print(f"  {run.id[:8]}  {label}")
         console.print("\nDelete these training runs first, then retry.", style="dim")
         raise typer.Exit(1)
 
     msg = f"Delete model {model_id[:8]}...? This cannot be undone."
     if affected.creator_training_run:
         r = affected.creator_training_run
-        name = r.name or "(unnamed)"
-        msg += f"\n  Note: this model was created by training run '{name}' ({r.id[:8]})"
+        tr_name = (
+            console.escape(r.training_run_name) if r.training_run_name else "(unnamed)"
+        )
+        msg += (
+            f"\n  Note: this model was created by training run '{tr_name}' ({r.id[:8]})"
+        )
 
     from osmosis_ai.cli.prompts import require_confirmation
 
     require_confirmation(msg, yes=yes)
 
-    client.delete_model(model_id, project_id, credentials=credentials)
+    client.delete_model(model_id, credentials=credentials)
     console.print(f"Model {model_id[:8]} deleted.", style="green")

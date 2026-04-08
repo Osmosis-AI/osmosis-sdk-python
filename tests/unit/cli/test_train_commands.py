@@ -13,7 +13,6 @@ from osmosis_ai.cli.console import Console
 from osmosis_ai.platform.api.models import (
     DeleteTrainingRunResult,
     PaginatedTrainingRuns,
-    PreservedModel,
     TrainingRun,
     TrainingRunDetail,
 )
@@ -32,12 +31,8 @@ def console_capture(monkeypatch: pytest.MonkeyPatch) -> StringIO:
 @pytest.fixture(autouse=True)
 def _mock_auth(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "osmosis_ai.platform.cli.project._require_auth",
+        "osmosis_ai.platform.cli.utils._require_auth",
         lambda: ("ws-test", object()),
-    )
-    monkeypatch.setattr(
-        "osmosis_ai.platform.cli.project._resolve_project_id",
-        lambda _p, *, workspace_name: "proj_1",
     )
 
 
@@ -51,13 +46,13 @@ class TestListRuns:
         self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
     ) -> None:
         class FakeClient:
-            def list_training_runs(self, pid, limit=30, offset=0, *, credentials=None):
+            def list_training_runs(self, limit=30, offset=0, *, credentials=None):
                 return PaginatedTrainingRuns(
                     training_runs=[], total_count=0, has_more=False
                 )
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-        train_module.list_runs(project=None, limit=30, all_=False)
+        train_module.list_runs(limit=30, all_=False)
         assert "No training runs found" in console_capture.getvalue()
 
     def test_list_with_runs(
@@ -73,13 +68,13 @@ class TestListRuns:
         )
 
         class FakeClient:
-            def list_training_runs(self, pid, limit=30, offset=0, *, credentials=None):
+            def list_training_runs(self, limit=30, offset=0, *, credentials=None):
                 return PaginatedTrainingRuns(
                     training_runs=[run], total_count=1, has_more=False
                 )
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-        train_module.list_runs(project=None, limit=30, all_=False)
+        train_module.list_runs(limit=30, all_=False)
         out = console_capture.getvalue()
         assert "my-run" in out
         assert "abcdef12" in out
@@ -96,13 +91,13 @@ class TestListRuns:
         )
 
         class FakeClient:
-            def list_training_runs(self, pid, limit=30, offset=0, *, credentials=None):
+            def list_training_runs(self, limit=30, offset=0, *, credentials=None):
                 return PaginatedTrainingRuns(
                     training_runs=[run], total_count=1, has_more=False
                 )
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-        train_module.list_runs(project=None, limit=30, all_=False)
+        train_module.list_runs(limit=30, all_=False)
         assert "(unnamed)" in console_capture.getvalue()
 
     def test_list_has_more(
@@ -115,13 +110,13 @@ class TestListRuns:
         )
 
         class FakeClient:
-            def list_training_runs(self, pid, limit=30, offset=0, *, credentials=None):
+            def list_training_runs(self, limit=30, offset=0, *, credentials=None):
                 return PaginatedTrainingRuns(
                     training_runs=[run], total_count=5, has_more=True
                 )
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-        train_module.list_runs(project=None, limit=30, all_=False)
+        train_module.list_runs(limit=30, all_=False)
         out = console_capture.getvalue()
         assert "Showing 1 of 5 training runs" in out
         assert "--all" in out
@@ -144,7 +139,7 @@ class TestStatus:
         )
 
         class FakeClient:
-            def list_training_runs(self, pid, *, limit=50, credentials=None):
+            def list_training_runs(self, limit=50, offset=0, *, credentials=None):
                 return PaginatedTrainingRuns(
                     training_runs=[], total_count=0, has_more=False
                 )
@@ -153,7 +148,7 @@ class TestStatus:
                 return detail
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-        train_module.status(id="abcdef1234567890abcdef1234567890", project=None)
+        train_module.status(id="abcdef1234567890abcdef1234567890")
         out = console_capture.getvalue()
         assert "run-1" in out
         assert "completed" in out
@@ -180,7 +175,7 @@ class TestStatus:
         )
 
         class FakeClient:
-            def list_training_runs(self, pid, *, limit=50, credentials=None):
+            def list_training_runs(self, limit=50, offset=0, *, credentials=None):
                 return PaginatedTrainingRuns(
                     training_runs=[], total_count=0, has_more=False
                 )
@@ -189,7 +184,7 @@ class TestStatus:
                 return detail
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-        train_module.status(id="abcdef1234567890abcdef1234567890", project=None)
+        train_module.status(id="abcdef1234567890abcdef1234567890")
         out = console_capture.getvalue()
         assert "model_out_1" in out
         assert "100" in out
@@ -211,7 +206,7 @@ class TestDelete:
         self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
     ) -> None:
         class FakeClient:
-            def list_training_runs(self, pid, *, limit=50, credentials=None):
+            def list_training_runs(self, limit=50, offset=0, *, credentials=None):
                 return PaginatedTrainingRuns(
                     training_runs=[], total_count=0, has_more=False
                 )
@@ -220,32 +215,7 @@ class TestDelete:
                 return DeleteTrainingRunResult(deleted=True)
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-        train_module.delete(id=self.RUN_ID, project=None, yes=True)
+        train_module.delete(id=self.RUN_ID, yes=True)
         out = console_capture.getvalue()
         assert "deleted" in out
         assert "Output model preserved" not in out
-
-    def test_delete_with_preserved_output_model(
-        self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
-    ) -> None:
-        class FakeClient:
-            def list_training_runs(self, pid, *, limit=50, credentials=None):
-                return PaginatedTrainingRuns(
-                    training_runs=[], total_count=0, has_more=False
-                )
-
-            def delete_training_run(self, run_id, *, credentials=None):
-                return DeleteTrainingRunResult(
-                    deleted=True,
-                    preserved_output_model=PreservedModel(
-                        id="model123456789012345678901234",
-                        name="my-output-model",
-                    ),
-                )
-
-        monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-        train_module.delete(id=self.RUN_ID, project=None, yes=True)
-        out = console_capture.getvalue()
-        assert "deleted" in out
-        assert "Output model preserved" in out
-        assert "my-output-model" in out
