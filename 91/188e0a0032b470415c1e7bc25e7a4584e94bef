@@ -1,0 +1,23 @@
+tests/unit/cli/test_metrics_graph.py
+  498181d32c8e8e87 40-47
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.5",
+  "base_commit_sha": "91188e0a0032b470415c1e7bc25e7a4584e94bef",
+  "prompts": {
+    "498181d32c8e8e87": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "7a37253a-b893-48db-bf67-030ee0fc6b1f",
+        "model": "gpt-5.4-xhigh"
+      },
+      "human_author": "JoyboyBrian",
+      "messages": [],
+      "total_additions": 8,
+      "total_deletions": 1,
+      "accepted_lines": 8,
+      "overriden_lines": 0
+    }
+  }
+}
