@@ -67,21 +67,21 @@ class TestGetActiveWorkspaceMessages:
     """Test _get_active_workspace_name() error message."""
 
     @patch(
-        "osmosis_ai.platform.cli.project.get_active_workspace_name",
+        "osmosis_ai.platform.cli.utils.get_active_workspace_name",
         return_value=None,
     )
     def test_no_workspace_raises_correct_message(self, _mock: object) -> None:
-        from osmosis_ai.platform.cli.project import _get_active_workspace_name
+        from osmosis_ai.platform.cli.utils import _get_active_workspace_name
 
         with pytest.raises(CLIError, match="No workspace selected"):
             _get_active_workspace_name()
 
     @patch(
-        "osmosis_ai.platform.cli.project.get_active_workspace_name",
+        "osmosis_ai.platform.cli.utils.get_active_workspace_name",
         return_value=None,
     )
     def test_no_workspace_does_not_say_not_logged_in(self, _mock: object) -> None:
-        from osmosis_ai.platform.cli.project import _get_active_workspace_name
+        from osmosis_ai.platform.cli.utils import _get_active_workspace_name
 
         with pytest.raises(CLIError) as exc_info:
             _get_active_workspace_name()
@@ -95,28 +95,28 @@ class TestRequireAuthMessages:
 
     @patch("osmosis_ai.platform.cli.utils.load_credentials", return_value=None)
     @patch(
-        "osmosis_ai.platform.cli.project.get_active_workspace_name",
+        "osmosis_ai.platform.cli.utils.get_active_workspace_name",
         return_value=None,
     )
     def test_no_login_says_not_logged_in_not_no_workspace(
         self, _ws_mock: object, _cred_mock: object
     ) -> None:
         """When both credentials and workspace are missing, error should say 'Not logged in'."""
-        from osmosis_ai.platform.cli.project import _require_auth
+        from osmosis_ai.platform.cli.utils import _require_auth
 
         with pytest.raises(CLIError, match="Not logged in"):
             _require_auth()
 
     @patch("osmosis_ai.platform.cli.utils.load_credentials")
     @patch(
-        "osmosis_ai.platform.cli.project.get_active_workspace_name",
+        "osmosis_ai.platform.cli.utils.get_active_workspace_name",
         return_value=None,
     )
     def test_logged_in_but_no_workspace_says_no_workspace(
         self, _ws_mock: object, mock_load: object
     ) -> None:
         """When logged in but no workspace, error should say 'No workspace selected'."""
-        from osmosis_ai.platform.cli.project import _require_auth
+        from osmosis_ai.platform.cli.utils import _require_auth
 
         mock_load.return_value = _make_credentials()
 

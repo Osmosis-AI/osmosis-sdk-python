@@ -15,7 +15,7 @@ from osmosis_ai.platform.api.models import (
     MetricDataPoint,
     MetricHistory,
     ModelAffectedResources,
-    ProjectDetail,
+    ProcessCount,
     TrainingRunMetrics,
     TrainingRunMetricsOverview,
     UploadInfo,
@@ -89,94 +89,6 @@ class TestUploadInfo:
 
 
 # =============================================================================
-# ProjectDetail Tests
-# =============================================================================
-
-
-class TestProjectDetail:
-    """Tests for ProjectDetail.from_dict."""
-
-    def test_from_dict_with_datasets(self) -> None:
-        """Verify full data with 2 recent datasets is parsed correctly."""
-        data = {
-            "id": "proj-001",
-            "project_name": "My Project",
-            "role": "admin",
-            "created_at": "2025-01-01T00:00:00Z",
-            "updated_at": "2025-06-15T12:00:00Z",
-            "datasets": {
-                "total_count": 42,
-                "recent": [
-                    {
-                        "id": "ds-1",
-                        "file_name": "train.jsonl",
-                        "file_size": 1024,
-                        "status": "uploaded",
-                        "created_at": "2025-06-01T00:00:00Z",
-                    },
-                    {
-                        "id": "ds-2",
-                        "file_name": "eval.jsonl",
-                        "file_size": 512,
-                        "status": "processing",
-                        "created_at": "2025-06-10T00:00:00Z",
-                    },
-                ],
-            },
-        }
-        detail = ProjectDetail.from_dict(data)
-        assert detail.id == "proj-001"
-        assert detail.project_name == "My Project"
-        assert detail.role == "admin"
-        assert detail.created_at == "2025-01-01T00:00:00Z"
-        assert detail.updated_at == "2025-06-15T12:00:00Z"
-        assert detail.dataset_count == 42
-        assert len(detail.recent_datasets) == 2
-        assert detail.recent_datasets[0].id == "ds-1"
-        assert detail.recent_datasets[0].file_name == "train.jsonl"
-        assert detail.recent_datasets[1].id == "ds-2"
-        assert detail.recent_datasets[1].status == "processing"
-
-    def test_from_dict_empty_datasets(self) -> None:
-        """Verify datasets key with empty recent list and zero count."""
-        data = {
-            "id": "proj-002",
-            "project_name": "Empty Project",
-            "role": "member",
-            "created_at": "2025-01-01T00:00:00Z",
-            "updated_at": "2025-01-01T00:00:00Z",
-            "datasets": {"recent": [], "total_count": 0},
-        }
-        detail = ProjectDetail.from_dict(data)
-        assert detail.dataset_count == 0
-        assert detail.recent_datasets == []
-
-    def test_from_dict_missing_datasets_key(self) -> None:
-        """Verify missing 'datasets' key falls back to defaults."""
-        data = {
-            "id": "proj-003",
-            "project_name": "No Datasets Key",
-            "role": "viewer",
-            "created_at": "2025-03-01T00:00:00Z",
-            "updated_at": "2025-03-01T00:00:00Z",
-        }
-        detail = ProjectDetail.from_dict(data)
-        assert detail.dataset_count == 0
-        assert detail.recent_datasets == []
-
-    def test_from_dict_default_role(self) -> None:
-        """Verify missing 'role' key defaults to 'member'."""
-        data = {
-            "id": "proj-004",
-            "project_name": "Default Role Project",
-            "created_at": "2025-02-01T00:00:00Z",
-            "updated_at": "2025-02-01T00:00:00Z",
-        }
-        detail = ProjectDetail.from_dict(data)
-        assert detail.role == "member"
-
-
-# =============================================================================
 # DatasetFile.is_terminal Tests
 # =============================================================================
 
@@ -241,53 +153,36 @@ class TestAffectedTrainingRun:
     """Tests for AffectedTrainingRun.from_dict."""
 
     def test_from_dict(self) -> None:
-        data = {"id": "run-1", "name": "My Run", "project_name": "proj-a"}
+        data = {"id": "run-1", "training_run_name": "My Run"}
         run = AffectedTrainingRun.from_dict(data)
         assert run.id == "run-1"
-        assert run.name == "My Run"
-        assert run.project_name == "proj-a"
+        assert run.training_run_name == "My Run"
 
-    def test_from_dict_null_name(self) -> None:
-        data = {"id": "run-2", "project_name": "proj-b"}
+    def test_from_dict_null_training_run_name(self) -> None:
+        data = {"id": "run-2"}
         run = AffectedTrainingRun.from_dict(data)
-        assert run.name is None
+        assert run.training_run_name is None
 
 
 class TestModelAffectedResources:
     """Tests for ModelAffectedResources.from_dict."""
 
     def test_empty(self) -> None:
-        data = {"training_runs_using_model": [], "creator_training_run": None}
+        data = {"training_runs_using_model": []}
         res = ModelAffectedResources.from_dict(data)
         assert res.training_runs_using_model == []
-        assert res.creator_training_run is None
         assert res.has_blocking_runs is False
 
     def test_with_blocking_runs(self) -> None:
         data = {
             "training_runs_using_model": [
-                {"id": "r1", "name": "Run 1", "project_name": "proj"},
-                {"id": "r2", "name": None, "project_name": "proj"},
+                {"id": "r1", "training_run_name": "Run 1"},
+                {"id": "r2", "training_run_name": None},
             ],
-            "creator_training_run": None,
         }
         res = ModelAffectedResources.from_dict(data)
         assert len(res.training_runs_using_model) == 2
         assert res.has_blocking_runs is True
-
-    def test_with_creator_run(self) -> None:
-        data = {
-            "training_runs_using_model": [],
-            "creator_training_run": {
-                "id": "r3",
-                "name": "Creator",
-                "project_name": "proj",
-            },
-        }
-        res = ModelAffectedResources.from_dict(data)
-        assert res.creator_training_run is not None
-        assert res.creator_training_run.id == "r3"
-        assert res.has_blocking_runs is False
 
 
 class TestWorkspaceDeletionStatus:
@@ -298,54 +193,49 @@ class TestWorkspaceDeletionStatus:
             "can_delete": True,
             "is_owner": True,
             "is_last_workspace": False,
-            "projects": [],
+            "has_running_processes": False,
+            "feature_pipelines": {"count": 0, "valid": True},
+            "training_runs": {"count": 0, "valid": True},
+            "models": {"count": 0, "valid": True},
         }
         status = WorkspaceDeletionStatus.from_dict(data)
         assert status.can_delete is True
         assert status.is_owner is True
         assert status.is_last_workspace is False
-        assert status.projects == []
-        assert status.projects_with_running_processes == []
+        assert status.has_running_processes is False
+        assert status.feature_pipelines == ProcessCount(count=0, valid=True)
+        assert status.training_runs == ProcessCount(count=0, valid=True)
+        assert status.models == ProcessCount(count=0, valid=True)
 
     def test_with_running_processes(self) -> None:
         data = {
             "can_delete": False,
             "is_owner": True,
             "is_last_workspace": False,
-            "projects": [
-                {
-                    "project_id": "p1",
-                    "project_name": "Project A",
-                    "has_running_processes": True,
-                    "feature_pipelines": {"count": 2, "valid": False},
-                    "training_runs": {"count": 0, "valid": True},
-                    "models": {"count": 1, "valid": False},
-                },
-                {
-                    "project_id": "p2",
-                    "project_name": "Project B",
-                    "has_running_processes": False,
-                    "feature_pipelines": {"count": 0, "valid": True},
-                    "training_runs": {"count": 0, "valid": True},
-                    "models": {"count": 0, "valid": True},
-                },
-            ],
+            "has_running_processes": True,
+            "feature_pipelines": {"count": 2, "valid": False},
+            "training_runs": {"count": 0, "valid": True},
+            "models": {"count": 1, "valid": False},
         }
         status = WorkspaceDeletionStatus.from_dict(data)
         assert status.can_delete is False
-        assert len(status.projects) == 2
-        blocking = status.projects_with_running_processes
-        assert len(blocking) == 1
-        assert blocking[0].project_name == "Project A"
-        assert blocking[0].feature_pipelines.count == 2
-        assert blocking[0].feature_pipelines.valid is False
+        assert status.has_running_processes is True
+        assert status.feature_pipelines.count == 2
+        assert status.feature_pipelines.valid is False
+        assert status.training_runs.count == 0
+        assert status.training_runs.valid is True
+        assert status.models.count == 1
+        assert status.models.valid is False
 
     def test_not_owner(self) -> None:
         data = {
             "can_delete": False,
             "is_owner": False,
             "is_last_workspace": False,
-            "projects": [],
+            "has_running_processes": False,
+            "feature_pipelines": {"count": 0, "valid": True},
+            "training_runs": {"count": 0, "valid": True},
+            "models": {"count": 0, "valid": True},
         }
         status = WorkspaceDeletionStatus.from_dict(data)
         assert status.can_delete is False

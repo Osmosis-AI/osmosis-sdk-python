@@ -152,7 +152,7 @@ def login(
 
         save_credentials(creds)
 
-        # Clear stale workspace/project context when user identity changes
+        # Clear stale workspace and local state when user identity changes
         # or when explicitly forcing a fresh start, to prevent subsequent
         # commands from sending the old workspace ID in X-Osmosis-Org.
         local_data_cleared = force or (
@@ -216,7 +216,7 @@ def logout(
     if not credentials.is_expired():
         revoke_cli_token(credentials)
 
-    # Delete local credentials and workspace/project state
+    # Delete local credentials and workspace/local state
     reset_session()
 
     console.print("Logged out successfully.", style="green")

@@ -33,7 +33,7 @@ osmosis auth whoami
 
 ### osmosis workspace
 
-Interactive workspace and project context:
+Manage workspaces interactively. Launches a TUI that shows your current workspace context and lets you switch workspace, browse training runs, datasets, and models.
 
 ```bash
 osmosis workspace

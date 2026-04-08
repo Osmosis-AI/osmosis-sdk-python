@@ -16,28 +16,12 @@ DEFAULT_VISIBLE_CHOICES = 10
 
 CACHE_TTL_SECONDS = 300
 
-# ── Project name validation ───────────────────────────────────────
+# ── Name validation ───────────────────────────────────────────────
+# Generic rules for platform entity names (e.g. workspaces).
 # Must match the frontend validation rules.
 
-PROJECT_NAME_RE = re.compile(r"^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?\Z")
-PROJECT_NAME_MAX = 64
-RESERVED_PROJECT_NAMES = frozenset(
-    {
-        # Org-level route segments
-        "projects",
-        "data-sources",
-        "tools",
-        "reward-functions",
-        "llm-judges",
-        "rollout-servers",
-        "settings",
-        # System reserved
-        "api",
-        "admin",
-        "new",
-        "project",
-    }
-)
+NAME_RE = re.compile(r"^[a-z0-9]([a-z0-9-]{0,62}[a-z0-9])?\Z")
+NAME_MAX = 64
 
 
 def validate_name(name: str, *, label: str = "Name") -> str | None:
@@ -47,11 +31,11 @@ def validate_name(name: str, *, label: str = "Name") -> str | None:
     """
     if not name:
         return f"{label} is required."
-    if len(name) > PROJECT_NAME_MAX:
-        return f"{label} must be {PROJECT_NAME_MAX} characters or less."
+    if len(name) > NAME_MAX:
+        return f"{label} must be {NAME_MAX} characters or less."
     if name != name.lower():
         return f"{label} must be lowercase."
-    if not PROJECT_NAME_RE.match(name):
+    if not NAME_RE.match(name):
         return (
             f"{label} must contain only lowercase letters, digits, and hyphens, "
             "and cannot start or end with a hyphen."
