@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-from concurrent.futures import ThreadPoolExecutor
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any
 from urllib.parse import quote, urlencode
 
 from osmosis_ai.platform.auth.platform_client import platform_request
@@ -16,9 +15,7 @@ from .models import (
     ModelAffectedResources,
     PaginatedBaseModels,
     PaginatedDatasets,
-    PaginatedOutputModels,
     PaginatedTrainingRuns,
-    TrainingRunAffectedResources,
     TrainingRunDetail,
     TrainingRunMetrics,
     WorkspaceDeletionStatus,
@@ -308,19 +305,6 @@ class OsmosisClient:
         )
         return TrainingRunMetrics.from_dict(data)
 
-    def get_training_run_affected_resources(
-        self,
-        run_id: str,
-        *,
-        credentials: Credentials | None = None,
-    ) -> TrainingRunAffectedResources:
-        """Get affected resources for a training run deletion confirmation."""
-        data = platform_request(
-            f"/api/cli/training-runs/{_safe_path(run_id)}/affected-resources",
-            credentials=credentials,
-        )
-        return TrainingRunAffectedResources.from_dict(data)
-
     # ── Models ────────────────────────────────────────────────────
 
     def list_base_models(
@@ -333,17 +317,6 @@ class OsmosisClient:
         qs = urlencode({"limit": limit, "offset": offset})
         data = platform_request(f"/api/cli/models/base?{qs}", credentials=credentials)
         return PaginatedBaseModels.from_dict(data)
-
-    def list_output_models(
-        self,
-        limit: int = DEFAULT_PAGE_SIZE,
-        offset: int = 0,
-        *,
-        credentials: Credentials | None = None,
-    ) -> PaginatedOutputModels:
-        qs = urlencode({"limit": limit, "offset": offset})
-        data = platform_request(f"/api/cli/models/output?{qs}", credentials=credentials)
-        return PaginatedOutputModels.from_dict(data)
 
     def delete_model(
         self,
@@ -362,42 +335,12 @@ class OsmosisClient:
     def get_model_affected_resources(
         self,
         model_id: str,
-        model_type: Literal["base", "output"] = "base",
         *,
         credentials: Credentials | None = None,
     ) -> ModelAffectedResources:
-        """Get affected resources for a model deletion.
-
-        Args:
-            model_id: The model ID.
-            model_type: "base" or "output".
-        """
-        qs = urlencode({"type": model_type})
+        """Get affected resources for a model deletion."""
         data = platform_request(
-            f"/api/cli/models/{_safe_path(model_id)}/affected-resources?{qs}",
+            f"/api/cli/models/{_safe_path(model_id)}/affected-resources",
             credentials=credentials,
         )
         return ModelAffectedResources.from_dict(data)
-
-    def fetch_all_models(
-        self,
-        limit: int = DEFAULT_PAGE_SIZE,
-        offset: int = 0,
-        *,
-        credentials: Credentials | None = None,
-    ) -> tuple[PaginatedBaseModels, PaginatedOutputModels]:
-        """Fetch base and output models in parallel."""
-        with ThreadPoolExecutor(max_workers=2) as pool:
-            base_fut = pool.submit(
-                self.list_base_models,
-                limit,
-                offset,
-                credentials=credentials,
-            )
-            output_fut = pool.submit(
-                self.list_output_models,
-                limit,
-                offset,
-                credentials=credentials,
-            )
-            return base_fut.result(), output_fut.result()

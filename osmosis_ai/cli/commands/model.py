@@ -42,19 +42,15 @@ def _print_model_section(
     console.print()
 
 
-def _fetch_all_models(client: Any, credentials: Any) -> tuple[list[Any], list[Any]]:
-    """Fetch all base and output models via exhaustive pagination."""
+def _fetch_all_models(client: Any, credentials: Any) -> list[Any]:
+    """Fetch all models via exhaustive pagination."""
     from osmosis_ai.platform.cli.utils import fetch_all_pages
 
-    base_models, _ = fetch_all_pages(
+    models, _ = fetch_all_pages(
         lambda lim, off: client.list_base_models(lim, off, credentials=credentials),
         items_attr="models",
     )
-    output_models, _ = fetch_all_pages(
-        lambda lim, off: client.list_output_models(lim, off, credentials=credentials),
-        items_attr="models",
-    )
-    return base_models, output_models
+    return models
 
 
 @app.command("list")
@@ -82,37 +78,23 @@ def list_models(
     with console.spinner("Fetching models..."):
         client = OsmosisClient()
         if fetch_all:
-            base_models, output_models = _fetch_all_models(client, credentials)
-            base_total = len(base_models)
-            output_total = len(output_models)
+            models = _fetch_all_models(client, credentials)
+            total = len(models)
         else:
-            base_result, output_result = client.fetch_all_models(
+            result = client.list_base_models(
                 limit=effective_limit, credentials=credentials
             )
-            base_models = base_result.models
-            base_total = base_result.total_count
-            output_models = output_result.models
-            output_total = output_result.total_count
+            models = result.models
+            total = result.total_count
 
-    if not base_models and not output_models:
+    if not models:
         console.print("No models found.")
         return
 
     _print_model_section(
-        output_models,
-        output_total,
-        "Output Models",
-        lambda m: (
-            console.format_styled(f"from {m.training_run_name}", "dim")
-            if m.training_run_name
-            else ""
-        ),
-    )
-
-    _print_model_section(
-        base_models,
-        base_total,
-        "Base Models",
+        models,
+        total,
+        "Models",
         lambda m: (
             console.format_styled(f"by {m.creator_name}", "dim")
             if m.creator_name
@@ -121,8 +103,7 @@ def list_models(
     )
 
     if not fetch_all:
-        total_shown = len(output_models) + len(base_models)
-        print_pagination_footer(total_shown, output_total + base_total, "models")
+        print_pagination_footer(len(models), total, "models")
 
 
 @app.command("deploy")
@@ -158,13 +139,12 @@ def delete(
 
     client = OsmosisClient()
 
-    base_models, output_models = _fetch_all_models(client, credentials)
-    model_id = resolve_id_prefix(id, base_models + output_models, entity_name="model")
-    model_type = "base" if any(m.id == model_id for m in base_models) else "output"
+    models = _fetch_all_models(client, credentials)
+    model_id = resolve_id_prefix(id, models, entity_name="model")
 
     try:
         affected = client.get_model_affected_resources(
-            model_id, model_type, credentials=credentials
+            model_id, credentials=credentials
         )
     except Exception as e:
         raise CLIError(f"Unable to verify model dependencies: {e}") from e
@@ -185,14 +165,6 @@ def delete(
         raise typer.Exit(1)
 
     msg = f"Delete model {model_id[:8]}...? This cannot be undone."
-    if affected.creator_training_run:
-        r = affected.creator_training_run
-        tr_name = (
-            console.escape(r.training_run_name) if r.training_run_name else "(unnamed)"
-        )
-        msg += (
-            f"\n  Note: this model was created by training run '{tr_name}' ({r.id[:8]})"
-        )
 
     from osmosis_ai.cli.prompts import require_confirmation
 

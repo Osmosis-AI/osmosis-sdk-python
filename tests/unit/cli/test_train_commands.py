@@ -161,7 +161,6 @@ class TestStatus:
             name="full-run",
             status="completed",
             model_name="gpt-2",
-            output_model_id="model_out_1",
             examples_processed_count=100,
             notes="experiment notes",
             hf_status="uploaded",
@@ -186,7 +185,6 @@ class TestStatus:
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
         train_module.status(id="abcdef1234567890abcdef1234567890")
         out = console_capture.getvalue()
-        assert "model_out_1" in out
         assert "100" in out
         assert "experiment notes" in out
         assert "uploaded" in out
@@ -202,7 +200,7 @@ class TestStatus:
 class TestDelete:
     RUN_ID = "abcdef1234567890abcdef1234567890"
 
-    def test_delete_without_output_model(
+    def test_delete_basic(
         self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
     ) -> None:
         class FakeClient:
@@ -218,4 +216,3 @@ class TestDelete:
         train_module.delete(id=self.RUN_ID, yes=True)
         out = console_capture.getvalue()
         assert "deleted" in out
-        assert "Output model preserved" not in out

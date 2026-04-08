@@ -168,10 +168,9 @@ class TestModelAffectedResources:
     """Tests for ModelAffectedResources.from_dict."""
 
     def test_empty(self) -> None:
-        data = {"training_runs_using_model": [], "creator_training_run": None}
+        data = {"training_runs_using_model": []}
         res = ModelAffectedResources.from_dict(data)
         assert res.training_runs_using_model == []
-        assert res.creator_training_run is None
         assert res.has_blocking_runs is False
 
     def test_with_blocking_runs(self) -> None:
@@ -180,24 +179,10 @@ class TestModelAffectedResources:
                 {"id": "r1", "training_run_name": "Run 1"},
                 {"id": "r2", "training_run_name": None},
             ],
-            "creator_training_run": None,
         }
         res = ModelAffectedResources.from_dict(data)
         assert len(res.training_runs_using_model) == 2
         assert res.has_blocking_runs is True
-
-    def test_with_creator_run(self) -> None:
-        data = {
-            "training_runs_using_model": [],
-            "creator_training_run": {
-                "id": "r3",
-                "training_run_name": "Creator",
-            },
-        }
-        res = ModelAffectedResources.from_dict(data)
-        assert res.creator_training_run is not None
-        assert res.creator_training_run.id == "r3"
-        assert res.has_blocking_runs is False
 
 
 class TestWorkspaceDeletionStatus:

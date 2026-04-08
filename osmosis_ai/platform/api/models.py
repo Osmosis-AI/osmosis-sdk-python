@@ -182,7 +182,6 @@ class TrainingRun:
 class TrainingRunDetail(TrainingRun):
     """Detailed training run info with additional fields."""
 
-    output_model_id: str | None = None
     examples_processed_count: int | None = None
     notes: str | None = None
     hf_status: str | None = None
@@ -208,7 +207,6 @@ class TrainingRunDetail(TrainingRun):
             error_message=run.get("error_message"),
             creator_name=run.get("creator_name"),
             creator_email=run.get("creator_email"),
-            output_model_id=run.get("output_model_id"),
             examples_processed_count=run.get("examples_processed_count"),
             notes=run.get("notes"),
             hf_status=run.get("hf_status"),
@@ -245,15 +243,6 @@ class DeleteTrainingRunResult:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> DeleteTrainingRunResult:
         return cls(deleted=data["deleted"])
-
-
-@dataclass
-class TrainingRunAffectedResources:
-    """Affected resources for a training run deletion."""
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> TrainingRunAffectedResources:
-        return cls()
 
 
 @dataclass
@@ -296,19 +285,14 @@ class ModelAffectedResources:
     """Affected resources for a model deletion."""
 
     training_runs_using_model: list[AffectedTrainingRun]
-    creator_training_run: AffectedTrainingRun | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> ModelAffectedResources:
-        creator = data.get("creator_training_run")
         return cls(
             training_runs_using_model=[
                 AffectedTrainingRun.from_dict(r)
                 for r in data.get("training_runs_using_model", [])
             ],
-            creator_training_run=AffectedTrainingRun.from_dict(creator)
-            if creator
-            else None,
         )
 
     @property
@@ -465,35 +449,6 @@ class BaseModelInfo:
 
 
 @dataclass
-class OutputModelInfo:
-    """An output model created by a training run."""
-
-    id: str
-    model_name: str
-    base_model: str | None = None
-    status: str = ""
-    description: str | None = None
-    training_run_id: str | None = None
-    training_run_name: str | None = None
-    created_at: str = ""
-    updated_at: str = ""
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> OutputModelInfo:
-        return cls(
-            id=data["id"],
-            model_name=data.get("model_name", ""),
-            base_model=data.get("base_model"),
-            status=data.get("status", ""),
-            description=data.get("description"),
-            training_run_id=data.get("training_run_id"),
-            training_run_name=data.get("training_run_name"),
-            created_at=data.get("created_at", ""),
-            updated_at=data.get("updated_at", ""),
-        )
-
-
-@dataclass
 class PaginatedBaseModels:
     """Paginated list of base models."""
 
@@ -506,25 +461,6 @@ class PaginatedBaseModels:
     def from_dict(cls, data: dict[str, Any]) -> PaginatedBaseModels:
         return cls(
             models=[BaseModelInfo.from_dict(m) for m in data.get("models", [])],
-            total_count=data.get("total_count", 0),
-            has_more=data.get("has_more", False),
-            next_offset=data.get("next_offset"),
-        )
-
-
-@dataclass
-class PaginatedOutputModels:
-    """Paginated list of output models."""
-
-    models: list[OutputModelInfo]
-    total_count: int
-    has_more: bool
-    next_offset: int | None = None
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> PaginatedOutputModels:
-        return cls(
-            models=[OutputModelInfo.from_dict(m) for m in data.get("models", [])],
             total_count=data.get("total_count", 0),
             has_more=data.get("has_more", False),
             next_offset=data.get("next_offset"),

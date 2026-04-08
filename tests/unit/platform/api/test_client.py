@@ -167,41 +167,23 @@ class TestGetModelAffectedResources:
     """Tests for OsmosisClient.get_model_affected_resources."""
 
     @patch("osmosis_ai.platform.api.client.platform_request")
-    def test_base_model_with_runs(self, mock_request: MagicMock) -> None:
+    def test_model_with_blocking_runs(self, mock_request: MagicMock) -> None:
         mock_request.return_value = {
             "training_runs_using_model": [
                 {"id": "r1", "training_run_name": "Run 1"},
             ],
-            "creator_training_run": None,
         }
         client = OsmosisClient()
-        result = client.get_model_affected_resources("m1", "base")
+        result = client.get_model_affected_resources("m1")
         assert len(result.training_runs_using_model) == 1
         assert result.has_blocking_runs is True
         path = mock_request.call_args[0][0]
         assert "/api/cli/models/m1/affected-resources" in path
-        assert "type=base" in path
-
-    @patch("osmosis_ai.platform.api.client.platform_request")
-    def test_output_model_with_creator(self, mock_request: MagicMock) -> None:
-        mock_request.return_value = {
-            "training_runs_using_model": [],
-            "creator_training_run": {
-                "id": "r2",
-                "training_run_name": "Creator Run",
-            },
-        }
-        client = OsmosisClient()
-        result = client.get_model_affected_resources("m2", "output")
-        assert result.creator_training_run is not None
-        assert result.creator_training_run.training_run_name == "Creator Run"
-        assert result.has_blocking_runs is False
 
     @patch("osmosis_ai.platform.api.client.platform_request")
     def test_path_encodes_model_id(self, mock_request: MagicMock) -> None:
         mock_request.return_value = {
             "training_runs_using_model": [],
-            "creator_training_run": None,
         }
         client = OsmosisClient()
         client.get_model_affected_resources("a/b")
