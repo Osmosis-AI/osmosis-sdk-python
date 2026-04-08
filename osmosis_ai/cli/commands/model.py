@@ -47,7 +47,9 @@ def _fetch_all_models(client: Any, credentials: Any) -> list[Any]:
     from osmosis_ai.platform.cli.utils import fetch_all_pages
 
     models, _ = fetch_all_pages(
-        lambda lim, off: client.list_base_models(lim, off, credentials=credentials),
+        lambda lim, off: client.list_base_models(
+            limit=lim, offset=off, credentials=credentials
+        ),
         items_attr="models",
     )
     return models
@@ -58,7 +60,7 @@ def list_models(
     limit: int = typer.Option(
         DEFAULT_PAGE_SIZE,
         "--limit",
-        help="Maximum number of models to show per category.",
+        help="Maximum number of models to show.",
     ),
     all_: bool = typer.Option(False, "--all", help="Show all models."),
 ) -> None:

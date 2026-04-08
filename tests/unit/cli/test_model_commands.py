@@ -38,7 +38,7 @@ class TestListModels:
         self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
     ) -> None:
         class FakeClient:
-            def list_base_models(self, *, limit=30, credentials=None):
+            def list_base_models(self, limit=30, offset=0, *, credentials=None):
                 return PaginatedBaseModels(models=[], total_count=0, has_more=False)
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
@@ -57,7 +57,7 @@ class TestListModels:
         )
 
         class FakeClient:
-            def list_base_models(self, *, limit=30, credentials=None):
+            def list_base_models(self, limit=30, offset=0, *, credentials=None):
                 return PaginatedBaseModels(models=[base], total_count=1, has_more=False)
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
@@ -77,7 +77,7 @@ class TestListModels:
         )
 
         class FakeClient:
-            def list_base_models(self, *, limit=1, credentials=None):
+            def list_base_models(self, limit=1, offset=0, *, credentials=None):
                 return PaginatedBaseModels(models=[base], total_count=5, has_more=True)
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)

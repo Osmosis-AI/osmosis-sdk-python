@@ -88,12 +88,12 @@ def status(
         resolve_run_id,
     )
 
-    ws_name, credentials = _require_auth()
+    _, credentials = _require_auth()
 
     from osmosis_ai.platform.api.client import OsmosisClient
 
     client = OsmosisClient()
-    run_id = resolve_run_id(id, ws_name, credentials, client=client)
+    run_id = resolve_run_id(id, credentials, client=client)
     run = client.get_training_run(run_id, credentials=credentials)
 
     rows = build_run_detail_rows(run)
@@ -210,7 +210,7 @@ def metrics(
     client = OsmosisClient()
 
     with console.spinner("Fetching training run..."):
-        run_id = resolve_run_id(id, ws_name, credentials, client=client)
+        run_id = resolve_run_id(id, credentials, client=client)
         run = client.get_training_run(run_id, credentials=credentials)
 
     if run.status == "pending":
@@ -323,12 +323,12 @@ def stop(
     """Stop a training run."""
     from osmosis_ai.platform.cli.utils import _require_auth, resolve_run_id
 
-    ws_name, credentials = _require_auth()
+    _, credentials = _require_auth()
 
     from osmosis_ai.platform.api.client import OsmosisClient
 
     client = OsmosisClient()
-    run_id = resolve_run_id(id, ws_name, credentials, client=client)
+    run_id = resolve_run_id(id, credentials, client=client)
 
     from osmosis_ai.cli.prompts import require_confirmation
 
@@ -348,12 +348,12 @@ def delete(
     """Delete a training run."""
     from osmosis_ai.platform.cli.utils import _require_auth, resolve_run_id
 
-    ws_name, credentials = _require_auth()
+    _, credentials = _require_auth()
 
     from osmosis_ai.platform.api.client import OsmosisClient
 
     client = OsmosisClient()
-    run_id = resolve_run_id(id, ws_name, credentials, client=client)
+    run_id = resolve_run_id(id, credentials, client=client)
 
     from osmosis_ai.cli.prompts import require_confirmation
 

@@ -104,7 +104,6 @@ def resolve_dataset_id(
 
 def resolve_run_id(
     id: str,
-    workspace_name: str,
     credentials: Credentials,
     *,
     client: Any = None,
