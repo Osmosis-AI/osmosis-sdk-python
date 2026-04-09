@@ -367,6 +367,12 @@ class EvalCommand:
 
         if debug:
             logging.basicConfig(level=logging.DEBUG)
+        else:
+            # Suppress verbose tracebacks from backend loggers;
+            # errors are already surfaced via the progress callback.
+            logging.getLogger("osmosis_ai.rollout_v2.backend").setLevel(
+                logging.CRITICAL
+            )
 
         if fresh and retry_failed:
             self.console.print_error(

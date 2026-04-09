@@ -76,7 +76,7 @@ class InProcessDriver(RolloutDriver):
         label: str | None = None,
         rollout_id: str = "",
     ) -> RolloutOutcome:
-        from osmosis_ai.rollout_v2.context import RolloutContext
+        from osmosis_ai.rollout_v2.context import RolloutContext, rollout_contextvar
         from osmosis_ai.rollout_v2.types import ExecutionRequest, ExecutionResult
 
         start = time.monotonic()
@@ -104,19 +104,21 @@ class InProcessDriver(RolloutDriver):
             nonlocal grader_result
             grader_result = result
 
+        token = rollout_contextvar.set(rollout_ctx)
         try:
-            with rollout_ctx:
-                await self.backend.execute(
-                    request,
-                    on_workflow_complete=on_workflow_complete,
-                    on_grader_complete=on_grader_complete,
-                )
+            await self.backend.execute(
+                request,
+                on_workflow_complete=on_workflow_complete,
+                on_grader_complete=on_grader_complete,
+            )
         except Exception as e:
             return RolloutOutcome(
                 status=RolloutStatus.FAILURE,
                 error=str(e),
                 duration_ms=(time.monotonic() - start) * 1000,
             )
+        finally:
+            rollout_contextvar.reset(token)
 
         final = grader_result or workflow_result
         if final is None:
