@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from io import StringIO
+from pathlib import Path
 
 import pytest
 
@@ -13,6 +14,7 @@ from osmosis_ai.cli.console import Console
 from osmosis_ai.platform.api.models import (
     DeleteTrainingRunResult,
     PaginatedTrainingRuns,
+    SubmitTrainingRunResult,
     TrainingRun,
     TrainingRunDetail,
 )
@@ -190,6 +192,134 @@ class TestStatus:
         assert "uploaded" in out
         assert "2026-01-01" in out
         assert "2026-01-02" in out
+
+
+# ---------------------------------------------------------------------------
+# submit
+# ---------------------------------------------------------------------------
+
+
+class TestSubmit:
+    SUBMIT_RESULT = SubmitTrainingRunResult(
+        id="550e8400-e29b-41d4-a716-446655440000",
+        name="my-training-run",
+        status="pending",
+        created_at="2026-04-10T12:00:00Z",
+    )
+
+    @staticmethod
+    def _write_config(tmp_path: Path) -> Path:
+        path = tmp_path / "train.toml"
+        path.write_text(
+            """
+[experiment]
+rollout = "calculator"
+entrypoint = "main.py"
+model_path = "Qwen/Qwen3.5-35B-A3B"
+dataset = "abc-123"
+
+[training]
+lr = 1e-6
+total_epochs = 1
+""".strip(),
+            encoding="utf-8",
+        )
+        return path
+
+    def test_submit_success(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        console_capture: StringIO,
+        tmp_path: Path,
+    ) -> None:
+        config_path = self._write_config(tmp_path)
+        result = self.SUBMIT_RESULT
+
+        class FakeClient:
+            def submit_training_run(self, **kwargs):
+                return result
+
+        monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        train_module.submit(config_path=config_path, yes=True)
+        out = console_capture.getvalue()
+        assert "my-training-run" in out
+        assert "550e8400" in out
+        assert "pending" in out
+        assert "training" in out  # URL contains "training"
+
+    def test_submit_shows_summary_table(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        console_capture: StringIO,
+        tmp_path: Path,
+    ) -> None:
+        config_path = self._write_config(tmp_path)
+
+        class FakeClient:
+            def submit_training_run(self, **kwargs):
+                return self.SUBMIT_RESULT
+
+        FakeClient.SUBMIT_RESULT = self.SUBMIT_RESULT
+        monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        train_module.submit(config_path=config_path, yes=True)
+        out = console_capture.getvalue()
+        assert "calculator" in out
+        assert "main.py" in out
+        assert "Qwen/Qwen3.5-35B-A3B" in out
+        assert "abc-123" in out
+
+    def test_submit_with_commit_sha(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        console_capture: StringIO,
+        tmp_path: Path,
+    ) -> None:
+        path = tmp_path / "train.toml"
+        path.write_text(
+            """
+[experiment]
+rollout = "r"
+entrypoint = "e.py"
+model_path = "m"
+dataset = "d"
+commit_sha = "deadbeef"
+""".strip(),
+            encoding="utf-8",
+        )
+
+        captured_kwargs: dict = {}
+
+        class FakeClient:
+            def submit_training_run(self, **kwargs):
+                captured_kwargs.update(kwargs)
+                return TestSubmit.SUBMIT_RESULT
+
+        monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        train_module.submit(config_path=path, yes=True)
+        assert captured_kwargs["commit_sha"] == "deadbeef"
+        assert "deadbeef" in console_capture.getvalue()
+
+    def test_submit_passes_config_to_api(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        console_capture: StringIO,
+        tmp_path: Path,
+    ) -> None:
+        config_path = self._write_config(tmp_path)
+        captured_kwargs: dict = {}
+
+        class FakeClient:
+            def submit_training_run(self, **kwargs):
+                captured_kwargs.update(kwargs)
+                return TestSubmit.SUBMIT_RESULT
+
+        monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        train_module.submit(config_path=config_path, yes=True)
+        assert captured_kwargs["model_path"] == "Qwen/Qwen3.5-35B-A3B"
+        assert captured_kwargs["dataset_name"] == "abc-123"
+        assert captured_kwargs["rollout_name"] == "calculator"
+        assert captured_kwargs["entrypoint"] == "main.py"
+        assert captured_kwargs["config"] == {"lr": 1e-6, "total_epochs": 1}
 
 
 # ---------------------------------------------------------------------------

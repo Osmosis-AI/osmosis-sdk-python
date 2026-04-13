@@ -112,9 +112,58 @@ def status(
 
 
 @app.command("submit")
-def submit() -> None:
+def submit(
+    config_path: Path = typer.Argument(
+        ...,
+        exists=True,
+        file_okay=True,
+        dir_okay=False,
+        readable=True,
+        resolve_path=True,
+        help="Path to training config TOML file.",
+    ),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
+) -> None:
     """Submit a new training run."""
-    not_implemented("train", "submit")
+    from osmosis_ai.platform.cli.training_config import load_training_config
+    from osmosis_ai.platform.cli.utils import _require_auth, platform_entity_url
+
+    config = load_training_config(config_path)
+    ws_name, credentials = _require_auth()
+
+    rows: list[tuple[str, str]] = [
+        ("Rollout", config.experiment_rollout),
+        ("Entrypoint", config.experiment_entrypoint),
+        ("Model", config.experiment_model_path),
+        ("Dataset", config.experiment_dataset),
+    ]
+    if config.experiment_commit_sha:
+        rows.append(("Commit", config.experiment_commit_sha))
+    console.table(rows, title="Training Run")
+
+    from osmosis_ai.cli.prompts import require_confirmation
+
+    require_confirmation("Submit this training run?", yes=yes)
+
+    from osmosis_ai.platform.api.client import OsmosisClient
+
+    with console.spinner("Submitting training run..."):
+        client = OsmosisClient()
+        result = client.submit_training_run(
+            model_path=config.experiment_model_path,
+            dataset_name=config.experiment_dataset,
+            rollout_name=config.experiment_rollout,
+            entrypoint=config.experiment_entrypoint,
+            commit_sha=config.experiment_commit_sha,
+            config=config.to_api_config(),
+            credentials=credentials,
+        )
+
+    url = platform_entity_url(ws_name, "training", result.id)
+    console.print(f"Training run submitted: {result.name}", style="green")
+    console.print(f"  ID: {result.id[:8]}")
+    console.print(f"  Status: {result.status}")
+    console.print(f"  View: {url}")
 
 
 def _safe_name(name: str) -> str:

@@ -16,6 +16,7 @@ from osmosis_ai.platform.api.models import (
     MetricHistory,
     ModelAffectedResources,
     ProcessCount,
+    SubmitTrainingRunResult,
     TrainingRunMetrics,
     TrainingRunMetricsOverview,
     UploadInfo,
@@ -245,6 +246,23 @@ class TestWorkspaceDeletionStatus:
 # =============================================================================
 # Metric Data Model Tests
 # =============================================================================
+
+
+class TestSubmitTrainingRunResult:
+    """Tests for SubmitTrainingRunResult.from_dict."""
+
+    def test_from_dict(self) -> None:
+        data = {
+            "id": "550e8400-e29b-41d4-a716-446655440000",
+            "name": "my-training-run",
+            "status": "pending",
+            "created_at": "2026-04-10T12:00:00Z",
+        }
+        result = SubmitTrainingRunResult.from_dict(data)
+        assert result.id == "550e8400-e29b-41d4-a716-446655440000"
+        assert result.name == "my-training-run"
+        assert result.status == "pending"
+        assert result.created_at == "2026-04-10T12:00:00Z"
 
 
 class TestMetricDataPoint:
