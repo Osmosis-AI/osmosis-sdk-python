@@ -132,13 +132,13 @@ def submit(
     ws_name, credentials = _require_auth()
 
     rows: list[tuple[str, str]] = [
-        ("Rollout", config.experiment_rollout),
-        ("Entrypoint", config.experiment_entrypoint),
-        ("Model", config.experiment_model_path),
-        ("Dataset", config.experiment_dataset),
+        ("Rollout", console.escape(config.experiment_rollout)),
+        ("Entrypoint", console.escape(config.experiment_entrypoint)),
+        ("Model", console.escape(config.experiment_model_path)),
+        ("Dataset", console.escape(config.experiment_dataset)),
     ]
     if config.experiment_commit_sha:
-        rows.append(("Commit", config.experiment_commit_sha))
+        rows.append(("Commit", console.escape(config.experiment_commit_sha)))
     console.table(rows, title="Training Run")
 
     from osmosis_ai.cli.prompts import require_confirmation
@@ -160,7 +160,9 @@ def submit(
         )
 
     url = platform_entity_url(ws_name, "training", result.id)
-    console.print(f"Training run submitted: {result.name}", style="green")
+    console.print(
+        f"Training run submitted: {console.escape(result.name)}", style="green"
+    )
     console.print(f"  ID: {result.id[:8]}")
     console.print(f"  Status: {result.status}")
     console.print(f"  View: {url}")

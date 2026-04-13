@@ -6,12 +6,14 @@ from pathlib import Path
 from typing import Any
 
 import tomllib
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from osmosis_ai.cli.errors import CLIError
 
 
 class _ExperimentSection(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     rollout: str
     entrypoint: str
     model_path: str
@@ -20,6 +22,8 @@ class _ExperimentSection(BaseModel):
 
 
 class _TrainingSection(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     lr: float | None = None
     total_epochs: int | None = None
     n_samples_per_prompt: int | None = None
@@ -29,11 +33,15 @@ class _TrainingSection(BaseModel):
 
 
 class _SamplingSection(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     rollout_temperature: float | None = None
     rollout_top_p: float | None = None
 
 
 class _CheckpointsSection(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     eval_interval: int | None = None
     checkpoint_save_freq: int | None = None
 
@@ -117,6 +125,11 @@ def load_training_config(path: Path) -> TrainingConfig:
         raise CLIError(f"Invalid config in {path}: {e}") from e
 
     # ── Cross-field validation ───────────────────────────────────
+    if training.n_samples_per_prompt is not None and training.n_samples_per_prompt <= 0:
+        raise CLIError(
+            f"n_samples_per_prompt must be a positive integer, "
+            f"got {training.n_samples_per_prompt} in {path}"
+        )
     if (
         training.global_batch_size is not None
         and training.n_samples_per_prompt is not None

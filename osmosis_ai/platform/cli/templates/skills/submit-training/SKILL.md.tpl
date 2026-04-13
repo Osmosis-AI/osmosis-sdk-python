@@ -8,7 +8,7 @@ Help the user configure and submit a training run on the Osmosis Platform.
 1. Identify which rollout to train (check `rollouts/` directory)
 2. Ensure rollout is validated (`osmosis eval run configs/eval/<rollout_name>.toml` passes)
 3. Copy the default template: `cp configs/training/default.toml configs/training/<run_name>.toml`
-4. Fill in the required `[experiment]` fields (`rollout`, `model_path`, `dataset`)
+4. Fill in the required `[experiment]` fields (`rollout`, `entrypoint`, `model_path`, `dataset`)
 5. Adjust optional hyperparameters based on the scenario (see guidance below)
 6. Verify dataset is available (`osmosis dataset list`)
 7. Submit: `osmosis train submit configs/training/<run_name>.toml`
@@ -23,6 +23,7 @@ Start from `configs/training/default.toml`. It contains all available parameters
 | Field | What to fill in |
 |-------|-----------------|
 | `rollout` | Rollout name — must match a directory under `rollouts/` |
+| `entrypoint` | Module path to the rollout entry point (e.g. `rollouts.my_agent.main:workflow`) |
 | `model_path` | Must be one of: `Qwen/Qwen3.5-35B-A3B`, `Qwen/Qwen3.5-122B-A10B` |
 | `dataset` | Dataset name from `osmosis dataset list` |
 | `commit_sha` | *(optional)* Git commit SHA to pin the rollout code. If omitted, uses latest on default branch. |
