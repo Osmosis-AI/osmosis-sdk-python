@@ -232,6 +232,7 @@ total_epochs = 1
         train_module.submit(config_path=config_path, yes=True)
         out = console_capture.getvalue()
         assert "my-training-run" in out
+        assert "550e8400" in out
         assert "pending" in out
         assert "training" in out  # URL contains "training"
 

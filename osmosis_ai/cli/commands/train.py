@@ -159,6 +159,7 @@ def submit(
     console.print(
         f"Training run submitted: {console.escape(result.name)}", style="green"
     )
+    console.print(f"  ID: {result.id[:8]}")
     console.print(f"  Status: {result.status}")
     console.print(f"  View: {url}")
 

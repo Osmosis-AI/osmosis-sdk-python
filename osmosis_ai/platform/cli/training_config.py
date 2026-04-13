@@ -13,7 +13,6 @@ from osmosis_ai.cli.errors import CLIError
 
 class _ExperimentSection(BaseModel):
     model_config = ConfigDict(extra="forbid")
-
     rollout: str
     entrypoint: str
     model_path: str
@@ -23,7 +22,6 @@ class _ExperimentSection(BaseModel):
 
 class _TrainingSection(BaseModel):
     model_config = ConfigDict(extra="forbid")
-
     lr: float | None = None
     total_epochs: int | None = None
     n_samples_per_prompt: int | None = None
@@ -34,14 +32,12 @@ class _TrainingSection(BaseModel):
 
 class _SamplingSection(BaseModel):
     model_config = ConfigDict(extra="forbid")
-
     rollout_temperature: float | None = None
     rollout_top_p: float | None = None
 
 
 class _CheckpointsSection(BaseModel):
     model_config = ConfigDict(extra="forbid")
-
     eval_interval: int | None = None
     checkpoint_save_freq: int | None = None
 
