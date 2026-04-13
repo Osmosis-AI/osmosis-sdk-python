@@ -252,6 +252,66 @@ global_batch_size = 64
     assert cfg.training_n_samples_per_prompt == 8
 
 
+def test_unknown_top_level_section(tmp_path: Path) -> None:
+    path = tmp_path / "unknown_section.toml"
+    path.write_text(
+        """
+[experiment]
+rollout = "r"
+entrypoint = "e.py"
+model_path = "m"
+dataset = "d"
+
+[bogus]
+foo = 1
+""".strip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(CLIError) as exc_info:
+        load_training_config(path)
+    assert "bogus" in str(exc_info.value)
+
+
+@pytest.mark.parametrize(
+    "section,key",
+    [
+        ("experiment", "typo_field"),
+        ("training", "lerning_rate"),
+        ("sampling", "temperatur"),
+        ("checkpoints", "save_freq"),
+    ],
+)
+def test_unknown_key_in_section(tmp_path: Path, section: str, key: str) -> None:
+    if section == "experiment":
+        content = f"""
+[experiment]
+rollout = "r"
+entrypoint = "e.py"
+model_path = "m"
+dataset = "d"
+{key} = 1
+""".strip()
+    else:
+        content = f"""
+[experiment]
+rollout = "r"
+entrypoint = "e.py"
+model_path = "m"
+dataset = "d"
+
+[{section}]
+{key} = 1
+""".strip()
+
+    path = tmp_path / "unknown_key.toml"
+    path.write_text(content, encoding="utf-8")
+
+    with pytest.raises(CLIError) as exc_info:
+        load_training_config(path)
+    assert "Invalid config" in str(exc_info.value)
+
+
 def test_invalid_training_field_type(tmp_path: Path) -> None:
     path = tmp_path / "bad_type.toml"
     path.write_text(

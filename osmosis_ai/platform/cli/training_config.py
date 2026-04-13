@@ -6,12 +6,14 @@ from pathlib import Path
 from typing import Any
 
 import tomllib
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 from osmosis_ai.cli.errors import CLIError
 
 
 class _ExperimentSection(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     rollout: str
     entrypoint: str
     model_path: str
@@ -20,6 +22,8 @@ class _ExperimentSection(BaseModel):
 
 
 class _TrainingSection(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     lr: float | None = None
     total_epochs: int | None = None
     n_samples_per_prompt: int | None = None
@@ -29,11 +33,15 @@ class _TrainingSection(BaseModel):
 
 
 class _SamplingSection(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     rollout_temperature: float | None = None
     rollout_top_p: float | None = None
 
 
 class _CheckpointsSection(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     eval_interval: int | None = None
     checkpoint_save_freq: int | None = None
 
@@ -90,7 +98,12 @@ def load_training_config(path: Path) -> TrainingConfig:
     except OSError as e:
         raise CLIError(f"Cannot read config file {path}: {e}") from e
 
-    # ── Validate [experiment] section ────────────────────────────
+    valid_sections = {"experiment", "training", "sampling", "checkpoints"}
+    unknown_sections = set(raw.keys()) - valid_sections
+    if unknown_sections:
+        sorted_names = ", ".join(sorted(unknown_sections))
+        raise CLIError(f"Unknown section(s) in {path}: {sorted_names}")
+
     if "experiment" not in raw:
         raise CLIError(f"Missing [experiment] section in {path}")
 
