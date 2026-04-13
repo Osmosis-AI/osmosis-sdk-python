@@ -16,6 +16,7 @@ from .models import (
     PaginatedBaseModels,
     PaginatedDatasets,
     PaginatedTrainingRuns,
+    SubmitTrainingRunResult,
     TrainingRunDetail,
     TrainingRunMetrics,
     WorkspaceDeletionStatus,
@@ -241,6 +242,36 @@ class OsmosisClient:
         return DatasetAffectedResources.from_dict(data)
 
     # ── Training Runs ─────────────────────────────────────────────
+
+    def submit_training_run(
+        self,
+        *,
+        model_path: str,
+        dataset_name: str,
+        rollout_name: str,
+        entrypoint: str,
+        commit_sha: str | None = None,
+        config: dict[str, Any] | None = None,
+        credentials: Credentials | None = None,
+    ) -> SubmitTrainingRunResult:
+        """Submit a new training run."""
+        data: dict[str, Any] = {
+            "model_path": model_path,
+            "dataset_name": dataset_name,
+            "rollout_name": rollout_name,
+            "entrypoint": entrypoint,
+        }
+        if commit_sha is not None:
+            data["commit_sha"] = commit_sha
+        if config is not None:
+            data["config"] = config
+        result = platform_request(
+            "/api/cli/training-runs",
+            method="POST",
+            data=data,
+            credentials=credentials,
+        )
+        return SubmitTrainingRunResult.from_dict(result)
 
     def list_training_runs(
         self,
