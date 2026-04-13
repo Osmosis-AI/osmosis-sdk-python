@@ -79,7 +79,6 @@ class TestListRuns:
         train_module.list_runs(limit=30, all_=False)
         out = console_capture.getvalue()
         assert "my-run" in out
-        assert "abcdef12" in out
         assert "gpt-2" in out
         assert "acc:0.95" in out
 
@@ -141,16 +140,11 @@ class TestStatus:
         )
 
         class FakeClient:
-            def list_training_runs(self, limit=50, offset=0, *, credentials=None):
-                return PaginatedTrainingRuns(
-                    training_runs=[], total_count=0, has_more=False
-                )
-
             def get_training_run(self, run_id, *, credentials=None):
                 return detail
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-        train_module.status(id="abcdef1234567890abcdef1234567890")
+        train_module.status(name="run-1")
         out = console_capture.getvalue()
         assert "run-1" in out
         assert "completed" in out
@@ -176,16 +170,11 @@ class TestStatus:
         )
 
         class FakeClient:
-            def list_training_runs(self, limit=50, offset=0, *, credentials=None):
-                return PaginatedTrainingRuns(
-                    training_runs=[], total_count=0, has_more=False
-                )
-
             def get_training_run(self, run_id, *, credentials=None):
                 return detail
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-        train_module.status(id="abcdef1234567890abcdef1234567890")
+        train_module.status(name="full-run")
         out = console_capture.getvalue()
         assert "100" in out
         assert "experiment notes" in out
@@ -243,7 +232,6 @@ total_epochs = 1
         train_module.submit(config_path=config_path, yes=True)
         out = console_capture.getvalue()
         assert "my-training-run" in out
-        assert "550e8400" in out
         assert "pending" in out
         assert "training" in out  # URL contains "training"
 
@@ -316,7 +304,7 @@ commit_sha = "deadbeef"
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
         train_module.submit(config_path=config_path, yes=True)
         assert captured_kwargs["model_path"] == "Qwen/Qwen3.5-35B-A3B"
-        assert captured_kwargs["dataset_name"] == "abc-123"
+        assert captured_kwargs["dataset"] == "abc-123"
         assert captured_kwargs["rollout_name"] == "calculator"
         assert captured_kwargs["entrypoint"] == "main.py"
         assert captured_kwargs["config"] == {"lr": 1e-6, "total_epochs": 1}
@@ -328,21 +316,15 @@ commit_sha = "deadbeef"
 
 
 class TestDelete:
-    RUN_ID = "abcdef1234567890abcdef1234567890"
-
     def test_delete_basic(
         self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
     ) -> None:
         class FakeClient:
-            def list_training_runs(self, limit=50, offset=0, *, credentials=None):
-                return PaginatedTrainingRuns(
-                    training_runs=[], total_count=0, has_more=False
-                )
-
             def delete_training_run(self, run_id, *, credentials=None):
                 return DeleteTrainingRunResult(deleted=True)
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-        train_module.delete(id=self.RUN_ID, yes=True)
+        train_module.delete(name="my-run", yes=True)
         out = console_capture.getvalue()
         assert "deleted" in out
+        assert "my-run" in out

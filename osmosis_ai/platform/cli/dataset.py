@@ -269,7 +269,7 @@ def upload(
         credentials=credentials,
     )
 
-    console.print(f"Upload complete. Dataset ID: {dataset.id}", style="green")
+    console.print(f"Dataset uploaded: {console.escape(file_path.name)}", style="green")
     url = platform_entity_url(ws_name, "datasets", dataset.id)
     console.print(f"Processing will continue on the platform. Check status at: {url}")
 
@@ -305,12 +305,11 @@ def list_datasets(limit: int = DEFAULT_PAGE_SIZE, all_: bool = False) -> None:
 
     console.print(f"Datasets ({total_count}):", style="bold")
     for d in datasets:
-        short_id = console.format_styled(d.id[:8], "dim")
         status_info = format_dataset_status(d)
         name = console.escape(d.file_name)
         date = format_dim_date(d.created_at)
         console.print(
-            f"  {short_id}  {name}  {format_size(d.file_size)}  {status_info}  {date}",
+            f"  {name}  {format_size(d.file_size)}  {status_info}  {date}",
             highlight=False,
         )
 
@@ -318,35 +317,29 @@ def list_datasets(limit: int = DEFAULT_PAGE_SIZE, all_: bool = False) -> None:
 
 
 def status(
-    id: str,
+    name: str,
 ) -> None:
     """Check dataset processing status."""
     _ws_name, credentials = _require_auth()
     from osmosis_ai.platform.api.client import OsmosisClient
 
-    from .utils import resolve_dataset_id
-
     client = OsmosisClient()
-    dataset_id = resolve_dataset_id(id, credentials, client=client)
-    ds = client.get_dataset(dataset_id, credentials=credentials)
+    ds = client.get_dataset(name, credentials=credentials)
 
     rows = build_dataset_detail_rows(ds)
     console.table(rows, title="Dataset Status")
 
 
 def preview(
-    id: str,
+    name: str,
     rows: int = 5,
 ) -> None:
     """Preview dataset rows."""
     _ws_name, credentials = _require_auth()
     from osmosis_ai.platform.api.client import OsmosisClient
 
-    from .utils import resolve_dataset_id
-
     client = OsmosisClient()
-    dataset_id = resolve_dataset_id(id, credentials, client=client)
-    ds = client.get_dataset(dataset_id, credentials=credentials)
+    ds = client.get_dataset(name, credentials=credentials)
 
     if ds.data_preview is None:
         if ds.status in STATUSES_IN_PROGRESS:
@@ -368,49 +361,43 @@ def preview(
 
 
 def delete(
-    id: str,
+    name: str,
     yes: bool = False,
 ) -> None:
     """Delete a dataset."""
     _ws_name, credentials = _require_auth()
     from osmosis_ai.platform.api.client import OsmosisClient
 
-    from .utils import resolve_dataset_id
-
     client = OsmosisClient()
-    dataset_id = resolve_dataset_id(id, credentials, client=client)
 
     # Blocking preflight: abort if active training runs use this dataset
     try:
-        affected = client.get_dataset_affected_resources(
-            dataset_id, credentials=credentials
-        )
+        affected = client.get_dataset_affected_resources(name, credentials=credentials)
     except Exception as e:
         raise CLIError(f"Unable to verify dataset dependencies: {e}") from e
 
     if affected.has_blocking_runs:
         lines = ["Cannot delete — active training runs depend on this dataset:"]
         for run in affected.affected_training_runs:
-            name = (
+            run_name = (
                 console.escape(run.training_run_name)
                 if run.training_run_name
                 else "(unnamed)"
             )
-            lines.append(f"  {run.id[:8]}  {name}")
+            lines.append(f"  {run_name}")
         lines.append("\nStop these training runs first, then retry.")
         raise CLIError("\n".join(lines))
 
     if not yes:
-        ds = client.get_dataset(dataset_id, credentials=credentials)
+        ds = client.get_dataset(name, credentials=credentials)
         console.print(f"  Dataset: {ds.file_name} ({format_size(ds.file_size)})")
-        console.print(f"  ID:      {ds.id}")
 
     from osmosis_ai.cli.prompts import require_confirmation
 
-    require_confirmation("Delete this dataset? This cannot be undone.", yes=yes)
+    require_confirmation(f'Delete dataset "{name}"? This cannot be undone.', yes=yes)
 
-    client.delete_dataset(dataset_id, credentials=credentials)
-    console.print("Dataset deleted.", style="green")
+    client.delete_dataset(name, credentials=credentials)
+    console.print(f'Dataset "{name}" deleted.', style="green")
 
 
 def validate(

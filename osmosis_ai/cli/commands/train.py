@@ -56,7 +56,6 @@ def list_runs(
     console.print(f"Training Runs ({total_count}):", style="bold")
     for r in training_runs:
         status_str = format_run_status(r)
-        short_id = console.format_styled(r.id[:8], "dim")
         name = (
             console.escape(r.name)
             if r.name
@@ -67,7 +66,7 @@ def list_runs(
         date = format_dim_date(r.created_at)
 
         console.print(
-            f"  {short_id}  {name}  {status_str}  {model}  {acc}  {date}",
+            f"  {name}  {status_str}  {model}  {acc}  {date}",
             highlight=False,
         )
 
@@ -76,16 +75,13 @@ def list_runs(
 
 @app.command("status")
 def status(
-    id: str = typer.Argument(
-        ..., help="Training run ID (or short prefix from 'train list')."
-    ),
+    name: str = typer.Argument(..., help="Training run name."),
 ) -> None:
     """Show training run details."""
     from osmosis_ai.platform.cli.utils import (
         _require_auth,
         build_run_detail_rows,
         format_date,
-        resolve_run_id,
     )
 
     _, credentials = _require_auth()
@@ -93,8 +89,7 @@ def status(
     from osmosis_ai.platform.api.client import OsmosisClient
 
     client = OsmosisClient()
-    run_id = resolve_run_id(id, credentials, client=client)
-    run = client.get_training_run(run_id, credentials=credentials)
+    run = client.get_training_run(name, credentials=credentials)
 
     rows = build_run_detail_rows(run)
     if run.examples_processed_count is not None:
@@ -151,7 +146,7 @@ def submit(
         client = OsmosisClient()
         result = client.submit_training_run(
             model_path=config.experiment_model_path,
-            dataset_name=config.experiment_dataset,
+            dataset=config.experiment_dataset,
             rollout_name=config.experiment_rollout,
             entrypoint=config.experiment_entrypoint,
             commit_sha=config.experiment_commit_sha,
@@ -163,7 +158,6 @@ def submit(
     console.print(
         f"Training run submitted: {console.escape(result.name)}", style="green"
     )
-    console.print(f"  ID: {result.id[:8]}")
     console.print(f"  Status: {result.status}")
     console.print(f"  View: {url}")
 
@@ -230,9 +224,7 @@ def _resolve_default_output(
 
 @app.command("metrics")
 def metrics(
-    id: str = typer.Argument(
-        ..., help="Training run ID (or short prefix from 'train list')."
-    ),
+    name: str = typer.Argument(..., help="Training run name."),
     output: str | None = typer.Option(
         None,
         "--output",
@@ -254,15 +246,13 @@ def metrics(
     from osmosis_ai.platform.cli.utils import (
         _require_auth,
         platform_entity_url,
-        resolve_run_id,
     )
 
     ws_name, credentials = _require_auth()
     client = OsmosisClient()
 
     with console.spinner("Fetching training run..."):
-        run_id = resolve_run_id(id, credentials, client=client)
-        run = client.get_training_run(run_id, credentials=credentials)
+        run = client.get_training_run(name, credentials=credentials)
 
     if run.status == "pending":
         raise CLIError("Metrics are not yet available for pending training runs.")
@@ -366,51 +356,45 @@ def traces() -> None:
 
 @app.command("stop")
 def stop(
-    id: str = typer.Argument(
-        ..., help="Training run ID (or short prefix from 'train list')."
-    ),
+    name: str = typer.Argument(..., help="Training run name."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
 ) -> None:
     """Stop a training run."""
-    from osmosis_ai.platform.cli.utils import _require_auth, resolve_run_id
+    from osmosis_ai.platform.cli.utils import _require_auth
 
     _, credentials = _require_auth()
 
     from osmosis_ai.platform.api.client import OsmosisClient
 
     client = OsmosisClient()
-    run_id = resolve_run_id(id, credentials, client=client)
 
     from osmosis_ai.cli.prompts import require_confirmation
 
-    require_confirmation(f"Stop training run {run_id[:8]}...?", yes=yes)
+    require_confirmation(f'Stop training run "{name}"?', yes=yes)
 
-    client.stop_training_run(run_id, credentials=credentials)
-    console.print(f"Training run {run_id[:8]} stopped.", style="green")
+    client.stop_training_run(name, credentials=credentials)
+    console.print(f'Training run "{name}" stopped.', style="green")
 
 
 @app.command("delete")
 def delete(
-    id: str = typer.Argument(
-        ..., help="Training run ID (or short prefix from 'train list')."
-    ),
+    name: str = typer.Argument(..., help="Training run name."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
 ) -> None:
     """Delete a training run."""
-    from osmosis_ai.platform.cli.utils import _require_auth, resolve_run_id
+    from osmosis_ai.platform.cli.utils import _require_auth
 
     _, credentials = _require_auth()
 
     from osmosis_ai.platform.api.client import OsmosisClient
 
     client = OsmosisClient()
-    run_id = resolve_run_id(id, credentials, client=client)
 
     from osmosis_ai.cli.prompts import require_confirmation
 
     require_confirmation(
-        f"Delete training run {run_id[:8]}...? This cannot be undone.", yes=yes
+        f'Delete training run "{name}"? This cannot be undone.', yes=yes
     )
 
-    client.delete_training_run(run_id, credentials=credentials)
-    console.print(f"Training run {run_id[:8]} deleted.", style="green")
+    client.delete_training_run(name, credentials=credentials)
+    console.print(f'Training run "{name}" deleted.', style="green")

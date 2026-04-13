@@ -15,6 +15,7 @@ from .models import (
     ModelAffectedResources,
     PaginatedBaseModels,
     PaginatedDatasets,
+    PaginatedRollouts,
     PaginatedTrainingRuns,
     SubmitTrainingRunResult,
     TrainingRunDetail,
@@ -247,7 +248,7 @@ class OsmosisClient:
         self,
         *,
         model_path: str,
-        dataset_name: str,
+        dataset: str,
         rollout_name: str,
         entrypoint: str,
         commit_sha: str | None = None,
@@ -257,7 +258,7 @@ class OsmosisClient:
         """Submit a new training run."""
         data: dict[str, Any] = {
             "model_path": model_path,
-            "dataset_name": dataset_name,
+            "dataset": dataset,
             "rollout_name": rollout_name,
             "entrypoint": entrypoint,
         }
@@ -335,6 +336,19 @@ class OsmosisClient:
             credentials=credentials,
         )
         return TrainingRunMetrics.from_dict(data)
+
+    # ── Rollouts ──────────────────────────────────────────────────
+
+    def list_rollouts(
+        self,
+        limit: int = DEFAULT_PAGE_SIZE,
+        offset: int = 0,
+        *,
+        credentials: Credentials | None = None,
+    ) -> PaginatedRollouts:
+        qs = urlencode({"limit": limit, "offset": offset})
+        data = platform_request(f"/api/cli/rollouts?{qs}", credentials=credentials)
+        return PaginatedRollouts.from_dict(data)
 
     # ── Models ────────────────────────────────────────────────────
 
