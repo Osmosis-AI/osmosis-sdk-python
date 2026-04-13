@@ -246,6 +246,25 @@ class DeleteTrainingRunResult:
 
 
 @dataclass
+class SubmitTrainingRunResult:
+    """Result of submitting a new training run."""
+
+    id: str
+    name: str
+    status: str
+    created_at: str
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> SubmitTrainingRunResult:
+        return cls(
+            id=data["id"],
+            name=data["name"],
+            status=data["status"],
+            created_at=data["created_at"],
+        )
+
+
+@dataclass
 class AffectedTrainingRun:
     """A training run affected by a resource deletion."""
 

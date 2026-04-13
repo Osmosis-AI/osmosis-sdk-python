@@ -17,8 +17,9 @@ Then fill in required fields and adjust parameters as needed. See the template f
 ```toml
 [experiment]
 rollout = "calculator"
+entrypoint = "main.py"
 model_path = "Qwen/Qwen3.5-35B-A3B"  # or "Qwen/Qwen3.5-122B-A10B"
-dataset_id = "my-dataset-abc123"
+dataset = "my-dataset-abc123"
 
 [training]
 # lr = 1e-6
