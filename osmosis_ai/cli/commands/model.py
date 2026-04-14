@@ -31,7 +31,7 @@ def _print_model_section(
     for m in models:
         style = entity_status_style(m.status) or "dim"
         status_str = console.format_styled(f"[{m.status}]", style)
-        name = console.escape(m.model_name)
+        name = console.escape(m.base_model or m.model_name)
         meta = metadata_fn(m)
         date = format_dim_date(m.created_at)
         console.print(
@@ -125,20 +125,9 @@ def build() -> None:
     not_implemented("model", "build")
 
 
-def _resolve_model_id(client: Any, name: str, credentials: Any) -> str:
-    """Resolve a model name to its ID by searching the model list."""
-    from osmosis_ai.cli.errors import CLIError
-
-    models = _fetch_all_models(client, credentials)
-    for m in models:
-        if m.model_name == name or m.id == name:
-            return m.id
-    raise CLIError(f'Model "{name}" not found.')
-
-
 @app.command("delete")
 def delete(
-    name: str = typer.Argument(..., help="Model name to delete."),
+    name: str = typer.Argument(..., help="Model path (e.g. google/gemma-2-9b-it)."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
 ) -> None:
     """Delete a model."""
@@ -150,12 +139,9 @@ def delete(
     from osmosis_ai.platform.api.client import OsmosisClient
 
     client = OsmosisClient()
-    model_id = _resolve_model_id(client, name, credentials)
 
     try:
-        affected = client.get_model_affected_resources(
-            model_id, credentials=credentials
-        )
+        affected = client.get_model_affected_resources(name, credentials=credentials)
     except Exception as e:
         raise CLIError(f"Unable to verify model dependencies: {e}") from e
 
@@ -178,5 +164,5 @@ def delete(
 
     require_confirmation(f'Delete model "{name}"? This cannot be undone.', yes=yes)
 
-    client.delete_model(model_id, credentials=credentials)
+    client.delete_model(name, credentials=credentials)
     console.print(f'Model "{name}" deleted.', style="green")
