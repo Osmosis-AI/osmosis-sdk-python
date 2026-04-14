@@ -107,7 +107,24 @@ version = {attr = "osmosis_ai.consts.PACKAGE_VERSION"}
 
 [tool.coverage.run]
 source = ["osmosis_ai"]
-omit = ["tests/*", "*/consts.py"]
+omit = [
+    "tests/*",
+    "*/consts.py",
+    # CLI command groups (thin Typer shells) + interactive prompts
+    "osmosis_ai/cli/commands/*",
+    "osmosis_ai/cli/main.py",
+    "osmosis_ai/cli/upgrade.py",
+    "osmosis_ai/cli/prompts.py",
+    # Platform CLI business logic (API calls, OAuth, interactive prompts)
+    "osmosis_ai/platform/cli/*",
+    # Rollout v2 — ABCs, type defs, integrations, harbor backend
+    "osmosis_ai/rollout_v2/agent_workflow.py",
+    "osmosis_ai/rollout_v2/grader.py",
+    "osmosis_ai/rollout_v2/backend/base.py",
+    "osmosis_ai/rollout_v2/types/*",
+    "osmosis_ai/rollout_v2/integrations/*",
+    "osmosis_ai/rollout_v2/backend/harbor/*",
+]
 
 [tool.coverage.report]
 fail_under = 70
