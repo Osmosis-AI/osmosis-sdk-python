@@ -24,7 +24,7 @@ from osmosis_ai.rollout_v2.utils.concurrency import ConcurrencyLimiter
 from osmosis_ai.rollout_v2.utils.imports import resolve_object
 from osmosis_ai.rollout_v2.utils.messages import map_initial_messages_to_content_blocks
 
-logger = logging.getLogger(__name__)
+logger: logging.Logger = logging.getLogger(__name__)
 
 
 class LocalBackend(ExecutionBackend):
@@ -52,7 +52,9 @@ class LocalBackend(ExecutionBackend):
             if self.workflow_config
             else 4
         )
-        self.limiter = ConcurrencyLimiter(max_concurrent=max_concurrent)
+        self.limiter: ConcurrencyLimiter = ConcurrencyLimiter(
+            max_concurrent=max_concurrent
+        )
 
     def health(self) -> dict[str, Any]:
         return {

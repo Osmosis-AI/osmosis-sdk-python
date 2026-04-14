@@ -40,7 +40,7 @@ from osmosis_ai.rollout_v2.types import (
 )
 from osmosis_ai.rollout_v2.utils.imports import to_import_path
 
-logger = logging.getLogger(__name__)
+logger: logging.Logger = logging.getLogger(__name__)
 
 AGENT_IMPORT_PATH = (
     "osmosis_ai.rollout_v2.backend.harbor.agent_adapter:OsmosisInstalledAgent"
@@ -95,30 +95,32 @@ class HarborBackend(ExecutionBackend):
         cleanup_successful_trials: bool = True,
         _sdk_source_dir: Path | None = None,  # local dev only
     ) -> None:
-        self.orchestrator = orchestrator
-        self.task_dir = task_dir
-        self.user_code_dir = user_code_dir
-        self.workflow_path = ensure_import_path(workflow)
-        self.workflow_config_path = (
+        self.orchestrator: TrialQueue = orchestrator
+        self.task_dir: Path = task_dir
+        self.user_code_dir: Path = user_code_dir
+        self.workflow_path: str = ensure_import_path(workflow)
+        self.workflow_config_path: str | None = (
             ensure_import_path(workflow_config) if workflow_config else None
         )
-        self.grader_path = ensure_import_path(grader) if grader else None
-        self.grader_config_path = (
+        self.grader_path: str | None = ensure_import_path(grader) if grader else None
+        self.grader_config_path: str | None = (
             ensure_import_path(grader_config) if grader_config else None
         )
-        self.grading = self.grader_path is not None
-        self.custom_tests_dir = custom_tests_dir
-        self.environment_config = environment_config or HarborEnvironmentConfig()
+        self.grading: bool = self.grader_path is not None
+        self.custom_tests_dir: Path | None = custom_tests_dir
+        self.environment_config: HarborEnvironmentConfig = (
+            environment_config or HarborEnvironmentConfig()
+        )
         self._sdk_source_dir = _sdk_source_dir
-        self.prebuild_local_image = prebuild_local_image
-        self.symlink_environment = symlink_environment
-        self.cleanup_successful_trials = cleanup_successful_trials
+        self.prebuild_local_image: bool = prebuild_local_image
+        self.symlink_environment: bool = symlink_environment
+        self.cleanup_successful_trials: bool = cleanup_successful_trials
 
-        self.root_dir = Path(f"/tmp/osmosis-harbor-{self.task_dir.name}")
-        self.rollouts_dir = self.root_dir / "rollouts"
+        self.root_dir: Path = Path(f"/tmp/osmosis-harbor-{self.task_dir.name}")
+        self.rollouts_dir: Path = self.root_dir / "rollouts"
         self.rollouts_dir.mkdir(parents=True, exist_ok=True)
-        self.shared_env_dir = self.root_dir / "shared-env" / self.task_dir.name
-        self.trials_dir = (
+        self.shared_env_dir: Path = self.root_dir / "shared-env" / self.task_dir.name
+        self.trials_dir: Path = (
             trials_dir if trials_dir != Path("trials") else self.root_dir / "trials"
         )
 

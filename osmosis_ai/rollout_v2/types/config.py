@@ -1,3 +1,5 @@
+from typing import ClassVar
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -6,7 +8,7 @@ class ConcurrencyConfig(BaseModel):
 
 
 class BaseConfig(BaseModel):
-    model_config = ConfigDict(
+    model_config: ClassVar[ConfigDict] = ConfigDict(
         extra="allow",  # Allow extra fields for flexibility
         validate_assignment=True,
         arbitrary_types_allowed=True,

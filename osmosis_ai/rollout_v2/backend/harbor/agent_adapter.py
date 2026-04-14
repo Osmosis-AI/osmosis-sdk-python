@@ -21,7 +21,7 @@ class OsmosisInstalledAgent(BaseInstalledAgent):
         self, logs_dir: Path, *args: Any, rollout_config_path: str = "", **kwargs: Any
     ):
         super().__init__(logs_dir, *args, **kwargs)
-        self.rollout_config_path = (
+        self.rollout_config_path: Path | None = (
             Path(rollout_config_path) if rollout_config_path else None
         )
 
@@ -29,13 +29,13 @@ class OsmosisInstalledAgent(BaseInstalledAgent):
     def name() -> str:
         return "osmosis-rollout-agent"
 
-    async def install(self, environment) -> None:
+    async def install(self, environment: Any) -> None:
         pass  # user code is baked into the image
 
-    async def setup(self, environment) -> None:
+    async def setup(self, environment: Any) -> None:
         pass  # user code is baked into the image
 
-    async def run(self, instruction, environment, context) -> None:
+    async def run(self, instruction: Any, environment: Any, context: Any) -> None:
         (self.logs_dir / "prompt.json").write_text(instruction)
 
         if self.rollout_config_path and self.rollout_config_path.exists():
