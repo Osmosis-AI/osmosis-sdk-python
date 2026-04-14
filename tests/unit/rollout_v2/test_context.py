@@ -1,0 +1,121 @@
+"""Tests for osmosis_ai.rollout_v2.context."""
+
+from unittest.mock import MagicMock
+
+import pytest
+
+from osmosis_ai.rollout_v2.context import (
+    AgentWorkflowContext,
+    GraderContext,
+    HarborAgentWorkflowContext,
+    RolloutContext,
+    get_rollout_context,
+)
+from osmosis_ai.rollout_v2.types import AgentWorkflowConfig, RolloutSample
+
+# ---------------------------------------------------------------------------
+# RolloutContext
+# ---------------------------------------------------------------------------
+
+
+class TestRolloutContext:
+    def test_defaults(self):
+        ctx = RolloutContext(
+            chat_completions_url="http://llm",
+            api_key="key",
+            rollout_id="r1",
+        )
+        assert ctx.chat_completions_url == "http://llm"
+        assert ctx.api_key == "key"
+        assert ctx.rollout_id == "r1"
+
+    def test_env_fallback(self, monkeypatch):
+        monkeypatch.setenv("OSMOSIS_CHAT_COMPLETIONS_URL", "http://env-llm")
+        monkeypatch.setenv("OSMOSIS_API_KEY", "env-key")
+        monkeypatch.setenv("OSMOSIS_ROLLOUT_ID", "env-r1")
+
+        ctx = RolloutContext()
+        assert ctx.chat_completions_url == "http://env-llm"
+        assert ctx.api_key == "env-key"
+        assert ctx.rollout_id == "env-r1"
+
+    def test_explicit_overrides_env(self, monkeypatch):
+        monkeypatch.setenv("OSMOSIS_CHAT_COMPLETIONS_URL", "http://env")
+        ctx = RolloutContext(chat_completions_url="http://explicit")
+        assert ctx.chat_completions_url == "http://explicit"
+
+    def test_context_manager(self):
+        ctx = RolloutContext(chat_completions_url="http://llm", rollout_id="r1")
+        assert get_rollout_context() is None
+
+        with ctx:
+            assert get_rollout_context() is ctx
+        assert get_rollout_context() is None
+
+    def test_register_agent_and_get_samples(self):
+        ctx = RolloutContext(chat_completions_url="http://llm", rollout_id="r1")
+        agent = MagicMock()
+        agent.messages = [{"role": "user", "content": "hi"}]
+
+        ctx.register_agent("s1", agent)
+        samples = ctx.get_samples()
+        assert "s1" in samples
+        assert isinstance(samples["s1"], RolloutSample)
+        assert samples["s1"].id == "s1"
+        assert samples["s1"].messages == agent.messages
+
+
+# ---------------------------------------------------------------------------
+# GraderContext
+# ---------------------------------------------------------------------------
+
+
+class TestGraderContext:
+    def test_get_samples(self):
+        sample = RolloutSample(id="s1", messages=[])
+        ctx = GraderContext(samples={"s1": sample})
+        assert ctx.get_samples() == {"s1": sample}
+
+    def test_set_sample_reward(self):
+        sample = RolloutSample(id="s1", messages=[])
+        ctx = GraderContext(samples={"s1": sample})
+        ctx.set_sample_reward("s1", 0.8)
+        assert ctx.samples["s1"].reward == 0.8
+
+    def test_set_reward_missing_sample_raises(self):
+        ctx = GraderContext(samples={})
+        with pytest.raises(ValueError, match="Sample unknown not found"):
+            ctx.set_sample_reward("unknown", 1.0)
+
+
+# ---------------------------------------------------------------------------
+# AgentWorkflowContext / HarborAgentWorkflowContext
+# ---------------------------------------------------------------------------
+
+
+class TestAgentWorkflowContext:
+    def test_basic_construction(self):
+        prompt = [{"role": "user", "content": "hello"}]
+        ctx = AgentWorkflowContext(prompt=prompt)
+        assert ctx.prompt == prompt
+        assert ctx.config is None
+
+    def test_with_config(self):
+        cfg = AgentWorkflowConfig(name="test")
+        ctx = AgentWorkflowContext(
+            prompt=[{"role": "user", "content": "hi"}], config=cfg
+        )
+        assert ctx.config is cfg
+
+
+class TestHarborAgentWorkflowContext:
+    def test_with_environment(self):
+        env = MagicMock()
+        cfg = AgentWorkflowConfig(name="harbor-test")
+        ctx = HarborAgentWorkflowContext(
+            prompt=[{"role": "user", "content": "hi"}],
+            config=cfg,
+            environment=env,
+        )
+        assert ctx.environment is env
+        assert ctx.config is cfg
