@@ -397,7 +397,7 @@ def delete(
     require_confirmation(f'Delete dataset "{name}"? This cannot be undone.', yes=yes)
 
     client.delete_dataset(name, credentials=credentials)
-    console.print(f'Dataset "{name}" deleted.', style="green")
+    console.print(f'Dataset "{console.escape(name)}" deleted.', style="green")
 
 
 def validate(
