@@ -12,7 +12,8 @@ from typing import TYPE_CHECKING, Any, Literal
 
 import typer
 
-from osmosis_ai.cli.errors import CLIError, not_implemented
+from osmosis_ai.cli.errors import CLIError
+from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE
 
 if TYPE_CHECKING:
     from osmosis_ai.cli.console import Console
@@ -381,7 +382,70 @@ def serve(
     )
 
 
+def _format_commit(r: Any) -> str:
+    """Format commit SHA as a clickable terminal hyperlink (OSC 8 via Rich)."""
+    sha = r.last_synced_commit_sha
+    if not sha:
+        return "[dim]—[/dim]"
+    short = sha[:7]
+    if r.repo_full_name:
+        url = f"https://github.com/{r.repo_full_name}/tree/{sha}"
+        return f"[dim][link={url}]{short}[/link][/dim]"
+    return f"[dim]{short}[/dim]"
+
+
 @app.command("list")
-def list_rollouts() -> None:
-    """List rollouts."""
-    not_implemented("rollout", "list")
+def list_rollouts(
+    limit: int = typer.Option(
+        DEFAULT_PAGE_SIZE, "--limit", help="Maximum number of rollouts to show."
+    ),
+    all_: bool = typer.Option(False, "--all", help="Show all rollouts."),
+) -> None:
+    """List rollouts in the current workspace."""
+    from osmosis_ai.cli.console import Console
+    from osmosis_ai.platform.cli.utils import (
+        _require_auth,
+        format_dim_date,
+        paginated_fetch,
+        print_pagination_footer,
+        validate_list_options,
+    )
+
+    effective_limit, fetch_all = validate_list_options(limit=limit, all_=all_)
+
+    console = Console()
+    _, credentials = _require_auth()
+
+    from osmosis_ai.platform.api.client import OsmosisClient
+
+    with console.spinner("Fetching rollouts..."):
+        client = OsmosisClient()
+        rollouts, total_count, _has_more = paginated_fetch(
+            lambda lim, off: client.list_rollouts(
+                limit=lim, offset=off, credentials=credentials
+            ),
+            items_attr="rollouts",
+            limit=effective_limit,
+            fetch_all=fetch_all,
+        )
+
+    if not rollouts:
+        console.print("No rollouts found.")
+        return
+
+    console.print(f"Rollouts ({total_count}):", style="bold")
+    for r in rollouts:
+        name = console.escape(r.name)
+        active = (
+            console.format_styled("[active]", "green")
+            if r.is_active
+            else console.format_styled("[inactive]", "dim")
+        )
+        commit = _format_commit(r)
+        date = format_dim_date(r.created_at)
+        console.print(
+            f"  {name}  {active}  {commit}  {date}",
+            highlight=False,
+        )
+
+    print_pagination_footer(len(rollouts), total_count, "rollouts")

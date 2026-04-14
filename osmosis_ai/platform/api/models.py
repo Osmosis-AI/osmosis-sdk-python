@@ -484,3 +484,52 @@ class PaginatedBaseModels:
             has_more=data.get("has_more", False),
             next_offset=data.get("next_offset"),
         )
+
+
+# ── Rollouts ─────────────────────────────────────────────────────
+
+
+@dataclass
+class RolloutInfo:
+    """A rollout record."""
+
+    id: str
+    name: str
+    description: str | None = None
+    is_active: bool = True
+    last_synced_at: str | None = None
+    last_synced_commit_sha: str | None = None
+    repo_full_name: str | None = None
+    created_at: str = ""
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> RolloutInfo:
+        return cls(
+            id=data["id"],
+            name=data.get("name", ""),
+            description=data.get("description"),
+            is_active=data.get("is_active", True),
+            last_synced_at=data.get("last_synced_at"),
+            last_synced_commit_sha=data.get("last_synced_commit_sha"),
+            repo_full_name=data.get("repo_full_name"),
+            created_at=data.get("created_at", ""),
+        )
+
+
+@dataclass
+class PaginatedRollouts:
+    """Paginated list of rollouts."""
+
+    rollouts: list[RolloutInfo]
+    total_count: int
+    has_more: bool
+    next_offset: int | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> PaginatedRollouts:
+        return cls(
+            rollouts=[RolloutInfo.from_dict(r) for r in data.get("rollouts", [])],
+            total_count=data.get("total_count", 0),
+            has_more=data.get("has_more", False),
+            next_offset=data.get("next_offset"),
+        )

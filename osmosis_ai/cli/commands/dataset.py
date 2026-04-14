@@ -37,27 +37,23 @@ def list_datasets(
 
 @app.command("status")
 def status(
-    id: str = typer.Argument(
-        ..., help="Dataset ID (or short prefix from 'dataset list')."
-    ),
+    name: str = typer.Argument(..., help="Dataset name."),
 ) -> None:
     """Check dataset processing status."""
     from osmosis_ai.platform.cli.dataset import status as _status
 
-    _status(id=id)
+    _status(name=name)
 
 
 @app.command("preview")
 def preview(
-    id: str = typer.Argument(
-        ..., help="Dataset ID (or short prefix from 'dataset list')."
-    ),
+    name: str = typer.Argument(..., help="Dataset name."),
     rows: int = typer.Option(5, "--rows", help="Number of rows to show."),
 ) -> None:
     """Preview dataset rows."""
     from osmosis_ai.platform.cli.dataset import preview as _preview
 
-    _preview(id=id, rows=rows)
+    _preview(name=name, rows=rows)
 
 
 @app.command("validate")
@@ -72,12 +68,10 @@ def validate(
 
 @app.command("delete")
 def delete(
-    id: str = typer.Argument(
-        ..., help="Dataset ID (or short prefix from 'dataset list')."
-    ),
+    name: str = typer.Argument(..., help="Dataset name."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
 ) -> None:
     """Delete a dataset."""
     from osmosis_ai.platform.cli.dataset import delete as _delete
 
-    _delete(id=id, yes=yes)
+    _delete(name=name, yes=yes)

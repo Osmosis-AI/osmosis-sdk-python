@@ -107,7 +107,7 @@ class TestMetricsCommandPlatformUrl:
             from osmosis_ai.cli.commands.train import metrics
 
             metrics(
-                id="550e8400-e29b-41d4-a716-446655440000",
+                name="reward-tuning-v3",
                 output=str(output),
             )
 
@@ -138,7 +138,7 @@ class TestMetricsCommandTrendGraphs:
             from osmosis_ai.cli.commands.train import metrics
 
             metrics(
-                id="550e8400-e29b-41d4-a716-446655440000",
+                name="reward-tuning-v3",
                 output=str(output),
             )
 
@@ -179,7 +179,7 @@ class TestMetricsCommandTrendGraphs:
             from osmosis_ai.cli.commands.train import metrics
 
             metrics(
-                id="550e8400-e29b-41d4-a716-446655440000",
+                name="reward-tuning-v3",
                 output=str(output),
             )
 
@@ -205,7 +205,7 @@ class TestMetricsCommandTrendGraphs:
             from osmosis_ai.cli.commands.train import metrics
 
             metrics(
-                id="550e8400-e29b-41d4-a716-446655440000",
+                name="reward-tuning-v3",
                 output=str(output),
             )
 
@@ -229,7 +229,7 @@ class TestMetricsCommandTrendGraphs:
             from osmosis_ai.cli.commands.train import metrics
 
             metrics(
-                id="550e8400-e29b-41d4-a716-446655440000",
+                name="reward-tuning-v3",
                 output=str(output),
             )
 
@@ -253,7 +253,7 @@ class TestMetricsCommandTrendGraphs:
             from osmosis_ai.cli.commands.train import metrics
 
             metrics(
-                id="550e8400-e29b-41d4-a716-446655440000",
+                name="reward-tuning-v3",
                 output=str(output),
             )
 
@@ -282,7 +282,7 @@ class TestMetricsCommandWritesFile:
         from osmosis_ai.cli.commands.train import metrics
 
         metrics(
-            id="550e8400-e29b-41d4-a716-446655440000",
+            name="reward-tuning-v3",
             output=str(output),
         )
 
@@ -315,7 +315,7 @@ class TestMetricsCommandWritesFile:
         from osmosis_ai.cli.commands.train import metrics
 
         metrics(
-            id="550e8400-e29b-41d4-a716-446655440000",
+            name="reward-tuning-v3",
             output=None,
         )
 
@@ -405,7 +405,7 @@ class TestMetricsCommandErrors:
 
         with pytest.raises(CLIError, match="not yet available for pending"):
             metrics(
-                id="550e8400-e29b-41d4-a716-446655440000",
+                name="reward-tuning-v3",
                 output="/tmp/out.json",
             )
 
@@ -425,7 +425,7 @@ class TestMetricsCommandErrors:
             from osmosis_ai.cli.commands.train import metrics
 
             metrics(
-                id="550e8400-e29b-41d4-a716-446655440000",
+                name="reward-tuning-v3",
                 output=str(output),
             )
 
@@ -457,7 +457,7 @@ class TestMetricsCommandErrors:
             from osmosis_ai.cli.commands.train import metrics
 
             metrics(
-                id="550e8400-e29b-41d4-a716-446655440000",
+                name="reward-tuning-v3",
                 output="/nonexistent/dir/metrics.json",
             )
 
@@ -486,7 +486,7 @@ class TestMetricsCommandErrors:
             from osmosis_ai.cli.commands.train import metrics
 
             metrics(
-                id="550e8400-e29b-41d4-a716-446655440000",
+                name="reward-tuning-v3",
                 output=None,
             )
 

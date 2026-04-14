@@ -29,14 +29,13 @@ def _print_model_section(
         return
     console.print(f"{title} ({total_count}):", style="bold")
     for m in models:
-        short_id = console.format_styled(m.id[:8], "dim")
         style = entity_status_style(m.status) or "dim"
         status_str = console.format_styled(f"[{m.status}]", style)
-        name = console.escape(m.model_name)
+        name = console.escape(m.base_model or m.model_name)
         meta = metadata_fn(m)
         date = format_dim_date(m.created_at)
         console.print(
-            f"  {short_id}  {name}  {status_str}  {meta}  {date}",
+            f"  {name}  {status_str}  {meta}  {date}",
             highlight=False,
         )
     console.print()
@@ -128,12 +127,12 @@ def build() -> None:
 
 @app.command("delete")
 def delete(
-    id: str = typer.Argument(..., help="Model ID to delete."),
+    name: str = typer.Argument(..., help="Model path (e.g. google/gemma-2-9b-it)."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
 ) -> None:
     """Delete a model."""
     from osmosis_ai.cli.errors import CLIError
-    from osmosis_ai.platform.cli.utils import _require_auth, resolve_id_prefix
+    from osmosis_ai.platform.cli.utils import _require_auth
 
     _ws_name, credentials = _require_auth()
 
@@ -141,13 +140,8 @@ def delete(
 
     client = OsmosisClient()
 
-    models = _fetch_all_models(client, credentials)
-    model_id = resolve_id_prefix(id, models, entity_name="model")
-
     try:
-        affected = client.get_model_affected_resources(
-            model_id, credentials=credentials
-        )
+        affected = client.get_model_affected_resources(name, credentials=credentials)
     except Exception as e:
         raise CLIError(f"Unable to verify model dependencies: {e}") from e
 
@@ -162,15 +156,13 @@ def delete(
                 if run.training_run_name
                 else "(unnamed)"
             )
-            console.print(f"  {run.id[:8]}  {label}")
+            console.print(f"  {label}")
         console.print("\nDelete these training runs first, then retry.", style="dim")
         raise typer.Exit(1)
 
-    msg = f"Delete model {model_id[:8]}...? This cannot be undone."
-
     from osmosis_ai.cli.prompts import require_confirmation
 
-    require_confirmation(msg, yes=yes)
+    require_confirmation(f'Delete model "{name}"? This cannot be undone.', yes=yes)
 
-    client.delete_model(model_id, credentials=credentials)
-    console.print(f"Model {model_id[:8]} deleted.", style="green")
+    client.delete_model(name, credentials=credentials)
+    console.print(f'Model "{name}" deleted.', style="green")
