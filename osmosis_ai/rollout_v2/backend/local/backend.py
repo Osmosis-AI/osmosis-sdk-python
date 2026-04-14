@@ -31,12 +31,12 @@ class LocalBackend(ExecutionBackend):
     def __init__(
         self,
         *,
-        workflow: type[AgentWorkflow] | str,
+        workflow: type[AgentWorkflow[Any]] | str,
         workflow_config: AgentWorkflowConfig | str | None = None,
         grader: type[Grader] | str | None = None,
         grader_config: GraderConfig | str | None = None,
     ) -> None:
-        self.workflow_cls: type[AgentWorkflow] = resolve_object(workflow)
+        self.workflow_cls: type[AgentWorkflow[Any]] = resolve_object(workflow)
         self.workflow_config: AgentWorkflowConfig | None = (
             resolve_object(workflow_config) if workflow_config else None
         )
