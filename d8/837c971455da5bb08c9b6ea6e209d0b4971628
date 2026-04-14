@@ -1,0 +1,25 @@
+osmosis_ai/rollout_v2/backend/local/backend.py
+  e20a92f3d2f9c459 34,39
+osmosis_ai/rollout_v2/backend/harbor/backend.py
+  e20a92f3d2f9c459 46,86
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8",
+  "base_commit_sha": "d8837c971455da5bb08c9b6ea6e209d0b4971628",
+  "prompts": {
+    "e20a92f3d2f9c459": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "cb4872e1-0281-4021-b570-288884fa498b",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian",
+      "messages": [],
+      "total_additions": 73,
+      "total_deletions": 16,
+      "accepted_lines": 64,
+      "overriden_lines": 1
+    }
+  }
+}
