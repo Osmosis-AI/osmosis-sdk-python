@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Annotated, Literal
 
 import tomllib
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from osmosis_ai.cli.errors import CLIError
 
@@ -14,17 +14,23 @@ LogLevel = Literal["critical", "error", "warning", "info", "debug", "trace"]
 
 
 class _ServeSection(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     rollout: str
     entrypoint: str
 
 
 class _ServerSection(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     port: Annotated[int, Field(ge=1, le=65535)] = 9000
     host: str = "0.0.0.0"
     log_level: LogLevel = "info"
 
 
 class _DebugSection(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     no_validate: bool = False
     trace_dir: str | None = None
 

@@ -6,12 +6,14 @@ from pathlib import Path
 from typing import Annotated
 
 import tomllib
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from osmosis_ai.cli.errors import CLIError
 
 
 class _EvalSection(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     dataset: str
     rollout: str
     entrypoint: str
@@ -22,23 +24,31 @@ class _EvalSection(BaseModel):
 
 
 class _LLMSection(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     model: str
     base_url: str | None = None
     api_key_env: str | None = None
 
 
 class _GraderSection(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     module: str | None = None
     config: str | None = None
 
 
 class _RunsSection(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     n: Annotated[int, Field(ge=1)] = 1
     batch_size: Annotated[int, Field(ge=1)] = 1
     pass_threshold: Annotated[float, Field(ge=0.0, le=1.0)] = 1.0
 
 
 class _OutputSection(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     log_samples: bool = False
     output_path: str | None = None
     quiet: bool = False
@@ -46,6 +56,8 @@ class _OutputSection(BaseModel):
 
 
 class _BaselineSection(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     model: str
     base_url: str | None = None
     api_key_env: str | None = None
