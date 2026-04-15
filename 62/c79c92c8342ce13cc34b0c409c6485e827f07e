@@ -1,0 +1,41 @@
+tests/unit/eval/evaluation/test_report.py
+  8c781c48b54b5260 5-6,45-60
+osmosis_ai/platform/cli/templates/skills/create-rollout/SKILL.md.tpl
+  8c781c48b54b5260 15-16,43-60,63
+osmosis_ai/eval/evaluation/report.py
+  8c781c48b54b5260 16-21,24
+osmosis_ai/eval/evaluation/cli.py
+  8c781c48b54b5260 541-555,557,559-560
+osmosis_ai/cli/commands/train.py
+  8c781c48b54b5260 59,70
+osmosis_ai/eval/config.py
+  8c781c48b54b5260 114-115
+osmosis_ai/cli/commands/model.py
+  8c781c48b54b5260 154,158,160
+osmosis_ai/eval/llm_proxy.py
+  8c781c48b54b5260 141-143,155-157
+osmosis_ai/eval/evaluation/cache.py
+  8c781c48b54b5260 281,683-685
+tests/unit/eval/evaluation/test_cache.py
+  8c781c48b54b5260 546-566,949-961
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.2.8",
+  "base_commit_sha": "62c79c92c8342ce13cc34b0c409c6485e827f07e",
+  "prompts": {
+    "8c781c48b54b5260": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "38b1f34e-ffda-4b9d-bf56-2ee8ceab8a16",
+        "model": "claude-opus-4-6"
+      },
+      "human_author": "JoyboyBrian",
+      "messages": [],
+      "total_additions": 115,
+      "total_deletions": 19,
+      "accepted_lines": 115,
+      "overriden_lines": 0
+    }
+  }
+}
