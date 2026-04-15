@@ -260,8 +260,11 @@ def load_workflow(
         workflow_cls, workflow_config, entrypoint_module = _resolve_workflow(
             rollout=rollout, entrypoint=entrypoint
         )
-    except (CLIError, ImportError, ValueError, TypeError) as e:
-        return None, None, None, str(e)
+    except Exception as e:
+        detail = str(e)
+        if not isinstance(e, (CLIError, ImportError, ValueError, TypeError)):
+            detail = f"{type(e).__name__}: {detail}"
+        return None, None, None, detail
 
     if console and not quiet:
         console.print(f"  Workflow: {workflow_cls.__name__}")
@@ -392,8 +395,27 @@ def _resolve_grader(
     from osmosis_ai.rollout_v2.utils.imports import resolve_object
 
     if explicit_grader:
+        from osmosis_ai.rollout_v2.grader import Grader
+        from osmosis_ai.rollout_v2.types import GraderConfig
+
         grader_cls = resolve_object(explicit_grader)
+        if (
+            not isinstance(grader_cls, type)
+            or not issubclass(grader_cls, Grader)
+            or grader_cls is Grader
+        ):
+            raise CLIError(
+                f"[grader].module must point to a concrete Grader subclass, "
+                f"but '{explicit_grader}' resolved to {grader_cls!r}"
+            )
+
         grader_config = resolve_object(explicit_config) if explicit_config else None
+        if grader_config is not None and not isinstance(grader_config, GraderConfig):
+            raise CLIError(
+                f"[grader].config must point to a GraderConfig instance, "
+                f"but '{explicit_config}' resolved to {type(grader_config).__name__}"
+            )
+
         return grader_cls, grader_config
 
     mod = sys.modules.get(module_name)

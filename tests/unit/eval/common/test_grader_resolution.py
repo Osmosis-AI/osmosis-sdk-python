@@ -3,6 +3,7 @@ import types
 
 import pytest
 
+from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.eval.common.cli import _resolve_grader
 
 
@@ -62,3 +63,50 @@ def test_resolve_grader_explicit_path(fake_module_with_grader):
     assert cls is not None
     assert cls.__name__ == "FakeGrader"
     assert config is not None
+
+
+def test_resolve_grader_explicit_not_a_class(fake_module_with_grader):
+    """Explicit grader pointing to a function should raise CLIError."""
+    fake_module_with_grader.some_func = lambda: None
+
+    with pytest.raises(CLIError, match="concrete Grader subclass"):
+        _resolve_grader(
+            "fake_grader_mod",
+            explicit_grader="fake_grader_mod:some_func",
+        )
+
+
+def test_resolve_grader_explicit_wrong_class(fake_module_with_grader):
+    """Explicit grader pointing to a non-Grader class should raise CLIError."""
+    fake_module_with_grader.NotAGrader = type("NotAGrader", (), {})
+
+    with pytest.raises(CLIError, match="concrete Grader subclass"):
+        _resolve_grader(
+            "fake_grader_mod",
+            explicit_grader="fake_grader_mod:NotAGrader",
+        )
+
+
+def test_resolve_grader_explicit_abstract_grader(fake_module_with_grader):
+    """Explicit grader pointing to the abstract Grader base should raise CLIError."""
+    from osmosis_ai.rollout_v2.grader import Grader
+
+    fake_module_with_grader.BaseGrader = Grader
+
+    with pytest.raises(CLIError, match="concrete Grader subclass"):
+        _resolve_grader(
+            "fake_grader_mod",
+            explicit_grader="fake_grader_mod:BaseGrader",
+        )
+
+
+def test_resolve_grader_explicit_bad_config(fake_module_with_grader):
+    """Explicit grader config pointing to a non-GraderConfig should raise CLIError."""
+    fake_module_with_grader.bad_config = {"not": "a config"}
+
+    with pytest.raises(CLIError, match="GraderConfig instance"):
+        _resolve_grader(
+            "fake_grader_mod",
+            explicit_grader="fake_grader_mod:FakeGrader",
+            explicit_config="fake_grader_mod:bad_config",
+        )

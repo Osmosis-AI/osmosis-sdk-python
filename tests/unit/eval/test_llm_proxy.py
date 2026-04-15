@@ -27,9 +27,9 @@ def test_proxy_collect_tokens_accumulates():
     assert proxy.collect_tokens("r1") == 0
 
 
-def test_proxy_systemic_error_initially_none():
+def test_proxy_systemic_error_initially_empty():
     proxy = LiteLLMProxy(model="openai/gpt-5-mini")
-    assert proxy.systemic_error is None
+    assert proxy.collect_systemic_error("any") is None
 
 
 def test_proxy_systemic_exceptions_list():
@@ -130,15 +130,18 @@ async def test_handle_request_systemic_error_sets_flag(monkeypatch):
     monkeypatch.setattr(_mod, "_get_litellm", lambda: fake_litellm)
 
     proxy = LiteLLMProxy(model="openai/gpt-5-mini")
-    assert proxy.systemic_error is None
+    assert proxy.collect_systemic_error("r1") is None
 
     with pytest.raises(FakeAuthError):
         await proxy._handle_request(
             "r1", {"messages": [{"role": "user", "content": "hi"}]}
         )
 
-    assert proxy.systemic_error is not None
-    assert "Invalid API key" in proxy.systemic_error
+    err = proxy.collect_systemic_error("r1")
+    assert err is not None
+    assert "Invalid API key" in err
+    # Second collect returns None (popped)
+    assert proxy.collect_systemic_error("r1") is None
 
 
 async def test_handle_request_writes_trace(monkeypatch, tmp_path):
@@ -189,3 +192,87 @@ async def test_handle_request_writes_trace(monkeypatch, tmp_path):
     assert trace_file.exists()
     content = trace_file.read_text()
     assert "llm_call" in content
+
+
+async def test_stream_response_mid_stream_error(monkeypatch):
+    """Mid-stream exception yields error frame + [DONE] instead of broken SSE."""
+    import json
+    from unittest.mock import MagicMock
+
+    async def _exploding_iterator():
+        chunk = MagicMock()
+        chunk.usage = None
+        chunk.model_dump.return_value = {"choices": [{"delta": {"content": "hi"}}]}
+        yield chunk
+        raise RuntimeError("connection reset by peer")
+
+    async def fake_acompletion(**kwargs):
+        return _exploding_iterator()
+
+    import osmosis_ai.eval.llm_proxy as _mod
+
+    fake_litellm = type(
+        "FakeLiteLLM",
+        (),
+        {
+            "suppress_debug_info": False,
+            "acompletion": staticmethod(fake_acompletion),
+        },
+    )()
+    monkeypatch.setattr(_mod, "_get_litellm", lambda: fake_litellm)
+
+    proxy = LiteLLMProxy(model="openai/gpt-5-mini")
+    frames = []
+    async for frame in proxy._stream_response(
+        "r1", {"messages": [{"role": "user", "content": "hi"}]}
+    ):
+        frames.append(frame)
+
+    # Should have: one data chunk, one error frame, one [DONE]
+    assert len(frames) == 3
+    assert '"delta"' in frames[0]
+    error_payload = json.loads(frames[1].removeprefix("data: ").strip())
+    assert error_payload["error"]["type"] == "RuntimeError"
+    assert "connection reset" in error_payload["error"]["message"]
+    assert frames[-1] == "data: [DONE]\n\n"
+
+
+async def test_stream_response_mid_stream_systemic_error(monkeypatch):
+    """Mid-stream systemic error is recorded in _systemic_errors."""
+
+    class FakeAuthError(Exception):
+        pass
+
+    FakeAuthError.__name__ = "AuthenticationError"
+
+    async def _auth_fail_iterator():
+        raise FakeAuthError("token revoked mid-stream")
+        yield  # make it an async generator
+
+    async def fake_acompletion(**kwargs):
+        return _auth_fail_iterator()
+
+    import osmosis_ai.eval.llm_proxy as _mod
+
+    fake_litellm = type(
+        "FakeLiteLLM",
+        (),
+        {
+            "suppress_debug_info": False,
+            "acompletion": staticmethod(fake_acompletion),
+        },
+    )()
+    monkeypatch.setattr(_mod, "_get_litellm", lambda: fake_litellm)
+
+    proxy = LiteLLMProxy(model="openai/gpt-5-mini")
+    frames = []
+    async for frame in proxy._stream_response(
+        "r1", {"messages": [{"role": "user", "content": "hi"}]}
+    ):
+        frames.append(frame)
+
+    # Error frame + [DONE]
+    assert frames[-1] == "data: [DONE]\n\n"
+    err = proxy.collect_systemic_error("r1")
+    assert err is not None
+    assert "token revoked" in err

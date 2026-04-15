@@ -129,7 +129,7 @@ class InProcessDriver(RolloutDriver):
             )
 
         tokens = self.proxy.collect_tokens(rollout_id)
-        systemic = self.proxy.systemic_error
+        systemic = self.proxy.collect_systemic_error(rollout_id)
 
         return RolloutOutcome(
             status=final.status,

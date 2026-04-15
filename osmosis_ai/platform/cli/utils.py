@@ -306,6 +306,7 @@ def _require_subscription(*, workspace_name: str) -> None:
         return
 
     refreshed = False
+    api_reached = False
     with contextlib.suppress(PlatformAPIError, OSError):
         credentials = require_credentials()
         from osmosis_ai.platform.api.client import OsmosisClient
@@ -314,6 +315,7 @@ def _require_subscription(*, workspace_name: str) -> None:
         info = client.refresh_workspace_info(
             credentials=credentials, workspace_name=workspace_name
         )
+        api_reached = True
         has_subscription = info.get("has_subscription")
         if has_subscription is not None:
             save_subscription_status(workspace_name, bool(has_subscription))
@@ -324,6 +326,12 @@ def _require_subscription(*, workspace_name: str) -> None:
         return
 
     if not refreshed and status is None:
+        if api_reached:
+            raise CLIError(
+                f"Workspace '{workspace_name}' not found. "
+                "It may have been deleted or renamed.\n"
+                "  Run 'osmosis workspace' to select a valid workspace."
+            )
         return
 
     raise CLIError(

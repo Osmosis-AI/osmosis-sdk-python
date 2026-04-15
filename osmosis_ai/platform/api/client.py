@@ -45,7 +45,7 @@ class OsmosisClient:
         self,
         *,
         credentials: Credentials | None = None,
-        workspace_name: str | None = None,
+        workspace_name: str,
     ) -> dict[str, Any]:
         """Fetch subscription status for a workspace via /api/cli/workspaces.
 
@@ -58,7 +58,7 @@ class OsmosisClient:
             require_workspace=False,
         )
         for ws in data.get("workspaces", []):
-            if workspace_name and ws.get("name") == workspace_name:
+            if ws.get("name") == workspace_name:
                 return {"has_subscription": ws.get("has_subscription")}
         return {}
 

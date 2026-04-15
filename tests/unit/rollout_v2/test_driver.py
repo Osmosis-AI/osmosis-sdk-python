@@ -21,14 +21,17 @@ def test_rollout_outcome_defaults():
 class FakeProxy:
     """Minimal proxy stub for InProcessDriver tests."""
 
-    def __init__(self, systemic_error=None):
+    def __init__(self, systemic_errors: dict[str, str] | None = None):
         self.url = "http://127.0.0.1:9999/v1"
         self.api_key = "test-key"
         self._tokens: dict[str, int] = {}
-        self.systemic_error = systemic_error
+        self._systemic_errors: dict[str, str] = systemic_errors or {}
 
     def collect_tokens(self, rollout_id: str) -> int:
         return self._tokens.pop(rollout_id, 0)
+
+    def collect_systemic_error(self, rollout_id: str) -> str | None:
+        return self._systemic_errors.pop(rollout_id, None)
 
     def set_tokens(self, rollout_id: str, count: int):
         self._tokens[rollout_id] = count
@@ -149,7 +152,7 @@ async def test_in_process_driver_systemic_error():
             status=RolloutStatus.FAILURE, err_message="auth fail"
         ),
     )
-    proxy = FakeProxy(systemic_error="Authentication failed")
+    proxy = FakeProxy(systemic_errors={"eval-0-run-0": "Authentication failed"})
     driver = InProcessDriver(backend=backend, proxy=proxy)
 
     outcome = await driver.run(

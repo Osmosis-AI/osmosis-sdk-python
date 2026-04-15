@@ -40,10 +40,10 @@ class LiteLLMProxy:
         self.base_url = base_url
         self.trace_dir: Path | None = Path(trace_dir) if trace_dir else None
         self._tokens: dict[str, int] = {}
+        self._systemic_errors: dict[str, str] = {}
         self._port: int | None = None
         self._server_task: asyncio.Task[None] | None = None
         self._server: Any = None
-        self.systemic_error: str | None = None
 
     @property
     def url(self) -> str:
@@ -53,6 +53,9 @@ class LiteLLMProxy:
 
     def collect_tokens(self, rollout_id: str) -> int:
         return self._tokens.pop(rollout_id, 0)
+
+    def collect_systemic_error(self, rollout_id: str) -> str | None:
+        return self._systemic_errors.pop(rollout_id, None)
 
     async def start(self) -> str:
         """Start proxy and return the base URL."""
@@ -97,6 +100,7 @@ class LiteLLMProxy:
         self._server = None
         self._port = None
         self._tokens.clear()
+        self._systemic_errors.clear()
 
     async def preflight_check(self) -> None:
         """Send a minimal 1-token request to verify LLM connectivity."""
@@ -160,7 +164,7 @@ class LiteLLMProxy:
             response: Any = await litellm.acompletion(**kwargs)
         except Exception as e:
             if type(e).__name__ in self.SYSTEMIC_EXCEPTIONS:
-                self.systemic_error = str(e)
+                self._systemic_errors[rollout_id] = str(e)
             raise
         elapsed_ms = (time.monotonic() - start) * 1000
 
@@ -197,20 +201,29 @@ class LiteLLMProxy:
             response: Any = await litellm.acompletion(**kwargs)
         except Exception as e:
             if type(e).__name__ in self.SYSTEMIC_EXCEPTIONS:
-                self.systemic_error = str(e)
+                self._systemic_errors[rollout_id] = str(e)
             error_data = {"error": {"message": str(e), "type": type(e).__name__}}
             yield f"data: {json.dumps(error_data)}\n\n"
             yield "data: [DONE]\n\n"
             return
 
-        async for chunk in response:
-            if hasattr(chunk, "usage") and chunk.usage:
-                total = chunk.usage.total_tokens or 0
-                if total > 0:
-                    self._tokens[rollout_id] = self._tokens.get(rollout_id, 0) + total
+        try:
+            async for chunk in response:
+                if hasattr(chunk, "usage") and chunk.usage:
+                    total = chunk.usage.total_tokens or 0
+                    if total > 0:
+                        self._tokens[rollout_id] = (
+                            self._tokens.get(rollout_id, 0) + total
+                        )
 
-            chunk_data = chunk.model_dump(exclude_none=True)
-            yield f"data: {json.dumps(chunk_data, ensure_ascii=False)}\n\n"
+                chunk_data = chunk.model_dump(exclude_none=True)
+                yield f"data: {json.dumps(chunk_data, ensure_ascii=False)}\n\n"
+        except Exception as e:
+            logger.warning("Streaming error for rollout_id=%s: %s", rollout_id, e)
+            if type(e).__name__ in self.SYSTEMIC_EXCEPTIONS:
+                self._systemic_errors[rollout_id] = str(e)
+            error_data = {"error": {"message": str(e), "type": type(e).__name__}}
+            yield f"data: {json.dumps(error_data)}\n\n"
 
         yield "data: [DONE]\n\n"
 
