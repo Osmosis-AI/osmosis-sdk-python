@@ -138,8 +138,21 @@ class LiteLLMProxy:
                 raise CLIError(f"LLM preflight check failed: {msg}") from e
             logger.debug("Preflight non-fatal error: %s", e)
 
-    # Keys that are either overridden by the proxy or handled separately.
-    _SKIP_BODY_KEYS = frozenset({"model", "messages", "stream", "stream_options"})
+    # Transport & credential keys are always proxy-controlled, never from request body.
+    _PROXY_CONTROLLED_KEYS = frozenset(
+        {
+            "model",
+            "messages",
+            "stream",
+            "stream_options",
+            "api_key",
+            "api_base",
+            "base_url",
+            "organization",
+            "api_version",
+            "custom_llm_provider",
+        }
+    )
 
     def _build_litellm_kwargs(self, body: dict) -> dict[str, Any]:
         """Build kwargs for litellm.acompletion from the incoming request body."""
@@ -153,7 +166,7 @@ class LiteLLMProxy:
             kwargs["api_base"] = self.base_url
 
         for key, value in body.items():
-            if key not in self._SKIP_BODY_KEYS and key not in kwargs:
+            if key not in self._PROXY_CONTROLLED_KEYS and key not in kwargs:
                 kwargs[key] = value
         return kwargs
 
