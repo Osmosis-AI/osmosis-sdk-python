@@ -52,7 +52,7 @@ class FakeDriver(RolloutDriver):
             return RolloutOutcome(
                 status=RolloutStatus.FAILURE,
                 error="Simulated provider failure",
-                systemic_error=True,
+                systemic_error="Simulated provider failure",
                 duration_ms=0.0,
                 tokens=0,
             )

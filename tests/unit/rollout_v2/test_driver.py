@@ -15,7 +15,7 @@ def test_rollout_outcome_defaults():
     assert outcome.error is None
     assert outcome.duration_ms == 0.0
     assert outcome.tokens == 0
-    assert outcome.systemic_error is False
+    assert outcome.systemic_error is None
 
 
 class FakeProxy:
@@ -111,7 +111,7 @@ async def test_in_process_driver_success(success_backend):
     assert outcome.samples["s1"].reward == 0.8
     assert outcome.tokens == 150
     assert outcome.duration_ms > 0
-    assert outcome.systemic_error is False
+    assert outcome.systemic_error is None
 
 
 async def test_in_process_driver_graded(graded_backend):
@@ -157,8 +157,8 @@ async def test_in_process_driver_systemic_error():
         rollout_id="eval-0-run-0",
     )
 
-    assert outcome.systemic_error is True
-    assert "Authentication failed" in outcome.error
+    assert outcome.systemic_error == "Authentication failed"
+    assert outcome.error == "auth fail"
 
 
 async def test_in_process_driver_max_concurrency():

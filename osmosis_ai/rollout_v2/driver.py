@@ -33,7 +33,7 @@ class RolloutOutcome:
     error: str | None = None
     duration_ms: float = 0.0
     tokens: int = 0
-    systemic_error: bool = False
+    systemic_error: str | None = None
 
 
 class RolloutDriver(ABC):
@@ -134,10 +134,10 @@ class InProcessDriver(RolloutDriver):
         return RolloutOutcome(
             status=final.status,
             samples=final.samples,
-            error=systemic or final.err_message,
+            error=final.err_message,
             duration_ms=(time.monotonic() - start) * 1000,
             tokens=tokens,
-            systemic_error=systemic is not None,
+            systemic_error=systemic,
         )
 
 

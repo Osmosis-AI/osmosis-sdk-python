@@ -429,7 +429,7 @@ class EvalOrchestrator:
 
                 # Systemic error → stop immediately
                 if result_dict.get("systemic_error"):
-                    stop_reason = result_dict.get("error", "Systemic error")
+                    stop_reason = result_dict["systemic_error"]
                     break
 
                 # Zero-token fail-fast heuristic
@@ -518,7 +518,7 @@ class EvalOrchestrator:
 
                     if result_dict.get("systemic_error"):
                         batch_has_systemic = True
-                        stop_reason = result_dict.get("error", "Systemic error")
+                        stop_reason = result_dict["systemic_error"]
 
                     # Track zero-token status for the batch
                     if result_dict.get("tokens", 0) > 0 or result_dict["success"]:

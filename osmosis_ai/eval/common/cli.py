@@ -2,7 +2,12 @@
 
 from __future__ import annotations
 
-import os
+import hashlib
+import importlib.machinery
+import importlib.util
+import sys
+import types
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from osmosis_ai.cli.console import Console
@@ -39,26 +44,113 @@ def truncate_error(text: str, max_len: int = 50) -> str:
     return flat[: max_len - 3] + "..." if len(flat) > max_len else flat
 
 
-def _ensure_rollout_on_path(rollout: str | None) -> str | None:
-    """Add rollouts/<name>/ to sys.path if rollout is specified.
-
-    Returns the rollout directory path, or None.
-    """
-    if not rollout:
-        return None
-
-    import sys
-
-    cwd = os.getcwd()
-    rollout_dir = os.path.join(cwd, "rollouts", rollout)
-    if not os.path.isdir(rollout_dir):
+def _resolve_rollout_entrypoint(
+    rollout: str,
+    entrypoint: str,
+) -> tuple[Path, Path]:
+    """Resolve and validate the rollout root and entrypoint file path."""
+    rollout_dir = (Path.cwd() / "rollouts" / rollout).resolve()
+    if not rollout_dir.is_dir():
         raise CLIError(
             f"Rollout directory not found: rollouts/{rollout}/\n"
             f"  Expected at: {rollout_dir}"
         )
-    if rollout_dir not in sys.path:
-        sys.path.insert(0, rollout_dir)
-    return rollout_dir
+
+    entrypoint_rel = Path(entrypoint)
+    if entrypoint_rel.is_absolute():
+        raise CLIError(
+            f"Entrypoint must be a path relative to rollouts/{rollout}/, got: {entrypoint}"
+        )
+    if entrypoint_rel.suffix != ".py":
+        raise CLIError(
+            f"Entrypoint must point to a Python file ending in .py, got: {entrypoint}"
+        )
+
+    entrypoint_path = (rollout_dir / entrypoint_rel).resolve()
+    try:
+        entrypoint_path.relative_to(rollout_dir)
+    except ValueError as exc:
+        raise CLIError(
+            f"Entrypoint must stay within rollouts/{rollout}/, got: {entrypoint}"
+        ) from exc
+
+    if not entrypoint_path.is_file():
+        raise CLIError(
+            f"Entrypoint file not found in rollouts/{rollout}/: {entrypoint}\n"
+            f"  Expected at: {entrypoint_path}"
+        )
+
+    return rollout_dir, entrypoint_path
+
+
+def _synthetic_rollout_package_name(rollout_dir: Path) -> str:
+    digest = hashlib.sha256(str(rollout_dir).encode("utf-8")).hexdigest()[:16]
+    return f"_osmosis_rollout_{digest}"
+
+
+def _clear_rollout_module_cache(package_name: str) -> None:
+    for module_name in list(sys.modules):
+        if module_name == package_name or module_name.startswith(f"{package_name}."):
+            sys.modules.pop(module_name, None)
+
+
+def _load_package_module(package_name: str, package_dir: Path) -> types.ModuleType:
+    init_py = package_dir / "__init__.py"
+    if init_py.is_file():
+        spec = importlib.util.spec_from_file_location(
+            package_name,
+            init_py,
+            submodule_search_locations=[str(package_dir)],
+        )
+        if spec is None or spec.loader is None:
+            raise CLIError(f"Failed to load rollout package: {package_dir}")
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[package_name] = module
+        spec.loader.exec_module(module)
+        return module
+
+    module = types.ModuleType(package_name)
+    module.__file__ = str(init_py)
+    module.__package__ = package_name
+    module.__path__ = [str(package_dir)]  # type: ignore[attr-defined]
+    spec = importlib.machinery.ModuleSpec(package_name, loader=None, is_package=True)
+    spec.submodule_search_locations = [str(package_dir)]
+    module.__spec__ = spec
+    sys.modules[package_name] = module
+    return module
+
+
+def _ensure_parent_packages(
+    package_name: str,
+    rollout_dir: Path,
+    entrypoint_path: Path,
+) -> None:
+    parts = entrypoint_path.relative_to(rollout_dir).with_suffix("").parts[:-1]
+    current_dir = rollout_dir
+    current_package = package_name
+    for part in parts:
+        current_dir = current_dir / part
+        current_package = f"{current_package}.{part}"
+        _load_package_module(current_package, current_dir)
+
+
+def _load_rollout_module(rollout: str, entrypoint: str) -> types.ModuleType:
+    """Load an entrypoint as an isolated synthetic package subtree."""
+    rollout_dir, entrypoint_path = _resolve_rollout_entrypoint(rollout, entrypoint)
+    package_name = _synthetic_rollout_package_name(rollout_dir)
+    _clear_rollout_module_cache(package_name)
+    _load_package_module(package_name, rollout_dir)
+    _ensure_parent_packages(package_name, rollout_dir, entrypoint_path)
+
+    relative_parts = entrypoint_path.relative_to(rollout_dir).with_suffix("").parts
+    module_name = ".".join((package_name, *relative_parts))
+    spec = importlib.util.spec_from_file_location(module_name, entrypoint_path)
+    if spec is None or spec.loader is None:
+        raise CLIError(f"Failed to load entrypoint module: {entrypoint}")
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[module_name] = module
+    spec.loader.exec_module(module)
+    return module
 
 
 def _entrypoint_to_module(entrypoint: str) -> str:
@@ -102,22 +194,10 @@ def _resolve_workflow(
 
     Returns (workflow_cls, config) where config may be None.
     """
-    import importlib
-    import sys
-
     from osmosis_ai.rollout_v2.agent_workflow import AgentWorkflow
     from osmosis_ai.rollout_v2.types import AgentWorkflowConfig
 
-    # Ensure cwd is on sys.path so local modules can be imported from CLI.
-    cwd = os.getcwd()
-    if cwd not in sys.path:
-        sys.path.insert(0, cwd)
-
-    # Add rollout directory to sys.path
-    _ensure_rollout_on_path(rollout)
-
-    module_name = _entrypoint_to_module(entrypoint)
-    mod = importlib.import_module(module_name)
+    mod = _load_rollout_module(rollout, entrypoint)
 
     workflow_pairs = [
         (n, v)
@@ -185,7 +265,9 @@ def load_workflow(
 
 
 def auto_discover_grader(
-    entrypoint: str,
+    module_name: str,
+    *,
+    entrypoint_label: str | None = None,
 ) -> tuple[type | None, Any]:
     """Discover a Grader subclass and its config from the entrypoint module.
 
@@ -195,14 +277,11 @@ def auto_discover_grader(
 
     Returns (grader_cls, grader_config) or (None, None) if not found.
     """
-    import sys
-
-    module_name = _entrypoint_to_module(entrypoint)
     mod = sys.modules.get(module_name)
     if mod is None:
         return None, None
 
-    return _discover_grader_from_module(mod, entrypoint)
+    return _discover_grader_from_module(mod, entrypoint_label or module_name)
 
 
 def load_dataset_rows(

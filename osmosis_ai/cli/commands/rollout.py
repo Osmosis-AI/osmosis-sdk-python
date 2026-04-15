@@ -191,7 +191,10 @@ def _serve(
         raise typer.Exit(1)
 
     try:
-        grader_cls, grader_config = auto_discover_grader(config.serve_entrypoint)
+        grader_cls, grader_config = auto_discover_grader(
+            workflow_cls.__module__,
+            entrypoint_label=config.serve_entrypoint,
+        )
     except CLIError as e:
         console.print_error(str(e))
         raise typer.Exit(1) from None

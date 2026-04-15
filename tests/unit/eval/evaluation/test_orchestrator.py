@@ -603,7 +603,7 @@ class TestOrchestratorSystemicError:
                 RolloutOutcome(
                     status=RolloutStatus.FAILURE,
                     error="Auth key expired",
-                    systemic_error=True,
+                    systemic_error="Auth key expired",
                     tokens=0,
                 ),
             ]
@@ -624,7 +624,7 @@ class TestOrchestratorSystemicError:
                 RolloutOutcome(
                     status=RolloutStatus.FAILURE,
                     error="Budget exceeded",
-                    systemic_error=True,
+                    systemic_error="Budget exceeded",
                     tokens=0,
                 ),
             ]
@@ -648,7 +648,7 @@ class TestOrchestratorSystemicError:
                 RolloutOutcome(
                     status=RolloutStatus.FAILURE,
                     error="Connection refused",
-                    systemic_error=True,
+                    systemic_error="Connection refused",
                     tokens=0,
                 ),
             ]
@@ -700,13 +700,13 @@ class TestOrchestratorBatchMode:
                 RolloutOutcome(
                     status=RolloutStatus.FAILURE,
                     error="Auth failed",
-                    systemic_error=True,
+                    systemic_error="Auth failed",
                     tokens=0,
                 ),
                 RolloutOutcome(
                     status=RolloutStatus.FAILURE,
                     error="Auth failed",
-                    systemic_error=True,
+                    systemic_error="Auth failed",
                     tokens=0,
                 ),
             ]
@@ -1191,7 +1191,7 @@ class TestProgressCallback:
                 RolloutOutcome(
                     status=RolloutStatus.FAILURE,
                     error="Error",
-                    systemic_error=True,
+                    systemic_error="Error",
                     tokens=0,
                 ),
             ]

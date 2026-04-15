@@ -330,7 +330,6 @@ class EvalCommand:
             return 1
 
         from osmosis_ai.eval.common.cli import (
-            _entrypoint_to_module,
             _resolve_grader,
             format_duration,
             load_dataset_rows,
@@ -426,10 +425,10 @@ class EvalCommand:
         assert workflow_cls is not None
 
         # 5. Resolve grader from [grader] override or auto-discover from entrypoint
-        entrypoint_module = _entrypoint_to_module(config.eval_entrypoint)
+        workflow_module_name = workflow_cls.__module__
         try:
             grader_cls, grader_config = _resolve_grader(
-                entrypoint_module,
+                workflow_module_name,
                 explicit_grader=config.grader_module,
                 explicit_config=config.grader_config,
             )
@@ -535,7 +534,7 @@ class EvalCommand:
 
         dataset_fingerprint = compute_dataset_fingerprint(config.eval_dataset)
 
-        module_fingerprint = compute_module_fingerprint(entrypoint_module) or ""
+        module_fingerprint = compute_module_fingerprint(workflow_module_name) or ""
 
         grader_fingerprint = compute_module_fingerprint(grader_cls.__module__)
 
