@@ -35,10 +35,10 @@ Credentials path: `~/.config/osmosis/credentials.json`.
 ### Token expiration
 
 ```
-Not logged in. Run 'osmosis auth login' first, or use --skip-register for local testing.
+Not logged in. Run 'osmosis auth login' first.
 ```
 
-Run `osmosis auth login` or use `osmosis rollout serve ... --local` / `--skip-register` when you do not need registration.
+Run `osmosis auth login` again before using workspace-scoped platform commands.
 
 ### Wrong workspace
 
@@ -46,7 +46,7 @@ Run `osmosis workspace` to inspect or switch context.
 
 ## Reward and grader issues
 
-Decorators like `@osmosis_reward` still apply to classic reward functions used in other platform flows. For **`osmosis eval run`**, scoring comes from your **Grader** implementation discovered next to the workflow — see [Eval mode](./eval-mode.md).
+Decorators like `@osmosis_reward` still apply to classic reward functions used in other platform flows. For **`osmosis eval run`**, scoring comes from your **Grader** implementation discovered next to the workflow — see [Eval](./eval.md).
 
 ## Rubric (`osmosis eval rubric`)
 
@@ -104,22 +104,14 @@ Fix reported workflow/grader issues before binding a port.
 
 `osmosis rollout serve` requires a concrete `Grader` discoverable from the entrypoint module. If validation reports that no grader was found, add one there; in most projects you will also define a `GraderConfig`.
 
-### Not logged in for registration
-
-Either `osmosis auth login` or start with `--skip-register` / `--local`.
-
 ### Missing FastAPI
 
 ```
 ImportError: ... Install ... osmosis-ai[server]
 ```
 
-### Public host / IP detection
-
-For registration, the process may need a reachable host. Set it with `-H` / `--host` on `osmosis rollout serve`, or in `[server].host` inside `serve.toml`. For local debugging without platform registration, use `--local`.
-
 ## See also
 
 - [CLI reference](./cli.md)
 - [Dataset format](./datasets.md)
-- [Eval mode](./eval-mode.md)
+- [Eval](./eval.md)

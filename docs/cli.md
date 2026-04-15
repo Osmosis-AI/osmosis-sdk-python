@@ -51,8 +51,6 @@ Start a v2 RolloutServer from a TOML file.
 
 ```bash
 osmosis rollout serve serve.toml
-osmosis rollout serve serve.toml --local
-osmosis rollout serve serve.toml --skip-register
 osmosis rollout serve serve.toml -p 9100 -H 127.0.0.1
 osmosis rollout serve serve.toml --validate-only
 ```
@@ -69,10 +67,6 @@ port = 9000
 host = "0.0.0.0"
 log_level = "info"
 
-[registration]
-skip = false
-# api_key = "optional-static-key"
-
 [debug]
 no_validate = false
 # trace_dir = "./traces"
@@ -85,20 +79,22 @@ no_validate = false
 | `--no-validate` | Skip backend validation |
 | `--validate-only` | Validate the required workflow/grader pair and exit |
 | `--log-level` | Override Uvicorn log level |
-| `--skip-register` | Do not register with the platform |
-| `--local` | No API key auth, no platform registration |
-
-With `--local`, do not set `[registration].api_key` in the config file.
 
 ### osmosis rollout list
 
-Reserved; not implemented yet.
+List rollouts in the current workspace.
+
+```bash
+osmosis rollout list
+osmosis rollout list --limit 50
+osmosis rollout list --all
+```
 
 ## Evaluation
 
 ### osmosis eval run
 
-Evaluate using a TOML config. The workflow is loaded from the entrypoint module, and the grader is usually auto-discovered from that same module, so most configs do not need a separate `[grader]` table.
+Evaluate using a TOML config. The workflow is loaded from the entrypoint module, and the grader is usually auto-discovered from that same module, so most configs do not need a separate `[grader]` table. If the grader lives elsewhere, set `[grader].module` and optional `[grader].config`.
 
 ```bash
 osmosis eval run eval.toml
@@ -108,7 +104,7 @@ osmosis eval run eval.toml --limit 20 --batch-size 4
 osmosis eval run eval.toml -o ./results --log-samples
 ```
 
-See [Eval mode](./eval-mode.md) for the full `[eval]`, `[llm]`, `[runs]`, `[baseline]`, and `[output]` sections.
+See [Eval](./eval.md) for the full `[eval]`, `[llm]`, `[runs]`, `[baseline]`, and `[output]` sections.
 
 ### osmosis eval cache
 
@@ -149,6 +145,6 @@ osmosis eval rubric -d data.jsonl \
 
 ## See also
 
-- [Eval mode](./eval-mode.md)
+- [Eval](./eval.md)
 - [Dataset format](./datasets.md)
 - [Troubleshooting](./troubleshooting.md)

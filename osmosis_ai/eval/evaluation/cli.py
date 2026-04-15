@@ -330,7 +330,8 @@ class EvalCommand:
             return 1
 
         from osmosis_ai.eval.common.cli import (
-            auto_discover_grader,
+            _entrypoint_to_module,
+            _resolve_grader,
             format_duration,
             load_dataset_rows,
             load_workflow,
@@ -424,10 +425,15 @@ class EvalCommand:
             return 1
         assert workflow_cls is not None
 
-        # 5. Resolve grader (auto-discover from entrypoint)
+        # 5. Resolve grader from [grader] override or auto-discover from entrypoint
+        entrypoint_module = _entrypoint_to_module(config.eval_entrypoint)
         try:
-            grader_cls, grader_config = auto_discover_grader(config.eval_entrypoint)
-        except CLIError as e:
+            grader_cls, grader_config = _resolve_grader(
+                entrypoint_module,
+                explicit_grader=config.grader_module,
+                explicit_config=config.grader_config,
+            )
+        except (CLIError, ImportError, TypeError, ValueError) as e:
             self.console.print_error(f"Error: {e}")
             return 1
 
@@ -435,7 +441,8 @@ class EvalCommand:
             self.console.print_error(
                 "No Grader was found in the entrypoint module. "
                 "`osmosis eval run` requires a concrete Grader (and typically a "
-                "GraderConfig) alongside the workflow."
+                "GraderConfig) alongside the workflow. Configure `[grader].module` "
+                "if the grader lives outside the entrypoint."
             )
             return 1
 
@@ -528,8 +535,7 @@ class EvalCommand:
 
         dataset_fingerprint = compute_dataset_fingerprint(config.eval_dataset)
 
-        ep_module = config.eval_entrypoint.replace("/", ".").removesuffix(".py")
-        module_fingerprint = compute_module_fingerprint(ep_module) or ""
+        module_fingerprint = compute_module_fingerprint(entrypoint_module) or ""
 
         grader_fingerprint = compute_module_fingerprint(grader_cls.__module__)
 

@@ -148,7 +148,6 @@ def _serve(
     no_validate: bool,
     validate_only: bool,
     log_level: LogLevel | None,
-    local: bool,
     console: Console,
 ) -> None:
     if validate_only and no_validate:
@@ -254,52 +253,38 @@ def _serve(
 
     fastapi_app = create_rollout_server(backend=backend)
 
-    if not local:
-        from fastapi import FastAPI
+    from starlette.middleware.base import BaseHTTPMiddleware
+    from starlette.requests import Request
 
-        assert isinstance(fastapi_app, FastAPI)
+    class _RolloutLabelMiddleware(BaseHTTPMiddleware):
+        async def dispatch(self, request: Request, call_next):
+            if request.method != "POST" or request.url.path != "/rollout":
+                return await call_next(request)
+            body = await request.body()
+            import json
 
-        @fastapi_app.get("/platform/health")
-        async def platform_health() -> dict[str, object]:
-            snap = backend.limiter.snapshot()
-            return {
-                "agent_loop": agent_name,
-                "active_rollouts": snap.get("running", 0),
-                "completed_rollouts": 0,
-            }
+            async def receive_replay():
+                return {"type": "http.request", "body": body, "more_body": False}
 
-        from starlette.middleware.base import BaseHTTPMiddleware
-        from starlette.requests import Request
+            try:
+                data = json.loads(body)
+            except json.JSONDecodeError:
+                return await call_next(
+                    Request(request.scope, receive_replay),
+                )
 
-        class _RolloutLabelMiddleware(BaseHTTPMiddleware):
-            async def dispatch(self, request: Request, call_next):
-                if request.method != "POST" or request.url.path != "/rollout":
-                    return await call_next(request)
-                body = await request.body()
-                import json
+            if not isinstance(data, dict) or data.get("label") in (None, ""):
+                return _json_error_response(
+                    status_code=400,
+                    detail=(
+                        "Missing required field 'label' for rollout requests when a "
+                        "grader is configured."
+                    ),
+                )
 
-                async def receive_replay():
-                    return {"type": "http.request", "body": body, "more_body": False}
+            return await call_next(Request(request.scope, receive_replay))
 
-                try:
-                    data = json.loads(body)
-                except json.JSONDecodeError:
-                    return await call_next(
-                        Request(request.scope, receive_replay),
-                    )
-
-                if not isinstance(data, dict) or data.get("label") in (None, ""):
-                    return _json_error_response(
-                        status_code=400,
-                        detail=(
-                            "Missing required field 'label' for rollout requests when a "
-                            "grader is configured."
-                        ),
-                    )
-
-                return await call_next(Request(request.scope, receive_replay))
-
-        fastapi_app.add_middleware(_RolloutLabelMiddleware)
+    fastapi_app.add_middleware(_RolloutLabelMiddleware)
 
     grader_name = grader_cls.__name__ if grader_cls else "(none)"
 
@@ -361,11 +346,6 @@ def serve(
         "--log-level",
         help="Uvicorn log level (overrides config).",
     ),
-    local: bool = typer.Option(
-        False,
-        "--local",
-        help="Local mode: skip platform middleware (label validation, /platform/health).",
-    ),
 ) -> None:
     """Start a v2 RolloutServer from a TOML config file."""
     from osmosis_ai.cli.console import Console
@@ -377,7 +357,6 @@ def serve(
         no_validate=no_validate,
         validate_only=validate_only,
         log_level=log_level,
-        local=local,
         console=Console(),
     )
 

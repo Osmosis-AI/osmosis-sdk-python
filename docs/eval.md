@@ -1,4 +1,4 @@
-# Eval mode
+# Eval
 
 Run **`osmosis eval run`** with a TOML file to execute an **AgentWorkflow** against a dataset using an external or self-hosted LLM. A **Grader** in the same entrypoint module provides reward scores.
 
@@ -27,6 +27,13 @@ Results are cached on disk so long runs can resume after interruption.
 ### Optional sections
 
 Most eval configs only need `[eval]`, `[llm]`, and optional `[runs]` / `[output]` settings. You do **not** typically need a `[grader]` table because the grader is usually auto-discovered from the entrypoint module.
+
+**`[grader]`** (optional — when the grader lives outside the entrypoint)
+
+| Key | Description |
+|-----|-------------|
+| `module` | Import path to the `Grader` class, e.g. `my_rollout.grader:MyGrader`. |
+| `config` | Optional import path to the `GraderConfig` object, e.g. `my_rollout.grader:grader_config`. |
 
 **`[runs]`**
 
@@ -95,6 +102,7 @@ osmosis eval run eval.toml --limit 50 --batch-size 4 -o ./results
 
 - The **workflow** class is the single concrete `AgentWorkflow` subclass in the entrypoint module (plus optional `AgentWorkflowConfig`).
 - The **grader** is usually auto-discovered from that same module, along with an optional `GraderConfig`, so most users do not need to declare grader wiring in TOML.
+- If the grader lives in another module, set `[grader].module` and optional `[grader].config` to override auto-discovery.
 - A grader is **required**; if none is found, `osmosis eval run` exits with an error.
 
 ## Connecting to model endpoints

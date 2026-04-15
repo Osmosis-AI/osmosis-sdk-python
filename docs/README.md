@@ -8,6 +8,6 @@
 ## Workflow commands
 
 - [Dataset format](./datasets.md) — Parquet / JSONL / CSV columns
-- [Eval mode](./eval-mode.md) — `osmosis eval run`, caching, pass@k
+- [Eval](./eval.md) — `osmosis eval run`, caching, pass@k
 - [CLI reference](./cli.md) — all `osmosis` commands and options
 - [Troubleshooting](./troubleshooting.md)

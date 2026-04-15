@@ -174,3 +174,22 @@ log_level = "verbose"
     with pytest.raises(CLIError) as exc_info:
         load_serve_config(path)
     assert "Invalid config" in str(exc_info.value)
+
+
+def test_registration_section_rejected(tmp_path: Path) -> None:
+    path = tmp_path / "registration.toml"
+    path.write_text(
+        """
+[serve]
+rollout = "r"
+entrypoint = "m:a"
+
+[registration]
+skip = true
+""".strip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(CLIError) as exc_info:
+        load_serve_config(path)
+    assert "[registration]" in str(exc_info.value)

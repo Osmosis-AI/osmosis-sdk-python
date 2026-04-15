@@ -80,6 +80,7 @@ def test_serve_help_shows_config_positional_and_no_module_flag(capsys):
     assert "CONFIG_PATH" in out
     assert "Path to serve TOML config file." in out
     assert "--module" not in out
+    assert "--local" not in out
     assert re.search(r"(?<!\w)-m(?!\w)", out) is None
 
 
@@ -278,7 +279,7 @@ def test_non_local_health_is_public(serve_app_capture):
     assert r.json().get("status") == "ok"
 
 
-def test_platform_health_accessible(serve_app_capture):
+def test_platform_health_not_exposed(serve_app_capture):
     from fastapi.testclient import TestClient
 
     cfg, captured = serve_app_capture
@@ -286,10 +287,7 @@ def test_platform_health_accessible(serve_app_capture):
     assert rc == 0
     client = TestClient(captured["app"])
     r = client.get("/platform/health")
-    assert r.status_code == 200
-    data = r.json()
-    assert data.get("agent_loop") == "wf_test"
-    assert "active_rollouts" in data
+    assert r.status_code == 404
 
 
 def test_post_rollout_missing_label_returns_400_json(serve_app_capture):

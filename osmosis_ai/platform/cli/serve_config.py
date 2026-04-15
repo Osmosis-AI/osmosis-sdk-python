@@ -66,6 +66,11 @@ def load_serve_config(path: Path) -> ServeConfig:
 
     server_section = raw.get("server", {})
     debug_section = raw.get("debug", {})
+    if "registration" in raw:
+        raise CLIError(
+            f"[registration] is no longer supported in {path}; "
+            "remove that section from the serve config."
+        )
 
     try:
         serve_parsed = _ServeSection(**serve_section)

@@ -27,7 +27,7 @@ Python SDK for [Osmosis AI](https://platform.osmosis.ai), a platform for trainin
 |------|-------------|
 | **Define agents** | One `AgentWorkflow` subclass (+ optional `AgentWorkflowConfig`) in your repo. For `rollout serve`, the entrypoint must also expose a concrete `Grader` (typically with a `GraderConfig`). |
 | **Layout** | Use a rollout pack directory under `rollouts/<name>/` when loading by rollout name; the CLI adds that directory to `sys.path`. |
-| **Serve** | `osmosis rollout serve serve.toml` — HTTP server for TrainGate. The entrypoint module must expose a concrete `Grader` (typically with a `GraderConfig`); config is TOML (`[serve]`, `[server]`, `[registration]`, `[debug]`). |
+| **Serve** | `osmosis rollout serve serve.toml` — HTTP server for TrainGate. The entrypoint module must expose a concrete `Grader` (typically with a `GraderConfig`); config is TOML (`[serve]`, `[server]`, `[debug]`). |
 | **Evaluate** | `osmosis eval run eval.toml` — same execution stack as training, with optional pass@k and caching. |
 
 **Example repositories:** [osmosis-git-sync-example](https://github.com/Osmosis-AI/osmosis-git-sync-example) (synced agent repo patterns) · [osmosis-remote-rollout-example](https://github.com/Osmosis-AI/osmosis-remote-rollout-example) (reference server usage — align with current SDK exports when upgrading).
@@ -39,7 +39,7 @@ Python SDK for [Osmosis AI](https://platform.osmosis.ai), a platform for trainin
 Requires **Python 3.12+**. For development setup, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 - **An LLM API key** (e.g., OpenAI, Anthropic, Groq) — required for `osmosis eval run` when using hosted models. See [supported providers](https://docs.litellm.ai/docs/providers).
-- **Osmosis account** (optional) — needed for `osmosis auth login`, workspace management, and registering a rollout server with the platform. Sign up at [platform.osmosis.ai](https://platform.osmosis.ai).
+- **Osmosis account** (optional) — needed for `osmosis auth login`, workspace management, and platform-backed commands such as datasets, models, and training runs. Sign up at [platform.osmosis.ai](https://platform.osmosis.ai).
 
 **pip**
 
@@ -59,7 +59,7 @@ uv add osmosis-ai[full]           # Same as [server] (all packaged optional feat
 
 ## Testing and evaluation
 
-- [Eval mode](docs/eval-mode.md) — graded runs, pass@k, cache/resume with `osmosis eval run`
+- [Eval](docs/eval.md) — graded runs, pass@k, cache/resume with `osmosis eval run`
 - [CLI reference](docs/cli.md)
 
 ## Contributing

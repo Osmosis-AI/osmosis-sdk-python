@@ -55,4 +55,4 @@ Any other columns are kept on the normalized row dict. Downstream code (workflow
 
 ## See also
 
-- [Eval mode](./eval-mode.md)
+- [Eval](./eval.md)
