@@ -413,7 +413,7 @@ class EvalCommand:
         assert rows is not None
 
         # 4. Load workflow
-        workflow_cls, workflow_config, error = load_workflow(
+        workflow_cls, workflow_config, entrypoint_module, error = load_workflow(
             rollout=config.eval_rollout,
             entrypoint=config.eval_entrypoint,
             quiet=quiet,
@@ -425,10 +425,9 @@ class EvalCommand:
         assert workflow_cls is not None
 
         # 5. Resolve grader from [grader] override or auto-discover from entrypoint
-        workflow_module_name = workflow_cls.__module__
         try:
             grader_cls, grader_config = _resolve_grader(
-                workflow_module_name,
+                entrypoint_module,
                 explicit_grader=config.grader_module,
                 explicit_config=config.grader_config,
             )
@@ -534,7 +533,7 @@ class EvalCommand:
 
         dataset_fingerprint = compute_dataset_fingerprint(config.eval_dataset)
 
-        module_fingerprint = compute_module_fingerprint(workflow_module_name) or ""
+        module_fingerprint = compute_module_fingerprint(entrypoint_module) or ""
 
         grader_fingerprint = compute_module_fingerprint(grader_cls.__module__)
 

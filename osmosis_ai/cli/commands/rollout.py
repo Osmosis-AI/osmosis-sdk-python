@@ -180,7 +180,7 @@ def _serve(
 
     from osmosis_ai.eval.common.cli import auto_discover_grader, load_workflow
 
-    workflow_cls, workflow_config, wf_err = load_workflow(
+    workflow_cls, workflow_config, entrypoint_module, wf_err = load_workflow(
         rollout=config.serve_rollout,
         entrypoint=config.serve_entrypoint,
         quiet=False,
@@ -192,7 +192,7 @@ def _serve(
 
     try:
         grader_cls, grader_config = auto_discover_grader(
-            workflow_cls.__module__,
+            entrypoint_module,
             entrypoint_label=config.serve_entrypoint,
         )
     except CLIError as e:

@@ -100,11 +100,11 @@ def patch_serve_pipeline(monkeypatch, tmp_path):
 
     monkeypatch.setattr(
         "osmosis_ai.eval.common.cli.load_workflow",
-        lambda **_: (_WF, wf_cfg, None),
+        lambda **_: (_WF, wf_cfg, "_test_wf_module", None),
     )
     monkeypatch.setattr(
         "osmosis_ai.eval.common.cli.auto_discover_grader",
-        lambda _ep: (DummyGrader, DUMMY_GRADER_CONFIG),
+        lambda _ep, **_kw: (DummyGrader, DUMMY_GRADER_CONFIG),
     )
     monkeypatch.setattr(
         "osmosis_ai.rollout_v2.validator.validate_backend",
@@ -131,11 +131,11 @@ def test_serve_fails_without_grader_even_with_no_validate(
 
     monkeypatch.setattr(
         "osmosis_ai.eval.common.cli.load_workflow",
-        lambda **_: (_WF, wf_cfg, None),
+        lambda **_: (_WF, wf_cfg, "_test_wf_module", None),
     )
     monkeypatch.setattr(
         "osmosis_ai.eval.common.cli.auto_discover_grader",
-        lambda _ep: (None, None),
+        lambda _ep, **_kw: (None, None),
     )
     monkeypatch.setattr("uvicorn.run", MagicMock())
 
@@ -171,11 +171,11 @@ def test_serve_fails_without_grader_with_debug_no_validate_in_config(
 
     monkeypatch.setattr(
         "osmosis_ai.eval.common.cli.load_workflow",
-        lambda **_: (_WF, wf_cfg, None),
+        lambda **_: (_WF, wf_cfg, "_test_wf_module", None),
     )
     monkeypatch.setattr(
         "osmosis_ai.eval.common.cli.auto_discover_grader",
-        lambda _ep: (None, None),
+        lambda _ep, **_kw: (None, None),
     )
     monkeypatch.setattr("uvicorn.run", MagicMock())
 
@@ -247,11 +247,11 @@ def serve_app_capture(monkeypatch, tmp_path):
 
     monkeypatch.setattr(
         "osmosis_ai.eval.common.cli.load_workflow",
-        lambda **_: (_WF, wf_cfg, None),
+        lambda **_: (_WF, wf_cfg, "_test_wf_module", None),
     )
     monkeypatch.setattr(
         "osmosis_ai.eval.common.cli.auto_discover_grader",
-        lambda _ep: (DummyGrader, DUMMY_GRADER_CONFIG),
+        lambda _ep, **_kw: (DummyGrader, DUMMY_GRADER_CONFIG),
     )
     monkeypatch.setattr(
         "osmosis_ai.rollout_v2.validator.validate_backend",
@@ -406,11 +406,11 @@ def test_serve_with_trace_dir_creates_session_subdir(monkeypatch, tmp_path, caps
 
     monkeypatch.setattr(
         "osmosis_ai.eval.common.cli.load_workflow",
-        lambda **_: (_WF, wf_cfg, None),
+        lambda **_: (_WF, wf_cfg, "_test_wf_module", None),
     )
     monkeypatch.setattr(
         "osmosis_ai.eval.common.cli.auto_discover_grader",
-        lambda _ep: (DummyGrader, DUMMY_GRADER_CONFIG),
+        lambda _ep, **_kw: (DummyGrader, DUMMY_GRADER_CONFIG),
     )
     monkeypatch.setattr(
         "osmosis_ai.rollout_v2.validator.validate_backend",

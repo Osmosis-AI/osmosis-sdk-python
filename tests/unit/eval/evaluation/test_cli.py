@@ -62,7 +62,7 @@ def _run_command(monkeypatch: pytest.MonkeyPatch, config: SimpleNamespace) -> No
     )
     monkeypatch.setattr(
         "osmosis_ai.eval.common.cli.load_workflow",
-        lambda **kwargs: (fake_workflow, None, None),
+        lambda **kwargs: (fake_workflow, None, "fake_entrypoint", None),
     )
     monkeypatch.setattr(EvalCommand, "_resolve_api_key", lambda self, cfg: None)
     monkeypatch.setattr("osmosis_ai.eval.llm_proxy.LiteLLMProxy", _FakeProxy)

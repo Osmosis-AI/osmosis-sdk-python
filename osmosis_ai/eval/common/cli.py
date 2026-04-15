@@ -186,13 +186,18 @@ def _pick_representative(pairs_for_one_object: list[tuple[str, Any]]) -> Any:
 def _resolve_workflow(
     rollout: str,
     entrypoint: str,
-) -> tuple[type, Any]:
+) -> tuple[type, Any, str]:
     """Resolve an AgentWorkflow subclass and its config.
 
     Converts the entrypoint file path to a module, imports it,
     and auto-discovers an AgentWorkflow subclass and optional config.
 
-    Returns (workflow_cls, config) where config may be None.
+    Returns (workflow_cls, config, entrypoint_module_name) where config
+    may be None.  *entrypoint_module_name* is the ``__name__`` of the
+    loaded entrypoint module — callers should use this (not
+    ``workflow_cls.__module__``) when discovering a Grader, because the
+    workflow class may have been defined in a different file and merely
+    imported into the entrypoint.
     """
     from osmosis_ai.rollout_v2.agent_workflow import AgentWorkflow
     from osmosis_ai.rollout_v2.types import AgentWorkflowConfig
@@ -235,7 +240,7 @@ def _resolve_workflow(
         else None
     )
 
-    return workflow_cls, config
+    return workflow_cls, config, mod.__name__
 
 
 def load_workflow(
@@ -243,25 +248,25 @@ def load_workflow(
     entrypoint: str,
     quiet: bool = False,
     console: Console | None = None,
-) -> tuple[type | None, Any, str | None]:
+) -> tuple[type | None, Any, str | None, str | None]:
     """Load an AgentWorkflow class and its config.
 
-    Returns (workflow_cls, workflow_config, error).
+    Returns (workflow_cls, workflow_config, entrypoint_module_name, error).
     """
     if console and not quiet:
         console.print(f"Loading workflow: {entrypoint}")
 
     try:
-        workflow_cls, workflow_config = _resolve_workflow(
+        workflow_cls, workflow_config, entrypoint_module = _resolve_workflow(
             rollout=rollout, entrypoint=entrypoint
         )
     except (CLIError, ImportError, ValueError, TypeError) as e:
-        return None, None, str(e)
+        return None, None, None, str(e)
 
     if console and not quiet:
         console.print(f"  Workflow: {workflow_cls.__name__}")
 
-    return workflow_cls, workflow_config, None
+    return workflow_cls, workflow_config, entrypoint_module, None
 
 
 def auto_discover_grader(
