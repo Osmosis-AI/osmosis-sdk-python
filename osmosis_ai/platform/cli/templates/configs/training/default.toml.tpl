@@ -9,8 +9,9 @@
 
 [experiment]
 rollout = "<your-rollout>"        # Rollout name (directory under rollouts/)
+entrypoint = "<your-entrypoint-file>" # Entrypoint file name
 model_path = "<your-model-path>"     # Must be a supported model (see above)
-dataset_id = "<your-dataset-id>"     # Platform dataset ID
+dataset = "<your-dataset-name>"        # Dataset name from `osmosis dataset list`
 # commit_sha =                       # Pin to a specific commit (default: latest on default branch)
 
 [training]

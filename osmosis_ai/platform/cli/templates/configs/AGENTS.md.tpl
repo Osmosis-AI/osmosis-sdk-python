@@ -17,8 +17,9 @@ Then fill in required fields and adjust parameters as needed. See the template f
 ```toml
 [experiment]
 rollout = "calculator"
+entrypoint = "main.py"
 model_path = "Qwen/Qwen3.5-35B-A3B"  # or "Qwen/Qwen3.5-122B-A10B"
-dataset_id = "my-dataset-abc123"
+dataset = "my-dataset-abc123"
 
 [training]
 # lr = 1e-6
@@ -40,20 +41,24 @@ dataset_id = "my-dataset-abc123"
 ## Eval Configs (`eval/*.toml`)
 
 ```toml
-rollout = "calculator"            # Required: target rollout name
-
 [eval]
-num_examples = 20
-rollouts_per_example = 3
+rollout = "calculator"
+entrypoint = "main.py"
+dataset = "data/dataset.jsonl"
 
-[sampling]
-max_tokens = 512
-temperature = 0.7
+[llm]
+model = "openai/gpt-5-mini"
+
+[runs]
+n = 3
+batch_size = 2
 ```
 
 ## Commands
 
 ```bash
 osmosis train submit configs/training/<config>.toml
-osmosis eval -m rollouts.<rollout_name>.main:agent -d data/dataset.jsonl --eval-fn rewards:fn --model gpt-4.1-mini
+osmosis eval run configs/eval/<config>.toml
+osmosis rollout serve <path-to-serve-config.toml>
+osmosis train status <run-name>
 ```

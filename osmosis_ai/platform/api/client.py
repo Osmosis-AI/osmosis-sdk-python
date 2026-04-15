@@ -15,7 +15,9 @@ from .models import (
     ModelAffectedResources,
     PaginatedBaseModels,
     PaginatedDatasets,
+    PaginatedRollouts,
     PaginatedTrainingRuns,
+    SubmitTrainingRunResult,
     TrainingRunDetail,
     TrainingRunMetrics,
     WorkspaceDeletionStatus,
@@ -43,7 +45,7 @@ class OsmosisClient:
         self,
         *,
         credentials: Credentials | None = None,
-        workspace_name: str | None = None,
+        workspace_name: str,
     ) -> dict[str, Any]:
         """Fetch subscription status for a workspace via /api/cli/workspaces.
 
@@ -56,9 +58,9 @@ class OsmosisClient:
             require_workspace=False,
         )
         for ws in data.get("workspaces", []):
-            if workspace_name and ws.get("name") == workspace_name:
-                return {"has_subscription": ws.get("has_subscription")}
-        return {}
+            if ws.get("name") == workspace_name:
+                return {"found": True, "has_subscription": ws.get("has_subscription")}
+        return {"found": False}
 
     def list_workspaces(
         self,
@@ -242,6 +244,36 @@ class OsmosisClient:
 
     # ── Training Runs ─────────────────────────────────────────────
 
+    def submit_training_run(
+        self,
+        *,
+        model_path: str,
+        dataset: str,
+        rollout_name: str,
+        entrypoint: str,
+        commit_sha: str | None = None,
+        config: dict[str, Any] | None = None,
+        credentials: Credentials | None = None,
+    ) -> SubmitTrainingRunResult:
+        """Submit a new training run."""
+        data: dict[str, Any] = {
+            "model_path": model_path,
+            "dataset": dataset,
+            "rollout_name": rollout_name,
+            "entrypoint": entrypoint,
+        }
+        if commit_sha is not None:
+            data["commit_sha"] = commit_sha
+        if config is not None:
+            data["config"] = config
+        result = platform_request(
+            "/api/cli/training-runs",
+            method="POST",
+            data=data,
+            credentials=credentials,
+        )
+        return SubmitTrainingRunResult.from_dict(result)
+
     def list_training_runs(
         self,
         limit: int = DEFAULT_PAGE_SIZE,
@@ -304,6 +336,19 @@ class OsmosisClient:
             credentials=credentials,
         )
         return TrainingRunMetrics.from_dict(data)
+
+    # ── Rollouts ──────────────────────────────────────────────────
+
+    def list_rollouts(
+        self,
+        limit: int = DEFAULT_PAGE_SIZE,
+        offset: int = 0,
+        *,
+        credentials: Credentials | None = None,
+    ) -> PaginatedRollouts:
+        qs = urlencode({"limit": limit, "offset": offset})
+        data = platform_request(f"/api/cli/rollouts?{qs}", credentials=credentials)
+        return PaginatedRollouts.from_dict(data)
 
     # ── Models ────────────────────────────────────────────────────
 

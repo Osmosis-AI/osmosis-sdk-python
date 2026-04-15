@@ -15,7 +15,6 @@ from osmosis_ai.platform.cli.utils import (
     format_processing_step,
     format_run_status,
     format_size,
-    resolve_id_prefix,
     validate_list_options,
 )
 from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE
@@ -38,41 +37,6 @@ from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE
 )
 def test_format_size(size_bytes: int, expected: str) -> None:
     assert format_size(size_bytes) == expected
-
-
-# ── resolve_id_prefix ────────────────────────────────────────────────
-
-
-def _make_items(*ids: str) -> list[SimpleNamespace]:
-    return [SimpleNamespace(id=id_) for id_ in ids]
-
-
-def test_resolve_id_prefix_full_id_returned_as_is() -> None:
-    full_id = "a" * 32
-    assert resolve_id_prefix(full_id, []) == full_id
-
-
-def test_resolve_id_prefix_unique_match() -> None:
-    items = _make_items("abc123def456", "xyz789ghi012")
-    assert resolve_id_prefix("abc", items) == "abc123def456"
-
-
-def test_resolve_id_prefix_no_match_raises() -> None:
-    items = _make_items("abc123def456")
-    with pytest.raises(CLIError, match="No item found"):
-        resolve_id_prefix("zzz", items)
-
-
-def test_resolve_id_prefix_ambiguous_raises() -> None:
-    items = _make_items("abc111", "abc222", "abc333")
-    with pytest.raises(CLIError, match="Ambiguous"):
-        resolve_id_prefix("abc", items)
-
-
-def test_resolve_id_prefix_custom_entity_name() -> None:
-    items = _make_items("abc123")
-    with pytest.raises(CLIError, match="No dataset found"):
-        resolve_id_prefix("zzz", items, entity_name="dataset")
 
 
 # ── format_processing_step ───────────────────────────────────────────

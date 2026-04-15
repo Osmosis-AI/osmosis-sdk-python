@@ -30,7 +30,7 @@ The table below lists all development commands. If you installed with **pip**, d
 | Task | Command |
 |------|---------|
 | Run all tests | `uv run pytest` |
-| Run a single file | `uv run pytest tests/unit/rollout/core/test_base.py` |
+| Run a single file | `uv run pytest tests/unit/rollout_v2/test_validator.py` |
 | Run tests by name | `uv run pytest -k "test_name"` |
 | Run with coverage | `uv run pytest --cov=osmosis_ai --cov-report=term-missing` |
 | Lint | `uv run ruff check .` |
@@ -117,7 +117,7 @@ Add a label to your PR so it gets categorized correctly in Release Notes:
 | `documentation` | Docs update |
 | `chore` / `ci` / `refactor` / `dependencies` | Maintenance work |
 
-Module-specific labels (`reward`, `rollout`, `server`, `cli`, `auth`, `eval`) can also be added for filtering.
+Module-specific labels (`reward`, `rollout`, `server`, `cli`, `auth`, `eval`) can also be added for filtering. Rollout work typically touches `osmosis_ai.rollout_v2` and related CLI commands.
 
 ### Workflow
 
@@ -126,4 +126,4 @@ Module-specific labels (`reward`, `rollout`, `server`, `cli`, `auth`, `eval`) ca
 3. Run `uv run pytest` and `uv run ruff check .`
 4. Submit a pull request with a properly formatted title and label
 
-CI will run linting, type checking (pyright + mypy), tests across Python 3.10-3.13, PR title validation, and a build validation on every PR.
+CI will run linting, type checking (pyright + mypy), tests on supported Python versions (see `requires-python` in `pyproject.toml`), PR title validation, and a build validation on every PR.

@@ -39,10 +39,11 @@ body:
       description: Which part of the SDK does this relate to?
       options:
         - Reward / Rubric decorators
-        - Remote Rollout (RolloutAgentLoop)
-        - Rollout Server (create_app)
-        - CLI (osmosis command)
-        - Authentication
+        - Remote rollout (`osmosis_ai.rollout_v2`)
+        - Rollout server (`create_rollout_server`)
+        - CLI (`osmosis` command)
+        - Authentication / platform
+        - Evaluation & rubrics
         - Other
     validations:
       required: false

@@ -1,194 +1,74 @@
 # Troubleshooting
 
-Common errors and their resolutions when working with the Osmosis SDK.
+Common errors when using the Osmosis SDK CLI and local evaluation.
 
-## Installation Issues
+## Installation
 
-### Missing extras
+### Missing optional dependencies
 
-The SDK ships optional dependency groups. If you see an `ImportError` for a
-package that should be available, you likely need to install the correct extra.
-
-| Error | Install command |
-|-------|----------------|
-| `No module named 'fastmcp'` | `pip install osmosis-ai[mcp]` |
-| `No module named 'fastapi'` / `No module named 'uvicorn'` | `pip install osmosis-ai[server]` |
+| Error | Install |
+|-------|---------|
+| `No module named 'fastapi'` / `uvicorn` | `pip install osmosis-ai[server]` |
 | `No module named 'pydantic_settings'` | `pip install osmosis-ai[server]` |
-| `No module named 'pyarrow'` | `pip install osmosis-ai[server]` (or `pip install pyarrow`) |
+| `No module named 'pyarrow'` | `pip install pyarrow` or `pip install osmosis-ai[server]` |
 | `No module named 'rich'` | `pip install osmosis-ai[server]` |
-| `No module named 'litellm'` | `pip install osmosis-ai` (included in core dependencies) |
-
-To install everything at once:
+| `No module named 'litellm'` | Should ship with core; reinstall `osmosis-ai` |
 
 ```bash
-pip install osmosis-ai[full]    # server + mcp
-pip install osmosis-ai[dev]     # full + testing/linting tools
+pip install osmosis-ai[full]
+pip install osmosis-ai[dev]   # + pytest, ruff, etc.
 ```
 
-### Python version requirements
+### Python version
 
-The SDK requires **Python 3.10 or later** (3.10, 3.11, 3.12, 3.13). If you see
-syntax errors or compatibility issues, verify your Python version:
+Requires **Python 3.12+**. Check with `python --version`.
 
-```bash
-python --version
-```
+## Authentication
 
-## Authentication Issues
+Credentials path: `~/.config/osmosis/credentials.json`.
 
-Credentials are saved to `~/.config/osmosis/credentials.json` after a
-successful `osmosis login`.
+### `osmosis auth login` fails
 
-### `osmosis login` fails
-
-1. **Network / firewall** -- the login flow requires outbound HTTPS to the
-   Osmosis platform. Ensure your network allows it.
-2. **Force re-login** -- if your session is in an inconsistent state, run:
-
-   ```bash
-   osmosis login --force
-   ```
+1. Ensure outbound HTTPS to the platform is allowed.
+2. Retry with `osmosis auth login --force`.
 
 ### Token expiration
 
-Tokens have an expiration time. When a token expires, commands that require
-authentication will fail silently or report that you are not logged in.
-
 ```
-Not logged in. Please run 'osmosis login' first, or use skip_register=True for local testing.
+Not logged in. Run 'osmosis auth login' first.
 ```
 
-Resolution:
+Run `osmosis auth login` again before using workspace-scoped platform commands.
 
-```bash
-osmosis login
-```
+### Wrong workspace
 
-To check your current session:
+Run `osmosis workspace` to inspect or switch context.
 
-```bash
-osmosis whoami
-```
+## Reward and grader issues
 
-### Multiple workspaces
+For **`osmosis eval run`**, scoring comes from your **Grader** implementation discovered next to the workflow — see [Eval](./eval.md).
 
-If you are logged in to the wrong workspace, commands may fail with permission
-errors. Run `osmosis workspace` to view your current context and switch to a different workspace.
+## Rubric (`osmosis eval rubric`)
 
-## Reward Function Errors
+### Missing API key
 
-### Signature validation errors from `@osmosis_reward`
+Set the provider-specific environment variable (e.g. `OPENAI_API_KEY`) or pass `--api-key`.
 
-The `@osmosis_reward` decorator enforces the classic Osmosis signature when the
-first parameter is named `solution_str`:
+### Provider errors
 
-```
-(solution_str: str, ground_truth: str, extra_info: dict = None, **kwargs) -> float
-```
+Check quota, model name, and network. Increase `--timeout` if calls are slow.
 
-Common `TypeError` messages and their causes:
+## Dataset errors
 
-| Error message | Cause |
-|---------------|-------|
-| `Function <name> must have at least 3 parameters, got <n>` | The function has fewer than three parameters. |
-| `First parameter 'solution_str' must be annotated as str, got <type>` | Missing or wrong type annotation on `solution_str`. |
-| `Second parameter must be named 'ground_truth', got '<name>'` | The second parameter has the wrong name. |
-| `Second parameter 'ground_truth' must be annotated as str, got <type>` | Missing or wrong type annotation on `ground_truth`. |
-| `Third parameter must be named 'extra_info', got '<name>'` | The third parameter has the wrong name. |
-| `Third parameter 'extra_info' must be annotated as dict or dict \| None, got <type>` | Wrong annotation on `extra_info`. Use `dict` or `dict \| None`. |
-| `Third parameter 'extra_info' must have a default value of None` | `extra_info` does not have a default value. |
+### `DatasetParseError`
 
-### Return type must be float
+Unsupported extension or malformed file. Supported: `.parquet`, `.jsonl`, `.csv`.
 
-When using the classic signature, the decorated function **must** return a plain
-`float`. Any other return type raises:
+### `DatasetValidationError`
 
-```
-TypeError: Function <name> must return a float, got <type>
-```
+Every row needs non-empty string `ground_truth`, `user_prompt`, and `system_prompt`. See [Dataset format](./datasets.md).
 
-Ensure you return `float(value)` rather than `int`, `Decimal`, or another
-numeric type.
-
-## Rubric Evaluation Errors
-
-### MissingAPIKeyError
-
-Raised when the LLM provider API key cannot be found. The error message
-includes a hint showing the expected environment variable.
-
-Resolution -- set the appropriate environment variable for your provider:
-
-| Provider | Environment variable |
-|----------|---------------------|
-| openai | `OPENAI_API_KEY` |
-| anthropic | `ANTHROPIC_API_KEY` |
-| xai | `XAI_API_KEY` |
-| gemini / google | `GEMINI_API_KEY` |
-| openrouter | `OPENROUTER_API_KEY` |
-| cerebras | `CEREBRAS_API_KEY` |
-| azure | `AZURE_API_KEY` |
-| bedrock | `AWS_ACCESS_KEY_ID` |
-| vertex_ai | `GOOGLE_APPLICATION_CREDENTIALS` |
-
-You can also provide the key directly in `model_info` via the `api_key` or
-`api_key_env` fields.
-
-### ProviderRequestError
-
-Raised when the LLM provider call fails. Common causes:
-
-- **Authentication failure** -- your API key is invalid or expired.
-- **Rate limiting** -- you have exceeded the provider's rate limit. Wait and retry.
-- **Timeout** -- the request took too long. Try increasing the `timeout` parameter or use a faster model.
-- **Invalid JSON response** -- the model returned content that could not be parsed.
-
-### ModelNotFoundError
-
-A subclass of `ProviderRequestError` raised when the requested model does not
-exist. Verify the model name and that your account has access.
-
-## Test Mode Errors
-
-These errors occur when running `osmosis test` or `osmosis eval`.
-
-### DatasetParseError
-
-Raised when the dataset file cannot be read or parsed.
-
-Resolution:
-
-- Ensure your file uses a supported format: `.parquet`, `.jsonl`, or `.csv`.
-- For JSONL files, verify each line is valid JSON.
-- For Parquet files, install `pyarrow` (included in the `server` extra).
-
-### DatasetValidationError
-
-Raised when dataset rows are missing required columns or have invalid values.
-
-Every dataset row must include these columns:
-
-| Column | Type | Description |
-|--------|------|-------------|
-| `ground_truth` | `str` | Reference answer |
-| `user_prompt` | `str` | User message |
-| `system_prompt` | `str` | System prompt |
-
-All values must be non-empty strings.
-
-### ToolValidationError
-
-Ensure your `get_tools()` method returns valid OpenAI-compatible function tool
-schemas. Each tool must have a `type` field set to `"function"` and a `function`
-object with at least a `name`.
-
-### Provider connection errors
-
-`SystemicProviderError` is raised when a provider error affects all rows (e.g.
-authentication failure, budget exhausted). The batch aborts early instead of
-retrying each row. Fix the underlying credential or connectivity issue and re-run.
-
-## Eval Cache Errors
+## Eval cache
 
 ### Lock contention
 
@@ -196,132 +76,42 @@ retrying each row. Fix the underlying credential or connectivity issue and re-ru
 TimeoutError: Another eval with the same config is already running.
 ```
 
-This means another `osmosis eval` process with the same configuration is already
-holding the cache lock. Wait for it to finish, or increase the timeout:
+Wait for the other process, or:
 
 ```bash
-export OSMOSIS_EVAL_LOCK_TIMEOUT=120  # seconds (default: 30)
+export OSMOSIS_EVAL_LOCK_TIMEOUT=120
 ```
 
-If the other process crashed without releasing the lock, the lock file (`.lock`)
-will be automatically released when the process exits. If a stale lock persists,
-you can manually delete it:
+### Dataset changed mid-run
+
+Use `--fresh` after mutating the dataset file.
+
+### Stale cache format
+
+Upgrade the package or delete the specific cache file after `osmosis eval cache ls`.
+
+## Rollout server
+
+### Validation failures
+
+Run a one-shot check:
 
 ```bash
-# Find the cache directory
-osmosis eval cache dir
-# Delete the stale lock file
-rm ~/.cache/osmosis/eval/{model}/{dataset}/{task_id}.lock
+osmosis rollout serve serve.toml --validate-only
 ```
 
-### Dataset changed during evaluation
+Fix reported workflow/grader issues before binding a port.
+
+`osmosis rollout serve` requires a concrete `Grader` discoverable from the entrypoint module. If validation reports that no grader was found, add one there; in most projects you will also define a `GraderConfig`.
+
+### Missing FastAPI
 
 ```
-Error: Dataset was modified during evaluation. Results may be inconsistent. Use --fresh to restart.
+ImportError: ... Install ... osmosis-ai[server]
 ```
 
-The dataset file was modified while the evaluation was in progress. Re-run with
-`--fresh` to start from scratch with the current dataset.
+## See also
 
-### Dataset changed since cached evaluation
-
-```
-Warning: Dataset file has changed since this eval completed.
-```
-
-A completed evaluation is loaded from cache but the dataset file has been
-modified since. The displayed results are from the original dataset. Use
-`--fresh` to re-evaluate with the current dataset.
-
-### Cache version mismatch
-
-```
-RuntimeError: Cache file created by a newer version of osmosis (vN).
-```
-
-The cache file was created by a newer version of the SDK. Upgrade osmosis or
-use `--fresh` to discard the incompatible cache and start a new evaluation.
-
-### Config hash collision
-
-```
-RuntimeError: Cache file belongs to a different eval configuration
-```
-
-Extremely rare: two different configurations produced the same short task ID.
-Re-run with a slightly different parameter (e.g., add `--temperature 0.7`)
-or manually delete the conflicting cache file.
-
-## Remote Rollout Errors
-
-### AgentLoopValidationError
-
-Raised by `osmosis validate` or when starting a server with `validate=True`.
-
-Common validation error codes:
-
-| Code | Meaning |
-|------|---------|
-| `MISSING_NAME` | Agent loop class has no `name` attribute. |
-| `INVALID_NAME_TYPE` | `name` is not a string. |
-| `EMPTY_NAME` | `name` is empty or whitespace. |
-| `RUN_NOT_ASYNC` | `run` is not an `async def` function. |
-| `GET_TOOLS_RETURNS_NONE` | `get_tools()` returned `None` instead of a list. |
-| `GET_TOOLS_EXCEPTION` | `get_tools()` raised an exception. |
-| `MISSING_TOOL_TYPE` | A tool dict is missing the `type` field. |
-| `MISSING_FUNCTION_NAME` | A function definition has no `name`. |
-
-Run validation before serving to catch these early:
-
-```bash
-osmosis validate -m server:agent_loop
-```
-
-### ServeError
-
-**Not logged in:**
-
-```
-ServeError: Not logged in. Please run 'osmosis login' first, or use skip_register=True for local testing.
-```
-
-Resolution -- run `osmosis login`, or pass `--skip-register` / `--local` if you
-do not need platform registration.
-
-**Missing dependencies:**
-
-```
-ImportError: FastAPI is required for serve_agent_loop(). Install it with: pip install osmosis-ai[server]
-```
-
-### Connection / timeout issues
-
-Rollout protocol exceptions:
-
-| Exception | Description | Retryable? |
-|-----------|-------------|------------|
-| `OsmosisTransportError` | Network-level failure (connection refused, DNS error). | Yes |
-| `OsmosisServerError` | Server returned HTTP 5xx. | Yes |
-| `OsmosisValidationError` | Server returned HTTP 4xx. | No |
-| `OsmosisTimeoutError` | Request exceeded configured timeout. | Yes |
-| `AgentLoopNotFoundError` | Registry lookup for agent name failed. | No |
-| `ToolExecutionError` | A tool call failed during execution. | Depends |
-| `ToolArgumentError` | Tool arguments could not be parsed. | No |
-
-For retryable errors, use exponential backoff. See [Configuration](./configuration.md) for client retry settings.
-
-### PublicIPDetectionError
-
-Raised when the server cannot detect its public IP address. Resolution:
-
-- Check network connectivity and firewall rules.
-- Provide an explicit host via `OSMOSIS_PUBLIC_HOST` environment variable or the `--host` flag.
-- If running locally, use `--local` mode which skips IP detection.
-
-## See Also
-
-- [CLI Reference](./cli.md) -- all `osmosis` commands and options
-- [Configuration](./configuration.md) -- environment variables and settings
-- [Dataset Format](./datasets.md) -- supported formats and required columns
-- [Test Mode](./test-mode.md) -- full `osmosis test` documentation
-- [Eval Mode](./eval-mode.md) -- full `osmosis eval` documentation
+- [CLI reference](./cli.md)
+- [Dataset format](./datasets.md)
+- [Eval](./eval.md)

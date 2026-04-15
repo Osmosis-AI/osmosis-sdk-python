@@ -11,15 +11,16 @@ Help the user create a new rollout in this Osmosis workspace.
 4. Design tools the agent will need (as plain Python functions)
 5. Design grader functions (how to score agent performance)
 6. Decide on system prompt and max_turns
-7. Implement in `rollouts/<rollout_name>/main.py` exporting a `RolloutAgentLoop` instance as `agent`
-8. Validate: `osmosis rollout test -m rollouts.<rollout_name>.main:agent -d data/dataset.jsonl --model gpt-4.1-mini`
+7. Implement in `rollouts/<rollout_name>/main.py` with a concrete `AgentWorkflow` and a concrete `Grader`
+8. Create `configs/eval/<rollout_name>.toml` (see Eval Config Template below)
+9. Validate: `osmosis eval run configs/eval/<rollout_name>.toml`
 
 ## Rollout Structure
 
 Each rollout must have:
 ```
 rollouts/<rollout_name>/
-├── main.py          # Must export a RolloutAgentLoop instance (e.g. `agent`)
+├── main.py          # Define a concrete AgentWorkflow and Grader
 ├── pyproject.toml   # Per-rollout dependencies
 └── README.md        # Description
 ```
@@ -39,9 +40,27 @@ rollouts/<rollout_name>/
 - Always include `**kwargs` for forward compatibility
 - Consider partial credit (not just 0/1)
 
+## Eval Config Template
+
+Create `configs/eval/<rollout_name>.toml` with:
+
+```toml
+[eval]
+rollout = "<rollout_name>"
+entrypoint = "main.py"
+dataset = "path/to/dataset.jsonl"
+
+[llm]
+model = "openai/gpt-4o"
+
+[runs]
+n = 1
+batch_size = 1
+```
+
 ## Validation
 
-After creating the rollout, always run:
+After creating the rollout and its eval config, always run:
 ```bash
-osmosis rollout test -m rollouts.<rollout_name>.main:agent -d data/dataset.jsonl --model gpt-4.1-mini
+osmosis eval run configs/eval/<rollout_name>.toml
 ```

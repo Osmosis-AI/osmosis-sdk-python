@@ -1,0 +1,46 @@
+"""Shared exceptions for local rollout workflows."""
+
+from __future__ import annotations
+
+
+class LocalExecutionError(Exception):
+    """Base exception for local execution errors."""
+
+
+class DatasetValidationError(LocalExecutionError):
+    """Raised when dataset rows fail schema/value validation."""
+
+
+class DatasetParseError(LocalExecutionError):
+    """Raised when dataset files cannot be parsed."""
+
+
+class ProviderError(LocalExecutionError):
+    """Raised when external provider calls fail."""
+
+
+class SystemicProviderError(ProviderError):
+    """Provider error that affects ALL rows (auth, budget, connectivity).
+
+    Unlike transient errors (rate limits, timeouts, context window), these
+    errors indicate a systemic configuration problem that will cause every
+    single row to fail identically.  Callers should abort the batch early
+    rather than retrying each row.
+    """
+
+    duration_ms: float | None
+    tokens: int | None
+
+    def __init__(self, *args: object) -> None:
+        super().__init__(*args)
+        self.duration_ms = None
+        self.tokens = None
+
+
+__all__ = [
+    "DatasetParseError",
+    "DatasetValidationError",
+    "LocalExecutionError",
+    "ProviderError",
+    "SystemicProviderError",
+]

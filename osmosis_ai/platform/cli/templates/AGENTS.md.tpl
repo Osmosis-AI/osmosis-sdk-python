@@ -7,7 +7,7 @@ This is an Osmosis workspace. It contains training rollouts for reinforcement le
 ## Structure
 
 - `rollouts/<env_name>/` — Each rollout is self-contained
-  - `main.py` — **Entry point** (required). Must export `load_environment()`.
+  - `main.py` — **Entry point** (required). Defines a concrete `AgentWorkflow` and typically a concrete `Grader`.
   - `pyproject.toml` — Per-rollout dependencies.
   - `README.md` — Rollout description.
 - `configs/training/` — Training configurations (TOML, workspace-scoped). Each config references a rollout by name.
@@ -19,7 +19,7 @@ This is an Osmosis workspace. It contains training rollouts for reinforcement le
 
 ### Rollout Definition
 
-Each rollout lives in `rollouts/<env_name>/` and must have a `main.py` with a `load_environment()` function.
+Each rollout lives in `rollouts/<env_name>/` and should expose one concrete `AgentWorkflow` subclass in the entrypoint module. For `osmosis rollout serve` and most eval flows, that module should also expose a concrete `Grader` and usually a `GraderConfig`.
 
 ### Tools
 
@@ -35,11 +35,10 @@ Always include `**kwargs` for forward compatibility.
 
 ```bash
 # Local development
-osmosis test <env_name> -m gpt-4.1-mini        # Quick test with cloud LLM
-osmosis eval <env_name> -d data/test.jsonl      # Batch evaluation
-osmosis serve <env_name>                        # Start rollout server
+osmosis eval run configs/eval/<env_name>.toml   # Batch evaluation
+osmosis rollout serve <path-to-serve-config.toml>  # Start rollout server
 
 # Training (workspace-scoped)
 osmosis train submit configs/training/qwen3-4b.toml
-osmosis train status <run-id>
+osmosis train status <run-name>
 ```

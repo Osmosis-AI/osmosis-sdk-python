@@ -6,13 +6,13 @@ Help the user configure and submit a training run on the Osmosis Platform.
 ## Steps
 
 1. Identify which rollout to train (check `rollouts/` directory)
-2. Ensure rollout is validated (`osmosis rollout test -m rollouts.<rollout_name>.main:agent -d data/dataset.jsonl --model gpt-4.1-mini` passes)
+2. Ensure rollout is validated (`osmosis eval run configs/eval/<rollout_name>.toml` passes)
 3. Copy the default template: `cp configs/training/default.toml configs/training/<run_name>.toml`
-4. Fill in the required `[experiment]` fields (`rollout`, `model_path`, `dataset_id`)
+4. Fill in the required `[experiment]` fields (`rollout`, `entrypoint`, `model_path`, `dataset`)
 5. Adjust optional hyperparameters based on the scenario (see guidance below)
 6. Verify dataset is available (`osmosis dataset list`)
 7. Submit: `osmosis train submit configs/training/<run_name>.toml`
-8. Monitor: `osmosis train status <run-id>`
+8. Monitor: `osmosis train status <run-name>`
 
 ## Config Template
 
@@ -23,8 +23,9 @@ Start from `configs/training/default.toml`. It contains all available parameters
 | Field | What to fill in |
 |-------|-----------------|
 | `rollout` | Rollout name — must match a directory under `rollouts/` |
+| `entrypoint` | Entrypoint file inside the rollout directory (for example `main.py` or `workflow.py`) |
 | `model_path` | Must be one of: `Qwen/Qwen3.5-35B-A3B`, `Qwen/Qwen3.5-122B-A10B` |
-| `dataset_id` | Dataset ID from `osmosis dataset list` |
+| `dataset` | Dataset name from `osmosis dataset list` |
 | `commit_sha` | *(optional)* Git commit SHA to pin the rollout code. If omitted, uses latest on default branch. |
 
 ### Scenario-Based Tuning Guide
@@ -58,4 +59,4 @@ Parameters below are in `[training]` unless noted otherwise.
 ## Execution Modes
 
 - **Platform-managed**: Push code via Git Sync, platform hosts the rollout
-- **Remote rollout**: User runs `osmosis rollout serve -m rollouts.<rollout_name>.main:agent`, platform connects to it
+- **Remote rollout**: User runs `osmosis rollout serve <path-to-serve-config.toml>`, platform connects to it

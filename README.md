@@ -19,47 +19,48 @@
 
 > ⚠️ **Warning**: osmosis-ai is still in active development. APIs may change between versions.
 
-Python SDK for [Osmosis AI](https://platform.osmosis.ai), a platform for training LLMs with reinforcement learning. Define custom reward functions, LLM-as-judge rubrics, and agent tools -- then use this SDK to build and test them locally before submitting training runs on managed GPU clusters.
+Python SDK for [Osmosis AI](https://platform.osmosis.ai), a platform for training LLMs with reinforcement learning. Implement an **AgentWorkflow** in Python, add a concrete **Grader** for serve/eval flows, drive them locally with the CLI, then connect a **RolloutServer** to managed training.
 
-## Quick Start
+## Quick start
 
-Pick a training mode and follow the example repo:
+| Step | What you do |
+|------|-------------|
+| **Define agents** | One `AgentWorkflow` subclass (+ optional `AgentWorkflowConfig`) in your repo. For `rollout serve`, the entrypoint must also expose a concrete `Grader` (typically with a `GraderConfig`). |
+| **Layout** | Use a rollout pack directory under `rollouts/<name>/` when loading by rollout name; the CLI adds that directory to `sys.path`. |
+| **Serve** | `osmosis rollout serve serve.toml` — HTTP server for TrainGate. The entrypoint module must expose a concrete `Grader` (typically with a `GraderConfig`); config is TOML (`[serve]`, `[server]`, `[debug]`). |
+| **Evaluate** | `osmosis eval run eval.toml` — same execution stack as training, with optional pass@k and caching. |
 
-| | Local Rollout | Remote Rollout |
-|--|--------------|----------------|
-| **How it works** | Osmosis manages the agent loop. You provide reward functions, rubrics, and MCP tools via a GitHub-synced repo. | You implement and host a `RolloutAgentLoop` server. Full control over agent behavior. |
-| **Best for** | Standard tool-use agents, fast iteration, zero infrastructure | Custom agent architectures, complex orchestration, persistent environments |
-| **Example repo** | [osmosis-git-sync-example](https://github.com/Osmosis-AI/osmosis-git-sync-example) | [osmosis-remote-rollout-example](https://github.com/Osmosis-AI/osmosis-remote-rollout-example) |
-| **Docs** | [Local Rollout Guide](docs/local-rollout/overview.md) | [Remote Rollout Guide](docs/remote-rollout/overview.md) |
+**Example repositories:** [osmosis-git-sync-example](https://github.com/Osmosis-AI/osmosis-git-sync-example) (synced agent repo patterns) · [osmosis-remote-rollout-example](https://github.com/Osmosis-AI/osmosis-remote-rollout-example) (reference server usage — align with current SDK exports when upgrading).
+
+**Documentation index:** [docs/README.md](docs/README.md)
 
 ## Installation
 
-Requires **Python 3.10+**. For development setup, see [CONTRIBUTING.md](CONTRIBUTING.md).
+Requires **Python 3.12+**. For development setup, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
-- **An LLM API key** (e.g., OpenAI, Anthropic, Groq) -- required for `osmosis test` and `osmosis eval`. See [supported providers](https://docs.litellm.ai/docs/providers).
-- **Osmosis account** (optional) -- needed for platform features like `osmosis login`, workspace management, and submitting training runs. Sign up at [platform.osmosis.ai](https://platform.osmosis.ai).
+- **An LLM API key** (e.g., OpenAI, Anthropic, Groq) — required for `osmosis eval run` when using hosted models. See [supported providers](https://docs.litellm.ai/docs/providers).
+- **Osmosis account** (optional) — needed for `osmosis auth login`, workspace management, and platform-backed commands such as datasets, models, and training runs. Sign up at [platform.osmosis.ai](https://platform.osmosis.ai).
 
 **pip**
 
 ```bash
 pip install osmosis-ai            # Core SDK
-pip install osmosis-ai[server]    # + FastAPI server for Remote Rollout
-pip install osmosis-ai[mcp]       # + MCP tool support for Local Rollout
-pip install osmosis-ai[full]      # All features
+pip install osmosis-ai[server]    # + FastAPI rollout server (pulls in platform extra)
+pip install osmosis-ai[full]      # Same as [server] (all packaged optional features)
 ```
 
 **uv**
 
 ```bash
 uv add osmosis-ai                 # Core SDK
-uv add osmosis-ai[server]         # + FastAPI server for Remote Rollout
-uv add osmosis-ai[mcp]            # + MCP tool support for Local Rollout
-uv add osmosis-ai[full]           # All features
+uv add osmosis-ai[server]         # + FastAPI rollout server (pulls in platform extra)
+uv add osmosis-ai[full]           # Same as [server] (all packaged optional features)
 ```
 
-## Testing & Evaluation
+## Testing and evaluation
 
-Both modes share the same CLI tools: [Test Mode](docs/test-mode.md) | [Eval Mode](docs/eval-mode.md) | [CLI Reference](docs/cli.md)
+- [Eval](docs/eval.md) — graded runs, pass@k, cache/resume with `osmosis eval run`
+- [CLI reference](docs/cli.md)
 
 ## Contributing
 

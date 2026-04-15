@@ -17,5 +17,10 @@ class ExecutionBackend(ABC):
     ) -> None:
         raise NotImplementedError
 
+    @property
+    def max_concurrency(self) -> int:
+        """Max concurrent executions this backend supports. 0 = no limit."""
+        return 0
+
     def health(self) -> dict[str, Any]:
         return {"status": "ok"}

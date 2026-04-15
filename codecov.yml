@@ -16,6 +16,8 @@ ignore:
   - "osmosis_ai/cli/upgrade.py"
   # Platform CLI business logic — API calls, OAuth flows, interactive prompts.
   - "osmosis_ai/platform/cli/"
+  # Eval CLI helpers — orchestrator commands, rubric CLI.
+  - "osmosis_ai/eval/**/cli.py"
   # Interactive prompt helpers (questionary/prompt_toolkit UI).
   - "osmosis_ai/cli/prompts.py"
   # Rollout v2 — ABCs & type definitions (no logic to test).

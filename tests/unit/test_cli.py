@@ -10,7 +10,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from osmosis_ai.cli import main as cli
-from osmosis_ai.rollout.eval.rubric.types import RubricResult
+from osmosis_ai.eval.rubric.types import RubricResult
 
 # =============================================================================
 # eval rubric — happy-path
@@ -33,7 +33,7 @@ def test_eval_rubric_basic(tmp_path, monkeypatch, capsys):
     mock_eval = AsyncMock(
         return_value=RubricResult(score=0.85, explanation="Good response", raw={})
     )
-    monkeypatch.setattr("osmosis_ai.rollout.eval.rubric.cli.evaluate_rubric", mock_eval)
+    monkeypatch.setattr("osmosis_ai.eval.rubric.cli.evaluate_rubric", mock_eval)
 
     exit_code = cli.main(
         [
@@ -44,7 +44,7 @@ def test_eval_rubric_basic(tmp_path, monkeypatch, capsys):
             "--rubric",
             "Score quality of the assistant response.",
             "--model",
-            "openai/gpt-4o",
+            "openai/gpt-5.4",
         ]
     )
 
@@ -69,7 +69,7 @@ def test_eval_rubric_with_output(tmp_path, monkeypatch, capsys):
     mock_eval = AsyncMock(
         return_value=RubricResult(score=0.85, explanation="Good response", raw={})
     )
-    monkeypatch.setattr("osmosis_ai.rollout.eval.rubric.cli.evaluate_rubric", mock_eval)
+    monkeypatch.setattr("osmosis_ai.eval.rubric.cli.evaluate_rubric", mock_eval)
 
     output_path = tmp_path / "results.json"
     exit_code = cli.main(
@@ -81,7 +81,7 @@ def test_eval_rubric_with_output(tmp_path, monkeypatch, capsys):
             "--rubric",
             "Score quality of the assistant response.",
             "--model",
-            "openai/gpt-4o",
+            "openai/gpt-5.4",
             "-o",
             str(output_path),
         ]
@@ -120,9 +120,7 @@ def test_eval_rubric_multiple_runs(tmp_path, monkeypatch, capsys):
             score=score, explanation=f"run-{call_count}", raw={"call": call_count}
         )
 
-    monkeypatch.setattr(
-        "osmosis_ai.rollout.eval.rubric.cli.evaluate_rubric", mock_eval_fn
-    )
+    monkeypatch.setattr("osmosis_ai.eval.rubric.cli.evaluate_rubric", mock_eval_fn)
 
     exit_code = cli.main(
         [
@@ -133,7 +131,7 @@ def test_eval_rubric_multiple_runs(tmp_path, monkeypatch, capsys):
             "--rubric",
             "Score quality.",
             "--model",
-            "openai/gpt-4o",
+            "openai/gpt-5.4",
             "-n",
             "3",
         ]
@@ -161,7 +159,7 @@ def test_eval_rubric_missing_data_path(tmp_path, capsys):
             "--rubric",
             "Score quality.",
             "--model",
-            "openai/gpt-4o",
+            "openai/gpt-5.4",
         ]
     )
     captured = capsys.readouterr()
@@ -183,76 +181,41 @@ def test_main_without_subcommand_shows_help(capsys):
     assert "osmosis" in captured.out.lower()
 
 
-def test_rollout_eval_rejects_n_runs_zero(capsys):
+def test_eval_run_rejects_missing_config(capsys):
+    """eval run fails when config file does not exist."""
     exit_code = cli.main(
         [
             "eval",
             "run",
-            "-m",
-            "my_agent:MyAgentLoop",
-            "-d",
-            "data.jsonl",
-            "--model",
-            "openai/gpt-4o",
-            "--eval-fn",
-            "rewards:score",
-            "--n",
-            "0",
+            "nonexistent.toml",
         ]
     )
     captured = capsys.readouterr()
 
     assert exit_code == 1
-    assert "Error: --n must be >= 1." in captured.err
+    assert "Config file not found" in captured.err
 
 
-def test_rollout_eval_rejects_batch_size_zero(capsys):
+def test_eval_run_rejects_fresh_and_retry_failed(tmp_path, capsys):
+    """eval run rejects --fresh and --retry-failed together."""
+    config_path = tmp_path / "eval.toml"
+    config_path.write_text(
+        '[eval]\nmodule = "mod:Agent"\ndataset = "data.jsonl"\n\n[llm]\nmodel = "openai/gpt-5.4"\n',
+        encoding="utf-8",
+    )
     exit_code = cli.main(
         [
             "eval",
             "run",
-            "-m",
-            "my_agent:MyAgentLoop",
-            "-d",
-            "data.jsonl",
-            "--model",
-            "openai/gpt-4o",
-            "--eval-fn",
-            "rewards:score",
-            "--batch-size",
-            "0",
+            str(config_path),
+            "--fresh",
+            "--retry-failed",
         ]
     )
     captured = capsys.readouterr()
 
     assert exit_code == 1
-    assert "Error: --batch-size must be >= 1." in captured.err
-
-
-def test_rollout_eval_accepts_any_model_with_base_url(capsys):
-    """With --base-url, any model name should be accepted and displayed as-is."""
-    cli.main(
-        [
-            "eval",
-            "run",
-            "-m",
-            "my_agent:MyAgentLoop",
-            "-d",
-            "data.jsonl",
-            "--model",
-            "Qwen/Qwen3-0.6B",
-            "--base-url",
-            "http://localhost:1234/v1",
-            "--eval-fn",
-            "rewards:score",
-        ]
-    )
-    captured = capsys.readouterr()
-
-    # Should pass model validation (may fail later at connectivity/auth)
-    assert "Invalid model/provider format" not in captured.err
-    # Model should be displayed without openai/ prefix
-    assert "Model: Qwen/Qwen3-0.6B" in captured.out
+    assert "--fresh and --retry-failed are mutually exclusive" in captured.err
 
 
 def test_fuzzy_suggestion(capsys):
@@ -260,27 +223,3 @@ def test_fuzzy_suggestion(capsys):
     captured = capsys.readouterr()
     assert exit_code != 0
     assert "Did you mean 'auth'?" in captured.err
-
-
-def test_rollout_test_accepts_any_model_with_base_url(capsys):
-    """With --base-url, any model name should be accepted and displayed as-is."""
-    cli.main(
-        [
-            "rollout",
-            "test",
-            "-m",
-            "my_agent:MyAgentLoop",
-            "-d",
-            "data.jsonl",
-            "--model",
-            "Qwen/Qwen3-0.6B",
-            "--base-url",
-            "http://localhost:1234/v1",
-        ]
-    )
-    captured = capsys.readouterr()
-
-    # Should pass model validation (may fail later at connectivity/auth)
-    assert "Invalid model/provider format" not in captured.err
-    # Model should be displayed without openai/ prefix
-    assert "Model: Qwen/Qwen3-0.6B" in captured.out

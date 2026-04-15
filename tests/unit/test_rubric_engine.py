@@ -1,4 +1,4 @@
-"""Tests for osmosis_ai.rollout.eval.rubric.engine -- provider parsing, prompt building, JSON parsing, and evaluation."""
+"""Tests for osmosis_ai.eval.rubric.engine -- provider parsing, prompt building, JSON parsing, and evaluation."""
 
 import json
 import sys
@@ -6,8 +6,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from osmosis_ai.rollout.eval.rubric.dataset import extract_assistant_content
-from osmosis_ai.rollout.eval.rubric.engine import (
+from osmosis_ai.eval.rubric.dataset import extract_assistant_content
+from osmosis_ai.eval.rubric.engine import (
     DEFAULT_REQUEST_TIMEOUT_SECONDS,
     _build_user_prompt,
     _default_timeout_for_model,
@@ -16,7 +16,7 @@ from osmosis_ai.rollout.eval.rubric.engine import (
     _to_litellm_model,
     evaluate_rubric,
 )
-from osmosis_ai.rollout.eval.rubric.types import (
+from osmosis_ai.eval.rubric.types import (
     MissingAPIKeyError,
     RubricResult,
 )
@@ -30,13 +30,13 @@ class TestParseProvider:
     """Tests for provider extraction from model strings."""
 
     def test_openai_prefix(self):
-        assert _parse_provider("openai/gpt-4o") == "openai"
+        assert _parse_provider("openai/gpt-5.4") == "openai"
 
     def test_anthropic_prefix(self):
         assert _parse_provider("anthropic/claude-3") == "anthropic"
 
     def test_bare_gpt_infers_openai(self):
-        assert _parse_provider("gpt-4o") == "openai"
+        assert _parse_provider("gpt-5.4") == "openai"
 
     def test_bare_claude_infers_anthropic(self):
         assert _parse_provider("claude-3-haiku") == "anthropic"
@@ -63,13 +63,13 @@ class TestToLitellmModel:
     """Tests for model format conversion."""
 
     def test_prefixed_model_unchanged(self):
-        assert _to_litellm_model("openai/gpt-4o") == "openai/gpt-4o"
+        assert _to_litellm_model("openai/gpt-5.4") == "openai/gpt-5.4"
         assert _to_litellm_model("openai/gpt-5-mini") == "openai/gpt-5-mini"
         assert _to_litellm_model("anthropic/claude-3") == "anthropic/claude-3"
         assert _to_litellm_model("groq/llama-3.1-70b") == "groq/llama-3.1-70b"
 
     def test_bare_openai_model_gets_prefix(self):
-        assert _to_litellm_model("gpt-4o") == "openai/gpt-4o"
+        assert _to_litellm_model("gpt-5.4") == "openai/gpt-5.4"
         assert _to_litellm_model("o3-mini") == "openai/o3-mini"
 
     def test_bare_non_openai_model_unchanged(self):
@@ -89,7 +89,7 @@ class TestDefaultTimeoutForModel:
 
     def test_openai_default_timeout(self):
         assert (
-            _default_timeout_for_model("openai", "gpt-4o")
+            _default_timeout_for_model("openai", "gpt-5.4")
             == DEFAULT_REQUEST_TIMEOUT_SECONDS
         )
 
@@ -247,7 +247,7 @@ def _create_mock_litellm_response(score: float, explanation: str) -> MagicMock:
     return mock_response
 
 
-_COMPLETION_PATCH = "osmosis_ai.rollout.eval.rubric.engine._litellm_completion"
+_COMPLETION_PATCH = "osmosis_ai.eval.rubric.engine._litellm_completion"
 
 
 class TestEvaluateRubric:
@@ -273,7 +273,7 @@ class TestEvaluateRubric:
         result = await evaluate_rubric(
             solution_str="The answer is 42",
             rubric="Score accuracy",
-            model="openai/gpt-4o",
+            model="openai/gpt-5.4",
             api_key="test-key",
         )
 
@@ -288,7 +288,7 @@ class TestEvaluateRubric:
                 await evaluate_rubric(
                     solution_str="Some text",
                     rubric="Score it",
-                    model="openai/gpt-4o",
+                    model="openai/gpt-5.4",
                 )
 
     async def test_empty_rubric_raises_type_error(self):
@@ -296,7 +296,7 @@ class TestEvaluateRubric:
             await evaluate_rubric(
                 solution_str="Some text",
                 rubric="",
-                model="openai/gpt-4o",
+                model="openai/gpt-5.4",
                 api_key="test-key",
             )
 
@@ -305,6 +305,6 @@ class TestEvaluateRubric:
             await evaluate_rubric(
                 solution_str="",
                 rubric="Score it",
-                model="openai/gpt-4o",
+                model="openai/gpt-5.4",
                 api_key="test-key",
             )
