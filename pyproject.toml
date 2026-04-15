@@ -13,19 +13,17 @@ authors = [
 license = {file = "LICENSE"}
 classifiers = [
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
 ]
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 dependencies = [
     "PyYAML>=6.0,<7.0",
     "python-dotenv>=0.1.0,<2.0.0",
     "requests>=2.0.0,<3.0.0",
-    "litellm>=1.40.0,<2.0.0",  # Unified LLM provider (supports 100+ providers)
+    "litellm>=1.40.0,<=1.82.6", # Unified LLM provider (supports 100+ providers)
     "tqdm>=4.0.0,<5.0.0",
     # Remote rollout SDK dependencies
     "httpx>=0.25.0,<1.0.0",
@@ -33,6 +31,8 @@ dependencies = [
     # Eval cache dependencies
     "filelock>=3.0.0,<4.0.0",
     "xxhash>=3.0.0",
+    "strands-agents[litellm]>=1.29.0",
+    "rich>=14.2.0",
     # Secure credential storage (system keychain)
     "keyring>=25.0.0",
     # Interactive CLI prompts
@@ -40,6 +40,7 @@ dependencies = [
     # CLI framework
     "typer>=0.16.0",
     "rich>=13.0.0",
+    "harbor==0.3.0",
 ]
 
 [project.optional-dependencies]
@@ -106,7 +107,24 @@ version = {attr = "osmosis_ai.consts.PACKAGE_VERSION"}
 
 [tool.coverage.run]
 source = ["osmosis_ai"]
-omit = ["tests/*", "*/consts.py"]
+omit = [
+    "tests/*",
+    "*/consts.py",
+    # CLI command groups (thin Typer shells) + interactive prompts
+    "osmosis_ai/cli/commands/*",
+    "osmosis_ai/cli/main.py",
+    "osmosis_ai/cli/upgrade.py",
+    "osmosis_ai/cli/prompts.py",
+    # Platform CLI business logic (API calls, OAuth, interactive prompts)
+    "osmosis_ai/platform/cli/*",
+    # Rollout v2 — ABCs, type defs, integrations, harbor backend
+    "osmosis_ai/rollout_v2/agent_workflow.py",
+    "osmosis_ai/rollout_v2/grader.py",
+    "osmosis_ai/rollout_v2/backend/base.py",
+    "osmosis_ai/rollout_v2/types/*",
+    "osmosis_ai/rollout_v2/integrations/*",
+    "osmosis_ai/rollout_v2/backend/harbor/*",
+]
 
 [tool.coverage.report]
 fail_under = 70
@@ -148,7 +166,7 @@ ignore = [
 known-first-party = ["osmosis_ai"]
 
 [tool.pyright]
-pythonVersion = "3.10"
+pythonVersion = "3.12"
 include = ["osmosis_ai"]
 exclude = ["tests", "build", "dist", "**/__pycache__"]
 typeCheckingMode = "standard"
@@ -156,7 +174,7 @@ reportMissingTypeStubs = false
 reportCallInDefaultInitializer = false
 
 [tool.mypy]
-python_version = "3.10"
+python_version = "3.12"
 files = ["osmosis_ai"]
 exclude = ["tests/", "build/", "dist/"]
 check_untyped_defs = true
