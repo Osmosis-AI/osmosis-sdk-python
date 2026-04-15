@@ -543,6 +543,27 @@ class TestSanitizePathPart:
         result = sanitize_path_part("café-model")
         assert result == "cafe-model"
 
+    def test_dot_dot_path_traversal(self):
+        """'..' must not pass through as a directory name."""
+        result = sanitize_path_part("..")
+        assert result.startswith("eval-")
+        assert ".." not in result
+
+    def test_single_dot(self):
+        """'.' must not pass through as a directory name."""
+        result = sanitize_path_part(".")
+        assert result.startswith("eval-")
+
+    def test_triple_dots(self):
+        result = sanitize_path_part("...")
+        assert result.startswith("eval-")
+        assert ".." not in result
+
+    def test_dots_in_normal_names_preserved(self):
+        """Single dots within names should be kept."""
+        assert sanitize_path_part("v1.2.3") == "v1.2.3"
+        assert sanitize_path_part("model.v2") == "model.v2"
+
 
 # ============================================================
 # atomic_write_json tests
@@ -924,6 +945,19 @@ class TestBuildSummary:
         assert pak[4] == pytest.approx(1.0)
         # n=5, c=2, k=2 => 1 - C(3,2)/C(5,2) = 1 - 3/10 = 0.7
         assert pak[2] == pytest.approx(0.7)
+
+    def test_pass_at_k_none_reward_not_counted_as_pass(self):
+        """Runs with reward=None must not be counted as passes even when threshold=0.0."""
+        runs = [
+            {"row_index": 0, "run_index": 0, "reward": 0.5, "success": True},
+            {"row_index": 0, "run_index": 1, "reward": None, "success": False},
+            {"row_index": 0, "run_index": 2, "reward": None, "success": False},
+        ]
+        result = build_summary(runs, pass_threshold=0.0, n_runs=3)
+        stats = result["reward_stats"]
+        pak = stats.get("pass_at_k", {})
+        # Only 1 of 3 runs has a non-None reward, so pass@1 should not be 1.0
+        assert pak[1] < 1.0
 
 
 # ============================================================

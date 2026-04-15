@@ -19,7 +19,6 @@ osmosis auth login --force
 
 ```bash
 osmosis auth logout
-osmosis auth logout --all
 osmosis auth logout -y
 ```
 

@@ -56,6 +56,7 @@ def list_runs(
     console.print(f"Training Runs ({total_count}):", style="bold")
     for r in training_runs:
         status_str = format_run_status(r)
+        short_id = console.format_styled(r.id[:8], "dim")
         name = (
             console.escape(r.name)
             if r.name
@@ -66,7 +67,7 @@ def list_runs(
         date = format_dim_date(r.created_at)
 
         console.print(
-            f"  {name}  {status_str}  {model}  {acc}  {date}",
+            f"  {short_id}  {name}  {status_str}  {model}  {acc}  {date}",
             highlight=False,
         )
 

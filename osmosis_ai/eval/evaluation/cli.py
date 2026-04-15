@@ -538,12 +538,26 @@ class EvalCommand:
 
         grader_fingerprint = compute_module_fingerprint(grader_cls.__module__)
 
-        # Merge CLI overrides into config for cache identity
-        config_for_hash = {
-            **config.model_dump(),
-            "offset": offset,
-            "limit": limit,
+        # Merge CLI overrides into config for cache identity.
+        # Exclude non-semantic fields (presentation/runtime flags) so that
+        # changing --quiet, --debug, --batch-size, etc. doesn't invalidate
+        # the cache and break resume.
+        _non_semantic = {
+            "eval_fresh",
+            "eval_retry_failed",
+            "llm_api_key_env",
+            "runs_batch_size",
+            "output_log_samples",
+            "output_path",
+            "output_quiet",
+            "output_debug",
+            "baseline_api_key_env",
         }
+        config_for_hash = {
+            k: v for k, v in config.model_dump().items() if k not in _non_semantic
+        }
+        config_for_hash["offset"] = offset
+        config_for_hash["limit"] = limit
 
         task_id, config_hash = compute_task_id(
             config=config_for_hash,

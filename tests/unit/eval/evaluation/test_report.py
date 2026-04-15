@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from osmosis_ai.eval.evaluation.report import pass_at_k
 
 
@@ -40,3 +42,19 @@ def test_pass_at_k_exact_values() -> None:
     """
     result = pass_at_k(n=4, c=2, k=2)
     assert abs(result - 5 / 6) < 1e-10
+
+
+def test_pass_at_k_invalid_c_greater_than_n() -> None:
+    """c > n is mathematically invalid and should raise."""
+    with pytest.raises(ValueError, match="cannot exceed"):
+        pass_at_k(n=5, c=8, k=1)
+
+
+def test_pass_at_k_invalid_negative() -> None:
+    """Negative n, c, or k should raise."""
+    with pytest.raises(ValueError):
+        pass_at_k(n=-1, c=0, k=1)
+    with pytest.raises(ValueError):
+        pass_at_k(n=5, c=-1, k=1)
+    with pytest.raises(ValueError):
+        pass_at_k(n=5, c=0, k=-1)

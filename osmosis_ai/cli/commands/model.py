@@ -151,12 +151,13 @@ def delete(
             style="red",
         )
         for run in affected.training_runs_using_model:
+            short_id = run.id[:8]
             label = (
                 console.escape(run.training_run_name)
                 if run.training_run_name
-                else "(unnamed)"
+                else f"(unnamed: {short_id})"
             )
-            console.print(f"  {label}")
+            console.print(f"  {label}  {console.format_styled(short_id, 'dim')}")
         console.print("\nDelete these training runs first, then retry.", style="dim")
         raise typer.Exit(1)
 

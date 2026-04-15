@@ -111,6 +111,8 @@ def load_eval_config(path: Path) -> EvalConfig:
             raw = tomllib.load(f)
     except tomllib.TOMLDecodeError as e:
         raise CLIError(f"Invalid TOML in {path}: {e}") from e
+    except OSError as e:
+        raise CLIError(f"Cannot read config file {path}: {e}") from e
 
     if "eval" not in raw:
         raise CLIError(f"Missing [eval] section in {path}")

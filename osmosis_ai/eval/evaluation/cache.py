@@ -278,6 +278,7 @@ def sanitize_path_part(s: str, max_len: int = 60) -> str:
     normalized = "".join(c for c in normalized if unicodedata.category(c) != "Mn")
     clean = re.sub(r"[^\w.\-]", "-", normalized)
     clean = re.sub(r"-+", "-", clean).strip("-")
+    clean = re.sub(r"\.{2,}", ".", clean).strip(".")
     if not clean:
         return f"eval-{xxhash.xxh3_128_hexdigest(s.encode())[:8]}"
     result = clean.lower()
@@ -679,7 +680,9 @@ def build_summary(
             row_pass_at_k: list[float] = []
             for row_runs in rows.values():
                 c = sum(
-                    1 for r in row_runs if (r.get("reward") or 0.0) >= pass_threshold
+                    1
+                    for r in row_runs
+                    if r.get("reward") is not None and r["reward"] >= pass_threshold
                 )
                 n = max(len(row_runs), n_runs)
                 if n > 0 and k <= n:
