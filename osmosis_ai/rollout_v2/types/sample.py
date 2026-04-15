@@ -3,7 +3,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-MessageDict = dict[str, list | str]
+MessageDict = dict[str, list[Any] | str]
 
 
 class RolloutSample(BaseModel):

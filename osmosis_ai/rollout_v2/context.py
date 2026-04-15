@@ -8,7 +8,9 @@ from osmosis_ai.rollout_v2.types import (
     RolloutSample,
 )
 
-rollout_contextvar: ContextVar = ContextVar("rollout_contextvar", default=None)
+rollout_contextvar: ContextVar["RolloutContext | None"] = ContextVar(
+    "rollout_contextvar", default=None
+)
 TConfig = TypeVar("TConfig", bound=AgentWorkflowConfig)
 
 # Env var names used by the container-side runners
@@ -30,7 +32,7 @@ class RolloutContext:
     rollout_id: str = ""
     registered_agents: dict[str, Any] = field(default_factory=dict)
 
-    def __post_init__(self):
+    def __post_init__(self) -> None:
         if not self.chat_completions_url:
             self.chat_completions_url = os.environ.get(CHAT_COMPLETIONS_URL_ENV, "")
         if not self.api_key:
@@ -38,11 +40,11 @@ class RolloutContext:
         if not self.rollout_id:
             self.rollout_id = os.environ.get(ROLLOUT_ID_ENV, "")
 
-    def __enter__(self):
+    def __enter__(self) -> "RolloutContext":
         rollout_contextvar.set(self)
         return self
 
-    def __exit__(self, *_):
+    def __exit__(self, *_: Any) -> None:
         rollout_contextvar.set(None)
 
     def register_agent(self, sample_id: str, agent: Any) -> None:
@@ -71,7 +73,7 @@ class GraderContext:
     def get_samples(self) -> dict[str, RolloutSample]:
         return self.samples
 
-    def set_sample_reward(self, sample_id: str, reward: float):
+    def set_sample_reward(self, sample_id: str, reward: float) -> None:
         if sample_id not in self.samples:
             raise ValueError(f"Sample {sample_id} not found")
         self.samples[sample_id].reward = reward

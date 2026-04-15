@@ -19,7 +19,7 @@ from osmosis_ai.rollout_v2.types import (
 )
 from osmosis_ai.rollout_v2.utils.http import post_json_with_retry
 
-logger = logging.getLogger(__name__)
+logger: logging.Logger = logging.getLogger(__name__)
 
 
 def create_rollout_server(

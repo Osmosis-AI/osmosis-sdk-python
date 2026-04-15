@@ -5,9 +5,9 @@ from contextlib import asynccontextmanager
 
 class ConcurrencyLimiter:
     def __init__(self, *, max_concurrent: int | None) -> None:
-        self.max_concurrent = max_concurrent
-        self.queued = 0
-        self.running = 0
+        self.max_concurrent: int | None = max_concurrent
+        self.queued: int = 0
+        self.running: int = 0
         self._semaphore = (
             asyncio.Semaphore(max_concurrent) if max_concurrent is not None else None
         )

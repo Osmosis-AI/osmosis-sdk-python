@@ -20,6 +20,15 @@ ignore:
   - "osmosis_ai/eval/**/cli.py"
   # Interactive prompt helpers (questionary/prompt_toolkit UI).
   - "osmosis_ai/cli/prompts.py"
+  # Rollout v2 — ABCs & type definitions (no logic to test).
+  - "osmosis_ai/rollout_v2/agent_workflow.py"
+  - "osmosis_ai/rollout_v2/grader.py"
+  - "osmosis_ai/rollout_v2/backend/base.py"
+  - "osmosis_ai/rollout_v2/types/"
+  # Rollout v2 — framework integrations (require external deps: strands, etc.).
+  - "osmosis_ai/rollout_v2/integrations/"
+  # Rollout v2 — Harbor backend (container orchestration, requires Docker/infra).
+  - "osmosis_ai/rollout_v2/backend/harbor/"
 
 comment:
   layout: "diff, flags, files"

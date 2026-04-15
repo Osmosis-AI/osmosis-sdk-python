@@ -24,19 +24,19 @@ from osmosis_ai.rollout_v2.utils.concurrency import ConcurrencyLimiter
 from osmosis_ai.rollout_v2.utils.imports import resolve_object
 from osmosis_ai.rollout_v2.utils.messages import map_initial_messages_to_content_blocks
 
-logger = logging.getLogger(__name__)
+logger: logging.Logger = logging.getLogger(__name__)
 
 
 class LocalBackend(ExecutionBackend):
     def __init__(
         self,
         *,
-        workflow: type[AgentWorkflow] | str,
+        workflow: type[AgentWorkflow[Any]] | str,
         workflow_config: AgentWorkflowConfig | str | None = None,
         grader: type[Grader] | str | None = None,
         grader_config: GraderConfig | str | None = None,
     ) -> None:
-        self.workflow_cls: type[AgentWorkflow] = resolve_object(workflow)
+        self.workflow_cls: type[AgentWorkflow[Any]] = resolve_object(workflow)
         self.workflow_config: AgentWorkflowConfig | None = (
             resolve_object(workflow_config) if workflow_config else None
         )
@@ -52,7 +52,9 @@ class LocalBackend(ExecutionBackend):
             if self.workflow_config
             else 4
         )
-        self.limiter = ConcurrencyLimiter(max_concurrent=max_concurrent)
+        self.limiter: ConcurrencyLimiter = ConcurrencyLimiter(
+            max_concurrent=max_concurrent
+        )
 
     @property
     def max_concurrency(self) -> int:
