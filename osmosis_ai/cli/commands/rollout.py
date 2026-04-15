@@ -189,6 +189,7 @@ def _serve(
     if wf_err or workflow_cls is None:
         console.print_error(wf_err or "Failed to load workflow.")
         raise typer.Exit(1)
+    assert entrypoint_module is not None
 
     try:
         grader_cls, grader_config = auto_discover_grader(

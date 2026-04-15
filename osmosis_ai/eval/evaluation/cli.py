@@ -423,6 +423,7 @@ class EvalCommand:
             self.console.print_error(f"Error: {error}")
             return 1
         assert workflow_cls is not None
+        assert entrypoint_module is not None
 
         # 5. Resolve grader from [grader] override or auto-discover from entrypoint
         try:
