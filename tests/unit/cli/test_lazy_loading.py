@@ -2,8 +2,8 @@
 
 Verifies that importing ``osmosis_ai`` does NOT eagerly pull in heavy
 dependencies (litellm, openai, fastapi) and that rubric exports remain
-accessible on demand. Stage 4: v1 rollout symbols are not re-exported at
-package top level.
+accessible on demand. Rollout SDK types are not re-exported at package
+top level — import from ``osmosis_ai.rollout`` directly.
 """
 
 from __future__ import annotations
@@ -33,28 +33,28 @@ def test_import_osmosis_ai_does_not_load_litellm():
     assert result.returncode == 0, f"litellm was eagerly loaded: {result.stderr}"
 
 
-# -- V1 rollout not re-exported ----------------------------------------------
+# -- Rollout types not re-exported at top level --------------------------------
 
 
 @pytest.mark.parametrize(
     "name",
     [
-        "RolloutAgentLoop",
-        "create_app",
+        "AgentWorkflow",
+        "Grader",
         "RolloutContext",
-        "RolloutResult",
+        "create_rollout_server",
     ],
 )
-def test_v1_rollout_export_not_on_package(name: str):
-    """Top-level osmosis_ai must not expose v1 rollout SDK names."""
+def test_rollout_types_not_on_package(name: str):
+    """Top-level osmosis_ai must not expose rollout SDK names."""
     with pytest.raises(AttributeError, match="no attribute"):
         getattr(osmosis_ai, name)
 
 
-def test_v1_rollout_names_not_in_all():
-    """__all__ must not list v1 rollout exports."""
-    assert "RolloutAgentLoop" not in osmosis_ai.__all__
-    assert "create_app" not in osmosis_ai.__all__
+def test_rollout_names_not_in_all():
+    """__all__ must not list rollout SDK exports."""
+    assert "AgentWorkflow" not in osmosis_ai.__all__
+    assert "Grader" not in osmosis_ai.__all__
 
 
 # -- Lazy rubric import -------------------------------------------------------

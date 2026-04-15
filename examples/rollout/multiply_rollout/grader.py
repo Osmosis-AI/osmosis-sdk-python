@@ -1,7 +1,7 @@
 from multiply_rollout.utils import extract_solution
-from osmosis_ai.rollout_v2.context import GraderContext
-from osmosis_ai.rollout_v2.grader import Grader
-from osmosis_ai.rollout_v2.types import GraderConfig
+from osmosis_ai.rollout.context import GraderContext
+from osmosis_ai.rollout.grader import Grader
+from osmosis_ai.rollout.types import GraderConfig
 
 
 class MultiplyGraderConfig(GraderConfig):

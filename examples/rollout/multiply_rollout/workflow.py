@@ -5,15 +5,15 @@ from strands.models.model import Model
 
 from multiply_rollout.tools import multiply_tool
 from multiply_rollout.utils import extract_solution
-from osmosis_ai.rollout_v2.agent_workflow import AgentWorkflow
-from osmosis_ai.rollout_v2.context import AgentWorkflowContext
-from osmosis_ai.rollout_v2.integrations.agents.strands import (
+from osmosis_ai.rollout.agent_workflow import AgentWorkflow
+from osmosis_ai.rollout.context import AgentWorkflowContext
+from osmosis_ai.rollout.integrations.agents.strands import (
     OsmosisRolloutModel,
 )
-from osmosis_ai.rollout_v2.integrations.agents.strands import (
+from osmosis_ai.rollout.integrations.agents.strands import (
     OsmosisStrandsAgent as StrandsAgent,
 )
-from osmosis_ai.rollout_v2.types import AgentWorkflowConfig
+from osmosis_ai.rollout.types import AgentWorkflowConfig
 
 
 class MultiplyAgentWorkflowConfig(AgentWorkflowConfig):

@@ -1,19 +1,19 @@
-"""Tests for osmosis_ai.rollout_v2.backend.local.backend."""
+"""Tests for osmosis_ai.rollout.backend.local.backend."""
 
 from typing import Any
 from unittest.mock import AsyncMock
 
-from osmosis_ai.rollout_v2.agent_workflow import AgentWorkflow
-from osmosis_ai.rollout_v2.backend.local.backend import (
+from osmosis_ai.rollout.agent_workflow import AgentWorkflow
+from osmosis_ai.rollout.backend.local.backend import (
     LocalBackend,
     _categorize_exception,
 )
-from osmosis_ai.rollout_v2.context import (
+from osmosis_ai.rollout.context import (
     AgentWorkflowContext,
     GraderContext,
 )
-from osmosis_ai.rollout_v2.grader import Grader
-from osmosis_ai.rollout_v2.types import (
+from osmosis_ai.rollout.grader import Grader
+from osmosis_ai.rollout.types import (
     AgentWorkflowConfig,
     ExecutionRequest,
     GraderConfig,
@@ -31,7 +31,7 @@ class StubWorkflow(AgentWorkflow):
         # Register a fake agent with the rollout context
         from unittest.mock import MagicMock
 
-        from osmosis_ai.rollout_v2.context import get_rollout_context
+        from osmosis_ai.rollout.context import get_rollout_context
 
         rollout_ctx = get_rollout_context()
         if rollout_ctx:

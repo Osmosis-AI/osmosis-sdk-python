@@ -1,7 +1,7 @@
 import pytest
 
-from osmosis_ai.rollout_v2.driver import InProcessDriver, RolloutOutcome
-from osmosis_ai.rollout_v2.types import (
+from osmosis_ai.rollout.driver import InProcessDriver, RolloutOutcome
+from osmosis_ai.rollout.types import (
     ExecutionResult,
     RolloutSample,
     RolloutStatus,

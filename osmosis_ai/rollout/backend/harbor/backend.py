@@ -26,10 +26,10 @@ from harbor.models.trial.config import (
 from harbor.trial.hooks import TrialEvent, TrialHookEvent
 from harbor.trial.queue import TrialQueue
 
-from osmosis_ai.rollout_v2.agent_workflow import AgentWorkflow
-from osmosis_ai.rollout_v2.backend.base import ExecutionBackend, ResultCallback
-from osmosis_ai.rollout_v2.grader import Grader
-from osmosis_ai.rollout_v2.types import (
+from osmosis_ai.rollout.agent_workflow import AgentWorkflow
+from osmosis_ai.rollout.backend.base import ExecutionBackend, ResultCallback
+from osmosis_ai.rollout.grader import Grader
+from osmosis_ai.rollout.types import (
     AgentWorkflowConfig,
     ExecutionRequest,
     ExecutionResult,
@@ -38,19 +38,19 @@ from osmosis_ai.rollout_v2.types import (
     RolloutSample,
     RolloutStatus,
 )
-from osmosis_ai.rollout_v2.utils.imports import to_import_path
+from osmosis_ai.rollout.utils.imports import to_import_path
 
 logger: logging.Logger = logging.getLogger(__name__)
 
 AGENT_IMPORT_PATH = (
-    "osmosis_ai.rollout_v2.backend.harbor.agent_adapter:OsmosisInstalledAgent"
+    "osmosis_ai.rollout.backend.harbor.agent_adapter:OsmosisInstalledAgent"
 )
 TRIAL_NAME_PREFIX = "trial-"
 
 TEST_SH_TEMPLATE = """\
 #!/bin/bash
 set -e
-PYTHONPATH=/workspace python -m osmosis_ai.rollout_v2.backend.harbor.grader_runner \
+PYTHONPATH=/workspace python -m osmosis_ai.rollout.backend.harbor.grader_runner \
     --config /logs/agent/rollout_config.json \
     --samples /logs/agent/samples.json
 """
@@ -309,7 +309,7 @@ class HarborBackend(ExecutionBackend):
         )
 
     def build_rollout_config(self, request: ExecutionRequest) -> dict[str, Any]:
-        from osmosis_ai.rollout_v2.context import get_rollout_context
+        from osmosis_ai.rollout.context import get_rollout_context
 
         config: dict[str, Any] = {
             "id": request.id,

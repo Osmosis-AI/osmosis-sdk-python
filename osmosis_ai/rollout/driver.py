@@ -14,10 +14,10 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from osmosis_ai.rollout_v2.types import RolloutSample, RolloutStatus
+from osmosis_ai.rollout.types import RolloutSample, RolloutStatus
 
 if TYPE_CHECKING:
-    from osmosis_ai.rollout_v2.backend.base import ExecutionBackend
+    from osmosis_ai.rollout.backend.base import ExecutionBackend
 
 
 @dataclass
@@ -76,8 +76,8 @@ class InProcessDriver(RolloutDriver):
         label: str | None = None,
         rollout_id: str = "",
     ) -> RolloutOutcome:
-        from osmosis_ai.rollout_v2.context import RolloutContext, rollout_contextvar
-        from osmosis_ai.rollout_v2.types import ExecutionRequest, ExecutionResult
+        from osmosis_ai.rollout.context import RolloutContext, rollout_contextvar
+        from osmosis_ai.rollout.types import ExecutionRequest, ExecutionResult
 
         start = time.monotonic()
 

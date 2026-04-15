@@ -3,16 +3,16 @@ import logging
 import traceback
 from typing import Any
 
-from osmosis_ai.rollout_v2.agent_workflow import AgentWorkflow
-from osmosis_ai.rollout_v2.backend.base import ExecutionBackend, ResultCallback
-from osmosis_ai.rollout_v2.context import (
+from osmosis_ai.rollout.agent_workflow import AgentWorkflow
+from osmosis_ai.rollout.backend.base import ExecutionBackend, ResultCallback
+from osmosis_ai.rollout.context import (
     AgentWorkflowContext,
     GraderContext,
     RolloutContext,
     get_rollout_context,
 )
-from osmosis_ai.rollout_v2.grader import Grader
-from osmosis_ai.rollout_v2.types import (
+from osmosis_ai.rollout.grader import Grader
+from osmosis_ai.rollout.types import (
     AgentWorkflowConfig,
     ExecutionRequest,
     ExecutionResult,
@@ -20,9 +20,9 @@ from osmosis_ai.rollout_v2.types import (
     RolloutErrorCategory,
     RolloutStatus,
 )
-from osmosis_ai.rollout_v2.utils.concurrency import ConcurrencyLimiter
-from osmosis_ai.rollout_v2.utils.imports import resolve_object
-from osmosis_ai.rollout_v2.utils.messages import map_initial_messages_to_content_blocks
+from osmosis_ai.rollout.utils.concurrency import ConcurrencyLimiter
+from osmosis_ai.rollout.utils.imports import resolve_object
+from osmosis_ai.rollout.utils.messages import map_initial_messages_to_content_blocks
 
 logger: logging.Logger = logging.getLogger(__name__)
 

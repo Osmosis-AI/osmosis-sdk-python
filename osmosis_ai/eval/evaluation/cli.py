@@ -381,9 +381,7 @@ class EvalCommand:
         else:
             # Suppress verbose tracebacks from backend loggers;
             # errors are already surfaced via the progress callback.
-            logging.getLogger("osmosis_ai.rollout_v2.backend").setLevel(
-                logging.CRITICAL
-            )
+            logging.getLogger("osmosis_ai.rollout.backend").setLevel(logging.CRITICAL)
 
         if fresh and retry_failed:
             self.console.print_error(
@@ -484,8 +482,8 @@ class EvalCommand:
         await proxy.start()
 
         # 9. Construct backend + driver
-        from osmosis_ai.rollout_v2.backend.local.backend import LocalBackend
-        from osmosis_ai.rollout_v2.driver import InProcessDriver, RolloutDriver
+        from osmosis_ai.rollout.backend.local.backend import LocalBackend
+        from osmosis_ai.rollout.driver import InProcessDriver, RolloutDriver
 
         backend = LocalBackend(
             workflow=workflow_cls,

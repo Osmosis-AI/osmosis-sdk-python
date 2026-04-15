@@ -10,9 +10,9 @@ from osmosis_ai.eval.common.cli import _resolve_grader
 @pytest.fixture
 def fake_module_with_grader():
     """Create a fake module with a Grader subclass and GraderConfig."""
-    from osmosis_ai.rollout_v2.context import GraderContext
-    from osmosis_ai.rollout_v2.grader import Grader
-    from osmosis_ai.rollout_v2.types import GraderConfig
+    from osmosis_ai.rollout.context import GraderContext
+    from osmosis_ai.rollout.grader import Grader
+    from osmosis_ai.rollout.types import GraderConfig
 
     class FakeGrader(Grader):
         async def grade(self, ctx: GraderContext):
@@ -39,8 +39,8 @@ def fake_module_without_grader():
 
 
 def test_resolve_grader_auto_discover(fake_module_with_grader):
-    from osmosis_ai.rollout_v2.grader import Grader
-    from osmosis_ai.rollout_v2.types import GraderConfig
+    from osmosis_ai.rollout.grader import Grader
+    from osmosis_ai.rollout.types import GraderConfig
 
     cls, config = _resolve_grader("fake_grader_mod")
     assert cls is not None
@@ -89,7 +89,7 @@ def test_resolve_grader_explicit_wrong_class(fake_module_with_grader):
 
 def test_resolve_grader_explicit_abstract_grader(fake_module_with_grader):
     """Explicit grader pointing to the abstract Grader base should raise CLIError."""
-    from osmosis_ai.rollout_v2.grader import Grader
+    from osmosis_ai.rollout.grader import Grader
 
     fake_module_with_grader.BaseGrader = Grader
 

@@ -12,9 +12,9 @@ import json
 from pathlib import Path
 from typing import Any
 
-from osmosis_ai.rollout_v2.context import GraderContext
-from osmosis_ai.rollout_v2.types import RolloutSample
-from osmosis_ai.rollout_v2.utils.imports import resolve_object
+from osmosis_ai.rollout.context import GraderContext
+from osmosis_ai.rollout.types import RolloutSample
+from osmosis_ai.rollout.utils.imports import resolve_object
 
 VERIFIER_LOGS_DIR = Path("/logs/verifier")
 

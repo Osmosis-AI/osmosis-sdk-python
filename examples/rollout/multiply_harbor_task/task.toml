@@ -4,7 +4,7 @@ version = "1.0"
 author_name = "Osmosis"
 difficulty = "easy"
 category = "math"
-tags = ["multiply", "rollout_v2"]
+tags = ["multiply", "rollout"]
 
 [verifier]
 timeout_sec = 60.0

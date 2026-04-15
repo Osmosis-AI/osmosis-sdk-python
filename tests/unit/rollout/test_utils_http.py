@@ -1,11 +1,11 @@
-"""Tests for osmosis_ai.rollout_v2.utils.http."""
+"""Tests for osmosis_ai.rollout.utils.http."""
 
 from unittest.mock import AsyncMock, patch
 
 import httpx
 import pytest
 
-from osmosis_ai.rollout_v2.utils.http import (
+from osmosis_ai.rollout.utils.http import (
     _is_retryable_exception,
     close_shared_client,
     get_shared_client,
@@ -83,7 +83,7 @@ class TestPostJsonWithRetry:
         mock_client.post = AsyncMock(return_value=response_400)
 
         with patch(
-            "osmosis_ai.rollout_v2.utils.http.get_shared_client",
+            "osmosis_ai.rollout.utils.http.get_shared_client",
             return_value=mock_client,
         ):
             with pytest.raises(httpx.HTTPStatusError):
@@ -103,7 +103,7 @@ class TestPostJsonWithRetry:
         mock_client.post = AsyncMock(return_value=response_200)
 
         with patch(
-            "osmosis_ai.rollout_v2.utils.http.get_shared_client",
+            "osmosis_ai.rollout.utils.http.get_shared_client",
             return_value=mock_client,
         ):
             resp = await post_json_with_retry(

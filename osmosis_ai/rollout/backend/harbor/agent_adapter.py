@@ -46,7 +46,7 @@ class OsmosisInstalledAgent(BaseInstalledAgent):
         await self.exec_as_agent(
             environment,
             command=(
-                "python -m osmosis_ai.rollout_v2.backend.harbor.agent_runner"
+                "python -m osmosis_ai.rollout.backend.harbor.agent_runner"
                 " --config /logs/agent/rollout_config.json"
                 " --prompt /logs/agent/prompt.json"
             ),

@@ -66,8 +66,8 @@ def _trace_log_basename(rollout_id: str) -> str:
 @lru_cache(maxsize=1)
 def _tracing_backend_proxy_cls() -> type:
     """Lazily define tracing proxy so importing this module stays lightweight."""
-    from osmosis_ai.rollout_v2.backend.base import ExecutionBackend, ResultCallback
-    from osmosis_ai.rollout_v2.types import ExecutionRequest, ExecutionResult
+    from osmosis_ai.rollout.backend.base import ExecutionBackend, ResultCallback
+    from osmosis_ai.rollout.types import ExecutionRequest, ExecutionResult
 
     class _TracingBackendProxy(ExecutionBackend):
         """Thin proxy that JSONL-logs rollout execution events (CLI-layer tracing)."""
@@ -212,7 +212,7 @@ def _serve(
     if validate_only:
         do_validate = True
 
-    from osmosis_ai.rollout_v2.validator import validate_backend
+    from osmosis_ai.rollout.validator import validate_backend
 
     if do_validate:
         v_result = validate_backend(
@@ -232,11 +232,11 @@ def _serve(
         console.print("Validation passed.")
         return
 
-    from osmosis_ai.rollout_v2.validator import resolved_agent_name
+    from osmosis_ai.rollout.validator import resolved_agent_name
 
     agent_name = resolved_agent_name(workflow_cls, workflow_config)
 
-    from osmosis_ai.rollout_v2.backend.local import LocalBackend
+    from osmosis_ai.rollout.backend.local import LocalBackend
 
     backend = LocalBackend(
         workflow=workflow_cls,
@@ -253,7 +253,7 @@ def _serve(
         )
         backend = _tracing_backend_proxy_cls()(backend, trace_session_path)
 
-    from osmosis_ai.rollout_v2.server.app import create_rollout_server
+    from osmosis_ai.rollout.server.app import create_rollout_server
 
     fastapi_app = create_rollout_server(backend=backend)
 
@@ -351,7 +351,7 @@ def serve(
         help="Uvicorn log level (overrides config).",
     ),
 ) -> None:
-    """Start a v2 RolloutServer from a TOML config file."""
+    """Start a RolloutServer from a TOML config file."""
     from osmosis_ai.cli.console import Console
 
     _serve(

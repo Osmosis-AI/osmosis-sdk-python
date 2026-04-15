@@ -13,9 +13,9 @@ import traceback
 from pathlib import Path
 from typing import Any
 
-from osmosis_ai.rollout_v2.context import AgentWorkflowContext, RolloutContext
-from osmosis_ai.rollout_v2.utils.imports import resolve_object
-from osmosis_ai.rollout_v2.utils.messages import map_initial_messages_to_content_blocks
+from osmosis_ai.rollout.context import AgentWorkflowContext, RolloutContext
+from osmosis_ai.rollout.utils.imports import resolve_object
+from osmosis_ai.rollout.utils.messages import map_initial_messages_to_content_blocks
 
 AGENT_LOGS_DIR = Path("/logs/agent")
 

@@ -1,6 +1,6 @@
-"""Tests for osmosis_ai.rollout_v2.server.auth."""
+"""Tests for osmosis_ai.rollout.server.auth."""
 
-from osmosis_ai.rollout_v2.server.auth import ControllerAuth
+from osmosis_ai.rollout.server.auth import ControllerAuth
 
 
 class TestControllerAuth:

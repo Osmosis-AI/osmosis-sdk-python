@@ -9,7 +9,7 @@ from strands.types.content import Messages, SystemContentBlock
 from strands.types.streaming import StreamEvent
 from strands.types.tools import ToolChoice, ToolSpec
 
-from osmosis_ai.rollout_v2.context import RolloutContext, get_rollout_context
+from osmosis_ai.rollout.context import RolloutContext, get_rollout_context
 
 T = TypeVar("T")
 

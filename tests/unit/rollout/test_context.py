@@ -1,10 +1,10 @@
-"""Tests for osmosis_ai.rollout_v2.context."""
+"""Tests for osmosis_ai.rollout.context."""
 
 from unittest.mock import MagicMock
 
 import pytest
 
-from osmosis_ai.rollout_v2.context import (
+from osmosis_ai.rollout.context import (
     AgentWorkflowContext,
     GraderContext,
     HarborAgentWorkflowContext,
@@ -12,7 +12,7 @@ from osmosis_ai.rollout_v2.context import (
     get_rollout_context,
     rollout_contextvar,
 )
-from osmosis_ai.rollout_v2.types import AgentWorkflowConfig, RolloutSample
+from osmosis_ai.rollout.types import AgentWorkflowConfig, RolloutSample
 
 # ---------------------------------------------------------------------------
 # RolloutContext

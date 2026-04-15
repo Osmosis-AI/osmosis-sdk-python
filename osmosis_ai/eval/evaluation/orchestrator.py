@@ -26,8 +26,8 @@ from osmosis_ai.eval.evaluation.cache import (
     DatasetStatus,
     build_summary,
 )
-from osmosis_ai.rollout_v2.driver import RolloutDriver
-from osmosis_ai.rollout_v2.types import RolloutSample, RolloutStatus
+from osmosis_ai.rollout.driver import RolloutDriver
+from osmosis_ai.rollout.types import RolloutSample, RolloutStatus
 
 
 def _extract_mean_reward(samples: dict[str, RolloutSample]) -> float | None:

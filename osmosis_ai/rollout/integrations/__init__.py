@@ -1,6 +1,6 @@
-"""Framework-specific rollout_v2 integrations."""
+"""Framework-specific rollout integrations."""
 
-from osmosis_ai.rollout_v2.integrations.agents.strands import (
+from osmosis_ai.rollout.integrations.agents.strands import (
     OsmosisRolloutModel,
     OsmosisStrandsAgent,
 )

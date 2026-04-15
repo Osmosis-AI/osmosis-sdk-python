@@ -1,4 +1,4 @@
-"""Static startup validation for v2 ``AgentWorkflow`` and ``Grader`` components.
+"""Static startup validation for ``AgentWorkflow`` and ``Grader`` components.
 
 Mirrors LocalBackend instantiation: ``workflow_cls(workflow_config)`` and
 ``grader_cls(grader_config)`` with no zero-argument fallback. Intended for use
@@ -12,9 +12,9 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass, field
 
-from osmosis_ai.rollout_v2.agent_workflow import AgentWorkflow
-from osmosis_ai.rollout_v2.grader import Grader
-from osmosis_ai.rollout_v2.types import AgentWorkflowConfig, GraderConfig
+from osmosis_ai.rollout.agent_workflow import AgentWorkflow
+from osmosis_ai.rollout.grader import Grader
+from osmosis_ai.rollout.types import AgentWorkflowConfig, GraderConfig
 
 __all__ = [
     "ValidationError",

@@ -3,7 +3,7 @@ from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any, Generic, TypeVar
 
-from osmosis_ai.rollout_v2.types import (
+from osmosis_ai.rollout.types import (
     AgentWorkflowConfig,
     RolloutSample,
 )

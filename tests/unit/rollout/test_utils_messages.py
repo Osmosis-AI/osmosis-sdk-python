@@ -1,6 +1,6 @@
-"""Tests for osmosis_ai.rollout_v2.utils.messages."""
+"""Tests for osmosis_ai.rollout.utils.messages."""
 
-from osmosis_ai.rollout_v2.utils.messages import map_initial_messages_to_content_blocks
+from osmosis_ai.rollout.utils.messages import map_initial_messages_to_content_blocks
 
 
 class TestMapInitialMessagesToContentBlocks:

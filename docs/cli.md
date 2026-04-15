@@ -44,7 +44,7 @@ In non-interactive environments, prints current context and exits.
 
 ### osmosis rollout serve
 
-Start a v2 RolloutServer from a TOML file.
+Start a RolloutServer from a TOML file.
 
 `osmosis rollout serve` requires the entrypoint module to expose a concrete `AgentWorkflow` and a concrete `Grader`. In practice you will usually also define a `GraderConfig`. If no grader is discoverable, serve fails before startup.
 

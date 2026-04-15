@@ -22,8 +22,8 @@ from osmosis_ai.eval.evaluation.orchestrator import (
     EvalOrchestrator,
     OrchestratorResult,
 )
-from osmosis_ai.rollout_v2.driver import RolloutDriver, RolloutOutcome
-from osmosis_ai.rollout_v2.types import RolloutSample, RolloutStatus
+from osmosis_ai.rollout.driver import RolloutDriver, RolloutOutcome
+from osmosis_ai.rollout.types import RolloutSample, RolloutStatus
 
 # ---------------------------------------------------------------------------
 # Helpers

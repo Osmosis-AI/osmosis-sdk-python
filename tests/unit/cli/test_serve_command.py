@@ -15,14 +15,14 @@ from osmosis_ai.cli.commands.rollout import (
     _tracing_backend_proxy_cls,
 )
 from osmosis_ai.cli.main import main
-from osmosis_ai.rollout_v2.grader import Grader
-from osmosis_ai.rollout_v2.types import (
+from osmosis_ai.rollout.grader import Grader
+from osmosis_ai.rollout.types import (
     ExecutionRequest,
     ExecutionResult,
     GraderConfig,
     RolloutStatus,
 )
-from osmosis_ai.rollout_v2.validator import ValidationResult
+from osmosis_ai.rollout.validator import ValidationResult
 
 
 class DummyGrader(Grader):
@@ -92,8 +92,8 @@ def patch_serve_pipeline(monkeypatch, tmp_path):
     """Avoid binding a real server; exercise wiring after config load."""
     cfg = _minimal_serve_toml(tmp_path)
 
-    from osmosis_ai.rollout_v2.agent_workflow import AgentWorkflow
-    from osmosis_ai.rollout_v2.types import AgentWorkflowConfig
+    from osmosis_ai.rollout.agent_workflow import AgentWorkflow
+    from osmosis_ai.rollout.types import AgentWorkflowConfig
 
     class _WF(AgentWorkflow):
         async def run(self, ctx):
@@ -110,7 +110,7 @@ def patch_serve_pipeline(monkeypatch, tmp_path):
         lambda _ep, **_kw: (DummyGrader, DUMMY_GRADER_CONFIG),
     )
     monkeypatch.setattr(
-        "osmosis_ai.rollout_v2.validator.validate_backend",
+        "osmosis_ai.rollout.validator.validate_backend",
         lambda *_a, **_kw: ValidationResult(valid=True, errors=[], warnings=[]),
     )
     monkeypatch.setattr("uvicorn.run", MagicMock())
@@ -123,8 +123,8 @@ def test_serve_fails_without_grader_even_with_no_validate(
     """Missing grader cannot be bypassed with --no-validate."""
     cfg = _minimal_serve_toml(tmp_path)
 
-    from osmosis_ai.rollout_v2.agent_workflow import AgentWorkflow
-    from osmosis_ai.rollout_v2.types import AgentWorkflowConfig
+    from osmosis_ai.rollout.agent_workflow import AgentWorkflow
+    from osmosis_ai.rollout.types import AgentWorkflowConfig
 
     class _WF(AgentWorkflow):
         async def run(self, ctx):
@@ -163,8 +163,8 @@ def test_serve_fails_without_grader_with_debug_no_validate_in_config(
         encoding="utf-8",
     )
 
-    from osmosis_ai.rollout_v2.agent_workflow import AgentWorkflow
-    from osmosis_ai.rollout_v2.types import AgentWorkflowConfig
+    from osmosis_ai.rollout.agent_workflow import AgentWorkflow
+    from osmosis_ai.rollout.types import AgentWorkflowConfig
 
     class _WF(AgentWorkflow):
         async def run(self, ctx):
@@ -239,8 +239,8 @@ def serve_app_capture(monkeypatch, tmp_path):
         encoding="utf-8",
     )
 
-    from osmosis_ai.rollout_v2.agent_workflow import AgentWorkflow
-    from osmosis_ai.rollout_v2.types import AgentWorkflowConfig
+    from osmosis_ai.rollout.agent_workflow import AgentWorkflow
+    from osmosis_ai.rollout.types import AgentWorkflowConfig
 
     class _WF(AgentWorkflow):
         async def run(self, ctx):
@@ -257,7 +257,7 @@ def serve_app_capture(monkeypatch, tmp_path):
         lambda _ep, **_kw: (DummyGrader, DUMMY_GRADER_CONFIG),
     )
     monkeypatch.setattr(
-        "osmosis_ai.rollout_v2.validator.validate_backend",
+        "osmosis_ai.rollout.validator.validate_backend",
         lambda *_a, **_kw: ValidationResult(valid=True, errors=[], warnings=[]),
     )
     captured: dict = {}
@@ -398,8 +398,8 @@ def test_serve_with_trace_dir_creates_session_subdir(monkeypatch, tmp_path, caps
         encoding="utf-8",
     )
 
-    from osmosis_ai.rollout_v2.agent_workflow import AgentWorkflow
-    from osmosis_ai.rollout_v2.types import AgentWorkflowConfig
+    from osmosis_ai.rollout.agent_workflow import AgentWorkflow
+    from osmosis_ai.rollout.types import AgentWorkflowConfig
 
     class _WF(AgentWorkflow):
         async def run(self, ctx):
@@ -416,7 +416,7 @@ def test_serve_with_trace_dir_creates_session_subdir(monkeypatch, tmp_path, caps
         lambda _ep, **_kw: (DummyGrader, DUMMY_GRADER_CONFIG),
     )
     monkeypatch.setattr(
-        "osmosis_ai.rollout_v2.validator.validate_backend",
+        "osmosis_ai.rollout.validator.validate_backend",
         lambda *_a, **_kw: ValidationResult(valid=True, errors=[], warnings=[]),
     )
     monkeypatch.setattr("uvicorn.run", MagicMock())

@@ -8,7 +8,7 @@ Requirements:
     - Docker running
 
 Usage:
-    python examples/rollout_v2/harbor_rollout_server_example.py
+    python examples/rollout/harbor_rollout_server_example.py
 """
 
 import logging
@@ -19,8 +19,8 @@ from harbor.trial.queue import TrialQueue
 from multiply_rollout.grader import MultiplyGrader, multiply_grader_config
 from multiply_rollout.workflow import MultiplyWorkflow, multiply_workflow_config
 
-from osmosis_ai.rollout_v2.backend.harbor import HarborBackend
-from osmosis_ai.rollout_v2.server import create_rollout_server
+from osmosis_ai.rollout.backend.harbor import HarborBackend
+from osmosis_ai.rollout.server import create_rollout_server
 
 logger = logging.getLogger(__name__)
 

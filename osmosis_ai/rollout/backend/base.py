@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from osmosis_ai.rollout_v2.types import ExecutionRequest, ExecutionResult
+from osmosis_ai.rollout.types import ExecutionRequest, ExecutionResult
 
 ResultCallback = Callable[[ExecutionResult], Awaitable[None]]
 

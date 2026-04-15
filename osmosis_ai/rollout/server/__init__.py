@@ -1,5 +1,5 @@
-from osmosis_ai.rollout_v2.server.app import create_rollout_server
-from osmosis_ai.rollout_v2.server.auth import ControllerAuth
+from osmosis_ai.rollout.server.app import create_rollout_server
+from osmosis_ai.rollout.server.auth import ControllerAuth
 
 __all__ = [
     "ControllerAuth",

@@ -4,10 +4,10 @@ from typing import Any
 
 from fastapi import BackgroundTasks, FastAPI, HTTPException
 
-from osmosis_ai.rollout_v2.backend.base import ExecutionBackend
-from osmosis_ai.rollout_v2.context import RolloutContext
-from osmosis_ai.rollout_v2.server.auth import ControllerAuth
-from osmosis_ai.rollout_v2.types import (
+from osmosis_ai.rollout.backend.base import ExecutionBackend
+from osmosis_ai.rollout.context import RolloutContext
+from osmosis_ai.rollout.server.auth import ControllerAuth
+from osmosis_ai.rollout.types import (
     ExecutionRequest,
     ExecutionResult,
     GraderCompleteRequest,
@@ -17,7 +17,7 @@ from osmosis_ai.rollout_v2.types import (
     RolloutInitResponse,
     RolloutStatus,
 )
-from osmosis_ai.rollout_v2.utils.http import post_json_with_retry
+from osmosis_ai.rollout.utils.http import post_json_with_retry
 
 logger: logging.Logger = logging.getLogger(__name__)
 

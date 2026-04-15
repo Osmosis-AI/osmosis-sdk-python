@@ -30,7 +30,7 @@ The table below lists all development commands. If you installed with **pip**, d
 | Task | Command |
 |------|---------|
 | Run all tests | `uv run pytest` |
-| Run a single file | `uv run pytest tests/unit/rollout_v2/test_validator.py` |
+| Run a single file | `uv run pytest tests/unit/rollout/test_validator.py` |
 | Run tests by name | `uv run pytest -k "test_name"` |
 | Run with coverage | `uv run pytest --cov=osmosis_ai --cov-report=term-missing` |
 | Lint | `uv run ruff check .` |
@@ -117,7 +117,7 @@ Add a label to your PR so it gets categorized correctly in Release Notes:
 | `documentation` | Docs update |
 | `chore` / `ci` / `refactor` / `dependencies` | Maintenance work |
 
-Module-specific labels (`reward`, `rollout`, `server`, `cli`, `auth`, `eval`) can also be added for filtering. Rollout work typically touches `osmosis_ai.rollout_v2` and related CLI commands.
+Module-specific labels (`reward`, `rollout`, `server`, `cli`, `auth`, `eval`) can also be added for filtering. Rollout work typically touches `osmosis_ai.rollout` and related CLI commands.
 
 ### Workflow
 

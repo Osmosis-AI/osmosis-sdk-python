@@ -1,16 +1,16 @@
-"""Tests for rollout_v2 static backend validation."""
+"""Tests for rollout static backend validation."""
 
 from __future__ import annotations
 
-from osmosis_ai.rollout_v2.agent_workflow import AgentWorkflow
-from osmosis_ai.rollout_v2.context import AgentWorkflowContext, GraderContext
-from osmosis_ai.rollout_v2.grader import Grader
-from osmosis_ai.rollout_v2.types import (
+from osmosis_ai.rollout.agent_workflow import AgentWorkflow
+from osmosis_ai.rollout.context import AgentWorkflowContext, GraderContext
+from osmosis_ai.rollout.grader import Grader
+from osmosis_ai.rollout.types import (
     AgentWorkflowConfig,
     ConcurrencyConfig,
     GraderConfig,
 )
-from osmosis_ai.rollout_v2.validator import (
+from osmosis_ai.rollout.validator import (
     ValidationError,
     ValidationResult,
     validate_backend,

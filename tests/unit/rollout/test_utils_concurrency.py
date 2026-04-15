@@ -1,10 +1,10 @@
-"""Tests for osmosis_ai.rollout_v2.utils.concurrency."""
+"""Tests for osmosis_ai.rollout.utils.concurrency."""
 
 import asyncio
 
 import pytest
 
-from osmosis_ai.rollout_v2.utils.concurrency import ConcurrencyLimiter
+from osmosis_ai.rollout.utils.concurrency import ConcurrencyLimiter
 
 
 class TestConcurrencyLimiter:

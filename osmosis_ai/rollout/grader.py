@@ -1,8 +1,8 @@
 from abc import ABC, abstractmethod
 from typing import Any
 
-from osmosis_ai.rollout_v2.context import GraderContext
-from osmosis_ai.rollout_v2.types import GraderConfig
+from osmosis_ai.rollout.context import GraderContext
+from osmosis_ai.rollout.types import GraderConfig
 
 
 class Grader(ABC):

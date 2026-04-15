@@ -3,7 +3,7 @@ from typing import Any
 
 from pydantic import BaseModel
 
-from osmosis_ai.rollout_v2.types.sample import (
+from osmosis_ai.rollout.types.sample import (
     MessageDict,
     RolloutErrorCategory,
     RolloutSample,
