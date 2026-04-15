@@ -43,7 +43,7 @@ from osmosis_ai.rollout_v2.utils.imports import to_import_path
 logger: logging.Logger = logging.getLogger(__name__)
 
 AGENT_IMPORT_PATH = (
-    "osmosis_ai.rollout_v2.backend.harbor._agent_adapter:OsmosisInstalledAgent"
+    "osmosis_ai.rollout_v2.backend.harbor.agent_adapter:OsmosisInstalledAgent"
 )
 TRIAL_NAME_PREFIX = "trial-"
 
