@@ -468,7 +468,7 @@ class EvalCommand:
 
         # 9. Construct backend + driver
         from osmosis_ai.rollout_v2.backend.local.backend import LocalBackend
-        from osmosis_ai.rollout_v2.driver import InProcessDriver
+        from osmosis_ai.rollout_v2.driver import InProcessDriver, RolloutDriver
 
         backend = LocalBackend(
             workflow=workflow_cls,
@@ -479,7 +479,7 @@ class EvalCommand:
         driver = InProcessDriver(backend=backend, proxy=proxy)
 
         # 10. Build drivers list
-        drivers: list[tuple[str | None, InProcessDriver]] = []
+        drivers: list[tuple[str | None, RolloutDriver]] = []
         baseline_proxy = None
         if config.baseline_model:
             drivers.append(("primary", driver))

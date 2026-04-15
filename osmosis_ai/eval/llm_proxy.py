@@ -157,7 +157,7 @@ class LiteLLMProxy:
 
         start = time.monotonic()
         try:
-            response = await litellm.acompletion(**kwargs)
+            response: Any = await litellm.acompletion(**kwargs)
         except Exception as e:
             if type(e).__name__ in self.SYSTEMIC_EXCEPTIONS:
                 self.systemic_error = str(e)
@@ -194,7 +194,7 @@ class LiteLLMProxy:
         kwargs["stream_options"] = {"include_usage": True}
 
         try:
-            response = await litellm.acompletion(**kwargs)
+            response: Any = await litellm.acompletion(**kwargs)
         except Exception as e:
             if type(e).__name__ in self.SYSTEMIC_EXCEPTIONS:
                 self.systemic_error = str(e)
