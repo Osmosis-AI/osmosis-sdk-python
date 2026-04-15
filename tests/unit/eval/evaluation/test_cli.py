@@ -94,9 +94,18 @@ def _run_command(monkeypatch: pytest.MonkeyPatch, config: SimpleNamespace) -> No
 
 
 def test_run_uses_explicit_grader_override(monkeypatch: pytest.MonkeyPatch) -> None:
+    from osmosis_ai.rollout_v2.context import GraderContext
+    from osmosis_ai.rollout_v2.grader import Grader
+    from osmosis_ai.rollout_v2.types import GraderConfig
+
     explicit_module = types.ModuleType("explicit_grader_mod")
-    explicit_grader = type("ExplicitGrader", (), {})
-    explicit_config = object()
+
+    class ExplicitGrader(Grader):
+        async def grade(self, ctx: GraderContext):
+            return None
+
+    explicit_grader = ExplicitGrader
+    explicit_config = GraderConfig(name="explicit-grader")
     explicit_module.ExplicitGrader = explicit_grader
     explicit_module.grader_config = explicit_config
     monkeypatch.setitem(sys.modules, "explicit_grader_mod", explicit_module)

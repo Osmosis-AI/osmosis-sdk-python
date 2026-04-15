@@ -81,7 +81,10 @@ def test_serve_help_shows_config_positional_and_no_module_flag(capsys):
     assert "Path to serve TOML config file." in out
     assert "--module" not in out
     assert "--local" not in out
-    assert re.search(r"(?<!\w)-m(?!\w)", out) is None
+    # Check that -m doesn't appear as a CLI option flag (ignore the Usage line
+    # which may contain "python -m pytest" depending on how tests are invoked).
+    options_section = out.split("Options", 1)[1] if "Options" in out else out
+    assert re.search(r"(?<!\w)-m(?!\w)", options_section) is None
 
 
 @pytest.fixture
