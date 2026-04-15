@@ -46,7 +46,7 @@ Run `osmosis workspace` to inspect or switch context.
 
 ## Reward and grader issues
 
-Decorators like `@osmosis_reward` still apply to classic reward functions used in other platform flows. For **`osmosis eval run`**, scoring comes from your **Grader** implementation discovered next to the workflow — see [Eval](./eval.md).
+For **`osmosis eval run`**, scoring comes from your **Grader** implementation discovered next to the workflow — see [Eval](./eval.md).
 
 ## Rubric (`osmosis eval rubric`)
 

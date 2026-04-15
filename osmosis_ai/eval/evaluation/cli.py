@@ -46,14 +46,22 @@ class EvalCommand:
             result = [
                 e
                 for e in result
-                if model_lower in e.get("config", {}).get("model", "").lower()
+                if model_lower
+                in (
+                    e.get("config", {}).get("llm_model", "")
+                    or e.get("config", {}).get("model", "")
+                ).lower()
             ]
         if dataset:
             dataset_lower = dataset.lower()
             result = [
                 e
                 for e in result
-                if dataset_lower in e.get("config", {}).get("dataset", "").lower()
+                if dataset_lower
+                in (
+                    e.get("config", {}).get("eval_dataset", "")
+                    or e.get("config", {}).get("dataset", "")
+                ).lower()
             ]
         if status:
             result = [e for e in result if e.get("status") == status]
@@ -351,6 +359,9 @@ class EvalCommand:
         # Booleans: CLI can enable (or), TOML sets default.
         limit = args.limit if args.limit is not None else config.eval_limit
         offset = args.offset if args.offset is not None else config.eval_offset
+        if offset is not None and offset < 0:
+            self.console.print_error("Error: --offset must be >= 0")
+            return 1
         fresh = args.fresh or config.eval_fresh
         retry_failed = args.retry_failed or config.eval_retry_failed
         batch_size = (

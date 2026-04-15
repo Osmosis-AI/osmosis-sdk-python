@@ -193,18 +193,14 @@ class LiteLLMProxy:
                 self._write_trace, rollout_id, body, response, elapsed_ms
             )
 
-        choice = response.choices[0]
-        message = choice.message.model_dump(exclude_none=True)
-        return {
-            "choices": [
-                {"message": message, "finish_reason": choice.finish_reason or "stop"}
-            ],
-            "usage": {
-                "prompt_tokens": usage.prompt_tokens if usage else 0,
-                "completion_tokens": usage.completion_tokens if usage else 0,
+        data = response.model_dump(exclude_none=True)
+        if usage:
+            data["usage"] = {
+                "prompt_tokens": usage.prompt_tokens or 0,
+                "completion_tokens": usage.completion_tokens or 0,
                 "total_tokens": total,
-            },
-        }
+            }
+        return data
 
     async def _stream_response(self, rollout_id: str, body: dict):
         """Forward streaming request to LLM, yield SSE chunks, count tokens."""

@@ -118,12 +118,16 @@ def load_eval_config(path: Path) -> EvalConfig:
         raise CLIError(f"Missing [eval] section in {path}")
 
     eval_section = raw["eval"]
+    if not isinstance(eval_section, dict):
+        raise CLIError(f"[eval] must be a TOML table in {path}")
 
     for required_key in ("rollout", "entrypoint", "dataset"):
         if required_key not in eval_section:
             raise CLIError(f"Missing '{required_key}' in [eval] section of {path}")
 
     llm_section = raw.get("llm", {})
+    if not isinstance(llm_section, dict):
+        raise CLIError(f"[llm] must be a TOML table in {path}")
     if "model" not in llm_section:
         raise CLIError(f"Missing [llm].model in {path}")
 

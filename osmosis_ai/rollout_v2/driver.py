@@ -112,10 +112,12 @@ class InProcessDriver(RolloutDriver):
                 on_grader_complete=on_grader_complete,
             )
         except Exception as e:
+            systemic = self.proxy.collect_systemic_error(rollout_id)
             return RolloutOutcome(
                 status=RolloutStatus.FAILURE,
                 error=str(e),
                 duration_ms=(time.monotonic() - start) * 1000,
+                systemic_error=systemic,
             )
         finally:
             rollout_contextvar.reset(token)

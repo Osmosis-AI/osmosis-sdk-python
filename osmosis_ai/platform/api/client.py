@@ -59,8 +59,8 @@ class OsmosisClient:
         )
         for ws in data.get("workspaces", []):
             if ws.get("name") == workspace_name:
-                return {"has_subscription": ws.get("has_subscription")}
-        return {}
+                return {"found": True, "has_subscription": ws.get("has_subscription")}
+        return {"found": False}
 
     def list_workspaces(
         self,
