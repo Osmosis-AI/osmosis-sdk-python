@@ -111,7 +111,6 @@ def load_training_config(path: Path) -> TrainingConfig:
     training_section = raw.get("training", {})
     sampling_section = raw.get("sampling", {})
     checkpoints_section = raw.get("checkpoints", {})
-
     try:
         experiment = _ExperimentSection(**experiment_section)
         training = _TrainingSection(**training_section)
