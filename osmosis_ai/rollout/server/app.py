@@ -70,8 +70,19 @@ async def _handle_rollout(
 
     async def on_grader_complete(result: ExecutionResult) -> None:
         if not request.grader_callback_url:
+            logger.info(
+                "Skipping grader callback for %s: no grader_callback_url",
+                request.rollout_id,
+            )
             return
-        await post_json_with_retry(
+        logger.info(
+            "Posting grader callback for %s to %s (status=%s, samples=%d)",
+            request.rollout_id,
+            request.grader_callback_url,
+            result.status,
+            len(result.samples),
+        )
+        resp = await post_json_with_retry(
             url=request.grader_callback_url,
             payload=GraderCompleteRequest(
                 rollout_id=request.rollout_id,
@@ -83,6 +94,11 @@ async def _handle_rollout(
                 err_category=result.err_category,
             ).model_dump(),
             headers=auth.as_bearer_headers(),
+        )
+        logger.info(
+            "Grader callback for %s completed: status=%d",
+            request.rollout_id,
+            resp.status_code,
         )
 
     try:
@@ -100,6 +116,7 @@ async def _handle_rollout(
                 if request.grader_callback_url
                 else None,
             )
+        logger.info("Rollout %s completed successfully", request.rollout_id)
     except Exception:
         logger.error(
             "Rollout %s failed: %s", request.rollout_id, traceback.format_exc()
@@ -116,3 +133,13 @@ async def _handle_rollout(
             )
         except Exception:
             logger.error("Failed to post error callback: %s", traceback.format_exc())
+        if request.grader_callback_url:
+            try:
+                await on_grader_complete(
+                    ExecutionResult(status=RolloutStatus.FAILURE)
+                )
+            except Exception:
+                logger.error(
+                    "Failed to post grader error callback: %s",
+                    traceback.format_exc(),
+                )
