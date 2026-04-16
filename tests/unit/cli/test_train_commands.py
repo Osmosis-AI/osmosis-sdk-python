@@ -316,7 +316,7 @@ commit_sha = "deadbeef"
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
         train_module.submit(config_path=config_path, yes=True)
         assert captured_kwargs["model_path"] == "Qwen/Qwen3.5-35B-A3B"
-        assert captured_kwargs["dataset_name"] == "abc-123"
+        assert captured_kwargs["dataset"] == "abc-123"
         assert captured_kwargs["rollout_name"] == "calculator"
         assert captured_kwargs["entrypoint"] == "main.py"
         assert captured_kwargs["config"] == {"lr": 1e-6, "total_epochs": 1}

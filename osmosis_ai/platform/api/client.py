@@ -247,7 +247,7 @@ class OsmosisClient:
         self,
         *,
         model_path: str,
-        dataset_name: str,
+        dataset: str,
         rollout_name: str,
         entrypoint: str,
         commit_sha: str | None = None,
@@ -257,10 +257,18 @@ class OsmosisClient:
         """Submit a new training run."""
         data: dict[str, Any] = {
             "model_path": model_path,
-            "dataset_name": dataset_name,
+            "dataset": dataset,
             "rollout_name": rollout_name,
             "entrypoint": entrypoint,
         }
+        # Also send dataset_id for backward compatibility with older server versions
+        try:
+            from uuid import UUID
+
+            UUID(dataset)
+            data["dataset_id"] = dataset
+        except ValueError:
+            pass
         if commit_sha is not None:
             data["commit_sha"] = commit_sha
         if config is not None:

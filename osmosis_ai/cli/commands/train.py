@@ -151,7 +151,7 @@ def submit(
         client = OsmosisClient()
         result = client.submit_training_run(
             model_path=config.experiment_model_path,
-            dataset_name=config.experiment_dataset,
+            dataset=config.experiment_dataset,
             rollout_name=config.experiment_rollout,
             entrypoint=config.experiment_entrypoint,
             commit_sha=config.experiment_commit_sha,
