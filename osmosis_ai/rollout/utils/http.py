@@ -58,11 +58,13 @@ async def post_json_with_retry(
                 raise
 
             delay = min(base_delay_seconds * (2 ** (attempt - 1)), max_delay_seconds)
+            exc_desc = str(exc) or f"{type(exc).__name__} (no message)"
             logging.warning(
-                "POST callback failed (attempt %s/%s): %s. Retrying in %.2fs",
+                "POST callback failed (attempt %s/%s): %s. URL: %s. Retrying in %.2fs",
                 attempt,
                 max_attempts,
-                str(exc),
+                exc_desc,
+                url,
                 delay,
             )
             await asyncio.sleep(delay)
