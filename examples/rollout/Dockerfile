@@ -20,15 +20,15 @@ WORKDIR /app
 
 # Copy SDK source and install with server extras
 # Build context must be the repo root:
-#   docker build -f examples/rollout_v2/Dockerfile .
+#   docker build -f examples/rollout/Dockerfile .
 COPY pyproject.toml uv.lock ./
 COPY osmosis_ai ./osmosis_ai
 RUN pip install --no-cache-dir ".[server]"
 
-# Copy the rollout_v2 examples (workflow, grader, harbor task, entrypoint)
-COPY examples/rollout_v2 ./examples/rollout_v2
+# Copy the rollout examples (workflow, grader, harbor task, entrypoint)
+COPY examples/rollout ./examples/rollout
 
-WORKDIR /app/examples/rollout_v2
+WORKDIR /app/examples/rollout
 
 EXPOSE 8000
 
