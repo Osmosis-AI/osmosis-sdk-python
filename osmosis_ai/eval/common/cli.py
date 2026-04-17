@@ -285,8 +285,6 @@ def auto_discover_grader(
 
     Returns (grader_cls, grader_config) or (None, None) if not found.
     """
-    import sys
-
     mod = sys.modules.get(module_name)
     if mod is None:
         return None, None
