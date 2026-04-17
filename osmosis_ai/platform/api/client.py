@@ -262,14 +262,6 @@ class OsmosisClient:
             "rollout_name": rollout_name,
             "entrypoint": entrypoint,
         }
-        # Also send dataset_id for backward compatibility with older server versions
-        try:
-            from uuid import UUID
-
-            UUID(dataset)
-            data["dataset_id"] = dataset
-        except ValueError:
-            pass
         if commit_sha is not None:
             data["commit_sha"] = commit_sha
         if config is not None:
