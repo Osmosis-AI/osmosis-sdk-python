@@ -135,9 +135,7 @@ async def _handle_rollout(
             logger.error("Failed to post error callback: %s", traceback.format_exc())
         if request.grader_callback_url:
             try:
-                await on_grader_complete(
-                    ExecutionResult(status=RolloutStatus.FAILURE)
-                )
+                await on_grader_complete(ExecutionResult(status=RolloutStatus.FAILURE))
             except Exception:
                 logger.error(
                     "Failed to post grader error callback: %s",

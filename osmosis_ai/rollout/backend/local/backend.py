@@ -87,9 +87,7 @@ class LocalBackend(ExecutionBackend):
                 graded = await self.run_grader(request, result)
                 await on_grader_complete(graded)
             else:
-                await on_grader_complete(
-                    ExecutionResult(status=RolloutStatus.FAILURE)
-                )
+                await on_grader_complete(ExecutionResult(status=RolloutStatus.FAILURE))
 
     async def run_workflow(self, request: ExecutionRequest) -> ExecutionResult:
         config = copy.deepcopy(self.workflow_config)
