@@ -153,15 +153,6 @@ def _load_rollout_module(rollout: str, entrypoint: str) -> types.ModuleType:
     return module
 
 
-def _entrypoint_to_module(entrypoint: str) -> str:
-    """Convert a file path to a Python module path.
-
-    "multiply_rollout/workflow.py" → "multiply_rollout.workflow"
-    "main.py"                      → "main"
-    """
-    return entrypoint.replace("/", ".").removesuffix(".py")
-
-
 def _group_by_object_id(
     pairs: list[tuple[str, Any]],
 ) -> dict[int, list[tuple[str, Any]]]:
@@ -199,8 +190,8 @@ def _resolve_workflow(
     workflow class may have been defined in a different file and merely
     imported into the entrypoint.
     """
-    from osmosis_ai.rollout_v2.agent_workflow import AgentWorkflow
-    from osmosis_ai.rollout_v2.types import AgentWorkflowConfig
+    from osmosis_ai.rollout.agent_workflow import AgentWorkflow
+    from osmosis_ai.rollout.types import AgentWorkflowConfig
 
     mod = _load_rollout_module(rollout, entrypoint)
 
@@ -344,8 +335,8 @@ def _discover_grader_from_module(
     entrypoint: str,
 ) -> tuple[type | None, Any]:
     """Pick Grader subclass and GraderConfig from a loaded module namespace."""
-    from osmosis_ai.rollout_v2.grader import Grader
-    from osmosis_ai.rollout_v2.types import GraderConfig
+    from osmosis_ai.rollout.grader import Grader
+    from osmosis_ai.rollout.types import GraderConfig
 
     grader_pairs = [
         (n, v)
@@ -392,11 +383,11 @@ def _resolve_grader(
     """
     import sys
 
-    from osmosis_ai.rollout_v2.utils.imports import resolve_object
+    from osmosis_ai.rollout.utils.imports import resolve_object
 
     if explicit_grader:
-        from osmosis_ai.rollout_v2.grader import Grader
-        from osmosis_ai.rollout_v2.types import GraderConfig
+        from osmosis_ai.rollout.grader import Grader
+        from osmosis_ai.rollout.types import GraderConfig
 
         grader_cls = resolve_object(explicit_grader)
         if (
@@ -415,7 +406,6 @@ def _resolve_grader(
                 f"[grader].config must point to a GraderConfig instance, "
                 f"but '{explicit_config}' resolved to {type(grader_config).__name__}"
             )
-
         return grader_cls, grader_config
 
     mod = sys.modules.get(module_name)

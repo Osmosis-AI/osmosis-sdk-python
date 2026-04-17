@@ -9,8 +9,8 @@ import pytest
 
 from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.eval.common.cli import _resolve_workflow, auto_discover_grader
-from osmosis_ai.rollout_v2.grader import Grader
-from osmosis_ai.rollout_v2.types import GraderConfig
+from osmosis_ai.rollout.grader import Grader
+from osmosis_ai.rollout.types import GraderConfig
 
 
 @pytest.fixture
@@ -37,7 +37,7 @@ def test_resolve_workflow_multiple_agent_workflow_subclasses(
         tmp_rollout_layout,
         "two_wf.py",
         """\
-        from osmosis_ai.rollout_v2.agent_workflow import AgentWorkflow
+        from osmosis_ai.rollout.agent_workflow import AgentWorkflow
 
         class W1(AgentWorkflow):
             async def run(self, ctx):
@@ -57,7 +57,7 @@ def test_resolve_workflow_multiple_agent_workflow_subclasses(
 
 
 def test_auto_discover_grader_multiple_grader_config_instances():
-    from osmosis_ai.rollout_v2.context import GraderContext
+    from osmosis_ai.rollout.context import GraderContext
 
     mod_name = "_test_two_gc"
 
@@ -92,7 +92,7 @@ def test_resolve_workflow_same_workflow_class_two_bindings_not_ambiguous(
         tmp_rollout_layout,
         "wf_alias.py",
         """\
-        from osmosis_ai.rollout_v2.agent_workflow import AgentWorkflow
+        from osmosis_ai.rollout.agent_workflow import AgentWorkflow
 
         class OnlyWorkflow(AgentWorkflow):
             async def run(self, ctx):
@@ -111,7 +111,7 @@ def test_resolve_workflow_same_workflow_class_two_bindings_not_ambiguous(
 
 
 def test_auto_discover_grader_same_grader_config_two_bindings_ok():
-    from osmosis_ai.rollout_v2.context import GraderContext
+    from osmosis_ai.rollout.context import GraderContext
 
     mod_name = "_test_gc_alias"
 
@@ -134,7 +134,7 @@ def test_auto_discover_grader_same_grader_config_two_bindings_ok():
 
 
 def test_auto_discover_grader_multiple_grader_subclasses():
-    from osmosis_ai.rollout_v2.context import GraderContext
+    from osmosis_ai.rollout.context import GraderContext
 
     mod_name = "_test_two_gr"
 
@@ -167,8 +167,8 @@ def test_resolve_workflow_multiple_agent_workflow_config_instances(
         tmp_rollout_layout,
         "two_cfg.py",
         """\
-        from osmosis_ai.rollout_v2.agent_workflow import AgentWorkflow
-        from osmosis_ai.rollout_v2.types import AgentWorkflowConfig
+        from osmosis_ai.rollout.agent_workflow import AgentWorkflow
+        from osmosis_ai.rollout.types import AgentWorkflowConfig
 
         class OnlyWorkflow(AgentWorkflow):
             async def run(self, ctx):

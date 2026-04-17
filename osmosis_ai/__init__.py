@@ -5,7 +5,7 @@ Features:
 - Rubric evaluation via LLM-as-judge (evaluate_rubric)
 - Type-safe interfaces for LLM-centric workflows
 
-Remote rollout uses ``osmosis_ai.rollout_v2`` and is not re-exported at package
+Remote rollout uses ``osmosis_ai.rollout`` and is not re-exported at package
 top level.
 """
 

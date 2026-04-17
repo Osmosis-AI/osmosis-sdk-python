@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "osmosis-ai"
 dynamic = ["version"]
-description = "A Python SDK for Osmosis LLM training workflows: reward/rubric validation, rollout v2, platform CLI, and evaluation tools."
+description = "A Python SDK for Osmosis LLM training workflows: reward/rubric validation, rollout, platform CLI, and evaluation tools."
 readme = "README.md"
 authors = [
     {name = "Osmosis AI", email = "jake@osmosis.ai"}
@@ -112,13 +112,13 @@ omit = [
     "osmosis_ai/cli/prompts.py",
     # Platform CLI business logic (API calls, OAuth, interactive prompts)
     "osmosis_ai/platform/cli/*",
-    # Rollout v2 — ABCs, type defs, integrations, harbor backend
-    "osmosis_ai/rollout_v2/agent_workflow.py",
-    "osmosis_ai/rollout_v2/grader.py",
-    "osmosis_ai/rollout_v2/backend/base.py",
-    "osmosis_ai/rollout_v2/types/*",
-    "osmosis_ai/rollout_v2/integrations/*",
-    "osmosis_ai/rollout_v2/backend/harbor/*",
+    # Rollout — ABCs, type defs, integrations, harbor backend
+    "osmosis_ai/rollout/agent_workflow.py",
+    "osmosis_ai/rollout/grader.py",
+    "osmosis_ai/rollout/backend/base.py",
+    "osmosis_ai/rollout/types/*",
+    "osmosis_ai/rollout/integrations/*",
+    "osmosis_ai/rollout/backend/harbor/*",
 ]
 
 [tool.coverage.report]

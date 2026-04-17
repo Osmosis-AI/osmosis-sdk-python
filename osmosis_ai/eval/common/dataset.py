@@ -232,7 +232,7 @@ class DatasetReader:
 
 
 def dataset_row_to_prompt(row: DatasetRow) -> list[dict[str, str]]:
-    """Convert a dataset row to a plain prompt list for v2 workflows."""
+    """Convert a dataset row to a plain prompt list for rollout workflows."""
     return [
         {"role": "system", "content": row["system_prompt"]},
         {"role": "user", "content": row["user_prompt"]},

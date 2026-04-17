@@ -74,7 +74,7 @@ def _run_command(monkeypatch: pytest.MonkeyPatch, config: SimpleNamespace) -> No
         raise _StopEval
 
     monkeypatch.setattr(
-        "osmosis_ai.rollout_v2.backend.local.backend.LocalBackend",
+        "osmosis_ai.rollout.backend.local.backend.LocalBackend",
         _fake_local_backend,
     )
 
@@ -94,9 +94,9 @@ def _run_command(monkeypatch: pytest.MonkeyPatch, config: SimpleNamespace) -> No
 
 
 def test_run_uses_explicit_grader_override(monkeypatch: pytest.MonkeyPatch) -> None:
-    from osmosis_ai.rollout_v2.context import GraderContext
-    from osmosis_ai.rollout_v2.grader import Grader
-    from osmosis_ai.rollout_v2.types import GraderConfig
+    from osmosis_ai.rollout.context import GraderContext
+    from osmosis_ai.rollout.grader import Grader
+    from osmosis_ai.rollout.types import GraderConfig
 
     explicit_module = types.ModuleType("explicit_grader_mod")
 
@@ -123,9 +123,9 @@ def test_run_uses_explicit_grader_override(monkeypatch: pytest.MonkeyPatch) -> N
 def test_run_auto_discovers_grader_from_entrypoint(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from osmosis_ai.rollout_v2.context import GraderContext
-    from osmosis_ai.rollout_v2.grader import Grader
-    from osmosis_ai.rollout_v2.types import GraderConfig
+    from osmosis_ai.rollout.context import GraderContext
+    from osmosis_ai.rollout.grader import Grader
+    from osmosis_ai.rollout.types import GraderConfig
 
     entrypoint_module = types.ModuleType("fake_entrypoint")
 
