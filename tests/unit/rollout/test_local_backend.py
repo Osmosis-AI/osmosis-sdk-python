@@ -166,7 +166,7 @@ class TestLocalBackend:
         for sample in grader_result.samples.values():
             assert sample.reward == 1.0
 
-    async def test_grader_not_called_without_label(self):
+    async def test_grader_callback_reports_failure_without_label(self):
         backend = LocalBackend(
             workflow=StubWorkflow,
             workflow_config=AgentWorkflowConfig(name="test"),
@@ -185,7 +185,9 @@ class TestLocalBackend:
             on_workflow_complete=on_complete,
             on_grader_complete=on_grader,
         )
-        on_grader.assert_not_awaited()
+        on_grader.assert_awaited_once()
+        grader_result = on_grader.call_args[0][0]
+        assert grader_result.status == RolloutStatus.FAILURE
 
     async def test_grader_failure_returns_error_result(self):
         backend = LocalBackend(

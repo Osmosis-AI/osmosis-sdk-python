@@ -285,6 +285,8 @@ def auto_discover_grader(
 
     Returns (grader_cls, grader_config) or (None, None) if not found.
     """
+    import sys
+
     mod = sys.modules.get(module_name)
     if mod is None:
         return None, None
@@ -415,7 +417,6 @@ def _resolve_grader(
                 f"[grader].config must point to a GraderConfig instance, "
                 f"but '{explicit_config}' resolved to {type(grader_config).__name__}"
             )
-
         return grader_cls, grader_config
 
     mod = sys.modules.get(module_name)
