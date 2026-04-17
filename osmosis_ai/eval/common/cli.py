@@ -153,15 +153,6 @@ def _load_rollout_module(rollout: str, entrypoint: str) -> types.ModuleType:
     return module
 
 
-def _entrypoint_to_module(entrypoint: str) -> str:
-    """Convert a file path to a Python module path.
-
-    "multiply_rollout/workflow.py" → "multiply_rollout.workflow"
-    "main.py"                      → "main"
-    """
-    return entrypoint.replace("/", ".").removesuffix(".py")
-
-
 def _group_by_object_id(
     pairs: list[tuple[str, Any]],
 ) -> dict[int, list[tuple[str, Any]]]:
