@@ -54,7 +54,7 @@ server = [
     "osmosis-ai[platform]",
     "fastapi>=0.100.0,<1.0.0",
     "uvicorn>=0.23.0,<1.0.0",
-    "pydantic-settings>=2.0.0,<3.0.0",
+    "pydantic-settings>=2.14.0,<3.0.0",
 ]
 
 # Development dependencies (testing, formatting, type checking, etc.)
