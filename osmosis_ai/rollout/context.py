@@ -51,6 +51,11 @@ class RolloutContext:
     def register_agent(self, sample_id: str, agent: Any) -> None:
         """Lazy path for frameworks (Strands) whose ``agent.messages`` is
         mutated in place; read at ``get_samples()`` time."""
+        if sample_id in self.recorded_samples:
+            raise ValueError(
+                f"sample_id '{sample_id}' already used in this rollout; "
+                f"pass sample_id= explicitly to disambiguate."
+            )
         self.registered_agents[sample_id] = agent
 
     def record_sample(self, sample_id: str, messages: list[dict[str, Any]]) -> None:

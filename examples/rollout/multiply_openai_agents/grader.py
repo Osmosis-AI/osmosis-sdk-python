@@ -15,16 +15,18 @@ multiply_grader_config = MultiplyGraderConfig()
 
 
 class MultiplyGrader(Grader):
-    def compute_reward(self, solution_str: str, ground_truth: str) -> float:
+    def compute_reward(self, solution_str: str, ground_truth: str):
         extracted = extract_solution(solution_str)
         try:
-            sol_val = float(extracted) if extracted is not None else None
-        except (TypeError, ValueError):
+            sol_val = float(extracted)
+        except Exception:
             return 0.0
-        if sol_val is None:
-            return 0.0
+
         gt_val = float(ground_truth)
-        return 1.0 if abs(gt_val - sol_val) < 1e-2 else 0.0
+
+        if abs(gt_val - sol_val) < 1e-2:
+            return 1.0
+        return 0.0
 
     async def grade(self, ctx: GraderContext) -> None:
         samples = ctx.get_samples()

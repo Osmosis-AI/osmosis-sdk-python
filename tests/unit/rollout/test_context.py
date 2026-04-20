@@ -122,6 +122,14 @@ class TestRolloutContext:
         with pytest.raises(ValueError, match="already used"):
             ctx.record_sample("s1", [])
 
+    def test_register_agent_raises_on_record_sample_collision(self):
+        ctx = RolloutContext(chat_completions_url="http://llm", rollout_id="r1")
+        ctx.record_sample("s1", [])
+        agent = MagicMock()
+        agent.messages = []
+        with pytest.raises(ValueError, match="already used"):
+            ctx.register_agent("s1", agent)
+
 
 # ---------------------------------------------------------------------------
 # GraderContext
