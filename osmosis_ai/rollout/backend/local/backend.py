@@ -22,7 +22,6 @@ from osmosis_ai.rollout.types import (
 )
 from osmosis_ai.rollout.utils.concurrency import ConcurrencyLimiter
 from osmosis_ai.rollout.utils.imports import resolve_object
-from osmosis_ai.rollout.utils.messages import map_initial_messages_to_content_blocks
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -92,7 +91,7 @@ class LocalBackend(ExecutionBackend):
     async def run_workflow(self, request: ExecutionRequest) -> ExecutionResult:
         config = copy.deepcopy(self.workflow_config)
         ctx = AgentWorkflowContext(
-            prompt=map_initial_messages_to_content_blocks(request.prompt),
+            prompt=request.prompt,
             config=config,
         )
 

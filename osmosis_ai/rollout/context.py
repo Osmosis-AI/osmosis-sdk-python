@@ -31,6 +31,7 @@ class RolloutContext:
     api_key: str | None = None
     rollout_id: str = ""
     registered_agents: dict[str, Any] = field(default_factory=dict)
+    recorded_samples: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not self.chat_completions_url:
@@ -48,16 +49,28 @@ class RolloutContext:
         rollout_contextvar.set(None)
 
     def register_agent(self, sample_id: str, agent: Any) -> None:
+        """Lazy path for frameworks (Strands) whose ``agent.messages`` is
+        mutated in place; read at ``get_samples()`` time."""
         self.registered_agents[sample_id] = agent
 
-    def get_samples(self) -> dict[str, RolloutSample]:
-        return {
-            sample_id: RolloutSample(
-                id=sample_id,
-                messages=agent.messages,
+    def record_sample(self, sample_id: str, messages: list[dict[str, Any]]) -> None:
+        """Eager path for frameworks (openai-agents) whose trajectory is
+        only observable after the SDK's run call returns."""
+        if sample_id in self.recorded_samples or sample_id in self.registered_agents:
+            raise ValueError(
+                f"sample_id '{sample_id}' already used in this rollout; "
+                f"pass sample_id= explicitly to disambiguate."
             )
+        self.recorded_samples[sample_id] = messages
+
+    def get_samples(self) -> dict[str, RolloutSample]:
+        samples: dict[str, RolloutSample] = {
+            sample_id: RolloutSample(id=sample_id, messages=agent.messages)
             for sample_id, agent in self.registered_agents.items()
         }
+        for sample_id, messages in self.recorded_samples.items():
+            samples[sample_id] = RolloutSample(id=sample_id, messages=messages)
+        return samples
 
 
 def get_rollout_context() -> RolloutContext | None:

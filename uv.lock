@@ -972,6 +972,15 @@ wheels = [
 ]
 
 [[package]]
+name = "griffelib"
+version = "2.0.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/9d/82/74f4a3310cdabfbb10da554c3a672847f1ed33c6f61dd472681ce7f1fe67/griffelib-2.0.2.tar.gz", hash = "sha256:3cf20b3bc470e83763ffbf236e0076b1211bac1bc67de13daf494640f2de707e", size = 166461, upload-time = "2026-03-27T11:34:51.091Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/11/8c/c9138d881c79aa0ea9ed83cbd58d5ca75624378b38cee225dcf5c42cc91f/griffelib-2.0.2-py3-none-any.whl", hash = "sha256:925c857658fb1ba40c0772c37acbc2ab650bd794d9c1b9726922e36ea4117ea1", size = 142357, upload-time = "2026-03-27T11:34:46.275Z" },
+]
+
+[[package]]
 name = "grpclib"
 version = "0.4.9"
 source = { registry = "https://pypi.org/simple" }
@@ -2027,6 +2036,25 @@ wheels = [
 ]
 
 [[package]]
+name = "openai-agents"
+version = "0.14.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "griffelib" },
+    { name = "mcp" },
+    { name = "openai" },
+    { name = "pydantic" },
+    { name = "requests" },
+    { name = "types-requests" },
+    { name = "typing-extensions" },
+    { name = "websockets" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/e2/2c/74fea5c1b20f107d19742af400045542e17eb449d044f950758a6f68f32f/openai_agents-0.14.2.tar.gz", hash = "sha256:fd4e1ae84e00aef4339ad39913468a0da34cba8ff5382925d38028ac3b435ef2", size = 5288888, upload-time = "2026-04-18T00:17:39.709Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/0b/02/bb3ddff9bca543cbcca0d362a645b03a0708b6c2cd6eb620d5f3de810bb3/openai_agents-0.14.2-py3-none-any.whl", hash = "sha256:acd75132f2ec70413a4e95680b629ccbc6f4f5d0d63414980153de09d409e695", size = 807364, upload-time = "2026-04-18T00:17:37.505Z" },
+]
+
+[[package]]
 name = "opentelemetry-api"
 version = "1.39.1"
 source = { registry = "https://pypi.org/simple" }
@@ -2171,6 +2199,8 @@ dependencies = [
     { name = "httpx" },
     { name = "keyring" },
     { name = "litellm" },
+    { name = "openai" },
+    { name = "openai-agents" },
     { name = "pydantic" },
     { name = "python-dotenv" },
     { name = "pyyaml" },
@@ -2226,6 +2256,8 @@ requires-dist = [
     { name = "keyring", specifier = ">=25.0.0" },
     { name = "litellm", specifier = ">=1.40.0,<=1.82.6" },
     { name = "mypy", marker = "extra == 'dev'", specifier = "==1.20.1" },
+    { name = "openai", specifier = ">=1.40.0" },
+    { name = "openai-agents", specifier = ">=0.14,<0.15" },
     { name = "osmosis-ai", extras = ["platform"], marker = "extra == 'server'" },
     { name = "osmosis-ai", extras = ["server"], marker = "extra == 'dev'" },
     { name = "osmosis-ai", extras = ["server"], marker = "extra == 'full'" },

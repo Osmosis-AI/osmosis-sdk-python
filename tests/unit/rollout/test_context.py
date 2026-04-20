@@ -82,6 +82,46 @@ class TestRolloutContext:
         assert samples["s1"].id == "s1"
         assert samples["s1"].messages == agent.messages
 
+    def test_record_sample_and_get_samples(self):
+        ctx = RolloutContext(chat_completions_url="http://llm", rollout_id="r1")
+        messages = [{"role": "assistant", "content": "done"}]
+        ctx.record_sample("s1", messages)
+
+        samples = ctx.get_samples()
+        assert "s1" in samples
+        assert isinstance(samples["s1"], RolloutSample)
+        assert samples["s1"].id == "s1"
+        assert samples["s1"].messages == messages
+
+    def test_get_samples_merges_both_tracks(self):
+        ctx = RolloutContext(chat_completions_url="http://llm", rollout_id="r1")
+
+        strands_agent = MagicMock()
+        strands_agent.messages = [{"role": "user", "content": [{"text": "hi"}]}]
+        ctx.register_agent("strands-sample", strands_agent)
+
+        oa_messages = [{"role": "assistant", "content": "done"}]
+        ctx.record_sample("openai-sample", oa_messages)
+
+        samples = ctx.get_samples()
+        assert set(samples) == {"strands-sample", "openai-sample"}
+        assert samples["strands-sample"].messages == strands_agent.messages
+        assert samples["openai-sample"].messages == oa_messages
+
+    def test_record_sample_raises_on_duplicate(self):
+        ctx = RolloutContext(chat_completions_url="http://llm", rollout_id="r1")
+        ctx.record_sample("s1", [])
+        with pytest.raises(ValueError, match="already used"):
+            ctx.record_sample("s1", [])
+
+    def test_record_sample_raises_on_register_agent_collision(self):
+        ctx = RolloutContext(chat_completions_url="http://llm", rollout_id="r1")
+        agent = MagicMock()
+        agent.messages = []
+        ctx.register_agent("s1", agent)
+        with pytest.raises(ValueError, match="already used"):
+            ctx.record_sample("s1", [])
+
 
 # ---------------------------------------------------------------------------
 # GraderContext

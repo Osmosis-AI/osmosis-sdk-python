@@ -221,3 +221,29 @@ class TestLocalBackend:
             workflow_config=AgentWorkflowConfig(name="test"),
         )
         assert backend.workflow_cls is StubWorkflow
+
+    async def test_prompt_passes_through_unchanged(self):
+        """LocalBackend must not mutate the prompt format — it is canonically
+        OpenAI chat format and integrations convert at their own boundary."""
+        captured: dict = {}
+
+        class CapturingWorkflow(AgentWorkflow):
+            async def run(self, ctx: AgentWorkflowContext) -> Any:
+                captured["prompt"] = ctx.prompt
+
+        backend = LocalBackend(
+            workflow=CapturingWorkflow,
+            workflow_config=AgentWorkflowConfig(name="passthrough"),
+        )
+        on_complete = AsyncMock()
+
+        original_prompt = [
+            {"role": "system", "content": "you are helpful"},
+            {"role": "user", "content": "hi"},
+        ]
+        request = ExecutionRequest(id="r1", prompt=original_prompt)
+        await backend.execute(request, on_workflow_complete=on_complete)
+
+        # Byte-for-byte identical: no content-block conversion, no copy-and-mutate.
+        assert captured["prompt"] == original_prompt
+        assert captured["prompt"][0]["content"] == "you are helpful"
