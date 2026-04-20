@@ -1,0 +1,27 @@
+osmosis_ai/rollout/context.py
+  387143717f580914 54-58
+tests/unit/rollout/test_context.py
+  387143717f580914 125-132
+examples/rollout/multiply_openai_agents/grader.py
+  387143717f580914 18,21-22,24,26-29
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.0",
+  "base_commit_sha": "4dbbdc70d501e5716c7d89fe36fcadee80ee2993",
+  "prompts": {
+    "387143717f580914": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "21127213-00b7-4ced-be53-290cd3956513",
+        "model": "gpt-5.4-xhigh-fast"
+      },
+      "human_author": "JoyboyBrian",
+      "messages": [],
+      "total_additions": 68,
+      "total_deletions": 17,
+      "accepted_lines": 22,
+      "overriden_lines": 6
+    }
+  }
+}
