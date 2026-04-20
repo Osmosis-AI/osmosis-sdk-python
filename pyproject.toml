@@ -34,7 +34,7 @@ dependencies = [
     "strands-agents[litellm]>=1.29.0",
     "rich>=14.2.0",
     # Secure credential storage (system keychain)
-    "keyring>=25.0.0",
+    "keyring>=25.7.0",
     # Interactive CLI prompts
     "questionary>=2.1.0,<3.0.0",
     # CLI framework
