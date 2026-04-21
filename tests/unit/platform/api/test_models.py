@@ -384,3 +384,125 @@ class TestTrainingRunMetrics:
         }
         result = TrainingRunMetrics.from_dict(data)
         assert result.metrics == []
+
+
+class TestDeploymentModels:
+    def test_deployment_info_from_dict(self) -> None:
+        from osmosis_ai.platform.api.models import DeploymentInfo
+
+        d = DeploymentInfo.from_dict(
+            {
+                "id": "dep_1",
+                "lora_name": "qwen3-run1-step-100-lora",
+                "status": "deployed",
+                "training_run_id": "run_1",
+                "training_run_name": "qwen3-run1",
+                "checkpoint_step": 100,
+                "base_model": "Qwen/Qwen3-30B-A3B-Instruct-2507-FP8",
+                "creator_name": "brian",
+                "created_at": "2026-04-20T00:00:00Z",
+            }
+        )
+        assert d.id == "dep_1"
+        assert d.lora_name == "qwen3-run1-step-100-lora"
+        assert d.status == "deployed"
+        assert d.checkpoint_step == 100
+        assert d.base_model == "Qwen/Qwen3-30B-A3B-Instruct-2507-FP8"
+
+    def test_deployment_info_minimal(self) -> None:
+        """Server may omit optional fields — from_dict must tolerate it."""
+        from osmosis_ai.platform.api.models import DeploymentInfo
+
+        d = DeploymentInfo.from_dict(
+            {
+                "id": "dep_1",
+                "lora_name": "x",
+                "status": "deployed",
+                "base_model": "Qwen/Qwen3",
+                "checkpoint_step": 0,
+            }
+        )
+        assert d.training_run_id is None
+        assert d.training_run_name is None
+        assert d.creator_name is None
+        assert d.created_at == ""
+
+    def test_paginated_deployments_from_dict(self) -> None:
+        from osmosis_ai.platform.api.models import PaginatedDeployments
+
+        p = PaginatedDeployments.from_dict(
+            {
+                "deployments": [
+                    {
+                        "id": "dep_1",
+                        "lora_name": "a",
+                        "status": "deployed",
+                        "base_model": "Qwen/Qwen3",
+                        "checkpoint_step": 1,
+                    }
+                ],
+                "total_count": 1,
+                "has_more": False,
+                "next_offset": None,
+            }
+        )
+        assert len(p.deployments) == 1
+        assert p.total_count == 1
+        assert p.has_more is False
+        assert p.next_offset is None
+
+    def test_create_deployment_result(self) -> None:
+        from osmosis_ai.platform.api.models import CreateDeploymentResult
+
+        r = CreateDeploymentResult.from_dict(
+            {"id": "dep_1", "lora_name": "x", "status": "deployed"}
+        )
+        assert r.id == "dep_1"
+        assert r.status == "deployed"
+
+    def test_rename_deployment_result(self) -> None:
+        from osmosis_ai.platform.api.models import RenameDeploymentResult
+
+        r = RenameDeploymentResult.from_dict({"id": "dep_1", "lora_name": "new"})
+        assert r.lora_name == "new"
+
+    def test_lora_checkpoint_info(self) -> None:
+        from osmosis_ai.platform.api.models import LoraCheckpointInfo
+
+        c = LoraCheckpointInfo.from_dict(
+            {
+                "id": "cp_1",
+                "checkpoint_step": 100,
+                "status": "uploaded",
+                "created_at": "2026-04-20T00:00:00Z",
+            }
+        )
+        assert c.checkpoint_step == 100
+        assert c.status == "uploaded"
+
+    def test_training_run_checkpoints(self) -> None:
+        from osmosis_ai.platform.api.models import TrainingRunCheckpoints
+
+        r = TrainingRunCheckpoints.from_dict(
+            {
+                "training_run_id": "run_1",
+                "training_run_name": "qwen3-run1",
+                "checkpoints": [
+                    {
+                        "id": "cp_1",
+                        "checkpoint_step": 100,
+                        "status": "uploaded",
+                        "created_at": "2026-04-20T00:00:00Z",
+                    },
+                    {
+                        "id": "cp_2",
+                        "checkpoint_step": 200,
+                        "status": "uploaded",
+                        "created_at": "2026-04-20T01:00:00Z",
+                    },
+                ],
+            }
+        )
+        assert r.training_run_name == "qwen3-run1"
+        assert len(r.checkpoints) == 2
+        assert r.checkpoints[1].checkpoint_step == 200

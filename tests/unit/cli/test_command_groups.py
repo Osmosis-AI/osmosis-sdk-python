@@ -32,7 +32,6 @@ def test_help_exits_zero(args, capfd):
 @pytest.mark.parametrize(
     "args",
     [
-        ["model", "deploy"],
         ["model", "export"],
         ["model", "build"],
         ["train", "traces"],

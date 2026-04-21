@@ -79,15 +79,18 @@ def status(
     name: str = typer.Argument(..., help="Training run name."),
 ) -> None:
     """Show training run details."""
+    from osmosis_ai.platform.api.client import OsmosisClient
+    from osmosis_ai.platform.api.models import RUN_STATUSES_SUCCESS
+    from osmosis_ai.platform.auth.platform_client import PlatformAPIError
     from osmosis_ai.platform.cli.utils import (
         _require_auth,
         build_run_detail_rows,
+        entity_status_style,
         format_date,
+        format_dim_date,
     )
 
     _, credentials = _require_auth()
-
-    from osmosis_ai.platform.api.client import OsmosisClient
 
     client = OsmosisClient()
     run = client.get_training_run(name, credentials=credentials)
@@ -105,6 +108,27 @@ def status(
         rows.append(("Completed", format_date(run.completed_at)))
 
     console.table(rows, title="Training Run")
+
+    if run.status in RUN_STATUSES_SUCCESS:
+        try:
+            ckpts = client.list_training_run_checkpoints(name, credentials=credentials)
+        except PlatformAPIError:
+            ckpts = None
+
+        if ckpts is not None and ckpts.checkpoints:
+            console.print()
+            console.print("Checkpoints:", style="bold")
+            for cp in ckpts.checkpoints:
+                step_str = f"step {cp.checkpoint_step}"
+                status_style = entity_status_style(cp.status) or "dim"
+                status_str = console.format_styled(f"[{cp.status}]", status_style)
+                date = format_dim_date(cp.created_at)
+                console.print(f"  {step_str}  {status_str}  {date}", highlight=False)
+            console.print()
+            console.print(
+                f"Deploy with:  osmosis deploy create {console.escape(name)} --step <N>",
+                style="dim",
+            )
 
 
 @app.command("submit")
