@@ -2,73 +2,41 @@
 osmosis-ai: A Python library for LLM training workflows.
 
 Features:
-- Reward function validation with @osmosis_reward and @osmosis_rubric decorators
-- Remote rollout SDK for integrating agent frameworks with Osmosis training
+- Rubric evaluation via LLM-as-judge (evaluate_rubric)
 - Type-safe interfaces for LLM-centric workflows
+
+Remote rollout uses ``osmosis_ai.rollout`` and is not re-exported at package
+top level.
 """
 
 from .consts import PACKAGE_VERSION as __version__
 
-# Remote rollout SDK exports
-from .rollout import (
-    CompletionsResult,
-    InitResponse,
-    OpenAIFunctionToolSchema,
-    # Client
-    OsmosisLLMClient,
-    # Exceptions
-    OsmosisRolloutError,
-    OsmosisServerError,
-    OsmosisTimeoutError,
-    OsmosisTransportError,
-    OsmosisValidationError,
-    # Core classes
-    RolloutAgentLoop,
-    RolloutContext,
-    RolloutMetrics,
-    # Schemas
-    RolloutRequest,
-    RolloutResponse,
-    RolloutResult,
-    # Server
-    create_app,
-    get_agent_loop,
-    list_agent_loops,
-    # Registry
-    register_agent_loop,
-)
-from .rubric_eval import MissingAPIKeyError, evaluate_rubric
-from .rubric_types import ModelNotFoundError, ProviderRequestError
-from .utils import osmosis_reward, osmosis_rubric
+# ---------------------------------------------------------------------------
+# Lazy-loaded exports: these names are resolved on first access so that
+# importing ``osmosis_ai`` does not pull in heavy dependencies (litellm,
+# openai, …) unless actually needed.
+# ---------------------------------------------------------------------------
 
-__all__ = [
-    "CompletionsResult",
-    "InitResponse",
+_RUBRIC_EXPORTS: set[str] = {
     "MissingAPIKeyError",
     "ModelNotFoundError",
-    "OpenAIFunctionToolSchema",
-    "OsmosisLLMClient",
-    "OsmosisRolloutError",
-    "OsmosisServerError",
-    "OsmosisTimeoutError",
-    "OsmosisTransportError",
-    "OsmosisValidationError",
     "ProviderRequestError",
-    # Remote rollout SDK
-    "RolloutAgentLoop",
-    "RolloutContext",
-    "RolloutMetrics",
-    "RolloutRequest",
-    "RolloutResponse",
-    "RolloutResult",
-    # Version
-    "__version__",
-    "create_app",
+    "RubricResult",
     "evaluate_rubric",
-    "get_agent_loop",
-    "list_agent_loops",
-    # Reward function decorators
-    "osmosis_reward",
-    "osmosis_rubric",
-    "register_agent_loop",
+}
+
+
+def __getattr__(name: str) -> object:
+    if name in _RUBRIC_EXPORTS:
+        from .eval import rubric
+
+        value = getattr(rubric, name)
+        globals()[name] = value  # cache so future access skips __getattr__
+        return value
+    raise AttributeError(f"module 'osmosis_ai' has no attribute {name!r}")
+
+
+__all__ = [
+    "__version__",
+    *sorted(_RUBRIC_EXPORTS),
 ]

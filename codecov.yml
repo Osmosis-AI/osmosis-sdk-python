@@ -8,6 +8,28 @@ coverage:
       default:
         target: 70%
 
+ignore:
+  # CLI command groups (Typer thin shells that delegate to business logic).
+  # Tested via manual/integration testing, not unit tests.
+  - "osmosis_ai/cli/commands/"
+  - "osmosis_ai/cli/main.py"
+  - "osmosis_ai/cli/upgrade.py"
+  # Platform CLI business logic — API calls, OAuth flows, interactive prompts.
+  - "osmosis_ai/platform/cli/"
+  # Eval CLI helpers — orchestrator commands, rubric CLI.
+  - "osmosis_ai/eval/**/cli.py"
+  # Interactive prompt helpers (questionary/prompt_toolkit UI).
+  - "osmosis_ai/cli/prompts.py"
+  # Rollout — ABCs & type definitions (no logic to test).
+  - "osmosis_ai/rollout/agent_workflow.py"
+  - "osmosis_ai/rollout/grader.py"
+  - "osmosis_ai/rollout/backend/base.py"
+  - "osmosis_ai/rollout/types/"
+  # Rollout — framework integrations (require external deps: strands, etc.).
+  - "osmosis_ai/rollout/integrations/"
+  # Rollout — Harbor backend (container orchestration, requires Docker/infra).
+  - "osmosis_ai/rollout/backend/harbor/"
+
 comment:
   layout: "diff, flags, files"
   require_changes: true

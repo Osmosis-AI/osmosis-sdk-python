@@ -12,8 +12,8 @@ repos:
       - id: detect-private-key
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.15.1
+    rev: v0.15.5
     hooks:
-      - id: ruff-check
+      - id: ruff
         args: [--fix]
       - id: ruff-format

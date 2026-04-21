@@ -52,4 +52,13 @@ coverage.xml
 todo.md
 .DS_Store
 
-CLAUDE.md
+/CLAUDE.md
+**/superpowers/
+
+.claude/
+.cursor/
+.gemini/
+.mcp.json
+
+# SDK
+trials

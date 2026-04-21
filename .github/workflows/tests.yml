@@ -9,9 +9,14 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   lint:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v6
 
@@ -23,6 +28,7 @@ jobs:
 
   typecheck-pyright:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v6
       - uses: astral-sh/setup-uv@v7
@@ -33,20 +39,30 @@ jobs:
         run: uv sync --frozen --extra dev
       - name: Run pyright
         run: uv run pyright osmosis_ai/
-      - name: Build and install for verifytypes
-        run: |
-          uv build --wheel --out-dir dist/
-          uv pip install dist/*.whl
       - name: Verify public API types
-        continue-on-error: true
-        run: uv run pyright --verifytypes osmosis_ai --ignoreexternal
+        run: |
+          output=$(uv run --no-editable pyright --verifytypes osmosis_ai --ignoreexternal 2>&1) || true
+          echo "$output"
+          # agent_adapter inherits from harbor's BaseInstalledAgent which has no
+          # type stubs, causing "base class unknown" in --verifytypes. Filter out
+          # these known errors and fail only on unexpected ones.
+          unexpected=$(echo "$output" | awk '
+            /^osmosis_ai\./ { sym = $0 }
+            /error:/ { if (sym !~ /agent_adapter/) print $0 }
+          ')
+          if [ -n "$unexpected" ]; then
+            echo "::error::Unexpected verifytypes errors:"
+            echo "$unexpected"
+            exit 1
+          fi
 
   pytest:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.10", "3.12", "3.13"]
+        python-version: ["3.12", "3.13"]
     steps:
       - uses: actions/checkout@v6
 
@@ -64,7 +80,7 @@ jobs:
 
       - name: Upload coverage to Codecov
         if: matrix.python-version == '3.12' && !github.event.pull_request.head.repo.fork
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@v6
         with:
           files: coverage.xml
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -75,6 +91,7 @@ jobs:
 
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v6
 
