@@ -26,11 +26,13 @@ from contextlib import contextmanager
 from typing import Any, cast
 
 from agents import Agent, RunConfig, Runner
+from agents.model_settings import ModelSettings
 from agents.models.chatcmpl_helpers import HEADERS_OVERRIDE
 from agents.models.openai_chatcompletions import OpenAIChatCompletionsModel
 from openai import AsyncOpenAI
 
 from osmosis_ai.rollout.context import get_rollout_context
+from osmosis_ai.rollout.types import MultiTurnMode
 
 # openai-agents' Agent.__init__ has ``instructions`` and ``prompt`` as
 # positional parameters 5 and 6. Rollout mode routes prompt content
@@ -101,6 +103,9 @@ class OsmosisOpenAIAgent(Agent):
             )
         kwargs.pop("instructions", None)
         kwargs.pop("prompt", None)
+        kwargs["model_settings"] = _with_single_sample_mode(
+            cast(ModelSettings | None, kwargs.get("model_settings"))
+        )
         super().__init__(*args, model=model, **kwargs)
 
     async def run(
@@ -179,3 +184,12 @@ def _resolve_sample_id(ctx: Any, agent: Any) -> str:
         stacklevel=3,
     )
     return f"{base}-{suffix}"
+
+
+def _with_single_sample_mode(
+    model_settings: ModelSettings | None,
+) -> ModelSettings:
+    base = model_settings or ModelSettings()
+    extra_body = dict(base.extra_body or {})
+    extra_body["multi_turn_mode"] = MultiTurnMode.SINGLE_SAMPLE.value
+    return dataclasses.replace(base, extra_body=extra_body)

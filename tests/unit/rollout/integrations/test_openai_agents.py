@@ -127,6 +127,24 @@ class TestOsmosisOpenAIAgent:
         assert agent.model is custom_model
         mock_client.assert_not_called()
 
+    def test_forces_single_sample_multi_turn_mode(self, rollout_context):
+        from agents.model_settings import ModelSettings
+
+        from osmosis_ai.rollout.integrations.agents.openai_agents import (
+            OsmosisOpenAIAgent,
+        )
+
+        with patch("osmosis_ai.rollout.integrations.agents.openai_agents.AsyncOpenAI"):
+            agent = OsmosisOpenAIAgent(
+                name="main",
+                model_settings=ModelSettings(extra_body={"existing": "value"}),
+            )
+
+        assert agent.model_settings.extra_body == {
+            "existing": "value",
+            "multi_turn_mode": "single_sample",
+        }
+
 
 class _FakeRunResult:
     def __init__(self, messages):
