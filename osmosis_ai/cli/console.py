@@ -59,15 +59,23 @@ class Console:
             rich_size["width"] = width
             rich_size["height"] = 25
 
+        # Disable Rich's default auto-highlighter: ReprHighlighter recolors
+        # numbers, hex strings, UUIDs, URLs, etc. inside printed strings,
+        # which clashes with explicit `style=` passed to Console.print (e.g.,
+        # a "green" message would show mixed colors on tokens like
+        # "step-40-lora" or "2d7a22"). Callers can opt back in per-call via
+        # `console.print(..., highlight=True)`.
         self._rich = RichConsole(
             file=file,
             force_terminal=force_terminal,
             no_color=no_color,
+            highlight=False,
             **rich_size,
         )
         self._rich_stderr = RichConsole(
             file=sys.stderr,
             no_color=no_color,
+            highlight=False,
             **rich_size,
         )
 
