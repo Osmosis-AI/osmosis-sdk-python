@@ -1,24 +1,13 @@
-# Osmosis SDK Documentation
+# Osmosis SDK documentation
 
-## Local Rollout
+## Rollout
 
-- [Overview](./local-rollout/overview.md)
-- [Reward Functions](./local-rollout/reward-functions.md)
-- [Reward Rubrics](./local-rollout/reward-rubrics.md)
-- [MCP Tools](./local-rollout/mcp-tools.md)
+- Run a server from TOML: `osmosis rollout serve <config.toml>` — see [CLI reference](./cli.md#osmosis-rollout-serve).
+- Validate only: `osmosis rollout serve <config.toml> --validate-only`
 
-## Remote Rollout
+## Workflow commands
 
-- [Overview](./remote-rollout/overview.md)
-- [Architecture](./remote-rollout/architecture.md)
-- [Agent Loop Guide](./remote-rollout/agent-loop.md)
-- [Examples](./remote-rollout/examples.md)
-
-## Reference
-
-- [Dataset Format](./datasets.md)
-- [Test Mode](./test-mode.md)
-- [Eval Mode](./eval-mode.md)
-- [CLI Reference](./cli.md)
-- [Configuration](./configuration.md)
+- [Dataset format](./datasets.md) — Parquet / JSONL / CSV columns
+- [Eval](./eval.md) — `osmosis eval run`, caching, pass@k
+- [CLI reference](./cli.md) — all `osmosis` commands and options
 - [Troubleshooting](./troubleshooting.md)

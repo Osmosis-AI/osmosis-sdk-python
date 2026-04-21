@@ -30,7 +30,7 @@ The table below lists all development commands. If you installed with **pip**, d
 | Task | Command |
 |------|---------|
 | Run all tests | `uv run pytest` |
-| Run a single file | `uv run pytest tests/unit/rollout/core/test_base.py` |
+| Run a single file | `uv run pytest tests/unit/rollout/test_validator.py` |
 | Run tests by name | `uv run pytest -k "test_name"` |
 | Run with coverage | `uv run pytest --cov=osmosis_ai --cov-report=term-missing` |
 | Lint | `uv run ruff check .` |
@@ -39,6 +39,7 @@ The table below lists all development commands. If you installed with **pip**, d
 | Check formatting | `uv run ruff format --check .` |
 | Type check (pyright) | `uv run pyright osmosis_ai/` |
 | Type check (mypy) | `uv run mypy osmosis_ai/` |
+| Verify public API types | `uv run --no-editable pyright --verifytypes osmosis_ai --ignoreexternal` |
 
 ## Testing
 
@@ -55,11 +56,12 @@ Ruff is pinned to one version across `pyproject.toml`, `.pre-commit-config.yaml`
 [Pyright](https://microsoft.github.io/pyright/) is the primary type checker and [mypy](https://mypy-lang.org/) is a secondary checker. Both are included in the `dev` extras.
 
 - **Pyright** — must pass. All errors must be resolved before merging.
+- **Pyright `--verifytypes`** — must pass. Ensures all public API symbols have complete type annotations.
 - **mypy** — advisory (`continue-on-error` in CI). Fix warnings when practical, but they won't block a PR.
 
 Configuration for both tools lives in `pyproject.toml` under `[tool.pyright]` and `[tool.mypy]`.
 
-> **Note:** CI also runs `pyright --verifytypes osmosis_ai --ignoreexternal` to check public API type completeness. This requires a non-editable install and is non-blocking in CI.
+> **Note:** `--verifytypes` requires a non-editable install. The `--no-editable` flag in `uv run` handles this automatically — it temporarily installs the package from a built wheel for the duration of the command.
 
 ## Pre-commit Hooks
 
@@ -69,6 +71,8 @@ Configuration for both tools lives in `pyproject.toml` under `[tool.pyright]` an
 pre-commit install
 ```
 
+> **Tip:** Run `uv run pyright osmosis_ai/` before pushing to catch type errors early. For full CI parity, also run `uv run --no-editable pyright --verifytypes osmosis_ai --ignoreexternal`. CI will block PRs with pyright failures.
+
 ## Pull Requests
 
 ### PR Title Format
@@ -77,12 +81,13 @@ All PR titles **must** follow this format (enforced by CI):
 
 ```
 [module] type: description
+[mod1][mod2] type: description          # multi-module (up to 3)
 ```
 
 - **Modules**: `reward`, `rollout`, `server`, `cli`, `auth`, `eval`, `misc`, `ci`, `doc`
 - **Types**: `feat`, `fix`, `refactor`, `chore`, `test`, `doc`
 
-For breaking changes, add `[BREAKING]` before the module:
+For breaking changes, add `[BREAKING]` before the modules:
 
 ```
 [BREAKING][module] type: description
@@ -92,6 +97,7 @@ For breaking changes, add `[BREAKING]` before the module:
 
 ```
 [rollout] feat: add streaming support for chat completions
+[rollout][auth] refactor: extract LifecycleManager
 [server] fix: handle timeout in rollout init
 [cli] chore: update dependency versions
 [BREAKING][reward] refactor: rename decorator parameters
@@ -111,7 +117,7 @@ Add a label to your PR so it gets categorized correctly in Release Notes:
 | `documentation` | Docs update |
 | `chore` / `ci` / `refactor` / `dependencies` | Maintenance work |
 
-Module-specific labels (`reward`, `rollout`, `server`, `cli`, `auth`, `eval`) can also be added for filtering.
+Module-specific labels (`reward`, `rollout`, `server`, `cli`, `auth`, `eval`) can also be added for filtering. Rollout work typically touches `osmosis_ai.rollout` and related CLI commands.
 
 ### Workflow
 
@@ -120,4 +126,4 @@ Module-specific labels (`reward`, `rollout`, `server`, `cli`, `auth`, `eval`) ca
 3. Run `uv run pytest` and `uv run ruff check .`
 4. Submit a pull request with a properly formatted title and label
 
-CI will run linting, type checking (pyright + mypy), tests across Python 3.10-3.13, PR title validation, and a build validation on every PR.
+CI will run linting, type checking (pyright + mypy), tests on supported Python versions (see `requires-python` in `pyproject.toml`), PR title validation, and a build validation on every PR.

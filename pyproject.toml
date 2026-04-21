@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "osmosis-ai"
 dynamic = ["version"]
-description = "A Python SDK for Osmosis LLM training workflows: reward/rubric validation and remote rollout."
+description = "A Python SDK for Osmosis LLM training workflows: reward/rubric validation, rollout, platform CLI, and evaluation tools."
 readme = "README.md"
 authors = [
     {name = "Osmosis AI", email = "jake@osmosis.ai"}
@@ -13,64 +13,69 @@ authors = [
 license = {file = "LICENSE"}
 classifiers = [
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.10",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
 ]
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 dependencies = [
     "PyYAML>=6.0,<7.0",
     "python-dotenv>=0.1.0,<2.0.0",
     "requests>=2.0.0,<3.0.0",
-    "litellm>=1.40.0,<2.0.0",  # Unified LLM provider (supports 100+ providers)
+    "litellm>=1.40.0,<=1.82.6", # Unified LLM provider (supports 100+ providers)
     "tqdm>=4.0.0,<5.0.0",
     # Remote rollout SDK dependencies
     "httpx>=0.25.0,<1.0.0",
     "pydantic>=2.0.0,<3.0.0",
+    # Eval cache dependencies
+    "filelock>=3.0.0,<4.0.0",
+    "xxhash>=3.0.0",
+    "strands-agents[litellm]>=1.29.0",
+    "rich>=14.2.0",
+    # Secure credential storage (system keychain)
+    "keyring>=25.0.0",
+    # Interactive CLI prompts
+    "questionary>=2.1.0,<3.0.0",
+    # CLI framework
+    "typer>=0.16.0",
+    "rich>=13.0.0",
+    "harbor==0.3.0",
 ]
 
 [project.optional-dependencies]
-# Server dependencies for create_app() with test mode support
+# Platform CLI (dataset upload/validate)
+platform = [
+    "pyarrow>=14.0.0",      # Parquet file validation
+]
+
+# Server dependencies for rollout serving
 server = [
+    "osmosis-ai[platform]",
     "fastapi>=0.100.0,<1.0.0",
     "uvicorn>=0.23.0,<1.0.0",
     "pydantic-settings>=2.0.0,<3.0.0",
-    "pyarrow>=14.0.0",      # Parquet file support for test mode
-    "rich>=13.0.0",         # Beautiful terminal output
-]
-
-# MCP tool support for git-sync users
-mcp = [
-    "fastmcp>=2.0.0",
 ]
 
 # Development dependencies (testing, formatting, type checking, etc.)
-# Includes server + mcp extras so pyright/mypy can resolve all imports.
+# Includes server extra so pyright/mypy can resolve server-related imports.
 dev = [
-    "osmosis-ai[server,mcp]",
+    "osmosis-ai[server]",
     "pytest>=8.0.0,<10.0.0",
     "pytest-asyncio>=0.23.0,<2.0.0",
     "pytest-cov>=6.0.0",
     "anyio>=4.0.0",
-    "ruff==0.15.1",  # Keep in sync with pre-commit and CI
+    "ruff==0.15.10",  # Keep in sync with pre-commit and CI
     "pre-commit>=4.0.0,<5.0.0",
     "pyright[nodejs]==1.1.408",
-    "mypy==1.19.1",
+    "mypy==1.20.1",
     "types-PyYAML>=6.0",
     "types-requests>=2.0",
 ]
 
-# Full installation with all optional features (union of server + mcp)
+# Full installation with all optional features
 full = [
-    "fastapi>=0.100.0,<1.0.0",
-    "uvicorn>=0.23.0,<1.0.0",
-    "pydantic-settings>=2.0.0,<3.0.0",
-    "pyarrow>=14.0.0",
-    "rich>=13.0.0",
-    "fastmcp>=2.0.0",
+    "osmosis-ai[server]",
 ]
 
 [project.urls]
@@ -78,9 +83,9 @@ Homepage = "https://github.com/Osmosis-AI/osmosis-sdk-python"
 Issues = "https://github.com/Osmosis-AI/osmosis-sdk-python/issues"
 
 [project.scripts]
-osmosis = "osmosis_ai.cli:main"
-osmosis_ai = "osmosis_ai.cli:main"
-osmosis-ai = "osmosis_ai.cli:main"
+osmosis = "osmosis_ai.cli.main:main"
+osmosis_ai = "osmosis_ai.cli.main:main"
+osmosis-ai = "osmosis_ai.cli.main:main"
 
 [tool.setuptools]
 include-package-data = true
@@ -90,14 +95,31 @@ where = ["."]
 include = ["osmosis_ai*"]
 
 [tool.setuptools.package-data]
-osmosis_ai = ["py.typed"]
+osmosis_ai = ["py.typed", "platform/cli/templates/**"]
 
 [tool.setuptools.dynamic]
 version = {attr = "osmosis_ai.consts.PACKAGE_VERSION"}
 
 [tool.coverage.run]
 source = ["osmosis_ai"]
-omit = ["tests/*", "*/consts.py"]
+omit = [
+    "tests/*",
+    "*/consts.py",
+    # CLI command groups (thin Typer shells) + interactive prompts
+    "osmosis_ai/cli/commands/*",
+    "osmosis_ai/cli/main.py",
+    "osmosis_ai/cli/upgrade.py",
+    "osmosis_ai/cli/prompts.py",
+    # Platform CLI business logic (API calls, OAuth, interactive prompts)
+    "osmosis_ai/platform/cli/*",
+    # Rollout — ABCs, type defs, integrations, harbor backend
+    "osmosis_ai/rollout/agent_workflow.py",
+    "osmosis_ai/rollout/grader.py",
+    "osmosis_ai/rollout/backend/base.py",
+    "osmosis_ai/rollout/types/*",
+    "osmosis_ai/rollout/integrations/*",
+    "osmosis_ai/rollout/backend/harbor/*",
+]
 
 [tool.coverage.report]
 fail_under = 70
@@ -130,11 +152,16 @@ ignore = [
     "RUF012",  # mutable-class-default (common with Pydantic models)
 ]
 
+[tool.ruff.lint.per-file-ignores]
+# B008: function-call-in-default-argument — required by Typer for typer.Option/Argument
+"**/cli/*.py" = ["B008"]
+"**/cli/**/*.py" = ["B008"]
+
 [tool.ruff.lint.isort]
 known-first-party = ["osmosis_ai"]
 
 [tool.pyright]
-pythonVersion = "3.10"
+pythonVersion = "3.12"
 include = ["osmosis_ai"]
 exclude = ["tests", "build", "dist", "**/__pycache__"]
 typeCheckingMode = "standard"
@@ -142,7 +169,7 @@ reportMissingTypeStubs = false
 reportCallInDefaultInitializer = false
 
 [tool.mypy]
-python_version = "3.10"
+python_version = "3.12"
 files = ["osmosis_ai"]
 exclude = ["tests/", "build/", "dist/"]
 check_untyped_defs = true
