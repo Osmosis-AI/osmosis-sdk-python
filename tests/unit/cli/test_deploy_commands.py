@@ -81,12 +81,54 @@ class TestCreate:
                     status="deployed",
                 )
 
+            def get_deployment(self, name, *, credentials=None):
+                return DeploymentInfo(
+                    id="dep_1",
+                    lora_name=name,
+                    status="deployed",
+                    base_model="Qwen/Qwen3-30B",
+                    checkpoint_step=100,
+                )
+
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
         deploy_module.create(training_run="qwen3-run1", step=100, name=None, yes=True)
         assert captured["training_run"] == "qwen3-run1"
         assert captured["checkpoint_step"] == 100
         assert captured["lora_name"] is None  # server generates
-        assert "Deployment created" in console_capture.getvalue()
+        out = console_capture.getvalue()
+        assert "Deployment created" in out
+        # Curl example surfaces the model id + inference endpoint + key hint
+        assert "Qwen/Qwen3-30B:qwen3-run1-step-100-lora" in out
+        assert "inference.osmosis.ai/v1/chat/completions" in out
+        assert "$OSMOSIS_API_KEY" in out
+        assert "api-keys" in out
+
+    def test_query_example_falls_back_when_lookup_fails(
+        self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
+    ) -> None:
+        """If the follow-up get_deployment fails, we still print a usable
+        curl template with a `<base-model>` placeholder — a failed display
+        enhancement must never mask a successful deployment."""
+
+        class FakeClient:
+            def list_training_run_checkpoints(self, name, *, credentials=None):
+                return _make_ckpts([100])
+
+            def create_deployment(self, *, training_run, **kw):
+                return CreateDeploymentResult(
+                    id="dep_1",
+                    lora_name="qwen3-run1-step-100-lora",
+                    status="deployed",
+                )
+
+            def get_deployment(self, name, *, credentials=None):
+                raise RuntimeError("backend unavailable")
+
+        monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        deploy_module.create(training_run="qwen3-run1", step=100, name=None, yes=True)
+        out = console_capture.getvalue()
+        assert "Deployment created" in out
+        assert "<base-model>:qwen3-run1-step-100-lora" in out
 
     def test_default_step_picks_latest(
         self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO

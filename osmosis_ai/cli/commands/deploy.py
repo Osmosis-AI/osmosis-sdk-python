@@ -58,6 +58,46 @@ def _fetch_all_deployments(client: Any, credentials: Any) -> list[Any]:
     return deployments
 
 
+def _print_query_example(
+    ws_name: str,
+    base_model: str | None,
+    lora_name: str,
+) -> None:
+    """Print a ready-to-copy curl example for the freshly deployed adapter.
+
+    The model identifier on the inference endpoint is ``{base_model}:{lora_name}``.
+    If ``base_model`` is unknown (e.g., the follow-up fetch failed), we fall back
+    to a ``<base-model>`` placeholder so the user still gets a usable template.
+    """
+    from osmosis_ai.platform.cli.utils import platform_entity_url
+    from osmosis_ai.platform.constants import INFERENCE_URL
+
+    model_id = f"{base_model or '<base-model>'}:{lora_name}"
+    endpoint = f"{INFERENCE_URL}/v1/chat/completions"
+    api_keys_url = platform_entity_url(ws_name, "api-keys")
+
+    # Built as a plain string so users can select + copy as-is. Rich markup is
+    # disabled when printing to avoid any interpretation of `{`, `[`, `$` etc.
+    curl_cmd = (
+        f"  curl -X POST {endpoint} \\\n"
+        f'    -H "Content-Type: application/json" \\\n'
+        f'    -H "Authorization: Bearer $OSMOSIS_API_KEY" \\\n'
+        f"    -d '{{\n"
+        f'      "model": "{model_id}",\n'
+        f'      "messages": [{{"role": "user", "content": "Hello"}}]\n'
+        f"    }}'"
+    )
+
+    console.print()
+    console.print("Try it (once status is active):", style="bold")
+    console.print()
+    # soft_wrap=True keeps each line intact so the command is copy-paste safe
+    # even when the terminal is narrower than the longest line.
+    console.print(curl_cmd, markup=False, highlight=False, soft_wrap=True)
+    console.print()
+    console.print(f"Create an API key: {api_keys_url}", style="dim")
+
+
 def _default_lora_name(run_name: str, step: int) -> str:
     """Mirror of monolith src/lib/slug-generator.ts::generateLoraName.
 
@@ -157,6 +197,20 @@ def create(
     )
     console.print(f"  Status: {result.status}")
     console.print(f"  View: {url}")
+
+    # Fetch full deployment details to get `base_model` for the curl example.
+    # The POST /deployments response intentionally omits it; we silently skip
+    # the curl block if this lookup fails so display issues never mask a
+    # successful deployment.
+    base_model: str | None = None
+    try:
+        details = client.get_deployment(result.lora_name, credentials=credentials)
+        base_model = details.base_model or None
+    except Exception:
+        # Best-effort display enhancement — never mask a successful deployment.
+        base_model = None
+
+    _print_query_example(ws_name, base_model, result.lora_name)
 
 
 @app.command("list")
