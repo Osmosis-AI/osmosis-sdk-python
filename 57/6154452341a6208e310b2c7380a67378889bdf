@@ -1,0 +1,27 @@
+pyproject.toml
+  5c07fd084829fe1b 134
+osmosis_ai/platform/cli/templates/pyproject.toml.tpl
+  5c07fd084829fe1b 5
+tests/unit/platform/cli/test_workspace_setup.py
+  5c07fd084829fe1b 230,233,243
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.2",
+  "base_commit_sha": "576154452341a6208e310b2c7380a67378889bdf",
+  "prompts": {
+    "5c07fd084829fe1b": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "8591c8d0-942f-4d0e-9051-767a30f6fd4b",
+        "model": "gpt-5.4-xhigh-fast"
+      },
+      "human_author": "JoyboyBrian",
+      "messages": [],
+      "total_additions": 5,
+      "total_deletions": 4,
+      "accepted_lines": 5,
+      "overriden_lines": 0
+    }
+  }
+}
