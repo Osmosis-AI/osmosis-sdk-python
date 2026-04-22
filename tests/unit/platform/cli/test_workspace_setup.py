@@ -227,10 +227,10 @@ class TestWriteScaffold:
         assert "created_at = " in content
         assert 'setup_source = "osmosis init"' in content
 
-    def test_pyproject_toml_contains_workspace_name_and_dependency(
+    def test_pyproject_toml_contains_workspace_name_dependency_and_python_requirement(
         self, tmp_path: Path
     ) -> None:
-        """pyproject.toml contains the workspace name and osmosis-ai dependency."""
+        """pyproject.toml contains the workspace name, dependency, and Python floor."""
         from osmosis_ai.consts import PACKAGE_VERSION
         from osmosis_ai.platform.cli.init import _write_scaffold
 
@@ -240,6 +240,7 @@ class TestWriteScaffold:
 
         content = (target / "pyproject.toml").read_text(encoding="utf-8")
         assert 'name = "cool-project"' in content
+        assert 'requires-python = ">=3.12"' in content
         assert f'"osmosis-ai>={PACKAGE_VERSION}"' in content
 
     def test_gitignore_has_python_sections(self, tmp_path: Path) -> None:
