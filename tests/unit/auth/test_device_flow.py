@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock, patch
 from urllib.error import HTTPError, URLError
 
@@ -32,7 +32,7 @@ def _make_device_code_response() -> bytes:
 
 def _make_token_response(**overrides: object) -> bytes:
     """Build a flat token response dict (matches device/token endpoint)."""
-    expires_str = (datetime.now(timezone.utc) + timedelta(days=90)).isoformat()
+    expires_str = (datetime.now(UTC) + timedelta(days=90)).isoformat()
     data: dict[str, object] = {
         "token": "jwt-user-token",
         "expires_at": expires_str,

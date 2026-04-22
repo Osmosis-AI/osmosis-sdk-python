@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import socket
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from unittest.mock import MagicMock, patch
 from urllib.error import HTTPError, URLError
@@ -67,7 +67,7 @@ def _make_verify_response(
 
 class TestVerifyAndGetUserInfo:
     def test_successful_verification(self) -> None:
-        expires_str = (datetime.now(timezone.utc) + timedelta(days=90)).isoformat()
+        expires_str = (datetime.now(UTC) + timedelta(days=90)).isoformat()
         body = _make_verify_response(expires_at=expires_str)
         mock_resp = MagicMock()
         mock_resp.read.return_value = body
@@ -90,10 +90,10 @@ class TestVerifyAndGetUserInfo:
         mock_resp.__enter__ = MagicMock(return_value=mock_resp)
         mock_resp.__exit__ = MagicMock(return_value=False)
 
-        before = datetime.now(timezone.utc)
+        before = datetime.now(UTC)
         with patch("osmosis_ai.platform.auth.flow.urlopen", return_value=mock_resp):
             result = verify_token("token")
-        after = datetime.now(timezone.utc)
+        after = datetime.now(UTC)
 
         assert result.expires_at >= before + timedelta(days=89)
         assert result.expires_at <= after + timedelta(days=91)
@@ -177,7 +177,7 @@ class TestVerifyAndGetUserInfo:
         self, user_data: dict, expected_match: str
     ) -> None:
         """Incomplete user fields should raise LoginError."""
-        expires_str = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
+        expires_str = (datetime.now(UTC) + timedelta(days=30)).isoformat()
         body = _make_verify_response(
             user=user_data,
             expires_at=expires_str,
@@ -192,7 +192,7 @@ class TestVerifyAndGetUserInfo:
                 verify_token("token")
 
     def test_no_token_id_in_response(self) -> None:
-        expires_str = (datetime.now(timezone.utc) + timedelta(days=30)).isoformat()
+        expires_str = (datetime.now(UTC) + timedelta(days=30)).isoformat()
         body = _make_verify_response(
             expires_at=expires_str,
             token_id=None,

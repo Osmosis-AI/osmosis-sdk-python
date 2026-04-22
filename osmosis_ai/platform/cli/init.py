@@ -113,7 +113,7 @@ def _write_scaffold(target: Path, ws_name: str, *, update: bool = False) -> None
     variables = {
         "name": ws_name,
         "sdk_version": PACKAGE_VERSION,
-        "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "created_at": datetime.datetime.now(datetime.UTC).isoformat(),
     }
 
     for entry in SCAFFOLD:
@@ -148,11 +148,9 @@ def _update_workspace_metadata(target: Path) -> None:
 
     match = re.search(_CREATED_AT_RE, original)
     created_at = (
-        match.group(1)
-        if match
-        else datetime.datetime.now(datetime.timezone.utc).isoformat()
+        match.group(1) if match else datetime.datetime.now(datetime.UTC).isoformat()
     )
-    updated_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    updated_at = datetime.datetime.now(datetime.UTC).isoformat()
 
     ws_toml.write_text(
         "# Osmosis Workspace Configuration\n"

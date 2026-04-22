@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
+import tomllib
 from pathlib import Path
 from typing import Annotated, Literal
 
-import tomllib
 from pydantic import BaseModel, ConfigDict, Field
 
 from osmosis_ai.cli.errors import CLIError

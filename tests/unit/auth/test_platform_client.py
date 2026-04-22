@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import http.client
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from io import BytesIO
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -34,7 +34,7 @@ def _make_credentials(
     access_token: str = "test-token-abc123",
 ) -> Credentials:
     """Create valid Credentials for testing."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     return Credentials(
         access_token=access_token,
         token_type="Bearer",

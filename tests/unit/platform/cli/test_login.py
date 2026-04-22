@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import osmosis_ai.cli.commands.auth as auth_module
 from osmosis_ai.platform.auth.credentials import Credentials, UserInfo
@@ -12,7 +12,7 @@ from osmosis_ai.platform.auth.flow import LoginResult
 def _make_credentials(
     user_id: str = "user_1", email: str = "a@example.com"
 ) -> Credentials:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     return Credentials(
         access_token="tok",
         token_type="Bearer",
@@ -25,7 +25,7 @@ def _make_credentials(
 def _make_login_result(email: str = "a@example.com") -> LoginResult:
     return LoginResult(
         user=UserInfo(id="user_1", email=email, name="User"),
-        expires_at=datetime.now(timezone.utc) + timedelta(days=30),
+        expires_at=datetime.now(UTC) + timedelta(days=30),
     )
 
 
