@@ -25,6 +25,7 @@ import warnings
 from contextlib import contextmanager
 from typing import Any, cast
 
+import httpx
 from agents import Agent, RunConfig, Runner
 from agents.model_settings import ModelSettings
 from agents.models.chatcmpl_helpers import HEADERS_OVERRIDE
@@ -32,6 +33,9 @@ from agents.models.openai_chatcompletions import OpenAIChatCompletionsModel
 from openai import AsyncOpenAI
 
 from osmosis_ai.rollout.context import get_rollout_context
+from osmosis_ai.rollout.integrations.agents._sse_bridge import (
+    SSEToJSONBridgeTransport,
+)
 from osmosis_ai.rollout.types import MultiTurnMode
 
 # openai-agents' Agent.__init__ has ``instructions`` and ``prompt`` as
@@ -93,9 +97,13 @@ class OsmosisOpenAIAgent(Agent):
                     "RolloutContext. Construct the agent inside "
                     "AgentWorkflow.run()."
                 )
+            # Adapt the SSE chat-completions response for non-streaming
+            # openai-python consumers.
+            http_client = httpx.AsyncClient(transport=SSEToJSONBridgeTransport())
             client = AsyncOpenAI(
                 base_url=ctx.chat_completions_url,
                 api_key=ctx.api_key or "sk-osmosis-rollout",
+                http_client=http_client,
             )
             model = OpenAIChatCompletionsModel(
                 model="osmosis-rollout",
