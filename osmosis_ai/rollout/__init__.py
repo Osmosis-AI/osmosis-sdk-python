@@ -11,7 +11,7 @@ from osmosis_ai.rollout.context import (
 )
 from osmosis_ai.rollout.grader import Grader
 from osmosis_ai.rollout.server import ControllerAuth, create_rollout_server
-from osmosis_ai.rollout.types import (
+from osmosis_ai.rollout_types import (
     AgentWorkflowConfig,
     ConcurrencyConfig,
     ExecutionRequest,
@@ -49,10 +49,10 @@ except ImportError:
 
 __all__ = [
     "AgentWorkflow",
+    "ControllerAuth",
     "AgentWorkflowConfig",
     "AgentWorkflowContext",
     "ConcurrencyConfig",
-    "ControllerAuth",
     "ExecutionBackend",
     "ExecutionRequest",
     "ExecutionResult",
