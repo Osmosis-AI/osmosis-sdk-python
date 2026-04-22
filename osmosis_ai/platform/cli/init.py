@@ -17,6 +17,7 @@ from pathlib import Path
 from osmosis_ai.cli.console import console
 from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.platform.auth.config import PLATFORM_URL
+from osmosis_ai.platform.auth.local_config import get_active_workspace_name
 from osmosis_ai.platform.cli.constants import validate_name
 
 # ── Prerequisites ────────────────────────────────────────────────
@@ -218,6 +219,97 @@ def _git_initial_commit(target: Path) -> None:
     )
 
 
+def _selected_workspace_git_context() -> dict[str, str | bool | None]:
+    """Best-effort Git integration context for the active workspace."""
+    selected_workspace_name = get_active_workspace_name()
+    if not selected_workspace_name:
+        return {
+            "workspace_name": None,
+            "git_sync_url": None,
+            "has_github_app_installation": False,
+            "connected_repo_url": None,
+        }
+
+    context: dict[str, str | bool | None] = {
+        "workspace_name": selected_workspace_name,
+        "git_sync_url": f"{PLATFORM_URL}/{selected_workspace_name}/integrations/git",
+        "has_github_app_installation": False,
+        "connected_repo_url": None,
+    }
+
+    from osmosis_ai.platform.api.client import OsmosisClient
+    from osmosis_ai.platform.auth import PlatformAPIError, load_credentials
+
+    credentials = load_credentials()
+    if credentials is None or credentials.is_expired():
+        return context
+
+    try:
+        workspace_info = OsmosisClient().refresh_workspace_info(
+            credentials=credentials,
+            workspace_name=selected_workspace_name,
+        )
+    except PlatformAPIError:
+        return context
+
+    connected_repo = workspace_info.get("connected_repo")
+    if isinstance(connected_repo, dict):
+        repo_url = connected_repo.get("repo_url")
+        if isinstance(repo_url, str) and repo_url:
+            context["connected_repo_url"] = repo_url
+
+    context["has_github_app_installation"] = bool(
+        workspace_info.get("has_github_app_installation")
+    )
+    return context
+
+
+def _git_sync_cta_text() -> str:
+    """Build the Git Sync CTA shown after workspace scaffolding."""
+    git_context = _selected_workspace_git_context()
+
+    connected_repo_url = git_context.get("connected_repo_url")
+    if isinstance(connected_repo_url, str) and connected_repo_url:
+        return f"Connected repo: [cyan]{connected_repo_url}[/cyan]"
+
+    git_sync_url = git_context.get("git_sync_url")
+    if isinstance(git_sync_url, str) and git_sync_url:
+        action = (
+            "choose a repo"
+            if git_context.get("has_github_app_installation")
+            else "connect your repo"
+        )
+        return f"Go to [cyan]{git_sync_url}[/cyan] to {action}"
+
+    return f"Go to [cyan]{PLATFORM_URL}[/cyan] → Git Sync to connect your repo"
+
+
+def _raise_if_selected_workspace_has_connected_repo() -> None:
+    """Block fresh init when the active workspace already has a connected repo."""
+    git_context = _selected_workspace_git_context()
+    workspace_name = git_context.get("workspace_name")
+    connected_repo_url = git_context.get("connected_repo_url")
+
+    if not (
+        isinstance(workspace_name, str)
+        and workspace_name
+        and isinstance(connected_repo_url, str)
+        and connected_repo_url
+    ):
+        return
+
+    raise CLIError(
+        f"Workspace '{workspace_name}' is already connected to:\n"
+        f"  {connected_repo_url}\n"
+        "\n"
+        "Clone the connected repo instead:\n"
+        f"  git clone {connected_repo_url}\n"
+        "\n"
+        "Or switch to another workspace first:\n"
+        "  osmosis workspace switch"
+    )
+
+
 def _print_next_steps(ws_name: str, *, here: bool = False) -> None:
     """Print post-setup CTA with Rich panels."""
     from rich import box as rich_box
@@ -248,7 +340,7 @@ def _print_next_steps(ws_name: str, *, here: bool = False) -> None:
     cmd_table.add_row()
     cmd_table.add_row(
         "[bold green]>[/bold green]",
-        f"Go to [cyan]{PLATFORM_URL}[/cyan] → Git Sync to connect your repo",
+        _git_sync_cta_text(),
     )
 
     prompt_body = (
@@ -314,6 +406,7 @@ def init(name: str, here: bool = False) -> None:
                 "Use 'osmosis init <name>' (without --here) to create a new directory, "
                 "or empty this directory first."
             )
+        _raise_if_selected_workspace_has_connected_repo()
     else:
         target = Path.cwd() / name
         if target.exists():
@@ -328,6 +421,7 @@ def init(name: str, here: bool = False) -> None:
                     "Use --here to initialize in the current directory."
                 )
         else:
+            _raise_if_selected_workspace_has_connected_repo()
             target.mkdir()
             created_dir = True
 

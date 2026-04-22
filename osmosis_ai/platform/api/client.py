@@ -52,10 +52,11 @@ class OsmosisClient:
         credentials: Credentials | None = None,
         workspace_name: str,
     ) -> dict[str, Any]:
-        """Fetch subscription status for a workspace via /api/cli/workspaces.
+        """Fetch workspace metadata via /api/cli/workspaces.
 
-        Returns a dict with ``has_subscription`` for the matched workspace,
-        or an empty dict if the workspace is not found.
+        Returns a dict with ``has_subscription`` plus optional Git integration
+        fields for the matched workspace, or an empty dict if the workspace is
+        not found.
         """
         data = platform_request(
             "/api/cli/workspaces",
@@ -64,7 +65,16 @@ class OsmosisClient:
         )
         for ws in data.get("workspaces", []):
             if ws.get("name") == workspace_name:
-                return {"found": True, "has_subscription": ws.get("has_subscription")}
+                return {
+                    "found": True,
+                    "has_subscription": ws.get("has_subscription"),
+                    # Default missing fields so newer SDKs stay compatible with
+                    # older platform deployments during rollout.
+                    "has_github_app_installation": ws.get(
+                        "has_github_app_installation", False
+                    ),
+                    "connected_repo": ws.get("connected_repo"),
+                }
         return {"found": False}
 
     def list_workspaces(

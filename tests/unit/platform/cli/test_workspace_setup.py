@@ -137,6 +137,58 @@ def test_init_here_allows_git_dir(monkeypatch, tmp_path: Path) -> None:
     init_module.init(name="test-ws", here=True)
 
 
+def test_init_raises_when_selected_workspace_has_connected_repo(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """Fresh init should stop before creating a directory when the active workspace already has a repo."""
+    import osmosis_ai.platform.cli.init as init_module
+
+    monkeypatch.setattr(init_module.shutil, "which", lambda cmd: "git")
+    monkeypatch.setattr(
+        init_module,
+        "_selected_workspace_git_context",
+        lambda: {
+            "workspace_name": "team-alpha",
+            "git_sync_url": "https://platform.osmosis.ai/team-alpha/integrations/git",
+            "has_github_app_installation": True,
+            "connected_repo_url": "https://github.com/acme/rollouts",
+        },
+    )
+
+    monkeypatch.chdir(tmp_path)
+
+    target = tmp_path / "test-ws"
+    with pytest.raises(CLIError, match="already connected"):
+        init_module.init(name="test-ws")
+
+    assert not target.exists()
+
+
+def test_init_here_raises_when_selected_workspace_has_connected_repo(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """init(here=True) should stop when the active workspace already has a connected repo."""
+    import osmosis_ai.platform.cli.init as init_module
+
+    monkeypatch.setattr(init_module.shutil, "which", lambda cmd: "git")
+    monkeypatch.setattr(
+        init_module,
+        "_selected_workspace_git_context",
+        lambda: {
+            "workspace_name": "team-alpha",
+            "git_sync_url": "https://platform.osmosis.ai/team-alpha/integrations/git",
+            "has_github_app_installation": True,
+            "connected_repo_url": "https://github.com/acme/rollouts",
+        },
+    )
+
+    (tmp_path / ".git").mkdir()
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(CLIError, match=r"git clone https://github\.com/acme/rollouts"):
+        init_module.init(name="test-ws", here=True)
+
+
 # ── _render_template ─────────────────────────────────────────────
 
 
@@ -482,7 +534,7 @@ class TestGitInitialCommit:
 
 class TestPrintNextSteps:
     def test_print_next_steps_default(self, monkeypatch) -> None:
-        """_print_next_steps includes 'cd' and platform URL when here=False."""
+        """_print_next_steps includes 'cd' and generic Git Sync CTA when no workspace is selected."""
         import io
 
         import osmosis_ai.platform.cli.init as mod
@@ -492,10 +544,104 @@ class TestPrintNextSteps:
         buf = io.StringIO()
         test_console = Console(file=buf, force_terminal=False, no_color=True)
         monkeypatch.setattr(mod, "console", test_console)
+        monkeypatch.setattr(mod, "get_active_workspace_name", lambda: None)
         _print_next_steps("my-workspace", here=False)
         output = buf.getvalue()
         assert "cd my-workspace" in output
         assert "Git Sync" in output
+        assert "integrations/git" not in output
+
+    def test_print_next_steps_selected_workspace(self, monkeypatch) -> None:
+        """_print_next_steps shows a workspace Git Sync URL when no repo is connected."""
+        import io
+
+        import osmosis_ai.platform.auth as auth_module
+        import osmosis_ai.platform.cli.init as mod
+        from osmosis_ai.cli.console import Console
+        from osmosis_ai.platform.cli.init import _print_next_steps
+
+        buf = io.StringIO()
+        test_console = Console(file=buf, force_terminal=False, no_color=True)
+        monkeypatch.setattr(mod, "console", test_console)
+        monkeypatch.setattr(mod, "get_active_workspace_name", lambda: "team-alpha")
+        monkeypatch.setattr(auth_module, "load_credentials", lambda: None)
+        _print_next_steps("my-workspace", here=False)
+        output = buf.getvalue()
+        assert "cd my-workspace" in output
+        assert f"{mod.PLATFORM_URL}/team-alpha/integrations/git" in output
+
+    def test_print_next_steps_connected_repo(self, monkeypatch) -> None:
+        """_print_next_steps shows the connected repository URL when one exists."""
+        import io
+
+        import osmosis_ai.platform.api.client as api_client_module
+        import osmosis_ai.platform.auth as auth_module
+        import osmosis_ai.platform.cli.init as mod
+        from osmosis_ai.cli.console import Console
+        from osmosis_ai.platform.cli.init import _print_next_steps
+
+        class _Creds:
+            def is_expired(self) -> bool:
+                return False
+
+        class FakeClient:
+            def refresh_workspace_info(self, *, credentials, workspace_name):
+                assert isinstance(credentials, _Creds)
+                assert workspace_name == "team-alpha"
+                return {
+                    "found": True,
+                    "has_github_app_installation": True,
+                    "connected_repo": {
+                        "repo_url": "https://github.com/acme/rollouts",
+                    },
+                }
+
+        buf = io.StringIO()
+        test_console = Console(file=buf, force_terminal=False, no_color=True)
+        monkeypatch.setattr(mod, "console", test_console)
+        monkeypatch.setattr(mod, "get_active_workspace_name", lambda: "team-alpha")
+        monkeypatch.setattr(auth_module, "load_credentials", lambda: _Creds())
+        monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        _print_next_steps("my-workspace", here=False)
+        output = buf.getvalue()
+        assert "cd my-workspace" in output
+        assert "Connected repo:" in output
+        assert "https://github.com/acme/rollouts" in output
+
+    def test_print_next_steps_choose_repo_when_app_installed(self, monkeypatch) -> None:
+        """_print_next_steps asks the user to choose a repo when GitHub is connected but no repo is linked."""
+        import io
+
+        import osmosis_ai.platform.api.client as api_client_module
+        import osmosis_ai.platform.auth as auth_module
+        import osmosis_ai.platform.cli.init as mod
+        from osmosis_ai.cli.console import Console
+        from osmosis_ai.platform.cli.init import _print_next_steps
+
+        class _Creds:
+            def is_expired(self) -> bool:
+                return False
+
+        class FakeClient:
+            def refresh_workspace_info(self, *, credentials, workspace_name):
+                assert isinstance(credentials, _Creds)
+                assert workspace_name == "team-alpha"
+                return {
+                    "found": True,
+                    "has_github_app_installation": True,
+                    "connected_repo": None,
+                }
+
+        buf = io.StringIO()
+        test_console = Console(file=buf, force_terminal=False, no_color=True)
+        monkeypatch.setattr(mod, "console", test_console)
+        monkeypatch.setattr(mod, "get_active_workspace_name", lambda: "team-alpha")
+        monkeypatch.setattr(auth_module, "load_credentials", lambda: _Creds())
+        monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        _print_next_steps("my-workspace", here=False)
+        output = buf.getvalue()
+        assert f"{mod.PLATFORM_URL}/team-alpha/integrations/git" in output
+        assert "choose a repo" in output
 
     def test_print_next_steps_here(self, monkeypatch) -> None:
         """_print_next_steps omits 'cd' when here=True but keeps platform URL."""
@@ -508,6 +654,7 @@ class TestPrintNextSteps:
         buf = io.StringIO()
         test_console = Console(file=buf, force_terminal=False, no_color=True)
         monkeypatch.setattr(mod, "console", test_console)
+        monkeypatch.setattr(mod, "get_active_workspace_name", lambda: None)
         _print_next_steps("my-workspace", here=True)
         output = buf.getvalue()
         assert "cd my-workspace" not in output
