@@ -9,15 +9,20 @@ from osmosis_ai.platform.auth.platform_client import platform_request
 from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE
 
 from .models import (
+    CreateDeploymentResult,
     DatasetAffectedResources,
     DatasetFile,
     DeleteTrainingRunResult,
+    DeploymentInfo,
     ModelAffectedResources,
     PaginatedBaseModels,
     PaginatedDatasets,
+    PaginatedDeployments,
     PaginatedRollouts,
     PaginatedTrainingRuns,
+    RenameDeploymentResult,
     SubmitTrainingRunResult,
+    TrainingRunCheckpoints,
     TrainingRunDetail,
     TrainingRunMetrics,
     WorkspaceDeletionStatus,
@@ -389,3 +394,104 @@ class OsmosisClient:
             credentials=credentials,
         )
         return ModelAffectedResources.from_dict(data)
+
+    # ── Deployments ───────────────────────────────────────────────
+
+    def list_deployments(
+        self,
+        limit: int = DEFAULT_PAGE_SIZE,
+        offset: int = 0,
+        *,
+        search: str | None = None,
+        credentials: Credentials | None = None,
+    ) -> PaginatedDeployments:
+        params: dict[str, str | int] = {"limit": limit, "offset": offset}
+        if search:
+            params["search"] = search
+        qs = urlencode(params)
+        data = platform_request(f"/api/cli/deployments?{qs}", credentials=credentials)
+        return PaginatedDeployments.from_dict(data)
+
+    def create_deployment(
+        self,
+        *,
+        training_run: str,
+        checkpoint_step: int,
+        lora_name: str | None = None,
+        credentials: Credentials | None = None,
+    ) -> CreateDeploymentResult:
+        """Create a deployment.
+
+        The CLI API accepts ``training_run`` + ``checkpoint_step``.
+        ``training_run`` may be a UUID or training run name, and
+        ``lora_name`` is optional — the server generates one when
+        omitted.
+        """
+        if checkpoint_step is None:
+            raise ValueError("checkpoint_step is required.")
+
+        body: dict[str, Any] = {
+            "training_run": training_run,
+            "checkpoint_step": checkpoint_step,
+        }
+        if lora_name is not None:
+            body["lora_name"] = lora_name
+        data = platform_request(
+            "/api/cli/deployments",
+            method="POST",
+            data=body,
+            credentials=credentials,
+        )
+        return CreateDeploymentResult.from_dict(data["deployment"])
+
+    def get_deployment(
+        self,
+        name_or_id: str,
+        *,
+        credentials: Credentials | None = None,
+    ) -> DeploymentInfo:
+        data = platform_request(
+            f"/api/cli/deployments/{_safe_path(name_or_id)}",
+            credentials=credentials,
+        )
+        return DeploymentInfo.from_dict(data["deployment"])
+
+    def delete_deployment(
+        self,
+        name_or_id: str,
+        *,
+        credentials: Credentials | None = None,
+    ) -> bool:
+        platform_request(
+            f"/api/cli/deployments/{_safe_path(name_or_id)}",
+            method="DELETE",
+            credentials=credentials,
+        )
+        return True
+
+    def rename_deployment(
+        self,
+        name_or_id: str,
+        new_name: str,
+        *,
+        credentials: Credentials | None = None,
+    ) -> RenameDeploymentResult:
+        data = platform_request(
+            f"/api/cli/deployments/{_safe_path(name_or_id)}",
+            method="PATCH",
+            data={"lora_name": new_name},
+            credentials=credentials,
+        )
+        return RenameDeploymentResult.from_dict(data["deployment"])
+
+    def list_training_run_checkpoints(
+        self,
+        name_or_id: str,
+        *,
+        credentials: Credentials | None = None,
+    ) -> TrainingRunCheckpoints:
+        data = platform_request(
+            f"/api/cli/training-runs/{_safe_path(name_or_id)}/checkpoints",
+            credentials=credentials,
+        )
+        return TrainingRunCheckpoints.from_dict(data)

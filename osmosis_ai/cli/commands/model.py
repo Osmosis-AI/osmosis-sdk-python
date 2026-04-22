@@ -8,11 +8,11 @@ from typing import Any
 import typer
 
 from osmosis_ai.cli.console import console
-from osmosis_ai.cli.errors import not_implemented
 from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE
 
 app: typer.Typer = typer.Typer(
-    help="Manage models (list, deploy, export, build, delete).", no_args_is_help=True
+    help="Manage models (base models and trainable checkpoints).",
+    no_args_is_help=True,
 )
 
 
@@ -22,7 +22,7 @@ def _print_model_section(
     title: str,
     metadata_fn: Callable[[Any], str],
 ) -> None:
-    """Print a section of models (base or output) with consistent formatting."""
+    """Print a section of base models with consistent formatting."""
     from osmosis_ai.platform.cli.utils import entity_status_style, format_dim_date
 
     if not models:
@@ -42,7 +42,7 @@ def _print_model_section(
 
 
 def _fetch_all_models(client: Any, credentials: Any) -> list[Any]:
-    """Fetch all models via exhaustive pagination."""
+    """Fetch all base models via exhaustive pagination."""
     from osmosis_ai.platform.cli.utils import fetch_all_pages
 
     models, _ = fetch_all_pages(
@@ -59,11 +59,11 @@ def list_models(
     limit: int = typer.Option(
         DEFAULT_PAGE_SIZE,
         "--limit",
-        help="Maximum number of models to show.",
+        help="Maximum number of base models to show.",
     ),
-    all_: bool = typer.Option(False, "--all", help="Show all models."),
+    all_: bool = typer.Option(False, "--all", help="Show all base models."),
 ) -> None:
-    """List models in the current workspace."""
+    """List base models in the current workspace."""
     from osmosis_ai.platform.cli.utils import (
         _require_auth,
         print_pagination_footer,
@@ -95,7 +95,7 @@ def list_models(
     _print_model_section(
         models,
         total,
-        "Models",
+        "Base Models",
         lambda m: (
             console.format_styled(f"by {m.creator_name}", "dim")
             if m.creator_name
@@ -104,25 +104,7 @@ def list_models(
     )
 
     if not fetch_all:
-        print_pagination_footer(len(models), total, "models")
-
-
-@app.command("deploy")
-def deploy() -> None:
-    """Deploy a model."""
-    not_implemented("model", "deploy")
-
-
-@app.command("export")
-def export() -> None:
-    """Export a model."""
-    not_implemented("model", "export")
-
-
-@app.command("build")
-def build() -> None:
-    """Build a model."""
-    not_implemented("model", "build")
+        print_pagination_footer(len(models), total, "base models")
 
 
 @app.command("delete")
@@ -130,19 +112,19 @@ def delete(
     name: str = typer.Argument(..., help="Model path (e.g. google/gemma-2-9b-it)."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
 ) -> None:
-    """Delete a model."""
+    """Delete a base model."""
     from osmosis_ai.cli.errors import CLIError
+    from osmosis_ai.cli.prompts import require_confirmation
+    from osmosis_ai.platform.api.client import OsmosisClient
+    from osmosis_ai.platform.auth.platform_client import PlatformAPIError
     from osmosis_ai.platform.cli.utils import _require_auth
 
     _ws_name, credentials = _require_auth()
-
-    from osmosis_ai.platform.api.client import OsmosisClient
-
     client = OsmosisClient()
 
     try:
         affected = client.get_model_affected_resources(name, credentials=credentials)
-    except Exception as e:
+    except PlatformAPIError as e:
         raise CLIError(f"Unable to verify model dependencies: {e}") from e
 
     if affected.has_blocking_runs:
@@ -161,9 +143,6 @@ def delete(
         console.print("\nDelete these training runs first, then retry.", style="dim")
         raise typer.Exit(1)
 
-    from osmosis_ai.cli.prompts import require_confirmation
-
     require_confirmation(f'Delete model "{name}"? This cannot be undone.', yes=yes)
-
     client.delete_model(name, credentials=credentials)
     console.print(f'Model "{name}" deleted.', style="green")

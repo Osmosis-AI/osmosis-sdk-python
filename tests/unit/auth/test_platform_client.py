@@ -20,6 +20,7 @@ from osmosis_ai.platform.auth.credentials import (
 from osmosis_ai.platform.auth.platform_client import (
     AuthenticationExpiredError,
     PlatformAPIError,
+    SubscriptionRequiredError,
     platform_request,
     revoke_cli_token,
 )
@@ -82,12 +83,29 @@ class TestExceptionClasses:
         err = PlatformAPIError("connection failed")
         assert str(err) == "connection failed"
         assert err.status_code is None
+        assert err.error_code is None
+        assert err.field is None
+        assert err.details is None
 
     def test_platform_api_error_with_status_code(self) -> None:
         """Verify PlatformAPIError stores the HTTP status code."""
         err = PlatformAPIError("not found", status_code=404)
         assert err.status_code == 404
         assert "not found" in str(err)
+
+    def test_platform_api_error_with_structured_metadata(self) -> None:
+        """Verify PlatformAPIError preserves optional structured metadata."""
+        err = PlatformAPIError(
+            "validation failed",
+            status_code=400,
+            error_code="VALIDATION",
+            field="checkpoint_step",
+            details={"error": "validation failed", "code": "VALIDATION"},
+        )
+        assert err.status_code == 400
+        assert err.error_code == "VALIDATION"
+        assert err.field == "checkpoint_step"
+        assert err.details == {"error": "validation failed", "code": "VALIDATION"}
 
 
 # =============================================================================
@@ -374,6 +392,59 @@ class TestPlatformRequest:
 
         assert "Agent not found" in str(exc_info.value)
         assert exc_info.value.status_code == 404
+
+    @patch("osmosis_ai.platform.auth.platform_client.urlopen")
+    def test_http_error_extracts_structured_error_metadata(
+        self, mock_urlopen: MagicMock
+    ) -> None:
+        """Verify structured error metadata is preserved when provided by the API."""
+        error_body = json.dumps(
+            {
+                "error": "A deployment with this LoRA name already exists",
+                "code": "CONFLICT",
+                "field": "loraName",
+            }
+        )
+        mock_urlopen.side_effect = _make_http_error(409, error_body)
+        creds = _make_credentials()
+
+        with pytest.raises(PlatformAPIError) as exc_info:
+            platform_request("/api/test", credentials=creds)
+
+        assert exc_info.value.status_code == 409
+        assert exc_info.value.error_code == "CONFLICT"
+        assert exc_info.value.field == "loraName"
+        assert exc_info.value.details == {
+            "error": "A deployment with this LoRA name already exists",
+            "code": "CONFLICT",
+            "field": "loraName",
+        }
+        assert "A deployment with this LoRA name already exists" in str(exc_info.value)
+
+    @patch("osmosis_ai.platform.auth.platform_client.urlopen")
+    def test_subscription_error_preserves_structured_metadata(
+        self, mock_urlopen: MagicMock
+    ) -> None:
+        """Verify subscription-required responses preserve structured metadata."""
+        error_body = json.dumps(
+            {
+                "error": "Active subscription required to create deployments",
+                "code": "FORBIDDEN",
+            }
+        )
+        mock_urlopen.side_effect = _make_http_error(403, error_body)
+        creds = _make_credentials()
+
+        with pytest.raises(SubscriptionRequiredError) as exc_info:
+            platform_request("/api/test", credentials=creds)
+
+        assert exc_info.value.status_code == 403
+        assert exc_info.value.error_code == "FORBIDDEN"
+        assert exc_info.value.field is None
+        assert exc_info.value.details == {
+            "error": "Active subscription required to create deployments",
+            "code": "FORBIDDEN",
+        }
 
     @patch("osmosis_ai.platform.auth.platform_client.urlopen")
     def test_http_error_truncates_long_response_body(

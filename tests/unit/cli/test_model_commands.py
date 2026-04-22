@@ -11,7 +11,9 @@ import osmosis_ai.platform.api.client as api_client_module
 import osmosis_ai.platform.cli.utils as utils_module
 from osmosis_ai.cli.console import Console
 from osmosis_ai.platform.api.models import (
+    AffectedTrainingRun,
     BaseModelInfo,
+    ModelAffectedResources,
     PaginatedBaseModels,
 )
 
@@ -64,7 +66,7 @@ class TestListModels:
         model_module.list_models(limit=30, all_=False)
         out = console_capture.getvalue()
         assert "gpt-2" in out
-        assert "Models" in out
+        assert "Base Models" in out
 
     def test_list_has_more_truncation(
         self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
@@ -83,5 +85,67 @@ class TestListModels:
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
         model_module.list_models(limit=1, all_=False)
         out = console_capture.getvalue()
-        assert "Showing 1 of 5 models" in out
+        assert "Showing 1 of 5 base models" in out
         assert "--all" in out
+
+
+class TestDeleteModel:
+    def test_happy_path(
+        self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
+    ) -> None:
+        captured: dict[str, object] = {}
+
+        class FakeClient:
+            def get_model_affected_resources(self, name, *, credentials=None):
+                return ModelAffectedResources(training_runs_using_model=[])
+
+            def delete_model(self, name, *, credentials=None):
+                captured["deleted"] = name
+                return True
+
+        monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        model_module.delete(name="Qwen/Qwen3", yes=True)
+        assert captured["deleted"] == "Qwen/Qwen3"
+        assert 'Model "Qwen/Qwen3" deleted' in console_capture.getvalue()
+
+    def test_blocked_by_training_runs(
+        self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
+    ) -> None:
+        import typer
+
+        class FakeClient:
+            def get_model_affected_resources(self, name, *, credentials=None):
+                return ModelAffectedResources(
+                    training_runs_using_model=[
+                        AffectedTrainingRun(id="run_abcdef12", training_run_name="r1"),
+                    ]
+                )
+
+            def delete_model(
+                self, name, *, credentials=None
+            ):  # pragma: no cover — blocked
+                raise AssertionError("should not delete when blocked")
+
+        monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        with pytest.raises(typer.Exit):
+            model_module.delete(name="Qwen/Qwen3", yes=True)
+        out = console_capture.getvalue()
+        assert "Cannot delete this model" in out
+        assert "r1" in out
+
+    def test_affected_resources_api_error(
+        self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
+    ) -> None:
+        from osmosis_ai.cli.errors import CLIError
+        from osmosis_ai.platform.auth.platform_client import PlatformAPIError
+
+        class FakeClient:
+            def get_model_affected_resources(self, name, *, credentials=None):
+                raise PlatformAPIError("boom", 500)
+
+            def delete_model(self, name, *, credentials=None):  # pragma: no cover
+                raise AssertionError("should not delete")
+
+        monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        with pytest.raises(CLIError, match="verify model dependencies"):
+            model_module.delete(name="Qwen/Qwen3", yes=True)

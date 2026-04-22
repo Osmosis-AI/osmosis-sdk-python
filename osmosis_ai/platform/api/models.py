@@ -533,3 +533,129 @@ class PaginatedRollouts:
             has_more=data.get("has_more", False),
             next_offset=data.get("next_offset"),
         )
+
+
+# ── Deployments (output models) ──────────────────────────────────
+
+
+@dataclass
+class DeploymentInfo:
+    """A deployment record — the 'output model' produced by a training run.
+
+    One deployment == one live LoRA adapter registered with inference.
+    """
+
+    id: str
+    lora_name: str
+    status: str
+    base_model: str
+    checkpoint_step: int
+    training_run_id: str | None = None
+    training_run_name: str | None = None
+    creator_name: str | None = None
+    created_at: str = ""
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> DeploymentInfo:
+        return cls(
+            id=data["id"],
+            lora_name=data["lora_name"],
+            status=data.get("status", ""),
+            base_model=data.get("base_model", ""),
+            checkpoint_step=data.get("checkpoint_step", 0),
+            training_run_id=data.get("training_run_id"),
+            training_run_name=data.get("training_run_name"),
+            creator_name=data.get("creator_name"),
+            created_at=data.get("created_at", ""),
+        )
+
+
+@dataclass
+class PaginatedDeployments:
+    """Paginated list of deployments."""
+
+    deployments: list[DeploymentInfo]
+    total_count: int
+    has_more: bool
+    next_offset: int | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> PaginatedDeployments:
+        return cls(
+            deployments=[
+                DeploymentInfo.from_dict(d) for d in data.get("deployments", [])
+            ],
+            total_count=data.get("total_count", 0),
+            has_more=data.get("has_more", False),
+            next_offset=data.get("next_offset"),
+        )
+
+
+@dataclass
+class CreateDeploymentResult:
+    """Result of creating a deployment."""
+
+    id: str
+    lora_name: str
+    status: str
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> CreateDeploymentResult:
+        return cls(
+            id=data["id"],
+            lora_name=data["lora_name"],
+            status=data.get("status", ""),
+        )
+
+
+@dataclass
+class RenameDeploymentResult:
+    """Result of renaming a deployment."""
+
+    id: str
+    lora_name: str
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> RenameDeploymentResult:
+        return cls(id=data["id"], lora_name=data["lora_name"])
+
+
+# ── LoRA checkpoints (for `osmosis train status` + `deploy create`) ─────
+
+
+@dataclass
+class LoraCheckpointInfo:
+    """A LoRA checkpoint produced by a training run."""
+
+    id: str
+    checkpoint_step: int
+    status: str
+    created_at: str = ""
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> LoraCheckpointInfo:
+        return cls(
+            id=data["id"],
+            checkpoint_step=data.get("checkpoint_step", 0),
+            status=data.get("status", ""),
+            created_at=data.get("created_at", ""),
+        )
+
+
+@dataclass
+class TrainingRunCheckpoints:
+    """All deployable LoRA checkpoints for a training run."""
+
+    training_run_id: str
+    training_run_name: str
+    checkpoints: list[LoraCheckpointInfo]
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> TrainingRunCheckpoints:
+        return cls(
+            training_run_id=data["training_run_id"],
+            training_run_name=data.get("training_run_name", ""),
+            checkpoints=[
+                LoraCheckpointInfo.from_dict(c) for c in data.get("checkpoints", [])
+            ],
+        )
