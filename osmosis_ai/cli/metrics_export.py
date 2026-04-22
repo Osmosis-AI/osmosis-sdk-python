@@ -18,7 +18,7 @@ _METRIC_KEY_MAP: dict[str, str] = {
 
 def _epoch_ms_to_iso(epoch_ms: int) -> str:
     """Convert epoch milliseconds to ISO 8601 string."""
-    dt = datetime.datetime.fromtimestamp(epoch_ms / 1000, tz=datetime.timezone.utc)
+    dt = datetime.datetime.fromtimestamp(epoch_ms / 1000, tz=datetime.UTC)
     return dt.isoformat()
 
 

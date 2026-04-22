@@ -7,7 +7,7 @@ is correct end-to-end.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
 import pytest
@@ -21,7 +21,7 @@ from osmosis_ai.platform.auth.platform_client import (
 
 
 def _make_credentials(*, expired: bool = False) -> Credentials:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     offset = timedelta(days=-1) if expired else timedelta(days=30)
     return Credentials(
         access_token="test-token",

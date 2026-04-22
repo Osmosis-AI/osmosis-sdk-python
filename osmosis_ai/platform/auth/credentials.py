@@ -18,7 +18,7 @@ import json
 import os
 import sys
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 import keyring
@@ -177,14 +177,14 @@ class Credentials:
             access_token=token,
             token_type="Bearer",
             expires_at=verified.expires_at,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
             user=verified.user,
             token_id=verified.token_id,
         )
 
     def is_expired(self) -> bool:
         """Check if the token has expired."""
-        return datetime.now(timezone.utc) >= self.expires_at.astimezone(timezone.utc)
+        return datetime.now(UTC) >= self.expires_at.astimezone(UTC)
 
 
 # ---------------------------------------------------------------------------
@@ -250,8 +250,8 @@ def load_credentials() -> Credentials | None:
         return Credentials(
             access_token=env_token,
             token_type="Bearer",
-            expires_at=datetime.max.replace(tzinfo=timezone.utc),
-            created_at=datetime.now(timezone.utc),
+            expires_at=datetime.max.replace(tzinfo=UTC),
+            created_at=datetime.now(UTC),
             user=UserInfo(id="", email="", name=None),
             token_id=None,
         )

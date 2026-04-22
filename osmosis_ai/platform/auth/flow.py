@@ -15,7 +15,7 @@ import sys
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -79,14 +79,14 @@ def _parse_expires_at(raw: str | None) -> datetime:
         LoginError: If the timestamp is naive (no timezone) or already expired.
     """
     if not raw:
-        return datetime.now(timezone.utc) + timedelta(days=90)
+        return datetime.now(UTC) + timedelta(days=90)
 
     expires_at = datetime.fromisoformat(raw.replace("Z", "+00:00"))
     if expires_at.tzinfo is None:
         raise LoginError(
             "Invalid expires_at from platform: expected timezone-aware ISO8601 timestamp"
         )
-    if datetime.now(timezone.utc) >= expires_at:
+    if datetime.now(UTC) >= expires_at:
         raise LoginError(
             "Received token is already expired. Please check system clock or try again."
         )
@@ -392,7 +392,7 @@ def device_login(timeout: float = 600.0) -> tuple[LoginResult, Credentials]:
         access_token=token,
         token_type="Bearer",
         expires_at=expires_at,
-        created_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
         user=user,
         token_id=token_id,
     )
