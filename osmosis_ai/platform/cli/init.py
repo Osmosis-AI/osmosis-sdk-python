@@ -238,7 +238,11 @@ def _selected_workspace_git_context() -> dict[str, str | bool | None]:
     }
 
     from osmosis_ai.platform.api.client import OsmosisClient
-    from osmosis_ai.platform.auth import PlatformAPIError, load_credentials
+    from osmosis_ai.platform.auth import (
+        AuthenticationExpiredError,
+        PlatformAPIError,
+        load_credentials,
+    )
 
     credentials = load_credentials()
     if credentials is None or credentials.is_expired():
@@ -248,8 +252,9 @@ def _selected_workspace_git_context() -> dict[str, str | bool | None]:
         workspace_info = OsmosisClient().refresh_workspace_info(
             credentials=credentials,
             workspace_name=selected_workspace_name,
+            cleanup_on_401=False,
         )
-    except PlatformAPIError:
+    except (AuthenticationExpiredError, PlatformAPIError):
         return context
 
     connected_repo = workspace_info.get("connected_repo")

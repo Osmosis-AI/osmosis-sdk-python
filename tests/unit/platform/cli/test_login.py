@@ -314,3 +314,49 @@ def test_login_does_not_fail_when_workspace_lookup_fails(monkeypatch, error) -> 
     rendered = output.getvalue()
     assert "Login Successful" in rendered
     assert "Authenticated, but could not load your workspaces yet." in rendered
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        PlatformAPIError("workspace endpoint unavailable"),
+        AuthenticationExpiredError("session expired"),
+    ],
+)
+def test_whoami_prints_local_identity_when_workspace_lookup_fails(
+    monkeypatch, error
+) -> None:
+    """whoami should still print local identity info when workspace lookup fails."""
+    creds = _make_credentials(user_id="user_1")
+    output = io.StringIO()
+    calls: list[dict[str, object]] = []
+
+    monkeypatch.setattr("osmosis_ai.platform.auth.load_credentials", lambda: creds)
+
+    def raise_workspace_error(*, credentials=None, cleanup_on_401=True):
+        calls.append(
+            {
+                "credentials": credentials,
+                "cleanup_on_401": cleanup_on_401,
+            }
+        )
+        raise error
+
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.ensure_active_workspace",
+        raise_workspace_error,
+    )
+    monkeypatch.setattr(
+        auth_module,
+        "console",
+        Console(file=output, force_terminal=False, no_color=True, width=80),
+    )
+
+    auth_module.whoami()
+
+    rendered = output.getvalue()
+    assert "a@example.com" in rendered
+    assert "User" in rendered
+    assert creds.expires_at.strftime("%Y-%m-%d") in rendered
+    assert "Workspace" not in rendered
+    assert calls == [{"credentials": creds, "cleanup_on_401": False}]

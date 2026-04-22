@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
 import shlex
 from typing import TYPE_CHECKING, Any
@@ -253,7 +254,7 @@ def login(
                     "Run 'osmosis workspace' later to choose one.",
                     style="yellow",
                 )
-        elif auto_selected:
+        elif auto_selected and active_workspace is not None:
             console.print(
                 f"\nAutomatically selected your only workspace: "
                 f"{esc(active_workspace['name'])}",
@@ -337,7 +338,12 @@ def logout(
 @app.command("whoami")
 def whoami() -> None:
     """Show current authenticated user and workspace."""
-    from osmosis_ai.platform.auth import ensure_active_workspace, load_credentials
+    from osmosis_ai.platform.auth import (
+        AuthenticationExpiredError,
+        PlatformAPIError,
+        ensure_active_workspace,
+        load_credentials,
+    )
     from osmosis_ai.platform.constants import MSG_NOT_LOGGED_IN
 
     credentials = load_credentials()
@@ -345,7 +351,12 @@ def whoami() -> None:
     if credentials is None:
         raise CLIError(MSG_NOT_LOGGED_IN)
 
-    active_workspace = ensure_active_workspace(credentials=credentials)
+    active_workspace = None
+    with contextlib.suppress(AuthenticationExpiredError, PlatformAPIError):
+        active_workspace = ensure_active_workspace(
+            credentials=credentials,
+            cleanup_on_401=False,
+        )
     esc = console.escape
 
     rows = [("Email", esc(credentials.user.email))]

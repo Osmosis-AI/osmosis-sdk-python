@@ -189,6 +189,46 @@ def test_init_here_raises_when_selected_workspace_has_connected_repo(
         init_module.init(name="test-ws", here=True)
 
 
+def test_init_ignores_auth_expiry_in_best_effort_workspace_lookup(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """init should continue when best-effort workspace Git metadata lookup hits 401."""
+    import osmosis_ai.platform.api.client as api_client_module
+    import osmosis_ai.platform.auth as auth_module
+    import osmosis_ai.platform.cli.init as init_module
+
+    class _Creds:
+        def is_expired(self) -> bool:
+            return False
+
+    class FakeClient:
+        def refresh_workspace_info(
+            self, *, credentials, workspace_name, cleanup_on_401=True
+        ):
+            assert isinstance(credentials, _Creds)
+            assert workspace_name == "team-alpha"
+            assert cleanup_on_401 is False
+            raise auth_module.AuthenticationExpiredError("session expired")
+
+    monkeypatch.setattr(init_module.shutil, "which", lambda cmd: "git")
+    for fn_name in (
+        "_write_scaffold",
+        "_git_init",
+        "_git_initial_commit",
+        "_update_workspace_metadata",
+    ):
+        monkeypatch.setattr(init_module, fn_name, lambda *a, **kw: None)
+    monkeypatch.setattr(init_module, "get_active_workspace_name", lambda: "team-alpha")
+    monkeypatch.setattr(auth_module, "load_credentials", lambda: _Creds())
+    monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+
+    monkeypatch.chdir(tmp_path)
+
+    init_module.init(name="test-ws")
+
+    assert (tmp_path / "test-ws").is_dir()
+
+
 # ── _render_template ─────────────────────────────────────────────
 
 
@@ -585,9 +625,12 @@ class TestPrintNextSteps:
                 return False
 
         class FakeClient:
-            def refresh_workspace_info(self, *, credentials, workspace_name):
+            def refresh_workspace_info(
+                self, *, credentials, workspace_name, cleanup_on_401=True
+            ):
                 assert isinstance(credentials, _Creds)
                 assert workspace_name == "team-alpha"
+                assert cleanup_on_401 is False
                 return {
                     "found": True,
                     "has_github_app_installation": True,
@@ -623,9 +666,12 @@ class TestPrintNextSteps:
                 return False
 
         class FakeClient:
-            def refresh_workspace_info(self, *, credentials, workspace_name):
+            def refresh_workspace_info(
+                self, *, credentials, workspace_name, cleanup_on_401=True
+            ):
                 assert isinstance(credentials, _Creds)
                 assert workspace_name == "team-alpha"
+                assert cleanup_on_401 is False
                 return {
                     "found": True,
                     "has_github_app_installation": True,

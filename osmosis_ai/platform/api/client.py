@@ -51,6 +51,7 @@ class OsmosisClient:
         *,
         credentials: Credentials | None = None,
         workspace_name: str,
+        cleanup_on_401: bool = True,
     ) -> dict[str, Any]:
         """Fetch workspace metadata via /api/cli/workspaces.
 
@@ -62,6 +63,7 @@ class OsmosisClient:
             "/api/cli/workspaces",
             credentials=credentials,
             require_workspace=False,
+            cleanup_on_401=cleanup_on_401,
         )
         for ws in data.get("workspaces", []):
             if ws.get("name") == workspace_name:
