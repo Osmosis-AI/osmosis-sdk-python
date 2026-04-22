@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import os
-from typing import TYPE_CHECKING
+import shlex
+from typing import TYPE_CHECKING, Any
 
 import typer
 
@@ -34,7 +35,50 @@ ASCII_ART = r"""
 ASCII_ART_MIN_WIDTH = 113
 
 
-def _validate_workspace_context(creds: Credentials) -> None:
+def _normalize_workspaces(raw_workspaces: Any) -> list[dict[str, str]]:
+    """Return workspace entries that have both an ID and a name."""
+    if not isinstance(raw_workspaces, list):
+        return []
+
+    workspaces: list[dict[str, str]] = []
+    for workspace in raw_workspaces:
+        if not isinstance(workspace, dict):
+            continue
+        ws_id = workspace.get("id")
+        ws_name = workspace.get("name")
+        if isinstance(ws_id, str) and ws_id and isinstance(ws_name, str) and ws_name:
+            workspaces.append({"id": ws_id, "name": ws_name})
+    return workspaces
+
+
+def _load_login_workspaces(
+    creds: Credentials,
+) -> tuple[list[dict[str, str]] | None, str | None]:
+    """Best-effort workspace lookup for post-login messaging."""
+    from osmosis_ai.platform.auth import (
+        AuthenticationExpiredError,
+        PlatformAPIError,
+        platform_request,
+    )
+
+    try:
+        data = platform_request(
+            "/api/cli/workspaces",
+            credentials=creds,
+            require_workspace=False,
+            cleanup_on_401=False,
+        )
+    except (AuthenticationExpiredError, PlatformAPIError) as exc:
+        return None, str(exc)
+
+    return _normalize_workspaces(data.get("workspaces")), None
+
+
+def _validate_workspace_context(
+    creds: Credentials,
+    *,
+    workspaces: list[dict[str, str]] | None = None,
+) -> None:
     """Validate the stored workspace is still accessible with new credentials.
 
     After login, the workspace ID in config.json may be stale (e.g. the user
@@ -46,20 +90,17 @@ def _validate_workspace_context(creds: Credentials) -> None:
         get_active_workspace,
         set_active_workspace,
     )
-    from osmosis_ai.platform.auth.platform_client import platform_request
 
     ws = get_active_workspace()
     if not ws:
         return
 
     try:
-        data = platform_request(
-            "/api/cli/workspaces",
-            credentials=creds,
-            require_workspace=False,
-            cleanup_on_401=False,
-        )
-        workspaces = data.get("workspaces", [])
+        if workspaces is None:
+            workspaces, _ = _load_login_workspaces(creds)
+        if workspaces is None:
+            return
+
         ws_by_id = {w["id"]: w for w in workspaces if "id" in w}
         ws_by_name = {w["name"]: w for w in workspaces if "name" in w}
 
@@ -83,6 +124,26 @@ def _validate_workspace_context(creds: Credentials) -> None:
         pass  # Don't block login for validation errors
 
 
+def _ensure_login_workspace_selection(
+    workspaces: list[dict[str, str]] | None,
+) -> tuple[dict[str, str] | None, bool]:
+    """Return the active workspace, auto-selecting the only available one."""
+    from osmosis_ai.platform.auth.local_config import (
+        get_active_workspace,
+        set_active_workspace,
+    )
+
+    active_workspace = get_active_workspace()
+    if active_workspace is not None:
+        return active_workspace, False
+    if workspaces is None or len(workspaces) != 1:
+        return None, False
+
+    workspace = workspaces[0]
+    set_active_workspace(workspace["id"], workspace["name"])
+    return workspace, True
+
+
 @app.command("login")
 def login(
     force: bool = typer.Option(
@@ -96,7 +157,6 @@ def login(
     from osmosis_ai.platform.auth import (
         LoginError,
         device_login,
-        ensure_active_workspace,
         load_credentials,
         verify_token,
     )
@@ -106,10 +166,7 @@ def login(
         save_credentials,
     )
     from osmosis_ai.platform.auth.flow import LoginResult
-    from osmosis_ai.platform.auth.local_config import (
-        clear_all_local_data,
-        get_active_workspace,
-    )
+    from osmosis_ai.platform.auth.local_config import clear_all_local_data
     from osmosis_ai.platform.auth.platform_client import revoke_cli_token
 
     if console.rich.width >= ASCII_ART_MIN_WIDTH:
@@ -156,6 +213,8 @@ def login(
 
         save_credentials(creds)
 
+        workspaces, workspace_lookup_error = _load_login_workspaces(creds)
+
         # Clear stale workspace and local state when user identity changes
         # or when explicitly forcing a fresh start, to prevent subsequent
         # commands from sending the old workspace ID in X-Osmosis-Org.
@@ -164,10 +223,10 @@ def login(
         )
         if local_data_cleared:
             clear_all_local_data()
-        else:
-            _validate_workspace_context(creds)
-        ensure_active_workspace(creds)
-        active_workspace = get_active_workspace()
+        elif workspaces is not None:
+            _validate_workspace_context(creds, workspaces=workspaces)
+
+        active_workspace, auto_selected = _ensure_login_workspace_selection(workspaces)
 
         # Display login success
         esc = console.escape
@@ -181,7 +240,44 @@ def login(
 
         console.panel("Login Successful", "\n".join(info_lines), style="green")
 
-        if active_workspace is None:
+        if workspace_lookup_error is not None:
+            if active_workspace is not None:
+                console.print(
+                    "\nAuthenticated, but could not refresh your workspace list. "
+                    "Current workspace selection was kept.",
+                    style="yellow",
+                )
+            else:
+                console.print(
+                    "\nAuthenticated, but could not load your workspaces yet. "
+                    "Run 'osmosis workspace' later to choose one.",
+                    style="yellow",
+                )
+        elif auto_selected:
+            console.print(
+                f"\nAutomatically selected your only workspace: "
+                f"{esc(active_workspace['name'])}",
+                style="green",
+            )
+        elif workspaces and len(workspaces) > 1:
+            console.print(
+                "\nMultiple workspaces are available. Switch with:",
+                style="dim",
+            )
+            for workspace in workspaces:
+                command = f"osmosis workspace switch {shlex.quote(workspace['name'])}"
+                console.print(f"  {esc(command)}")
+            console.print(
+                "Or run 'osmosis workspace' for interactive selection.",
+                style="dim",
+            )
+        elif active_workspace is None and workspaces == []:
+            console.print(
+                "\nNo workspaces were found for this account. "
+                "Run 'osmosis workspace' to manage workspaces.",
+                style="dim",
+            )
+        elif active_workspace is None:
             console.print(
                 "\nRun 'osmosis workspace' to select a workspace.",
                 style="dim",
