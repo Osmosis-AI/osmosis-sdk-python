@@ -76,7 +76,7 @@ def _validate_workspace_context(creds: Credentials) -> None:
         clear_all_local_data()
         console.print(
             "\nPrevious workspace is no longer accessible. "
-            "Run 'osmosis workspace' to select a workspace.",
+            "Resetting local workspace selection.",
             style="yellow",
         )
     except Exception:
@@ -96,6 +96,7 @@ def login(
     from osmosis_ai.platform.auth import (
         LoginError,
         device_login,
+        ensure_active_workspace,
         load_credentials,
         verify_token,
     )
@@ -105,7 +106,10 @@ def login(
         save_credentials,
     )
     from osmosis_ai.platform.auth.flow import LoginResult
-    from osmosis_ai.platform.auth.local_config import clear_all_local_data
+    from osmosis_ai.platform.auth.local_config import (
+        clear_all_local_data,
+        get_active_workspace,
+    )
     from osmosis_ai.platform.auth.platform_client import revoke_cli_token
 
     if console.rich.width >= ASCII_ART_MIN_WIDTH:
@@ -162,6 +166,8 @@ def login(
             clear_all_local_data()
         else:
             _validate_workspace_context(creds)
+        ensure_active_workspace(creds)
+        active_workspace = get_active_workspace()
 
         # Display login success
         esc = console.escape
@@ -169,14 +175,17 @@ def login(
         info_lines = [f"Email: {esc(result.user.email)}"]
         if result.user.name:
             info_lines.append(f"Name: {esc(result.user.name)}")
+        if active_workspace:
+            info_lines.append(f"Workspace: {esc(active_workspace['name'])}")
         info_lines.append(f"Expires: {result.expires_at.strftime('%Y-%m-%d')}")
 
         console.panel("Login Successful", "\n".join(info_lines), style="green")
 
-        console.print(
-            "\nRun 'osmosis workspace' to select a workspace.",
-            style="dim",
-        )
+        if active_workspace is None:
+            console.print(
+                "\nRun 'osmosis workspace' to select a workspace.",
+                style="dim",
+            )
 
     except LoginError as e:
         console.print_error(str(e))
@@ -232,8 +241,7 @@ def logout(
 @app.command("whoami")
 def whoami() -> None:
     """Show current authenticated user and workspace."""
-    from osmosis_ai.platform.auth import load_credentials
-    from osmosis_ai.platform.auth.local_config import get_active_workspace_name
+    from osmosis_ai.platform.auth import ensure_active_workspace, load_credentials
     from osmosis_ai.platform.constants import MSG_NOT_LOGGED_IN
 
     credentials = load_credentials()
@@ -241,14 +249,14 @@ def whoami() -> None:
     if credentials is None:
         raise CLIError(MSG_NOT_LOGGED_IN)
 
-    ws_name = get_active_workspace_name()
+    active_workspace = ensure_active_workspace(credentials=credentials)
     esc = console.escape
 
     rows = [("Email", esc(credentials.user.email))]
     if credentials.user.name:
         rows.append(("Name", esc(credentials.user.name)))
-    if ws_name:
-        rows.append(("Workspace", esc(ws_name)))
+    if active_workspace:
+        rows.append(("Workspace", esc(active_workspace["name"])))
     rows.append(("Expires", credentials.expires_at.strftime("%Y-%m-%d")))
 
     console.table(rows)

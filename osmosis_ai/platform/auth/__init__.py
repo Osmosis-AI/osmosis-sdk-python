@@ -21,6 +21,7 @@ from .platform_client import (
     AuthenticationExpiredError,
     PlatformAPIError,
     SubscriptionRequiredError,
+    ensure_active_workspace,
     platform_request,
 )
 
@@ -37,6 +38,7 @@ __all__ = [
     "UserInfo",
     "delete_credentials",
     "device_login",
+    "ensure_active_workspace",
     "get_active_workspace",
     "get_active_workspace_id",
     "get_credential_store",

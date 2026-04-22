@@ -19,13 +19,11 @@ from osmosis_ai.cli.prompts import (
 )
 from osmosis_ai.platform.auth import (
     PlatformAPIError,
+    ensure_active_workspace,
     load_credentials,
     platform_request,
 )
-from osmosis_ai.platform.auth.local_config import (
-    get_active_workspace,
-    set_active_workspace,
-)
+from osmosis_ai.platform.auth.local_config import set_active_workspace
 from osmosis_ai.platform.constants import MSG_NOT_LOGGED_IN
 
 from .constants import BACK, DEFAULT_VISIBLE_CHOICES
@@ -397,6 +395,7 @@ def _open_in_browser(ws_name: str) -> None:
 def list_workspaces() -> None:
     """List all workspaces (non-interactive)."""
     credentials = require_credentials()
+    active_ws = ensure_active_workspace(credentials=credentials)
     result = platform_request(
         "/api/cli/workspaces", require_workspace=False, credentials=credentials
     )
@@ -406,7 +405,6 @@ def list_workspaces() -> None:
         console.print("No workspaces found.")
         return
 
-    active_ws = get_active_workspace()
     active_name = active_ws["name"] if active_ws else None
 
     console.print(f"Workspaces ({len(workspaces)}):", style="bold")
@@ -449,7 +447,7 @@ def workspace() -> None:
     if credentials is None:
         raise CLIError(MSG_NOT_LOGGED_IN)
 
-    active_ws = get_active_workspace()
+    active_ws = ensure_active_workspace(credentials=credentials)
     ws_name = active_ws["name"] if active_ws else None
 
     _show_context(ws_name)

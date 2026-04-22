@@ -2,9 +2,13 @@
 
 from __future__ import annotations
 
+import io
 from datetime import UTC, datetime, timedelta
 
+import pytest
+
 import osmosis_ai.cli.commands.auth as auth_module
+from osmosis_ai.cli.console import Console
 from osmosis_ai.platform.auth.credentials import Credentials, UserInfo
 from osmosis_ai.platform.auth.flow import LoginResult
 
@@ -26,6 +30,19 @@ def _make_login_result(email: str = "a@example.com") -> LoginResult:
     return LoginResult(
         user=UserInfo(id="user_1", email=email, name="User"),
         expires_at=datetime.now(UTC) + timedelta(days=30),
+    )
+
+
+@pytest.fixture(autouse=True)
+def _stub_workspace_resolution(monkeypatch) -> None:
+    """Keep login tests offline unless a test overrides workspace resolution."""
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.ensure_active_workspace",
+        lambda credentials=None, **kwargs: None,
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.local_config.get_active_workspace",
+        lambda: None,
     )
 
 
@@ -158,3 +175,42 @@ def test_first_login_does_not_clear_workspace(monkeypatch) -> None:
     auth_module.login(force=False, token=None)
 
     assert not clear_calls, "no cleanup needed for first-time login"
+
+
+def test_login_auto_selects_only_workspace(monkeypatch) -> None:
+    """Login should auto-select the only available workspace and skip the prompt."""
+    new_creds = _make_credentials(user_id="user_1")
+    result = _make_login_result()
+    output = io.StringIO()
+
+    monkeypatch.delenv("OSMOSIS_TOKEN", raising=False)
+    monkeypatch.setattr("osmosis_ai.platform.auth.load_credentials", lambda: None)
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.credentials.save_credentials", lambda c: "keyring"
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.device_login",
+        lambda **kw: (result, new_creds),
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.ensure_active_workspace",
+        lambda credentials=None, **kwargs: {
+            "id": "ws_only",
+            "name": "solo-workspace",
+        },
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.local_config.get_active_workspace",
+        lambda: {"id": "ws_only", "name": "solo-workspace"},
+    )
+    monkeypatch.setattr(
+        auth_module,
+        "console",
+        Console(file=output, force_terminal=False, no_color=True, width=80),
+    )
+
+    auth_module.login(force=False, token=None)
+
+    rendered = output.getvalue()
+    assert "Workspace: solo-workspace" in rendered
+    assert "Run 'osmosis workspace' to select a workspace." not in rendered

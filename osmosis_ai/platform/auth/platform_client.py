@@ -15,7 +15,12 @@ from osmosis_ai.platform.constants import MSG_NOT_LOGGED_IN
 
 from .config import PLATFORM_URL
 from .credentials import load_credentials
-from .local_config import get_active_workspace_id, reset_session
+from .local_config import (
+    get_active_workspace,
+    get_active_workspace_id,
+    reset_session,
+    set_active_workspace,
+)
 
 if TYPE_CHECKING:
     from .credentials import Credentials
@@ -105,6 +110,43 @@ def revoke_cli_token(credentials: Credentials) -> bool:
         return False
 
 
+def ensure_active_workspace(
+    credentials: Credentials | None = None,
+    *,
+    cleanup_on_401: bool = True,
+) -> dict[str, str] | None:
+    """Return the active workspace, auto-selecting it when only one exists."""
+    active_workspace = get_active_workspace()
+    if active_workspace is not None:
+        return active_workspace
+
+    if credentials is None:
+        credentials = load_credentials()
+    if credentials is None:
+        return None
+
+    data = platform_request(
+        "/api/cli/workspaces",
+        credentials=credentials,
+        require_workspace=False,
+        cleanup_on_401=cleanup_on_401,
+    )
+    workspaces = data.get("workspaces", [])
+    if len(workspaces) != 1:
+        return None
+
+    workspace = workspaces[0]
+    ws_id = workspace.get("id")
+    ws_name = workspace.get("name")
+    if not isinstance(ws_id, str) or not ws_id:
+        return None
+    if not isinstance(ws_name, str) or not ws_name:
+        return None
+
+    set_active_workspace(ws_id, ws_name)
+    return {"id": ws_id, "name": ws_name}
+
+
 def platform_request(
     endpoint: str,
     method: str = "GET",
@@ -161,6 +203,12 @@ def platform_request(
     # Add workspace context if required
     if require_workspace:
         resolved_workspace_id = workspace_id or get_active_workspace_id()
+        if not resolved_workspace_id:
+            active_workspace = ensure_active_workspace(
+                credentials=credentials,
+                cleanup_on_401=cleanup_on_401,
+            )
+            resolved_workspace_id = active_workspace["id"] if active_workspace else None
         if not resolved_workspace_id:
             raise PlatformAPIError(
                 "No workspace selected. Run 'osmosis workspace' to select a workspace."
