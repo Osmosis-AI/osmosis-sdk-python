@@ -620,7 +620,7 @@ class RenameDeploymentResult:
         return cls(id=data["id"], lora_name=data["lora_name"])
 
 
-# ── LoRA checkpoints (for `osmosis train status` + `model deploy`) ─────
+# ── LoRA checkpoints (for `osmosis train status` + `deploy create`) ─────
 
 
 @dataclass

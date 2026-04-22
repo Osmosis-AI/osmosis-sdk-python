@@ -416,23 +416,24 @@ class OsmosisClient:
         self,
         *,
         training_run: str,
-        checkpoint_step: int | None = None,
-        lora_checkpoint_id: str | None = None,
+        checkpoint_step: int,
         lora_name: str | None = None,
         credentials: Credentials | None = None,
     ) -> CreateDeploymentResult:
         """Create a deployment.
 
-        Exactly one of ``checkpoint_step`` / ``lora_checkpoint_id`` must
-        be provided. ``training_run`` accepts a UUID or training run name.
+        The CLI API accepts ``training_run`` + ``checkpoint_step``.
+        ``training_run`` may be a UUID or training run name, and
         ``lora_name`` is optional — the server generates one when
         omitted.
         """
-        body: dict[str, Any] = {"training_run": training_run}
-        if checkpoint_step is not None:
-            body["checkpoint_step"] = checkpoint_step
-        if lora_checkpoint_id is not None:
-            body["lora_checkpoint_id"] = lora_checkpoint_id
+        if checkpoint_step is None:
+            raise ValueError("checkpoint_step is required.")
+
+        body: dict[str, Any] = {
+            "training_run": training_run,
+            "checkpoint_step": checkpoint_step,
+        }
         if lora_name is not None:
             body["lora_name"] = lora_name
         data = platform_request(

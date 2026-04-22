@@ -67,8 +67,7 @@ class TestCreate:
                 self,
                 *,
                 training_run,
-                checkpoint_step=None,
-                lora_checkpoint_id=None,
+                checkpoint_step,
                 lora_name=None,
                 credentials=None,
             ):

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from osmosis_ai.platform.api.client import OsmosisClient
 
 
@@ -92,19 +94,6 @@ class TestCreateDeployment:
         assert kwargs["data"]["lora_name"] == "custom"
 
     @patch("osmosis_ai.platform.api.client.platform_request")
-    def test_with_checkpoint_id(self, mock_req: MagicMock) -> None:
-        mock_req.return_value = {
-            "deployment": {"id": "dep_1", "lora_name": "x", "status": "deployed"}
-        }
-        client = OsmosisClient()
-        client.create_deployment(
-            training_run="qwen3-run1", lora_checkpoint_id="cp-uuid"
-        )
-        _, kwargs = mock_req.call_args
-        assert kwargs["data"]["lora_checkpoint_id"] == "cp-uuid"
-        assert "checkpoint_step" not in kwargs["data"]
-
-    @patch("osmosis_ai.platform.api.client.platform_request")
     def test_none_fields_omitted(self, mock_req: MagicMock) -> None:
         mock_req.return_value = {
             "deployment": {"id": "dep_1", "lora_name": "x", "status": "deployed"}
@@ -113,6 +102,14 @@ class TestCreateDeployment:
         client.create_deployment(training_run="run", checkpoint_step=0)
         _, kwargs = mock_req.call_args
         assert set(kwargs["data"].keys()) == {"training_run", "checkpoint_step"}
+
+    def test_requires_checkpoint_step(self) -> None:
+        client = OsmosisClient()
+        with pytest.raises(ValueError, match="checkpoint_step is required"):
+            client.create_deployment(
+                training_run="run",
+                checkpoint_step=None,  # type: ignore[arg-type]
+            )
 
 
 class TestGetDeployment:
