@@ -8,7 +8,6 @@ from typing import Any
 import typer
 
 from osmosis_ai.cli.console import console
-from osmosis_ai.cli.errors import not_implemented
 from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE
 
 app: typer.Typer = typer.Typer(
@@ -106,18 +105,6 @@ def list_models(
 
     if not fetch_all:
         print_pagination_footer(len(models), total, "base models")
-
-
-@app.command("export")
-def export() -> None:
-    """Export a model."""
-    not_implemented("model", "export")
-
-
-@app.command("build")
-def build() -> None:
-    """Build a model."""
-    not_implemented("model", "build")
 
 
 @app.command("delete")
