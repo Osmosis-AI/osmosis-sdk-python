@@ -145,6 +145,11 @@ def _check_file_basics(file: str) -> tuple[Path, str, int]:
     return file_path, ext, file_size
 
 
+def _dataset_name_from_path(file_path: Path) -> str:
+    """Derive the platform dataset name from a local file path."""
+    return file_path.stem
+
+
 def _perform_upload(
     *,
     file_path: Path,
@@ -165,9 +170,10 @@ def _perform_upload(
     )
 
     client = OsmosisClient()
+    dataset_name = _dataset_name_from_path(file_path)
 
     dataset = client.create_dataset(
-        file_path.name,
+        dataset_name,
         file_size,
         ext,
         credentials=credentials,
@@ -269,7 +275,9 @@ def upload(
         credentials=credentials,
     )
 
-    console.print(f"Dataset uploaded: {console.escape(file_path.name)}", style="green")
+    console.print(
+        f"Dataset uploaded: {console.escape(dataset.file_name)}", style="green"
+    )
     url = platform_entity_url(ws_name, "datasets", dataset.id)
     console.print(f"Processing will continue on the platform. Check status at: {url}")
 

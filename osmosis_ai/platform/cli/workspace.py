@@ -195,7 +195,10 @@ def _upload_dataset_interactive(
         console.print_error(str(e))
         return False
 
-    console.print(f"Upload complete. Dataset ID: {dataset.id}", style="green")
+    console.print(
+        f"Upload complete. Dataset: {console.escape(dataset.file_name)}",
+        style="green",
+    )
     url = platform_entity_url(ws_name, "datasets", dataset.id)
     console.print(f"Check status at: {url}")
     return True
