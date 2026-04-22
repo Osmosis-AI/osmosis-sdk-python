@@ -28,18 +28,39 @@ class AuthenticationExpiredError(Exception):
 class PlatformAPIError(Exception):
     """Raised when a Platform API call fails."""
 
-    def __init__(self, message: str, status_code: int | None = None):
+    def __init__(
+        self,
+        message: str,
+        status_code: int | None = None,
+        *,
+        error_code: str | None = None,
+        field: str | None = None,
+        details: dict[str, Any] | None = None,
+    ):
         super().__init__(message)
         self.status_code = status_code
+        self.error_code = error_code
+        self.field = field
+        self.details = details
 
 
 class SubscriptionRequiredError(PlatformAPIError):
     """Raised when the workspace requires an active subscription for the requested action."""
 
-    def __init__(self, message: str | None = None):
+    def __init__(
+        self,
+        message: str | None = None,
+        *,
+        error_code: str | None = None,
+        field: str | None = None,
+        details: dict[str, Any] | None = None,
+    ):
         super().__init__(
             message or "Active subscription required",
             status_code=403,
+            error_code=error_code,
+            field=field,
+            details=details,
         )
 
 
@@ -173,6 +194,8 @@ def platform_request(
         # Best-effort capture of structured error message from response body
         detail = ""
         error_body: dict[str, Any] = {}
+        error_code: str | None = None
+        field: str | None = None
         try:
             raw = e.read()
             text = raw.decode("utf-8", errors="replace").strip() if raw else ""
@@ -182,6 +205,10 @@ def platform_request(
                     # Only treat as error_body if it's actually a dict
                     if isinstance(parsed, dict):
                         error_body = parsed
+                        if isinstance(error_body.get("code"), str):
+                            error_code = error_body["code"]
+                        if isinstance(error_body.get("field"), str):
+                            field = error_body["field"]
                 # Prefer structured error/message field over raw body
                 error_msg = error_body.get("error") or error_body.get("message")
                 if error_msg and isinstance(error_msg, str):
@@ -198,16 +225,30 @@ def platform_request(
             error_msg = error_body.get("error", "")
             if isinstance(error_msg, str):
                 if "subscription" in error_msg.lower():
-                    raise SubscriptionRequiredError(error_msg) from e
+                    raise SubscriptionRequiredError(
+                        error_msg,
+                        error_code=error_code,
+                        field=field,
+                        details=error_body or None,
+                    ) from e
                 if "workspace" in error_msg.lower() and "access" in error_msg.lower():
                     raise PlatformAPIError(
                         f"{error_msg}\n"
                         "Your workspace context may be stale. "
                         "Run 'osmosis auth login' or 'osmosis workspace' to re-select.",
                         e.code,
+                        error_code=error_code,
+                        field=field,
+                        details=error_body or None,
                     ) from e
 
-        raise PlatformAPIError(f"API error: HTTP {e.code}.{detail}", e.code) from e
+        raise PlatformAPIError(
+            f"API error: HTTP {e.code}.{detail}",
+            e.code,
+            error_code=error_code,
+            field=field,
+            details=error_body or None,
+        ) from e
     except URLError as e:
         raise PlatformAPIError(f"Connection error: {e.reason}") from e
     except json.JSONDecodeError as e:
