@@ -1458,7 +1458,7 @@ wheels = [
 
 [[package]]
 name = "litellm"
-version = "1.82.0"
+version = "1.83.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiohttp" },
@@ -1474,9 +1474,9 @@ dependencies = [
     { name = "tiktoken" },
     { name = "tokenizers" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/6c/00/49bb5c28e0dea0f5086229a2a08d5fdc6c8dc0d8e2acb2a2d1f7dd9f4b70/litellm-1.82.0.tar.gz", hash = "sha256:d388f52447daccbcaafa19a3e68d17b75f1374b5bf2cde680d65e1cd86e50d22", size = 16800355, upload-time = "2026-03-01T02:35:30.363Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/22/92/6ce9737554994ca8e536e5f4f6a87cc7c4774b656c9eb9add071caf7d54b/litellm-1.83.0.tar.gz", hash = "sha256:860bebc76c4bb27b4cf90b4a77acd66dba25aced37e3db98750de8a1766bfb7a", size = 17333062, upload-time = "2026-03-31T05:08:25.331Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/28/89/eb28bfcf97d6b045c400e72eb047c381594467048c237dbb6c227764084c/litellm-1.82.0-py3-none-any.whl", hash = "sha256:5496b5d4532cccdc7a095c21cbac4042f7662021c57bc1d17be4e39838929e80", size = 14911978, upload-time = "2026-03-01T02:35:26.844Z" },
+    { url = "https://files.pythonhosted.org/packages/19/2c/a670cc050fcd6f45c6199eb99e259c73aea92edba8d5c2fc1b3686d36217/litellm-1.83.0-py3-none-any.whl", hash = "sha256:88c536d339248f3987571493015784671ba3f193a328e1ea6780dbebaa2094a8", size = 15610306, upload-time = "2026-03-31T05:08:21.987Z" },
 ]
 
 [[package]]
@@ -2054,6 +2054,11 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/0b/02/bb3ddff9bca543cbcca0d362a645b03a0708b6c2cd6eb620d5f3de810bb3/openai_agents-0.14.2-py3-none-any.whl", hash = "sha256:acd75132f2ec70413a4e95680b629ccbc6f4f5d0d63414980153de09d409e695", size = 807364, upload-time = "2026-04-18T00:17:37.505Z" },
 ]
 
+[package.optional-dependencies]
+litellm = [
+    { name = "litellm" },
+]
+
 [[package]]
 name = "opentelemetry-api"
 version = "1.39.1"
@@ -2214,8 +2219,7 @@ dev = [
     { name = "fastapi" },
     { name = "harbor" },
     { name = "mypy" },
-    { name = "openai" },
-    { name = "openai-agents" },
+    { name = "openai-agents", extra = ["litellm"] },
     { name = "pre-commit" },
     { name = "pyarrow" },
     { name = "pydantic-settings" },
@@ -2233,8 +2237,7 @@ dev = [
 full = [
     { name = "fastapi" },
     { name = "harbor" },
-    { name = "openai" },
-    { name = "openai-agents" },
+    { name = "openai-agents", extra = ["litellm"] },
     { name = "pyarrow" },
     { name = "pydantic-settings" },
     { name = "pyyaml" },
@@ -2247,8 +2250,7 @@ platform = [
 server = [
     { name = "fastapi" },
     { name = "harbor" },
-    { name = "openai" },
-    { name = "openai-agents" },
+    { name = "openai-agents", extra = ["litellm"] },
     { name = "pyarrow" },
     { name = "pydantic-settings" },
     { name = "pyyaml" },
@@ -2264,10 +2266,9 @@ requires-dist = [
     { name = "harbor", marker = "extra == 'server'", specifier = "==0.3.0" },
     { name = "httpx", specifier = ">=0.25.0,<1.0.0" },
     { name = "keyring", specifier = ">=25.0.0" },
-    { name = "litellm", specifier = ">=1.40.0,<=1.82.6" },
+    { name = "litellm", specifier = ">=1.83.0,<2.0.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = "==1.20.1" },
-    { name = "openai", marker = "extra == 'server'", specifier = ">=1.40.0" },
-    { name = "openai-agents", marker = "extra == 'server'", specifier = ">=0.14,<0.15" },
+    { name = "openai-agents", extras = ["litellm"], marker = "extra == 'server'", specifier = ">=0.14,<0.15" },
     { name = "osmosis-ai", extras = ["platform"], marker = "extra == 'server'" },
     { name = "osmosis-ai", extras = ["server"], marker = "extra == 'dev'" },
     { name = "osmosis-ai", extras = ["server"], marker = "extra == 'full'" },
@@ -3365,7 +3366,7 @@ wheels = [
 
 [[package]]
 name = "strands-agents"
-version = "1.34.1"
+version = "1.32.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "boto3" },
@@ -3381,9 +3382,9 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "watchdog" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/be/22/f958d52a794e508a31ace8b8cbba0379226a98fac9826f3b757f95912b70/strands_agents-1.34.1.tar.gz", hash = "sha256:d1ff614dc364ce54348c24b011bbef6c466a0dd33e19996bd1a4ec4aab846cb1", size = 796829, upload-time = "2026-04-01T20:37:29.755Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/d4/b9/c18d13bbf85c23eb66d9f61bced0c1f5a3ac18916331eabde049f6c4dd33/strands_agents-1.32.0.tar.gz", hash = "sha256:2e399bc5ea98d91dbcdf79913115aa579a6bb3251dfe6c15be114821cad893a4", size = 776171, upload-time = "2026-03-20T14:07:41.75Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/19/eb/b0db0fb9ae691d3ed0ac9f9604b60f9154671baf4c61853c0b6607e2a91e/strands_agents-1.34.1-py3-none-any.whl", hash = "sha256:edc5ccd4fbc64bf203ced282083ed011953f628cf8f060e1c88e6a2fd8429f3a", size = 393990, upload-time = "2026-04-01T20:37:27.906Z" },
+    { url = "https://files.pythonhosted.org/packages/6b/a9/7e00371130dec1ae16df3fd0f7450aa2b92859b625818c793d178b2f1835/strands_agents-1.32.0-py3-none-any.whl", hash = "sha256:60c0eaae32ee1fc366ecebb10bca07681015104c111472a7378f71bbcdedbba4", size = 387030, upload-time = "2026-03-20T14:07:39.754Z" },
 ]
 
 [package.optional-dependencies]

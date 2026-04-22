@@ -1,10 +1,11 @@
 """OpenAI Agents SDK integration for Osmosis rollouts.
 
-Mirrors ``strands.py``: construct ``OsmosisOpenAIAgent`` inside
-``AgentWorkflow.run()`` and call ``await agent.run(ctx.prompt)``. Header
-injection (``x-sample-id`` / ``x-rollout-id``) uses ``HEADERS_OVERRIDE``,
-a ContextVar in openai-agents, which is handoff-safe and
-concurrency-safe.
+Construct ``OsmosisOpenAIAgent`` inside ``AgentWorkflow.run()`` and call
+``await agent.run(ctx.prompt)``. The default wiring routes every chat
+completion through the official ``openai-agents[litellm]`` adapter so
+the wire protocol matches the Strands integration exactly — both end up
+calling ``litellm.acompletion`` with the controller's SSE endpoint plus
+``x-rollout-id`` / ``x-sample-id`` headers.
 
 Example::
 
@@ -25,18 +26,11 @@ import warnings
 from contextlib import contextmanager
 from typing import Any, cast
 
-import httpx
 from agents import Agent, RunConfig, Runner
-from agents.model_settings import ModelSettings
+from agents.extensions.models.litellm_model import LitellmModel
 from agents.models.chatcmpl_helpers import HEADERS_OVERRIDE
-from agents.models.openai_chatcompletions import OpenAIChatCompletionsModel
-from openai import AsyncOpenAI
 
 from osmosis_ai.rollout.context import get_rollout_context
-from osmosis_ai.rollout.integrations.agents._sse_bridge import (
-    SSEToJSONBridgeTransport,
-)
-from osmosis_ai.rollout.types import MultiTurnMode
 
 # openai-agents' Agent.__init__ has ``instructions`` and ``prompt`` as
 # positional parameters 5 and 6. Rollout mode routes prompt content
@@ -97,23 +91,14 @@ class OsmosisOpenAIAgent(Agent):
                     "RolloutContext. Construct the agent inside "
                     "AgentWorkflow.run()."
                 )
-            # Adapt the SSE chat-completions response for non-streaming
-            # openai-python consumers.
-            http_client = httpx.AsyncClient(transport=SSEToJSONBridgeTransport())
-            client = AsyncOpenAI(
+            # Mirror OsmosisRolloutModel.for_sample() in strands.py: hand the
+            # controller URL / api_key straight to LiteLLM with no extra
+            # request-shaping (e.g. no extra_body overrides).
+            model = LitellmModel(
+                model="openai/osmosis-rollout",
                 base_url=ctx.chat_completions_url,
-                api_key=ctx.api_key or "sk-osmosis-rollout",
-                http_client=http_client,
+                api_key=ctx.api_key,
             )
-            model = OpenAIChatCompletionsModel(
-                model="osmosis-rollout",
-                openai_client=client,
-            )
-        kwargs.pop("instructions", None)
-        kwargs.pop("prompt", None)
-        kwargs["model_settings"] = _with_single_sample_mode(
-            cast(ModelSettings | None, kwargs.get("model_settings"))
-        )
         super().__init__(*args, model=model, **kwargs)
 
     async def run(
@@ -157,7 +142,12 @@ class OsmosisOpenAIAgent(Agent):
                 "x-sample-id": resolved_sample_id,
             }
         ):
-            result = await Runner.run(self, input, run_config=rc, **kwargs)
+            result = Runner.run_streamed(self, input, run_config=rc, **kwargs)
+            async for _ in result.stream_events():
+                pass
+
+        if result.run_loop_exception is not None:
+            raise result.run_loop_exception
 
         ctx.record_sample(
             resolved_sample_id, cast(list[dict[str, Any]], result.to_input_list())
@@ -192,12 +182,3 @@ def _resolve_sample_id(ctx: Any, agent: Any) -> str:
         stacklevel=3,
     )
     return f"{base}-{suffix}"
-
-
-def _with_single_sample_mode(
-    model_settings: ModelSettings | None,
-) -> ModelSettings:
-    base = model_settings or ModelSettings()
-    extra_body = dict(base.extra_body or {})
-    extra_body["multi_turn_mode"] = MultiTurnMode.SINGLE_SAMPLE.value
-    return dataclasses.replace(base, extra_body=extra_body)
