@@ -4,6 +4,9 @@ Run **`osmosis eval run`** with a TOML file to execute an **AgentWorkflow** agai
 
 Results are cached on disk so long runs can resume after interruption.
 
+Eval configs must live under `configs/eval/` inside a structured Osmosis
+workspace.
+
 ## TOML configuration
 
 ### Required
@@ -69,13 +72,13 @@ Most eval configs only need `[eval]`, `[llm]`, and optional `[runs]` / `[output]
 | `fresh` | `false` | Start fresh (same as CLI `--fresh`). |
 | `retry_failed` | `false` | Only failed runs (same as CLI `--retry-failed`). |
 
-### Example `eval.toml`
+### Example `configs/eval/my-rollout.toml`
 
 ```toml
 [eval]
 rollout = "my_rollout"
 entrypoint = "workflow.py"
-dataset = "data.parquet"
+dataset = "data/my-eval.parquet"
 
 [llm]
 model = "openai/gpt-5-mini"
@@ -93,9 +96,9 @@ log_samples = true
 ## Quick start
 
 ```bash
-osmosis eval run eval.toml
-osmosis eval run eval.toml --fresh
-osmosis eval run eval.toml --limit 50 --batch-size 4 -o ./results
+osmosis eval run configs/eval/my-rollout.toml
+osmosis eval run configs/eval/my-rollout.toml --fresh
+osmosis eval run configs/eval/my-rollout.toml --limit 50 --batch-size 4 -o ./results
 ```
 
 ## Workflow and grader discovery

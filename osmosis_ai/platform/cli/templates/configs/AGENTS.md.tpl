@@ -1,50 +1,38 @@
 # Training & Evaluation Configs
 
-Configs are workspace-scoped and reference specific rollouts by name.
+Configs are workspace-scoped and must stay in their canonical directories.
 
-## Training Configs (`training/*.toml`)
+## Canonical paths
 
-Each TOML file defines a training run configuration. Start from the default template:
+- Training: `configs/training/<name>.toml`
+- Eval: `configs/eval/<name>.toml`
+
+Do not place these configs elsewhere. The CLI validates these locations.
+
+## Training configs (`training/*.toml`)
+
+Start from the default template:
 
 ```bash
 cp configs/training/default.toml configs/training/<run_name>.toml
 ```
 
-Then fill in required fields and adjust parameters as needed. See the template for all available options with defaults.
+Then fill in the required fields:
 
-### Example
+- `rollout` must match a directory under `rollouts/`
+- `entrypoint` must be a Python path relative to that rollout, usually `main.py`
+- `model_path` must be a supported base model
+- `dataset` must be a platform dataset name
 
-```toml
-[experiment]
-rollout = "calculator"
-entrypoint = "main.py"
-model_path = "Qwen/Qwen3.5-35B-A3B"  # or "Qwen/Qwen3.5-122B-A10B"
-dataset = "my-dataset-abc123"
+## Eval configs (`eval/*.toml`)
 
-[training]
-# lr = 1e-6
-# total_epochs = 1
-# n_samples_per_prompt = 8
-# global_batch_size = 64
-# max_prompt_length = 8192
-# max_response_length = 8192
-
-[sampling]
-# rollout_temperature = 1.0
-# rollout_top_p = 1.0
-
-[checkpoints]
-# eval_interval =
-# checkpoint_save_freq = 20
-```
-
-## Eval Configs (`eval/*.toml`)
+Use one eval config per rollout baseline. `entrypoint` should usually be `main.py`.
 
 ```toml
 [eval]
 rollout = "calculator"
 entrypoint = "main.py"
-dataset = "data/dataset.jsonl"
+dataset = "data/calculator.jsonl"
 
 [llm]
 model = "openai/gpt-5-mini"
@@ -57,8 +45,10 @@ batch_size = 2
 ## Commands
 
 ```bash
+osmosis workspace validate
+osmosis rollout validate configs/training/<config>.toml
+osmosis rollout validate configs/eval/<config>.toml
 osmosis train submit configs/training/<config>.toml
 osmosis eval run configs/eval/<config>.toml
-osmosis rollout serve <path-to-serve-config.toml>
 osmosis train status <run-name>
 ```

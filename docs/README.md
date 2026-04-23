@@ -2,8 +2,8 @@
 
 ## Rollout
 
-- Run a server from TOML: `osmosis rollout serve <config.toml>` — see [CLI reference](./cli.md#osmosis-rollout-serve).
-- Validate only: `osmosis rollout serve <config.toml> --validate-only`
+- Validate a training or eval entrypoint: `osmosis rollout validate configs/training/<config>.toml`
+- Validate an eval entrypoint: `osmosis rollout validate configs/eval/<config>.toml`
 
 ## Workflow commands
 
