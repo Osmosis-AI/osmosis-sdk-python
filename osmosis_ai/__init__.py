@@ -9,7 +9,18 @@ Remote rollout uses ``osmosis_ai.rollout`` and is not re-exported at package
 top level.
 """
 
+from typing import TYPE_CHECKING
+
 from .consts import PACKAGE_VERSION as __version__
+
+if TYPE_CHECKING:
+    from .eval.rubric import (
+        MissingAPIKeyError,
+        ModelNotFoundError,
+        ProviderRequestError,
+        RubricResult,
+        evaluate_rubric,
+    )
 
 # ---------------------------------------------------------------------------
 # Lazy-loaded exports: these names are resolved on first access so that
@@ -17,13 +28,15 @@ from .consts import PACKAGE_VERSION as __version__
 # openai, …) unless actually needed.
 # ---------------------------------------------------------------------------
 
-_RUBRIC_EXPORTS: set[str] = {
-    "MissingAPIKeyError",
-    "ModelNotFoundError",
-    "ProviderRequestError",
-    "RubricResult",
-    "evaluate_rubric",
-}
+_RUBRIC_EXPORTS: frozenset[str] = frozenset(
+    {
+        "MissingAPIKeyError",
+        "ModelNotFoundError",
+        "ProviderRequestError",
+        "RubricResult",
+        "evaluate_rubric",
+    }
+)
 
 
 def __getattr__(name: str) -> object:
@@ -37,6 +50,10 @@ def __getattr__(name: str) -> object:
 
 
 __all__ = [
+    "MissingAPIKeyError",
+    "ModelNotFoundError",
+    "ProviderRequestError",
+    "RubricResult",
     "__version__",
-    *sorted(_RUBRIC_EXPORTS),
+    "evaluate_rubric",
 ]

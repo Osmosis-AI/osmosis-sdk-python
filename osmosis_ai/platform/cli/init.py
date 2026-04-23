@@ -13,10 +13,16 @@ import subprocess as _subprocess
 from dataclasses import dataclass
 from importlib.resources import files
 from pathlib import Path
+from typing import Any
 
 from osmosis_ai.cli.console import console
 from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.platform.auth.config import PLATFORM_URL
+from osmosis_ai.platform.auth.local_config import (
+    get_active_workspace_id,
+    get_active_workspace_name,
+    set_active_workspace,
+)
 from osmosis_ai.platform.cli.constants import validate_name
 
 # ── Prerequisites ────────────────────────────────────────────────
@@ -218,7 +224,163 @@ def _git_initial_commit(target: Path) -> None:
     )
 
 
-def _print_next_steps(ws_name: str, *, here: bool = False) -> None:
+def _selected_workspace_git_context() -> dict[str, str | bool | None]:
+    """Best-effort Git integration context for the active workspace.
+
+    Always verifies the active workspace against the platform when
+    credentials are usable, so a stale local selection (e.g. a
+    workspace the user no longer belongs to) can't silently bypass Git
+    Sync guidance or connected-repo blocking. Also auto-selects the
+    only available workspace when nothing is saved locally, keeping
+    behavior consistent with the rest of the CLI for single-workspace
+    users.
+
+    Falls back to the locally cached workspace name (without
+    connected-repo metadata) only when the platform is unreachable or
+    credentials are missing/expired.
+    """
+    from osmosis_ai.platform.auth import (
+        AuthenticationExpiredError,
+        PlatformAPIError,
+        load_credentials,
+        platform_request,
+    )
+
+    empty_context: dict[str, str | bool | None] = {
+        "workspace_name": None,
+        "git_sync_url": None,
+        "has_github_app_installation": False,
+        "connected_repo_url": None,
+    }
+
+    def _offline_fallback() -> dict[str, str | bool | None]:
+        local_name = get_active_workspace_name()
+        if not local_name:
+            return empty_context
+        return {
+            "workspace_name": local_name,
+            "git_sync_url": f"{PLATFORM_URL}/{local_name}/integrations/git",
+            "has_github_app_installation": False,
+            "connected_repo_url": None,
+        }
+
+    credentials = load_credentials()
+    if credentials is None or credentials.is_expired():
+        return _offline_fallback()
+
+    try:
+        data = platform_request(
+            "/api/cli/workspaces",
+            credentials=credentials,
+            require_workspace=False,
+            cleanup_on_401=False,
+        )
+    except (AuthenticationExpiredError, PlatformAPIError):
+        return _offline_fallback()
+
+    workspaces = [ws for ws in data.get("workspaces", []) if isinstance(ws, dict)]
+
+    local_id = get_active_workspace_id()
+    matched: dict[str, Any] | None = None
+    if local_id:
+        matched = next((ws for ws in workspaces if ws.get("id") == local_id), None)
+
+    # Auto-select the only workspace when nothing valid is saved locally.
+    # Mirrors ensure_active_workspace() so single-workspace users get the
+    # same Git Sync guidance and connected-repo blocking as everyone else.
+    if matched is None and len(workspaces) == 1:
+        only_ws = workspaces[0]
+        only_id = only_ws.get("id")
+        only_name = only_ws.get("name")
+        if (
+            isinstance(only_id, str)
+            and only_id
+            and isinstance(only_name, str)
+            and only_name
+        ):
+            set_active_workspace(only_id, only_name)
+            matched = only_ws
+
+    if matched is None:
+        return empty_context
+
+    selected_name = matched.get("name")
+    if not isinstance(selected_name, str) or not selected_name:
+        return empty_context
+
+    connected_repo_url: str | None = None
+    connected_repo = matched.get("connected_repo")
+    if isinstance(connected_repo, dict):
+        repo_url = connected_repo.get("repo_url")
+        if isinstance(repo_url, str) and repo_url:
+            connected_repo_url = repo_url
+
+    return {
+        "workspace_name": selected_name,
+        "git_sync_url": f"{PLATFORM_URL}/{selected_name}/integrations/git",
+        "has_github_app_installation": bool(matched.get("has_github_app_installation")),
+        "connected_repo_url": connected_repo_url,
+    }
+
+
+def _git_sync_cta_text(
+    git_context: dict[str, str | bool | None] | None = None,
+) -> str:
+    """Build the Git Sync CTA shown after workspace scaffolding."""
+    if git_context is None:
+        git_context = _selected_workspace_git_context()
+
+    connected_repo_url = git_context.get("connected_repo_url")
+    if isinstance(connected_repo_url, str) and connected_repo_url:
+        return f"Connected repo: [cyan]{connected_repo_url}[/cyan]"
+
+    git_sync_url = git_context.get("git_sync_url")
+    if isinstance(git_sync_url, str) and git_sync_url:
+        action = (
+            "choose a repo"
+            if git_context.get("has_github_app_installation")
+            else "connect your repo"
+        )
+        return f"Go to [cyan]{git_sync_url}[/cyan] to {action}"
+
+    return f"Go to [cyan]{PLATFORM_URL}[/cyan] → Git Sync to connect your repo"
+
+
+def _raise_if_selected_workspace_has_connected_repo(
+    git_context: dict[str, str | bool | None] | None = None,
+) -> None:
+    """Block fresh init when the active workspace already has a connected repo."""
+    if git_context is None:
+        git_context = _selected_workspace_git_context()
+    workspace_name = git_context.get("workspace_name")
+    connected_repo_url = git_context.get("connected_repo_url")
+
+    if not (
+        isinstance(workspace_name, str)
+        and workspace_name
+        and isinstance(connected_repo_url, str)
+        and connected_repo_url
+    ):
+        return
+
+    raise CLIError(
+        f"Workspace '{workspace_name}' is already connected to:\n"
+        f"  {connected_repo_url}\n"
+        "\n"
+        "Clone the connected repo instead:\n"
+        f"  git clone {connected_repo_url}\n"
+        "\n"
+        "Or switch to another workspace first:\n"
+        "  osmosis workspace switch"
+    )
+
+
+def _print_next_steps(
+    ws_name: str,
+    *,
+    here: bool = False,
+    git_context: dict[str, str | bool | None] | None = None,
+) -> None:
     """Print post-setup CTA with Rich panels."""
     from rich import box as rich_box
     from rich.console import Group
@@ -248,7 +410,7 @@ def _print_next_steps(ws_name: str, *, here: bool = False) -> None:
     cmd_table.add_row()
     cmd_table.add_row(
         "[bold green]>[/bold green]",
-        f"Go to [cyan]{PLATFORM_URL}[/cyan] → Git Sync to connect your repo",
+        _git_sync_cta_text(git_context),
     )
 
     prompt_body = (
@@ -306,6 +468,16 @@ def init(name: str, here: bool = False) -> None:
 
     # Determine target directory
     created_dir = False
+    # Resolve active workspace (and Git integration state) once so we don't
+    # hit the platform twice during a single `osmosis init`.
+    git_context: dict[str, str | bool | None] | None = None
+
+    def _ensure_git_context() -> dict[str, str | bool | None]:
+        nonlocal git_context
+        if git_context is None:
+            git_context = _selected_workspace_git_context()
+        return git_context
+
     if here:
         target = Path.cwd()
         if any(p.name != ".git" for p in target.iterdir()):
@@ -314,6 +486,7 @@ def init(name: str, here: bool = False) -> None:
                 "Use 'osmosis init <name>' (without --here) to create a new directory, "
                 "or empty this directory first."
             )
+        _raise_if_selected_workspace_has_connected_repo(_ensure_git_context())
     else:
         target = Path.cwd() / name
         if target.exists():
@@ -328,6 +501,7 @@ def init(name: str, here: bool = False) -> None:
                     "Use --here to initialize in the current directory."
                 )
         else:
+            _raise_if_selected_workspace_has_connected_repo(_ensure_git_context())
             target.mkdir()
             created_dir = True
 
@@ -345,4 +519,4 @@ def init(name: str, here: bool = False) -> None:
             shutil.rmtree(target)
         raise
 
-    _print_next_steps(name, here=here)
+    _print_next_steps(name, here=here, git_context=_ensure_git_context())

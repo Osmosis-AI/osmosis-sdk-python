@@ -137,6 +137,249 @@ def test_init_here_allows_git_dir(monkeypatch, tmp_path: Path) -> None:
     init_module.init(name="test-ws", here=True)
 
 
+def test_init_raises_when_selected_workspace_has_connected_repo(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """Fresh init should stop before creating a directory when the active workspace already has a repo."""
+    import osmosis_ai.platform.cli.init as init_module
+
+    monkeypatch.setattr(init_module.shutil, "which", lambda cmd: "git")
+    monkeypatch.setattr(
+        init_module,
+        "_selected_workspace_git_context",
+        lambda: {
+            "workspace_name": "team-alpha",
+            "git_sync_url": "https://platform.osmosis.ai/team-alpha/integrations/git",
+            "has_github_app_installation": True,
+            "connected_repo_url": "https://github.com/acme/rollouts",
+        },
+    )
+
+    monkeypatch.chdir(tmp_path)
+
+    target = tmp_path / "test-ws"
+    with pytest.raises(CLIError, match="already connected"):
+        init_module.init(name="test-ws")
+
+    assert not target.exists()
+
+
+def test_init_here_raises_when_selected_workspace_has_connected_repo(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """init(here=True) should stop when the active workspace already has a connected repo."""
+    import osmosis_ai.platform.cli.init as init_module
+
+    monkeypatch.setattr(init_module.shutil, "which", lambda cmd: "git")
+    monkeypatch.setattr(
+        init_module,
+        "_selected_workspace_git_context",
+        lambda: {
+            "workspace_name": "team-alpha",
+            "git_sync_url": "https://platform.osmosis.ai/team-alpha/integrations/git",
+            "has_github_app_installation": True,
+            "connected_repo_url": "https://github.com/acme/rollouts",
+        },
+    )
+
+    (tmp_path / ".git").mkdir()
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(CLIError, match=r"git clone https://github\.com/acme/rollouts"):
+        init_module.init(name="test-ws", here=True)
+
+
+def test_init_ignores_auth_expiry_in_best_effort_workspace_lookup(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """init should continue when best-effort workspace Git metadata lookup hits 401."""
+    import osmosis_ai.platform.auth as auth_module
+    import osmosis_ai.platform.cli.init as init_module
+
+    class _Creds:
+        def is_expired(self) -> bool:
+            return False
+
+    def fake_platform_request(endpoint, **kwargs):
+        assert endpoint == "/api/cli/workspaces"
+        assert kwargs.get("cleanup_on_401") is False
+        raise auth_module.AuthenticationExpiredError("session expired")
+
+    monkeypatch.setattr(init_module.shutil, "which", lambda cmd: "git")
+    for fn_name in (
+        "_write_scaffold",
+        "_git_init",
+        "_git_initial_commit",
+        "_update_workspace_metadata",
+    ):
+        monkeypatch.setattr(init_module, fn_name, lambda *a, **kw: None)
+    monkeypatch.setattr(init_module, "get_active_workspace_name", lambda: "team-alpha")
+    monkeypatch.setattr(auth_module, "load_credentials", lambda: _Creds())
+    monkeypatch.setattr(auth_module, "platform_request", fake_platform_request)
+
+    monkeypatch.chdir(tmp_path)
+
+    init_module.init(name="test-ws")
+
+    assert (tmp_path / "test-ws").is_dir()
+
+
+def test_init_auto_selects_single_workspace_for_git_context(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """init should auto-select the only workspace when none is saved locally.
+
+    This also persists the selection to local config so subsequent CLI
+    commands see the same active workspace.
+    """
+    import osmosis_ai.platform.auth as auth_module
+    import osmosis_ai.platform.cli.init as init_module
+
+    class _Creds:
+        def is_expired(self) -> bool:
+            return False
+
+    calls: list[tuple[str, dict]] = []
+    persisted: dict[str, str] = {}
+
+    def fake_platform_request(endpoint, **kwargs):
+        calls.append((endpoint, kwargs))
+        assert endpoint == "/api/cli/workspaces"
+        assert kwargs.get("cleanup_on_401") is False
+        return {
+            "workspaces": [
+                {
+                    "id": "ws_solo",
+                    "name": "solo-team",
+                    "has_github_app_installation": False,
+                    "connected_repo": None,
+                }
+            ]
+        }
+
+    def fake_set_active_workspace(workspace_id, workspace_name):
+        persisted["id"] = workspace_id
+        persisted["name"] = workspace_name
+
+    monkeypatch.setattr(init_module.shutil, "which", lambda cmd: "git")
+    for fn_name in (
+        "_write_scaffold",
+        "_git_init",
+        "_git_initial_commit",
+        "_update_workspace_metadata",
+    ):
+        monkeypatch.setattr(init_module, fn_name, lambda *a, **kw: None)
+    monkeypatch.setattr(init_module, "get_active_workspace_name", lambda: None)
+    monkeypatch.setattr(init_module, "get_active_workspace_id", lambda: None)
+    monkeypatch.setattr(init_module, "set_active_workspace", fake_set_active_workspace)
+    monkeypatch.setattr(auth_module, "load_credentials", lambda: _Creds())
+    monkeypatch.setattr(auth_module, "platform_request", fake_platform_request)
+
+    monkeypatch.chdir(tmp_path)
+
+    init_module.init(name="test-ws")
+
+    assert (tmp_path / "test-ws").is_dir()
+    # Only one API call — fetch + verify + extract metadata are unified.
+    assert len(calls) == 1
+    # Auto-selection should have been persisted.
+    assert persisted == {"id": "ws_solo", "name": "solo-team"}
+
+
+def test_init_blocks_when_auto_selected_workspace_has_connected_repo(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """init should raise when the auto-selected single workspace already has a connected repo."""
+    import osmosis_ai.platform.auth as auth_module
+    import osmosis_ai.platform.cli.init as init_module
+
+    class _Creds:
+        def is_expired(self) -> bool:
+            return False
+
+    def fake_platform_request(endpoint, **kwargs):
+        assert endpoint == "/api/cli/workspaces"
+        return {
+            "workspaces": [
+                {
+                    "id": "ws_solo",
+                    "name": "solo-team",
+                    "has_github_app_installation": True,
+                    "connected_repo": {
+                        "repo_url": "https://github.com/acme/rollouts",
+                    },
+                }
+            ]
+        }
+
+    monkeypatch.setattr(init_module.shutil, "which", lambda cmd: "git")
+    monkeypatch.setattr(init_module, "get_active_workspace_name", lambda: None)
+    monkeypatch.setattr(init_module, "get_active_workspace_id", lambda: None)
+    monkeypatch.setattr(init_module, "set_active_workspace", lambda *a, **kw: None)
+    monkeypatch.setattr(auth_module, "load_credentials", lambda: _Creds())
+    monkeypatch.setattr(auth_module, "platform_request", fake_platform_request)
+
+    monkeypatch.chdir(tmp_path)
+
+    target = tmp_path / "test-ws"
+    with pytest.raises(CLIError, match="already connected"):
+        init_module.init(name="test-ws")
+
+    assert not target.exists()
+
+
+def test_init_does_not_trust_stale_local_workspace_id(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """init should ignore a locally cached workspace id that the server no longer returns.
+
+    Regression guard: previously, a stale local workspace name would be
+    trusted verbatim, producing broken Git Sync links and bypassing the
+    connected-repo guardrail.
+    """
+    import osmosis_ai.platform.auth as auth_module
+    import osmosis_ai.platform.cli.init as init_module
+
+    class _Creds:
+        def is_expired(self) -> bool:
+            return False
+
+    def fake_platform_request(endpoint, **kwargs):
+        assert endpoint == "/api/cli/workspaces"
+        # Server lists two *other* workspaces — the local id is gone.
+        return {
+            "workspaces": [
+                {"id": "ws_a", "name": "team-a"},
+                {"id": "ws_b", "name": "team-b"},
+            ]
+        }
+
+    monkeypatch.setattr(init_module.shutil, "which", lambda cmd: "git")
+    for fn_name in (
+        "_write_scaffold",
+        "_git_init",
+        "_git_initial_commit",
+        "_update_workspace_metadata",
+    ):
+        monkeypatch.setattr(init_module, fn_name, lambda *a, **kw: None)
+    # Local state points to a workspace the user no longer belongs to.
+    monkeypatch.setattr(init_module, "get_active_workspace_name", lambda: "old-team")
+    monkeypatch.setattr(init_module, "get_active_workspace_id", lambda: "ws_stale")
+    monkeypatch.setattr(auth_module, "load_credentials", lambda: _Creds())
+    monkeypatch.setattr(auth_module, "platform_request", fake_platform_request)
+
+    monkeypatch.chdir(tmp_path)
+
+    # init should still succeed (empty Git context, no false connected-repo block).
+    init_module.init(name="test-ws")
+
+    context = init_module._selected_workspace_git_context()
+    # Stale id wasn't trusted, and there's no unambiguous auto-selection.
+    assert context["workspace_name"] is None
+    assert context["git_sync_url"] is None
+    assert context["connected_repo_url"] is None
+
+
 # ── _render_template ─────────────────────────────────────────────
 
 
@@ -482,9 +725,10 @@ class TestGitInitialCommit:
 
 class TestPrintNextSteps:
     def test_print_next_steps_default(self, monkeypatch) -> None:
-        """_print_next_steps includes 'cd' and platform URL when here=False."""
+        """_print_next_steps includes 'cd' and generic Git Sync CTA when no workspace is selected."""
         import io
 
+        import osmosis_ai.platform.auth as auth_module
         import osmosis_ai.platform.cli.init as mod
         from osmosis_ai.cli.console import Console
         from osmosis_ai.platform.cli.init import _print_next_steps
@@ -492,15 +736,118 @@ class TestPrintNextSteps:
         buf = io.StringIO()
         test_console = Console(file=buf, force_terminal=False, no_color=True)
         monkeypatch.setattr(mod, "console", test_console)
+        monkeypatch.setattr(mod, "get_active_workspace_name", lambda: None)
+        monkeypatch.setattr(auth_module, "load_credentials", lambda: None)
         _print_next_steps("my-workspace", here=False)
         output = buf.getvalue()
         assert "cd my-workspace" in output
         assert "Git Sync" in output
+        assert "integrations/git" not in output
+
+    def test_print_next_steps_selected_workspace(self, monkeypatch) -> None:
+        """_print_next_steps shows a workspace Git Sync URL when no repo is connected."""
+        import io
+
+        import osmosis_ai.platform.auth as auth_module
+        import osmosis_ai.platform.cli.init as mod
+        from osmosis_ai.cli.console import Console
+        from osmosis_ai.platform.cli.init import _print_next_steps
+
+        buf = io.StringIO()
+        test_console = Console(file=buf, force_terminal=False, no_color=True)
+        monkeypatch.setattr(mod, "console", test_console)
+        monkeypatch.setattr(mod, "get_active_workspace_name", lambda: "team-alpha")
+        monkeypatch.setattr(auth_module, "load_credentials", lambda: None)
+        _print_next_steps("my-workspace", here=False)
+        output = buf.getvalue()
+        assert "cd my-workspace" in output
+        assert f"{mod.PLATFORM_URL}/team-alpha/integrations/git" in output
+
+    def test_print_next_steps_connected_repo(self, monkeypatch) -> None:
+        """_print_next_steps shows the connected repository URL when one exists."""
+        import io
+
+        import osmosis_ai.platform.auth as auth_module
+        import osmosis_ai.platform.cli.init as mod
+        from osmosis_ai.cli.console import Console
+        from osmosis_ai.platform.cli.init import _print_next_steps
+
+        class _Creds:
+            def is_expired(self) -> bool:
+                return False
+
+        def fake_platform_request(endpoint, **kwargs):
+            assert endpoint == "/api/cli/workspaces"
+            assert kwargs.get("cleanup_on_401") is False
+            return {
+                "workspaces": [
+                    {
+                        "id": "ws_alpha",
+                        "name": "team-alpha",
+                        "has_github_app_installation": True,
+                        "connected_repo": {
+                            "repo_url": "https://github.com/acme/rollouts",
+                        },
+                    }
+                ]
+            }
+
+        buf = io.StringIO()
+        test_console = Console(file=buf, force_terminal=False, no_color=True)
+        monkeypatch.setattr(mod, "console", test_console)
+        monkeypatch.setattr(mod, "get_active_workspace_name", lambda: "team-alpha")
+        monkeypatch.setattr(mod, "get_active_workspace_id", lambda: "ws_alpha")
+        monkeypatch.setattr(auth_module, "load_credentials", lambda: _Creds())
+        monkeypatch.setattr(auth_module, "platform_request", fake_platform_request)
+        _print_next_steps("my-workspace", here=False)
+        output = buf.getvalue()
+        assert "cd my-workspace" in output
+        assert "Connected repo:" in output
+        assert "https://github.com/acme/rollouts" in output
+
+    def test_print_next_steps_choose_repo_when_app_installed(self, monkeypatch) -> None:
+        """_print_next_steps asks the user to choose a repo when GitHub is connected but no repo is linked."""
+        import io
+
+        import osmosis_ai.platform.auth as auth_module
+        import osmosis_ai.platform.cli.init as mod
+        from osmosis_ai.cli.console import Console
+        from osmosis_ai.platform.cli.init import _print_next_steps
+
+        class _Creds:
+            def is_expired(self) -> bool:
+                return False
+
+        def fake_platform_request(endpoint, **kwargs):
+            assert endpoint == "/api/cli/workspaces"
+            return {
+                "workspaces": [
+                    {
+                        "id": "ws_alpha",
+                        "name": "team-alpha",
+                        "has_github_app_installation": True,
+                        "connected_repo": None,
+                    }
+                ]
+            }
+
+        buf = io.StringIO()
+        test_console = Console(file=buf, force_terminal=False, no_color=True)
+        monkeypatch.setattr(mod, "console", test_console)
+        monkeypatch.setattr(mod, "get_active_workspace_name", lambda: "team-alpha")
+        monkeypatch.setattr(mod, "get_active_workspace_id", lambda: "ws_alpha")
+        monkeypatch.setattr(auth_module, "load_credentials", lambda: _Creds())
+        monkeypatch.setattr(auth_module, "platform_request", fake_platform_request)
+        _print_next_steps("my-workspace", here=False)
+        output = buf.getvalue()
+        assert f"{mod.PLATFORM_URL}/team-alpha/integrations/git" in output
+        assert "choose a repo" in output
 
     def test_print_next_steps_here(self, monkeypatch) -> None:
         """_print_next_steps omits 'cd' when here=True but keeps platform URL."""
         import io
 
+        import osmosis_ai.platform.auth as auth_module
         import osmosis_ai.platform.cli.init as mod
         from osmosis_ai.cli.console import Console
         from osmosis_ai.platform.cli.init import _print_next_steps
@@ -508,6 +855,8 @@ class TestPrintNextSteps:
         buf = io.StringIO()
         test_console = Console(file=buf, force_terminal=False, no_color=True)
         monkeypatch.setattr(mod, "console", test_console)
+        monkeypatch.setattr(mod, "get_active_workspace_name", lambda: None)
+        monkeypatch.setattr(auth_module, "load_credentials", lambda: None)
         _print_next_steps("my-workspace", here=True)
         output = buf.getvalue()
         assert "cd my-workspace" not in output
