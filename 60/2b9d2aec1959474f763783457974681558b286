@@ -1,0 +1,25 @@
+osmosis_ai/platform/cli/init.py
+  baf60cceeab36cdd 16,21-25,228-241,246,249-266,269,272-273,275,279-312,316,318-323,326-328,330-331,349-351,353-354,378-383,413,471-480,489,504,522
+tests/unit/platform/cli/test_workspace_setup.py
+  baf60cceeab36cdd 203-206,218,227-382,731,740,779-793,799,801,821-832,838,840,850,859
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.2",
+  "base_commit_sha": "602b9d2aec1959474f763783457974681558b286",
+  "prompts": {
+    "baf60cceeab36cdd": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "addaa35a-444b-480b-afcd-67d780cb0af5",
+        "model": "gpt-5.4-xhigh-fast"
+      },
+      "human_author": "JoyboyBrian",
+      "messages": [],
+      "total_additions": 389,
+      "total_deletions": 156,
+      "accepted_lines": 317,
+      "overriden_lines": 0
+    }
+  }
+}
