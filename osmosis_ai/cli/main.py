@@ -80,7 +80,7 @@ def _register_commands() -> None:
     # -- Command groups --
     from osmosis_ai.cli.commands.auth import app as auth_app
     from osmosis_ai.cli.commands.dataset import app as dataset_app
-    from osmosis_ai.cli.commands.deploy import app as deploy_app
+    from osmosis_ai.cli.commands.deployment import app as deployment_app
     from osmosis_ai.cli.commands.eval import app as eval_app
     from osmosis_ai.cli.commands.model import app as model_app
     from osmosis_ai.cli.commands.rollout import app as rollout_app
@@ -93,7 +93,7 @@ def _register_commands() -> None:
     app.add_typer(dataset_app, name="dataset", rich_help_panel=_WORKFLOW)
     app.add_typer(train_app, name="train", rich_help_panel=_WORKFLOW)
     app.add_typer(model_app, name="model", rich_help_panel=_WORKFLOW)
-    app.add_typer(deploy_app, name="deploy", rich_help_panel=_WORKFLOW)
+    app.add_typer(deployment_app, name="deployment", rich_help_panel=_WORKFLOW)
     app.add_typer(eval_app, name="eval", rich_help_panel=_WORKFLOW)
     app.add_typer(rollout_app, name="rollout", rich_help_panel=_WORKFLOW)
 
@@ -104,6 +104,13 @@ def _register_commands() -> None:
     from osmosis_ai.cli.commands.init import init
 
     app.command("init", rich_help_panel=_WORKFLOW)(init)
+
+    # `deploy` and `undeploy` are verbs, not CRUD on the deployment resource,
+    # so they are promoted to top-level to avoid `osmosis deployment deploy`.
+    from osmosis_ai.cli.commands.deployment import deploy, undeploy
+
+    app.command("deploy", rich_help_panel=_WORKFLOW)(deploy)
+    app.command("undeploy", rich_help_panel=_WORKFLOW)(undeploy)
 
     from osmosis_ai.cli.upgrade import upgrade
 

@@ -40,5 +40,5 @@ osmosis rollout serve <path-to-serve-config.toml>  # Start rollout server
 
 # Training (workspace-scoped)
 osmosis train submit configs/training/qwen3-4b.toml
-osmosis train status <run-name>
+osmosis train info <run-name>
 ```

@@ -12,7 +12,7 @@ Help the user configure and submit a training run on the Osmosis Platform.
 5. Adjust optional hyperparameters based on the scenario (see guidance below)
 6. Verify dataset is available (`osmosis dataset list`)
 7. Submit: `osmosis train submit configs/training/<run_name>.toml`
-8. Monitor: `osmosis train status <run-name>`
+8. Monitor: `osmosis train info <run-name>`
 
 ## Config Template
 

@@ -74,13 +74,13 @@ def list_runs(
     print_pagination_footer(len(training_runs), total_count, "training runs")
 
 
-@app.command("status")
-def status(
+@app.command("info")
+def info(
     name: str = typer.Argument(..., help="Training run name."),
 ) -> None:
     """Show training run details."""
     from osmosis_ai.platform.api.client import OsmosisClient
-    from osmosis_ai.platform.api.models import RUN_STATUSES_SUCCESS
+    from osmosis_ai.platform.api.models import RUN_STATUSES_TERMINAL
     from osmosis_ai.platform.auth.platform_client import PlatformAPIError
     from osmosis_ai.platform.cli.utils import (
         _require_auth,
@@ -109,7 +109,7 @@ def status(
 
     console.table(rows, title="Training Run")
 
-    if run.status in RUN_STATUSES_SUCCESS:
+    if run.status in RUN_STATUSES_TERMINAL:
         try:
             ckpts = client.list_training_run_checkpoints(name, credentials=credentials)
         except PlatformAPIError:
@@ -119,14 +119,23 @@ def status(
             console.print()
             console.print("Checkpoints:", style="bold")
             for cp in ckpts.checkpoints:
+                name = (
+                    console.escape(cp.checkpoint_name)
+                    if cp.checkpoint_name
+                    else console.format_styled("(unnamed)", "dim")
+                )
                 step_str = f"step {cp.checkpoint_step}"
                 status_style = entity_status_style(cp.status) or "dim"
                 status_str = console.format_styled(f"[{cp.status}]", status_style)
                 date = format_dim_date(cp.created_at)
-                console.print(f"  {step_str}  {status_str}  {date}", highlight=False)
+                short_id = console.format_styled(cp.id[:8], "dim")
+                console.print(
+                    f"  {name}  {step_str}  {status_str}  {short_id}  {date}",
+                    highlight=False,
+                )
             console.print()
             console.print(
-                f"Deploy with:  osmosis deploy create {console.escape(name)} --step <N>",
+                "Deploy with:  osmosis deploy <checkpoint-name>",
                 style="dim",
             )
 

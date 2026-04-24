@@ -124,12 +124,12 @@ class TestListRuns:
 
 
 # ---------------------------------------------------------------------------
-# status
+# info
 # ---------------------------------------------------------------------------
 
 
-class TestStatus:
-    def test_status_basic(
+class TestInfo:
+    def test_info_basic(
         self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
     ) -> None:
         detail = TrainingRunDetail(
@@ -144,12 +144,12 @@ class TestStatus:
                 return detail
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-        train_module.status(name="run-1")
+        train_module.info(name="run-1")
         out = console_capture.getvalue()
         assert "run-1" in out
         assert "completed" in out
 
-    def test_status_with_all_optional_fields(
+    def test_info_with_all_optional_fields(
         self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
     ) -> None:
         detail = TrainingRunDetail(
@@ -174,7 +174,7 @@ class TestStatus:
                 return detail
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-        train_module.status(name="full-run")
+        train_module.info(name="full-run")
         out = console_capture.getvalue()
         assert "100" in out
         assert "experiment notes" in out

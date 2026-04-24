@@ -60,5 +60,5 @@ batch_size = 2
 osmosis train submit configs/training/<config>.toml
 osmosis eval run configs/eval/<config>.toml
 osmosis rollout serve <path-to-serve-config.toml>
-osmosis train status <run-name>
+osmosis train info <run-name>
 ```

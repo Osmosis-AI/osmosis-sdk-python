@@ -324,10 +324,10 @@ def list_datasets(limit: int = DEFAULT_PAGE_SIZE, all_: bool = False) -> None:
     print_pagination_footer(len(datasets), total_count, "datasets")
 
 
-def status(
+def info(
     name: str,
 ) -> None:
-    """Check dataset processing status."""
+    """Show dataset details and processing status."""
     _ws_name, credentials = _require_auth()
     from osmosis_ai.platform.api.client import OsmosisClient
 
@@ -335,7 +335,7 @@ def status(
     ds = client.get_dataset(name, credentials=credentials)
 
     rows = build_dataset_detail_rows(ds)
-    console.table(rows, title="Dataset Status")
+    console.table(rows, title="Dataset")
 
 
 def preview(
