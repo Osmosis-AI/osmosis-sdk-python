@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 
 from osmosis_ai.cli.errors import CLIError
+from osmosis_ai.cli.paths import parse_cli_path
 
 from .dataset import RubricRecord, load_rubric_dataset
 from .engine import evaluate_rubric
@@ -72,8 +73,9 @@ class RubricCommand:
         ConsoleReportRenderer().render(report)
 
         if output_path:
-            out = Path(output_path).expanduser()
-            if out.is_dir():
+            parsed_output = parse_cli_path(output_path, expand_user=True)
+            out = parsed_output.path
+            if parsed_output.has_trailing_separator or out.is_dir():
                 out = out / "rubric_eval_result.json"
             written = JsonReportWriter().write(report, out)
             print(f"Wrote results to {written}")

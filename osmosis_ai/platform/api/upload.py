@@ -408,6 +408,8 @@ def upload_file_multipart(
 
 def make_progress_bar(
     file_size: int,
+    *,
+    description: str = "Uploading",
 ) -> tuple[AbstractContextManager[Any], ProgressCallback]:
     """Create a progress bar and a matching callback.
 
@@ -443,7 +445,7 @@ def make_progress_bar(
             DownloadColumn(binary_units=True),
             _SpeedCol(),
         )
-        task_id = progress.add_task("Uploading", total=file_size)
+        task_id = progress.add_task(description, total=file_size)
 
         def _rich_cb(uploaded: int, total: int) -> None:
             progress.update(task_id, completed=uploaded)
@@ -455,7 +457,7 @@ def make_progress_bar(
     # Plain-text fallback
     def _plain_cb(uploaded: int, total: int) -> None:
         pct = uploaded * 100 // total if total else 0
-        sys.stdout.write(f"\rUploading: {pct}%")
+        sys.stdout.write(f"\r{description}: {pct}%")
         sys.stdout.flush()
         if uploaded >= total:
             sys.stdout.write("\n")

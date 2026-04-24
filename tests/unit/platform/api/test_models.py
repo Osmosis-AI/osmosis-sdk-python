@@ -11,6 +11,7 @@ from osmosis_ai.platform.api.models import (
     STATUSES_SUCCESS,
     STATUSES_TERMINAL,
     AffectedTrainingRun,
+    DatasetDownloadInfo,
     DatasetFile,
     MetricDataPoint,
     MetricHistory,
@@ -118,6 +119,34 @@ class TestDatasetFileIsTerminal:
             {"id": "ds-nt", "file_name": "f.jsonl", "file_size": 100, "status": status}
         )
         assert ds.is_terminal is False
+
+
+class TestDatasetDownloadInfo:
+    """Tests for DatasetDownloadInfo.from_dict."""
+
+    def test_from_dict_snake_case(self) -> None:
+        info = DatasetDownloadInfo.from_dict(
+            {
+                "presigned_url": "https://example.com/data.jsonl",
+                "expires_in": 3600,
+                "file_name": "data.jsonl",
+            }
+        )
+        assert info.presigned_url == "https://example.com/data.jsonl"
+        assert info.expires_in == 3600
+        assert info.file_name == "data.jsonl"
+
+    def test_from_dict_camel_case(self) -> None:
+        info = DatasetDownloadInfo.from_dict(
+            {
+                "presignedUrl": "https://example.com/data.csv",
+                "expiresIn": 3600,
+                "downloadFileName": "data.csv",
+            }
+        )
+        assert info.presigned_url == "https://example.com/data.csv"
+        assert info.expires_in == 3600
+        assert info.file_name == "data.csv"
 
 
 # =============================================================================

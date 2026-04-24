@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
@@ -571,6 +572,31 @@ class TestRubricCommandRun:
             )
         expected_file = output_dir / "rubric_eval_result.json"
         assert expected_file.exists()
+
+    def test_run_with_trailing_separator_uses_directory_mode(self, tmp_path: Path):
+        data_file = tmp_path / "data.jsonl"
+        record = {
+            "messages": [{"role": "assistant", "content": "Hello"}],
+        }
+        data_file.write_text(json.dumps(record) + "\n", encoding="utf-8")
+
+        output_dir = tmp_path / "new_output_dir"
+
+        mock_result = RubricResult(score=0.6, explanation="Fair", raw={})
+
+        with patch(
+            _EVALUATE_RUBRIC_PATCH, new_callable=AsyncMock, return_value=mock_result
+        ):
+            RubricCommand().run(
+                data=str(data_file),
+                rubric="Score quality",
+                model="openai/gpt-5.4",
+                api_key="test-key",
+                output_path=f"{output_dir}{os.sep}",
+            )
+
+        assert (output_dir / "rubric_eval_result.json").exists()
+        assert not output_dir.is_file()
 
     def test_run_solution_str_records(self, tmp_path: Path):
         data_file = tmp_path / "data.jsonl"
