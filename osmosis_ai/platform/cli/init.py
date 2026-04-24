@@ -13,10 +13,16 @@ import subprocess as _subprocess
 from dataclasses import dataclass
 from importlib.resources import files
 from pathlib import Path
+from typing import Any
 
 from osmosis_ai.cli.console import console
 from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.platform.auth.config import PLATFORM_URL
+from osmosis_ai.platform.auth.local_config import (
+    get_active_workspace_id,
+    get_active_workspace_name,
+    set_active_workspace,
+)
 from osmosis_ai.platform.cli.constants import validate_name
 
 # ── Prerequisites ────────────────────────────────────────────────
@@ -29,6 +35,30 @@ def _check_git_installed() -> None:
             "Git is not installed or not on PATH.\n"
             "  Install it from https://git-scm.com/ and try again."
         )
+
+
+# ── Plugin marketplace configuration ────────────────────────────
+#
+# `osmosis init` scaffolds a `.claude/settings.json` that points Claude Code
+# at the Osmosis plugin marketplace. The plugin hosts the agent skills
+# (`plan-training`, `create-rollouts`, `evaluate-rollouts`, etc.), so updates ship
+# via a `git push` to the plugins repo rather than a new SDK release.
+#
+# The env vars let us point scaffolded workspaces at a different repo or
+# marketplace (e.g. a staging mirror) without shipping an SDK release.
+
+_PLUGIN_REPO_DEFAULT = "Osmosis-AI/osmosis-plugins"
+_PLUGIN_MARKETPLACE_DEFAULT = "osmosis"
+
+
+def _plugin_repo() -> str:
+    """GitHub repo (`owner/name`) hosting the Osmosis plugin marketplace."""
+    return os.environ.get("OSMOSIS_PLUGIN_REPO") or _PLUGIN_REPO_DEFAULT
+
+
+def _plugin_marketplace() -> str:
+    """Marketplace name as declared in the plugin repo's `marketplace.json`."""
+    return os.environ.get("OSMOSIS_PLUGIN_MARKETPLACE") or _PLUGIN_MARKETPLACE_DEFAULT
 
 
 # ── Scaffold manifest ───────────────────────────────────────────
@@ -56,35 +86,31 @@ class ScaffoldEntry:
 
 SCAFFOLD: list[ScaffoldEntry] = [
     # Directory placeholders
+    ScaffoldEntry("", ".osmosis/research/experiments/.gitkeep"),
     ScaffoldEntry("", "rollouts/.gitkeep"),
     ScaffoldEntry("", "configs/eval/.gitkeep"),
     ScaffoldEntry("", "data/.gitkeep"),
     # Rendered templates (workspace.toml handled separately on update)
     ScaffoldEntry("workspace.toml.tpl", ".osmosis/workspace.toml", render=True),
+    ScaffoldEntry("research/program.md.tpl", ".osmosis/research/program.md"),
     ScaffoldEntry("pyproject.toml.tpl", "pyproject.toml", render=True),
     ScaffoldEntry("README.md.tpl", "README.md", render=True),
     # Static files — configs (skip on update)
     ScaffoldEntry("gitignore.tpl", ".gitignore"),
     ScaffoldEntry("configs/training/default.toml.tpl", "configs/training/default.toml"),
-    # Agent docs & skills (overwrite on update)
-    ScaffoldEntry("AGENTS.md.tpl", "AGENTS.md", overwrite_on_update=True),
+    # Agent docs (overwrite on update)
+    ScaffoldEntry("AGENTS.md.tpl", "AGENTS.md", render=True, overwrite_on_update=True),
     ScaffoldEntry("CLAUDE.md.tpl", "CLAUDE.md", overwrite_on_update=True),
     ScaffoldEntry(
         "configs/AGENTS.md.tpl", "configs/AGENTS.md", overwrite_on_update=True
     ),
+    # Plugin marketplace registration for Claude Code (committed so the
+    # team shares a single plugin source). Always refreshed on update so
+    # SDK upgrades can bump the marketplace URL in-place.
     ScaffoldEntry(
-        "skills/create-rollout/SKILL.md.tpl",
-        ".osmosis/skills/create-rollout/SKILL.md",
-        overwrite_on_update=True,
-    ),
-    ScaffoldEntry(
-        "skills/evaluate-rollout/SKILL.md.tpl",
-        ".osmosis/skills/evaluate-rollout/SKILL.md",
-        overwrite_on_update=True,
-    ),
-    ScaffoldEntry(
-        "skills/submit-training/SKILL.md.tpl",
-        ".osmosis/skills/submit-training/SKILL.md",
+        "claude/settings.json.tpl",
+        ".claude/settings.json",
+        render=True,
         overwrite_on_update=True,
     ),
 ]
@@ -113,7 +139,9 @@ def _write_scaffold(target: Path, ws_name: str, *, update: bool = False) -> None
     variables = {
         "name": ws_name,
         "sdk_version": PACKAGE_VERSION,
-        "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "created_at": datetime.datetime.now(datetime.UTC).isoformat(),
+        "plugin_repo": _plugin_repo(),
+        "plugin_marketplace": _plugin_marketplace(),
     }
 
     for entry in SCAFFOLD:
@@ -148,11 +176,9 @@ def _update_workspace_metadata(target: Path) -> None:
 
     match = re.search(_CREATED_AT_RE, original)
     created_at = (
-        match.group(1)
-        if match
-        else datetime.datetime.now(datetime.timezone.utc).isoformat()
+        match.group(1) if match else datetime.datetime.now(datetime.UTC).isoformat()
     )
-    updated_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    updated_at = datetime.datetime.now(datetime.UTC).isoformat()
 
     ws_toml.write_text(
         "# Osmosis Workspace Configuration\n"
@@ -220,7 +246,163 @@ def _git_initial_commit(target: Path) -> None:
     )
 
 
-def _print_next_steps(ws_name: str, *, here: bool = False) -> None:
+def _selected_workspace_git_context() -> dict[str, str | bool | None]:
+    """Best-effort Git integration context for the active workspace.
+
+    Always verifies the active workspace against the platform when
+    credentials are usable, so a stale local selection (e.g. a
+    workspace the user no longer belongs to) can't silently bypass Git
+    Sync guidance or connected-repo blocking. Also auto-selects the
+    only available workspace when nothing is saved locally, keeping
+    behavior consistent with the rest of the CLI for single-workspace
+    users.
+
+    Falls back to the locally cached workspace name (without
+    connected-repo metadata) only when the platform is unreachable or
+    credentials are missing/expired.
+    """
+    from osmosis_ai.platform.auth import (
+        AuthenticationExpiredError,
+        PlatformAPIError,
+        load_credentials,
+        platform_request,
+    )
+
+    empty_context: dict[str, str | bool | None] = {
+        "workspace_name": None,
+        "git_sync_url": None,
+        "has_github_app_installation": False,
+        "connected_repo_url": None,
+    }
+
+    def _offline_fallback() -> dict[str, str | bool | None]:
+        local_name = get_active_workspace_name()
+        if not local_name:
+            return empty_context
+        return {
+            "workspace_name": local_name,
+            "git_sync_url": f"{PLATFORM_URL}/{local_name}/integrations/git",
+            "has_github_app_installation": False,
+            "connected_repo_url": None,
+        }
+
+    credentials = load_credentials()
+    if credentials is None or credentials.is_expired():
+        return _offline_fallback()
+
+    try:
+        data = platform_request(
+            "/api/cli/workspaces",
+            credentials=credentials,
+            require_workspace=False,
+            cleanup_on_401=False,
+        )
+    except (AuthenticationExpiredError, PlatformAPIError):
+        return _offline_fallback()
+
+    workspaces = [ws for ws in data.get("workspaces", []) if isinstance(ws, dict)]
+
+    local_id = get_active_workspace_id()
+    matched: dict[str, Any] | None = None
+    if local_id:
+        matched = next((ws for ws in workspaces if ws.get("id") == local_id), None)
+
+    # Auto-select the only workspace when nothing valid is saved locally.
+    # Mirrors ensure_active_workspace() so single-workspace users get the
+    # same Git Sync guidance and connected-repo blocking as everyone else.
+    if matched is None and len(workspaces) == 1:
+        only_ws = workspaces[0]
+        only_id = only_ws.get("id")
+        only_name = only_ws.get("name")
+        if (
+            isinstance(only_id, str)
+            and only_id
+            and isinstance(only_name, str)
+            and only_name
+        ):
+            set_active_workspace(only_id, only_name)
+            matched = only_ws
+
+    if matched is None:
+        return empty_context
+
+    selected_name = matched.get("name")
+    if not isinstance(selected_name, str) or not selected_name:
+        return empty_context
+
+    connected_repo_url: str | None = None
+    connected_repo = matched.get("connected_repo")
+    if isinstance(connected_repo, dict):
+        repo_url = connected_repo.get("repo_url")
+        if isinstance(repo_url, str) and repo_url:
+            connected_repo_url = repo_url
+
+    return {
+        "workspace_name": selected_name,
+        "git_sync_url": f"{PLATFORM_URL}/{selected_name}/integrations/git",
+        "has_github_app_installation": bool(matched.get("has_github_app_installation")),
+        "connected_repo_url": connected_repo_url,
+    }
+
+
+def _git_sync_cta_text(
+    git_context: dict[str, str | bool | None] | None = None,
+) -> str:
+    """Build the Git Sync CTA shown after workspace scaffolding."""
+    if git_context is None:
+        git_context = _selected_workspace_git_context()
+
+    connected_repo_url = git_context.get("connected_repo_url")
+    if isinstance(connected_repo_url, str) and connected_repo_url:
+        return f"Connected repo: [cyan]{connected_repo_url}[/cyan]"
+
+    git_sync_url = git_context.get("git_sync_url")
+    if isinstance(git_sync_url, str) and git_sync_url:
+        action = (
+            "choose a repo"
+            if git_context.get("has_github_app_installation")
+            else "connect your repo"
+        )
+        return f"Go to [cyan]{git_sync_url}[/cyan] to {action}"
+
+    return f"Go to [cyan]{PLATFORM_URL}[/cyan] → Git Sync to connect your repo"
+
+
+def _raise_if_selected_workspace_has_connected_repo(
+    git_context: dict[str, str | bool | None] | None = None,
+) -> None:
+    """Block fresh init when the active workspace already has a connected repo."""
+    if git_context is None:
+        git_context = _selected_workspace_git_context()
+    workspace_name = git_context.get("workspace_name")
+    connected_repo_url = git_context.get("connected_repo_url")
+
+    if not (
+        isinstance(workspace_name, str)
+        and workspace_name
+        and isinstance(connected_repo_url, str)
+        and connected_repo_url
+    ):
+        return
+
+    raise CLIError(
+        f"Workspace '{workspace_name}' is already connected to:\n"
+        f"  {connected_repo_url}\n"
+        "\n"
+        "Clone the connected repo instead:\n"
+        f"  git clone {connected_repo_url}\n"
+        "\n"
+        "Or switch to another workspace first:\n"
+        "  osmosis workspace switch"
+    )
+
+
+def _print_next_steps(
+    ws_name: str,
+    *,
+    here: bool = False,
+    git_context: dict[str, str | bool | None] | None = None,
+) -> None:
     """Print post-setup CTA with Rich panels."""
     from rich import box as rich_box
     from rich.console import Group
@@ -250,13 +432,38 @@ def _print_next_steps(ws_name: str, *, here: bool = False) -> None:
     cmd_table.add_row()
     cmd_table.add_row(
         "[bold green]>[/bold green]",
-        f"Go to [cyan]{PLATFORM_URL}[/cyan] → Git Sync to connect your repo",
+        _git_sync_cta_text(git_context),
     )
 
     prompt_body = (
         "I want to train a model for <my task domain>. "
-        "Create an initial rollout with tools and a grader, "
-        "then run a quick eval baseline."
+        "Read .osmosis/research/program.md, create a baseline rollout in the "
+        "canonical workspace structure, iterate locally with evals, and prepare "
+        "a training config."
+    )
+
+    plugin_repo = _plugin_repo()
+    plugin_marketplace = _plugin_marketplace()
+    plugin_table = Table.grid(padding=(0, 1))
+    plugin_table.add_row(
+        "[bold cyan]Claude Code[/bold cyan]",
+        "open this folder — it'll prompt to install [cyan]osmosis[/cyan]",
+    )
+    plugin_table.add_row(
+        "[bold cyan]Cursor[/bold cyan]",
+        f"Settings → Rules → Add Remote Rule → [cyan]{plugin_repo}[/cyan]",
+    )
+    plugin_table.add_row(
+        "[bold cyan]Codex[/bold cyan]",
+        f"[cyan]codex plugin marketplace add {plugin_repo}[/cyan]",
+    )
+    plugin_table.add_row(
+        "[dim] [/dim]",
+        "[dim]then[/dim]",
+    )
+    plugin_table.add_row(
+        "[bold cyan] [/bold cyan]",
+        f"[cyan]codex plugin install {plugin_marketplace}[/cyan]",
     )
 
     content = Group(
@@ -264,6 +471,15 @@ def _print_next_steps(ws_name: str, *, here: bool = False) -> None:
             cmd_table,
             title="next steps",
             border_style="green",
+            box=rich_box.ROUNDED,
+            padding=(0, 1),
+            expand=False,
+        ),
+        Text(),
+        Panel(
+            plugin_table,
+            title="install the osmosis agent plugin",
+            border_style="cyan",
             box=rich_box.ROUNDED,
             padding=(0, 1),
             expand=False,
@@ -308,6 +524,16 @@ def init(name: str, here: bool = False) -> None:
 
     # Determine target directory
     created_dir = False
+    # Resolve active workspace (and Git integration state) once so we don't
+    # hit the platform twice during a single `osmosis init`.
+    git_context: dict[str, str | bool | None] | None = None
+
+    def _ensure_git_context() -> dict[str, str | bool | None]:
+        nonlocal git_context
+        if git_context is None:
+            git_context = _selected_workspace_git_context()
+        return git_context
+
     if here:
         target = Path.cwd()
         if any(p.name != ".git" for p in target.iterdir()):
@@ -316,6 +542,7 @@ def init(name: str, here: bool = False) -> None:
                 "Use 'osmosis init <name>' (without --here) to create a new directory, "
                 "or empty this directory first."
             )
+        _raise_if_selected_workspace_has_connected_repo(_ensure_git_context())
     else:
         target = Path.cwd() / name
         if target.exists():
@@ -330,6 +557,7 @@ def init(name: str, here: bool = False) -> None:
                     "Use --here to initialize in the current directory."
                 )
         else:
+            _raise_if_selected_workspace_has_connected_repo(_ensure_git_context())
             target.mkdir()
             created_dir = True
 
@@ -347,4 +575,4 @@ def init(name: str, here: bool = False) -> None:
             shutil.rmtree(target)
         raise
 
-    _print_next_steps(name, here=here)
+    _print_next_steps(name, here=here, git_context=_ensure_git_context())

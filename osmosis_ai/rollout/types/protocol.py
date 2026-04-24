@@ -1,4 +1,4 @@
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel
@@ -57,7 +57,7 @@ class GraderInitRequest(BaseModel):
 class GraderInitResponse(BaseModel): ...
 
 
-class GraderStatus(str, Enum):
+class GraderStatus(StrEnum):
     PENDING = "pending"
     SUCCESS = "success"
     FAILURE = "failure"

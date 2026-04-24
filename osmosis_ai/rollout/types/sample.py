@@ -1,4 +1,4 @@
-from enum import Enum
+from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -18,20 +18,20 @@ class RolloutSample(BaseModel):
     extra_fields: dict[str, Any] = Field(default_factory=dict)
 
 
-class RolloutStatus(str, Enum):
+class RolloutStatus(StrEnum):
     PENDING = "pending"
     SUCCESS = "success"
     FAILURE = "failure"
 
 
-class RolloutErrorCategory(str, Enum):
+class RolloutErrorCategory(StrEnum):
     TIMEOUT = "timeout"
     VALIDATION_ERROR = "validation_error"
     HTTP_ERROR = "http_error"
     AGENT_ERROR = "agent_error"
 
 
-class MultiTurnMode(str, Enum):
+class MultiTurnMode(StrEnum):
     MULTI_SAMPLE = "multi_sample"
     SINGLE_SAMPLE = "single_sample"
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import http.client
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from io import BytesIO
 from typing import Any
 from unittest.mock import MagicMock, patch
@@ -20,6 +20,7 @@ from osmosis_ai.platform.auth.credentials import (
 from osmosis_ai.platform.auth.platform_client import (
     AuthenticationExpiredError,
     PlatformAPIError,
+    SubscriptionRequiredError,
     platform_request,
     revoke_cli_token,
 )
@@ -33,7 +34,7 @@ def _make_credentials(
     access_token: str = "test-token-abc123",
 ) -> Credentials:
     """Create valid Credentials for testing."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     return Credentials(
         access_token=access_token,
         token_type="Bearer",
@@ -82,12 +83,29 @@ class TestExceptionClasses:
         err = PlatformAPIError("connection failed")
         assert str(err) == "connection failed"
         assert err.status_code is None
+        assert err.error_code is None
+        assert err.field is None
+        assert err.details is None
 
     def test_platform_api_error_with_status_code(self) -> None:
         """Verify PlatformAPIError stores the HTTP status code."""
         err = PlatformAPIError("not found", status_code=404)
         assert err.status_code == 404
         assert "not found" in str(err)
+
+    def test_platform_api_error_with_structured_metadata(self) -> None:
+        """Verify PlatformAPIError preserves optional structured metadata."""
+        err = PlatformAPIError(
+            "validation failed",
+            status_code=400,
+            error_code="VALIDATION",
+            field="checkpoint_step",
+            details={"error": "validation failed", "code": "VALIDATION"},
+        )
+        assert err.status_code == 400
+        assert err.error_code == "VALIDATION"
+        assert err.field == "checkpoint_step"
+        assert err.details == {"error": "validation failed", "code": "VALIDATION"}
 
 
 # =============================================================================
@@ -101,9 +119,15 @@ class TestPlatformRequest:
     @pytest.fixture(autouse=True)
     def _mock_active_workspace(self) -> Any:
         """Provide a default workspace ID so require_workspace=True doesn't fail."""
-        with patch(
-            "osmosis_ai.platform.auth.platform_client.get_active_workspace_id",
-            return_value="default_ws_test",
+        with (
+            patch(
+                "osmosis_ai.platform.auth.platform_client.get_active_workspace_id",
+                return_value="default_ws_test",
+            ),
+            patch(
+                "osmosis_ai.platform.auth.platform_client.get_active_workspace",
+                return_value={"id": "default_ws_test", "name": "default-workspace"},
+            ),
         ):
             yield
 
@@ -242,12 +266,86 @@ class TestPlatformRequest:
         """Verify PlatformAPIError when require_workspace=True but no workspace is available."""
         creds = _make_credentials()
 
-        with patch(
-            "osmosis_ai.platform.auth.platform_client.get_active_workspace_id",
-            return_value=None,
+        with (
+            patch(
+                "osmosis_ai.platform.auth.platform_client.get_active_workspace_id",
+                return_value=None,
+            ),
+            patch(
+                "osmosis_ai.platform.auth.platform_client.ensure_active_workspace",
+                return_value=None,
+            ),
         ):
             with pytest.raises(PlatformAPIError, match="No workspace selected"):
                 platform_request("/api/test", credentials=creds)
+
+    @patch("osmosis_ai.platform.auth.platform_client.set_active_workspace")
+    @patch("osmosis_ai.platform.auth.platform_client.urlopen")
+    def test_auto_selects_single_workspace_when_none_active(
+        self,
+        mock_urlopen: MagicMock,
+        mock_set_active_workspace: MagicMock,
+    ) -> None:
+        """Verify a single available workspace is auto-selected and reused."""
+        creds = _make_credentials()
+        mock_urlopen.side_effect = [
+            _make_http_response(
+                {"workspaces": [{"id": "ws_only", "name": "solo-workspace"}]}
+            ),
+            _make_http_response({"ok": True}),
+        ]
+
+        with (
+            patch(
+                "osmosis_ai.platform.auth.platform_client.get_active_workspace_id",
+                return_value=None,
+            ),
+            patch(
+                "osmosis_ai.platform.auth.platform_client.get_active_workspace",
+                return_value=None,
+            ),
+        ):
+            platform_request("/api/test", credentials=creds)
+
+        mock_set_active_workspace.assert_called_once_with("ws_only", "solo-workspace")
+        workspace_lookup = mock_urlopen.call_args_list[0][0][0]
+        api_request = mock_urlopen.call_args_list[1][0][0]
+        assert workspace_lookup.full_url.endswith("/api/cli/workspaces")
+        assert api_request.get_header("X-osmosis-org") == "ws_only"
+
+    @patch("osmosis_ai.platform.auth.platform_client.set_active_workspace")
+    @patch("osmosis_ai.platform.auth.platform_client.urlopen")
+    def test_does_not_auto_select_when_multiple_workspaces_available(
+        self,
+        mock_urlopen: MagicMock,
+        mock_set_active_workspace: MagicMock,
+    ) -> None:
+        """Verify multiple workspaces still require an explicit user selection."""
+        creds = _make_credentials()
+        mock_urlopen.return_value = _make_http_response(
+            {
+                "workspaces": [
+                    {"id": "ws_1", "name": "first-workspace"},
+                    {"id": "ws_2", "name": "second-workspace"},
+                ]
+            }
+        )
+
+        with (
+            patch(
+                "osmosis_ai.platform.auth.platform_client.get_active_workspace_id",
+                return_value=None,
+            ),
+            patch(
+                "osmosis_ai.platform.auth.platform_client.get_active_workspace",
+                return_value=None,
+            ),
+        ):
+            with pytest.raises(PlatformAPIError, match="No workspace selected"):
+                platform_request("/api/test", credentials=creds)
+
+        mock_set_active_workspace.assert_not_called()
+        assert mock_urlopen.call_count == 1
 
     @patch("osmosis_ai.platform.auth.platform_client.urlopen")
     def test_get_request_has_no_body(self, mock_urlopen: MagicMock) -> None:
@@ -374,6 +472,59 @@ class TestPlatformRequest:
 
         assert "Agent not found" in str(exc_info.value)
         assert exc_info.value.status_code == 404
+
+    @patch("osmosis_ai.platform.auth.platform_client.urlopen")
+    def test_http_error_extracts_structured_error_metadata(
+        self, mock_urlopen: MagicMock
+    ) -> None:
+        """Verify structured error metadata is preserved when provided by the API."""
+        error_body = json.dumps(
+            {
+                "error": "A deployment with this LoRA name already exists",
+                "code": "CONFLICT",
+                "field": "loraName",
+            }
+        )
+        mock_urlopen.side_effect = _make_http_error(409, error_body)
+        creds = _make_credentials()
+
+        with pytest.raises(PlatformAPIError) as exc_info:
+            platform_request("/api/test", credentials=creds)
+
+        assert exc_info.value.status_code == 409
+        assert exc_info.value.error_code == "CONFLICT"
+        assert exc_info.value.field == "loraName"
+        assert exc_info.value.details == {
+            "error": "A deployment with this LoRA name already exists",
+            "code": "CONFLICT",
+            "field": "loraName",
+        }
+        assert "A deployment with this LoRA name already exists" in str(exc_info.value)
+
+    @patch("osmosis_ai.platform.auth.platform_client.urlopen")
+    def test_subscription_error_preserves_structured_metadata(
+        self, mock_urlopen: MagicMock
+    ) -> None:
+        """Verify subscription-required responses preserve structured metadata."""
+        error_body = json.dumps(
+            {
+                "error": "Active subscription required to create deployments",
+                "code": "FORBIDDEN",
+            }
+        )
+        mock_urlopen.side_effect = _make_http_error(403, error_body)
+        creds = _make_credentials()
+
+        with pytest.raises(SubscriptionRequiredError) as exc_info:
+            platform_request("/api/test", credentials=creds)
+
+        assert exc_info.value.status_code == 403
+        assert exc_info.value.error_code == "FORBIDDEN"
+        assert exc_info.value.field is None
+        assert exc_info.value.details == {
+            "error": "Active subscription required to create deployments",
+            "code": "FORBIDDEN",
+        }
 
     @patch("osmosis_ai.platform.auth.platform_client.urlopen")
     def test_http_error_truncates_long_response_body(

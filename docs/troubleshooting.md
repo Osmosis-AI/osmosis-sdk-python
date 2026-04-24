@@ -90,25 +90,21 @@ Use `--fresh` after mutating the dataset file.
 
 Upgrade the package or delete the specific cache file after `osmosis eval cache ls`.
 
-## Rollout server
+## Rollout validation
 
 ### Validation failures
 
 Run a one-shot check:
 
 ```bash
-osmosis rollout serve serve.toml --validate-only
+osmosis rollout validate configs/training/<run>.toml
 ```
 
-Fix reported workflow/grader issues before binding a port.
+Fix reported workflow/grader issues before submitting training.
 
-`osmosis rollout serve` requires a concrete `Grader` discoverable from the entrypoint module. If validation reports that no grader was found, add one there; in most projects you will also define a `GraderConfig`.
-
-### Missing FastAPI
-
-```
-ImportError: ... Install ... osmosis-ai[server]
-```
+`osmosis rollout validate` requires a concrete `Grader` discoverable from the
+resolved entrypoint module. If validation reports that no grader was found, add
+one there; in most projects you will also define a `GraderConfig`.
 
 ## See also
 

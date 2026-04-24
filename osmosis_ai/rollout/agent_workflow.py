@@ -1,13 +1,11 @@
 from abc import ABC, abstractmethod
-from typing import Any, Generic, TypeVar
+from typing import Any
 
 from osmosis_ai.rollout.context import AgentWorkflowContext
 from osmosis_ai.rollout.types import AgentWorkflowConfig
 
-TConfig = TypeVar("TConfig", bound=AgentWorkflowConfig)
 
-
-class AgentWorkflow(Generic[TConfig], ABC):
+class AgentWorkflow[TConfig: AgentWorkflowConfig](ABC):
     def __init__(self, config: TConfig | None = None):
         self.config = config
 

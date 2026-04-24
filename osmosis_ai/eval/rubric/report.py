@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from statistics import mean, pstdev, pvariance
 from typing import Any
@@ -87,7 +87,7 @@ class JsonReportWriter:
     def write(self, report: RubricReport, output_path: Path) -> Path:
         output_path.parent.mkdir(parents=True, exist_ok=True)
         payload: dict[str, Any] = {
-            "generated_at": datetime.now(timezone.utc).isoformat(),
+            "generated_at": datetime.now(UTC).isoformat(),
             "model": report.model,
             "rubric": report.rubric_text,
             "data_path": str(report.data_path),

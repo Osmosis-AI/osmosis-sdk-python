@@ -18,6 +18,9 @@ from osmosis_ai.cli.main import main
         ["dataset", "--help"],
         ["train", "--help"],
         ["model", "--help"],
+        ["deployment", "--help"],
+        ["deploy", "--help"],
+        ["undeploy", "--help"],
         ["rollout", "--help"],
         ["eval", "--help"],
         ["upgrade", "--help"],
@@ -32,9 +35,6 @@ def test_help_exits_zero(args, capfd):
 @pytest.mark.parametrize(
     "args",
     [
-        ["model", "deploy"],
-        ["model", "export"],
-        ["model", "build"],
         ["train", "traces"],
         ["rollout", "list"],
     ],
@@ -43,6 +43,16 @@ def test_placeholder_commands_exit_one(args):
     """Placeholder commands should exit with code 1."""
     rc = main(args)
     assert rc == 1
+
+
+@pytest.mark.parametrize("subcommand", ["export", "build"])
+def test_removed_model_commands_are_unknown(subcommand, capfd):
+    """Removed model commands should report unknown-command errors."""
+    rc = main(["model", subcommand])
+    captured = capfd.readouterr()
+
+    assert rc != 0
+    assert f"No such command '{subcommand}'" in captured.err
 
 
 def test_deprecated_login_alias_works(capfd):
@@ -62,6 +72,7 @@ def test_all_groups_in_help_output(capfd):
         "dataset",
         "train",
         "model",
+        "deployment",
         "rollout",
         "eval",
     ]:

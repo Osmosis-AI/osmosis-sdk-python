@@ -12,12 +12,17 @@ from .models import (
     DatasetAffectedResources,
     DatasetFile,
     DeleteTrainingRunResult,
+    DeploymentInfo,
+    DeploymentSummary,
     ModelAffectedResources,
     PaginatedBaseModels,
     PaginatedDatasets,
+    PaginatedDeployments,
     PaginatedRollouts,
     PaginatedTrainingRuns,
+    RenameDeploymentResult,
     SubmitTrainingRunResult,
+    TrainingRunCheckpoints,
     TrainingRunDetail,
     TrainingRunMetrics,
     WorkspaceDeletionStatus,
@@ -46,20 +51,32 @@ class OsmosisClient:
         *,
         credentials: Credentials | None = None,
         workspace_name: str,
+        cleanup_on_401: bool = True,
     ) -> dict[str, Any]:
-        """Fetch subscription status for a workspace via /api/cli/workspaces.
+        """Fetch workspace metadata via /api/cli/workspaces.
 
-        Returns a dict with ``has_subscription`` for the matched workspace,
-        or an empty dict if the workspace is not found.
+        Returns a dict with ``has_subscription`` plus optional Git integration
+        fields for the matched workspace, or an empty dict if the workspace is
+        not found.
         """
         data = platform_request(
             "/api/cli/workspaces",
             credentials=credentials,
             require_workspace=False,
+            cleanup_on_401=cleanup_on_401,
         )
         for ws in data.get("workspaces", []):
             if ws.get("name") == workspace_name:
-                return {"found": True, "has_subscription": ws.get("has_subscription")}
+                return {
+                    "found": True,
+                    "has_subscription": ws.get("has_subscription"),
+                    # Default missing fields so newer SDKs stay compatible with
+                    # older platform deployments during rollout.
+                    "has_github_app_installation": ws.get(
+                        "has_github_app_installation", False
+                    ),
+                    "connected_repo": ws.get("connected_repo"),
+                }
         return {"found": False}
 
     def list_workspaces(
@@ -389,3 +406,115 @@ class OsmosisClient:
             credentials=credentials,
         )
         return ModelAffectedResources.from_dict(data)
+
+    # ── Deployments ───────────────────────────────────────────────
+    # All mutating endpoints key off `checkpoint` (UUID or checkpoint_name).
+    # Lifecycle: deploy → active, undeploy → inactive, failure → failed.
+
+    def list_deployments(
+        self,
+        limit: int = DEFAULT_PAGE_SIZE,
+        offset: int = 0,
+        *,
+        credentials: Credentials | None = None,
+    ) -> PaginatedDeployments:
+        """List LoRA deployments in the current workspace."""
+        qs = urlencode({"limit": limit, "offset": offset})
+        data = platform_request(f"/api/cli/deployments?{qs}", credentials=credentials)
+        return PaginatedDeployments.from_dict(data)
+
+    def get_deployment(
+        self,
+        checkpoint: str,
+        *,
+        credentials: Credentials | None = None,
+    ) -> DeploymentInfo:
+        """Fetch a deployment by checkpoint UUID or checkpoint name."""
+        data = platform_request(
+            f"/api/cli/deployments/{_safe_path(checkpoint)}",
+            credentials=credentials,
+        )
+        return DeploymentInfo.from_dict(data["deployment"])
+
+    def deploy_checkpoint(
+        self,
+        checkpoint: str,
+        *,
+        credentials: Credentials | None = None,
+    ) -> DeploymentSummary:
+        """Deploy (or reactivate) a LoRA checkpoint.
+
+        Idempotent: deploying a checkpoint that is already active returns
+        the existing deployment.
+        """
+        data = platform_request(
+            f"/api/cli/deployments/{_safe_path(checkpoint)}/deploy",
+            method="POST",
+            data={},
+            credentials=credentials,
+        )
+        return DeploymentSummary.from_dict(data["deployment"])
+
+    def undeploy_checkpoint(
+        self,
+        checkpoint: str,
+        *,
+        credentials: Credentials | None = None,
+    ) -> DeploymentSummary:
+        """Undeploy a LoRA checkpoint (transitions to ``inactive``)."""
+        data = platform_request(
+            f"/api/cli/deployments/{_safe_path(checkpoint)}/undeploy",
+            method="POST",
+            data={},
+            credentials=credentials,
+        )
+        return DeploymentSummary.from_dict(data)
+
+    def rename_checkpoint(
+        self,
+        checkpoint: str,
+        new_name: str,
+        *,
+        credentials: Credentials | None = None,
+    ) -> RenameDeploymentResult:
+        """Rename a LoRA checkpoint.
+
+        Renaming an ``active`` deployment also re-registers the LoRA with
+        inference under the new name.
+        """
+        data = platform_request(
+            f"/api/cli/deployments/{_safe_path(checkpoint)}",
+            method="PATCH",
+            data={"checkpoint_name": new_name},
+            credentials=credentials,
+        )
+        return RenameDeploymentResult.from_dict(data)
+
+    def delete_deployment(
+        self,
+        checkpoint: str,
+        *,
+        credentials: Credentials | None = None,
+    ) -> bool:
+        """Delete a deployment record (idempotent)."""
+        platform_request(
+            f"/api/cli/deployments/{_safe_path(checkpoint)}",
+            method="DELETE",
+            credentials=credentials,
+        )
+        return True
+
+    # ── Training-run checkpoints ──────────────────────────────────
+    # Still used by `osmosis train status` to list deployable checkpoints.
+
+    def list_training_run_checkpoints(
+        self,
+        name_or_id: str,
+        *,
+        credentials: Credentials | None = None,
+    ) -> TrainingRunCheckpoints:
+        data = platform_request(
+            f"/api/cli/training-runs/{_safe_path(name_or_id)}/checkpoints",
+            credentials=credentials,
+        )
+        return TrainingRunCheckpoints.from_dict(data)

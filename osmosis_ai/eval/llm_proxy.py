@@ -321,7 +321,7 @@ async def _wait_for_port(host: str, port: int, timeout: float = 10.0) -> None:
             writer.close()
             await writer.wait_closed()
             return
-        except (OSError, asyncio.TimeoutError):
+        except (TimeoutError, OSError):
             await asyncio.sleep(0.05)
     raise TimeoutError(f"LiteLLMProxy did not start within {timeout}s")
 
