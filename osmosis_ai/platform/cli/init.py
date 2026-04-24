@@ -37,6 +37,30 @@ def _check_git_installed() -> None:
         )
 
 
+# ── Plugin marketplace configuration ────────────────────────────
+#
+# `osmosis init` scaffolds a `.claude/settings.json` that points Claude Code
+# at the Osmosis plugin marketplace. The plugin hosts the agent skills
+# (`vibe-train`, `autoresearch`, `bootstrap-rollout`, etc.), so updates ship
+# via a `git push` to the plugins repo rather than a new SDK release.
+#
+# The env vars let us point scaffolded workspaces at a different repo or
+# marketplace (e.g. a staging mirror) without shipping an SDK release.
+
+_PLUGIN_REPO_DEFAULT = "Osmosis-AI/osmosis-plugins"
+_PLUGIN_MARKETPLACE_DEFAULT = "osmosis"
+
+
+def _plugin_repo() -> str:
+    """GitHub repo (`owner/name`) hosting the Osmosis plugin marketplace."""
+    return os.environ.get("OSMOSIS_PLUGIN_REPO") or _PLUGIN_REPO_DEFAULT
+
+
+def _plugin_marketplace() -> str:
+    """Marketplace name as declared in the plugin repo's `marketplace.json`."""
+    return os.environ.get("OSMOSIS_PLUGIN_MARKETPLACE") or _PLUGIN_MARKETPLACE_DEFAULT
+
+
 # ── Scaffold manifest ───────────────────────────────────────────
 
 _TEMPLATES = files("osmosis_ai.platform.cli") / "templates"
@@ -62,35 +86,31 @@ class ScaffoldEntry:
 
 SCAFFOLD: list[ScaffoldEntry] = [
     # Directory placeholders
+    ScaffoldEntry("", ".osmosis/research/experiments/.gitkeep"),
     ScaffoldEntry("", "rollouts/.gitkeep"),
     ScaffoldEntry("", "configs/eval/.gitkeep"),
     ScaffoldEntry("", "data/.gitkeep"),
     # Rendered templates (workspace.toml handled separately on update)
     ScaffoldEntry("workspace.toml.tpl", ".osmosis/workspace.toml", render=True),
+    ScaffoldEntry("research/program.md.tpl", ".osmosis/research/program.md"),
     ScaffoldEntry("pyproject.toml.tpl", "pyproject.toml", render=True),
     ScaffoldEntry("README.md.tpl", "README.md", render=True),
     # Static files — configs (skip on update)
     ScaffoldEntry("gitignore.tpl", ".gitignore"),
     ScaffoldEntry("configs/training/default.toml.tpl", "configs/training/default.toml"),
-    # Agent docs & skills (overwrite on update)
-    ScaffoldEntry("AGENTS.md.tpl", "AGENTS.md", overwrite_on_update=True),
+    # Agent docs (overwrite on update)
+    ScaffoldEntry("AGENTS.md.tpl", "AGENTS.md", render=True, overwrite_on_update=True),
     ScaffoldEntry("CLAUDE.md.tpl", "CLAUDE.md", overwrite_on_update=True),
     ScaffoldEntry(
         "configs/AGENTS.md.tpl", "configs/AGENTS.md", overwrite_on_update=True
     ),
+    # Plugin marketplace registration for Claude Code (committed so the
+    # team shares a single plugin source). Always refreshed on update so
+    # SDK upgrades can bump the marketplace URL in-place.
     ScaffoldEntry(
-        "skills/create-rollout/SKILL.md.tpl",
-        ".osmosis/skills/create-rollout/SKILL.md",
-        overwrite_on_update=True,
-    ),
-    ScaffoldEntry(
-        "skills/evaluate-rollout/SKILL.md.tpl",
-        ".osmosis/skills/evaluate-rollout/SKILL.md",
-        overwrite_on_update=True,
-    ),
-    ScaffoldEntry(
-        "skills/submit-training/SKILL.md.tpl",
-        ".osmosis/skills/submit-training/SKILL.md",
+        "claude/settings.json.tpl",
+        ".claude/settings.json",
+        render=True,
         overwrite_on_update=True,
     ),
 ]
@@ -120,6 +140,8 @@ def _write_scaffold(target: Path, ws_name: str, *, update: bool = False) -> None
         "name": ws_name,
         "sdk_version": PACKAGE_VERSION,
         "created_at": datetime.datetime.now(datetime.UTC).isoformat(),
+        "plugin_repo": _plugin_repo(),
+        "plugin_marketplace": _plugin_marketplace(),
     }
 
     for entry in SCAFFOLD:
@@ -415,8 +437,33 @@ def _print_next_steps(
 
     prompt_body = (
         "I want to train a model for <my task domain>. "
-        "Create an initial rollout with tools and a grader, "
-        "then run a quick eval baseline."
+        "Read .osmosis/research/program.md, create a baseline rollout in the "
+        "canonical workspace structure, iterate locally with evals, and prepare "
+        "a training config."
+    )
+
+    plugin_repo = _plugin_repo()
+    plugin_marketplace = _plugin_marketplace()
+    plugin_table = Table.grid(padding=(0, 1))
+    plugin_table.add_row(
+        "[bold cyan]Claude Code[/bold cyan]",
+        "open this folder — it'll prompt to install [cyan]osmosis[/cyan]",
+    )
+    plugin_table.add_row(
+        "[bold cyan]Cursor[/bold cyan]",
+        f"Settings → Rules → Add Remote Rule → [cyan]{plugin_repo}[/cyan]",
+    )
+    plugin_table.add_row(
+        "[bold cyan]Codex[/bold cyan]",
+        f"[cyan]codex plugin marketplace add {plugin_repo}[/cyan]",
+    )
+    plugin_table.add_row(
+        "[dim] [/dim]",
+        "[dim]then[/dim]",
+    )
+    plugin_table.add_row(
+        "[bold cyan] [/bold cyan]",
+        f"[cyan]codex plugin install {plugin_marketplace}[/cyan]",
     )
 
     content = Group(
@@ -424,6 +471,15 @@ def _print_next_steps(
             cmd_table,
             title="next steps",
             border_style="green",
+            box=rich_box.ROUNDED,
+            padding=(0, 1),
+            expand=False,
+        ),
+        Text(),
+        Panel(
+            plugin_table,
+            title="install the osmosis agent plugin",
+            border_style="cyan",
             box=rich_box.ROUNDED,
             padding=(0, 1),
             expand=False,

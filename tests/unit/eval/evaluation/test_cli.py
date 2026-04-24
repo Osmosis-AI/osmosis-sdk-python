@@ -66,6 +66,18 @@ def _run_command(monkeypatch: pytest.MonkeyPatch, config: SimpleNamespace) -> No
     )
     monkeypatch.setattr(EvalCommand, "_resolve_api_key", lambda self, cfg: None)
     monkeypatch.setattr("osmosis_ai.eval.llm_proxy.LiteLLMProxy", _FakeProxy)
+    monkeypatch.setattr(
+        "osmosis_ai.platform.cli.workspace_contract.resolve_workspace_root",
+        lambda path: path.parent,
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.cli.workspace_contract.validate_workspace_contract",
+        lambda workspace_root: None,
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.cli.workspace_contract.ensure_workspace_config_path",
+        lambda *args, **kwargs: None,
+    )
 
     def _fake_local_backend(*, workflow, workflow_config, grader, grader_config):
         assert workflow is fake_workflow

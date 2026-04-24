@@ -426,29 +426,30 @@ class TestWriteScaffold:
         assert (target / "README.md").is_file()
 
         # .gitkeep markers
+        assert (target / ".osmosis" / "research" / "experiments" / ".gitkeep").is_file()
         assert (target / "rollouts" / ".gitkeep").is_file()
         assert (target / "configs" / "eval" / ".gitkeep").is_file()
         assert (target / "data" / ".gitkeep").is_file()
 
         # Training config template (replaces configs/training/.gitkeep)
         assert (target / "configs" / "training" / "default.toml").is_file()
+        assert (target / ".osmosis" / "research" / "program.md").is_file()
 
         # Static templates (formerly downloaded)
         assert (target / "AGENTS.md").is_file()
         assert (target / "CLAUDE.md").is_file()
         assert (target / "configs" / "AGENTS.md").is_file()
-        assert (
-            target / ".osmosis" / "skills" / "create-rollout" / "SKILL.md"
-        ).is_file()
-        assert (
-            target / ".osmosis" / "skills" / "evaluate-rollout" / "SKILL.md"
-        ).is_file()
-        assert (
-            target / ".osmosis" / "skills" / "submit-training" / "SKILL.md"
-        ).is_file()
+
+        # Claude Code plugin marketplace registration
+        assert (target / ".claude" / "settings.json").is_file()
+
+        # Skills now live in the `osmosis` plugin repo, not the workspace.
+        assert not (target / ".osmosis" / "skills").exists()
 
         # Directories exist
         assert (target / ".osmosis").is_dir()
+        assert (target / ".osmosis" / "research").is_dir()
+        assert (target / ".osmosis" / "research" / "experiments").is_dir()
         assert (target / "rollouts").is_dir()
         assert (target / "configs" / "training").is_dir()
         assert (target / "configs" / "eval").is_dir()
@@ -486,6 +487,24 @@ class TestWriteScaffold:
         assert 'requires-python = ">=3.12"' in content
         assert f'"osmosis-ai>={PACKAGE_VERSION}"' in content
 
+    def test_agents_md_respects_plugin_overrides(
+        self, monkeypatch, tmp_path: Path
+    ) -> None:
+        """AGENTS.md renders plugin setup instructions from env overrides."""
+        from osmosis_ai.platform.cli.init import _write_scaffold
+
+        monkeypatch.setenv("OSMOSIS_PLUGIN_REPO", "my-org/my-plugins")
+        monkeypatch.setenv("OSMOSIS_PLUGIN_MARKETPLACE", "my-marketplace")
+
+        target = tmp_path / "ws"
+        target.mkdir()
+        _write_scaffold(target, "ws")
+
+        content = (target / "AGENTS.md").read_text(encoding="utf-8")
+        assert "codex plugin marketplace add my-org/my-plugins" in content
+        assert "codex plugin install my-marketplace" in content
+        assert "codex plugin install osmosis" not in content
+
     def test_gitignore_has_python_sections(self, tmp_path: Path) -> None:
         """.gitignore includes Python-related patterns."""
         from osmosis_ai.platform.cli.init import _write_scaffold
@@ -509,6 +528,8 @@ class TestWriteScaffold:
 
         content = (target / "README.md").read_text(encoding="utf-8")
         assert "my-awesome-ws" in content
+        assert "osmosis workspace validate" in content
+        assert ".osmosis/research/program.md" in content
 
     def test_is_idempotent(self, tmp_path: Path) -> None:
         """Running _write_scaffold twice does NOT overwrite pre-existing files."""
@@ -556,8 +577,8 @@ class TestWriteScaffold:
 
 
 class TestWriteScaffoldUpdate:
-    def test_update_overwrites_agents_and_skills(self, tmp_path: Path) -> None:
-        """update=True overwrites AGENTS.md, CLAUDE.md, and skills."""
+    def test_update_overwrites_agents_and_plugin_settings(self, tmp_path: Path) -> None:
+        """update=True overwrites AGENTS.md, CLAUDE.md, and .claude/settings.json."""
         from osmosis_ai.platform.cli.init import _write_scaffold
 
         target = tmp_path / "ws"
@@ -570,8 +591,8 @@ class TestWriteScaffoldUpdate:
         (target / "configs" / "AGENTS.md").write_text(
             "custom cfg agents", encoding="utf-8"
         )
-        skill = target / ".osmosis" / "skills" / "create-rollout" / "SKILL.md"
-        skill.write_text("custom skill", encoding="utf-8")
+        settings = target / ".claude" / "settings.json"
+        settings.write_text("{}", encoding="utf-8")
 
         _write_scaffold(target, "ws", update=True)
 
@@ -580,7 +601,7 @@ class TestWriteScaffoldUpdate:
         assert (target / "configs" / "AGENTS.md").read_text(
             encoding="utf-8"
         ) != "custom cfg agents"
-        assert skill.read_text(encoding="utf-8") != "custom skill"
+        assert settings.read_text(encoding="utf-8") != "{}"
 
     def test_update_preserves_configs(self, tmp_path: Path) -> None:
         """update=True does NOT overwrite pyproject.toml, .gitignore, README, or training config."""
@@ -625,6 +646,64 @@ class TestWriteScaffoldUpdate:
         assert (target / ".osmosis" / "workspace.toml").read_text(
             encoding="utf-8"
         ) == original
+
+
+# ── Claude plugin marketplace settings ──────────────────────────
+
+
+class TestClaudePluginSettings:
+    def test_settings_json_uses_default_repo_and_marketplace(
+        self, tmp_path: Path
+    ) -> None:
+        """Without env overrides, .claude/settings.json points at the default plugin repo."""
+        import json
+
+        from osmosis_ai.platform.cli.init import (
+            _PLUGIN_MARKETPLACE_DEFAULT,
+            _PLUGIN_REPO_DEFAULT,
+            _write_scaffold,
+        )
+
+        target = tmp_path / "ws"
+        target.mkdir()
+        _write_scaffold(target, "ws")
+
+        data = json.loads(
+            (target / ".claude" / "settings.json").read_text(encoding="utf-8")
+        )
+        assert _PLUGIN_MARKETPLACE_DEFAULT in data["extraKnownMarketplaces"]
+        assert (
+            data["extraKnownMarketplaces"][_PLUGIN_MARKETPLACE_DEFAULT]["source"][
+                "repo"
+            ]
+            == _PLUGIN_REPO_DEFAULT
+        )
+        assert data["enabledPlugins"][f"osmosis@{_PLUGIN_MARKETPLACE_DEFAULT}"] is True
+
+    def test_settings_json_respects_env_overrides(
+        self, monkeypatch, tmp_path: Path
+    ) -> None:
+        """OSMOSIS_PLUGIN_REPO / OSMOSIS_PLUGIN_MARKETPLACE override the defaults."""
+        import json
+
+        from osmosis_ai.platform.cli.init import _write_scaffold
+
+        monkeypatch.setenv("OSMOSIS_PLUGIN_REPO", "my-org/my-plugins")
+        monkeypatch.setenv("OSMOSIS_PLUGIN_MARKETPLACE", "my-marketplace")
+
+        target = tmp_path / "ws"
+        target.mkdir()
+        _write_scaffold(target, "ws")
+
+        data = json.loads(
+            (target / ".claude" / "settings.json").read_text(encoding="utf-8")
+        )
+        assert "my-marketplace" in data["extraKnownMarketplaces"]
+        assert (
+            data["extraKnownMarketplaces"]["my-marketplace"]["source"]["repo"]
+            == "my-org/my-plugins"
+        )
+        assert data["enabledPlugins"]["osmosis@my-marketplace"] is True
 
 
 # ── _update_workspace_metadata ───────────────────────────────────
@@ -843,6 +922,34 @@ class TestPrintNextSteps:
         assert f"{mod.PLATFORM_URL}/team-alpha/integrations/git" in output
         assert "choose a repo" in output
 
+    def test_print_next_steps_includes_plugin_install_hints(self, monkeypatch) -> None:
+        """_print_next_steps advertises the osmosis plugin for Claude / Cursor / Codex."""
+        import io
+
+        import osmosis_ai.platform.auth as auth_module
+        import osmosis_ai.platform.cli.init as mod
+        from osmosis_ai.cli.console import Console
+        from osmosis_ai.platform.cli.init import _print_next_steps
+
+        monkeypatch.setenv("OSMOSIS_PLUGIN_REPO", "my-org/my-plugins")
+        monkeypatch.setenv("OSMOSIS_PLUGIN_MARKETPLACE", "my-marketplace")
+
+        buf = io.StringIO()
+        test_console = Console(file=buf, force_terminal=False, no_color=True)
+        monkeypatch.setattr(mod, "console", test_console)
+        monkeypatch.setattr(mod, "get_active_workspace_name", lambda: None)
+        monkeypatch.setattr(auth_module, "load_credentials", lambda: None)
+
+        _print_next_steps("my-workspace", here=False)
+        output = buf.getvalue()
+        assert "osmosis agent plugin" in output
+        assert "Claude Code" in output
+        assert "Cursor" in output
+        assert "Codex" in output
+        assert "my-org/my-plugins" in output
+        assert "codex plugin install my-marketplace" in output
+        assert "codex plugin install osmosis" not in output
+
     def test_print_next_steps_here(self, monkeypatch) -> None:
         """_print_next_steps omits 'cd' when here=True but keeps platform URL."""
         import io
@@ -887,6 +994,8 @@ def test_full_init_flow(monkeypatch, tmp_path: Path) -> None:
     assert target.is_dir()
 
     assert (target / ".osmosis" / "workspace.toml").is_file()
+    assert (target / ".osmosis" / "research" / "program.md").is_file()
+    assert (target / ".osmosis" / "research" / "experiments" / ".gitkeep").is_file()
     assert (target / "pyproject.toml").is_file()
     assert (target / ".gitignore").is_file()
     assert (target / "README.md").is_file()
@@ -907,7 +1016,7 @@ def test_full_init_flow(monkeypatch, tmp_path: Path) -> None:
 
 
 def test_full_init_update_flow(monkeypatch, tmp_path: Path) -> None:
-    """Update mode: overwrites agents/skills, updates metadata, does NOT commit."""
+    """Update mode: overwrites agent docs/plugin settings, updates metadata, does NOT commit."""
     import io
 
     import osmosis_ai.platform.cli.init as init_module
