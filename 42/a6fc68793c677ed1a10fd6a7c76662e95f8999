@@ -1,0 +1,25 @@
+osmosis_ai/cli/commands/deployment.py
+  914a08ad3c300577 130,158,178
+tests/unit/cli/test_deployment_commands.py
+  914a08ad3c300577 5,123-147,173-199,260-285
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "42a6fc68793c677ed1a10fd6a7c76662e95f8999",
+  "prompts": {
+    "914a08ad3c300577": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "943fa021-7833-4744-b0d2-b32395b8267e",
+        "model": "gpt-5.5-extra-high"
+      },
+      "human_author": "JoyboyBrian",
+      "messages": [],
+      "total_additions": 83,
+      "total_deletions": 3,
+      "accepted_lines": 83,
+      "overriden_lines": 0
+    }
+  }
+}
