@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import contextlib
 import tempfile
+from collections.abc import Iterator
 from email.message import Message
 from pathlib import Path
+from urllib.parse import urljoin
 
 import httpx
 
@@ -13,6 +15,8 @@ from .upload import _require_https, make_progress_bar
 
 DOWNLOAD_TIMEOUT = 600.0
 DOWNLOAD_CHUNK_SIZE = 1024 * 1024
+MAX_DOWNLOAD_REDIRECTS = 20
+_REDIRECT_STATUS_CODES = {301, 302, 303, 307, 308}
 
 
 def _safe_download_filename(filename: str | None) -> str | None:
@@ -65,6 +69,37 @@ def _resolve_download_destination(
     return destination
 
 
+@contextlib.contextmanager
+def _stream_download_response(
+    url: str,
+    timeout: httpx.Timeout,
+) -> Iterator[httpx.Response]:
+    current_url = url
+    for redirect_count in range(MAX_DOWNLOAD_REDIRECTS + 1):
+        _require_https(current_url, "Download presigned URL")
+        with httpx.stream(
+            "GET",
+            current_url,
+            timeout=timeout,
+            follow_redirects=False,
+        ) as response:
+            if response.status_code not in _REDIRECT_STATUS_CODES:
+                yield response
+                return
+
+            location = response.headers.get("location")
+            if location is None:
+                yield response
+                return
+
+            if redirect_count >= MAX_DOWNLOAD_REDIRECTS:
+                raise RuntimeError("Too many redirects while downloading file")
+
+            current_url = urljoin(current_url, location)
+            _require_https(current_url, "Download redirect URL")
+            response.read()
+
+
 def download_file(
     url: str,
     *,
@@ -76,10 +111,8 @@ def download_file(
 ) -> Path:
     """Download a presigned URL to disk and return the final path."""
 
-    _require_https(url, "Download presigned URL")
-
     timeout = httpx.Timeout(DOWNLOAD_TIMEOUT, connect=30.0)
-    with httpx.stream("GET", url, timeout=timeout, follow_redirects=True) as response:
+    with _stream_download_response(url, timeout) as response:
         if not 200 <= response.status_code < 300:
             body = response.read().decode("utf-8", errors="replace")[:500]
             detail = f" {body}" if body else ""

@@ -73,6 +73,71 @@ def test_download_file_uses_content_disposition_filename(monkeypatch, tmp_path) 
     assert not list(tmp_path.glob("*.tmp"))
 
 
+def test_download_file_follows_https_redirect(monkeypatch, tmp_path) -> None:
+    responses = iter(
+        [
+            _FakeStreamResponse(
+                status_code=302,
+                headers={"location": "/download/data.jsonl"},
+            ),
+            _FakeStreamResponse(
+                headers={"content-length": "11"},
+                chunks=[b"hello ", b"world"],
+            ),
+        ]
+    )
+    requests: list[tuple[str, str, bool]] = []
+
+    def fake_stream(method, url, **kwargs):
+        requests.append((method, url, kwargs["follow_redirects"]))
+        return next(responses)
+
+    monkeypatch.setattr(download_module.httpx, "stream", fake_stream)
+    monkeypatch.setattr(
+        download_module,
+        "make_progress_bar",
+        lambda total, *, description: (nullcontext(), lambda *_args: None),
+    )
+
+    destination = download_module.download_file(
+        "https://example.com/signed",
+        output=tmp_path,
+        default_filename="data.jsonl",
+        expected_size=11,
+    )
+
+    assert destination == tmp_path / "data.jsonl"
+    assert destination.read_bytes() == b"hello world"
+    assert requests == [
+        ("GET", "https://example.com/signed", False),
+        ("GET", "https://example.com/download/data.jsonl", False),
+    ]
+
+
+def test_download_file_rejects_insecure_redirect(monkeypatch, tmp_path) -> None:
+    requests: list[str] = []
+
+    def fake_stream(_method, url, **_kwargs):
+        requests.append(url)
+        return _FakeStreamResponse(
+            status_code=302,
+            headers={"location": "http://example.com/data.jsonl"},
+        )
+
+    monkeypatch.setattr(download_module.httpx, "stream", fake_stream)
+
+    with pytest.raises(RuntimeError, match="Download redirect URL must use HTTPS"):
+        download_module.download_file(
+            "https://example.com/signed",
+            output=tmp_path,
+            default_filename="data.jsonl",
+            expected_size=11,
+        )
+
+    assert requests == ["https://example.com/signed"]
+    assert not list(tmp_path.iterdir())
+
+
 def test_download_file_refuses_to_overwrite_existing_file(
     monkeypatch, tmp_path
 ) -> None:
