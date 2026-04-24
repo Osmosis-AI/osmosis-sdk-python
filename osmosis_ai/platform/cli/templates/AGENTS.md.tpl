@@ -49,8 +49,8 @@ Detailed workflow guidance lives in the **`osmosis` agent plugin**:
   plugin automatically; on first open, Claude Code prompts to install.
 - **Cursor** — Settings → Rules → "Add Remote Rule" → paste the plugin repo
   URL (skills render as Remote Rules in Cursor).
-- **Codex** — Run `codex plugin marketplace add <plugin-repo>` once, then
-  `codex plugin install osmosis`.
+- **Codex** — Run `codex plugin marketplace add {plugin_repo}` once, then
+  `codex plugin install {plugin_marketplace}`.
 
 The plugin repo is configured in `.claude/settings.json`. Check that file
 before modifying plugin state.

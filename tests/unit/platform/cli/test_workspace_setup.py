@@ -487,6 +487,24 @@ class TestWriteScaffold:
         assert 'requires-python = ">=3.12"' in content
         assert f'"osmosis-ai>={PACKAGE_VERSION}"' in content
 
+    def test_agents_md_respects_plugin_overrides(
+        self, monkeypatch, tmp_path: Path
+    ) -> None:
+        """AGENTS.md renders plugin setup instructions from env overrides."""
+        from osmosis_ai.platform.cli.init import _write_scaffold
+
+        monkeypatch.setenv("OSMOSIS_PLUGIN_REPO", "my-org/my-plugins")
+        monkeypatch.setenv("OSMOSIS_PLUGIN_MARKETPLACE", "my-marketplace")
+
+        target = tmp_path / "ws"
+        target.mkdir()
+        _write_scaffold(target, "ws")
+
+        content = (target / "AGENTS.md").read_text(encoding="utf-8")
+        assert "codex plugin marketplace add my-org/my-plugins" in content
+        assert "codex plugin install my-marketplace" in content
+        assert "codex plugin install osmosis" not in content
+
     def test_gitignore_has_python_sections(self, tmp_path: Path) -> None:
         """.gitignore includes Python-related patterns."""
         from osmosis_ai.platform.cli.init import _write_scaffold
@@ -914,6 +932,7 @@ class TestPrintNextSteps:
         from osmosis_ai.platform.cli.init import _print_next_steps
 
         monkeypatch.setenv("OSMOSIS_PLUGIN_REPO", "my-org/my-plugins")
+        monkeypatch.setenv("OSMOSIS_PLUGIN_MARKETPLACE", "my-marketplace")
 
         buf = io.StringIO()
         test_console = Console(file=buf, force_terminal=False, no_color=True)
@@ -928,6 +947,8 @@ class TestPrintNextSteps:
         assert "Cursor" in output
         assert "Codex" in output
         assert "my-org/my-plugins" in output
+        assert "codex plugin install my-marketplace" in output
+        assert "codex plugin install osmosis" not in output
 
     def test_print_next_steps_here(self, monkeypatch) -> None:
         """_print_next_steps omits 'cd' when here=True but keeps platform URL."""

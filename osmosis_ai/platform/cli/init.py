@@ -99,7 +99,7 @@ SCAFFOLD: list[ScaffoldEntry] = [
     ScaffoldEntry("gitignore.tpl", ".gitignore"),
     ScaffoldEntry("configs/training/default.toml.tpl", "configs/training/default.toml"),
     # Agent docs (overwrite on update)
-    ScaffoldEntry("AGENTS.md.tpl", "AGENTS.md", overwrite_on_update=True),
+    ScaffoldEntry("AGENTS.md.tpl", "AGENTS.md", render=True, overwrite_on_update=True),
     ScaffoldEntry("CLAUDE.md.tpl", "CLAUDE.md", overwrite_on_update=True),
     ScaffoldEntry(
         "configs/AGENTS.md.tpl", "configs/AGENTS.md", overwrite_on_update=True
@@ -443,6 +443,7 @@ def _print_next_steps(
     )
 
     plugin_repo = _plugin_repo()
+    plugin_marketplace = _plugin_marketplace()
     plugin_table = Table.grid(padding=(0, 1))
     plugin_table.add_row(
         "[bold cyan]Claude Code[/bold cyan]",
@@ -462,7 +463,7 @@ def _print_next_steps(
     )
     plugin_table.add_row(
         "[bold cyan] [/bold cyan]",
-        "[cyan]codex plugin install osmosis[/cyan]",
+        f"[cyan]codex plugin install {plugin_marketplace}[/cyan]",
     )
 
     content = Group(
