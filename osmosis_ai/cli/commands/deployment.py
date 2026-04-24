@@ -127,7 +127,7 @@ def info(
     rows: list[tuple[str, str]] = [
         ("Checkpoint", console.escape(d.checkpoint_name) if d.checkpoint_name else "—"),
         ("ID", d.id),
-        ("Status", d.status),
+        ("Status", console.escape(d.status)),
         ("Base Model", console.escape(d.base_model) if d.base_model else "—"),
         ("Step", str(d.checkpoint_step)),
     ]
@@ -155,7 +155,7 @@ def deploy(
     _, credentials = _require_auth()
     client = OsmosisClient()
 
-    with console.spinner(f'Deploying checkpoint "{checkpoint}"...'):
+    with console.spinner(f'Deploying checkpoint "{console.escape(checkpoint)}"...'):
         result = client.deploy_checkpoint(checkpoint, credentials=credentials)
 
     status_str = _format_deployment_status(result.status)
@@ -175,7 +175,7 @@ def undeploy(
     _, credentials = _require_auth()
     client = OsmosisClient()
 
-    with console.spinner(f'Undeploying checkpoint "{checkpoint}"...'):
+    with console.spinner(f'Undeploying checkpoint "{console.escape(checkpoint)}"...'):
         result = client.undeploy_checkpoint(checkpoint, credentials=credentials)
 
     status_str = _format_deployment_status(result.status)

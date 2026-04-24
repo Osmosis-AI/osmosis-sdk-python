@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from io import StringIO
 
 import pytest
@@ -119,6 +120,31 @@ class TestInfo:
         assert "Qwen/Qwen3" in out
         assert "qwen3-run1" in out
 
+    def test_info_escapes_status_for_rich_table(
+        self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
+    ) -> None:
+        captured_rows: list[tuple[str, str]] = []
+
+        class FakeClient:
+            def get_deployment(self, checkpoint, *, credentials=None):
+                return DeploymentInfo(
+                    id="dep_1",
+                    checkpoint_name="qwen3-run1-step-100",
+                    status="[red]failed[/red]",
+                    checkpoint_step=100,
+                    base_model="Qwen/Qwen3",
+                )
+
+        def record_table(rows, *args, **kwargs):
+            captured_rows.extend(rows)
+
+        monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(deployment_module.console, "table", record_table)
+
+        deployment_module.info(checkpoint="qwen3-run1-step-100")
+
+        assert ("Status", "\\[red]failed\\[/red]") in captured_rows
+
 
 class TestDeploy:
     def test_deploy_accepts_checkpoint_name(
@@ -143,6 +169,33 @@ class TestDeploy:
             "credentials": AUTH_CREDENTIALS,
         }
         assert "qwen3-run1-step-100" in console_capture.getvalue()
+
+    def test_deploy_escapes_checkpoint_in_spinner(
+        self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
+    ) -> None:
+        captured: dict[str, object] = {}
+
+        @contextmanager
+        def record_spinner(message):
+            captured["message"] = message
+            yield
+
+        class FakeClient:
+            def deploy_checkpoint(self, checkpoint, *, credentials=None):
+                captured["checkpoint"] = checkpoint
+                return DeploymentSummary(
+                    id="dep_1",
+                    checkpoint_name="qwen3-run1-step-100",
+                    status="active",
+                )
+
+        monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(deployment_module.console, "spinner", record_spinner)
+
+        deployment_module.deploy(checkpoint="[red]bad[/red]")
+
+        assert captured["checkpoint"] == "[red]bad[/red]"
+        assert captured["message"] == 'Deploying checkpoint "\\[red]bad\\[/red]"...'
 
     def test_deploy_failed_result_does_not_force_message_green(
         self, monkeypatch: pytest.MonkeyPatch
@@ -203,6 +256,33 @@ class TestUndeploy:
         }
         assert "qwen3-run1-step-100" in out
         assert "inactive" in out
+
+    def test_undeploy_escapes_checkpoint_in_spinner(
+        self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
+    ) -> None:
+        captured: dict[str, object] = {}
+
+        @contextmanager
+        def record_spinner(message):
+            captured["message"] = message
+            yield
+
+        class FakeClient:
+            def undeploy_checkpoint(self, checkpoint, *, credentials=None):
+                captured["checkpoint"] = checkpoint
+                return DeploymentSummary(
+                    id="dep_1",
+                    checkpoint_name="qwen3-run1-step-100",
+                    status="inactive",
+                )
+
+        monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(deployment_module.console, "spinner", record_spinner)
+
+        deployment_module.undeploy(checkpoint="[red]bad[/red]")
+
+        assert captured["checkpoint"] == "[red]bad[/red]"
+        assert captured["message"] == 'Undeploying checkpoint "\\[red]bad\\[/red]"...'
 
 
 class TestRename:
