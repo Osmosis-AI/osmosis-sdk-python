@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import contextlib
-import os
 import tempfile
 from email.message import Message
 from pathlib import Path
@@ -39,6 +38,7 @@ def _resolve_download_destination(
     filename: str,
     *,
     overwrite: bool,
+    output_is_directory: bool = False,
 ) -> Path:
     safe_filename = _safe_download_filename(filename)
     if safe_filename is None:
@@ -48,10 +48,10 @@ def _resolve_download_destination(
         destination = Path.cwd() / safe_filename
     elif output.exists() and output.is_dir():
         destination = output / safe_filename
-    elif str(output).endswith(os.sep):
-        if not output.exists():
-            raise RuntimeError(f"Output directory not found: {output}")
-        destination = output / safe_filename
+    elif output_is_directory:
+        if output.exists():
+            raise RuntimeError(f"Output is not a directory: {output}")
+        raise RuntimeError(f"Output directory not found: {output}")
     else:
         destination = output
 
@@ -72,6 +72,7 @@ def download_file(
     default_filename: str,
     expected_size: int,
     overwrite: bool = False,
+    output_is_directory: bool = False,
 ) -> Path:
     """Download a presigned URL to disk and return the final path."""
 
@@ -91,6 +92,7 @@ def download_file(
             output,
             header_filename or default_filename,
             overwrite=overwrite,
+            output_is_directory=output_is_directory,
         )
 
         content_length = response.headers.get("content-length")

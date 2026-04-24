@@ -10,6 +10,7 @@ from urllib.parse import unquote, urlparse
 
 from osmosis_ai.cli.console import console
 from osmosis_ai.cli.errors import CLIError
+from osmosis_ai.cli.paths import parse_cli_path
 from osmosis_ai.cli.prompts import confirm, is_interactive
 from osmosis_ai.platform.api.models import STATUSES_IN_PROGRESS
 from osmosis_ai.platform.auth import (
@@ -410,7 +411,8 @@ def download(
         info.file_name or ds.file_name,
         info.presigned_url,
     )
-    output_path = Path(output).expanduser() if output else None
+    parsed_output = parse_cli_path(output, expand_user=True) if output else None
+    output_path = parsed_output.path if parsed_output else None
 
     try:
         destination = download_file(
@@ -419,6 +421,9 @@ def download(
             default_filename=default_filename,
             expected_size=ds.file_size,
             overwrite=overwrite,
+            output_is_directory=(
+                parsed_output.has_trailing_separator if parsed_output else False
+            ),
         )
     except FileExistsError as exc:
         raise CLIError(f"{exc} Use --overwrite to replace it.") from None

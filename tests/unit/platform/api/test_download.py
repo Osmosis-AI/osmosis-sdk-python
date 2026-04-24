@@ -102,6 +102,22 @@ def test_download_file_refuses_to_overwrite_existing_file(
     assert existing.read_text(encoding="utf-8") == "old"
 
 
+def test_resolve_download_destination_rejects_missing_directory_intent(
+    tmp_path,
+) -> None:
+    missing_dir = tmp_path / "missing"
+
+    with pytest.raises(RuntimeError, match="Output directory not found"):
+        download_module._resolve_download_destination(
+            missing_dir,
+            "data.jsonl",
+            overwrite=False,
+            output_is_directory=True,
+        )
+
+    assert not missing_dir.exists()
+
+
 def test_download_file_reports_http_errors(monkeypatch, tmp_path) -> None:
     monkeypatch.setattr(
         download_module.httpx,

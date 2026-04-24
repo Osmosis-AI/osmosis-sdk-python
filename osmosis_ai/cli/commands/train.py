@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import re
 from pathlib import Path
 
@@ -249,11 +248,14 @@ def _resolve_output_path(output: str, run_name: str | None, run_id: str) -> Path
 
     Parent directories are created automatically.
     """
-    path = Path(output)
+    from osmosis_ai.cli.paths import parse_cli_path
+
+    parsed_output = parse_cli_path(output)
+    path = parsed_output.path
 
     try:
         # Directory mode: trailing separator or existing directory
-        if output.endswith(("/", os.sep)) or path.is_dir():
+        if parsed_output.has_trailing_separator or path.is_dir():
             path.mkdir(parents=True, exist_ok=True)
             return path / _default_filename(run_name, run_id)
 

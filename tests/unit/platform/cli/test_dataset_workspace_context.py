@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from io import StringIO
 
 import pytest
@@ -201,12 +202,14 @@ def test_download_uses_active_workspace_context_and_saves_file(
         default_filename: str,
         expected_size: int,
         overwrite: bool,
+        output_is_directory: bool,
     ):
         calls["download_url"] = url
         calls["output"] = output
         calls["default_filename"] = default_filename
         calls["expected_size"] = expected_size
         calls["overwrite"] = overwrite
+        calls["output_is_directory"] = output_is_directory
         return tmp_path / "data.jsonl"
 
     monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
@@ -222,8 +225,72 @@ def test_download_uses_active_workspace_context_and_saves_file(
         "default_filename": "data.jsonl",
         "expected_size": 4,
         "overwrite": True,
+        "output_is_directory": False,
     }
     assert "Dataset downloaded:" in output.getvalue()
+
+
+def test_download_preserves_trailing_separator_as_directory_intent(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    calls: dict[str, object] = {}
+    fake_credentials = object()
+
+    monkeypatch.setattr(
+        dataset_module, "_require_auth", lambda: ("ws-b", fake_credentials)
+    )
+
+    class FakeClient:
+        def get_dataset(
+            self,
+            file_id: str,
+            *,
+            credentials=None,
+        ) -> DatasetFile:
+            assert file_id == "dataset-1"
+            return DatasetFile(
+                id="dataset-1",
+                file_name="data",
+                file_size=4,
+                status="uploaded",
+            )
+
+        def get_dataset_download_url(
+            self,
+            file_id: str,
+            *,
+            credentials=None,
+        ) -> DatasetDownloadInfo:
+            assert file_id == "dataset-1"
+            return DatasetDownloadInfo(
+                presigned_url="https://example.com/data.jsonl",
+                expires_in=3600,
+            )
+
+    def fake_download_file(
+        url: str,
+        *,
+        output,
+        default_filename: str,
+        expected_size: int,
+        overwrite: bool,
+        output_is_directory: bool,
+    ):
+        calls["output"] = output
+        calls["output_is_directory"] = output_is_directory
+        return tmp_path / "data.jsonl"
+
+    monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+    monkeypatch.setattr(download_module, "download_file", fake_download_file)
+
+    missing_dir = tmp_path / "missing"
+    dataset_module.download("dataset-1", output=f"{missing_dir}{os.sep}")
+
+    assert calls == {
+        "output": missing_dir,
+        "output_is_directory": True,
+    }
 
 
 def test_download_rejects_processing_dataset(monkeypatch) -> None:
