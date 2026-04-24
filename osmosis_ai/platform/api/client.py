@@ -9,11 +9,11 @@ from osmosis_ai.platform.auth.platform_client import platform_request
 from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE
 
 from .models import (
-    CreateDeploymentResult,
     DatasetAffectedResources,
     DatasetFile,
     DeleteTrainingRunResult,
     DeploymentInfo,
+    DeploymentSummary,
     ModelAffectedResources,
     PaginatedBaseModels,
     PaginatedDatasets,
@@ -408,93 +408,104 @@ class OsmosisClient:
         return ModelAffectedResources.from_dict(data)
 
     # ── Deployments ───────────────────────────────────────────────
+    # All mutating endpoints key off `checkpoint` (UUID or checkpoint_name).
+    # Lifecycle: deploy → active, undeploy → inactive, failure → failed.
 
     def list_deployments(
         self,
         limit: int = DEFAULT_PAGE_SIZE,
         offset: int = 0,
         *,
-        search: str | None = None,
         credentials: Credentials | None = None,
     ) -> PaginatedDeployments:
-        params: dict[str, str | int] = {"limit": limit, "offset": offset}
-        if search:
-            params["search"] = search
-        qs = urlencode(params)
+        """List LoRA deployments in the current workspace."""
+        qs = urlencode({"limit": limit, "offset": offset})
         data = platform_request(f"/api/cli/deployments?{qs}", credentials=credentials)
         return PaginatedDeployments.from_dict(data)
 
-    def create_deployment(
-        self,
-        *,
-        training_run: str,
-        checkpoint_step: int,
-        lora_name: str | None = None,
-        credentials: Credentials | None = None,
-    ) -> CreateDeploymentResult:
-        """Create a deployment.
-
-        The CLI API accepts ``training_run`` + ``checkpoint_step``.
-        ``training_run`` may be a UUID or training run name, and
-        ``lora_name`` is optional — the server generates one when
-        omitted.
-        """
-        if checkpoint_step is None:
-            raise ValueError("checkpoint_step is required.")
-
-        body: dict[str, Any] = {
-            "training_run": training_run,
-            "checkpoint_step": checkpoint_step,
-        }
-        if lora_name is not None:
-            body["lora_name"] = lora_name
-        data = platform_request(
-            "/api/cli/deployments",
-            method="POST",
-            data=body,
-            credentials=credentials,
-        )
-        return CreateDeploymentResult.from_dict(data["deployment"])
-
     def get_deployment(
         self,
-        name_or_id: str,
+        checkpoint: str,
         *,
         credentials: Credentials | None = None,
     ) -> DeploymentInfo:
+        """Fetch a deployment by checkpoint UUID or checkpoint name."""
         data = platform_request(
-            f"/api/cli/deployments/{_safe_path(name_or_id)}",
+            f"/api/cli/deployments/{_safe_path(checkpoint)}",
             credentials=credentials,
         )
         return DeploymentInfo.from_dict(data["deployment"])
 
+    def deploy_checkpoint(
+        self,
+        checkpoint: str,
+        *,
+        credentials: Credentials | None = None,
+    ) -> DeploymentSummary:
+        """Deploy (or reactivate) a LoRA checkpoint.
+
+        Idempotent: deploying a checkpoint that is already active returns
+        the existing deployment.
+        """
+        data = platform_request(
+            f"/api/cli/deployments/{_safe_path(checkpoint)}/deploy",
+            method="POST",
+            data={},
+            credentials=credentials,
+        )
+        return DeploymentSummary.from_dict(data["deployment"])
+
+    def undeploy_checkpoint(
+        self,
+        checkpoint: str,
+        *,
+        credentials: Credentials | None = None,
+    ) -> DeploymentSummary:
+        """Undeploy a LoRA checkpoint (transitions to ``inactive``)."""
+        data = platform_request(
+            f"/api/cli/deployments/{_safe_path(checkpoint)}/undeploy",
+            method="POST",
+            data={},
+            credentials=credentials,
+        )
+        return DeploymentSummary.from_dict(data)
+
+    def rename_checkpoint(
+        self,
+        checkpoint: str,
+        new_name: str,
+        *,
+        credentials: Credentials | None = None,
+    ) -> RenameDeploymentResult:
+        """Rename a LoRA checkpoint.
+
+        Renaming an ``active`` deployment also re-registers the LoRA with
+        inference under the new name.
+        """
+        data = platform_request(
+            f"/api/cli/deployments/{_safe_path(checkpoint)}",
+            method="PATCH",
+            data={"checkpoint_name": new_name},
+            credentials=credentials,
+        )
+        return RenameDeploymentResult.from_dict(data)
+
     def delete_deployment(
         self,
-        name_or_id: str,
+        checkpoint: str,
         *,
         credentials: Credentials | None = None,
     ) -> bool:
+        """Delete a deployment record (idempotent)."""
         platform_request(
-            f"/api/cli/deployments/{_safe_path(name_or_id)}",
+            f"/api/cli/deployments/{_safe_path(checkpoint)}",
             method="DELETE",
             credentials=credentials,
         )
         return True
 
-    def rename_deployment(
-        self,
-        name_or_id: str,
-        new_name: str,
-        *,
-        credentials: Credentials | None = None,
-    ) -> RenameDeploymentResult:
-        data = platform_request(
-            f"/api/cli/deployments/{_safe_path(name_or_id)}",
-            method="PATCH",
-            data={"lora_name": new_name},
-            credentials=credentials,
-        )
-        return RenameDeploymentResult.from_dict(data["deployment"])
+    # ── Training-run checkpoints ──────────────────────────────────
+    # Still used by `osmosis train status` to list deployable checkpoints.
 
     def list_training_run_checkpoints(
         self,

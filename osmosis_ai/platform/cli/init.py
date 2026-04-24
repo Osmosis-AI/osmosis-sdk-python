@@ -41,7 +41,7 @@ def _check_git_installed() -> None:
 #
 # `osmosis init` scaffolds a `.claude/settings.json` that points Claude Code
 # at the Osmosis plugin marketplace. The plugin hosts the agent skills
-# (`vibe-train`, `autoresearch`, `bootstrap-rollout`, etc.), so updates ship
+# (`plan-training`, `create-rollouts`, `evaluate-rollouts`, etc.), so updates ship
 # via a `git push` to the plugins repo rather than a new SDK release.
 #
 # The env vars let us point scaffolded workspaces at a different repo or

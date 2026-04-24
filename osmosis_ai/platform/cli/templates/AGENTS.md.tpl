@@ -35,13 +35,11 @@ Detailed workflow guidance lives in the **`osmosis` agent plugin**:
 
 | Skill | What it does |
 | --- | --- |
-| `vibe-train` | Orchestrate the full task-to-training workflow. |
-| `bootstrap-rollout` | Create a baseline rollout, grader, and config set in canonical paths. |
-| `iterate-rollout` | Run short local experiment loops driven by eval results. |
-| `create-rollout-server` | Make a rollout entrypoint valid for Osmosis-managed hosting. |
-| `curate-dataset` | Build or refine local datasets under `data/`. |
-| `debug-rollout` | Diagnose rollout, grader, config, or eval failures. |
-| `launch-training` | Prepare a training config and submit it safely. |
+| `plan-training` | Turn a vague task into a concrete local training plan. |
+| `create-rollouts` | Create or adapt rollouts, graders, entrypoints, and baseline eval configs. |
+| `evaluate-rollouts` | Run local evals, compare baselines, and iterate with data. |
+| `debug-rollouts` | Diagnose rollout, grader, config, dataset, or preflight failures. |
+| `submit-training` | Prepare a training config and submit it safely. |
 
 ### Enabling the plugin
 

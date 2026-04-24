@@ -486,6 +486,101 @@ class PaginatedBaseModels:
         )
 
 
+# ── Deployments ──────────────────────────────────────────────────
+# Status lifecycle: "active" / "inactive" / "failed".
+# Naming lives on the LoRA checkpoint (`checkpoint_name`), not the deployment.
+
+DEPLOYMENT_STATUSES_SUCCESS: frozenset[str] = frozenset({"active"})
+DEPLOYMENT_STATUSES_INACTIVE: frozenset[str] = frozenset({"inactive"})
+DEPLOYMENT_STATUSES_ERROR: frozenset[str] = frozenset({"failed"})
+
+
+@dataclass
+class DeploymentInfo:
+    """A LoRA deployment record (one deployment per checkpoint)."""
+
+    id: str
+    checkpoint_name: str
+    status: str
+    checkpoint_step: int
+    base_model: str
+    training_run_id: str | None = None
+    training_run_name: str | None = None
+    creator_name: str | None = None
+    created_at: str = ""
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> DeploymentInfo:
+        return cls(
+            id=data["id"],
+            checkpoint_name=data.get("checkpoint_name", ""),
+            status=data.get("status", ""),
+            checkpoint_step=data.get("checkpoint_step", 0),
+            base_model=data.get("base_model", ""),
+            training_run_id=data.get("training_run_id"),
+            training_run_name=data.get("training_run_name"),
+            creator_name=data.get("creator_name"),
+            created_at=data.get("created_at", ""),
+        )
+
+
+@dataclass
+class PaginatedDeployments:
+    """Paginated list of deployments."""
+
+    deployments: list[DeploymentInfo]
+    total_count: int
+    has_more: bool
+    next_offset: int | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> PaginatedDeployments:
+        return cls(
+            deployments=[
+                DeploymentInfo.from_dict(d) for d in data.get("deployments", [])
+            ],
+            total_count=data.get("total_count", 0),
+            has_more=data.get("has_more", False),
+            next_offset=data.get("next_offset"),
+        )
+
+
+@dataclass
+class DeploymentSummary:
+    """Minimal deployment identity returned from deploy/undeploy endpoints."""
+
+    id: str
+    checkpoint_name: str
+    status: str
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> DeploymentSummary:
+        return cls(
+            id=data["id"],
+            checkpoint_name=data.get("checkpoint_name", ""),
+            status=data.get("status", ""),
+        )
+
+
+@dataclass
+class RenameDeploymentResult:
+    """Result of renaming a checkpoint via PATCH /api/cli/deployments/[checkpointId]."""
+
+    id: str
+    old_checkpoint_name: str
+    checkpoint_name: str
+    status: str
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> RenameDeploymentResult:
+        return cls(
+            id=data["id"],
+            old_checkpoint_name=data.get("old_checkpoint_name", ""),
+            checkpoint_name=data.get("checkpoint_name", ""),
+            status=data.get("status", ""),
+        )
+
+
 # ── Rollouts ─────────────────────────────────────────────────────
 
 
@@ -535,92 +630,7 @@ class PaginatedRollouts:
         )
 
 
-# ── Deployments (output models) ──────────────────────────────────
-
-
-@dataclass
-class DeploymentInfo:
-    """A deployment record — the 'output model' produced by a training run.
-
-    One deployment == one live LoRA adapter registered with inference.
-    """
-
-    id: str
-    lora_name: str
-    status: str
-    base_model: str
-    checkpoint_step: int
-    training_run_id: str | None = None
-    training_run_name: str | None = None
-    creator_name: str | None = None
-    created_at: str = ""
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> DeploymentInfo:
-        return cls(
-            id=data["id"],
-            lora_name=data["lora_name"],
-            status=data.get("status", ""),
-            base_model=data.get("base_model", ""),
-            checkpoint_step=data.get("checkpoint_step", 0),
-            training_run_id=data.get("training_run_id"),
-            training_run_name=data.get("training_run_name"),
-            creator_name=data.get("creator_name"),
-            created_at=data.get("created_at", ""),
-        )
-
-
-@dataclass
-class PaginatedDeployments:
-    """Paginated list of deployments."""
-
-    deployments: list[DeploymentInfo]
-    total_count: int
-    has_more: bool
-    next_offset: int | None = None
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> PaginatedDeployments:
-        return cls(
-            deployments=[
-                DeploymentInfo.from_dict(d) for d in data.get("deployments", [])
-            ],
-            total_count=data.get("total_count", 0),
-            has_more=data.get("has_more", False),
-            next_offset=data.get("next_offset"),
-        )
-
-
-@dataclass
-class CreateDeploymentResult:
-    """Result of creating a deployment."""
-
-    id: str
-    lora_name: str
-    status: str
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> CreateDeploymentResult:
-        return cls(
-            id=data["id"],
-            lora_name=data["lora_name"],
-            status=data.get("status", ""),
-        )
-
-
-@dataclass
-class RenameDeploymentResult:
-    """Result of renaming a deployment."""
-
-    id: str
-    lora_name: str
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> RenameDeploymentResult:
-        return cls(id=data["id"], lora_name=data["lora_name"])
-
-
-# ── LoRA checkpoints (for `osmosis train status` + `deploy create`) ─────
+# ── LoRA checkpoints (for `osmosis train status` + `osmosis deploy`) ─────
 
 
 @dataclass
@@ -630,6 +640,7 @@ class LoraCheckpointInfo:
     id: str
     checkpoint_step: int
     status: str
+    checkpoint_name: str = ""
     created_at: str = ""
 
     @classmethod
@@ -638,6 +649,7 @@ class LoraCheckpointInfo:
             id=data["id"],
             checkpoint_step=data.get("checkpoint_step", 0),
             status=data.get("status", ""),
+            checkpoint_name=data.get("checkpoint_name", ""),
             created_at=data.get("created_at", ""),
         )
 

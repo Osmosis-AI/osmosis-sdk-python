@@ -18,6 +18,9 @@ from osmosis_ai.cli.main import main
         ["dataset", "--help"],
         ["train", "--help"],
         ["model", "--help"],
+        ["deployment", "--help"],
+        ["deploy", "--help"],
+        ["undeploy", "--help"],
         ["rollout", "--help"],
         ["eval", "--help"],
         ["upgrade", "--help"],
@@ -69,6 +72,7 @@ def test_all_groups_in_help_output(capfd):
         "dataset",
         "train",
         "model",
+        "deployment",
         "rollout",
         "eval",
     ]:

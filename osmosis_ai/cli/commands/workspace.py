@@ -49,7 +49,11 @@ def create(
 
     client = OsmosisClient()
     result = client.create_workspace(name, timezone, credentials=credentials)
-    console.print(f"Workspace '{result['name']}' created.", style="green")
+    console.print(
+        f"Workspace '{console.escape(result['name'])}' created.",
+        style="green",
+        highlight=False,
+    )
 
 
 @app.command("delete")
@@ -117,7 +121,11 @@ def delete(
     )
 
     client.delete_workspace(workspace["id"], credentials=credentials)
-    console.print(f"Workspace '{workspace['name']}' deleted.", style="green")
+    console.print(
+        f"Workspace '{console.escape(workspace['name'])}' deleted.",
+        style="green",
+        highlight=False,
+    )
 
 
 @app.command("switch")
