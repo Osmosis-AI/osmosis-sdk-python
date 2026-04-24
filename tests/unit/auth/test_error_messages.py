@@ -70,7 +70,13 @@ class TestGetActiveWorkspaceMessages:
         "osmosis_ai.platform.cli.utils.get_active_workspace_name",
         return_value=None,
     )
-    def test_no_workspace_raises_correct_message(self, _mock: object) -> None:
+    @patch(
+        "osmosis_ai.platform.cli.utils.ensure_active_workspace",
+        return_value=None,
+    )
+    def test_no_workspace_raises_correct_message(
+        self, _auto_mock: object, _mock: object
+    ) -> None:
         from osmosis_ai.platform.cli.utils import _get_active_workspace_name
 
         with pytest.raises(CLIError, match="No workspace selected"):
@@ -80,7 +86,13 @@ class TestGetActiveWorkspaceMessages:
         "osmosis_ai.platform.cli.utils.get_active_workspace_name",
         return_value=None,
     )
-    def test_no_workspace_does_not_say_not_logged_in(self, _mock: object) -> None:
+    @patch(
+        "osmosis_ai.platform.cli.utils.ensure_active_workspace",
+        return_value=None,
+    )
+    def test_no_workspace_does_not_say_not_logged_in(
+        self, _auto_mock: object, _mock: object
+    ) -> None:
         from osmosis_ai.platform.cli.utils import _get_active_workspace_name
 
         with pytest.raises(CLIError) as exc_info:
@@ -88,6 +100,21 @@ class TestGetActiveWorkspaceMessages:
 
         assert "Not logged in" not in str(exc_info.value)
         assert "login" not in str(exc_info.value).lower()
+
+    @patch(
+        "osmosis_ai.platform.cli.utils.get_active_workspace_name",
+        return_value=None,
+    )
+    @patch(
+        "osmosis_ai.platform.cli.utils.ensure_active_workspace",
+        return_value={"id": "ws_only", "name": "solo-workspace"},
+    )
+    def test_single_workspace_is_auto_selected(
+        self, _auto_mock: object, _mock: object
+    ) -> None:
+        from osmosis_ai.platform.cli.utils import _get_active_workspace_name
+
+        assert _get_active_workspace_name() == "solo-workspace"
 
 
 class TestRequireAuthMessages:
@@ -112,8 +139,12 @@ class TestRequireAuthMessages:
         "osmosis_ai.platform.cli.utils.get_active_workspace_name",
         return_value=None,
     )
+    @patch(
+        "osmosis_ai.platform.cli.utils.ensure_active_workspace",
+        return_value=None,
+    )
     def test_logged_in_but_no_workspace_says_no_workspace(
-        self, _ws_mock: object, mock_load: object
+        self, _auto_mock: object, _ws_mock: object, mock_load: object
     ) -> None:
         """When logged in but no workspace, error should say 'No workspace selected'."""
         from osmosis_ai.platform.cli.utils import _require_auth
@@ -122,6 +153,29 @@ class TestRequireAuthMessages:
 
         with pytest.raises(CLIError, match="No workspace selected"):
             _require_auth()
+
+    @patch("osmosis_ai.platform.cli.utils.load_credentials")
+    @patch(
+        "osmosis_ai.platform.cli.utils.get_active_workspace_name",
+        return_value=None,
+    )
+    @patch(
+        "osmosis_ai.platform.cli.utils.ensure_active_workspace",
+        return_value={"id": "ws_only", "name": "solo-workspace"},
+    )
+    def test_logged_in_with_single_workspace_auto_selects(
+        self, _auto_mock: object, _ws_mock: object, mock_load: object
+    ) -> None:
+        """When only one workspace exists, _require_auth should resolve it automatically."""
+        from osmosis_ai.platform.cli.utils import _require_auth
+
+        creds = _make_credentials()
+        mock_load.return_value = creds
+
+        workspace_name, resolved_credentials = _require_auth()
+
+        assert workspace_name == "solo-workspace"
+        assert resolved_credentials is creds
 
 
 class TestPlatformRequestMessages:
@@ -140,7 +194,13 @@ class TestPlatformRequestMessages:
         "osmosis_ai.platform.auth.platform_client.get_active_workspace_id",
         return_value=None,
     )
-    def test_no_workspace_says_workspace_not_expired(self, _mock: object) -> None:
+    @patch(
+        "osmosis_ai.platform.auth.platform_client.ensure_active_workspace",
+        return_value=None,
+    )
+    def test_no_workspace_says_workspace_not_expired(
+        self, _auto_mock: object, _mock: object
+    ) -> None:
         from osmosis_ai.platform.auth.platform_client import platform_request
 
         creds = _make_credentials()

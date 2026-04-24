@@ -119,9 +119,15 @@ class TestPlatformRequest:
     @pytest.fixture(autouse=True)
     def _mock_active_workspace(self) -> Any:
         """Provide a default workspace ID so require_workspace=True doesn't fail."""
-        with patch(
-            "osmosis_ai.platform.auth.platform_client.get_active_workspace_id",
-            return_value="default_ws_test",
+        with (
+            patch(
+                "osmosis_ai.platform.auth.platform_client.get_active_workspace_id",
+                return_value="default_ws_test",
+            ),
+            patch(
+                "osmosis_ai.platform.auth.platform_client.get_active_workspace",
+                return_value={"id": "default_ws_test", "name": "default-workspace"},
+            ),
         ):
             yield
 
@@ -260,12 +266,86 @@ class TestPlatformRequest:
         """Verify PlatformAPIError when require_workspace=True but no workspace is available."""
         creds = _make_credentials()
 
-        with patch(
-            "osmosis_ai.platform.auth.platform_client.get_active_workspace_id",
-            return_value=None,
+        with (
+            patch(
+                "osmosis_ai.platform.auth.platform_client.get_active_workspace_id",
+                return_value=None,
+            ),
+            patch(
+                "osmosis_ai.platform.auth.platform_client.ensure_active_workspace",
+                return_value=None,
+            ),
         ):
             with pytest.raises(PlatformAPIError, match="No workspace selected"):
                 platform_request("/api/test", credentials=creds)
+
+    @patch("osmosis_ai.platform.auth.platform_client.set_active_workspace")
+    @patch("osmosis_ai.platform.auth.platform_client.urlopen")
+    def test_auto_selects_single_workspace_when_none_active(
+        self,
+        mock_urlopen: MagicMock,
+        mock_set_active_workspace: MagicMock,
+    ) -> None:
+        """Verify a single available workspace is auto-selected and reused."""
+        creds = _make_credentials()
+        mock_urlopen.side_effect = [
+            _make_http_response(
+                {"workspaces": [{"id": "ws_only", "name": "solo-workspace"}]}
+            ),
+            _make_http_response({"ok": True}),
+        ]
+
+        with (
+            patch(
+                "osmosis_ai.platform.auth.platform_client.get_active_workspace_id",
+                return_value=None,
+            ),
+            patch(
+                "osmosis_ai.platform.auth.platform_client.get_active_workspace",
+                return_value=None,
+            ),
+        ):
+            platform_request("/api/test", credentials=creds)
+
+        mock_set_active_workspace.assert_called_once_with("ws_only", "solo-workspace")
+        workspace_lookup = mock_urlopen.call_args_list[0][0][0]
+        api_request = mock_urlopen.call_args_list[1][0][0]
+        assert workspace_lookup.full_url.endswith("/api/cli/workspaces")
+        assert api_request.get_header("X-osmosis-org") == "ws_only"
+
+    @patch("osmosis_ai.platform.auth.platform_client.set_active_workspace")
+    @patch("osmosis_ai.platform.auth.platform_client.urlopen")
+    def test_does_not_auto_select_when_multiple_workspaces_available(
+        self,
+        mock_urlopen: MagicMock,
+        mock_set_active_workspace: MagicMock,
+    ) -> None:
+        """Verify multiple workspaces still require an explicit user selection."""
+        creds = _make_credentials()
+        mock_urlopen.return_value = _make_http_response(
+            {
+                "workspaces": [
+                    {"id": "ws_1", "name": "first-workspace"},
+                    {"id": "ws_2", "name": "second-workspace"},
+                ]
+            }
+        )
+
+        with (
+            patch(
+                "osmosis_ai.platform.auth.platform_client.get_active_workspace_id",
+                return_value=None,
+            ),
+            patch(
+                "osmosis_ai.platform.auth.platform_client.get_active_workspace",
+                return_value=None,
+            ),
+        ):
+            with pytest.raises(PlatformAPIError, match="No workspace selected"):
+                platform_request("/api/test", credentials=creds)
+
+        mock_set_active_workspace.assert_not_called()
+        assert mock_urlopen.call_count == 1
 
     @patch("osmosis_ai.platform.auth.platform_client.urlopen")
     def test_get_request_has_no_body(self, mock_urlopen: MagicMock) -> None:

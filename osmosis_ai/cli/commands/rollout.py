@@ -1,14 +1,9 @@
-"""Rollout commands: serve, list."""
+"""Rollout commands: validate, list."""
 
 from __future__ import annotations
 
-import hashlib
-import re
-import time
-import uuid
-from functools import lru_cache
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any
 
 import typer
 
@@ -19,350 +14,127 @@ if TYPE_CHECKING:
     from osmosis_ai.cli.console import Console
 
 app: typer.Typer = typer.Typer(
-    help="Manage rollouts (serve, list).",
+    help="Manage rollouts (validate, list).",
     no_args_is_help=True,
 )
 
-# Valid log levels for uvicorn (defined locally to avoid importing the heavy
-# serve module at CLI parse time).
-LogLevel = Literal["critical", "error", "warning", "info", "debug", "trace"]
 
-
-def _json_error_response(*, status_code: int, detail: str):
-    from starlette.responses import JSONResponse
-
-    return JSONResponse(status_code=status_code, content={"detail": detail})
-
-
-def _format_http_origin(host: str, port: int) -> str:
-    """Format ``http://host:port`` for display and probes; bracket IPv6 literals."""
-    import ipaddress
-
-    h = host.strip()
-    if ":" in h:
-        try:
-            ipaddress.IPv6Address(h)
-        except ValueError:
-            pass
-        else:
-            return f"http://[{h}]:{port}"
-    return f"http://{h}:{port}"
-
-
-def _trace_log_basename(rollout_id: str) -> str:
-    """Flat, path-safe trace filename; original id is still logged in JSONL events."""
-    digest = hashlib.sha256(rollout_id.encode("utf-8")).hexdigest()[:16]
-    stem = rollout_id.replace("\\", "/").replace("/", "_")
-    stem = re.sub(r"[^0-9A-Za-z._-]", "_", stem)
-    stem = re.sub(r"_+", "_", stem).strip("._-")
-    while ".." in stem:
-        stem = stem.replace("..", "_")
-    if not stem:
-        stem = "rollout"
-    stem = stem[:48]
-    return f"{stem}_{digest}.jsonl"
-
-
-@lru_cache(maxsize=1)
-def _tracing_backend_proxy_cls() -> type:
-    """Lazily define tracing proxy so importing this module stays lightweight."""
-    from osmosis_ai.rollout.backend.base import ExecutionBackend, ResultCallback
-    from osmosis_ai.rollout.types import ExecutionRequest, ExecutionResult
-
-    class _TracingBackendProxy(ExecutionBackend):
-        """Thin proxy that JSONL-logs rollout execution events (CLI-layer tracing)."""
-
-        def __init__(self, inner: ExecutionBackend, session_dir: Path) -> None:
-            self._inner = inner
-            self.session_dir = session_dir
-            self.session_dir.mkdir(parents=True, exist_ok=True)
-
-        def __getattr__(self, name: str) -> Any:
-            return getattr(self._inner, name)
-
-        @property
-        def max_concurrency(self) -> int:
-            return self._inner.max_concurrency
-
-        def health(self) -> dict[str, Any]:
-            return self._inner.health()
-
-        async def execute(
-            self,
-            request: ExecutionRequest,
-            on_workflow_complete: ResultCallback,
-            on_grader_complete: ResultCallback | None = None,
-        ) -> None:
-            import json
-
-            log_path = self.session_dir / _trace_log_basename(request.id)
-
-            def _append(event: dict[str, Any]) -> None:
-                event.setdefault("ts", time.time())
-                with open(log_path, "a", encoding="utf-8") as f:
-                    f.write(json.dumps(event, default=str) + "\n")
-
-            _append(
-                {
-                    "event": "rollout_start",
-                    "rollout_id": request.id,
-                    "label": request.label,
-                }
-            )
-
-            async def _wf_wrap(result: ExecutionResult) -> None:
-                _append(
-                    {
-                        "event": "workflow_complete",
-                        "status": str(result.status),
-                        "err_message": result.err_message,
-                    }
-                )
-                await on_workflow_complete(result)
-
-            async def _gr_wrap(result: ExecutionResult) -> None:
-                _append(
-                    {
-                        "event": "grader_complete",
-                        "status": str(result.status),
-                        "err_message": result.err_message,
-                    }
-                )
-                if on_grader_complete:
-                    await on_grader_complete(result)
-
-            await self._inner.execute(
-                request,
-                _wf_wrap,
-                _gr_wrap if on_grader_complete else None,
-            )
-
-    return _TracingBackendProxy
-
-
-def _serve(
-    *,
+def _resolve_validation_target(
     config_path: Path,
-    port: int | None,
-    host: str | None,
-    no_validate: bool,
-    validate_only: bool,
-    log_level: LogLevel | None,
-    console: Console,
-) -> None:
-    if validate_only and no_validate:
-        console.print_error(
-            "Error: --validate-only and --no-validate are mutually exclusive."
-        )
-        raise typer.Exit(1)
+) -> tuple[str, Path, str, str, str | None, str | None]:
+    from osmosis_ai.eval.config import load_eval_config
+    from osmosis_ai.platform.cli.training_config import load_training_config
+    from osmosis_ai.platform.cli.workspace_contract import (
+        ensure_workspace_config_path,
+        resolve_workspace_root,
+        validate_workspace_contract,
+    )
 
-    from osmosis_ai.platform.cli.serve_config import load_serve_config
+    workspace_root = resolve_workspace_root(config_path)
+    validate_workspace_contract(workspace_root)
+
+    resolved_path = config_path.resolve()
+    training_dir = (workspace_root / "configs" / "training").resolve()
+    eval_dir = (workspace_root / "configs" / "eval").resolve()
 
     try:
-        config = load_serve_config(Path(config_path))
-    except CLIError as e:
-        console.print_error(str(e))
-        raise typer.Exit(1) from None
-
-    updates: dict[str, object] = {}
-    if port is not None:
-        updates["server_port"] = port
-    if host is not None:
-        updates["server_host"] = host
-    if log_level is not None:
-        updates["server_log_level"] = log_level
-    if updates:
-        config = config.model_copy(update=updates)
-
-    serve_host = config.server_host
-    serve_port = config.server_port
-    uvicorn_log_level = config.server_log_level
-
-    from osmosis_ai.eval.common.cli import auto_discover_grader, load_workflow
-
-    workflow_cls, workflow_config, entrypoint_module, wf_err = load_workflow(
-        rollout=config.serve_rollout,
-        entrypoint=config.serve_entrypoint,
-        quiet=False,
-        console=console,
-    )
-    if wf_err or workflow_cls is None:
-        console.print_error(wf_err or "Failed to load workflow.")
-        raise typer.Exit(1)
-    assert entrypoint_module is not None
+        resolved_path.relative_to(training_dir)
+    except ValueError:
+        pass
+    else:
+        ensure_workspace_config_path(
+            config_path,
+            workspace_root,
+            config_dir="configs/training",
+            command_label="`osmosis rollout validate`",
+        )
+        config = load_training_config(config_path)
+        return (
+            "training",
+            workspace_root,
+            config.experiment_rollout,
+            config.experiment_entrypoint,
+            None,
+            None,
+        )
 
     try:
-        grader_cls, grader_config = auto_discover_grader(
-            entrypoint_module,
-            entrypoint_label=config.serve_entrypoint,
+        resolved_path.relative_to(eval_dir)
+    except ValueError:
+        pass
+    else:
+        ensure_workspace_config_path(
+            config_path,
+            workspace_root,
+            config_dir="configs/eval",
+            command_label="`osmosis rollout validate`",
         )
-    except CLIError as e:
-        console.print_error(str(e))
-        raise typer.Exit(1) from None
-
-    if grader_cls is None:
-        console.print_error(
-            "No Grader was found in the entrypoint module. "
-            "`osmosis rollout serve` requires a concrete Grader (and typically a "
-            "GraderConfig) alongside the workflow; this cannot be skipped."
+        config = load_eval_config(config_path)
+        return (
+            "eval",
+            workspace_root,
+            config.eval_rollout,
+            config.eval_entrypoint,
+            config.grader_module,
+            config.grader_config,
         )
-        raise typer.Exit(1)
 
-    do_validate = not (no_validate or config.debug_no_validate)
-    if validate_only:
-        do_validate = True
-
-    from osmosis_ai.rollout.validator import validate_backend
-
-    if do_validate:
-        v_result = validate_backend(
-            workflow_cls,
-            workflow_config,
-            grader_cls=grader_cls,
-            grader_config=grader_config,
-        )
-        for w in v_result.warnings:
-            console.print(f"[WARN] [{w.code}] {w.message}")
-        for err in v_result.errors:
-            console.print_error(f"[{err.code}] {err.message}")
-        if not v_result.valid:
-            raise typer.Exit(1)
-
-    if validate_only:
-        console.print("Validation passed.")
-        return
-
-    from osmosis_ai.rollout.validator import resolved_agent_name
-
-    agent_name = resolved_agent_name(workflow_cls, workflow_config)
-
-    from osmosis_ai.rollout.backend.local import LocalBackend
-
-    backend = LocalBackend(
-        workflow=workflow_cls,
-        workflow_config=workflow_config,
-        grader=grader_cls,
-        grader_config=grader_config,
-    )
-
-    trace_session_path: Path | None = None
-    if config.debug_trace_dir:
-        trace_root = Path(config.debug_trace_dir)
-        trace_session_path = trace_root / (
-            f"{int(time.time() * 1000)}_{uuid.uuid4().hex[:12]}"
-        )
-        backend = _tracing_backend_proxy_cls()(backend, trace_session_path)
-
-    from osmosis_ai.rollout.server.app import create_rollout_server
-
-    fastapi_app = create_rollout_server(backend=backend)
-
-    from starlette.middleware.base import BaseHTTPMiddleware
-    from starlette.requests import Request
-
-    class _RolloutLabelMiddleware(BaseHTTPMiddleware):
-        async def dispatch(self, request: Request, call_next):
-            if request.method != "POST" or request.url.path != "/rollout":
-                return await call_next(request)
-            body = await request.body()
-            import json
-
-            async def receive_replay():
-                return {"type": "http.request", "body": body, "more_body": False}
-
-            try:
-                data = json.loads(body)
-            except json.JSONDecodeError:
-                return await call_next(
-                    Request(request.scope, receive_replay),
-                )
-
-            if not isinstance(data, dict) or data.get("label") in (None, ""):
-                return _json_error_response(
-                    status_code=400,
-                    detail=(
-                        "Missing required field 'label' for rollout requests when a "
-                        "grader is configured."
-                    ),
-                )
-
-            return await call_next(Request(request.scope, receive_replay))
-
-    fastapi_app.add_middleware(_RolloutLabelMiddleware)
-
-    grader_name = grader_cls.__name__ if grader_cls else "(none)"
-
-    trace_display = (
-        str(trace_session_path) if trace_session_path is not None else "(off)"
-    )
-
-    console.table(
-        [
-            ("Agent", agent_name),
-            ("Address", _format_http_origin(serve_host, serve_port)),
-            ("Grader", grader_name),
-            ("Trace", trace_display),
-        ],
-        title="Rollout Server",
-    )
-
-    import uvicorn
-
-    uvicorn.run(
-        fastapi_app,
-        host=serve_host,
-        port=serve_port,
-        log_level=str(uvicorn_log_level),
+    raise CLIError(
+        "`osmosis rollout validate` only accepts configs under "
+        "`configs/training/` or `configs/eval/`."
     )
 
 
-@app.command("serve")
-def serve(
+def _validate_rollout_config(*, config_path: Path, console: Console) -> None:
+    from osmosis_ai.platform.cli.workspace_contract import validate_rollout_backend
+
+    (
+        config_kind,
+        workspace_root,
+        rollout,
+        entrypoint,
+        grader_module,
+        grader_config_ref,
+    ) = _resolve_validation_target(config_path)
+
+    validate_rollout_backend(
+        workspace_root=workspace_root,
+        rollout=rollout,
+        entrypoint=entrypoint,
+        command_label="`osmosis rollout validate`",
+        grader_module=grader_module,
+        grader_config_ref=grader_config_ref,
+    )
+
+    rows: list[tuple[str, str]] = [
+        ("Config", str(config_path.resolve())),
+        ("Kind", config_kind),
+        ("Rollout", rollout),
+        ("Entrypoint", entrypoint),
+    ]
+    if grader_module:
+        rows.append(("Grader override", grader_module))
+
+    console.table(rows, title="Rollout Validation")
+    console.print("Validation passed.", style="green")
+
+
+@app.command("validate")
+def validate(
     config_path: Path = typer.Argument(
         ...,
-        exists=False,
+        exists=True,
         file_okay=True,
         dir_okay=False,
         readable=True,
         resolve_path=True,
-        help="Path to serve TOML config file.",
-    ),
-    port: int | None = typer.Option(
-        None,
-        "-p",
-        "--port",
-        help="Port to bind to (overrides config).",
-    ),
-    host: str | None = typer.Option(
-        None,
-        "-H",
-        "--host",
-        help="Host to bind to (overrides config).",
-    ),
-    no_validate: bool = typer.Option(
-        False, "--no-validate", help="Skip backend validation."
-    ),
-    validate_only: bool = typer.Option(
-        False, "--validate-only", help="Validate workflow/grader and exit."
-    ),
-    log_level: LogLevel | None = typer.Option(
-        None,
-        "--log-level",
-        help="Uvicorn log level (overrides config).",
+        help="Path to training or eval TOML config file.",
     ),
 ) -> None:
-    """Start a RolloutServer from a TOML config file."""
+    """Validate a rollout entrypoint referenced by a config file."""
     from osmosis_ai.cli.console import Console
 
-    _serve(
-        config_path=config_path,
-        port=port,
-        host=host,
-        no_validate=no_validate,
-        validate_only=validate_only,
-        log_level=log_level,
-        console=Console(),
-    )
+    _validate_rollout_config(config_path=config_path, console=Console())
 
 
 def _format_commit(r: Any) -> str:

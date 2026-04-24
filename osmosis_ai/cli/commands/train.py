@@ -80,7 +80,7 @@ def status(
 ) -> None:
     """Show training run details."""
     from osmosis_ai.platform.api.client import OsmosisClient
-    from osmosis_ai.platform.api.models import RUN_STATUSES_SUCCESS
+    from osmosis_ai.platform.api.models import RUN_STATUSES_TERMINAL
     from osmosis_ai.platform.auth.platform_client import PlatformAPIError
     from osmosis_ai.platform.cli.utils import (
         _require_auth,
@@ -109,7 +109,7 @@ def status(
 
     console.table(rows, title="Training Run")
 
-    if run.status in RUN_STATUSES_SUCCESS:
+    if run.status in RUN_STATUSES_TERMINAL:
         try:
             ckpts = client.list_training_run_checkpoints(name, credentials=credentials)
         except PlatformAPIError:
@@ -119,16 +119,33 @@ def status(
             console.print()
             console.print("Checkpoints:", style="bold")
             for cp in ckpts.checkpoints:
+                name = (
+                    console.escape(cp.checkpoint_name)
+                    if cp.checkpoint_name
+                    else console.format_styled("(unnamed)", "dim")
+                )
                 step_str = f"step {cp.checkpoint_step}"
                 status_style = entity_status_style(cp.status) or "dim"
                 status_str = console.format_styled(f"[{cp.status}]", status_style)
                 date = format_dim_date(cp.created_at)
-                console.print(f"  {step_str}  {status_str}  {date}", highlight=False)
+                short_id = console.format_styled(cp.id[:8], "dim")
+                console.print(
+                    f"  {name}  {step_str}  {status_str}  {short_id}  {date}",
+                    highlight=False,
+                )
             console.print()
             console.print(
-                f"Deploy with:  osmosis deploy create {console.escape(name)} --step <N>",
+                "Deploy with:  osmosis deploy <checkpoint-name>",
                 style="dim",
             )
+
+
+@app.command("info", hidden=True)
+def info(
+    name: str = typer.Argument(..., help="Training run name."),
+) -> None:
+    """Deprecated alias for `osmosis train status`."""
+    status(name=name)
 
 
 @app.command("submit")
@@ -147,8 +164,28 @@ def submit(
     """Submit a new training run."""
     from osmosis_ai.platform.cli.training_config import load_training_config
     from osmosis_ai.platform.cli.utils import _require_auth, platform_entity_url
+    from osmosis_ai.platform.cli.workspace_contract import (
+        ensure_workspace_config_path,
+        resolve_workspace_root,
+        validate_rollout_backend,
+        validate_workspace_contract,
+    )
 
+    workspace_root = resolve_workspace_root(config_path)
+    validate_workspace_contract(workspace_root)
+    ensure_workspace_config_path(
+        config_path,
+        workspace_root,
+        config_dir="configs/training",
+        command_label="`osmosis train submit`",
+    )
     config = load_training_config(config_path)
+    validate_rollout_backend(
+        workspace_root=workspace_root,
+        rollout=config.experiment_rollout,
+        entrypoint=config.experiment_entrypoint,
+        command_label="`osmosis train submit`",
+    )
     ws_name, credentials = _require_auth()
 
     rows: list[tuple[str, str]] = [
@@ -179,9 +216,11 @@ def submit(
             credentials=credentials,
         )
 
-    url = platform_entity_url(ws_name, "training", result.id)
+    url = console.escape(platform_entity_url(ws_name, "training", result.id))
     console.print(
-        f"Training run submitted: {console.escape(result.name)}", style="green"
+        f"Training run submitted: {console.escape(result.name)}",
+        style="green",
+        highlight=False,
     )
     console.print(f"  Status: {result.status}")
     console.print(f"  View: {url}")
@@ -285,9 +324,9 @@ def metrics(
     is_in_progress = run.status in RUN_STATUSES_IN_PROGRESS
 
     # ── Platform URL (no metrics dependency) ─────────────────────
-    url = platform_entity_url(ws_name, "training", run.id)
+    url = console.escape(platform_entity_url(ws_name, "training", run.id))
     console.print()
-    console.print(f"View full details: {url}", style="cyan")
+    console.print(f"View full details: {url}", style="cyan", highlight=False)
     console.print()
 
     # ── Fetch metrics (best-effort) ──────────────────────────────
@@ -368,9 +407,17 @@ def metrics(
                 else _resolve_default_output(run.name, run.id)
             )
             out_path.write_text(json.dumps(export, indent=2, ensure_ascii=False) + "\n")
-            console.print(f"Saved to {out_path}", style="green")
+            console.print(
+                f"Saved to {console.escape(str(out_path))}",
+                style="green",
+                highlight=False,
+            )
         except (CLIError, OSError) as exc:
-            console.print(f"Could not save metrics: {exc}", style="yellow")
+            console.print(
+                f"Could not save metrics: {console.escape(str(exc))}",
+                style="yellow",
+                highlight=False,
+            )
 
 
 @app.command("traces")
@@ -398,7 +445,11 @@ def stop(
     require_confirmation(f'Stop training run "{name}"?', yes=yes)
 
     client.stop_training_run(name, credentials=credentials)
-    console.print(f'Training run "{name}" stopped.', style="green")
+    console.print(
+        f'Training run "{console.escape(name)}" stopped.',
+        style="green",
+        highlight=False,
+    )
 
 
 @app.command("delete")
@@ -422,4 +473,8 @@ def delete(
     )
 
     client.delete_training_run(name, credentials=credentials)
-    console.print(f'Training run "{name}" deleted.', style="green")
+    console.print(
+        f'Training run "{console.escape(name)}" deleted.',
+        style="green",
+        highlight=False,
+    )

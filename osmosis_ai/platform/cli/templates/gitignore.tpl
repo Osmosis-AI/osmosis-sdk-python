@@ -31,6 +31,11 @@ coverage.xml
 .env
 .env.*
 
+# ── Agent tooling (personal overrides only) ──────────
+# `.claude/settings.json` is committed — it registers the osmosis plugin
+# marketplace for the whole team. Personal overrides go in settings.local.json.
+.claude/settings.local.json
+
 # ── OS ──────────────────────────────────────────────
 .DS_Store
 Thumbs.db

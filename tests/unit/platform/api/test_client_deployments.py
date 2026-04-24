@@ -1,10 +1,14 @@
-"""Tests for OsmosisClient deployment + checkpoint methods."""
+"""Tests for OsmosisClient deployment + checkpoint methods.
+
+Covers the checkpoint-centric API:
+    list_deployments / get_deployment / deploy_checkpoint /
+    undeploy_checkpoint / rename_checkpoint / delete_deployment /
+    list_training_run_checkpoints
+"""
 
 from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
-
-import pytest
 
 from osmosis_ai.platform.api.client import OsmosisClient
 
@@ -27,20 +31,7 @@ class TestListDeployments:
         assert "offset=5" in args[0]
 
     @patch("osmosis_ai.platform.api.client.platform_request")
-    def test_with_search(self, mock_req: MagicMock) -> None:
-        mock_req.return_value = {
-            "deployments": [],
-            "total_count": 0,
-            "has_more": False,
-            "next_offset": None,
-        }
-        client = OsmosisClient()
-        client.list_deployments(search="my-lora")
-        args, _ = mock_req.call_args
-        assert "search=my-lora" in args[0]
-
-    @patch("osmosis_ai.platform.api.client.platform_request")
-    def test_no_search_no_param(self, mock_req: MagicMock) -> None:
+    def test_defaults(self, mock_req: MagicMock) -> None:
         mock_req.return_value = {
             "deployments": [],
             "total_count": 0,
@@ -50,95 +41,38 @@ class TestListDeployments:
         client = OsmosisClient()
         client.list_deployments()
         args, _ = mock_req.call_args
-        assert "search=" not in args[0]
-
-
-class TestCreateDeployment:
-    @patch("osmosis_ai.platform.api.client.platform_request")
-    def test_with_step(self, mock_req: MagicMock) -> None:
-        mock_req.return_value = {
-            "deployment": {
-                "id": "dep_1",
-                "lora_name": "auto-generated",
-                "status": "deployed",
-            }
-        }
-        client = OsmosisClient()
-        result = client.create_deployment(
-            training_run="qwen3-run1", checkpoint_step=100
-        )
-        assert result.id == "dep_1"
-
-        args, kwargs = mock_req.call_args
-        assert args[0] == "/api/cli/deployments"
-        assert kwargs["method"] == "POST"
-        assert kwargs["data"] == {
-            "training_run": "qwen3-run1",
-            "checkpoint_step": 100,
-        }
-
-    @patch("osmosis_ai.platform.api.client.platform_request")
-    def test_with_name_override(self, mock_req: MagicMock) -> None:
-        mock_req.return_value = {
-            "deployment": {
-                "id": "dep_1",
-                "lora_name": "custom",
-                "status": "deployed",
-            }
-        }
-        client = OsmosisClient()
-        client.create_deployment(
-            training_run="qwen3-run1", checkpoint_step=100, lora_name="custom"
-        )
-        _, kwargs = mock_req.call_args
-        assert kwargs["data"]["lora_name"] == "custom"
-
-    @patch("osmosis_ai.platform.api.client.platform_request")
-    def test_none_fields_omitted(self, mock_req: MagicMock) -> None:
-        mock_req.return_value = {
-            "deployment": {"id": "dep_1", "lora_name": "x", "status": "deployed"}
-        }
-        client = OsmosisClient()
-        client.create_deployment(training_run="run", checkpoint_step=0)
-        _, kwargs = mock_req.call_args
-        assert set(kwargs["data"].keys()) == {"training_run", "checkpoint_step"}
-
-    def test_requires_checkpoint_step(self) -> None:
-        client = OsmosisClient()
-        with pytest.raises(ValueError, match="checkpoint_step is required"):
-            client.create_deployment(
-                training_run="run",
-                checkpoint_step=None,  # type: ignore[arg-type]
-            )
+        assert "/api/cli/deployments?" in args[0]
+        assert "limit=" in args[0]
+        assert "offset=0" in args[0]
 
 
 class TestGetDeployment:
     @patch("osmosis_ai.platform.api.client.platform_request")
-    def test_by_name(self, mock_req: MagicMock) -> None:
+    def test_by_checkpoint_name(self, mock_req: MagicMock) -> None:
         mock_req.return_value = {
             "deployment": {
                 "id": "dep_1",
-                "lora_name": "x",
-                "status": "deployed",
+                "checkpoint_name": "qwen3-step-100",
+                "status": "active",
+                "checkpoint_step": 100,
                 "base_model": "Qwen/Qwen3",
-                "checkpoint_step": 1,
             }
         }
         client = OsmosisClient()
-        result = client.get_deployment("my-lora")
-        assert result.lora_name == "x"
+        result = client.get_deployment("qwen3-step-100")
+        assert result.checkpoint_name == "qwen3-step-100"
         args, _ = mock_req.call_args
-        assert args[0] == "/api/cli/deployments/my-lora"
+        assert args[0] == "/api/cli/deployments/qwen3-step-100"
 
     @patch("osmosis_ai.platform.api.client.platform_request")
     def test_urlencodes_path(self, mock_req: MagicMock) -> None:
         mock_req.return_value = {
             "deployment": {
                 "id": "d",
-                "lora_name": "x",
-                "status": "deployed",
-                "base_model": "q",
+                "checkpoint_name": "x",
+                "status": "active",
                 "checkpoint_step": 0,
+                "base_model": "q",
             }
         }
         client = OsmosisClient()
@@ -147,28 +81,81 @@ class TestGetDeployment:
         assert "../" not in args[0]
 
 
+class TestDeployCheckpoint:
+    @patch("osmosis_ai.platform.api.client.platform_request")
+    def test_deploy(self, mock_req: MagicMock) -> None:
+        mock_req.return_value = {
+            "deployment": {
+                "id": "dep_1",
+                "checkpoint_name": "qwen3-step-100",
+                "status": "active",
+            }
+        }
+        client = OsmosisClient()
+        result = client.deploy_checkpoint("qwen3-step-100")
+        assert result.id == "dep_1"
+        assert result.status == "active"
+        args, kwargs = mock_req.call_args
+        assert args[0] == "/api/cli/deployments/qwen3-step-100/deploy"
+        assert kwargs["method"] == "POST"
+        assert kwargs["data"] == {}
+
+    @patch("osmosis_ai.platform.api.client.platform_request")
+    def test_deploy_urlencodes_path(self, mock_req: MagicMock) -> None:
+        mock_req.return_value = {
+            "deployment": {"id": "d", "checkpoint_name": "x", "status": "active"}
+        }
+        client = OsmosisClient()
+        client.deploy_checkpoint("../bad")
+        args, _ = mock_req.call_args
+        assert "../" not in args[0]
+
+
+class TestUndeployCheckpoint:
+    @patch("osmosis_ai.platform.api.client.platform_request")
+    def test_undeploy(self, mock_req: MagicMock) -> None:
+        mock_req.return_value = {
+            "id": "dep_1",
+            "checkpoint_name": "qwen3-step-100",
+            "status": "inactive",
+        }
+        client = OsmosisClient()
+        result = client.undeploy_checkpoint("qwen3-step-100")
+        assert result.status == "inactive"
+        args, kwargs = mock_req.call_args
+        assert args[0] == "/api/cli/deployments/qwen3-step-100/undeploy"
+        assert kwargs["method"] == "POST"
+        assert kwargs["data"] == {}
+
+
+class TestRenameCheckpoint:
+    @patch("osmosis_ai.platform.api.client.platform_request")
+    def test_rename(self, mock_req: MagicMock) -> None:
+        mock_req.return_value = {
+            "id": "dep_1",
+            "old_checkpoint_name": "old-name",
+            "checkpoint_name": "new-name",
+            "status": "active",
+        }
+        client = OsmosisClient()
+        result = client.rename_checkpoint("old-name", "new-name")
+        assert result.checkpoint_name == "new-name"
+        assert result.old_checkpoint_name == "old-name"
+        args, kwargs = mock_req.call_args
+        assert args[0] == "/api/cli/deployments/old-name"
+        assert kwargs["method"] == "PATCH"
+        assert kwargs["data"] == {"checkpoint_name": "new-name"}
+
+
 class TestDeleteDeployment:
     @patch("osmosis_ai.platform.api.client.platform_request")
     def test_delete(self, mock_req: MagicMock) -> None:
         mock_req.return_value = {"deleted": True}
         client = OsmosisClient()
-        assert client.delete_deployment("my-lora") is True
+        assert client.delete_deployment("qwen3-step-100") is True
         args, kwargs = mock_req.call_args
-        assert args[0] == "/api/cli/deployments/my-lora"
+        assert args[0] == "/api/cli/deployments/qwen3-step-100"
         assert kwargs["method"] == "DELETE"
-
-
-class TestRenameDeployment:
-    @patch("osmosis_ai.platform.api.client.platform_request")
-    def test_rename(self, mock_req: MagicMock) -> None:
-        mock_req.return_value = {"deployment": {"id": "dep_1", "lora_name": "new-name"}}
-        client = OsmosisClient()
-        result = client.rename_deployment("old-name", "new-name")
-        assert result.lora_name == "new-name"
-        args, kwargs = mock_req.call_args
-        assert args[0] == "/api/cli/deployments/old-name"
-        assert kwargs["method"] == "PATCH"
-        assert kwargs["data"] == {"lora_name": "new-name"}
 
 
 class TestListTrainingRunCheckpoints:

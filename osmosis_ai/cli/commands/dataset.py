@@ -7,7 +7,7 @@ import typer
 from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE
 
 app: typer.Typer = typer.Typer(
-    help="Manage datasets (upload, list, status, preview, validate, delete).",
+    help="Manage datasets (upload, list, info, preview, validate, delete).",
     no_args_is_help=True,
 )
 
@@ -35,14 +35,14 @@ def list_datasets(
     _list_datasets(limit=limit, all_=all_)
 
 
-@app.command("status")
-def status(
+@app.command("info")
+def info(
     name: str = typer.Argument(..., help="Dataset name."),
 ) -> None:
-    """Check dataset processing status."""
-    from osmosis_ai.platform.cli.dataset import status as _status
+    """Show dataset details and processing status."""
+    from osmosis_ai.platform.cli.dataset import info as _info
 
-    _status(name=name)
+    _info(name=name)
 
 
 @app.command("preview")

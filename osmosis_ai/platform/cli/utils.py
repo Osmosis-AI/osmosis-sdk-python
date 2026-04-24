@@ -20,6 +20,7 @@ from osmosis_ai.platform.api.models import (
 from osmosis_ai.platform.auth import (
     AuthenticationExpiredError,
     PlatformAPIError,
+    ensure_active_workspace,
     load_credentials,
 )
 from osmosis_ai.platform.auth.config import PLATFORM_URL
@@ -268,9 +269,15 @@ def validate_list_options(
     return limit, all_
 
 
-def _get_active_workspace_name() -> str:
+def _get_active_workspace_name(
+    credentials: Credentials | None = None,
+) -> str:
     """Return the active workspace name, or raise if none is selected."""
     workspace_name = get_active_workspace_name()
+    if workspace_name is None:
+        active_workspace = ensure_active_workspace(credentials=credentials)
+        if active_workspace is not None:
+            workspace_name = active_workspace["name"]
     if workspace_name is None:
         raise CLIError(
             "No workspace selected. Run 'osmosis workspace' to select a workspace."
@@ -289,7 +296,7 @@ def _require_auth(
     """
     credentials = require_credentials()
     if workspace_name is None:
-        workspace_name = _get_active_workspace_name()
+        workspace_name = _get_active_workspace_name(credentials)
     return workspace_name, credentials
 
 

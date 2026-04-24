@@ -1,4 +1,8 @@
-"""Model management commands."""
+"""Base-model management commands.
+
+LoRA deployments live under ``osmosis deployment`` — this group is
+scoped to base (foundation) models only.
+"""
 
 from __future__ import annotations
 
@@ -11,8 +15,7 @@ from osmosis_ai.cli.console import console
 from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE
 
 app: typer.Typer = typer.Typer(
-    help="Manage models (base models and trainable checkpoints).",
-    no_args_is_help=True,
+    help="Manage base models (list, delete).", no_args_is_help=True
 )
 
 
@@ -145,4 +148,8 @@ def delete(
 
     require_confirmation(f'Delete model "{name}"? This cannot be undone.', yes=yes)
     client.delete_model(name, credentials=credentials)
-    console.print(f'Model "{name}" deleted.', style="green")
+    console.print(
+        f'Model "{console.escape(name)}" deleted.',
+        style="green",
+        highlight=False,
+    )
