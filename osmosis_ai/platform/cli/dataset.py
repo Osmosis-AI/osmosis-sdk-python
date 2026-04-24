@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import time
 from collections.abc import Iterable
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
+from urllib.parse import unquote, urlparse
 
 from osmosis_ai.cli.console import console
 from osmosis_ai.cli.errors import CLIError
@@ -371,6 +372,64 @@ def preview(
             console.print(str(row))
     else:
         console.print(str(data_rows))
+
+
+def _default_download_filename(file_name: str, presigned_url: str) -> str:
+    """Choose a useful filename when the platform response omits one."""
+    if Path(file_name).suffix:
+        return file_name
+
+    suffix = PurePosixPath(unquote(urlparse(presigned_url).path)).suffix
+    if suffix.lstrip(".").lower() in VALID_EXTENSIONS:
+        return f"{file_name}{suffix}"
+    return file_name
+
+
+def download(
+    name: str,
+    output: str | None = None,
+    overwrite: bool = False,
+) -> None:
+    """Download a dataset file."""
+    _ws_name, credentials = _require_auth()
+    from osmosis_ai.platform.api.client import OsmosisClient
+    from osmosis_ai.platform.api.download import download_file
+
+    client = OsmosisClient()
+    ds = client.get_dataset(name, credentials=credentials)
+    if ds.status != "uploaded":
+        if ds.status in STATUSES_IN_PROGRESS:
+            raise CLIError(
+                f"Dataset is still processing (status: {ds.status}). "
+                "Try again after it finishes uploading."
+            )
+        raise CLIError(f"Dataset is not available for download (status: {ds.status}).")
+
+    info = client.get_dataset_download_url(name, credentials=credentials)
+    default_filename = _default_download_filename(
+        info.file_name or ds.file_name,
+        info.presigned_url,
+    )
+    output_path = Path(output).expanduser() if output else None
+
+    try:
+        destination = download_file(
+            info.presigned_url,
+            output=output_path,
+            default_filename=default_filename,
+            expected_size=ds.file_size,
+            overwrite=overwrite,
+        )
+    except FileExistsError as exc:
+        raise CLIError(f"{exc} Use --overwrite to replace it.") from None
+    except Exception as exc:
+        raise CLIError(f"Download failed: {exc}") from exc
+
+    console.print(
+        f"Dataset downloaded: {console.escape(str(destination))}",
+        style="green",
+        highlight=False,
+    )
 
 
 def delete(

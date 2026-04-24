@@ -102,6 +102,32 @@ class DatasetFile:
 
 
 @dataclass
+class DatasetDownloadInfo:
+    """Download instructions returned by the dataset download endpoint."""
+
+    presigned_url: str
+    expires_in: int | None = None
+    file_name: str | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> DatasetDownloadInfo:
+        expires_in = data.get("expires_in")
+        if expires_in is None:
+            expires_in = data.get("expiresIn")
+
+        return cls(
+            presigned_url=data.get("presigned_url") or data["presignedUrl"],
+            expires_in=expires_in,
+            file_name=(
+                data.get("file_name")
+                or data.get("fileName")
+                or data.get("download_file_name")
+                or data.get("downloadFileName")
+            ),
+        )
+
+
+@dataclass
 class PaginatedDatasets:
     """Paginated list of datasets."""
 

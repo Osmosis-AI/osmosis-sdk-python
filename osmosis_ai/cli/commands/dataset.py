@@ -7,7 +7,7 @@ import typer
 from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE
 
 app: typer.Typer = typer.Typer(
-    help="Manage datasets (upload, list, info, preview, validate, delete).",
+    help="Manage datasets (upload, download, list, info, preview, validate, delete).",
     no_args_is_help=True,
 )
 
@@ -20,6 +20,27 @@ def upload(
     from osmosis_ai.platform.cli.dataset import upload as _upload
 
     _upload(file=file)
+
+
+@app.command("download")
+def download(
+    name: str = typer.Argument(..., help="Dataset name or ID."),
+    output: str | None = typer.Option(
+        None,
+        "--output",
+        "-o",
+        help="Destination file or existing directory.",
+    ),
+    overwrite: bool = typer.Option(
+        False,
+        "--overwrite",
+        help="Replace the destination file if it already exists.",
+    ),
+) -> None:
+    """Download a dataset file."""
+    from osmosis_ai.platform.cli.dataset import download as _download
+
+    _download(name=name, output=output, overwrite=overwrite)
 
 
 @app.command("list")
