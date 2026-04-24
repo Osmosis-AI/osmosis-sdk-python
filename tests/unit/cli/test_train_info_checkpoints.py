@@ -1,4 +1,4 @@
-"""Tests for 'osmosis train info' checkpoints section."""
+"""Tests for 'osmosis train status' checkpoints section."""
 
 from __future__ import annotations
 
@@ -64,7 +64,7 @@ def _make_stopped_run() -> TrainingRunDetail:
     )
 
 
-class TestInfoCheckpoints:
+class TestStatusCheckpoints:
     def test_finished_run_shows_checkpoints_section(
         self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
     ) -> None:
@@ -88,7 +88,7 @@ class TestInfoCheckpoints:
                 )
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-        train_module.info(name="qwen3-run1")
+        train_module.status(name="qwen3-run1")
         out = console_capture.getvalue()
         assert "Checkpoints" in out
         assert "qwen3-run1-step-100" in out
@@ -112,7 +112,7 @@ class TestInfoCheckpoints:
                 raise AssertionError("should not call for running run")
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-        train_module.info(name="qwen3-run1")
+        train_module.status(name="qwen3-run1")
         out = console_capture.getvalue()
         assert "Checkpoints" not in out
         assert called["ckpts"] is False
@@ -140,7 +140,7 @@ class TestInfoCheckpoints:
                 )
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-        train_module.info(name="qwen3-run1")
+        train_module.status(name="qwen3-run1")
         out = console_capture.getvalue()
         assert "stopped" in out
         assert "Checkpoints" in out
@@ -159,7 +159,7 @@ class TestInfoCheckpoints:
                 raise PlatformAPIError("Internal server error", 500)
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-        train_module.info(name="qwen3-run1")
+        train_module.status(name="qwen3-run1")
         out = console_capture.getvalue()
         assert "Checkpoints" not in out
         assert "Training Run" in out
@@ -179,7 +179,7 @@ class TestInfoCheckpoints:
                 )
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-        train_module.info(name="qwen3-run1")
+        train_module.status(name="qwen3-run1")
         out = console_capture.getvalue()
         assert "Checkpoints" not in out
         assert "Deploy with:" not in out

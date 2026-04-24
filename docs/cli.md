@@ -42,42 +42,23 @@ In non-interactive environments, prints current context and exits.
 
 ## Rollout
 
-### osmosis rollout serve
+### osmosis rollout validate
 
-Start a RolloutServer from a TOML file.
+Validate the rollout entrypoint referenced by a training or eval config.
 
-`osmosis rollout serve` requires the entrypoint module to expose a concrete `AgentWorkflow` and a concrete `Grader`. In practice you will usually also define a `GraderConfig`. If no grader is discoverable, serve fails before startup.
+`osmosis rollout validate` requires the resolved entrypoint module to expose a
+concrete `AgentWorkflow` and a concrete `Grader` (unless an eval config
+provides an explicit grader override).
 
 ```bash
-osmosis rollout serve serve.toml
-osmosis rollout serve serve.toml -p 9100 -H 127.0.0.1
-osmosis rollout serve serve.toml --validate-only
+osmosis rollout validate configs/eval/my-rollout.toml
+osmosis rollout validate configs/training/my-run.toml
 ```
 
-**`serve.toml` shape (minimal):**
+The command only accepts configs under these canonical workspace paths:
 
-```toml
-[serve]
-rollout = "my_rollout"
-entrypoint = "workflow.py"
-
-[server]
-port = 9000
-host = "0.0.0.0"
-log_level = "info"
-
-[debug]
-no_validate = false
-# trace_dir = "./traces"
-```
-
-| Option | Description |
-|--------|-------------|
-| `-p` / `--port` | Override `[server].port` |
-| `-H` / `--host` | Override `[server].host` |
-| `--no-validate` | Skip backend validation |
-| `--validate-only` | Validate the required workflow/grader pair and exit |
-| `--log-level` | Override Uvicorn log level |
+- `configs/eval/<name>.toml`
+- `configs/training/<name>.toml`
 
 ### osmosis rollout list
 
@@ -95,12 +76,15 @@ osmosis rollout list --all
 
 Evaluate using a TOML config. The workflow is loaded from the entrypoint module, and the grader is usually auto-discovered from that same module, so most configs do not need a separate `[grader]` table. If the grader lives elsewhere, set `[grader].module` and optional `[grader].config`.
 
+`osmosis eval run` expects the config file to live under `configs/eval/` inside a
+structured Osmosis workspace.
+
 ```bash
-osmosis eval run eval.toml
-osmosis eval run eval.toml --fresh
-osmosis eval run eval.toml --retry-failed
-osmosis eval run eval.toml --limit 20 --batch-size 4
-osmosis eval run eval.toml -o ./results --log-samples
+osmosis eval run configs/eval/my-rollout.toml
+osmosis eval run configs/eval/my-rollout.toml --fresh
+osmosis eval run configs/eval/my-rollout.toml --retry-failed
+osmosis eval run configs/eval/my-rollout.toml --limit 20 --batch-size 4
+osmosis eval run configs/eval/my-rollout.toml -o ./results --log-samples
 ```
 
 See [Eval](./eval.md) for the full `[eval]`, `[llm]`, `[runs]`, `[baseline]`, and `[output]` sections.

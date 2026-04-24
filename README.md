@@ -19,16 +19,16 @@
 
 > ⚠️ **Warning**: osmosis-ai is still in active development. APIs may change between versions.
 
-Python SDK for [Osmosis AI](https://platform.osmosis.ai), a platform for training LLMs with reinforcement learning. Implement an **AgentWorkflow** in Python, add a concrete **Grader** for serve/eval flows, drive them locally with the CLI, then connect a **RolloutServer** to managed training.
+Python SDK for [Osmosis AI](https://platform.osmosis.ai), a platform for training LLMs with reinforcement learning. Implement an **AgentWorkflow** in Python, add a concrete **Grader** for local eval and managed training flows, validate the rollout entrypoint locally with the CLI, then let Osmosis managed hosting load it through Git Sync.
 
 ## Quick start
 
 | Step | What you do |
 |------|-------------|
-| **Define agents** | One `AgentWorkflow` subclass (+ optional `AgentWorkflowConfig`) in your repo. For `rollout serve`, the entrypoint must also expose a concrete `Grader` (typically with a `GraderConfig`). |
+| **Define agents** | One `AgentWorkflow` subclass (+ optional `AgentWorkflowConfig`) in your repo. The training/eval entrypoint must also expose a concrete `Grader` (typically with a `GraderConfig`). |
 | **Layout** | Use a rollout pack directory under `rollouts/<name>/` when loading by rollout name; the CLI adds that directory to `sys.path`. |
-| **Serve** | `osmosis rollout serve serve.toml` — HTTP server for TrainGate. The entrypoint module must expose a concrete `Grader` (typically with a `GraderConfig`); config is TOML (`[serve]`, `[server]`, `[debug]`). |
-| **Evaluate** | `osmosis eval run eval.toml` — same execution stack as training, with optional pass@k and caching. |
+| **Validate** | `osmosis rollout validate configs/training/<name>.toml` — validate the rollout entrypoint referenced by a training or eval config before managed hosting or training submission. |
+| **Evaluate** | `osmosis eval run configs/eval/<name>.toml` — same execution stack as training, with optional pass@k and caching. |
 
 **Example repositories:** [osmosis-git-sync-example](https://github.com/Osmosis-AI/osmosis-git-sync-example) (synced agent repo patterns) · [osmosis-remote-rollout-example](https://github.com/Osmosis-AI/osmosis-remote-rollout-example) (reference server usage — align with current SDK exports when upgrading).
 

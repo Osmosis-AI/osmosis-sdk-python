@@ -74,8 +74,8 @@ def list_runs(
     print_pagination_footer(len(training_runs), total_count, "training runs")
 
 
-@app.command("info")
-def info(
+@app.command("status")
+def status(
     name: str = typer.Argument(..., help="Training run name."),
 ) -> None:
     """Show training run details."""
@@ -140,6 +140,14 @@ def info(
             )
 
 
+@app.command("info", hidden=True)
+def info(
+    name: str = typer.Argument(..., help="Training run name."),
+) -> None:
+    """Deprecated alias for `osmosis train status`."""
+    status(name=name)
+
+
 @app.command("submit")
 def submit(
     config_path: Path = typer.Argument(
@@ -156,8 +164,28 @@ def submit(
     """Submit a new training run."""
     from osmosis_ai.platform.cli.training_config import load_training_config
     from osmosis_ai.platform.cli.utils import _require_auth, platform_entity_url
+    from osmosis_ai.platform.cli.workspace_contract import (
+        ensure_workspace_config_path,
+        resolve_workspace_root,
+        validate_rollout_backend,
+        validate_workspace_contract,
+    )
 
+    workspace_root = resolve_workspace_root(config_path)
+    validate_workspace_contract(workspace_root)
+    ensure_workspace_config_path(
+        config_path,
+        workspace_root,
+        config_dir="configs/training",
+        command_label="`osmosis train submit`",
+    )
     config = load_training_config(config_path)
+    validate_rollout_backend(
+        workspace_root=workspace_root,
+        rollout=config.experiment_rollout,
+        entrypoint=config.experiment_entrypoint,
+        command_label="`osmosis train submit`",
+    )
     ws_name, credentials = _require_auth()
 
     rows: list[tuple[str, str]] = [

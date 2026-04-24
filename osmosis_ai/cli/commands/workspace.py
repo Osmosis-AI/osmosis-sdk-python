@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import typer
 
 app: typer.Typer = typer.Typer(
@@ -134,3 +136,38 @@ def switch(
     from osmosis_ai.platform.cli.workspace import switch_workspace
 
     switch_workspace(workspace=workspace)
+
+
+@app.command("validate")
+def validate(
+    path: Path = typer.Argument(
+        Path("."),
+        exists=True,
+        file_okay=False,
+        dir_okay=True,
+        resolve_path=True,
+        help="Workspace path (defaults to current directory).",
+    ),
+) -> None:
+    """Validate the canonical Osmosis workspace structure."""
+    from osmosis_ai.cli.console import console
+    from osmosis_ai.platform.cli.workspace_contract import (
+        resolve_workspace_root,
+        validate_workspace_contract,
+    )
+
+    workspace_root = resolve_workspace_root(path)
+    validate_workspace_contract(workspace_root)
+    console.table(
+        [
+            ("Root", str(workspace_root)),
+            ("Workspace metadata", ".osmosis/workspace.toml"),
+            ("Research", ".osmosis/research/"),
+            ("Rollouts", "rollouts/"),
+            ("Training configs", "configs/training/"),
+            ("Eval configs", "configs/eval/"),
+            ("Datasets", "data/"),
+        ],
+        title="Workspace Contract",
+    )
+    console.print("Workspace contract is valid.", style="green")

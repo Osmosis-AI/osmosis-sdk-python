@@ -11,6 +11,7 @@ import osmosis_ai.cli.commands.train as train_module
 import osmosis_ai.platform.api.client as api_client_module
 import osmosis_ai.platform.cli.utils as utils_module
 from osmosis_ai.cli.console import Console
+from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.platform.api.models import (
     DeleteTrainingRunResult,
     PaginatedTrainingRuns,
@@ -124,12 +125,12 @@ class TestListRuns:
 
 
 # ---------------------------------------------------------------------------
-# info
+# status
 # ---------------------------------------------------------------------------
 
 
-class TestInfo:
-    def test_info_basic(
+class TestStatus:
+    def test_status_basic(
         self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
     ) -> None:
         detail = TrainingRunDetail(
@@ -144,12 +145,12 @@ class TestInfo:
                 return detail
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-        train_module.info(name="run-1")
+        train_module.status(name="run-1")
         out = console_capture.getvalue()
         assert "run-1" in out
         assert "completed" in out
 
-    def test_info_with_all_optional_fields(
+    def test_status_with_all_optional_fields(
         self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
     ) -> None:
         detail = TrainingRunDetail(
@@ -174,7 +175,7 @@ class TestInfo:
                 return detail
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-        train_module.info(name="full-run")
+        train_module.status(name="full-run")
         out = console_capture.getvalue()
         assert "100" in out
         assert "experiment notes" in out
@@ -197,8 +198,42 @@ class TestSubmit:
     )
 
     @staticmethod
-    def _write_config(tmp_path: Path) -> Path:
-        path = tmp_path / "train.toml"
+    def _write_workspace(tmp_path: Path, *, rollout: str = "calculator") -> Path:
+        for rel_path in (
+            ".osmosis/research",
+            f"rollouts/{rollout}",
+            "configs/training",
+            "configs/eval",
+            "data",
+        ):
+            (tmp_path / rel_path).mkdir(parents=True, exist_ok=True)
+
+        (tmp_path / ".osmosis" / "workspace.toml").write_text(
+            "[workspace]\nsetup_source = 'test'\n",
+            encoding="utf-8",
+        )
+        (tmp_path / "rollouts" / rollout / "main.py").write_text(
+            """
+from osmosis_ai.rollout import AgentWorkflow, Grader
+
+
+class TestWorkflow(AgentWorkflow):
+    async def run(self, ctx):
+        return None
+
+
+class TestGrader(Grader):
+    async def grade(self, ctx):
+        return 1.0
+""".strip(),
+            encoding="utf-8",
+        )
+        return tmp_path
+
+    @classmethod
+    def _write_config(cls, tmp_path: Path) -> Path:
+        workspace_root = cls._write_workspace(tmp_path)
+        path = workspace_root / "configs" / "training" / "train.toml"
         path.write_text(
             """
 [experiment]
@@ -263,12 +298,13 @@ total_epochs = 1
         console_capture: StringIO,
         tmp_path: Path,
     ) -> None:
-        path = tmp_path / "train.toml"
+        workspace_root = self._write_workspace(tmp_path, rollout="r")
+        path = workspace_root / "configs" / "training" / "train.toml"
         path.write_text(
             """
 [experiment]
 rollout = "r"
-entrypoint = "e.py"
+entrypoint = "main.py"
 model_path = "m"
 dataset = "d"
 commit_sha = "deadbeef"
@@ -309,6 +345,57 @@ commit_sha = "deadbeef"
         assert captured_kwargs["rollout_name"] == "calculator"
         assert captured_kwargs["entrypoint"] == "main.py"
         assert captured_kwargs["config"] == {"lr": 1e-6, "total_epochs": 1}
+
+    def test_submit_rejects_non_canonical_training_config_path(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        self._write_workspace(tmp_path)
+        path = tmp_path / "train.toml"
+        path.write_text(
+            """
+[experiment]
+rollout = "calculator"
+entrypoint = "main.py"
+model_path = "m"
+dataset = "d"
+""".strip(),
+            encoding="utf-8",
+        )
+
+        with pytest.raises(CLIError, match="configs/training"):
+            train_module.submit(config_path=path, yes=True)
+
+    def test_submit_requires_concrete_grader(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        workspace_root = self._write_workspace(tmp_path, rollout="graderless")
+        (workspace_root / "rollouts" / "graderless" / "main.py").write_text(
+            """
+from osmosis_ai.rollout import AgentWorkflow
+
+
+class TestWorkflow(AgentWorkflow):
+    async def run(self, ctx):
+        return None
+""".strip(),
+            encoding="utf-8",
+        )
+        path = workspace_root / "configs" / "training" / "graderless.toml"
+        path.write_text(
+            """
+[experiment]
+rollout = "graderless"
+entrypoint = "main.py"
+model_path = "m"
+dataset = "d"
+""".strip(),
+            encoding="utf-8",
+        )
+
+        with pytest.raises(CLIError, match="Grader"):
+            train_module.submit(config_path=path, yes=True)
 
 
 # ---------------------------------------------------------------------------

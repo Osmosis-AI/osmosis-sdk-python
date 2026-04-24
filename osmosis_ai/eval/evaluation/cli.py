@@ -345,11 +345,29 @@ class EvalCommand:
             truncate_error,
         )
         from osmosis_ai.eval.config import load_eval_config
+        from osmosis_ai.platform.cli.workspace_contract import (
+            ensure_workspace_config_path,
+            resolve_workspace_root,
+            validate_workspace_contract,
+        )
 
         # 1. Load TOML config
         config_path = Path(args.config_path)
         try:
             config = load_eval_config(config_path)
+        except CLIError as e:
+            self.console.print_error(f"Error: {e}")
+            return 1
+
+        try:
+            workspace_root = resolve_workspace_root(config_path)
+            validate_workspace_contract(workspace_root)
+            ensure_workspace_config_path(
+                config_path,
+                workspace_root,
+                config_dir="configs/eval",
+                command_label="`osmosis eval run`",
+            )
         except CLIError as e:
             self.console.print_error(f"Error: {e}")
             return 1
@@ -427,6 +445,7 @@ class EvalCommand:
             entrypoint=config.eval_entrypoint,
             quiet=quiet,
             console=self.console,
+            workspace_root=workspace_root,
         )
         if error:
             self.console.print_error(f"Error: {error}")
