@@ -1,0 +1,23 @@
+osmosis_ai/rollout/backend/harbor/__init__.py
+  d17ef3b09be9cd2c 4,7
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "abfe03d86f9899e10860bee217f1e452beb85a9b",
+  "prompts": {
+    "d17ef3b09be9cd2c": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "620d3466-e26f-42e4-ad26-913399924d29",
+        "model": "gpt-5.5-extra-high"
+      },
+      "human_author": "JoyboyBrian",
+      "messages": [],
+      "total_additions": 74,
+      "total_deletions": 53,
+      "accepted_lines": 10,
+      "overriden_lines": 4
+    }
+  }
+}
