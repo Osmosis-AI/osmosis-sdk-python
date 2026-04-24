@@ -160,7 +160,7 @@ def deploy(
 
     status_str = _format_deployment_status(result.status)
     name = console.escape(result.checkpoint_name) if result.checkpoint_name else "—"
-    console.print(f"Deployment {name} {status_str}", style="green")
+    console.print(f"Deployment {name} {status_str}", highlight=False)
 
 
 def undeploy(
@@ -180,7 +180,7 @@ def undeploy(
 
     status_str = _format_deployment_status(result.status)
     name = console.escape(result.checkpoint_name) if result.checkpoint_name else "—"
-    console.print(f"Deployment {name} {status_str}", style="green")
+    console.print(f"Deployment {name} {status_str}", highlight=False)
 
 
 @app.command("rename")
@@ -204,7 +204,7 @@ def rename(
 
     old = console.escape(result.old_checkpoint_name)
     new = console.escape(result.checkpoint_name)
-    console.print(f"Renamed {old} -> {new}", style="green")
+    console.print(f"Renamed {old} -> {new}", style="green", highlight=False)
     if result.status == "failed":
         console.print(
             "Warning: inference re-registration failed; deployment is marked as failed.",
@@ -233,4 +233,8 @@ def delete(
 
     client = OsmosisClient()
     client.delete_deployment(checkpoint, credentials=credentials)
-    console.print(f'Deployment for "{checkpoint}" deleted.', style="green")
+    console.print(
+        f'Deployment for "{console.escape(checkpoint)}" deleted.',
+        style="green",
+        highlight=False,
+    )

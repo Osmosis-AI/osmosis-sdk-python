@@ -188,9 +188,11 @@ def submit(
             credentials=credentials,
         )
 
-    url = platform_entity_url(ws_name, "training", result.id)
+    url = console.escape(platform_entity_url(ws_name, "training", result.id))
     console.print(
-        f"Training run submitted: {console.escape(result.name)}", style="green"
+        f"Training run submitted: {console.escape(result.name)}",
+        style="green",
+        highlight=False,
     )
     console.print(f"  Status: {result.status}")
     console.print(f"  View: {url}")
@@ -294,9 +296,9 @@ def metrics(
     is_in_progress = run.status in RUN_STATUSES_IN_PROGRESS
 
     # ── Platform URL (no metrics dependency) ─────────────────────
-    url = platform_entity_url(ws_name, "training", run.id)
+    url = console.escape(platform_entity_url(ws_name, "training", run.id))
     console.print()
-    console.print(f"View full details: {url}", style="cyan")
+    console.print(f"View full details: {url}", style="cyan", highlight=False)
     console.print()
 
     # ── Fetch metrics (best-effort) ──────────────────────────────
@@ -377,9 +379,17 @@ def metrics(
                 else _resolve_default_output(run.name, run.id)
             )
             out_path.write_text(json.dumps(export, indent=2, ensure_ascii=False) + "\n")
-            console.print(f"Saved to {out_path}", style="green")
+            console.print(
+                f"Saved to {console.escape(str(out_path))}",
+                style="green",
+                highlight=False,
+            )
         except (CLIError, OSError) as exc:
-            console.print(f"Could not save metrics: {exc}", style="yellow")
+            console.print(
+                f"Could not save metrics: {console.escape(str(exc))}",
+                style="yellow",
+                highlight=False,
+            )
 
 
 @app.command("traces")
@@ -407,7 +417,11 @@ def stop(
     require_confirmation(f'Stop training run "{name}"?', yes=yes)
 
     client.stop_training_run(name, credentials=credentials)
-    console.print(f'Training run "{name}" stopped.', style="green")
+    console.print(
+        f'Training run "{console.escape(name)}" stopped.',
+        style="green",
+        highlight=False,
+    )
 
 
 @app.command("delete")
@@ -431,4 +445,8 @@ def delete(
     )
 
     client.delete_training_run(name, credentials=credentials)
-    console.print(f'Training run "{name}" deleted.', style="green")
+    console.print(
+        f'Training run "{console.escape(name)}" deleted.',
+        style="green",
+        highlight=False,
+    )

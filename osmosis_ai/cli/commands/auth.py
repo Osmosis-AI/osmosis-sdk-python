@@ -259,6 +259,7 @@ def login(
                 f"\nAutomatically selected your only workspace: "
                 f"{esc(active_workspace['name'])}",
                 style="green",
+                highlight=False,
             )
         elif workspaces and len(workspaces) > 1:
             console.print(

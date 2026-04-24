@@ -144,6 +144,38 @@ class TestDeploy:
         }
         assert "qwen3-run1-step-100" in console_capture.getvalue()
 
+    def test_deploy_failed_result_does_not_force_message_green(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        output = StringIO()
+        tty_console = Console(file=output, force_terminal=True, width=120)
+        print_calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
+
+        original_print = tty_console.print
+
+        def record_print(*args, **kwargs):
+            print_calls.append((args, kwargs))
+            original_print(*args, **kwargs)
+
+        monkeypatch.setattr(tty_console, "print", record_print)
+        monkeypatch.setattr(deployment_module, "console", tty_console)
+
+        class FakeClient:
+            def deploy_checkpoint(self, checkpoint, *, credentials=None):
+                return DeploymentSummary(
+                    id="dep_1",
+                    checkpoint_name="qwen3-run1-step-100",
+                    status="failed",
+                )
+
+        monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        deployment_module.deploy(checkpoint="qwen3-run1-step-100")
+
+        args, kwargs = print_calls[-1]
+        assert args == ("Deployment qwen3-run1-step-100 [red]\\[failed][/red]",)
+        assert kwargs.get("style") is None
+        assert kwargs["highlight"] is False
+
 
 class TestUndeploy:
     def test_undeploy_accepts_checkpoint_uuid(

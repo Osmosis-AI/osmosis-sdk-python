@@ -148,4 +148,8 @@ def delete(
 
     require_confirmation(f'Delete model "{name}"? This cannot be undone.', yes=yes)
     client.delete_model(name, credentials=credentials)
-    console.print(f'Model "{name}" deleted.', style="green")
+    console.print(
+        f'Model "{console.escape(name)}" deleted.',
+        style="green",
+        highlight=False,
+    )

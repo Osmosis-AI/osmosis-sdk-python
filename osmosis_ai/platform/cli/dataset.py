@@ -189,10 +189,13 @@ def _perform_upload(
             f", {upload_info.total_parts} parts" if upload_info.total_parts else ""
         )
         console.print(
-            f"Uploading {file_path.name} ({format_size(file_size)}, multipart{parts_label})..."
+            f"Uploading {console.escape(file_path.name)} "
+            f"({format_size(file_size)}, multipart{parts_label})..."
         )
     else:
-        console.print(f"Uploading {file_path.name} ({format_size(file_size)})...")
+        console.print(
+            f"Uploading {console.escape(file_path.name)} ({format_size(file_size)})..."
+        )
 
     ctx, progress_cb = make_progress_bar(file_size)
 
@@ -256,8 +259,8 @@ def upload(
     console.print()
     console.table(
         [
-            ("Workspace", ws_name or "unknown"),
-            ("File", f"{file_path.name} ({format_size(file_size)})"),
+            ("Workspace", console.escape(ws_name) if ws_name else "unknown"),
+            ("File", f"{console.escape(file_path.name)} ({format_size(file_size)})"),
         ],
         title="Upload Target",
     )
@@ -276,9 +279,11 @@ def upload(
     )
 
     console.print(
-        f"Dataset uploaded: {console.escape(dataset.file_name)}", style="green"
+        f"Dataset uploaded: {console.escape(dataset.file_name)}",
+        style="green",
+        highlight=False,
     )
-    url = platform_entity_url(ws_name, "datasets", dataset.id)
+    url = console.escape(platform_entity_url(ws_name, "datasets", dataset.id))
     console.print(f"Processing will continue on the platform. Check status at: {url}")
 
 
@@ -398,14 +403,20 @@ def delete(
 
     if not yes:
         ds = client.get_dataset(name, credentials=credentials)
-        console.print(f"  Dataset: {ds.file_name} ({format_size(ds.file_size)})")
+        console.print(
+            f"  Dataset: {console.escape(ds.file_name)} ({format_size(ds.file_size)})"
+        )
 
     from osmosis_ai.cli.prompts import require_confirmation
 
     require_confirmation(f'Delete dataset "{name}"? This cannot be undone.', yes=yes)
 
     client.delete_dataset(name, credentials=credentials)
-    console.print(f'Dataset "{console.escape(name)}" deleted.', style="green")
+    console.print(
+        f'Dataset "{console.escape(name)}" deleted.',
+        style="green",
+        highlight=False,
+    )
 
 
 def validate(
@@ -421,8 +432,9 @@ def validate(
         raise CLIError("Validation failed:\n" + "\n".join(f"  - {e}" for e in errors))
 
     console.print(
-        f"Valid {ext} file: {file_path.name} ({format_size(file_size)})",
+        f"Valid {ext} file: {console.escape(file_path.name)} ({format_size(file_size)})",
         style="green",
+        highlight=False,
     )
 
 

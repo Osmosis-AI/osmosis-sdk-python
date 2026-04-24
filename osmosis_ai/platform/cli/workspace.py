@@ -179,7 +179,9 @@ def _upload_dataset_interactive(
         )
         return False
 
-    console.print(f"  File: {file_path.name} ({format_size(file_size)})")
+    console.print(
+        f"  File: {console.escape(file_path.name)} ({format_size(file_size)})"
+    )
     ok = confirm("Upload to this workspace?", default=True)
     if not ok:
         return False
@@ -198,8 +200,9 @@ def _upload_dataset_interactive(
     console.print(
         f"Upload complete. Dataset: {console.escape(dataset.file_name)}",
         style="green",
+        highlight=False,
     )
-    url = platform_entity_url(ws_name, "datasets", dataset.id)
+    url = console.escape(platform_entity_url(ws_name, "datasets", dataset.id))
     console.print(f"Check status at: {url}")
     return True
 
@@ -412,10 +415,11 @@ def list_workspaces() -> None:
 
     console.print(f"Workspaces ({len(workspaces)}):", style="bold")
     for ws in workspaces:
-        name = ws.get("name", "")
-        marker = " (current)" if name == active_name else ""
+        raw_name = ws.get("name", "")
+        name = console.escape(raw_name)
+        marker = " (current)" if raw_name == active_name else ""
         sub_label = "active" if ws.get("has_subscription") else "no subscription"
-        console.print(f"  {name}{marker}  [{sub_label}]")
+        console.print(f"  {name}{marker}  {console.escape(f'[{sub_label}]')}")
 
 
 def switch_workspace(workspace: str) -> None:
