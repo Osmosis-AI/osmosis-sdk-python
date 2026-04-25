@@ -70,6 +70,12 @@ def _callback(
 _registered = False
 
 
+def _print_error(message: str) -> None:
+    from osmosis_ai.cli.console import Console
+
+    Console(file=sys.stderr).print_error(f"Error: {message}", soft_wrap=True)
+
+
 def _register_commands() -> None:
     """Register all subcommands. Called once before app() runs."""
     global _registered
@@ -143,21 +149,21 @@ def main(argv: list[str] | None = None) -> int:
         # after help is already printed — just exit cleanly.
         if not str(exc):
             return 0
-        print(f"Error: {exc}", file=sys.stderr)
+        _print_error(str(exc))
         return exc.exit_code
     except AuthenticationExpiredError:
-        print(f"Error: {MSG_SESSION_EXPIRED}", file=sys.stderr)
+        _print_error(MSG_SESSION_EXPIRED)
         return 1
     except PlatformAPIError as exc:
-        print(f"Error: {exc}", file=sys.stderr)
+        _print_error(str(exc))
         return 1
     except CLIError as exc:
-        print(f"Error: {exc}", file=sys.stderr)
+        _print_error(str(exc))
         return 1
     except KeyboardInterrupt:
         return 130
     except Exception as exc:
-        print(f"Error: {exc}", file=sys.stderr)
+        _print_error(str(exc))
         return 1
 
 

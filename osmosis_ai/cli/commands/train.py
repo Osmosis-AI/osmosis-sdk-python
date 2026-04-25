@@ -215,14 +215,14 @@ def submit(
             credentials=credentials,
         )
 
-    url = console.escape(platform_entity_url(ws_name, "training", result.id))
+    url = platform_entity_url(ws_name, "training", result.id)
     console.print(
         f"Training run submitted: {console.escape(result.name)}",
         style="green",
         highlight=False,
     )
     console.print(f"  Status: {result.status}")
-    console.print(f"  View: {url}")
+    console.print("  View: ", console.format_url(url), sep="", soft_wrap=True)
 
 
 def _safe_name(name: str) -> str:
@@ -326,9 +326,15 @@ def metrics(
     is_in_progress = run.status in RUN_STATUSES_IN_PROGRESS
 
     # ── Platform URL (no metrics dependency) ─────────────────────
-    url = console.escape(platform_entity_url(ws_name, "training", run.id))
+    url = platform_entity_url(ws_name, "training", run.id)
     console.print()
-    console.print(f"View full details: {url}", style="cyan", highlight=False)
+    console.print(
+        "View full details: ",
+        console.format_url(url, style="cyan"),
+        sep="",
+        highlight=False,
+        soft_wrap=True,
+    )
     console.print()
 
     # ── Fetch metrics (best-effort) ──────────────────────────────

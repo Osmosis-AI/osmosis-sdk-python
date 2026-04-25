@@ -285,8 +285,13 @@ def upload(
         style="green",
         highlight=False,
     )
-    url = console.escape(platform_entity_url(ws_name, "datasets", dataset.id))
-    console.print(f"Processing will continue on the platform. Check status at: {url}")
+    url = platform_entity_url(ws_name, "datasets", dataset.id)
+    console.print(
+        "Processing will continue on the platform. Check status at: ",
+        console.format_url(url),
+        sep="",
+        soft_wrap=True,
+    )
 
 
 def list_datasets(limit: int = DEFAULT_PAGE_SIZE, all_: bool = False) -> None:

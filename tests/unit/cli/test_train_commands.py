@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 from io import StringIO
 from pathlib import Path
 
@@ -270,6 +271,39 @@ total_epochs = 1
         assert "550e8400" in out
         assert "pending" in out
         assert "training" in out  # URL contains "training"
+
+    def test_submit_url_does_not_insert_rich_line_breaks(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        config_path = self._write_config(tmp_path)
+        result = self.SUBMIT_RESULT
+        output = StringIO()
+        tty_console = Console(
+            file=output,
+            force_terminal=True,
+            no_color=True,
+            width=92,
+        )
+        monkeypatch.setattr(tty_console, "spinner", lambda message: nullcontext())
+        monkeypatch.setattr(train_module, "console", tty_console)
+        monkeypatch.setattr(utils_module, "console", tty_console)
+
+        class FakeClient:
+            def submit_training_run(self, **kwargs):
+                return result
+
+        monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        train_module.submit(config_path=config_path, yes=True)
+
+        expected_url = utils_module.platform_entity_url(
+            "ws-test",
+            "training",
+            result.id,
+        )
+        out = output.getvalue()
+        assert f"  View: {expected_url}" in out
 
     def test_submit_shows_summary_table(
         self,

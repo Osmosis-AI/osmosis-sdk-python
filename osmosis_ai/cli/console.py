@@ -24,7 +24,18 @@ from rich import box
 from rich.console import Console as RichConsole
 from rich.markup import escape as rich_escape
 from rich.panel import Panel
+from rich.style import Style
 from rich.table import Table
+from rich.text import Text
+
+
+def _url_link_text(
+    url: str, label: str | None = None, style: str | None = None
+) -> Text:
+    link_style = Style(link=url)
+    if style:
+        link_style = Style.parse(style) + link_style
+    return Text(label or url, style=link_style)
 
 
 class Console:
@@ -111,13 +122,24 @@ class Console:
         """
         self._rich.print(*args, style=style, end=end, **kwargs)
 
-    def print_error(self, message: str) -> None:
+    def print_error(
+        self,
+        message: str,
+        *,
+        soft_wrap: bool | None = None,
+        markup: bool = False,
+    ) -> None:
         """Print an error message to stderr.
 
         Args:
             message: Error message to print.
+            soft_wrap: Whether Rich should avoid inserting hard line breaks.
+            markup: Whether to interpret Rich markup in the message.
         """
-        self._rich_stderr.print(message, style="bold red")
+        kwargs: dict[str, Any] = {"markup": markup}
+        if soft_wrap is not None:
+            kwargs["soft_wrap"] = soft_wrap
+        self._rich_stderr.print(message, style="bold red", **kwargs)
 
     def separator(self, title: str = "") -> None:
         """Print a separator line with optional title.
@@ -150,7 +172,7 @@ class Console:
 
     def table(
         self,
-        rows: list[tuple[str, str]],
+        rows: list[tuple[Any, Any]],
         *,
         title: str | None = None,
         headers: tuple[str, str] | None = None,
@@ -203,6 +225,16 @@ class Console:
             Styled text string with Rich markup.
         """
         return f"[{style}]{rich_escape(text)}[/{style}]"
+
+    def format_url(
+        self,
+        url: str,
+        *,
+        label: str | None = None,
+        style: str | None = None,
+    ) -> Text:
+        """Return a Rich terminal hyperlink for a URL."""
+        return _url_link_text(url, label=label, style=style)
 
     @contextmanager
     def spinner(self, message: str) -> Generator[None, None, None]:

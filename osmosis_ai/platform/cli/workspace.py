@@ -68,8 +68,11 @@ def _show_context(ws_name: str | None) -> None:
     )
     url = platform_entity_url(ws_name)
     console.print(
-        f"{console.format_styled('URL:', 'bold')}     "
-        f"{console.format_styled(url, 'dim')}"
+        console.format_styled("URL:", "bold"),
+        "     ",
+        console.format_url(url, style="dim"),
+        sep="",
+        soft_wrap=True,
     )
     console.print()
 
@@ -202,8 +205,8 @@ def _upload_dataset_interactive(
         style="green",
         highlight=False,
     )
-    url = console.escape(platform_entity_url(ws_name, "datasets", dataset.id))
-    console.print(f"Check status at: {url}")
+    url = platform_entity_url(ws_name, "datasets", dataset.id)
+    console.print("Check status at: ", console.format_url(url), sep="", soft_wrap=True)
     return True
 
 
@@ -267,9 +270,9 @@ def _show_dataset_detail(ds: Any, ws_name: str) -> None:
     if ds.created_at:
         rows.append(("Created", format_date(ds.created_at)))
     url = platform_entity_url(ws_name, "datasets", ds.id)
-    rows.append(("URL", url))
 
     console.table(rows, title="Dataset Detail")
+    _print_platform_link(url)
     console.print()
 
 
@@ -322,9 +325,9 @@ def _show_run_detail(r: Any, ws_name: str) -> None:
     """Display detailed info for a single training run."""
     rows = build_run_detail_rows(r)
     url = platform_entity_url(ws_name, "training", r.id)
-    rows.append(("URL", url))
 
     console.table(rows, title="Training Run")
+    _print_platform_link(url)
     console.print()
 
 
@@ -384,16 +387,32 @@ def _show_model_detail(m: Any, ws_name: str) -> None:
     if m.created_at:
         rows.append(("Created", format_date(m.created_at)))
     url = platform_entity_url(ws_name, "models", m.id)
-    rows.append(("URL", url))
 
     console.table(rows, title="Model Detail")
+    _print_platform_link(url)
     console.print()
+
+
+def _print_platform_link(url: str) -> None:
+    """Print a copyable platform URL outside tables so Rich won't truncate it."""
+    console.print(
+        "View on platform: ",
+        console.format_url(url, style="cyan"),
+        sep="",
+        soft_wrap=True,
+    )
 
 
 def _open_in_browser(ws_name: str) -> None:
     """Open the workspace URL in the default browser."""
     url = platform_entity_url(ws_name)
-    console.print(f"Opening {console.format_styled(url, 'dim')} ...")
+    console.print(
+        "Opening ",
+        console.format_url(url, style="dim"),
+        " ...",
+        sep="",
+        soft_wrap=True,
+    )
     webbrowser.open(url)
     console.print()
 

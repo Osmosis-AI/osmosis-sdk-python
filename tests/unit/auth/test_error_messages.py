@@ -230,6 +230,21 @@ class TestMainExceptionHandlerMessages:
         assert "No workspace selected" in capsys.readouterr().err
 
     @patch("osmosis_ai.cli.main._registered", True)
+    def test_cli_error_preserves_bracketed_section_names(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        from osmosis_ai.cli.main import main
+
+        with patch(
+            "osmosis_ai.cli.main.app",
+            side_effect=CLIError("Missing [experiment] section in train.toml"),
+        ):
+            code = main([])
+
+        assert code == 1
+        assert "Missing [experiment] section" in capsys.readouterr().err
+
+    @patch("osmosis_ai.cli.main._registered", True)
     def test_auth_expired_shows_session_expired(
         self, capsys: pytest.CaptureFixture[str]
     ) -> None:

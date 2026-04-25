@@ -347,14 +347,19 @@ def _selected_workspace_git_context() -> dict[str, str | bool | None]:
 
 def _git_sync_cta_text(
     git_context: dict[str, str | bool | None] | None = None,
-) -> str:
+) -> Any:
     """Build the Git Sync CTA shown after workspace scaffolding."""
+    from rich.text import Text
+
     if git_context is None:
         git_context = _selected_workspace_git_context()
 
     connected_repo_url = git_context.get("connected_repo_url")
     if isinstance(connected_repo_url, str) and connected_repo_url:
-        return f"Connected repo: [cyan]{connected_repo_url}[/cyan]"
+        return Text.assemble(
+            "Connected repo: ",
+            console.format_url(connected_repo_url, style="cyan"),
+        )
 
     git_sync_url = git_context.get("git_sync_url")
     if isinstance(git_sync_url, str) and git_sync_url:
@@ -363,9 +368,15 @@ def _git_sync_cta_text(
             if git_context.get("has_github_app_installation")
             else "connect your repo"
         )
-        return f"Go to [cyan]{git_sync_url}[/cyan] to {action}"
+        return Text.assemble(
+            f"{action}: ",
+            console.format_url(git_sync_url, style="cyan"),
+        )
 
-    return f"Go to [cyan]{PLATFORM_URL}[/cyan] → Git Sync to connect your repo"
+    return Text.assemble(
+        "connect your repo with Git Sync: ",
+        console.format_url(PLATFORM_URL, style="cyan"),
+    )
 
 
 def _raise_if_selected_workspace_has_connected_repo(
