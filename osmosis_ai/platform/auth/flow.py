@@ -331,7 +331,8 @@ def device_login(timeout: float = 600.0) -> tuple[LoginResult, Credentials]:
     Returns:
         Tuple of (LoginResult, Credentials). Caller is responsible for saving credentials.
     """
-    device_code_resp = request_device_code()
+    with console.spinner("Requesting device code..."):
+        device_code_resp = request_device_code()
 
     console.print()
     copied = _copy_to_clipboard(device_code_resp.user_code)
@@ -347,9 +348,8 @@ def device_login(timeout: float = 600.0) -> tuple[LoginResult, Credentials]:
     console.print()
 
     verification_url = device_code_resp.verification_uri
-    console.print(
-        f"Open this URL in your browser: {verification_url}",
-        style="yellow",
+    console.print_url(
+        "Open this URL in your browser: ", verification_url, style="yellow"
     )
 
     if sys.stdin.isatty():

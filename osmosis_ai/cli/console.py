@@ -226,6 +226,13 @@ class Console:
         """
         return f"[{style}]{rich_escape(text)}[/{style}]"
 
+    def format_text(self, text: Any, style: str | None = None) -> Text:
+        """Return plain text with optional Rich styling.
+
+        Use this for dynamic values that should never be parsed as Rich markup.
+        """
+        return Text("" if text is None else str(text), style=style)
+
     def format_url(
         self,
         url: str,
@@ -235,6 +242,22 @@ class Console:
     ) -> Text:
         """Return a Rich terminal hyperlink for a URL."""
         return _url_link_text(url, label=label, style=style)
+
+    def print_url(
+        self,
+        prefix: str,
+        url: str,
+        *,
+        label: str | None = None,
+        style: str | None = None,
+    ) -> None:
+        """Print a URL without inserting hard line breaks into the link target."""
+        self._rich.print(
+            self.format_text(prefix),
+            self.format_url(url, label=label, style=style),
+            sep="",
+            soft_wrap=True,
+        )
 
     @contextmanager
     def spinner(self, message: str) -> Generator[None, None, None]:

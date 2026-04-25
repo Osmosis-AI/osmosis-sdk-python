@@ -63,12 +63,13 @@ def _load_login_workspaces(
     )
 
     try:
-        data = platform_request(
-            "/api/cli/workspaces",
-            credentials=creds,
-            require_workspace=False,
-            cleanup_on_401=False,
-        )
+        with console.spinner("Loading workspaces..."):
+            data = platform_request(
+                "/api/cli/workspaces",
+                credentials=creds,
+                require_workspace=False,
+                cleanup_on_401=False,
+            )
     except (AuthenticationExpiredError, PlatformAPIError) as exc:
         return None, str(exc)
 
@@ -171,7 +172,7 @@ def login(
     from osmosis_ai.platform.auth.platform_client import revoke_cli_token
 
     if console.rich.width >= ASCII_ART_MIN_WIDTH:
-        print(ASCII_ART)
+        console.print(ASCII_ART, markup=False, highlight=False)
     else:
         console.print()
         console.print("  Osmosis AI", style="bold magenta")
@@ -194,7 +195,8 @@ def login(
 
         # Two login paths: token or device flow
         if token:
-            verified = verify_token(token)
+            with console.spinner("Verifying token..."):
+                verified = verify_token(token)
             creds = Credentials.from_verify_result(token, verified)
             result = LoginResult.from_verify_result(verified)
         else:
@@ -210,7 +212,8 @@ def login(
             and old_credentials.token_id
             and old_credentials.token_id != creds.token_id
         ):
-            revoke_cli_token(old_credentials)
+            with console.spinner("Revoking old session..."):
+                revoke_cli_token(old_credentials)
 
         save_credentials(creds)
 
@@ -321,7 +324,8 @@ def logout(
 
     # Best-effort server-side revocation
     if not credentials.is_expired():
-        revoke_cli_token(credentials)
+        with console.spinner("Revoking session..."):
+            revoke_cli_token(credentials)
 
     # Delete local credentials and workspace/local state
     reset_session()
@@ -354,10 +358,11 @@ def whoami() -> None:
 
     active_workspace = None
     with contextlib.suppress(AuthenticationExpiredError, PlatformAPIError):
-        active_workspace = ensure_active_workspace(
-            credentials=credentials,
-            cleanup_on_401=False,
-        )
+        with console.spinner("Loading workspace..."):
+            active_workspace = ensure_active_workspace(
+                credentials=credentials,
+                cleanup_on_401=False,
+            )
     esc = console.escape
 
     rows = [("Email", esc(credentials.user.email))]

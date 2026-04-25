@@ -120,13 +120,17 @@ def delete(
     from osmosis_ai.cli.prompts import require_confirmation
     from osmosis_ai.platform.api.client import OsmosisClient
     from osmosis_ai.platform.auth.platform_client import PlatformAPIError
-    from osmosis_ai.platform.cli.utils import _require_auth
+    from osmosis_ai.platform.cli.utils import _require_auth, platform_call
 
     _ws_name, credentials = _require_auth()
     client = OsmosisClient()
 
     try:
-        affected = client.get_model_affected_resources(name, credentials=credentials)
+        affected = platform_call(
+            "Checking model dependencies...",
+            lambda: client.get_model_affected_resources(name, credentials=credentials),
+            output_console=console,
+        )
     except PlatformAPIError as e:
         raise CLIError(f"Unable to verify model dependencies: {e}") from e
 
@@ -147,7 +151,11 @@ def delete(
         raise typer.Exit(1)
 
     require_confirmation(f'Delete model "{name}"? This cannot be undone.', yes=yes)
-    client.delete_model(name, credentials=credentials)
+    platform_call(
+        "Deleting model...",
+        lambda: client.delete_model(name, credentials=credentials),
+        output_console=console,
+    )
     console.print(
         f'Model "{console.escape(name)}" deleted.',
         style="green",

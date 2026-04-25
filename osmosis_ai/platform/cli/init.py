@@ -267,6 +267,7 @@ def _selected_workspace_git_context() -> dict[str, str | bool | None]:
         load_credentials,
         platform_request,
     )
+    from osmosis_ai.platform.cli.utils import platform_call
 
     empty_context: dict[str, str | bool | None] = {
         "workspace_name": None,
@@ -291,11 +292,15 @@ def _selected_workspace_git_context() -> dict[str, str | bool | None]:
         return _offline_fallback()
 
     try:
-        data = platform_request(
-            "/api/cli/workspaces",
-            credentials=credentials,
-            require_workspace=False,
-            cleanup_on_401=False,
+        data = platform_call(
+            "Loading workspace Git Sync status...",
+            lambda: platform_request(
+                "/api/cli/workspaces",
+                credentials=credentials,
+                require_workspace=False,
+                cleanup_on_401=False,
+            ),
+            output_console=console,
         )
     except (AuthenticationExpiredError, PlatformAPIError):
         return _offline_fallback()
@@ -422,8 +427,12 @@ def _print_next_steps(
     from rich.text import Text
 
     cmd_table = Table.grid(padding=(0, 1))
+    cmd_table.add_column(no_wrap=True)
+    cmd_table.add_column(no_wrap=True)
     if not here:
-        cmd_table.add_row("[bold green]$[/bold green]", f"cd {ws_name}")
+        cmd_table.add_row(
+            "[bold green]$[/bold green]", console.format_text(f"cd {ws_name}")
+        )
     cmd_table.add_row(
         "[bold green]$[/bold green]",
         "gh repo create --private --source=. --push",
@@ -456,17 +465,24 @@ def _print_next_steps(
     plugin_repo = _plugin_repo()
     plugin_marketplace = _plugin_marketplace()
     plugin_table = Table.grid(padding=(0, 1))
+    plugin_table.add_column(no_wrap=True)
+    plugin_table.add_column(no_wrap=True)
     plugin_table.add_row(
         "[bold cyan]Claude Code[/bold cyan]",
         "open this folder — it'll prompt to install [cyan]osmosis[/cyan]",
     )
     plugin_table.add_row(
         "[bold cyan]Cursor[/bold cyan]",
-        f"Settings → Rules → Add Remote Rule → [cyan]{plugin_repo}[/cyan]",
+        Text.assemble(
+            "Settings → Rules → Add Remote Rule → ",
+            console.format_text(plugin_repo, style="cyan"),
+        ),
     )
     plugin_table.add_row(
         "[bold cyan]Codex[/bold cyan]",
-        f"[cyan]codex plugin marketplace add {plugin_repo}[/cyan]",
+        console.format_text(
+            f"codex plugin marketplace add {plugin_repo}", style="cyan"
+        ),
     )
     plugin_table.add_row(
         "[dim] [/dim]",
@@ -474,7 +490,7 @@ def _print_next_steps(
     )
     plugin_table.add_row(
         "[bold cyan] [/bold cyan]",
-        f"[cyan]codex plugin install {plugin_marketplace}[/cyan]",
+        console.format_text(f"codex plugin install {plugin_marketplace}", style="cyan"),
     )
 
     content = Group(

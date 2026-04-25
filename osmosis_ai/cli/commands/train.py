@@ -87,12 +87,17 @@ def status(
         entity_status_style,
         format_date,
         format_dim_date,
+        platform_call,
     )
 
     _, credentials = _require_auth()
 
     client = OsmosisClient()
-    run = client.get_training_run(name, credentials=credentials)
+    run = platform_call(
+        "Fetching training run...",
+        lambda: client.get_training_run(name, credentials=credentials),
+        output_console=console,
+    )
 
     rows = build_run_detail_rows(run)
     if run.examples_processed_count is not None:
@@ -110,7 +115,13 @@ def status(
 
     if run.status in RUN_STATUSES_TERMINAL:
         try:
-            ckpts = client.list_training_run_checkpoints(name, credentials=credentials)
+            ckpts = platform_call(
+                "Fetching checkpoints...",
+                lambda: client.list_training_run_checkpoints(
+                    name, credentials=credentials
+                ),
+                output_console=console,
+            )
         except PlatformAPIError:
             ckpts = None
 
@@ -162,7 +173,11 @@ def submit(
 ) -> None:
     """Submit a new training run."""
     from osmosis_ai.platform.cli.training_config import load_training_config
-    from osmosis_ai.platform.cli.utils import _require_auth, platform_entity_url
+    from osmosis_ai.platform.cli.utils import (
+        _require_auth,
+        platform_call,
+        platform_entity_url,
+    )
     from osmosis_ai.platform.cli.workspace_contract import (
         ensure_workspace_config_path,
         resolve_workspace_root,
@@ -203,9 +218,10 @@ def submit(
 
     from osmosis_ai.platform.api.client import OsmosisClient
 
-    with console.spinner("Submitting training run..."):
-        client = OsmosisClient()
-        result = client.submit_training_run(
+    client = OsmosisClient()
+    result = platform_call(
+        "Submitting training run...",
+        lambda: client.submit_training_run(
             model_path=config.experiment_model_path,
             dataset=config.experiment_dataset,
             rollout_name=config.experiment_rollout,
@@ -213,7 +229,9 @@ def submit(
             commit_sha=config.experiment_commit_sha,
             config=config.to_api_config(),
             credentials=credentials,
-        )
+        ),
+        output_console=console,
+    )
 
     url = platform_entity_url(ws_name, "training", result.id)
     console.print(
@@ -222,7 +240,7 @@ def submit(
         highlight=False,
     )
     console.print(f"  Status: {result.status}")
-    console.print("  View: ", console.format_url(url), sep="", soft_wrap=True)
+    console.print_url("  View: ", url)
 
 
 def _safe_name(name: str) -> str:
@@ -311,14 +329,18 @@ def metrics(
     from osmosis_ai.platform.auth.platform_client import PlatformAPIError
     from osmosis_ai.platform.cli.utils import (
         _require_auth,
+        platform_call,
         platform_entity_url,
     )
 
     ws_name, credentials = _require_auth()
     client = OsmosisClient()
 
-    with console.spinner("Fetching training run..."):
-        run = client.get_training_run(name, credentials=credentials)
+    run = platform_call(
+        "Fetching training run...",
+        lambda: client.get_training_run(name, credentials=credentials),
+        output_console=console,
+    )
 
     if run.status == "pending":
         raise CLIError("Metrics are not yet available for pending training runs.")
@@ -328,22 +350,17 @@ def metrics(
     # ── Platform URL (no metrics dependency) ─────────────────────
     url = platform_entity_url(ws_name, "training", run.id)
     console.print()
-    console.print(
-        "View full details: ",
-        console.format_url(url, style="cyan"),
-        sep="",
-        highlight=False,
-        soft_wrap=True,
-    )
+    console.print_url("View full details: ", url, style="cyan")
     console.print()
 
     # ── Fetch metrics (best-effort) ──────────────────────────────
     metrics_data = None
     try:
-        with console.spinner("Fetching metrics..."):
-            metrics_data = client.get_training_run_metrics(
-                run.id, credentials=credentials
-            )
+        metrics_data = platform_call(
+            "Fetching metrics...",
+            lambda: client.get_training_run_metrics(run.id, credentials=credentials),
+            output_console=console,
+        )
     except (PlatformAPIError, KeyError):
         console.print("Could not fetch metrics data.", style="yellow")
 
@@ -440,7 +457,7 @@ def stop(
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
 ) -> None:
     """Stop a training run."""
-    from osmosis_ai.platform.cli.utils import _require_auth
+    from osmosis_ai.platform.cli.utils import _require_auth, platform_call
 
     _, credentials = _require_auth()
 
@@ -452,7 +469,11 @@ def stop(
 
     require_confirmation(f'Stop training run "{name}"?', yes=yes)
 
-    client.stop_training_run(name, credentials=credentials)
+    platform_call(
+        "Stopping training run...",
+        lambda: client.stop_training_run(name, credentials=credentials),
+        output_console=console,
+    )
     console.print(
         f'Training run "{console.escape(name)}" stopped.',
         style="green",
@@ -466,7 +487,7 @@ def delete(
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
 ) -> None:
     """Delete a training run."""
-    from osmosis_ai.platform.cli.utils import _require_auth
+    from osmosis_ai.platform.cli.utils import _require_auth, platform_call
 
     _, credentials = _require_auth()
 
@@ -480,7 +501,11 @@ def delete(
         f'Delete training run "{name}"? This cannot be undone.', yes=yes
     )
 
-    client.delete_training_run(name, credentials=credentials)
+    platform_call(
+        "Deleting training run...",
+        lambda: client.delete_training_run(name, credentials=credentials),
+        output_console=console,
+    )
     console.print(
         f'Training run "{console.escape(name)}" deleted.',
         style="green",

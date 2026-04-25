@@ -106,14 +106,14 @@ def _validate_rollout_config(*, config_path: Path, console: Console) -> None:
         grader_config_ref=grader_config_ref,
     )
 
-    rows: list[tuple[str, str]] = [
-        ("Config", str(config_path.resolve())),
-        ("Kind", config_kind),
-        ("Rollout", rollout),
-        ("Entrypoint", entrypoint),
+    rows: list[tuple[str, Any]] = [
+        ("Config", console.format_text(config_path.resolve())),
+        ("Kind", console.format_text(config_kind)),
+        ("Rollout", console.format_text(rollout)),
+        ("Entrypoint", console.format_text(entrypoint)),
     ]
     if grader_module:
-        rows.append(("Grader override", grader_module))
+        rows.append(("Grader override", console.format_text(grader_module)))
 
     console.table(rows, title="Rollout Validation")
     console.print("Validation passed.", style="green")
@@ -137,16 +137,16 @@ def validate(
     _validate_rollout_config(config_path=config_path, console=Console())
 
 
-def _format_commit(r: Any) -> str:
+def _format_commit(r: Any, console: Console) -> Any:
     """Format commit SHA as a clickable terminal hyperlink (OSC 8 via Rich)."""
     sha = r.last_synced_commit_sha
     if not sha:
-        return "[dim]—[/dim]"
+        return console.format_text("—", style="dim")
     short = sha[:7]
     if r.repo_full_name:
         url = f"https://github.com/{r.repo_full_name}/tree/{sha}"
-        return f"[dim][link={url}]{short}[/link][/dim]"
-    return f"[dim]{short}[/dim]"
+        return console.format_url(url, label=short, style="dim")
+    return console.format_text(short, style="dim")
 
 
 @app.command("list")
@@ -160,7 +160,7 @@ def list_rollouts(
     from osmosis_ai.cli.console import Console
     from osmosis_ai.platform.cli.utils import (
         _require_auth,
-        format_dim_date,
+        format_date,
         paginated_fetch,
         print_pagination_footer,
         validate_list_options,
@@ -190,17 +190,23 @@ def list_rollouts(
 
     console.print(f"Rollouts ({total_count}):", style="bold")
     for r in rollouts:
-        name = console.escape(r.name)
+        name = console.format_text(r.name)
         active = (
-            console.format_styled("[active]", "green")
+            console.format_text("[active]", style="green")
             if r.is_active
-            else console.format_styled("[inactive]", "dim")
+            else console.format_text("[inactive]", style="dim")
         )
-        commit = _format_commit(r)
-        date = format_dim_date(r.created_at)
+        commit = _format_commit(r, console)
+        date = console.format_text(format_date(r.created_at), style="dim")
         console.print(
-            f"  {name}  {active}  {commit}  {date}",
-            highlight=False,
+            console.format_text("  ")
+            + name
+            + console.format_text("  ")
+            + active
+            + console.format_text("  ")
+            + commit
+            + console.format_text("  ")
+            + date
         )
 
     print_pagination_footer(len(rollouts), total_count, "rollouts")

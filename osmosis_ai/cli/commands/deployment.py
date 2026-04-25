@@ -117,12 +117,16 @@ def info(
 ) -> None:
     """Show deployment details for a checkpoint."""
     from osmosis_ai.platform.api.client import OsmosisClient
-    from osmosis_ai.platform.cli.utils import _require_auth, format_date
+    from osmosis_ai.platform.cli.utils import _require_auth, format_date, platform_call
 
     _, credentials = _require_auth()
 
     client = OsmosisClient()
-    d = client.get_deployment(checkpoint, credentials=credentials)
+    d = platform_call(
+        "Fetching deployment...",
+        lambda: client.get_deployment(checkpoint, credentials=credentials),
+        output_console=console,
+    )
 
     rows: list[tuple[str, str]] = [
         ("Checkpoint", console.escape(d.checkpoint_name) if d.checkpoint_name else "—"),
@@ -150,13 +154,16 @@ def deploy(
 ) -> None:
     """Deploy (or reactivate) a LoRA checkpoint."""
     from osmosis_ai.platform.api.client import OsmosisClient
-    from osmosis_ai.platform.cli.utils import _require_auth
+    from osmosis_ai.platform.cli.utils import _require_auth, platform_call
 
     _, credentials = _require_auth()
     client = OsmosisClient()
 
-    with console.spinner(f'Deploying checkpoint "{console.escape(checkpoint)}"...'):
-        result = client.deploy_checkpoint(checkpoint, credentials=credentials)
+    result = platform_call(
+        f'Deploying checkpoint "{console.escape(checkpoint)}"...',
+        lambda: client.deploy_checkpoint(checkpoint, credentials=credentials),
+        output_console=console,
+    )
 
     status_str = _format_deployment_status(result.status)
     name = console.escape(result.checkpoint_name) if result.checkpoint_name else "—"
@@ -170,13 +177,16 @@ def undeploy(
 ) -> None:
     """Undeploy a LoRA checkpoint (transition to ``inactive``)."""
     from osmosis_ai.platform.api.client import OsmosisClient
-    from osmosis_ai.platform.cli.utils import _require_auth
+    from osmosis_ai.platform.cli.utils import _require_auth, platform_call
 
     _, credentials = _require_auth()
     client = OsmosisClient()
 
-    with console.spinner(f'Undeploying checkpoint "{console.escape(checkpoint)}"...'):
-        result = client.undeploy_checkpoint(checkpoint, credentials=credentials)
+    result = platform_call(
+        f'Undeploying checkpoint "{console.escape(checkpoint)}"...',
+        lambda: client.undeploy_checkpoint(checkpoint, credentials=credentials),
+        output_console=console,
+    )
 
     status_str = _format_deployment_status(result.status)
     name = console.escape(result.checkpoint_name) if result.checkpoint_name else "—"
@@ -194,13 +204,16 @@ def rename(
 ) -> None:
     """Rename a LoRA checkpoint (re-registers inference if active)."""
     from osmosis_ai.platform.api.client import OsmosisClient
-    from osmosis_ai.platform.cli.utils import _require_auth
+    from osmosis_ai.platform.cli.utils import _require_auth, platform_call
 
     _, credentials = _require_auth()
     client = OsmosisClient()
 
-    with console.spinner("Renaming checkpoint..."):
-        result = client.rename_checkpoint(checkpoint, new_name, credentials=credentials)
+    result = platform_call(
+        "Renaming checkpoint...",
+        lambda: client.rename_checkpoint(checkpoint, new_name, credentials=credentials),
+        output_console=console,
+    )
 
     old = console.escape(result.old_checkpoint_name)
     new = console.escape(result.checkpoint_name)
@@ -222,7 +235,7 @@ def delete(
     """Delete a deployment record (idempotent)."""
     from osmosis_ai.cli.prompts import require_confirmation
     from osmosis_ai.platform.api.client import OsmosisClient
-    from osmosis_ai.platform.cli.utils import _require_auth
+    from osmosis_ai.platform.cli.utils import _require_auth, platform_call
 
     _, credentials = _require_auth()
 
@@ -232,7 +245,11 @@ def delete(
     )
 
     client = OsmosisClient()
-    client.delete_deployment(checkpoint, credentials=credentials)
+    platform_call(
+        "Deleting deployment...",
+        lambda: client.delete_deployment(checkpoint, credentials=credentials),
+        output_console=console,
+    )
     console.print(
         f'Deployment for "{console.escape(checkpoint)}" deleted.',
         style="green",

@@ -34,6 +34,7 @@ from .utils import (
     format_date,
     format_run_status,
     format_size,
+    platform_call,
     platform_entity_url,
     require_credentials,
 )
@@ -67,13 +68,7 @@ def _show_context(ws_name: str | None) -> None:
         f"{console.format_styled(ws_name, 'cyan')}"
     )
     url = platform_entity_url(ws_name)
-    console.print(
-        console.format_styled("URL:", "bold"),
-        "     ",
-        console.format_url(url, style="dim"),
-        sep="",
-        soft_wrap=True,
-    )
+    console.print_url("URL:     ", url, style="dim")
     console.print()
 
 
@@ -206,7 +201,7 @@ def _upload_dataset_interactive(
         highlight=False,
     )
     url = platform_entity_url(ws_name, "datasets", dataset.id)
-    console.print("Check status at: ", console.format_url(url), sep="", soft_wrap=True)
+    console.print_url("Check status at: ", url)
     return True
 
 
@@ -258,7 +253,11 @@ def _browse_datasets(ws_name: str) -> bool:
             if uploaded:
                 # Refresh the list after successful upload
                 with contextlib.suppress(PlatformAPIError):
-                    result = client.list_datasets(credentials=credentials)
+                    result = platform_call(
+                        "Refreshing datasets...",
+                        lambda: client.list_datasets(credentials=credentials),
+                        output_console=console,
+                    )
             continue
 
         _show_dataset_detail(selected, ws_name)
@@ -374,16 +373,16 @@ def _browse_models(ws_name: str) -> None:
 def _show_model_detail(m: Any, ws_name: str) -> None:
     """Display detailed info for a single model."""
     rows: list[tuple[str, str]] = [
-        ("Model", m.model_name),
-        ("ID", m.id),
-        ("Status", m.status),
+        ("Model", console.format_text(m.model_name)),
+        ("ID", console.format_text(m.id)),
+        ("Status", console.format_text(m.status)),
     ]
     if m.base_model:
-        rows.append(("Base Model", m.base_model))
+        rows.append(("Base Model", console.format_text(m.base_model)))
     if m.description:
-        rows.append(("Description", m.description))
+        rows.append(("Description", console.format_text(m.description)))
     if m.creator_name:
-        rows.append(("Creator", m.creator_name))
+        rows.append(("Creator", console.format_text(m.creator_name)))
     if m.created_at:
         rows.append(("Created", format_date(m.created_at)))
     url = platform_entity_url(ws_name, "models", m.id)
@@ -395,24 +394,13 @@ def _show_model_detail(m: Any, ws_name: str) -> None:
 
 def _print_platform_link(url: str) -> None:
     """Print a copyable platform URL outside tables so Rich won't truncate it."""
-    console.print(
-        "View on platform: ",
-        console.format_url(url, style="cyan"),
-        sep="",
-        soft_wrap=True,
-    )
+    console.print_url("View on platform: ", url, style="cyan")
 
 
 def _open_in_browser(ws_name: str) -> None:
     """Open the workspace URL in the default browser."""
     url = platform_entity_url(ws_name)
-    console.print(
-        "Opening ",
-        console.format_url(url, style="dim"),
-        " ...",
-        sep="",
-        soft_wrap=True,
-    )
+    console.print_url("Opening ", url, style="dim")
     webbrowser.open(url)
     console.print()
 
@@ -420,9 +408,17 @@ def _open_in_browser(ws_name: str) -> None:
 def list_workspaces() -> None:
     """List all workspaces (non-interactive)."""
     credentials = require_credentials()
-    active_ws = ensure_active_workspace(credentials=credentials)
-    result = platform_request(
-        "/api/cli/workspaces", require_workspace=False, credentials=credentials
+    active_ws = platform_call(
+        "Loading workspaces...",
+        lambda: ensure_active_workspace(credentials=credentials),
+        output_console=console,
+    )
+    result = platform_call(
+        "Loading workspaces...",
+        lambda: platform_request(
+            "/api/cli/workspaces", require_workspace=False, credentials=credentials
+        ),
+        output_console=console,
     )
     workspaces = result.get("workspaces", [])
 
@@ -444,8 +440,12 @@ def list_workspaces() -> None:
 def switch_workspace(workspace: str) -> None:
     """Switch to a different workspace."""
     credentials = require_credentials()
-    result = platform_request(
-        "/api/cli/workspaces", require_workspace=False, credentials=credentials
+    result = platform_call(
+        "Loading workspaces...",
+        lambda: platform_request(
+            "/api/cli/workspaces", require_workspace=False, credentials=credentials
+        ),
+        output_console=console,
     )
     workspaces = result.get("workspaces", [])
 
@@ -473,7 +473,11 @@ def workspace() -> None:
     if credentials is None:
         raise CLIError(MSG_NOT_LOGGED_IN)
 
-    active_ws = ensure_active_workspace(credentials=credentials)
+    active_ws = platform_call(
+        "Loading workspace...",
+        lambda: ensure_active_workspace(credentials=credentials),
+        output_console=console,
+    )
     ws_name = active_ws["name"] if active_ws else None
 
     _show_context(ws_name)

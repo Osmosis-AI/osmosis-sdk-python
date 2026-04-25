@@ -6,7 +6,7 @@ import contextlib
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
-from osmosis_ai.cli.console import console
+from osmosis_ai.cli.console import Console, console
 from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.platform.api.models import (
     RUN_STATUSES_ERROR,
@@ -33,6 +33,18 @@ from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE
 
 if TYPE_CHECKING:
     from osmosis_ai.platform.auth.credentials import Credentials
+
+
+def platform_call[T](
+    message: str,
+    call: Callable[[], T],
+    *,
+    output_console: Console | None = None,
+) -> T:
+    """Run a platform request while showing a consistent CLI loading status."""
+    status_console = output_console or console
+    with status_console.spinner(message):
+        return call()
 
 
 def require_credentials() -> Credentials:
@@ -275,7 +287,10 @@ def _get_active_workspace_name(
     """Return the active workspace name, or raise if none is selected."""
     workspace_name = get_active_workspace_name()
     if workspace_name is None:
-        active_workspace = ensure_active_workspace(credentials=credentials)
+        active_workspace = platform_call(
+            "Loading workspace...",
+            lambda: ensure_active_workspace(credentials=credentials),
+        )
         if active_workspace is not None:
             workspace_name = active_workspace["name"]
     if workspace_name is None:
@@ -320,8 +335,11 @@ def _require_subscription(*, workspace_name: str) -> None:
         from osmosis_ai.platform.api.client import OsmosisClient
 
         client = OsmosisClient()
-        info = client.refresh_workspace_info(
-            credentials=credentials, workspace_name=workspace_name
+        info = platform_call(
+            "Checking subscription...",
+            lambda: client.refresh_workspace_info(
+                credentials=credentials, workspace_name=workspace_name
+            ),
         )
         api_reached = True
         workspace_found = info.get("found", False)

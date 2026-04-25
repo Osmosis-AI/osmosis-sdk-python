@@ -31,6 +31,7 @@ from .utils import (
     format_dataset_status,
     format_dim_date,
     format_size,
+    platform_call,
     platform_entity_url,
 )
 
@@ -85,10 +86,14 @@ def _complete_with_retry(
             )
             time.sleep(delay)
         try:
-            return client.complete_upload(
-                dataset_id,
-                parts=parts,
-                credentials=credentials,
+            return platform_call(
+                "Finalizing upload...",
+                lambda: client.complete_upload(
+                    dataset_id,
+                    parts=parts,
+                    credentials=credentials,
+                ),
+                output_console=console,
             )
         except AuthenticationExpiredError:
             raise  # Not transient — surface immediately
@@ -174,11 +179,15 @@ def _perform_upload(
     client = OsmosisClient()
     dataset_name = _dataset_name_from_path(file_path)
 
-    dataset = client.create_dataset(
-        dataset_name,
-        file_size,
-        ext,
-        credentials=credentials,
+    dataset = platform_call(
+        "Creating dataset...",
+        lambda: client.create_dataset(
+            dataset_name,
+            file_size,
+            ext,
+            credentials=credentials,
+        ),
+        output_console=console,
     )
 
     upload_info = dataset.upload
@@ -286,11 +295,8 @@ def upload(
         highlight=False,
     )
     url = platform_entity_url(ws_name, "datasets", dataset.id)
-    console.print(
-        "Processing will continue on the platform. Check status at: ",
-        console.format_url(url),
-        sep="",
-        soft_wrap=True,
+    console.print_url(
+        "Processing will continue on the platform. Check status at: ", url
     )
 
 
@@ -344,7 +350,11 @@ def info(
     from osmosis_ai.platform.api.client import OsmosisClient
 
     client = OsmosisClient()
-    ds = client.get_dataset(name, credentials=credentials)
+    ds = platform_call(
+        "Fetching dataset...",
+        lambda: client.get_dataset(name, credentials=credentials),
+        output_console=console,
+    )
 
     rows = build_dataset_detail_rows(ds)
     console.table(rows, title="Dataset")
@@ -359,7 +369,11 @@ def preview(
     from osmosis_ai.platform.api.client import OsmosisClient
 
     client = OsmosisClient()
-    ds = client.get_dataset(name, credentials=credentials)
+    ds = platform_call(
+        "Fetching dataset...",
+        lambda: client.get_dataset(name, credentials=credentials),
+        output_console=console,
+    )
 
     if ds.data_preview is None:
         if ds.status in STATUSES_IN_PROGRESS:
@@ -402,7 +416,11 @@ def download(
     from osmosis_ai.platform.api.download import download_file
 
     client = OsmosisClient()
-    ds = client.get_dataset(name, credentials=credentials)
+    ds = platform_call(
+        "Fetching dataset...",
+        lambda: client.get_dataset(name, credentials=credentials),
+        output_console=console,
+    )
     if ds.status != "uploaded":
         if ds.status in STATUSES_IN_PROGRESS:
             raise CLIError(
@@ -411,7 +429,11 @@ def download(
             )
         raise CLIError(f"Dataset is not available for download (status: {ds.status}).")
 
-    info = client.get_dataset_download_url(name, credentials=credentials)
+    info = platform_call(
+        "Preparing download...",
+        lambda: client.get_dataset_download_url(name, credentials=credentials),
+        output_console=console,
+    )
     default_filename = _default_download_filename(
         info.file_name or ds.file_name,
         info.presigned_url,
@@ -454,7 +476,13 @@ def delete(
 
     # Blocking preflight: abort if active training runs use this dataset
     try:
-        affected = client.get_dataset_affected_resources(name, credentials=credentials)
+        affected = platform_call(
+            "Checking dataset dependencies...",
+            lambda: client.get_dataset_affected_resources(
+                name, credentials=credentials
+            ),
+            output_console=console,
+        )
     except Exception as e:
         raise CLIError(f"Unable to verify dataset dependencies: {e}") from e
 
@@ -471,7 +499,11 @@ def delete(
         raise CLIError("\n".join(lines))
 
     if not yes:
-        ds = client.get_dataset(name, credentials=credentials)
+        ds = platform_call(
+            "Fetching dataset...",
+            lambda: client.get_dataset(name, credentials=credentials),
+            output_console=console,
+        )
         console.print(
             f"  Dataset: {console.escape(ds.file_name)} ({format_size(ds.file_size)})"
         )
@@ -480,7 +512,11 @@ def delete(
 
     require_confirmation(f'Delete dataset "{name}"? This cannot be undone.', yes=yes)
 
-    client.delete_dataset(name, credentials=credentials)
+    platform_call(
+        "Deleting dataset...",
+        lambda: client.delete_dataset(name, credentials=credentials),
+        output_console=console,
+    )
     console.print(
         f'Dataset "{console.escape(name)}" deleted.',
         style="green",

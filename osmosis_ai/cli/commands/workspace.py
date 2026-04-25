@@ -41,14 +41,18 @@ def create(
 ) -> None:
     """Create a new workspace."""
     from osmosis_ai.cli.console import console
-    from osmosis_ai.platform.cli.utils import _require_auth
+    from osmosis_ai.platform.cli.utils import _require_auth, platform_call
 
     _, credentials = _require_auth()
 
     from osmosis_ai.platform.api.client import OsmosisClient
 
     client = OsmosisClient()
-    result = client.create_workspace(name, timezone, credentials=credentials)
+    result = platform_call(
+        "Creating workspace...",
+        lambda: client.create_workspace(name, timezone, credentials=credentials),
+        output_console=console,
+    )
     console.print(
         f"Workspace '{console.escape(result['name'])}' created.",
         style="green",
@@ -64,7 +68,7 @@ def delete(
     """Delete a workspace."""
     from osmosis_ai.cli.console import console
     from osmosis_ai.cli.errors import CLIError
-    from osmosis_ai.platform.cli.utils import _require_auth
+    from osmosis_ai.platform.cli.utils import _require_auth, platform_call
 
     _, credentials = _require_auth()
 
@@ -72,7 +76,11 @@ def delete(
 
     client = OsmosisClient()
 
-    ws_data = client.list_workspaces(credentials=credentials)
+    ws_data = platform_call(
+        "Loading workspaces...",
+        lambda: client.list_workspaces(credentials=credentials),
+        output_console=console,
+    )
     workspace = None
     for ws in ws_data.get("workspaces", []):
         if ws.get("name") == name.lower():
@@ -83,8 +91,12 @@ def delete(
         raise CLIError(f"Workspace '{name}' not found.")
 
     try:
-        status = client.get_workspace_deletion_status(
-            workspace["id"], credentials=credentials
+        status = platform_call(
+            "Checking workspace deletion safety...",
+            lambda: client.get_workspace_deletion_status(
+                workspace["id"], credentials=credentials
+            ),
+            output_console=console,
         )
     except Exception as e:
         raise CLIError(f"Unable to verify workspace deletion safety: {e}") from e
@@ -120,7 +132,11 @@ def delete(
         yes=yes,
     )
 
-    client.delete_workspace(workspace["id"], credentials=credentials)
+    platform_call(
+        "Deleting workspace...",
+        lambda: client.delete_workspace(workspace["id"], credentials=credentials),
+        output_console=console,
+    )
     console.print(
         f"Workspace '{console.escape(workspace['name'])}' deleted.",
         style="green",
@@ -160,7 +176,7 @@ def validate(
     validate_workspace_contract(workspace_root)
     console.table(
         [
-            ("Root", str(workspace_root)),
+            ("Root", console.format_text(workspace_root)),
             ("Workspace metadata", ".osmosis/workspace.toml"),
             ("Research", ".osmosis/research/"),
             ("Rollouts", "rollouts/"),

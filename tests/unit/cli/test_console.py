@@ -356,3 +356,28 @@ def test_format_styled_escapes_brackets() -> None:
     result = c.format_styled("[bold]text", "cyan")
     assert "\\[bold]" in result  # opening bracket escaped
     assert "cyan" in result
+
+
+# ── format_text / print_url ──────────────────────────────────────────
+
+
+def test_format_text_does_not_parse_markup() -> None:
+    output = StringIO()
+    console = Console(file=output, force_terminal=True, no_color=True, width=120)
+
+    console.print(console.format_text("[red]model-123[/red]", style="green"))
+
+    assert output.getvalue() == "[red]model-123[/red]\n"
+
+
+def test_print_url_preserves_url_without_rich_line_breaks() -> None:
+    output = StringIO()
+    console = Console(file=output, force_terminal=True, no_color=True, width=92)
+    url = (
+        "https://platform.osmosis.ai/osmosis-shared/training/"
+        "328be61c-ef39-45e1-9b33-1e3c7c482e97?filter[]=ok"
+    )
+
+    console.print_url("  View: ", url)
+
+    assert output.getvalue() == f"  View: {url}\n"
