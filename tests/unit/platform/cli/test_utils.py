@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from io import StringIO
 from types import SimpleNamespace
 
@@ -15,6 +16,7 @@ from osmosis_ai.platform.cli.utils import (
     format_processing_step,
     format_run_status,
     format_size,
+    platform_call,
     validate_list_options,
 )
 from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE
@@ -274,3 +276,28 @@ def test_validate_list_options_custom_limit() -> None:
 def test_validate_list_options_mutual_exclusion() -> None:
     with pytest.raises(CLIError, match="mutually exclusive"):
         validate_list_options(limit=10, all_=True)
+
+
+# ── platform_call ────────────────────────────────────────────────────
+
+
+def test_platform_call_uses_injected_console() -> None:
+    output = StringIO()
+    status_console = Console(file=output, force_terminal=False)
+    messages: list[str] = []
+
+    @contextmanager
+    def record_spinner(message: str):
+        messages.append(message)
+        yield
+
+    status_console.spinner = record_spinner  # type: ignore[method-assign]
+
+    result = platform_call(
+        "Fetching things...",
+        lambda: "ok",
+        output_console=status_console,
+    )
+
+    assert result == "ok"
+    assert messages == ["Fetching things..."]

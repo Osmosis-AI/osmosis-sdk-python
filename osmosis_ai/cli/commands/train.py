@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
+from typing import Any
 
 import typer
 
@@ -14,20 +15,53 @@ from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE
 app: typer.Typer = typer.Typer(help="Manage training runs.", no_args_is_help=True)
 
 
+def _detail_fields(rows: list[tuple[str, str]]) -> list[Any]:
+    from osmosis_ai.cli.output import DetailField
+
+    return [DetailField(label=label, value=value) for label, value in rows]
+
+
+def _require_confirmation(message: str, *, yes: bool) -> None:
+    if yes:
+        return
+
+    from osmosis_ai.cli.output import OutputFormat, get_output_context
+
+    output = get_output_context()
+    if output.format is not OutputFormat.rich or not output.interactive:
+        err = CLIError(
+            "Use --yes to confirm in non-interactive mode.",
+            code="INTERACTIVE_REQUIRED",
+        )
+        if output.format is OutputFormat.json:
+            from osmosis_ai.cli.output import emit_structured_error_to_stderr
+
+            emit_structured_error_to_stderr(err)
+            raise typer.Exit(1)
+        raise err
+
+    from osmosis_ai.cli.prompts import require_confirmation
+
+    require_confirmation(message, yes=yes)
+
+
 @app.command("list")
 def list_runs(
     limit: int = typer.Option(
         DEFAULT_PAGE_SIZE, "--limit", help="Maximum number of runs to show."
     ),
     all_: bool = typer.Option(False, "--all", help="Show all training runs."),
-) -> None:
+) -> Any:
     """List training runs in the current workspace."""
+    from osmosis_ai.cli.output import (
+        ListColumn,
+        ListResult,
+        get_output_context,
+        serialize_training_run,
+    )
     from osmosis_ai.platform.cli.utils import (
         _require_auth,
-        format_dim_date,
-        format_run_status,
-        paginated_fetch,
-        print_pagination_footer,
+        fetch_all_pages,
         validate_list_options,
     )
 
@@ -37,62 +71,71 @@ def list_runs(
 
     from osmosis_ai.platform.api.client import OsmosisClient
 
-    with console.spinner("Fetching training runs..."):
-        client = OsmosisClient()
-        training_runs, total_count, _has_more = paginated_fetch(
-            lambda lim, off: client.list_training_runs(
-                limit=lim, offset=off, credentials=credentials
-            ),
-            items_attr="training_runs",
-            limit=effective_limit,
-            fetch_all=fetch_all,
-        )
+    output = get_output_context()
+    client = OsmosisClient()
+    with output.status("Fetching training runs..."):
+        if fetch_all:
+            training_runs, total_count = fetch_all_pages(
+                lambda lim, off: client.list_training_runs(
+                    limit=lim, offset=off, credentials=credentials
+                ),
+                items_attr="training_runs",
+            )
+            has_more = False
+            next_offset = None
+        else:
+            page = client.list_training_runs(
+                limit=effective_limit, offset=0, credentials=credentials
+            )
+            training_runs = page.training_runs
+            total_count = page.total_count
+            has_more = page.has_more
+            next_offset = page.next_offset
 
-    if not training_runs:
-        console.print("No training runs found.")
-        return
-
-    console.print(f"Training Runs ({total_count}):", style="bold")
-    for r in training_runs:
-        status_str = format_run_status(r)
-        short_id = console.format_styled(r.id[:8], "dim")
-        name = (
-            console.escape(r.name)
-            if r.name
-            else console.format_styled("(unnamed)", "dim")
-        )
-        model = console.escape(r.model_name) if r.model_name else "—"
-        acc = f"acc:{r.eval_accuracy:.2f}" if r.eval_accuracy is not None else ""
-        date = format_dim_date(r.created_at)
-
-        console.print(
-            f"  {short_id}  {name}  {status_str}  {model}  {acc}  {date}",
-            highlight=False,
-        )
-
-    print_pagination_footer(len(training_runs), total_count, "training runs")
+    return ListResult(
+        title="Training Runs",
+        items=[serialize_training_run(r) for r in training_runs],
+        total_count=total_count,
+        has_more=has_more,
+        next_offset=next_offset,
+        columns=[
+            ListColumn(key="name", label="Name"),
+            ListColumn(key="status", label="Status"),
+            ListColumn(key="model_name", label="Model"),
+            ListColumn(key="eval_accuracy", label="Accuracy"),
+            ListColumn(key="created_at", label="Created"),
+            ListColumn(key="id", label="ID", no_wrap=True),
+        ],
+    )
 
 
 @app.command("status")
 def status(
     name: str = typer.Argument(..., help="Training run name."),
-) -> None:
+) -> Any:
     """Show training run details."""
+    from osmosis_ai.cli.output import (
+        DetailField,
+        DetailResult,
+        get_output_context,
+        serialize_checkpoint,
+        serialize_training_run,
+    )
     from osmosis_ai.platform.api.client import OsmosisClient
     from osmosis_ai.platform.api.models import RUN_STATUSES_TERMINAL
     from osmosis_ai.platform.auth.platform_client import PlatformAPIError
     from osmosis_ai.platform.cli.utils import (
         _require_auth,
         build_run_detail_rows,
-        entity_status_style,
         format_date,
-        format_dim_date,
     )
 
     _, credentials = _require_auth()
 
     client = OsmosisClient()
-    run = client.get_training_run(name, credentials=credentials)
+    output = get_output_context()
+    with output.status("Fetching training run..."):
+        run = client.get_training_run(name, credentials=credentials)
 
     rows = build_run_detail_rows(run)
     if run.examples_processed_count is not None:
@@ -106,45 +149,59 @@ def status(
     if run.completed_at:
         rows.append(("Completed", format_date(run.completed_at)))
 
-    console.table(rows, title="Training Run")
+    checkpoints = []
 
     if run.status in RUN_STATUSES_TERMINAL:
         try:
-            ckpts = client.list_training_run_checkpoints(name, credentials=credentials)
+            with output.status("Fetching checkpoints..."):
+                ckpts = client.list_training_run_checkpoints(
+                    name, credentials=credentials
+                )
         except PlatformAPIError:
             ckpts = None
 
         if ckpts is not None and ckpts.checkpoints:
-            console.print()
-            console.print("Checkpoints:", style="bold")
-            for cp in ckpts.checkpoints:
-                name = (
-                    console.escape(cp.checkpoint_name)
-                    if cp.checkpoint_name
-                    else console.format_styled("(unnamed)", "dim")
-                )
-                step_str = f"step {cp.checkpoint_step}"
-                status_style = entity_status_style(cp.status) or "dim"
-                status_str = console.format_styled(f"[{cp.status}]", status_style)
-                date = format_dim_date(cp.created_at)
-                short_id = console.format_styled(cp.id[:8], "dim")
-                console.print(
-                    f"  {name}  {step_str}  {status_str}  {short_id}  {date}",
-                    highlight=False,
-                )
-            console.print()
-            console.print(
-                "Deploy with:  osmosis deploy <checkpoint-name>",
-                style="dim",
+            checkpoints = ckpts.checkpoints
+
+    fields = _detail_fields(rows)
+    for cp in checkpoints:
+        cp_name = cp.checkpoint_name or "(unnamed)"
+        fields.append(
+            DetailField(
+                label="Checkpoint",
+                value=(
+                    f"{cp_name}  step {cp.checkpoint_step}  [{cp.status}]"
+                    f"  {cp.id[:8]}  {format_date(cp.created_at)}"
+                ),
             )
+        )
+    if checkpoints:
+        fields.append(
+            DetailField(
+                label="Deploy",
+                value="osmosis deploy <checkpoint-name>",
+            )
+        )
+
+    data = serialize_training_run(run)
+    data.update(
+        {
+            "examples_processed_count": run.examples_processed_count,
+            "notes": run.notes,
+            "hf_status": run.hf_status,
+            "checkpoints": [serialize_checkpoint(cp) for cp in checkpoints],
+        }
+    )
+
+    return DetailResult(title="Training Run", data=data, fields=fields)
 
 
 @app.command("info", hidden=True)
 def info(
     name: str = typer.Argument(..., help="Training run name."),
-) -> None:
+) -> Any:
     """Deprecated alias for `osmosis train status`."""
-    status(name=name)
+    return status(name=name)
 
 
 @app.command("submit")
@@ -159,10 +216,14 @@ def submit(
         help="Path to training config TOML file.",
     ),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
-) -> None:
+) -> Any:
     """Submit a new training run."""
+    from osmosis_ai.cli.output import OperationResult, get_output_context
     from osmosis_ai.platform.cli.training_config import load_training_config
-    from osmosis_ai.platform.cli.utils import _require_auth, platform_entity_url
+    from osmosis_ai.platform.cli.utils import (
+        _require_auth,
+        platform_entity_url,
+    )
     from osmosis_ai.platform.cli.workspace_contract import (
         ensure_workspace_config_path,
         resolve_workspace_root,
@@ -197,14 +258,13 @@ def submit(
         rows.append(("Commit", console.escape(config.experiment_commit_sha)))
     console.table(rows, title="Training Run")
 
-    from osmosis_ai.cli.prompts import require_confirmation
-
-    require_confirmation("Submit this training run?", yes=yes)
+    _require_confirmation("Submit this training run?", yes=yes)
 
     from osmosis_ai.platform.api.client import OsmosisClient
 
-    with console.spinner("Submitting training run..."):
-        client = OsmosisClient()
+    client = OsmosisClient()
+    output = get_output_context()
+    with output.status("Submitting training run..."):
         result = client.submit_training_run(
             model_path=config.experiment_model_path,
             dataset=config.experiment_dataset,
@@ -215,14 +275,34 @@ def submit(
             credentials=credentials,
         )
 
-    url = console.escape(platform_entity_url(ws_name, "training", result.id))
-    console.print(
-        f"Training run submitted: {console.escape(result.name)}",
-        style="green",
-        highlight=False,
+    url = platform_entity_url(ws_name, "training", result.id)
+    return OperationResult(
+        operation="train.submit",
+        status="success",
+        resource={
+            "id": result.id,
+            "name": result.name,
+            "status": result.status,
+            "created_at": result.created_at,
+            "url": url,
+            "config": {
+                "rollout": config.experiment_rollout,
+                "entrypoint": config.experiment_entrypoint,
+                "model": config.experiment_model_path,
+                "dataset": config.experiment_dataset,
+                "commit_sha": config.experiment_commit_sha,
+            },
+        },
+        message=f"Training run submitted: {result.name}",
+        display_next_steps=[
+            f"Status: {result.status}",
+            f"View: {url}",
+        ],
+        next_steps_structured=[
+            {"action": "train_status", "name": result.name},
+            {"action": "open_url", "url": url},
+        ],
     )
-    console.print(f"  Status: {result.status}")
-    console.print(f"  View: {url}")
 
 
 def _safe_name(name: str) -> str:
@@ -301,11 +381,18 @@ def metrics(
             " filename inside it. (default: .osmosis/metrics/)"
         ),
     ),
-) -> None:
+) -> Any:
     """Export training run metrics to a JSON file."""
     import json
 
     from osmosis_ai.cli.metrics_export import build_export_dict
+    from osmosis_ai.cli.output import (
+        DetailField,
+        DetailResult,
+        OutputFormat,
+        get_output_context,
+        serialize_training_run,
+    )
     from osmosis_ai.platform.api.client import OsmosisClient
     from osmosis_ai.platform.api.models import RUN_STATUSES_IN_PROGRESS
     from osmosis_ai.platform.auth.platform_client import PlatformAPIError
@@ -316,8 +403,9 @@ def metrics(
 
     ws_name, credentials = _require_auth()
     client = OsmosisClient()
+    output_ctx = get_output_context()
 
-    with console.spinner("Fetching training run..."):
+    with output_ctx.status("Fetching training run..."):
         run = client.get_training_run(name, credentials=credentials)
 
     if run.status == "pending":
@@ -326,27 +414,18 @@ def metrics(
     is_in_progress = run.status in RUN_STATUSES_IN_PROGRESS
 
     # ── Platform URL (no metrics dependency) ─────────────────────
-    url = console.escape(platform_entity_url(ws_name, "training", run.id))
-    console.print()
-    console.print(f"View full details: {url}", style="cyan", highlight=False)
-    console.print()
+    url = platform_entity_url(ws_name, "training", run.id)
 
     # ── Fetch metrics (best-effort) ──────────────────────────────
     metrics_data = None
+    metrics_error: str | None = None
     try:
-        with console.spinner("Fetching metrics..."):
+        with output_ctx.status("Fetching metrics..."):
             metrics_data = client.get_training_run_metrics(
                 run.id, credentials=credentials
             )
-    except (PlatformAPIError, KeyError):
-        console.print("Could not fetch metrics data.", style="yellow")
-
-    if is_in_progress:
-        console.print(
-            "Note: training is in progress. Metrics shown are a snapshot.",
-            style="yellow",
-        )
-        console.print()
+    except (PlatformAPIError, KeyError) as exc:
+        metrics_error = str(exc) or "Could not fetch metrics data."
 
     # ── Summary table ─────────────────────────────────────────────
     rows: list[tuple[str, str]] = []
@@ -374,7 +453,8 @@ def metrics(
         if total_steps:
             rows.append(("Steps", f"{total_steps:,}"))
 
-    console.table(rows, title="Training Run Metrics")
+    fields = _detail_fields(rows)
+    fields.insert(0, DetailField(label="View", value=url))
 
     # ── Metric trends ─────────────────────────────────────────────
     if metrics_data is not None and metrics_data.metrics:
@@ -383,7 +463,7 @@ def metrics(
             should_render_metric_trends,
         )
 
-        if should_render_metric_trends(
+        if output_ctx.format is OutputFormat.rich and should_render_metric_trends(
             is_tty=console.is_tty,
             terminal_width=console.width,
             metrics=metrics_data.metrics,
@@ -392,34 +472,60 @@ def metrics(
                 metrics_data.metrics, terminal_width=console.width
             )
             if trends:
-                console.print()
-                console.separator("Metric Trends")
-                console.print(trends)
+                fields.append(DetailField(label="Metric Trends", value=trends))
     elif metrics_data is not None:
-        console.print("No metric data found.", style="dim")
+        fields.append(DetailField(label="Metrics", value="No metric data found."))
+
+    if metrics_error is not None:
+        fields.append(
+            DetailField(label="Metrics", value="Could not fetch metrics data.")
+        )
+
+    if is_in_progress:
+        fields.append(
+            DetailField(
+                label="Note",
+                value="Training is in progress. Metrics shown are a snapshot.",
+            )
+        )
 
     # ── Save to file (best-effort) ────────────────────────────────
+    export: dict[str, Any] | None = None
+    output_path: str | None = None
+    save_warning: str | None = None
     if metrics_data is not None:
         export = build_export_dict(run, metrics_data)
-        console.print()
-        try:
-            out_path = (
-                _resolve_output_path(output, run.name, run.id)
-                if output
-                else _resolve_default_output(run.name, run.id)
-            )
-            out_path.write_text(json.dumps(export, indent=2, ensure_ascii=False) + "\n")
-            console.print(
-                f"Saved to {console.escape(str(out_path))}",
-                style="green",
-                highlight=False,
-            )
-        except (CLIError, OSError) as exc:
-            console.print(
-                f"Could not save metrics: {console.escape(str(exc))}",
-                style="yellow",
-                highlight=False,
-            )
+        should_write_file = output is not None or output_ctx.format is OutputFormat.rich
+        if should_write_file:
+            try:
+                out_path = (
+                    _resolve_output_path(output, run.name, run.id)
+                    if output
+                    else _resolve_default_output(run.name, run.id)
+                )
+                out_path.write_text(
+                    json.dumps(export, indent=2, ensure_ascii=False) + "\n"
+                )
+                output_path = str(out_path)
+                fields.append(DetailField(label="Saved", value=output_path))
+            except (CLIError, OSError) as exc:
+                save_warning = f"Could not save metrics: {exc}"
+                fields.append(DetailField(label="Warning", value=save_warning))
+
+    return DetailResult(
+        title="Training Run Metrics",
+        data={
+            "training_run": serialize_training_run(run),
+            "platform_url": url,
+            "in_progress": is_in_progress,
+            "metrics_available": metrics_data is not None,
+            "metrics_error": metrics_error,
+            "metrics": export,
+            "output_path": output_path,
+            "save_warning": save_warning,
+        },
+        fields=fields,
+    )
 
 
 @app.command("traces")
@@ -432,8 +538,9 @@ def traces() -> None:
 def stop(
     name: str = typer.Argument(..., help="Training run name."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
-) -> None:
+) -> Any:
     """Stop a training run."""
+    from osmosis_ai.cli.output import OperationResult, get_output_context
     from osmosis_ai.platform.cli.utils import _require_auth
 
     _, credentials = _require_auth()
@@ -442,15 +549,16 @@ def stop(
 
     client = OsmosisClient()
 
-    from osmosis_ai.cli.prompts import require_confirmation
+    _require_confirmation(f'Stop training run "{name}"?', yes=yes)
 
-    require_confirmation(f'Stop training run "{name}"?', yes=yes)
-
-    client.stop_training_run(name, credentials=credentials)
-    console.print(
-        f'Training run "{console.escape(name)}" stopped.',
-        style="green",
-        highlight=False,
+    output = get_output_context()
+    with output.status("Stopping training run..."):
+        client.stop_training_run(name, credentials=credentials)
+    return OperationResult(
+        operation="train.stop",
+        status="success",
+        resource={"name": name},
+        message=f'Training run "{name}" stopped.',
     )
 
 
@@ -458,8 +566,9 @@ def stop(
 def delete(
     name: str = typer.Argument(..., help="Training run name."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
-) -> None:
+) -> Any:
     """Delete a training run."""
+    from osmosis_ai.cli.output import OperationResult, get_output_context
     from osmosis_ai.platform.cli.utils import _require_auth
 
     _, credentials = _require_auth()
@@ -468,15 +577,16 @@ def delete(
 
     client = OsmosisClient()
 
-    from osmosis_ai.cli.prompts import require_confirmation
-
-    require_confirmation(
+    _require_confirmation(
         f'Delete training run "{name}"? This cannot be undone.', yes=yes
     )
 
-    client.delete_training_run(name, credentials=credentials)
-    console.print(
-        f'Training run "{console.escape(name)}" deleted.',
-        style="green",
-        highlight=False,
+    output = get_output_context()
+    with output.status("Deleting training run..."):
+        client.delete_training_run(name, credentials=credentials)
+    return OperationResult(
+        operation="train.delete",
+        status="success",
+        resource={"name": name},
+        message=f'Training run "{name}" deleted.',
     )

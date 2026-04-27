@@ -12,7 +12,7 @@ pip install -e .
 osmosis auth login
 
 # Verify the canonical workspace layout
-osmosis workspace validate
+osmosis --json workspace validate
 ```
 
 ## Ask your agent
@@ -20,5 +20,5 @@ osmosis workspace validate
 ```text
 I want to train a model for <task>. Read .osmosis/research/program.md,
 create a baseline rollout in this workspace, iterate locally with evals,
-and prepare a training config.
+and prepare a training config. Use `osmosis --json` for Osmosis CLI commands.
 ```

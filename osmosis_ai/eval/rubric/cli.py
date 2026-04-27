@@ -3,8 +3,10 @@ from __future__ import annotations
 import asyncio
 import sys
 from pathlib import Path
+from typing import Any
 
 from osmosis_ai.cli.errors import CLIError
+from osmosis_ai.cli.output import OperationResult, OutputFormat, get_output_context
 from osmosis_ai.cli.paths import parse_cli_path
 
 from .dataset import RubricRecord, load_rubric_dataset
@@ -34,7 +36,7 @@ class RubricCommand:
         timeout: float | None = None,
         score_min: float = 0.0,
         score_max: float = 1.0,
-    ) -> int:
+    ) -> int | OperationResult:
         if number < 1:
             raise CLIError("--number must be at least 1.")
 
@@ -70,18 +72,69 @@ class RubricCommand:
             overall_statistics=calculate_statistics(all_scores),
         )
 
-        ConsoleReportRenderer().render(report)
+        output = get_output_context()
+        if output.format is OutputFormat.rich:
+            ConsoleReportRenderer().render(report)
 
+        written: Path | None = None
         if output_path:
             parsed_output = parse_cli_path(output_path, expand_user=True)
             out = parsed_output.path
             if parsed_output.has_trailing_separator or out.is_dir():
                 out = out / "rubric_eval_result.json"
             written = JsonReportWriter().write(report, out)
-            print(f"Wrote results to {written}")
+            if output.format is OutputFormat.rich:
+                from osmosis_ai.cli.console import console
+
+                console.print(f"Wrote results to {console.escape(str(written))}")
 
         has_errors = any(r.errors for r in results)
+        if output.format is not OutputFormat.rich:
+            return OperationResult(
+                operation="eval.rubric",
+                status="failed" if has_errors else "success",
+                resource=self._report_resource(report, written),
+                message=(
+                    "Rubric evaluation completed with errors."
+                    if has_errors
+                    else "Rubric evaluation completed."
+                ),
+                exit_code=1 if has_errors else 0,
+            )
         return 1 if has_errors else 0
+
+    @staticmethod
+    def _record_payload(result: RecordResult) -> dict[str, Any]:
+        return {
+            "index": result.record_index,
+            "label": result.label,
+            "scores": result.scores,
+            "explanations": result.explanations,
+            "errors": result.errors,
+            "statistics": result.statistics,
+        }
+
+    @classmethod
+    def _report_resource(
+        cls,
+        report: RubricReport,
+        output_path: Path | None,
+    ) -> dict[str, Any]:
+        resource: dict[str, Any] = {
+            "model": report.model,
+            "data_path": str(report.data_path),
+            "number": report.number,
+            "statistics": report.overall_statistics,
+            "record_count": len(report.results),
+            "error_count": sum(len(result.errors) for result in report.results),
+        }
+        if output_path is not None:
+            resource["output_path"] = str(output_path)
+        else:
+            resource["records"] = [
+                cls._record_payload(result) for result in report.results
+            ]
+        return resource
 
     @staticmethod
     def _resolve_rubric_text(rubric: str) -> str:
@@ -113,7 +166,11 @@ class RubricCommand:
         score_max: float,
     ) -> list[RecordResult]:
         total = len(records) * number
-        show_progress = total > 1 and getattr(sys.stderr, "isatty", lambda: False)()
+        show_progress = (
+            get_output_context().format is not OutputFormat.json
+            and total > 1
+            and getattr(sys.stderr, "isatty", lambda: False)()
+        )
         progress = None
         if show_progress:
             from tqdm import tqdm

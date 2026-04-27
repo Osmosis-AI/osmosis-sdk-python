@@ -8,7 +8,12 @@ from io import StringIO
 import pytest
 
 from osmosis_ai.cli.console import Console
-from osmosis_ai.platform.api.models import DatasetFile, UploadInfo
+from osmosis_ai.platform.api.models import (
+    BaseModelInfo,
+    DatasetFile,
+    TrainingRun,
+    UploadInfo,
+)
 
 # ---------------------------------------------------------------------------
 # _clean_file_path — drag-and-drop path normalization
@@ -48,6 +53,94 @@ class TestCleanFilePath:
         from osmosis_ai.platform.cli.workspace import _clean_file_path
 
         assert _clean_file_path("/path/to/file.jsonl") == "/path/to/file.jsonl"
+
+
+# ---------------------------------------------------------------------------
+# Detail views — platform links
+# ---------------------------------------------------------------------------
+
+
+class TestWorkspaceDetailLinks:
+    def _assert_copyable_platform_link(
+        self, output: StringIO, expected_url: str
+    ) -> None:
+        rendered = output.getvalue()
+        assert "View on platform:" in rendered
+        assert expected_url in rendered
+        assert "…" not in rendered
+
+    def test_dataset_detail_prints_copyable_url_outside_table(self, monkeypatch):
+        import osmosis_ai.platform.cli.workspace as workspace_module
+
+        output = StringIO()
+        monkeypatch.setattr(
+            workspace_module,
+            "console",
+            Console(file=output, force_terminal=True, no_color=True, width=60),
+        )
+        dataset = DatasetFile(
+            id="328be61c-ef39-45e1-9b33-1e3c7c482e97",
+            file_name="data",
+            file_size=2,
+            status="uploaded",
+        )
+
+        workspace_module._show_dataset_detail(dataset, "osmosis-shared")
+
+        expected_url = workspace_module.platform_entity_url(
+            "osmosis-shared",
+            "datasets",
+            "328be61c-ef39-45e1-9b33-1e3c7c482e97",
+        )
+        self._assert_copyable_platform_link(output, expected_url)
+
+    def test_run_detail_prints_copyable_url_outside_table(self, monkeypatch):
+        import osmosis_ai.platform.cli.workspace as workspace_module
+
+        output = StringIO()
+        monkeypatch.setattr(
+            workspace_module,
+            "console",
+            Console(file=output, force_terminal=True, no_color=True, width=60),
+        )
+        run = TrainingRun(
+            id="328be61c-ef39-45e1-9b33-1e3c7c482e97",
+            name="run-1",
+            status="finished",
+        )
+
+        workspace_module._show_run_detail(run, "osmosis-shared")
+
+        expected_url = workspace_module.platform_entity_url(
+            "osmosis-shared",
+            "training",
+            "328be61c-ef39-45e1-9b33-1e3c7c482e97",
+        )
+        self._assert_copyable_platform_link(output, expected_url)
+
+    def test_model_detail_prints_copyable_url_outside_table(self, monkeypatch):
+        import osmosis_ai.platform.cli.workspace as workspace_module
+
+        output = StringIO()
+        monkeypatch.setattr(
+            workspace_module,
+            "console",
+            Console(file=output, force_terminal=True, no_color=True, width=60),
+        )
+        model = BaseModelInfo(
+            id="328be61c-ef39-45e1-9b33-1e3c7c482e97",
+            model_name="model-1",
+            status="ready",
+        )
+
+        workspace_module._show_model_detail(model, "osmosis-shared")
+
+        expected_url = workspace_module.platform_entity_url(
+            "osmosis-shared",
+            "models",
+            "328be61c-ef39-45e1-9b33-1e3c7c482e97",
+        )
+        self._assert_copyable_platform_link(output, expected_url)
 
 
 # ---------------------------------------------------------------------------

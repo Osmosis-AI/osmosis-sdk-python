@@ -7,10 +7,13 @@ import shutil
 import subprocess
 import sys
 import urllib.request
+from typing import Any
 
 import typer
 
 from osmosis_ai.cli.console import console
+from osmosis_ai.cli.errors import CLIError
+from osmosis_ai.cli.output import OperationResult, OutputFormat, get_output_context
 from osmosis_ai.consts import PACKAGE_VERSION, package_name
 
 PYPI_URL = f"https://pypi.org/pypi/{package_name}/json"
@@ -86,15 +89,45 @@ def _get_upgrade_commands(method: str) -> list[list[str]]:
     return commands.get(method, commands["pip"])
 
 
-def upgrade() -> None:
+def _upgrade_resource(
+    *,
+    installed: str,
+    latest: str | None,
+    method: str | None = None,
+    command: list[str] | None = None,
+    stdout: str | None = None,
+    stderr: str | None = None,
+) -> dict[str, Any]:
+    resource: dict[str, Any] = {
+        "installed_version": installed,
+        "latest_version": latest,
+    }
+    if method is not None:
+        resource["method"] = method
+    if command is not None:
+        resource["command"] = command
+    if stdout:
+        resource["stdout"] = stdout
+    if stderr:
+        resource["stderr"] = stderr
+    return resource
+
+
+def upgrade() -> Any:
     """Upgrade the Osmosis CLI to the latest version."""
     installed = PACKAGE_VERSION
+    output = get_output_context()
+    structured_output = output.format is not OutputFormat.rich
 
     console.print(f"Installed version: {installed}")
     console.print("Checking for updates...", style="dim")
 
     latest = _fetch_latest_version()
     if latest is None:
+        if structured_output:
+            raise CLIError(
+                "Failed to check for updates from PyPI.", code="PLATFORM_ERROR"
+            )
         console.print_error("Failed to check for updates from PyPI.")
         raise typer.Exit(1)
 
@@ -102,6 +135,13 @@ def upgrade() -> None:
     console.print()
 
     if _is_up_to_date(installed, latest):
+        if structured_output:
+            return OperationResult(
+                operation="upgrade",
+                status="no_update",
+                resource=_upgrade_resource(installed=installed, latest=latest),
+                message="Already up to date.",
+            )
         console.print("Already up to date!", style="green")
         return
 
@@ -117,22 +157,103 @@ def upgrade() -> None:
     console.print(f"Detected install method: {method}")
     console.print()
 
+    last_failure: OperationResult | None = None
+
     for cmd in cmds:
         if shutil.which(cmd[0]) is None:
             continue
 
         console.print(f"Running: {' '.join(cmd)}", style="dim")
         try:
-            result = subprocess.run(cmd, timeout=120)
+            run_kwargs: dict[str, Any] = {"timeout": 120}
+            if structured_output:
+                run_kwargs.update({"capture_output": True, "text": True})
+            else:
+                run_kwargs["stdout"] = subprocess.DEVNULL
+            result = subprocess.run(cmd, **run_kwargs)
             if result.returncode == 0:
+                if structured_output:
+                    return OperationResult(
+                        operation="upgrade",
+                        status="success",
+                        resource=_upgrade_resource(
+                            installed=installed,
+                            latest=latest,
+                            method=method,
+                            command=cmd,
+                            stdout=getattr(result, "stdout", None),
+                            stderr=getattr(result, "stderr", None),
+                        ),
+                        message=f"Successfully upgraded to {latest}.",
+                    )
                 console.print()
                 console.print(f"Successfully upgraded to {latest}!", style="bold green")
                 return
+            if structured_output:
+                last_failure = OperationResult(
+                    operation="upgrade",
+                    status="failed",
+                    resource=_upgrade_resource(
+                        installed=installed,
+                        latest=latest,
+                        method=method,
+                        command=cmd,
+                        stdout=getattr(result, "stdout", None),
+                        stderr=getattr(result, "stderr", None),
+                    ),
+                    message="Upgrade failed.",
+                    exit_code=1,
+                )
+                continue
             console.print()
         except subprocess.TimeoutExpired:
+            if structured_output:
+                last_failure = OperationResult(
+                    operation="upgrade",
+                    status="failed",
+                    resource=_upgrade_resource(
+                        installed=installed,
+                        latest=latest,
+                        method=method,
+                        command=cmd,
+                    ),
+                    message="Upgrade command timed out.",
+                    exit_code=1,
+                )
+                continue
             console.print_error("Upgrade command timed out.")
         except Exception as exc:
+            if structured_output:
+                last_failure = OperationResult(
+                    operation="upgrade",
+                    status="failed",
+                    resource=_upgrade_resource(
+                        installed=installed,
+                        latest=latest,
+                        method=method,
+                        command=cmd,
+                        stderr=str(exc),
+                    ),
+                    message="Error running upgrade.",
+                    exit_code=1,
+                )
+                continue
             console.print_error(f"Error running upgrade: {exc}")
+
+    if structured_output:
+        if last_failure is not None:
+            return last_failure
+        return OperationResult(
+            operation="upgrade",
+            status="failed",
+            resource=_upgrade_resource(
+                installed=installed,
+                latest=latest,
+                method=method,
+            ),
+            message="Upgrade failed.",
+            exit_code=1,
+        )
 
     console.print()
     console.print_error("Upgrade failed. You can try manually:")

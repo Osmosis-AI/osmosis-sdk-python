@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "keys": [
+    "id",
+    "checkpoint_name",
+    "checkpoint_step",
+    "status",
+    "created_at"
+  ]
+}

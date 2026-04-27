@@ -1,0 +1,12 @@
+{
+  "schema_version": 1,
+  "keys": [
+    "id",
+    "model_name",
+    "base_model",
+    "status",
+    "creator_name",
+    "created_at",
+    "updated_at"
+  ]
+}

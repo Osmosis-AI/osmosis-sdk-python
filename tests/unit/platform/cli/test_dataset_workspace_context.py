@@ -42,11 +42,12 @@ def test_list_datasets_uses_active_workspace(monkeypatch) -> None:
 
     monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
 
-    dataset_module.list_datasets()
+    result = dataset_module.list_datasets()
 
     assert calls == {
         "credentials": fake_credentials,
     }
+    assert result.total_count == 0
 
 
 def test_upload_passes_active_workspace_context_to_subscription_and_api_calls(
@@ -71,7 +72,6 @@ def test_upload_passes_active_workspace_context_to_subscription_and_api_calls(
         dataset_module, "_require_subscription", fake_require_subscription
     )
     monkeypatch.setattr(dataset_module, "_validate_file", lambda _path, _ext: [])
-    monkeypatch.setattr(dataset_module, "is_interactive", lambda: False)
     monkeypatch.setattr(
         dataset_module, "console", Console(file=output, force_terminal=False)
     )
@@ -137,16 +137,18 @@ def test_upload_passes_active_workspace_context_to_subscription_and_api_calls(
 
     monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
 
-    dataset_module.upload(str(file_path))
+    result = dataset_module.upload(str(file_path))
 
     assert calls == {
         "workspace_name": "ws-b",
         "create_credentials": fake_credentials,
         "complete_credentials": fake_credentials,
     }
-    rendered = output.getvalue()
-    assert "Dataset uploaded: data" in rendered
-    assert "https://example.com/ws-b/datasets/dataset-1" in rendered
+    assert result.operation == "dataset.upload"
+    assert result.status == "success"
+    assert result.resource["id"] == "dataset-1"
+    assert result.resource["status"] == "uploaded"
+    assert "https://example.com/ws-b/datasets/dataset-1" in result.display_next_steps[0]
 
 
 def test_download_uses_active_workspace_context_and_saves_file(
@@ -215,7 +217,7 @@ def test_download_uses_active_workspace_context_and_saves_file(
     monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
     monkeypatch.setattr(download_module, "download_file", fake_download_file)
 
-    dataset_module.download("dataset-1", output=str(tmp_path), overwrite=True)
+    result = dataset_module.download("dataset-1", output=str(tmp_path), overwrite=True)
 
     assert calls == {
         "get_credentials": fake_credentials,
@@ -227,7 +229,9 @@ def test_download_uses_active_workspace_context_and_saves_file(
         "overwrite": True,
         "output_is_directory": False,
     }
-    assert "Dataset downloaded:" in output.getvalue()
+    assert result.operation == "dataset.download"
+    assert result.status == "success"
+    assert result.resource["output_path"] == str(tmp_path / "data.jsonl")
 
 
 def test_download_preserves_trailing_separator_as_directory_intent(

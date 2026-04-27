@@ -11,6 +11,13 @@ import osmosis_ai.cli.commands.deployment as deployment_module
 import osmosis_ai.platform.api.client as api_client_module
 import osmosis_ai.platform.cli.utils as utils_module
 from osmosis_ai.cli.console import Console
+from osmosis_ai.cli.output import (
+    DetailResult,
+    ListResult,
+    OperationResult,
+    OutputFormat,
+    override_output_context,
+)
 from osmosis_ai.platform.api.models import (
     DeploymentInfo,
     DeploymentSummary,
@@ -49,8 +56,13 @@ class TestListDeployments:
                 )
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-        deployment_module.list_deployments(limit=30, all_=False)
-        assert "No deployments found" in console_capture.getvalue()
+        result = deployment_module.list_deployments(limit=30, all_=False)
+
+        assert isinstance(result, ListResult)
+        assert result.title == "Deployments"
+        assert result.items == []
+        assert result.total_count == 0
+        assert result.has_more is False
 
     def test_list_with_deployments(
         self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
@@ -75,16 +87,16 @@ class TestListDeployments:
                 )
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-        deployment_module.list_deployments(limit=10, all_=False)
-        out = console_capture.getvalue()
+        result = deployment_module.list_deployments(limit=10, all_=False)
         assert captured == {
             "limit": 10,
             "offset": 0,
             "credentials": AUTH_CREDENTIALS,
         }
-        assert "Deployments" in out
-        assert "qwen3-run1-step-100" in out
-        assert "Qwen/Qwen3" in out
+        assert isinstance(result, ListResult)
+        assert result.title == "Deployments"
+        assert result.items[0]["checkpoint_name"] == "qwen3-run1-step-100"
+        assert result.items[0]["base_model"] == "Qwen/Qwen3"
 
 
 class TestInfo:
@@ -110,21 +122,20 @@ class TestInfo:
                 )
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-        deployment_module.info(checkpoint=checkpoint_id)
-        out = console_capture.getvalue()
+        result = deployment_module.info(checkpoint=checkpoint_id)
         assert captured == {
             "checkpoint": checkpoint_id,
             "credentials": AUTH_CREDENTIALS,
         }
-        assert "qwen3-run1-step-100" in out
-        assert "Qwen/Qwen3" in out
-        assert "qwen3-run1" in out
+        assert isinstance(result, DetailResult)
+        assert result.title == "Deployment"
+        assert result.data["checkpoint_name"] == "qwen3-run1-step-100"
+        assert result.data["base_model"] == "Qwen/Qwen3"
+        assert result.data["training_run_name"] == "qwen3-run1"
 
     def test_info_escapes_status_for_rich_table(
         self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
     ) -> None:
-        captured_rows: list[tuple[str, str]] = []
-
         class FakeClient:
             def get_deployment(self, checkpoint, *, credentials=None):
                 return DeploymentInfo(
@@ -135,15 +146,14 @@ class TestInfo:
                     base_model="Qwen/Qwen3",
                 )
 
-        def record_table(rows, *args, **kwargs):
-            captured_rows.extend(rows)
-
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-        monkeypatch.setattr(deployment_module.console, "table", record_table)
 
-        deployment_module.info(checkpoint="qwen3-run1-step-100")
+        result = deployment_module.info(checkpoint="qwen3-run1-step-100")
 
-        assert ("Status", "\\[red]failed\\[/red]") in captured_rows
+        assert isinstance(result, DetailResult)
+        assert ("Status", "\\[red]failed\\[/red]") in [
+            (field.label, field.value) for field in result.fields
+        ]
 
 
 class TestDeploy:
@@ -163,12 +173,20 @@ class TestDeploy:
                 )
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-        deployment_module.deploy(checkpoint="qwen3-run1-step-100")
+        result = deployment_module.deploy(checkpoint="qwen3-run1-step-100")
         assert captured == {
             "checkpoint": "qwen3-run1-step-100",
             "credentials": AUTH_CREDENTIALS,
         }
-        assert "qwen3-run1-step-100" in console_capture.getvalue()
+        assert isinstance(result, OperationResult)
+        assert result.operation == "deploy"
+        assert result.status == "success"
+        assert result.resource == {
+            "id": "dep_1",
+            "checkpoint_name": "qwen3-run1-step-100",
+            "status": "active",
+        }
+        assert result.message == "Deployment qwen3-run1-step-100 active"
 
     def test_deploy_escapes_checkpoint_in_spinner(
         self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
@@ -190,29 +208,20 @@ class TestDeploy:
                 )
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-        monkeypatch.setattr(deployment_module.console, "spinner", record_spinner)
 
-        deployment_module.deploy(checkpoint="[red]bad[/red]")
+        with override_output_context(
+            format=OutputFormat.rich, interactive=True
+        ) as output:
+            monkeypatch.setattr(output, "status", record_spinner)
+            result = deployment_module.deploy(checkpoint="[red]bad[/red]")
 
         assert captured["checkpoint"] == "[red]bad[/red]"
         assert captured["message"] == 'Deploying checkpoint "\\[red]bad\\[/red]"...'
+        assert isinstance(result, OperationResult)
 
     def test_deploy_failed_result_does_not_force_message_green(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        output = StringIO()
-        tty_console = Console(file=output, force_terminal=True, width=120)
-        print_calls: list[tuple[tuple[object, ...], dict[str, object]]] = []
-
-        original_print = tty_console.print
-
-        def record_print(*args, **kwargs):
-            print_calls.append((args, kwargs))
-            original_print(*args, **kwargs)
-
-        monkeypatch.setattr(tty_console, "print", record_print)
-        monkeypatch.setattr(deployment_module, "console", tty_console)
-
         class FakeClient:
             def deploy_checkpoint(self, checkpoint, *, credentials=None):
                 return DeploymentSummary(
@@ -222,12 +231,12 @@ class TestDeploy:
                 )
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-        deployment_module.deploy(checkpoint="qwen3-run1-step-100")
+        result = deployment_module.deploy(checkpoint="qwen3-run1-step-100")
 
-        args, kwargs = print_calls[-1]
-        assert args == ("Deployment qwen3-run1-step-100 [red]\\[failed][/red]",)
-        assert kwargs.get("style") is None
-        assert kwargs["highlight"] is False
+        assert isinstance(result, OperationResult)
+        assert result.status == "failed"
+        assert result.message == "Deployment qwen3-run1-step-100 failed"
+        assert result.exit_code == 1
 
 
 class TestUndeploy:
@@ -248,14 +257,20 @@ class TestUndeploy:
                 )
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-        deployment_module.undeploy(checkpoint=checkpoint_id)
-        out = console_capture.getvalue()
+        result = deployment_module.undeploy(checkpoint=checkpoint_id)
         assert captured == {
             "checkpoint": checkpoint_id,
             "credentials": AUTH_CREDENTIALS,
         }
-        assert "qwen3-run1-step-100" in out
-        assert "inactive" in out
+        assert isinstance(result, OperationResult)
+        assert result.operation == "undeploy"
+        assert result.status == "success"
+        assert result.resource == {
+            "id": checkpoint_id,
+            "checkpoint_name": "qwen3-run1-step-100",
+            "status": "inactive",
+        }
+        assert result.message == "Deployment qwen3-run1-step-100 inactive"
 
     def test_undeploy_escapes_checkpoint_in_spinner(
         self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
@@ -277,12 +292,34 @@ class TestUndeploy:
                 )
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-        monkeypatch.setattr(deployment_module.console, "spinner", record_spinner)
 
-        deployment_module.undeploy(checkpoint="[red]bad[/red]")
+        with override_output_context(
+            format=OutputFormat.rich, interactive=True
+        ) as output:
+            monkeypatch.setattr(output, "status", record_spinner)
+            result = deployment_module.undeploy(checkpoint="[red]bad[/red]")
 
         assert captured["checkpoint"] == "[red]bad[/red]"
         assert captured["message"] == 'Undeploying checkpoint "\\[red]bad\\[/red]"...'
+        assert isinstance(result, OperationResult)
+
+    def test_undeploy_failed_result_exits_nonzero(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        class FakeClient:
+            def undeploy_checkpoint(self, checkpoint, *, credentials=None):
+                return DeploymentSummary(
+                    id="dep_1",
+                    checkpoint_name="qwen3-run1-step-100",
+                    status="failed",
+                )
+
+        monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        result = deployment_module.undeploy(checkpoint="qwen3-run1-step-100")
+
+        assert isinstance(result, OperationResult)
+        assert result.status == "failed"
+        assert result.exit_code == 1
 
 
 class TestRename:
@@ -304,13 +341,22 @@ class TestRename:
                 )
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-        deployment_module.rename(checkpoint="old-name", new_name="new-name")
+        result = deployment_module.rename(checkpoint="old-name", new_name="new-name")
         assert captured == {
             "checkpoint": "old-name",
             "new_name": "new-name",
             "credentials": AUTH_CREDENTIALS,
         }
-        assert "Renamed old-name -> new-name" in console_capture.getvalue()
+        assert isinstance(result, OperationResult)
+        assert result.operation == "deployment.rename"
+        assert result.status == "success"
+        assert result.resource == {
+            "id": "dep_1",
+            "old_checkpoint_name": "old-name",
+            "checkpoint_name": "new-name",
+            "status": "active",
+        }
+        assert result.message == "Renamed old-name -> new-name"
 
     def test_rename_warns_when_reregistration_fails(
         self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
@@ -325,8 +371,14 @@ class TestRename:
                 )
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-        deployment_module.rename(checkpoint="old-name", new_name="new-name")
-        assert "re-registration failed" in console_capture.getvalue()
+        result = deployment_module.rename(checkpoint="old-name", new_name="new-name")
+
+        assert isinstance(result, OperationResult)
+        assert result.status == "failed"
+        assert result.display_next_steps == [
+            "Warning: inference re-registration failed; deployment is marked as failed."
+        ]
+        assert result.exit_code == 1
 
 
 class TestDelete:
@@ -342,9 +394,13 @@ class TestDelete:
                 return True
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-        deployment_module.delete(checkpoint="qwen3-run1-step-100", yes=True)
+        result = deployment_module.delete(checkpoint="qwen3-run1-step-100", yes=True)
         assert captured == {
             "checkpoint": "qwen3-run1-step-100",
             "credentials": AUTH_CREDENTIALS,
         }
-        assert "deleted" in console_capture.getvalue()
+        assert isinstance(result, OperationResult)
+        assert result.operation == "deployment.delete"
+        assert result.status == "success"
+        assert result.resource == {"checkpoint": "qwen3-run1-step-100"}
+        assert result.message == 'Deployment for "qwen3-run1-step-100" deleted.'

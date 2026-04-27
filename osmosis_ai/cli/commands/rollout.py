@@ -3,15 +3,12 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import typer
 
 from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE
-
-if TYPE_CHECKING:
-    from osmosis_ai.cli.console import Console
 
 app: typer.Typer = typer.Typer(
     help="Manage rollouts (validate, list).",
@@ -85,7 +82,8 @@ def _resolve_validation_target(
     )
 
 
-def _validate_rollout_config(*, config_path: Path, console: Console) -> None:
+def _validate_rollout_config(*, config_path: Path) -> Any:
+    from osmosis_ai.cli.output import DetailField, DetailResult
     from osmosis_ai.platform.cli.workspace_contract import validate_rollout_backend
 
     (
@@ -106,7 +104,7 @@ def _validate_rollout_config(*, config_path: Path, console: Console) -> None:
         grader_config_ref=grader_config_ref,
     )
 
-    rows: list[tuple[str, str]] = [
+    rows: list[tuple[str, Any]] = [
         ("Config", str(config_path.resolve())),
         ("Kind", config_kind),
         ("Rollout", rollout),
@@ -114,9 +112,23 @@ def _validate_rollout_config(*, config_path: Path, console: Console) -> None:
     ]
     if grader_module:
         rows.append(("Grader override", grader_module))
+    rows.append(("Status", "Validation passed."))
 
-    console.table(rows, title="Rollout Validation")
-    console.print("Validation passed.", style="green")
+    return DetailResult(
+        title="Rollout Validation",
+        data={
+            "config": str(config_path.resolve()),
+            "kind": config_kind,
+            "rollout": rollout,
+            "entrypoint": entrypoint,
+            "grader_module": grader_module,
+            "grader_config": grader_config_ref,
+            "valid": True,
+        },
+        fields=[
+            DetailField(label=str(label), value=str(value)) for label, value in rows
+        ],
+    )
 
 
 @app.command("validate")
@@ -130,23 +142,9 @@ def validate(
         resolve_path=True,
         help="Path to training or eval TOML config file.",
     ),
-) -> None:
+) -> Any:
     """Validate a rollout entrypoint referenced by a config file."""
-    from osmosis_ai.cli.console import Console
-
-    _validate_rollout_config(config_path=config_path, console=Console())
-
-
-def _format_commit(r: Any) -> str:
-    """Format commit SHA as a clickable terminal hyperlink (OSC 8 via Rich)."""
-    sha = r.last_synced_commit_sha
-    if not sha:
-        return "[dim]—[/dim]"
-    short = sha[:7]
-    if r.repo_full_name:
-        url = f"https://github.com/{r.repo_full_name}/tree/{sha}"
-        return f"[dim][link={url}]{short}[/link][/dim]"
-    return f"[dim]{short}[/dim]"
+    return _validate_rollout_config(config_path=config_path)
 
 
 @app.command("list")
@@ -155,52 +153,59 @@ def list_rollouts(
         DEFAULT_PAGE_SIZE, "--limit", help="Maximum number of rollouts to show."
     ),
     all_: bool = typer.Option(False, "--all", help="Show all rollouts."),
-) -> None:
+) -> Any:
     """List rollouts in the current workspace."""
-    from osmosis_ai.cli.console import Console
+    from osmosis_ai.cli.output import (
+        ListColumn,
+        ListResult,
+        get_output_context,
+        serialize_rollout,
+    )
     from osmosis_ai.platform.cli.utils import (
         _require_auth,
-        format_dim_date,
-        paginated_fetch,
-        print_pagination_footer,
+        fetch_all_pages,
         validate_list_options,
     )
 
     effective_limit, fetch_all = validate_list_options(limit=limit, all_=all_)
 
-    console = Console()
     _, credentials = _require_auth()
 
     from osmosis_ai.platform.api.client import OsmosisClient
 
-    with console.spinner("Fetching rollouts..."):
-        client = OsmosisClient()
-        rollouts, total_count, _has_more = paginated_fetch(
-            lambda lim, off: client.list_rollouts(
-                limit=lim, offset=off, credentials=credentials
-            ),
-            items_attr="rollouts",
-            limit=effective_limit,
-            fetch_all=fetch_all,
-        )
+    output = get_output_context()
+    client = OsmosisClient()
+    with output.status("Fetching rollouts..."):
+        if fetch_all:
+            rollouts, total_count = fetch_all_pages(
+                lambda lim, off: client.list_rollouts(
+                    limit=lim, offset=off, credentials=credentials
+                ),
+                items_attr="rollouts",
+            )
+            has_more = False
+            next_offset = None
+        else:
+            page = client.list_rollouts(
+                limit=effective_limit, offset=0, credentials=credentials
+            )
+            rollouts = page.rollouts
+            total_count = page.total_count
+            has_more = page.has_more
+            next_offset = page.next_offset
 
-    if not rollouts:
-        console.print("No rollouts found.")
-        return
-
-    console.print(f"Rollouts ({total_count}):", style="bold")
-    for r in rollouts:
-        name = console.escape(r.name)
-        active = (
-            console.format_styled("[active]", "green")
-            if r.is_active
-            else console.format_styled("[inactive]", "dim")
-        )
-        commit = _format_commit(r)
-        date = format_dim_date(r.created_at)
-        console.print(
-            f"  {name}  {active}  {commit}  {date}",
-            highlight=False,
-        )
-
-    print_pagination_footer(len(rollouts), total_count, "rollouts")
+    return ListResult(
+        title="Rollouts",
+        items=[serialize_rollout(rollout) for rollout in rollouts],
+        total_count=total_count,
+        has_more=has_more,
+        next_offset=next_offset,
+        columns=[
+            ListColumn(key="name", label="Name"),
+            ListColumn(key="is_active", label="Active"),
+            ListColumn(key="repo_full_name", label="Repository"),
+            ListColumn(key="last_synced_commit_sha", label="Commit"),
+            ListColumn(key="created_at", label="Created"),
+            ListColumn(key="id", label="ID", no_wrap=True),
+        ],
+    )

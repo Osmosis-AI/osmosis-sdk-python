@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "keys": {
+    "required": ["schema_version", "status", "operation"],
+    "optional": ["resource", "message", "next_steps_structured"]
+  }
+}

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import socket
 from datetime import UTC, datetime, timedelta
+from io import BytesIO
 from typing import Any
 from unittest.mock import MagicMock, patch
 from urllib.error import HTTPError, URLError
@@ -107,8 +108,37 @@ class TestVerifyAndGetUserInfo:
             fp=None,  # type: ignore[arg-type]
         )
         with patch("osmosis_ai.platform.auth.flow.urlopen", side_effect=error):
-            with pytest.raises(LoginError, match="Invalid or expired token"):
+            with pytest.raises(LoginError, match="Authentication failed") as exc_info:
                 verify_token("expired-token")
+
+        assert exc_info.value.code is None
+
+    @pytest.mark.parametrize(
+        ("error_code", "expected_message"),
+        [
+            ("AUTH_HEADER_MISSING", "Token is missing."),
+            ("TOKEN_MISSING", "Token is missing."),
+            ("TOKEN_EXPIRED", "Token has expired."),
+            ("TOKEN_INVALID", "Token is invalid."),
+            ("TOKEN_REVOKED", "Token has been revoked."),
+            ("UNKNOWN_AUTH_ERROR", "Authentication failed."),
+        ],
+    )
+    def test_http_401_uses_structured_cli_token_code(
+        self, error_code: str, expected_message: str
+    ) -> None:
+        error = HTTPError(
+            url="http://test",
+            code=401,
+            msg="Unauthorized",
+            hdrs=None,
+            fp=BytesIO(json.dumps({"code": error_code}).encode()),
+        )
+        with patch("osmosis_ai.platform.auth.flow.urlopen", side_effect=error):
+            with pytest.raises(LoginError, match=expected_message) as exc_info:
+                verify_token("expired-token")
+
+        assert exc_info.value.code == error_code
 
     def test_http_500_raises_login_error(self) -> None:
         error = HTTPError(
@@ -119,8 +149,10 @@ class TestVerifyAndGetUserInfo:
             fp=None,  # type: ignore[arg-type]
         )
         with patch("osmosis_ai.platform.auth.flow.urlopen", side_effect=error):
-            with pytest.raises(LoginError, match="internal error"):
+            with pytest.raises(LoginError, match="internal error") as exc_info:
                 verify_token("token")
+
+        assert exc_info.value.status_code == 500
 
     def test_network_error_raises_login_error(self) -> None:
         error = URLError(reason="Connection refused")

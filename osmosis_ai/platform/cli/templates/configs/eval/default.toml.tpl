@@ -1,5 +1,5 @@
 # Osmosis Eval Configuration
-# Usage: osmosis eval run configs/eval/<your-config>.toml
+# Usage: osmosis --json eval run configs/eval/<your-config>.toml
 
 [eval]
 rollout = "<your-rollout>"                 # Rollout name (directory under rollouts/)

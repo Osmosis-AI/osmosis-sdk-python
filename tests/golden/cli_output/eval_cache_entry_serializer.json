@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "keys": [
+    "task_id",
+    "model",
+    "dataset",
+    "status",
+    "runs_count",
+    "created_at"
+  ]
+}

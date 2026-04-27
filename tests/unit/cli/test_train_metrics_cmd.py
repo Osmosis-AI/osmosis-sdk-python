@@ -8,9 +8,11 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
+from rich.console import Console as RichConsole
 
 from osmosis_ai.cli.console import Console
 from osmosis_ai.cli.metrics_graph import MIN_TREND_TERMINAL_WIDTH, SPARKLINE_BLOCKS
+from osmosis_ai.cli.output import DetailResult
 from osmosis_ai.platform.api.models import (
     MetricDataPoint,
     MetricHistory,
@@ -88,6 +90,20 @@ def _patch_train_console(
     )
 
 
+def _field_value(result: DetailResult, label: str) -> str:
+    for field in result.fields:
+        if field.label == label:
+            return field.value
+    raise AssertionError(f"Missing field {label!r}")
+
+
+def _render_rich_text(value: object) -> str:
+    buffer = io.StringIO()
+    rich = RichConsole(file=buffer, force_terminal=False, no_color=True, width=120)
+    rich.print(value)
+    return buffer.getvalue()
+
+
 class TestMetricsCommandPlatformUrl:
     """Platform URL is printed at the top of output."""
 
@@ -106,15 +122,15 @@ class TestMetricsCommandPlatformUrl:
         with _patch_train_console(buf, force_terminal=False, width=120):
             from osmosis_ai.cli.commands.train import metrics
 
-            metrics(
+            result = metrics(
                 name="reward-tuning-v3",
                 output=str(output),
             )
 
-        text = buf.getvalue()
-        assert "View full details:" in text
-        assert "ws/training/" in text
-        assert "550e8400-e29b-41d4-a716-446655440000" in text
+        assert isinstance(result, DetailResult)
+        view = _field_value(result, "View")
+        assert "ws/training/" in view
+        assert "550e8400-e29b-41d4-a716-446655440000" in view
 
 
 class TestMetricsCommandTrendGraphs:
@@ -137,16 +153,16 @@ class TestMetricsCommandTrendGraphs:
         ):
             from osmosis_ai.cli.commands.train import metrics
 
-            metrics(
+            result = metrics(
                 name="reward-tuning-v3",
                 output=str(output),
             )
 
-        text = buf.getvalue()
-        assert "Training Run Metrics" in text
-        assert "Metric Trends" in text  # Rule separator header
-        assert "Training Reward" in text
-        assert any(c in text for c in SPARKLINE_BLOCKS)
+        assert isinstance(result, DetailResult)
+        assert result.title == "Training Run Metrics"
+        trends = _render_rich_text(_field_value(result, "Metric Trends"))
+        assert "Training Reward" in trends
+        assert any(c in trends for c in SPARKLINE_BLOCKS)
 
     @patch(_PATCH_CLIENT)
     @patch(_PATCH_AUTH)
@@ -178,14 +194,14 @@ class TestMetricsCommandTrendGraphs:
         ):
             from osmosis_ai.cli.commands.train import metrics
 
-            metrics(
+            result = metrics(
                 name="reward-tuning-v3",
                 output=str(output),
             )
 
-        text = buf.getvalue()
-        assert bracket_title in text
-        assert "Metric Trends" in text
+        assert isinstance(result, DetailResult)
+        trends = _render_rich_text(_field_value(result, "Metric Trends"))
+        assert bracket_title in trends
 
     @patch(_PATCH_CLIENT)
     @patch(_PATCH_AUTH)
@@ -252,16 +268,16 @@ class TestMetricsCommandTrendGraphs:
         ):
             from osmosis_ai.cli.commands.train import metrics
 
-            metrics(
+            result = metrics(
                 name="reward-tuning-v3",
                 output=str(output),
             )
 
-        text = buf.getvalue()
-        assert "No metric data found." in text
-        assert "Metric Trends" not in text
+        assert isinstance(result, DetailResult)
+        assert _field_value(result, "Metrics") == "No metric data found."
+        assert all(field.label != "Metric Trends" for field in result.fields)
         # Summary table is always shown (run metadata is valuable even without metrics)
-        assert "Training Run Metrics" in text
+        assert result.title == "Training Run Metrics"
 
 
 class TestMetricsCommandWritesFile:
@@ -424,13 +440,13 @@ class TestMetricsCommandErrors:
         with _patch_train_console(buf, force_terminal=False, width=120):
             from osmosis_ai.cli.commands.train import metrics
 
-            metrics(
+            result = metrics(
                 name="reward-tuning-v3",
                 output=str(output),
             )
 
-        text = buf.getvalue()
-        assert "training is in progress" in text
+        assert isinstance(result, DetailResult)
+        assert "Training is in progress" in _field_value(result, "Note")
         assert output.exists()
 
     def test_no_workspace_no_output_raises(self, tmp_path: Path) -> None:
@@ -456,13 +472,13 @@ class TestMetricsCommandErrors:
         with _patch_train_console(buf, force_terminal=False, width=80):
             from osmosis_ai.cli.commands.train import metrics
 
-            metrics(
+            result = metrics(
                 name="reward-tuning-v3",
                 output="/nonexistent/dir/metrics.json",
             )
 
-        text = buf.getvalue()
-        assert "Could not save metrics" in text
+        assert isinstance(result, DetailResult)
+        assert "Could not save metrics" in _field_value(result, "Warning")
 
     @patch(_PATCH_CLIENT)
     @patch(_PATCH_AUTH)
@@ -485,11 +501,11 @@ class TestMetricsCommandErrors:
         with _patch_train_console(buf, force_terminal=False, width=80):
             from osmosis_ai.cli.commands.train import metrics
 
-            metrics(
+            result = metrics(
                 name="reward-tuning-v3",
                 output=None,
             )
 
-        text = buf.getvalue()
-        assert "Training Run Metrics" in text
-        assert "Could not save metrics" in text
+        assert isinstance(result, DetailResult)
+        assert result.title == "Training Run Metrics"
+        assert "Could not save metrics" in _field_value(result, "Warning")

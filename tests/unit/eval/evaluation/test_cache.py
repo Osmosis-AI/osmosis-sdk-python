@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import io
 import json
 import types
+from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
@@ -1501,6 +1503,31 @@ class TestCacheRm:
         assert ret == 0
         assert not cache_path.exists()
         assert not jsonl_path.exists()
+
+    def test_rm_structured_returns_operation_without_stdout(
+        self, tmp_path: Path, monkeypatch
+    ):
+        """Structured cache rm returns data without pre-rendering stdout."""
+        from osmosis_ai.cli.output import OperationResult, OutputFormat
+        from osmosis_ai.cli.output.context import override_output_context
+
+        cache_path = _make_cache_entry(tmp_path, "abc123", "gpt-4", "data.jsonl")
+        monkeypatch.setattr(
+            "osmosis_ai.eval.evaluation.cache._get_cache_root",
+            lambda: tmp_path,
+        )
+        cmd = self._make_command()
+
+        out = io.StringIO()
+        with override_output_context(format=OutputFormat.json):
+            with redirect_stdout(out):
+                ret = cmd._run_cache_rm(task_id="abc123")
+
+        assert out.getvalue() == ""
+        assert isinstance(ret, OperationResult)
+        assert ret.operation == "eval.cache.rm"
+        assert ret.resource == {"deleted_count": 1}
+        assert not cache_path.exists()
 
     def test_rm_nonexistent_task_id(self, tmp_path: Path, monkeypatch):
         """Non-existent task_id prints message and returns 1."""

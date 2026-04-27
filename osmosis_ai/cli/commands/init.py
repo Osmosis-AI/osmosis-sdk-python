@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import typer
 
 
@@ -14,8 +16,8 @@ def init(
         "--here",
         help="Initialize in current directory instead of creating a subdirectory.",
     ),
-) -> None:
+) -> Any:
     """Initialize a new Osmosis workspace directory."""
     from osmosis_ai.platform.cli.init import init as do_init
 
-    do_init(name=name, here=here)
+    return do_init(name=name, here=here)
