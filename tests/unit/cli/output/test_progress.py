@@ -35,6 +35,23 @@ def test_plain_mode_emits_only_to_stderr() -> None:
     assert err.getvalue().count("100%") == 1
 
 
+def test_plain_mode_reports_ten_percent_buckets() -> None:
+    out, err = io.StringIO(), io.StringIO()
+    with override_output_context(format=OutputFormat.plain):
+        with redirect_stdout(out), redirect_stderr(err):
+            ctx, callback = make_progress_bar(100)
+            with ctx:
+                callback(9, 100)
+                callback(19, 100)
+                callback(100, 100)
+    stderr = err.getvalue()
+    assert out.getvalue() == ""
+    assert "9%" not in stderr
+    assert "10%" in stderr
+    assert "19%" not in stderr
+    assert "100%" in stderr
+
+
 def test_rich_mode_emits_to_stderr_only() -> None:
     out, err = io.StringIO(), io.StringIO()
     with override_output_context(format=OutputFormat.rich):

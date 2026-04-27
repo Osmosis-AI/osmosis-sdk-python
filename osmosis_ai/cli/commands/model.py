@@ -6,7 +6,6 @@ scoped to base (foundation) models only.
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from typing import Any
 
 import typer
@@ -42,44 +41,6 @@ def _require_confirmation(message: str, *, yes: bool) -> None:
     from osmosis_ai.cli.prompts import require_confirmation
 
     require_confirmation(message, yes=yes)
-
-
-def _print_model_section(
-    models: list[Any],
-    total_count: int,
-    title: str,
-    metadata_fn: Callable[[Any], str],
-) -> None:
-    """Print a section of base models with consistent formatting."""
-    from osmosis_ai.platform.cli.utils import entity_status_style, format_dim_date
-
-    if not models:
-        return
-    console.print(f"{title} ({total_count}):", style="bold")
-    for m in models:
-        style = entity_status_style(m.status) or "dim"
-        status_str = console.format_styled(f"[{m.status}]", style)
-        name = console.escape(m.base_model or m.model_name)
-        meta = metadata_fn(m)
-        date = format_dim_date(m.created_at)
-        console.print(
-            f"  {name}  {status_str}  {meta}  {date}",
-            highlight=False,
-        )
-    console.print()
-
-
-def _fetch_all_models(client: Any, credentials: Any) -> list[Any]:
-    """Fetch all base models via exhaustive pagination."""
-    from osmosis_ai.platform.cli.utils import fetch_all_pages
-
-    models, _ = fetch_all_pages(
-        lambda lim, off: client.list_base_models(
-            limit=lim, offset=off, credentials=credentials
-        ),
-        items_attr="models",
-    )
-    return models
 
 
 @app.command("list")

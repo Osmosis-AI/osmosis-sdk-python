@@ -502,10 +502,9 @@ def create_workspace(name: str, timezone: str) -> Any:
         serialize_workspace,
     )
     from osmosis_ai.platform.api.client import OsmosisClient
-    from osmosis_ai.platform.cli.utils import _require_auth
 
     output = get_output_context()
-    _, credentials = _require_auth()
+    credentials = require_credentials()
 
     client = OsmosisClient()
     result = platform_call(

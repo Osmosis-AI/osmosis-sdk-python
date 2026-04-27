@@ -111,7 +111,7 @@ def test_whoami_json_with_env_token_keeps_matching_local_workspace(
     )
     monkeypatch.setattr(
         "osmosis_ai.platform.auth.get_active_workspace",
-        lambda: {"id": "env_ws_2", "name": "env-2"},
+        lambda: {"id": "env_ws_2", "name": "old-env-2"},
     )
     monkeypatch.setattr(
         "osmosis_ai.platform.auth.platform_request",

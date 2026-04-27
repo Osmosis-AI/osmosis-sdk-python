@@ -87,13 +87,15 @@ def test_workspace_switch_plain_returns_renderer_output(monkeypatch, capsys) -> 
 
 
 def test_workspace_create_json_returns_operation_result(monkeypatch, capsys) -> None:
+    creds = object()
     monkeypatch.setattr(
-        "osmosis_ai.platform.cli.utils._require_auth",
-        lambda **kwargs: ("default", object()),
+        "osmosis_ai.platform.cli.workspace.require_credentials",
+        lambda: creds,
     )
 
     class FakeClient:
         def create_workspace(self, name, timezone, *, credentials=None):
+            assert credentials is creds
             return {"id": "ws_new", "name": name, "timezone": timezone}
 
     monkeypatch.setattr("osmosis_ai.platform.api.client.OsmosisClient", FakeClient)

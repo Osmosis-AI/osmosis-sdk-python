@@ -86,7 +86,7 @@ class RubricCommand:
             if output.format is OutputFormat.rich:
                 from osmosis_ai.cli.console import console
 
-                console.print(f"Wrote results to {written}")
+                console.print(f"Wrote results to {console.escape(str(written))}")
 
         has_errors = any(r.errors for r in results)
         if output.format is not OutputFormat.rich:

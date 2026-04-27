@@ -152,18 +152,6 @@ def validate(
     return _validate_rollout_config(config_path=config_path)
 
 
-def _format_commit(r: Any, console: Console) -> Any:
-    """Format commit SHA as a clickable terminal hyperlink (OSC 8 via Rich)."""
-    sha = r.last_synced_commit_sha
-    if not sha:
-        return console.format_text("—", style="dim")
-    short = sha[:7]
-    if r.repo_full_name:
-        url = f"https://github.com/{r.repo_full_name}/tree/{sha}"
-        return console.format_url(url, label=short, style="dim")
-    return console.format_text(short, style="dim")
-
-
 @app.command("list")
 def list_rollouts(
     limit: int = typer.Option(

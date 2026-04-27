@@ -57,6 +57,19 @@ def test_rich_list_includes_column_headers() -> None:
     assert "ds_1" in stdout and "uploaded" in stdout
 
 
+def test_rich_list_renders_raw_cell_markup_as_text() -> None:
+    result = ListResult(
+        title="Models",
+        items=[{"name": "[red]model[/red]"}],
+        total_count=1,
+        has_more=False,
+        next_offset=None,
+        columns=[ListColumn(key="name", label="Name")],
+    )
+    stdout, _ = _render(result)
+    assert "[red]model[/red]" in stdout
+
+
 def test_rich_message_renders_message_text() -> None:
     stdout, _ = _render(MessageResult(message="Logged out."))
     assert "Logged out." in stdout
@@ -72,3 +85,13 @@ def test_rich_operation_renders_message() -> None:
     stdout, _ = _render(result)
     assert "Deployed." in stdout
     assert "Try it now" in stdout
+
+
+def test_rich_operation_renders_message_markup_as_text() -> None:
+    result = OperationResult(
+        operation="model.delete",
+        status="success",
+        message='Model "[red]danger[/red]" deleted.',
+    )
+    stdout, _ = _render(result)
+    assert 'Model "[red]danger[/red]" deleted.' in stdout

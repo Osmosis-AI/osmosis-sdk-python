@@ -102,6 +102,17 @@ def _display_items(result: ListResult) -> list[dict[str, Any]]:
     return result.display_items if result.display_items is not None else result.items
 
 
+def _rich_text(value: Any, *, style: str | None = None) -> Any:
+    from rich.text import Text
+
+    if isinstance(value, Text):
+        if style is not None:
+            value.stylize(style)
+        return value
+    text = "" if value is None else str(value)
+    return Text(text.replace("\\[", "[").replace("\\]", "]"), style=style)
+
+
 def _render_plain(result: CommandResult, output: OutputContext) -> None:
     if isinstance(result, DetailResult):
         for field in result.fields:
@@ -149,7 +160,9 @@ def _render_rich(result: CommandResult, output: OutputContext) -> None:
     if isinstance(result, DetailResult):
         if result.title:
             console.separator(result.title)
-        console.table([(field.label, field.value) for field in result.fields])
+        console.table(
+            [(field.label, _rich_text(field.value)) for field in result.fields]
+        )
         return
 
     if isinstance(result, ListResult):
@@ -158,10 +171,14 @@ def _render_rich(result: CommandResult, output: OutputContext) -> None:
         table = Table(show_header=True, header_style="bold")
         for column in result.columns:
             table.add_column(column.label, no_wrap=column.no_wrap)
-        for item in _display_items(result):
+        for idx, item in enumerate(_display_items(result)):
+            raw_item = result.items[idx] if idx < len(result.items) else {}
             table.add_row(
                 *[
-                    "" if item.get(column.key) is None else str(item.get(column.key))
+                    ("" if item.get(column.key) is None else str(item.get(column.key)))
+                    if result.display_items is not None
+                    and item.get(column.key) != raw_item.get(column.key)
+                    else _rich_text(item.get(column.key))
                     for column in result.columns
                 ]
             )
@@ -177,13 +194,13 @@ def _render_rich(result: CommandResult, output: OutputContext) -> None:
     if isinstance(result, OperationResult):
         if result.message:
             style = "green" if result.status == "success" else "yellow"
-            console.print(result.message, style=style)
+            console.rich.print(_rich_text(result.message, style=style))
         for hint in result.display_next_steps:
-            console.print(hint, style="dim")
+            console.rich.print(_rich_text(hint, style="dim"))
         return
 
     if isinstance(result, MessageResult):
-        console.print(result.message)
+        console.rich.print(_rich_text(result.message))
         return
 
     raise TypeError(f"Unsupported CommandResult: {type(result).__name__}")

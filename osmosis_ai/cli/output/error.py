@@ -69,7 +69,7 @@ def classify_error(exc: BaseException) -> CLIError:
 def _argv_command_path(argv: list[str]) -> str:
     skip_flags_with_value = {"--format"}
     skip_flags = {"--json", "--plain", "--version", "-V", "--help", "-h"}
-    result: list[str] = []
+    tokens: list[str] = []
     i = 0
     while i < len(argv):
         token = argv[i]
@@ -85,11 +85,39 @@ def _argv_command_path(argv: list[str]) -> str:
         if token.startswith("-"):
             i += 1
             continue
-        result.append(token)
-        if len(result) == 2:
-            break
+        tokens.append(token)
         i += 1
-    return " ".join(result) if result else "<root>"
+    if not tokens:
+        return "<root>"
+
+    top_level_commands = {
+        "deploy",
+        "init",
+        "login",
+        "logout",
+        "undeploy",
+        "upgrade",
+        "whoami",
+    }
+    command_groups = {
+        "auth",
+        "dataset",
+        "deployment",
+        "eval",
+        "model",
+        "rollout",
+        "train",
+        "workspace",
+    }
+
+    command = tokens[0]
+    if command in top_level_commands or len(tokens) == 1:
+        return command
+    if command == "eval" and tokens[1] == "cache" and len(tokens) >= 3:
+        return " ".join(tokens[:3])
+    if command in command_groups:
+        return " ".join(tokens[:2])
+    return command
 
 
 def command_path_for_error(ctx: click.Context | None) -> str:

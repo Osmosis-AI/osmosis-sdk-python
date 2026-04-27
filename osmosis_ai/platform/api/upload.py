@@ -424,15 +424,16 @@ def make_progress_bar(
         return nullcontext(), lambda uploaded, total: None
 
     if output.format is OutputFormat.plain:
-        last_pct = -1
+        last_pct = 0
 
         def _plain_cb(uploaded: int, total: int) -> None:
             nonlocal last_pct
-            pct = uploaded * 100 // total if total else 0
-            if pct != last_pct and (pct - last_pct >= 10 or uploaded >= total):
-                sys.stderr.write(f"{description}: {pct}%\n")
+            pct = uploaded * 100 // total if total else 100
+            next_pct = 100 if uploaded >= total else (pct // 10) * 10
+            if next_pct > last_pct:
+                sys.stderr.write(f"{description}: {next_pct}%\n")
                 sys.stderr.flush()
-                last_pct = pct
+                last_pct = next_pct
 
         return nullcontext(), _plain_cb
 

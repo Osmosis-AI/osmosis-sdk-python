@@ -632,9 +632,16 @@ def whoami() -> Any:
                 )
                 workspaces = _normalize_workspaces(data.get("workspaces"))
                 local_workspace = get_active_workspace()
-                if local_workspace in workspaces:
-                    active_workspace = local_workspace
-                elif len(workspaces) == 1:
+                active_workspace = next(
+                    (
+                        workspace
+                        for workspace in workspaces
+                        if local_workspace
+                        and workspace.get("id") == local_workspace.get("id")
+                    ),
+                    None,
+                )
+                if active_workspace is None and len(workspaces) == 1:
                     active_workspace = workspaces[0]
     else:
         with contextlib.suppress(AuthenticationExpiredError, PlatformAPIError):
@@ -657,11 +664,22 @@ def whoami() -> Any:
         "source": source,
     }
 
-    fields = [DetailField(label="Email", value=credentials.user.email or "")]
+    fields = [
+        DetailField(
+            label="Email", value=console.format_text(credentials.user.email or "")
+        )
+    ]
     if credentials.user.name:
-        fields.append(DetailField(label="Name", value=credentials.user.name))
+        fields.append(
+            DetailField(label="Name", value=console.format_text(credentials.user.name))
+        )
     if active_workspace:
-        fields.append(DetailField(label="Workspace", value=active_workspace["name"]))
+        fields.append(
+            DetailField(
+                label="Workspace",
+                value=console.format_text(active_workspace["name"]),
+            )
+        )
     fields.append(
         DetailField(label="Expires", value=credentials.expires_at.strftime("%Y-%m-%d"))
     )
