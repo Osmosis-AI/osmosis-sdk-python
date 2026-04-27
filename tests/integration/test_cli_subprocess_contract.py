@@ -35,7 +35,9 @@ def test_eval_cache_dir_json_is_single_stdout_envelope(tmp_path: Path) -> None:
     assert proc.stderr == ""
     payload = json.loads(proc.stdout)
     assert payload["schema_version"] == 1
-    assert payload["data"]["cache_root"].endswith("/eval")
+    assert (
+        Path(payload["data"]["cache_root"]) == (tmp_path / "cache" / "eval").resolve()
+    )
 
 
 def test_eval_cache_ls_json_is_single_stdout_envelope(tmp_path: Path) -> None:

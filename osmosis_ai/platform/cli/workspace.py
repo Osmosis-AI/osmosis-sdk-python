@@ -565,7 +565,6 @@ def delete_workspace(name: str, *, yes: bool = False) -> Any:
         serialize_workspace,
     )
     from osmosis_ai.platform.api.client import OsmosisClient
-    from osmosis_ai.platform.cli.utils import _require_auth
 
     output = get_output_context()
     if not yes and (output.format is not OutputFormat.rich or not output.interactive):
@@ -574,7 +573,7 @@ def delete_workspace(name: str, *, yes: bool = False) -> Any:
             code="INTERACTIVE_REQUIRED",
         )
 
-    _, credentials = _require_auth()
+    credentials = require_credentials()
     client = OsmosisClient()
 
     ws_data = platform_call(
@@ -584,7 +583,7 @@ def delete_workspace(name: str, *, yes: bool = False) -> Any:
     )
     workspace = None
     for ws in ws_data.get("workspaces", []):
-        if ws.get("name") == name.lower():
+        if ws.get("name", "").lower() == name.lower():
             workspace = ws
             break
 

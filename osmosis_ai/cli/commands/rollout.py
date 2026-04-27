@@ -3,15 +3,12 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import typer
 
 from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE
-
-if TYPE_CHECKING:
-    from osmosis_ai.cli.console import Console
 
 app: typer.Typer = typer.Typer(
     help="Manage rollouts (validate, list).",
@@ -85,9 +82,7 @@ def _resolve_validation_target(
     )
 
 
-def _validate_rollout_config(
-    *, config_path: Path, console: Console | None = None
-) -> Any:
+def _validate_rollout_config(*, config_path: Path) -> Any:
     from osmosis_ai.cli.output import DetailField, DetailResult
     from osmosis_ai.platform.cli.workspace_contract import validate_rollout_backend
 

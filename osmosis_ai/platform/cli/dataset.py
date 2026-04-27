@@ -683,6 +683,7 @@ def _validate_file_with_warnings(
             import pyarrow.parquet  # noqa: F401
         except ImportError:
             warnings.append(PARQUET_VALIDATION_SKIPPED_WARNING)
+            return [], warnings
     return _validate_file(file_path, ext), warnings
 
 

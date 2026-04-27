@@ -73,7 +73,9 @@ def test_login_json_force_with_invalid_token_preserves_existing_session(
     monkeypatch.setattr("osmosis_ai.platform.auth.load_credentials", _credentials)
     monkeypatch.setattr(
         "osmosis_ai.platform.auth.verify_token",
-        lambda token: (_ for _ in ()).throw(LoginError("Authentication failed.")),
+        lambda token: (_ for _ in ()).throw(
+            LoginError("Authentication failed.", status_code=401)
+        ),
     )
     monkeypatch.setattr(
         "osmosis_ai.platform.auth.credentials.delete_credentials",
@@ -132,6 +134,29 @@ def test_login_json_with_platform_verify_error_is_platform_error(
     assert envelope["error"]["code"] == "PLATFORM_ERROR"
     assert envelope["error"]["details"]["status_code"] == 500
     assert "internal error" in envelope["error"]["message"]
+
+
+def test_login_json_with_malformed_verify_response_is_platform_error(
+    monkeypatch, capsys
+) -> None:
+    monkeypatch.delenv("OSMOSIS_TOKEN", raising=False)
+    monkeypatch.setattr("osmosis_ai.platform.auth.load_credentials", lambda: None)
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.verify_token",
+        lambda token: (_ for _ in ()).throw(
+            LoginError("Invalid response from platform")
+        ),
+    )
+
+    exit_code = cli.main(["--json", "auth", "login", "--token", "secret"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert captured.out == ""
+    envelope = json.loads(captured.err)
+    assert envelope["error"]["code"] == "PLATFORM_ERROR"
+    assert envelope["error"]["details"] == {}
+    assert envelope["error"]["message"] == "Invalid response from platform"
 
 
 def test_login_json_replaces_session_before_revoking_old_token(

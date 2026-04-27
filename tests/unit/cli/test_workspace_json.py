@@ -126,13 +126,13 @@ def test_workspace_delete_json_with_yes_returns_operation_result(
     monkeypatch, capsys
 ) -> None:
     monkeypatch.setattr(
-        "osmosis_ai.platform.cli.utils._require_auth",
-        lambda **kwargs: ("default", object()),
+        "osmosis_ai.platform.cli.workspace.require_credentials",
+        lambda: object(),
     )
 
     class FakeClient:
         def list_workspaces(self, *, credentials=None):
-            return {"workspaces": [{"id": "ws_1", "name": "default"}]}
+            return {"workspaces": [{"id": "ws_1", "name": "Default"}]}
 
         def get_workspace_deletion_status(self, workspace_id, *, credentials=None):
             return SimpleNamespace(
@@ -155,7 +155,7 @@ def test_workspace_delete_json_with_yes_returns_operation_result(
     assert exit_code == 0
     payload = json.loads(captured.out)
     assert payload["operation"] == "workspace.delete"
-    assert payload["resource"] == {"id": "ws_1", "name": "default"}
+    assert payload["resource"] == {"id": "ws_1", "name": "Default"}
 
 
 def test_workspace_delete_json_preserves_platform_error_code(
@@ -164,8 +164,8 @@ def test_workspace_delete_json_preserves_platform_error_code(
     from osmosis_ai.platform.auth.platform_client import PlatformAPIError
 
     monkeypatch.setattr(
-        "osmosis_ai.platform.cli.utils._require_auth",
-        lambda **kwargs: ("default", object()),
+        "osmosis_ai.platform.cli.workspace.require_credentials",
+        lambda: object(),
     )
 
     class FakeClient:

@@ -35,6 +35,15 @@ ASCII_ART = r"""
 """
 ASCII_ART_MIN_WIDTH = 113
 
+_AUTH_LOGIN_ERROR_CODES = {
+    "AUTH_HEADER_MISSING",
+    "TOKEN_MISSING",
+    "TOKEN_EXPIRED",
+    "TOKEN_INVALID",
+    "TOKEN_REVOKED",
+    "UNKNOWN_AUTH_ERROR",
+}
+
 
 def _normalize_workspaces(raw_workspaces: Any) -> list[dict[str, str]]:
     """Return workspace entries that have both an ID and a name."""
@@ -239,13 +248,18 @@ def _verify_env_token(env_token: str) -> Any:
 
 def _cli_error_from_login_error(exc: Any) -> CLIError:
     status_code = getattr(exc, "status_code", None)
-    if isinstance(status_code, int) and status_code != 401:
-        details: dict[str, Any] = {"status_code": status_code}
-        platform_code = getattr(exc, "code", None)
-        if isinstance(platform_code, str):
-            details["platform_code"] = platform_code
-        return CLIError(str(exc), code="PLATFORM_ERROR", details=details)
-    return CLIError(str(exc), code="AUTH_REQUIRED")
+    platform_code = getattr(exc, "code", None)
+    if status_code == 401 or (
+        isinstance(platform_code, str) and platform_code in _AUTH_LOGIN_ERROR_CODES
+    ):
+        return CLIError(str(exc), code="AUTH_REQUIRED")
+
+    details: dict[str, Any] = {}
+    if isinstance(status_code, int):
+        details["status_code"] = status_code
+    if isinstance(platform_code, str):
+        details["platform_code"] = platform_code
+    return CLIError(str(exc), code="PLATFORM_ERROR", details=details)
 
 
 def _machine_login_with_token(*, token: str, force: bool) -> Any:

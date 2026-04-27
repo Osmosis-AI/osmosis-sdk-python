@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import sys
-from collections.abc import Callable, Iterator
+from collections.abc import Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar, Token
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import StrEnum
 
 import click
@@ -29,7 +29,6 @@ class OutputContext:
     quiet: bool = False
     schema_version: int = 1
     output_emitted: bool = False
-    _close_callbacks: list[Callable[[], None]] = field(default_factory=list, repr=False)
 
     @contextmanager
     def status(self, message: str) -> Iterator[None]:
