@@ -18,6 +18,7 @@ from osmosis_ai.platform.auth.platform_client import (
     AuthenticationExpiredError,
     PlatformAPIError,
 )
+from osmosis_ai.platform.constants import MSG_ENV_TOKEN_INVALID
 
 
 def _make_credentials(*, expired: bool = False) -> Credentials:
@@ -49,8 +50,11 @@ class TestRequireCredentialsMessages:
 
         mock_load.return_value = _make_credentials(expired=True)
 
-        with pytest.raises(AuthenticationExpiredError):
+        with pytest.raises(AuthenticationExpiredError) as exc_info:
             require_credentials()
+
+        assert "session has expired" in str(exc_info.value)
+        assert "osmosis auth login" in str(exc_info.value)
 
     @patch("osmosis_ai.platform.cli.utils.load_credentials")
     def test_valid_credentials_returns_them(self, mock_load: object) -> None:
@@ -252,12 +256,27 @@ class TestMainExceptionHandlerMessages:
 
         with patch(
             "osmosis_ai.cli.main.app",
-            side_effect=AuthenticationExpiredError("expired"),
+            side_effect=AuthenticationExpiredError(),
         ):
             code = main([])
 
         assert code == 1
         captured = capsys.readouterr().err
-        assert (
-            "session has expired" in captured.lower() or "expired" in captured.lower()
-        )
+        assert "session has expired" in captured.lower()
+
+    @patch("osmosis_ai.cli.main._registered", True)
+    def test_auth_expired_preserves_env_token_guidance(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        from osmosis_ai.cli.main import main
+
+        with patch(
+            "osmosis_ai.cli.main.app",
+            side_effect=AuthenticationExpiredError(MSG_ENV_TOKEN_INVALID),
+        ):
+            code = main([])
+
+        assert code == 1
+        captured = capsys.readouterr().err
+        assert "OSMOSIS_TOKEN environment variable is invalid or expired" in captured
+        assert "unset OSMOSIS_TOKEN" in captured

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import os
 import sys
 from typing import TYPE_CHECKING, Any
 from urllib.error import HTTPError, URLError
@@ -11,7 +12,13 @@ from urllib.request import Request, urlopen
 
 from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.consts import PACKAGE_VERSION
-from osmosis_ai.platform.constants import MSG_NOT_LOGGED_IN
+from osmosis_ai.platform.constants import (
+    MSG_ENV_TOKEN_EXPIRED,
+    MSG_ENV_TOKEN_INVALID,
+    MSG_ENV_TOKEN_REVOKED,
+    MSG_NOT_LOGGED_IN,
+    MSG_SESSION_EXPIRED,
+)
 
 from .config import PLATFORM_URL
 from .credentials import load_credentials
@@ -28,6 +35,10 @@ if TYPE_CHECKING:
 
 class AuthenticationExpiredError(Exception):
     """Raised when the stored credentials are invalid, expired, or revoked."""
+
+    def __init__(self, message: str = MSG_SESSION_EXPIRED, *, code: str | None = None):
+        super().__init__(message)
+        self.code = code
 
 
 class PlatformAPIError(Exception):
@@ -67,6 +78,57 @@ class SubscriptionRequiredError(PlatformAPIError):
             field=field,
             details=details,
         )
+
+
+def _credentials_match_env_token(credentials: Credentials | None) -> bool:
+    env_token = os.environ.get("OSMOSIS_TOKEN")
+    return bool(
+        env_token and credentials is not None and credentials.access_token == env_token
+    )
+
+
+def _read_error_body(e: HTTPError) -> dict[str, Any]:
+    try:
+        raw = e.read()
+        text = raw.decode("utf-8", errors="replace").strip() if raw else ""
+        if not text:
+            return {}
+        parsed = json.loads(text)
+        return parsed if isinstance(parsed, dict) else {}
+    except Exception:
+        return {}
+
+
+def _auth_error_message(error_code: str | None, *, using_env_token: bool) -> str:
+    if using_env_token:
+        if error_code == "TOKEN_EXPIRED":
+            return MSG_ENV_TOKEN_EXPIRED
+        if error_code == "TOKEN_REVOKED":
+            return MSG_ENV_TOKEN_REVOKED
+        return MSG_ENV_TOKEN_INVALID
+
+    if error_code == "TOKEN_REVOKED":
+        return (
+            "Your session has been revoked. "
+            "Please run 'osmosis auth login' to re-authenticate."
+        )
+    return MSG_SESSION_EXPIRED
+
+
+_WORKSPACE_AUTH_ERROR_MESSAGES: dict[str, str] = {
+    "WORKSPACE_HEADER_MISSING": (
+        "No workspace selected. Run 'osmosis workspace' to select a workspace."
+    ),
+    "WORKSPACE_HEADER_INVALID": (
+        "Your workspace context is invalid. "
+        "Run 'osmosis auth login' or 'osmosis workspace' to re-select."
+    ),
+    "WORKSPACE_ACCESS_DENIED": (
+        "You do not have access to this workspace.\n"
+        "Your workspace context may be stale. "
+        "Run 'osmosis auth login' or 'osmosis workspace' to re-select."
+    ),
+}
 
 
 def revoke_cli_token(credentials: Credentials) -> bool:
@@ -191,6 +253,7 @@ def platform_request(
         credentials = load_credentials()
     if credentials is None:
         raise CLIError(MSG_NOT_LOGGED_IN)
+    using_env_token = _credentials_match_env_token(credentials)
 
     url = f"{PLATFORM_URL}{endpoint}"
 
@@ -232,11 +295,15 @@ def platform_request(
             return result
     except HTTPError as e:
         if e.code == 401:
-            if cleanup_on_401:
+            error_body = _read_error_body(e)
+            error_code = error_body.get("code")
+            if not isinstance(error_code, str):
+                error_code = None
+            if cleanup_on_401 and not using_env_token:
                 reset_session()
             raise AuthenticationExpiredError(
-                "Your session has expired or been revoked. "
-                "Please run 'osmosis auth login' to re-authenticate."
+                _auth_error_message(error_code, using_env_token=using_env_token),
+                code=error_code,
             ) from e
 
         # Best-effort capture of structured error message from response body
@@ -267,6 +334,15 @@ def platform_request(
                     detail = f" Response: {text}"
         except Exception:
             pass
+
+        if error_code in _WORKSPACE_AUTH_ERROR_MESSAGES:
+            raise PlatformAPIError(
+                _WORKSPACE_AUTH_ERROR_MESSAGES[error_code],
+                e.code,
+                error_code=error_code,
+                field=field,
+                details=error_body or None,
+            ) from e
 
         # Detect subscription-required responses (403 with subscription message)
         if e.code == 403 and isinstance(error_body, dict):

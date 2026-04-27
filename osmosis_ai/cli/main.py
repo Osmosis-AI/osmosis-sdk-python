@@ -30,7 +30,6 @@ from osmosis_ai.platform.auth.platform_client import (
     AuthenticationExpiredError,
     PlatformAPIError,
 )
-from osmosis_ai.platform.constants import MSG_SESSION_EXPIRED
 
 
 class OsmosisGroup(typer.core.TyperGroup):
@@ -162,7 +161,7 @@ def _handle_cli_error(
         )
     else:
         if isinstance(exc, AuthenticationExpiredError):
-            _print_error(MSG_SESSION_EXPIRED)
+            _print_error(str(exc))
         else:
             _print_error(str(exc))
     return exit_code

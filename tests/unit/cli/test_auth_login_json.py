@@ -108,6 +108,32 @@ def test_login_json_force_with_invalid_token_preserves_existing_session(
     assert side_effects == []
 
 
+def test_login_json_with_platform_verify_error_is_platform_error(
+    monkeypatch, capsys
+) -> None:
+    monkeypatch.delenv("OSMOSIS_TOKEN", raising=False)
+    monkeypatch.setattr("osmosis_ai.platform.auth.load_credentials", lambda: None)
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.verify_token",
+        lambda token: (_ for _ in ()).throw(
+            LoginError(
+                "Osmosis platform encountered an internal error. Please try again later.",
+                status_code=500,
+            )
+        ),
+    )
+
+    exit_code = cli.main(["--json", "auth", "login", "--token", "secret"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert captured.out == ""
+    envelope = json.loads(captured.err)
+    assert envelope["error"]["code"] == "PLATFORM_ERROR"
+    assert envelope["error"]["details"]["status_code"] == 500
+    assert "internal error" in envelope["error"]["message"]
+
+
 def test_login_json_replaces_session_before_revoking_old_token(
     monkeypatch, capsys, fake_verify_result
 ) -> None:
@@ -208,6 +234,60 @@ def test_login_rich_with_env_token_is_verify_only(
     assert verify_calls == ["env-token"]
     assert save_calls == []
     assert delete_calls == []
+
+
+@pytest.mark.parametrize(
+    "error_code",
+    ["AUTH_HEADER_MISSING", "TOKEN_MISSING", "TOKEN_INVALID", "UNKNOWN_AUTH_ERROR"],
+)
+def test_login_rich_with_invalid_env_token_mentions_unset(
+    monkeypatch, capsys, error_code: str
+) -> None:
+    monkeypatch.setenv("OSMOSIS_TOKEN", "bad-env-token")
+    errors = []
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.verify_token",
+        lambda token: (_ for _ in ()).throw(
+            LoginError("Token is invalid.", code=error_code)
+        ),
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.cli.commands.auth.console.print_error",
+        lambda message: errors.append(message),
+    )
+
+    exit_code = cli.main(["auth", "login"])
+
+    capsys.readouterr()
+    message = errors[0]
+    assert exit_code == 1
+    assert "OSMOSIS_TOKEN environment variable is invalid or expired" in message
+    assert "unset OSMOSIS_TOKEN" in message
+
+
+@pytest.mark.parametrize(
+    "error_code",
+    ["AUTH_HEADER_MISSING", "TOKEN_MISSING", "TOKEN_INVALID", "UNKNOWN_AUTH_ERROR"],
+)
+def test_login_json_with_invalid_env_token_mentions_unset(
+    monkeypatch, capsys, error_code: str
+) -> None:
+    monkeypatch.setenv("OSMOSIS_TOKEN", "bad-env-token")
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.verify_token",
+        lambda token: (_ for _ in ()).throw(
+            LoginError("Token is invalid.", code=error_code)
+        ),
+    )
+
+    exit_code = cli.main(["--json", "auth", "login"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    envelope = json.loads(captured.err)
+    assert envelope["error"]["code"] == "AUTH_REQUIRED"
+    assert "OSMOSIS_TOKEN environment variable" in envelope["error"]["message"]
+    assert "unset OSMOSIS_TOKEN" in envelope["error"]["message"]
 
 
 def test_login_json_without_token_or_env_fails_interactive_required(

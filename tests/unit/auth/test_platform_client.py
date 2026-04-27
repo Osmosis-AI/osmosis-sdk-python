@@ -425,7 +425,7 @@ class TestPlatformRequest:
         mock_urlopen.side_effect = _make_http_error(401, "Unauthorized")
         creds = _make_credentials()
 
-        with pytest.raises(AuthenticationExpiredError, match="expired or been revoked"):
+        with pytest.raises(AuthenticationExpiredError, match="session has expired"):
             platform_request("/api/test", credentials=creds)
 
         mock_reset.assert_called_once()
@@ -439,10 +439,77 @@ class TestPlatformRequest:
         mock_urlopen.side_effect = _make_http_error(401, "Unauthorized")
         creds = _make_credentials()
 
-        with pytest.raises(AuthenticationExpiredError, match="expired or been revoked"):
+        with pytest.raises(AuthenticationExpiredError, match="session has expired"):
             platform_request("/api/test", credentials=creds, cleanup_on_401=False)
 
         mock_reset.assert_not_called()
+
+    def test_401_with_env_token_skips_cleanup_and_mentions_unset(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Verify an invalid OSMOSIS_TOKEN does not wipe saved credentials."""
+        monkeypatch.setenv("OSMOSIS_TOKEN", "env-token")
+        creds = _make_credentials(access_token="env-token")
+
+        with (
+            patch(
+                "osmosis_ai.platform.auth.platform_client.urlopen",
+                side_effect=_make_http_error(
+                    401, json.dumps({"code": "TOKEN_EXPIRED"})
+                ),
+            ),
+            patch(
+                "osmosis_ai.platform.auth.platform_client.reset_session"
+            ) as mock_reset,
+        ):
+            with pytest.raises(AuthenticationExpiredError) as exc_info:
+                platform_request("/api/test", credentials=creds)
+
+        assert "OSMOSIS_TOKEN environment variable has expired" in str(exc_info.value)
+        assert "unset OSMOSIS_TOKEN" in str(exc_info.value)
+        mock_reset.assert_not_called()
+
+    @pytest.mark.parametrize(
+        ("status_code", "error_code", "expected_message"),
+        [
+            (
+                400,
+                "WORKSPACE_HEADER_MISSING",
+                "No workspace selected",
+            ),
+            (
+                400,
+                "WORKSPACE_HEADER_INVALID",
+                "workspace context is invalid",
+            ),
+            (
+                403,
+                "WORKSPACE_ACCESS_DENIED",
+                "do not have access to this workspace",
+            ),
+        ],
+    )
+    @patch("osmosis_ai.platform.auth.platform_client.urlopen")
+    def test_workspace_auth_codes_use_sdk_guidance(
+        self,
+        mock_urlopen: MagicMock,
+        status_code: int,
+        error_code: str,
+        expected_message: str,
+    ) -> None:
+        """Verify monolith workspace auth codes map to actionable CLI errors."""
+        mock_urlopen.side_effect = _make_http_error(
+            status_code, json.dumps({"code": error_code})
+        )
+        creds = _make_credentials()
+
+        with pytest.raises(PlatformAPIError) as exc_info:
+            platform_request("/api/test", credentials=creds)
+
+        assert exc_info.value.status_code == status_code
+        assert exc_info.value.error_code == error_code
+        assert exc_info.value.details == {"code": error_code}
+        assert expected_message in str(exc_info.value)
 
     @patch("osmosis_ai.platform.auth.platform_client.urlopen")
     def test_non_401_http_error_raises_platform_api_error(

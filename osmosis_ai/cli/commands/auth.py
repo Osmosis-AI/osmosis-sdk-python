@@ -207,6 +207,46 @@ def _login_operation_result(
     )
 
 
+def _verify_env_token(env_token: str) -> Any:
+    """Verify OSMOSIS_TOKEN and replace generic 401s with actionable guidance."""
+    from osmosis_ai.platform.auth import LoginError, verify_token
+    from osmosis_ai.platform.constants import (
+        MSG_ENV_TOKEN_EXPIRED,
+        MSG_ENV_TOKEN_INVALID,
+        MSG_ENV_TOKEN_REVOKED,
+    )
+
+    env_messages = {
+        "AUTH_HEADER_MISSING": MSG_ENV_TOKEN_INVALID,
+        "TOKEN_MISSING": MSG_ENV_TOKEN_INVALID,
+        "TOKEN_EXPIRED": MSG_ENV_TOKEN_EXPIRED,
+        "TOKEN_INVALID": MSG_ENV_TOKEN_INVALID,
+        "TOKEN_REVOKED": MSG_ENV_TOKEN_REVOKED,
+        "UNKNOWN_AUTH_ERROR": MSG_ENV_TOKEN_INVALID,
+    }
+
+    try:
+        return verify_token(env_token)
+    except LoginError as exc:
+        message = env_messages.get(exc.code)
+        if message is not None:
+            raise LoginError(
+                message, code=exc.code, status_code=exc.status_code
+            ) from exc
+        raise
+
+
+def _cli_error_from_login_error(exc: Any) -> CLIError:
+    status_code = getattr(exc, "status_code", None)
+    if isinstance(status_code, int) and status_code != 401:
+        details = {"status_code": status_code}
+        platform_code = getattr(exc, "code", None)
+        if isinstance(platform_code, str):
+            details["platform_code"] = platform_code
+        return CLIError(str(exc), code="PLATFORM_ERROR", details=details)
+    return CLIError(str(exc), code="AUTH_REQUIRED")
+
+
 def _machine_login_with_token(*, token: str, force: bool) -> Any:
     """Verify and persist an explicit token, returning structured output."""
     from osmosis_ai.cli.output import get_output_context
@@ -268,11 +308,10 @@ def _machine_login_with_token(*, token: str, force: bool) -> Any:
 def _machine_login_with_env_token(*, env_token: str) -> Any:
     """Verify OSMOSIS_TOKEN without mutating local credential/session state."""
     from osmosis_ai.cli.output import OperationResult, get_output_context
-    from osmosis_ai.platform.auth import verify_token
 
     output = get_output_context()
     with output.status("Verifying environment token..."):
-        verified = verify_token(env_token)
+        verified = _verify_env_token(env_token)
 
     return OperationResult(
         operation="auth.login",
@@ -460,7 +499,7 @@ def login(
             code="INTERACTIVE_REQUIRED",
         )
     except LoginError as exc:
-        raise CLIError(str(exc), code="AUTH_REQUIRED") from exc
+        raise _cli_error_from_login_error(exc) from exc
 
 
 @app.command("logout")
@@ -562,7 +601,6 @@ def whoami() -> Any:
         get_active_workspace,
         load_credentials,
         platform_request,
-        verify_token,
     )
     from osmosis_ai.platform.constants import MSG_NOT_LOGGED_IN
 
@@ -574,9 +612,9 @@ def whoami() -> Any:
     if env_token:
         try:
             with output.status("Verifying token..."):
-                verified = verify_token(env_token)
+                verified = _verify_env_token(env_token)
         except LoginError as exc:
-            raise CLIError(str(exc), code="AUTH_REQUIRED") from exc
+            raise _cli_error_from_login_error(exc) from exc
         credentials = Credentials.from_verify_result(env_token, verified)
     else:
         credentials = load_credentials()

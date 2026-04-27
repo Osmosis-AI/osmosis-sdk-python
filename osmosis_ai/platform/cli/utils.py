@@ -55,7 +55,7 @@ def require_credentials() -> Credentials:
     if credentials is None:
         raise CLIError(MSG_NOT_LOGGED_IN)
     if credentials.is_expired():
-        raise AuthenticationExpiredError("Session has expired.")
+        raise AuthenticationExpiredError()
     return credentials
 
 

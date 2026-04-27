@@ -30,6 +30,17 @@ from .credentials import Credentials, UserInfo
 class LoginError(Exception):
     """Error during login flow."""
 
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: str | None = None,
+        status_code: int | None = None,
+    ):
+        super().__init__(message)
+        self.code = code
+        self.status_code = status_code
+
 
 @dataclass
 class VerifyResult:
@@ -119,15 +130,22 @@ def _copy_to_clipboard(text: str) -> bool:
         return False
 
 
-def _read_error_detail(e: HTTPError) -> str:
-    """Extract error message from an HTTPError JSON response body."""
+def _read_error_body(e: HTTPError) -> dict[str, Any]:
+    """Extract a JSON error body from an HTTPError."""
     try:
         body = json.loads(e.read().decode())
         if isinstance(body, dict):
-            return body.get("error", "") or body.get("message", "")
+            return body
     except Exception:
         pass
-    return ""
+    return {}
+
+
+def _read_error_detail(e: HTTPError) -> str:
+    """Extract error message from an HTTPError JSON response body."""
+    body = _read_error_body(e)
+    detail = body.get("error", "") or body.get("message", "")
+    return detail if isinstance(detail, str) else ""
 
 
 # User-friendly messages keyed by HTTP status code.
@@ -139,6 +157,15 @@ _HTTP_ERROR_MESSAGES: dict[int, str] = {
     502: "Osmosis platform is temporarily unavailable. Please try again later.",
     503: "Osmosis platform is temporarily unavailable. Please try again later.",
     504: "Osmosis platform is temporarily unavailable. Please try again later.",
+}
+
+_CLI_TOKEN_ERROR_MESSAGES: dict[str, str] = {
+    "AUTH_HEADER_MISSING": "Token is missing.",
+    "TOKEN_MISSING": "Token is missing.",
+    "TOKEN_EXPIRED": "Token has expired.",
+    "TOKEN_INVALID": "Token is invalid.",
+    "TOKEN_REVOKED": "Token has been revoked.",
+    "UNKNOWN_AUTH_ERROR": "Authentication failed.",
 }
 
 
@@ -154,12 +181,14 @@ def _login_error_from_http(
     friendly = _HTTP_ERROR_MESSAGES.get(e.code)
 
     if detail and friendly:
-        return LoginError(f"{friendly} ({detail})")
+        return LoginError(f"{friendly} ({detail})", status_code=e.code)
     if friendly:
-        return LoginError(friendly)
+        return LoginError(friendly, status_code=e.code)
     if detail:
-        return LoginError(f"{fallback_prefix}: {detail} (HTTP {e.code})")
-    return LoginError(f"{fallback_prefix}: HTTP {e.code}")
+        return LoginError(
+            f"{fallback_prefix}: {detail} (HTTP {e.code})", status_code=e.code
+        )
+    return LoginError(f"{fallback_prefix}: HTTP {e.code}", status_code=e.code)
 
 
 # ---------------------------------------------------------------------------
@@ -216,7 +245,15 @@ def verify_token(token: str) -> VerifyResult:
 
     except HTTPError as e:
         if e.code == 401:
-            raise LoginError("Invalid or expired token") from e
+            error_body = _read_error_body(e)
+            error_code = error_body.get("code")
+            if isinstance(error_code, str) and error_code in _CLI_TOKEN_ERROR_MESSAGES:
+                raise LoginError(
+                    _CLI_TOKEN_ERROR_MESSAGES[error_code],
+                    code=error_code,
+                    status_code=e.code,
+                ) from e
+            raise LoginError(_HTTP_ERROR_MESSAGES[e.code], status_code=e.code) from e
         raise _login_error_from_http(e, "Verification failed") from e
     except URLError as e:
         raise LoginError(f"Could not connect to platform: {e.reason}") from e
