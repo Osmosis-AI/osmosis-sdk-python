@@ -110,7 +110,10 @@ def _rich_text(value: Any, *, style: str | None = None) -> Any:
             value.stylize(style)
         return value
     text = "" if value is None else str(value)
-    return Text(text.replace("\\[", "[").replace("\\]", "]"), style=style)
+    text = text.replace("\\[", "[").replace("\\]", "]")
+    if style is None:
+        return Text(text)
+    return Text(text, style=style)
 
 
 def _render_plain(result: CommandResult, output: OutputContext) -> None:
