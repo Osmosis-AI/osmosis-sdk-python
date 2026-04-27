@@ -1,0 +1,35 @@
+osmosis_ai/platform/cli/workspace.py
+  607c270601d19654 594-600
+tests/unit/cli/output/test_renderer_json.py
+  607c270601d19654 67-88,132-149,156-166
+osmosis_ai/eval/evaluation/cli.py
+  607c270601d19654 823
+osmosis_ai/cli/commands/auth.py
+  607c270601d19654 233-234
+osmosis_ai/cli/output/renderer.py
+  607c270601d19654 26-37,46-50,74-85,93
+tests/unit/cli/test_workspace_json.py
+  607c270601d19654 161-187
+tests/unit/cli/test_auth_login_json.py
+  607c270601d19654 293-313
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "b553e64611c9d138cd1ebe52bbc3f79230ffa82e",
+  "prompts": {
+    "607c270601d19654": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "fae047a0-b6c2-48ac-90e0-df57a00f9110",
+        "model": "gpt-5.5-extra-high"
+      },
+      "human_author": "JoyboyBrian",
+      "messages": [],
+      "total_additions": 155,
+      "total_deletions": 31,
+      "accepted_lines": 146,
+      "overriden_lines": 3
+    }
+  }
+}
