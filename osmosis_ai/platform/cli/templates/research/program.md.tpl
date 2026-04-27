@@ -19,7 +19,7 @@ rollout to improve.
 1. Read the current rollout, grader, dataset, and config files.
 2. Pick one hypothesis for improvement.
 3. Make the smallest change that tests that hypothesis.
-4. Run `osmosis eval run configs/eval/<name>.toml`.
+4. Run `osmosis --json eval run configs/eval/<name>.toml`.
 5. Compare results to the previous baseline.
 6. Keep or revert the change based on the result.
 7. Log the experiment under `.osmosis/research/experiments/`.

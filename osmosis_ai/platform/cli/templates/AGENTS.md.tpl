@@ -27,7 +27,7 @@ top-level layout.
   explicit grader override where supported).
 - Tools should be async Python functions with type hints and docstrings.
 - `Grader.grade` must be async and return a float in `[0.0, 1.0]`.
-- Before `osmosis train submit`, validate the workspace and run a local eval.
+- Before `osmosis --json train submit`, validate the workspace and run a local eval.
 
 ## AI skills
 
@@ -53,13 +53,19 @@ Detailed workflow guidance lives in the **`osmosis` agent plugin**:
 The plugin repo is configured in `.claude/settings.json`. Check that file
 before modifying plugin state.
 
+## CLI output
+
+- When you run `osmosis` commands as an AI agent or in automation, use the
+  global `--json` flag before the command.
+- Use the default rich output only for interactive human sessions.
+
 ## Common commands
 
 ```bash
-osmosis workspace validate
-osmosis rollout validate configs/eval/<name>.toml
-osmosis rollout validate configs/training/<run>.toml
-osmosis eval run configs/eval/<name>.toml
-osmosis train submit configs/training/<run>.toml
-osmosis train status <run-name>
+osmosis --json workspace validate
+osmosis --json rollout validate configs/eval/<name>.toml
+osmosis --json rollout validate configs/training/<run>.toml
+osmosis --json eval run configs/eval/<name>.toml
+osmosis --json train submit configs/training/<run>.toml
+osmosis --json train status <run-name>
 ```

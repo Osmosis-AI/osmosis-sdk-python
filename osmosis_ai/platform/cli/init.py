@@ -464,7 +464,7 @@ def _print_next_steps(
         "I want to train a model for <my task domain>. "
         "Read .osmosis/research/program.md, create a baseline rollout in the "
         "canonical workspace structure, iterate locally with evals, and prepare "
-        "a training config."
+        "a training config. Use `osmosis --json` for Osmosis CLI commands."
     )
 
     plugin_repo = _plugin_repo()
