@@ -405,8 +405,33 @@ def _open_in_browser(ws_name: str) -> None:
     console.print()
 
 
-def list_workspaces() -> None:
+def _interactive_workspace_error() -> CLIError:
+    return CLIError(
+        "Interactive workspace UI is unavailable in this mode. "
+        "Use 'osmosis workspace list', 'osmosis workspace switch <name>', or "
+        "'osmosis workspace create <name>'.",
+        code="INTERACTIVE_REQUIRED",
+    )
+
+
+def _workspace_summary(ws: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "id": ws["id"],
+        "name": ws["name"],
+    }
+
+
+def list_workspaces() -> Any:
     """List all workspaces (non-interactive)."""
+    from osmosis_ai.cli.output import (
+        ListColumn,
+        ListResult,
+        OutputFormat,
+        get_output_context,
+        serialize_workspace,
+    )
+
+    output = get_output_context()
     credentials = require_credentials()
     active_ws = platform_call(
         "Loading workspaces...",
@@ -423,10 +448,40 @@ def list_workspaces() -> None:
     workspaces = result.get("workspaces", [])
 
     if not workspaces:
-        console.print("No workspaces found.")
-        return
+        if output.format is OutputFormat.rich:
+            console.print("No workspaces found.")
+            return None
+        return ListResult(
+            title="Workspaces",
+            items=[],
+            total_count=0,
+            has_more=False,
+            next_offset=None,
+            columns=[ListColumn(key="name", label="Name")],
+        )
 
     active_name = active_ws["name"] if active_ws else None
+
+    if output.format is not OutputFormat.rich:
+        items = []
+        for ws in workspaces:
+            item = serialize_workspace(_workspace_summary(ws))
+            item["is_active"] = ws.get("name") == active_name
+            if "has_subscription" in ws:
+                item["has_subscription"] = bool(ws.get("has_subscription"))
+            items.append(item)
+        return ListResult(
+            title="Workspaces",
+            items=items,
+            total_count=len(items),
+            has_more=False,
+            next_offset=None,
+            columns=[
+                ListColumn(key="name", label="Name"),
+                ListColumn(key="id", label="ID", plain=False),
+                ListColumn(key="is_active", label="Active", plain=False),
+            ],
+        )
 
     console.print(f"Workspaces ({len(workspaces)}):", style="bold")
     for ws in workspaces:
@@ -435,10 +490,175 @@ def list_workspaces() -> None:
         marker = " (current)" if raw_name == active_name else ""
         sub_label = "active" if ws.get("has_subscription") else "no subscription"
         console.print(f"  {name}{marker}  {console.escape(f'[{sub_label}]')}")
+    return None
 
 
-def switch_workspace(workspace: str) -> None:
+def create_workspace(name: str, timezone: str) -> Any:
+    """Create a new workspace."""
+    from osmosis_ai.cli.output import (
+        OperationResult,
+        OutputFormat,
+        get_output_context,
+        serialize_workspace,
+    )
+    from osmosis_ai.platform.api.client import OsmosisClient
+    from osmosis_ai.platform.cli.utils import _require_auth
+
+    output = get_output_context()
+    _, credentials = _require_auth()
+
+    client = OsmosisClient()
+    result = platform_call(
+        "Creating workspace...",
+        lambda: client.create_workspace(name, timezone, credentials=credentials),
+        output_console=console,
+    )
+
+    resource = serialize_workspace(_workspace_summary(result))
+    resource["timezone"] = timezone
+
+    if output.format is OutputFormat.rich:
+        console.print(
+            f"Workspace '{console.escape(result['name'])}' created.",
+            style="green",
+            highlight=False,
+        )
+        return None
+
+    return OperationResult(
+        operation="workspace.create",
+        status="success",
+        resource=resource,
+        message=f"Workspace '{result['name']}' created.",
+        display_next_steps=[f"Switch with: osmosis workspace switch {result['name']}"],
+        next_steps_structured=[
+            {"action": "workspace.switch", "name": result["name"]},
+        ],
+    )
+
+
+def _require_delete_confirmation(*, workspace_name: str, yes: bool) -> None:
+    from osmosis_ai.cli.output import OutputFormat, get_output_context
+    from osmosis_ai.cli.prompts import require_confirmation
+
+    if yes:
+        return
+    output = get_output_context()
+    if output.format is not OutputFormat.rich or not output.interactive:
+        raise CLIError(
+            "Use --yes to confirm in non-interactive mode.",
+            code="INTERACTIVE_REQUIRED",
+        )
+    require_confirmation(
+        f"Delete workspace '{workspace_name}'? "
+        "This will stop all running processes and delete all datasets and training "
+        "runs. This cannot be undone.",
+        yes=False,
+    )
+
+
+def delete_workspace(name: str, *, yes: bool = False) -> Any:
+    """Delete a workspace."""
+    from osmosis_ai.cli.output import (
+        OperationResult,
+        OutputFormat,
+        get_output_context,
+        serialize_workspace,
+    )
+    from osmosis_ai.platform.api.client import OsmosisClient
+    from osmosis_ai.platform.cli.utils import _require_auth
+
+    output = get_output_context()
+    if not yes and (output.format is not OutputFormat.rich or not output.interactive):
+        raise CLIError(
+            "Use --yes to confirm in non-interactive mode.",
+            code="INTERACTIVE_REQUIRED",
+        )
+
+    _, credentials = _require_auth()
+    client = OsmosisClient()
+
+    ws_data = platform_call(
+        "Loading workspaces...",
+        lambda: client.list_workspaces(credentials=credentials),
+        output_console=console,
+    )
+    workspace = None
+    for ws in ws_data.get("workspaces", []):
+        if ws.get("name") == name.lower():
+            workspace = ws
+            break
+
+    if not workspace:
+        raise CLIError(f"Workspace '{name}' not found.", code="NOT_FOUND")
+
+    try:
+        status = platform_call(
+            "Checking workspace deletion safety...",
+            lambda: client.get_workspace_deletion_status(
+                workspace["id"], credentials=credentials
+            ),
+            output_console=console,
+        )
+    except Exception as e:
+        raise CLIError(f"Unable to verify workspace deletion safety: {e}") from e
+
+    if not status.is_owner:
+        raise CLIError("Only workspace owners can delete a workspace.")
+
+    if status.is_last_workspace:
+        raise CLIError("Cannot delete your only workspace.")
+
+    if output.format is OutputFormat.rich and status.has_running_processes:
+        console.print(
+            "This workspace has running processes:",
+            style="yellow",
+        )
+        processes: list[str] = []
+        if not status.feature_pipelines.valid:
+            processes.append(f"{status.feature_pipelines.count} pipeline(s)")
+        if not status.training_runs.valid:
+            processes.append(f"{status.training_runs.count} training run(s)")
+        if not status.models.valid:
+            processes.append(f"{status.models.count} active model(s)")
+        if processes:
+            console.print(f"  {', '.join(processes)}")
+        console.print()
+
+    _require_delete_confirmation(workspace_name=workspace["name"], yes=yes)
+
+    platform_call(
+        "Deleting workspace...",
+        lambda: client.delete_workspace(workspace["id"], credentials=credentials),
+        output_console=console,
+    )
+
+    if output.format is OutputFormat.rich:
+        console.print(
+            f"Workspace '{console.escape(workspace['name'])}' deleted.",
+            style="green",
+            highlight=False,
+        )
+        return None
+
+    return OperationResult(
+        operation="workspace.delete",
+        status="success",
+        resource=serialize_workspace(_workspace_summary(workspace)),
+        message=f"Workspace '{workspace['name']}' deleted.",
+    )
+
+
+def switch_workspace(workspace: str) -> Any:
     """Switch to a different workspace."""
+    from osmosis_ai.cli.output import (
+        OperationResult,
+        OutputFormat,
+        get_output_context,
+        serialize_workspace,
+    )
+
+    output = get_output_context()
     credentials = require_credentials()
     result = platform_call(
         "Loading workspaces...",
@@ -462,12 +682,80 @@ def switch_workspace(workspace: str) -> None:
     ws_name = ws["name"]
 
     set_active_workspace(ws_id, ws_name)
+    resource = serialize_workspace(_workspace_summary(ws))
+    if output.format is not OutputFormat.rich:
+        return OperationResult(
+            operation="workspace.switch",
+            status="success",
+            resource=resource,
+            message=f"Switched to workspace: {ws_name}",
+        )
+
     console.print(f"Switched to workspace: {console.format_styled(ws_name, 'cyan')}")
+    return None
+
+
+def validate_workspace(path: Any) -> Any:
+    """Validate the canonical Osmosis workspace structure."""
+    from osmosis_ai.cli.output import (
+        DetailField,
+        DetailResult,
+        OutputFormat,
+        get_output_context,
+    )
+    from osmosis_ai.platform.cli.workspace_contract import (
+        resolve_workspace_root,
+        validate_workspace_contract,
+    )
+
+    output = get_output_context()
+    workspace_root = resolve_workspace_root(path)
+    validate_workspace_contract(workspace_root)
+    rows = [
+        ("Root", str(workspace_root)),
+        ("Workspace metadata", ".osmosis/workspace.toml"),
+        ("Research", ".osmosis/research/"),
+        ("Rollouts", "rollouts/"),
+        ("Training configs", "configs/training/"),
+        ("Eval configs", "configs/eval/"),
+        ("Datasets", "data/"),
+    ]
+    if output.format is OutputFormat.rich:
+        console.table(
+            [
+                ("Root", console.format_text(workspace_root)),
+                ("Workspace metadata", ".osmosis/workspace.toml"),
+                ("Research", ".osmosis/research/"),
+                ("Rollouts", "rollouts/"),
+                ("Training configs", "configs/training/"),
+                ("Eval configs", "configs/eval/"),
+                ("Datasets", "data/"),
+            ],
+            title="Workspace Contract",
+        )
+        console.print("Workspace contract is valid.", style="green")
+        return None
+
+    return DetailResult(
+        title="Workspace Contract",
+        data={
+            "root": str(workspace_root),
+            "required_paths": [value for label, value in rows if label != "Root"],
+            "valid": True,
+        },
+        fields=[DetailField(label=label, value=value) for label, value in rows],
+    )
 
 
 @app.callback(invoke_without_command=True)
 def workspace() -> None:
     """Manage workspace context."""
+    from osmosis_ai.cli.output import OutputFormat, get_output_context
+
+    output = get_output_context()
+    if output.format is not OutputFormat.rich:
+        raise _interactive_workspace_error()
+
     credentials = load_credentials()
 
     if credentials is None:

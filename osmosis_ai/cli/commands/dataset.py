@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import typer
 
 from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE
@@ -15,11 +17,11 @@ app: typer.Typer = typer.Typer(
 @app.command("upload")
 def upload(
     file: str = typer.Argument(..., help="Path to the file to upload."),
-) -> None:
+) -> Any:
     """Upload a dataset file."""
     from osmosis_ai.platform.cli.dataset import upload as _upload
 
-    _upload(file=file)
+    return _upload(file=file)
 
 
 @app.command("download")
@@ -36,11 +38,11 @@ def download(
         "--overwrite",
         help="Replace the destination file if it already exists.",
     ),
-) -> None:
+) -> Any:
     """Download a dataset file."""
     from osmosis_ai.platform.cli.dataset import download as _download
 
-    _download(name=name, output=output, overwrite=overwrite)
+    return _download(name=name, output=output, overwrite=overwrite)
 
 
 @app.command("list")
@@ -49,50 +51,50 @@ def list_datasets(
         DEFAULT_PAGE_SIZE, "--limit", help="Maximum number of datasets to show."
     ),
     all_: bool = typer.Option(False, "--all", help="Show all datasets."),
-) -> None:
+) -> Any:
     """List datasets."""
     from osmosis_ai.platform.cli.dataset import list_datasets as _list_datasets
 
-    _list_datasets(limit=limit, all_=all_)
+    return _list_datasets(limit=limit, all_=all_)
 
 
 @app.command("info")
 def info(
     name: str = typer.Argument(..., help="Dataset name."),
-) -> None:
+) -> Any:
     """Show dataset details and processing status."""
     from osmosis_ai.platform.cli.dataset import info as _info
 
-    _info(name=name)
+    return _info(name=name)
 
 
 @app.command("preview")
 def preview(
     name: str = typer.Argument(..., help="Dataset name."),
     rows: int = typer.Option(5, "--rows", help="Number of rows to show."),
-) -> None:
+) -> Any:
     """Preview dataset rows."""
     from osmosis_ai.platform.cli.dataset import preview as _preview
 
-    _preview(name=name, rows=rows)
+    return _preview(name=name, rows=rows)
 
 
 @app.command("validate")
 def validate(
     file: str = typer.Argument(..., help="Path to the file to validate."),
-) -> None:
+) -> Any:
     """Validate a dataset file locally."""
     from osmosis_ai.platform.cli.dataset import validate as _validate
 
-    _validate(file=file)
+    return _validate(file=file)
 
 
 @app.command("delete")
 def delete(
     name: str = typer.Argument(..., help="Dataset name."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
-) -> None:
+) -> Any:
     """Delete a dataset."""
     from osmosis_ai.platform.cli.dataset import delete as _delete
 
-    _delete(name=name, yes=yes)
+    return _delete(name=name, yes=yes)

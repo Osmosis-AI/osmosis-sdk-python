@@ -10,6 +10,7 @@ import osmosis_ai.cli.commands.train as train_module
 import osmosis_ai.platform.api.client as api_client_module
 import osmosis_ai.platform.cli.utils as utils_module
 from osmosis_ai.cli.console import Console
+from osmosis_ai.cli.output import DetailResult
 from osmosis_ai.platform.api.models import (
     LoraCheckpointInfo,
     TrainingRunCheckpoints,
@@ -88,13 +89,22 @@ class TestStatusCheckpoints:
                 )
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-        train_module.status(name="qwen3-run1")
-        out = console_capture.getvalue()
-        assert "Checkpoints" in out
-        assert "qwen3-run1-step-100" in out
-        assert "step 100" in out
-        assert "cp_1"[:8] in out
-        assert "osmosis deploy <checkpoint-name>" in out
+        result = train_module.status(name="qwen3-run1")
+
+        assert isinstance(result, DetailResult)
+        checkpoint = result.data["checkpoints"][0]
+        assert checkpoint["checkpoint_name"] == "qwen3-run1-step-100"
+        assert checkpoint["checkpoint_step"] == 100
+        assert checkpoint["id"] == "cp_1"
+        checkpoint_fields = [
+            field.value for field in result.fields if field.label == "Checkpoint"
+        ]
+        assert checkpoint_fields == [
+            "qwen3-run1-step-100  step 100  [uploaded]  cp_1  2026-04-20"
+        ]
+        assert ("Deploy", "osmosis deploy <checkpoint-name>") in [
+            (field.label, field.value) for field in result.fields
+        ]
 
     def test_running_run_skips_checkpoints(
         self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
@@ -112,9 +122,11 @@ class TestStatusCheckpoints:
                 raise AssertionError("should not call for running run")
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-        train_module.status(name="qwen3-run1")
-        out = console_capture.getvalue()
-        assert "Checkpoints" not in out
+        result = train_module.status(name="qwen3-run1")
+
+        assert isinstance(result, DetailResult)
+        assert result.data["checkpoints"] == []
+        assert all(field.label != "Checkpoint" for field in result.fields)
         assert called["ckpts"] is False
 
     def test_stopped_run_shows_uploaded_checkpoints(
@@ -140,11 +152,13 @@ class TestStatusCheckpoints:
                 )
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-        train_module.status(name="qwen3-run1")
-        out = console_capture.getvalue()
-        assert "stopped" in out
-        assert "Checkpoints" in out
-        assert "qwen3-run1-step-100" in out
+        result = train_module.status(name="qwen3-run1")
+
+        assert isinstance(result, DetailResult)
+        assert result.data["status"] == "stopped"
+        assert result.data["checkpoints"][0]["checkpoint_name"] == (
+            "qwen3-run1-step-100"
+        )
 
     def test_endpoint_error_is_non_fatal(
         self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
@@ -159,10 +173,12 @@ class TestStatusCheckpoints:
                 raise PlatformAPIError("Internal server error", 500)
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-        train_module.status(name="qwen3-run1")
-        out = console_capture.getvalue()
-        assert "Checkpoints" not in out
-        assert "Training Run" in out
+        result = train_module.status(name="qwen3-run1")
+
+        assert isinstance(result, DetailResult)
+        assert result.title == "Training Run"
+        assert result.data["checkpoints"] == []
+        assert all(field.label != "Checkpoint" for field in result.fields)
 
     def test_finished_but_no_checkpoints(
         self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
@@ -179,7 +195,10 @@ class TestStatusCheckpoints:
                 )
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-        train_module.status(name="qwen3-run1")
-        out = console_capture.getvalue()
-        assert "Checkpoints" not in out
-        assert "Deploy with:" not in out
+        result = train_module.status(name="qwen3-run1")
+
+        assert isinstance(result, DetailResult)
+        assert result.data["checkpoints"] == []
+        assert all(
+            field.label not in {"Checkpoint", "Deploy"} for field in result.fields
+        )

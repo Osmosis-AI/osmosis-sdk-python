@@ -411,19 +411,33 @@ def make_progress_bar(
     *,
     description: str = "Uploading",
 ) -> tuple[AbstractContextManager[Any], ProgressCallback]:
-    """Create a progress bar and a matching callback.
+    """Create an output-aware progress bar and a matching callback.
 
-    Returns (progress_context, callback) where progress_context is a
-    context manager wrapping a rich Progress bar (or a no-op nullcontext
-    for plain-text fallback).
-
-    The caller should use::
-
-        ctx, cb = make_progress_bar(size)
-        with ctx:
-            upload_fn(..., progress_callback=cb)
+    JSON mode stays fully silent. Plain mode emits coarse stderr updates. Rich
+    mode uses a stderr-bound Rich progress bar so stdout remains clean.
     """
+    from osmosis_ai.cli.output.context import OutputFormat, get_output_context
+
+    output = get_output_context()
+
+    if output.format is OutputFormat.json:
+        return nullcontext(), lambda uploaded, total: None
+
+    if output.format is OutputFormat.plain:
+        last_pct = -1
+
+        def _plain_cb(uploaded: int, total: int) -> None:
+            nonlocal last_pct
+            pct = uploaded * 100 // total if total else 0
+            if pct != last_pct and (pct - last_pct >= 10 or uploaded >= total):
+                sys.stderr.write(f"{description}: {pct}%\n")
+                sys.stderr.flush()
+                last_pct = pct
+
+        return nullcontext(), _plain_cb
+
     try:
+        from rich.console import Console as RichConsole
         from rich.progress import (
             BarColumn,
             DownloadColumn,
@@ -444,6 +458,9 @@ def make_progress_bar(
             BarColumn(),
             DownloadColumn(binary_units=True),
             _SpeedCol(),
+            console=RichConsole(stderr=True),
+            redirect_stdout=False,
+            redirect_stderr=False,
         )
         task_id = progress.add_task(description, total=file_size)
 
@@ -452,14 +469,14 @@ def make_progress_bar(
 
         return progress, _rich_cb
     except ImportError:
-        pass
+        last_pct = -1
 
-    # Plain-text fallback
-    def _plain_cb(uploaded: int, total: int) -> None:
-        pct = uploaded * 100 // total if total else 0
-        sys.stdout.write(f"\r{description}: {pct}%")
-        sys.stdout.flush()
-        if uploaded >= total:
-            sys.stdout.write("\n")
+        def _fallback(uploaded: int, total: int) -> None:
+            nonlocal last_pct
+            pct = uploaded * 100 // total if total else 0
+            if pct != last_pct and (pct - last_pct >= 10 or uploaded >= total):
+                sys.stderr.write(f"{description}: {pct}%\n")
+                sys.stderr.flush()
+                last_pct = pct
 
-    return nullcontext(), _plain_cb
+        return nullcontext(), _fallback

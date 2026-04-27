@@ -21,6 +21,8 @@ the platform resolves both forms.
 
 from __future__ import annotations
 
+from typing import Any
+
 import typer
 
 from osmosis_ai.cli.console import console
@@ -30,6 +32,45 @@ app: typer.Typer = typer.Typer(
     help="Manage LoRA deployments (list, info, rename, delete).",
     no_args_is_help=True,
 )
+
+
+def _detail_fields(rows: list[tuple[str, str]]) -> list[Any]:
+    from osmosis_ai.cli.output import DetailField
+
+    return [DetailField(label=label, value=value) for label, value in rows]
+
+
+def _require_confirmation(message: str, *, yes: bool) -> None:
+    if yes:
+        return
+
+    from osmosis_ai.cli.errors import CLIError
+    from osmosis_ai.cli.output import OutputFormat, get_output_context
+
+    output = get_output_context()
+    if output.format is not OutputFormat.rich or not output.interactive:
+        err = CLIError(
+            "Use --yes to confirm in non-interactive mode.",
+            code="INTERACTIVE_REQUIRED",
+        )
+        if output.format is OutputFormat.json:
+            from osmosis_ai.cli.output import emit_structured_error_to_stderr
+
+            emit_structured_error_to_stderr(err)
+            raise typer.Exit(1)
+        raise err
+
+    from osmosis_ai.cli.prompts import require_confirmation
+
+    require_confirmation(message, yes=yes)
+
+
+def _deployment_summary_resource(result: Any) -> dict[str, Any]:
+    return {
+        "id": result.id,
+        "checkpoint_name": result.checkpoint_name,
+        "status": result.status,
+    }
 
 
 def _deployment_status_style(status: str) -> str | None:
@@ -64,14 +105,18 @@ def list_deployments(
         DEFAULT_PAGE_SIZE, "--limit", help="Maximum number of deployments to show."
     ),
     all_: bool = typer.Option(False, "--all", help="Show all deployments."),
-) -> None:
+) -> Any:
     """List LoRA deployments in the current workspace."""
+    from osmosis_ai.cli.output import (
+        ListColumn,
+        ListResult,
+        get_output_context,
+        serialize_deployment,
+    )
     from osmosis_ai.platform.api.client import OsmosisClient
     from osmosis_ai.platform.cli.utils import (
         _require_auth,
-        format_dim_date,
-        paginated_fetch,
-        print_pagination_footer,
+        fetch_all_pages,
         validate_list_options,
     )
 
@@ -79,34 +124,42 @@ def list_deployments(
 
     _, credentials = _require_auth()
 
-    with console.spinner("Fetching deployments..."):
-        client = OsmosisClient()
-        deployments, total_count, _has_more = paginated_fetch(
-            lambda lim, off: client.list_deployments(
-                limit=lim, offset=off, credentials=credentials
-            ),
-            items_attr="deployments",
-            limit=effective_limit,
-            fetch_all=fetch_all,
-        )
+    output = get_output_context()
+    client = OsmosisClient()
+    with output.status("Fetching deployments..."):
+        if fetch_all:
+            deployments, total_count = fetch_all_pages(
+                lambda lim, off: client.list_deployments(
+                    limit=lim, offset=off, credentials=credentials
+                ),
+                items_attr="deployments",
+            )
+            has_more = False
+            next_offset = None
+        else:
+            page = client.list_deployments(
+                limit=effective_limit, offset=0, credentials=credentials
+            )
+            deployments = page.deployments
+            total_count = page.total_count
+            has_more = page.has_more
+            next_offset = page.next_offset
 
-    if not deployments:
-        console.print("No deployments found.")
-        return
-
-    console.print(f"Deployments ({total_count}):", style="bold")
-    for d in deployments:
-        status_str = _format_deployment_status(d.status)
-        name = console.escape(d.checkpoint_name) if d.checkpoint_name else "—"
-        base_model = console.escape(d.base_model) if d.base_model else "—"
-        step = f"step:{d.checkpoint_step}"
-        date = format_dim_date(d.created_at)
-        console.print(
-            f"  {name}  {status_str}  {base_model}  {step}  {date}",
-            highlight=False,
-        )
-
-    print_pagination_footer(len(deployments), total_count, "deployments")
+    return ListResult(
+        title="Deployments",
+        items=[serialize_deployment(dep) for dep in deployments],
+        total_count=total_count,
+        has_more=has_more,
+        next_offset=next_offset,
+        columns=[
+            ListColumn(key="checkpoint_name", label="Checkpoint"),
+            ListColumn(key="status", label="Status"),
+            ListColumn(key="base_model", label="Base Model"),
+            ListColumn(key="checkpoint_step", label="Step"),
+            ListColumn(key="created_at", label="Created"),
+            ListColumn(key="id", label="ID", no_wrap=True),
+        ],
+    )
 
 
 @app.command("info")
@@ -114,19 +167,22 @@ def info(
     checkpoint: str = typer.Argument(
         ..., help="Checkpoint UUID or checkpoint_name.", metavar="CHECKPOINT"
     ),
-) -> None:
+) -> Any:
     """Show deployment details for a checkpoint."""
+    from osmosis_ai.cli.output import (
+        DetailResult,
+        get_output_context,
+        serialize_deployment,
+    )
     from osmosis_ai.platform.api.client import OsmosisClient
-    from osmosis_ai.platform.cli.utils import _require_auth, format_date, platform_call
+    from osmosis_ai.platform.cli.utils import _require_auth, format_date
 
     _, credentials = _require_auth()
 
     client = OsmosisClient()
-    d = platform_call(
-        "Fetching deployment...",
-        lambda: client.get_deployment(checkpoint, credentials=credentials),
-        output_console=console,
-    )
+    output = get_output_context()
+    with output.status("Fetching deployment..."):
+        d = client.get_deployment(checkpoint, credentials=credentials)
 
     rows: list[tuple[str, str]] = [
         ("Checkpoint", console.escape(d.checkpoint_name) if d.checkpoint_name else "—"),
@@ -144,53 +200,85 @@ def info(
     if d.created_at:
         rows.append(("Created", format_date(d.created_at)))
 
-    console.table(rows, title="Deployment")
+    return DetailResult(
+        title="Deployment",
+        data=serialize_deployment(d),
+        fields=_detail_fields(rows),
+    )
 
 
 def deploy(
     checkpoint: str = typer.Argument(
         ..., help="Checkpoint UUID or checkpoint_name.", metavar="CHECKPOINT"
     ),
-) -> None:
+) -> Any:
     """Deploy (or reactivate) a LoRA checkpoint."""
+    from osmosis_ai.cli.output import OperationResult, get_output_context
     from osmosis_ai.platform.api.client import OsmosisClient
-    from osmosis_ai.platform.cli.utils import _require_auth, platform_call
+    from osmosis_ai.platform.cli.utils import _require_auth
 
     _, credentials = _require_auth()
     client = OsmosisClient()
+    output = get_output_context()
 
-    result = platform_call(
-        f'Deploying checkpoint "{console.escape(checkpoint)}"...',
-        lambda: client.deploy_checkpoint(checkpoint, credentials=credentials),
-        output_console=console,
+    with output.status(f'Deploying checkpoint "{console.escape(checkpoint)}"...'):
+        result = client.deploy_checkpoint(checkpoint, credentials=credentials)
+
+    op_status = "failed" if result.status == "failed" else "success"
+    return OperationResult(
+        operation="deploy",
+        status=op_status,
+        resource=_deployment_summary_resource(result),
+        message=f"Deployment {result.checkpoint_name or '-'} {result.status}",
+        display_next_steps=[
+            f"Inspect with: osmosis deployment info {result.checkpoint_name}"
+        ]
+        if result.checkpoint_name
+        else [],
+        next_steps_structured=[
+            {"action": "deployment_info", "checkpoint_name": result.checkpoint_name}
+        ]
+        if result.checkpoint_name
+        else [],
+        exit_code=1 if op_status == "failed" else 0,
     )
-
-    status_str = _format_deployment_status(result.status)
-    name = console.escape(result.checkpoint_name) if result.checkpoint_name else "—"
-    console.print(f"Deployment {name} {status_str}", highlight=False)
 
 
 def undeploy(
     checkpoint: str = typer.Argument(
         ..., help="Checkpoint UUID or checkpoint_name.", metavar="CHECKPOINT"
     ),
-) -> None:
+) -> Any:
     """Undeploy a LoRA checkpoint (transition to ``inactive``)."""
+    from osmosis_ai.cli.output import OperationResult, get_output_context
     from osmosis_ai.platform.api.client import OsmosisClient
-    from osmosis_ai.platform.cli.utils import _require_auth, platform_call
+    from osmosis_ai.platform.cli.utils import _require_auth
 
     _, credentials = _require_auth()
     client = OsmosisClient()
+    output = get_output_context()
 
-    result = platform_call(
-        f'Undeploying checkpoint "{console.escape(checkpoint)}"...',
-        lambda: client.undeploy_checkpoint(checkpoint, credentials=credentials),
-        output_console=console,
+    with output.status(f'Undeploying checkpoint "{console.escape(checkpoint)}"...'):
+        result = client.undeploy_checkpoint(checkpoint, credentials=credentials)
+
+    op_status = "failed" if result.status == "failed" else "success"
+    return OperationResult(
+        operation="undeploy",
+        status=op_status,
+        resource=_deployment_summary_resource(result),
+        message=f"Deployment {result.checkpoint_name or '-'} {result.status}",
+        display_next_steps=[
+            f"Inspect with: osmosis deployment info {result.checkpoint_name}"
+        ]
+        if result.checkpoint_name
+        else [],
+        next_steps_structured=[
+            {"action": "deployment_info", "checkpoint_name": result.checkpoint_name}
+        ]
+        if result.checkpoint_name
+        else [],
+        exit_code=1 if op_status == "failed" else 0,
     )
-
-    status_str = _format_deployment_status(result.status)
-    name = console.escape(result.checkpoint_name) if result.checkpoint_name else "—"
-    console.print(f"Deployment {name} {status_str}", highlight=False)
 
 
 @app.command("rename")
@@ -201,28 +289,37 @@ def rename(
     new_name: str = typer.Argument(
         ..., help="New checkpoint name.", metavar="NEW_NAME"
     ),
-) -> None:
+) -> Any:
     """Rename a LoRA checkpoint (re-registers inference if active)."""
+    from osmosis_ai.cli.output import OperationResult, get_output_context
     from osmosis_ai.platform.api.client import OsmosisClient
-    from osmosis_ai.platform.cli.utils import _require_auth, platform_call
+    from osmosis_ai.platform.cli.utils import _require_auth
 
     _, credentials = _require_auth()
     client = OsmosisClient()
+    output = get_output_context()
 
-    result = platform_call(
-        "Renaming checkpoint...",
-        lambda: client.rename_checkpoint(checkpoint, new_name, credentials=credentials),
-        output_console=console,
-    )
+    with output.status("Renaming checkpoint..."):
+        result = client.rename_checkpoint(checkpoint, new_name, credentials=credentials)
 
-    old = console.escape(result.old_checkpoint_name)
-    new = console.escape(result.checkpoint_name)
-    console.print(f"Renamed {old} -> {new}", style="green", highlight=False)
+    display_next_steps = []
     if result.status == "failed":
-        console.print(
-            "Warning: inference re-registration failed; deployment is marked as failed.",
-            style="yellow",
+        display_next_steps.append(
+            "Warning: inference re-registration failed; deployment is marked as failed."
         )
+    return OperationResult(
+        operation="deployment.rename",
+        status="failed" if result.status == "failed" else "success",
+        resource={
+            "id": result.id,
+            "old_checkpoint_name": result.old_checkpoint_name,
+            "checkpoint_name": result.checkpoint_name,
+            "status": result.status,
+        },
+        message=f"Renamed {result.old_checkpoint_name} -> {result.checkpoint_name}",
+        display_next_steps=display_next_steps,
+        exit_code=1 if result.status == "failed" else 0,
+    )
 
 
 @app.command("delete")
@@ -231,27 +328,26 @@ def delete(
         ..., help="Checkpoint UUID or checkpoint_name.", metavar="CHECKPOINT"
     ),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
-) -> None:
+) -> Any:
     """Delete a deployment record (idempotent)."""
-    from osmosis_ai.cli.prompts import require_confirmation
+    from osmosis_ai.cli.output import OperationResult, get_output_context
     from osmosis_ai.platform.api.client import OsmosisClient
-    from osmosis_ai.platform.cli.utils import _require_auth, platform_call
+    from osmosis_ai.platform.cli.utils import _require_auth
 
     _, credentials = _require_auth()
 
-    require_confirmation(
+    _require_confirmation(
         f'Delete deployment for checkpoint "{checkpoint}"? This cannot be undone.',
         yes=yes,
     )
 
     client = OsmosisClient()
-    platform_call(
-        "Deleting deployment...",
-        lambda: client.delete_deployment(checkpoint, credentials=credentials),
-        output_console=console,
-    )
-    console.print(
-        f'Deployment for "{console.escape(checkpoint)}" deleted.',
-        style="green",
-        highlight=False,
+    output = get_output_context()
+    with output.status("Deleting deployment..."):
+        client.delete_deployment(checkpoint, credentials=credentials)
+    return OperationResult(
+        operation="deployment.delete",
+        status="success",
+        resource={"checkpoint": checkpoint},
+        message=f'Deployment for "{checkpoint}" deleted.',
     )

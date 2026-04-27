@@ -19,6 +19,31 @@ app: typer.Typer = typer.Typer(
 )
 
 
+def _require_confirmation(message: str, *, yes: bool) -> None:
+    if yes:
+        return
+
+    from osmosis_ai.cli.errors import CLIError
+    from osmosis_ai.cli.output import OutputFormat, get_output_context
+
+    output = get_output_context()
+    if output.format is not OutputFormat.rich or not output.interactive:
+        err = CLIError(
+            "Use --yes to confirm in non-interactive mode.",
+            code="INTERACTIVE_REQUIRED",
+        )
+        if output.format is OutputFormat.json:
+            from osmosis_ai.cli.output import emit_structured_error_to_stderr
+
+            emit_structured_error_to_stderr(err)
+            raise typer.Exit(1)
+        raise err
+
+    from osmosis_ai.cli.prompts import require_confirmation
+
+    require_confirmation(message, yes=yes)
+
+
 def _print_model_section(
     models: list[Any],
     total_count: int,
@@ -65,11 +90,17 @@ def list_models(
         help="Maximum number of base models to show.",
     ),
     all_: bool = typer.Option(False, "--all", help="Show all base models."),
-) -> None:
+) -> Any:
     """List base models in the current workspace."""
+    from osmosis_ai.cli.output import (
+        ListColumn,
+        ListResult,
+        get_output_context,
+        serialize_model,
+    )
     from osmosis_ai.platform.cli.utils import (
         _require_auth,
-        print_pagination_footer,
+        fetch_all_pages,
         validate_list_options,
     )
 
@@ -79,62 +110,81 @@ def list_models(
 
     from osmosis_ai.platform.api.client import OsmosisClient
 
-    with console.spinner("Fetching models..."):
-        client = OsmosisClient()
+    output = get_output_context()
+    client = OsmosisClient()
+    with output.status("Fetching models..."):
         if fetch_all:
-            models = _fetch_all_models(client, credentials)
-            total = len(models)
+            models, total = fetch_all_pages(
+                lambda lim, off: client.list_base_models(
+                    limit=lim, offset=off, credentials=credentials
+                ),
+                items_attr="models",
+            )
+            has_more = False
+            next_offset = None
         else:
             result = client.list_base_models(
-                limit=effective_limit, credentials=credentials
+                limit=effective_limit, offset=0, credentials=credentials
             )
             models = result.models
             total = result.total_count
+            has_more = result.has_more
+            next_offset = result.next_offset
 
-    if not models:
-        console.print("No models found.")
-        return
-
-    _print_model_section(
-        models,
-        total,
-        "Base Models",
-        lambda m: (
-            console.format_styled(f"by {m.creator_name}", "dim")
-            if m.creator_name
-            else ""
-        ),
+    return ListResult(
+        title="Base Models",
+        items=[serialize_model(model) for model in models],
+        total_count=total,
+        has_more=has_more,
+        next_offset=next_offset,
+        columns=[
+            ListColumn(key="model_name", label="Model"),
+            ListColumn(key="base_model", label="Base"),
+            ListColumn(key="status", label="Status"),
+            ListColumn(key="creator_name", label="Creator"),
+            ListColumn(key="created_at", label="Created"),
+            ListColumn(key="id", label="ID", no_wrap=True),
+        ],
     )
-
-    if not fetch_all:
-        print_pagination_footer(len(models), total, "base models")
 
 
 @app.command("delete")
 def delete(
     name: str = typer.Argument(..., help="Model path (e.g. google/gemma-2-9b-it)."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
-) -> None:
+) -> Any:
     """Delete a base model."""
     from osmosis_ai.cli.errors import CLIError
-    from osmosis_ai.cli.prompts import require_confirmation
+    from osmosis_ai.cli.output import OperationResult, OutputFormat, get_output_context
     from osmosis_ai.platform.api.client import OsmosisClient
     from osmosis_ai.platform.auth.platform_client import PlatformAPIError
-    from osmosis_ai.platform.cli.utils import _require_auth, platform_call
+    from osmosis_ai.platform.cli.utils import _require_auth
 
     _ws_name, credentials = _require_auth()
     client = OsmosisClient()
+    output = get_output_context()
 
     try:
-        affected = platform_call(
-            "Checking model dependencies...",
-            lambda: client.get_model_affected_resources(name, credentials=credentials),
-            output_console=console,
-        )
+        with output.status("Checking model dependencies..."):
+            affected = client.get_model_affected_resources(
+                name, credentials=credentials
+            )
     except PlatformAPIError as e:
         raise CLIError(f"Unable to verify model dependencies: {e}") from e
 
     if affected.has_blocking_runs:
+        blocking_runs = [
+            {
+                "id": run.id,
+                "training_run_name": run.training_run_name,
+            }
+            for run in affected.training_runs_using_model
+        ]
+        if output.format is not OutputFormat.rich:
+            raise CLIError(
+                "Cannot delete this model because training runs depend on it.",
+                details={"training_runs": blocking_runs},
+            )
         console.print(
             "Cannot delete this model — the following training runs depend on it:",
             style="red",
@@ -150,14 +200,12 @@ def delete(
         console.print("\nDelete these training runs first, then retry.", style="dim")
         raise typer.Exit(1)
 
-    require_confirmation(f'Delete model "{name}"? This cannot be undone.', yes=yes)
-    platform_call(
-        "Deleting model...",
-        lambda: client.delete_model(name, credentials=credentials),
-        output_console=console,
-    )
-    console.print(
-        f'Model "{console.escape(name)}" deleted.',
-        style="green",
-        highlight=False,
+    _require_confirmation(f'Delete model "{name}"? This cannot be undone.', yes=yes)
+    with output.status("Deleting model..."):
+        client.delete_model(name, credentials=credentials)
+    return OperationResult(
+        operation="model.delete",
+        status="success",
+        resource={"name": name},
+        message=f'Model "{name}" deleted.',
     )

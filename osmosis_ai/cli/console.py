@@ -1,4 +1,4 @@
-"""Console output with Rich and automatic TTY-aware rendering.
+"""Console output facade with Rich and output-context aware rendering.
 
 Rich automatically strips ANSI control codes when output is not directed
 to a terminal (e.g., piped to a file), and respects the NO_COLOR
@@ -52,7 +52,7 @@ class Console:
         force_terminal: bool | None = None,
         no_color: bool = False,
         width: int | None = None,
-    ):
+    ) -> None:
         """Initialize the console.
 
         Args:
@@ -105,6 +105,17 @@ class Console:
         """The underlying Rich Console instance."""
         return self._rich
 
+    @staticmethod
+    def _output_format() -> Any:
+        from osmosis_ai.cli.output.context import get_output_context
+
+        return get_output_context().format
+
+    def _is_rich_mode(self) -> bool:
+        from osmosis_ai.cli.output.context import OutputFormat
+
+        return self._output_format() is OutputFormat.rich
+
     def print(
         self,
         *args: Any,
@@ -120,6 +131,8 @@ class Console:
             end: String to print at end. Defaults to newline.
             **kwargs: Additional arguments passed to rich.print.
         """
+        if not self._is_rich_mode():
+            return
         self._rich.print(*args, style=style, end=end, **kwargs)
 
     def print_error(
@@ -147,6 +160,8 @@ class Console:
         Args:
             title: Optional title to display in the separator.
         """
+        if not self._is_rich_mode():
+            return
         from rich.rule import Rule
 
         self._rich.print(Rule(title, style="dim"))
@@ -167,6 +182,8 @@ class Console:
             style: Border style color.
             padding: Padding (vertical, horizontal).
         """
+        if not self._is_rich_mode():
+            return
         panel = Panel(content, title=title, border_style=style, padding=padding)
         self._rich.print(panel)
 
@@ -184,6 +201,8 @@ class Console:
             title: Optional table title.
             headers: Optional column headers.
         """
+        if not self._is_rich_mode():
+            return
         table = Table(
             title=title,
             box=box.ROUNDED,
@@ -252,6 +271,8 @@ class Console:
         style: str | None = None,
     ) -> None:
         """Print a URL without inserting hard line breaks into the link target."""
+        if not self._is_rich_mode():
+            return
         self._rich.print(
             self.format_text(prefix),
             self.format_url(url, label=label, style=style),
@@ -268,6 +289,18 @@ class Console:
             with console.spinner("Loading workspaces..."):
                 result = api_call()
         """
+        from osmosis_ai.cli.output.context import OutputFormat
+
+        fmt = self._output_format()
+        if fmt is OutputFormat.json:
+            yield
+            return
+        if fmt is OutputFormat.plain:
+            sys.stderr.write(message + "\n")
+            sys.stderr.flush()
+            yield
+            return
+
         if self.is_tty:
             from rich.status import Status
 
@@ -275,6 +308,14 @@ class Console:
                 yield
         else:
             self._rich.print(message)
+            yield
+
+    @contextmanager
+    def status(self, message: str) -> Generator[None, None, None]:
+        """Alias for spinner with output-context aware routing."""
+        from osmosis_ai.cli.output.context import get_output_context
+
+        with get_output_context().status(message):
             yield
 
     def input(self, prompt: str = "", style: str | None = None) -> str:

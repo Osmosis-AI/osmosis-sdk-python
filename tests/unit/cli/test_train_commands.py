@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from contextlib import nullcontext
 from io import StringIO
 from pathlib import Path
 
@@ -13,6 +12,7 @@ import osmosis_ai.platform.api.client as api_client_module
 import osmosis_ai.platform.cli.utils as utils_module
 from osmosis_ai.cli.console import Console
 from osmosis_ai.cli.errors import CLIError
+from osmosis_ai.cli.output import DetailResult, ListResult, OperationResult
 from osmosis_ai.platform.api.models import (
     DeleteTrainingRunResult,
     PaginatedTrainingRuns,
@@ -56,8 +56,13 @@ class TestListRuns:
                 )
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-        train_module.list_runs(limit=30, all_=False)
-        assert "No training runs found" in console_capture.getvalue()
+        result = train_module.list_runs(limit=30, all_=False)
+
+        assert isinstance(result, ListResult)
+        assert result.title == "Training Runs"
+        assert result.items == []
+        assert result.total_count == 0
+        assert result.has_more is False
 
     def test_list_with_runs(
         self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
@@ -78,11 +83,12 @@ class TestListRuns:
                 )
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-        train_module.list_runs(limit=30, all_=False)
-        out = console_capture.getvalue()
-        assert "my-run" in out
-        assert "gpt-2" in out
-        assert "acc:0.95" in out
+        result = train_module.list_runs(limit=30, all_=False)
+
+        assert isinstance(result, ListResult)
+        assert result.items[0]["name"] == "my-run"
+        assert result.items[0]["model_name"] == "gpt-2"
+        assert result.items[0]["eval_accuracy"] == 0.95
 
     def test_list_unnamed_run(
         self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
@@ -100,8 +106,11 @@ class TestListRuns:
                 )
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-        train_module.list_runs(limit=30, all_=False)
-        assert "(unnamed)" in console_capture.getvalue()
+        result = train_module.list_runs(limit=30, all_=False)
+
+        assert isinstance(result, ListResult)
+        assert result.items[0]["name"] is None
+        assert result.items[0]["status"] == "running"
 
     def test_list_has_more(
         self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
@@ -119,10 +128,12 @@ class TestListRuns:
                 )
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-        train_module.list_runs(limit=30, all_=False)
-        out = console_capture.getvalue()
-        assert "Showing 1 of 5 training runs" in out
-        assert "--all" in out
+        result = train_module.list_runs(limit=30, all_=False)
+
+        assert isinstance(result, ListResult)
+        assert len(result.items) == 1
+        assert result.total_count == 5
+        assert result.has_more is True
 
 
 # ---------------------------------------------------------------------------
@@ -146,10 +157,12 @@ class TestStatus:
                 return detail
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-        train_module.status(name="run-1")
-        out = console_capture.getvalue()
-        assert "run-1" in out
-        assert "completed" in out
+        result = train_module.status(name="run-1")
+
+        assert isinstance(result, DetailResult)
+        assert result.title == "Training Run"
+        assert result.data["name"] == "run-1"
+        assert result.data["status"] == "completed"
 
     def test_status_with_all_optional_fields(
         self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
@@ -176,13 +189,18 @@ class TestStatus:
                 return detail
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-        train_module.status(name="full-run")
-        out = console_capture.getvalue()
-        assert "100" in out
-        assert "experiment notes" in out
-        assert "uploaded" in out
-        assert "2026-01-01" in out
-        assert "2026-01-02" in out
+        result = train_module.status(name="full-run")
+
+        assert isinstance(result, DetailResult)
+        fields = {field.label: field.value for field in result.fields}
+        assert fields["Examples"] == "100"
+        assert fields["Notes"] == "experiment notes"
+        assert fields["HF Status"] == "uploaded"
+        assert fields["Started"] == "2026-01-01"
+        assert fields["Completed"] == "2026-01-02"
+        assert result.data["examples_processed_count"] == 100
+        assert result.data["notes"] == "experiment notes"
+        assert result.data["hf_status"] == "uploaded"
 
 
 # ---------------------------------------------------------------------------
@@ -265,12 +283,17 @@ total_epochs = 1
                 return result
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-        train_module.submit(config_path=config_path, yes=True)
-        out = console_capture.getvalue()
-        assert "my-training-run" in out
-        assert "550e8400" in out
-        assert "pending" in out
-        assert "training" in out  # URL contains "training"
+        command_result = train_module.submit(config_path=config_path, yes=True)
+
+        assert isinstance(command_result, OperationResult)
+        assert command_result.operation == "train.submit"
+        assert command_result.status == "success"
+        assert command_result.resource is not None
+        assert command_result.resource["name"] == "my-training-run"
+        assert command_result.resource["id"] == "550e8400-e29b-41d4-a716-446655440000"
+        assert command_result.resource["status"] == "pending"
+        assert "/training/" in command_result.resource["url"]
+        assert command_result.message == "Training run submitted: my-training-run"
 
     def test_submit_url_does_not_insert_rich_line_breaks(
         self,
@@ -279,31 +302,23 @@ total_epochs = 1
     ) -> None:
         config_path = self._write_config(tmp_path)
         result = self.SUBMIT_RESULT
-        output = StringIO()
-        tty_console = Console(
-            file=output,
-            force_terminal=True,
-            no_color=True,
-            width=92,
-        )
-        monkeypatch.setattr(tty_console, "spinner", lambda message: nullcontext())
-        monkeypatch.setattr(train_module, "console", tty_console)
-        monkeypatch.setattr(utils_module, "console", tty_console)
 
         class FakeClient:
             def submit_training_run(self, **kwargs):
                 return result
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-        train_module.submit(config_path=config_path, yes=True)
+        command_result = train_module.submit(config_path=config_path, yes=True)
 
         expected_url = utils_module.platform_entity_url(
             "ws-test",
             "training",
             result.id,
         )
-        out = output.getvalue()
-        assert f"  View: {expected_url}" in out
+        assert isinstance(command_result, OperationResult)
+        assert command_result.resource is not None
+        assert command_result.resource["url"] == expected_url
+        assert f"View: {expected_url}" in command_result.display_next_steps
 
     def test_submit_shows_summary_table(
         self,
@@ -319,12 +334,21 @@ total_epochs = 1
 
         FakeClient.SUBMIT_RESULT = self.SUBMIT_RESULT
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-        train_module.submit(config_path=config_path, yes=True)
+        result = train_module.submit(config_path=config_path, yes=True)
         out = console_capture.getvalue()
         assert "calculator" in out
         assert "main.py" in out
         assert "Qwen/Qwen3.5-35B-A3B" in out
         assert "abc-123" in out
+        assert isinstance(result, OperationResult)
+        assert result.resource is not None
+        assert result.resource["config"] == {
+            "rollout": "calculator",
+            "entrypoint": "main.py",
+            "model": "Qwen/Qwen3.5-35B-A3B",
+            "dataset": "abc-123",
+            "commit_sha": None,
+        }
 
     def test_submit_with_commit_sha(
         self,
@@ -354,9 +378,12 @@ commit_sha = "deadbeef"
                 return TestSubmit.SUBMIT_RESULT
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-        train_module.submit(config_path=path, yes=True)
+        result = train_module.submit(config_path=path, yes=True)
         assert captured_kwargs["commit_sha"] == "deadbeef"
         assert "deadbeef" in console_capture.getvalue()
+        assert isinstance(result, OperationResult)
+        assert result.resource is not None
+        assert result.resource["config"]["commit_sha"] == "deadbeef"
 
     def test_submit_passes_config_to_api(
         self,
@@ -446,7 +473,10 @@ class TestDelete:
                 return DeleteTrainingRunResult(deleted=True)
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-        train_module.delete(name="my-run", yes=True)
-        out = console_capture.getvalue()
-        assert "deleted" in out
-        assert "my-run" in out
+        result = train_module.delete(name="my-run", yes=True)
+
+        assert isinstance(result, OperationResult)
+        assert result.operation == "train.delete"
+        assert result.status == "success"
+        assert result.resource == {"name": "my-run"}
+        assert result.message == 'Training run "my-run" deleted.'

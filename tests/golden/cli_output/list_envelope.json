@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "keys": [
+    "schema_version",
+    "items",
+    "total_count",
+    "has_more",
+    "next_offset"
+  ]
+}
