@@ -372,7 +372,7 @@ def _browse_models(ws_name: str) -> None:
 
 def _show_model_detail(m: Any, ws_name: str) -> None:
     """Display detailed info for a single model."""
-    rows: list[tuple[str, str]] = [
+    rows: list[tuple[Any, Any]] = [
         ("Model", console.format_text(m.model_name)),
         ("ID", console.format_text(m.id)),
         ("Status", console.format_text(m.status)),

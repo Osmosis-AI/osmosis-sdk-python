@@ -131,8 +131,9 @@ def _output_context_for_error(
     exc: BaseException,
     argv: list[str] | None,
 ) -> OutputContext:
-    if isinstance(exc, click.ClickException) and exc.ctx is not None:
-        root_obj = exc.ctx.find_root().obj
+    ctx = getattr(exc, "ctx", None)
+    if isinstance(exc, click.ClickException) and isinstance(ctx, click.Context):
+        root_obj = ctx.find_root().obj
         if isinstance(root_obj, OutputContext):
             return root_obj
 
@@ -154,7 +155,8 @@ def _handle_cli_error(
 ) -> int:
     output = _output_context_for_error(exc, argv)
     if output.format is OutputFormat.json:
-        ctx = exc.ctx if isinstance(exc, click.ClickException) else None
+        raw_ctx = getattr(exc, "ctx", None)
+        ctx = raw_ctx if isinstance(raw_ctx, click.Context) else None
         emit_structured_error_to_stderr(
             classify_error(exc),
             command=command_path_for_error(ctx),

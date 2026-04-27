@@ -62,6 +62,7 @@ class Console:
             width: Fixed terminal width (for testing). None = auto-detect.
         """
         file = file or sys.stdout
+        self._no_color = no_color
 
         # When TERM=dumb, Rich's Console.size short-circuits to 80x25 unless both width and
         # height are set; width alone is ignored (see rich.console.Console.size).
@@ -250,7 +251,10 @@ class Console:
 
         Use this for dynamic values that should never be parsed as Rich markup.
         """
-        return Text("" if text is None else str(text), style=style)
+        value = "" if text is None else str(text)
+        if style is None:
+            return Text(value)
+        return Text(value, style=style)
 
     def format_url(
         self,
@@ -260,6 +264,8 @@ class Console:
         style: str | None = None,
     ) -> Text:
         """Return a Rich terminal hyperlink for a URL."""
+        if self._no_color:
+            return self.format_text(label or url, style=style)
         return _url_link_text(url, label=label, style=style)
 
     def print_url(

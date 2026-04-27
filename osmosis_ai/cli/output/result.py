@@ -11,7 +11,7 @@ class DetailField:
     """Single label/value row for Rich + plain detail output."""
 
     label: str
-    value: str
+    value: Any
 
 
 @dataclass(frozen=True)

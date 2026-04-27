@@ -228,18 +228,17 @@ def _verify_env_token(env_token: str) -> Any:
     try:
         return verify_token(env_token)
     except LoginError as exc:
-        message = env_messages.get(exc.code)
+        code = exc.code
+        message = env_messages.get(code) if code is not None else None
         if message is not None:
-            raise LoginError(
-                message, code=exc.code, status_code=exc.status_code
-            ) from exc
+            raise LoginError(message, code=code, status_code=exc.status_code) from exc
         raise
 
 
 def _cli_error_from_login_error(exc: Any) -> CLIError:
     status_code = getattr(exc, "status_code", None)
     if isinstance(status_code, int) and status_code != 401:
-        details = {"status_code": status_code}
+        details: dict[str, Any] = {"status_code": status_code}
         platform_code = getattr(exc, "code", None)
         if isinstance(platform_code, str):
             details["platform_code"] = platform_code
