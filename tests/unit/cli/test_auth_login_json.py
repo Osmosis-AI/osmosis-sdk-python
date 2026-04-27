@@ -290,6 +290,27 @@ def test_login_json_with_invalid_env_token_mentions_unset(
     assert "unset OSMOSIS_TOKEN" in envelope["error"]["message"]
 
 
+def test_login_json_with_generic_401_env_token_mentions_unset(
+    monkeypatch, capsys
+) -> None:
+    monkeypatch.setenv("OSMOSIS_TOKEN", "bad-env-token")
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.verify_token",
+        lambda token: (_ for _ in ()).throw(
+            LoginError("Authentication failed.", status_code=401)
+        ),
+    )
+
+    exit_code = cli.main(["--json", "auth", "login"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    envelope = json.loads(captured.err)
+    assert envelope["error"]["code"] == "AUTH_REQUIRED"
+    assert "OSMOSIS_TOKEN environment variable" in envelope["error"]["message"]
+    assert "unset OSMOSIS_TOKEN" in envelope["error"]["message"]
+
+
 def test_login_json_without_token_or_env_fails_interactive_required(
     monkeypatch, capsys
 ) -> None:

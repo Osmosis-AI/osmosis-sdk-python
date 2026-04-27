@@ -230,6 +230,8 @@ def _verify_env_token(env_token: str) -> Any:
     except LoginError as exc:
         code = exc.code
         message = env_messages.get(code) if code is not None else None
+        if message is None and exc.status_code == 401:
+            message = MSG_ENV_TOKEN_INVALID
         if message is not None:
             raise LoginError(message, code=code, status_code=exc.status_code) from exc
         raise

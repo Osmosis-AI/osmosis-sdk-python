@@ -816,12 +816,11 @@ class EvalCommand:
         try:
             orch_result = await orchestrator.run()
         except Exception as e:
-            result = self._fail(f"Error during evaluation: {e}", code="INTERNAL")
             if debug:
                 import traceback
 
                 traceback.print_exc()
-            return result
+            return self._fail(f"Error during evaluation: {e}", code="INTERNAL")
         finally:
             await proxy.stop()
             if baseline_proxy:

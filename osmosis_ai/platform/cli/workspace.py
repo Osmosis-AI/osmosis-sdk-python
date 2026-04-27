@@ -591,16 +591,13 @@ def delete_workspace(name: str, *, yes: bool = False) -> Any:
     if not workspace:
         raise CLIError(f"Workspace '{name}' not found.", code="NOT_FOUND")
 
-    try:
-        status = platform_call(
-            "Checking workspace deletion safety...",
-            lambda: client.get_workspace_deletion_status(
-                workspace["id"], credentials=credentials
-            ),
-            output_console=console,
-        )
-    except Exception as e:
-        raise CLIError(f"Unable to verify workspace deletion safety: {e}") from e
+    status = platform_call(
+        "Checking workspace deletion safety...",
+        lambda: client.get_workspace_deletion_status(
+            workspace["id"], credentials=credentials
+        ),
+        output_console=console,
+    )
 
     if not status.is_owner:
         raise CLIError("Only workspace owners can delete a workspace.")

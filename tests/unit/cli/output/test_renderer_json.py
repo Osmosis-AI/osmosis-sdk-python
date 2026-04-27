@@ -64,6 +64,28 @@ def test_list_envelope_supports_extra_keys() -> None:
     assert payload["workspace"] == "ws-a"
 
 
+def test_list_envelope_extra_cannot_override_reserved_keys() -> None:
+    result = ListResult(
+        title="Datasets",
+        items=[{"id": "ds_1"}],
+        total_count=1,
+        has_more=False,
+        next_offset=None,
+        columns=[],
+        extra={
+            "schema_version": 999,
+            "items": [],
+            "has_more": True,
+            "workspace": "ws-a",
+        },
+    )
+    payload, _ = _render_to_json(result)
+    assert payload["schema_version"] == 1
+    assert payload["items"] == [{"id": "ds_1"}]
+    assert payload["has_more"] is False
+    assert payload["workspace"] == "ws-a"
+
+
 def test_detail_envelope_required_keys() -> None:
     result = DetailResult(
         title="Dataset",
@@ -107,10 +129,41 @@ def test_operation_envelope_includes_structured_next_steps_only() -> None:
     assert "display_next_steps" not in payload
 
 
+def test_operation_envelope_extra_cannot_override_reserved_keys() -> None:
+    result = OperationResult(
+        operation="deploy",
+        status="success",
+        extra={
+            "status": "failed",
+            "operation": "delete",
+            "message": "from extra",
+            "workspace": "ws-a",
+        },
+    )
+    payload, _ = _render_to_json(result)
+    assert payload["status"] == "success"
+    assert payload["operation"] == "deploy"
+    assert "message" not in payload
+    assert payload["workspace"] == "ws-a"
+
+
 def test_message_envelope_includes_schema_version() -> None:
     result = MessageResult(message="Logged out.")
     payload, _ = _render_to_json(result)
     assert payload == {"schema_version": 1, "message": "Logged out."}
+
+
+def test_message_envelope_extra_cannot_override_reserved_keys() -> None:
+    result = MessageResult(
+        message="Logged out.",
+        extra={"schema_version": 999, "message": "from extra", "workspace": "ws-a"},
+    )
+    payload, _ = _render_to_json(result)
+    assert payload == {
+        "schema_version": 1,
+        "message": "Logged out.",
+        "workspace": "ws-a",
+    }
 
 
 def test_no_ansi_or_rich_box_on_json_stdout() -> None:

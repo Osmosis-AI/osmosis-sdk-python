@@ -23,6 +23,18 @@ _RICH_STYLE_TAG_RE = re.compile(
 )
 
 
+def _merge_extra(
+    payload: dict[str, Any],
+    extra: dict[str, Any],
+    *,
+    reserved: set[str],
+) -> dict[str, Any]:
+    for key, value in extra.items():
+        if key not in reserved:
+            payload[key] = value
+    return payload
+
+
 def _envelope_list(result: ListResult, *, schema_version: int) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "schema_version": schema_version,
@@ -31,8 +43,11 @@ def _envelope_list(result: ListResult, *, schema_version: int) -> dict[str, Any]
         "has_more": result.has_more,
         "next_offset": result.next_offset,
     }
-    payload.update(result.extra)
-    return payload
+    return _merge_extra(
+        payload,
+        result.extra,
+        reserved={"schema_version", "items", "total_count", "has_more", "next_offset"},
+    )
 
 
 def _envelope_detail(result: DetailResult, *, schema_version: int) -> dict[str, Any]:
@@ -56,8 +71,18 @@ def _envelope_operation(
         payload["message"] = result.message
     if result.next_steps_structured:
         payload["next_steps_structured"] = result.next_steps_structured
-    payload.update(result.extra)
-    return payload
+    return _merge_extra(
+        payload,
+        result.extra,
+        reserved={
+            "schema_version",
+            "status",
+            "operation",
+            "resource",
+            "message",
+            "next_steps_structured",
+        },
+    )
 
 
 def _envelope_message(result: MessageResult, *, schema_version: int) -> dict[str, Any]:
@@ -65,8 +90,7 @@ def _envelope_message(result: MessageResult, *, schema_version: int) -> dict[str
         "schema_version": schema_version,
         "message": result.message,
     }
-    payload.update(result.extra)
-    return payload
+    return _merge_extra(payload, result.extra, reserved={"schema_version", "message"})
 
 
 def _build_json_envelope(
