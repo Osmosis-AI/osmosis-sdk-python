@@ -196,7 +196,9 @@ def test_whoami_json_with_env_token_verify_failure_emits_auth_required(
     monkeypatch.setenv("OSMOSIS_TOKEN", "env-token")
     monkeypatch.setattr(
         "osmosis_ai.platform.auth.verify_token",
-        lambda token: (_ for _ in ()).throw(LoginError("Authentication failed.")),
+        lambda token: (_ for _ in ()).throw(
+            LoginError("Authentication failed.", status_code=401)
+        ),
     )
     monkeypatch.setattr(
         "osmosis_ai.platform.auth.load_credentials",
@@ -212,6 +214,34 @@ def test_whoami_json_with_env_token_verify_failure_emits_auth_required(
     assert captured.out == ""
     envelope = json.loads(captured.err)
     assert envelope["error"]["code"] == "AUTH_REQUIRED"
+
+
+def test_whoami_json_with_env_token_malformed_response_emits_platform_error(
+    monkeypatch, capsys
+) -> None:
+    from osmosis_ai.platform.auth import LoginError
+
+    monkeypatch.setenv("OSMOSIS_TOKEN", "env-token")
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.verify_token",
+        lambda token: (_ for _ in ()).throw(
+            LoginError("Invalid response from platform")
+        ),
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.load_credentials",
+        lambda: pytest.fail(
+            "env token whoami should not fall back to stored credentials"
+        ),
+    )
+
+    exit_code = cli.main(["--json", "auth", "whoami"])
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    assert captured.out == ""
+    envelope = json.loads(captured.err)
+    assert envelope["error"]["code"] == "PLATFORM_ERROR"
 
 
 def test_whoami_json_when_logged_out_emits_auth_required(monkeypatch, capsys) -> None:
