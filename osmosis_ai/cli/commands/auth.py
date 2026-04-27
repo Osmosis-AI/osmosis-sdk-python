@@ -275,7 +275,7 @@ def _machine_login_with_token(*, token: str, force: bool) -> Any:
     from osmosis_ai.platform.auth.platform_client import revoke_cli_token
 
     output = get_output_context()
-    old_credentials = load_credentials()
+    old_credentials = load_credentials(include_env=False)
 
     with output.status("Verifying token..."):
         verified = verify_token(token)
@@ -379,7 +379,9 @@ def _rich_login(force: bool, token: str | None) -> Any:
         if env_token and token is None:
             return _machine_login_with_env_token(env_token=env_token)
 
-        old_credentials = load_credentials()
+        old_credentials = (
+            load_credentials(include_env=False) if token else load_credentials()
+        )
 
         # Two login paths: token or device flow
         if token:

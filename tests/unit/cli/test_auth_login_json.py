@@ -21,14 +21,21 @@ def fake_verify_result() -> VerifyResult:
     )
 
 
-def _credentials() -> Credentials:
+def _credentials(
+    *,
+    access_token: str = "t",
+    user_id: str = "u",
+    email: str = "x@example.com",
+    token_id: str = "tok",
+    include_env: bool = True,
+) -> Credentials:
     return Credentials(
-        access_token="t",
+        access_token=access_token,
         token_type="Bearer",
         expires_at=datetime.now(UTC) + timedelta(days=1),
         created_at=datetime.now(UTC),
-        user=UserInfo(id="u", email="x@example.com", name=None),
-        token_id="tok",
+        user=UserInfo(id=user_id, email=email, name=None),
+        token_id=token_id,
     )
 
 
@@ -36,7 +43,10 @@ def test_login_json_with_token_returns_operation_result(
     monkeypatch, capsys, fake_verify_result
 ) -> None:
     monkeypatch.delenv("OSMOSIS_TOKEN", raising=False)
-    monkeypatch.setattr("osmosis_ai.platform.auth.load_credentials", lambda: None)
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.load_credentials",
+        lambda **kwargs: None,
+    )
     monkeypatch.setattr(
         "osmosis_ai.platform.auth.verify_token", lambda token: fake_verify_result
     )
@@ -114,7 +124,10 @@ def test_login_json_with_platform_verify_error_is_platform_error(
     monkeypatch, capsys
 ) -> None:
     monkeypatch.delenv("OSMOSIS_TOKEN", raising=False)
-    monkeypatch.setattr("osmosis_ai.platform.auth.load_credentials", lambda: None)
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.load_credentials",
+        lambda **kwargs: None,
+    )
     monkeypatch.setattr(
         "osmosis_ai.platform.auth.verify_token",
         lambda token: (_ for _ in ()).throw(
@@ -140,7 +153,10 @@ def test_login_json_with_malformed_verify_response_is_platform_error(
     monkeypatch, capsys
 ) -> None:
     monkeypatch.delenv("OSMOSIS_TOKEN", raising=False)
-    monkeypatch.setattr("osmosis_ai.platform.auth.load_credentials", lambda: None)
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.load_credentials",
+        lambda **kwargs: None,
+    )
     monkeypatch.setattr(
         "osmosis_ai.platform.auth.verify_token",
         lambda token: (_ for _ in ()).throw(
@@ -194,6 +210,60 @@ def test_login_json_replaces_session_before_revoking_old_token(
     assert exit_code == 0
     assert json.loads(captured.out)["status"] == "success"
     assert calls[:2] == ["save_credentials", "revoke_cli_token"]
+
+
+def test_login_json_with_token_loads_stored_credentials_when_env_is_set(
+    monkeypatch, capsys, fake_verify_result
+) -> None:
+    monkeypatch.setenv("OSMOSIS_TOKEN", "env-token")
+    calls = []
+    old_credentials = _credentials(
+        access_token="stored-token",
+        user_id=fake_verify_result.user.id,
+        token_id="tok_old",
+    )
+
+    def load_credentials(*, include_env: bool = True):
+        calls.append(("load_credentials", include_env))
+        return old_credentials
+
+    monkeypatch.setattr("osmosis_ai.platform.auth.load_credentials", load_credentials)
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.verify_token", lambda token: fake_verify_result
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.credentials.save_credentials",
+        lambda creds: (
+            calls.append(("save_credentials", creds.access_token)) or "keyring"
+        ),
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.platform_client.revoke_cli_token",
+        lambda creds: (
+            calls.append(("revoke_cli_token", creds.access_token, creds.token_id))
+            or True
+        ),
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.local_config.clear_all_local_data",
+        lambda: calls.append(("clear_all_local_data",)),
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.cli.commands.auth._load_login_workspaces", lambda creds: ([], None)
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.cli.commands.auth._ensure_login_workspace_selection",
+        lambda workspaces: (None, False),
+    )
+
+    exit_code = cli.main(["--json", "auth", "login", "--token", "new-token"])
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert json.loads(captured.out)["status"] == "success"
+    assert ("load_credentials", False) in calls
+    assert ("revoke_cli_token", "stored-token", "tok_old") in calls
+    assert ("clear_all_local_data",) not in calls
 
 
 def test_login_json_with_env_token_is_verify_only(

@@ -167,7 +167,7 @@ class RubricCommand:
     ) -> list[RecordResult]:
         total = len(records) * number
         show_progress = (
-            get_output_context().format is OutputFormat.rich
+            get_output_context().format is not OutputFormat.json
             and total > 1
             and getattr(sys.stderr, "isatty", lambda: False)()
         )

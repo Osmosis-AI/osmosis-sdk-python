@@ -135,3 +135,40 @@ def test_eval_rubric_json_suppresses_tty_progress(
     assert captured.err == ""
     payload = json.loads(captured.out)
     assert payload["status"] == "success"
+
+
+def test_eval_rubric_plain_allows_tty_progress(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path,
+    capsys,
+) -> None:
+    data_path = tmp_path / "records.jsonl"
+    data_path.write_text(
+        json.dumps({"solution_str": "answer", "id": "row-1"}) + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(sys.stderr, "isatty", lambda: True)
+    monkeypatch.setattr(
+        "osmosis_ai.eval.rubric.cli.evaluate_rubric",
+        AsyncMock(return_value=RubricResult(score=1.0, explanation="ok", raw={})),
+    )
+
+    exit_code = cli.main(
+        [
+            "--plain",
+            "eval",
+            "rubric",
+            "-d",
+            str(data_path),
+            "--rubric",
+            "Score quality.",
+            "--model",
+            "openai/gpt-5.4",
+            "--number",
+            "2",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert captured.err != ""
