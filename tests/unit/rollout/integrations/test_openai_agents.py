@@ -57,17 +57,19 @@ class _FakeStreamingRunResult(_FakeRunResult):
         *,
         events: list[dict[str, Any]] | None = None,
         exception: BaseException | None = None,
+        run_loop_exception: BaseException | None = None,
         final_output: Any = None,
     ) -> None:
         super().__init__(messages, final_output=final_output)
         self._events = events or []
-        self.run_loop_exception = exception
+        self._stream_exception = exception
+        self.run_loop_exception = run_loop_exception
 
     async def stream_events(self):
         for event in self._events:
             yield event
-        if self.run_loop_exception is not None:
-            raise self.run_loop_exception
+        if self._stream_exception is not None:
+            raise self._stream_exception
 
 
 class _ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
@@ -375,6 +377,24 @@ class TestOpenAIAgentsRunner:
             ),
         ):
             with pytest.raises(RuntimeError, match="stream failed"):
+                await Runner.run(Agent(name="main"), "hi")
+
+        assert rollout_context.get_samples() == {}
+
+    async def test_does_not_record_sample_when_run_loop_exception_is_stored(
+        self, rollout_context
+    ):
+        from osmosis_ai.rollout.integrations.agents.openai_agents import Runner
+
+        with patch(
+            "osmosis_ai.rollout.integrations.agents.openai_agents.OpenAIRunner.run_streamed",
+            return_value=_FakeStreamingRunResult(
+                [{"role": "assistant", "content": "x"}],
+                events=[{"type": "done"}],
+                run_loop_exception=RuntimeError("run loop failed"),
+            ),
+        ):
+            with pytest.raises(RuntimeError, match="run loop failed"):
                 await Runner.run(Agent(name="main"), "hi")
 
         assert rollout_context.get_samples() == {}

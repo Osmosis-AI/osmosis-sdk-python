@@ -82,6 +82,10 @@ class Runner:
             async for _ in result.stream_events():
                 pass
 
+        run_loop_exception = result.run_loop_exception
+        if run_loop_exception is not None:
+            raise run_loop_exception
+
         _record_result(rollout_ctx, resolved_sample_id, result)
         return result
 
