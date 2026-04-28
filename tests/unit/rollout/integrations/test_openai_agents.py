@@ -12,7 +12,7 @@ from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
-from agents import function_tool
+from agents import Agent, RunConfig, function_tool
 from agents.extensions.models.litellm_model import LitellmModel
 
 from osmosis_ai.rollout.context import RolloutContext
@@ -33,23 +33,15 @@ def rollout_context():
         yield ctx
 
 
-class _FakeStreamingRunResult:
+class _FakeRunResult:
     def __init__(
         self,
         messages: list[dict[str, Any]],
         *,
-        events: list[dict[str, Any]] | None = None,
-        exception: BaseException | None = None,
         final_output: Any = None,
     ) -> None:
         self._messages = messages
-        self._events = events or []
-        self.run_loop_exception = exception
         self.final_output = final_output
-
-    async def stream_events(self):
-        for event in self._events:
-            yield event
 
     def to_input_list(self):
         return self._messages
@@ -58,11 +50,31 @@ class _FakeStreamingRunResult:
         return self.final_output
 
 
+class _FakeStreamingRunResult(_FakeRunResult):
+    def __init__(
+        self,
+        messages: list[dict[str, Any]],
+        *,
+        events: list[dict[str, Any]] | None = None,
+        exception: BaseException | None = None,
+        final_output: Any = None,
+    ) -> None:
+        super().__init__(messages, final_output=final_output)
+        self._events = events or []
+        self.run_loop_exception = exception
+
+    async def stream_events(self):
+        for event in self._events:
+            yield event
+        if self.run_loop_exception is not None:
+            raise self.run_loop_exception
+
+
 class _ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
     daemon_threads = True
 
 
-class _ChunkSSEServer:
+class _ChatCompletionsServer:
     def __init__(
         self,
         payloads: list[dict[str, Any]],
@@ -103,9 +115,16 @@ class _ChunkSSEServer:
                 )
                 idx = min(owner._request_count, len(owner._payloads) - 1)
                 owner._request_count += 1
-                data = _sse_body(owner._payloads[idx])
+                payload = owner._payloads[idx]
+                if body.get("stream"):
+                    data = _sse_body(payload)
+                    content_type = "text/event-stream"
+                else:
+                    data = json.dumps(payload).encode()
+                    content_type = "application/json"
+
                 self.send_response(200)
-                self.send_header("Content-Type", "text/event-stream")
+                self.send_header("Content-Type", content_type)
                 self.send_header("Cache-Control", "no-cache")
                 self.send_header("Content-Length", str(len(data)))
                 self.end_headers()
@@ -122,35 +141,41 @@ def _sse_body(payload: dict[str, Any]) -> bytes:
     return (f": ping\n\ndata: {json.dumps(payload)}\n\ndata: [DONE]\n\n").encode()
 
 
-def _chunk_payload(
+def _completion_payload(
     *,
     content: str | None = None,
     finish_reason: str | None = "stop",
-    role: str | None = None,
+    role: str | None = "assistant",
     tool_calls: list[dict[str, Any]] | None = None,
     usage: dict[str, Any] | None = None,
+    stream: bool = True,
 ) -> dict[str, Any]:
+    message: dict[str, Any] = {"role": role, "content": content or ""}
     delta: dict[str, Any] = {}
     if role is not None:
         delta["role"] = role
     if content is not None:
         delta["content"] = content
     if tool_calls is not None:
+        message["tool_calls"] = tool_calls
         delta["tool_calls"] = tool_calls
+
+    choice: dict[str, Any] = {
+        "index": 0,
+        "finish_reason": finish_reason,
+        "logprobs": None,
+    }
+    if stream:
+        choice["delta"] = delta
+    else:
+        choice["message"] = message
 
     return {
         "id": f"chatcmpl-{uuid.uuid4().hex[:24]}",
-        "object": "chat.completion.chunk",
+        "object": "chat.completion.chunk" if stream else "chat.completion",
         "created": int(time.time()),
         "model": "osmosis-rollout",
-        "choices": [
-            {
-                "index": 0,
-                "delta": delta,
-                "finish_reason": finish_reason,
-                "logprobs": None,
-            }
-        ],
+        "choices": [choice],
         "usage": usage,
     }
 
@@ -160,167 +185,129 @@ def add(a: int, b: int) -> str:
     return str(a + b)
 
 
-class TestOsmosisOpenAIAgent:
-    def test_requires_active_rollout_context(self):
-        from osmosis_ai.rollout.integrations.agents.openai_agents import (
-            OsmosisOpenAIAgent,
-        )
+class TestOpenAIAgentsRunner:
+    async def test_requires_active_rollout_context(self):
+        from osmosis_ai.rollout.integrations.agents.openai_agents import Runner
+
+        agent = Agent(name="main")
 
         with pytest.raises(RuntimeError, match="active RolloutContext"):
-            OsmosisOpenAIAgent(name="x")
+            await Runner.run(agent, "hi")
 
-    def test_builds_litellm_model_from_context(self, rollout_context):
-        from osmosis_ai.rollout.integrations.agents.openai_agents import (
-            OsmosisOpenAIAgent,
-        )
+    async def test_agent_can_be_constructed_outside_rollout_context(
+        self, rollout_context
+    ):
+        from osmosis_ai.rollout.integrations.agents.openai_agents import Runner
 
-        agent = OsmosisOpenAIAgent(name="main")
+        agent = Agent(name="main", instructions="do stuff")
+        messages = [{"role": "assistant", "content": "ok"}]
 
-        assert isinstance(agent.model, LitellmModel)
-        assert agent.model.model == "openai/osmosis-rollout"
-        assert agent.model.base_url == "http://controller:9"
-        assert agent.model.api_key == "test-key"
+        with patch(
+            "osmosis_ai.rollout.integrations.agents.openai_agents.OpenAIRunner.run_streamed",
+            return_value=_FakeStreamingRunResult(messages, final_output="ok"),
+        ):
+            result = await Runner.run(agent, "hi")
 
-    def test_rejects_instructions_argument(self, rollout_context):
-        from osmosis_ai.rollout.integrations.agents.openai_agents import (
-            OsmosisOpenAIAgent,
-        )
+        assert result.final_output == "ok"
+        assert rollout_context.get_samples()["main"].messages == messages
 
-        with pytest.raises(TypeError, match="does not accept instructions"):
-            OsmosisOpenAIAgent(name="main", instructions="do stuff")
+    async def test_builds_litellm_model_from_context(self, rollout_context):
+        from osmosis_ai.rollout.integrations.agents.openai_agents import Runner
 
-    def test_rejects_prompt_argument(self, rollout_context):
-        from osmosis_ai.rollout.integrations.agents.openai_agents import (
-            OsmosisOpenAIAgent,
-        )
+        captured = {}
 
-        with pytest.raises(TypeError, match="does not accept prompt"):
-            OsmosisOpenAIAgent(name="main", prompt={"id": "rollout-prompt"})
+        def fake_run(agent, input, *, run_config, **kwargs):
+            captured["run_config"] = run_config
+            return _FakeStreamingRunResult([{"role": "assistant", "content": "ok"}])
 
-    def test_rejects_positional_instructions_argument(self, rollout_context):
-        from osmosis_ai.rollout.integrations.agents.openai_agents import (
-            OsmosisOpenAIAgent,
-        )
+        with patch(
+            "osmosis_ai.rollout.integrations.agents.openai_agents.OpenAIRunner.run_streamed",
+            side_effect=fake_run,
+        ):
+            await Runner.run(Agent(name="main"), "hi")
 
-        with pytest.raises(TypeError, match="does not accept instructions"):
-            OsmosisOpenAIAgent("main", None, [], [], {}, "do stuff")
+        model = captured["run_config"].model
+        assert isinstance(model, LitellmModel)
+        assert model.model == "openai/osmosis-rollout"
+        assert model.base_url == "http://controller:9"
+        assert model.api_key == "test-key"
 
-    def test_rejects_positional_prompt_argument(self, rollout_context):
-        from osmosis_ai.rollout.integrations.agents.openai_agents import (
-            OsmosisOpenAIAgent,
-        )
+    async def test_agent_model_is_overridden_by_rollout_model(self, rollout_context):
+        from osmosis_ai.rollout.integrations.agents.openai_agents import Runner
 
-        with pytest.raises(TypeError, match="does not accept prompt"):
-            OsmosisOpenAIAgent("main", None, [], [], {}, None, {"id": "rollout-prompt"})
+        captured = {}
 
-    def test_propagates_none_api_key_when_missing(self):
-        from osmosis_ai.rollout.integrations.agents.openai_agents import (
-            OsmosisOpenAIAgent,
-        )
+        def fake_run(agent, input, *, run_config, **kwargs):
+            captured["agent"] = agent
+            captured["run_config"] = run_config
+            return _FakeStreamingRunResult([{"role": "assistant", "content": "ok"}])
 
-        ctx = RolloutContext(
-            chat_completions_url="http://controller:9",
-            api_key=None,
-            rollout_id="r1",
-        )
+        with patch(
+            "osmosis_ai.rollout.integrations.agents.openai_agents.OpenAIRunner.run_streamed",
+            side_effect=fake_run,
+        ):
+            await Runner.run(Agent(name="main", model="gpt-4o"), "hi")
 
-        with ctx:
-            agent = OsmosisOpenAIAgent(name="main")
+        assert captured["agent"].model == "gpt-4o"
+        assert isinstance(captured["run_config"].model, LitellmModel)
 
-        assert isinstance(agent.model, LitellmModel)
-        assert agent.model.api_key is None
-
-    def test_user_supplied_model_is_respected(self, rollout_context):
+    async def test_user_supplied_run_config_model_is_respected(self, rollout_context):
         from agents.models.interface import Model
 
-        from osmosis_ai.rollout.integrations.agents.openai_agents import (
-            OsmosisOpenAIAgent,
-        )
+        from osmosis_ai.rollout.integrations.agents.openai_agents import Runner
 
         custom_model = MagicMock(spec=Model, name="UserModel")
-        agent = OsmosisOpenAIAgent(name="main", model=custom_model)
+        captured = {}
 
-        assert agent.model is custom_model
+        def fake_run(agent, input, *, run_config, **kwargs):
+            captured["run_config"] = run_config
+            return _FakeStreamingRunResult([{"role": "assistant", "content": "ok"}])
 
-    def test_user_supplied_model_settings_are_preserved_verbatim(self, rollout_context):
-        """Mirror Strands: no automatic extra_body injection — what the
-        user passes is what hits the wire."""
-        from agents.model_settings import ModelSettings
+        with patch(
+            "osmosis_ai.rollout.integrations.agents.openai_agents.OpenAIRunner.run_streamed",
+            side_effect=fake_run,
+        ):
+            await Runner.run(
+                Agent(name="main"),
+                "hi",
+                run_config=RunConfig(model=custom_model),
+            )
 
-        from osmosis_ai.rollout.integrations.agents.openai_agents import (
-            OsmosisOpenAIAgent,
-        )
+        assert captured["run_config"].model is custom_model
 
-        agent = OsmosisOpenAIAgent(
-            name="main",
-            model_settings=ModelSettings(extra_body={"existing": "value"}),
-        )
-
-        assert agent.model_settings.extra_body == {"existing": "value"}
-
-
-class TestOsmosisOpenAIAgentRun:
     async def test_injects_headers_via_context_var(self, rollout_context):
         from agents.models.chatcmpl_helpers import HEADERS_OVERRIDE
 
-        from osmosis_ai.rollout.integrations.agents.openai_agents import (
-            OsmosisOpenAIAgent,
-        )
+        from osmosis_ai.rollout.integrations.agents.openai_agents import Runner
 
         seen_headers = {}
 
-        def fake_run_streamed(agent, input, *, run_config, **kwargs):
+        def fake_run(agent, input, *, run_config, **kwargs):
             seen_headers.update(HEADERS_OVERRIDE.get() or {})
-            return _FakeStreamingRunResult(
-                [{"role": "assistant", "content": "done"}],
-                events=[{"type": "response.created"}],
-                final_output="done",
-            )
+            return _FakeStreamingRunResult([{"role": "assistant", "content": "done"}])
 
         with patch(
-            "osmosis_ai.rollout.integrations.agents.openai_agents.Runner.run_streamed",
-            side_effect=fake_run_streamed,
+            "osmosis_ai.rollout.integrations.agents.openai_agents.OpenAIRunner.run_streamed",
+            side_effect=fake_run,
         ):
-            agent = OsmosisOpenAIAgent(name="main")
-            result = await agent.run("hi")
+            await Runner.run(Agent(name="main"), "hi")
 
-        assert result.final_output == "done"
         assert seen_headers["x-rollout-id"] == "rollout-xyz"
         assert seen_headers["x-sample-id"] == "main"
 
-    async def test_records_sample_after_run(self, rollout_context):
-        from osmosis_ai.rollout.integrations.agents.openai_agents import (
-            OsmosisOpenAIAgent,
-        )
-
-        messages = [{"role": "assistant", "content": "42"}]
-
-        with patch(
-            "osmosis_ai.rollout.integrations.agents.openai_agents.Runner.run_streamed",
-            return_value=_FakeStreamingRunResult(messages),
-        ):
-            agent = OsmosisOpenAIAgent(name="main")
-            await agent.run("hi")
-
-        samples = rollout_context.get_samples()
-        assert "main" in samples
-        assert samples["main"].messages == messages
-
     async def test_resolves_collision_with_suffix_and_warns(self, rollout_context):
-        from osmosis_ai.rollout.integrations.agents.openai_agents import (
-            OsmosisOpenAIAgent,
-        )
+        from osmosis_ai.rollout.integrations.agents.openai_agents import Runner
 
         with patch(
-            "osmosis_ai.rollout.integrations.agents.openai_agents.Runner.run_streamed",
+            "osmosis_ai.rollout.integrations.agents.openai_agents.OpenAIRunner.run_streamed",
             return_value=_FakeStreamingRunResult(
                 [{"role": "assistant", "content": "ok"}]
             ),
         ):
-            agent = OsmosisOpenAIAgent(name="main")
-            await agent.run("turn 1")
+            agent = Agent(name="main")
+            await Runner.run(agent, "turn 1")
             with pytest.warns(RuntimeWarning, match="already used"):
-                await agent.run("turn 2")
+                await Runner.run(agent, "turn 2")
 
         samples = rollout_context.get_samples()
         assert "main" in samples
@@ -329,110 +316,78 @@ class TestOsmosisOpenAIAgentRun:
         assert other_ids[0].startswith("main-")
 
     async def test_explicit_sample_id_is_respected(self, rollout_context):
-        from osmosis_ai.rollout.integrations.agents.openai_agents import (
-            OsmosisOpenAIAgent,
-        )
+        from osmosis_ai.rollout.integrations.agents.openai_agents import Runner
 
         with patch(
-            "osmosis_ai.rollout.integrations.agents.openai_agents.Runner.run_streamed",
+            "osmosis_ai.rollout.integrations.agents.openai_agents.OpenAIRunner.run_streamed",
             return_value=_FakeStreamingRunResult(
                 [{"role": "assistant", "content": "ok"}]
             ),
         ):
-            agent = OsmosisOpenAIAgent(name="main")
-            await agent.run("hi", sample_id="explicit-id")
+            await Runner.run(Agent(name="main"), "hi", sample_id="explicit-id")
 
         samples = rollout_context.get_samples()
         assert "explicit-id" in samples
         assert "main" not in samples
 
-    async def test_raises_outside_rollout_context(self, rollout_context):
-        from osmosis_ai.rollout.context import rollout_contextvar
-        from osmosis_ai.rollout.integrations.agents.openai_agents import (
-            OsmosisOpenAIAgent,
-        )
-
-        agent = OsmosisOpenAIAgent(name="main")
-
-        token = rollout_contextvar.set(None)
-        try:
-            with pytest.raises(RuntimeError, match="requires an active RolloutContext"):
-                await agent.run("hi")
-        finally:
-            rollout_contextvar.reset(token)
-
     async def test_forces_tracing_disabled(self, rollout_context):
-        from osmosis_ai.rollout.integrations.agents.openai_agents import (
-            OsmosisOpenAIAgent,
-        )
+        from osmosis_ai.rollout.integrations.agents.openai_agents import Runner
 
         captured = {}
 
-        def fake_run_streamed(agent, input, *, run_config, **kwargs):
+        def fake_run(agent, input, *, run_config, **kwargs):
             captured["run_config"] = run_config
             return _FakeStreamingRunResult([{"role": "assistant", "content": "x"}])
 
         with patch(
-            "osmosis_ai.rollout.integrations.agents.openai_agents.Runner.run_streamed",
-            side_effect=fake_run_streamed,
+            "osmosis_ai.rollout.integrations.agents.openai_agents.OpenAIRunner.run_streamed",
+            side_effect=fake_run,
         ):
-            agent = OsmosisOpenAIAgent(name="main")
-            await agent.run("hi")
+            await Runner.run(Agent(name="main"), "hi")
 
         assert captured["run_config"].tracing_disabled is True
 
     async def test_forwards_runner_kwargs(self, rollout_context):
-        from osmosis_ai.rollout.integrations.agents.openai_agents import (
-            OsmosisOpenAIAgent,
-        )
+        from osmosis_ai.rollout.integrations.agents.openai_agents import Runner
 
         captured = {}
 
-        def fake_run_streamed(agent, input, *, run_config, **kwargs):
+        def fake_run(agent, input, *, run_config, **kwargs):
             captured["kwargs"] = kwargs
             return _FakeStreamingRunResult([{"role": "assistant", "content": "x"}])
 
         with patch(
-            "osmosis_ai.rollout.integrations.agents.openai_agents.Runner.run_streamed",
-            side_effect=fake_run_streamed,
+            "osmosis_ai.rollout.integrations.agents.openai_agents.OpenAIRunner.run_streamed",
+            side_effect=fake_run,
         ):
-            agent = OsmosisOpenAIAgent(name="main")
-            await agent.run("hi", max_turns=8)
+            await Runner.run(Agent(name="main"), "hi", max_turns=8)
 
         assert captured["kwargs"]["max_turns"] == 8
 
-    async def test_raises_background_stream_exception(self, rollout_context):
-        from osmosis_ai.rollout.integrations.agents.openai_agents import (
-            OsmosisOpenAIAgent,
-        )
+    async def test_does_not_record_sample_when_stream_raises(self, rollout_context):
+        from osmosis_ai.rollout.integrations.agents.openai_agents import Runner
 
         with patch(
-            "osmosis_ai.rollout.integrations.agents.openai_agents.Runner.run_streamed",
+            "osmosis_ai.rollout.integrations.agents.openai_agents.OpenAIRunner.run_streamed",
             return_value=_FakeStreamingRunResult(
                 [{"role": "assistant", "content": "x"}],
                 exception=RuntimeError("stream failed"),
             ),
         ):
-            agent = OsmosisOpenAIAgent(name="main")
             with pytest.raises(RuntimeError, match="stream failed"):
-                await agent.run("hi")
+                await Runner.run(Agent(name="main"), "hi")
 
         assert rollout_context.get_samples() == {}
 
-
-class TestOsmosisOpenAIAgentStreamingIntegration:
-    async def test_run_streamed_consumes_chunk_sse_response(self):
-        from osmosis_ai.rollout.integrations.agents.openai_agents import (
-            OsmosisOpenAIAgent,
-        )
+    async def test_run_consumes_chunk_sse_response(self):
+        from osmosis_ai.rollout.integrations.agents.openai_agents import Runner
 
         seen_requests: list[dict[str, Any]] = []
-        server = _ChunkSSEServer(
+        server = _ChatCompletionsServer(
             [
-                _chunk_payload(
+                _completion_payload(
                     content="hi",
                     finish_reason="stop",
-                    role="assistant",
                     usage={
                         "prompt_tokens": 1,
                         "completion_tokens": 1,
@@ -450,13 +405,11 @@ class TestOsmosisOpenAIAgentStreamingIntegration:
 
         try:
             with ctx:
-                agent = OsmosisOpenAIAgent(name="main")
-                result = await agent.run("hello")
+                result = await Runner.run(Agent(name="main"), "hello")
 
             samples = ctx.get_samples()
             body = seen_requests[0]["body"]
             assert body["stream"] is True
-            # Match the Strands wire contract: no extra_body / multi_turn_mode.
             assert "multi_turn_mode" not in body
             assert seen_requests[0]["headers"]["x-rollout-id"] == "rollout-xyz"
             assert seen_requests[0]["headers"]["x-sample-id"] == "main"
@@ -465,17 +418,56 @@ class TestOsmosisOpenAIAgentStreamingIntegration:
         finally:
             server.close()
 
-    async def test_run_streamed_handles_tool_call_loop_over_sse(self):
-        from osmosis_ai.rollout.integrations.agents.openai_agents import (
-            OsmosisOpenAIAgent,
-        )
+    async def test_run_preserves_system_and_user_prompt_roles(self):
+        from osmosis_ai.rollout.integrations.agents.openai_agents import Runner
 
         seen_requests: list[dict[str, Any]] = []
-        server = _ChunkSSEServer(
+        server = _ChatCompletionsServer(
             [
-                _chunk_payload(
+                _completion_payload(
+                    content="hi",
+                    finish_reason="stop",
+                    usage={
+                        "prompt_tokens": 3,
+                        "completion_tokens": 1,
+                        "total_tokens": 4,
+                    },
+                )
+            ],
+            seen_requests,
+        )
+        ctx = RolloutContext(
+            chat_completions_url=server.url,
+            api_key="test-key",
+            rollout_id="rollout-xyz",
+        )
+        prompt = [
+            {"role": "system", "content": "Follow the training rubric."},
+            {"role": "user", "content": "Say hi."},
+        ]
+
+        try:
+            with ctx:
+                await Runner.run(Agent(name="main"), prompt)
+
+            messages = seen_requests[0]["body"]["messages"]
+            assert messages[0] == {
+                "role": "system",
+                "content": "Follow the training rubric.",
+            }
+            assert messages[1] == {"role": "user", "content": "Say hi."}
+            assert seen_requests[0]["body"]["stream"] is True
+        finally:
+            server.close()
+
+    async def test_run_handles_tool_call_loop_over_sse(self):
+        from osmosis_ai.rollout.integrations.agents.openai_agents import Runner
+
+        seen_requests: list[dict[str, Any]] = []
+        server = _ChatCompletionsServer(
+            [
+                _completion_payload(
                     finish_reason="tool_calls",
-                    role="assistant",
                     tool_calls=[
                         {
                             "index": 0,
@@ -493,10 +485,9 @@ class TestOsmosisOpenAIAgentStreamingIntegration:
                         "total_tokens": 3,
                     },
                 ),
-                _chunk_payload(
+                _completion_payload(
                     content="The answer is 3",
                     finish_reason="stop",
-                    role="assistant",
                     usage={
                         "prompt_tokens": 4,
                         "completion_tokens": 4,
@@ -514,8 +505,7 @@ class TestOsmosisOpenAIAgentStreamingIntegration:
 
         try:
             with ctx:
-                agent = OsmosisOpenAIAgent(name="main", tools=[add])
-                result = await agent.run("hello")
+                result = await Runner.run(Agent(name="main", tools=[add]), "hello")
 
             messages = result.to_input_list()
             assert len(seen_requests) == 2

@@ -1,9 +1,11 @@
 try:
     from osmosis_ai.rollout.integrations.agents.openai_agents import (
-        OsmosisOpenAIAgent,  # noqa: F401
+        Agent,  # noqa: F401
+        RunConfig,  # noqa: F401
+        Runner,  # noqa: F401
     )
 
-    _openai_exports = ["OsmosisOpenAIAgent"]
+    _openai_exports = ["Agent", "RunConfig", "Runner"]
 except ImportError:
     _openai_exports = []
 

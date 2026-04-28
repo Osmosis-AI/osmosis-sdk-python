@@ -28,14 +28,7 @@ from osmosis_ai.rollout.types import (
     RolloutStatus,
 )
 
-try:
-    from osmosis_ai.rollout.integrations.agents.openai_agents import (
-        OsmosisOpenAIAgent,  # noqa: F401
-    )
-
-    _openai_exports = ["OsmosisOpenAIAgent"]
-except ImportError:
-    _openai_exports = []
+_openai_exports: list[str] = []
 
 try:
     from osmosis_ai.rollout.integrations.agents.strands import (

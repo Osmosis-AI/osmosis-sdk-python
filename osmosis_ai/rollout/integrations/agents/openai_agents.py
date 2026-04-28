@@ -1,21 +1,17 @@
 """OpenAI Agents SDK integration for Osmosis rollouts.
 
-Construct ``OsmosisOpenAIAgent`` inside ``AgentWorkflow.run()`` and call
-``await agent.run(ctx.prompt)``. The default wiring routes every chat
-completion through the official ``openai-agents[litellm]`` adapter so
-the wire protocol matches the Strands integration exactly — both end up
-calling ``litellm.acompletion`` with the controller's SSE endpoint plus
-``x-rollout-id`` / ``x-sample-id`` headers.
+Use the same ``Agent`` + ``Runner`` pattern as ``openai-agents``. Importing
+from this module keeps user code close to the upstream SDK while routing model
+calls through the rollout controller:
 
 Example::
 
+    from osmosis_ai.rollout.integrations.agents.openai_agents import Agent, Runner
+
     class MyWorkflow(AgentWorkflow):
         async def run(self, ctx: AgentWorkflowContext) -> None:
-            agent = OsmosisOpenAIAgent(
-                name="multiply",
-                tools=[multiply_tool],
-            )
-            await agent.run(ctx.prompt)
+            agent = Agent(name="multiply", tools=[multiply_tool])
+            await Runner.run(agent, ctx.prompt, max_turns=8)
 """
 
 from __future__ import annotations
@@ -26,132 +22,67 @@ import warnings
 from contextlib import contextmanager
 from typing import Any, cast
 
-from agents import Agent, RunConfig, Runner
+from agents import Agent, RunConfig
+from agents import Runner as OpenAIRunner
 from agents.extensions.models.litellm_model import LitellmModel
 from agents.models.chatcmpl_helpers import HEADERS_OVERRIDE
 
-from osmosis_ai.rollout.context import get_rollout_context
-
-# openai-agents' Agent.__init__ has ``instructions`` and ``prompt`` as
-# positional parameters 5 and 6. Rollout mode routes prompt content
-# exclusively via ``ctx.prompt``, so we reject both — including the
-# positional form — to avoid silent drift between controller and agent.
-_FORBIDDEN_PROMPT_ARG_POSITIONS: dict[int, str] = {
-    5: "instructions",
-    6: "prompt",
-}
+from osmosis_ai.rollout.context import RolloutContext, get_rollout_context
 
 
-def _raise_forbidden_prompt_arg(name: str) -> None:
-    raise TypeError(
-        f"OsmosisOpenAIAgent does not accept {name} in rollout mode. "
-        "Prompt must come from ctx.prompt / controller initial_messages."
-    )
+class Runner:
+    """Osmosis-compatible wrapper around ``agents.Runner``.
 
-
-def _validate_prompt_sources(args: tuple[Any, ...], kwargs: dict[str, Any]) -> None:
-    for position, name in _FORBIDDEN_PROMPT_ARG_POSITIONS.items():
-        if len(args) > position and args[position] is not None:
-            _raise_forbidden_prompt_arg(name)
-
-    for name in ("instructions", "prompt"):
-        if kwargs.get(name) is not None:
-            _raise_forbidden_prompt_arg(name)
-
-
-class OsmosisOpenAIAgent(Agent):
-    """Drop-in replacement for ``agents.Agent`` that wires up the
-    rollout-owned Chat Completions endpoint.
-
-    Reads ``RolloutContext`` from the active contextvar at construction
-    time, so it MUST be constructed inside ``AgentWorkflow.run()``.
-    Prompt semantics stay aligned with Traingate / ``OsmosisStrandsAgent``:
-    rollout input comes from ``ctx.prompt`` only, so ``instructions`` and
-    ``prompt`` are forbidden. If a ``model`` is passed explicitly, it is
-    respected verbatim — advanced users can opt out of the default
-    wiring for custom setups.
-
-    Use ``await agent.run(ctx.prompt)`` to execute; it injects per-sample
-    headers, forces tracing off, and records the trajectory as a
-    ``RolloutSample``.
+    The public call shape mirrors OpenAI Agents: define a normal
+    ``agents.Agent`` and execute it with ``await Runner.run(...)``. The wrapper
+    supplies the rollout-owned LiteLLM model, per-sample controller headers,
+    tracing defaults, and sample recording. It always uses the upstream
+    streaming runner because the rollout controller's supported path is SSE
+    Chat Completions.
     """
 
-    def __init__(
-        self,
-        *args: Any,
-        model: Any = None,
-        **kwargs: Any,
-    ) -> None:
-        _validate_prompt_sources(args, kwargs)
-        if model is None:
-            ctx = get_rollout_context()
-            if ctx is None:
-                raise RuntimeError(
-                    "OsmosisOpenAIAgent must be constructed inside an active "
-                    "RolloutContext. Construct the agent inside "
-                    "AgentWorkflow.run()."
-                )
-            # Mirror OsmosisRolloutModel.for_sample() in strands.py: hand the
-            # controller URL / api_key straight to LiteLLM with no extra
-            # request-shaping (e.g. no extra_body overrides).
-            model = LitellmModel(
-                model="openai/osmosis-rollout",
-                base_url=ctx.chat_completions_url,
-                api_key=ctx.api_key,
-            )
-        super().__init__(*args, model=model, **kwargs)
-
+    @classmethod
     async def run(
-        self,
+        cls,
+        starting_agent: Agent[Any],
         input: Any,
         *,
-        sample_id: str | None = None,
+        context: Any | None = None,
+        max_turns: int = 10,
+        hooks: Any | None = None,
         run_config: RunConfig | None = None,
-        **kwargs: Any,
+        error_handlers: Any | None = None,
+        previous_response_id: str | None = None,
+        auto_previous_response_id: bool = False,
+        conversation_id: str | None = None,
+        session: Any | None = None,
+        sample_id: str | None = None,
     ) -> Any:
-        """Execute this agent as a single rollout sample.
+        """Run an OpenAI agent as one rollout sample over streaming SSE."""
+        rollout_ctx = _require_rollout_context("Runner.run")
+        resolved_sample_id = _resolve_sample_id(
+            rollout_ctx, starting_agent, sample_id=sample_id
+        )
+        rc = _rollout_run_config(rollout_ctx, run_config)
 
-        Injects ``x-rollout-id`` / ``x-sample-id`` into every outbound
-        ChatCompletions call via ``HEADERS_OVERRIDE`` (handoff-safe
-        because it is a ContextVar), forces ``RunConfig.tracing_disabled``
-        to True so rollout usage doesn't leak into the user's other
-        openai-agents usage, and records the trajectory via
-        ``ctx.record_sample`` after ``Runner.run`` returns.
-
-        ``sample_id`` defaults to ``self.name``; collisions in the same
-        rollout auto-suffix with a short uuid and emit a
-        ``RuntimeWarning``. Pass ``sample_id=`` to disambiguate
-        multi-round use.
-        """
-        ctx = get_rollout_context()
-        if ctx is None:
-            raise RuntimeError(
-                "OsmosisOpenAIAgent.run requires an active RolloutContext. "
-                "Call it from inside AgentWorkflow.run()."
+        with _headers_scope(_rollout_headers(rollout_ctx, resolved_sample_id)):
+            result = OpenAIRunner.run_streamed(
+                starting_agent,
+                input,
+                context=context,
+                max_turns=max_turns,
+                hooks=hooks,
+                run_config=rc,
+                error_handlers=error_handlers,
+                previous_response_id=previous_response_id,
+                auto_previous_response_id=auto_previous_response_id,
+                conversation_id=conversation_id,
+                session=session,
             )
-
-        resolved_sample_id = sample_id or _resolve_sample_id(ctx, self)
-
-        rc = run_config or RunConfig()
-        if rc.tracing_disabled is False:
-            rc = dataclasses.replace(rc, tracing_disabled=True)
-
-        with _headers_scope(
-            {
-                "x-rollout-id": ctx.rollout_id,
-                "x-sample-id": resolved_sample_id,
-            }
-        ):
-            result = Runner.run_streamed(self, input, run_config=rc, **kwargs)
             async for _ in result.stream_events():
                 pass
 
-        if result.run_loop_exception is not None:
-            raise result.run_loop_exception
-
-        ctx.record_sample(
-            resolved_sample_id, cast(list[dict[str, Any]], result.to_input_list())
-        )
+        _record_result(rollout_ctx, resolved_sample_id, result)
         return result
 
 
@@ -159,8 +90,8 @@ class OsmosisOpenAIAgent(Agent):
 def _headers_scope(headers: dict[str, str]):
     """Set HEADERS_OVERRIDE for the duration of a block.
 
-    Merges with any outer HEADERS_OVERRIDE so nested ``agent.run`` calls
-    (unusual but not forbidden) compose headers rather than clobbering.
+    Merges with any outer HEADERS_OVERRIDE so nested runner calls compose
+    headers rather than clobbering.
     """
     token = HEADERS_OVERRIDE.set({**(HEADERS_OVERRIDE.get() or {}), **headers})
     try:
@@ -169,7 +100,48 @@ def _headers_scope(headers: dict[str, str]):
         HEADERS_OVERRIDE.reset(token)
 
 
-def _resolve_sample_id(ctx: Any, agent: Any) -> str:
+def _require_rollout_context(api_name: str) -> RolloutContext:
+    ctx = get_rollout_context()
+    if ctx is None:
+        raise RuntimeError(
+            f"{api_name} requires an active RolloutContext. "
+            "Call it from inside AgentWorkflow.run()."
+        )
+    return ctx
+
+
+def _rollout_run_config(ctx: RolloutContext, run_config: RunConfig | None) -> RunConfig:
+    rc = run_config or RunConfig()
+    updates: dict[str, Any] = {}
+    if rc.model is None:
+        # Match the Strands integration: hand controller URL/API key to LiteLLM
+        # and keep request shaping in the upstream OpenAI Agents adapter.
+        updates["model"] = LitellmModel(
+            model="openai/osmosis-rollout",
+            base_url=ctx.chat_completions_url,
+            api_key=ctx.api_key,
+        )
+    if rc.tracing_disabled is False:
+        updates["tracing_disabled"] = True
+    return dataclasses.replace(rc, **updates) if updates else rc
+
+
+def _rollout_headers(ctx: RolloutContext, sample_id: str) -> dict[str, str]:
+    return {
+        "x-rollout-id": ctx.rollout_id,
+        "x-sample-id": sample_id,
+    }
+
+
+def _record_result(ctx: RolloutContext, sample_id: str, result: Any) -> None:
+    ctx.record_sample(sample_id, cast(list[dict[str, Any]], result.to_input_list()))
+
+
+def _resolve_sample_id(
+    ctx: RolloutContext, agent: Any, *, sample_id: str | None = None
+) -> str:
+    if sample_id is not None:
+        return sample_id
     base = getattr(agent, "name", None) or "sample"
     if base not in ctx.recorded_samples and base not in ctx.registered_agents:
         return base
@@ -182,3 +154,6 @@ def _resolve_sample_id(ctx: Any, agent: Any) -> str:
         stacklevel=3,
     )
     return f"{base}-{suffix}"
+
+
+__all__ = ["Agent", "RunConfig", "Runner"]
