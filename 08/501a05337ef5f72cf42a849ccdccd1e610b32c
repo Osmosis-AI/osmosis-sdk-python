@@ -1,0 +1,23 @@
+tests/unit/cli/test_whoami.py
+  607c270601d19654 199-201,219-244
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "08501a05337ef5f72cf42a849ccdccd1e610b32c",
+  "prompts": {
+    "607c270601d19654": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "fae047a0-b6c2-48ac-90e0-df57a00f9110",
+        "model": "gpt-5.5-extra-high"
+      },
+      "human_author": "JoyboyBrian",
+      "messages": [],
+      "total_additions": 31,
+      "total_deletions": 1,
+      "accepted_lines": 37,
+      "overriden_lines": 0
+    }
+  }
+}
