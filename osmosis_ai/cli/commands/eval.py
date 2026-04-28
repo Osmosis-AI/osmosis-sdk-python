@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 import typer
 
@@ -37,12 +37,13 @@ def eval_run(
     batch_size: int | None = typer.Option(
         None, "--batch-size", help="Override concurrent batch size."
     ),
-) -> None:
+) -> Any:
     """Evaluate agent against dataset using TOML config."""
+    from osmosis_ai.cli.output import CommandResult
     from osmosis_ai.eval.evaluation.cli import EvalCommand
 
     cmd = EvalCommand()
-    rc = cmd.run(
+    result = cmd.run(
         config_path=config_path,
         fresh=fresh,
         retry_failed=retry_failed,
@@ -54,8 +55,11 @@ def eval_run(
         log_samples=log_samples,
         batch_size_override=batch_size,
     )
-    if rc:
-        raise typer.Exit(rc)
+    if isinstance(result, CommandResult):
+        return result
+    if result:
+        raise typer.Exit(result)
+    return None
 
 
 @app.command("rubric")
@@ -86,11 +90,12 @@ def eval_rubric(
     ),
     score_min: float = typer.Option(0.0, "--score-min", help="Minimum score."),
     score_max: float = typer.Option(1.0, "--score-max", help="Maximum score."),
-) -> None:
+) -> Any:
     """Evaluate conversations against a rubric using LLM-as-judge."""
+    from osmosis_ai.cli.output import CommandResult
     from osmosis_ai.eval.rubric.cli import RubricCommand
 
-    rc = RubricCommand().run(
+    result = RubricCommand().run(
         data=data,
         rubric=rubric,
         model=model,
@@ -101,18 +106,25 @@ def eval_rubric(
         score_min=score_min,
         score_max=score_max,
     )
-    if rc:
-        raise typer.Exit(rc)
+    if isinstance(result, CommandResult):
+        return result
+    if result:
+        raise typer.Exit(result)
+    return None
 
 
 @cache_app.command("dir")
-def eval_cache_dir() -> None:
+def eval_cache_dir() -> Any:
     """Print cache root directory path."""
+    from osmosis_ai.cli.output import CommandResult
     from osmosis_ai.eval.evaluation.cli import EvalCommand
 
-    rc = EvalCommand()._run_cache_dir()
-    if rc:
-        raise typer.Exit(rc)
+    result = EvalCommand()._run_cache_dir()
+    if isinstance(result, CommandResult):
+        return result
+    if result:
+        raise typer.Exit(result)
+    return None
 
 
 @cache_app.command("ls")
@@ -126,17 +138,21 @@ def eval_cache_ls(
     cache_status: Literal["in_progress", "completed"] | None = typer.Option(
         None, "--status", help="Filter by status (in_progress, completed)."
     ),
-) -> None:
+) -> Any:
     """List cached evaluations."""
+    from osmosis_ai.cli.output import CommandResult
     from osmosis_ai.eval.evaluation.cli import EvalCommand
 
-    rc = EvalCommand()._run_cache_ls(
+    result = EvalCommand()._run_cache_ls(
         cache_model=cache_model,
         cache_dataset=cache_dataset,
         cache_status=cache_status,
     )
-    if rc:
-        raise typer.Exit(rc)
+    if isinstance(result, CommandResult):
+        return result
+    if result:
+        raise typer.Exit(result)
+    return None
 
 
 @cache_app.command("rm")
@@ -155,11 +171,12 @@ def eval_cache_rm(
         None, "--status", help="Filter by status (in_progress, completed)."
     ),
     yes: bool = typer.Option(False, "-y", "--yes", help="Skip confirmation prompt."),
-) -> None:
+) -> Any:
     """Remove cached evaluations."""
+    from osmosis_ai.cli.output import CommandResult
     from osmosis_ai.eval.evaluation.cli import EvalCommand
 
-    rc = EvalCommand()._run_cache_rm(
+    result = EvalCommand()._run_cache_rm(
         task_id=task_id,
         rm_all=rm_all,
         cache_model=cache_model,
@@ -167,5 +184,8 @@ def eval_cache_rm(
         cache_status=cache_status,
         yes=yes,
     )
-    if rc:
-        raise typer.Exit(rc)
+    if isinstance(result, CommandResult):
+        return result
+    if result:
+        raise typer.Exit(result)
+    return None

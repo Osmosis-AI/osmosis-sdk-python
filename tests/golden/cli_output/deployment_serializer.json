@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "keys": [
+    "id",
+    "checkpoint_name",
+    "status",
+    "base_model",
+    "checkpoint_step",
+    "training_run_id",
+    "training_run_name",
+    "creator_name",
+    "created_at"
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "keys": [
+    "id",
+    "name",
+    "is_active",
+    "repo_full_name",
+    "last_synced_commit_sha",
+    "created_at"
+  ]
+}

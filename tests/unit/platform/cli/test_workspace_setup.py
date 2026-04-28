@@ -528,7 +528,7 @@ class TestWriteScaffold:
 
         content = (target / "README.md").read_text(encoding="utf-8")
         assert "my-awesome-ws" in content
-        assert "osmosis workspace validate" in content
+        assert "osmosis --json workspace validate" in content
         assert ".osmosis/research/program.md" in content
 
     def test_is_idempotent(self, tmp_path: Path) -> None:

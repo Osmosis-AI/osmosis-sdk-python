@@ -4,12 +4,25 @@ from __future__ import annotations
 
 import time
 from collections.abc import Iterable
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
+from urllib.parse import unquote, urlparse
 
 from osmosis_ai.cli.console import console
 from osmosis_ai.cli.errors import CLIError
-from osmosis_ai.cli.prompts import confirm, is_interactive
+from osmosis_ai.cli.output import (
+    CommandResult,
+    DetailField,
+    DetailResult,
+    ListColumn,
+    ListResult,
+    OperationResult,
+    OutputFormat,
+    get_output_context,
+    serialize_dataset,
+)
+from osmosis_ai.cli.paths import parse_cli_path
+from osmosis_ai.cli.prompts import confirm
 from osmosis_ai.platform.api.models import STATUSES_IN_PROGRESS
 from osmosis_ai.platform.auth import (
     AuthenticationExpiredError,
@@ -29,6 +42,7 @@ from .utils import (
     format_dataset_status,
     format_dim_date,
     format_size,
+    platform_call,
     platform_entity_url,
 )
 
@@ -61,6 +75,11 @@ def _abort_upload(
 
 from osmosis_ai.platform.api.upload import BACKOFF_BASE, BACKOFF_CAP, MAX_RETRIES
 
+PARQUET_VALIDATION_SKIPPED_WARNING = (
+    "pyarrow not installed; parquet content validation skipped. "
+    "Install with: pip install 'osmosis-ai[platform]'"
+)
+
 
 def _complete_with_retry(
     client: Any,
@@ -83,10 +102,14 @@ def _complete_with_retry(
             )
             time.sleep(delay)
         try:
-            return client.complete_upload(
-                dataset_id,
-                parts=parts,
-                credentials=credentials,
+            return platform_call(
+                "Finalizing upload...",
+                lambda: client.complete_upload(
+                    dataset_id,
+                    parts=parts,
+                    credentials=credentials,
+                ),
+                output_console=console,
             )
         except AuthenticationExpiredError:
             raise  # Not transient — surface immediately
@@ -115,7 +138,11 @@ def _complete_with_retry(
         style="yellow",
     )
     console.print()
-    raise CLIError(f"Failed to complete upload: {last_error}") from last_error
+    raise CLIError(
+        f"Failed to complete upload: {last_error}",
+        code="PLATFORM_ERROR",
+        details={"dataset_id": dataset_id},
+    ) from last_error
 
 
 def _check_file_basics(file: str) -> tuple[Path, str, int]:
@@ -150,6 +177,11 @@ def _dataset_name_from_path(file_path: Path) -> str:
     return file_path.stem
 
 
+def _detail_fields(rows: list[tuple[str, str]]) -> list[DetailField]:
+    """Convert existing label/value rows into renderer detail fields."""
+    return [DetailField(label=label, value=value) for label, value in rows]
+
+
 def _perform_upload(
     *,
     file_path: Path,
@@ -172,11 +204,15 @@ def _perform_upload(
     client = OsmosisClient()
     dataset_name = _dataset_name_from_path(file_path)
 
-    dataset = client.create_dataset(
-        dataset_name,
-        file_size,
-        ext,
-        credentials=credentials,
+    dataset = platform_call(
+        "Creating dataset...",
+        lambda: client.create_dataset(
+            dataset_name,
+            file_size,
+            ext,
+            credentials=credentials,
+        ),
+        output_console=console,
     )
 
     upload_info = dataset.upload
@@ -211,7 +247,7 @@ def _perform_upload(
         except Exception as e:
             _abort_upload(client, dataset.id, credentials=credentials)
             raise CLIError(f"Upload failed: {e}") from e
-        _complete_with_retry(
+        completed = _complete_with_retry(
             client,
             dataset.id,
             parts=parts,
@@ -230,21 +266,22 @@ def _perform_upload(
         except Exception as e:
             _abort_upload(client, dataset.id, credentials=credentials)
             raise CLIError(f"Upload failed: {e}") from e
-        _complete_with_retry(
+        completed = _complete_with_retry(
             client,
             dataset.id,
             credentials=credentials,
         )
 
-    return dataset
+    return completed or dataset
 
 
 def upload(
     file: str,
-) -> None:
+) -> CommandResult:
     """Upload a dataset file."""
     ws_name, credentials = _require_auth()
     _require_subscription(workspace_name=ws_name)
+    output = get_output_context()
 
     file_path, ext, file_size = _check_file_basics(file)
 
@@ -265,11 +302,14 @@ def upload(
         title="Upload Target",
     )
     console.print()
-    if is_interactive():
+    if output.interactive:
         proceed = confirm("Proceed with upload?", default=True)
         if proceed is None or not proceed:
-            console.print("Upload cancelled.", style="dim")
-            return
+            return OperationResult(
+                operation="dataset.upload",
+                status="cancelled",
+                message="Upload cancelled.",
+            )
 
     dataset = _perform_upload(
         file_path=file_path,
@@ -278,20 +318,28 @@ def upload(
         credentials=credentials,
     )
 
-    console.print(
-        f"Dataset uploaded: {console.escape(dataset.file_name)}",
-        style="green",
-        highlight=False,
+    url = platform_entity_url(ws_name, "datasets", dataset.id)
+    return OperationResult(
+        operation="dataset.upload",
+        status="success",
+        resource=serialize_dataset(dataset),
+        message=f"Dataset uploaded: {dataset.file_name}",
+        display_next_steps=[
+            f"Processing will continue on the platform. Check status at: {url}"
+        ],
+        next_steps_structured=[
+            {
+                "label": "View dataset",
+                "url": url,
+            }
+        ],
     )
-    url = console.escape(platform_entity_url(ws_name, "datasets", dataset.id))
-    console.print(f"Processing will continue on the platform. Check status at: {url}")
 
 
-def list_datasets(limit: int = DEFAULT_PAGE_SIZE, all_: bool = False) -> None:
+def list_datasets(limit: int = DEFAULT_PAGE_SIZE, all_: bool = False) -> CommandResult:
     """List datasets."""
     from osmosis_ai.platform.cli.utils import (
-        paginated_fetch,
-        print_pagination_footer,
+        fetch_all_pages,
         validate_list_options,
     )
 
@@ -303,81 +351,227 @@ def list_datasets(limit: int = DEFAULT_PAGE_SIZE, all_: bool = False) -> None:
     client = OsmosisClient()
 
     with console.spinner("Fetching datasets..."):
-        datasets, total_count, _has_more = paginated_fetch(
-            lambda lim, off: client.list_datasets(
-                limit=lim, offset=off, credentials=credentials
-            ),
-            items_attr="datasets",
-            limit=effective_limit,
-            fetch_all=fetch_all,
-        )
+        if fetch_all:
+            datasets, total_count = fetch_all_pages(
+                lambda lim, off: client.list_datasets(
+                    limit=lim, offset=off, credentials=credentials
+                ),
+                items_attr="datasets",
+            )
+            has_more = False
+            next_offset = None
+        else:
+            page = client.list_datasets(
+                limit=effective_limit,
+                offset=0,
+                credentials=credentials,
+            )
+            datasets = page.datasets
+            total_count = page.total_count
+            has_more = page.has_more
+            next_offset = page.next_offset
 
-    if not datasets:
-        console.print("No datasets found.")
-        return
-
-    console.print(f"Datasets ({total_count}):", style="bold")
-    for d in datasets:
-        status_info = format_dataset_status(d)
-        name = console.escape(d.file_name)
-        date = format_dim_date(d.created_at)
-        console.print(
-            f"  {name}  {format_size(d.file_size)}  {status_info}  {date}",
-            highlight=False,
-        )
-
-    print_pagination_footer(len(datasets), total_count, "datasets")
+    return ListResult(
+        title="Datasets",
+        items=[serialize_dataset(d) for d in datasets],
+        total_count=total_count,
+        has_more=has_more,
+        next_offset=next_offset,
+        columns=[
+            ListColumn(key="file_name", label="File"),
+            ListColumn(key="status", label="Status"),
+            ListColumn(key="file_size", label="Size"),
+            ListColumn(key="created_at", label="Created"),
+            ListColumn(key="id", label="ID", no_wrap=True),
+        ],
+        display_items=[
+            {
+                **serialize_dataset(d),
+                "status": format_dataset_status(d),
+                "file_size": format_size(d.file_size),
+                "created_at": format_dim_date(d.created_at),
+            }
+            for d in datasets
+        ],
+    )
 
 
 def info(
     name: str,
-) -> None:
+) -> CommandResult:
     """Show dataset details and processing status."""
     _ws_name, credentials = _require_auth()
     from osmosis_ai.platform.api.client import OsmosisClient
 
     client = OsmosisClient()
-    ds = client.get_dataset(name, credentials=credentials)
+    ds = platform_call(
+        "Fetching dataset...",
+        lambda: client.get_dataset(name, credentials=credentials),
+        output_console=console,
+    )
 
     rows = build_dataset_detail_rows(ds)
-    console.table(rows, title="Dataset")
+    return DetailResult(
+        title="Dataset",
+        data=serialize_dataset(ds),
+        fields=_detail_fields(rows),
+    )
 
 
 def preview(
     name: str,
     rows: int = 5,
-) -> None:
+) -> CommandResult:
     """Preview dataset rows."""
     _ws_name, credentials = _require_auth()
     from osmosis_ai.platform.api.client import OsmosisClient
 
     client = OsmosisClient()
-    ds = client.get_dataset(name, credentials=credentials)
+    ds = platform_call(
+        "Fetching dataset...",
+        lambda: client.get_dataset(name, credentials=credentials),
+        output_console=console,
+    )
 
     if ds.data_preview is None:
         if ds.status in STATUSES_IN_PROGRESS:
-            console.print(
-                f"Dataset is still processing (status: {ds.status}).",
-                style="yellow",
-            )
+            message = f"Dataset is still processing (status: {ds.status})."
         else:
-            console.print("No preview available for this dataset.", style="dim")
-        return
+            message = "No preview available for this dataset."
+        return DetailResult(
+            title="Dataset Preview",
+            data={
+                "dataset": serialize_dataset(ds),
+                "rows": None,
+                "requested_rows": rows,
+                "returned_rows": 0,
+                "available": False,
+                "message": message,
+            },
+            fields=[
+                DetailField(label="Dataset", value=ds.file_name),
+                DetailField(label="Status", value=ds.status),
+                DetailField(label="Preview", value=message),
+            ],
+        )
 
     data_rows = ds.data_preview
     if isinstance(data_rows, list):
         limit = min(rows, len(data_rows))
-        for row in data_rows[:limit]:
-            console.print(str(row))
+        preview_rows = data_rows[:limit]
+        fields = [
+            DetailField(label="Dataset", value=ds.file_name),
+            DetailField(label="Rows", value=f"{len(preview_rows)} of {len(data_rows)}"),
+        ]
+        fields.extend(
+            DetailField(label=f"Row {idx}", value=str(row))
+            for idx, row in enumerate(preview_rows, 1)
+        )
     else:
-        console.print(str(data_rows))
+        preview_rows = data_rows
+        fields = [
+            DetailField(label="Dataset", value=ds.file_name),
+            DetailField(label="Preview", value=str(data_rows)),
+        ]
+
+    return DetailResult(
+        title="Dataset Preview",
+        data={
+            "dataset": serialize_dataset(ds),
+            "rows": preview_rows,
+            "requested_rows": rows,
+            "returned_rows": len(preview_rows) if isinstance(preview_rows, list) else 1,
+            "available": True,
+        },
+        fields=fields,
+    )
+
+
+def _default_download_filename(file_name: str, presigned_url: str) -> str:
+    """Choose a useful filename when the platform response omits one."""
+    if Path(file_name).suffix:
+        return file_name
+
+    suffix = PurePosixPath(unquote(urlparse(presigned_url).path)).suffix
+    if suffix.lstrip(".").lower() in VALID_EXTENSIONS:
+        return f"{file_name}{suffix}"
+    return file_name
+
+
+def download(
+    name: str,
+    output: str | None = None,
+    overwrite: bool = False,
+) -> CommandResult:
+    """Download a dataset file."""
+    _ws_name, credentials = _require_auth()
+    from osmosis_ai.platform.api.client import OsmosisClient
+    from osmosis_ai.platform.api.download import download_file
+
+    client = OsmosisClient()
+    ds = platform_call(
+        "Fetching dataset...",
+        lambda: client.get_dataset(name, credentials=credentials),
+        output_console=console,
+    )
+    if ds.status != "uploaded":
+        if ds.status in STATUSES_IN_PROGRESS:
+            raise CLIError(
+                f"Dataset is still processing (status: {ds.status}). "
+                "Try again after it finishes uploading."
+            )
+        raise CLIError(f"Dataset is not available for download (status: {ds.status}).")
+
+    info = platform_call(
+        "Preparing download...",
+        lambda: client.get_dataset_download_url(name, credentials=credentials),
+        output_console=console,
+    )
+    default_filename = _default_download_filename(
+        info.file_name or ds.file_name,
+        info.presigned_url,
+    )
+    parsed_output = parse_cli_path(output, expand_user=True) if output else None
+    output_path = parsed_output.path if parsed_output else None
+
+    try:
+        destination = download_file(
+            info.presigned_url,
+            output=output_path,
+            default_filename=default_filename,
+            expected_size=ds.file_size,
+            overwrite=overwrite,
+            output_is_directory=(
+                parsed_output.has_trailing_separator if parsed_output else False
+            ),
+        )
+    except FileExistsError as exc:
+        raise CLIError(f"{exc} Use --overwrite to replace it.") from None
+    except Exception as exc:
+        raise CLIError(f"Download failed: {exc}") from exc
+
+    resource = serialize_dataset(ds)
+    resource["output_path"] = str(destination)
+    return OperationResult(
+        operation="dataset.download",
+        status="success",
+        resource=resource,
+        message=f"Dataset downloaded: {destination}",
+    )
 
 
 def delete(
     name: str,
     yes: bool = False,
-) -> None:
+) -> CommandResult:
     """Delete a dataset."""
+    output = get_output_context()
+    if not yes and (output.format is not OutputFormat.rich or not output.interactive):
+        raise CLIError(
+            "Use --yes to confirm in non-interactive mode.",
+            code="INTERACTIVE_REQUIRED",
+        )
+
     _ws_name, credentials = _require_auth()
     from osmosis_ai.platform.api.client import OsmosisClient
 
@@ -385,11 +579,30 @@ def delete(
 
     # Blocking preflight: abort if active training runs use this dataset
     try:
-        affected = client.get_dataset_affected_resources(name, credentials=credentials)
+        affected = platform_call(
+            "Checking dataset dependencies...",
+            lambda: client.get_dataset_affected_resources(
+                name, credentials=credentials
+            ),
+            output_console=console,
+        )
     except Exception as e:
         raise CLIError(f"Unable to verify dataset dependencies: {e}") from e
 
     if affected.has_blocking_runs:
+        blocking_runs = [
+            {
+                "id": run.id,
+                "training_run_name": run.training_run_name,
+            }
+            for run in affected.affected_training_runs
+        ]
+        if output.format is not OutputFormat.rich:
+            raise CLIError(
+                "Cannot delete this dataset because training runs depend on it.",
+                code="CONFLICT",
+                details={"training_runs": blocking_runs},
+            )
         lines = ["Cannot delete — active training runs depend on this dataset:"]
         for run in affected.affected_training_runs:
             run_name = (
@@ -402,7 +615,11 @@ def delete(
         raise CLIError("\n".join(lines))
 
     if not yes:
-        ds = client.get_dataset(name, credentials=credentials)
+        ds = platform_call(
+            "Fetching dataset...",
+            lambda: client.get_dataset(name, credentials=credentials),
+            output_console=console,
+        )
         console.print(
             f"  Dataset: {console.escape(ds.file_name)} ({format_size(ds.file_size)})"
         )
@@ -411,31 +628,63 @@ def delete(
 
     require_confirmation(f'Delete dataset "{name}"? This cannot be undone.', yes=yes)
 
-    client.delete_dataset(name, credentials=credentials)
-    console.print(
-        f'Dataset "{console.escape(name)}" deleted.',
-        style="green",
-        highlight=False,
+    platform_call(
+        "Deleting dataset...",
+        lambda: client.delete_dataset(name, credentials=credentials),
+        output_console=console,
+    )
+    return OperationResult(
+        operation="dataset.delete",
+        status="success",
+        resource={"id": name},
+        message=f'Dataset "{name}" deleted.',
     )
 
 
 def validate(
     file: str,
-) -> None:
+) -> CommandResult:
     """Validate a dataset file locally."""
     file_path, ext, file_size = _check_file_basics(file)
 
     # Format validation
-    errors = _validate_file(file_path, ext)
+    errors, warnings = _validate_file_with_warnings(file_path, ext)
 
     if errors:
         raise CLIError("Validation failed:\n" + "\n".join(f"  - {e}" for e in errors))
 
-    console.print(
-        f"Valid {ext} file: {console.escape(file_path.name)} ({format_size(file_size)})",
-        style="green",
-        highlight=False,
+    return DetailResult(
+        title="Dataset Validation",
+        data={
+            "valid": True,
+            "file": str(file_path),
+            "file_name": file_path.name,
+            "extension": ext,
+            "file_size": file_size,
+            "errors": [],
+            "warnings": warnings,
+        },
+        fields=[
+            DetailField(label="File", value=file_path.name),
+            DetailField(label="Size", value=format_size(file_size)),
+            DetailField(label="Status", value=f"Valid {ext} file"),
+            *[DetailField(label="Warning", value=warning) for warning in warnings],
+        ],
     )
+
+
+def _validate_file_with_warnings(
+    file_path: Path, ext: str
+) -> tuple[list[str], list[str]]:
+    """Validate file contents and surface non-fatal validation skips."""
+    warnings: list[str] = []
+    if ext == "parquet":
+        try:
+            import pyarrow.parquet  # noqa: F401
+        except ImportError:
+            warnings.append(PARQUET_VALIDATION_SKIPPED_WARNING)
+            return [], warnings
+    return _validate_file(file_path, ext), warnings
 
 
 def _validate_file(file_path: Path, ext: str) -> list[str]:
@@ -506,8 +755,7 @@ def _validate_parquet(file_path: Path) -> list[str]:
         import pyarrow.parquet as pq
     except ImportError:
         console.print(
-            "Note: pyarrow not installed — parquet content validation skipped. "
-            "Install with: pip install 'osmosis-ai[platform]'",
+            f"Note: {PARQUET_VALIDATION_SKIPPED_WARNING}",
             style="dim yellow",
         )
         return []

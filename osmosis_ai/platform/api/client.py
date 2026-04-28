@@ -10,6 +10,7 @@ from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE
 
 from .models import (
     DatasetAffectedResources,
+    DatasetDownloadInfo,
     DatasetFile,
     DeleteTrainingRunResult,
     DeploymentInfo,
@@ -232,6 +233,18 @@ class OsmosisClient:
             credentials=credentials,
         )
         return DatasetFile.from_dict(data)
+
+    def get_dataset_download_url(
+        self,
+        file_id: str,
+        *,
+        credentials: Credentials | None = None,
+    ) -> DatasetDownloadInfo:
+        data = platform_request(
+            f"/api/cli/datasets/{_safe_path(file_id)}/download",
+            credentials=credentials,
+        )
+        return DatasetDownloadInfo.from_dict(data)
 
     def delete_dataset(
         self,

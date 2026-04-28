@@ -330,6 +330,27 @@ def test_load_credentials_from_env(monkeypatch) -> None:
     assert creds.user.id == ""  # minimal user info for env token
 
 
+def test_load_credentials_can_skip_env_token(tmp_path, monkeypatch) -> None:
+    creds_file = tmp_path / "creds.json"
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.credentials.CREDENTIALS_FILE", creds_file
+    )
+    monkeypatch.setenv("OSMOSIS_TOKEN", "env-token-abc")
+
+    stored = _make_credentials(token_id="tok_stored")
+    data = stored.to_dict()
+    data["token_store"] = TOKEN_STORE_FILE
+    creds_file.write_text(json.dumps(data))
+
+    from osmosis_ai.platform.auth.credentials import load_credentials
+
+    assert load_credentials().access_token == "env-token-abc"
+    loaded = load_credentials(include_env=False)
+    assert loaded is not None
+    assert loaded.access_token == "test-token"
+    assert loaded.token_id == "tok_stored"
+
+
 # ---------------------------------------------------------------------------
 # load: version mismatch
 # ---------------------------------------------------------------------------

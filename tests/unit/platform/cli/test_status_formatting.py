@@ -27,7 +27,7 @@ def test_list_datasets_preserves_uncategorized_status_brackets(
     monkeypatch: pytest.MonkeyPatch,
     status: str,
 ) -> None:
-    console, output = _make_rich_console()
+    console, _output = _make_rich_console()
     fake_credentials = object()
 
     monkeypatch.setattr(dataset_module, "console", console)
@@ -60,9 +60,10 @@ def test_list_datasets_preserves_uncategorized_status_brackets(
 
     monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
 
-    dataset_module.list_datasets()
+    result = dataset_module.list_datasets()
 
-    assert f"[{status}]" in strip_ansi(output.getvalue())
+    assert result.display_items is not None
+    assert f"\\[{status}]" == result.display_items[0]["status"]
 
 
 @pytest.mark.parametrize("status", ["cancelled", "deleted"])

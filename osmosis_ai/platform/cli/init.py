@@ -267,8 +267,10 @@ def _selected_workspace_git_context() -> dict[str, str | bool | None]:
         load_credentials,
         platform_request,
     )
+    from osmosis_ai.platform.cli.utils import platform_call
 
     empty_context: dict[str, str | bool | None] = {
+        "workspace_id": None,
         "workspace_name": None,
         "git_sync_url": None,
         "has_github_app_installation": False,
@@ -280,6 +282,7 @@ def _selected_workspace_git_context() -> dict[str, str | bool | None]:
         if not local_name:
             return empty_context
         return {
+            "workspace_id": get_active_workspace_id(),
             "workspace_name": local_name,
             "git_sync_url": f"{PLATFORM_URL}/{local_name}/integrations/git",
             "has_github_app_installation": False,
@@ -291,11 +294,15 @@ def _selected_workspace_git_context() -> dict[str, str | bool | None]:
         return _offline_fallback()
 
     try:
-        data = platform_request(
-            "/api/cli/workspaces",
-            credentials=credentials,
-            require_workspace=False,
-            cleanup_on_401=False,
+        data = platform_call(
+            "Loading workspace Git Sync status...",
+            lambda: platform_request(
+                "/api/cli/workspaces",
+                credentials=credentials,
+                require_workspace=False,
+                cleanup_on_401=False,
+            ),
+            output_console=console,
         )
     except (AuthenticationExpiredError, PlatformAPIError):
         return _offline_fallback()
@@ -338,6 +345,9 @@ def _selected_workspace_git_context() -> dict[str, str | bool | None]:
             connected_repo_url = repo_url
 
     return {
+        "workspace_id": matched.get("id")
+        if isinstance(matched.get("id"), str)
+        else None,
         "workspace_name": selected_name,
         "git_sync_url": f"{PLATFORM_URL}/{selected_name}/integrations/git",
         "has_github_app_installation": bool(matched.get("has_github_app_installation")),
@@ -347,14 +357,19 @@ def _selected_workspace_git_context() -> dict[str, str | bool | None]:
 
 def _git_sync_cta_text(
     git_context: dict[str, str | bool | None] | None = None,
-) -> str:
+) -> Any:
     """Build the Git Sync CTA shown after workspace scaffolding."""
+    from rich.text import Text
+
     if git_context is None:
         git_context = _selected_workspace_git_context()
 
     connected_repo_url = git_context.get("connected_repo_url")
     if isinstance(connected_repo_url, str) and connected_repo_url:
-        return f"Connected repo: [cyan]{connected_repo_url}[/cyan]"
+        return Text.assemble(
+            "Connected repo: ",
+            console.format_url(connected_repo_url, style="cyan"),
+        )
 
     git_sync_url = git_context.get("git_sync_url")
     if isinstance(git_sync_url, str) and git_sync_url:
@@ -363,9 +378,15 @@ def _git_sync_cta_text(
             if git_context.get("has_github_app_installation")
             else "connect your repo"
         )
-        return f"Go to [cyan]{git_sync_url}[/cyan] to {action}"
+        return Text.assemble(
+            f"{action}: ",
+            console.format_url(git_sync_url, style="cyan"),
+        )
 
-    return f"Go to [cyan]{PLATFORM_URL}[/cyan] → Git Sync to connect your repo"
+    return Text.assemble(
+        "connect your repo with Git Sync: ",
+        console.format_url(PLATFORM_URL, style="cyan"),
+    )
 
 
 def _raise_if_selected_workspace_has_connected_repo(
@@ -411,8 +432,12 @@ def _print_next_steps(
     from rich.text import Text
 
     cmd_table = Table.grid(padding=(0, 1))
+    cmd_table.add_column(no_wrap=True)
+    cmd_table.add_column()
     if not here:
-        cmd_table.add_row("[bold green]$[/bold green]", f"cd {ws_name}")
+        cmd_table.add_row(
+            "[bold green]$[/bold green]", console.format_text(f"cd {ws_name}")
+        )
     cmd_table.add_row(
         "[bold green]$[/bold green]",
         "gh repo create --private --source=. --push",
@@ -439,23 +464,30 @@ def _print_next_steps(
         "I want to train a model for <my task domain>. "
         "Read .osmosis/research/program.md, create a baseline rollout in the "
         "canonical workspace structure, iterate locally with evals, and prepare "
-        "a training config."
+        "a training config. Use `osmosis --json` for Osmosis CLI commands."
     )
 
     plugin_repo = _plugin_repo()
     plugin_marketplace = _plugin_marketplace()
     plugin_table = Table.grid(padding=(0, 1))
+    plugin_table.add_column(no_wrap=True)
+    plugin_table.add_column(no_wrap=True)
     plugin_table.add_row(
         "[bold cyan]Claude Code[/bold cyan]",
         "open this folder — it'll prompt to install [cyan]osmosis[/cyan]",
     )
     plugin_table.add_row(
         "[bold cyan]Cursor[/bold cyan]",
-        f"Settings → Rules → Add Remote Rule → [cyan]{plugin_repo}[/cyan]",
+        Text.assemble(
+            "Settings → Rules → Add Remote Rule → ",
+            console.format_text(plugin_repo, style="cyan"),
+        ),
     )
     plugin_table.add_row(
         "[bold cyan]Codex[/bold cyan]",
-        f"[cyan]codex plugin marketplace add {plugin_repo}[/cyan]",
+        console.format_text(
+            f"codex plugin marketplace add {plugin_repo}", style="cyan"
+        ),
     )
     plugin_table.add_row(
         "[dim] [/dim]",
@@ -463,7 +495,7 @@ def _print_next_steps(
     )
     plugin_table.add_row(
         "[bold cyan] [/bold cyan]",
-        f"[cyan]codex plugin install {plugin_marketplace}[/cyan]",
+        console.format_text(f"codex plugin install {plugin_marketplace}", style="cyan"),
     )
 
     content = Group(
@@ -508,14 +540,109 @@ def _print_next_steps(
     )
 
 
+def _created_paths_for_result(target: Path) -> list[str]:
+    """Return scaffold paths to expose in machine-readable init output."""
+    paths: list[Path] = [target]
+    paths.extend(
+        target / entry.dest for entry in SCAFFOLD if (target / entry.dest).exists()
+    )
+    if (target / ".git").exists():
+        paths.append(target / ".git")
+    return [str(path.resolve()) for path in paths]
+
+
+def _workspace_for_result(
+    git_context: dict[str, str | bool | None],
+) -> dict[str, str] | None:
+    workspace_id = git_context.get("workspace_id")
+    workspace_name = git_context.get("workspace_name")
+    if (
+        isinstance(workspace_id, str)
+        and workspace_id
+        and isinstance(workspace_name, str)
+    ):
+        return {"id": workspace_id, "name": workspace_name}
+    if isinstance(workspace_name, str) and workspace_name:
+        return {"name": workspace_name}
+    return None
+
+
+def _init_next_steps_structured(
+    ws_name: str,
+    *,
+    here: bool,
+    git_context: dict[str, str | bool | None],
+) -> list[dict[str, Any]]:
+    steps: list[dict[str, Any]] = []
+    if not here:
+        steps.append({"action": "cd", "path": ws_name, "command": f"cd {ws_name}"})
+    steps.extend(
+        [
+            {
+                "action": "create_github_repo",
+                "command": "gh repo create --private --source=. --push",
+            },
+            {
+                "action": "add_git_remote",
+                "command": "git remote add origin <your-repo-url>",
+            },
+            {"action": "push_git", "command": "git push -u origin main"},
+        ]
+    )
+
+    connected_repo_url = git_context.get("connected_repo_url")
+    if isinstance(connected_repo_url, str) and connected_repo_url:
+        steps.append({"action": "clone_connected_repo", "url": connected_repo_url})
+    else:
+        git_sync_url = git_context.get("git_sync_url")
+        if isinstance(git_sync_url, str) and git_sync_url:
+            steps.append({"action": "configure_git_sync", "url": git_sync_url})
+
+    plugin_repo = _plugin_repo()
+    plugin_marketplace = _plugin_marketplace()
+    steps.extend(
+        [
+            {
+                "action": "install_cursor_rule",
+                "source": plugin_repo,
+            },
+            {
+                "action": "install_codex_plugin",
+                "commands": [
+                    f"codex plugin marketplace add {plugin_repo}",
+                    f"codex plugin install {plugin_marketplace}",
+                ],
+            },
+        ]
+    )
+    return steps
+
+
+def _init_display_next_steps(ws_name: str, *, here: bool) -> list[str]:
+    steps: list[str] = []
+    if not here:
+        steps.append(f"cd {ws_name}")
+    steps.extend(
+        [
+            "gh repo create --private --source=. --push",
+            "git remote add origin <your-repo-url>",
+            "git push -u origin main",
+        ]
+    )
+    return steps
+
+
 # ── Main entry point ─────────────────────────────────────────────
 
 
-def init(name: str, here: bool = False) -> None:
+def init(name: str, here: bool = False) -> Any:
     """Initialise a new local workspace directory.
 
     This is the main entry point for ``osmosis init <name>``.
     """
+    from osmosis_ai.cli.output import OperationResult, OutputFormat, get_output_context
+
+    output = get_output_context()
     _check_git_installed()
 
     name_error = validate_name(name, label="Workspace name")
@@ -548,9 +675,10 @@ def init(name: str, here: bool = False) -> None:
         if target.exists():
             if (target / ".osmosis" / "workspace.toml").is_file():
                 # Re-entry: update mode
-                console.print(
-                    f"Updating existing workspace in [cyan]./{name}[/cyan]...",
-                )
+                if output.format is OutputFormat.rich:
+                    console.print(
+                        f"Updating existing workspace in [cyan]./{name}[/cyan]...",
+                    )
             else:
                 raise CLIError(
                     f"Directory ./{name} already exists. "
@@ -575,4 +703,32 @@ def init(name: str, here: bool = False) -> None:
             shutil.rmtree(target)
         raise
 
-    _print_next_steps(name, here=here, git_context=_ensure_git_context())
+    final_git_context = _ensure_git_context()
+    if output.format is OutputFormat.rich:
+        _print_next_steps(name, here=here, git_context=final_git_context)
+        return None
+
+    resource = {
+        "path": str(target.resolve()),
+        "created_paths": _created_paths_for_result(target),
+        "workspace": _workspace_for_result(final_git_context),
+        "git_sync_url": final_git_context.get("git_sync_url"),
+        "connected_repo_url": final_git_context.get("connected_repo_url"),
+        "mode": "update" if is_update else "create",
+    }
+    return OperationResult(
+        operation="init",
+        status="success",
+        resource=resource,
+        message=(
+            f"Updated workspace in {target.resolve()}."
+            if is_update
+            else f"Initialized workspace in {target.resolve()}."
+        ),
+        display_next_steps=_init_display_next_steps(name, here=here),
+        next_steps_structured=_init_next_steps_structured(
+            name,
+            here=here,
+            git_context=final_git_context,
+        ),
+    )

@@ -11,9 +11,11 @@ from pathlib import Path
 import pytest
 
 from osmosis_ai.platform.cli.dataset import (
+    PARQUET_VALIDATION_SKIPPED_WARNING,
     _check_required_columns,
     _read_tail_lines,
     _validate_csv,
+    _validate_file_with_warnings,
     _validate_jsonl,
     _validate_parquet,
 )
@@ -245,6 +247,39 @@ class TestValidateCsv:
 
 
 class TestValidateParquet:
+    def test_validate_file_with_warnings_skips_parquet_once(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ):
+        """Structured validation should surface one warning without console output."""
+        import builtins
+        from io import StringIO
+
+        from osmosis_ai.cli.console import Console
+
+        real_import = builtins.__import__
+
+        def _block_pyarrow(name: str, *args, **kwargs):
+            if name == "pyarrow.parquet" or name == "pyarrow":
+                raise ImportError("mocked missing pyarrow")
+            return real_import(name, *args, **kwargs)
+
+        monkeypatch.setattr(builtins, "__import__", _block_pyarrow)
+
+        import osmosis_ai.platform.cli.dataset as dataset_mod
+
+        buf = StringIO()
+        fake_console = Console(file=buf, force_terminal=False)
+        monkeypatch.setattr(dataset_mod, "console", fake_console)
+
+        f = tmp_path / "test.parquet"
+        f.write_bytes(b"fake parquet data")
+
+        errors, warnings = _validate_file_with_warnings(f, "parquet")
+
+        assert errors == []
+        assert warnings == [PARQUET_VALIDATION_SKIPPED_WARNING]
+        assert buf.getvalue() == ""
+
     def test_missing_pyarrow_prints_warning(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ):

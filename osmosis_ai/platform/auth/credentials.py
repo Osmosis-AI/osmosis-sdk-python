@@ -238,14 +238,18 @@ def save_credentials(credentials: Credentials) -> str:
     return TOKEN_STORE_FILE
 
 
-def load_credentials() -> Credentials | None:
+def load_credentials(*, include_env: bool = True) -> Credentials | None:
     """Load credentials with priority: env var → keyring → plain-text file.
+
+    Args:
+        include_env: When ``False``, skip ``OSMOSIS_TOKEN`` and load only
+            credentials persisted by the CLI.
 
     Returns:
         The loaded credentials, or ``None`` if no credentials exist.
     """
     # 1. Environment variable
-    env_token = os.environ.get("OSMOSIS_TOKEN")
+    env_token = os.environ.get("OSMOSIS_TOKEN") if include_env else None
     if env_token:
         return Credentials(
             access_token=env_token,

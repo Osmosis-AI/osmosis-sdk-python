@@ -145,6 +145,19 @@ class TestURLPathSafety:
         assert path == "/api/cli/datasets/a%2Fb"
 
     @patch("osmosis_ai.platform.api.client.platform_request")
+    def test_get_dataset_download_url_encodes_id(self, mock_request: MagicMock) -> None:
+        mock_request.return_value = {
+            "presigned_url": "https://example.com/download",
+            "expires_in": 3600,
+            "file_name": "f.jsonl",
+        }
+        client = OsmosisClient()
+        result = client.get_dataset_download_url("a/b")
+        path = mock_request.call_args[0][0]
+        assert path == "/api/cli/datasets/a%2Fb/download"
+        assert result.presigned_url == "https://example.com/download"
+
+    @patch("osmosis_ai.platform.api.client.platform_request")
     def test_delete_dataset_encodes_id(self, mock_request: MagicMock) -> None:
         mock_request.return_value = None
         client = OsmosisClient()
