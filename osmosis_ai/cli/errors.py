@@ -1,10 +1,6 @@
 from __future__ import annotations
 
 
-class CLIError(Exception):
-    """Raised when the CLI encounters a recoverable error."""
-
-
 def not_implemented(group: str, cmd: str) -> None:
     """Print a 'not yet implemented' message and exit."""
     import typer

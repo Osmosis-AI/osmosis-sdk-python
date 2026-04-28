@@ -388,7 +388,7 @@ def require_confirmation(message: str, *, yes: bool = False) -> None:
     if yes:
         return
     if not is_interactive():
-        from osmosis_ai.cli.errors import CLIError
+        from osmosis_ai.errors import CLIError
 
         raise CLIError("Use --yes to confirm in non-interactive mode.")
     if not confirm(message):

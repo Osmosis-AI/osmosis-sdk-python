@@ -9,9 +9,9 @@ from typing import Any
 from urllib.parse import unquote, urlparse
 
 from osmosis_ai.cli.console import console
-from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.cli.paths import parse_cli_path
 from osmosis_ai.cli.prompts import confirm, is_interactive
+from osmosis_ai.errors import CLIError
 from osmosis_ai.platform.api.models import STATUSES_IN_PROGRESS
 from osmosis_ai.platform.auth import (
     AuthenticationExpiredError,

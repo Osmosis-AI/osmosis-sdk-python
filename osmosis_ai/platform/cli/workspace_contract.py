@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from osmosis_ai.cli.errors import CLIError
+from osmosis_ai.errors import CLIError
 
 _REQUIRED_DIRS = (
     ".osmosis",

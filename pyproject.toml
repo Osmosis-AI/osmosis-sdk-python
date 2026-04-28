@@ -20,47 +20,52 @@ classifiers = [
 ]
 requires-python = ">=3.12"
 dependencies = [
-    "PyYAML>=6.0,<7.0",
-    "python-dotenv>=0.1.0,<2.0.0",
-    "requests>=2.0.0,<3.0.0",
-    "litellm>=1.40.0,<=1.82.6", # Unified LLM provider (supports 100+ providers)
-    "tqdm>=4.0.0,<5.0.0",
-    # Remote rollout SDK dependencies
-    "httpx>=0.25.0,<1.0.0",
     "pydantic>=2.0.0,<3.0.0",
-    # Eval cache dependencies
-    "filelock>=3.0.0,<4.0.0",
-    "xxhash>=3.0.0",
-    "strands-agents[litellm]>=1.29.0",
-    "rich>=14.2.0",
-    # Secure credential storage (system keychain)
-    "keyring>=25.0.0",
-    # Interactive CLI prompts
-    "questionary>=2.1.0,<3.0.0",
-    # CLI framework
-    "typer>=0.16.0",
-    "rich>=13.0.0",
-    "harbor==0.3.0",
 ]
 
 [project.optional-dependencies]
-# Platform CLI (dataset upload/validate)
-platform = [
-    "pyarrow>=14.0.0",      # Parquet file validation
-]
+# Types-only — base install already covers this; explicit for documentation
+types = []
 
-# Server dependencies for rollout serving
+# Rollout server: FastAPI app, execution backends, agent integrations
 server = [
-    "osmosis-ai[platform]",
     "fastapi>=0.100.0,<1.0.0",
     "uvicorn>=0.23.0,<1.0.0",
     "pydantic-settings>=2.0.0,<3.0.0",
+    "httpx>=0.25.0,<1.0.0",
+    "harbor==0.3.0",
+    "strands-agents[litellm]>=1.29.0",
+]
+
+# Platform API client: auth, credential storage, API operations
+client = [
+    "httpx>=0.25.0,<1.0.0",
+    "keyring>=25.0.0",
+    "python-dotenv>=0.1.0,<2.0.0",
+]
+
+# CLI: interactive commands, eval, rubric engine
+cli = [
+    "osmosis-ai[client]",
+    "typer>=0.16.0",
+    "rich>=14.2.0",
+    "questionary>=2.1.0,<3.0.0",
+    "PyYAML>=6.0,<7.0",
+    "litellm>=1.40.0,<=1.82.6",
+    "tqdm>=4.0.0,<5.0.0",
+    "filelock>=3.0.0,<4.0.0",
+    "xxhash>=3.0.0",
+]
+
+# Full installation with all optional features
+full = [
+    "osmosis-ai[server]",
+    "osmosis-ai[cli]",
 ]
 
 # Development dependencies (testing, formatting, type checking, etc.)
-# Includes server extra so pyright/mypy can resolve server-related imports.
 dev = [
-    "osmosis-ai[server]",
+    "osmosis-ai[full]",
     "pytest>=8.0.0,<10.0.0",
     "pytest-asyncio>=0.23.0,<2.0.0",
     "pytest-cov>=6.0.0",
@@ -71,11 +76,7 @@ dev = [
     "mypy==1.20.2",
     "types-PyYAML>=6.0",
     "types-requests>=2.0",
-]
-
-# Full installation with all optional features
-full = [
-    "osmosis-ai[server]",
+    "pyarrow>=14.0.0",
 ]
 
 [project.urls]

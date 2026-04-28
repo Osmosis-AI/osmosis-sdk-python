@@ -8,7 +8,7 @@ from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from osmosis_ai.cli.errors import CLIError
+from osmosis_ai.errors import CLIError
 
 
 class _EvalSection(BaseModel):

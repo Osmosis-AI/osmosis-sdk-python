@@ -7,7 +7,7 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from osmosis_ai.cli.console import console
-from osmosis_ai.cli.errors import CLIError
+from osmosis_ai.errors import CLIError
 from osmosis_ai.platform.api.models import (
     RUN_STATUSES_ERROR,
     RUN_STATUSES_IN_PROGRESS,

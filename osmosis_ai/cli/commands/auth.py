@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING, Any
 import typer
 
 from osmosis_ai.cli.console import console
-from osmosis_ai.cli.errors import CLIError
+from osmosis_ai.errors import CLIError
 
 if TYPE_CHECKING:
     from osmosis_ai.platform.auth.credentials import Credentials

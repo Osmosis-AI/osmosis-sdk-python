@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 import typer
 
-from osmosis_ai.cli.errors import CLIError
+from osmosis_ai.errors import CLIError
 from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE
 
 if TYPE_CHECKING:

@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from osmosis_ai.cli.errors import CLIError
+from osmosis_ai.errors import CLIError
 from osmosis_ai.eval.rubric.cli import RubricCommand
 from osmosis_ai.eval.rubric.dataset import (
     RubricRecord,

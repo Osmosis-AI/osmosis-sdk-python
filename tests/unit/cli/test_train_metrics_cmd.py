@@ -401,7 +401,7 @@ class TestMetricsCommandErrors:
         client.get_training_run.return_value = _make_run_detail(status="pending")
 
         from osmosis_ai.cli.commands.train import metrics
-        from osmosis_ai.cli.errors import CLIError
+        from osmosis_ai.errors import CLIError
 
         with pytest.raises(CLIError, match="not yet available for pending"):
             metrics(
@@ -436,7 +436,7 @@ class TestMetricsCommandErrors:
     def test_no_workspace_no_output_raises(self, tmp_path: Path) -> None:
         """Without .osmosis/workspace.toml and no -o flag, should error."""
         from osmosis_ai.cli.commands.train import _resolve_default_output
-        from osmosis_ai.cli.errors import CLIError
+        from osmosis_ai.errors import CLIError
 
         with pytest.raises(CLIError, match="Not in an Osmosis workspace"):
             _resolve_default_output("my-run", "abc12345", cwd=tmp_path)

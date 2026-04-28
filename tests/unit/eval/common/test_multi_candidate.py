@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from osmosis_ai.cli.errors import CLIError
+from osmosis_ai.errors import CLIError
 from osmosis_ai.eval.common.cli import _resolve_workflow, auto_discover_grader
 from osmosis_ai.rollout.grader import Grader
 from osmosis_ai.rollout.types import GraderConfig

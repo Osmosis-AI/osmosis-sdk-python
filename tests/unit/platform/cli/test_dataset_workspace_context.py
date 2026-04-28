@@ -12,7 +12,7 @@ import osmosis_ai.platform.api.download as download_module
 import osmosis_ai.platform.api.upload as upload_module
 import osmosis_ai.platform.cli.dataset as dataset_module
 from osmosis_ai.cli.console import Console
-from osmosis_ai.cli.errors import CLIError
+from osmosis_ai.errors import CLIError
 from osmosis_ai.platform.api.models import (
     DatasetDownloadInfo,
     DatasetFile,

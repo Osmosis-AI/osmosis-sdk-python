@@ -96,14 +96,14 @@ model = "openai/gpt-3.5-turbo"
 
 
 def test_load_config_missing_file():
-    from osmosis_ai.cli.errors import CLIError
+    from osmosis_ai.errors import CLIError
 
     with pytest.raises(CLIError, match="Config file not found"):
         load_eval_config(Path("/nonexistent/config.toml"))
 
 
 def test_load_config_invalid_toml(tmp_toml):
-    from osmosis_ai.cli.errors import CLIError
+    from osmosis_ai.errors import CLIError
 
     path = tmp_toml("this is not [valid toml")
     with pytest.raises(CLIError, match="Invalid TOML"):
@@ -111,7 +111,7 @@ def test_load_config_invalid_toml(tmp_toml):
 
 
 def test_load_config_missing_eval_section(tmp_toml):
-    from osmosis_ai.cli.errors import CLIError
+    from osmosis_ai.errors import CLIError
 
     path = tmp_toml("""
 [llm]
@@ -122,7 +122,7 @@ model = "openai/gpt-5.4"
 
 
 def test_load_config_missing_rollout(tmp_toml):
-    from osmosis_ai.cli.errors import CLIError
+    from osmosis_ai.errors import CLIError
 
     path = tmp_toml("""
 [eval]
@@ -137,7 +137,7 @@ model = "openai/gpt-5.4"
 
 
 def test_load_config_missing_entrypoint(tmp_toml):
-    from osmosis_ai.cli.errors import CLIError
+    from osmosis_ai.errors import CLIError
 
     path = tmp_toml("""
 [eval]
@@ -152,7 +152,7 @@ model = "openai/gpt-5.4"
 
 
 def test_load_config_missing_dataset(tmp_toml):
-    from osmosis_ai.cli.errors import CLIError
+    from osmosis_ai.errors import CLIError
 
     path = tmp_toml("""
 [eval]
@@ -167,7 +167,7 @@ model = "openai/gpt-5.4"
 
 
 def test_load_config_missing_llm_model(tmp_toml):
-    from osmosis_ai.cli.errors import CLIError
+    from osmosis_ai.errors import CLIError
 
     path = tmp_toml("""
 [eval]
@@ -200,7 +200,7 @@ config = "my_rollout:grader_config"
 
 def test_load_config_invalid_runs_n_type(tmp_toml):
     """runs.n must be an integer, not a string."""
-    from osmosis_ai.cli.errors import CLIError
+    from osmosis_ai.errors import CLIError
 
     path = tmp_toml("""
 [eval]
@@ -220,7 +220,7 @@ n = "four"
 
 def test_load_config_invalid_batch_size_zero(tmp_toml):
     """runs.batch_size must be >= 1."""
-    from osmosis_ai.cli.errors import CLIError
+    from osmosis_ai.errors import CLIError
 
     path = tmp_toml("""
 [eval]
@@ -240,7 +240,7 @@ batch_size = 0
 
 def test_load_config_invalid_pass_threshold_range(tmp_toml):
     """runs.pass_threshold must be 0.0..1.0."""
-    from osmosis_ai.cli.errors import CLIError
+    from osmosis_ai.errors import CLIError
 
     path = tmp_toml("""
 [eval]

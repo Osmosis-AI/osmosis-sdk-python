@@ -193,7 +193,7 @@ class TestPerformUpload:
     def test_raises_on_missing_upload_info(self, monkeypatch, tmp_path):
         """_perform_upload raises CLIError if server returns no upload info."""
         import osmosis_ai.platform.api.client as api_client_module
-        from osmosis_ai.cli.errors import CLIError
+        from osmosis_ai.errors import CLIError
 
         file_path = tmp_path / "data.jsonl"
         file_path.write_text("{}")
@@ -224,7 +224,7 @@ class TestPerformUpload:
         """_perform_upload aborts and raises CLIError on KeyboardInterrupt."""
         import osmosis_ai.platform.api.client as api_client_module
         import osmosis_ai.platform.api.upload as upload_module
-        from osmosis_ai.cli.errors import CLIError
+        from osmosis_ai.errors import CLIError
 
         file_path = tmp_path / "data.jsonl"
         file_path.write_text("{}")

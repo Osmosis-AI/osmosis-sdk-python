@@ -41,7 +41,13 @@ _RUBRIC_EXPORTS: frozenset[str] = frozenset(
 
 def __getattr__(name: str) -> object:
     if name in _RUBRIC_EXPORTS:
-        from .eval import rubric
+        try:
+            from .eval import rubric
+        except ImportError:
+            raise ImportError(
+                f"'{name}' requires additional dependencies: "
+                "pip install osmosis-ai[cli]"
+            ) from None
 
         value = getattr(rubric, name)
         globals()[name] = value  # cache so future access skips __getattr__

@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from osmosis_ai.cli.console import Console
-from osmosis_ai.cli.errors import CLIError
+from osmosis_ai.errors import CLIError
 from osmosis_ai.eval.common.dataset import DatasetReader
 from osmosis_ai.eval.common.errors import (
     DatasetParseError,

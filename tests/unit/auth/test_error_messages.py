@@ -12,7 +12,7 @@ from unittest.mock import patch
 
 import pytest
 
-from osmosis_ai.cli.errors import CLIError
+from osmosis_ai.errors import CLIError
 from osmosis_ai.platform.auth.credentials import Credentials, UserInfo
 from osmosis_ai.platform.auth.platform_client import (
     AuthenticationExpiredError,

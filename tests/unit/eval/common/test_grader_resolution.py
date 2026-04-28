@@ -3,7 +3,7 @@ import types
 
 import pytest
 
-from osmosis_ai.cli.errors import CLIError
+from osmosis_ai.errors import CLIError
 from osmosis_ai.eval.common.cli import _resolve_grader
 
 

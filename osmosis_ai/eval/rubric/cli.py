@@ -4,8 +4,8 @@ import asyncio
 import sys
 from pathlib import Path
 
-from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.cli.paths import parse_cli_path
+from osmosis_ai.errors import CLIError
 
 from .dataset import RubricRecord, load_rubric_dataset
 from .engine import evaluate_rubric

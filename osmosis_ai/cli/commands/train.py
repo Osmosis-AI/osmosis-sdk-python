@@ -8,7 +8,8 @@ from pathlib import Path
 import typer
 
 from osmosis_ai.cli.console import console
-from osmosis_ai.cli.errors import CLIError, not_implemented
+from osmosis_ai.cli.errors import not_implemented
+from osmosis_ai.errors import CLIError
 from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE
 
 app: typer.Typer = typer.Typer(help="Manage training runs.", no_args_is_help=True)

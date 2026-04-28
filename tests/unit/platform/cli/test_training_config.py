@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from osmosis_ai.cli.errors import CLIError
+from osmosis_ai.errors import CLIError
 from osmosis_ai.platform.cli.training_config import TrainingConfig, load_training_config
 
 # ---------------------------------------------------------------------------

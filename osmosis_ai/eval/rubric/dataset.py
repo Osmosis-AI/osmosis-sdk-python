@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from osmosis_ai.cli.errors import CLIError
+from osmosis_ai.errors import CLIError
 
 
 def extract_assistant_content(messages: list[dict[str, Any]]) -> str:

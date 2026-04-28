@@ -63,7 +63,7 @@ def delete(
 ) -> None:
     """Delete a workspace."""
     from osmosis_ai.cli.console import console
-    from osmosis_ai.cli.errors import CLIError
+    from osmosis_ai.errors import CLIError
     from osmosis_ai.platform.cli.utils import _require_auth
 
     _, credentials = _require_auth()

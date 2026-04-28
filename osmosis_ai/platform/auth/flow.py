@@ -20,7 +20,6 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-from osmosis_ai.cli.console import console
 from osmosis_ai.consts import PACKAGE_VERSION
 
 from .config import PLATFORM_URL
@@ -331,6 +330,8 @@ def device_login(timeout: float = 600.0) -> tuple[LoginResult, Credentials]:
     Returns:
         Tuple of (LoginResult, Credentials). Caller is responsible for saving credentials.
     """
+    from osmosis_ai.cli.console import console
+
     device_code_resp = request_device_code()
 
     console.print()

@@ -104,7 +104,7 @@ class LiteLLMProxy:
 
     async def preflight_check(self) -> None:
         """Send a minimal 1-token request to verify LLM connectivity."""
-        from osmosis_ai.cli.errors import CLIError
+        from osmosis_ai.errors import CLIError
 
         litellm = _get_litellm()
 
@@ -298,7 +298,7 @@ def _get_litellm():
             litellm._async_client_cleanup_registered = True
         return litellm
     except ImportError as exc:
-        from osmosis_ai.cli.errors import CLIError
+        from osmosis_ai.errors import CLIError
 
         raise CLIError(
             "LiteLLM is required. Install with: pip install litellm"

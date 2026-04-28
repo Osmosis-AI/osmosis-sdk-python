@@ -116,8 +116,8 @@ def delete(
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
 ) -> None:
     """Delete a base model."""
-    from osmosis_ai.cli.errors import CLIError
     from osmosis_ai.cli.prompts import require_confirmation
+    from osmosis_ai.errors import CLIError
     from osmosis_ai.platform.api.client import OsmosisClient
     from osmosis_ai.platform.auth.platform_client import PlatformAPIError
     from osmosis_ai.platform.cli.utils import _require_auth

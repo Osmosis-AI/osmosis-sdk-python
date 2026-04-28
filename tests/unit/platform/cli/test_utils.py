@@ -8,7 +8,7 @@ from types import SimpleNamespace
 import pytest
 
 from osmosis_ai.cli.console import Console
-from osmosis_ai.cli.errors import CLIError
+from osmosis_ai.errors import CLIError
 from osmosis_ai.platform.cli.utils import (
     fetch_all_pages,
     format_dataset_status,

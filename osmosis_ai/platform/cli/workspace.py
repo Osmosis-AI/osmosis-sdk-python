@@ -7,7 +7,6 @@ from typing import Any
 import typer
 
 from osmosis_ai.cli.console import console
-from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.cli.prompts import (
     Choice,
     Separator,
@@ -17,6 +16,7 @@ from osmosis_ai.cli.prompts import (
     select_list,
     text,
 )
+from osmosis_ai.errors import CLIError
 from osmosis_ai.platform.auth import (
     PlatformAPIError,
     ensure_active_workspace,

@@ -52,7 +52,7 @@ def test_proxy_trace_dir_set():
 
 async def test_preflight_check_bad_model_format(monkeypatch):
     """preflight_check raises CLIError on invalid model format."""
-    from osmosis_ai.cli.errors import CLIError
+    from osmosis_ai.errors import CLIError
 
     def fake_get_llm_provider(model, api_base=None):
         raise Exception("Bad model format")
@@ -76,7 +76,7 @@ async def test_preflight_check_bad_model_format(monkeypatch):
 
 async def test_preflight_check_auth_failure(monkeypatch):
     """preflight_check raises CLIError on authentication error."""
-    from osmosis_ai.cli.errors import CLIError
+    from osmosis_ai.errors import CLIError
 
     class FakeAuthError(Exception):
         pass

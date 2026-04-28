@@ -7,7 +7,7 @@ from pathlib import Path
 
 import pytest
 
-from osmosis_ai.cli.errors import CLIError
+from osmosis_ai.errors import CLIError
 
 # ── Error case: git not found ────────────────────────────────────
 

@@ -9,8 +9,8 @@ import typer
 import typer.core
 from dotenv import find_dotenv, load_dotenv
 
-from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.consts import PACKAGE_VERSION, package_name
+from osmosis_ai.errors import CLIError
 from osmosis_ai.platform.auth.platform_client import (
     AuthenticationExpiredError,
     PlatformAPIError,

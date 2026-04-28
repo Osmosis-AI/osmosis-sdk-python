@@ -136,7 +136,7 @@ class TestDeleteModel:
     def test_affected_resources_api_error(
         self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
     ) -> None:
-        from osmosis_ai.cli.errors import CLIError
+        from osmosis_ai.errors import CLIError
         from osmosis_ai.platform.auth.platform_client import PlatformAPIError
 
         class FakeClient:

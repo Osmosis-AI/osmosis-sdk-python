@@ -234,7 +234,7 @@ class EvalCommand:
             return None
         value = os.environ.get(config.llm_api_key_env)
         if not value:
-            from osmosis_ai.cli.errors import CLIError
+            from osmosis_ai.errors import CLIError
 
             raise CLIError(
                 f"Environment variable '{config.llm_api_key_env}' "
@@ -328,7 +328,7 @@ class EvalCommand:
                 self.console.print(f"  Failed: {failed}")
 
     async def _run_async(self, args: Any) -> int:
-        from osmosis_ai.cli.errors import CLIError
+        from osmosis_ai.errors import CLIError
 
         # Reject conflicting CLI flags before config load so invalid fixtures cannot mask this error.
         if args.fresh and args.retry_failed:

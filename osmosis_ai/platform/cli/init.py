@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Any
 
 from osmosis_ai.cli.console import console
-from osmosis_ai.cli.errors import CLIError
+from osmosis_ai.errors import CLIError
 from osmosis_ai.platform.auth.config import PLATFORM_URL
 from osmosis_ai.platform.auth.local_config import (
     get_active_workspace_id,
