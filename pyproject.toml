@@ -32,6 +32,7 @@ dependencies = [
     "filelock>=3.0.0,<4.0.0",
     "xxhash>=3.0.0",
     "strands-agents[litellm]>=1.29.0",
+    "openai-agents[litellm]>=0.0.10",
     "rich>=14.2.0",
     # Secure credential storage (system keychain)
     "keyring>=25.0.0",

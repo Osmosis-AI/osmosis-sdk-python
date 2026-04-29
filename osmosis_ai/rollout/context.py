@@ -1,4 +1,5 @@
 import os
+from abc import ABC, abstractmethod
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any
@@ -7,6 +8,25 @@ from osmosis_ai.rollout.types import (
     AgentWorkflowConfig,
     RolloutSample,
 )
+
+
+class SampleSource(ABC):
+    """Produces a ``RolloutSample`` for grading from a framework-specific object.
+
+    Each integration ships a small source class that wraps its underlying
+    object (an Agent, a Session, etc.) and produces a sample on demand.
+    The source is decoupled from the integration's framework classes so
+    they do not need to inherit from this ABC.
+
+    RolloutContext indexes registered sources by name and calls
+    ``get_sample`` lazily at sample collection time, passing the
+    registration name so the source can stamp it onto the returned
+    ``RolloutSample.id``.
+    """
+
+    @abstractmethod
+    def get_sample(self, name: str) -> RolloutSample:
+        """Return the current rollout sample for the given registration name."""
 
 rollout_contextvar: ContextVar["RolloutContext | None"] = ContextVar(
     "rollout_contextvar", default=None
@@ -29,7 +49,7 @@ class RolloutContext:
     chat_completions_url: str = ""
     api_key: str | None = None
     rollout_id: str = ""
-    registered_agents: dict[str, Any] = field(default_factory=dict)
+    sample_sources: dict[str, SampleSource] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not self.chat_completions_url:
@@ -46,17 +66,40 @@ class RolloutContext:
     def __exit__(self, *_: Any) -> None:
         rollout_contextvar.set(None)
 
-    def register_agent(self, sample_id: str, agent: Any) -> None:
-        self.registered_agents[sample_id] = agent
+    def register_sample_source(self, name: str, source: SampleSource) -> None:
+        """Register a sample source under the given name. The context calls
+        ``source.get_sample(name)`` lazily when ``get_samples()`` is invoked,
+        so the source can keep reflecting state that mutates until the
+        rollout ends.
+        """
+        if name in self.sample_sources:
+            raise ValueError(f"Session with {name} already exists, please give your session or agent a unique name in the workflow")
+        self.sample_sources[name] = source
+
+    def register_agent(self, name: str, agent: Any) -> None:
+        """Backwards-compat helper for objects that expose a ``messages``
+        attribute in chat-completion format. New integrations should provide
+        their own ``SampleSource`` subclass and call ``register_sample_source``.
+        """
+        self.register_sample_source(name, AgentMessagesSampleSource(agent))
 
     def get_samples(self) -> dict[str, RolloutSample]:
         return {
-            sample_id: RolloutSample(
-                id=sample_id,
-                messages=agent.messages,
-            )
-            for sample_id, agent in self.registered_agents.items()
+            name: source.get_sample(name)
+            for name, source in self.sample_sources.items()
         }
+
+
+class AgentMessagesSampleSource(SampleSource):
+    """Source for objects that expose a ``messages`` attribute in
+    chat-completion format. Used by ``RolloutContext.register_agent``.
+    """
+
+    def __init__(self, agent: Any) -> None:
+        self.agent = agent
+
+    def get_sample(self, name: str) -> RolloutSample:
+        return RolloutSample(id=name, messages=list(self.agent.messages))
 
 
 def get_rollout_context() -> RolloutContext | None:
