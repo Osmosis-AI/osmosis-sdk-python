@@ -14,7 +14,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from agents import Agent, ModelSettings, RunConfig, function_tool
 from agents.extensions.models.litellm_model import LitellmModel
-from agents.models.interface import Model, ModelProvider
+from agents.models.interface import Model
 
 from osmosis_ai.rollout.context import RolloutContext
 
@@ -71,19 +71,6 @@ class _FakeStreamingRunResult(_FakeRunResult):
             yield event
         if self._stream_exception is not None:
             raise self._stream_exception
-
-
-class _FakeModelProvider(ModelProvider):
-    def __init__(self, model: Model) -> None:
-        self.model = model
-        self.model_names: list[str | None] = []
-
-    def get_model(self, model_name: str | None) -> Model:
-        self.model_names.append(model_name)
-        return self.model
-
-    async def aclose(self) -> None:
-        return None
 
 
 class _ThreadingHTTPServer(ThreadingMixIn, HTTPServer):
@@ -217,74 +204,6 @@ class TestOpenAIAgentsRunner:
         assert result is expected
         run.assert_awaited_once()
 
-    def test_run_streamed_delegates_without_rollout_context(self):
-        from osmosis_ai.rollout.integrations.agents.openai_agents import Runner
-
-        expected = _FakeStreamingRunResult([{"role": "assistant", "content": "ok"}])
-
-        with patch(
-            "osmosis_ai.rollout.integrations.agents.openai_agents.OpenAIRunner.run_streamed",
-            return_value=expected,
-        ) as run_streamed:
-            result = Runner.run_streamed(Agent(name="main"), "hi")
-
-        assert result is expected
-        run_streamed.assert_called_once()
-
-    async def test_run_streamed_records_after_stream_completes(self, rollout_context):
-        from osmosis_ai.rollout.integrations.agents.openai_agents import Runner
-
-        messages = [{"role": "assistant", "content": "ok"}]
-
-        with patch(
-            "osmosis_ai.rollout.integrations.agents.openai_agents.OpenAIRunner.run_streamed",
-            return_value=_FakeStreamingRunResult(messages, events=[{"type": "done"}]),
-        ):
-            result = Runner.run_streamed(Agent(name="main"), "hi")
-            assert rollout_context.get_samples() == {}
-            async for _ in result.stream_events():
-                pass
-
-        assert rollout_context.get_samples()["main"].messages == messages
-
-    async def test_run_streamed_respects_agent_model_in_rollout_context(
-        self, rollout_context
-    ):
-        from osmosis_ai.rollout.integrations.agents.openai_agents import Runner
-
-        custom_model = MagicMock(spec=Model, name="UserModel")
-        model_provider = _FakeModelProvider(custom_model)
-        captured = {}
-
-        def fake_run(agent, input, *, run_config, **kwargs):
-            captured["agent_model"] = agent.model
-            captured["resolved_model"] = run_config.model_provider.get_model(
-                agent.model
-            )
-            return _FakeStreamingRunResult(
-                [{"role": "assistant", "content": "ok"}],
-                events=[{"type": "done"}],
-            )
-
-        with patch(
-            "osmosis_ai.rollout.integrations.agents.openai_agents.OpenAIRunner.run_streamed",
-            side_effect=fake_run,
-        ):
-            result = Runner.run_streamed(
-                Agent(name="main", model="gpt-4o"),
-                "hi",
-                run_config=RunConfig(model_provider=model_provider),
-            )
-            async for _ in result.stream_events():
-                pass
-
-        assert captured["agent_model"] == "gpt-4o"
-        assert captured["resolved_model"] is custom_model
-        assert model_provider.model_names == ["gpt-4o"]
-        assert rollout_context.get_samples()["main"].messages == [
-            {"role": "assistant", "content": "ok"}
-        ]
-
     async def test_agent_can_be_constructed_outside_rollout_context(
         self, rollout_context
     ):
@@ -324,7 +243,9 @@ class TestOpenAIAgentsRunner:
         assert model.base_url == "http://controller:9"
         assert model.api_key == "test-key"
 
-    async def test_agent_model_is_respected_in_rollout_context(self, rollout_context):
+    async def test_explicit_agent_model_uses_upstream_non_streaming_path(
+        self, rollout_context
+    ):
         from osmosis_ai.rollout.integrations.agents.openai_agents import Runner
 
         captured = {}
@@ -337,15 +258,14 @@ class TestOpenAIAgentsRunner:
         with (
             patch(
                 "osmosis_ai.rollout.integrations.agents.openai_agents.OpenAIRunner.run",
-                side_effect=fake_run,
-            ) as run,
+                new=fake_run,
+            ),
             patch(
-                "osmosis_ai.rollout.integrations.agents.openai_agents.OpenAIRunner.run_streamed"
+                "osmosis_ai.rollout.integrations.agents.openai_agents.OpenAIRunner.run_streamed",
             ) as run_streamed,
         ):
             await Runner.run(Agent(name="main", model="gpt-4o"), "hi")
 
-        run.assert_awaited_once()
         run_streamed.assert_not_called()
         assert captured["agent"].model == "gpt-4o"
         assert captured["run_config"].model is None
@@ -369,7 +289,7 @@ class TestOpenAIAgentsRunner:
 
         with patch(
             "osmosis_ai.rollout.integrations.agents.openai_agents.OpenAIRunner.run",
-            side_effect=fake_run,
+            new=fake_run,
         ):
             await Runner.run(
                 Agent(name="main", model="gpt-4o"),
@@ -379,7 +299,9 @@ class TestOpenAIAgentsRunner:
 
         assert captured["resolved_model"] is not None
 
-    async def test_user_supplied_run_config_model_is_respected(self, rollout_context):
+    async def test_explicit_run_config_model_uses_upstream_non_streaming_path(
+        self, rollout_context
+    ):
         from osmosis_ai.rollout.integrations.agents.openai_agents import Runner
 
         custom_model = MagicMock(spec=Model, name="UserModel")
@@ -392,10 +314,10 @@ class TestOpenAIAgentsRunner:
         with (
             patch(
                 "osmosis_ai.rollout.integrations.agents.openai_agents.OpenAIRunner.run",
-                side_effect=fake_run,
-            ) as run,
+                new=fake_run,
+            ),
             patch(
-                "osmosis_ai.rollout.integrations.agents.openai_agents.OpenAIRunner.run_streamed"
+                "osmosis_ai.rollout.integrations.agents.openai_agents.OpenAIRunner.run_streamed",
             ) as run_streamed,
         ):
             await Runner.run(
@@ -404,7 +326,6 @@ class TestOpenAIAgentsRunner:
                 run_config=RunConfig(model=custom_model),
             )
 
-        run.assert_awaited_once()
         run_streamed.assert_not_called()
         assert captured["run_config"].model is custom_model
 
@@ -427,7 +348,7 @@ class TestOpenAIAgentsRunner:
         assert seen_headers["x-rollout-id"] == "rollout-xyz"
         assert seen_headers["x-sample-id"] == "main"
 
-    async def test_resolves_collision_with_suffix_and_warns(self, rollout_context):
+    async def test_collision_raises_and_keeps_first_sample(self, rollout_context):
         from osmosis_ai.rollout.integrations.agents.openai_agents import Runner
 
         with patch(
@@ -438,14 +359,11 @@ class TestOpenAIAgentsRunner:
         ):
             agent = Agent(name="main")
             await Runner.run(agent, "turn 1")
-            with pytest.warns(RuntimeWarning, match="already used"):
+            with pytest.raises(ValueError, match="already used"):
                 await Runner.run(agent, "turn 2")
 
         samples = rollout_context.get_samples()
-        assert "main" in samples
-        other_ids = [sid for sid in samples if sid != "main"]
-        assert len(other_ids) == 1
-        assert other_ids[0].startswith("main-")
+        assert list(samples) == ["main"]
 
     async def test_explicit_sample_id_is_respected(self, rollout_context):
         from osmosis_ai.rollout.integrations.agents.openai_agents import Runner
@@ -462,7 +380,7 @@ class TestOpenAIAgentsRunner:
         assert "explicit-id" in samples
         assert "main" not in samples
 
-    async def test_forces_tracing_disabled(self, rollout_context):
+    async def test_preserves_user_tracing_setting(self, rollout_context):
         from osmosis_ai.rollout.integrations.agents.openai_agents import Runner
 
         captured = {}
@@ -475,9 +393,13 @@ class TestOpenAIAgentsRunner:
             "osmosis_ai.rollout.integrations.agents.openai_agents.OpenAIRunner.run_streamed",
             side_effect=fake_run,
         ):
-            await Runner.run(Agent(name="main"), "hi")
+            await Runner.run(
+                Agent(name="main"),
+                "hi",
+                run_config=RunConfig(tracing_disabled=False),
+            )
 
-        assert captured["run_config"].tracing_disabled is True
+        assert captured["run_config"].tracing_disabled is False
 
     async def test_forwards_runner_kwargs(self, rollout_context):
         from osmosis_ai.rollout.integrations.agents.openai_agents import Runner
@@ -528,6 +450,62 @@ class TestOpenAIAgentsRunner:
                 await Runner.run(Agent(name="main"), "hi")
 
         assert rollout_context.get_samples() == {}
+
+    def test_run_streamed_delegates_without_rollout_context(self):
+        from osmosis_ai.rollout.integrations.agents.openai_agents import Runner
+
+        expected = _FakeStreamingRunResult([{"role": "assistant", "content": "ok"}])
+
+        with patch(
+            "osmosis_ai.rollout.integrations.agents.openai_agents.OpenAIRunner.run_streamed",
+            return_value=expected,
+        ) as run_streamed:
+            result = Runner.run_streamed(Agent(name="main"), "hi")
+
+        assert result is expected
+        run_streamed.assert_called_once()
+
+    async def test_run_streamed_records_after_stream_drained(self, rollout_context):
+        from osmosis_ai.rollout.integrations.agents.openai_agents import Runner
+
+        messages = [{"role": "assistant", "content": "ok"}]
+
+        with patch(
+            "osmosis_ai.rollout.integrations.agents.openai_agents.OpenAIRunner.run_streamed",
+            return_value=_FakeStreamingRunResult(messages, events=[{"type": "done"}]),
+        ):
+            result = Runner.run_streamed(Agent(name="main"), "hi")
+            assert rollout_context.get_samples() == {}
+            async for _ in result.stream_events():
+                pass
+
+        assert rollout_context.get_samples()["main"].messages == messages
+
+    async def test_run_streamed_records_explicit_model_run(self, rollout_context):
+        from osmosis_ai.rollout.integrations.agents.openai_agents import Runner
+
+        custom_model = MagicMock(spec=Model, name="UserModel")
+        messages = [{"role": "assistant", "content": "ok"}]
+
+        with patch(
+            "osmosis_ai.rollout.integrations.agents.openai_agents.OpenAIRunner.run_streamed",
+            return_value=_FakeStreamingRunResult(messages, events=[{"type": "done"}]),
+        ):
+            result = Runner.run_streamed(
+                Agent(name="main", model="gpt-4o"),
+                "hi",
+                run_config=RunConfig(model=custom_model),
+            )
+            async for _ in result.stream_events():
+                pass
+
+        assert rollout_context.get_samples()["main"].messages == messages
+
+    def test_run_sync_raises_not_implemented(self):
+        from osmosis_ai.rollout.integrations.agents.openai_agents import Runner
+
+        with pytest.raises(NotImplementedError, match="run_sync is not supported"):
+            Runner.run_sync(Agent(name="main"), "hi")
 
     async def test_run_consumes_chunk_sse_response(self):
         from osmosis_ai.rollout.integrations.agents.openai_agents import Runner
