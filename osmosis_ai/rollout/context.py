@@ -73,33 +73,17 @@ class RolloutContext:
         rollout ends.
         """
         if name in self.sample_sources:
-            raise ValueError(f"Session with {name} already exists, please give your session or agent a unique name in the workflow")
+            raise ValueError(
+                f"Session with {name} already exists, please give your session "
+                "or agent a unique name in the workflow"
+            )
         self.sample_sources[name] = source
-
-    def register_agent(self, name: str, agent: Any) -> None:
-        """Backwards-compat helper for objects that expose a ``messages``
-        attribute in chat-completion format. New integrations should provide
-        their own ``SampleSource`` subclass and call ``register_sample_source``.
-        """
-        self.register_sample_source(name, AgentMessagesSampleSource(agent))
 
     def get_samples(self) -> dict[str, RolloutSample]:
         return {
             name: source.get_sample(name)
             for name, source in self.sample_sources.items()
         }
-
-
-class AgentMessagesSampleSource(SampleSource):
-    """Source for objects that expose a ``messages`` attribute in
-    chat-completion format. Used by ``RolloutContext.register_agent``.
-    """
-
-    def __init__(self, agent: Any) -> None:
-        self.agent = agent
-
-    def get_sample(self, name: str) -> RolloutSample:
-        return RolloutSample(id=name, messages=list(self.agent.messages))
 
 
 def get_rollout_context() -> RolloutContext | None:
