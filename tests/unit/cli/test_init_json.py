@@ -73,5 +73,5 @@ def test_init_plain_uses_renderer_without_rich_panels(
 
     captured = capsys.readouterr()
     assert exit_code == 0
-    assert captured.out.startswith("Initialized workspace in ")
+    assert captured.out.startswith("Initialized project in ")
     assert "get started" not in captured.out

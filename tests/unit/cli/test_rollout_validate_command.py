@@ -7,7 +7,7 @@ from pathlib import Path
 from osmosis_ai.cli.main import main
 
 
-def _make_workspace(root: Path, *, with_grader: bool = True) -> Path:
+def _make_project(root: Path, *, with_grader: bool = True) -> Path:
     for rel_path in (
         ".osmosis/research",
         "rollouts/demo",
@@ -17,8 +17,8 @@ def _make_workspace(root: Path, *, with_grader: bool = True) -> Path:
     ):
         (root / rel_path).mkdir(parents=True, exist_ok=True)
 
-    (root / ".osmosis" / "workspace.toml").write_text(
-        "[workspace]\nsetup_source = 'test'\n",
+    (root / ".osmosis" / "project.toml").write_text(
+        "[project]\nsetup_source = 'test'\n",
         encoding="utf-8",
     )
     (root / ".osmosis" / "research" / "program.md").write_text(
@@ -67,8 +67,8 @@ def test_validate_help_shows_config_positional(capsys) -> None:
 
 
 def test_validate_training_config_success(tmp_path, capsys) -> None:
-    workspace_root = _make_workspace(tmp_path)
-    config_path = workspace_root / "configs" / "training" / "demo.toml"
+    project_root = _make_project(tmp_path)
+    config_path = project_root / "configs" / "training" / "demo.toml"
     config_path.write_text(
         """
 [experiment]
@@ -89,8 +89,8 @@ dataset = "demo-dataset"
 
 
 def test_validate_eval_config_success(tmp_path, capsys) -> None:
-    workspace_root = _make_workspace(tmp_path)
-    config_path = workspace_root / "configs" / "eval" / "demo.toml"
+    project_root = _make_project(tmp_path)
+    config_path = project_root / "configs" / "eval" / "demo.toml"
     config_path.write_text(
         """
 [eval]
@@ -113,8 +113,8 @@ model = "openai/gpt-5-mini"
 
 
 def test_validate_rejects_noncanonical_config_path(tmp_path, capsys) -> None:
-    workspace_root = _make_workspace(tmp_path)
-    config_path = workspace_root / "demo.toml"
+    project_root = _make_project(tmp_path)
+    config_path = project_root / "demo.toml"
     config_path.write_text(
         """
 [experiment]
@@ -135,8 +135,8 @@ dataset = "demo-dataset"
 
 
 def test_validate_fails_without_grader(tmp_path, capsys) -> None:
-    workspace_root = _make_workspace(tmp_path, with_grader=False)
-    config_path = workspace_root / "configs" / "training" / "demo.toml"
+    project_root = _make_project(tmp_path, with_grader=False)
+    config_path = project_root / "configs" / "training" / "demo.toml"
     config_path.write_text(
         """
 [experiment]

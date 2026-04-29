@@ -33,7 +33,7 @@ def _stub_auth(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
-def _make_rollout_workspace(root: Path) -> Path:
+def _make_rollout_project(root: Path) -> Path:
     for rel_path in (
         ".osmosis/research",
         "rollouts/demo",
@@ -42,8 +42,8 @@ def _make_rollout_workspace(root: Path) -> Path:
         "data",
     ):
         (root / rel_path).mkdir(parents=True, exist_ok=True)
-    (root / ".osmosis" / "workspace.toml").write_text(
-        "[workspace]\nsetup_source = 'test'\n", encoding="utf-8"
+    (root / ".osmosis" / "project.toml").write_text(
+        "[project]\nsetup_source = 'test'\n", encoding="utf-8"
     )
     (root / "rollouts" / "demo" / "main.py").write_text(
         """
@@ -107,7 +107,7 @@ def test_train_metrics_json_does_not_write_default_file(
     _stub_auth(monkeypatch)
     osmosis_dir = tmp_path / ".osmosis"
     osmosis_dir.mkdir()
-    (osmosis_dir / "workspace.toml").write_text("[workspace]\n", encoding="utf-8")
+    (osmosis_dir / "project.toml").write_text("[project]\n", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
 
     class FakeClient:
@@ -310,8 +310,8 @@ def test_rollout_list_json_returns_envelope(
 def test_rollout_validate_json_returns_detail_result(
     tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    workspace = _make_rollout_workspace(tmp_path)
-    config_path = workspace / "configs" / "training" / "demo.toml"
+    project = _make_rollout_project(tmp_path)
+    config_path = project / "configs" / "training" / "demo.toml"
     config_path.write_text(
         """
 [experiment]

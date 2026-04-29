@@ -1,4 +1,9 @@
-"""Workspace contract helpers for structured Osmosis workspaces."""
+"""Project contract helpers for structured Osmosis projects.
+
+A "project" is the local on-disk directory created by `osmosis init` —
+distinct from a Platform workspace (the remote tenant managed via
+`osmosis workspace`).
+"""
 
 from __future__ import annotations
 
@@ -17,67 +22,67 @@ _REQUIRED_DIRS = (
     "data",
 )
 
-_WORKSPACE_TOML = ".osmosis/workspace.toml"
+_PROJECT_TOML = ".osmosis/project.toml"
 
 
-def find_workspace_root(start: Path) -> Path | None:
-    """Return the nearest ancestor that looks like an Osmosis workspace."""
+def find_project_root(start: Path) -> Path | None:
+    """Return the nearest ancestor that looks like an Osmosis project."""
     current = start.resolve()
     if current.is_file():
         current = current.parent
 
     for candidate in (current, *current.parents):
-        if (candidate / _WORKSPACE_TOML).is_file():
+        if (candidate / _PROJECT_TOML).is_file():
             return candidate
     return None
 
 
-def resolve_workspace_root(start: Path | None = None) -> Path:
-    """Resolve the active Osmosis workspace root from a path or the cwd."""
+def resolve_project_root(start: Path | None = None) -> Path:
+    """Resolve the active Osmosis project root from a path or the cwd."""
     candidate = start or Path.cwd()
-    workspace_root = find_workspace_root(candidate)
-    if workspace_root is None:
+    project_root = find_project_root(candidate)
+    if project_root is None:
         raise CLIError(
-            "Not in an Osmosis workspace.\n"
-            "  Expected to find .osmosis/workspace.toml in this directory or an ancestor."
+            "Not in an Osmosis project.\n"
+            "  Expected to find .osmosis/project.toml in this directory or an ancestor."
         )
-    return workspace_root
+    return project_root
 
 
-def validate_workspace_contract(workspace_root: Path) -> None:
-    """Ensure the canonical workspace layout exists."""
-    workspace_root = workspace_root.resolve()
+def validate_project_contract(project_root: Path) -> None:
+    """Ensure the canonical project layout exists."""
+    project_root = project_root.resolve()
 
     missing_paths = [
         rel_path
         for rel_path in _REQUIRED_DIRS
-        if not (workspace_root / rel_path).is_dir()
+        if not (project_root / rel_path).is_dir()
     ]
-    if not (workspace_root / _WORKSPACE_TOML).is_file():
-        missing_paths.insert(0, _WORKSPACE_TOML)
+    if not (project_root / _PROJECT_TOML).is_file():
+        missing_paths.insert(0, _PROJECT_TOML)
 
     if not missing_paths:
         return
 
     formatted = "\n".join(f"  - {path}" for path in missing_paths)
     raise CLIError(
-        "Workspace is missing required Osmosis paths.\n"
+        "Project is missing required Osmosis paths.\n"
         f"{formatted}\n"
         "\n"
-        "Re-run `osmosis init` in this workspace to restore the canonical layout."
+        "Re-run `osmosis init` in this project to restore the canonical layout."
     )
 
 
-def ensure_workspace_config_path(
+def ensure_project_config_path(
     config_path: Path,
-    workspace_root: Path,
+    project_root: Path,
     *,
     config_dir: str,
     command_label: str,
 ) -> None:
-    """Require command configs to live under the canonical workspace directory."""
+    """Require command configs to live under the canonical project directory."""
     config_path = config_path.resolve()
-    config_root = (workspace_root / config_dir).resolve()
+    config_root = (project_root / config_dir).resolve()
 
     try:
         config_path.relative_to(config_root)
@@ -100,14 +105,14 @@ def _format_backend_validation_errors(errors: list[Any]) -> str:
 
 def validate_rollout_backend(
     *,
-    workspace_root: Path,
+    project_root: Path,
     rollout: str,
     entrypoint: str,
     command_label: str,
     grader_module: str | None = None,
     grader_config_ref: str | None = None,
 ) -> None:
-    """Load and validate a rollout backend against the workspace contract."""
+    """Load and validate a rollout backend against the project contract."""
     from osmosis_ai.eval.common.cli import _resolve_grader, load_workflow
     from osmosis_ai.rollout.validator import validate_backend
 
@@ -116,7 +121,7 @@ def validate_rollout_backend(
         entrypoint=entrypoint,
         quiet=True,
         console=None,
-        workspace_root=workspace_root,
+        project_root=project_root,
     )
     if workflow_error or workflow_cls is None or entrypoint_module is None:
         raise CLIError(
@@ -157,9 +162,9 @@ def validate_rollout_backend(
 
 
 __all__ = [
-    "ensure_workspace_config_path",
-    "find_workspace_root",
-    "resolve_workspace_root",
+    "ensure_project_config_path",
+    "find_project_root",
+    "resolve_project_root",
+    "validate_project_contract",
     "validate_rollout_backend",
-    "validate_workspace_contract",
 ]

@@ -48,11 +48,11 @@ def _resolve_rollout_entrypoint(
     rollout: str,
     entrypoint: str,
     *,
-    workspace_root: Path | None = None,
+    project_root: Path | None = None,
 ) -> tuple[Path, Path]:
     """Resolve and validate the rollout root and entrypoint file path."""
-    workspace_root = (workspace_root or Path.cwd()).resolve()
-    rollout_dir = (workspace_root / "rollouts" / rollout).resolve()
+    project_root = (project_root or Path.cwd()).resolve()
+    rollout_dir = (project_root / "rollouts" / rollout).resolve()
     if not rollout_dir.is_dir():
         raise CLIError(
             f"Rollout directory not found: rollouts/{rollout}/\n"
@@ -141,13 +141,13 @@ def _load_rollout_module(
     rollout: str,
     entrypoint: str,
     *,
-    workspace_root: Path | None = None,
+    project_root: Path | None = None,
 ) -> types.ModuleType:
     """Load an entrypoint as an isolated synthetic package subtree."""
     rollout_dir, entrypoint_path = _resolve_rollout_entrypoint(
         rollout,
         entrypoint,
-        workspace_root=workspace_root,
+        project_root=project_root,
     )
     package_name = _synthetic_rollout_package_name(rollout_dir)
     _clear_rollout_module_cache(package_name)
@@ -190,7 +190,7 @@ def _resolve_workflow(
     rollout: str,
     entrypoint: str,
     *,
-    workspace_root: Path | None = None,
+    project_root: Path | None = None,
 ) -> tuple[type, Any, str]:
     """Resolve an AgentWorkflow subclass and its config.
 
@@ -210,7 +210,7 @@ def _resolve_workflow(
     mod = _load_rollout_module(
         rollout,
         entrypoint,
-        workspace_root=workspace_root,
+        project_root=project_root,
     )
 
     workflow_pairs = [
@@ -257,7 +257,7 @@ def load_workflow(
     entrypoint: str,
     quiet: bool = False,
     console: Console | None = None,
-    workspace_root: Path | None = None,
+    project_root: Path | None = None,
 ) -> tuple[type | None, Any, str | None, str | None]:
     """Load an AgentWorkflow class and its config.
 
@@ -270,7 +270,7 @@ def load_workflow(
         workflow_cls, workflow_config, entrypoint_module = _resolve_workflow(
             rollout=rollout,
             entrypoint=entrypoint,
-            workspace_root=workspace_root,
+            project_root=project_root,
         )
     except Exception as e:
         detail = str(e)

@@ -217,7 +217,7 @@ class TestSubmit:
     )
 
     @staticmethod
-    def _write_workspace(tmp_path: Path, *, rollout: str = "calculator") -> Path:
+    def _write_project(tmp_path: Path, *, rollout: str = "calculator") -> Path:
         for rel_path in (
             ".osmosis/research",
             f"rollouts/{rollout}",
@@ -227,8 +227,8 @@ class TestSubmit:
         ):
             (tmp_path / rel_path).mkdir(parents=True, exist_ok=True)
 
-        (tmp_path / ".osmosis" / "workspace.toml").write_text(
-            "[workspace]\nsetup_source = 'test'\n",
+        (tmp_path / ".osmosis" / "project.toml").write_text(
+            "[project]\nsetup_source = 'test'\n",
             encoding="utf-8",
         )
         (tmp_path / "rollouts" / rollout / "main.py").write_text(
@@ -251,8 +251,8 @@ class TestGrader(Grader):
 
     @classmethod
     def _write_config(cls, tmp_path: Path) -> Path:
-        workspace_root = cls._write_workspace(tmp_path)
-        path = workspace_root / "configs" / "training" / "train.toml"
+        project_root = cls._write_project(tmp_path)
+        path = project_root / "configs" / "training" / "train.toml"
         path.write_text(
             """
 [experiment]
@@ -356,8 +356,8 @@ total_epochs = 1
         console_capture: StringIO,
         tmp_path: Path,
     ) -> None:
-        workspace_root = self._write_workspace(tmp_path, rollout="r")
-        path = workspace_root / "configs" / "training" / "train.toml"
+        project_root = self._write_project(tmp_path, rollout="r")
+        path = project_root / "configs" / "training" / "train.toml"
         path.write_text(
             """
 [experiment]
@@ -411,7 +411,7 @@ commit_sha = "deadbeef"
         self,
         tmp_path: Path,
     ) -> None:
-        self._write_workspace(tmp_path)
+        self._write_project(tmp_path)
         path = tmp_path / "train.toml"
         path.write_text(
             """
@@ -431,8 +431,8 @@ dataset = "d"
         self,
         tmp_path: Path,
     ) -> None:
-        workspace_root = self._write_workspace(tmp_path, rollout="graderless")
-        (workspace_root / "rollouts" / "graderless" / "main.py").write_text(
+        project_root = self._write_project(tmp_path, rollout="graderless")
+        (project_root / "rollouts" / "graderless" / "main.py").write_text(
             """
 from osmosis_ai.rollout import AgentWorkflow
 
@@ -443,7 +443,7 @@ class TestWorkflow(AgentWorkflow):
 """.strip(),
             encoding="utf-8",
         )
-        path = workspace_root / "configs" / "training" / "graderless.toml"
+        path = project_root / "configs" / "training" / "graderless.toml"
         path.write_text(
             """
 [experiment]

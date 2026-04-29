@@ -20,35 +20,35 @@ def _resolve_validation_target(
     config_path: Path,
 ) -> tuple[str, Path, str, str, str | None, str | None]:
     from osmosis_ai.eval.config import load_eval_config
-    from osmosis_ai.platform.cli.training_config import load_training_config
-    from osmosis_ai.platform.cli.workspace_contract import (
-        ensure_workspace_config_path,
-        resolve_workspace_root,
-        validate_workspace_contract,
+    from osmosis_ai.platform.cli.project_contract import (
+        ensure_project_config_path,
+        resolve_project_root,
+        validate_project_contract,
     )
+    from osmosis_ai.platform.cli.training_config import load_training_config
 
-    workspace_root = resolve_workspace_root(config_path)
-    validate_workspace_contract(workspace_root)
+    project_root = resolve_project_root(config_path)
+    validate_project_contract(project_root)
 
     resolved_path = config_path.resolve()
-    training_dir = (workspace_root / "configs" / "training").resolve()
-    eval_dir = (workspace_root / "configs" / "eval").resolve()
+    training_dir = (project_root / "configs" / "training").resolve()
+    eval_dir = (project_root / "configs" / "eval").resolve()
 
     try:
         resolved_path.relative_to(training_dir)
     except ValueError:
         pass
     else:
-        ensure_workspace_config_path(
+        ensure_project_config_path(
             config_path,
-            workspace_root,
+            project_root,
             config_dir="configs/training",
             command_label="`osmosis rollout validate`",
         )
         config = load_training_config(config_path)
         return (
             "training",
-            workspace_root,
+            project_root,
             config.experiment_rollout,
             config.experiment_entrypoint,
             None,
@@ -60,16 +60,16 @@ def _resolve_validation_target(
     except ValueError:
         pass
     else:
-        ensure_workspace_config_path(
+        ensure_project_config_path(
             config_path,
-            workspace_root,
+            project_root,
             config_dir="configs/eval",
             command_label="`osmosis rollout validate`",
         )
         config = load_eval_config(config_path)
         return (
             "eval",
-            workspace_root,
+            project_root,
             config.eval_rollout,
             config.eval_entrypoint,
             config.grader_module,
@@ -84,11 +84,11 @@ def _resolve_validation_target(
 
 def _validate_rollout_config(*, config_path: Path) -> Any:
     from osmosis_ai.cli.output import DetailField, DetailResult
-    from osmosis_ai.platform.cli.workspace_contract import validate_rollout_backend
+    from osmosis_ai.platform.cli.project_contract import validate_rollout_backend
 
     (
         config_kind,
-        workspace_root,
+        project_root,
         rollout,
         entrypoint,
         grader_module,
@@ -96,7 +96,7 @@ def _validate_rollout_config(*, config_path: Path) -> Any:
     ) = _resolve_validation_target(config_path)
 
     validate_rollout_backend(
-        workspace_root=workspace_root,
+        project_root=project_root,
         rollout=rollout,
         entrypoint=entrypoint,
         command_label="`osmosis rollout validate`",
@@ -154,7 +154,7 @@ def list_rollouts(
     ),
     all_: bool = typer.Option(False, "--all", help="Show all rollouts."),
 ) -> Any:
-    """List rollouts in the current workspace."""
+    """List rollouts in the current platform workspace."""
     from osmosis_ai.cli.output import (
         ListColumn,
         ListResult,

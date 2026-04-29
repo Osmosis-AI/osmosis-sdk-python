@@ -5,7 +5,7 @@ Run **`osmosis eval run`** with a TOML file to execute an **AgentWorkflow** agai
 Results are cached on disk so long runs can resume after interruption.
 
 Eval configs must live under `configs/eval/` inside a structured Osmosis
-workspace.
+project.
 
 ## TOML configuration
 

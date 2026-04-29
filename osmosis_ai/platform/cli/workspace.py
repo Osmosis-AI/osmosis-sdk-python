@@ -690,58 +690,6 @@ def switch_workspace(workspace: str) -> Any:
     return None
 
 
-def validate_workspace(path: Any) -> Any:
-    """Validate the canonical Osmosis workspace structure."""
-    from osmosis_ai.cli.output import (
-        DetailField,
-        DetailResult,
-        OutputFormat,
-        get_output_context,
-    )
-    from osmosis_ai.platform.cli.workspace_contract import (
-        resolve_workspace_root,
-        validate_workspace_contract,
-    )
-
-    output = get_output_context()
-    workspace_root = resolve_workspace_root(path)
-    validate_workspace_contract(workspace_root)
-    rows = [
-        ("Root", str(workspace_root)),
-        ("Workspace metadata", ".osmosis/workspace.toml"),
-        ("Research", ".osmosis/research/"),
-        ("Rollouts", "rollouts/"),
-        ("Training configs", "configs/training/"),
-        ("Eval configs", "configs/eval/"),
-        ("Datasets", "data/"),
-    ]
-    if output.format is OutputFormat.rich:
-        console.table(
-            [
-                ("Root", console.format_text(workspace_root)),
-                ("Workspace metadata", ".osmosis/workspace.toml"),
-                ("Research", ".osmosis/research/"),
-                ("Rollouts", "rollouts/"),
-                ("Training configs", "configs/training/"),
-                ("Eval configs", "configs/eval/"),
-                ("Datasets", "data/"),
-            ],
-            title="Workspace Contract",
-        )
-        console.print("Workspace contract is valid.", style="green")
-        return None
-
-    return DetailResult(
-        title="Workspace Contract",
-        data={
-            "root": str(workspace_root),
-            "required_paths": [value for label, value in rows if label != "Root"],
-            "valid": True,
-        },
-        fields=[DetailField(label=label, value=value) for label, value in rows],
-    )
-
-
 @app.callback(invoke_without_command=True)
 def workspace() -> None:
     """Manage workspace context."""

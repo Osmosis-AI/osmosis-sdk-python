@@ -1,12 +1,12 @@
-# Osmosis Workspace
+# Osmosis Project
 
-This is a **structured Osmosis workspace**. Do not invent a different
+This is a **structured Osmosis project**. Do not invent a different
 top-level layout.
 
-## Workspace contract
+## Project contract
 
 - Required paths:
-  - `.osmosis/workspace.toml`
+  - `.osmosis/project.toml`
   - `.osmosis/research/`
   - `rollouts/`
   - `configs/training/`
@@ -27,7 +27,7 @@ top-level layout.
   explicit grader override where supported).
 - Tools should be async Python functions with type hints and docstrings.
 - `Grader.grade` must be async and return a float in `[0.0, 1.0]`.
-- Before `osmosis --json train submit`, validate the workspace and run a local eval.
+- Before `osmosis --json train submit`, validate the project and run a local eval.
 
 ## AI skills
 
@@ -43,7 +43,7 @@ Detailed workflow guidance lives in the **`osmosis` agent plugin**:
 
 ### Enabling the plugin
 
-- **Claude Code** — `.claude/settings.json` in this workspace registers the
+- **Claude Code** — `.claude/settings.json` in this project registers the
   plugin automatically; on first open, Claude Code prompts to install.
 - **Cursor** — Settings → Rules → "Add Remote Rule" → paste the plugin repo
   URL (skills render as Remote Rules in Cursor).
@@ -62,7 +62,7 @@ before modifying plugin state.
 ## Common commands
 
 ```bash
-osmosis --json workspace validate
+osmosis --json project validate
 osmosis --json rollout validate configs/eval/<name>.toml
 osmosis --json rollout validate configs/training/<run>.toml
 osmosis --json eval run configs/eval/<name>.toml
