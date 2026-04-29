@@ -1,11 +1,13 @@
 from typing import Any
 
-from agents import Agent, Runner
+from agents import Runner
+from agents.models.interface import Model
 
 from multiply_rollout_openai.tools import multiply_tool
 from osmosis_ai.rollout.agent_workflow import AgentWorkflow
 from osmosis_ai.rollout.context import AgentWorkflowContext
 from osmosis_ai.rollout.integrations.agents.openai_agents import (
+    OsmosisAgent,
     OsmosisRolloutModel,
     OsmosisSession,
 )
@@ -15,15 +17,12 @@ from osmosis_ai.rollout.types import AgentWorkflowConfig
 class MultiplyAgentWorkflowConfig(AgentWorkflowConfig):
     name: str = "MultiplyAgentWorkflow"
     description: str = "Multiply two numbers"
-    instructions: str
+    model: Model
     tools: Any
 
 
 multiply_workflow_config = MultiplyAgentWorkflowConfig(
-    instructions=(
-        "You are a math assistant. Use the multiply tool to compute products. "
-        "When you have the answer, respond with `#### <number>` on its own line."
-    ),
+    model=OsmosisRolloutModel(temperature=1.0, top_p=1.0, max_tokens=4096),
     tools=[multiply_tool],
 )
 
@@ -32,17 +31,16 @@ class MultiplyWorkflow(AgentWorkflow):
     async def run(self, ctx: AgentWorkflowContext):
         config = ctx.config
 
-        agent = Agent(
+        agent = OsmosisAgent(
             name="multiply",
-            instructions=config.instructions,
-            model=OsmosisRolloutModel(),
+            model=config.model,
             tools=config.tools,
         )
 
         session = OsmosisSession(name="multiply")
         await Runner.run(
             agent,
-            input=ctx.prompt,
+            ctx.prompt,
             session=session,
             max_turns=8,
         )
