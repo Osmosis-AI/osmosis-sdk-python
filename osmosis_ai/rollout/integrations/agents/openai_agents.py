@@ -1,27 +1,3 @@
-"""OpenAI Agents SDK integration for Osmosis rollouts.
-
-Usage::
-
-    from osmosis_ai.rollout.integrations.agents.openai_agents import (
-        OsmosisAgent,
-        OsmosisMemorySession,
-        OsmosisRolloutModel,
-    )
-
-    # In your workflow config (no RolloutContext yet):
-    config_model = OsmosisRolloutModel(temperature=0.7)
-
-    # Inside your workflow run (RolloutContext is active):
-    agent = OsmosisAgent(name="bot", model=config_model, tools=[...])
-    session = OsmosisMemorySession(name="math-rollout")
-    result = await Runner.run(agent, prompt, session=session)
-
-``OsmosisAgent`` swaps the placeholder ``OsmosisRolloutModel`` for a real
-streaming-only LitellmModel wired to the active ``RolloutContext``. The
-session is per-run: construct one per ``Runner.run`` so its name reaches the
-model via a ContextVar set when the runner reads from the session.
-"""
-
 import uuid
 from collections.abc import AsyncIterator
 from contextvars import ContextVar
