@@ -106,7 +106,7 @@ def list_deployments(
     ),
     all_: bool = typer.Option(False, "--all", help="Show all deployments."),
 ) -> Any:
-    """List LoRA deployments in the current workspace."""
+    """List LoRA deployments in the current platform workspace."""
     from osmosis_ai.cli.output import (
         ListColumn,
         ListResult,

@@ -1,3 +1,3 @@
-# Osmosis Workspace
+# Osmosis Project
 
-Before beginning any task, read `AGENTS.md` in this workspace.
+Before beginning any task, read `AGENTS.md` in this project.

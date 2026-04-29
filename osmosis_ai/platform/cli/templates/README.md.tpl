@@ -1,6 +1,6 @@
 # {name}
 
-Structured Osmosis workspace for task-specific training.
+Structured Osmosis project for task-specific training.
 
 ## Quick start
 
@@ -11,14 +11,14 @@ pip install -e .
 # Authenticate with Osmosis
 osmosis auth login
 
-# Verify the canonical workspace layout
-osmosis --json workspace validate
+# Verify the canonical project layout
+osmosis --json project validate
 ```
 
 ## Ask your agent
 
 ```text
 I want to train a model for <task>. Read .osmosis/research/program.md,
-create a baseline rollout in this workspace, iterate locally with evals,
+create a baseline rollout in this project, iterate locally with evals,
 and prepare a training config. Use `osmosis --json` for Osmosis CLI commands.
 ```

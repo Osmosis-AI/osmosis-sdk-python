@@ -67,7 +67,7 @@ def get_rollout_context() -> RolloutContext | None:
 class GraderContext:
     label: str | None = None
     samples: dict[str, RolloutSample] = field(default_factory=dict)
-    workspace_path: str | None = None
+    project_path: str | None = None
 
     def get_samples(self) -> dict[str, RolloutSample]:
         return self.samples

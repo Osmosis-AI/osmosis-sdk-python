@@ -1,4 +1,4 @@
-"""Tests for workspace init (osmosis init <name>) core flow and error handling."""
+"""Tests for project init (osmosis init <name>) core flow and error handling."""
 
 from __future__ import annotations
 
@@ -19,30 +19,30 @@ def test_init_raises_when_git_not_found(monkeypatch) -> None:
     monkeypatch.setattr(init_module.shutil, "which", lambda cmd: None)
 
     with pytest.raises(CLIError, match=r"[Gg]it"):
-        init_module.init(name="test-ws")
+        init_module.init(name="test-project")
 
 
-# ── Error case: directory exists without workspace.toml ─────────────────
+# ── Error case: directory exists without project.toml ─────────────────
 
 
-def test_init_raises_when_directory_exists_without_workspace_toml(
+def test_init_raises_when_directory_exists_without_project_toml(
     monkeypatch, tmp_path: Path
 ) -> None:
-    """init raises CLIError if target dir exists but has no .osmosis/workspace.toml."""
+    """init raises CLIError if target dir exists but has no .osmosis/project.toml."""
     import osmosis_ai.platform.cli.init as init_module
 
     monkeypatch.setattr(init_module.shutil, "which", lambda cmd: "git")
 
-    target = tmp_path / "my-workspace"
+    target = tmp_path / "my-project"
     target.mkdir()
 
     monkeypatch.chdir(tmp_path)
 
     with pytest.raises(CLIError, match="already exists"):
-        init_module.init(name="my-workspace")
+        init_module.init(name="my-project")
 
 
-# ── Re-entry: directory exists with .osmosis/workspace.toml ─────────────
+# ── Re-entry: directory exists with .osmosis/project.toml ─────────────
 
 
 def _stub_scaffold_fns(monkeypatch, module) -> None:
@@ -51,29 +51,29 @@ def _stub_scaffold_fns(monkeypatch, module) -> None:
         "_write_scaffold",
         "_git_init",
         "_git_initial_commit",
-        "_update_workspace_metadata",
+        "_update_project_metadata",
         "_print_next_steps",
     ):
         monkeypatch.setattr(module, fn_name, lambda *a, **kw: None)
 
 
-def test_init_rerun_on_existing_workspace(monkeypatch, tmp_path: Path) -> None:
-    """init enters update mode when target dir has .osmosis/workspace.toml."""
+def test_init_rerun_on_existing_project(monkeypatch, tmp_path: Path) -> None:
+    """init enters update mode when target dir has .osmosis/project.toml."""
     import osmosis_ai.platform.cli.init as init_module
 
     monkeypatch.setattr(init_module.shutil, "which", lambda cmd: "git")
     _stub_scaffold_fns(monkeypatch, init_module)
 
-    target = tmp_path / "my-workspace"
+    target = tmp_path / "my-project"
     target.mkdir()
     osmosis_dir = target / ".osmosis"
     osmosis_dir.mkdir()
-    (osmosis_dir / "workspace.toml").write_text('[workspace]\nname = "my-workspace"\n')
+    (osmosis_dir / "project.toml").write_text('[project]\nname = "my-project"\n')
 
     monkeypatch.chdir(tmp_path)
 
     # Should NOT raise — enters update mode
-    init_module.init(name="my-workspace")
+    init_module.init(name="my-project")
 
 
 # ── Cleanup on scaffold failure ──────────────────────────────────
@@ -92,11 +92,11 @@ def test_init_cleanup_on_scaffold_failure(monkeypatch, tmp_path: Path) -> None:
 
     monkeypatch.chdir(tmp_path)
 
-    target = tmp_path / "fail-ws"
+    target = tmp_path / "fail-project"
     assert not target.exists()
 
     with pytest.raises(CLIError, match="scaffold failed"):
-        init_module.init(name="fail-ws")
+        init_module.init(name="fail-project")
 
     # Directory should have been cleaned up
     assert not target.exists()
@@ -116,7 +116,7 @@ def test_init_here_raises_when_not_empty(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.chdir(tmp_path)
 
     with pytest.raises(CLIError, match="not empty"):
-        init_module.init(name="test-ws", here=True)
+        init_module.init(name="test-project", here=True)
 
 
 # ── --here: allows directory with only .git/ ──────────────────────
@@ -134,7 +134,7 @@ def test_init_here_allows_git_dir(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.chdir(tmp_path)
 
     # Should NOT raise
-    init_module.init(name="test-ws", here=True)
+    init_module.init(name="test-project", here=True)
 
 
 def test_init_raises_when_selected_workspace_has_connected_repo(
@@ -157,9 +157,9 @@ def test_init_raises_when_selected_workspace_has_connected_repo(
 
     monkeypatch.chdir(tmp_path)
 
-    target = tmp_path / "test-ws"
+    target = tmp_path / "test-project"
     with pytest.raises(CLIError, match="already connected"):
-        init_module.init(name="test-ws")
+        init_module.init(name="test-project")
 
     assert not target.exists()
 
@@ -186,7 +186,7 @@ def test_init_here_raises_when_selected_workspace_has_connected_repo(
     monkeypatch.chdir(tmp_path)
 
     with pytest.raises(CLIError, match=r"git clone https://github\.com/acme/rollouts"):
-        init_module.init(name="test-ws", here=True)
+        init_module.init(name="test-project", here=True)
 
 
 def test_init_ignores_auth_expiry_in_best_effort_workspace_lookup(
@@ -210,7 +210,7 @@ def test_init_ignores_auth_expiry_in_best_effort_workspace_lookup(
         "_write_scaffold",
         "_git_init",
         "_git_initial_commit",
-        "_update_workspace_metadata",
+        "_update_project_metadata",
     ):
         monkeypatch.setattr(init_module, fn_name, lambda *a, **kw: None)
     monkeypatch.setattr(init_module, "get_active_workspace_name", lambda: "team-alpha")
@@ -219,9 +219,9 @@ def test_init_ignores_auth_expiry_in_best_effort_workspace_lookup(
 
     monkeypatch.chdir(tmp_path)
 
-    init_module.init(name="test-ws")
+    init_module.init(name="test-project")
 
-    assert (tmp_path / "test-ws").is_dir()
+    assert (tmp_path / "test-project").is_dir()
 
 
 def test_init_auto_selects_single_workspace_for_git_context(
@@ -266,7 +266,7 @@ def test_init_auto_selects_single_workspace_for_git_context(
         "_write_scaffold",
         "_git_init",
         "_git_initial_commit",
-        "_update_workspace_metadata",
+        "_update_project_metadata",
     ):
         monkeypatch.setattr(init_module, fn_name, lambda *a, **kw: None)
     monkeypatch.setattr(init_module, "get_active_workspace_name", lambda: None)
@@ -277,9 +277,9 @@ def test_init_auto_selects_single_workspace_for_git_context(
 
     monkeypatch.chdir(tmp_path)
 
-    init_module.init(name="test-ws")
+    init_module.init(name="test-project")
 
-    assert (tmp_path / "test-ws").is_dir()
+    assert (tmp_path / "test-project").is_dir()
     # Only one API call — fetch + verify + extract metadata are unified.
     assert len(calls) == 1
     # Auto-selection should have been persisted.
@@ -321,9 +321,9 @@ def test_init_blocks_when_auto_selected_workspace_has_connected_repo(
 
     monkeypatch.chdir(tmp_path)
 
-    target = tmp_path / "test-ws"
+    target = tmp_path / "test-project"
     with pytest.raises(CLIError, match="already connected"):
-        init_module.init(name="test-ws")
+        init_module.init(name="test-project")
 
     assert not target.exists()
 
@@ -359,7 +359,7 @@ def test_init_does_not_trust_stale_local_workspace_id(
         "_write_scaffold",
         "_git_init",
         "_git_initial_commit",
-        "_update_workspace_metadata",
+        "_update_project_metadata",
     ):
         monkeypatch.setattr(init_module, fn_name, lambda *a, **kw: None)
     # Local state points to a workspace the user no longer belongs to.
@@ -371,7 +371,7 @@ def test_init_does_not_trust_stale_local_workspace_id(
     monkeypatch.chdir(tmp_path)
 
     # init should still succeed (empty Git context, no false connected-repo block).
-    init_module.init(name="test-ws")
+    init_module.init(name="test-project")
 
     context = init_module._selected_workspace_git_context()
     # Stale id wasn't trusted, and there's no unambiguous auto-selection.
@@ -389,7 +389,7 @@ class TestRenderTemplate:
         from osmosis_ai.platform.cli.init import _render_template
 
         result = _render_template(
-            "workspace.toml.tpl",
+            "project.toml.tpl",
             {
                 "sdk_version": "1.2.3",
                 "created_at": "2026-01-01T00:00:00+00:00",
@@ -415,12 +415,12 @@ class TestWriteScaffold:
         """_write_scaffold creates all expected directories, files, and .gitkeep markers."""
         from osmosis_ai.platform.cli.init import _write_scaffold
 
-        target = tmp_path / "my-ws"
+        target = tmp_path / "my-project"
         target.mkdir()
-        _write_scaffold(target, "my-ws")
+        _write_scaffold(target, "my-project")
 
         # Config files (rendered)
-        assert (target / ".osmosis" / "workspace.toml").is_file()
+        assert (target / ".osmosis" / "project.toml").is_file()
         assert (target / "pyproject.toml").is_file()
         assert (target / ".gitignore").is_file()
         assert (target / "README.md").is_file()
@@ -443,7 +443,7 @@ class TestWriteScaffold:
         # Claude Code plugin marketplace registration
         assert (target / ".claude" / "settings.json").is_file()
 
-        # Skills now live in the `osmosis` plugin repo, not the workspace.
+        # Skills now live in the `osmosis` plugin repo, not the project.
         assert not (target / ".osmosis" / "skills").exists()
 
         # Directories exist
@@ -455,26 +455,26 @@ class TestWriteScaffold:
         assert (target / "configs" / "eval").is_dir()
         assert (target / "data").is_dir()
 
-    def test_workspace_toml_contains_sdk_version_and_created_at(
+    def test_project_toml_contains_sdk_version_and_created_at(
         self, tmp_path: Path
     ) -> None:
-        """workspace.toml contains sdk_version from PACKAGE_VERSION and a created_at timestamp."""
+        """project.toml contains sdk_version from PACKAGE_VERSION and a created_at timestamp."""
         from osmosis_ai.consts import PACKAGE_VERSION
         from osmosis_ai.platform.cli.init import _write_scaffold
 
-        target = tmp_path / "ws"
+        target = tmp_path / "project"
         target.mkdir()
-        _write_scaffold(target, "ws")
+        _write_scaffold(target, "project")
 
-        content = (target / ".osmosis" / "workspace.toml").read_text(encoding="utf-8")
+        content = (target / ".osmosis" / "project.toml").read_text(encoding="utf-8")
         assert f'sdk_version = "{PACKAGE_VERSION}"' in content
         assert "created_at = " in content
         assert 'setup_source = "osmosis init"' in content
 
-    def test_pyproject_toml_contains_workspace_name_dependency_and_python_requirement(
+    def test_pyproject_toml_contains_project_name_dependency_and_python_requirement(
         self, tmp_path: Path
     ) -> None:
-        """pyproject.toml contains the workspace name, dependency, and Python floor."""
+        """pyproject.toml contains the project name, dependency, and Python floor."""
         from osmosis_ai.consts import PACKAGE_VERSION
         from osmosis_ai.platform.cli.init import _write_scaffold
 
@@ -496,9 +496,9 @@ class TestWriteScaffold:
         monkeypatch.setenv("OSMOSIS_PLUGIN_REPO", "my-org/my-plugins")
         monkeypatch.setenv("OSMOSIS_PLUGIN_MARKETPLACE", "my-marketplace")
 
-        target = tmp_path / "ws"
+        target = tmp_path / "project"
         target.mkdir()
-        _write_scaffold(target, "ws")
+        _write_scaffold(target, "project")
 
         content = (target / "AGENTS.md").read_text(encoding="utf-8")
         assert "codex plugin marketplace add my-org/my-plugins" in content
@@ -509,40 +509,40 @@ class TestWriteScaffold:
         """.gitignore includes Python-related patterns."""
         from osmosis_ai.platform.cli.init import _write_scaffold
 
-        target = tmp_path / "ws"
+        target = tmp_path / "project"
         target.mkdir()
-        _write_scaffold(target, "ws")
+        _write_scaffold(target, "project")
 
         content = (target / ".gitignore").read_text(encoding="utf-8")
         assert "__pycache__" in content
         assert ".venv" in content
         assert ".env" in content
 
-    def test_readme_contains_workspace_name(self, tmp_path: Path) -> None:
-        """README.md contains the workspace name."""
+    def test_readme_contains_project_name(self, tmp_path: Path) -> None:
+        """README.md contains the project name."""
         from osmosis_ai.platform.cli.init import _write_scaffold
 
-        target = tmp_path / "ws"
+        target = tmp_path / "project"
         target.mkdir()
-        _write_scaffold(target, "my-awesome-ws")
+        _write_scaffold(target, "my-awesome-project")
 
         content = (target / "README.md").read_text(encoding="utf-8")
-        assert "my-awesome-ws" in content
-        assert "osmosis --json workspace validate" in content
+        assert "my-awesome-project" in content
+        assert "osmosis --json project validate" in content
         assert ".osmosis/research/program.md" in content
 
     def test_is_idempotent(self, tmp_path: Path) -> None:
         """Running _write_scaffold twice does NOT overwrite pre-existing files."""
         from osmosis_ai.platform.cli.init import _write_scaffold
 
-        target = tmp_path / "ws"
+        target = tmp_path / "project"
         target.mkdir()
 
-        _write_scaffold(target, "ws")
+        _write_scaffold(target, "project")
 
-        original_ws = "custom workspace content"
-        (target / ".osmosis" / "workspace.toml").write_text(
-            original_ws, encoding="utf-8"
+        original_proj = "custom project content"
+        (target / ".osmosis" / "project.toml").write_text(
+            original_proj, encoding="utf-8"
         )
         original_pyproject = "custom pyproject content"
         (target / "pyproject.toml").write_text(original_pyproject, encoding="utf-8")
@@ -557,11 +557,11 @@ class TestWriteScaffold:
         original_agents = "custom agents"
         (target / "AGENTS.md").write_text(original_agents, encoding="utf-8")
 
-        _write_scaffold(target, "ws")
+        _write_scaffold(target, "project")
 
-        assert (target / ".osmosis" / "workspace.toml").read_text(
+        assert (target / ".osmosis" / "project.toml").read_text(
             encoding="utf-8"
-        ) == original_ws
+        ) == original_proj
         assert (target / "pyproject.toml").read_text(
             encoding="utf-8"
         ) == original_pyproject
@@ -581,9 +581,9 @@ class TestWriteScaffoldUpdate:
         """update=True overwrites AGENTS.md, CLAUDE.md, and .claude/settings.json."""
         from osmosis_ai.platform.cli.init import _write_scaffold
 
-        target = tmp_path / "ws"
+        target = tmp_path / "project"
         target.mkdir()
-        _write_scaffold(target, "ws")
+        _write_scaffold(target, "project")
 
         # Tamper with overwrite-on-update files
         (target / "AGENTS.md").write_text("custom agents", encoding="utf-8")
@@ -594,7 +594,7 @@ class TestWriteScaffoldUpdate:
         settings = target / ".claude" / "settings.json"
         settings.write_text("{}", encoding="utf-8")
 
-        _write_scaffold(target, "ws", update=True)
+        _write_scaffold(target, "project", update=True)
 
         assert (target / "AGENTS.md").read_text(encoding="utf-8") != "custom agents"
         assert (target / "CLAUDE.md").read_text(encoding="utf-8") != "custom claude"
@@ -607,9 +607,9 @@ class TestWriteScaffoldUpdate:
         """update=True does NOT overwrite pyproject.toml, .gitignore, README, or training config."""
         from osmosis_ai.platform.cli.init import _write_scaffold
 
-        target = tmp_path / "ws"
+        target = tmp_path / "project"
         target.mkdir()
-        _write_scaffold(target, "ws")
+        _write_scaffold(target, "project")
 
         custom = {
             "pyproject.toml": "custom pyproject",
@@ -622,7 +622,7 @@ class TestWriteScaffoldUpdate:
             "custom training", encoding="utf-8"
         )
 
-        _write_scaffold(target, "ws", update=True)
+        _write_scaffold(target, "project", update=True)
 
         for rel, content in custom.items():
             assert (target / rel).read_text(encoding="utf-8") == content
@@ -630,20 +630,20 @@ class TestWriteScaffoldUpdate:
             encoding="utf-8"
         ) == "custom training"
 
-    def test_update_does_not_overwrite_workspace_toml(self, tmp_path: Path) -> None:
-        """update=True leaves workspace.toml alone (handled by _update_workspace_metadata)."""
+    def test_update_does_not_overwrite_project_toml(self, tmp_path: Path) -> None:
+        """update=True leaves project.toml alone (handled by _update_project_metadata)."""
         from osmosis_ai.platform.cli.init import _write_scaffold
 
-        target = tmp_path / "ws"
+        target = tmp_path / "project"
         target.mkdir()
-        _write_scaffold(target, "ws")
+        _write_scaffold(target, "project")
 
-        original = "custom workspace toml"
-        (target / ".osmosis" / "workspace.toml").write_text(original, encoding="utf-8")
+        original = "custom project toml"
+        (target / ".osmosis" / "project.toml").write_text(original, encoding="utf-8")
 
-        _write_scaffold(target, "ws", update=True)
+        _write_scaffold(target, "project", update=True)
 
-        assert (target / ".osmosis" / "workspace.toml").read_text(
+        assert (target / ".osmosis" / "project.toml").read_text(
             encoding="utf-8"
         ) == original
 
@@ -664,9 +664,9 @@ class TestClaudePluginSettings:
             _write_scaffold,
         )
 
-        target = tmp_path / "ws"
+        target = tmp_path / "project"
         target.mkdir()
-        _write_scaffold(target, "ws")
+        _write_scaffold(target, "project")
 
         data = json.loads(
             (target / ".claude" / "settings.json").read_text(encoding="utf-8")
@@ -691,9 +691,9 @@ class TestClaudePluginSettings:
         monkeypatch.setenv("OSMOSIS_PLUGIN_REPO", "my-org/my-plugins")
         monkeypatch.setenv("OSMOSIS_PLUGIN_MARKETPLACE", "my-marketplace")
 
-        target = tmp_path / "ws"
+        target = tmp_path / "project"
         target.mkdir()
-        _write_scaffold(target, "ws")
+        _write_scaffold(target, "project")
 
         data = json.loads(
             (target / ".claude" / "settings.json").read_text(encoding="utf-8")
@@ -706,42 +706,42 @@ class TestClaudePluginSettings:
         assert data["enabledPlugins"]["osmosis@my-marketplace"] is True
 
 
-# ── _update_workspace_metadata ───────────────────────────────────
+# ── _update_project_metadata ───────────────────────────────────
 
 
-class TestUpdateWorkspaceMetadata:
+class TestUpdateProjectMetadata:
     def test_preserves_created_at_and_adds_updated_at(self, tmp_path: Path) -> None:
-        """_update_workspace_metadata keeps original created_at and adds updated_at."""
+        """_update_project_metadata keeps original created_at and adds updated_at."""
         from osmosis_ai.consts import PACKAGE_VERSION
-        from osmosis_ai.platform.cli.init import _update_workspace_metadata
+        from osmosis_ai.platform.cli.init import _update_project_metadata
 
-        ws_dir = tmp_path / ".osmosis"
-        ws_dir.mkdir()
-        (ws_dir / "workspace.toml").write_text(
-            "[workspace]\n"
+        osmosis_dir = tmp_path / ".osmosis"
+        osmosis_dir.mkdir()
+        (osmosis_dir / "project.toml").write_text(
+            "[project]\n"
             'sdk_version = "0.0.1"\n'
             'created_at = "2025-01-01T00:00:00+00:00"\n'
             'setup_source = "osmosis init"\n',
             encoding="utf-8",
         )
 
-        _update_workspace_metadata(tmp_path)
+        _update_project_metadata(tmp_path)
 
-        content = (ws_dir / "workspace.toml").read_text(encoding="utf-8")
+        content = (osmosis_dir / "project.toml").read_text(encoding="utf-8")
         assert 'created_at = "2025-01-01T00:00:00+00:00"' in content
         assert "updated_at = " in content
         assert f'sdk_version = "{PACKAGE_VERSION}"' in content
 
-    def test_handles_missing_workspace_toml(self, tmp_path: Path) -> None:
-        """_update_workspace_metadata works even if workspace.toml doesn't exist yet."""
-        from osmosis_ai.platform.cli.init import _update_workspace_metadata
+    def test_handles_missing_project_toml(self, tmp_path: Path) -> None:
+        """_update_project_metadata works even if project.toml doesn't exist yet."""
+        from osmosis_ai.platform.cli.init import _update_project_metadata
 
-        ws_dir = tmp_path / ".osmosis"
-        ws_dir.mkdir()
+        osmosis_dir = tmp_path / ".osmosis"
+        osmosis_dir.mkdir()
 
-        _update_workspace_metadata(tmp_path)
+        _update_project_metadata(tmp_path)
 
-        content = (ws_dir / "workspace.toml").read_text(encoding="utf-8")
+        content = (osmosis_dir / "project.toml").read_text(encoding="utf-8")
         assert "created_at = " in content
         assert "updated_at = " in content
 
@@ -796,7 +796,7 @@ class TestGitInitialCommit:
             text=True,
             check=True,
         )
-        assert "Initial workspace setup" in result.stdout
+        assert "Initial project setup" in result.stdout
 
 
 # ── _print_next_steps ──────────────────────────────────────────────
@@ -817,9 +817,9 @@ class TestPrintNextSteps:
         monkeypatch.setattr(mod, "console", test_console)
         monkeypatch.setattr(mod, "get_active_workspace_name", lambda: None)
         monkeypatch.setattr(auth_module, "load_credentials", lambda: None)
-        _print_next_steps("my-workspace", here=False)
+        _print_next_steps("my-project", here=False)
         output = buf.getvalue()
-        assert "cd my-workspace" in output
+        assert "cd my-project" in output
         assert "Git Sync" in output
         assert "integrations/git" not in output
 
@@ -837,9 +837,9 @@ class TestPrintNextSteps:
         monkeypatch.setattr(mod, "console", test_console)
         monkeypatch.setattr(mod, "get_active_workspace_name", lambda: "team-alpha")
         monkeypatch.setattr(auth_module, "load_credentials", lambda: None)
-        _print_next_steps("my-workspace", here=False)
+        _print_next_steps("my-project", here=False)
         output = buf.getvalue()
-        assert "cd my-workspace" in output
+        assert "cd my-project" in output
         assert f"{mod.PLATFORM_URL}/team-alpha/integrations/git" in output
 
     def test_print_next_steps_connected_repo(self, monkeypatch) -> None:
@@ -878,9 +878,9 @@ class TestPrintNextSteps:
         monkeypatch.setattr(mod, "get_active_workspace_id", lambda: "ws_alpha")
         monkeypatch.setattr(auth_module, "load_credentials", lambda: _Creds())
         monkeypatch.setattr(auth_module, "platform_request", fake_platform_request)
-        _print_next_steps("my-workspace", here=False)
+        _print_next_steps("my-project", here=False)
         output = buf.getvalue()
-        assert "cd my-workspace" in output
+        assert "cd my-project" in output
         assert "Connected repo:" in output
         assert "https://github.com/acme/rollouts" in output
 
@@ -917,7 +917,7 @@ class TestPrintNextSteps:
         monkeypatch.setattr(mod, "get_active_workspace_id", lambda: "ws_alpha")
         monkeypatch.setattr(auth_module, "load_credentials", lambda: _Creds())
         monkeypatch.setattr(auth_module, "platform_request", fake_platform_request)
-        _print_next_steps("my-workspace", here=False)
+        _print_next_steps("my-project", here=False)
         output = buf.getvalue()
         assert f"{mod.PLATFORM_URL}/team-alpha/integrations/git" in output
         assert "choose a repo" in output
@@ -940,7 +940,7 @@ class TestPrintNextSteps:
         monkeypatch.setattr(mod, "get_active_workspace_name", lambda: None)
         monkeypatch.setattr(auth_module, "load_credentials", lambda: None)
 
-        _print_next_steps("my-workspace", here=False)
+        _print_next_steps("my-project", here=False)
         output = buf.getvalue()
         assert "osmosis agent plugin" in output
         assert "Claude Code" in output
@@ -964,9 +964,9 @@ class TestPrintNextSteps:
         monkeypatch.setattr(mod, "console", test_console)
         monkeypatch.setattr(mod, "get_active_workspace_name", lambda: None)
         monkeypatch.setattr(auth_module, "load_credentials", lambda: None)
-        _print_next_steps("my-workspace", here=True)
+        _print_next_steps("my-project", here=True)
         output = buf.getvalue()
-        assert "cd my-workspace" not in output
+        assert "cd my-project" not in output
         assert "Git Sync" in output
 
 
@@ -988,12 +988,12 @@ def test_full_init_flow(monkeypatch, tmp_path: Path) -> None:
 
     monkeypatch.chdir(tmp_path)
 
-    init_module.init(name="test-ws")
+    init_module.init(name="test-project")
 
-    target = tmp_path / "test-ws"
+    target = tmp_path / "test-project"
     assert target.is_dir()
 
-    assert (target / ".osmosis" / "workspace.toml").is_file()
+    assert (target / ".osmosis" / "project.toml").is_file()
     assert (target / ".osmosis" / "research" / "program.md").is_file()
     assert (target / ".osmosis" / "research" / "experiments" / ".gitkeep").is_file()
     assert (target / "pyproject.toml").is_file()
@@ -1012,7 +1012,7 @@ def test_full_init_flow(monkeypatch, tmp_path: Path) -> None:
         text=True,
         check=True,
     )
-    assert "Initial workspace setup" in result.stdout
+    assert "Initial project setup" in result.stdout
 
 
 def test_full_init_update_flow(monkeypatch, tmp_path: Path) -> None:
@@ -1031,8 +1031,8 @@ def test_full_init_update_flow(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.chdir(tmp_path)
 
     # First run — fresh init
-    init_module.init(name="test-ws")
-    target = tmp_path / "test-ws"
+    init_module.init(name="test-project")
+    target = tmp_path / "test-project"
 
     # Record initial state
     commit_count_before = subprocess.run(
@@ -1048,15 +1048,15 @@ def test_full_init_update_flow(monkeypatch, tmp_path: Path) -> None:
     (target / "pyproject.toml").write_text("user pyproject", encoding="utf-8")
 
     # Second run — update mode
-    init_module.init(name="test-ws")
+    init_module.init(name="test-project")
 
     # AGENTS.md was overwritten
     assert (target / "AGENTS.md").read_text(encoding="utf-8") != "user edits"
     # pyproject.toml was preserved
     assert (target / "pyproject.toml").read_text(encoding="utf-8") == "user pyproject"
-    # workspace.toml has updated_at
-    ws_content = (target / ".osmosis" / "workspace.toml").read_text(encoding="utf-8")
-    assert "updated_at = " in ws_content
+    # project.toml has updated_at
+    project_content = (target / ".osmosis" / "project.toml").read_text(encoding="utf-8")
+    assert "updated_at = " in project_content
 
     # No new git commit was created
     commit_count_after = subprocess.run(

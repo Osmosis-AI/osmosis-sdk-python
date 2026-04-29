@@ -105,6 +105,7 @@ def _argv_command_path(argv: list[str]) -> str:
         "deployment",
         "eval",
         "model",
+        "project",
         "rollout",
         "train",
         "workspace",

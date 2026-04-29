@@ -1,6 +1,6 @@
 # Training & Evaluation Configs
 
-Configs are workspace-scoped and must stay in their canonical directories.
+Configs are project-scoped and must stay in their canonical directories.
 
 ## Canonical paths
 
@@ -47,7 +47,7 @@ batch_size = 2
 ## Commands
 
 ```bash
-osmosis --json workspace validate
+osmosis --json project validate
 osmosis --json rollout validate configs/training/<config>.toml
 osmosis --json rollout validate configs/eval/<config>.toml
 osmosis --json train submit configs/training/<config>.toml
