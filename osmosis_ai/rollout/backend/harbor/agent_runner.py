@@ -67,7 +67,7 @@ async def run_workflow(
         with rollout_ctx:
             await workflow.run(ctx)
 
-        samples = rollout_ctx.get_samples()
+        samples = await rollout_ctx.get_samples()
         samples_data = {sid: s.model_dump() for sid, s in samples.items()}
 
         (AGENT_LOGS_DIR / "samples.json").write_text(

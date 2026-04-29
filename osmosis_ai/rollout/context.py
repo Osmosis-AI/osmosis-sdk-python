@@ -25,7 +25,7 @@ class SampleSource(ABC):
     """
 
     @abstractmethod
-    def get_sample(self, name: str) -> RolloutSample:
+    async def get_sample(self, name: str) -> RolloutSample:
         """Return the current rollout sample for the given registration name."""
 
 rollout_contextvar: ContextVar["RolloutContext | None"] = ContextVar(
@@ -79,11 +79,11 @@ class RolloutContext:
             )
         self.sample_sources[name] = source
 
-    def get_samples(self) -> dict[str, RolloutSample]:
-        return {
-            name: source.get_sample(name)
-            for name, source in self.sample_sources.items()
-        }
+    async def get_samples(self) -> dict[str, RolloutSample]:
+        out: dict[str, RolloutSample] = {}
+        for name, source in self.sample_sources.items():
+            out[name] = await source.get_sample(name)
+        return out
 
 
 def get_rollout_context() -> RolloutContext | None:

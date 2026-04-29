@@ -4,8 +4,8 @@ Usage::
 
     from osmosis_ai.rollout.integrations.agents.openai_agents import (
         OsmosisAgent,
+        OsmosisMemorySession,
         OsmosisRolloutModel,
-        OsmosisSession,
     )
 
     # In your workflow config (no RolloutContext yet):
@@ -13,7 +13,7 @@ Usage::
 
     # Inside your workflow run (RolloutContext is active):
     agent = OsmosisAgent(name="bot", model=config_model, tools=[...])
-    session = OsmosisSession(name="math-rollout")
+    session = OsmosisMemorySession(name="math-rollout")
     result = await Runner.run(agent, prompt, session=session)
 
 ``OsmosisAgent`` swaps the placeholder ``OsmosisRolloutModel`` for a real
@@ -47,20 +47,20 @@ current_sample_id: ContextVar[str | None] = ContextVar(
 )
 
 
-class OsmosisSession(SessionABC):
+class OsmosisMemorySession(SessionABC):
     """In-memory session that doubles as the sample source for an Osmosis rollout.
 
     Behavior:
     - Inside a ``RolloutContext``: registers itself for sample collection
-      (via ``OsmosisSessionSampleSource``) and publishes its sample id to
-      a ContextVar each time the runner reads from or writes to it.
+      (via ``SessionSampleSource``) and publishes its sample id
+      to a ContextVar each time the runner reads from or writes to it.
       ``OsmosisRolloutModel`` reads that ContextVar to stamp per-rollout
       headers.
     - Outside a ``RolloutContext``: behaves as a plain in-memory
       ``SessionABC`` implementation, so the same workflow code can run
       locally without an Osmosis rollout.
 
-    Pass exactly one ``OsmosisSession`` per ``Runner.run`` when using
+    Pass exactly one ``OsmosisMemorySession`` per ``Runner.run`` when using
     ``OsmosisRolloutModel``.
     """
 
@@ -70,7 +70,7 @@ class OsmosisSession(SessionABC):
         self.items: list[TResponseInputItem] = []
         ctx = get_rollout_context()
         if ctx is not None:
-            ctx.register_sample_source(self.name, OsmosisSessionSampleSource(self))
+            ctx.register_sample_source(self.name, SessionSampleSource(self))
 
     async def get_items(
         self, limit: int | None = None
@@ -91,22 +91,23 @@ class OsmosisSession(SessionABC):
         self.items.clear()
 
 
-class OsmosisSessionSampleSource(SampleSource):
-    """Produces a ``RolloutSample`` from an OsmosisSession's stored items.
+class SessionSampleSource(SampleSource):
+    """Produces a ``RolloutSample`` from any OpenAI Agents SDK ``Session``.
 
-    Decoupled from ``OsmosisSession`` so the session class stays a plain
-    ``SessionABC`` implementation and the source can evolve independently
-    (e.g., to add system instructions or filter reasoning items) without
-    touching the session.
+    Works against any ``SessionABC`` implementation by calling its public
+    ``get_items`` method, then converting items to chat-completion format.
+    Use this with sessions you don't control (e.g., ``SQLiteSession``) by
+    registering it manually with the active ``RolloutContext``.
     """
 
-    def __init__(self, session: OsmosisSession) -> None:
+    def __init__(self, session: SessionABC) -> None:
         self.session = session
 
-    def get_sample(self, name: str) -> RolloutSample:
+    async def get_sample(self, name: str) -> RolloutSample:
+        items = await self.session.get_items()
         messages = cast(
             list[dict[str, Any]],
-            Converter.items_to_messages(list(self.session.items)),
+            Converter.items_to_messages(items),
         )
         return RolloutSample(id=name, messages=messages)
 
@@ -147,7 +148,7 @@ class OsmosisLitellmModel(LitellmModel):
     """Streaming-only LitellmModel pre-wired for the Osmosis completions server.
 
     Stateless across calls: the per-call session name is read from a
-    ContextVar that ``OsmosisSession`` publishes when the runner interacts
+    ContextVar that ``OsmosisMemorySession`` publishes when the runner interacts
     with it. One instance can be safely shared across agents and runs (within
     the rollout context that constructed it).
 
@@ -179,10 +180,10 @@ class OsmosisLitellmModel(LitellmModel):
         sample_id = current_sample_id.get()
         if sample_id is None:
             raise RuntimeError(
-                "OsmosisLitellmModel was called without an active OsmosisSession.\n"
-                "Pass `session=OsmosisSession()` to Runner.run() so the model "
-                "can stamp per-rollout headers and the runner can persist the "
-                "conversation for grading."
+                "OsmosisLitellmModel was called without an active OsmosisMemorySession.\n"
+                "Pass `session=OsmosisMemorySession()` to Runner.run() so the "
+                "model can stamp per-rollout headers and the runner can "
+                "persist the conversation for grading."
             )
         return {
             **super()._merge_headers(model_settings),
@@ -237,7 +238,7 @@ class OsmosisAgent(Agent):
 __all__ = [
     "OsmosisAgent",
     "OsmosisLitellmModel",
+    "OsmosisMemorySession",
     "OsmosisRolloutModel",
-    "OsmosisSession",
-    "OsmosisSessionSampleSource",
+    "SessionSampleSource",
 ]

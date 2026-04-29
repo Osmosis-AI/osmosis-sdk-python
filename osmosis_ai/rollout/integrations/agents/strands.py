@@ -29,7 +29,7 @@ class StrandsAgentSampleSource(SampleSource):
     def __init__(self, agent: StrandsAgent) -> None:
         self.agent = agent
 
-    def get_sample(self, name: str) -> RolloutSample:
+    async def get_sample(self, name: str) -> RolloutSample:
         return RolloutSample(id=name, messages=list(self.agent.messages))
 
 
