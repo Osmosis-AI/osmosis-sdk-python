@@ -39,11 +39,7 @@ from openai.types.responses.response_usage import (
     OutputTokensDetails,
 )
 
-from osmosis_ai.rollout.context import (
-    RolloutContext,
-    SampleSource,
-    get_rollout_context,
-)
+from osmosis_ai.rollout.context import SampleSource, get_rollout_context
 from osmosis_ai.rollout.types import RolloutSample
 
 current_sample_id: ContextVar[str | None] = ContextVar(
@@ -163,7 +159,14 @@ class OsmosisLitellmModel(LitellmModel):
     - Per-rollout bookkeeping headers are injected on every model call.
     """
 
-    def __init__(self, ctx: RolloutContext, **litellm_kwargs: Any) -> None:
+    def __init__(self, **litellm_kwargs: Any) -> None:
+        ctx = get_rollout_context()
+        if ctx is None:
+            raise RuntimeError(
+                "OsmosisLitellmModel requires an active RolloutContext. "
+                "Construct it inside your workflow run, where the execution "
+                "backend has set up the context."
+            )
         self.rollout_id = ctx.rollout_id
         super().__init__(
             model="openai/osmosis-rollout",
@@ -227,14 +230,7 @@ class OsmosisAgent(Agent):
 
     def __init__(self, *args: Any, model: Any = None, **kwargs: Any) -> None:
         if isinstance(model, OsmosisRolloutModel):
-            ctx = get_rollout_context()
-            if ctx is None:
-                raise RuntimeError(
-                    "OsmosisAgent with OsmosisRolloutModel requires an active "
-                    "RolloutContext. Ensure the execution backend sets up the "
-                    "context before running the workflow."
-                )
-            model = OsmosisLitellmModel(ctx, **model.litellm_kwargs)
+            model = OsmosisLitellmModel(**model.litellm_kwargs)
         super().__init__(*args, model=model, **kwargs)
 
 
