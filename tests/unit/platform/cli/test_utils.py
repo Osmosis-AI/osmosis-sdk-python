@@ -301,3 +301,70 @@ def test_platform_call_uses_injected_console() -> None:
 
     assert result == "ok"
     assert messages == ["Fetching things..."]
+
+
+# ── _require_subscription ────────────────────────────────────────────
+
+
+class _FakeCreds:
+    def is_expired(self) -> bool:
+        return False
+
+
+def test_require_subscription_propagates_auth_expired_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A real 401 must surface as AuthenticationExpiredError instead of being
+    masked by the misleading "subscription required" CLIError when a stale
+    `False` cache is present.
+    """
+    import osmosis_ai.platform.cli.utils as utils_module
+    from osmosis_ai.platform.auth import AuthenticationExpiredError
+
+    monkeypatch.setattr(
+        utils_module, "load_subscription_status", lambda *_a, **_kw: False
+    )
+    monkeypatch.setattr(
+        utils_module, "save_subscription_status", lambda *_a, **_kw: None
+    )
+    monkeypatch.setattr(utils_module, "require_credentials", lambda: _FakeCreds())
+
+    class _FakeClient:
+        def refresh_workspace_info(self, **_kwargs):
+            raise AuthenticationExpiredError("session expired")
+
+    monkeypatch.setattr(
+        "osmosis_ai.platform.api.client.OsmosisClient", lambda: _FakeClient()
+    )
+
+    with pytest.raises(AuthenticationExpiredError):
+        utils_module._require_subscription(workspace_name="team-alpha")
+
+
+def test_require_subscription_swallows_platform_api_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Transient platform errors should not block when cache is unknown — the
+    actual mutating call surfaces them with full context.
+    """
+    import osmosis_ai.platform.cli.utils as utils_module
+    from osmosis_ai.platform.auth import PlatformAPIError
+
+    monkeypatch.setattr(
+        utils_module, "load_subscription_status", lambda *_a, **_kw: None
+    )
+    monkeypatch.setattr(
+        utils_module, "save_subscription_status", lambda *_a, **_kw: None
+    )
+    monkeypatch.setattr(utils_module, "require_credentials", lambda: _FakeCreds())
+
+    class _FakeClient:
+        def refresh_workspace_info(self, **_kwargs):
+            raise PlatformAPIError("platform unreachable")
+
+    monkeypatch.setattr(
+        "osmosis_ai.platform.api.client.OsmosisClient", lambda: _FakeClient()
+    )
+
+    # No exception — degrades gracefully so the next API call surfaces it.
+    utils_module._require_subscription(workspace_name="team-alpha")

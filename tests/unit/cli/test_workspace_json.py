@@ -25,7 +25,7 @@ def test_workspace_list_json_returns_list_result(monkeypatch, capsys) -> None:
     )
     monkeypatch.setattr(
         "osmosis_ai.platform.cli.workspace.ensure_active_workspace",
-        lambda credentials=None: {"id": "ws_1", "name": "default"},
+        lambda credentials=None, **_kwargs: {"id": "ws_1", "name": "default"},
     )
     monkeypatch.setattr(
         "osmosis_ai.platform.cli.workspace.platform_request",

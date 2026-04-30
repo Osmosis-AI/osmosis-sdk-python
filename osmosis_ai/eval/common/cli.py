@@ -137,6 +137,21 @@ def _ensure_parent_packages(
         _load_package_module(current_package, current_dir)
 
 
+def _ensure_rollout_dir_on_path(rollout_dir: Path) -> None:
+    """Add the rollout directory to ``sys.path`` so sibling packages resolve.
+
+    The synthetic-package wrapper isolates the entrypoint module itself, but
+    real-world entrypoints commonly do absolute imports of sibling packages
+    that live next to them (e.g. ``from multiply_openai_agents.grader import
+    ...`` next to ``local_rollout_server_openai_agents_example.py``). Those
+    are top-level imports, so the rollout directory must be searchable via
+    ``sys.path`` for them to resolve.
+    """
+    rollout_dir_str = str(rollout_dir)
+    if rollout_dir_str not in sys.path:
+        sys.path.insert(0, rollout_dir_str)
+
+
 def _load_rollout_module(
     rollout: str,
     entrypoint: str,
@@ -149,6 +164,7 @@ def _load_rollout_module(
         entrypoint,
         project_root=project_root,
     )
+    _ensure_rollout_dir_on_path(rollout_dir)
     package_name = _synthetic_rollout_package_name(rollout_dir)
     _clear_rollout_module_cache(package_name)
     _load_package_module(package_name, rollout_dir)
