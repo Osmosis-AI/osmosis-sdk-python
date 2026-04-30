@@ -1,6 +1,6 @@
 import uuid
 from collections.abc import AsyncGenerator
-from typing import Any, TypeVar
+from typing import Any, TypeVar, cast
 
 from strands import Agent as StrandsAgent
 from strands.models.litellm import LiteLLMModel
@@ -10,6 +10,7 @@ from strands.types.streaming import StreamEvent
 from strands.types.tools import ToolChoice, ToolSpec
 
 from osmosis_ai.rollout.context import RolloutContext, get_rollout_context
+from osmosis_ai.rollout.utils.messages import map_initial_messages_to_content_blocks
 
 T = TypeVar("T")
 
@@ -72,8 +73,15 @@ class OsmosisStrandsAgent(StrandsAgent):
     """
 
     def __init__(
-        self, *args: Any, model: Model | str | None = None, **kwargs: Any
+        self,
+        *args: Any,
+        messages: list[dict[str, Any]] | None = None,
+        model: Model | str | None = None,
+        **kwargs: Any,
     ) -> None:
+        if messages:
+            messages = map_initial_messages_to_content_blocks(messages)
+
         if isinstance(model, OsmosisRolloutModel):
             rollout_ctx = get_rollout_context()
             if rollout_ctx is None:
@@ -85,4 +93,9 @@ class OsmosisStrandsAgent(StrandsAgent):
             model = model.for_sample(sample_id, rollout_ctx)
             rollout_ctx.register_agent(sample_id, self)
 
-        super().__init__(*args, model=model, **kwargs)
+        super().__init__(
+            *args,
+            model=model,
+            messages=cast(Messages | None, messages),
+            **kwargs,
+        )

@@ -10,10 +10,6 @@ from osmosis_ai.rollout.context import (
     get_rollout_context,
 )
 from osmosis_ai.rollout.grader import Grader
-from osmosis_ai.rollout.integrations.agents.strands import (
-    OsmosisRolloutModel,
-    OsmosisStrandsAgent,
-)
 from osmosis_ai.rollout.server import ControllerAuth, create_rollout_server
 from osmosis_ai.rollout.types import (
     AgentWorkflowConfig,
@@ -32,6 +28,18 @@ from osmosis_ai.rollout.types import (
     RolloutStatus,
 )
 
+_openai_exports: list[str] = []
+
+try:
+    from osmosis_ai.rollout.integrations.agents.strands import (
+        OsmosisRolloutModel,  # noqa: F401
+        OsmosisStrandsAgent,  # noqa: F401
+    )
+
+    _strands_exports = ["OsmosisRolloutModel", "OsmosisStrandsAgent"]
+except ImportError:
+    _strands_exports = []
+
 __all__ = [
     "AgentWorkflow",
     "AgentWorkflowConfig",
@@ -49,8 +57,6 @@ __all__ = [
     "HarborAgentWorkflowContext",
     "LocalBackend",
     "MultiTurnMode",
-    "OsmosisRolloutModel",
-    "OsmosisStrandsAgent",
     "RolloutCompleteRequest",
     "RolloutContext",
     "RolloutErrorCategory",
@@ -60,4 +66,6 @@ __all__ = [
     "RolloutStatus",
     "create_rollout_server",
     "get_rollout_context",
+    *_openai_exports,
+    *_strands_exports,
 ]
