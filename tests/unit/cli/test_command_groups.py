@@ -23,6 +23,7 @@ from osmosis_ai.cli.main import main
         ["deploy", "--help"],
         ["undeploy", "--help"],
         ["rollout", "--help"],
+        ["template", "--help"],
         ["eval", "--help"],
         ["upgrade", "--help"],
     ],
@@ -76,6 +77,7 @@ def test_all_groups_in_help_output(capfd):
         "model",
         "deployment",
         "rollout",
+        "template",
         "eval",
     ]:
         assert group in output, f"'{group}' not found in --help output"

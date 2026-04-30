@@ -1,0 +1,36 @@
+# Rollout-local dependency manifest for the `multiply` cookbook rollout.
+#
+# A rollout in an Osmosis project is defined by three sibling files:
+#   * main.py        — the entrypoint (or any other Python file the configs reference)
+#   * pyproject.toml — this file: declares what the rollout needs to run
+#   * README.md      — human-facing description
+#
+# Install the rollout's deps from this directory with one of:
+#
+#   pip install -e .
+#   uv sync                # if the surrounding project uses uv
+#
+# After install, run the rollout through the project-rooted CLI workflow:
+#
+#   osmosis --json rollout validate configs/eval/multiply.toml
+#   osmosis --json eval run configs/eval/multiply.toml
+#   osmosis --json train submit configs/training/multiply.toml
+
+[project]
+name = "multiply-rollout"
+version = "0.1.0"
+description = "Multiplication agent rollout (Osmosis cookbook starter template)."
+requires-python = ">=3.12"
+dependencies = [
+    # Core SDK + local rollout server (FastAPI + uvicorn).
+    # Pin to a concrete release in production rollouts.
+    "osmosis-ai[server]",
+]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["multiply_rollout*"]

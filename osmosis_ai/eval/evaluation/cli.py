@@ -295,6 +295,17 @@ class EvalCommand:
         return asyncio.run(self._run_async(args))
 
     @staticmethod
+    def _load_project_dotenv(project_root: Path) -> None:
+        """Load project-local .env for eval runs without overriding shell env."""
+        dotenv_path = project_root / ".env"
+        if not dotenv_path.is_file():
+            return
+
+        from dotenv import load_dotenv
+
+        load_dotenv(dotenv_path=dotenv_path, override=False)
+
+    @staticmethod
     def _resolve_api_key(config: Any) -> str | None:
         import os
 
@@ -503,6 +514,8 @@ class EvalCommand:
             )
         except CLIError as e:
             return self._fail(f"Error: {e}")
+
+        self._load_project_dotenv(project_root)
 
         # Apply CLI overrides (CLI flags take precedence over TOML).
         # Optional values: CLI wins when not None.
