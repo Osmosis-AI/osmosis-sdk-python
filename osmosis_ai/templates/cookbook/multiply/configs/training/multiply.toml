@@ -5,7 +5,7 @@
 # rollouts/multiply/ — install its deps with `pip install -e rollouts/multiply`.
 #
 # Submit with:
-#   osmosis --json train submit configs/training/multiply.toml
+#   osmosis train submit configs/training/multiply.toml
 #
 # Before running:
 #   1. Upload a multiplication dataset (questions + numeric ground-truth labels)

@@ -5,7 +5,7 @@
 # rollouts/multiply/ — install its deps with `pip install -e rollouts/multiply`.
 #
 # Run with:
-#   osmosis --json eval run configs/eval/multiply.toml
+#   osmosis eval run configs/eval/multiply.toml
 #
 # Before running:
 #   Set [llm].model to a LiteLLM model your environment can reach.
@@ -22,7 +22,7 @@ dataset = "data/multiply.jsonl"
 # retry_failed = false
 
 [llm]
-model = "openai/gpt-5-mini"           # Replace with your preferred LiteLLM model.
+model = "openai/gpt-5.5"           # Replace with your preferred LiteLLM model.
 # base_url =
 # api_key_env = "OPENAI_API_KEY"
 
