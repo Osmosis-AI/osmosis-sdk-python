@@ -32,7 +32,7 @@ osmosis auth whoami
 
 ### osmosis workspace
 
-Manage workspaces interactively. Launches a TUI that shows your current workspace context and lets you switch workspace, browse training runs, datasets, and models.
+Manage platform workspaces interactively. Launches a TUI that shows your current workspace context and lets you switch workspace, browse training runs, datasets, and models.
 
 ```bash
 osmosis workspace
@@ -40,48 +40,45 @@ osmosis workspace
 
 In non-interactive environments, prints current context and exits.
 
-## Rollout
+## Project
 
-### osmosis rollout serve
+### osmosis project validate
 
-Start a RolloutServer from a TOML file.
-
-`osmosis rollout serve` requires the entrypoint module to expose a concrete `AgentWorkflow` and a concrete `Grader`. In practice you will usually also define a `GraderConfig`. If no grader is discoverable, serve fails before startup.
+Validate the canonical layout of a local Osmosis project (the directory created
+by `osmosis init`).
 
 ```bash
-osmosis rollout serve serve.toml
-osmosis rollout serve serve.toml -p 9100 -H 127.0.0.1
-osmosis rollout serve serve.toml --validate-only
+osmosis project validate
+osmosis project validate ./path/to/project
 ```
 
-**`serve.toml` shape (minimal):**
+The command checks for `.osmosis/project.toml` and the required `rollouts/`,
+`configs/training/`, `configs/eval/`, `data/`, and `.osmosis/research/`
+directories.
 
-```toml
-[serve]
-rollout = "my_rollout"
-entrypoint = "workflow.py"
+## Rollout
 
-[server]
-port = 9000
-host = "0.0.0.0"
-log_level = "info"
+### osmosis rollout validate
 
-[debug]
-no_validate = false
-# trace_dir = "./traces"
+Validate the rollout entrypoint referenced by a training or eval config.
+
+`osmosis rollout validate` requires the resolved entrypoint module to expose a
+concrete `AgentWorkflow` and a concrete `Grader` (unless an eval config
+provides an explicit grader override).
+
+```bash
+osmosis rollout validate configs/eval/my-rollout.toml
+osmosis rollout validate configs/training/my-run.toml
 ```
 
-| Option | Description |
-|--------|-------------|
-| `-p` / `--port` | Override `[server].port` |
-| `-H` / `--host` | Override `[server].host` |
-| `--no-validate` | Skip backend validation |
-| `--validate-only` | Validate the required workflow/grader pair and exit |
-| `--log-level` | Override Uvicorn log level |
+The command only accepts configs under these canonical project paths:
+
+- `configs/eval/<name>.toml`
+- `configs/training/<name>.toml`
 
 ### osmosis rollout list
 
-List rollouts in the current workspace.
+List rollouts in the current platform workspace.
 
 ```bash
 osmosis rollout list
@@ -95,12 +92,15 @@ osmosis rollout list --all
 
 Evaluate using a TOML config. The workflow is loaded from the entrypoint module, and the grader is usually auto-discovered from that same module, so most configs do not need a separate `[grader]` table. If the grader lives elsewhere, set `[grader].module` and optional `[grader].config`.
 
+`osmosis eval run` expects the config file to live under `configs/eval/` inside a
+structured Osmosis project.
+
 ```bash
-osmosis eval run eval.toml
-osmosis eval run eval.toml --fresh
-osmosis eval run eval.toml --retry-failed
-osmosis eval run eval.toml --limit 20 --batch-size 4
-osmosis eval run eval.toml -o ./results --log-samples
+osmosis eval run configs/eval/my-rollout.toml
+osmosis eval run configs/eval/my-rollout.toml --fresh
+osmosis eval run configs/eval/my-rollout.toml --retry-failed
+osmosis eval run configs/eval/my-rollout.toml --limit 20 --batch-size 4
+osmosis eval run configs/eval/my-rollout.toml -o ./results --log-samples
 ```
 
 See [Eval](./eval.md) for the full `[eval]`, `[llm]`, `[runs]`, `[baseline]`, and `[output]` sections.

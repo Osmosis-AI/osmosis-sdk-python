@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import contextlib
 import json
+import os
 import sys
 from typing import TYPE_CHECKING, Any
 from urllib.error import HTTPError, URLError
@@ -11,11 +12,22 @@ from urllib.request import Request, urlopen
 
 from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.consts import PACKAGE_VERSION
-from osmosis_ai.platform.constants import MSG_NOT_LOGGED_IN
+from osmosis_ai.platform.constants import (
+    MSG_ENV_TOKEN_EXPIRED,
+    MSG_ENV_TOKEN_INVALID,
+    MSG_ENV_TOKEN_REVOKED,
+    MSG_NOT_LOGGED_IN,
+    MSG_SESSION_EXPIRED,
+)
 
 from .config import PLATFORM_URL
 from .credentials import load_credentials
-from .local_config import get_active_workspace_id, reset_session
+from .local_config import (
+    get_active_workspace,
+    get_active_workspace_id,
+    reset_session,
+    set_active_workspace,
+)
 
 if TYPE_CHECKING:
     from .credentials import Credentials
@@ -24,23 +36,99 @@ if TYPE_CHECKING:
 class AuthenticationExpiredError(Exception):
     """Raised when the stored credentials are invalid, expired, or revoked."""
 
+    def __init__(self, message: str = MSG_SESSION_EXPIRED, *, code: str | None = None):
+        super().__init__(message)
+        self.code = code
+
 
 class PlatformAPIError(Exception):
     """Raised when a Platform API call fails."""
 
-    def __init__(self, message: str, status_code: int | None = None):
+    def __init__(
+        self,
+        message: str,
+        status_code: int | None = None,
+        *,
+        error_code: str | None = None,
+        field: str | None = None,
+        details: dict[str, Any] | None = None,
+    ):
         super().__init__(message)
         self.status_code = status_code
+        self.error_code = error_code
+        self.field = field
+        self.details = details
 
 
 class SubscriptionRequiredError(PlatformAPIError):
     """Raised when the workspace requires an active subscription for the requested action."""
 
-    def __init__(self, message: str | None = None):
+    def __init__(
+        self,
+        message: str | None = None,
+        *,
+        error_code: str | None = None,
+        field: str | None = None,
+        details: dict[str, Any] | None = None,
+    ):
         super().__init__(
             message or "Active subscription required",
             status_code=403,
+            error_code=error_code,
+            field=field,
+            details=details,
         )
+
+
+def _credentials_match_env_token(credentials: Credentials | None) -> bool:
+    env_token = os.environ.get("OSMOSIS_TOKEN")
+    return bool(
+        env_token and credentials is not None and credentials.access_token == env_token
+    )
+
+
+def _read_error_body(e: HTTPError) -> dict[str, Any]:
+    try:
+        raw = e.read()
+        text = raw.decode("utf-8", errors="replace").strip() if raw else ""
+        if not text:
+            return {}
+        parsed = json.loads(text)
+        return parsed if isinstance(parsed, dict) else {}
+    except Exception:
+        return {}
+
+
+def _auth_error_message(error_code: str | None, *, using_env_token: bool) -> str:
+    if using_env_token:
+        if error_code == "TOKEN_EXPIRED":
+            return MSG_ENV_TOKEN_EXPIRED
+        if error_code == "TOKEN_REVOKED":
+            return MSG_ENV_TOKEN_REVOKED
+        return MSG_ENV_TOKEN_INVALID
+
+    if error_code == "TOKEN_REVOKED":
+        return (
+            "Your session has been revoked. "
+            "Please run 'osmosis auth login' to re-authenticate."
+        )
+    return MSG_SESSION_EXPIRED
+
+
+_WORKSPACE_AUTH_ERROR_MESSAGES: dict[str, str] = {
+    "WORKSPACE_HEADER_MISSING": (
+        "No workspace selected. Run 'osmosis workspace' to select a workspace."
+    ),
+    "WORKSPACE_HEADER_INVALID": (
+        "Your workspace context is invalid. "
+        "Run 'osmosis auth login' or 'osmosis workspace' to re-select."
+    ),
+    "WORKSPACE_ACCESS_DENIED": (
+        "You do not have access to this workspace.\n"
+        "Your workspace context may be stale. "
+        "Run 'osmosis auth login' or 'osmosis workspace' to re-select."
+    ),
+}
 
 
 def revoke_cli_token(credentials: Credentials) -> bool:
@@ -82,6 +170,43 @@ def revoke_cli_token(credentials: Credentials) -> bool:
     except (URLError, OSError):
         # Network errors are not critical for best-effort revocation.
         return False
+
+
+def ensure_active_workspace(
+    credentials: Credentials | None = None,
+    *,
+    cleanup_on_401: bool = True,
+) -> dict[str, str] | None:
+    """Return the active workspace, auto-selecting it when only one exists."""
+    active_workspace = get_active_workspace()
+    if active_workspace is not None:
+        return active_workspace
+
+    if credentials is None:
+        credentials = load_credentials()
+    if credentials is None:
+        return None
+
+    data = platform_request(
+        "/api/cli/workspaces",
+        credentials=credentials,
+        require_workspace=False,
+        cleanup_on_401=cleanup_on_401,
+    )
+    workspaces = data.get("workspaces", [])
+    if len(workspaces) != 1:
+        return None
+
+    workspace = workspaces[0]
+    ws_id = workspace.get("id")
+    ws_name = workspace.get("name")
+    if not isinstance(ws_id, str) or not ws_id:
+        return None
+    if not isinstance(ws_name, str) or not ws_name:
+        return None
+
+    set_active_workspace(ws_id, ws_name)
+    return {"id": ws_id, "name": ws_name}
 
 
 def platform_request(
@@ -128,6 +253,7 @@ def platform_request(
         credentials = load_credentials()
     if credentials is None:
         raise CLIError(MSG_NOT_LOGGED_IN)
+    using_env_token = _credentials_match_env_token(credentials)
 
     url = f"{PLATFORM_URL}{endpoint}"
 
@@ -140,6 +266,12 @@ def platform_request(
     # Add workspace context if required
     if require_workspace:
         resolved_workspace_id = workspace_id or get_active_workspace_id()
+        if not resolved_workspace_id:
+            active_workspace = ensure_active_workspace(
+                credentials=credentials,
+                cleanup_on_401=cleanup_on_401,
+            )
+            resolved_workspace_id = active_workspace["id"] if active_workspace else None
         if not resolved_workspace_id:
             raise PlatformAPIError(
                 "No workspace selected. Run 'osmosis workspace' to select a workspace."
@@ -163,16 +295,22 @@ def platform_request(
             return result
     except HTTPError as e:
         if e.code == 401:
-            if cleanup_on_401:
+            error_body = _read_error_body(e)
+            error_code = error_body.get("code")
+            if not isinstance(error_code, str):
+                error_code = None
+            if cleanup_on_401 and not using_env_token:
                 reset_session()
             raise AuthenticationExpiredError(
-                "Your session has expired or been revoked. "
-                "Please run 'osmosis auth login' to re-authenticate."
+                _auth_error_message(error_code, using_env_token=using_env_token),
+                code=error_code,
             ) from e
 
         # Best-effort capture of structured error message from response body
         detail = ""
         error_body: dict[str, Any] = {}
+        error_code: str | None = None
+        field: str | None = None
         try:
             raw = e.read()
             text = raw.decode("utf-8", errors="replace").strip() if raw else ""
@@ -182,6 +320,10 @@ def platform_request(
                     # Only treat as error_body if it's actually a dict
                     if isinstance(parsed, dict):
                         error_body = parsed
+                        if isinstance(error_body.get("code"), str):
+                            error_code = error_body["code"]
+                        if isinstance(error_body.get("field"), str):
+                            field = error_body["field"]
                 # Prefer structured error/message field over raw body
                 error_msg = error_body.get("error") or error_body.get("message")
                 if error_msg and isinstance(error_msg, str):
@@ -193,21 +335,44 @@ def platform_request(
         except Exception:
             pass
 
+        if error_code in _WORKSPACE_AUTH_ERROR_MESSAGES:
+            raise PlatformAPIError(
+                _WORKSPACE_AUTH_ERROR_MESSAGES[error_code],
+                e.code,
+                error_code=error_code,
+                field=field,
+                details=error_body or None,
+            ) from e
+
         # Detect subscription-required responses (403 with subscription message)
         if e.code == 403 and isinstance(error_body, dict):
             error_msg = error_body.get("error", "")
             if isinstance(error_msg, str):
                 if "subscription" in error_msg.lower():
-                    raise SubscriptionRequiredError(error_msg) from e
+                    raise SubscriptionRequiredError(
+                        error_msg,
+                        error_code=error_code,
+                        field=field,
+                        details=error_body or None,
+                    ) from e
                 if "workspace" in error_msg.lower() and "access" in error_msg.lower():
                     raise PlatformAPIError(
                         f"{error_msg}\n"
                         "Your workspace context may be stale. "
                         "Run 'osmosis auth login' or 'osmosis workspace' to re-select.",
                         e.code,
+                        error_code=error_code,
+                        field=field,
+                        details=error_body or None,
                     ) from e
 
-        raise PlatformAPIError(f"API error: HTTP {e.code}.{detail}", e.code) from e
+        raise PlatformAPIError(
+            f"API error: HTTP {e.code}.{detail}",
+            e.code,
+            error_code=error_code,
+            field=field,
+            details=error_body or None,
+        ) from e
     except URLError as e:
         raise PlatformAPIError(f"Connection error: {e.reason}") from e
     except json.JSONDecodeError as e:

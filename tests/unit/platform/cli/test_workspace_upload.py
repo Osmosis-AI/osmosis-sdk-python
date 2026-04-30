@@ -3,10 +3,17 @@
 from __future__ import annotations
 
 from contextlib import nullcontext
+from io import StringIO
 
 import pytest
 
-from osmosis_ai.platform.api.models import DatasetFile, UploadInfo
+from osmosis_ai.cli.console import Console
+from osmosis_ai.platform.api.models import (
+    BaseModelInfo,
+    DatasetFile,
+    TrainingRun,
+    UploadInfo,
+)
 
 # ---------------------------------------------------------------------------
 # _clean_file_path — drag-and-drop path normalization
@@ -49,12 +56,100 @@ class TestCleanFilePath:
 
 
 # ---------------------------------------------------------------------------
+# Detail views — platform links
+# ---------------------------------------------------------------------------
+
+
+class TestWorkspaceDetailLinks:
+    def _assert_copyable_platform_link(
+        self, output: StringIO, expected_url: str
+    ) -> None:
+        rendered = output.getvalue()
+        assert "View on platform:" in rendered
+        assert expected_url in rendered
+        assert "…" not in rendered
+
+    def test_dataset_detail_prints_copyable_url_outside_table(self, monkeypatch):
+        import osmosis_ai.platform.cli.workspace as workspace_module
+
+        output = StringIO()
+        monkeypatch.setattr(
+            workspace_module,
+            "console",
+            Console(file=output, force_terminal=True, no_color=True, width=60),
+        )
+        dataset = DatasetFile(
+            id="328be61c-ef39-45e1-9b33-1e3c7c482e97",
+            file_name="data",
+            file_size=2,
+            status="uploaded",
+        )
+
+        workspace_module._show_dataset_detail(dataset, "osmosis-shared")
+
+        expected_url = workspace_module.platform_entity_url(
+            "osmosis-shared",
+            "datasets",
+            "328be61c-ef39-45e1-9b33-1e3c7c482e97",
+        )
+        self._assert_copyable_platform_link(output, expected_url)
+
+    def test_run_detail_prints_copyable_url_outside_table(self, monkeypatch):
+        import osmosis_ai.platform.cli.workspace as workspace_module
+
+        output = StringIO()
+        monkeypatch.setattr(
+            workspace_module,
+            "console",
+            Console(file=output, force_terminal=True, no_color=True, width=60),
+        )
+        run = TrainingRun(
+            id="328be61c-ef39-45e1-9b33-1e3c7c482e97",
+            name="run-1",
+            status="finished",
+        )
+
+        workspace_module._show_run_detail(run, "osmosis-shared")
+
+        expected_url = workspace_module.platform_entity_url(
+            "osmosis-shared",
+            "training",
+            "328be61c-ef39-45e1-9b33-1e3c7c482e97",
+        )
+        self._assert_copyable_platform_link(output, expected_url)
+
+    def test_model_detail_prints_copyable_url_outside_table(self, monkeypatch):
+        import osmosis_ai.platform.cli.workspace as workspace_module
+
+        output = StringIO()
+        monkeypatch.setattr(
+            workspace_module,
+            "console",
+            Console(file=output, force_terminal=True, no_color=True, width=60),
+        )
+        model = BaseModelInfo(
+            id="328be61c-ef39-45e1-9b33-1e3c7c482e97",
+            model_name="model-1",
+            status="ready",
+        )
+
+        workspace_module._show_model_detail(model, "osmosis-shared")
+
+        expected_url = workspace_module.platform_entity_url(
+            "osmosis-shared",
+            "models",
+            "328be61c-ef39-45e1-9b33-1e3c7c482e97",
+        )
+        self._assert_copyable_platform_link(output, expected_url)
+
+
+# ---------------------------------------------------------------------------
 # _perform_upload — extracted core upload logic
 # ---------------------------------------------------------------------------
 
 
 def _make_fake_dataset(
-    file_name: str = "data.jsonl",
+    file_name: str = "data",
     file_size: int = 2,
     method: str = "simple",
 ) -> DatasetFile:
@@ -96,7 +191,7 @@ class TestPerformUpload:
         class FakeClient:
             def create_dataset(self, file_name, file_size, ext, *, credentials=None):
                 calls["create"] = True
-                assert file_name == "data.jsonl"
+                assert file_name == "data"
                 assert ext == "jsonl"
                 assert credentials is fake_credentials
                 return fake_dataset
@@ -108,7 +203,7 @@ class TestPerformUpload:
                 assert credentials is fake_credentials
                 return DatasetFile(
                     id=file_id,
-                    file_name="data.jsonl",
+                    file_name="data",
                     file_size=file_size,
                     status="uploaded",
                 )
@@ -141,6 +236,53 @@ class TestPerformUpload:
         assert calls["s3_upload"]
         assert calls["complete"]
 
+    def test_strips_extension_from_dataset_name(self, monkeypatch, tmp_path):
+        """_perform_upload sends the dataset name without the file extension."""
+        import osmosis_ai.platform.api.client as api_client_module
+        import osmosis_ai.platform.api.upload as upload_module
+
+        file_path = tmp_path / "agent.eval.v2.jsonl"
+        file_path.write_text("{}")
+        file_size = file_path.stat().st_size
+
+        created: dict[str, str] = {}
+
+        class FakeClient:
+            def create_dataset(self, file_name, file_size, ext, *, credentials=None):
+                created["file_name"] = file_name
+                return _make_fake_dataset(file_name=file_name, file_size=file_size)
+
+            def complete_upload(self, file_id, parts=None, *, credentials=None):
+                return DatasetFile(
+                    id=file_id,
+                    file_name="agent.eval.v2",
+                    file_size=file_size,
+                    status="uploaded",
+                )
+
+        monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(
+            upload_module,
+            "make_progress_bar",
+            lambda _size: (nullcontext(), lambda _done, _total: None),
+        )
+        monkeypatch.setattr(
+            upload_module,
+            "upload_file_simple",
+            lambda _fp, _info, progress_callback=None: None,
+        )
+
+        from osmosis_ai.platform.cli.dataset import _perform_upload
+
+        _perform_upload(
+            file_path=file_path,
+            ext="jsonl",
+            file_size=file_size,
+            credentials=None,
+        )
+
+        assert created == {"file_name": "agent.eval.v2"}
+
     def test_raises_on_missing_upload_info(self, monkeypatch, tmp_path):
         """_perform_upload raises CLIError if server returns no upload info."""
         import osmosis_ai.platform.api.client as api_client_module
@@ -153,7 +295,7 @@ class TestPerformUpload:
             def create_dataset(self, *args, **kwargs):
                 return DatasetFile(
                     id="dataset-1",
-                    file_name="data.jsonl",
+                    file_name="data",
                     file_size=2,
                     status="created",
                     upload=None,
@@ -244,18 +386,27 @@ class TestUploadDatasetInteractive:
         import osmosis_ai.platform.cli.workspace as workspace_module
 
         file_path, dataset_module, _ = self._setup_mocks(monkeypatch, tmp_path)
+        output = StringIO()
 
         # Mock text() to return file path (simulating drag & drop)
         monkeypatch.setattr(workspace_module, "text", lambda msg, **kw: str(file_path))
         # Mock confirm() to approve
         monkeypatch.setattr(workspace_module, "confirm", lambda msg, **kw: True)
+        monkeypatch.setattr(
+            workspace_module, "console", Console(file=output, force_terminal=False)
+        )
+        monkeypatch.setattr(
+            workspace_module,
+            "platform_entity_url",
+            lambda ws, entity, item_id: f"https://example.com/{ws}/{entity}/{item_id}",
+        )
 
         uploaded = {}
 
         def fake_perform_upload(*, file_path, ext, file_size, credentials):
             uploaded["called"] = True
             return DatasetFile(
-                id="ds-1", file_name="data.jsonl", file_size=2, status="uploaded"
+                id="ds-1", file_name="data", file_size=2, status="uploaded"
             )
 
         monkeypatch.setattr(dataset_module, "_perform_upload", fake_perform_upload)
@@ -269,6 +420,9 @@ class TestUploadDatasetInteractive:
 
         assert result is True
         assert uploaded["called"]
+        rendered = output.getvalue()
+        assert "Upload complete. Dataset: data" in rendered
+        assert "https://example.com/my-ws/datasets/ds-1" in rendered
 
     def test_returns_false_on_cancelled_input(self, monkeypatch, tmp_path):
         """Returns False when user cancels the file path prompt."""

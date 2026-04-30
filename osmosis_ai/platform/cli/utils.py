@@ -6,7 +6,7 @@ import contextlib
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
-from osmosis_ai.cli.console import console
+from osmosis_ai.cli.console import Console, console
 from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.platform.api.models import (
     RUN_STATUSES_ERROR,
@@ -20,6 +20,7 @@ from osmosis_ai.platform.api.models import (
 from osmosis_ai.platform.auth import (
     AuthenticationExpiredError,
     PlatformAPIError,
+    ensure_active_workspace,
     load_credentials,
 )
 from osmosis_ai.platform.auth.config import PLATFORM_URL
@@ -34,6 +35,18 @@ if TYPE_CHECKING:
     from osmosis_ai.platform.auth.credentials import Credentials
 
 
+def platform_call[T](
+    message: str,
+    call: Callable[[], T],
+    *,
+    output_console: Console | None = None,
+) -> T:
+    """Run a platform request while showing a consistent CLI loading status."""
+    status_console = output_console or console
+    with status_console.spinner(message):
+        return call()
+
+
 def require_credentials() -> Credentials:
     """Load valid credentials, raising if not available or expired."""
     from osmosis_ai.platform.constants import MSG_NOT_LOGGED_IN
@@ -42,7 +55,7 @@ def require_credentials() -> Credentials:
     if credentials is None:
         raise CLIError(MSG_NOT_LOGGED_IN)
     if credentials.is_expired():
-        raise AuthenticationExpiredError("Session has expired.")
+        raise AuthenticationExpiredError()
     return credentials
 
 
@@ -268,9 +281,18 @@ def validate_list_options(
     return limit, all_
 
 
-def _get_active_workspace_name() -> str:
+def _get_active_workspace_name(
+    credentials: Credentials | None = None,
+) -> str:
     """Return the active workspace name, or raise if none is selected."""
     workspace_name = get_active_workspace_name()
+    if workspace_name is None:
+        active_workspace = platform_call(
+            "Loading workspace...",
+            lambda: ensure_active_workspace(credentials=credentials),
+        )
+        if active_workspace is not None:
+            workspace_name = active_workspace["name"]
     if workspace_name is None:
         raise CLIError(
             "No workspace selected. Run 'osmosis workspace' to select a workspace."
@@ -289,7 +311,7 @@ def _require_auth(
     """
     credentials = require_credentials()
     if workspace_name is None:
-        workspace_name = _get_active_workspace_name()
+        workspace_name = _get_active_workspace_name(credentials)
     return workspace_name, credentials
 
 
@@ -308,13 +330,22 @@ def _require_subscription(*, workspace_name: str) -> None:
     refreshed = False
     api_reached = False
     workspace_found = False
+    # Intentionally do NOT suppress AuthenticationExpiredError here: a real
+    # 401 must surface as "session expired" rather than be silently swallowed
+    # and reported below as the misleading "subscription required" error
+    # when a stale `False` subscription cache is present.
     with contextlib.suppress(PlatformAPIError, OSError):
         credentials = require_credentials()
         from osmosis_ai.platform.api.client import OsmosisClient
 
         client = OsmosisClient()
-        info = client.refresh_workspace_info(
-            credentials=credentials, workspace_name=workspace_name
+        info = platform_call(
+            "Checking subscription...",
+            lambda: client.refresh_workspace_info(
+                credentials=credentials,
+                workspace_name=workspace_name,
+                cleanup_on_401=False,
+            ),
         )
         api_reached = True
         workspace_found = info.get("found", False)

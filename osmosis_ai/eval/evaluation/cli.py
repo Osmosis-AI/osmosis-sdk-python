@@ -8,12 +8,25 @@ from __future__ import annotations
 import asyncio
 import logging
 import shutil
+import sys
 import time
 from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
 from osmosis_ai.cli.console import Console
+from osmosis_ai.cli.errors import CLIError
+from osmosis_ai.cli.output import (
+    DetailField,
+    DetailResult,
+    ListColumn,
+    ListResult,
+    MessageResult,
+    OperationResult,
+    OutputFormat,
+    get_output_context,
+    serialize_eval_cache_entry,
+)
 
 if TYPE_CHECKING:
     from osmosis_ai.eval.evaluation.cache import BuildSummaryResult
@@ -25,10 +38,32 @@ class EvalCommand:
     def __init__(self) -> None:
         self.console: Console = Console()
 
-    def _run_cache_dir(self) -> int:
+    @staticmethod
+    def _structured_output() -> bool:
+        return get_output_context().format is not OutputFormat.rich
+
+    def _fail(self, message: str, *, code: str = "VALIDATION") -> int:
+        if self._structured_output():
+            raise CLIError(message.removeprefix("Error: "), code=code)
+        self.console.print_error(message)
+        return 1
+
+    @staticmethod
+    def _stderr_line(message: str) -> None:
+        sys.stderr.write(message + "\n")
+        sys.stderr.flush()
+
+    def _run_cache_dir(self) -> int | DetailResult:
         from osmosis_ai.eval.evaluation.cache import JsonFileCacheBackend
 
         backend = JsonFileCacheBackend()
+        if self._structured_output():
+            path = str(backend.cache_root)
+            return DetailResult(
+                title="Eval Cache",
+                data={"cache_root": path},
+                fields=[DetailField(label="Cache root", value=path)],
+            )
         self.console.print(str(backend.cache_root))
         return 0
 
@@ -73,7 +108,7 @@ class EvalCommand:
         cache_model: str | None = None,
         cache_dataset: str | None = None,
         cache_status: str | None = None,
-    ) -> int:
+    ) -> int | ListResult:
         from osmosis_ai.eval.evaluation.cache import JsonFileCacheBackend
 
         backend = JsonFileCacheBackend()
@@ -87,6 +122,23 @@ class EvalCommand:
 
         # Sort by created_at descending (newest first)
         entries.sort(key=lambda e: e.get("created_at", ""), reverse=True)
+
+        if self._structured_output():
+            return ListResult(
+                title="Eval Caches",
+                items=[serialize_eval_cache_entry(entry) for entry in entries],
+                total_count=len(entries),
+                has_more=False,
+                next_offset=None,
+                columns=[
+                    ListColumn(key="task_id", label="Task ID", no_wrap=True),
+                    ListColumn(key="model", label="Model"),
+                    ListColumn(key="dataset", label="Dataset"),
+                    ListColumn(key="status", label="Status"),
+                    ListColumn(key="runs_count", label="Runs", align="right"),
+                    ListColumn(key="created_at", label="Created"),
+                ],
+            )
 
         if not entries:
             self.console.print("No cached evaluations found.")
@@ -147,17 +199,16 @@ class EvalCommand:
         cache_dataset: str | None = None,
         cache_status: str | None = None,
         yes: bool = False,
-    ) -> int:
+    ) -> int | OperationResult | MessageResult:
         from osmosis_ai.eval.evaluation.cache import JsonFileCacheBackend
 
         has_filter = any([cache_model, cache_dataset, cache_status])
 
         if not task_id and not rm_all and not has_filter:
-            self.console.print_error(
+            return self._fail(
                 "Error: Provide a task_id, --all, or at least one filter "
-                "(--model, --dataset, --status)."
+                "(--model, --dataset, --status).",
             )
-            return 1
 
         backend = JsonFileCacheBackend()
         all_entries = backend.list_caches()
@@ -173,12 +224,22 @@ class EvalCommand:
             )
 
         if not targets:
+            if self._structured_output():
+                raise CLIError(
+                    "No matching cached evaluations found.",
+                    code="NOT_FOUND",
+                )
             self.console.print("No matching cached evaluations found.")
             return 1
 
         # Single task_id deletion: no confirmation needed
         is_batch = not task_id
         if is_batch and not yes:
+            if self._structured_output():
+                raise CLIError(
+                    "Use --yes to confirm cache deletion in non-interactive mode.",
+                    code="INTERACTIVE_REQUIRED",
+                )
             self.console.print(f"Will delete {len(targets)} cached evaluation(s):")
             for e in targets:
                 config = e.get("config", {})
@@ -220,11 +281,29 @@ class EvalCommand:
             deleted += 1
 
         self.console.print(f"Deleted {deleted} cached evaluation(s).")
+        if self._structured_output():
+            return OperationResult(
+                operation="eval.cache.rm",
+                status="success",
+                resource={"deleted_count": deleted},
+                message=f"Deleted {deleted} cached evaluation(s).",
+            )
         return 0
 
-    def run(self, **kwargs: Any) -> int:
+    def run(self, **kwargs: Any) -> int | DetailResult:
         args = SimpleNamespace(**kwargs)
         return asyncio.run(self._run_async(args))
+
+    @staticmethod
+    def _load_project_dotenv(project_root: Path) -> None:
+        """Load project-local .env for eval runs without overriding shell env."""
+        dotenv_path = project_root / ".env"
+        if not dotenv_path.is_file():
+            return
+
+        from dotenv import load_dotenv
+
+        load_dotenv(dotenv_path=dotenv_path, override=False)
 
     @staticmethod
     def _resolve_api_key(config: Any) -> str | None:
@@ -327,15 +406,81 @@ class EvalCommand:
             if failed:
                 self.console.print(f"  Failed: {failed}")
 
-    async def _run_async(self, args: Any) -> int:
-        from osmosis_ai.cli.errors import CLIError
+    @staticmethod
+    def _partial_failures(cache_data: dict[str, Any]) -> list[dict[str, Any]]:
+        failures: list[dict[str, Any]] = []
+        for run in cache_data.get("runs", []):
+            if run.get("success", True):
+                continue
+            failures.append(
+                {
+                    "row_index": run.get("row_index"),
+                    "run_index": run.get("run_index"),
+                    "model_tag": run.get("model_tag"),
+                    "error": run.get("error"),
+                }
+            )
+        return failures
+
+    def _build_eval_run_result(
+        self,
+        *,
+        status: str,
+        summary: BuildSummaryResult | None,
+        total_completed: int,
+        total_expected: int,
+        cache_path: Path,
+        samples_path: Path | None,
+        output_path: Path | None,
+        cache_data: dict[str, Any],
+        dataset_fingerprint_warning: str | None = None,
+        exit_code: int = 0,
+    ) -> DetailResult:
+        summary_data: dict[str, Any] = dict(summary or {})
+        partial_failures = self._partial_failures(cache_data)
+        failed_runs = int(summary_data.get("failed", len(partial_failures)))
+        total_runs = int(summary_data.get("total_runs", total_expected))
+        data = {
+            "status": status,
+            "total_runs": total_runs,
+            "completed_runs": total_completed,
+            "expected_runs": total_expected,
+            "failed_runs": failed_runs,
+            "cache_path": str(cache_path),
+            "samples_path": str(samples_path) if samples_path else None,
+            "output_path": str(output_path) if output_path else None,
+            "partial_failures": partial_failures,
+            "summary": summary_data,
+        }
+        if dataset_fingerprint_warning:
+            data["dataset_fingerprint_warning"] = dataset_fingerprint_warning
+
+        return DetailResult(
+            title="Eval Run",
+            data=data,
+            fields=[
+                DetailField(label="Status", value=status),
+                DetailField(label="Total runs", value=str(total_runs)),
+                DetailField(label="Completed runs", value=str(total_completed)),
+                DetailField(label="Failed runs", value=str(failed_runs)),
+                DetailField(label="Cache", value=str(cache_path)),
+                DetailField(
+                    label="Output",
+                    value=str(output_path) if output_path else "",
+                ),
+            ],
+            exit_code=exit_code,
+        )
+
+    async def _run_async(self, args: Any) -> int | DetailResult:
+        output = get_output_context()
+        structured_output = output.format is not OutputFormat.rich
 
         # Reject conflicting CLI flags before config load so invalid fixtures cannot mask this error.
         if args.fresh and args.retry_failed:
-            self.console.print_error(
+            return self._fail(
                 "Error: --fresh and --retry-failed are mutually exclusive."
             )
-            return 1
 
         from osmosis_ai.eval.common.cli import (
             _resolve_grader,
@@ -345,14 +490,32 @@ class EvalCommand:
             truncate_error,
         )
         from osmosis_ai.eval.config import load_eval_config
+        from osmosis_ai.platform.cli.project_contract import (
+            ensure_project_config_path,
+            resolve_project_root,
+            validate_project_contract,
+        )
 
         # 1. Load TOML config
         config_path = Path(args.config_path)
         try:
             config = load_eval_config(config_path)
         except CLIError as e:
-            self.console.print_error(f"Error: {e}")
-            return 1
+            return self._fail(f"Error: {e}")
+
+        try:
+            project_root = resolve_project_root(config_path)
+            validate_project_contract(project_root)
+            ensure_project_config_path(
+                config_path,
+                project_root,
+                config_dir="configs/eval",
+                command_label="`osmosis eval run`",
+            )
+        except CLIError as e:
+            return self._fail(f"Error: {e}")
+
+        self._load_project_dotenv(project_root)
 
         # Apply CLI overrides (CLI flags take precedence over TOML).
         # Optional values: CLI wins when not None.
@@ -360,8 +523,7 @@ class EvalCommand:
         limit = args.limit if args.limit is not None else config.eval_limit
         offset = args.offset if args.offset is not None else config.eval_offset
         if offset is not None and offset < 0:
-            self.console.print_error("Error: --offset must be >= 0")
-            return 1
+            return self._fail("Error: --offset must be >= 0")
         fresh = args.fresh or config.eval_fresh
         retry_failed = args.retry_failed or config.eval_retry_failed
         batch_size = (
@@ -384,10 +546,9 @@ class EvalCommand:
             logging.getLogger("osmosis_ai.rollout.backend").setLevel(logging.CRITICAL)
 
         if fresh and retry_failed:
-            self.console.print_error(
+            return self._fail(
                 "Error: --fresh and --retry-failed are mutually exclusive."
             )
-            return 1
 
         if not quiet:
             from osmosis_ai.consts import PACKAGE_VERSION
@@ -403,8 +564,7 @@ class EvalCommand:
         try:
             api_key = self._resolve_api_key(config)
         except CLIError as e:
-            self.console.print_error(f"Error: {e}")
-            return 1
+            return self._fail(f"Error: {e}")
 
         # 3. Load dataset
         rows, error = load_dataset_rows(
@@ -417,8 +577,7 @@ class EvalCommand:
             action_label="evaluating",
         )
         if error:
-            self.console.print_error(f"Error: {error}")
-            return 1
+            return self._fail(f"Error: {error}")
         assert rows is not None
 
         # 4. Load workflow
@@ -427,10 +586,10 @@ class EvalCommand:
             entrypoint=config.eval_entrypoint,
             quiet=quiet,
             console=self.console,
+            project_root=project_root,
         )
         if error:
-            self.console.print_error(f"Error: {error}")
-            return 1
+            return self._fail(f"Error: {error}")
         assert workflow_cls is not None
         assert entrypoint_module is not None
 
@@ -442,17 +601,15 @@ class EvalCommand:
                 explicit_config=config.grader_config,
             )
         except (CLIError, ImportError, TypeError, ValueError) as e:
-            self.console.print_error(f"Error: {e}")
-            return 1
+            return self._fail(f"Error: {e}")
 
         if grader_cls is None:
-            self.console.print_error(
+            return self._fail(
                 "No Grader was found in the entrypoint module. "
                 "`osmosis eval run` requires a concrete Grader (and typically a "
                 "GraderConfig) alongside the workflow. Configure `[grader].module` "
                 "if the grader lives outside the entrypoint."
             )
-            return 1
 
         if not quiet:
             self.console.print(f"  Grader: {grader_cls.__name__}")
@@ -475,8 +632,7 @@ class EvalCommand:
         try:
             await proxy.preflight_check()
         except CLIError as e:
-            self.console.print_error(f"Error: {e}")
-            return 1
+            return self._fail(f"Error: {e}")
 
         # 8. Start proxy
         await proxy.start()
@@ -506,11 +662,10 @@ class EvalCommand:
 
                 baseline_api_key = os.environ.get(config.baseline_api_key_env)
                 if not baseline_api_key:
-                    self.console.print_error(
+                    await proxy.stop()
+                    return self._fail(
                         f"Error: Environment variable '{config.baseline_api_key_env}' is not set."
                     )
-                    await proxy.stop()
-                    return 1
 
             baseline_proxy = LiteLLMProxy(
                 model=config.baseline_model,
@@ -521,9 +676,8 @@ class EvalCommand:
             try:
                 await baseline_proxy.preflight_check()
             except CLIError as e:
-                self.console.print_error(f"Error (baseline): {e}")
                 await proxy.stop()
-                return 1
+                return self._fail(f"Error (baseline): {e}")
 
             await baseline_proxy.start()
             baseline_driver = InProcessDriver(backend=backend, proxy=baseline_proxy)
@@ -598,16 +752,17 @@ class EvalCommand:
             output_path_resolved = Path(output_path).resolve()
             cache_root_resolved = _get_cache_root().resolve()
             if output_path_resolved == cache_root_resolved:
-                self.console.print_error(
-                    "Error: --output-path cannot be the same as the cache root directory."
-                )
                 await proxy.stop()
                 if baseline_proxy:
                     await baseline_proxy.stop()
-                return 1
+                return self._fail(
+                    "Error: --output-path cannot be the same as the cache root directory."
+                )
 
         def on_progress(current: int, total: int, result: dict) -> None:
             if quiet:
+                return
+            if output.format is OutputFormat.json:
                 return
 
             status_style = "green" if result["success"] else "red"
@@ -627,20 +782,29 @@ class EvalCommand:
                 error_suffix = f" - {truncate_error(result['error'])}"
 
             tokens = result.get("tokens", 0)
+            line = (
+                f"[{current}/{total}] {tag_prefix}{status} "
+                f"({duration}, {tokens:,} tokens){reward_str}{error_suffix}"
+            )
+            if output.format is OutputFormat.plain:
+                self._stderr_line(line)
+                return
             status_styled = self.console.format_styled(status, status_style)
             self.console.print(
                 f"[{current}/{total}] {tag_prefix}{status_styled} "
                 f"({duration}, {tokens:,} tokens){reward_str}{error_suffix}"
             )
 
-        if not quiet:
+        if not quiet and output.format is not OutputFormat.json:
             self.console.print()
             n_info = f" x{config.runs_n} runs" if config.runs_n > 1 else ""
             batch_info = f", batch_size={batch_size}" if batch_size > 1 else ""
             model_info = " x2 models" if config.baseline_model else ""
-            self.console.print(
-                f"Running evaluation ({len(rows)} rows{n_info}{model_info}{batch_info})..."
-            )
+            message = f"Running evaluation ({len(rows)} rows{n_info}{model_info}{batch_info})..."
+            if output.format is OutputFormat.plain:
+                self._stderr_line(message)
+            else:
+                self.console.print(message)
 
         # 12. Run orchestrator
         from osmosis_ai.eval.evaluation.orchestrator import EvalOrchestrator
@@ -665,12 +829,11 @@ class EvalCommand:
         try:
             orch_result = await orchestrator.run()
         except Exception as e:
-            self.console.print_error(f"Error during evaluation: {e}")
             if debug:
                 import traceback
 
                 traceback.print_exc()
-            return 1
+            return self._fail(f"Error during evaluation: {e}", code="INTERNAL")
         finally:
             await proxy.stop()
             if baseline_proxy:
@@ -678,6 +841,7 @@ class EvalCommand:
 
         # 13. Handle result status
         if orch_result.status == "already_completed":
+            results_path: Path | None = None
             if not quiet:
                 self.console.print(
                     "\nEvaluation already completed (cached).", style="bold"
@@ -700,8 +864,21 @@ class EvalCommand:
                     samples_path=orch_result.samples_path,
                     task_id=task_id,
                 )
+                results_path = results_path
                 if not quiet:
                     self.console.print(f"Output written to: {results_path}")
+            if structured_output:
+                return self._build_eval_run_result(
+                    status=orch_result.status,
+                    summary=orch_result.summary,
+                    total_completed=orch_result.total_completed,
+                    total_expected=orch_result.total_expected,
+                    cache_path=orch_result.cache_path,
+                    samples_path=orch_result.samples_path,
+                    output_path=results_path,
+                    cache_data=orch_result.cache_data,
+                    dataset_fingerprint_warning=orch_result.dataset_fingerprint_warning,
+                )
             return 0
 
         if orch_result.status == "interrupted":
@@ -713,15 +890,26 @@ class EvalCommand:
                 )
                 self.console.print(f"Cache: {orch_result.cache_path}")
                 self.console.print("Re-run the same command to resume.")
+            if structured_output:
+                return self._build_eval_run_result(
+                    status=orch_result.status,
+                    summary=orch_result.summary,
+                    total_completed=orch_result.total_completed,
+                    total_expected=orch_result.total_expected,
+                    cache_path=orch_result.cache_path,
+                    samples_path=orch_result.samples_path,
+                    output_path=None,
+                    cache_data=orch_result.cache_data,
+                    exit_code=130,
+                )
             return 130
 
         if orch_result.status == "dataset_modified":
-            self.console.print_error(
+            return self._fail(
                 f"Error: Dataset was modified during evaluation"
                 f"{(' (' + orch_result.stop_reason + ')') if orch_result.stop_reason else ''}. "
                 f"Results may be inconsistent. Use --fresh to restart."
             )
-            return 1
 
         if orch_result.status == "systemic_error":
             if not quiet:
@@ -737,6 +925,18 @@ class EvalCommand:
                 self.console.print(
                     f"\nPartial results cached at: {orch_result.cache_path}"
                 )
+            if structured_output:
+                return self._build_eval_run_result(
+                    status=orch_result.status,
+                    summary=orch_result.summary,
+                    total_completed=orch_result.total_completed,
+                    total_expected=orch_result.total_expected,
+                    cache_path=orch_result.cache_path,
+                    samples_path=orch_result.samples_path,
+                    output_path=None,
+                    cache_data=orch_result.cache_data,
+                    exit_code=1,
+                )
             return 1
 
         # completed
@@ -750,6 +950,7 @@ class EvalCommand:
             if orch_result.samples_path:
                 self.console.print(f"Samples: {orch_result.samples_path}")
 
+        results_path = None
         if output_path:
             results_path = self._write_orchestrator_output(
                 output_path=output_path,
@@ -761,6 +962,18 @@ class EvalCommand:
             )
             if not quiet:
                 self.console.print(f"Output written to: {results_path}")
+
+        if structured_output:
+            return self._build_eval_run_result(
+                status=orch_result.status,
+                summary=orch_result.summary,
+                total_completed=orch_result.total_completed,
+                total_expected=orch_result.total_expected,
+                cache_path=orch_result.cache_path,
+                samples_path=orch_result.samples_path,
+                output_path=results_path,
+                cache_data=orch_result.cache_data,
+            )
 
         return 0
 

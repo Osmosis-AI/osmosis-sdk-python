@@ -1,0 +1,4 @@
+{
+  "schema_version": 1,
+  "keys": ["schema_version", "command", "cli_version", "error"]
+}

@@ -145,6 +145,19 @@ class TestURLPathSafety:
         assert path == "/api/cli/datasets/a%2Fb"
 
     @patch("osmosis_ai.platform.api.client.platform_request")
+    def test_get_dataset_download_url_encodes_id(self, mock_request: MagicMock) -> None:
+        mock_request.return_value = {
+            "presigned_url": "https://example.com/download",
+            "expires_in": 3600,
+            "file_name": "f.jsonl",
+        }
+        client = OsmosisClient()
+        result = client.get_dataset_download_url("a/b")
+        path = mock_request.call_args[0][0]
+        assert path == "/api/cli/datasets/a%2Fb/download"
+        assert result.presigned_url == "https://example.com/download"
+
+    @patch("osmosis_ai.platform.api.client.platform_request")
     def test_delete_dataset_encodes_id(self, mock_request: MagicMock) -> None:
         mock_request.return_value = None
         client = OsmosisClient()
@@ -243,6 +256,75 @@ class TestGetWorkspaceDeletionStatus:
         client.get_workspace_deletion_status("ws-1")
         call_kwargs = mock_request.call_args
         assert call_kwargs.kwargs.get("require_workspace") is False
+
+
+class TestRefreshWorkspaceInfo:
+    """Tests for OsmosisClient.refresh_workspace_info."""
+
+    @patch("osmosis_ai.platform.api.client.platform_request")
+    def test_returns_git_metadata_for_matching_workspace(
+        self, mock_request: MagicMock
+    ) -> None:
+        mock_request.return_value = {
+            "workspaces": [
+                {
+                    "id": "ws-1",
+                    "name": "team-alpha",
+                    "has_subscription": True,
+                    "has_github_app_installation": True,
+                    "connected_repo": {
+                        "id": "repo-1",
+                        "repo_full_name": "acme/rollouts",
+                        "repo_url": "https://github.com/acme/rollouts",
+                        "default_branch": "main",
+                        "sync_status": "ready",
+                        "last_synced_commit_sha": "abcdef123456",
+                    },
+                }
+            ]
+        }
+        client = OsmosisClient()
+        result = client.refresh_workspace_info(workspace_name="team-alpha")
+        assert result["found"] is True
+        assert result["has_subscription"] is True
+        assert result["has_github_app_installation"] is True
+        assert (
+            result["connected_repo"]["repo_url"] == "https://github.com/acme/rollouts"
+        )
+        call_kwargs = mock_request.call_args
+        assert call_kwargs.args[0] == "/api/cli/workspaces"
+        assert call_kwargs.kwargs["require_workspace"] is False
+
+    @patch("osmosis_ai.platform.api.client.platform_request")
+    def test_defaults_new_fields_for_older_platform_response(
+        self, mock_request: MagicMock
+    ) -> None:
+        mock_request.return_value = {
+            "workspaces": [
+                {
+                    "id": "ws-1",
+                    "name": "team-alpha",
+                    "has_subscription": True,
+                }
+            ]
+        }
+        client = OsmosisClient()
+        result = client.refresh_workspace_info(workspace_name="team-alpha")
+        assert result == {
+            "found": True,
+            "has_subscription": True,
+            "has_github_app_installation": False,
+            "connected_repo": None,
+        }
+
+    @patch("osmosis_ai.platform.api.client.platform_request")
+    def test_returns_found_false_when_workspace_missing(
+        self, mock_request: MagicMock
+    ) -> None:
+        mock_request.return_value = {"workspaces": []}
+        client = OsmosisClient()
+        result = client.refresh_workspace_info(workspace_name="missing")
+        assert result == {"found": False}
 
 
 class TestGetTrainingRunMetrics:

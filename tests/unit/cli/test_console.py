@@ -128,6 +128,102 @@ def test_print_respects_sep() -> None:
     assert "a|b|c" in output.getvalue()
 
 
+def test_print_soft_wrap_preserves_url_without_rich_line_breaks() -> None:
+    """URL output should not get hard line breaks inserted by Rich wrapping."""
+    output = StringIO()
+    console = Console(file=output, force_terminal=True, no_color=True, width=92)
+    url = (
+        "https://platform.osmosis.ai/osmosis-shared/training/"
+        "328be61c-ef39-45e1-9b33-1e3c7c482e97"
+    )
+
+    console.print("  View: ", console.format_url(url), sep="", soft_wrap=True)
+
+    assert output.getvalue() == f"  View: {url}\n"
+
+
+def test_format_url_emits_terminal_hyperlink(monkeypatch) -> None:
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.setenv("TERM", "xterm-256color")
+    output = StringIO()
+    console = Console(file=output, force_terminal=True, width=120)
+    url = "https://platform.osmosis.ai/osmosis-shared/training/run-1"
+
+    console.print("View: ", console.format_url(url), sep="")
+
+    rendered = output.getvalue()
+    assert "\x1b]8;" in rendered
+    assert url in rendered
+
+
+def test_format_url_handles_brackets_in_url(monkeypatch) -> None:
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.setenv("TERM", "xterm-256color")
+    output = StringIO()
+    console = Console(file=output, force_terminal=True, width=120)
+    url = "https://platform.osmosis.ai/osmosis-shared/training/run-1?filter[]=ok"
+
+    console.print("View: ", console.format_url(url), sep="")
+
+    rendered = output.getvalue()
+    assert "\x1b]8;" in rendered
+    assert url in rendered
+
+
+def test_print_error_preserves_url_without_rich_line_breaks(monkeypatch) -> None:
+    """URL-bearing error messages should stay copyable in captured output."""
+    error_output = StringIO()
+    monkeypatch.setattr(sys, "stderr", error_output)
+    console = Console(file=StringIO(), force_terminal=True, no_color=True, width=92)
+    url = (
+        "https://platform.osmosis.ai/osmosis-shared/settings/billing/"
+        "328be61c-ef39-45e1-9b33-1e3c7c482e97"
+    )
+
+    console.print_error(f"Upgrade at: {url}", soft_wrap=True)
+
+    assert error_output.getvalue() == f"Upgrade at: {url}\n"
+
+
+def test_print_error_does_not_parse_rich_markup(monkeypatch) -> None:
+    error_output = StringIO()
+    monkeypatch.setattr(sys, "stderr", error_output)
+    console = Console(file=StringIO(), force_terminal=True, no_color=True, width=120)
+
+    console.print_error("Missing [experiment] section", soft_wrap=True)
+
+    assert error_output.getvalue() == "Missing [experiment] section\n"
+
+
+def test_table_url_emits_terminal_hyperlink(monkeypatch) -> None:
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.setenv("TERM", "xterm-256color")
+    output = StringIO()
+    console = Console(file=output, force_terminal=True, width=120)
+    url = "https://platform.osmosis.ai/osmosis-shared/datasets/dataset-1"
+
+    console.table([("URL", console.format_url(url))], title="Dataset")
+
+    rendered = output.getvalue()
+    assert "\x1b]8;" in rendered
+    assert url in rendered
+
+
+def test_format_url_uses_label_for_visible_text(monkeypatch) -> None:
+    monkeypatch.delenv("NO_COLOR", raising=False)
+    monkeypatch.setenv("TERM", "xterm-256color")
+    output = StringIO()
+    console = Console(file=output, force_terminal=True, width=120)
+    url = "https://platform.osmosis.ai/osmosis-shared/integrations/git"
+
+    console.print("Open ", console.format_url(url, label="Git Sync"), sep="")
+
+    rendered = output.getvalue()
+    assert "\x1b]8;" in rendered
+    assert url in rendered
+    assert "Git Sync" in rendered
+
+
 def test_non_tty_output_has_no_ansi() -> None:
     """Non-TTY output should not contain ANSI escape codes."""
     output = StringIO()
@@ -260,3 +356,28 @@ def test_format_styled_escapes_brackets() -> None:
     result = c.format_styled("[bold]text", "cyan")
     assert "\\[bold]" in result  # opening bracket escaped
     assert "cyan" in result
+
+
+# ── format_text / print_url ──────────────────────────────────────────
+
+
+def test_format_text_does_not_parse_markup() -> None:
+    output = StringIO()
+    console = Console(file=output, force_terminal=True, no_color=True, width=120)
+
+    console.print(console.format_text("[red]model-123[/red]", style="green"))
+
+    assert output.getvalue() == "[red]model-123[/red]\n"
+
+
+def test_print_url_preserves_url_without_rich_line_breaks() -> None:
+    output = StringIO()
+    console = Console(file=output, force_terminal=True, no_color=True, width=92)
+    url = (
+        "https://platform.osmosis.ai/osmosis-shared/training/"
+        "328be61c-ef39-45e1-9b33-1e3c7c482e97?filter[]=ok"
+    )
+
+    console.print_url("  View: ", url)
+
+    assert output.getvalue() == f"  View: {url}\n"

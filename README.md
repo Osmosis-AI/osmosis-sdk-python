@@ -19,20 +19,36 @@
 
 > ⚠️ **Warning**: osmosis-ai is still in active development. APIs may change between versions.
 
-Python SDK for [Osmosis AI](https://platform.osmosis.ai), a platform for training LLMs with reinforcement learning. Implement an **AgentWorkflow** in Python, add a concrete **Grader** for serve/eval flows, drive them locally with the CLI, then connect a **RolloutServer** to managed training.
+Python SDK for [Osmosis AI](https://platform.osmosis.ai), a platform for training LLMs with reinforcement learning. Implement an **AgentWorkflow** in Python, add a concrete **Grader** for local eval and managed training flows, validate the rollout entrypoint locally with the CLI, then let Osmosis managed hosting load it through Git Sync.
 
 ## Quick start
 
 | Step | What you do |
 |------|-------------|
-| **Define agents** | One `AgentWorkflow` subclass (+ optional `AgentWorkflowConfig`) in your repo. For `rollout serve`, the entrypoint must also expose a concrete `Grader` (typically with a `GraderConfig`). |
+| **Define agents** | One `AgentWorkflow` subclass (+ optional `AgentWorkflowConfig`) in your repo. The training/eval entrypoint must also expose a concrete `Grader` (typically with a `GraderConfig`). |
 | **Layout** | Use a rollout pack directory under `rollouts/<name>/` when loading by rollout name; the CLI adds that directory to `sys.path`. |
-| **Serve** | `osmosis rollout serve serve.toml` — HTTP server for TrainGate. The entrypoint module must expose a concrete `Grader` (typically with a `GraderConfig`); config is TOML (`[serve]`, `[server]`, `[debug]`). |
-| **Evaluate** | `osmosis eval run eval.toml` — same execution stack as training, with optional pass@k and caching. |
+| **Validate** | `osmosis rollout validate configs/training/<name>.toml` — validate the rollout entrypoint referenced by a training or eval config before managed hosting or training submission. |
+| **Evaluate** | `osmosis eval run configs/eval/<name>.toml` — same execution stack as training, with optional pass@k and caching. |
 
 **Example repositories:** [osmosis-git-sync-example](https://github.com/Osmosis-AI/osmosis-git-sync-example) (synced agent repo patterns) · [osmosis-remote-rollout-example](https://github.com/Osmosis-AI/osmosis-remote-rollout-example) (reference server usage — align with current SDK exports when upgrading).
 
 **Documentation index:** [docs/README.md](docs/README.md)
+
+## Agent-friendly CLI output
+
+The `osmosis` CLI keeps Rich as the default output for humans, but every public command also speaks structured JSON and low-noise plain text for AI agents, CI/CD, and shell automation. Put these global output flags before the command:
+
+```bash
+osmosis dataset list                         # human-friendly Rich table
+osmosis --json dataset list                  # recommended for AI agents and CI/CD
+osmosis --format plain dataset list          # low-noise text for shell pipelines
+```
+
+JSON is the stable machine contract: every successful response includes `schema_version: 1`; list envelopes include `items`, `total_count`, `has_more`, and `next_offset`; detail envelopes include `data`; operation envelopes include `status`, `operation`, optional `resource`, and optional `next_steps_structured`. Errors are JSON-structured on stderr with `code`, `message`, `details`, optional `request_id`, plus the command path and SDK `cli_version`.
+
+Plain mode is for humans and simple shell pipelines, not a strict schema. `--format` and its `--json` / `--plain` aliases are global flags parsed before subcommands; prefer `osmosis --json <command>` or `osmosis --format plain <command>` over the default Rich output in non-interactive environments. Command-local `--output` always means a file path, not a format selector, so `osmosis dataset download my-dataset --output ./data.jsonl` works in every mode.
+
+In JSON or plain mode, interactive commands fail fast with `INTERACTIVE_REQUIRED` unless a non-interactive flow exists, typically by passing `--yes` or `--token`. `OSMOSIS_TOKEN` is verify-only across the CLI: it activates authentication for the current process but is never written to the on-disk credentials store, never revoked, and never deletes existing credentials.
 
 ## Installation
 

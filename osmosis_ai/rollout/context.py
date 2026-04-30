@@ -1,7 +1,7 @@
 import os
 from contextvars import ContextVar
 from dataclasses import dataclass, field
-from typing import Any, Generic, TypeVar
+from typing import Any
 
 from osmosis_ai.rollout.types import (
     AgentWorkflowConfig,
@@ -11,7 +11,6 @@ from osmosis_ai.rollout.types import (
 rollout_contextvar: ContextVar["RolloutContext | None"] = ContextVar(
     "rollout_contextvar", default=None
 )
-TConfig = TypeVar("TConfig", bound=AgentWorkflowConfig)
 
 # Env var names used by the container-side runners
 CHAT_COMPLETIONS_URL_ENV = "OSMOSIS_CHAT_COMPLETIONS_URL"
@@ -68,7 +67,7 @@ def get_rollout_context() -> RolloutContext | None:
 class GraderContext:
     label: str | None = None
     samples: dict[str, RolloutSample] = field(default_factory=dict)
-    workspace_path: str | None = None
+    project_path: str | None = None
 
     def get_samples(self) -> dict[str, RolloutSample]:
         return self.samples
@@ -80,7 +79,7 @@ class GraderContext:
 
 
 @dataclass
-class AgentWorkflowContext(Generic[TConfig]):
+class AgentWorkflowContext[TConfig: AgentWorkflowConfig]:
     prompt: list[dict[str, Any]]
     config: TConfig | None = None
 
@@ -94,7 +93,9 @@ class AgentWorkflowContext(Generic[TConfig]):
 
 
 @dataclass
-class HarborAgentWorkflowContext(AgentWorkflowContext[TConfig]):
+class HarborAgentWorkflowContext[TConfig: AgentWorkflowConfig](
+    AgentWorkflowContext[TConfig]
+):
     """Context for agent workflow execution under HarborBackend.
 
     Extends AgentWorkflowContext with the Harbor ``BaseEnvironment``,

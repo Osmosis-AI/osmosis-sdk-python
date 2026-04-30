@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from io import StringIO
 from types import SimpleNamespace
 
@@ -15,6 +16,7 @@ from osmosis_ai.platform.cli.utils import (
     format_processing_step,
     format_run_status,
     format_size,
+    platform_call,
     validate_list_options,
 )
 from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE
@@ -274,3 +276,95 @@ def test_validate_list_options_custom_limit() -> None:
 def test_validate_list_options_mutual_exclusion() -> None:
     with pytest.raises(CLIError, match="mutually exclusive"):
         validate_list_options(limit=10, all_=True)
+
+
+# ── platform_call ────────────────────────────────────────────────────
+
+
+def test_platform_call_uses_injected_console() -> None:
+    output = StringIO()
+    status_console = Console(file=output, force_terminal=False)
+    messages: list[str] = []
+
+    @contextmanager
+    def record_spinner(message: str):
+        messages.append(message)
+        yield
+
+    status_console.spinner = record_spinner  # type: ignore[method-assign]
+
+    result = platform_call(
+        "Fetching things...",
+        lambda: "ok",
+        output_console=status_console,
+    )
+
+    assert result == "ok"
+    assert messages == ["Fetching things..."]
+
+
+# ── _require_subscription ────────────────────────────────────────────
+
+
+class _FakeCreds:
+    def is_expired(self) -> bool:
+        return False
+
+
+def test_require_subscription_propagates_auth_expired_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A real 401 must surface as AuthenticationExpiredError instead of being
+    masked by the misleading "subscription required" CLIError when a stale
+    `False` cache is present.
+    """
+    import osmosis_ai.platform.cli.utils as utils_module
+    from osmosis_ai.platform.auth import AuthenticationExpiredError
+
+    monkeypatch.setattr(
+        utils_module, "load_subscription_status", lambda *_a, **_kw: False
+    )
+    monkeypatch.setattr(
+        utils_module, "save_subscription_status", lambda *_a, **_kw: None
+    )
+    monkeypatch.setattr(utils_module, "require_credentials", lambda: _FakeCreds())
+
+    class _FakeClient:
+        def refresh_workspace_info(self, **_kwargs):
+            raise AuthenticationExpiredError("session expired")
+
+    monkeypatch.setattr(
+        "osmosis_ai.platform.api.client.OsmosisClient", lambda: _FakeClient()
+    )
+
+    with pytest.raises(AuthenticationExpiredError):
+        utils_module._require_subscription(workspace_name="team-alpha")
+
+
+def test_require_subscription_swallows_platform_api_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Transient platform errors should not block when cache is unknown — the
+    actual mutating call surfaces them with full context.
+    """
+    import osmosis_ai.platform.cli.utils as utils_module
+    from osmosis_ai.platform.auth import PlatformAPIError
+
+    monkeypatch.setattr(
+        utils_module, "load_subscription_status", lambda *_a, **_kw: None
+    )
+    monkeypatch.setattr(
+        utils_module, "save_subscription_status", lambda *_a, **_kw: None
+    )
+    monkeypatch.setattr(utils_module, "require_credentials", lambda: _FakeCreds())
+
+    class _FakeClient:
+        def refresh_workspace_info(self, **_kwargs):
+            raise PlatformAPIError("platform unreachable")
+
+    monkeypatch.setattr(
+        "osmosis_ai.platform.api.client.OsmosisClient", lambda: _FakeClient()
+    )
+
+    # No exception — degrades gracefully so the next API call surfaces it.
+    utils_module._require_subscription(workspace_name="team-alpha")

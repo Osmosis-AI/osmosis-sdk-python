@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "keys": [
+    "id",
+    "file_name",
+    "file_size",
+    "status",
+    "processing_step",
+    "processing_percent",
+    "error",
+    "created_at",
+    "updated_at"
+  ]
+}

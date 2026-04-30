@@ -7,7 +7,7 @@ is correct end-to-end.
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
 import pytest
@@ -18,10 +18,11 @@ from osmosis_ai.platform.auth.platform_client import (
     AuthenticationExpiredError,
     PlatformAPIError,
 )
+from osmosis_ai.platform.constants import MSG_ENV_TOKEN_INVALID
 
 
 def _make_credentials(*, expired: bool = False) -> Credentials:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     offset = timedelta(days=-1) if expired else timedelta(days=30)
     return Credentials(
         access_token="test-token",
@@ -49,8 +50,11 @@ class TestRequireCredentialsMessages:
 
         mock_load.return_value = _make_credentials(expired=True)
 
-        with pytest.raises(AuthenticationExpiredError):
+        with pytest.raises(AuthenticationExpiredError) as exc_info:
             require_credentials()
+
+        assert "session has expired" in str(exc_info.value)
+        assert "osmosis auth login" in str(exc_info.value)
 
     @patch("osmosis_ai.platform.cli.utils.load_credentials")
     def test_valid_credentials_returns_them(self, mock_load: object) -> None:
@@ -70,7 +74,13 @@ class TestGetActiveWorkspaceMessages:
         "osmosis_ai.platform.cli.utils.get_active_workspace_name",
         return_value=None,
     )
-    def test_no_workspace_raises_correct_message(self, _mock: object) -> None:
+    @patch(
+        "osmosis_ai.platform.cli.utils.ensure_active_workspace",
+        return_value=None,
+    )
+    def test_no_workspace_raises_correct_message(
+        self, _auto_mock: object, _mock: object
+    ) -> None:
         from osmosis_ai.platform.cli.utils import _get_active_workspace_name
 
         with pytest.raises(CLIError, match="No workspace selected"):
@@ -80,7 +90,13 @@ class TestGetActiveWorkspaceMessages:
         "osmosis_ai.platform.cli.utils.get_active_workspace_name",
         return_value=None,
     )
-    def test_no_workspace_does_not_say_not_logged_in(self, _mock: object) -> None:
+    @patch(
+        "osmosis_ai.platform.cli.utils.ensure_active_workspace",
+        return_value=None,
+    )
+    def test_no_workspace_does_not_say_not_logged_in(
+        self, _auto_mock: object, _mock: object
+    ) -> None:
         from osmosis_ai.platform.cli.utils import _get_active_workspace_name
 
         with pytest.raises(CLIError) as exc_info:
@@ -88,6 +104,21 @@ class TestGetActiveWorkspaceMessages:
 
         assert "Not logged in" not in str(exc_info.value)
         assert "login" not in str(exc_info.value).lower()
+
+    @patch(
+        "osmosis_ai.platform.cli.utils.get_active_workspace_name",
+        return_value=None,
+    )
+    @patch(
+        "osmosis_ai.platform.cli.utils.ensure_active_workspace",
+        return_value={"id": "ws_only", "name": "solo-workspace"},
+    )
+    def test_single_workspace_is_auto_selected(
+        self, _auto_mock: object, _mock: object
+    ) -> None:
+        from osmosis_ai.platform.cli.utils import _get_active_workspace_name
+
+        assert _get_active_workspace_name() == "solo-workspace"
 
 
 class TestRequireAuthMessages:
@@ -112,8 +143,12 @@ class TestRequireAuthMessages:
         "osmosis_ai.platform.cli.utils.get_active_workspace_name",
         return_value=None,
     )
+    @patch(
+        "osmosis_ai.platform.cli.utils.ensure_active_workspace",
+        return_value=None,
+    )
     def test_logged_in_but_no_workspace_says_no_workspace(
-        self, _ws_mock: object, mock_load: object
+        self, _auto_mock: object, _ws_mock: object, mock_load: object
     ) -> None:
         """When logged in but no workspace, error should say 'No workspace selected'."""
         from osmosis_ai.platform.cli.utils import _require_auth
@@ -122,6 +157,29 @@ class TestRequireAuthMessages:
 
         with pytest.raises(CLIError, match="No workspace selected"):
             _require_auth()
+
+    @patch("osmosis_ai.platform.cli.utils.load_credentials")
+    @patch(
+        "osmosis_ai.platform.cli.utils.get_active_workspace_name",
+        return_value=None,
+    )
+    @patch(
+        "osmosis_ai.platform.cli.utils.ensure_active_workspace",
+        return_value={"id": "ws_only", "name": "solo-workspace"},
+    )
+    def test_logged_in_with_single_workspace_auto_selects(
+        self, _auto_mock: object, _ws_mock: object, mock_load: object
+    ) -> None:
+        """When only one workspace exists, _require_auth should resolve it automatically."""
+        from osmosis_ai.platform.cli.utils import _require_auth
+
+        creds = _make_credentials()
+        mock_load.return_value = creds
+
+        workspace_name, resolved_credentials = _require_auth()
+
+        assert workspace_name == "solo-workspace"
+        assert resolved_credentials is creds
 
 
 class TestPlatformRequestMessages:
@@ -140,7 +198,13 @@ class TestPlatformRequestMessages:
         "osmosis_ai.platform.auth.platform_client.get_active_workspace_id",
         return_value=None,
     )
-    def test_no_workspace_says_workspace_not_expired(self, _mock: object) -> None:
+    @patch(
+        "osmosis_ai.platform.auth.platform_client.ensure_active_workspace",
+        return_value=None,
+    )
+    def test_no_workspace_says_workspace_not_expired(
+        self, _auto_mock: object, _mock: object
+    ) -> None:
         from osmosis_ai.platform.auth.platform_client import platform_request
 
         creds = _make_credentials()
@@ -170,6 +234,21 @@ class TestMainExceptionHandlerMessages:
         assert "No workspace selected" in capsys.readouterr().err
 
     @patch("osmosis_ai.cli.main._registered", True)
+    def test_cli_error_preserves_bracketed_section_names(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        from osmosis_ai.cli.main import main
+
+        with patch(
+            "osmosis_ai.cli.main.app",
+            side_effect=CLIError("Missing [experiment] section in train.toml"),
+        ):
+            code = main([])
+
+        assert code == 1
+        assert "Missing [experiment] section" in capsys.readouterr().err
+
+    @patch("osmosis_ai.cli.main._registered", True)
     def test_auth_expired_shows_session_expired(
         self, capsys: pytest.CaptureFixture[str]
     ) -> None:
@@ -177,12 +256,27 @@ class TestMainExceptionHandlerMessages:
 
         with patch(
             "osmosis_ai.cli.main.app",
-            side_effect=AuthenticationExpiredError("expired"),
+            side_effect=AuthenticationExpiredError(),
         ):
             code = main([])
 
         assert code == 1
         captured = capsys.readouterr().err
-        assert (
-            "session has expired" in captured.lower() or "expired" in captured.lower()
-        )
+        assert "session has expired" in captured.lower()
+
+    @patch("osmosis_ai.cli.main._registered", True)
+    def test_auth_expired_preserves_env_token_guidance(
+        self, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        from osmosis_ai.cli.main import main
+
+        with patch(
+            "osmosis_ai.cli.main.app",
+            side_effect=AuthenticationExpiredError(MSG_ENV_TOKEN_INVALID),
+        ):
+            code = main([])
+
+        assert code == 1
+        captured = capsys.readouterr().err
+        assert "OSMOSIS_TOKEN environment variable is invalid or expired" in captured
+        assert "unset OSMOSIS_TOKEN" in captured

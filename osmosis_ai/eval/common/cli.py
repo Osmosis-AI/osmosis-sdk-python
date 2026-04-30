@@ -47,9 +47,12 @@ def truncate_error(text: str, max_len: int = 50) -> str:
 def _resolve_rollout_entrypoint(
     rollout: str,
     entrypoint: str,
+    *,
+    project_root: Path | None = None,
 ) -> tuple[Path, Path]:
     """Resolve and validate the rollout root and entrypoint file path."""
-    rollout_dir = (Path.cwd() / "rollouts" / rollout).resolve()
+    project_root = (project_root or Path.cwd()).resolve()
+    rollout_dir = (project_root / "rollouts" / rollout).resolve()
     if not rollout_dir.is_dir():
         raise CLIError(
             f"Rollout directory not found: rollouts/{rollout}/\n"
@@ -134,9 +137,34 @@ def _ensure_parent_packages(
         _load_package_module(current_package, current_dir)
 
 
-def _load_rollout_module(rollout: str, entrypoint: str) -> types.ModuleType:
+def _ensure_rollout_dir_on_path(rollout_dir: Path) -> None:
+    """Add the rollout directory to ``sys.path`` so sibling packages resolve.
+
+    The synthetic-package wrapper isolates the entrypoint module itself, but
+    real-world entrypoints commonly do absolute imports of sibling packages
+    that live next to them (e.g. ``from multiply_openai_agents.grader import
+    ...`` next to ``local_rollout_server_openai_agents_example.py``). Those
+    are top-level imports, so the rollout directory must be searchable via
+    ``sys.path`` for them to resolve.
+    """
+    rollout_dir_str = str(rollout_dir)
+    if rollout_dir_str not in sys.path:
+        sys.path.insert(0, rollout_dir_str)
+
+
+def _load_rollout_module(
+    rollout: str,
+    entrypoint: str,
+    *,
+    project_root: Path | None = None,
+) -> types.ModuleType:
     """Load an entrypoint as an isolated synthetic package subtree."""
-    rollout_dir, entrypoint_path = _resolve_rollout_entrypoint(rollout, entrypoint)
+    rollout_dir, entrypoint_path = _resolve_rollout_entrypoint(
+        rollout,
+        entrypoint,
+        project_root=project_root,
+    )
+    _ensure_rollout_dir_on_path(rollout_dir)
     package_name = _synthetic_rollout_package_name(rollout_dir)
     _clear_rollout_module_cache(package_name)
     _load_package_module(package_name, rollout_dir)
@@ -177,6 +205,8 @@ def _pick_representative(pairs_for_one_object: list[tuple[str, Any]]) -> Any:
 def _resolve_workflow(
     rollout: str,
     entrypoint: str,
+    *,
+    project_root: Path | None = None,
 ) -> tuple[type, Any, str]:
     """Resolve an AgentWorkflow subclass and its config.
 
@@ -193,7 +223,11 @@ def _resolve_workflow(
     from osmosis_ai.rollout.agent_workflow import AgentWorkflow
     from osmosis_ai.rollout.types import AgentWorkflowConfig
 
-    mod = _load_rollout_module(rollout, entrypoint)
+    mod = _load_rollout_module(
+        rollout,
+        entrypoint,
+        project_root=project_root,
+    )
 
     workflow_pairs = [
         (n, v)
@@ -239,6 +273,7 @@ def load_workflow(
     entrypoint: str,
     quiet: bool = False,
     console: Console | None = None,
+    project_root: Path | None = None,
 ) -> tuple[type | None, Any, str | None, str | None]:
     """Load an AgentWorkflow class and its config.
 
@@ -249,7 +284,9 @@ def load_workflow(
 
     try:
         workflow_cls, workflow_config, entrypoint_module = _resolve_workflow(
-            rollout=rollout, entrypoint=entrypoint
+            rollout=rollout,
+            entrypoint=entrypoint,
+            project_root=project_root,
         )
     except Exception as e:
         detail = str(e)

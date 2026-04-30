@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta, timezone
+import io
+from datetime import UTC, datetime, timedelta
+
+import pytest
 
 import osmosis_ai.cli.commands.auth as auth_module
+from osmosis_ai.cli.console import Console
+from osmosis_ai.platform.auth import AuthenticationExpiredError, PlatformAPIError
 from osmosis_ai.platform.auth.credentials import Credentials, UserInfo
 from osmosis_ai.platform.auth.flow import LoginResult
 
@@ -12,7 +17,7 @@ from osmosis_ai.platform.auth.flow import LoginResult
 def _make_credentials(
     user_id: str = "user_1", email: str = "a@example.com"
 ) -> Credentials:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     return Credentials(
         access_token="tok",
         token_type="Bearer",
@@ -25,7 +30,41 @@ def _make_credentials(
 def _make_login_result(email: str = "a@example.com") -> LoginResult:
     return LoginResult(
         user=UserInfo(id="user_1", email=email, name="User"),
-        expires_at=datetime.now(timezone.utc) + timedelta(days=30),
+        expires_at=datetime.now(UTC) + timedelta(days=30),
+    )
+
+
+@pytest.fixture(autouse=True)
+def _stub_workspace_resolution(monkeypatch) -> None:
+    """Keep login tests offline unless a test overrides workspace resolution."""
+    active_workspace: dict[str, str] | None = None
+
+    def get_active_workspace() -> dict[str, str] | None:
+        return active_workspace
+
+    def set_active_workspace(workspace_id: str, workspace_name: str) -> None:
+        nonlocal active_workspace
+        active_workspace = {"id": workspace_id, "name": workspace_name}
+
+    def clear_all_local_data() -> None:
+        nonlocal active_workspace
+        active_workspace = None
+
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.platform_request",
+        lambda *args, **kwargs: {"workspaces": []},
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.local_config.get_active_workspace",
+        get_active_workspace,
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.local_config.set_active_workspace",
+        set_active_workspace,
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.local_config.clear_all_local_data",
+        clear_all_local_data,
     )
 
 
@@ -158,3 +197,166 @@ def test_first_login_does_not_clear_workspace(monkeypatch) -> None:
     auth_module.login(force=False, token=None)
 
     assert not clear_calls, "no cleanup needed for first-time login"
+
+
+def test_login_auto_selects_only_workspace(monkeypatch) -> None:
+    """Login should auto-select the only available workspace and skip the prompt."""
+    new_creds = _make_credentials(user_id="user_1")
+    result = _make_login_result()
+    output = io.StringIO()
+
+    monkeypatch.delenv("OSMOSIS_TOKEN", raising=False)
+    monkeypatch.setattr("osmosis_ai.platform.auth.load_credentials", lambda: None)
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.credentials.save_credentials", lambda c: "keyring"
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.device_login",
+        lambda **kw: (result, new_creds),
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.platform_request",
+        lambda *args, **kwargs: {
+            "workspaces": [{"id": "ws_only", "name": "solo-workspace"}]
+        },
+    )
+    monkeypatch.setattr(
+        auth_module,
+        "console",
+        Console(file=output, force_terminal=False, no_color=True, width=80),
+    )
+
+    auth_module.login(force=False, token=None)
+
+    rendered = output.getvalue()
+    assert "Workspace: solo-workspace" in rendered
+    assert "Automatically selected your only workspace: solo-workspace" in rendered
+    assert "Run 'osmosis workspace' to select a workspace." not in rendered
+
+
+def test_login_prints_switch_commands_for_multiple_workspaces(monkeypatch) -> None:
+    """Login should print copyable switch commands when multiple workspaces exist."""
+    new_creds = _make_credentials(user_id="user_1")
+    result = _make_login_result()
+    output = io.StringIO()
+
+    monkeypatch.delenv("OSMOSIS_TOKEN", raising=False)
+    monkeypatch.setattr("osmosis_ai.platform.auth.load_credentials", lambda: None)
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.credentials.save_credentials", lambda c: "keyring"
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.device_login",
+        lambda **kw: (result, new_creds),
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.platform_request",
+        lambda *args, **kwargs: {
+            "workspaces": [
+                {"id": "ws_alpha", "name": "team-alpha"},
+                {"id": "ws_beta", "name": "ML Team"},
+            ]
+        },
+    )
+    monkeypatch.setattr(
+        auth_module,
+        "console",
+        Console(file=output, force_terminal=False, no_color=True, width=80),
+    )
+
+    auth_module.login(force=False, token=None)
+
+    rendered = output.getvalue()
+    assert "Multiple workspaces are available. Switch with:" in rendered
+    assert "osmosis workspace switch team-alpha" in rendered
+    assert "osmosis workspace switch 'ML Team'" in rendered
+    assert "Or run 'osmosis workspace' for interactive selection." in rendered
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        PlatformAPIError("workspace endpoint unavailable"),
+        AuthenticationExpiredError("session expired"),
+    ],
+)
+def test_login_does_not_fail_when_workspace_lookup_fails(monkeypatch, error) -> None:
+    """Workspace lookup errors should not turn a successful login into a failure."""
+    new_creds = _make_credentials(user_id="user_1")
+    result = _make_login_result()
+    output = io.StringIO()
+
+    monkeypatch.delenv("OSMOSIS_TOKEN", raising=False)
+    monkeypatch.setattr("osmosis_ai.platform.auth.load_credentials", lambda: None)
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.credentials.save_credentials", lambda c: "keyring"
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.device_login",
+        lambda **kw: (result, new_creds),
+    )
+
+    def raise_workspace_error(*args, **kwargs):
+        raise error
+
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.platform_request",
+        raise_workspace_error,
+    )
+    monkeypatch.setattr(
+        auth_module,
+        "console",
+        Console(file=output, force_terminal=False, no_color=True, width=80),
+    )
+
+    auth_module.login(force=False, token=None)
+
+    rendered = output.getvalue()
+    assert "Login Successful" in rendered
+    assert "Authenticated, but could not load your workspaces yet." in rendered
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        PlatformAPIError("workspace endpoint unavailable"),
+        AuthenticationExpiredError("session expired"),
+    ],
+)
+def test_whoami_prints_local_identity_when_workspace_lookup_fails(
+    monkeypatch, error
+) -> None:
+    """whoami should still print local identity info when workspace lookup fails."""
+    creds = _make_credentials(user_id="user_1")
+    output = io.StringIO()
+    calls: list[dict[str, object]] = []
+
+    monkeypatch.setattr("osmosis_ai.platform.auth.load_credentials", lambda: creds)
+
+    def raise_workspace_error(*, credentials=None, cleanup_on_401=True):
+        calls.append(
+            {
+                "credentials": credentials,
+                "cleanup_on_401": cleanup_on_401,
+            }
+        )
+        raise error
+
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.ensure_active_workspace",
+        raise_workspace_error,
+    )
+    monkeypatch.setattr(
+        auth_module,
+        "console",
+        Console(file=output, force_terminal=False, no_color=True, width=80),
+    )
+
+    auth_module.whoami()
+
+    rendered = output.getvalue()
+    assert "a@example.com" in rendered
+    assert "User" in rendered
+    assert creds.expires_at.strftime("%Y-%m-%d") in rendered
+    assert "Workspace" not in rendered
+    assert calls == [{"credentials": creds, "cleanup_on_401": False}]

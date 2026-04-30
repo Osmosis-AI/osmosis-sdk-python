@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
 from osmosis_ai.platform.auth.credentials import (
@@ -23,7 +23,7 @@ def _make_credentials(
     created_at: datetime | None = None,
     token_id: str | None = None,
 ) -> Credentials:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     return Credentials(
         access_token="test-token",
         token_type="Bearer",
@@ -35,7 +35,7 @@ def _make_credentials(
 
 
 def test_credentials_roundtrip_preserves_tz_aware_expires_at() -> None:
-    now_utc = datetime.now(timezone.utc)
+    now_utc = datetime.now(UTC)
     creds = _make_credentials(
         expires_at=now_utc + timedelta(minutes=5),
         created_at=now_utc,
@@ -330,6 +330,27 @@ def test_load_credentials_from_env(monkeypatch) -> None:
     assert creds.user.id == ""  # minimal user info for env token
 
 
+def test_load_credentials_can_skip_env_token(tmp_path, monkeypatch) -> None:
+    creds_file = tmp_path / "creds.json"
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.credentials.CREDENTIALS_FILE", creds_file
+    )
+    monkeypatch.setenv("OSMOSIS_TOKEN", "env-token-abc")
+
+    stored = _make_credentials(token_id="tok_stored")
+    data = stored.to_dict()
+    data["token_store"] = TOKEN_STORE_FILE
+    creds_file.write_text(json.dumps(data))
+
+    from osmosis_ai.platform.auth.credentials import load_credentials
+
+    assert load_credentials().access_token == "env-token-abc"
+    loaded = load_credentials(include_env=False)
+    assert loaded is not None
+    assert loaded.access_token == "test-token"
+    assert loaded.token_id == "tok_stored"
+
+
 # ---------------------------------------------------------------------------
 # load: version mismatch
 # ---------------------------------------------------------------------------
@@ -580,9 +601,7 @@ def test_delete_with_missing_file_still_cleans_keyring(tmp_path, monkeypatch) ->
 
 
 def test_is_expired_true() -> None:
-    creds = _make_credentials(
-        expires_at=datetime.now(timezone.utc) - timedelta(hours=1)
-    )
+    creds = _make_credentials(expires_at=datetime.now(UTC) - timedelta(hours=1))
     assert creds.is_expired() is True
 
 

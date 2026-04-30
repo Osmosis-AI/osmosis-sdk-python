@@ -1,10 +1,10 @@
 # Osmosis Eval Configuration
-# Usage: osmosis eval run configs/eval/<your-config>.toml
+# Usage: osmosis --json eval run configs/eval/<your-config>.toml
 
 [eval]
 rollout = "<your-rollout>"                 # Rollout name (directory under rollouts/)
 entrypoint = "<your-entrypoint-file>"      # Entrypoint file (relative to rollout dir)
-dataset = "<your-dataset>.jsonl"           # Dataset path (relative to workspace root)
+dataset = "<your-dataset>.jsonl"           # Dataset path (relative to project root)
 # limit =                                  # Max rows to evaluate
 # offset = 0                               # Skip first N rows
 # fresh = false                            # Discard cached results

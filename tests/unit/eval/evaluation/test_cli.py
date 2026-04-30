@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import sys
 import types
 from types import SimpleNamespace
@@ -49,6 +50,28 @@ def _make_config(**overrides):
     return SimpleNamespace(**values)
 
 
+def test_load_project_dotenv_sets_missing_env(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    (tmp_path / ".env").write_text("OPENAI_API_KEY=from-dotenv\n", encoding="utf-8")
+
+    EvalCommand._load_project_dotenv(tmp_path)
+
+    assert os.environ["OPENAI_API_KEY"] == "from-dotenv"
+
+
+def test_load_project_dotenv_does_not_override_shell_env(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "from-shell")
+    (tmp_path / ".env").write_text("OPENAI_API_KEY=from-dotenv\n", encoding="utf-8")
+
+    EvalCommand._load_project_dotenv(tmp_path)
+
+    assert os.environ["OPENAI_API_KEY"] == "from-shell"
+
+
 def _run_command(monkeypatch: pytest.MonkeyPatch, config: SimpleNamespace) -> None:
     fake_workflow = type("FakeWorkflow", (), {})
 
@@ -66,6 +89,18 @@ def _run_command(monkeypatch: pytest.MonkeyPatch, config: SimpleNamespace) -> No
     )
     monkeypatch.setattr(EvalCommand, "_resolve_api_key", lambda self, cfg: None)
     monkeypatch.setattr("osmosis_ai.eval.llm_proxy.LiteLLMProxy", _FakeProxy)
+    monkeypatch.setattr(
+        "osmosis_ai.platform.cli.project_contract.resolve_project_root",
+        lambda path: path.parent,
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.cli.project_contract.validate_project_contract",
+        lambda project_root: None,
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.cli.project_contract.ensure_project_config_path",
+        lambda *args, **kwargs: None,
+    )
 
     def _fake_local_backend(*, workflow, workflow_config, grader, grader_config):
         assert workflow is fake_workflow
