@@ -15,6 +15,7 @@ from osmosis_ai.rollout.context import (
     get_rollout_context,
 )
 from osmosis_ai.rollout.types import RolloutSample
+from osmosis_ai.rollout.utils.messages import map_initial_messages_to_content_blocks
 
 T = TypeVar("T")
 
@@ -103,5 +104,8 @@ class OsmosisStrandsAgent(StrandsAgent):
             name = kwargs.get("name") or kwargs.get("agent_id") or uuid.uuid4().hex
             model = model.for_sample(name, rollout_ctx)
             rollout_ctx.register_sample_source(name, StrandsAgentSampleSource(self))
+
+        if "messages" in kwargs and kwargs["messages"]:
+            kwargs["messages"] = map_initial_messages_to_content_blocks(kwargs["messages"])
 
         super().__init__(*args, model=model, **kwargs)
