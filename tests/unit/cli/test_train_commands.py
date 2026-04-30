@@ -277,7 +277,7 @@ class TestGrader(Grader):
 [experiment]
 rollout = "calculator"
 entrypoint = "main.py"
-model_path = "Qwen/Qwen3.5-35B-A3B"
+model_path = "Qwen/Qwen3.6-35B-A3B"
 dataset = "abc-123"
 
 [training]
@@ -357,14 +357,14 @@ total_epochs = 1
         out = console_capture.getvalue()
         assert "calculator" in out
         assert "main.py" in out
-        assert "Qwen/Qwen3.5-35B-A3B" in out
+        assert "Qwen/Qwen3.6-35B-A3B" in out
         assert "abc-123" in out
         assert isinstance(result, OperationResult)
         assert result.resource is not None
         assert result.resource["config"] == {
             "rollout": "calculator",
             "entrypoint": "main.py",
-            "model": "Qwen/Qwen3.5-35B-A3B",
+            "model": "Qwen/Qwen3.6-35B-A3B",
             "dataset": "abc-123",
             "commit_sha": None,
         }
@@ -420,7 +420,7 @@ commit_sha = "deadbeef"
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
         train_module.submit(config_path=config_path, yes=True)
-        assert captured_kwargs["model_path"] == "Qwen/Qwen3.5-35B-A3B"
+        assert captured_kwargs["model_path"] == "Qwen/Qwen3.6-35B-A3B"
         assert captured_kwargs["dataset"] == "abc-123"
         assert captured_kwargs["rollout_name"] == "calculator"
         assert captured_kwargs["entrypoint"] == "main.py"
@@ -714,7 +714,7 @@ class TestSubmitNonInteractiveContext:
         assert details["summary"] == {
             "Rollout": "calculator",
             "Entrypoint": "main.py",
-            "Model": "Qwen/Qwen3.5-35B-A3B",
+            "Model": "Qwen/Qwen3.6-35B-A3B",
             "Dataset": "abc-123",
         }
         assert any("connected Git repository" in note for note in details["notes"])

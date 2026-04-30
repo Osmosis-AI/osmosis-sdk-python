@@ -4,7 +4,7 @@
 # Usage: osmosis --json train submit configs/training/<your-config>.toml
 #
 # Supported models:
-#   - Qwen/Qwen3.5-35B-A3B
+#   - Qwen/Qwen3.6-35B-A3B
 #   - Qwen/Qwen3.5-122B-A10B
 
 [experiment]

@@ -74,7 +74,7 @@ def test_validate_training_config_success(tmp_path, capsys) -> None:
 [experiment]
 rollout = "demo"
 entrypoint = "main.py"
-model_path = "Qwen/Qwen3.5-35B-A3B"
+model_path = "Qwen/Qwen3.6-35B-A3B"
 dataset = "demo-dataset"
 """.strip(),
         encoding="utf-8",
@@ -120,7 +120,7 @@ def test_validate_rejects_noncanonical_config_path(tmp_path, capsys) -> None:
 [experiment]
 rollout = "demo"
 entrypoint = "main.py"
-model_path = "Qwen/Qwen3.5-35B-A3B"
+model_path = "Qwen/Qwen3.6-35B-A3B"
 dataset = "demo-dataset"
 """.strip(),
         encoding="utf-8",
@@ -142,7 +142,7 @@ def test_validate_fails_without_grader(tmp_path, capsys) -> None:
 [experiment]
 rollout = "demo"
 entrypoint = "main.py"
-model_path = "Qwen/Qwen3.5-35B-A3B"
+model_path = "Qwen/Qwen3.6-35B-A3B"
 dataset = "demo-dataset"
 """.strip(),
         encoding="utf-8",

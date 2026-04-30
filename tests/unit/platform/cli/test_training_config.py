@@ -21,7 +21,7 @@ def test_load_full_config(tmp_path: Path) -> None:
 [experiment]
 rollout = "calculator"
 entrypoint = "main.py"
-model_path = "Qwen/Qwen3.5-35B-A3B"
+model_path = "Qwen/Qwen3.6-35B-A3B"
 dataset = "abc-123"
 commit_sha = "deadbeef"
 
@@ -48,7 +48,7 @@ checkpoint_save_freq = 20
     assert isinstance(cfg, TrainingConfig)
     assert cfg.experiment_rollout == "calculator"
     assert cfg.experiment_entrypoint == "main.py"
-    assert cfg.experiment_model_path == "Qwen/Qwen3.5-35B-A3B"
+    assert cfg.experiment_model_path == "Qwen/Qwen3.6-35B-A3B"
     assert cfg.experiment_dataset == "abc-123"
     assert cfg.experiment_commit_sha == "deadbeef"
     assert cfg.training_lr == 1e-6
@@ -70,7 +70,7 @@ def test_load_minimal_config(tmp_path: Path) -> None:
 [experiment]
 rollout = "r"
 entrypoint = "e.py"
-model_path = "Qwen/Qwen3.5-35B-A3B"
+model_path = "Qwen/Qwen3.6-35B-A3B"
 dataset = "id-1"
 """.strip(),
         encoding="utf-8",
