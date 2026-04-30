@@ -1,0 +1,23 @@
+.github/workflows/tests.yml
+  92beec84d3d871f5 46-51,54-58
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "205ef6843b8d83a4b1664b43bb197dffc8563c5d",
+  "prompts": {
+    "92beec84d3d871f5": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "bb43f331-3ecd-46f5-8465-d95ab9385c57",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "JoyboyBrian",
+      "messages": [],
+      "total_additions": 11,
+      "total_deletions": 4,
+      "accepted_lines": 11,
+      "overriden_lines": 0
+    }
+  }
+}
