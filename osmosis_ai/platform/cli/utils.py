@@ -330,6 +330,10 @@ def _require_subscription(*, workspace_name: str) -> None:
     refreshed = False
     api_reached = False
     workspace_found = False
+    # Intentionally do NOT suppress AuthenticationExpiredError here: a real
+    # 401 must surface as "session expired" rather than be silently swallowed
+    # and reported below as the misleading "subscription required" error
+    # when a stale `False` subscription cache is present.
     with contextlib.suppress(PlatformAPIError, OSError):
         credentials = require_credentials()
         from osmosis_ai.platform.api.client import OsmosisClient
@@ -338,7 +342,9 @@ def _require_subscription(*, workspace_name: str) -> None:
         info = platform_call(
             "Checking subscription...",
             lambda: client.refresh_workspace_info(
-                credentials=credentials, workspace_name=workspace_name
+                credentials=credentials,
+                workspace_name=workspace_name,
+                cleanup_on_401=False,
             ),
         )
         api_reached = True

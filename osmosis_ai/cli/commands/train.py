@@ -21,7 +21,23 @@ def _detail_fields(rows: list[tuple[str, str]]) -> list[Any]:
     return [DetailField(label=label, value=value) for label, value in rows]
 
 
-def _require_confirmation(message: str, *, yes: bool) -> None:
+def _require_confirmation(
+    message: str,
+    *,
+    yes: bool,
+    summary: list[tuple[str, str]] | None = None,
+    notes: list[str] | None = None,
+    warnings: list[str] | None = None,
+) -> None:
+    """Confirm a destructive action, surfacing context in non-interactive modes.
+
+    In rich+interactive mode, falls back to the questionary prompt. In JSON
+    and plain modes (or any non-interactive shell), raises an
+    ``INTERACTIVE_REQUIRED`` error that carries the prompt question, the
+    summary of what would be acted on, and any notes/warnings — so AI
+    agents and CI scripts can see exactly what they're being asked to
+    confirm without first having to retry with ``--yes``.
+    """
     if yes:
         return
 
@@ -29,9 +45,36 @@ def _require_confirmation(message: str, *, yes: bool) -> None:
 
     output = get_output_context()
     if output.format is not OutputFormat.rich or not output.interactive:
+        details: dict[str, Any] = {"prompt": message}
+        if summary:
+            details["summary"] = {label: value for label, value in summary}
+        if notes:
+            details["notes"] = list(notes)
+        if warnings:
+            details["warnings"] = list(warnings)
+
+        if output.format is OutputFormat.plain:
+            import sys
+
+            lines: list[str] = [f"Confirmation required: {message}"]
+            if summary:
+                for label, value in summary:
+                    lines.append(f"  {label}: {value}")
+            if notes:
+                lines.append("Notes:")
+                for note in notes:
+                    lines.append(f"  - {note}")
+            if warnings:
+                lines.append("Warnings:")
+                for warning in warnings:
+                    lines.append(f"  - {warning}")
+            sys.stderr.write("\n".join(lines) + "\n")
+            sys.stderr.flush()
+
         err = CLIError(
             "Use --yes to confirm in non-interactive mode.",
             code="INTERACTIVE_REQUIRED",
+            details=details,
         )
         if output.format is OutputFormat.json:
             from osmosis_ai.cli.output import emit_structured_error_to_stderr
@@ -43,6 +86,109 @@ def _require_confirmation(message: str, *, yes: bool) -> None:
     from osmosis_ai.cli.prompts import require_confirmation
 
     require_confirmation(message, yes=yes)
+
+
+def _print_remote_fetch_notice(
+    project_root: Path,
+    *,
+    pinned_commit_sha: str | None,
+) -> tuple[list[str], list[str]]:
+    """Remind the user that submit pulls *code* from the connected Git remote
+    while reading *config values* from the local TOML file.
+
+    The platform clones the workspace's connected Git repository (or
+    fetches a pinned commit) before training, so local *code* changes
+    that haven't been pushed will silently be ignored. The config TOML
+    passed to ``osmosis train submit``, by contrast, is read from disk
+    and its values are sent verbatim in the submit payload — local
+    edits to the config take effect immediately, even if they are
+    uncommitted.
+
+    Returns ``(notes, warnings)`` as plain-text lists so callers can
+    surface the same context in non-rich modes (e.g. the JSON error
+    envelope when ``--yes`` is missing). The Rich panel is rendered
+    only when the output format is Rich.
+    """
+    from osmosis_ai.cli.output import OutputFormat, get_output_context
+    from osmosis_ai.platform.cli.workspace_repo import summarize_local_git_state
+
+    state = summarize_local_git_state(project_root)
+
+    warnings: list[str] = []
+    if state is not None:
+        if state.is_dirty:
+            warnings.append(
+                "Uncommitted changes detected — code edits won't be picked up "
+                "(only the config file above is read locally)."
+            )
+        if state.has_upstream and state.ahead > 0:
+            commits_word = "commit" if state.ahead == 1 else "commits"
+            warnings.append(
+                f"{state.ahead} unpushed {commits_word} ahead of upstream — "
+                "push code before submitting."
+            )
+        elif state.branch is not None and not state.has_upstream:
+            warnings.append(
+                f"Branch '{state.branch}' has no upstream — "
+                "push code and set tracking before submitting."
+            )
+
+    notes: list[str] = []
+    if pinned_commit_sha:
+        notes.append(
+            f"Osmosis will fetch commit {pinned_commit_sha} from the "
+            "workspace's connected Git repository for training code."
+        )
+        notes.append("Make sure that commit is already pushed to the remote.")
+    else:
+        notes.append(
+            "Osmosis will fetch the latest training code from the workspace's "
+            "connected Git repository."
+        )
+        if state is not None and state.branch and state.head_sha:
+            notes.append(f"Local branch: {state.branch} @ {state.head_sha[:8]}")
+        notes.append("Make sure your code changes are committed and pushed.")
+    notes.append(
+        "Config values come from your local TOML file and are submitted "
+        "as-is — uncommitted edits to the config still apply."
+    )
+
+    if get_output_context().format is OutputFormat.rich:
+        body_lines: list[str] = []
+        if pinned_commit_sha:
+            body_lines.append(
+                f"Osmosis will fetch commit [bold]{console.escape(pinned_commit_sha)}[/bold] "
+                "from the workspace's connected Git repository for training code."
+            )
+            body_lines.append("Make sure that commit is already pushed to the remote.")
+        else:
+            body_lines.append(
+                "Osmosis will fetch the latest training code from the workspace's "
+                "connected Git repository."
+            )
+            if state is not None and state.branch and state.head_sha:
+                body_lines.append(
+                    f"Local: [bold]{console.escape(state.branch)}[/bold] @ "
+                    f"[dim]{console.escape(state.head_sha[:8])}[/dim]"
+                )
+            body_lines.append("Make sure your code changes are committed and pushed.")
+
+        body_lines.append("")
+        body_lines.append(
+            "[dim]Config values above come from your local TOML file and are "
+            "submitted as-is — uncommitted edits to the config still apply.[/dim]"
+        )
+
+        if warnings:
+            body_lines.append("")
+            for warning in warnings:
+                body_lines.append(f"[yellow]• {console.escape(warning)}[/yellow]")
+
+        style = "yellow" if warnings else "blue"
+        title = "Push before submitting" if warnings else "Before you submit"
+        console.panel(title, "\n".join(body_lines), style=style)
+
+    return notes, warnings
 
 
 @app.command("list")
@@ -230,6 +376,11 @@ def submit(
         _require_auth,
         platform_entity_url,
     )
+    from osmosis_ai.platform.cli.workspace_repo import (
+        validate_active_workspace_repo,
+    )
+
+    command_label = "`osmosis train submit`"
 
     project_root = resolve_project_root(config_path)
     validate_project_contract(project_root)
@@ -237,28 +388,48 @@ def submit(
         config_path,
         project_root,
         config_dir="configs/training",
-        command_label="`osmosis train submit`",
+        command_label=command_label,
     )
     config = load_training_config(config_path)
     validate_rollout_backend(
         project_root=project_root,
         rollout=config.experiment_rollout,
         entrypoint=config.experiment_entrypoint,
-        command_label="`osmosis train submit`",
+        command_label=command_label,
     )
     ws_name, credentials = _require_auth()
+    validate_active_workspace_repo(
+        project_root=project_root,
+        workspace_name=ws_name,
+        credentials=credentials,
+        command_label=command_label,
+    )
 
-    rows: list[tuple[str, str]] = [
-        ("Rollout", console.escape(config.experiment_rollout)),
-        ("Entrypoint", console.escape(config.experiment_entrypoint)),
-        ("Model", console.escape(config.experiment_model_path)),
-        ("Dataset", console.escape(config.experiment_dataset)),
+    summary_rows: list[tuple[str, str]] = [
+        ("Rollout", config.experiment_rollout),
+        ("Entrypoint", config.experiment_entrypoint),
+        ("Model", config.experiment_model_path),
+        ("Dataset", config.experiment_dataset),
     ]
     if config.experiment_commit_sha:
-        rows.append(("Commit", console.escape(config.experiment_commit_sha)))
-    console.table(rows, title="Training Run")
+        summary_rows.append(("Commit", config.experiment_commit_sha))
+    console.table(
+        [(label, console.escape(value)) for label, value in summary_rows],
+        title="Training Run",
+    )
 
-    _require_confirmation("Submit this training run?", yes=yes)
+    notes, warnings = _print_remote_fetch_notice(
+        project_root,
+        pinned_commit_sha=config.experiment_commit_sha,
+    )
+
+    _require_confirmation(
+        "Submit this training run?",
+        yes=yes,
+        summary=summary_rows,
+        notes=notes,
+        warnings=warnings,
+    )
 
     from osmosis_ai.platform.api.client import OsmosisClient
 
@@ -549,7 +720,11 @@ def stop(
 
     client = OsmosisClient()
 
-    _require_confirmation(f'Stop training run "{name}"?', yes=yes)
+    _require_confirmation(
+        f'Stop training run "{name}"?',
+        yes=yes,
+        summary=[("Name", name)],
+    )
 
     output = get_output_context()
     with output.status("Stopping training run..."):
@@ -578,7 +753,9 @@ def delete(
     client = OsmosisClient()
 
     _require_confirmation(
-        f'Delete training run "{name}"? This cannot be undone.', yes=yes
+        f'Delete training run "{name}"? This cannot be undone.',
+        yes=yes,
+        summary=[("Name", name)],
     )
 
     output = get_output_context()

@@ -99,7 +99,13 @@ def _select_workspace(
     """Prompt the user to select a workspace. Returns (ws_id, ws_name), BACK, or None."""
     try:
         with console.spinner("Loading workspaces..."):
-            result = platform_request("/api/cli/workspaces", require_workspace=False)
+            # Read-only menu fetch: a transient 401 must not wipe local
+            # credentials/workspace state out from under the user mid-menu.
+            result = platform_request(
+                "/api/cli/workspaces",
+                require_workspace=False,
+                cleanup_on_401=False,
+            )
         workspaces = result.get("workspaces", [])
     except PlatformAPIError as e:
         console.print_error(f"Failed to load workspaces: {e}")
@@ -433,15 +439,21 @@ def list_workspaces() -> Any:
 
     output = get_output_context()
     credentials = require_credentials()
+    # Read-only listing: never let a transient 401 wipe local credentials
+    # or active-workspace state. A real auth failure surfaces as
+    # AuthenticationExpiredError on the next mutating command.
     active_ws = platform_call(
         "Loading workspaces...",
-        lambda: ensure_active_workspace(credentials=credentials),
+        lambda: ensure_active_workspace(credentials=credentials, cleanup_on_401=False),
         output_console=console,
     )
     result = platform_call(
         "Loading workspaces...",
         lambda: platform_request(
-            "/api/cli/workspaces", require_workspace=False, credentials=credentials
+            "/api/cli/workspaces",
+            require_workspace=False,
+            credentials=credentials,
+            cleanup_on_401=False,
         ),
         output_console=console,
     )
@@ -655,10 +667,16 @@ def switch_workspace(workspace: str) -> Any:
 
     output = get_output_context()
     credentials = require_credentials()
+    # Read-only fetch to resolve the requested workspace name → id.
+    # A transient 401 must not wipe local credentials/workspace state;
+    # the next mutating command will surface a real auth failure.
     result = platform_call(
         "Loading workspaces...",
         lambda: platform_request(
-            "/api/cli/workspaces", require_workspace=False, credentials=credentials
+            "/api/cli/workspaces",
+            require_workspace=False,
+            credentials=credentials,
+            cleanup_on_401=False,
         ),
         output_console=console,
     )
@@ -704,9 +722,11 @@ def workspace() -> None:
     if credentials is None:
         raise CLIError(MSG_NOT_LOGGED_IN)
 
+    # Interactive entrypoint: never let a transient 401 wipe local
+    # credentials/workspace state just from opening the menu.
     active_ws = platform_call(
         "Loading workspace...",
-        lambda: ensure_active_workspace(credentials=credentials),
+        lambda: ensure_active_workspace(credentials=credentials, cleanup_on_401=False),
         output_console=console,
     )
     ws_name = active_ws["name"] if active_ws else None

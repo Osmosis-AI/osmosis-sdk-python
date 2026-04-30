@@ -22,11 +22,7 @@ from typing import Any
 from osmosis_ai.cli.console import console
 from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.platform.auth.config import PLATFORM_URL
-from osmosis_ai.platform.auth.local_config import (
-    get_active_workspace_id,
-    get_active_workspace_name,
-    set_active_workspace,
-)
+from osmosis_ai.platform.auth.local_config import get_active_workspace_id
 from osmosis_ai.platform.cli.constants import validate_name
 
 # ── Prerequisites ────────────────────────────────────────────────
@@ -252,123 +248,69 @@ def _git_initial_commit(target: Path) -> None:
     )
 
 
-def _selected_workspace_git_context() -> dict[str, str | bool | None]:
-    """Best-effort Git integration context for the active platform workspace.
+def _resolve_workspace_git_context(
+    *,
+    workspace_name: str,
+    workspace_id: str | None,
+    credentials: Any,
+) -> dict[str, str | bool | None]:
+    """Fetch the active workspace's Git Sync metadata from the platform.
 
-    Always verifies the active workspace against the platform when
-    credentials are usable, so a stale local selection (e.g. a
-    workspace the user no longer belongs to) can't silently bypass Git
-    Sync guidance or connected-repo blocking. Also auto-selects the
-    only available workspace when nothing is saved locally, keeping
-    behavior consistent with the rest of the CLI for single-workspace
-    users.
+    The caller is responsible for ensuring an active workspace exists
+    (typically via :func:`_require_auth`); this function only refreshes
+    the connected-repo state and GitHub App installation flag used to
+    drive the post-init CTA and the connected-repo guard.
 
-    Falls back to the locally cached workspace name (without
-    connected-repo metadata) only when the platform is unreachable or
-    credentials are missing/expired.
+    Network/auth errors during the metadata refresh degrade the
+    returned context (no connected repo, no GitHub App), but the
+    workspace identity and Git Sync URL are always preserved so the
+    CTA still points at the right page. The connected-repo guard only
+    blocks when the platform confirms a connected repo, so a transient
+    outage doesn't spuriously block init.
     """
+    from osmosis_ai.platform.api.client import OsmosisClient
     from osmosis_ai.platform.auth import (
         AuthenticationExpiredError,
         PlatformAPIError,
-        load_credentials,
-        platform_request,
     )
     from osmosis_ai.platform.cli.utils import platform_call
 
-    empty_context: dict[str, str | bool | None] = {
-        "workspace_id": None,
-        "workspace_name": None,
-        "git_sync_url": None,
+    context: dict[str, str | bool | None] = {
+        "workspace_id": workspace_id,
+        "workspace_name": workspace_name,
+        "git_sync_url": f"{PLATFORM_URL}/{workspace_name}/integrations/git",
         "has_github_app_installation": False,
         "connected_repo_url": None,
     }
 
-    def _offline_fallback() -> dict[str, str | bool | None]:
-        local_name = get_active_workspace_name()
-        if not local_name:
-            return empty_context
-        return {
-            "workspace_id": get_active_workspace_id(),
-            "workspace_name": local_name,
-            "git_sync_url": f"{PLATFORM_URL}/{local_name}/integrations/git",
-            "has_github_app_installation": False,
-            "connected_repo_url": None,
-        }
-
-    credentials = load_credentials()
-    if credentials is None or credentials.is_expired():
-        return _offline_fallback()
-
+    client = OsmosisClient()
     try:
-        data = platform_call(
+        info = platform_call(
             "Loading workspace Git Sync status...",
-            lambda: platform_request(
-                "/api/cli/workspaces",
+            lambda: client.refresh_workspace_info(
                 credentials=credentials,
-                require_workspace=False,
+                workspace_name=workspace_name,
                 cleanup_on_401=False,
             ),
             output_console=console,
         )
     except (AuthenticationExpiredError, PlatformAPIError):
-        return _offline_fallback()
+        return context
 
-    workspaces = [ws for ws in data.get("workspaces", []) if isinstance(ws, dict)]
-
-    local_id = get_active_workspace_id()
-    matched: dict[str, Any] | None = None
-    if local_id:
-        matched = next((ws for ws in workspaces if ws.get("id") == local_id), None)
-
-    # Auto-select the only workspace when nothing valid is saved locally.
-    # Mirrors ensure_active_workspace() so single-workspace users get the
-    # same Git Sync guidance and connected-repo blocking as everyone else.
-    if matched is None and len(workspaces) == 1:
-        only_ws = workspaces[0]
-        only_id = only_ws.get("id")
-        only_name = only_ws.get("name")
-        if (
-            isinstance(only_id, str)
-            and only_id
-            and isinstance(only_name, str)
-            and only_name
-        ):
-            set_active_workspace(only_id, only_name)
-            matched = only_ws
-
-    if matched is None:
-        return empty_context
-
-    selected_name = matched.get("name")
-    if not isinstance(selected_name, str) or not selected_name:
-        return empty_context
-
-    connected_repo_url: str | None = None
-    connected_repo = matched.get("connected_repo")
+    context["has_github_app_installation"] = bool(
+        info.get("has_github_app_installation")
+    )
+    connected_repo = info.get("connected_repo")
     if isinstance(connected_repo, dict):
         repo_url = connected_repo.get("repo_url")
         if isinstance(repo_url, str) and repo_url:
-            connected_repo_url = repo_url
-
-    return {
-        "workspace_id": matched.get("id")
-        if isinstance(matched.get("id"), str)
-        else None,
-        "workspace_name": selected_name,
-        "git_sync_url": f"{PLATFORM_URL}/{selected_name}/integrations/git",
-        "has_github_app_installation": bool(matched.get("has_github_app_installation")),
-        "connected_repo_url": connected_repo_url,
-    }
+            context["connected_repo_url"] = repo_url
+    return context
 
 
-def _git_sync_cta_text(
-    git_context: dict[str, str | bool | None] | None = None,
-) -> Any:
+def _git_sync_cta_text(git_context: dict[str, str | bool | None]) -> Any:
     """Build the Git Sync CTA shown after project scaffolding."""
     from rich.text import Text
-
-    if git_context is None:
-        git_context = _selected_workspace_git_context()
 
     connected_repo_url = git_context.get("connected_repo_url")
     if isinstance(connected_repo_url, str) and connected_repo_url:
@@ -396,11 +338,9 @@ def _git_sync_cta_text(
 
 
 def _raise_if_selected_workspace_has_connected_repo(
-    git_context: dict[str, str | bool | None] | None = None,
+    git_context: dict[str, str | bool | None],
 ) -> None:
     """Block fresh init when the active platform workspace already has a connected repo."""
-    if git_context is None:
-        git_context = _selected_workspace_git_context()
     workspace_name = git_context.get("workspace_name")
     connected_repo_url = git_context.get("connected_repo_url")
 
@@ -428,7 +368,7 @@ def _print_next_steps(
     project_name: str,
     *,
     here: bool = False,
-    git_context: dict[str, str | bool | None] | None = None,
+    git_context: dict[str, str | bool | None],
 ) -> None:
     """Print post-setup CTA with Rich panels."""
     from rich import box as rich_box
@@ -560,17 +500,19 @@ def _created_paths_for_result(target: Path) -> list[str]:
 def _workspace_for_result(
     git_context: dict[str, str | bool | None],
 ) -> dict[str, str] | None:
+    """Shape workspace metadata for the JSON/plain ``init`` result envelope.
+
+    ``init`` requires an active workspace, so ``workspace_name`` is
+    expected to always be set; ``workspace_id`` may be missing when the
+    locally cached id wasn't returned by ``_require_auth``.
+    """
     workspace_id = git_context.get("workspace_id")
     workspace_name = git_context.get("workspace_name")
-    if (
-        isinstance(workspace_id, str)
-        and workspace_id
-        and isinstance(workspace_name, str)
-    ):
+    if not (isinstance(workspace_name, str) and workspace_name):
+        return None
+    if isinstance(workspace_id, str) and workspace_id:
         return {"id": workspace_id, "name": workspace_name}
-    if isinstance(workspace_name, str) and workspace_name:
-        return {"name": workspace_name}
-    return None
+    return {"name": workspace_name}
 
 
 def _init_next_steps_structured(
@@ -647,8 +589,15 @@ def init(name: str, here: bool = False) -> Any:
     """Initialise a new local Osmosis project directory.
 
     This is the main entry point for ``osmosis init <name>``.
+
+    Requires an authenticated session with an active platform
+    workspace. The connected-repo guard then runs against authoritative
+    platform state instead of best-effort local cache, so we never
+    silently scaffold a fresh project into a workspace that's already
+    wired to a different repo.
     """
     from osmosis_ai.cli.output import OperationResult, OutputFormat, get_output_context
+    from osmosis_ai.platform.cli.utils import _require_auth
 
     output = get_output_context()
     _check_git_installed()
@@ -657,17 +606,17 @@ def init(name: str, here: bool = False) -> Any:
     if name_error:
         raise CLIError(name_error)
 
-    # Determine target directory
-    created_dir = False
-    # Resolve active platform workspace (and Git integration state) once so we
-    # don't hit the platform twice during a single `osmosis init`.
-    git_context: dict[str, str | bool | None] | None = None
+    # Auth + active workspace are required before any directory work so
+    # the connected-repo guard runs on every fresh init path. The same
+    # gating is used by `osmosis train submit` for consistency.
+    workspace_name, credentials = _require_auth()
+    git_context = _resolve_workspace_git_context(
+        workspace_name=workspace_name,
+        workspace_id=get_active_workspace_id(),
+        credentials=credentials,
+    )
 
-    def _ensure_git_context() -> dict[str, str | bool | None]:
-        nonlocal git_context
-        if git_context is None:
-            git_context = _selected_workspace_git_context()
-        return git_context
+    created_dir = False
 
     if here:
         target = Path.cwd()
@@ -677,7 +626,7 @@ def init(name: str, here: bool = False) -> Any:
                 "Use 'osmosis init <name>' (without --here) to create a new directory, "
                 "or empty this directory first."
             )
-        _raise_if_selected_workspace_has_connected_repo(_ensure_git_context())
+        _raise_if_selected_workspace_has_connected_repo(git_context)
     else:
         target = Path.cwd() / name
         if target.exists():
@@ -693,7 +642,7 @@ def init(name: str, here: bool = False) -> Any:
                     "Use --here to initialize in the current directory."
                 )
         else:
-            _raise_if_selected_workspace_has_connected_repo(_ensure_git_context())
+            _raise_if_selected_workspace_has_connected_repo(git_context)
             target.mkdir()
             created_dir = True
 
@@ -711,17 +660,16 @@ def init(name: str, here: bool = False) -> Any:
             shutil.rmtree(target)
         raise
 
-    final_git_context = _ensure_git_context()
     if output.format is OutputFormat.rich:
-        _print_next_steps(name, here=here, git_context=final_git_context)
+        _print_next_steps(name, here=here, git_context=git_context)
         return None
 
     resource = {
         "path": str(target.resolve()),
         "created_paths": _created_paths_for_result(target),
-        "workspace": _workspace_for_result(final_git_context),
-        "git_sync_url": final_git_context.get("git_sync_url"),
-        "connected_repo_url": final_git_context.get("connected_repo_url"),
+        "workspace": _workspace_for_result(git_context),
+        "git_sync_url": git_context.get("git_sync_url"),
+        "connected_repo_url": git_context.get("connected_repo_url"),
         "mode": "update" if is_update else "create",
     }
     return OperationResult(
@@ -737,6 +685,6 @@ def init(name: str, here: bool = False) -> Any:
         next_steps_structured=_init_next_steps_structured(
             name,
             here=here,
-            git_context=final_git_context,
+            git_context=git_context,
         ),
     )
