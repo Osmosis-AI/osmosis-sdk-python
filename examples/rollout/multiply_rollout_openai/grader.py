@@ -1,3 +1,5 @@
+from typing import Any
+
 from multiply_rollout_openai.utils import extract_solution
 from osmosis_ai.rollout.context import GraderContext
 from osmosis_ai.rollout.grader import Grader
@@ -27,19 +29,28 @@ class MultiplyGrader(Grader):
         return 0.0
 
     async def grade(self, ctx: GraderContext):
-        rollout_samples = ctx.get_samples()
-
-        if "multiply" in rollout_samples:
-            content = rollout_samples["multiply"].messages[-1].get("content", "")
-            if isinstance(content, list):
-                # Chat-completion content can be a list of parts; pick text parts.
-                content = "".join(
-                    part.get("text", "") for part in content if isinstance(part, dict)
-                )
-            reward = self.compute_reward(content, ctx.label)
-            ctx.set_sample_reward("multiply", reward)
-            print(f"[MultiplyGrader] reward = {reward}")
-        else:
-            for sample_id in rollout_samples:
-                ctx.set_sample_reward(sample_id, 0)
+        samples = ctx.get_samples()
+        if "multiply" not in samples:
+            for sample_id in samples:
+                ctx.set_sample_reward(sample_id, 0.0)
                 print(f"[MultiplyGrader] reward for {sample_id} = 0")
+            return
+
+        last_message = samples["multiply"].messages[-1]
+        content = last_message.get("content", "")
+        reward = self.compute_reward(_extract_text(content), ctx.label or "")
+        ctx.set_sample_reward("multiply", reward)
+        print(f"[MultiplyGrader] reward = {reward}")
+
+
+def _extract_text(content: Any) -> str:
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = [
+            item.get("text", "")
+            for item in content
+            if isinstance(item, dict) and item.get("type") == "output_text"
+        ]
+        return "\n".join(parts)
+    return ""

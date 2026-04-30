@@ -1,14 +1,13 @@
 import uuid
 from collections.abc import AsyncIterator
 from contextvars import ContextVar
-from typing import Any, cast
+from typing import Any
 
 from agents import Agent
 from agents.extensions.models.litellm_model import LitellmModel
 from agents.items import ModelResponse, TResponseInputItem, TResponseStreamEvent
 from agents.memory.session import SessionABC
 from agents.model_settings import ModelSettings
-from agents.models.chatcmpl_converter import Converter
 from agents.usage import Usage
 from openai.types.responses.response_usage import (
     InputTokensDetails,
@@ -70,10 +69,15 @@ class OsmosisMemorySession(SessionABC):
 class SessionSampleSource(SampleSource):
     """Produces a ``RolloutSample`` from any OpenAI Agents SDK ``Session``.
 
-    Works against any ``SessionABC`` implementation by calling its public
-    ``get_items`` method, then converting items to chat-completion format.
-    Use this with sessions you don't control (e.g., ``SQLiteSession``) by
-    registering it manually with the active ``RolloutContext``.
+    Works against any ``SessionABC`` by returning the items the runner
+    persisted via ``add_items`` (canonical Responses-API ``TResponseInputItem``
+    shape). We deliberately do not run ``Converter.items_to_messages`` here:
+    that converter is lossy (collapses reasoning into ``reasoning_content``,
+    rewrites ``file_search_call`` into a synthetic function call) and raises
+    ``UserError`` for hosted-tool items, ``ItemReference``s, compaction
+    items, and any unknown content shape, which would crash sample
+    collection on perfectly successful runs. The canonical shape is the
+    SDK's stable persisted format and is what graders should walk.
     """
 
     def __init__(self, session: SessionABC) -> None:
@@ -81,11 +85,7 @@ class SessionSampleSource(SampleSource):
 
     async def get_sample(self, name: str) -> RolloutSample:
         items = await self.session.get_items()
-        messages = cast(
-            list[dict[str, Any]],
-            Converter.items_to_messages(items),
-        )
-        return RolloutSample(id=name, messages=messages)
+        return RolloutSample(id=name, messages=items)
 
 
 class OsmosisRolloutModel(LitellmModel):
