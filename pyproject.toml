@@ -23,7 +23,7 @@ dependencies = [
     "PyYAML>=6.0,<7.0",
     "python-dotenv>=0.1.0,<2.0.0",
     "requests>=2.0.0,<3.0.0",
-    "litellm>=1.40.0,<=1.82.6", # Unified LLM provider (supports 100+ providers)
+    "litellm==1.82.6", # avoids compromised 1.82.7/1.82.8
     "tqdm>=4.0.0,<5.0.0",
     # Remote rollout SDK dependencies
     "httpx>=0.25.0,<1.0.0",
@@ -93,9 +93,17 @@ include-package-data = true
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["osmosis_ai*"]
+# The cookbook is a tree of starter recipes shipped as package data, not
+# importable Python packages — keep setuptools from registering its
+# subdirectories as part of the SDK's import surface.
+exclude = ["osmosis_ai.templates.cookbook*"]
 
 [tool.setuptools.package-data]
-osmosis_ai = ["py.typed", "platform/cli/templates/**"]
+osmosis_ai = [
+    "py.typed",
+    "platform/cli/templates/**",
+    "templates/cookbook/**",
+]
 
 [tool.setuptools.dynamic]
 version = {attr = "osmosis_ai.consts.PACKAGE_VERSION"}
@@ -119,6 +127,8 @@ omit = [
     "osmosis_ai/rollout/types/*",
     "osmosis_ai/rollout/integrations/*",
     "osmosis_ai/rollout/backend/harbor/*",
+    # Templates cookbook ships as data (starter recipes), not SDK code.
+    "osmosis_ai/templates/cookbook/*",
 ]
 
 [tool.coverage.report]
@@ -133,6 +143,13 @@ exclude_lines = [
 [tool.ruff]
 target-version = "py312"
 line-length = 88
+extend-exclude = [
+    # Cookbook templates are user-facing starter recipes shipped as data
+    # (copied into ./templates/<name>/ on `osmosis template apply`); they
+    # are not part of the SDK's internal code surface and should not be
+    # held to internal lint rules.
+    "osmosis_ai/templates/cookbook",
+]
 
 [tool.ruff.lint]
 select = [
@@ -163,7 +180,14 @@ known-first-party = ["osmosis_ai"]
 [tool.pyright]
 pythonVersion = "3.12"
 include = ["osmosis_ai"]
-exclude = ["tests", "build", "dist", "**/__pycache__"]
+exclude = [
+    "tests",
+    "build",
+    "dist",
+    "**/__pycache__",
+    # Cookbook templates ship as data, not internal code (see ruff exclude).
+    "osmosis_ai/templates/cookbook",
+]
 typeCheckingMode = "standard"
 reportMissingTypeStubs = false
 reportCallInDefaultInitializer = false
@@ -171,7 +195,12 @@ reportCallInDefaultInitializer = false
 [tool.mypy]
 python_version = "3.12"
 files = ["osmosis_ai"]
-exclude = ["tests/", "build/", "dist/"]
+exclude = [
+    "tests/",
+    "build/",
+    "dist/",
+    "osmosis_ai/templates/cookbook/",
+]
 check_untyped_defs = true
 warn_return_any = true
 warn_unused_configs = true

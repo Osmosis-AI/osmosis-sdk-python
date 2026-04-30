@@ -26,6 +26,7 @@ class LiteLLMProxy:
         "AuthenticationError",
         "BudgetExceededError",
         "NotFoundError",
+        "UnsupportedParamsError",
     )
 
     def __init__(

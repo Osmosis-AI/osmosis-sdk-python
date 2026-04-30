@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import sys
 import types
 from types import SimpleNamespace
@@ -47,6 +48,28 @@ def _make_config(**overrides):
     }
     values.update(overrides)
     return SimpleNamespace(**values)
+
+
+def test_load_project_dotenv_sets_missing_env(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    (tmp_path / ".env").write_text("OPENAI_API_KEY=from-dotenv\n", encoding="utf-8")
+
+    EvalCommand._load_project_dotenv(tmp_path)
+
+    assert os.environ["OPENAI_API_KEY"] == "from-dotenv"
+
+
+def test_load_project_dotenv_does_not_override_shell_env(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "from-shell")
+    (tmp_path / ".env").write_text("OPENAI_API_KEY=from-dotenv\n", encoding="utf-8")
+
+    EvalCommand._load_project_dotenv(tmp_path)
+
+    assert os.environ["OPENAI_API_KEY"] == "from-shell"
 
 
 def _run_command(monkeypatch: pytest.MonkeyPatch, config: SimpleNamespace) -> None:
