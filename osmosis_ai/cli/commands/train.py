@@ -413,6 +413,21 @@ def submit(
     ]
     if config.experiment_commit_sha:
         summary_rows.append(("Commit", config.experiment_commit_sha))
+    if config.rollout_env:
+        env_keys = ", ".join(sorted(config.rollout_env))
+        summary_rows.append((f"Rollout env ({len(config.rollout_env)})", env_keys))
+    if config.rollout_secret_refs:
+        # Show env-var name → secret-record name (no secret values, ever).
+        secret_summary = ", ".join(
+            f"{env_name}={secret_name}"
+            for env_name, secret_name in sorted(config.rollout_secret_refs.items())
+        )
+        summary_rows.append(
+            (
+                f"Rollout secrets ({len(config.rollout_secret_refs)})",
+                secret_summary,
+            )
+        )
     console.table(
         [(label, console.escape(value)) for label, value in summary_rows],
         title="Training Run",
@@ -443,6 +458,8 @@ def submit(
             entrypoint=config.experiment_entrypoint,
             commit_sha=config.experiment_commit_sha,
             config=config.to_api_config(),
+            rollout_env=config.rollout_env or None,
+            rollout_secret_refs=config.rollout_secret_refs or None,
             credentials=credentials,
         )
 

@@ -283,9 +283,17 @@ class OsmosisClient:
         entrypoint: str,
         commit_sha: str | None = None,
         config: dict[str, Any] | None = None,
+        rollout_env: dict[str, str] | None = None,
+        rollout_secret_refs: dict[str, str] | None = None,
         credentials: Credentials | None = None,
     ) -> SubmitTrainingRunResult:
-        """Submit a new training run."""
+        """Submit a new training run.
+
+        ``rollout_env`` is a literal env-var-name → value map applied to the
+        rollout container. ``rollout_secret_refs`` maps env-var names to the
+        names of workspace ``environment_secret`` records; values are resolved
+        server-side and never travel through the CLI.
+        """
         data: dict[str, Any] = {
             "model_path": model_path,
             "dataset": dataset,
@@ -296,6 +304,10 @@ class OsmosisClient:
             data["commit_sha"] = commit_sha
         if config is not None:
             data["config"] = config
+        if rollout_env:
+            data["rollout_env"] = rollout_env
+        if rollout_secret_refs:
+            data["rollout_secret_refs"] = rollout_secret_refs
         result = platform_request(
             "/api/cli/training-runs",
             method="POST",
