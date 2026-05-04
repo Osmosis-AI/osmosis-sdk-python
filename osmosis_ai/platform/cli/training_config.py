@@ -131,11 +131,11 @@ def load_training_config(path: Path) -> TrainingConfig:
             f"got {training.n_samples_per_prompt} in {path}"
         )
     if (
-        training.rollout_batch_size is not None
-        and training.n_samples_per_prompt is not None
+        training.rollout_batch_size is None
+        or training.n_samples_per_prompt is None
     ):
         raise CLIError(
-            f"rollout_batch_size and n samples per prompt cannot be null"
+            f"Both rollout_batch_size and n samples per prompt cannot be null"
         )
 
     return TrainingConfig(
