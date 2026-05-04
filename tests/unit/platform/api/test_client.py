@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -325,6 +326,121 @@ class TestRefreshWorkspaceInfo:
         client = OsmosisClient()
         result = client.refresh_workspace_info(workspace_name="missing")
         assert result == {"found": False}
+
+
+class TestSubmitTrainingRun:
+    """Tests for OsmosisClient.submit_training_run payload assembly."""
+
+    @staticmethod
+    def _response() -> dict[str, Any]:
+        return {
+            "id": "run-1",
+            "name": "run-1",
+            "status": "pending",
+            "created_at": "2026-05-04T00:00:00Z",
+        }
+
+    @patch("osmosis_ai.platform.api.client.platform_request")
+    def test_minimal_payload_omits_optional_fields(
+        self, mock_request: MagicMock
+    ) -> None:
+        """Optional fields are omitted from the payload when not provided."""
+        mock_request.return_value = self._response()
+        client = OsmosisClient()
+        result = client.submit_training_run(
+            model_path="m1",
+            dataset="ds1",
+            rollout_name="rollout1",
+            entrypoint="rollouts/main.py",
+        )
+        assert result.id == "run-1"
+        payload = mock_request.call_args.kwargs["data"]
+        assert payload == {
+            "model_path": "m1",
+            "dataset": "ds1",
+            "rollout_name": "rollout1",
+            "entrypoint": "rollouts/main.py",
+        }
+        assert "rollout_env" not in payload
+        assert "rollout_secret_refs" not in payload
+
+    @patch("osmosis_ai.platform.api.client.platform_request")
+    def test_rollout_env_included_when_non_empty(self, mock_request: MagicMock) -> None:
+        """Non-empty rollout_env map is forwarded to the platform."""
+        mock_request.return_value = self._response()
+        client = OsmosisClient()
+        rollout_env = {"FOO": "bar", "BAZ": "qux"}
+        client.submit_training_run(
+            model_path="m1",
+            dataset="ds1",
+            rollout_name="rollout1",
+            entrypoint="rollouts/main.py",
+            rollout_env=rollout_env,
+        )
+        payload = mock_request.call_args.kwargs["data"]
+        assert payload["rollout_env"] == rollout_env
+        assert "rollout_secret_refs" not in payload
+
+    @patch("osmosis_ai.platform.api.client.platform_request")
+    def test_rollout_secret_refs_included_when_non_empty(
+        self, mock_request: MagicMock
+    ) -> None:
+        """Non-empty rollout_secret_refs map is forwarded to the platform."""
+        mock_request.return_value = self._response()
+        client = OsmosisClient()
+        secret_refs = {"OPENAI_API_KEY": "openai-prod"}
+        client.submit_training_run(
+            model_path="m1",
+            dataset="ds1",
+            rollout_name="rollout1",
+            entrypoint="rollouts/main.py",
+            rollout_secret_refs=secret_refs,
+        )
+        payload = mock_request.call_args.kwargs["data"]
+        assert payload["rollout_secret_refs"] == secret_refs
+        assert "rollout_env" not in payload
+
+    @patch("osmosis_ai.platform.api.client.platform_request")
+    def test_empty_rollout_env_and_secret_refs_are_omitted(
+        self, mock_request: MagicMock
+    ) -> None:
+        """Empty dicts are treated as 'not provided' and stripped from payload."""
+        mock_request.return_value = self._response()
+        client = OsmosisClient()
+        client.submit_training_run(
+            model_path="m1",
+            dataset="ds1",
+            rollout_name="rollout1",
+            entrypoint="rollouts/main.py",
+            rollout_env={},
+            rollout_secret_refs={},
+        )
+        payload = mock_request.call_args.kwargs["data"]
+        assert "rollout_env" not in payload
+        assert "rollout_secret_refs" not in payload
+
+    @patch("osmosis_ai.platform.api.client.platform_request")
+    def test_commit_sha_and_config_included_when_provided(
+        self, mock_request: MagicMock
+    ) -> None:
+        """commit_sha and config are forwarded when provided."""
+        mock_request.return_value = self._response()
+        client = OsmosisClient()
+        client.submit_training_run(
+            model_path="m1",
+            dataset="ds1",
+            rollout_name="rollout1",
+            entrypoint="rollouts/main.py",
+            commit_sha="abc123",
+            config={"lr": 0.001},
+            rollout_env={"FOO": "bar"},
+            rollout_secret_refs={"OPENAI_API_KEY": "openai-prod"},
+        )
+        payload = mock_request.call_args.kwargs["data"]
+        assert payload["commit_sha"] == "abc123"
+        assert payload["config"] == {"lr": 0.001}
+        assert payload["rollout_env"] == {"FOO": "bar"}
+        assert payload["rollout_secret_refs"] == {"OPENAI_API_KEY": "openai-prod"}
 
 
 class TestGetTrainingRunMetrics:
