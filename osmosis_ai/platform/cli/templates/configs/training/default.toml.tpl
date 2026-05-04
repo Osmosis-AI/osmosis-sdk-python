@@ -20,7 +20,7 @@ dataset = "<your-dataset-name>"        # Dataset name from `osmosis --json datas
 # lr = 1e-6                          # Learning rate
 # total_epochs = 1                   # Number of training epochs
 # n_samples_per_prompt = 8           # Rollout samples per prompt
-# global_batch_size = 64             # Training batch size
+# rollout_batch_size = 64            # Rollout batch size
 # max_prompt_length = 8192           # Max prompt tokens
 # max_response_length = 8192         # Max response tokens
 
