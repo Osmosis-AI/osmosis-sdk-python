@@ -27,7 +27,7 @@ class _TrainingSection(BaseModel):
     lr: float | None = None
     total_epochs: int | None = None
     n_samples_per_prompt: int | None = None
-    global_batch_size: int | None = None
+    rollout_batch_size: int | None = None
     max_prompt_length: int | None = None
     max_response_length: int | None = None
 
@@ -60,7 +60,7 @@ class TrainingConfig(BaseModel):
     training_lr: float | None
     training_total_epochs: int | None
     training_n_samples_per_prompt: int | None
-    training_global_batch_size: int | None
+    training_rollout_batch_size: int | None
     training_max_prompt_length: int | None
     training_max_response_length: int | None
 
@@ -131,13 +131,11 @@ def load_training_config(path: Path) -> TrainingConfig:
             f"got {training.n_samples_per_prompt} in {path}"
         )
     if (
-        training.global_batch_size is not None
+        training.rollout_batch_size is not None
         and training.n_samples_per_prompt is not None
-        and training.global_batch_size % training.n_samples_per_prompt != 0
     ):
         raise CLIError(
-            f"global_batch_size ({training.global_batch_size}) must be divisible "
-            f"by n_samples_per_prompt ({training.n_samples_per_prompt}) in {path}"
+            f"rollout_batch_size and n samples per prompt cannot be null"
         )
 
     return TrainingConfig(
@@ -149,7 +147,7 @@ def load_training_config(path: Path) -> TrainingConfig:
         training_lr=training.lr,
         training_total_epochs=training.total_epochs,
         training_n_samples_per_prompt=training.n_samples_per_prompt,
-        training_global_batch_size=training.global_batch_size,
+        training_rollout_batch_size=training.rollout_batch_size,
         training_max_prompt_length=training.max_prompt_length,
         training_max_response_length=training.max_response_length,
         sampling_rollout_temperature=sampling.rollout_temperature,

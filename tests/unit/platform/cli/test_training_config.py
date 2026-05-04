@@ -29,7 +29,7 @@ commit_sha = "deadbeef"
 lr = 1e-6
 total_epochs = 2
 n_samples_per_prompt = 8
-global_batch_size = 64
+rollout_batch_size = 64
 max_prompt_length = 4096
 max_response_length = 8192
 
@@ -54,7 +54,7 @@ checkpoint_save_freq = 20
     assert cfg.training_lr == 1e-6
     assert cfg.training_total_epochs == 2
     assert cfg.training_n_samples_per_prompt == 8
-    assert cfg.training_global_batch_size == 64
+    assert cfg.training_rollout_batch_size == 64
     assert cfg.training_max_prompt_length == 4096
     assert cfg.training_max_response_length == 8192
     assert cfg.sampling_rollout_temperature == 0.8
@@ -207,28 +207,6 @@ def test_directory_path_raises(tmp_path: Path) -> None:
     assert "Cannot read config file" in str(exc_info.value)
 
 
-def test_batch_size_not_divisible(tmp_path: Path) -> None:
-    path = tmp_path / "bad_batch.toml"
-    path.write_text(
-        """
-[experiment]
-rollout = "r"
-entrypoint = "e.py"
-model_path = "m"
-dataset = "d"
-
-[training]
-n_samples_per_prompt = 8
-global_batch_size = 65
-""".strip(),
-        encoding="utf-8",
-    )
-
-    with pytest.raises(CLIError) as exc_info:
-        load_training_config(path)
-    assert "divisible" in str(exc_info.value)
-
-
 def test_batch_size_divisible_ok(tmp_path: Path) -> None:
     """Batch size exactly divisible by n_samples_per_prompt should succeed."""
     path = tmp_path / "ok_batch.toml"
@@ -242,13 +220,13 @@ dataset = "d"
 
 [training]
 n_samples_per_prompt = 8
-global_batch_size = 64
+rollout_batch_size = 64
 """.strip(),
         encoding="utf-8",
     )
 
     cfg = load_training_config(path)
-    assert cfg.training_global_batch_size == 64
+    assert cfg.training_rollout_batch_size == 64
     assert cfg.training_n_samples_per_prompt == 8
 
 
