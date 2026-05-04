@@ -130,13 +130,8 @@ def load_training_config(path: Path) -> TrainingConfig:
             f"n_samples_per_prompt must be a positive integer, "
             f"got {training.n_samples_per_prompt} in {path}"
         )
-    if (
-        training.rollout_batch_size is None
-        or training.n_samples_per_prompt is None
-    ):
-        raise CLIError(
-            f"Both rollout_batch_size and n samples per prompt cannot be null"
-        )
+    if training.rollout_batch_size is None or training.n_samples_per_prompt is None:
+        raise CLIError("rollout_batch_size and n_samples_per_prompt must both be set")
 
     return TrainingConfig(
         experiment_rollout=experiment.rollout,
