@@ -1,0 +1,25 @@
+osmosis_ai/platform/cli/training_config.py
+  a5f097a3689abe88 134
+tests/unit/platform/cli/test_training_config.py
+  a5f097a3689abe88 75-78,88-89,112-113,129-130,145-148,154-157,227-260,272,278
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.3.4",
+  "base_commit_sha": "1fa1a3fe4ee5126292cdcac181854ff60c66581d",
+  "prompts": {
+    "a5f097a3689abe88": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "ff7bc293-3ffc-49de-b078-2c9fc89726c7",
+        "model": "gpt-5.5-extra-high"
+      },
+      "human_author": "JoyboyBrian",
+      "messages": [],
+      "total_additions": 56,
+      "total_deletions": 7,
+      "accepted_lines": 55,
+      "overriden_lines": 0
+    }
+  }
+}
