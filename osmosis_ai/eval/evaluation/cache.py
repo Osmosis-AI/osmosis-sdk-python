@@ -191,6 +191,33 @@ def compute_module_fingerprint(module_path: str) -> str | None:
     return _hash_file(source_file)
 
 
+def compute_rollout_package_fingerprint(module_path: str) -> str | None:
+    """Hash the full rollout package for a loaded eval entrypoint.
+
+    Eval entrypoints are loaded under a synthetic package whose root path is the
+    rollout directory. Hashing that directory keeps imported workflow/grader
+    implementation changes from reusing stale cache entries.
+    """
+    module_name, _, _ = module_path.partition(":")
+    try:
+        importlib.import_module(module_name)
+    except ImportError:
+        return None
+
+    root_name = module_name.split(".", 1)[0]
+    root_mod = sys.modules.get(root_name)
+    root_paths = getattr(root_mod, "__path__", None)
+    if root_paths:
+        try:
+            root_path = Path(next(iter(root_paths)))
+        except (StopIteration, TypeError):
+            root_path = None
+        if root_path is not None and root_path.is_dir():
+            return _hash_directory_tree(root_path)
+
+    return compute_module_fingerprint(module_path)
+
+
 def compute_eval_fns_fingerprint(eval_fn_paths: list[str]) -> str | None:
     """Hash the source files of all eval functions.
 
@@ -225,13 +252,14 @@ def compute_eval_fns_fingerprint(eval_fn_paths: list[str]) -> str | None:
 def _get_cache_root() -> Path:
     """Resolve eval cache root directory.
 
-    Priority: OSMOSIS_CACHE_DIR > XDG_CACHE_HOME > ~/.cache/osmosis/eval
+    Priority: OSMOSIS_CACHE_DIR > project-local .osmosis/cache/eval.
     """
+    from osmosis_ai.platform.cli.project_contract import resolve_project_root_from_cwd
+
+    project_root = resolve_project_root_from_cwd()
     if env := os.environ.get("OSMOSIS_CACHE_DIR"):
-        return Path(env).expanduser().resolve() / "eval"
-    xdg = os.environ.get("XDG_CACHE_HOME")
-    base = Path(xdg).expanduser().resolve() if xdg else Path.home() / ".cache"
-    return base / "osmosis" / "eval"
+        return (Path(env).expanduser().resolve() / "eval").resolve()
+    return (project_root / ".osmosis" / "cache" / "eval").resolve()
 
 
 _WINDOWS_RESERVED_NAMES = frozenset(

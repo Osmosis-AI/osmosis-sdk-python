@@ -22,12 +22,7 @@ from osmosis_ai.platform.constants import (
 
 from .config import PLATFORM_URL
 from .credentials import load_credentials
-from .local_config import (
-    get_active_workspace,
-    get_active_workspace_id,
-    reset_session,
-    set_active_workspace,
-)
+from .local_config import reset_session
 
 if TYPE_CHECKING:
     from .credentials import Credentials
@@ -117,16 +112,15 @@ def _auth_error_message(error_code: str | None, *, using_env_token: bool) -> str
 
 _WORKSPACE_AUTH_ERROR_MESSAGES: dict[str, str] = {
     "WORKSPACE_HEADER_MISSING": (
-        "No workspace selected. Run 'osmosis workspace' to select a workspace."
+        "This command requires a linked Osmosis project. Run 'osmosis project link' from the project root."
     ),
     "WORKSPACE_HEADER_INVALID": (
-        "Your workspace context is invalid. "
-        "Run 'osmosis auth login' or 'osmosis workspace' to re-select."
+        "This project is linked to a workspace that is no longer accessible. "
+        "Run 'osmosis auth login' if you changed users, or unlink and run 'osmosis project link' again."
     ),
     "WORKSPACE_ACCESS_DENIED": (
-        "You do not have access to this workspace.\n"
-        "Your workspace context may be stale. "
-        "Run 'osmosis auth login' or 'osmosis workspace' to re-select."
+        "This project is linked to a workspace that is no longer accessible. "
+        "Run 'osmosis auth login' if you changed users, or unlink and run 'osmosis project link' again."
     ),
 }
 
@@ -172,43 +166,6 @@ def revoke_cli_token(credentials: Credentials) -> bool:
         return False
 
 
-def ensure_active_workspace(
-    credentials: Credentials | None = None,
-    *,
-    cleanup_on_401: bool = True,
-) -> dict[str, str] | None:
-    """Return the active workspace, auto-selecting it when only one exists."""
-    active_workspace = get_active_workspace()
-    if active_workspace is not None:
-        return active_workspace
-
-    if credentials is None:
-        credentials = load_credentials()
-    if credentials is None:
-        return None
-
-    data = platform_request(
-        "/api/cli/workspaces",
-        credentials=credentials,
-        require_workspace=False,
-        cleanup_on_401=cleanup_on_401,
-    )
-    workspaces = data.get("workspaces", [])
-    if len(workspaces) != 1:
-        return None
-
-    workspace = workspaces[0]
-    ws_id = workspace.get("id")
-    ws_name = workspace.get("name")
-    if not isinstance(ws_id, str) or not ws_id:
-        return None
-    if not isinstance(ws_name, str) or not ws_name:
-        return None
-
-    set_active_workspace(ws_id, ws_name)
-    return {"id": ws_id, "name": ws_name}
-
-
 def platform_request(
     endpoint: str,
     method: str = "GET",
@@ -231,9 +188,9 @@ def platform_request(
         headers: Additional headers
         timeout: Request timeout in seconds
         credentials: Optional explicit credentials override. If not provided,
-            uses the active workspace credentials from local storage.
-        workspace_id: Optional workspace ID for X-Osmosis-Org header. If not
-            provided and require_workspace is True, uses the active workspace.
+            uses credentials from local storage.
+        workspace_id: Explicit workspace ID for X-Osmosis-Org header when
+            require_workspace is True.
         require_workspace: If True, requires a workspace context and adds
             X-Osmosis-Org header. If False, omits workspace context.
         cleanup_on_401: If True (default), a 401 response triggers
@@ -263,20 +220,13 @@ def platform_request(
         "User-Agent": f"osmosis-cli/{PACKAGE_VERSION}",
     }
 
-    # Add workspace context if required
     if require_workspace:
-        resolved_workspace_id = workspace_id or get_active_workspace_id()
-        if not resolved_workspace_id:
-            active_workspace = ensure_active_workspace(
-                credentials=credentials,
-                cleanup_on_401=cleanup_on_401,
-            )
-            resolved_workspace_id = active_workspace["id"] if active_workspace else None
-        if not resolved_workspace_id:
+        if not workspace_id:
             raise PlatformAPIError(
-                "No workspace selected. Run 'osmosis workspace' to select a workspace."
+                "Workspace-scoped platform requests require an explicit workspace_id.",
+                error_code="WORKSPACE_ID_REQUIRED",
             )
-        req_headers["X-Osmosis-Org"] = resolved_workspace_id
+        req_headers["X-Osmosis-Org"] = workspace_id
 
     if headers:
         req_headers.update(headers)
@@ -358,8 +308,9 @@ def platform_request(
                 if "workspace" in error_msg.lower() and "access" in error_msg.lower():
                     raise PlatformAPIError(
                         f"{error_msg}\n"
-                        "Your workspace context may be stale. "
-                        "Run 'osmosis auth login' or 'osmosis workspace' to re-select.",
+                        "This project is linked to a workspace that is no longer accessible. "
+                        "Run 'osmosis auth login' if you changed users, or unlink and run "
+                        "'osmosis project link' again.",
                         e.code,
                         error_code=error_code,
                         field=field,

@@ -4,7 +4,7 @@ Installing the SDK provides a lightweight CLI as `osmosis` (aliases: `osmosis_ai
 
 ## Authentication
 
-Credentials are stored at `~/.config/osmosis/credentials.json` (workspace-aware).
+Credentials are stored at `~/.config/osmosis/credentials.json`.
 
 ### osmosis auth login
 
@@ -32,15 +32,42 @@ osmosis auth whoami
 
 ### osmosis workspace
 
-Manage platform workspaces interactively. Launches a TUI that shows your current workspace context and lets you switch workspace, browse training runs, datasets, and models.
+Open the interactive workspace browser. The TUI lets you choose an accessible workspace, then browse training runs, datasets, and models.
 
 ```bash
 osmosis workspace
 ```
 
-In non-interactive environments, prints current context and exits.
+In non-interactive environments, use a specific subcommand such as `osmosis workspace list`, `osmosis workspace create <name>`, or `osmosis workspace delete <name> --yes`. To link this project with a workspace for platform commands, use `osmosis project link --workspace <workspace-id-or-name>`.
 
 ## Project
+
+### osmosis project link
+
+Link this project with an Osmosis workspace. Platform commands resolve their workspace from the current project.
+
+```bash
+osmosis project link --workspace <workspace-id-or-name>
+osmosis project link --workspace <workspace-id-or-name> --yes
+```
+
+The project mapping is stored in `~/.osmosis/config.json`.
+
+For CI:
+
+```bash
+export OSMOSIS_TOKEN=<token>
+osmosis project link --workspace <workspace-id-or-name> --yes
+osmosis train submit configs/training/default.toml --yes
+```
+
+To adopt an existing repository as an Osmosis project:
+
+```bash
+git clone <repo_url>
+cd <repo>
+osmosis init --here <name> --workspace <workspace-id-or-name>
+```
 
 ### osmosis project validate
 
@@ -52,8 +79,8 @@ osmosis project validate
 osmosis project validate ./path/to/project
 ```
 
-The command checks for `.osmosis/project.toml` and the required `rollouts/`,
-`configs/training/`, `configs/eval/`, `data/`, and `.osmosis/research/`
+The command checks for `.osmosis/project.toml`, `.osmosis/program.md`, and the
+required `rollouts/`, `configs/training/`, `configs/eval/`, and `data/`
 directories.
 
 ## Rollout
@@ -78,7 +105,7 @@ The command only accepts configs under these canonical project paths:
 
 ### osmosis rollout list
 
-List rollouts in the current platform workspace.
+List rollouts in the linked project workspace.
 
 ```bash
 osmosis rollout list

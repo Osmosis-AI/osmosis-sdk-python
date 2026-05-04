@@ -26,6 +26,10 @@ from typing import Any
 import typer
 
 from osmosis_ai.cli.console import console
+from osmosis_ai.cli.errors import CLIError
+from osmosis_ai.cli.output import OutputFormat
+from osmosis_ai.cli.prompts import Choice, Separator, select_list
+from osmosis_ai.platform.cli.workspace_context import WorkspaceContext
 from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE
 
 app: typer.Typer = typer.Typer(
@@ -38,6 +42,13 @@ def _detail_fields(rows: list[tuple[str, str]]) -> list[Any]:
     from osmosis_ai.cli.output import DetailField
 
     return [DetailField(label=label, value=value) for label, value in rows]
+
+
+def _workspace_result_context(workspace: Any) -> dict[str, Any]:
+    return {
+        "workspace": {"id": workspace.workspace_id, "name": workspace.workspace_name},
+        "project_root": str(workspace.project_root),
+    }
 
 
 def _require_confirmation(message: str, *, yes: bool) -> None:
@@ -99,6 +110,54 @@ def _format_deployment_status(status: str) -> str:
     return console.escape(label)
 
 
+def _select_checkpoint_for_deploy(workspace: WorkspaceContext) -> str:
+    from osmosis_ai.platform.api.client import OsmosisClient
+
+    client = OsmosisClient()
+    runs = client.list_training_runs(
+        credentials=workspace.credentials,
+        workspace_id=workspace.workspace_id,
+    ).training_runs
+    if not runs:
+        raise CLIError("No training runs with deployable checkpoints found.")
+
+    while True:
+        run_choices: list[str | Choice | Separator] = [
+            Choice(r.name or r.id, value=r) for r in runs
+        ]
+        selected_run = select_list(
+            "Choose a training run",
+            items=run_choices,
+            actions=[Choice("Cancel", value=None)],
+        )
+        if selected_run is None:
+            raise CLIError("Deploy cancelled.")
+        checkpoints = client.list_training_run_checkpoints(
+            selected_run.id,
+            credentials=workspace.credentials,
+            workspace_id=workspace.workspace_id,
+        ).checkpoints
+        if not checkpoints:
+            run_label = selected_run.name or selected_run.id
+            raise CLIError(
+                f'No deployable checkpoints found for training run "{run_label}".'
+            )
+
+        checkpoint_choices: list[str | Choice | Separator] = [
+            Choice(cp.checkpoint_name or cp.id, value=cp) for cp in checkpoints
+        ]
+        selected_checkpoint = select_list(
+            "Choose a checkpoint",
+            items=checkpoint_choices,
+            actions=[Choice("Back", value="__back__"), Choice("Cancel", value=None)],
+        )
+        if selected_checkpoint == "__back__":
+            continue
+        if selected_checkpoint is None:
+            raise CLIError("Deploy cancelled.")
+        return selected_checkpoint.checkpoint_name or selected_checkpoint.id
+
+
 @app.command("list")
 def list_deployments(
     limit: int = typer.Option(
@@ -106,7 +165,7 @@ def list_deployments(
     ),
     all_: bool = typer.Option(False, "--all", help="Show all deployments."),
 ) -> Any:
-    """List LoRA deployments in the current platform workspace."""
+    """List LoRA deployments in the linked project workspace."""
     from osmosis_ai.cli.output import (
         ListColumn,
         ListResult,
@@ -115,14 +174,16 @@ def list_deployments(
     )
     from osmosis_ai.platform.api.client import OsmosisClient
     from osmosis_ai.platform.cli.utils import (
-        _require_auth,
         fetch_all_pages,
+        require_workspace_context,
         validate_list_options,
     )
 
     effective_limit, fetch_all = validate_list_options(limit=limit, all_=all_)
 
-    _, credentials = _require_auth()
+    workspace = require_workspace_context()
+    credentials = workspace.credentials
+    workspace_id = workspace.workspace_id
 
     output = get_output_context()
     client = OsmosisClient()
@@ -130,7 +191,10 @@ def list_deployments(
         if fetch_all:
             deployments, total_count = fetch_all_pages(
                 lambda lim, off: client.list_deployments(
-                    limit=lim, offset=off, credentials=credentials
+                    limit=lim,
+                    offset=off,
+                    credentials=credentials,
+                    workspace_id=workspace_id,
                 ),
                 items_attr="deployments",
             )
@@ -138,7 +202,10 @@ def list_deployments(
             next_offset = None
         else:
             page = client.list_deployments(
-                limit=effective_limit, offset=0, credentials=credentials
+                limit=effective_limit,
+                offset=0,
+                credentials=credentials,
+                workspace_id=workspace_id,
             )
             deployments = page.deployments
             total_count = page.total_count
@@ -151,6 +218,7 @@ def list_deployments(
         total_count=total_count,
         has_more=has_more,
         next_offset=next_offset,
+        extra=_workspace_result_context(workspace),
         columns=[
             ListColumn(key="checkpoint_name", label="Checkpoint"),
             ListColumn(key="status", label="Status"),
@@ -175,14 +243,20 @@ def info(
         serialize_deployment,
     )
     from osmosis_ai.platform.api.client import OsmosisClient
-    from osmosis_ai.platform.cli.utils import _require_auth, format_date
+    from osmosis_ai.platform.cli.utils import format_date, require_workspace_context
 
-    _, credentials = _require_auth()
+    workspace = require_workspace_context()
+    credentials = workspace.credentials
+    workspace_id = workspace.workspace_id
 
     client = OsmosisClient()
     output = get_output_context()
     with output.status("Fetching deployment..."):
-        d = client.get_deployment(checkpoint, credentials=credentials)
+        d = client.get_deployment(
+            checkpoint,
+            credentials=credentials,
+            workspace_id=workspace_id,
+        )
 
     rows: list[tuple[str, str]] = [
         ("Checkpoint", console.escape(d.checkpoint_name) if d.checkpoint_name else "—"),
@@ -200,35 +274,56 @@ def info(
     if d.created_at:
         rows.append(("Created", format_date(d.created_at)))
 
+    data = serialize_deployment(d)
+    data.update(_workspace_result_context(workspace))
     return DetailResult(
         title="Deployment",
-        data=serialize_deployment(d),
+        data=data,
         fields=_detail_fields(rows),
     )
 
 
 def deploy(
-    checkpoint: str = typer.Argument(
-        ..., help="Checkpoint UUID or checkpoint_name.", metavar="CHECKPOINT"
+    checkpoint: str | None = typer.Argument(
+        None, help="Checkpoint UUID or checkpoint_name.", metavar="CHECKPOINT"
     ),
 ) -> Any:
     """Deploy (or reactivate) a LoRA checkpoint."""
     from osmosis_ai.cli.output import OperationResult, get_output_context
     from osmosis_ai.platform.api.client import OsmosisClient
-    from osmosis_ai.platform.cli.utils import _require_auth
+    from osmosis_ai.platform.cli.utils import require_workspace_context
 
-    _, credentials = _require_auth()
-    client = OsmosisClient()
     output = get_output_context()
+    if checkpoint is None and (
+        output.format is not OutputFormat.rich or not output.interactive
+    ):
+        raise CLIError(
+            "Checkpoint is required in non-interactive mode.",
+            code="INTERACTIVE_REQUIRED",
+        )
+
+    workspace = require_workspace_context()
+    credentials = workspace.credentials
+    workspace_id = workspace.workspace_id
+    if checkpoint is None:
+        checkpoint = _select_checkpoint_for_deploy(workspace)
+
+    client = OsmosisClient()
 
     with output.status(f'Deploying checkpoint "{console.escape(checkpoint)}"...'):
-        result = client.deploy_checkpoint(checkpoint, credentials=credentials)
+        result = client.deploy_checkpoint(
+            checkpoint,
+            credentials=credentials,
+            workspace_id=workspace_id,
+        )
 
     op_status = "failed" if result.status == "failed" else "success"
+    resource = _deployment_summary_resource(result)
+    resource.update(_workspace_result_context(workspace))
     return OperationResult(
         operation="deploy",
         status=op_status,
-        resource=_deployment_summary_resource(result),
+        resource=resource,
         message=f"Deployment {result.checkpoint_name or '-'} {result.status}",
         display_next_steps=[
             f"Inspect with: osmosis deployment info {result.checkpoint_name}"
@@ -252,20 +347,28 @@ def undeploy(
     """Undeploy a LoRA checkpoint (transition to ``inactive``)."""
     from osmosis_ai.cli.output import OperationResult, get_output_context
     from osmosis_ai.platform.api.client import OsmosisClient
-    from osmosis_ai.platform.cli.utils import _require_auth
+    from osmosis_ai.platform.cli.utils import require_workspace_context
 
-    _, credentials = _require_auth()
+    workspace = require_workspace_context()
+    credentials = workspace.credentials
+    workspace_id = workspace.workspace_id
     client = OsmosisClient()
     output = get_output_context()
 
     with output.status(f'Undeploying checkpoint "{console.escape(checkpoint)}"...'):
-        result = client.undeploy_checkpoint(checkpoint, credentials=credentials)
+        result = client.undeploy_checkpoint(
+            checkpoint,
+            credentials=credentials,
+            workspace_id=workspace_id,
+        )
 
     op_status = "failed" if result.status == "failed" else "success"
+    resource = _deployment_summary_resource(result)
+    resource.update(_workspace_result_context(workspace))
     return OperationResult(
         operation="undeploy",
         status=op_status,
-        resource=_deployment_summary_resource(result),
+        resource=resource,
         message=f"Deployment {result.checkpoint_name or '-'} {result.status}",
         display_next_steps=[
             f"Inspect with: osmosis deployment info {result.checkpoint_name}"
@@ -293,14 +396,21 @@ def rename(
     """Rename a LoRA checkpoint (re-registers inference if active)."""
     from osmosis_ai.cli.output import OperationResult, get_output_context
     from osmosis_ai.platform.api.client import OsmosisClient
-    from osmosis_ai.platform.cli.utils import _require_auth
+    from osmosis_ai.platform.cli.utils import require_workspace_context
 
-    _, credentials = _require_auth()
+    workspace = require_workspace_context()
+    credentials = workspace.credentials
+    workspace_id = workspace.workspace_id
     client = OsmosisClient()
     output = get_output_context()
 
     with output.status("Renaming checkpoint..."):
-        result = client.rename_checkpoint(checkpoint, new_name, credentials=credentials)
+        result = client.rename_checkpoint(
+            checkpoint,
+            new_name,
+            credentials=credentials,
+            workspace_id=workspace_id,
+        )
 
     display_next_steps = []
     if result.status == "failed":
@@ -315,6 +425,7 @@ def rename(
             "old_checkpoint_name": result.old_checkpoint_name,
             "checkpoint_name": result.checkpoint_name,
             "status": result.status,
+            **_workspace_result_context(workspace),
         },
         message=f"Renamed {result.old_checkpoint_name} -> {result.checkpoint_name}",
         display_next_steps=display_next_steps,
@@ -332,9 +443,11 @@ def delete(
     """Delete a deployment record (idempotent)."""
     from osmosis_ai.cli.output import OperationResult, get_output_context
     from osmosis_ai.platform.api.client import OsmosisClient
-    from osmosis_ai.platform.cli.utils import _require_auth
+    from osmosis_ai.platform.cli.utils import require_workspace_context
 
-    _, credentials = _require_auth()
+    workspace = require_workspace_context()
+    credentials = workspace.credentials
+    workspace_id = workspace.workspace_id
 
     _require_confirmation(
         f'Delete deployment for checkpoint "{checkpoint}"? This cannot be undone.',
@@ -344,10 +457,14 @@ def delete(
     client = OsmosisClient()
     output = get_output_context()
     with output.status("Deleting deployment..."):
-        client.delete_deployment(checkpoint, credentials=credentials)
+        client.delete_deployment(
+            checkpoint,
+            credentials=credentials,
+            workspace_id=workspace_id,
+        )
     return OperationResult(
         operation="deployment.delete",
         status="success",
-        resource={"checkpoint": checkpoint},
+        resource={"checkpoint": checkpoint, **_workspace_result_context(workspace)},
         message=f'Deployment for "{checkpoint}" deleted.',
     )

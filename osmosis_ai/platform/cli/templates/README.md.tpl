@@ -18,7 +18,7 @@ osmosis --json project validate
 ## Ask your agent
 
 ```text
-I want to train a model for <task>. Read .osmosis/research/program.md,
+I want to train a model for <task>. Read .osmosis/program.md,
 create a baseline rollout in this project, iterate locally with evals,
 and prepare a training config. Use `osmosis --json` for Osmosis CLI commands.
 ```

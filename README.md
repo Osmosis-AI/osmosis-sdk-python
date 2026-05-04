@@ -27,6 +27,7 @@ Python SDK for [Osmosis AI](https://platform.osmosis.ai), a platform for trainin
 |------|-------------|
 | **Define agents** | One `AgentWorkflow` subclass (+ optional `AgentWorkflowConfig`) in your repo. The training/eval entrypoint must also expose a concrete `Grader` (typically with a `GraderConfig`). |
 | **Layout** | Use a rollout pack directory under `rollouts/<name>/` when loading by rollout name; the CLI adds that directory to `sys.path`. |
+| **Link project** | `osmosis project link --workspace <workspace-id-or-name>` — platform commands use the workspace resolved from the current project. |
 | **Validate** | `osmosis rollout validate configs/training/<name>.toml` — validate the rollout entrypoint referenced by a training or eval config before managed hosting or training submission. |
 | **Evaluate** | `osmosis eval run configs/eval/<name>.toml` — same execution stack as training, with optional pass@k and caching. |
 
@@ -50,12 +51,30 @@ Plain mode is for humans and simple shell pipelines, not a strict schema. `--for
 
 In JSON or plain mode, interactive commands fail fast with `INTERACTIVE_REQUIRED` unless a non-interactive flow exists, typically by passing `--yes` or `--token`. `OSMOSIS_TOKEN` is verify-only across the CLI: it activates authentication for the current process but is never written to the on-disk credentials store, never revoked, and never deletes existing credentials.
 
+## Project adoption and CI
+
+Adopt an existing repository as an Osmosis project:
+
+```bash
+git clone <repo_url>
+cd <repo>
+osmosis init --here <name> --workspace <workspace-id-or-name>
+```
+
+Submit from CI with a project link and non-interactive confirmation:
+
+```bash
+export OSMOSIS_TOKEN=<token>
+osmosis project link --workspace <workspace-id-or-name> --yes
+osmosis train submit configs/training/default.toml --yes
+```
+
 ## Installation
 
 Requires **Python 3.12+**. For development setup, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 - **An LLM API key** (e.g., OpenAI, Anthropic, Groq) — required for `osmosis eval run` when using hosted models. See [supported providers](https://docs.litellm.ai/docs/providers).
-- **Osmosis account** (optional) — needed for `osmosis auth login`, workspace management, and platform-backed commands such as datasets, models, and training runs. Sign up at [platform.osmosis.ai](https://platform.osmosis.ai).
+- **Osmosis account** (optional) — needed for `osmosis auth login`, project links, and platform-backed commands such as datasets, models, and training runs. Sign up at [platform.osmosis.ai](https://platform.osmosis.ai).
 
 **pip**
 

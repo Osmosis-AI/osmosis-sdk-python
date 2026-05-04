@@ -7,7 +7,11 @@ from pathlib import Path
 import pytest
 
 from osmosis_ai.cli.errors import CLIError
-from osmosis_ai.platform.cli.training_config import TrainingConfig, load_training_config
+from osmosis_ai.platform.cli.training_config import (
+    TrainingConfig,
+    load_training_config,
+    validate_training_context_paths,
+)
 
 # ---------------------------------------------------------------------------
 # Valid configs
@@ -138,6 +142,82 @@ dataset = "d"
 
     cfg = load_training_config(path)
     assert cfg.to_api_config() == {}
+
+
+# ---------------------------------------------------------------------------
+# Context path validation
+# ---------------------------------------------------------------------------
+
+
+def _training_config(
+    *,
+    rollout: str = "calculator",
+    entrypoint: str = "workers/main.py",
+) -> TrainingConfig:
+    return TrainingConfig(
+        experiment_rollout=rollout,
+        experiment_entrypoint=entrypoint,
+        experiment_model_path="m",
+        experiment_dataset="d",
+        experiment_commit_sha=None,
+        training_lr=None,
+        training_total_epochs=None,
+        training_n_samples_per_prompt=None,
+        training_global_batch_size=None,
+        training_max_prompt_length=None,
+        training_max_response_length=None,
+        sampling_rollout_temperature=None,
+        sampling_rollout_top_p=None,
+        checkpoints_eval_interval=None,
+        checkpoints_checkpoint_save_freq=None,
+    )
+
+
+def test_validate_training_context_paths_allows_entrypoint_under_rollout(
+    tmp_path: Path,
+) -> None:
+    cfg = _training_config()
+
+    validate_training_context_paths(cfg, tmp_path)
+
+
+def test_validate_training_context_paths_rejects_entrypoint_escape(
+    tmp_path: Path,
+) -> None:
+    cfg = _training_config(entrypoint="../outside.py")
+
+    with pytest.raises(CLIError, match="under rollouts/<rollout>"):
+        validate_training_context_paths(cfg, tmp_path)
+
+
+def test_validate_training_context_paths_rejects_rollout_escape(
+    tmp_path: Path,
+) -> None:
+    cfg = _training_config(rollout="../outside", entrypoint="main.py")
+
+    with pytest.raises(CLIError, match="current project's rollouts"):
+        validate_training_context_paths(cfg, tmp_path)
+
+
+def test_validate_training_context_paths_rejects_absolute_rollout(
+    tmp_path: Path,
+) -> None:
+    cfg = _training_config(rollout=str(tmp_path / "outside"), entrypoint="main.py")
+
+    with pytest.raises(CLIError, match="logical rollout name"):
+        validate_training_context_paths(cfg, tmp_path)
+
+
+def test_validate_training_context_paths_rejects_absolute_rollout_under_project(
+    tmp_path: Path,
+) -> None:
+    cfg = _training_config(
+        rollout=str(tmp_path / "rollouts" / "calculator"),
+        entrypoint="main.py",
+    )
+
+    with pytest.raises(CLIError, match="logical rollout name"):
+        validate_training_context_paths(cfg, tmp_path)
 
 
 # ---------------------------------------------------------------------------

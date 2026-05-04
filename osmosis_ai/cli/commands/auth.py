@@ -2,9 +2,7 @@
 
 from __future__ import annotations
 
-import contextlib
 import os
-import shlex
 from typing import TYPE_CHECKING, Any
 
 import typer
@@ -85,74 +83,26 @@ def _load_login_workspaces(
     return _normalize_workspaces(data.get("workspaces")), None
 
 
-def _validate_workspace_context(
-    creds: Credentials,
-    *,
-    workspaces: list[dict[str, str]] | None = None,
-) -> None:
-    """Validate the stored workspace is still accessible with new credentials.
-
-    After login, the workspace ID in config.json may be stale (e.g. the user
-    switched between local dev and production, or the local DB was recreated).
-    This check prevents confusing 403 errors on subsequent commands.
-    """
-    from osmosis_ai.platform.auth.local_config import (
-        clear_all_local_data,
-        get_active_workspace,
-        set_active_workspace,
-    )
-
-    ws = get_active_workspace()
-    if not ws:
-        return
+def _current_linked_project_summary() -> dict[str, str] | None:
+    from osmosis_ai.platform.auth.config import PLATFORM_URL
+    from osmosis_ai.platform.cli.project_contract import resolve_project_root_from_cwd
+    from osmosis_ai.platform.cli.project_mapping import CONFIG_FILE, ProjectMappingStore
 
     try:
-        if workspaces is None:
-            workspaces, _ = _load_login_workspaces(creds)
-        if workspaces is None:
-            return
-
-        ws_by_id = {w["id"]: w for w in workspaces if "id" in w}
-        ws_by_name = {w["name"]: w for w in workspaces if "name" in w}
-
-        if ws["id"] in ws_by_id:
-            return  # Still valid
-
-        # ID is stale -- try to fix by matching workspace name
-        if ws["name"] in ws_by_name:
-            correct = ws_by_name[ws["name"]]
-            set_active_workspace(correct["id"], correct["name"])
-            return
-
-        # Workspace no longer accessible at all
-        clear_all_local_data()
-        console.print(
-            "\nPrevious workspace is no longer accessible. "
-            "Resetting local workspace selection.",
-            style="yellow",
-        )
-    except Exception:
-        pass  # Don't block login for validation errors
-
-
-def _ensure_login_workspace_selection(
-    workspaces: list[dict[str, str]] | None,
-) -> tuple[dict[str, str] | None, bool]:
-    """Return the active workspace, auto-selecting the only available one."""
-    from osmosis_ai.platform.auth.local_config import (
-        get_active_workspace,
-        set_active_workspace,
-    )
-
-    active_workspace = get_active_workspace()
-    if active_workspace is not None:
-        return active_workspace, False
-    if workspaces is None or len(workspaces) != 1:
-        return None, False
-
-    workspace = workspaces[0]
-    set_active_workspace(workspace["id"], workspace["name"])
-    return workspace, True
+        project_root = resolve_project_root_from_cwd()
+        record = ProjectMappingStore(
+            config_file=CONFIG_FILE,
+            platform_url=PLATFORM_URL,
+        ).get_project(str(project_root))
+    except CLIError:
+        return None
+    if record is None:
+        return None
+    return {
+        "project_root": str(project_root),
+        "workspace_id": record.workspace_id,
+        "workspace_name": record.workspace_name,
+    }
 
 
 def _login_operation_result(
@@ -162,26 +112,19 @@ def _login_operation_result(
     expires_at: Any,
     source: str,
     saved: bool,
-    active_workspace: dict[str, str] | None = None,
     token_store: str | None = None,
     workspace_lookup_error: str | None = None,
-    auto_selected: bool = False,
     local_data_cleared: bool = False,
     workspace_count: int | None = None,
 ) -> Any:
     """Build the structured login result for JSON/plain output."""
     from osmosis_ai.cli.output import OperationResult
 
-    workspace = (
-        {"id": active_workspace["id"], "name": active_workspace["name"]}
-        if active_workspace
-        else None
-    )
     resource: dict[str, Any] = {
         "email": email,
         "name": name,
         "expires_at": expires_at.isoformat(),
-        "workspace": workspace,
+        "workspace": None,
         "source": source,
         "verified": True,
         "saved": saved,
@@ -190,8 +133,6 @@ def _login_operation_result(
         resource["token_store"] = token_store
     if workspace_lookup_error is not None:
         resource["workspace_lookup_error"] = workspace_lookup_error
-    if auto_selected:
-        resource["auto_selected_workspace"] = True
     if local_data_cleared:
         resource["local_data_cleared"] = True
     if workspace_count is not None:
@@ -199,12 +140,17 @@ def _login_operation_result(
 
     next_steps: list[str] = []
     next_steps_structured: list[dict[str, Any]] = []
-    if workspace is None and workspace_count and workspace_count > 1:
-        next_steps.append("Choose a workspace with: osmosis workspace switch <name>")
-        next_steps_structured.append({"action": "workspace.switch", "name": None})
-    elif workspace is None and saved:
-        next_steps.append("Choose a workspace with: osmosis workspace")
-        next_steps_structured.append({"action": "workspace.interactive"})
+    if saved:
+        next_steps.append(
+            "Link a project with: "
+            "osmosis project link --workspace <workspace-id-or-name>"
+        )
+        next_steps_structured.append(
+            {
+                "action": "project.link",
+                "workspace": "<workspace-id-or-name>",
+            }
+        )
 
     return OperationResult(
         operation="auth.login",
@@ -300,10 +246,6 @@ def _machine_login_with_token(*, token: str, force: bool) -> Any:
     )
     if local_data_cleared:
         clear_all_local_data()
-    elif workspaces is not None:
-        _validate_workspace_context(creds, workspaces=workspaces)
-
-    active_workspace, auto_selected = _ensure_login_workspace_selection(workspaces)
 
     return _login_operation_result(
         email=result.user.email,
@@ -311,10 +253,8 @@ def _machine_login_with_token(*, token: str, force: bool) -> Any:
         expires_at=result.expires_at,
         source="token",
         saved=True,
-        active_workspace=active_workspace,
         token_store=token_store,
         workspace_lookup_error=workspace_lookup_error,
-        auto_selected=auto_selected,
         local_data_cleared=bool(local_data_cleared),
         workspace_count=len(workspaces) if workspaces is not None else None,
     )
@@ -352,7 +292,7 @@ def _machine_login_with_env_token(*, env_token: str) -> Any:
 
 
 def _rich_login(force: bool, token: str | None) -> Any:
-    """Preserve the original rich, interactive login behavior."""
+    """Run rich, interactive login behavior."""
     from osmosis_ai.platform.auth import (
         LoginError,
         device_login,
@@ -409,18 +349,13 @@ def _rich_login(force: bool, token: str | None) -> Any:
 
         workspaces, workspace_lookup_error = _load_login_workspaces(creds)
 
-        # Clear stale workspace and local state when user identity changes
-        # or when explicitly forcing a fresh start, to prevent subsequent
-        # commands from sending the old workspace ID in X-Osmosis-Org.
+        # Clear legacy auth-local state when user identity changes or when
+        # explicitly forcing a fresh start.
         local_data_cleared = force or (
             old_credentials and old_credentials.user.id != creds.user.id
         )
         if local_data_cleared:
             clear_all_local_data()
-        elif workspaces is not None:
-            _validate_workspace_context(creds, workspaces=workspaces)
-
-        active_workspace, auto_selected = _ensure_login_workspace_selection(workspaces)
 
         # Display login success
         esc = console.escape
@@ -428,55 +363,28 @@ def _rich_login(force: bool, token: str | None) -> Any:
         info_lines = [f"Email: {esc(result.user.email)}"]
         if result.user.name:
             info_lines.append(f"Name: {esc(result.user.name)}")
-        if active_workspace:
-            info_lines.append(f"Workspace: {esc(active_workspace['name'])}")
         info_lines.append(f"Expires: {result.expires_at.strftime('%Y-%m-%d')}")
 
         console.panel("Login Successful", "\n".join(info_lines), style="green")
 
         if workspace_lookup_error is not None:
-            if active_workspace is not None:
-                console.print(
-                    "\nAuthenticated, but could not refresh your workspace list. "
-                    "Current workspace selection was kept.",
-                    style="yellow",
-                )
-            else:
-                console.print(
-                    "\nAuthenticated, but could not load your workspaces yet. "
-                    "Run 'osmosis workspace' later to choose one.",
-                    style="yellow",
-                )
-        elif auto_selected and active_workspace is not None:
             console.print(
-                f"\nAutomatically selected your only workspace: "
-                f"{esc(active_workspace['name'])}",
-                style="green",
-                highlight=False,
+                "\nAuthenticated, but could not load your workspaces yet.",
+                style="yellow",
             )
-        elif workspaces and len(workspaces) > 1:
-            console.print(
-                "\nMultiple workspaces are available. Switch with:",
-                style="dim",
-            )
-            for workspace in workspaces:
-                command = f"osmosis workspace switch {shlex.quote(workspace['name'])}"
-                console.print(f"  {esc(command)}")
-            console.print(
-                "Or run 'osmosis workspace' for interactive selection.",
-                style="dim",
-            )
-        elif active_workspace is None and workspaces == []:
+        elif workspaces == []:
             console.print(
                 "\nNo workspaces were found for this account. "
-                "Run 'osmosis workspace' to manage workspaces.",
+                "Run 'osmosis workspace create <name>' to create one, "
+                "or 'osmosis workspace list' to inspect workspace access.",
                 style="dim",
             )
-        elif active_workspace is None:
-            console.print(
-                "\nRun 'osmosis workspace' to select a workspace.",
-                style="dim",
-            )
+
+        console.print(
+            "\nLink a project with: "
+            "osmosis project link --workspace <workspace-id-or-name>",
+            style="dim",
+        )
 
     except LoginError as e:
         console.print_error(str(e))
@@ -533,9 +441,25 @@ def logout(
     from osmosis_ai.platform.auth.platform_client import revoke_cli_token
 
     output = get_output_context()
-    credentials = load_credentials()
+    credentials = load_credentials(include_env=False)
+    env_token_set = bool(os.environ.get("OSMOSIS_TOKEN"))
 
     if credentials is None:
+        if env_token_set:
+            message = "OSMOSIS_TOKEN is set. Run 'unset OSMOSIS_TOKEN' to logout."
+            if output.format is OutputFormat.rich:
+                console.print(message, style="yellow")
+                return None
+            return OperationResult(
+                operation="auth.logout",
+                status="noop",
+                resource={"logged_in": True, "env_token_set": True},
+                message=message,
+                display_next_steps=["Run 'unset OSMOSIS_TOKEN' to logout."],
+                next_steps_structured=[
+                    {"action": "unset_env", "name": "OSMOSIS_TOKEN"}
+                ],
+            )
         if output.format is OutputFormat.rich:
             console.print("Not logged in.")
             return None
@@ -568,7 +492,6 @@ def logout(
     # Delete local credentials and workspace/local state
     reset_session()
 
-    env_token_set = bool(os.environ.get("OSMOSIS_TOKEN"))
     if output.format is not OutputFormat.rich:
         return OperationResult(
             operation="auth.logout",
@@ -602,7 +525,7 @@ def logout(
 
 @app.command("whoami")
 def whoami() -> Any:
-    """Show current authenticated user and workspace."""
+    """Show current authenticated user and linked project, when available."""
     from osmosis_ai.cli.output import (
         DetailField,
         DetailResult,
@@ -613,18 +536,13 @@ def whoami() -> Any:
         AuthenticationExpiredError,
         Credentials,
         LoginError,
-        PlatformAPIError,
-        ensure_active_workspace,
-        get_active_workspace,
         load_credentials,
-        platform_request,
     )
     from osmosis_ai.platform.constants import MSG_NOT_LOGGED_IN
 
     output = get_output_context()
     env_token = os.environ.get("OSMOSIS_TOKEN")
     source = "environment" if env_token else "credentials"
-    active_workspace = None
 
     if env_token:
         try:
@@ -638,46 +556,46 @@ def whoami() -> Any:
 
     if credentials is None:
         raise CLIError(MSG_NOT_LOGGED_IN, code="AUTH_REQUIRED")
+    if not env_token and credentials.is_expired():
+        raise AuthenticationExpiredError()
 
-    if env_token:
-        with contextlib.suppress(AuthenticationExpiredError, PlatformAPIError):
-            with output.status("Loading workspace..."):
-                data = platform_request(
-                    "/api/cli/workspaces",
-                    credentials=credentials,
-                    require_workspace=False,
-                    cleanup_on_401=False,
-                )
-                workspaces = _normalize_workspaces(data.get("workspaces"))
-                local_workspace = get_active_workspace()
-                active_workspace = next(
-                    (
-                        workspace
-                        for workspace in workspaces
-                        if local_workspace
-                        and workspace.get("id") == local_workspace.get("id")
-                    ),
-                    None,
-                )
-                if active_workspace is None and len(workspaces) == 1:
-                    active_workspace = workspaces[0]
-    else:
-        with contextlib.suppress(AuthenticationExpiredError, PlatformAPIError):
-            with output.status("Loading workspace..."):
-                active_workspace = ensure_active_workspace(
-                    credentials=credentials,
-                    cleanup_on_401=False,
-                )
-
-    workspace = (
-        {"id": active_workspace["id"], "name": active_workspace["name"]}
-        if active_workspace
+    linked_project = _current_linked_project_summary()
+    local_linked_project = (
+        {
+            "project_root": linked_project["project_root"],
+            "workspace": {
+                "id": linked_project["workspace_id"],
+                "name": linked_project["workspace_name"],
+            },
+            "source": "local_project_mapping",
+            "verified_with_active_token": not bool(env_token),
+        }
+        if linked_project
         else None
     )
+    workspace = (
+        {
+            "id": linked_project["workspace_id"],
+            "name": linked_project["workspace_name"],
+        }
+        if linked_project
+        else None
+    )
+    account = {
+        "email": credentials.user.email,
+        "name": credentials.user.name,
+        "expires_at": credentials.expires_at.isoformat(),
+        "source": source,
+    }
+    if credentials.token_id:
+        account["token_id"] = credentials.token_id
     data = {
+        "account": account,
+        "local_linked_project": local_linked_project,
         "email": credentials.user.email,
         "name": credentials.user.name,
         "workspace": workspace,
+        "linked_project": linked_project,
         "expires_at": credentials.expires_at.isoformat(),
         "source": source,
     }
@@ -691,13 +609,30 @@ def whoami() -> Any:
         fields.append(
             DetailField(label="Name", value=console.format_text(credentials.user.name))
         )
-    if active_workspace:
+    fields.append(DetailField(label="Auth source", value=source))
+    if linked_project:
         fields.append(
             DetailField(
-                label="Workspace",
-                value=console.format_text(active_workspace["name"]),
+                label="Local project root",
+                value=console.format_text(linked_project["project_root"]),
             )
         )
+        fields.append(
+            DetailField(
+                label="Local linked workspace",
+                value=console.format_text(
+                    f"{linked_project['workspace_name']} "
+                    f"({linked_project['workspace_id']})"
+                ),
+            )
+        )
+        if env_token:
+            fields.append(
+                DetailField(
+                    label="Local link status",
+                    value=("Local metadata only; not verified against OSMOSIS_TOKEN."),
+                )
+            )
     fields.append(
         DetailField(label="Expires", value=credentials.expires_at.strftime("%Y-%m-%d"))
     )

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 import pytest
 
@@ -24,11 +25,70 @@ def fake_credentials() -> Credentials:
     )
 
 
-def _patch_auth(monkeypatch, creds: Credentials | None, workspace=None) -> None:
+def _patch_auth(monkeypatch, creds: Credentials | None) -> None:
     monkeypatch.setattr("osmosis_ai.platform.auth.load_credentials", lambda: creds)
+
+
+def _write_legacy_active_workspace(
+    monkeypatch: pytest.MonkeyPatch, config_file: Path
+) -> None:
+    config_file.parent.mkdir(parents=True, exist_ok=True)
+    config_file.write_text(
+        '{"active_workspace":{"id":"legacy-ws","name":"legacy-workspace"}}',
+        encoding="utf-8",
+    )
     monkeypatch.setattr(
-        "osmosis_ai.platform.auth.ensure_active_workspace",
-        lambda *args, **kwargs: workspace,
+        "osmosis_ai.platform.auth.local_config.CONFIG_FILE",
+        config_file,
+    )
+
+
+def _create_canonical_project(project_root: Path) -> None:
+    for relative in (
+        ".osmosis",
+        "rollouts",
+        "configs",
+        "configs/eval",
+        "configs/training",
+        "data",
+    ):
+        (project_root / relative).mkdir(parents=True, exist_ok=True)
+    (project_root / ".osmosis" / "project.toml").write_text(
+        '[project]\nname = "demo"\n',
+        encoding="utf-8",
+    )
+    (project_root / ".osmosis" / "program.md").write_text(
+        "# Program\n",
+        encoding="utf-8",
+    )
+
+
+def _link_project_mapping(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    config_file: Path,
+    project_root: Path,
+    workspace_id: str = "ws_1",
+    workspace_name: str = "default",
+) -> None:
+    from osmosis_ai.platform.cli.project_mapping import (
+        ProjectLinkRecord,
+        ProjectMappingStore,
+        now_linked_at,
+    )
+
+    monkeypatch.setattr(
+        "osmosis_ai.platform.cli.project_mapping.CONFIG_FILE",
+        config_file,
+    )
+    ProjectMappingStore(config_file=config_file).link(
+        ProjectLinkRecord(
+            project_path=str(project_root.resolve()),
+            workspace_id=workspace_id,
+            workspace_name=workspace_name,
+            repo_url=None,
+            linked_at=now_linked_at(),
+        )
     )
 
 
@@ -41,13 +101,14 @@ def fake_verify_result() -> VerifyResult:
     )
 
 
-def test_whoami_json_envelope(monkeypatch, capsys, fake_credentials) -> None:
-    _patch_auth(
-        monkeypatch,
-        fake_credentials,
-        {"id": "ws_1", "name": "default"},
-    )
+def test_whoami_json_outside_linked_project_has_no_workspace(
+    monkeypatch, capsys, tmp_path, fake_credentials
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    _patch_auth(monkeypatch, fake_credentials)
+
     exit_code = cli.main(["--json", "auth", "whoami"])
+
     captured = capsys.readouterr()
     assert exit_code == 0
     assert captured.err == ""
@@ -56,14 +117,54 @@ def test_whoami_json_envelope(monkeypatch, capsys, fake_credentials) -> None:
     data = payload["data"]
     assert data["email"] == "brian@example.com"
     assert data["name"] == "Brian"
-    assert data["workspace"] == {"id": "ws_1", "name": "default"}
+    assert data["workspace"] is None
+    assert data["linked_project"] is None
+    assert data["local_linked_project"] is None
+    assert data["account"]["email"] == "brian@example.com"
+    assert data["account"]["source"] == "credentials"
     assert data["source"] == "credentials"
     assert "expires_at" in data
 
 
-def test_whoami_json_with_env_token_uses_verified_identity(
-    monkeypatch, capsys, fake_verify_result
+def test_whoami_json_inside_linked_project_reports_project_mapping(
+    monkeypatch, capsys, tmp_path, fake_credentials
 ) -> None:
+    project_root = tmp_path / "project"
+    _create_canonical_project(project_root)
+    _link_project_mapping(
+        monkeypatch,
+        config_file=tmp_path / "home" / ".osmosis" / "config.json",
+        project_root=project_root,
+        workspace_id="ws_linked",
+        workspace_name="team-alpha",
+    )
+    monkeypatch.chdir(project_root)
+    _patch_auth(monkeypatch, fake_credentials)
+
+    exit_code = cli.main(["--json", "auth", "whoami"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    payload = json.loads(captured.out)
+    data = payload["data"]
+    assert data["workspace"] == {"id": "ws_linked", "name": "team-alpha"}
+    assert data["linked_project"] == {
+        "project_root": str(project_root.resolve()),
+        "workspace_id": "ws_linked",
+        "workspace_name": "team-alpha",
+    }
+    assert data["local_linked_project"] == {
+        "project_root": str(project_root.resolve()),
+        "workspace": {"id": "ws_linked", "name": "team-alpha"},
+        "source": "local_project_mapping",
+        "verified_with_active_token": True,
+    }
+
+
+def test_whoami_json_with_env_token_uses_verified_identity(
+    monkeypatch, capsys, tmp_path, fake_verify_result
+) -> None:
+    monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("OSMOSIS_TOKEN", "env-token")
     verify_calls = []
     monkeypatch.setattr(
@@ -75,17 +176,9 @@ def test_whoami_json_with_env_token_uses_verified_identity(
         lambda: pytest.fail("env token whoami should not use stored credentials"),
     )
     monkeypatch.setattr(
-        "osmosis_ai.platform.auth.get_active_workspace",
-        lambda: {"id": "stored_ws", "name": "stored"},
-    )
-    monkeypatch.setattr(
         "osmosis_ai.platform.auth.platform_request",
-        lambda *args, **kwargs: {"workspaces": [{"id": "env_ws", "name": "env"}]},
-    )
-    monkeypatch.setattr(
-        "osmosis_ai.platform.auth.ensure_active_workspace",
         lambda *args, **kwargs: pytest.fail(
-            "env token whoami should not use cached workspace resolution"
+            "env token whoami should not fetch workspace list"
         ),
     )
 
@@ -97,84 +190,33 @@ def test_whoami_json_with_env_token_uses_verified_identity(
     data = payload["data"]
     assert data["email"] == "env@example.com"
     assert data["name"] == "Env User"
-    assert data["workspace"] == {"id": "env_ws", "name": "env"}
+    assert data["workspace"] is None
+    assert data["linked_project"] is None
+    assert data["local_linked_project"] is None
+    assert data["account"]["email"] == "env@example.com"
+    assert data["account"]["source"] == "environment"
     assert data["source"] == "environment"
     assert verify_calls == ["env-token"]
 
 
-def test_whoami_json_with_env_token_keeps_matching_local_workspace(
-    monkeypatch, capsys, fake_verify_result
+def test_whoami_json_with_env_token_ignores_cached_workspace_resolution(
+    monkeypatch, capsys, tmp_path, fake_verify_result
 ) -> None:
+    monkeypatch.chdir(tmp_path)
     monkeypatch.setenv("OSMOSIS_TOKEN", "env-token")
+    _write_legacy_active_workspace(monkeypatch, tmp_path / "legacy-config.json")
     monkeypatch.setattr(
         "osmosis_ai.platform.auth.verify_token", lambda token: fake_verify_result
     )
     monkeypatch.setattr(
-        "osmosis_ai.platform.auth.get_active_workspace",
-        lambda: {"id": "env_ws_2", "name": "old-env-2"},
-    )
-    monkeypatch.setattr(
         "osmosis_ai.platform.auth.platform_request",
-        lambda *args, **kwargs: {
-            "workspaces": [
-                {"id": "env_ws_1", "name": "env-1"},
-                {"id": "env_ws_2", "name": "env-2"},
-            ]
-        },
+        lambda *args, **kwargs: pytest.fail(
+            "env token whoami should not fetch workspace list"
+        ),
     )
     monkeypatch.setattr(
         "osmosis_ai.platform.auth.load_credentials",
-        lambda: Credentials(
-            access_token="stored-token",
-            token_type="Bearer",
-            expires_at=datetime.now(UTC) + timedelta(days=30),
-            created_at=datetime.now(UTC),
-            user=UserInfo(id="stored_u1", email="stored@example.com", name="Stored"),
-            token_id="stored_tok_1",
-        ),
-    )
-
-    exit_code = cli.main(["--json", "auth", "whoami"])
-    captured = capsys.readouterr()
-
-    assert exit_code == 0
-    payload = json.loads(captured.out)
-    data = payload["data"]
-    assert data["email"] == "env@example.com"
-    assert data["workspace"] == {"id": "env_ws_2", "name": "env-2"}
-    assert data["source"] == "environment"
-
-
-def test_whoami_json_with_env_token_ignores_mismatched_local_workspace(
-    monkeypatch, capsys, fake_verify_result
-) -> None:
-    monkeypatch.setenv("OSMOSIS_TOKEN", "env-token")
-    monkeypatch.setattr(
-        "osmosis_ai.platform.auth.verify_token", lambda token: fake_verify_result
-    )
-    monkeypatch.setattr(
-        "osmosis_ai.platform.auth.get_active_workspace",
-        lambda: {"id": "stored_ws", "name": "stored"},
-    )
-    monkeypatch.setattr(
-        "osmosis_ai.platform.auth.platform_request",
-        lambda *args, **kwargs: {
-            "workspaces": [
-                {"id": "env_ws_1", "name": "env-1"},
-                {"id": "env_ws_2", "name": "env-2"},
-            ]
-        },
-    )
-    monkeypatch.setattr(
-        "osmosis_ai.platform.auth.load_credentials",
-        lambda: Credentials(
-            access_token="stored-token",
-            token_type="Bearer",
-            expires_at=datetime.now(UTC) + timedelta(days=30),
-            created_at=datetime.now(UTC),
-            user=UserInfo(id="stored_u1", email="stored@example.com", name="Stored"),
-            token_id="stored_tok_1",
-        ),
+        lambda: pytest.fail("env token whoami should not use stored credentials"),
     )
 
     exit_code = cli.main(["--json", "auth", "whoami"])
@@ -185,6 +227,87 @@ def test_whoami_json_with_env_token_ignores_mismatched_local_workspace(
     data = payload["data"]
     assert data["email"] == "env@example.com"
     assert data["workspace"] is None
+    assert data["linked_project"] is None
+    assert data["source"] == "environment"
+
+
+def test_whoami_json_with_env_token_reports_local_project_separately(
+    monkeypatch, capsys, tmp_path, fake_verify_result
+) -> None:
+    project_root = tmp_path / "project"
+    _create_canonical_project(project_root)
+    _link_project_mapping(
+        monkeypatch,
+        config_file=tmp_path / "home" / ".osmosis" / "config.json",
+        project_root=project_root,
+        workspace_id="ws_linked",
+        workspace_name="team-alpha",
+    )
+    monkeypatch.chdir(project_root)
+    monkeypatch.setenv("OSMOSIS_TOKEN", "env-token")
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.verify_token", lambda token: fake_verify_result
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.platform_request",
+        lambda *args, **kwargs: pytest.fail(
+            "env token whoami should not fetch workspace list"
+        ),
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.load_credentials",
+        lambda: pytest.fail("env token whoami should not use stored credentials"),
+    )
+
+    exit_code = cli.main(["--json", "auth", "whoami"])
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    data = json.loads(captured.out)["data"]
+    assert data["account"]["email"] == "env@example.com"
+    assert data["workspace"] == {"id": "ws_linked", "name": "team-alpha"}
+    assert data["linked_project"] == {
+        "project_root": str(project_root.resolve()),
+        "workspace_id": "ws_linked",
+        "workspace_name": "team-alpha",
+    }
+    assert data["local_linked_project"] == {
+        "project_root": str(project_root.resolve()),
+        "workspace": {"id": "ws_linked", "name": "team-alpha"},
+        "source": "local_project_mapping",
+        "verified_with_active_token": False,
+    }
+
+
+def test_whoami_json_with_env_token_ignores_mismatched_local_workspace(
+    monkeypatch, capsys, tmp_path, fake_verify_result
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("OSMOSIS_TOKEN", "env-token")
+    _write_legacy_active_workspace(monkeypatch, tmp_path / "legacy-config.json")
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.verify_token", lambda token: fake_verify_result
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.platform_request",
+        lambda *args, **kwargs: pytest.fail(
+            "env token whoami should not fetch workspace list"
+        ),
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.load_credentials",
+        lambda: pytest.fail("env token whoami should not use stored credentials"),
+    )
+
+    exit_code = cli.main(["--json", "auth", "whoami"])
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    payload = json.loads(captured.out)
+    data = payload["data"]
+    assert data["email"] == "env@example.com"
+    assert data["workspace"] is None
+    assert data["linked_project"] is None
     assert data["source"] == "environment"
 
 
@@ -254,28 +377,76 @@ def test_whoami_json_when_logged_out_emits_auth_required(monkeypatch, capsys) ->
     assert envelope["error"]["code"] == "AUTH_REQUIRED"
 
 
-def test_whoami_plain_renders_label_value_lines(
+def test_whoami_json_with_expired_stored_credentials_emits_auth_required(
     monkeypatch, capsys, fake_credentials
 ) -> None:
-    _patch_auth(
-        monkeypatch,
-        fake_credentials,
-        {"id": "ws_1", "name": "default"},
+    monkeypatch.delenv("OSMOSIS_TOKEN", raising=False)
+    expired_credentials = Credentials(
+        access_token=fake_credentials.access_token,
+        token_type=fake_credentials.token_type,
+        expires_at=datetime.now(UTC) - timedelta(days=1),
+        created_at=fake_credentials.created_at,
+        user=fake_credentials.user,
+        token_id=fake_credentials.token_id,
     )
+    _patch_auth(monkeypatch, expired_credentials)
+
+    exit_code = cli.main(["--json", "auth", "whoami"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert captured.out == ""
+    envelope = json.loads(captured.err)
+    assert envelope["error"]["code"] == "AUTH_REQUIRED"
+    assert "session has expired" in envelope["error"]["message"]
+    assert "osmosis auth login" in envelope["error"]["message"]
+
+
+def test_whoami_plain_renders_label_value_lines(
+    monkeypatch, capsys, tmp_path, fake_credentials
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    _patch_auth(monkeypatch, fake_credentials)
+
     exit_code = cli.main(["--plain", "auth", "whoami"])
+
     captured = capsys.readouterr()
     assert exit_code == 0
     lines = captured.out.splitlines()
     assert "Email: brian@example.com" in lines
-    assert "Workspace: default" in lines
+    assert not any(line.startswith("Workspace:") for line in lines)
 
 
-def test_whoami_rich_still_uses_table(monkeypatch, capsys, fake_credentials) -> None:
-    _patch_auth(
+def test_whoami_plain_inside_linked_project_renders_mapping(
+    monkeypatch, capsys, tmp_path, fake_credentials
+) -> None:
+    project_root = tmp_path / "project"
+    _create_canonical_project(project_root)
+    _link_project_mapping(
         monkeypatch,
-        fake_credentials,
-        {"id": "ws_1", "name": "default"},
+        config_file=tmp_path / "home" / ".osmosis" / "config.json",
+        project_root=project_root,
+        workspace_id="ws_linked",
+        workspace_name="team-alpha",
     )
+    monkeypatch.chdir(project_root)
+    _patch_auth(monkeypatch, fake_credentials)
+
+    exit_code = cli.main(["--plain", "auth", "whoami"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    lines = captured.out.splitlines()
+    assert f"Local project root: {project_root.resolve()}" in lines
+    assert "Local linked workspace: team-alpha (ws_linked)" in lines
+
+
+def test_whoami_rich_still_uses_table(
+    monkeypatch, capsys, tmp_path, fake_credentials
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    _patch_auth(monkeypatch, fake_credentials)
+
     exit_code = cli.main(["auth", "whoami"])
     captured = capsys.readouterr()
     assert exit_code == 0

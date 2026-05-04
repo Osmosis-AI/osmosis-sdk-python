@@ -19,11 +19,9 @@ from osmosis_ai.cli.prompts import (
 )
 from osmosis_ai.platform.auth import (
     PlatformAPIError,
-    ensure_active_workspace,
     load_credentials,
     platform_request,
 )
-from osmosis_ai.platform.auth.local_config import set_active_workspace
 from osmosis_ai.platform.constants import MSG_NOT_LOGGED_IN
 
 from .constants import BACK, DEFAULT_VISIBLE_CHOICES
@@ -57,9 +55,15 @@ def _clean_file_path(raw: str) -> str:
 
 
 def _show_context(ws_name: str | None) -> None:
-    """Display current workspace context."""
+    """Display linked project workspace context."""
     if not ws_name:
-        console.print(console.format_styled("No workspace selected.", "dim"))
+        console.print(
+            console.format_styled(
+                "This project is not linked to an Osmosis workspace for the "
+                "current platform.",
+                "dim",
+            )
+        )
         console.print()
         return
 
@@ -75,7 +79,7 @@ def _show_context(ws_name: str | None) -> None:
 def _main_menu(has_workspace: bool) -> str | None:
     """Show main menu and return the selected action."""
     choices: list[str | Choice | Separator] = [
-        Choice("Change workspace", value="switch"),
+        Choice("Browse workspace", value="browse"),
     ]
     if has_workspace:
         choices.extend(
@@ -129,29 +133,9 @@ def _select_workspace(
     return select("Choose a workspace", choices=choices)
 
 
-def _switch_context(active_ws_name: str | None) -> str | None:
-    """Select a workspace, confirm, and set it active.
-
-    Returns the new workspace name on success, or None if the user backs out.
-    """
-    selected = _select_workspace(active_ws_name)
-    if selected is None or selected == BACK:
-        return None
-    ws_id, ws_name = selected
-    ok = confirm(f"Switch to workspace {ws_name}?")
-    if not ok:
-        return None
-    if ws_name != active_ws_name:
-        set_active_workspace(ws_id, ws_name)
-    console.print(
-        f"{console.format_styled('Switched to:', 'bold')} "
-        f"{console.format_styled(ws_name, 'cyan')}"
-    )
-    return ws_name
-
-
 def _upload_dataset_interactive(
     ws_name: str,
+    workspace_id: str,
     credentials: Any,
 ) -> bool:
     """Prompt for a file path and upload it as a dataset.
@@ -195,6 +179,7 @@ def _upload_dataset_interactive(
             file_path=file_path,
             ext=ext,
             file_size=file_size,
+            workspace_id=workspace_id,
             credentials=credentials,
         )
     except CLIError as e:
@@ -214,7 +199,7 @@ def _upload_dataset_interactive(
 _UPLOAD = "__upload__"
 
 
-def _browse_datasets(ws_name: str) -> bool:
+def _browse_datasets(ws_name: str, workspace_id: str) -> bool:
     """List datasets and allow selecting one for details or uploading."""
     from osmosis_ai.platform.api.client import OsmosisClient
 
@@ -225,7 +210,10 @@ def _browse_datasets(ws_name: str) -> bool:
     try:
         credentials = require_credentials()
         with console.spinner("Loading datasets..."):
-            result = client.list_datasets(credentials=credentials)
+            result = client.list_datasets(
+                credentials=credentials,
+                workspace_id=workspace_id,
+            )
     except PlatformAPIError as e:
         console.print_error(f"Failed to load datasets: {e}")
         return True
@@ -255,13 +243,20 @@ def _browse_datasets(ws_name: str) -> bool:
             return True
 
         if selected == _UPLOAD:
-            uploaded = _upload_dataset_interactive(ws_name, credentials)
+            uploaded = _upload_dataset_interactive(
+                ws_name,
+                workspace_id,
+                credentials,
+            )
             if uploaded:
                 # Refresh the list after successful upload
                 with contextlib.suppress(PlatformAPIError):
                     result = platform_call(
                         "Refreshing datasets...",
-                        lambda: client.list_datasets(credentials=credentials),
+                        lambda: client.list_datasets(
+                            credentials=credentials,
+                            workspace_id=workspace_id,
+                        ),
                         output_console=console,
                     )
             continue
@@ -281,7 +276,7 @@ def _show_dataset_detail(ds: Any, ws_name: str) -> None:
     console.print()
 
 
-def _browse_runs(ws_name: str) -> None:
+def _browse_runs(ws_name: str, workspace_id: str) -> None:
     """List training runs and allow selecting one for details."""
     from osmosis_ai.platform.api.client import OsmosisClient
 
@@ -296,7 +291,10 @@ def _browse_runs(ws_name: str) -> None:
     try:
         credentials = require_credentials()
         with console.spinner("Loading training runs..."):
-            result = client.list_training_runs(credentials=credentials)
+            result = client.list_training_runs(
+                credentials=credentials,
+                workspace_id=workspace_id,
+            )
     except PlatformAPIError as e:
         console.print_error(f"Failed to load training runs: {e}")
         return
@@ -336,7 +334,7 @@ def _show_run_detail(r: Any, ws_name: str) -> None:
     console.print()
 
 
-def _browse_models(ws_name: str) -> None:
+def _browse_models(ws_name: str, workspace_id: str) -> None:
     """List models and allow selecting one for details."""
     from osmosis_ai.platform.api.client import OsmosisClient
 
@@ -345,7 +343,10 @@ def _browse_models(ws_name: str) -> None:
     try:
         credentials = require_credentials()
         with console.spinner("Loading models..."):
-            result = client.list_base_models(credentials=credentials)
+            result = client.list_base_models(
+                credentials=credentials,
+                workspace_id=workspace_id,
+            )
     except PlatformAPIError as e:
         console.print_error(f"Failed to load models: {e}")
         return
@@ -411,11 +412,10 @@ def _open_in_browser(ws_name: str) -> None:
     console.print()
 
 
-def _interactive_workspace_error() -> CLIError:
+def _workspace_ui_error() -> CLIError:
     return CLIError(
         "Interactive workspace UI is unavailable in this mode. "
-        "Use 'osmosis workspace list', 'osmosis workspace switch <name>', or "
-        "'osmosis workspace create <name>'.",
+        "Use 'osmosis workspace list' or 'osmosis workspace create <name>'.",
         code="INTERACTIVE_REQUIRED",
     )
 
@@ -439,14 +439,6 @@ def list_workspaces() -> Any:
 
     output = get_output_context()
     credentials = require_credentials()
-    # Read-only listing: never let a transient 401 wipe local credentials
-    # or active-workspace state. A real auth failure surfaces as
-    # AuthenticationExpiredError on the next mutating command.
-    active_ws = platform_call(
-        "Loading workspaces...",
-        lambda: ensure_active_workspace(credentials=credentials, cleanup_on_401=False),
-        output_console=console,
-    )
     result = platform_call(
         "Loading workspaces...",
         lambda: platform_request(
@@ -472,13 +464,10 @@ def list_workspaces() -> Any:
             columns=[ListColumn(key="name", label="Name")],
         )
 
-    active_name = active_ws["name"] if active_ws else None
-
     if output.format is not OutputFormat.rich:
         items = []
         for ws in workspaces:
             item = serialize_workspace(_workspace_summary(ws))
-            item["is_active"] = ws.get("name") == active_name
             if "has_subscription" in ws:
                 item["has_subscription"] = bool(ws.get("has_subscription"))
             items.append(item)
@@ -491,7 +480,6 @@ def list_workspaces() -> Any:
             columns=[
                 ListColumn(key="name", label="Name"),
                 ListColumn(key="id", label="ID", plain=False),
-                ListColumn(key="is_active", label="Active", plain=False),
             ],
         )
 
@@ -499,9 +487,8 @@ def list_workspaces() -> Any:
     for ws in workspaces:
         raw_name = ws.get("name", "")
         name = console.escape(raw_name)
-        marker = " (current)" if raw_name == active_name else ""
         sub_label = "active" if ws.get("has_subscription") else "no subscription"
-        console.print(f"  {name}{marker}  {console.escape(f'[{sub_label}]')}")
+        console.print(f"  {name}  {console.escape(f'[{sub_label}]')}")
     return None
 
 
@@ -541,9 +528,8 @@ def create_workspace(name: str, timezone: str) -> Any:
         status="success",
         resource=resource,
         message=f"Workspace '{result['name']}' created.",
-        display_next_steps=[f"Switch with: osmosis workspace switch {result['name']}"],
-        next_steps_structured=[
-            {"action": "workspace.switch", "name": result["name"]},
+        display_next_steps=[
+            f"Link from a project with: osmosis project link --workspace {result['id']}"
         ],
     )
 
@@ -656,58 +642,6 @@ def delete_workspace(name: str, *, yes: bool = False) -> Any:
     )
 
 
-def switch_workspace(workspace: str) -> Any:
-    """Switch to a different workspace."""
-    from osmosis_ai.cli.output import (
-        OperationResult,
-        OutputFormat,
-        get_output_context,
-        serialize_workspace,
-    )
-
-    output = get_output_context()
-    credentials = require_credentials()
-    # Read-only fetch to resolve the requested workspace name → id.
-    # A transient 401 must not wipe local credentials/workspace state;
-    # the next mutating command will surface a real auth failure.
-    result = platform_call(
-        "Loading workspaces...",
-        lambda: platform_request(
-            "/api/cli/workspaces",
-            require_workspace=False,
-            credentials=credentials,
-            cleanup_on_401=False,
-        ),
-        output_console=console,
-    )
-    workspaces = result.get("workspaces", [])
-
-    target = workspace.lower()
-    matched = [ws for ws in workspaces if ws.get("name", "").lower() == target]
-    if not matched:
-        available = ", ".join(ws.get("name", "") for ws in workspaces) or "(none)"
-        raise CLIError(
-            f"Workspace '{workspace}' not found.\n  Available workspaces: {available}"
-        )
-
-    ws = matched[0]
-    ws_id = ws["id"]
-    ws_name = ws["name"]
-
-    set_active_workspace(ws_id, ws_name)
-    resource = serialize_workspace(_workspace_summary(ws))
-    if output.format is not OutputFormat.rich:
-        return OperationResult(
-            operation="workspace.switch",
-            status="success",
-            resource=resource,
-            message=f"Switched to workspace: {ws_name}",
-        )
-
-    console.print(f"Switched to workspace: {console.format_styled(ws_name, 'cyan')}")
-    return None
-
-
 @app.callback(invoke_without_command=True)
 def workspace() -> None:
     """Manage workspace context."""
@@ -715,21 +649,15 @@ def workspace() -> None:
 
     output = get_output_context()
     if output.format is not OutputFormat.rich:
-        raise _interactive_workspace_error()
+        raise _workspace_ui_error()
 
     credentials = load_credentials()
 
     if credentials is None:
         raise CLIError(MSG_NOT_LOGGED_IN)
 
-    # Interactive entrypoint: never let a transient 401 wipe local
-    # credentials/workspace state just from opening the menu.
-    active_ws = platform_call(
-        "Loading workspace...",
-        lambda: ensure_active_workspace(credentials=credentials, cleanup_on_401=False),
-        output_console=console,
-    )
-    ws_name = active_ws["name"] if active_ws else None
+    ws_id = None
+    ws_name = None
 
     _show_context(ws_name)
 
@@ -741,24 +669,24 @@ def workspace() -> None:
 
         if action is None or action == "exit":
             return
-        if action == "switch":
-            new_ws = _switch_context(ws_name)
-            if new_ws is not None:
-                ws_name = new_ws
+        if action == "browse":
+            selected = _select_workspace(ws_name)
+            if isinstance(selected, tuple):
+                ws_id, ws_name = selected
                 console.print()
                 _show_context(ws_name)
         elif action == "datasets":
-            if ws_name is None:
+            if ws_name is None or ws_id is None:
                 continue
-            _browse_datasets(ws_name)
+            _browse_datasets(ws_name, ws_id)
         elif action == "runs":
-            if ws_name is None:
+            if ws_name is None or ws_id is None:
                 continue
-            _browse_runs(ws_name)
+            _browse_runs(ws_name, ws_id)
         elif action == "models":
-            if ws_name is None:
+            if ws_name is None or ws_id is None:
                 continue
-            _browse_models(ws_name)
+            _browse_models(ws_name, ws_id)
         elif action == "browser":
             if ws_name is None:
                 continue

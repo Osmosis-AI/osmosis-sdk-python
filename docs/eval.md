@@ -126,14 +126,14 @@ When `[runs].n` > 1, each row is executed multiple times. Summary output include
 ## Result caching and resume
 
 1. A **task id** is derived from the full configuration, dataset fingerprint, and source fingerprints for the entrypoint / grader modules.
-2. Cache files live under `~/.cache/osmosis/eval/` or `$OSMOSIS_CACHE_DIR/eval/` when set.
+2. Cache files live under project-local `.osmosis/cache/eval/`, or `$OSMOSIS_CACHE_DIR/eval/` when set.
 3. Re-running the **same** command resumes an in-progress cache; use `--fresh` to discard.
 
 **Environment:**
 
 | Variable | Description |
 |----------|-------------|
-| `OSMOSIS_CACHE_DIR` | Override cache root (eval uses `<root>/eval/`). |
+| `OSMOSIS_CACHE_DIR` | Override cache root (eval uses `<root>/eval/`; the command must still run inside an Osmosis project). |
 | `OSMOSIS_EVAL_LOCK_TIMEOUT` | Lock acquisition timeout seconds (default `30`). |
 
 Cache invalidation includes: TOML and CLI overrides, dataset content, and entrypoint/grader source fingerprints. Changes in **external** dependencies not imported as part of those modules may not invalidate the cache — use `--fresh` after upgrading libraries.

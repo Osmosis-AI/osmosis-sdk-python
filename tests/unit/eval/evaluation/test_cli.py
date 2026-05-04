@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import sys
 import types
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -23,6 +24,24 @@ class _FakeProxy:
 
     async def start(self) -> None:
         return None
+
+
+def _make_project(root: Path) -> Path:
+    for rel_path in (
+        ".osmosis",
+        "rollouts",
+        "configs",
+        "configs/eval",
+        "configs/training",
+        "data",
+    ):
+        (root / rel_path).mkdir(parents=True, exist_ok=True)
+    (root / ".osmosis" / "project.toml").write_text(
+        "[project]\nname='test'\n",
+        encoding="utf-8",
+    )
+    (root / ".osmosis" / "program.md").write_text("# Test\n", encoding="utf-8")
+    return root
 
 
 def _make_config(**overrides):
@@ -80,6 +99,10 @@ def _run_command(monkeypatch: pytest.MonkeyPatch, config: SimpleNamespace) -> No
         lambda path: config,
     )
     monkeypatch.setattr(
+        "osmosis_ai.eval.config.resolve_eval_context_paths",
+        lambda cfg, project_root: cfg,
+    )
+    monkeypatch.setattr(
         "osmosis_ai.eval.common.cli.load_dataset_rows",
         lambda **kwargs: ([{"id": 1}], None),
     )
@@ -90,8 +113,8 @@ def _run_command(monkeypatch: pytest.MonkeyPatch, config: SimpleNamespace) -> No
     monkeypatch.setattr(EvalCommand, "_resolve_api_key", lambda self, cfg: None)
     monkeypatch.setattr("osmosis_ai.eval.llm_proxy.LiteLLMProxy", _FakeProxy)
     monkeypatch.setattr(
-        "osmosis_ai.platform.cli.project_contract.resolve_project_root",
-        lambda path: path.parent,
+        "osmosis_ai.platform.cli.project_contract.resolve_project_root_from_cwd",
+        lambda: Path.cwd(),
     )
     monkeypatch.setattr(
         "osmosis_ai.platform.cli.project_contract.validate_project_contract",
@@ -179,3 +202,69 @@ def test_run_auto_discovers_grader_from_entrypoint(
     config._expected_grader_config = discovered_config
 
     _run_command(monkeypatch, config)
+
+
+def test_eval_run_config_path_must_be_under_current_project(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys,
+) -> None:
+    from osmosis_ai.cli.main import main
+
+    project = _make_project(tmp_path / "project")
+    outside = tmp_path / "other.toml"
+    outside.write_text(
+        "[eval]\n"
+        "rollout='r'\n"
+        "entrypoint='main.py'\n"
+        "dataset='data/x.jsonl'\n"
+        "[llm]\n"
+        "model='openai/test'\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(project)
+
+    rc = main(["--json", "eval", "run", str(outside)])
+
+    assert rc == 1
+    assert "configs/eval" in capsys.readouterr().err
+
+
+def test_resolve_eval_context_paths_preserves_dotted_grader_config(
+    tmp_path: Path,
+) -> None:
+    from osmosis_ai.eval.config import EvalConfig, resolve_eval_context_paths
+
+    project = _make_project(tmp_path / "project")
+    config = EvalConfig(
+        eval_dataset="data/x.jsonl",
+        eval_rollout="demo",
+        eval_entrypoint="main.py",
+        llm_model="openai/test",
+        grader_config="my_rollout.grader:grader_config",
+    )
+
+    resolved = resolve_eval_context_paths(config, project)
+
+    assert resolved.grader_config == "my_rollout.grader:grader_config"
+
+
+def test_resolve_eval_context_paths_resolves_filesystem_grader_config(
+    tmp_path: Path,
+) -> None:
+    from osmosis_ai.eval.config import EvalConfig, resolve_eval_context_paths
+
+    project = _make_project(tmp_path / "project")
+    config = EvalConfig(
+        eval_dataset="data/x.jsonl",
+        eval_rollout="demo",
+        eval_entrypoint="main.py",
+        llm_model="openai/test",
+        grader_config="configs/grader.toml",
+    )
+
+    resolved = resolve_eval_context_paths(config, project)
+
+    assert resolved.grader_config == str(
+        (project / "configs" / "grader.toml").resolve()
+    )

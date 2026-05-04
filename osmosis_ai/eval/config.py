@@ -9,6 +9,7 @@ from typing import Annotated
 from pydantic import BaseModel, ConfigDict, Field
 
 from osmosis_ai.cli.errors import CLIError
+from osmosis_ai.platform.cli.project_contract import ensure_context_path
 
 
 class _EvalSection(BaseModel):
@@ -101,6 +102,19 @@ class EvalConfig(BaseModel):
     baseline_api_key_env: str | None = None
 
 
+def _is_filesystem_grader_config(value: str) -> bool:
+    """Return True when [grader].config looks like a local filesystem path."""
+    if ":" in value:
+        return False
+    candidate = Path(value)
+    return (
+        candidate.is_absolute()
+        or "/" in value
+        or "\\" in value
+        or bool(candidate.suffix)
+    )
+
+
 def load_eval_config(path: Path) -> EvalConfig:
     """Load and validate TOML config. Raises CLIError on any problem."""
     if not path.exists():
@@ -178,4 +192,42 @@ def load_eval_config(path: Path) -> EvalConfig:
     )
 
 
-__all__ = ["EvalConfig", "load_eval_config"]
+def resolve_eval_context_paths(config: EvalConfig, project_root: Path) -> EvalConfig:
+    """Resolve eval filesystem paths against the active project root."""
+    dataset = ensure_context_path(
+        Path(config.eval_dataset),
+        project_root,
+        required_dir="data",
+        label="[eval].dataset",
+    )
+    entrypoint = ensure_context_path(
+        Path("rollouts") / config.eval_rollout / config.eval_entrypoint,
+        project_root,
+        required_dir=f"rollouts/{config.eval_rollout}",
+        label="[eval].entrypoint",
+    )
+    grader_config = config.grader_config
+    if grader_config:
+        candidate = Path(grader_config)
+        if _is_filesystem_grader_config(grader_config):
+            grader_config = str(
+                ensure_context_path(
+                    candidate,
+                    project_root,
+                    required_dir=".",
+                    label="[grader].config",
+                )
+            )
+
+    return config.model_copy(
+        update={
+            "eval_dataset": str(dataset),
+            "eval_entrypoint": str(
+                entrypoint.relative_to(project_root / "rollouts" / config.eval_rollout)
+            ),
+            "grader_config": grader_config,
+        }
+    )
+
+
+__all__ = ["EvalConfig", "load_eval_config", "resolve_eval_context_paths"]

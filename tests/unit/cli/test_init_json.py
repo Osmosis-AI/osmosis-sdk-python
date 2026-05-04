@@ -32,22 +32,32 @@ def _patch_workspace_context(
     import osmosis_ai.platform.cli.init as init_module
 
     workspace_name = git_context.get("workspace_name")
-    monkeypatch.setattr(
-        "osmosis_ai.platform.cli.utils._require_auth",
-        lambda: (workspace_name or "default", _FakeCreds()),
-    )
-    monkeypatch.setattr(init_module, "get_active_workspace_id", lambda: workspace_id)
+    monkeypatch.setattr(init_module, "_require_link_credentials", lambda: _FakeCreds())
     monkeypatch.setattr(
         init_module,
-        "_resolve_workspace_git_context",
-        lambda **_kwargs: git_context,
+        "_resolve_workspace_for_link",
+        lambda ref, credentials: {
+            "id": workspace_id or ref,
+            "name": workspace_name or "default",
+            "has_github_app_installation": git_context.get(
+                "has_github_app_installation", False
+            ),
+            "connected_repo": (
+                {"repo_url": git_context["connected_repo_url"]}
+                if git_context.get("connected_repo_url")
+                else None
+            ),
+        },
     )
 
 
 def test_init_json_returns_created_paths_and_next_steps(
     monkeypatch, tmp_path, capsys
 ) -> None:
+    import osmosis_ai.platform.cli.init as init_module
+
     monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(init_module, "CONFIG_FILE", tmp_path / "config.json")
     _stub_init_dependencies(monkeypatch)
     _patch_workspace_context(
         monkeypatch,
@@ -61,7 +71,7 @@ def test_init_json_returns_created_paths_and_next_steps(
         },
     )
 
-    exit_code = cli.main(["--json", "init", "demo"])
+    exit_code = cli.main(["--json", "init", "demo", "--workspace", "ws_1"])
 
     captured = capsys.readouterr()
     assert exit_code == 0
@@ -70,8 +80,9 @@ def test_init_json_returns_created_paths_and_next_steps(
     assert payload["status"] == "success"
     assert payload["operation"] == "init"
     assert payload["resource"]["workspace"] == {"id": "ws_1", "name": "default"}
+    assert payload["resource"]["linked"] is True
+    assert payload["resource"]["mode"] == "create"
     assert payload["resource"]["created_paths"] == [str((tmp_path / "demo").resolve())]
-    assert payload["resource"]["git_sync_url"].endswith("/default/integrations/git")
     assert payload["next_steps_structured"]
 
 
@@ -92,9 +103,40 @@ def test_init_plain_uses_renderer_without_rich_panels(
         },
     )
 
-    exit_code = cli.main(["--plain", "init", "demo"])
+    exit_code = cli.main(["--plain", "init", "demo", "--no-link"])
 
     captured = capsys.readouterr()
     assert exit_code == 0
     assert captured.out.startswith("Initialized project in ")
     assert "get started" not in captured.out
+
+
+def test_init_json_noninteractive_requires_link_choice(
+    monkeypatch, tmp_path, capsys
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    _stub_init_dependencies(monkeypatch)
+
+    exit_code = cli.main(["--json", "init", "demo"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert captured.out == ""
+    assert json.loads(captured.err)["error"]["code"] == "INTERACTIVE_REQUIRED"
+
+
+def test_project_init_json_matches_top_level_init(
+    monkeypatch, tmp_path, capsys
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    _stub_init_dependencies(monkeypatch)
+
+    exit_code = cli.main(["--json", "project", "init", "demo", "--no-link"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    payload = json.loads(captured.out)
+    assert payload["operation"] == "init"
+    assert payload["resource"]["workspace"] is None
+    assert payload["resource"]["linked"] is False
+    assert payload["resource"]["mode"] == "create"

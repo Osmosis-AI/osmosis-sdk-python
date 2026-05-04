@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from io import StringIO
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -25,6 +26,7 @@ def _make_rich_console() -> tuple[Console, StringIO]:
 @pytest.mark.parametrize("status", ["cancelled", "deleted"])
 def test_list_datasets_preserves_uncategorized_status_brackets(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
     status: str,
 ) -> None:
     console, _output = _make_rich_console()
@@ -33,7 +35,14 @@ def test_list_datasets_preserves_uncategorized_status_brackets(
     monkeypatch.setattr(dataset_module, "console", console)
     monkeypatch.setattr(utils_module, "console", console)
     monkeypatch.setattr(
-        dataset_module, "_require_auth", lambda: ("ws-b", fake_credentials)
+        dataset_module,
+        "require_workspace_context",
+        lambda: SimpleNamespace(
+            credentials=fake_credentials,
+            workspace_id="ws-b",
+            workspace_name="workspace-b",
+            project_root=tmp_path,
+        ),
     )
 
     class FakeClient:
@@ -43,8 +52,10 @@ def test_list_datasets_preserves_uncategorized_status_brackets(
             offset: int = 0,
             *,
             credentials=None,
+            workspace_id: str,
         ) -> PaginatedDatasets:
             assert credentials is fake_credentials
+            assert workspace_id == "ws-b"
             return PaginatedDatasets(
                 datasets=[
                     DatasetFile(

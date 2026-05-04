@@ -18,6 +18,13 @@ app: typer.Typer = typer.Typer(
 )
 
 
+def _workspace_result_context(workspace: Any) -> dict[str, Any]:
+    return {
+        "workspace": {"id": workspace.workspace_id, "name": workspace.workspace_name},
+        "project_root": str(workspace.project_root),
+    }
+
+
 def _require_confirmation(message: str, *, yes: bool) -> None:
     if yes:
         return
@@ -52,7 +59,7 @@ def list_models(
     ),
     all_: bool = typer.Option(False, "--all", help="Show all base models."),
 ) -> Any:
-    """List base models in the current platform workspace."""
+    """List base models in the linked project workspace."""
     from osmosis_ai.cli.output import (
         ListColumn,
         ListResult,
@@ -60,14 +67,16 @@ def list_models(
         serialize_model,
     )
     from osmosis_ai.platform.cli.utils import (
-        _require_auth,
         fetch_all_pages,
+        require_workspace_context,
         validate_list_options,
     )
 
     effective_limit, fetch_all = validate_list_options(limit=limit, all_=all_)
 
-    _ws_name, credentials = _require_auth()
+    workspace = require_workspace_context()
+    credentials = workspace.credentials
+    workspace_id = workspace.workspace_id
 
     from osmosis_ai.platform.api.client import OsmosisClient
 
@@ -77,7 +86,10 @@ def list_models(
         if fetch_all:
             models, total = fetch_all_pages(
                 lambda lim, off: client.list_base_models(
-                    limit=lim, offset=off, credentials=credentials
+                    limit=lim,
+                    offset=off,
+                    credentials=credentials,
+                    workspace_id=workspace_id,
                 ),
                 items_attr="models",
             )
@@ -85,7 +97,10 @@ def list_models(
             next_offset = None
         else:
             result = client.list_base_models(
-                limit=effective_limit, offset=0, credentials=credentials
+                limit=effective_limit,
+                offset=0,
+                credentials=credentials,
+                workspace_id=workspace_id,
             )
             models = result.models
             total = result.total_count
@@ -98,6 +113,7 @@ def list_models(
         total_count=total,
         has_more=has_more,
         next_offset=next_offset,
+        extra=_workspace_result_context(workspace),
         columns=[
             ListColumn(key="model_name", label="Model"),
             ListColumn(key="base_model", label="Base"),
@@ -119,16 +135,20 @@ def delete(
     from osmosis_ai.cli.output import OperationResult, OutputFormat, get_output_context
     from osmosis_ai.platform.api.client import OsmosisClient
     from osmosis_ai.platform.auth.platform_client import PlatformAPIError
-    from osmosis_ai.platform.cli.utils import _require_auth
+    from osmosis_ai.platform.cli.utils import require_workspace_context
 
-    _ws_name, credentials = _require_auth()
+    workspace = require_workspace_context()
+    credentials = workspace.credentials
+    workspace_id = workspace.workspace_id
     client = OsmosisClient()
     output = get_output_context()
 
     try:
         with output.status("Checking model dependencies..."):
             affected = client.get_model_affected_resources(
-                name, credentials=credentials
+                name,
+                credentials=credentials,
+                workspace_id=workspace_id,
             )
     except PlatformAPIError as e:
         raise CLIError(f"Unable to verify model dependencies: {e}") from e
@@ -163,10 +183,14 @@ def delete(
 
     _require_confirmation(f'Delete model "{name}"? This cannot be undone.', yes=yes)
     with output.status("Deleting model..."):
-        client.delete_model(name, credentials=credentials)
+        client.delete_model(
+            name,
+            credentials=credentials,
+            workspace_id=workspace_id,
+        )
     return OperationResult(
         operation="model.delete",
         status="success",
-        resource={"name": name},
+        resource={"name": name, **_workspace_result_context(workspace)},
         message=f'Model "{name}" deleted.',
     )

@@ -159,4 +159,30 @@ def load_training_config(path: Path) -> TrainingConfig:
     )
 
 
-__all__ = ["TrainingConfig", "load_training_config"]
+def validate_training_context_paths(config: TrainingConfig, project_root: Path) -> None:
+    if Path(config.experiment_rollout).is_absolute():
+        raise CLIError("Training rollout must be a logical rollout name.")
+
+    rollouts_root = (project_root / "rollouts").resolve()
+    rollout_root = (project_root / "rollouts" / config.experiment_rollout).resolve()
+    try:
+        rollout_root.relative_to(rollouts_root)
+    except ValueError as exc:
+        raise CLIError(
+            "Training rollout must resolve under the current project's rollouts directory."
+        ) from exc
+
+    rollout_path = (rollout_root / config.experiment_entrypoint).resolve()
+    try:
+        rollout_path.relative_to(rollout_root)
+    except ValueError as exc:
+        raise CLIError(
+            "Training entrypoint must resolve under rollouts/<rollout>/ within the current project."
+        ) from exc
+
+
+__all__ = [
+    "TrainingConfig",
+    "load_training_config",
+    "validate_training_context_paths",
+]

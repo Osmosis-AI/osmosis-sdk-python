@@ -2,7 +2,7 @@
 
 A "project" is the local on-disk directory created by `osmosis init` —
 distinct from a Platform workspace (the remote tenant managed via
-`osmosis workspace`).
+the platform and linked with `osmosis project link`).
 """
 
 from __future__ import annotations
@@ -14,7 +14,6 @@ from osmosis_ai.cli.errors import CLIError
 
 _REQUIRED_DIRS = (
     ".osmosis",
-    ".osmosis/research",
     "rollouts",
     "configs",
     "configs/eval",
@@ -23,6 +22,10 @@ _REQUIRED_DIRS = (
 )
 
 _PROJECT_TOML = ".osmosis/project.toml"
+_REQUIRED_FILES = (
+    _PROJECT_TOML,
+    ".osmosis/program.md",
+)
 
 
 def find_project_root(start: Path) -> Path | None:
@@ -49,6 +52,16 @@ def resolve_project_root(start: Path | None = None) -> Path:
     return project_root
 
 
+def resolve_project_root_from_cwd(cwd: Path | None = None) -> Path:
+    """Resolve the active Osmosis project root only from cwd ancestry."""
+    project_root = find_project_root(cwd or Path.cwd())
+    if project_root is None:
+        raise CLIError(
+            "Not in an Osmosis project. Run 'osmosis init' or cd into a cloned Osmosis project."
+        )
+    return project_root.resolve()
+
+
 def validate_project_contract(project_root: Path) -> None:
     """Ensure the canonical project layout exists."""
     project_root = project_root.resolve()
@@ -58,8 +71,11 @@ def validate_project_contract(project_root: Path) -> None:
         for rel_path in _REQUIRED_DIRS
         if not (project_root / rel_path).is_dir()
     ]
-    if not (project_root / _PROJECT_TOML).is_file():
-        missing_paths.insert(0, _PROJECT_TOML)
+    missing_paths.extend(
+        rel_path
+        for rel_path in _REQUIRED_FILES
+        if not (project_root / rel_path).is_file()
+    )
 
     if not missing_paths:
         return
@@ -69,8 +85,41 @@ def validate_project_contract(project_root: Path) -> None:
         "Project is missing required Osmosis paths.\n"
         f"{formatted}\n"
         "\n"
-        "Re-run `osmosis init` in this project to restore the canonical layout."
+        "Run `osmosis project doctor --fix` in this project to restore the canonical layout."
     )
+
+
+def ensure_context_path(
+    path: Path,
+    project_root: Path,
+    *,
+    required_dir: str,
+    label: str,
+    suffix: str | None = None,
+) -> Path:
+    """Resolve a context-bearing path relative to project root and require containment."""
+    required_path = Path(required_dir)
+    if required_path.is_absolute() or ".." in required_path.parts:
+        raise CLIError(
+            f"required_dir must be relative and must not contain '..': {required_dir}"
+        )
+
+    candidate = path if path.is_absolute() else project_root / path
+    resolved = candidate.resolve()
+    required_root = (project_root / required_path).resolve()
+    try:
+        resolved.relative_to(required_root)
+    except ValueError as exc:
+        raise CLIError(
+            f"{label} must live under `{required_dir}/`.\n"
+            f"  Got: {resolved}\n"
+            f"  Expected under: {required_root}"
+        ) from exc
+    if suffix is not None and resolved.suffix != suffix:
+        raise CLIError(
+            f"{label} must be a {suffix} file under `{required_dir}/`, got: {resolved}"
+        )
+    return resolved
 
 
 def ensure_project_config_path(
@@ -81,22 +130,13 @@ def ensure_project_config_path(
     command_label: str,
 ) -> None:
     """Require command configs to live under the canonical project directory."""
-    config_path = config_path.resolve()
-    config_root = (project_root / config_dir).resolve()
-
-    try:
-        config_path.relative_to(config_root)
-    except ValueError as exc:
-        raise CLIError(
-            f"{command_label} config must live under `{config_dir}/`.\n"
-            f"  Got: {config_path}\n"
-            f"  Expected under: {config_root}"
-        ) from exc
-
-    if config_path.suffix != ".toml":
-        raise CLIError(
-            f"{command_label} config must be a TOML file under `{config_dir}/`, got: {config_path}"
-        )
+    ensure_context_path(
+        config_path,
+        project_root,
+        required_dir=config_dir,
+        label=f"{command_label} config",
+        suffix=".toml",
+    )
 
 
 def _format_backend_validation_errors(errors: list[Any]) -> str:
@@ -162,9 +202,11 @@ def validate_rollout_backend(
 
 
 __all__ = [
+    "ensure_context_path",
     "ensure_project_config_path",
     "find_project_root",
     "resolve_project_root",
+    "resolve_project_root_from_cwd",
     "validate_project_contract",
     "validate_rollout_backend",
 ]
