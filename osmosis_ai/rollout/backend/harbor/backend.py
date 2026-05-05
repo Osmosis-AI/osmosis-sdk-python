@@ -39,6 +39,7 @@ from osmosis_ai.rollout.types import (
     RolloutStatus,
 )
 from osmosis_ai.rollout.utils.imports import to_import_path
+from osmosis_ai.rollout.utils.rewards import validate_samples_have_rewards
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -455,13 +456,25 @@ class HarborBackend(ExecutionBackend):
                 for sid, reward in rewards.items():
                     if sid in samples:
                         samples[sid].reward = float(reward)
-                if not samples or any(
-                    sample.reward is None for sample in samples.values()
-                ):
+                try:
+                    validate_samples_have_rewards(samples)
+                except ValueError as e:
+                    if not rewards:
+                        logger.warning(
+                            "Harbor verifier returned empty rewards for rollout %s",
+                            rollout_id,
+                        )
+                    else:
+                        logger.warning(
+                            "Harbor verifier returned incomplete rewards for rollout "
+                            "%s: %s",
+                            rollout_id,
+                            e,
+                        )
                     result = ExecutionResult(
                         status=RolloutStatus.FAILURE,
                         samples=samples,
-                        err_message="Missing rewards after trial completion",
+                        err_message=str(e),
                         err_category=RolloutErrorCategory.VALIDATION_ERROR,
                     )
                 else:
