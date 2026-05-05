@@ -71,10 +71,11 @@ class PendingTrial:
 class HarborBackend(ExecutionBackend):
     """Execution backend that runs workflows inside Harbor containers.
 
-    With prebuild_local_image (default), the Docker image is built once at init
-    and Harbor skips docker compose build on every trial. With
-    symlink_environment (default), per-rollout task dirs symlink to a
-    shared environment dir instead of copying.
+    With prebuild_local_image (default for Docker), the Docker image is built
+    once at init and Harbor skips docker compose build on every trial. With
+    symlink_environment (default for Docker), per-rollout task dirs symlink to a
+    shared environment dir instead of copying. Remote Harbor environments disable
+    these local optimizations by default.
     """
 
     def __init__(
@@ -90,8 +91,8 @@ class HarborBackend(ExecutionBackend):
         trials_dir: Path = Path("trials"),
         custom_tests_dir: Path | None = None,
         environment_config: HarborEnvironmentConfig | None = None,
-        prebuild_local_image: bool = True,
-        symlink_environment: bool = True,
+        prebuild_local_image: bool | None = None,
+        symlink_environment: bool | None = None,
         cleanup_successful_trials: bool = True,
         _sdk_source_dir: Path | None = None,  # local dev only
     ) -> None:
@@ -112,9 +113,21 @@ class HarborBackend(ExecutionBackend):
             environment_config or HarborEnvironmentConfig()
         )
         self._sdk_source_dir = _sdk_source_dir
+        is_docker_environment = self.environment_config.type == EnvironmentType.DOCKER
+        if prebuild_local_image is None:
+            prebuild_local_image = is_docker_environment
+        if symlink_environment is None:
+            symlink_environment = is_docker_environment
+
         self.prebuild_local_image: bool = prebuild_local_image
         self.symlink_environment: bool = symlink_environment
         self.cleanup_successful_trials: bool = cleanup_successful_trials
+
+        if not is_docker_environment and self.prebuild_local_image:
+            raise ValueError(
+                "prebuild_local_image=True is only supported for Docker "
+                "Harbor environments."
+            )
 
         self.root_dir: Path = Path(f"/tmp/osmosis-harbor-{self.task_dir.name}")
         self.rollouts_dir: Path = self.root_dir / "rollouts"
