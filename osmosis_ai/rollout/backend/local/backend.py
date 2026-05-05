@@ -127,9 +127,15 @@ class LocalBackend(ExecutionBackend):
         try:
             grader = self.grader_cls(self.grader_config)
             await grader.grade(grader_ctx)
+            samples = grader_ctx.get_samples()
+            if not samples:
+                raise ValueError("No samples after grading")
+            for sid, sample in samples.items():
+                if sample.reward is None:
+                    raise ValueError(f"Sample {sid} has no reward after grading")
             return ExecutionResult(
                 status=RolloutStatus.SUCCESS,
-                samples=grader_ctx.get_samples(),
+                samples=samples,
             )
         except Exception as e:
             logger.error(traceback.format_exc())

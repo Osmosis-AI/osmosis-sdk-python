@@ -455,7 +455,19 @@ class HarborBackend(ExecutionBackend):
                 for sid, reward in rewards.items():
                     if sid in samples:
                         samples[sid].reward = float(reward)
-                result = ExecutionResult(status=RolloutStatus.SUCCESS, samples=samples)
+                if not samples or any(
+                    sample.reward is None for sample in samples.values()
+                ):
+                    result = ExecutionResult(
+                        status=RolloutStatus.FAILURE,
+                        samples=samples,
+                        err_message="Missing rewards after trial completion",
+                        err_category=RolloutErrorCategory.VALIDATION_ERROR,
+                    )
+                else:
+                    result = ExecutionResult(
+                        status=RolloutStatus.SUCCESS, samples=samples
+                    )
             elif event.result and event.result.exception_info:
                 err = event.result.exception_info
                 result = ExecutionResult(
@@ -465,7 +477,7 @@ class HarborBackend(ExecutionBackend):
                     err_category=RolloutErrorCategory.AGENT_ERROR,
                 )
             else:
-                result = ExecutionResult(status=RolloutStatus.SUCCESS, samples=samples)
+                result = ExecutionResult(status=RolloutStatus.FAILURE, samples=samples)
 
             await pending.on_grader_complete(result)
 
