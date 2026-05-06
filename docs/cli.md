@@ -88,11 +88,10 @@ osmosis project link --workspace <workspace-id-or-name> --yes
 osmosis train submit configs/training/default.toml --yes
 ```
 
-To adopt an existing repository as an Osmosis project:
+To create a project in the current directory, run `init --here` from a
+completely empty directory:
 
 ```bash
-git clone <repo_url>
-cd <repo>
 osmosis init --here <name>
 osmosis project link --workspace <workspace-id-or-name>
 ```

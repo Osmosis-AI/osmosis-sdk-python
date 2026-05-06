@@ -51,13 +51,14 @@ Plain mode is for humans and simple shell pipelines, not a strict schema. `--for
 
 In JSON or plain mode, interactive commands fail fast with `INTERACTIVE_REQUIRED` unless a non-interactive flow exists, typically by passing `--yes` or `--token`. `OSMOSIS_TOKEN` is verify-only across the CLI: it activates authentication for the current process but is never written to the on-disk credentials store, never revoked, and never deletes existing credentials.
 
-## Project adoption and CI
+## Project creation and CI
 
-Adopt an existing repository as an Osmosis project:
+Create an Osmosis project in a new directory, or use `--here` from a completely
+empty current directory:
 
 ```bash
-git clone <repo_url>
-cd <repo>
+osmosis init <name>
+# or, from an empty directory:
 osmosis init --here <name>
 osmosis project link --workspace <workspace-id-or-name>
 ```

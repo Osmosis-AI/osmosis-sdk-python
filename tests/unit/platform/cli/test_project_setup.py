@@ -147,7 +147,7 @@ def test_init_cleanup_on_scaffold_failure(monkeypatch, tmp_path: Path) -> None:
     assert not target.exists()
 
 
-# ── --here: adopts current directory ──────────────────────────────
+# ── --here: creates in an empty current directory ─────────────────
 
 
 def test_init_here_rejects_non_empty_non_git_directory(
@@ -160,15 +160,15 @@ def test_init_here_rejects_non_empty_non_git_directory(
     (tmp_path / "some_file.txt").write_text("content")
     monkeypatch.chdir(tmp_path)
 
-    with pytest.raises(CLIError, match="empty directory or Git worktree top-level"):
+    with pytest.raises(CLIError, match="Current directory is not empty"):
         init_module.init(name="test-project", here=True)
 
     assert not (tmp_path / ".osmosis").exists()
     assert (tmp_path / "some_file.txt").read_text(encoding="utf-8") == "content"
 
 
-def test_init_here_adopts_non_empty_git_root(monkeypatch, tmp_path: Path) -> None:
-    """init(here=True) scaffolds into the current Git root."""
+def test_init_here_rejects_non_empty_git_root(monkeypatch, tmp_path: Path) -> None:
+    """init(here=True) rejects existing Git repositories."""
     import osmosis_ai.platform.cli.init as init_module
 
     subprocess.run(
@@ -177,23 +177,21 @@ def test_init_here_adopts_non_empty_git_root(monkeypatch, tmp_path: Path) -> Non
         capture_output=True,
     )
     monkeypatch.setattr(init_module.shutil, "which", lambda cmd: "git")
-    monkeypatch.setattr(init_module, "_git_initial_commit", lambda target: None)
     monkeypatch.setattr(init_module, "_print_next_steps", lambda *a, **kw: None)
 
     (tmp_path / "some_file.txt").write_text("content")
 
     monkeypatch.chdir(tmp_path)
 
-    init_module.init(name="test-project", here=True)
+    with pytest.raises(CLIError, match="Current directory is not empty"):
+        init_module.init(name="test-project", here=True)
 
-    assert (tmp_path / ".osmosis" / "project.toml").is_file()
+    assert not (tmp_path / ".osmosis").exists()
+    assert (tmp_path / "some_file.txt").read_text(encoding="utf-8") == "content"
 
 
-# ── --here: allows directory with only .git/ ──────────────────────
-
-
-def test_init_here_allows_git_dir(monkeypatch, tmp_path: Path) -> None:
-    """init(here=True) allows a directory containing only .git/."""
+def test_init_here_rejects_git_dir(monkeypatch, tmp_path: Path) -> None:
+    """init(here=True) rejects a directory containing only .git/."""
     import osmosis_ai.platform.cli.init as init_module
 
     monkeypatch.setattr(init_module.shutil, "which", lambda cmd: "git")
@@ -203,8 +201,8 @@ def test_init_here_allows_git_dir(monkeypatch, tmp_path: Path) -> None:
 
     monkeypatch.chdir(tmp_path)
 
-    # Should NOT raise
-    init_module.init(name="test-project", here=True)
+    with pytest.raises(CLIError, match="Current directory is not empty"):
+        init_module.init(name="test-project", here=True)
 
 
 # ── _render_template ─────────────────────────────────────────────
@@ -843,38 +841,41 @@ def test_init_local_only_does_not_require_auth(
     assert (tmp_path / "demo" / ".osmosis" / "project.toml").is_file()
 
 
-def test_init_here_rejects_git_subdirectory(
+def test_full_init_here_creates_initial_commit(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    import subprocess
+    import io
 
     import osmosis_ai.platform.cli.init as init_module
+    from osmosis_ai.cli.console import Console
 
-    subprocess.run(
-        ["git", "init", "-b", "main", str(tmp_path)],
-        check=True,
+    monkeypatch.setattr(init_module.shutil, "which", lambda cmd: "git")
+
+    buf = io.StringIO()
+    test_console = Console(file=buf, force_terminal=False, no_color=True)
+    monkeypatch.setattr(init_module, "console", test_console)
+
+    monkeypatch.chdir(tmp_path)
+
+    init_module.init(name="demo", here=True)
+
+    assert (tmp_path / ".osmosis" / "project.toml").is_file()
+
+    result = subprocess.run(
+        ["git", "log", "--oneline"],
+        cwd=tmp_path,
         capture_output=True,
+        text=True,
+        check=True,
     )
-    subdir = tmp_path / "subdir"
-    subdir.mkdir()
-    monkeypatch.chdir(subdir)
-
-    with pytest.raises(CLIError, match="Git worktree top-level"):
-        init_module.init(name="demo", here=True)
+    assert "Initial project setup" in result.stdout
 
 
-def test_init_here_scaffold_failure_removes_attempt_files_only(
+def test_init_here_scaffold_failure_removes_created_files(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     import osmosis_ai.platform.cli.init as init_module
 
-    existing = tmp_path / "existing.txt"
-    existing.write_text("keep", encoding="utf-8")
-    subprocess.run(
-        ["git", "init", "-b", "main", str(tmp_path)],
-        check=True,
-        capture_output=True,
-    )
     monkeypatch.setattr(init_module.shutil, "which", lambda cmd: "git")
 
     def _partial_scaffold(
@@ -894,10 +895,9 @@ def test_init_here_scaffold_failure_removes_attempt_files_only(
     with pytest.raises(CLIError, match="scaffold failed"):
         init_module.init(name="demo", here=True)
 
-    assert existing.read_text(encoding="utf-8") == "keep"
     assert not (tmp_path / ".osmosis").exists()
     assert not (tmp_path / "rollouts").exists()
-    assert (tmp_path / ".git").exists()
+    assert not any(tmp_path.iterdir())
 
 
 def test_full_init_existing_project_fails(monkeypatch, tmp_path: Path) -> None:

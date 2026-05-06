@@ -292,42 +292,9 @@ def _target_for_init(name: str, *, here: bool) -> tuple[Path, bool]:
     return (Path.cwd() / name).resolve(), True
 
 
-def _git_worktree_top_level(path: Path) -> Path | None:
-    """Return the Git worktree root containing *path*, or ``None``."""
-    if shutil.which("git") is None:
-        return None
-    result = _subprocess.run(
-        ["git", "-C", str(path), "rev-parse", "--show-toplevel"],
-        capture_output=True,
-        text=True,
-        check=False,
-    )
-    if result.returncode != 0:
-        return None
-    top = result.stdout.strip()
-    return Path(top).resolve() if top else None
-
-
-def _is_empty_or_only_git_dir(path: Path) -> bool:
-    """Return whether *path* is empty or contains only a ``.git`` entry."""
-    return all(child.name == ".git" for child in path.iterdir())
-
-
-def _snapshot_existing_paths(root: Path) -> set[Path]:
-    """Capture paths that existed before an adopt-mode init attempt."""
-    if not root.exists():
-        return set()
-    return {path.resolve() for path in root.rglob("*")}
-
-
-def _remove_paths_created_after(root: Path, before: set[Path]) -> None:
-    """Remove files/directories created after *before* without touching existing paths."""
-    if not root.exists():
-        return
-    paths = sorted(root.rglob("*"), key=lambda path: len(path.parts), reverse=True)
-    for path in paths:
-        if path.resolve() in before:
-            continue
+def _remove_directory_contents(root: Path) -> None:
+    """Remove all files and directories under *root*."""
+    for path in sorted(root.iterdir(), key=lambda path: len(path.parts), reverse=True):
         if path.is_dir():
             shutil.rmtree(path)
         else:
@@ -555,9 +522,7 @@ def init(
         raise CLIError(name_error)
 
     target, creates_subdir = _target_for_init(name, here=here)
-    mode = "adopt" if here else "create"
     created_dir = False
-    before_paths: set[Path] = set()
     git_context: dict[str, str | bool | None] = {
         "workspace_id": None,
         "workspace_name": None,
@@ -567,14 +532,11 @@ def init(
     }
 
     if here:
-        git_top = _git_worktree_top_level(target)
-        if git_top is not None and git_top != target:
+        if any(target.iterdir()):
             raise CLIError(
-                "--here must be run from the Git worktree top-level, not a subdirectory."
-            )
-        if git_top is None and not _is_empty_or_only_git_dir(target):
-            raise CLIError(
-                "--here must be run from an empty directory or Git worktree top-level."
+                "Current directory is not empty. "
+                "Use 'osmosis init <name>' without --here to create a new directory, "
+                "or empty this directory first."
             )
     elif target.exists():
         if (target / ".osmosis" / "project.toml").is_file():
@@ -599,20 +561,15 @@ def init(
         if creates_subdir:
             target.mkdir()
             created_dir = True
-        else:
-            before_paths = _snapshot_existing_paths(target)
 
         _write_scaffold(target, name, update=False)
-        if creates_subdir:
-            _git_init(target)
-            _git_initial_commit(target)
-        else:
-            _git_init(target)
+        _git_init(target)
+        _git_initial_commit(target)
     except Exception:
         if created_dir and target.exists():
             shutil.rmtree(target)
         elif not creates_subdir:
-            _remove_paths_created_after(target, before_paths)
+            _remove_directory_contents(target)
         raise
 
     if output.format is OutputFormat.rich:
@@ -624,7 +581,7 @@ def init(
         "created_paths": _created_paths_for_result(target),
         "workspace": None,
         "linked": False,
-        "mode": mode,
+        "mode": "create",
     }
     return OperationResult(
         operation="init",
