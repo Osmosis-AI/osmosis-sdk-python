@@ -12,8 +12,6 @@ from pydantic import BaseModel, ConfigDict, Field
 from osmosis_ai.cli.errors import CLIError
 
 # Names the platform-app reserves for built-in env vars on the rollout container.
-# Kept in sync with `buildRolloutServerConfig` in
-# platform-app/src/lib/traingate/lifecycle-config.ts.
 _RESERVED_ROLLOUT_ENV_NAMES: frozenset[str] = frozenset(
     {
         "GITHUB_CLONE_URL",
