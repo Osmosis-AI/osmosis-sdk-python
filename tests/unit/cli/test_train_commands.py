@@ -283,6 +283,8 @@ dataset = "abc-123"
 [training]
 lr = 1e-6
 total_epochs = 1
+n_samples_per_prompt = 8
+rollout_batch_size = 64
 """.strip(),
             encoding="utf-8",
         )
@@ -385,6 +387,10 @@ entrypoint = "main.py"
 model_path = "m"
 dataset = "d"
 commit_sha = "deadbeef"
+
+[training]
+n_samples_per_prompt = 8
+rollout_batch_size = 64
 """.strip(),
             encoding="utf-8",
         )
@@ -424,7 +430,12 @@ commit_sha = "deadbeef"
         assert captured_kwargs["dataset"] == "abc-123"
         assert captured_kwargs["rollout_name"] == "calculator"
         assert captured_kwargs["entrypoint"] == "main.py"
-        assert captured_kwargs["config"] == {"lr": 1e-6, "total_epochs": 1}
+        assert captured_kwargs["config"] == {
+            "lr": 1e-6,
+            "total_epochs": 1,
+            "n_samples_per_prompt": 8,
+            "rollout_batch_size": 64,
+        }
 
     def test_submit_rejects_non_canonical_training_config_path(
         self,
@@ -470,6 +481,10 @@ rollout = "graderless"
 entrypoint = "main.py"
 model_path = "m"
 dataset = "d"
+
+[training]
+n_samples_per_prompt = 8
+rollout_batch_size = 64
 """.strip(),
             encoding="utf-8",
         )
@@ -615,6 +630,10 @@ entrypoint = "main.py"
 model_path = "m"
 dataset = "d"
 commit_sha = "deadbeef1234"
+
+[training]
+n_samples_per_prompt = 8
+rollout_batch_size = 64
 """.strip(),
             encoding="utf-8",
         )

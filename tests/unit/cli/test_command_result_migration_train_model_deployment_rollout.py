@@ -319,6 +319,10 @@ rollout = "demo"
 entrypoint = "main.py"
 model_path = "Qwen/Qwen3"
 dataset = "demo-dataset"
+
+[training]
+n_samples_per_prompt = 8
+rollout_batch_size = 64
 """.strip(),
         encoding="utf-8",
     )

@@ -24,7 +24,7 @@ dataset = "<your-multiply-dataset>"   # Replace with the uploaded dataset name.
 # lr = 1e-6
 total_epochs = 1
 n_samples_per_prompt = 8
-global_batch_size = 64
+rollout_batch_size = 64
 max_prompt_length = 2048
 max_response_length = 2048
 
