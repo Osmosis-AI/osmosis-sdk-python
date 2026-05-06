@@ -15,7 +15,6 @@ from typing import Any
 
 from harbor.agents.installed.base import BaseInstalledAgent
 from harbor.models.agent.context import AgentContext
-from harbor.models.trial.paths import EnvironmentPaths
 
 
 class OsmosisInstalledAgent(BaseInstalledAgent):
@@ -40,6 +39,8 @@ class OsmosisInstalledAgent(BaseInstalledAgent):
     async def run(self, instruction: Any, environment: Any, context: Any) -> None:
         prompt_path = self.logs_dir / "prompt.json"
         config_path = self.logs_dir / "rollout_config.json"
+        prompt_env_path = environment.env_paths.agent_dir / "prompt.json"
+        config_env_path = environment.env_paths.agent_dir / "rollout_config.json"
 
         prompt_path.write_text(instruction)
 
@@ -49,20 +50,20 @@ class OsmosisInstalledAgent(BaseInstalledAgent):
         if not environment.capabilities.mounted:
             await environment.upload_file(
                 prompt_path,
-                (EnvironmentPaths.agent_dir / "prompt.json").as_posix(),
+                prompt_env_path.as_posix(),
             )
             if config_path.exists():
                 await environment.upload_file(
                     config_path,
-                    (EnvironmentPaths.agent_dir / "rollout_config.json").as_posix(),
+                    config_env_path.as_posix(),
                 )
 
         await self.exec_as_agent(
             environment,
             command=(
                 "python -m osmosis_ai.rollout.backend.harbor.agent_runner"
-                " --config /logs/agent/rollout_config.json"
-                " --prompt /logs/agent/prompt.json"
+                f" --config {config_env_path.as_posix()}"
+                f" --prompt {prompt_env_path.as_posix()}"
             ),
             cwd="/workspace",
             env={"PYTHONPATH": "/workspace"},
