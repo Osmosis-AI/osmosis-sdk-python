@@ -355,6 +355,8 @@ dataset = "abc-123"
 [training]
 lr = 1e-6
 total_epochs = 1
+n_samples_per_prompt = 8
+rollout_batch_size = 64
 """.strip(),
             encoding="utf-8",
         )
@@ -471,6 +473,10 @@ entrypoint = "main.py"
 model_path = "m"
 dataset = "d"
 commit_sha = "deadbeef"
+
+[training]
+n_samples_per_prompt = 8
+rollout_batch_size = 64
 """.strip(),
             encoding="utf-8",
         )
@@ -513,7 +519,12 @@ commit_sha = "deadbeef"
         assert captured_kwargs["rollout_name"] == "calculator"
         assert captured_kwargs["entrypoint"] == "main.py"
         assert captured_kwargs["workspace_id"] == WORKSPACE_ID
-        assert captured_kwargs["config"] == {"lr": 1e-6, "total_epochs": 1}
+        assert captured_kwargs["config"] == {
+            "lr": 1e-6,
+            "total_epochs": 1,
+            "n_samples_per_prompt": 8,
+            "rollout_batch_size": 64,
+        }
 
     def test_submit_rejects_non_canonical_training_config_path(
         self,
@@ -563,6 +574,10 @@ rollout = "graderless"
 entrypoint = "main.py"
 model_path = "m"
 dataset = "d"
+
+[training]
+n_samples_per_prompt = 8
+rollout_batch_size = 64
 """.strip(),
             encoding="utf-8",
         )
@@ -717,6 +732,10 @@ entrypoint = "main.py"
 model_path = "m"
 dataset = "d"
 commit_sha = "deadbeef1234"
+
+[training]
+n_samples_per_prompt = 8
+rollout_batch_size = 64
 """.strip(),
             encoding="utf-8",
         )
@@ -819,7 +838,16 @@ def test_train_submit_requires_linked_project(
     project = _make_project(tmp_path / "project")
     config = project / "configs" / "training" / "default.toml"
     config.write_text(
-        "[experiment]\nrollout='demo'\nentrypoint='main.py'\nmodel_path='m'\ndataset='ds'\n",
+        (
+            "[experiment]\n"
+            "rollout='demo'\n"
+            "entrypoint='main.py'\n"
+            "model_path='m'\n"
+            "dataset='ds'\n\n"
+            "[training]\n"
+            "n_samples_per_prompt=1\n"
+            "rollout_batch_size=1\n"
+        ),
         encoding="utf-8",
     )
     monkeypatch.chdir(project)
@@ -844,7 +872,16 @@ def test_train_submit_resolves_relative_config_from_project_subdirectory(
     project = _make_project(tmp_path / "project")
     config = project / "configs" / "training" / "default.toml"
     config.write_text(
-        "[experiment]\nrollout='demo'\nentrypoint='main.py'\nmodel_path='m'\ndataset='ds'\n",
+        (
+            "[experiment]\n"
+            "rollout='demo'\n"
+            "entrypoint='main.py'\n"
+            "model_path='m'\n"
+            "dataset='ds'\n\n"
+            "[training]\n"
+            "n_samples_per_prompt=1\n"
+            "rollout_batch_size=1\n"
+        ),
         encoding="utf-8",
     )
     monkeypatch.chdir(project / "rollouts" / "demo")

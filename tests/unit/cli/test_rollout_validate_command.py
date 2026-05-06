@@ -150,6 +150,10 @@ rollout = "demo"
 entrypoint = "main.py"
 model_path = "Qwen/Qwen3.6-35B-A3B"
 dataset = "demo-dataset"
+
+[training]
+n_samples_per_prompt = 8
+rollout_batch_size = 64
 """.strip(),
         encoding="utf-8",
     )
@@ -202,6 +206,10 @@ rollout = "demo"
 entrypoint = "main.py"
 model_path = "Qwen/Qwen3.6-35B-A3B"
 dataset = "demo-dataset"
+
+[training]
+n_samples_per_prompt = 8
+rollout_batch_size = 64
 """.strip(),
         encoding="utf-8",
     )
@@ -227,6 +235,10 @@ rollout = "demo"
 entrypoint = "main.py"
 model_path = "Qwen/Qwen3.6-35B-A3B"
 dataset = "demo-dataset"
+
+[training]
+n_samples_per_prompt = 8
+rollout_batch_size = 64
 """.strip(),
         encoding="utf-8",
     )
