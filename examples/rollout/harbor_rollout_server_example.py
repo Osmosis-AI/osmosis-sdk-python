@@ -15,8 +15,7 @@ import logging
 from pathlib import Path
 
 import uvicorn
-from harbor.models.trial.config import EnvironmentConfig as HarborEnvironmentConfig
-from harbor.models.trial.config import EnvironmentType
+from harbor.models.trial.config import EnvironmentConfig, EnvironmentType
 from harbor.trial.queue import TrialQueue
 from multiply_rollout.grader import MultiplyGrader, multiply_grader_config
 from multiply_rollout.workflow import MultiplyWorkflow, multiply_workflow_config
@@ -41,7 +40,7 @@ def main():
         workflow_config=multiply_workflow_config,
         grader=MultiplyGrader,
         grader_config=multiply_grader_config,
-        environment_config=HarborEnvironmentConfig(type=EnvironmentType.DAYTONA),
+        environment_config=EnvironmentConfig(type=EnvironmentType.DAYTONA),
         cleanup_successful_trials=True,
         _sdk_source_dir=SDK_ROOT,  # local dev only
     )
