@@ -11,6 +11,8 @@ from osmosis_ai.platform.cli.project_mapping import (
     ProjectMappingStore,
 )
 
+_CONNECTED_REPO = "https://github.com/acme/project.git"
+
 
 class _Creds:
     def is_expired(self) -> bool:
@@ -32,6 +34,26 @@ def _make_project(root: Path) -> Path:
         "# Test Program\n", encoding="utf-8"
     )
     return root
+
+
+def _workspace(
+    *,
+    workspace_id: str = "ws_1",
+    name: str = "team-alpha",
+    repo_url: str | None = _CONNECTED_REPO,
+) -> dict[str, object]:
+    return {
+        "id": workspace_id,
+        "name": name,
+        "connected_repo": {"repo_url": repo_url} if repo_url is not None else None,
+    }
+
+
+def _allow_matching_origin(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "osmosis_ai.platform.cli.workspace_repo.get_local_git_remote_url",
+        lambda project_root: _CONNECTED_REPO,
+    )
 
 
 @pytest.fixture
@@ -79,10 +101,9 @@ def test_project_link_by_workspace_id_writes_mapping(
     )
     monkeypatch.setattr(
         "osmosis_ai.platform.cli.project.list_accessible_workspaces",
-        lambda *, credentials: [
-            {"id": "ws_1", "name": "team-alpha", "connected_repo": None}
-        ],
+        lambda *, credentials: [_workspace()],
     )
+    _allow_matching_origin(monkeypatch)
 
     rc = main(["--json", "project", "link", "--workspace", "ws_1", "--yes"])
 
@@ -113,10 +134,9 @@ def test_link_alias_matches_project_link(
     )
     monkeypatch.setattr(
         "osmosis_ai.platform.cli.project.list_accessible_workspaces",
-        lambda *, credentials: [
-            {"id": "ws_1", "name": "team-alpha", "connected_repo": None}
-        ],
+        lambda *, credentials: [_workspace()],
     )
+    _allow_matching_origin(monkeypatch)
 
     assert main(["--json", "link", "--workspace", "ws_1", "--yes"]) == 0
     payload = json.loads(capsys.readouterr().out)
@@ -227,6 +247,61 @@ def test_project_link_rejects_malformed_workspace_record(
     assert "Invalid workspace record" in error["message"]
 
 
+def test_project_link_requires_connected_repo(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    isolated_mapping: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    project = _make_project(tmp_path / "project")
+    monkeypatch.chdir(project)
+    monkeypatch.setattr(
+        "osmosis_ai.platform.cli.project.load_credentials", lambda: _Creds()
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.cli.project.list_accessible_workspaces",
+        lambda *, credentials: [_workspace(repo_url=None)],
+    )
+
+    rc = main(["--json", "project", "link", "--workspace", "ws_1", "--yes"])
+
+    assert rc == 1
+    error = json.loads(capsys.readouterr().err)["error"]
+    assert "has no Git Sync connected repository" in error["message"]
+    assert "https://platform.osmosis.ai/team-alpha/integrations/git" in error["message"]
+    assert not isolated_mapping.exists()
+
+
+def test_project_link_requires_matching_origin(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    isolated_mapping: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    project = _make_project(tmp_path / "project")
+    monkeypatch.chdir(project)
+    monkeypatch.setattr(
+        "osmosis_ai.platform.cli.project.load_credentials", lambda: _Creds()
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.cli.project.list_accessible_workspaces",
+        lambda *, credentials: [_workspace()],
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.cli.workspace_repo.get_local_git_remote_url",
+        lambda project_root: "https://github.com/acme/other.git",
+    )
+
+    rc = main(["--json", "project", "link", "--workspace", "ws_1", "--yes"])
+
+    assert rc == 1
+    error = json.loads(capsys.readouterr().err)["error"]
+    assert "must be run from a clone" in error["message"]
+    assert _CONNECTED_REPO in error["message"]
+    assert "https://github.com/acme/other.git" in error["message"]
+    assert not isolated_mapping.exists()
+
+
 def test_project_info_refresh_updates_cached_workspace_metadata(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -282,9 +357,14 @@ def test_project_link_rich_output_escapes_workspace_name(
     monkeypatch.setattr(
         "osmosis_ai.platform.cli.project.list_accessible_workspaces",
         lambda *, credentials: [
-            {"id": "ws_1", "name": "[red]team[/red]", "connected_repo": None}
+            {
+                "id": "ws_1",
+                "name": "[red]team[/red]",
+                "connected_repo": {"repo_url": _CONNECTED_REPO},
+            }
         ],
     )
+    _allow_matching_origin(monkeypatch)
     messages: list[str] = []
     monkeypatch.setattr(
         "osmosis_ai.platform.cli.project.console.print",

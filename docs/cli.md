@@ -48,7 +48,10 @@ In non-interactive environments, use a specific subcommand such as `osmosis work
 
 ### osmosis project link
 
-Link this project with an Osmosis workspace. Platform commands resolve their workspace from the current project.
+Link this project with an Osmosis workspace. The workspace must have a Git
+Sync connected repository, and the command must be run from a checkout whose
+`origin` remote matches that repository. Platform commands resolve their
+workspace from the current project.
 
 ```bash
 osmosis project link --workspace <workspace-id-or-name>
@@ -90,7 +93,8 @@ To adopt an existing repository as an Osmosis project:
 ```bash
 git clone <repo_url>
 cd <repo>
-osmosis init --here <name> --workspace <workspace-id-or-name>
+osmosis init --here <name>
+osmosis project link --workspace <workspace-id-or-name>
 ```
 
 ### osmosis project validate

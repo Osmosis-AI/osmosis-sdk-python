@@ -27,7 +27,7 @@ Python SDK for [Osmosis AI](https://platform.osmosis.ai), a platform for trainin
 |------|-------------|
 | **Define agents** | One `AgentWorkflow` subclass (+ optional `AgentWorkflowConfig`) in your repo. The training/eval entrypoint must also expose a concrete `Grader` (typically with a `GraderConfig`). |
 | **Layout** | Use a rollout pack directory under `rollouts/<name>/` when loading by rollout name; the CLI adds that directory to `sys.path`. |
-| **Link project** | `osmosis project link --workspace <workspace-id-or-name>` — platform commands use the workspace resolved from the current project. |
+| **Link project** | `osmosis project link --workspace <workspace-id-or-name>` — run from the workspace's connected Git Sync repo checkout so platform commands resolve the correct workspace. |
 | **Validate** | `osmosis rollout validate configs/training/<name>.toml` — validate the rollout entrypoint referenced by a training or eval config before managed hosting or training submission. |
 | **Evaluate** | `osmosis eval run configs/eval/<name>.toml` — same execution stack as training, with optional pass@k and caching. |
 
@@ -58,7 +58,8 @@ Adopt an existing repository as an Osmosis project:
 ```bash
 git clone <repo_url>
 cd <repo>
-osmosis init --here <name> --workspace <workspace-id-or-name>
+osmosis init --here <name>
+osmosis project link --workspace <workspace-id-or-name>
 ```
 
 Submit from CI with a project link and non-interactive confirmation:

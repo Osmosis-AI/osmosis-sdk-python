@@ -256,6 +256,86 @@ def _repo_url_from_workspace(workspace: dict[str, Any]) -> str | None:
     return None
 
 
+def _raw_repo_url_from_workspace(workspace: dict[str, Any]) -> str | None:
+    connected_repo = workspace.get("connected_repo")
+    if isinstance(connected_repo, dict):
+        repo_url = connected_repo.get("repo_url")
+        if isinstance(repo_url, str) and repo_url:
+            return repo_url
+    repo_url = workspace.get("repo_url")
+    if isinstance(repo_url, str) and repo_url:
+        return repo_url
+    return None
+
+
+def _git_sync_url(workspace_name: str) -> str:
+    return f"{PLATFORM_URL}/{workspace_name}/integrations/git"
+
+
+def _require_connected_repo_checkout(
+    *,
+    project_root: Path,
+    workspace_name: str,
+    workspace: dict[str, Any],
+) -> None:
+    from osmosis_ai.platform.cli.workspace_repo import (
+        get_local_git_remote_url,
+        normalize_git_url,
+    )
+
+    repo_url = _raw_repo_url_from_workspace(workspace)
+    if repo_url is None:
+        raise CLIError(
+            f"Workspace '{workspace_name}' has no Git Sync connected repository.\n"
+            "\n"
+            "Connect a repo via Git Sync:\n"
+            f"  {_git_sync_url(workspace_name)}\n"
+            "\n"
+            "Then clone it and link from that checkout:\n"
+            "  git clone <repo-url>\n"
+            "  cd <repo>\n"
+            f"  osmosis project link --workspace {workspace_name}"
+        )
+
+    expected = normalize_git_url(repo_url)
+    if expected is None:
+        raise CLIError(
+            "Unable to validate the workspace's Git Sync connected repository URL.\n"
+            f"  Workspace '{workspace_name}' is connected to:\n"
+            f"    {repo_url}\n"
+            "\n"
+            "Reconnect the repo in Git Sync, then run project link again:\n"
+            f"  {_git_sync_url(workspace_name)}"
+        )
+
+    local_remote = get_local_git_remote_url(project_root)
+    if normalize_git_url(local_remote) == expected:
+        return
+
+    if local_remote is None:
+        raise CLIError(
+            "Project link must be run from a clone of the workspace's "
+            "connected Git repository.\n"
+            f"  Workspace '{workspace_name}' is connected to:\n"
+            f"    {repo_url}\n"
+            f"  Local project at {project_root} has no `origin` remote.\n"
+            "\n"
+            "Clone the connected repo:\n"
+            f"  git clone {repo_url}"
+        )
+
+    raise CLIError(
+        "Project link must be run from a clone of the workspace's "
+        "connected Git repository.\n"
+        f"  Workspace '{workspace_name}' is connected to:\n"
+        f"    {repo_url}\n"
+        "  Local `origin` remote:\n"
+        f"    {local_remote}\n"
+        "\n"
+        "Run from the connected repo checkout, then link again."
+    )
+
+
 def _select_workspace_interactive(
     workspaces: list[dict[str, Any]],
 ) -> dict[str, Any]:
@@ -305,6 +385,11 @@ def link_project(workspace: str | None = None, yes: bool = False) -> Any:
         else _select_workspace_interactive(workspaces)
     )
     workspace_summary = _workspace_summary(selected)
+    _require_connected_repo_checkout(
+        project_root=project_root,
+        workspace_name=workspace_summary["name"],
+        workspace=selected,
+    )
     record = ProjectLinkRecord(
         project_path=str(project_root),
         workspace_id=workspace_summary["id"],

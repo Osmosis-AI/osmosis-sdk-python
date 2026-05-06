@@ -225,9 +225,7 @@ class ProjectMappingStore:
         with self._lock():
             data = self._read_unlocked()
             bucket = self._bucket(data)
-            existing = self._check_link_allowed(bucket, record)
-            if existing is not None:
-                return existing
+            self._check_link_allowed(bucket, record)
             stored = ProjectLinkRecord.from_json(record.to_json())
             bucket["projects"][stored.project_path] = stored.to_json()
             bucket["workspaceToProject"][stored.workspace_id] = stored.project_path

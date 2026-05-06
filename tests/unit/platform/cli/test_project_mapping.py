@@ -195,6 +195,40 @@ def test_link_returns_sanitized_stored_record(tmp_path: Path) -> None:
     assert linked == store.get_project(record.project_path)
 
 
+def test_relink_same_workspace_refreshes_stored_metadata(tmp_path: Path) -> None:
+    store = ProjectMappingStore(
+        config_file=tmp_path / "config.json", platform_url="https://platform.osmosis.ai"
+    )
+    project_path = str((tmp_path / "project").resolve())
+    store.link(
+        ProjectLinkRecord(
+            project_path=project_path,
+            workspace_id="ws_1",
+            workspace_name="old-name",
+            repo_url="https://github.com/acme/old.git",
+            linked_at="2026-05-03T00:00:00+00:00",
+        )
+    )
+    refreshed = ProjectLinkRecord(
+        project_path=project_path,
+        workspace_id="ws_1",
+        workspace_name="new-name",
+        repo_url="https://user:pat@github.com/acme/new.git?token=x#main",
+        linked_at="2026-05-06T00:00:00+00:00",
+    )
+
+    linked = store.link(refreshed)
+
+    assert linked == ProjectLinkRecord(
+        project_path=project_path,
+        workspace_id="ws_1",
+        workspace_name="new-name",
+        repo_url="https://github.com/acme/new.git",
+        linked_at="2026-05-06T00:00:00+00:00",
+    )
+    assert store.get_project(project_path) == linked
+
+
 def test_platform_buckets_are_isolated(tmp_path: Path) -> None:
     prod = ProjectMappingStore(
         config_file=tmp_path / "config.json", platform_url="https://platform.osmosis.ai"
