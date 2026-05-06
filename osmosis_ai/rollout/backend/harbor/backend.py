@@ -57,6 +57,11 @@ PYTHONPATH=/workspace python -m osmosis_ai.rollout.backend.harbor.grader_runner 
 """
 
 
+def uses_local_docker_runtime(environment_config: HarborEnvironmentConfig) -> bool:
+    """Return whether Harbor will run the trial on the host Docker runtime."""
+    return environment_config.type == EnvironmentType.DOCKER
+
+
 class PendingTrial:
     def __init__(
         self,
@@ -72,10 +77,11 @@ class PendingTrial:
 class HarborBackend(ExecutionBackend):
     """Execution backend that runs workflows inside Harbor containers.
 
-    With prebuild_local_image (default), the Docker image is built once at init
-    and Harbor skips docker compose build on every trial. With
-    symlink_environment (default), per-rollout task dirs symlink to a
-    shared environment dir instead of copying.
+    With prebuild_local_image (default for Docker), the Docker image is built
+    once at init and Harbor skips docker compose build on every trial. With
+    symlink_environment (default for Docker), per-rollout task dirs symlink to a
+    shared environment dir instead of copying. Remote Harbor environments disable
+    these local optimizations by default.
     """
 
     def __init__(
@@ -91,8 +97,8 @@ class HarborBackend(ExecutionBackend):
         trials_dir: Path = Path("trials"),
         custom_tests_dir: Path | None = None,
         environment_config: HarborEnvironmentConfig | None = None,
-        prebuild_local_image: bool = True,
-        symlink_environment: bool = True,
+        prebuild_local_image: bool | None = None,
+        symlink_environment: bool | None = None,
         cleanup_successful_trials: bool = True,
         _sdk_source_dir: Path | None = None,  # local dev only
     ) -> None:
@@ -113,9 +119,21 @@ class HarborBackend(ExecutionBackend):
             environment_config or HarborEnvironmentConfig()
         )
         self._sdk_source_dir = _sdk_source_dir
+        uses_local_docker = uses_local_docker_runtime(self.environment_config)
+        if prebuild_local_image is None:
+            prebuild_local_image = uses_local_docker
+        if symlink_environment is None:
+            symlink_environment = uses_local_docker
+
         self.prebuild_local_image: bool = prebuild_local_image
         self.symlink_environment: bool = symlink_environment
         self.cleanup_successful_trials: bool = cleanup_successful_trials
+
+        if not uses_local_docker and self.prebuild_local_image:
+            raise ValueError(
+                "prebuild_local_image=True is only supported for Docker "
+                "Harbor environments."
+            )
 
         self.root_dir: Path = Path(f"/tmp/osmosis-harbor-{self.task_dir.name}")
         self.rollouts_dir: Path = self.root_dir / "rollouts"
@@ -329,7 +347,7 @@ class HarborBackend(ExecutionBackend):
         if ctx:
             if ctx.chat_completions_url:
                 url = ctx.chat_completions_url
-                if self.environment_config.type == EnvironmentType.DOCKER:
+                if uses_local_docker_runtime(self.environment_config):
                     url = rewrite_url_for_docker(url)
                 config["chat_completions_url"] = url
             if ctx.api_key:

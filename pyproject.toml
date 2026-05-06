@@ -40,7 +40,7 @@ dependencies = [
     # CLI framework
     "typer>=0.16.0",
     "rich>=13.0.0",
-    "harbor==0.3.0",
+    "harbor[daytona]==0.6.1",
 ]
 
 [project.optional-dependencies]

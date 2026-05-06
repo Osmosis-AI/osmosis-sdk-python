@@ -2,7 +2,8 @@
 
 Extends BaseInstalledAgent to run an AgentWorkflow inside the container.
 User code and SDK are baked into the image at /workspace/ during Docker build.
-Rollout config is passed via kwargs and copied to the mounted volume.
+Rollout config is passed via kwargs and copied to the mounted volume for Docker.
+For non-mounted environments, runner inputs are uploaded to Harbor's agent logs.
 """
 
 from __future__ import annotations
@@ -36,19 +37,33 @@ class OsmosisInstalledAgent(BaseInstalledAgent):
         pass  # user code is baked into the image
 
     async def run(self, instruction: Any, environment: Any, context: Any) -> None:
-        (self.logs_dir / "prompt.json").write_text(instruction)
+        prompt_path = self.logs_dir / "prompt.json"
+        config_path = self.logs_dir / "rollout_config.json"
+        prompt_env_path = environment.env_paths.agent_dir / "prompt.json"
+        config_env_path = environment.env_paths.agent_dir / "rollout_config.json"
+
+        prompt_path.write_text(instruction)
 
         if self.rollout_config_path and self.rollout_config_path.exists():
-            shutil.copy2(
-                self.rollout_config_path, self.logs_dir / "rollout_config.json"
+            shutil.copy2(self.rollout_config_path, config_path)
+
+        if not environment.capabilities.mounted:
+            await environment.upload_file(
+                prompt_path,
+                prompt_env_path.as_posix(),
             )
+            if config_path.exists():
+                await environment.upload_file(
+                    config_path,
+                    config_env_path.as_posix(),
+                )
 
         await self.exec_as_agent(
             environment,
             command=(
                 "python -m osmosis_ai.rollout.backend.harbor.agent_runner"
-                " --config /logs/agent/rollout_config.json"
-                " --prompt /logs/agent/prompt.json"
+                f" --config {config_env_path.as_posix()}"
+                f" --prompt {prompt_env_path.as_posix()}"
             ),
             cwd="/workspace",
             env={"PYTHONPATH": "/workspace"},
