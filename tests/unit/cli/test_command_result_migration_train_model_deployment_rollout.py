@@ -55,6 +55,7 @@ def _stub_workspace_context(monkeypatch: pytest.MonkeyPatch) -> None:
 def _make_rollout_project(root: Path) -> Path:
     for rel_path in (
         ".osmosis",
+        ".osmosis/research",
         "rollouts/demo",
         "configs/training",
         "configs/eval",
@@ -64,7 +65,9 @@ def _make_rollout_project(root: Path) -> Path:
     (root / ".osmosis" / "project.toml").write_text(
         "[project]\nsetup_source = 'test'\n", encoding="utf-8"
     )
-    (root / ".osmosis" / "program.md").write_text("# Test Program\n", encoding="utf-8")
+    (root / ".osmosis" / "research" / "program.md").write_text(
+        "# Test Program\n", encoding="utf-8"
+    )
     (root / "rollouts" / "demo" / "main.py").write_text(
         """
 from osmosis_ai.rollout.agent_workflow import AgentWorkflow

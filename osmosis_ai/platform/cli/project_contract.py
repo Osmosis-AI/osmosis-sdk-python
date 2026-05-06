@@ -22,10 +22,7 @@ _REQUIRED_DIRS = (
 )
 
 _PROJECT_TOML = ".osmosis/project.toml"
-_REQUIRED_FILES = (
-    _PROJECT_TOML,
-    ".osmosis/program.md",
-)
+_REQUIRED_FILES = (_PROJECT_TOML,)
 
 
 def find_project_root(start: Path) -> Path | None:

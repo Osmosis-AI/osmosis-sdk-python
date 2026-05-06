@@ -25,8 +25,20 @@ def fake_credentials() -> Credentials:
     )
 
 
-def _patch_auth(monkeypatch, creds: Credentials | None) -> None:
+def _patch_auth(monkeypatch, creds: Credentials | None) -> list[str]:
+    verify_calls: list[str] = []
     monkeypatch.setattr("osmosis_ai.platform.auth.load_credentials", lambda: creds)
+    if creds is not None:
+        verified = VerifyResult(
+            user=creds.user,
+            expires_at=creds.expires_at,
+            token_id=creds.token_id,
+        )
+        monkeypatch.setattr(
+            "osmosis_ai.platform.auth.verify_token",
+            lambda token: verify_calls.append(token) or verified,
+        )
+    return verify_calls
 
 
 def _write_legacy_active_workspace(
@@ -46,6 +58,7 @@ def _write_legacy_active_workspace(
 def _create_canonical_project(project_root: Path) -> None:
     for relative in (
         ".osmosis",
+        ".osmosis/research",
         "rollouts",
         "configs",
         "configs/eval",
@@ -57,7 +70,7 @@ def _create_canonical_project(project_root: Path) -> None:
         '[project]\nname = "demo"\n',
         encoding="utf-8",
     )
-    (project_root / ".osmosis" / "program.md").write_text(
+    (project_root / ".osmosis" / "research" / "program.md").write_text(
         "# Program\n",
         encoding="utf-8",
     )
@@ -126,7 +139,7 @@ def test_whoami_json_outside_linked_project_has_no_workspace(
     assert "expires_at" in data
 
 
-def test_whoami_json_inside_linked_project_reports_project_mapping(
+def test_whoami_json_inside_linked_project_stays_auth_only(
     monkeypatch, capsys, tmp_path, fake_credentials
 ) -> None:
     project_root = tmp_path / "project"
@@ -147,18 +160,25 @@ def test_whoami_json_inside_linked_project_reports_project_mapping(
     assert exit_code == 0
     payload = json.loads(captured.out)
     data = payload["data"]
-    assert data["workspace"] == {"id": "ws_linked", "name": "team-alpha"}
-    assert data["linked_project"] == {
-        "project_root": str(project_root.resolve()),
-        "workspace_id": "ws_linked",
-        "workspace_name": "team-alpha",
-    }
-    assert data["local_linked_project"] == {
-        "project_root": str(project_root.resolve()),
-        "workspace": {"id": "ws_linked", "name": "team-alpha"},
-        "source": "local_project_mapping",
-        "verified_with_active_token": True,
-    }
+    assert data["workspace"] is None
+    assert data["linked_project"] is None
+    assert data["local_linked_project"] is None
+
+
+def test_whoami_json_with_stored_credentials_verifies_token(
+    monkeypatch, capsys, tmp_path, fake_credentials
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    verify_calls = _patch_auth(monkeypatch, fake_credentials)
+
+    exit_code = cli.main(["--json", "auth", "whoami"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    data = json.loads(captured.out)["data"]
+    assert data["account"]["source"] == "credentials"
+    assert data["account"]["email"] == "brian@example.com"
+    assert verify_calls == ["token"]
 
 
 def test_whoami_json_with_env_token_uses_verified_identity(
@@ -231,7 +251,7 @@ def test_whoami_json_with_env_token_ignores_cached_workspace_resolution(
     assert data["source"] == "environment"
 
 
-def test_whoami_json_with_env_token_reports_local_project_separately(
+def test_whoami_json_with_env_token_stays_auth_only_inside_linked_project(
     monkeypatch, capsys, tmp_path, fake_verify_result
 ) -> None:
     project_root = tmp_path / "project"
@@ -265,18 +285,9 @@ def test_whoami_json_with_env_token_reports_local_project_separately(
     assert exit_code == 0
     data = json.loads(captured.out)["data"]
     assert data["account"]["email"] == "env@example.com"
-    assert data["workspace"] == {"id": "ws_linked", "name": "team-alpha"}
-    assert data["linked_project"] == {
-        "project_root": str(project_root.resolve()),
-        "workspace_id": "ws_linked",
-        "workspace_name": "team-alpha",
-    }
-    assert data["local_linked_project"] == {
-        "project_root": str(project_root.resolve()),
-        "workspace": {"id": "ws_linked", "name": "team-alpha"},
-        "source": "local_project_mapping",
-        "verified_with_active_token": False,
-    }
+    assert data["workspace"] is None
+    assert data["linked_project"] is None
+    assert data["local_linked_project"] is None
 
 
 def test_whoami_json_with_env_token_ignores_mismatched_local_workspace(
@@ -402,6 +413,30 @@ def test_whoami_json_with_expired_stored_credentials_emits_auth_required(
     assert "osmosis auth login" in envelope["error"]["message"]
 
 
+def test_whoami_json_with_revoked_stored_credentials_emits_auth_required(
+    monkeypatch, capsys, fake_credentials
+) -> None:
+    from osmosis_ai.platform.auth import LoginError
+
+    monkeypatch.delenv("OSMOSIS_TOKEN", raising=False)
+    _patch_auth(monkeypatch, fake_credentials)
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.verify_token",
+        lambda token: (_ for _ in ()).throw(
+            LoginError("Token has been revoked.", code="TOKEN_REVOKED", status_code=401)
+        ),
+    )
+
+    exit_code = cli.main(["--json", "auth", "whoami"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert captured.out == ""
+    envelope = json.loads(captured.err)
+    assert envelope["error"]["code"] == "AUTH_REQUIRED"
+    assert "osmosis auth login" in envelope["error"]["message"]
+
+
 def test_whoami_plain_renders_label_value_lines(
     monkeypatch, capsys, tmp_path, fake_credentials
 ) -> None:
@@ -417,7 +452,7 @@ def test_whoami_plain_renders_label_value_lines(
     assert not any(line.startswith("Workspace:") for line in lines)
 
 
-def test_whoami_plain_inside_linked_project_renders_mapping(
+def test_whoami_plain_inside_linked_project_stays_auth_only(
     monkeypatch, capsys, tmp_path, fake_credentials
 ) -> None:
     project_root = tmp_path / "project"
@@ -437,8 +472,8 @@ def test_whoami_plain_inside_linked_project_renders_mapping(
     captured = capsys.readouterr()
     assert exit_code == 0
     lines = captured.out.splitlines()
-    assert f"Local project root: {project_root.resolve()}" in lines
-    assert "Local linked workspace: team-alpha (ws_linked)" in lines
+    assert not any(line.startswith("Local project root:") for line in lines)
+    assert not any(line.startswith("Local linked workspace:") for line in lines)
 
 
 def test_whoami_rich_still_uses_table(

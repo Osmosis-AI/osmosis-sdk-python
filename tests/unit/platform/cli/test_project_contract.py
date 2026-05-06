@@ -16,7 +16,6 @@ from osmosis_ai.platform.cli.project_contract import (
 def _make_project(root: Path) -> Path:
     (root / ".osmosis").mkdir(parents=True)
     (root / ".osmosis" / "project.toml").write_text("[project]\n", encoding="utf-8")
-    (root / ".osmosis" / "program.md").write_text("# Test Program\n", encoding="utf-8")
     (root / "configs" / "eval").mkdir(parents=True)
     (root / "configs" / "training").mkdir(parents=True)
     (root / "data").mkdir()
@@ -43,16 +42,12 @@ def test_resolve_project_root_from_cwd_reports_missing_project(
         resolve_project_root_from_cwd()
 
 
-def test_validate_project_contract_requires_program_file(tmp_path: Path) -> None:
+def test_validate_project_contract_does_not_require_training_brief(
+    tmp_path: Path,
+) -> None:
     project = _make_project(tmp_path / "project")
-    (project / ".osmosis" / "program.md").unlink()
 
-    with pytest.raises(CLIError) as exc:
-        validate_project_contract(project)
-
-    message = str(exc.value)
-    assert ".osmosis/program.md" in message
-    assert "osmosis project doctor --fix" in message
+    validate_project_contract(project)
 
 
 def test_ensure_context_path_accepts_canonical_config(tmp_path: Path) -> None:

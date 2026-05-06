@@ -14,6 +14,7 @@ from osmosis_ai.platform.auth.config import PLATFORM_URL
 from osmosis_ai.platform.cli.project_mapping import (
     CONFIG_FILE,
     ProjectLinkRecord,
+    ProjectMappingEntry,
     ProjectMappingStore,
     normalize_platform_key,
     now_linked_at,
@@ -45,7 +46,6 @@ def validate_project(path: Any) -> Any:
     rows = [
         ("Root", str(project_root)),
         ("Project metadata", ".osmosis/project.toml"),
-        ("Training brief", ".osmosis/program.md"),
         ("Rollouts", "rollouts/"),
         ("Training configs", "configs/training/"),
         ("Eval configs", "configs/eval/"),
@@ -56,7 +56,6 @@ def validate_project(path: Any) -> Any:
             [
                 ("Root", console.format_text(project_root)),
                 ("Project metadata", ".osmosis/project.toml"),
-                ("Training brief", ".osmosis/program.md"),
                 ("Rollouts", "rollouts/"),
                 ("Training configs", "configs/training/"),
                 ("Eval configs", "configs/eval/"),
@@ -116,10 +115,7 @@ def doctor_project(*, fix: bool = False, yes: bool = False) -> Any:
         ):
             refreshed = []
             refresh_agents = False
-        migrate_legacy_program = ".osmosis/program.md" in missing
         _write_scaffold(project_root, project_root.name, update=refresh_agents)
-        if migrate_legacy_program:
-            _migrate_legacy_program(project_root)
         missing = _missing_scaffold_paths(project_root)
 
     return OperationResult(
@@ -141,15 +137,6 @@ def _missing_scaffold_paths(project_root: Path) -> list[str]:
     return [
         entry.dest for entry in SCAFFOLD if not (project_root / entry.dest).exists()
     ]
-
-
-def _migrate_legacy_program(project_root: Path) -> None:
-    program = project_root / ".osmosis" / "program.md"
-    legacy_program = project_root / ".osmosis" / "research" / "program.md"
-    if not legacy_program.is_file():
-        return
-    program.parent.mkdir(parents=True, exist_ok=True)
-    program.write_bytes(legacy_program.read_bytes())
 
 
 def _workspace_summary(workspace: dict[str, Any]) -> dict[str, Any]:
@@ -186,6 +173,48 @@ def _link_data(
         "platform_key": normalize_platform_key(PLATFORM_URL),
         "linked": linked,
         "workspace": _record_workspace(record) if record is not None else None,
+    }
+
+
+def _current_project_root() -> Path | None:
+    from osmosis_ai.platform.cli.project_contract import resolve_project_root_from_cwd
+
+    try:
+        return resolve_project_root_from_cwd()
+    except CLIError:
+        return None
+
+
+def _project_list_item(
+    entry: ProjectMappingEntry, *, current_project_root: Path | None
+) -> dict[str, Any]:
+    record = entry.record
+    project_root = Path(record.project_path)
+    workspace = {
+        "id": record.workspace_id,
+        "name": record.workspace_name,
+        "repo_url": record.repo_url,
+    }
+    return {
+        "project_root": record.project_path,
+        "platform": entry.platform_key,
+        "workspace": workspace,
+        "linked_at": record.linked_at,
+        "exists": project_root.exists(),
+        "current": (
+            current_project_root is not None
+            and record.project_path == str(current_project_root)
+        ),
+    }
+
+
+def _project_list_display_item(item: dict[str, Any]) -> dict[str, Any]:
+    workspace = item["workspace"]
+    return {
+        **item,
+        "current": "*" if item["current"] else "",
+        "workspace": f"{workspace['name']} ({workspace['id']})",
+        "exists": "yes" if item["exists"] else "no",
     }
 
 
@@ -410,10 +439,51 @@ def project_info(refresh: bool = False) -> Any:
     )
 
 
+def list_projects(*, all_platforms: bool = False) -> Any:
+    """List local project-to-workspace mappings."""
+    from osmosis_ai.cli.output import ListColumn, ListResult
+
+    store = ProjectMappingStore(config_file=CONFIG_FILE, platform_url=PLATFORM_URL)
+    if all_platforms:
+        entries = store.list_all_projects()
+    else:
+        entries = [
+            ProjectMappingEntry(platform_key=store.platform_key, record=record)
+            for record in store.list_projects()
+        ]
+    current_project_root = _current_project_root()
+    items = [
+        _project_list_item(entry, current_project_root=current_project_root)
+        for entry in entries
+    ]
+    return ListResult(
+        title="Linked Projects",
+        items=items,
+        total_count=len(items),
+        has_more=False,
+        next_offset=None,
+        columns=[
+            ListColumn(key="current", label="", no_wrap=True),
+            ListColumn(key="project_root", label="Project"),
+            ListColumn(key="workspace", label="Workspace"),
+            ListColumn(key="platform", label="Platform", no_wrap=True),
+            ListColumn(key="exists", label="Exists", no_wrap=True),
+            ListColumn(key="linked_at", label="Linked At", no_wrap=True),
+        ],
+        display_items=[_project_list_display_item(item) for item in items],
+        extra={
+            "platform": PLATFORM_URL,
+            "platform_key": store.platform_key,
+            "all_platforms": all_platforms,
+        },
+    )
+
+
 __all__ = [
     "CONFIG_FILE",
     "doctor_project",
     "link_project",
+    "list_projects",
     "project_info",
     "unlink_project",
     "validate_project",

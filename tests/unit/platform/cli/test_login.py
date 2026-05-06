@@ -12,7 +12,7 @@ from osmosis_ai.cli.console import Console
 from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.platform.auth import AuthenticationExpiredError, PlatformAPIError
 from osmosis_ai.platform.auth.credentials import Credentials, UserInfo
-from osmosis_ai.platform.auth.flow import LoginResult
+from osmosis_ai.platform.auth.flow import LoginResult, VerifyResult
 
 
 def _make_credentials(
@@ -303,6 +303,14 @@ def test_whoami_prints_local_identity_outside_project(monkeypatch) -> None:
     output = io.StringIO()
 
     monkeypatch.setattr("osmosis_ai.platform.auth.load_credentials", lambda: creds)
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.verify_token",
+        lambda token: VerifyResult(
+            user=creds.user,
+            expires_at=creds.expires_at,
+            token_id=creds.token_id,
+        ),
+    )
     monkeypatch.setattr(
         "osmosis_ai.platform.cli.project_contract.resolve_project_root_from_cwd",
         lambda: (_ for _ in ()).throw(CLIError("not in project")),

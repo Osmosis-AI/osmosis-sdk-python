@@ -22,10 +22,10 @@ def test_project_doctor_dry_run_reports_missing_paths(
 
     assert rc == 0
     payload = json.loads(capsys.readouterr().out)
-    assert ".osmosis/program.md" in payload["resource"]["missing"]
+    assert ".osmosis/research/program.md" in payload["resource"]["missing"]
     assert "rollouts/.gitkeep" in payload["resource"]["missing"]
     assert payload["resource"]["fixed"] is False
-    assert not (project / ".osmosis" / "program.md").exists()
+    assert not (project / ".osmosis" / "research" / "program.md").exists()
 
 
 def test_project_doctor_fix_creates_missing_paths(
@@ -38,27 +38,28 @@ def test_project_doctor_fix_creates_missing_paths(
 
     payload = json.loads(capsys.readouterr().out)
     assert rc == 0
-    assert (project / ".osmosis" / "program.md").is_file()
+    assert (project / ".osmosis" / "research" / "program.md").is_file()
     assert (project / "configs" / "training").is_dir()
     assert payload["resource"]["missing"] == []
 
 
-def test_project_doctor_fix_migrates_legacy_program_content(
+def test_project_doctor_fix_preserves_existing_research_program(
     tmp_path: Path, monkeypatch, capsys
 ) -> None:
     project = _make_project(tmp_path / "project")
-    legacy = project / ".osmosis" / "research" / "program.md"
-    legacy.parent.mkdir(parents=True)
-    legacy.write_text("# Legacy Brief\n\nKeep this content.\n", encoding="utf-8")
+    program = project / ".osmosis" / "research" / "program.md"
+    program.parent.mkdir(parents=True)
+    program.write_text("# Research Brief\n\nKeep this content.\n", encoding="utf-8")
     monkeypatch.chdir(project)
 
     rc = main(["--json", "project", "doctor", "--fix", "--yes"])
 
     capsys.readouterr()
     assert rc == 0
-    assert (project / ".osmosis" / "program.md").read_text(
-        encoding="utf-8"
-    ) == "# Legacy Brief\n\nKeep this content.\n"
+    assert (
+        program.read_text(encoding="utf-8")
+        == "# Research Brief\n\nKeep this content.\n"
+    )
 
 
 def test_project_doctor_declining_refresh_preserves_agents_but_repairs_missing_paths(
@@ -76,6 +77,6 @@ def test_project_doctor_declining_refresh_preserves_agents_but_repairs_missing_p
         result = doctor_project(fix=True, yes=False)
 
     assert (project / "AGENTS.md").read_text(encoding="utf-8") == "custom agents"
-    assert (project / ".osmosis" / "program.md").is_file()
+    assert (project / ".osmosis" / "research" / "program.md").is_file()
     assert (project / "configs" / "training").is_dir()
     assert result.resource["refreshed"] == []

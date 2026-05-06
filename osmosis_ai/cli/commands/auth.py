@@ -83,28 +83,6 @@ def _load_login_workspaces(
     return _normalize_workspaces(data.get("workspaces")), None
 
 
-def _current_linked_project_summary() -> dict[str, str] | None:
-    from osmosis_ai.platform.auth.config import PLATFORM_URL
-    from osmosis_ai.platform.cli.project_contract import resolve_project_root_from_cwd
-    from osmosis_ai.platform.cli.project_mapping import CONFIG_FILE, ProjectMappingStore
-
-    try:
-        project_root = resolve_project_root_from_cwd()
-        record = ProjectMappingStore(
-            config_file=CONFIG_FILE,
-            platform_url=PLATFORM_URL,
-        ).get_project(str(project_root))
-    except CLIError:
-        return None
-    if record is None:
-        return None
-    return {
-        "project_root": str(project_root),
-        "workspace_id": record.workspace_id,
-        "workspace_name": record.workspace_name,
-    }
-
-
 def _login_operation_result(
     *,
     email: str,
@@ -525,7 +503,7 @@ def logout(
 
 @app.command("whoami")
 def whoami() -> Any:
-    """Show current authenticated user and linked project, when available."""
+    """Show current authenticated user."""
     from osmosis_ai.cli.output import (
         DetailField,
         DetailResult,
@@ -537,6 +515,7 @@ def whoami() -> Any:
         Credentials,
         LoginError,
         load_credentials,
+        verify_token,
     )
     from osmosis_ai.platform.constants import MSG_NOT_LOGGED_IN
 
@@ -558,29 +537,28 @@ def whoami() -> Any:
         raise CLIError(MSG_NOT_LOGGED_IN, code="AUTH_REQUIRED")
     if not env_token and credentials.is_expired():
         raise AuthenticationExpiredError()
+    if not env_token:
+        try:
+            with output.status("Verifying session..."):
+                verified = verify_token(credentials.access_token)
+        except LoginError as exc:
+            platform_code = getattr(exc, "code", None)
+            if getattr(exc, "status_code", None) == 401 or (
+                isinstance(platform_code, str)
+                and platform_code in _AUTH_LOGIN_ERROR_CODES
+            ):
+                message = (
+                    "Your session has been revoked. "
+                    "Please run 'osmosis auth login' to re-authenticate."
+                    if platform_code == "TOKEN_REVOKED"
+                    else None
+                )
+                if message is not None:
+                    raise AuthenticationExpiredError(message) from exc
+                raise AuthenticationExpiredError() from exc
+            raise _cli_error_from_login_error(exc) from exc
+        credentials = Credentials.from_verify_result(credentials.access_token, verified)
 
-    linked_project = _current_linked_project_summary()
-    local_linked_project = (
-        {
-            "project_root": linked_project["project_root"],
-            "workspace": {
-                "id": linked_project["workspace_id"],
-                "name": linked_project["workspace_name"],
-            },
-            "source": "local_project_mapping",
-            "verified_with_active_token": not bool(env_token),
-        }
-        if linked_project
-        else None
-    )
-    workspace = (
-        {
-            "id": linked_project["workspace_id"],
-            "name": linked_project["workspace_name"],
-        }
-        if linked_project
-        else None
-    )
     account = {
         "email": credentials.user.email,
         "name": credentials.user.name,
@@ -591,11 +569,11 @@ def whoami() -> Any:
         account["token_id"] = credentials.token_id
     data = {
         "account": account,
-        "local_linked_project": local_linked_project,
+        "local_linked_project": None,
         "email": credentials.user.email,
         "name": credentials.user.name,
-        "workspace": workspace,
-        "linked_project": linked_project,
+        "workspace": None,
+        "linked_project": None,
         "expires_at": credentials.expires_at.isoformat(),
         "source": source,
     }
@@ -610,29 +588,6 @@ def whoami() -> Any:
             DetailField(label="Name", value=console.format_text(credentials.user.name))
         )
     fields.append(DetailField(label="Auth source", value=source))
-    if linked_project:
-        fields.append(
-            DetailField(
-                label="Local project root",
-                value=console.format_text(linked_project["project_root"]),
-            )
-        )
-        fields.append(
-            DetailField(
-                label="Local linked workspace",
-                value=console.format_text(
-                    f"{linked_project['workspace_name']} "
-                    f"({linked_project['workspace_id']})"
-                ),
-            )
-        )
-        if env_token:
-            fields.append(
-                DetailField(
-                    label="Local link status",
-                    value=("Local metadata only; not verified against OSMOSIS_TOKEN."),
-                )
-            )
     fields.append(
         DetailField(label="Expires", value=credentials.expires_at.strftime("%Y-%m-%d"))
     )

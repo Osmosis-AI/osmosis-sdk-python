@@ -7,7 +7,6 @@ top-level layout.
 
 - Required paths:
   - `.osmosis/project.toml`
-  - `.osmosis/program.md`
   - `rollouts/`
   - `configs/training/`
   - `configs/eval/`
@@ -16,7 +15,7 @@ top-level layout.
 - The canonical rollout entrypoint is `rollouts/<name>/main.py`.
 - Eval configs live in `configs/eval/<name>.toml`.
 - Training configs live in `configs/training/<name>.toml`.
-- Local training guidance lives in `.osmosis/program.md`.
+- Local training guidance lives in `.osmosis/research/program.md`.
 - Local cache state lives in `.osmosis/cache/` and should not be treated as source.
 - Do not create new top-level directories unless the user explicitly asks.
 

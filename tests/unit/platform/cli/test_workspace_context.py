@@ -36,7 +36,9 @@ def _make_project(root: Path) -> Path:
     ):
         (root / rel_path).mkdir(parents=True)
     (root / ".osmosis" / "project.toml").write_text("[project]\n", encoding="utf-8")
-    (root / ".osmosis" / "program.md").write_text("# Program\n", encoding="utf-8")
+    (root / ".osmosis" / "research" / "program.md").write_text(
+        "# Program\n", encoding="utf-8"
+    )
     return root
 
 

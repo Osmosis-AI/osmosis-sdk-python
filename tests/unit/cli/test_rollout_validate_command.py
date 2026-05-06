@@ -32,10 +32,6 @@ def _make_project(root: Path, *, with_grader: bool = True) -> Path:
         "[project]\nsetup_source = 'test'\n",
         encoding="utf-8",
     )
-    (root / ".osmosis" / "program.md").write_text(
-        "# test\n",
-        encoding="utf-8",
-    )
     (root / ".osmosis" / "research" / "program.md").write_text(
         "# test\n",
         encoding="utf-8",

@@ -29,6 +29,7 @@ class _FakeProxy:
 def _make_project(root: Path) -> Path:
     for rel_path in (
         ".osmosis",
+        ".osmosis/research",
         "rollouts",
         "configs",
         "configs/eval",
@@ -40,7 +41,9 @@ def _make_project(root: Path) -> Path:
         "[project]\nname='test'\n",
         encoding="utf-8",
     )
-    (root / ".osmosis" / "program.md").write_text("# Test\n", encoding="utf-8")
+    (root / ".osmosis" / "research" / "program.md").write_text(
+        "# Test\n", encoding="utf-8"
+    )
     return root
 
 

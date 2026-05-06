@@ -200,6 +200,7 @@ def test_eval_run_rejects_missing_config_inside_project(tmp_path, monkeypatch, c
     """eval run fails when a project-local config file does not exist."""
     for rel_path in (
         ".osmosis",
+        ".osmosis/research",
         "rollouts",
         "configs",
         "configs/eval",
@@ -211,7 +212,9 @@ def test_eval_run_rejects_missing_config_inside_project(tmp_path, monkeypatch, c
         "[project]\nname='test'\n",
         encoding="utf-8",
     )
-    (tmp_path / ".osmosis" / "program.md").write_text("# Test\n", encoding="utf-8")
+    (tmp_path / ".osmosis" / "research" / "program.md").write_text(
+        "# Test\n", encoding="utf-8"
+    )
     monkeypatch.chdir(tmp_path)
 
     exit_code = cli.main(["eval", "run", "configs/eval/nonexistent.toml"])

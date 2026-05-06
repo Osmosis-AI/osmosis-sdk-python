@@ -53,7 +53,7 @@ def _make_project(root: Path, *, rollout: str = "demo") -> Path:
         "[project]\nsetup_source = 'test'\n",
         encoding="utf-8",
     )
-    (root / ".osmosis" / "program.md").write_text(
+    (root / ".osmosis" / "research" / "program.md").write_text(
         "# Test Program\n",
         encoding="utf-8",
     )

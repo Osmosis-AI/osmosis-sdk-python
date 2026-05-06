@@ -61,6 +61,12 @@ class ProjectLinkRecord:
         return data
 
 
+@dataclass(frozen=True, slots=True)
+class ProjectMappingEntry:
+    platform_key: str
+    record: ProjectLinkRecord
+
+
 class MappingConflictError(CLIError):
     pass
 
@@ -174,6 +180,40 @@ class ProjectMappingStore:
             if not isinstance(project_data, dict):
                 return None
             return ProjectLinkRecord.from_json(project_data)
+
+    def list_projects(self) -> list[ProjectLinkRecord]:
+        with self._lock():
+            data = self._read_unlocked()
+            bucket = self._bucket(data)
+            return [
+                ProjectLinkRecord.from_json(project_data)
+                for _, project_data in sorted(bucket["projects"].items())
+                if isinstance(project_data, dict)
+            ]
+
+    def list_all_projects(self) -> list[ProjectMappingEntry]:
+        with self._lock():
+            data = self._read_unlocked()
+            platforms = data["platforms"]
+            entries: list[ProjectMappingEntry] = []
+            for platform_key, bucket in sorted(platforms.items()):
+                if not isinstance(bucket, dict):
+                    continue
+                projects = bucket.get("projects")
+                if not isinstance(projects, dict):
+                    continue
+                for project_path, project_data in sorted(projects.items()):
+                    if not isinstance(project_data, dict):
+                        raise CLIError(
+                            f"Invalid project link record for {project_path}"
+                        )
+                    record = ProjectLinkRecord.from_json(project_data)
+                    if record.project_path != project_path:
+                        raise CLIError(f"Invalid project link path for {project_path}")
+                    entries.append(
+                        ProjectMappingEntry(platform_key=platform_key, record=record)
+                    )
+            return entries
 
     def check_link_allowed(self, record: ProjectLinkRecord) -> None:
         with self._lock():

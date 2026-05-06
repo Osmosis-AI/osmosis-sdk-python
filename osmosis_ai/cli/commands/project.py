@@ -129,3 +129,17 @@ def info(
     from osmosis_ai.platform.cli.project import project_info
 
     return project_info(refresh=refresh)
+
+
+@app.command("list")
+def list_(
+    all_platforms: bool = typer.Option(
+        False,
+        "--all-platforms",
+        help="Include linked projects for every platform URL in local config.",
+    ),
+) -> Any:
+    """List local project-to-workspace mappings."""
+    from osmosis_ai.platform.cli.project import list_projects
+
+    return list_projects(all_platforms=all_platforms)

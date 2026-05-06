@@ -447,7 +447,7 @@ class TestWriteScaffold:
 
         # Training config template
         assert (target / "configs" / "training" / "default.toml").is_file()
-        assert (target / ".osmosis" / "program.md").is_file()
+        assert (target / ".osmosis" / "research" / "program.md").is_file()
 
         # Static templates (formerly downloaded)
         assert (target / "AGENTS.md").is_file()
@@ -530,7 +530,7 @@ class TestWriteScaffold:
         assert "__pycache__" in content
         assert ".venv" in content
         assert ".env" in content
-        assert "!.osmosis/program.md" in content
+        assert "!.osmosis/research/program.md" in content
 
     def test_readme_contains_project_name(self, tmp_path: Path) -> None:
         """README.md contains the project name."""
@@ -543,7 +543,7 @@ class TestWriteScaffold:
         content = (target / "README.md").read_text(encoding="utf-8")
         assert "my-awesome-project" in content
         assert "osmosis --json project validate" in content
-        assert ".osmosis/program.md" in content
+        assert ".osmosis/research/program.md" in content
 
     def test_is_idempotent(self, tmp_path: Path) -> None:
         """Running _write_scaffold twice does NOT overwrite pre-existing files."""
@@ -992,7 +992,7 @@ def test_full_init_flow(monkeypatch, tmp_path: Path) -> None:
     assert target.is_dir()
 
     assert (target / ".osmosis" / "project.toml").is_file()
-    assert (target / ".osmosis" / "program.md").is_file()
+    assert (target / ".osmosis" / "research" / "program.md").is_file()
     assert (target / ".osmosis" / "cache" / ".gitkeep").is_file()
     assert (target / "pyproject.toml").is_file()
     assert (target / ".gitignore").is_file()

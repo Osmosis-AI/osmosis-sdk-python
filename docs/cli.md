@@ -28,6 +28,10 @@ osmosis auth logout -y
 osmosis auth whoami
 ```
 
+`whoami` verifies the active credentials and reports the authenticated account.
+It does not inspect local project links. Use `osmosis project info` for the
+current project link or `osmosis project list` for the local link table.
+
 > Top-level `osmosis login`, `osmosis logout`, and `osmosis whoami` still work as hidden aliases during the transition.
 
 ### osmosis workspace
@@ -52,6 +56,26 @@ osmosis project link --workspace <workspace-id-or-name> --yes
 ```
 
 The project mapping is stored in `~/.osmosis/config.json`.
+
+### osmosis project info
+
+Show the local workspace link for the current project. This reads local metadata
+by default and only contacts the platform when `--refresh` is passed.
+
+```bash
+osmosis project info
+osmosis project info --refresh
+```
+
+### osmosis project list
+
+List project-to-workspace links stored on this machine. This command reads the
+local mapping table and does not require authentication.
+
+```bash
+osmosis project list
+osmosis project list --all-platforms
+```
 
 For CI:
 
@@ -79,9 +103,8 @@ osmosis project validate
 osmosis project validate ./path/to/project
 ```
 
-The command checks for `.osmosis/project.toml`, `.osmosis/program.md`, and the
-required `rollouts/`, `configs/training/`, `configs/eval/`, and `data/`
-directories.
+The command checks for `.osmosis/project.toml` and the required `rollouts/`,
+`configs/training/`, `configs/eval/`, and `data/` directories.
 
 ## Rollout
 

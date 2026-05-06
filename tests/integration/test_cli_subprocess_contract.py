@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[2]
 def _make_project(root: Path) -> Path:
     for rel_path in (
         ".osmosis",
+        ".osmosis/research",
         "rollouts",
         "configs",
         "configs/eval",
@@ -25,7 +26,9 @@ def _make_project(root: Path) -> Path:
         "[project]\nname='test'\n",
         encoding="utf-8",
     )
-    (root / ".osmosis" / "program.md").write_text("# Test\n", encoding="utf-8")
+    (root / ".osmosis" / "research" / "program.md").write_text(
+        "# Test\n", encoding="utf-8"
+    )
     return root
 
 
@@ -35,6 +38,9 @@ def _run_json_command(
     project = _make_project(tmp_path / "project")
     env = {**os.environ}
     env.pop("OSMOSIS_CACHE_DIR", None)
+    env["PYTHONPATH"] = os.pathsep.join(
+        [str(ROOT), *(path for path in [env.get("PYTHONPATH")] if path)]
+    )
     return subprocess.run(
         [sys.executable, "-m", "osmosis_ai.cli.main", "--json", *args],
         cwd=project,

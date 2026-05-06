@@ -98,7 +98,7 @@ SCAFFOLD: list[ScaffoldEntry] = [
     ScaffoldEntry("", "data/.gitkeep"),
     # Rendered templates (project.toml handled separately on update)
     ScaffoldEntry("project.toml.tpl", ".osmosis/project.toml", render=True),
-    ScaffoldEntry("program.md.tpl", ".osmosis/program.md"),
+    ScaffoldEntry("program.md.tpl", ".osmosis/research/program.md"),
     ScaffoldEntry("pyproject.toml.tpl", "pyproject.toml", render=True),
     ScaffoldEntry("README.md.tpl", "README.md", render=True),
     # Static files — configs (skip on update)
@@ -585,7 +585,7 @@ def _print_next_steps(
 
     prompt_body = (
         "I want to train a model for <my task domain>. "
-        "Read .osmosis/program.md, create a baseline rollout in the "
+        "Read .osmosis/research/program.md, create a baseline rollout in the "
         "canonical project structure, iterate locally with evals, and prepare "
         "a training config. Use `osmosis --json` for Osmosis CLI commands."
     )

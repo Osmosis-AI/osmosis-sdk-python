@@ -11,6 +11,7 @@ from osmosis_ai.cli import main as cli
 def _project_root(root: Path) -> Path:
     for rel_path in (
         ".osmosis",
+        ".osmosis/research",
         "rollouts",
         "configs/training",
         "configs/eval",
@@ -18,7 +19,9 @@ def _project_root(root: Path) -> Path:
     ):
         (root / rel_path).mkdir(parents=True, exist_ok=True)
     (root / ".osmosis" / "project.toml").write_text("[project]\n", encoding="utf-8")
-    (root / ".osmosis" / "program.md").write_text("# Test Program\n", encoding="utf-8")
+    (root / ".osmosis" / "research" / "program.md").write_text(
+        "# Test Program\n", encoding="utf-8"
+    )
     return root
 
 

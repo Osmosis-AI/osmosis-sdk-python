@@ -20,6 +20,7 @@ class _Creds:
 def _make_project(root: Path) -> Path:
     for rel in (
         ".osmosis",
+        ".osmosis/research",
         "rollouts",
         "configs/eval",
         "configs/training",
@@ -27,7 +28,9 @@ def _make_project(root: Path) -> Path:
     ):
         (root / rel).mkdir(parents=True, exist_ok=True)
     (root / ".osmosis" / "project.toml").write_text("[project]\n", encoding="utf-8")
-    (root / ".osmosis" / "program.md").write_text("# Test Program\n", encoding="utf-8")
+    (root / ".osmosis" / "research" / "program.md").write_text(
+        "# Test Program\n", encoding="utf-8"
+    )
     return root
 
 
@@ -47,10 +50,11 @@ def _seed_link(
     workspace_id: str = "ws_1",
     workspace_name: str = "team-alpha",
     repo_url: str | None = None,
+    platform_url: str = "https://platform.osmosis.ai",
 ) -> None:
     ProjectMappingStore(
         config_file=config_file,
-        platform_url="https://platform.osmosis.ai",
+        platform_url=platform_url,
     ).link(
         ProjectLinkRecord(
             project_path=str(project.resolve()),
@@ -328,3 +332,118 @@ def test_project_info_shows_unlinked_success(
     payload = json.loads(capsys.readouterr().out)
     assert payload["data"]["project_root"] == str(project.resolve())
     assert payload["data"]["linked"] is False
+
+
+def test_project_list_reads_local_mappings_without_login(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    isolated_mapping: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    current_project = _make_project(tmp_path / "current")
+    archived_project = tmp_path / "archived"
+    _seed_link(
+        isolated_mapping,
+        current_project,
+        workspace_id="ws_current",
+        workspace_name="current-team",
+        repo_url="https://github.com/acme/current",
+    )
+    _seed_link(
+        isolated_mapping,
+        archived_project,
+        workspace_id="ws_archived",
+        workspace_name="archived-team",
+    )
+    monkeypatch.chdir(current_project)
+    monkeypatch.setattr(
+        "osmosis_ai.platform.cli.project.load_credentials",
+        lambda: pytest.fail("project list should not require credentials"),
+    )
+
+    rc = main(["--json", "project", "list"])
+
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["total_count"] == 2
+    by_workspace = {item["workspace"]["id"]: item for item in payload["items"]}
+    current = by_workspace["ws_current"]
+    assert current["project_root"] == str(current_project.resolve())
+    assert current["workspace"] == {
+        "id": "ws_current",
+        "name": "current-team",
+        "repo_url": "https://github.com/acme/current",
+    }
+    assert current["platform"] == "https://platform.osmosis.ai"
+    assert current["exists"] is True
+    assert current["current"] is True
+    archived = by_workspace["ws_archived"]
+    assert archived["project_root"] == str(archived_project.resolve())
+    assert archived["exists"] is False
+    assert archived["current"] is False
+
+
+def test_project_list_filters_to_current_platform_by_default(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    isolated_mapping: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    current_project = _make_project(tmp_path / "current")
+    staging_project = _make_project(tmp_path / "staging")
+    _seed_link(
+        isolated_mapping,
+        current_project,
+        workspace_id="ws_current",
+        workspace_name="current-team",
+    )
+    _seed_link(
+        isolated_mapping,
+        staging_project,
+        workspace_id="ws_staging",
+        workspace_name="staging-team",
+        platform_url="https://staging.osmosis.ai",
+    )
+    monkeypatch.chdir(tmp_path)
+
+    rc = main(["--json", "project", "list"])
+
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert [item["workspace"]["id"] for item in payload["items"]] == ["ws_current"]
+
+
+def test_project_list_all_platforms_includes_every_bucket(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    isolated_mapping: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    current_project = _make_project(tmp_path / "current")
+    staging_project = _make_project(tmp_path / "staging")
+    _seed_link(
+        isolated_mapping,
+        current_project,
+        workspace_id="ws_current",
+        workspace_name="current-team",
+    )
+    _seed_link(
+        isolated_mapping,
+        staging_project,
+        workspace_id="ws_staging",
+        workspace_name="staging-team",
+        platform_url="https://staging.osmosis.ai",
+    )
+    monkeypatch.chdir(tmp_path)
+
+    rc = main(["--json", "project", "list", "--all-platforms"])
+
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    platforms_by_workspace = {
+        item["workspace"]["id"]: item["platform"] for item in payload["items"]
+    }
+    assert platforms_by_workspace == {
+        "ws_current": "https://platform.osmosis.ai",
+        "ws_staging": "https://staging.osmosis.ai",
+    }
