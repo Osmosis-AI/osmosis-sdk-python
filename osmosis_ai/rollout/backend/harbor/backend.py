@@ -39,6 +39,7 @@ from osmosis_ai.rollout.types import (
     RolloutStatus,
 )
 from osmosis_ai.rollout.utils.imports import to_import_path
+from osmosis_ai.rollout.utils.rewards import validate_samples_have_rewards
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -473,7 +474,31 @@ class HarborBackend(ExecutionBackend):
                 for sid, reward in rewards.items():
                     if sid in samples:
                         samples[sid].reward = float(reward)
-                result = ExecutionResult(status=RolloutStatus.SUCCESS, samples=samples)
+                try:
+                    validate_samples_have_rewards(samples)
+                except ValueError as e:
+                    if not rewards:
+                        logger.warning(
+                            "Harbor verifier returned empty rewards for rollout %s",
+                            rollout_id,
+                        )
+                    else:
+                        logger.warning(
+                            "Harbor verifier returned incomplete rewards for rollout "
+                            "%s: %s",
+                            rollout_id,
+                            e,
+                        )
+                    result = ExecutionResult(
+                        status=RolloutStatus.FAILURE,
+                        samples=samples,
+                        err_message=str(e),
+                        err_category=RolloutErrorCategory.VALIDATION_ERROR,
+                    )
+                else:
+                    result = ExecutionResult(
+                        status=RolloutStatus.SUCCESS, samples=samples
+                    )
             elif event.result and event.result.exception_info:
                 err = event.result.exception_info
                 result = ExecutionResult(
@@ -483,7 +508,7 @@ class HarborBackend(ExecutionBackend):
                     err_category=RolloutErrorCategory.AGENT_ERROR,
                 )
             else:
-                result = ExecutionResult(status=RolloutStatus.SUCCESS, samples=samples)
+                result = ExecutionResult(status=RolloutStatus.FAILURE, samples=samples)
 
             await pending.on_grader_complete(result)
 
