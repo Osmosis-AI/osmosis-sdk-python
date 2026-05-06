@@ -56,6 +56,11 @@ PYTHONPATH=/workspace python -m osmosis_ai.rollout.backend.harbor.grader_runner 
 """
 
 
+def uses_local_docker_runtime(environment_config: HarborEnvironmentConfig) -> bool:
+    """Return whether Harbor will run the trial on the host Docker runtime."""
+    return environment_config.type == EnvironmentType.DOCKER
+
+
 class PendingTrial:
     def __init__(
         self,
@@ -113,17 +118,17 @@ class HarborBackend(ExecutionBackend):
             environment_config or HarborEnvironmentConfig()
         )
         self._sdk_source_dir = _sdk_source_dir
-        is_docker_environment = self.environment_config.type == EnvironmentType.DOCKER
+        uses_local_docker = uses_local_docker_runtime(self.environment_config)
         if prebuild_local_image is None:
-            prebuild_local_image = is_docker_environment
+            prebuild_local_image = uses_local_docker
         if symlink_environment is None:
-            symlink_environment = is_docker_environment
+            symlink_environment = uses_local_docker
 
         self.prebuild_local_image: bool = prebuild_local_image
         self.symlink_environment: bool = symlink_environment
         self.cleanup_successful_trials: bool = cleanup_successful_trials
 
-        if not is_docker_environment and self.prebuild_local_image:
+        if not uses_local_docker and self.prebuild_local_image:
             raise ValueError(
                 "prebuild_local_image=True is only supported for Docker "
                 "Harbor environments."
@@ -341,7 +346,7 @@ class HarborBackend(ExecutionBackend):
         if ctx:
             if ctx.chat_completions_url:
                 url = ctx.chat_completions_url
-                if self.environment_config.type == EnvironmentType.DOCKER:
+                if uses_local_docker_runtime(self.environment_config):
                     url = rewrite_url_for_docker(url)
                 config["chat_completions_url"] = url
             if ctx.api_key:

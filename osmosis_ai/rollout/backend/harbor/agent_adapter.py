@@ -46,7 +46,7 @@ class OsmosisInstalledAgent(BaseInstalledAgent):
         if self.rollout_config_path and self.rollout_config_path.exists():
             shutil.copy2(self.rollout_config_path, config_path)
 
-        if not environment.is_mounted:
+        if not environment.capabilities.mounted:
             await environment.upload_file(
                 prompt_path,
                 (EnvironmentPaths.agent_dir / "prompt.json").as_posix(),
