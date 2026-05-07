@@ -153,7 +153,7 @@ class OsmosisLitellmModel(LitellmModel):
                 "Construct it inside your workflow run, where the execution "
                 "backend has set up the context."
             )
-        self.rollout_id = ctx.rollout_id
+        self.rollout_id: str = ctx.rollout_id
         super().__init__(
             model="openai/osmosis-rollout",
             base_url=ctx.chat_completions_url,
