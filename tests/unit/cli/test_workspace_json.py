@@ -24,10 +24,6 @@ def test_workspace_list_json_returns_list_result(monkeypatch, capsys) -> None:
         "osmosis_ai.platform.cli.workspace.require_credentials", lambda: object()
     )
     monkeypatch.setattr(
-        "osmosis_ai.platform.cli.workspace.ensure_active_workspace",
-        lambda credentials=None: {"id": "ws_1", "name": "default"},
-    )
-    monkeypatch.setattr(
         "osmosis_ai.platform.cli.workspace.platform_request",
         lambda *args, **kwargs: {
             "workspaces": [
@@ -45,31 +41,22 @@ def test_workspace_list_json_returns_list_result(monkeypatch, capsys) -> None:
     assert payload["schema_version"] == 1
     assert payload["total_count"] == 2
     assert payload["items"][0]["name"] == "default"
-    assert payload["items"][0]["is_active"] is True
+    assert "is_active" not in payload["items"][0]
 
 
-def test_workspace_switch_plain_returns_renderer_output(monkeypatch, capsys) -> None:
-    persisted = {}
+def test_workspace_switch_is_removed(monkeypatch, capsys) -> None:
+    from osmosis_ai.cli.errors import CLIError
+    from osmosis_ai.cli.main import main
+
     monkeypatch.setattr(
-        "osmosis_ai.platform.cli.workspace.require_credentials", lambda: object()
-    )
-    monkeypatch.setattr(
-        "osmosis_ai.platform.cli.workspace.platform_request",
-        lambda *args, **kwargs: {"workspaces": [{"id": "ws_2", "name": "research"}]},
-    )
-    monkeypatch.setattr(
-        "osmosis_ai.platform.cli.workspace.set_active_workspace",
-        lambda workspace_id, workspace_name: persisted.update(
-            {"id": workspace_id, "name": workspace_name}
-        ),
+        "osmosis_ai.platform.cli.workspace.require_credentials",
+        lambda: (_ for _ in ()).throw(CLIError("switch handler should not run")),
     )
 
-    exit_code = cli.main(["--plain", "workspace", "switch", "research"])
+    rc = main(["workspace", "switch", "team-alpha"])
 
-    captured = capsys.readouterr()
-    assert exit_code == 0
-    assert captured.out == "Switched to workspace: research\n"
-    assert persisted == {"id": "ws_2", "name": "research"}
+    assert rc != 0
+    assert "No such command" in capsys.readouterr().err
 
 
 def test_workspace_create_json_returns_operation_result(monkeypatch, capsys) -> None:
@@ -96,6 +83,7 @@ def test_workspace_create_json_returns_operation_result(monkeypatch, capsys) -> 
     assert payload["operation"] == "workspace.create"
     assert payload["resource"]["id"] == "ws_new"
     assert payload["resource"]["name"] == "new-team"
+    assert "workspace.switch" not in json.dumps(payload)
 
 
 def test_workspace_delete_json_without_yes_fails_interactive_required(capsys) -> None:

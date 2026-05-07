@@ -22,6 +22,7 @@ from osmosis_ai.rollout.types import (
 )
 from osmosis_ai.rollout.utils.concurrency import ConcurrencyLimiter
 from osmosis_ai.rollout.utils.imports import resolve_object
+from osmosis_ai.rollout.utils.rewards import validate_samples_have_rewards
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -126,9 +127,11 @@ class LocalBackend(ExecutionBackend):
         try:
             grader = self.grader_cls(self.grader_config)
             await grader.grade(grader_ctx)
+            samples = grader_ctx.get_samples()
+            validate_samples_have_rewards(samples)
             return ExecutionResult(
                 status=RolloutStatus.SUCCESS,
-                samples=grader_ctx.get_samples(),
+                samples=samples,
             )
         except Exception as e:
             logger.error(traceback.format_exc())

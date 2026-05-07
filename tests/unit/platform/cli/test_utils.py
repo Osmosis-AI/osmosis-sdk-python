@@ -301,3 +301,160 @@ def test_platform_call_uses_injected_console() -> None:
 
     assert result == "ok"
     assert messages == ["Fetching things..."]
+
+
+# ── _require_subscription ────────────────────────────────────────────
+
+
+class _FakeCreds:
+    def is_expired(self) -> bool:
+        return False
+
+
+def test_require_subscription_refreshes_linked_workspace_by_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import osmosis_ai.platform.cli.utils as utils_module
+
+    saved: dict[str, bool] = {}
+    calls: dict[str, object] = {}
+
+    def fake_load_subscription_status(
+        workspace_name: str, *, max_age: int | None = None
+    ) -> bool | None:
+        calls["cache_workspace_name"] = workspace_name
+        calls["cache_max_age"] = max_age
+        return saved.get(workspace_name)
+
+    def fake_save_subscription_status(workspace_name: str, status: bool) -> None:
+        saved[workspace_name] = status
+
+    credentials = _FakeCreds()
+    monkeypatch.setattr(
+        utils_module, "load_subscription_status", fake_load_subscription_status
+    )
+    monkeypatch.setattr(
+        utils_module, "save_subscription_status", fake_save_subscription_status
+    )
+    monkeypatch.setattr(utils_module, "require_credentials", lambda: credentials)
+
+    class _FakeClient:
+        def refresh_workspace_info(self, **kwargs):
+            calls["refresh_kwargs"] = kwargs
+            return {"found": True, "has_subscription": True}
+
+    monkeypatch.setattr(
+        "osmosis_ai.platform.api.client.OsmosisClient", lambda: _FakeClient()
+    )
+
+    utils_module._require_subscription(
+        workspace_id="ws_123",
+        workspace_name="team-alpha",
+    )
+
+    assert saved == {"team-alpha": True}
+    assert calls["refresh_kwargs"] == {
+        "credentials": credentials,
+        "workspace_id": "ws_123",
+        "workspace_name": "team-alpha",
+        "cleanup_on_401": False,
+    }
+
+
+def test_require_subscription_propagates_auth_expired_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A real 401 must surface as AuthenticationExpiredError instead of being
+    masked by the misleading "subscription required" CLIError when a stale
+    `False` cache is present.
+    """
+    import osmosis_ai.platform.cli.utils as utils_module
+    from osmosis_ai.platform.auth import AuthenticationExpiredError
+
+    monkeypatch.setattr(
+        utils_module, "load_subscription_status", lambda *_a, **_kw: False
+    )
+    monkeypatch.setattr(
+        utils_module, "save_subscription_status", lambda *_a, **_kw: None
+    )
+    monkeypatch.setattr(utils_module, "require_credentials", lambda: _FakeCreds())
+
+    class _FakeClient:
+        def refresh_workspace_info(self, **_kwargs):
+            raise AuthenticationExpiredError("session expired")
+
+    monkeypatch.setattr(
+        "osmosis_ai.platform.api.client.OsmosisClient", lambda: _FakeClient()
+    )
+
+    with pytest.raises(AuthenticationExpiredError):
+        utils_module._require_subscription(
+            workspace_id="ws_123",
+            workspace_name="team-alpha",
+        )
+
+
+def test_require_subscription_swallows_platform_api_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Transient platform errors should not block when cache is unknown — the
+    actual mutating call surfaces them with full context.
+    """
+    import osmosis_ai.platform.cli.utils as utils_module
+    from osmosis_ai.platform.auth import PlatformAPIError
+
+    monkeypatch.setattr(
+        utils_module, "load_subscription_status", lambda *_a, **_kw: None
+    )
+    monkeypatch.setattr(
+        utils_module, "save_subscription_status", lambda *_a, **_kw: None
+    )
+    monkeypatch.setattr(utils_module, "require_credentials", lambda: _FakeCreds())
+
+    class _FakeClient:
+        def refresh_workspace_info(self, **_kwargs):
+            raise PlatformAPIError("platform unreachable")
+
+    monkeypatch.setattr(
+        "osmosis_ai.platform.api.client.OsmosisClient", lambda: _FakeClient()
+    )
+
+    # No exception — degrades gracefully so the next API call surfaces it.
+    utils_module._require_subscription(
+        workspace_id="ws_123",
+        workspace_name="team-alpha",
+    )
+
+
+def test_require_subscription_missing_workspace_uses_project_relink_hint(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import osmosis_ai.platform.cli.utils as utils_module
+
+    monkeypatch.setattr(
+        utils_module, "load_subscription_status", lambda *_a, **_kw: None
+    )
+    monkeypatch.setattr(
+        utils_module, "save_subscription_status", lambda *_a, **_kw: None
+    )
+    monkeypatch.setattr(utils_module, "require_credentials", lambda: _FakeCreds())
+
+    class _FakeClient:
+        def refresh_workspace_info(self, **_kwargs):
+            return {"found": False}
+
+    monkeypatch.setattr(
+        "osmosis_ai.platform.api.client.OsmosisClient", lambda: _FakeClient()
+    )
+
+    with pytest.raises(CLIError) as exc_info:
+        utils_module._require_subscription(
+            workspace_id="ws_deleted",
+            workspace_name="team-alpha",
+        )
+
+    message = str(exc_info.value)
+    assert "osmosis workspace" not in message
+    assert "osmosis auth login" in message
+    assert "osmosis project unlink" in message
+    assert "osmosis project link" in message

@@ -7,29 +7,24 @@ import json
 from osmosis_ai.cli import main as cli
 
 
-def test_init_json_returns_created_paths_and_next_steps(
-    monkeypatch, tmp_path, capsys
-) -> None:
+def _stub_init_dependencies(monkeypatch) -> None:
+    """Stub side-effecting helpers so init() runs without touching disk/git."""
     import osmosis_ai.platform.cli.init as init_module
 
-    monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(init_module.shutil, "which", lambda cmd: "git")
     monkeypatch.setattr(init_module, "_write_scaffold", lambda *args, **kwargs: None)
     monkeypatch.setattr(init_module, "_git_init", lambda *args, **kwargs: None)
     monkeypatch.setattr(
         init_module, "_git_initial_commit", lambda *args, **kwargs: None
     )
-    monkeypatch.setattr(
-        init_module,
-        "_selected_workspace_git_context",
-        lambda: {
-            "workspace_id": "ws_1",
-            "workspace_name": "default",
-            "git_sync_url": "https://platform.osmosis.ai/default/integrations/git",
-            "has_github_app_installation": False,
-            "connected_repo_url": None,
-        },
-    )
+
+
+def test_init_json_returns_created_paths_and_next_steps(
+    monkeypatch, tmp_path, capsys
+) -> None:
+
+    monkeypatch.chdir(tmp_path)
+    _stub_init_dependencies(monkeypatch)
 
     exit_code = cli.main(["--json", "init", "demo"])
 
@@ -39,35 +34,18 @@ def test_init_json_returns_created_paths_and_next_steps(
     payload = json.loads(captured.out)
     assert payload["status"] == "success"
     assert payload["operation"] == "init"
-    assert payload["resource"]["workspace"] == {"id": "ws_1", "name": "default"}
+    assert payload["resource"]["workspace"] is None
+    assert payload["resource"]["linked"] is False
+    assert payload["resource"]["mode"] == "create"
     assert payload["resource"]["created_paths"] == [str((tmp_path / "demo").resolve())]
-    assert payload["resource"]["git_sync_url"].endswith("/default/integrations/git")
     assert payload["next_steps_structured"]
 
 
 def test_init_plain_uses_renderer_without_rich_panels(
     monkeypatch, tmp_path, capsys
 ) -> None:
-    import osmosis_ai.platform.cli.init as init_module
-
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(init_module.shutil, "which", lambda cmd: "git")
-    monkeypatch.setattr(init_module, "_write_scaffold", lambda *args, **kwargs: None)
-    monkeypatch.setattr(init_module, "_git_init", lambda *args, **kwargs: None)
-    monkeypatch.setattr(
-        init_module, "_git_initial_commit", lambda *args, **kwargs: None
-    )
-    monkeypatch.setattr(
-        init_module,
-        "_selected_workspace_git_context",
-        lambda: {
-            "workspace_id": None,
-            "workspace_name": None,
-            "git_sync_url": None,
-            "has_github_app_installation": False,
-            "connected_repo_url": None,
-        },
-    )
+    _stub_init_dependencies(monkeypatch)
 
     exit_code = cli.main(["--plain", "init", "demo"])
 
@@ -75,3 +53,34 @@ def test_init_plain_uses_renderer_without_rich_panels(
     assert exit_code == 0
     assert captured.out.startswith("Initialized project in ")
     assert "get started" not in captured.out
+
+
+def test_init_json_rejects_removed_workspace_flag(
+    monkeypatch, tmp_path, capsys
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    _stub_init_dependencies(monkeypatch)
+
+    exit_code = cli.main(["--json", "init", "demo", "--workspace", "ws_1"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 2
+    assert captured.out == ""
+    assert "No such option" in json.loads(captured.err)["error"]["message"]
+
+
+def test_project_init_json_matches_top_level_init(
+    monkeypatch, tmp_path, capsys
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    _stub_init_dependencies(monkeypatch)
+
+    exit_code = cli.main(["--json", "project", "init", "demo"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    payload = json.loads(captured.out)
+    assert payload["operation"] == "init"
+    assert payload["resource"]["workspace"] is None
+    assert payload["resource"]["linked"] is False
+    assert payload["resource"]["mode"] == "create"

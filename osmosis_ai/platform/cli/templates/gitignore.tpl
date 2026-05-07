@@ -36,6 +36,10 @@ coverage.xml
 # marketplace for the whole team. Personal overrides go in settings.local.json.
 .claude/settings.local.json
 
+# ── Osmosis local state ──────────────────────────────
+.osmosis/**
+!.osmosis/project.toml
+
 # ── OS ──────────────────────────────────────────────
 .DS_Store
 Thumbs.db

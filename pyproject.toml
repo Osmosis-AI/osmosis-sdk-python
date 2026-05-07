@@ -41,7 +41,7 @@ dependencies = [
     # CLI framework
     "typer>=0.16.0",
     "rich>=13.0.0",
-    "harbor==0.3.0",
+    "harbor[daytona]==0.6.1",
 ]
 
 [project.optional-dependencies]
@@ -94,9 +94,17 @@ include-package-data = true
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["osmosis_ai*"]
+# The cookbook is a tree of starter recipes shipped as package data, not
+# importable Python packages — keep setuptools from registering its
+# subdirectories as part of the SDK's import surface.
+exclude = ["osmosis_ai.templates.cookbook*"]
 
 [tool.setuptools.package-data]
-osmosis_ai = ["py.typed", "platform/cli/templates/**"]
+osmosis_ai = [
+    "py.typed",
+    "platform/cli/templates/**",
+    "templates/cookbook/**",
+]
 
 [tool.setuptools.dynamic]
 version = {attr = "osmosis_ai.consts.PACKAGE_VERSION"}
@@ -120,9 +128,31 @@ omit = [
     "osmosis_ai/rollout/types/*",
     "osmosis_ai/rollout/integrations/*",
     "osmosis_ai/rollout/backend/harbor/*",
+    # Templates cookbook ships as data (starter recipes), not SDK code.
+    "osmosis_ai/templates/cookbook/*",
 ]
 
 [tool.coverage.report]
+omit = [
+    "tests/*",
+    "*/consts.py",
+    # CLI command groups (thin Typer shells) + interactive prompts
+    "osmosis_ai/cli/commands/*",
+    "osmosis_ai/cli/main.py",
+    "osmosis_ai/cli/upgrade.py",
+    "osmosis_ai/cli/prompts.py",
+    # Platform CLI business logic (API calls, OAuth, interactive prompts)
+    "osmosis_ai/platform/cli/*",
+    # Rollout — ABCs, type defs, integrations, harbor backend
+    "osmosis_ai/rollout/agent_workflow.py",
+    "osmosis_ai/rollout/grader.py",
+    "osmosis_ai/rollout/backend/base.py",
+    "osmosis_ai/rollout/types/*",
+    "osmosis_ai/rollout/integrations/*",
+    "osmosis_ai/rollout/backend/harbor/*",
+    # Templates cookbook ships as data (starter recipes), not SDK code.
+    "osmosis_ai/templates/cookbook/*",
+]
 fail_under = 70
 show_missing = true
 exclude_lines = [
@@ -134,6 +164,13 @@ exclude_lines = [
 [tool.ruff]
 target-version = "py312"
 line-length = 88
+extend-exclude = [
+    # Cookbook templates are user-facing starter recipes shipped as data
+    # (copied into ./templates/<name>/ on `osmosis template apply`); they
+    # are not part of the SDK's internal code surface and should not be
+    # held to internal lint rules.
+    "osmosis_ai/templates/cookbook",
+]
 
 [tool.ruff.lint]
 select = [
@@ -164,7 +201,14 @@ known-first-party = ["osmosis_ai"]
 [tool.pyright]
 pythonVersion = "3.12"
 include = ["osmosis_ai"]
-exclude = ["tests", "build", "dist", "**/__pycache__"]
+exclude = [
+    "tests",
+    "build",
+    "dist",
+    "**/__pycache__",
+    # Cookbook templates ship as data, not internal code (see ruff exclude).
+    "osmosis_ai/templates/cookbook",
+]
 typeCheckingMode = "standard"
 reportMissingTypeStubs = false
 reportCallInDefaultInitializer = false
@@ -172,7 +216,12 @@ reportCallInDefaultInitializer = false
 [tool.mypy]
 python_version = "3.12"
 files = ["osmosis_ai"]
-exclude = ["tests/", "build/", "dist/"]
+exclude = [
+    "tests/",
+    "build/",
+    "dist/",
+    "osmosis_ai/templates/cookbook/",
+]
 check_untyped_defs = true
 warn_return_any = true
 warn_unused_configs = true

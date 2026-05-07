@@ -302,16 +302,6 @@ def select_list(
         choices.append(Separator())
         choices.extend(actions)
 
-    # Auto-default to first selectable data item
-    if default is None:
-        for c in items:
-            if isinstance(c, str):
-                default = c
-                break
-            if isinstance(c, Choice) and not isinstance(c, Separator):
-                default = c.value
-                break
-
     if instruction is None and actions:
         instruction = "(↑↓ select, Tab jump to actions, ESC back)"
 

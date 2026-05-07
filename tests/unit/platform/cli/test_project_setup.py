@@ -9,6 +9,32 @@ import pytest
 
 from osmosis_ai.cli.errors import CLIError
 
+# ── Shared fixtures ──────────────────────────────────────────────
+
+
+_DEFAULT_WORKSPACE_NAME = "default-workspace"
+_DEFAULT_WORKSPACE_ID = "ws_default"
+
+
+def _default_git_context() -> dict[str, str | bool | None]:
+    """Return a workspace context with no connected repo and no GitHub App."""
+    return {
+        "workspace_id": _DEFAULT_WORKSPACE_ID,
+        "workspace_name": _DEFAULT_WORKSPACE_NAME,
+        "git_sync_url": (
+            f"https://platform.osmosis.ai/{_DEFAULT_WORKSPACE_NAME}/integrations/git"
+        ),
+        "has_github_app_installation": False,
+        "connected_repo_url": None,
+    }
+
+
+@pytest.fixture(autouse=True)
+def _mock_init_auth(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Reserved fixture slot for init tests that need global monkeypatching."""
+    return None
+
+
 # ── Error case: git not found ────────────────────────────────────
 
 
@@ -20,6 +46,24 @@ def test_init_raises_when_git_not_found(monkeypatch) -> None:
 
     with pytest.raises(CLIError, match=r"[Gg]it"):
         init_module.init(name="test-project")
+
+
+# ── Local-only init ───────────────────────────────────────────────
+
+
+def test_init_does_not_require_auth(monkeypatch, tmp_path: Path) -> None:
+    """init scaffolds locally without platform credentials or workspace lookup."""
+    import osmosis_ai.platform.cli.init as init_module
+
+    monkeypatch.setattr(init_module.shutil, "which", lambda cmd: "git")
+    monkeypatch.setattr(init_module, "_git_init", lambda target: None)
+    monkeypatch.setattr(init_module, "_git_initial_commit", lambda target: None)
+    monkeypatch.setattr(init_module, "_print_next_steps", lambda *a, **kw: None)
+    monkeypatch.chdir(tmp_path)
+
+    init_module.init(name="test-project")
+
+    assert (tmp_path / "test-project" / ".osmosis" / "project.toml").is_file()
 
 
 # ── Error case: directory exists without project.toml ─────────────────
@@ -57,12 +101,13 @@ def _stub_scaffold_fns(monkeypatch, module) -> None:
         monkeypatch.setattr(module, fn_name, lambda *a, **kw: None)
 
 
-def test_init_rerun_on_existing_project(monkeypatch, tmp_path: Path) -> None:
-    """init enters update mode when target dir has .osmosis/project.toml."""
+def test_init_existing_project_fails_instead_of_update(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """init fails when target dir has .osmosis/project.toml."""
     import osmosis_ai.platform.cli.init as init_module
 
     monkeypatch.setattr(init_module.shutil, "which", lambda cmd: "git")
-    _stub_scaffold_fns(monkeypatch, init_module)
 
     target = tmp_path / "my-project"
     target.mkdir()
@@ -72,8 +117,8 @@ def test_init_rerun_on_existing_project(monkeypatch, tmp_path: Path) -> None:
 
     monkeypatch.chdir(tmp_path)
 
-    # Should NOT raise — enters update mode
-    init_module.init(name="my-project")
+    with pytest.raises(CLIError, match="Already an Osmosis project"):
+        init_module.init(name="my-project")
 
 
 # ── Cleanup on scaffold failure ──────────────────────────────────
@@ -102,28 +147,51 @@ def test_init_cleanup_on_scaffold_failure(monkeypatch, tmp_path: Path) -> None:
     assert not target.exists()
 
 
-# ── --here: raises when directory not empty ───────────────────────
+# ── --here: creates in an empty current directory ─────────────────
 
 
-def test_init_here_raises_when_not_empty(monkeypatch, tmp_path: Path) -> None:
-    """init(here=True) raises CLIError if cwd is not empty."""
+def test_init_here_rejects_non_empty_non_git_directory(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """init(here=True) rejects arbitrary non-empty directories."""
     import osmosis_ai.platform.cli.init as init_module
 
     monkeypatch.setattr(init_module.shutil, "which", lambda cmd: "git")
+    (tmp_path / "some_file.txt").write_text("content")
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(CLIError, match="Current directory is not empty"):
+        init_module.init(name="test-project", here=True)
+
+    assert not (tmp_path / ".osmosis").exists()
+    assert (tmp_path / "some_file.txt").read_text(encoding="utf-8") == "content"
+
+
+def test_init_here_rejects_non_empty_git_root(monkeypatch, tmp_path: Path) -> None:
+    """init(here=True) rejects existing Git repositories."""
+    import osmosis_ai.platform.cli.init as init_module
+
+    subprocess.run(
+        ["git", "init", "-b", "main", str(tmp_path)],
+        check=True,
+        capture_output=True,
+    )
+    monkeypatch.setattr(init_module.shutil, "which", lambda cmd: "git")
+    monkeypatch.setattr(init_module, "_print_next_steps", lambda *a, **kw: None)
 
     (tmp_path / "some_file.txt").write_text("content")
 
     monkeypatch.chdir(tmp_path)
 
-    with pytest.raises(CLIError, match="not empty"):
+    with pytest.raises(CLIError, match="Current directory is not empty"):
         init_module.init(name="test-project", here=True)
 
+    assert not (tmp_path / ".osmosis").exists()
+    assert (tmp_path / "some_file.txt").read_text(encoding="utf-8") == "content"
 
-# ── --here: allows directory with only .git/ ──────────────────────
 
-
-def test_init_here_allows_git_dir(monkeypatch, tmp_path: Path) -> None:
-    """init(here=True) allows a directory containing only .git/."""
+def test_init_here_rejects_git_dir(monkeypatch, tmp_path: Path) -> None:
+    """init(here=True) rejects a directory containing only .git/."""
     import osmosis_ai.platform.cli.init as init_module
 
     monkeypatch.setattr(init_module.shutil, "which", lambda cmd: "git")
@@ -133,251 +201,8 @@ def test_init_here_allows_git_dir(monkeypatch, tmp_path: Path) -> None:
 
     monkeypatch.chdir(tmp_path)
 
-    # Should NOT raise
-    init_module.init(name="test-project", here=True)
-
-
-def test_init_raises_when_selected_workspace_has_connected_repo(
-    monkeypatch, tmp_path: Path
-) -> None:
-    """Fresh init should stop before creating a directory when the active workspace already has a repo."""
-    import osmosis_ai.platform.cli.init as init_module
-
-    monkeypatch.setattr(init_module.shutil, "which", lambda cmd: "git")
-    monkeypatch.setattr(
-        init_module,
-        "_selected_workspace_git_context",
-        lambda: {
-            "workspace_name": "team-alpha",
-            "git_sync_url": "https://platform.osmosis.ai/team-alpha/integrations/git",
-            "has_github_app_installation": True,
-            "connected_repo_url": "https://github.com/acme/rollouts",
-        },
-    )
-
-    monkeypatch.chdir(tmp_path)
-
-    target = tmp_path / "test-project"
-    with pytest.raises(CLIError, match="already connected"):
-        init_module.init(name="test-project")
-
-    assert not target.exists()
-
-
-def test_init_here_raises_when_selected_workspace_has_connected_repo(
-    monkeypatch, tmp_path: Path
-) -> None:
-    """init(here=True) should stop when the active workspace already has a connected repo."""
-    import osmosis_ai.platform.cli.init as init_module
-
-    monkeypatch.setattr(init_module.shutil, "which", lambda cmd: "git")
-    monkeypatch.setattr(
-        init_module,
-        "_selected_workspace_git_context",
-        lambda: {
-            "workspace_name": "team-alpha",
-            "git_sync_url": "https://platform.osmosis.ai/team-alpha/integrations/git",
-            "has_github_app_installation": True,
-            "connected_repo_url": "https://github.com/acme/rollouts",
-        },
-    )
-
-    (tmp_path / ".git").mkdir()
-    monkeypatch.chdir(tmp_path)
-
-    with pytest.raises(CLIError, match=r"git clone https://github\.com/acme/rollouts"):
+    with pytest.raises(CLIError, match="Current directory is not empty"):
         init_module.init(name="test-project", here=True)
-
-
-def test_init_ignores_auth_expiry_in_best_effort_workspace_lookup(
-    monkeypatch, tmp_path: Path
-) -> None:
-    """init should continue when best-effort workspace Git metadata lookup hits 401."""
-    import osmosis_ai.platform.auth as auth_module
-    import osmosis_ai.platform.cli.init as init_module
-
-    class _Creds:
-        def is_expired(self) -> bool:
-            return False
-
-    def fake_platform_request(endpoint, **kwargs):
-        assert endpoint == "/api/cli/workspaces"
-        assert kwargs.get("cleanup_on_401") is False
-        raise auth_module.AuthenticationExpiredError("session expired")
-
-    monkeypatch.setattr(init_module.shutil, "which", lambda cmd: "git")
-    for fn_name in (
-        "_write_scaffold",
-        "_git_init",
-        "_git_initial_commit",
-        "_update_project_metadata",
-    ):
-        monkeypatch.setattr(init_module, fn_name, lambda *a, **kw: None)
-    monkeypatch.setattr(init_module, "get_active_workspace_name", lambda: "team-alpha")
-    monkeypatch.setattr(auth_module, "load_credentials", lambda: _Creds())
-    monkeypatch.setattr(auth_module, "platform_request", fake_platform_request)
-
-    monkeypatch.chdir(tmp_path)
-
-    init_module.init(name="test-project")
-
-    assert (tmp_path / "test-project").is_dir()
-
-
-def test_init_auto_selects_single_workspace_for_git_context(
-    monkeypatch, tmp_path: Path
-) -> None:
-    """init should auto-select the only workspace when none is saved locally.
-
-    This also persists the selection to local config so subsequent CLI
-    commands see the same active workspace.
-    """
-    import osmosis_ai.platform.auth as auth_module
-    import osmosis_ai.platform.cli.init as init_module
-
-    class _Creds:
-        def is_expired(self) -> bool:
-            return False
-
-    calls: list[tuple[str, dict]] = []
-    persisted: dict[str, str] = {}
-
-    def fake_platform_request(endpoint, **kwargs):
-        calls.append((endpoint, kwargs))
-        assert endpoint == "/api/cli/workspaces"
-        assert kwargs.get("cleanup_on_401") is False
-        return {
-            "workspaces": [
-                {
-                    "id": "ws_solo",
-                    "name": "solo-team",
-                    "has_github_app_installation": False,
-                    "connected_repo": None,
-                }
-            ]
-        }
-
-    def fake_set_active_workspace(workspace_id, workspace_name):
-        persisted["id"] = workspace_id
-        persisted["name"] = workspace_name
-
-    monkeypatch.setattr(init_module.shutil, "which", lambda cmd: "git")
-    for fn_name in (
-        "_write_scaffold",
-        "_git_init",
-        "_git_initial_commit",
-        "_update_project_metadata",
-    ):
-        monkeypatch.setattr(init_module, fn_name, lambda *a, **kw: None)
-    monkeypatch.setattr(init_module, "get_active_workspace_name", lambda: None)
-    monkeypatch.setattr(init_module, "get_active_workspace_id", lambda: None)
-    monkeypatch.setattr(init_module, "set_active_workspace", fake_set_active_workspace)
-    monkeypatch.setattr(auth_module, "load_credentials", lambda: _Creds())
-    monkeypatch.setattr(auth_module, "platform_request", fake_platform_request)
-
-    monkeypatch.chdir(tmp_path)
-
-    init_module.init(name="test-project")
-
-    assert (tmp_path / "test-project").is_dir()
-    # Only one API call — fetch + verify + extract metadata are unified.
-    assert len(calls) == 1
-    # Auto-selection should have been persisted.
-    assert persisted == {"id": "ws_solo", "name": "solo-team"}
-
-
-def test_init_blocks_when_auto_selected_workspace_has_connected_repo(
-    monkeypatch, tmp_path: Path
-) -> None:
-    """init should raise when the auto-selected single workspace already has a connected repo."""
-    import osmosis_ai.platform.auth as auth_module
-    import osmosis_ai.platform.cli.init as init_module
-
-    class _Creds:
-        def is_expired(self) -> bool:
-            return False
-
-    def fake_platform_request(endpoint, **kwargs):
-        assert endpoint == "/api/cli/workspaces"
-        return {
-            "workspaces": [
-                {
-                    "id": "ws_solo",
-                    "name": "solo-team",
-                    "has_github_app_installation": True,
-                    "connected_repo": {
-                        "repo_url": "https://github.com/acme/rollouts",
-                    },
-                }
-            ]
-        }
-
-    monkeypatch.setattr(init_module.shutil, "which", lambda cmd: "git")
-    monkeypatch.setattr(init_module, "get_active_workspace_name", lambda: None)
-    monkeypatch.setattr(init_module, "get_active_workspace_id", lambda: None)
-    monkeypatch.setattr(init_module, "set_active_workspace", lambda *a, **kw: None)
-    monkeypatch.setattr(auth_module, "load_credentials", lambda: _Creds())
-    monkeypatch.setattr(auth_module, "platform_request", fake_platform_request)
-
-    monkeypatch.chdir(tmp_path)
-
-    target = tmp_path / "test-project"
-    with pytest.raises(CLIError, match="already connected"):
-        init_module.init(name="test-project")
-
-    assert not target.exists()
-
-
-def test_init_does_not_trust_stale_local_workspace_id(
-    monkeypatch, tmp_path: Path
-) -> None:
-    """init should ignore a locally cached workspace id that the server no longer returns.
-
-    Regression guard: previously, a stale local workspace name would be
-    trusted verbatim, producing broken Git Sync links and bypassing the
-    connected-repo guardrail.
-    """
-    import osmosis_ai.platform.auth as auth_module
-    import osmosis_ai.platform.cli.init as init_module
-
-    class _Creds:
-        def is_expired(self) -> bool:
-            return False
-
-    def fake_platform_request(endpoint, **kwargs):
-        assert endpoint == "/api/cli/workspaces"
-        # Server lists two *other* workspaces — the local id is gone.
-        return {
-            "workspaces": [
-                {"id": "ws_a", "name": "team-a"},
-                {"id": "ws_b", "name": "team-b"},
-            ]
-        }
-
-    monkeypatch.setattr(init_module.shutil, "which", lambda cmd: "git")
-    for fn_name in (
-        "_write_scaffold",
-        "_git_init",
-        "_git_initial_commit",
-        "_update_project_metadata",
-    ):
-        monkeypatch.setattr(init_module, fn_name, lambda *a, **kw: None)
-    # Local state points to a workspace the user no longer belongs to.
-    monkeypatch.setattr(init_module, "get_active_workspace_name", lambda: "old-team")
-    monkeypatch.setattr(init_module, "get_active_workspace_id", lambda: "ws_stale")
-    monkeypatch.setattr(auth_module, "load_credentials", lambda: _Creds())
-    monkeypatch.setattr(auth_module, "platform_request", fake_platform_request)
-
-    monkeypatch.chdir(tmp_path)
-
-    # init should still succeed (empty Git context, no false connected-repo block).
-    init_module.init(name="test-project")
-
-    context = init_module._selected_workspace_git_context()
-    # Stale id wasn't trusted, and there's no unambiguous auto-selection.
-    assert context["workspace_name"] is None
-    assert context["git_sync_url"] is None
-    assert context["connected_repo_url"] is None
 
 
 # ── _render_template ─────────────────────────────────────────────
@@ -426,12 +251,13 @@ class TestWriteScaffold:
         assert (target / "README.md").is_file()
 
         # .gitkeep markers
-        assert (target / ".osmosis" / "research" / "experiments" / ".gitkeep").is_file()
+        assert (target / ".osmosis" / "cache" / ".gitkeep").is_file()
         assert (target / "rollouts" / ".gitkeep").is_file()
         assert (target / "configs" / "eval" / ".gitkeep").is_file()
+        assert (target / "configs" / "training" / ".gitkeep").is_file()
         assert (target / "data" / ".gitkeep").is_file()
 
-        # Training config template (replaces configs/training/.gitkeep)
+        # Training config template
         assert (target / "configs" / "training" / "default.toml").is_file()
         assert (target / ".osmosis" / "research" / "program.md").is_file()
 
@@ -448,8 +274,7 @@ class TestWriteScaffold:
 
         # Directories exist
         assert (target / ".osmosis").is_dir()
-        assert (target / ".osmosis" / "research").is_dir()
-        assert (target / ".osmosis" / "research" / "experiments").is_dir()
+        assert (target / ".osmosis" / "cache").is_dir()
         assert (target / "rollouts").is_dir()
         assert (target / "configs" / "training").is_dir()
         assert (target / "configs" / "eval").is_dir()
@@ -505,8 +330,8 @@ class TestWriteScaffold:
         assert "codex plugin install my-marketplace" in content
         assert "codex plugin install osmosis" not in content
 
-    def test_gitignore_has_python_sections(self, tmp_path: Path) -> None:
-        """.gitignore includes Python-related patterns."""
+    def test_gitignore_has_python_and_osmosis_sections(self, tmp_path: Path) -> None:
+        """.gitignore includes Python patterns and ignores local Osmosis state."""
         from osmosis_ai.platform.cli.init import _write_scaffold
 
         target = tmp_path / "project"
@@ -517,6 +342,9 @@ class TestWriteScaffold:
         assert "__pycache__" in content
         assert ".venv" in content
         assert ".env" in content
+        assert ".osmosis/**" in content
+        assert "!.osmosis/project.toml" in content
+        assert "!.osmosis/research/program.md" not in content
 
     def test_readme_contains_project_name(self, tmp_path: Path) -> None:
         """README.md contains the project name."""
@@ -765,6 +593,25 @@ class TestGitInit:
         _git_init(tmp_path)  # Should not raise
         assert (tmp_path / ".git").is_dir()
 
+    def test_git_init_skips_existing_git_file(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """_git_init is a no-op for worktree/submodule .git files."""
+        import osmosis_ai.platform.cli.init as init_module
+
+        (tmp_path / ".git").write_text(
+            "gitdir: /tmp/example/.git/worktrees/project\n",
+            encoding="utf-8",
+        )
+
+        def _fail_run(*args, **kwargs):
+            raise AssertionError("git init should not run when .git exists")
+
+        monkeypatch.setattr(init_module._subprocess, "run", _fail_run)
+
+        init_module._git_init(tmp_path)
+        assert (tmp_path / ".git").is_file()
+
 
 # ── _git_initial_commit ───────────────────────────────────────────
 
@@ -803,21 +650,32 @@ class TestGitInitialCommit:
 
 
 class TestPrintNextSteps:
-    def test_print_next_steps_default(self, monkeypatch) -> None:
-        """_print_next_steps includes 'cd' and generic Git Sync CTA when no workspace is selected."""
+    @staticmethod
+    def _build_console(monkeypatch):
+        """Swap the init module's console for a captured StringIO console."""
         import io
 
-        import osmosis_ai.platform.auth as auth_module
         import osmosis_ai.platform.cli.init as mod
         from osmosis_ai.cli.console import Console
-        from osmosis_ai.platform.cli.init import _print_next_steps
 
         buf = io.StringIO()
         test_console = Console(file=buf, force_terminal=False, no_color=True)
         monkeypatch.setattr(mod, "console", test_console)
-        monkeypatch.setattr(mod, "get_active_workspace_name", lambda: None)
-        monkeypatch.setattr(auth_module, "load_credentials", lambda: None)
-        _print_next_steps("my-project", here=False)
+        return buf
+
+    def test_print_next_steps_empty_context(self, monkeypatch) -> None:
+        """_print_next_steps falls back to the generic Git Sync CTA with an empty context."""
+        from osmosis_ai.platform.cli.init import _print_next_steps
+
+        buf = self._build_console(monkeypatch)
+        empty_context: dict[str, str | bool | None] = {
+            "workspace_id": None,
+            "workspace_name": None,
+            "git_sync_url": None,
+            "has_github_app_installation": False,
+            "connected_repo_url": None,
+        }
+        _print_next_steps("my-project", here=False, git_context=empty_context)
         output = buf.getvalue()
         assert "cd my-project" in output
         assert "Git Sync" in output
@@ -825,60 +683,42 @@ class TestPrintNextSteps:
 
     def test_print_next_steps_selected_workspace(self, monkeypatch) -> None:
         """_print_next_steps shows a workspace Git Sync URL when no repo is connected."""
-        import io
-
-        import osmosis_ai.platform.auth as auth_module
         import osmosis_ai.platform.cli.init as mod
-        from osmosis_ai.cli.console import Console
         from osmosis_ai.platform.cli.init import _print_next_steps
 
-        buf = io.StringIO()
-        test_console = Console(file=buf, force_terminal=False, no_color=True)
-        monkeypatch.setattr(mod, "console", test_console)
-        monkeypatch.setattr(mod, "get_active_workspace_name", lambda: "team-alpha")
-        monkeypatch.setattr(auth_module, "load_credentials", lambda: None)
-        _print_next_steps("my-project", here=False)
+        buf = self._build_console(monkeypatch)
+        _print_next_steps(
+            "my-project",
+            here=False,
+            git_context={
+                "workspace_id": "ws_alpha",
+                "workspace_name": "team-alpha",
+                "git_sync_url": (f"{mod.PLATFORM_URL}/team-alpha/integrations/git"),
+                "has_github_app_installation": False,
+                "connected_repo_url": None,
+            },
+        )
         output = buf.getvalue()
         assert "cd my-project" in output
         assert f"{mod.PLATFORM_URL}/team-alpha/integrations/git" in output
 
     def test_print_next_steps_connected_repo(self, monkeypatch) -> None:
         """_print_next_steps shows the connected repository URL when one exists."""
-        import io
-
-        import osmosis_ai.platform.auth as auth_module
         import osmosis_ai.platform.cli.init as mod
-        from osmosis_ai.cli.console import Console
         from osmosis_ai.platform.cli.init import _print_next_steps
 
-        class _Creds:
-            def is_expired(self) -> bool:
-                return False
-
-        def fake_platform_request(endpoint, **kwargs):
-            assert endpoint == "/api/cli/workspaces"
-            assert kwargs.get("cleanup_on_401") is False
-            return {
-                "workspaces": [
-                    {
-                        "id": "ws_alpha",
-                        "name": "team-alpha",
-                        "has_github_app_installation": True,
-                        "connected_repo": {
-                            "repo_url": "https://github.com/acme/rollouts",
-                        },
-                    }
-                ]
-            }
-
-        buf = io.StringIO()
-        test_console = Console(file=buf, force_terminal=False, no_color=True)
-        monkeypatch.setattr(mod, "console", test_console)
-        monkeypatch.setattr(mod, "get_active_workspace_name", lambda: "team-alpha")
-        monkeypatch.setattr(mod, "get_active_workspace_id", lambda: "ws_alpha")
-        monkeypatch.setattr(auth_module, "load_credentials", lambda: _Creds())
-        monkeypatch.setattr(auth_module, "platform_request", fake_platform_request)
-        _print_next_steps("my-project", here=False)
+        buf = self._build_console(monkeypatch)
+        _print_next_steps(
+            "my-project",
+            here=False,
+            git_context={
+                "workspace_id": "ws_alpha",
+                "workspace_name": "team-alpha",
+                "git_sync_url": (f"{mod.PLATFORM_URL}/team-alpha/integrations/git"),
+                "has_github_app_installation": True,
+                "connected_repo_url": "https://github.com/acme/rollouts",
+            },
+        )
         output = buf.getvalue()
         assert "cd my-project" in output
         assert "Connected repo:" in output
@@ -886,61 +726,38 @@ class TestPrintNextSteps:
 
     def test_print_next_steps_choose_repo_when_app_installed(self, monkeypatch) -> None:
         """_print_next_steps asks the user to choose a repo when GitHub is connected but no repo is linked."""
-        import io
-
-        import osmosis_ai.platform.auth as auth_module
         import osmosis_ai.platform.cli.init as mod
-        from osmosis_ai.cli.console import Console
         from osmosis_ai.platform.cli.init import _print_next_steps
 
-        class _Creds:
-            def is_expired(self) -> bool:
-                return False
-
-        def fake_platform_request(endpoint, **kwargs):
-            assert endpoint == "/api/cli/workspaces"
-            return {
-                "workspaces": [
-                    {
-                        "id": "ws_alpha",
-                        "name": "team-alpha",
-                        "has_github_app_installation": True,
-                        "connected_repo": None,
-                    }
-                ]
-            }
-
-        buf = io.StringIO()
-        test_console = Console(file=buf, force_terminal=False, no_color=True)
-        monkeypatch.setattr(mod, "console", test_console)
-        monkeypatch.setattr(mod, "get_active_workspace_name", lambda: "team-alpha")
-        monkeypatch.setattr(mod, "get_active_workspace_id", lambda: "ws_alpha")
-        monkeypatch.setattr(auth_module, "load_credentials", lambda: _Creds())
-        monkeypatch.setattr(auth_module, "platform_request", fake_platform_request)
-        _print_next_steps("my-project", here=False)
+        buf = self._build_console(monkeypatch)
+        _print_next_steps(
+            "my-project",
+            here=False,
+            git_context={
+                "workspace_id": "ws_alpha",
+                "workspace_name": "team-alpha",
+                "git_sync_url": (f"{mod.PLATFORM_URL}/team-alpha/integrations/git"),
+                "has_github_app_installation": True,
+                "connected_repo_url": None,
+            },
+        )
         output = buf.getvalue()
         assert f"{mod.PLATFORM_URL}/team-alpha/integrations/git" in output
         assert "choose a repo" in output
 
     def test_print_next_steps_includes_plugin_install_hints(self, monkeypatch) -> None:
         """_print_next_steps advertises the osmosis plugin for Claude / Cursor / Codex."""
-        import io
-
-        import osmosis_ai.platform.auth as auth_module
-        import osmosis_ai.platform.cli.init as mod
-        from osmosis_ai.cli.console import Console
         from osmosis_ai.platform.cli.init import _print_next_steps
 
         monkeypatch.setenv("OSMOSIS_PLUGIN_REPO", "my-org/my-plugins")
         monkeypatch.setenv("OSMOSIS_PLUGIN_MARKETPLACE", "my-marketplace")
 
-        buf = io.StringIO()
-        test_console = Console(file=buf, force_terminal=False, no_color=True)
-        monkeypatch.setattr(mod, "console", test_console)
-        monkeypatch.setattr(mod, "get_active_workspace_name", lambda: None)
-        monkeypatch.setattr(auth_module, "load_credentials", lambda: None)
-
-        _print_next_steps("my-project", here=False)
+        buf = self._build_console(monkeypatch)
+        _print_next_steps(
+            "my-project",
+            here=False,
+            git_context=_default_git_context(),
+        )
         output = buf.getvalue()
         assert "osmosis agent plugin" in output
         assert "Claude Code" in output
@@ -952,22 +769,17 @@ class TestPrintNextSteps:
 
     def test_print_next_steps_here(self, monkeypatch) -> None:
         """_print_next_steps omits 'cd' when here=True but keeps platform URL."""
-        import io
-
-        import osmosis_ai.platform.auth as auth_module
-        import osmosis_ai.platform.cli.init as mod
-        from osmosis_ai.cli.console import Console
         from osmosis_ai.platform.cli.init import _print_next_steps
 
-        buf = io.StringIO()
-        test_console = Console(file=buf, force_terminal=False, no_color=True)
-        monkeypatch.setattr(mod, "console", test_console)
-        monkeypatch.setattr(mod, "get_active_workspace_name", lambda: None)
-        monkeypatch.setattr(auth_module, "load_credentials", lambda: None)
-        _print_next_steps("my-project", here=True)
+        buf = self._build_console(monkeypatch)
+        _print_next_steps(
+            "my-project",
+            here=True,
+            git_context=_default_git_context(),
+        )
         output = buf.getvalue()
         assert "cd my-project" not in output
-        assert "Git Sync" in output
+        assert "Git Sync" in output or "integrations/git" in output
 
 
 # ── Integration tests — full init flow ────────────────────────────
@@ -995,7 +807,7 @@ def test_full_init_flow(monkeypatch, tmp_path: Path) -> None:
 
     assert (target / ".osmosis" / "project.toml").is_file()
     assert (target / ".osmosis" / "research" / "program.md").is_file()
-    assert (target / ".osmosis" / "research" / "experiments" / ".gitkeep").is_file()
+    assert (target / ".osmosis" / "cache" / ".gitkeep").is_file()
     assert (target / "pyproject.toml").is_file()
     assert (target / ".gitignore").is_file()
     assert (target / "README.md").is_file()
@@ -1015,8 +827,25 @@ def test_full_init_flow(monkeypatch, tmp_path: Path) -> None:
     assert "Initial project setup" in result.stdout
 
 
-def test_full_init_update_flow(monkeypatch, tmp_path: Path) -> None:
-    """Update mode: overwrites agent docs/plugin settings, updates metadata, does NOT commit."""
+def test_init_local_only_does_not_require_auth(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import osmosis_ai.platform.cli.init as init_module
+
+    monkeypatch.setattr(init_module.shutil, "which", lambda cmd: "git")
+    monkeypatch.setattr(init_module, "_git_init", lambda target: None)
+    monkeypatch.setattr(init_module, "_git_initial_commit", lambda target: None)
+    monkeypatch.setattr(init_module, "_print_next_steps", lambda *a, **kw: None)
+    monkeypatch.chdir(tmp_path)
+
+    init_module.init(name="demo")
+
+    assert (tmp_path / "demo" / ".osmosis" / "project.toml").is_file()
+
+
+def test_full_init_here_creates_initial_commit(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     import io
 
     import osmosis_ai.platform.cli.init as init_module
@@ -1030,43 +859,68 @@ def test_full_init_update_flow(monkeypatch, tmp_path: Path) -> None:
 
     monkeypatch.chdir(tmp_path)
 
-    # First run — fresh init
-    init_module.init(name="test-project")
-    target = tmp_path / "test-project"
+    init_module.init(name="demo", here=True)
 
-    # Record initial state
-    commit_count_before = subprocess.run(
-        ["git", "rev-list", "--count", "HEAD"],
-        cwd=target,
+    assert (tmp_path / ".osmosis" / "project.toml").is_file()
+
+    result = subprocess.run(
+        ["git", "log", "--oneline"],
+        cwd=tmp_path,
         capture_output=True,
         text=True,
         check=True,
-    ).stdout.strip()
+    )
+    assert "Initial project setup" in result.stdout
 
-    # Tamper with AGENTS.md and a config
-    (target / "AGENTS.md").write_text("user edits", encoding="utf-8")
-    (target / "pyproject.toml").write_text("user pyproject", encoding="utf-8")
 
-    # Second run — update mode
+def test_init_here_scaffold_failure_removes_created_files(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import osmosis_ai.platform.cli.init as init_module
+
+    monkeypatch.setattr(init_module.shutil, "which", lambda cmd: "git")
+
+    def _partial_scaffold(
+        target: Path, project_name: str, *, update: bool = False
+    ) -> None:
+        (target / ".osmosis").mkdir()
+        (target / ".osmosis" / "project.toml").write_text(
+            "[project]\n", encoding="utf-8"
+        )
+        (target / "rollouts").mkdir()
+        (target / "rollouts" / ".gitkeep").write_text("", encoding="utf-8")
+        raise CLIError("scaffold failed")
+
+    monkeypatch.setattr(init_module, "_write_scaffold", _partial_scaffold)
+    monkeypatch.chdir(tmp_path)
+
+    with pytest.raises(CLIError, match="scaffold failed"):
+        init_module.init(name="demo", here=True)
+
+    assert not (tmp_path / ".osmosis").exists()
+    assert not (tmp_path / "rollouts").exists()
+    assert not any(tmp_path.iterdir())
+
+
+def test_full_init_existing_project_fails(monkeypatch, tmp_path: Path) -> None:
+    """A second init run no longer updates an existing project."""
+    import io
+
+    import osmosis_ai.platform.cli.init as init_module
+    from osmosis_ai.cli.console import Console
+
+    monkeypatch.setattr(init_module.shutil, "which", lambda cmd: "git")
+
+    buf = io.StringIO()
+    test_console = Console(file=buf, force_terminal=False, no_color=True)
+    monkeypatch.setattr(init_module, "console", test_console)
+
+    monkeypatch.chdir(tmp_path)
+
     init_module.init(name="test-project")
 
-    # AGENTS.md was overwritten
-    assert (target / "AGENTS.md").read_text(encoding="utf-8") != "user edits"
-    # pyproject.toml was preserved
-    assert (target / "pyproject.toml").read_text(encoding="utf-8") == "user pyproject"
-    # project.toml has updated_at
-    project_content = (target / ".osmosis" / "project.toml").read_text(encoding="utf-8")
-    assert "updated_at = " in project_content
-
-    # No new git commit was created
-    commit_count_after = subprocess.run(
-        ["git", "rev-list", "--count", "HEAD"],
-        cwd=target,
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout.strip()
-    assert commit_count_before == commit_count_after
+    with pytest.raises(CLIError, match="Already an Osmosis project"):
+        init_module.init(name="test-project")
 
 
 # ── CLI command registration ──────────────────────────────────────
@@ -1086,4 +940,6 @@ def test_init_command_registered() -> None:
     output = strip_ansi(result.output)
     assert "Initialize" in output
     assert "--here" in output
+    assert "--workspace" not in output
+    assert "--no-link" not in output
     assert "NAME" in output

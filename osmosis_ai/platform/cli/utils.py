@@ -20,14 +20,16 @@ from osmosis_ai.platform.api.models import (
 from osmosis_ai.platform.auth import (
     AuthenticationExpiredError,
     PlatformAPIError,
-    ensure_active_workspace,
     load_credentials,
 )
 from osmosis_ai.platform.auth.config import PLATFORM_URL
 from osmosis_ai.platform.auth.local_config import (
-    get_active_workspace_name,
     load_subscription_status,
     save_subscription_status,
+)
+from osmosis_ai.platform.cli.workspace_context import (
+    WorkspaceContext,
+    resolve_linked_workspace_context,
 )
 from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE
 
@@ -57,6 +59,11 @@ def require_credentials() -> Credentials:
     if credentials.is_expired():
         raise AuthenticationExpiredError()
     return credentials
+
+
+def require_workspace_context() -> WorkspaceContext:
+    """Resolve the current linked Osmosis project workspace."""
+    return resolve_linked_workspace_context()
 
 
 def format_dataset_status(d: Any, *, for_prompt: bool = False) -> str:
@@ -281,41 +288,21 @@ def validate_list_options(
     return limit, all_
 
 
-def _get_active_workspace_name(
-    credentials: Credentials | None = None,
-) -> str:
-    """Return the active workspace name, or raise if none is selected."""
-    workspace_name = get_active_workspace_name()
-    if workspace_name is None:
-        active_workspace = platform_call(
-            "Loading workspace...",
-            lambda: ensure_active_workspace(credentials=credentials),
-        )
-        if active_workspace is not None:
-            workspace_name = active_workspace["name"]
-    if workspace_name is None:
-        raise CLIError(
-            "No workspace selected. Run 'osmosis workspace' to select a workspace."
-        )
-    return workspace_name
-
-
 def _require_auth(
     *,
     workspace_name: str | None = None,
 ) -> tuple[str, Credentials]:
-    """Check that user is authenticated and has a workspace selected.
-
-    Checks credentials first so that unauthenticated users see "Not logged in"
-    instead of the misleading "No workspace selected".
-    """
-    credentials = require_credentials()
+    """Check that user is authenticated for legacy bootstrap flows."""
     if workspace_name is None:
-        workspace_name = _get_active_workspace_name(credentials)
+        raise CLIError(
+            "This command requires a linked Osmosis project. "
+            "Run 'osmosis project link' from the project root."
+        )
+    credentials = require_credentials()
     return workspace_name, credentials
 
 
-def _require_subscription(*, workspace_name: str) -> None:
+def _require_subscription(*, workspace_id: str, workspace_name: str) -> None:
     """Check that a workspace has an active subscription.
 
     Uses cached status with TTL. If the cache is expired, stale, or False,
@@ -330,6 +317,10 @@ def _require_subscription(*, workspace_name: str) -> None:
     refreshed = False
     api_reached = False
     workspace_found = False
+    # Intentionally do NOT suppress AuthenticationExpiredError here: a real
+    # 401 must surface as "session expired" rather than be silently swallowed
+    # and reported below as the misleading "subscription required" error
+    # when a stale `False` subscription cache is present.
     with contextlib.suppress(PlatformAPIError, OSError):
         credentials = require_credentials()
         from osmosis_ai.platform.api.client import OsmosisClient
@@ -338,7 +329,10 @@ def _require_subscription(*, workspace_name: str) -> None:
         info = platform_call(
             "Checking subscription...",
             lambda: client.refresh_workspace_info(
-                credentials=credentials, workspace_name=workspace_name
+                credentials=credentials,
+                workspace_id=workspace_id,
+                workspace_name=workspace_name,
+                cleanup_on_401=False,
             ),
         )
         api_reached = True
@@ -355,9 +349,12 @@ def _require_subscription(*, workspace_name: str) -> None:
     if not refreshed and status is None:
         if api_reached and not workspace_found:
             raise CLIError(
-                f"Workspace '{workspace_name}' not found. "
-                "It may have been deleted or renamed.\n"
-                "  Run 'osmosis workspace' to select a valid workspace."
+                f"Workspace '{workspace_name}' ({workspace_id}) not found. "
+                "It may have been deleted, renamed, or become inaccessible.\n"
+                "  Run 'osmosis auth login' if you logged in as a different user, "
+                "or relink this project:\n"
+                "    osmosis project unlink\n"
+                "    osmosis project link"
             )
         return
 

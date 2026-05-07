@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -22,7 +24,9 @@ class TestCompleteUploadValidation:
             "status": "uploaded",
         }
         client = OsmosisClient()
-        result = client.complete_upload(file_id="file-1", parts=None)
+        result = client.complete_upload(
+            file_id="file-1", parts=None, workspace_id="ws_test"
+        )
         assert result.id == "file-1"
         assert result.status == "uploaded"
         mock_request.assert_called_once()
@@ -45,7 +49,9 @@ class TestCompleteUploadValidation:
             {"PartNumber": 2, "ETag": "etag-bbb"},
         ]
         client = OsmosisClient()
-        result = client.complete_upload(file_id="file-2", parts=parts)
+        result = client.complete_upload(
+            file_id="file-2", parts=parts, workspace_id="ws_test"
+        )
         assert result.id == "file-2"
         assert result.status == "uploaded"
         # Verify parts payload was passed correctly
@@ -66,7 +72,9 @@ class TestCompleteUploadValidation:
             {"PartNumber": 1, "ETag": "etag-2"},
         ]
         with pytest.raises(ValueError, match="Duplicate part numbers"):
-            client.complete_upload(file_id="file-1", parts=parts)
+            client.complete_upload(
+                file_id="file-1", parts=parts, workspace_id="ws_test"
+            )
 
 
 class TestAbortUpload:
@@ -77,10 +85,108 @@ class TestAbortUpload:
         """Verify abort sends empty body (server reads upload_id from DB)."""
         mock_request.return_value = None
         client = OsmosisClient()
-        client.abort_upload(file_id="file-1")
+        client.abort_upload(file_id="file-1", workspace_id="ws_test")
         call_kwargs = mock_request.call_args
         payload = call_kwargs.kwargs.get("data") or call_kwargs[1].get("data")
         assert payload == {}
+
+
+class TestListDatasets:
+    """Tests for OsmosisClient.list_datasets."""
+
+    @patch("osmosis_ai.platform.api.client.platform_request")
+    def test_list_datasets_passes_workspace_id(self, mock_request: MagicMock) -> None:
+        mock_request.return_value = {"datasets": [], "total_count": 0}
+
+        OsmosisClient().list_datasets(credentials=object(), workspace_id="ws_123")
+
+        assert mock_request.call_args.kwargs["workspace_id"] == "ws_123"
+
+
+class TestWorkspaceIdPassthrough:
+    """Tests representative workspace-scoped methods pass workspace_id."""
+
+    @pytest.mark.parametrize(
+        ("call_client", "response"),
+        [
+            (
+                lambda client: client.create_dataset(
+                    "data.jsonl", 100, "jsonl", workspace_id="ws_123"
+                ),
+                {
+                    "id": "file-1",
+                    "file_name": "data.jsonl",
+                    "file_size": 100,
+                    "status": "uploaded",
+                },
+            ),
+            (
+                lambda client: client.submit_training_run(
+                    model_path="openai/gpt-oss",
+                    dataset="dataset-1",
+                    rollout_name="rollout",
+                    entrypoint="rollout.py",
+                    workspace_id="ws_123",
+                ),
+                {
+                    "id": "run-1",
+                    "name": "Run 1",
+                    "status": "pending",
+                    "created_at": "2026-05-03T00:00:00Z",
+                },
+            ),
+            (
+                lambda client: client.list_training_runs(workspace_id="ws_123"),
+                {"training_runs": [], "total_count": 0},
+            ),
+            (
+                lambda client: client.list_rollouts(workspace_id="ws_123"),
+                {"rollouts": [], "total_count": 0},
+            ),
+            (
+                lambda client: client.list_base_models(workspace_id="ws_123"),
+                {"models": [], "total_count": 0},
+            ),
+            (
+                lambda client: client.list_deployments(workspace_id="ws_123"),
+                {"deployments": [], "total_count": 0},
+            ),
+            (
+                lambda client: client.deploy_checkpoint(
+                    "checkpoint-1", workspace_id="ws_123"
+                ),
+                {
+                    "deployment": {
+                        "id": "dep-1",
+                        "checkpoint_name": "checkpoint-1",
+                        "status": "active",
+                    }
+                },
+            ),
+            (
+                lambda client: client.list_training_run_checkpoints(
+                    "run-1", workspace_id="ws_123"
+                ),
+                {
+                    "training_run_id": "run-1",
+                    "training_run_name": "Run 1",
+                    "checkpoints": [],
+                },
+            ),
+        ],
+    )
+    @patch("osmosis_ai.platform.api.client.platform_request")
+    def test_workspace_scoped_methods_pass_workspace_id(
+        self,
+        mock_request: MagicMock,
+        call_client: Callable[[OsmosisClient], object],
+        response: dict[str, Any],
+    ) -> None:
+        mock_request.return_value = response
+
+        call_client(OsmosisClient())
+
+        assert mock_request.call_args.kwargs["workspace_id"] == "ws_123"
 
 
 class TestSafePath:
@@ -119,7 +225,7 @@ class TestURLPathSafety:
             "status": "uploaded",
         }
         client = OsmosisClient()
-        client.complete_upload(file_id="a/b")
+        client.complete_upload(file_id="a/b", workspace_id="ws_test")
         path = mock_request.call_args[0][0]
         assert path == "/api/cli/datasets/a%2Fb/complete"
 
@@ -127,7 +233,7 @@ class TestURLPathSafety:
     def test_abort_upload_encodes_id(self, mock_request: MagicMock) -> None:
         mock_request.return_value = None
         client = OsmosisClient()
-        client.abort_upload(file_id="a/b")
+        client.abort_upload(file_id="a/b", workspace_id="ws_test")
         path = mock_request.call_args[0][0]
         assert path == "/api/cli/datasets/a%2Fb/abort"
 
@@ -140,7 +246,7 @@ class TestURLPathSafety:
             "status": "uploaded",
         }
         client = OsmosisClient()
-        client.get_dataset("a/b")
+        client.get_dataset("a/b", workspace_id="ws_test")
         path = mock_request.call_args[0][0]
         assert path == "/api/cli/datasets/a%2Fb"
 
@@ -152,7 +258,7 @@ class TestURLPathSafety:
             "file_name": "f.jsonl",
         }
         client = OsmosisClient()
-        result = client.get_dataset_download_url("a/b")
+        result = client.get_dataset_download_url("a/b", workspace_id="ws_test")
         path = mock_request.call_args[0][0]
         assert path == "/api/cli/datasets/a%2Fb/download"
         assert result.presigned_url == "https://example.com/download"
@@ -161,7 +267,7 @@ class TestURLPathSafety:
     def test_delete_dataset_encodes_id(self, mock_request: MagicMock) -> None:
         mock_request.return_value = None
         client = OsmosisClient()
-        client.delete_dataset("a/b")
+        client.delete_dataset("a/b", workspace_id="ws_test")
         path = mock_request.call_args[0][0]
         assert path == "/api/cli/datasets/a%2Fb"
 
@@ -171,7 +277,7 @@ class TestURLPathSafety:
             "training_run": {"id": "r1", "status": "running"},
         }
         client = OsmosisClient()
-        client.get_training_run("a/b")
+        client.get_training_run("a/b", workspace_id="ws_test")
         path = mock_request.call_args[0][0]
         assert path == "/api/cli/training-runs/a%2Fb"
 
@@ -187,7 +293,7 @@ class TestGetModelAffectedResources:
             ],
         }
         client = OsmosisClient()
-        result = client.get_model_affected_resources("m1")
+        result = client.get_model_affected_resources("m1", workspace_id="ws_test")
         assert len(result.training_runs_using_model) == 1
         assert result.has_blocking_runs is True
         path = mock_request.call_args[0][0]
@@ -199,7 +305,7 @@ class TestGetModelAffectedResources:
             "training_runs_using_model": [],
         }
         client = OsmosisClient()
-        client.get_model_affected_resources("a/b")
+        client.get_model_affected_resources("a/b", workspace_id="ws_test")
         path = mock_request.call_args[0][0]
         assert "a%2Fb" in path
 
@@ -312,6 +418,8 @@ class TestRefreshWorkspaceInfo:
         result = client.refresh_workspace_info(workspace_name="team-alpha")
         assert result == {
             "found": True,
+            "id": "ws-1",
+            "name": "team-alpha",
             "has_subscription": True,
             "has_github_app_installation": False,
             "connected_repo": None,
@@ -325,6 +433,154 @@ class TestRefreshWorkspaceInfo:
         client = OsmosisClient()
         result = client.refresh_workspace_info(workspace_name="missing")
         assert result == {"found": False}
+
+    @patch("osmosis_ai.platform.api.client.platform_request")
+    def test_workspace_id_takes_precedence_over_workspace_name(
+        self, mock_request: MagicMock
+    ) -> None:
+        mock_request.return_value = {
+            "workspaces": [
+                {
+                    "id": "ws-1",
+                    "name": "team-alpha",
+                    "has_subscription": True,
+                },
+                {
+                    "id": "ws-2",
+                    "name": "team-beta",
+                    "has_subscription": False,
+                },
+            ]
+        }
+        client = OsmosisClient()
+
+        result = client.refresh_workspace_info(
+            workspace_id="ws-2", workspace_name="team-alpha"
+        )
+
+        assert result["found"] is True
+        assert result["id"] == "ws-2"
+        assert result["name"] == "team-beta"
+
+
+class TestSubmitTrainingRun:
+    """Tests for OsmosisClient.submit_training_run payload assembly."""
+
+    @staticmethod
+    def _response() -> dict[str, Any]:
+        return {
+            "id": "run-1",
+            "name": "run-1",
+            "status": "pending",
+            "created_at": "2026-05-04T00:00:00Z",
+        }
+
+    @patch("osmosis_ai.platform.api.client.platform_request")
+    def test_minimal_payload_omits_optional_fields(
+        self, mock_request: MagicMock
+    ) -> None:
+        """Optional fields are omitted from the payload when not provided."""
+        mock_request.return_value = self._response()
+        client = OsmosisClient()
+        result = client.submit_training_run(
+            model_path="m1",
+            dataset="ds1",
+            rollout_name="rollout1",
+            entrypoint="rollouts/main.py",
+            workspace_id="ws_test",
+        )
+        assert result.id == "run-1"
+        payload = mock_request.call_args.kwargs["data"]
+        assert payload == {
+            "model_path": "m1",
+            "dataset": "ds1",
+            "rollout_name": "rollout1",
+            "entrypoint": "rollouts/main.py",
+        }
+        assert "rollout_env" not in payload
+        assert "rollout_secret_refs" not in payload
+
+    @patch("osmosis_ai.platform.api.client.platform_request")
+    def test_rollout_env_included_when_non_empty(self, mock_request: MagicMock) -> None:
+        """Non-empty rollout_env map is forwarded to the platform."""
+        mock_request.return_value = self._response()
+        client = OsmosisClient()
+        rollout_env = {"FOO": "bar", "BAZ": "qux"}
+        client.submit_training_run(
+            model_path="m1",
+            dataset="ds1",
+            rollout_name="rollout1",
+            entrypoint="rollouts/main.py",
+            rollout_env=rollout_env,
+            workspace_id="ws_test",
+        )
+        payload = mock_request.call_args.kwargs["data"]
+        assert payload["rollout_env"] == rollout_env
+        assert "rollout_secret_refs" not in payload
+
+    @patch("osmosis_ai.platform.api.client.platform_request")
+    def test_rollout_secret_refs_included_when_non_empty(
+        self, mock_request: MagicMock
+    ) -> None:
+        """Non-empty rollout_secret_refs map is forwarded to the platform."""
+        mock_request.return_value = self._response()
+        client = OsmosisClient()
+        secret_refs = {"OPENAI_API_KEY": "openai-prod"}
+        client.submit_training_run(
+            model_path="m1",
+            dataset="ds1",
+            rollout_name="rollout1",
+            entrypoint="rollouts/main.py",
+            rollout_secret_refs=secret_refs,
+            workspace_id="ws_test",
+        )
+        payload = mock_request.call_args.kwargs["data"]
+        assert payload["rollout_secret_refs"] == secret_refs
+        assert "rollout_env" not in payload
+
+    @patch("osmosis_ai.platform.api.client.platform_request")
+    def test_empty_rollout_env_and_secret_refs_are_omitted(
+        self, mock_request: MagicMock
+    ) -> None:
+        """Empty dicts are treated as 'not provided' and stripped from payload."""
+        mock_request.return_value = self._response()
+        client = OsmosisClient()
+        client.submit_training_run(
+            model_path="m1",
+            dataset="ds1",
+            rollout_name="rollout1",
+            entrypoint="rollouts/main.py",
+            rollout_env={},
+            rollout_secret_refs={},
+            workspace_id="ws_test",
+        )
+        payload = mock_request.call_args.kwargs["data"]
+        assert "rollout_env" not in payload
+        assert "rollout_secret_refs" not in payload
+
+    @patch("osmosis_ai.platform.api.client.platform_request")
+    def test_commit_sha_and_config_included_when_provided(
+        self, mock_request: MagicMock
+    ) -> None:
+        """commit_sha and config are forwarded when provided."""
+        mock_request.return_value = self._response()
+        client = OsmosisClient()
+        client.submit_training_run(
+            model_path="m1",
+            dataset="ds1",
+            rollout_name="rollout1",
+            entrypoint="rollouts/main.py",
+            commit_sha="abc123",
+            config={"lr": 0.001},
+            rollout_env={"FOO": "bar"},
+            rollout_secret_refs={"OPENAI_API_KEY": "openai-prod"},
+            workspace_id="ws_test",
+        )
+        payload = mock_request.call_args.kwargs["data"]
+        assert payload["commit_sha"] == "abc123"
+        assert payload["config"] == {"lr": 0.001}
+        assert payload["rollout_env"] == {"FOO": "bar"}
+        assert payload["rollout_secret_refs"] == {"OPENAI_API_KEY": "openai-prod"}
 
 
 class TestGetTrainingRunMetrics:
@@ -355,7 +611,7 @@ class TestGetTrainingRunMetrics:
             ],
         }
         client = OsmosisClient()
-        result = client.get_training_run_metrics("run-1")
+        result = client.get_training_run_metrics("run-1", workspace_id="ws_test")
         assert result.training_run_id == "run-1"
         assert result.overview.reward == 0.85
         assert len(result.metrics) == 1
@@ -379,6 +635,6 @@ class TestGetTrainingRunMetrics:
             "metrics": [],
         }
         client = OsmosisClient()
-        client.get_training_run_metrics("a/b")
+        client.get_training_run_metrics("a/b", workspace_id="ws_test")
         path = mock_request.call_args[0][0]
         assert path == "/api/cli/training-runs/a%2Fb/metrics"

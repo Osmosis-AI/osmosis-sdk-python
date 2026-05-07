@@ -15,13 +15,36 @@ from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE
 app: typer.Typer = typer.Typer(help="Manage training runs.", no_args_is_help=True)
 
 
+def _workspace_result_context(workspace: Any) -> dict[str, Any]:
+    return {
+        "workspace": {"id": workspace.workspace_id, "name": workspace.workspace_name},
+        "project_root": str(workspace.project_root),
+    }
+
+
 def _detail_fields(rows: list[tuple[str, str]]) -> list[Any]:
     from osmosis_ai.cli.output import DetailField
 
     return [DetailField(label=label, value=value) for label, value in rows]
 
 
-def _require_confirmation(message: str, *, yes: bool) -> None:
+def _require_confirmation(
+    message: str,
+    *,
+    yes: bool,
+    summary: list[tuple[str, str]] | None = None,
+    notes: list[str] | None = None,
+    warnings: list[str] | None = None,
+) -> None:
+    """Confirm a destructive action, surfacing context in non-interactive modes.
+
+    In rich+interactive mode, falls back to the questionary prompt. In JSON
+    and plain modes (or any non-interactive shell), raises an
+    ``INTERACTIVE_REQUIRED`` error that carries the prompt question, the
+    summary of what would be acted on, and any notes/warnings — so AI
+    agents and CI scripts can see exactly what they're being asked to
+    confirm without first having to retry with ``--yes``.
+    """
     if yes:
         return
 
@@ -29,9 +52,36 @@ def _require_confirmation(message: str, *, yes: bool) -> None:
 
     output = get_output_context()
     if output.format is not OutputFormat.rich or not output.interactive:
+        details: dict[str, Any] = {"prompt": message}
+        if summary:
+            details["summary"] = {label: value for label, value in summary}
+        if notes:
+            details["notes"] = list(notes)
+        if warnings:
+            details["warnings"] = list(warnings)
+
+        if output.format is OutputFormat.plain:
+            import sys
+
+            lines: list[str] = [f"Confirmation required: {message}"]
+            if summary:
+                for label, value in summary:
+                    lines.append(f"  {label}: {value}")
+            if notes:
+                lines.append("Notes:")
+                for note in notes:
+                    lines.append(f"  - {note}")
+            if warnings:
+                lines.append("Warnings:")
+                for warning in warnings:
+                    lines.append(f"  - {warning}")
+            sys.stderr.write("\n".join(lines) + "\n")
+            sys.stderr.flush()
+
         err = CLIError(
             "Use --yes to confirm in non-interactive mode.",
             code="INTERACTIVE_REQUIRED",
+            details=details,
         )
         if output.format is OutputFormat.json:
             from osmosis_ai.cli.output import emit_structured_error_to_stderr
@@ -45,6 +95,109 @@ def _require_confirmation(message: str, *, yes: bool) -> None:
     require_confirmation(message, yes=yes)
 
 
+def _print_remote_fetch_notice(
+    project_root: Path,
+    *,
+    pinned_commit_sha: str | None,
+) -> tuple[list[str], list[str]]:
+    """Remind the user that submit pulls *code* from the connected Git remote
+    while reading *config values* from the local TOML file.
+
+    The platform clones the workspace's connected Git repository (or
+    fetches a pinned commit) before training, so local *code* changes
+    that haven't been pushed will silently be ignored. The config TOML
+    passed to ``osmosis train submit``, by contrast, is read from disk
+    and its values are sent verbatim in the submit payload — local
+    edits to the config take effect immediately, even if they are
+    uncommitted.
+
+    Returns ``(notes, warnings)`` as plain-text lists so callers can
+    surface the same context in non-rich modes (e.g. the JSON error
+    envelope when ``--yes`` is missing). The Rich panel is rendered
+    only when the output format is Rich.
+    """
+    from osmosis_ai.cli.output import OutputFormat, get_output_context
+    from osmosis_ai.platform.cli.workspace_repo import summarize_local_git_state
+
+    state = summarize_local_git_state(project_root)
+
+    warnings: list[str] = []
+    if state is not None:
+        if state.is_dirty:
+            warnings.append(
+                "Uncommitted changes detected — code edits won't be picked up "
+                "(only the config file above is read locally)."
+            )
+        if state.has_upstream and state.ahead > 0:
+            commits_word = "commit" if state.ahead == 1 else "commits"
+            warnings.append(
+                f"{state.ahead} unpushed {commits_word} ahead of upstream — "
+                "push code before submitting."
+            )
+        elif state.branch is not None and not state.has_upstream:
+            warnings.append(
+                f"Branch '{state.branch}' has no upstream — "
+                "push code and set tracking before submitting."
+            )
+
+    notes: list[str] = []
+    if pinned_commit_sha:
+        notes.append(
+            f"Osmosis will fetch commit {pinned_commit_sha} from the "
+            "workspace's connected Git repository for training code."
+        )
+        notes.append("Make sure that commit is already pushed to the remote.")
+    else:
+        notes.append(
+            "Osmosis will fetch the latest training code from the workspace's "
+            "connected Git repository."
+        )
+        if state is not None and state.branch and state.head_sha:
+            notes.append(f"Local branch: {state.branch} @ {state.head_sha[:8]}")
+        notes.append("Make sure your code changes are committed and pushed.")
+    notes.append(
+        "Config values come from your local TOML file and are submitted "
+        "as-is — uncommitted edits to the config still apply."
+    )
+
+    if get_output_context().format is OutputFormat.rich:
+        body_lines: list[str] = []
+        if pinned_commit_sha:
+            body_lines.append(
+                f"Osmosis will fetch commit [bold]{console.escape(pinned_commit_sha)}[/bold] "
+                "from the workspace's connected Git repository for training code."
+            )
+            body_lines.append("Make sure that commit is already pushed to the remote.")
+        else:
+            body_lines.append(
+                "Osmosis will fetch the latest training code from the workspace's "
+                "connected Git repository."
+            )
+            if state is not None and state.branch and state.head_sha:
+                body_lines.append(
+                    f"Local: [bold]{console.escape(state.branch)}[/bold] @ "
+                    f"[dim]{console.escape(state.head_sha[:8])}[/dim]"
+                )
+            body_lines.append("Make sure your code changes are committed and pushed.")
+
+        body_lines.append("")
+        body_lines.append(
+            "[dim]Config values above come from your local TOML file and are "
+            "submitted as-is — uncommitted edits to the config still apply.[/dim]"
+        )
+
+        if warnings:
+            body_lines.append("")
+            for warning in warnings:
+                body_lines.append(f"[yellow]• {console.escape(warning)}[/yellow]")
+
+        style = "yellow" if warnings else "blue"
+        title = "Push before submitting" if warnings else "Before you submit"
+        console.panel(title, "\n".join(body_lines), style=style)
+
+    return notes, warnings
+
+
 @app.command("list")
 def list_runs(
     limit: int = typer.Option(
@@ -52,7 +205,7 @@ def list_runs(
     ),
     all_: bool = typer.Option(False, "--all", help="Show all training runs."),
 ) -> Any:
-    """List training runs in the current platform workspace."""
+    """List training runs in the linked project workspace."""
     from osmosis_ai.cli.output import (
         ListColumn,
         ListResult,
@@ -60,14 +213,15 @@ def list_runs(
         serialize_training_run,
     )
     from osmosis_ai.platform.cli.utils import (
-        _require_auth,
         fetch_all_pages,
+        require_workspace_context,
         validate_list_options,
     )
 
     effective_limit, fetch_all = validate_list_options(limit=limit, all_=all_)
 
-    _, credentials = _require_auth()
+    workspace = require_workspace_context()
+    credentials = workspace.credentials
 
     from osmosis_ai.platform.api.client import OsmosisClient
 
@@ -77,7 +231,10 @@ def list_runs(
         if fetch_all:
             training_runs, total_count = fetch_all_pages(
                 lambda lim, off: client.list_training_runs(
-                    limit=lim, offset=off, credentials=credentials
+                    limit=lim,
+                    offset=off,
+                    credentials=credentials,
+                    workspace_id=workspace.workspace_id,
                 ),
                 items_attr="training_runs",
             )
@@ -85,7 +242,10 @@ def list_runs(
             next_offset = None
         else:
             page = client.list_training_runs(
-                limit=effective_limit, offset=0, credentials=credentials
+                limit=effective_limit,
+                offset=0,
+                credentials=credentials,
+                workspace_id=workspace.workspace_id,
             )
             training_runs = page.training_runs
             total_count = page.total_count
@@ -98,6 +258,7 @@ def list_runs(
         total_count=total_count,
         has_more=has_more,
         next_offset=next_offset,
+        extra=_workspace_result_context(workspace),
         columns=[
             ListColumn(key="name", label="Name"),
             ListColumn(key="status", label="Status"),
@@ -125,17 +286,22 @@ def status(
     from osmosis_ai.platform.api.models import RUN_STATUSES_TERMINAL
     from osmosis_ai.platform.auth.platform_client import PlatformAPIError
     from osmosis_ai.platform.cli.utils import (
-        _require_auth,
         build_run_detail_rows,
         format_date,
+        require_workspace_context,
     )
 
-    _, credentials = _require_auth()
+    workspace = require_workspace_context()
+    credentials = workspace.credentials
 
     client = OsmosisClient()
     output = get_output_context()
     with output.status("Fetching training run..."):
-        run = client.get_training_run(name, credentials=credentials)
+        run = client.get_training_run(
+            name,
+            credentials=credentials,
+            workspace_id=workspace.workspace_id,
+        )
 
     rows = build_run_detail_rows(run)
     if run.examples_processed_count is not None:
@@ -155,7 +321,9 @@ def status(
         try:
             with output.status("Fetching checkpoints..."):
                 ckpts = client.list_training_run_checkpoints(
-                    name, credentials=credentials
+                    name,
+                    credentials=credentials,
+                    workspace_id=workspace.workspace_id,
                 )
         except PlatformAPIError:
             ckpts = None
@@ -190,6 +358,7 @@ def status(
             "notes": run.notes,
             "hf_status": run.hf_status,
             "checkpoints": [serialize_checkpoint(cp) for cp in checkpoints],
+            **_workspace_result_context(workspace),
         }
     )
 
@@ -208,11 +377,11 @@ def info(
 def submit(
     config_path: Path = typer.Argument(
         ...,
-        exists=True,
+        exists=False,
         file_okay=True,
         dir_okay=False,
-        readable=True,
-        resolve_path=True,
+        readable=False,
+        resolve_path=False,
         help="Path to training config TOML file.",
     ),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
@@ -221,44 +390,96 @@ def submit(
     from osmosis_ai.cli.output import OperationResult, get_output_context
     from osmosis_ai.platform.cli.project_contract import (
         ensure_project_config_path,
-        resolve_project_root,
+        resolve_project_root_from_cwd,
         validate_project_contract,
         validate_rollout_backend,
     )
-    from osmosis_ai.platform.cli.training_config import load_training_config
+    from osmosis_ai.platform.cli.training_config import (
+        load_training_config,
+        validate_training_context_paths,
+    )
     from osmosis_ai.platform.cli.utils import (
-        _require_auth,
         platform_entity_url,
+        require_workspace_context,
+    )
+    from osmosis_ai.platform.cli.workspace_repo import (
+        require_git_top_level,
+        validate_workspace_repo,
     )
 
-    project_root = resolve_project_root(config_path)
+    command_label = "`osmosis train submit`"
+
+    project_root = resolve_project_root_from_cwd()
     validate_project_contract(project_root)
+    config_path = Path(config_path)
+    resolved_config_path = (
+        config_path if config_path.is_absolute() else project_root / config_path
+    )
     ensure_project_config_path(
-        config_path,
+        resolved_config_path,
         project_root,
         config_dir="configs/training",
-        command_label="`osmosis train submit`",
+        command_label=command_label,
     )
-    config = load_training_config(config_path)
+    config = load_training_config(resolved_config_path)
+    validate_training_context_paths(config, project_root)
     validate_rollout_backend(
         project_root=project_root,
         rollout=config.experiment_rollout,
         entrypoint=config.experiment_entrypoint,
-        command_label="`osmosis train submit`",
+        command_label=command_label,
     )
-    ws_name, credentials = _require_auth()
+    workspace = require_workspace_context()
+    credentials = workspace.credentials
+    require_git_top_level(project_root, command_label)
+    validate_workspace_repo(
+        project_root=project_root,
+        workspace_id=workspace.workspace_id,
+        workspace_name=workspace.workspace_name,
+        credentials=credentials,
+        command_label=command_label,
+    )
 
-    rows: list[tuple[str, str]] = [
-        ("Rollout", console.escape(config.experiment_rollout)),
-        ("Entrypoint", console.escape(config.experiment_entrypoint)),
-        ("Model", console.escape(config.experiment_model_path)),
-        ("Dataset", console.escape(config.experiment_dataset)),
+    summary_rows: list[tuple[str, str]] = [
+        ("Rollout", config.experiment_rollout),
+        ("Entrypoint", config.experiment_entrypoint),
+        ("Model", config.experiment_model_path),
+        ("Dataset", config.experiment_dataset),
     ]
     if config.experiment_commit_sha:
-        rows.append(("Commit", console.escape(config.experiment_commit_sha)))
-    console.table(rows, title="Training Run")
+        summary_rows.append(("Commit", config.experiment_commit_sha))
+    if config.rollout_env:
+        env_keys = ", ".join(sorted(config.rollout_env))
+        summary_rows.append((f"Rollout env ({len(config.rollout_env)})", env_keys))
+    if config.rollout_secret_refs:
+        # Show env-var name → secret-record name (no secret values, ever).
+        secret_summary = ", ".join(
+            f"{env_name}={secret_name}"
+            for env_name, secret_name in sorted(config.rollout_secret_refs.items())
+        )
+        summary_rows.append(
+            (
+                f"Rollout secrets ({len(config.rollout_secret_refs)})",
+                secret_summary,
+            )
+        )
+    console.table(
+        [(label, console.escape(value)) for label, value in summary_rows],
+        title="Training Run",
+    )
 
-    _require_confirmation("Submit this training run?", yes=yes)
+    notes, warnings = _print_remote_fetch_notice(
+        project_root,
+        pinned_commit_sha=config.experiment_commit_sha,
+    )
+
+    _require_confirmation(
+        "Submit this training run?",
+        yes=yes,
+        summary=summary_rows,
+        notes=notes,
+        warnings=warnings,
+    )
 
     from osmosis_ai.platform.api.client import OsmosisClient
 
@@ -272,10 +493,13 @@ def submit(
             entrypoint=config.experiment_entrypoint,
             commit_sha=config.experiment_commit_sha,
             config=config.to_api_config(),
+            rollout_env=config.rollout_env or None,
+            rollout_secret_refs=config.rollout_secret_refs or None,
             credentials=credentials,
+            workspace_id=workspace.workspace_id,
         )
 
-    url = platform_entity_url(ws_name, "training", result.id)
+    url = platform_entity_url(workspace.workspace_name, "training", result.id)
     return OperationResult(
         operation="train.submit",
         status="success",
@@ -285,6 +509,7 @@ def submit(
             "status": result.status,
             "created_at": result.created_at,
             "url": url,
+            **_workspace_result_context(workspace),
             "config": {
                 "rollout": config.experiment_rollout,
                 "entrypoint": config.experiment_entrypoint,
@@ -397,16 +622,21 @@ def metrics(
     from osmosis_ai.platform.api.models import RUN_STATUSES_IN_PROGRESS
     from osmosis_ai.platform.auth.platform_client import PlatformAPIError
     from osmosis_ai.platform.cli.utils import (
-        _require_auth,
         platform_entity_url,
+        require_workspace_context,
     )
 
-    ws_name, credentials = _require_auth()
+    workspace = require_workspace_context()
+    credentials = workspace.credentials
     client = OsmosisClient()
     output_ctx = get_output_context()
 
     with output_ctx.status("Fetching training run..."):
-        run = client.get_training_run(name, credentials=credentials)
+        run = client.get_training_run(
+            name,
+            credentials=credentials,
+            workspace_id=workspace.workspace_id,
+        )
 
     if run.status == "pending":
         raise CLIError("Metrics are not yet available for pending training runs.")
@@ -414,7 +644,7 @@ def metrics(
     is_in_progress = run.status in RUN_STATUSES_IN_PROGRESS
 
     # ── Platform URL (no metrics dependency) ─────────────────────
-    url = platform_entity_url(ws_name, "training", run.id)
+    url = platform_entity_url(workspace.workspace_name, "training", run.id)
 
     # ── Fetch metrics (best-effort) ──────────────────────────────
     metrics_data = None
@@ -422,7 +652,9 @@ def metrics(
     try:
         with output_ctx.status("Fetching metrics..."):
             metrics_data = client.get_training_run_metrics(
-                run.id, credentials=credentials
+                run.id,
+                credentials=credentials,
+                workspace_id=workspace.workspace_id,
             )
     except (PlatformAPIError, KeyError) as exc:
         metrics_error = str(exc) or "Could not fetch metrics data."
@@ -501,7 +733,11 @@ def metrics(
                 out_path = (
                     _resolve_output_path(output, run.name, run.id)
                     if output
-                    else _resolve_default_output(run.name, run.id)
+                    else _resolve_default_output(
+                        run.name,
+                        run.id,
+                        cwd=workspace.project_root,
+                    )
                 )
                 out_path.write_text(
                     json.dumps(export, indent=2, ensure_ascii=False) + "\n"
@@ -523,6 +759,7 @@ def metrics(
             "metrics": export,
             "output_path": output_path,
             "save_warning": save_warning,
+            **_workspace_result_context(workspace),
         },
         fields=fields,
     )
@@ -541,23 +778,32 @@ def stop(
 ) -> Any:
     """Stop a training run."""
     from osmosis_ai.cli.output import OperationResult, get_output_context
-    from osmosis_ai.platform.cli.utils import _require_auth
+    from osmosis_ai.platform.cli.utils import require_workspace_context
 
-    _, credentials = _require_auth()
+    workspace = require_workspace_context()
+    credentials = workspace.credentials
 
     from osmosis_ai.platform.api.client import OsmosisClient
 
     client = OsmosisClient()
 
-    _require_confirmation(f'Stop training run "{name}"?', yes=yes)
+    _require_confirmation(
+        f'Stop training run "{name}"?',
+        yes=yes,
+        summary=[("Name", name)],
+    )
 
     output = get_output_context()
     with output.status("Stopping training run..."):
-        client.stop_training_run(name, credentials=credentials)
+        client.stop_training_run(
+            name,
+            credentials=credentials,
+            workspace_id=workspace.workspace_id,
+        )
     return OperationResult(
         operation="train.stop",
         status="success",
-        resource={"name": name},
+        resource={"name": name, **_workspace_result_context(workspace)},
         message=f'Training run "{name}" stopped.',
     )
 
@@ -569,24 +815,31 @@ def delete(
 ) -> Any:
     """Delete a training run."""
     from osmosis_ai.cli.output import OperationResult, get_output_context
-    from osmosis_ai.platform.cli.utils import _require_auth
+    from osmosis_ai.platform.cli.utils import require_workspace_context
 
-    _, credentials = _require_auth()
+    workspace = require_workspace_context()
+    credentials = workspace.credentials
 
     from osmosis_ai.platform.api.client import OsmosisClient
 
     client = OsmosisClient()
 
     _require_confirmation(
-        f'Delete training run "{name}"? This cannot be undone.', yes=yes
+        f'Delete training run "{name}"? This cannot be undone.',
+        yes=yes,
+        summary=[("Name", name)],
     )
 
     output = get_output_context()
     with output.status("Deleting training run..."):
-        client.delete_training_run(name, credentials=credentials)
+        client.delete_training_run(
+            name,
+            credentials=credentials,
+            workspace_id=workspace.workspace_id,
+        )
     return OperationResult(
         operation="train.delete",
         status="success",
-        resource={"name": name},
+        resource={"name": name, **_workspace_result_context(workspace)},
         message=f'Training run "{name}" deleted.',
     )

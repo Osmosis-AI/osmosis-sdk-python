@@ -184,3 +184,60 @@ def test_resolve_workflow_multiple_agent_workflow_config_instances(
             entrypoint="two_cfg.py",
         )
     assert "Multiple AgentWorkflowConfig" in str(exc_info.value)
+
+
+def test_resolve_workflow_entrypoint_can_import_sibling_package(
+    tmp_rollout_layout: str,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """Entrypoints commonly do absolute imports of sibling packages within
+    the rollout directory (e.g. ``from multiply_openai_agents.workflow import
+    MultiplyWorkflow``). The loader must put the rollout dir on ``sys.path``
+    so those imports resolve."""
+    rollout_dir = tmp_path / "rollouts" / tmp_rollout_layout
+
+    # Sibling package next to the entrypoint.
+    sibling_pkg = rollout_dir / "sibling_pkg"
+    sibling_pkg.mkdir()
+    (sibling_pkg / "__init__.py").write_text("", encoding="utf-8")
+    (sibling_pkg / "workflow.py").write_text(
+        textwrap.dedent(
+            """\
+            from osmosis_ai.rollout.agent_workflow import AgentWorkflow
+
+            class SiblingWorkflow(AgentWorkflow):
+                async def run(self, ctx):
+                    pass
+            """
+        ),
+        encoding="utf-8",
+    )
+
+    _write_entrypoint(
+        tmp_path,
+        tmp_rollout_layout,
+        "ep_sibling.py",
+        """\
+        from sibling_pkg.workflow import SiblingWorkflow
+        """,
+    )
+
+    rollout_dir_str = str(rollout_dir.resolve())
+
+    def _cleanup_sys_path():
+        if rollout_dir_str in sys.path:
+            sys.path.remove(rollout_dir_str)
+        sys.modules.pop("sibling_pkg", None)
+        sys.modules.pop("sibling_pkg.workflow", None)
+
+    monkeypatch.setattr(sys, "path", [p for p in sys.path if p != rollout_dir_str])
+    try:
+        wf_cls, _cfg, _mod_name = _resolve_workflow(
+            rollout=tmp_rollout_layout,
+            entrypoint="ep_sibling.py",
+        )
+        assert wf_cls is not None
+        assert wf_cls.__name__ == "SiblingWorkflow"
+    finally:
+        _cleanup_sys_path()

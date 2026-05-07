@@ -8,12 +8,76 @@ from io import StringIO
 import pytest
 
 from osmosis_ai.cli.console import Console
+from osmosis_ai.cli.errors import CLIError
+from osmosis_ai.cli.output import OutputFormat, override_output_context
 from osmosis_ai.platform.api.models import (
     BaseModelInfo,
     DatasetFile,
+    PaginatedBaseModels,
+    PaginatedTrainingRuns,
     TrainingRun,
     UploadInfo,
 )
+
+WORKSPACE_ID = "ws_1"
+
+
+# ---------------------------------------------------------------------------
+# Workspace entrypoint — linked project context
+# ---------------------------------------------------------------------------
+
+
+class TestWorkspaceEntrypoint:
+    def test_initializes_from_linked_project_workspace(self, monkeypatch):
+        import osmosis_ai.platform.cli.workspace as workspace_module
+
+        output = StringIO()
+        monkeypatch.setattr(
+            workspace_module,
+            "console",
+            Console(file=output, force_terminal=True, no_color=True, width=80),
+        )
+        monkeypatch.setattr(workspace_module, "load_credentials", lambda: object())
+        monkeypatch.setattr(workspace_module, "is_interactive", lambda: False)
+
+        class LinkedWorkspace:
+            workspace_id = WORKSPACE_ID
+            workspace_name = "team-alpha"
+
+        monkeypatch.setattr(
+            "osmosis_ai.platform.cli.workspace_context.resolve_linked_workspace_context",
+            lambda: LinkedWorkspace(),
+        )
+
+        with override_output_context(format=OutputFormat.rich, interactive=True):
+            workspace_module.workspace()
+
+        rendered = output.getvalue()
+        assert "Current:" in rendered
+        assert "team-alpha" in rendered
+        assert "not linked" not in rendered
+
+    def test_unlinked_or_outside_project_keeps_browse_only_context(self, monkeypatch):
+        import osmosis_ai.platform.cli.workspace as workspace_module
+
+        output = StringIO()
+        monkeypatch.setattr(
+            workspace_module,
+            "console",
+            Console(file=output, force_terminal=True, no_color=True, width=80),
+        )
+        monkeypatch.setattr(workspace_module, "load_credentials", lambda: object())
+        monkeypatch.setattr(workspace_module, "is_interactive", lambda: False)
+        monkeypatch.setattr(
+            "osmosis_ai.platform.cli.workspace_context.resolve_linked_workspace_context",
+            lambda: (_ for _ in ()).throw(CLIError("Not in an Osmosis project.")),
+        )
+
+        with override_output_context(format=OutputFormat.rich, interactive=True):
+            workspace_module.workspace()
+
+        assert "not linked" in output.getvalue()
+
 
 # ---------------------------------------------------------------------------
 # _clean_file_path — drag-and-drop path normalization
@@ -144,6 +208,73 @@ class TestWorkspaceDetailLinks:
 
 
 # ---------------------------------------------------------------------------
+# Workspace browse lists — explicit workspace scoping
+# ---------------------------------------------------------------------------
+
+
+class TestWorkspaceBrowseLists:
+    def test_browse_runs_passes_workspace_id(self, monkeypatch):
+        import osmosis_ai.platform.api.client as api_client_module
+        import osmosis_ai.platform.cli.workspace as workspace_module
+
+        fake_credentials = object()
+        monkeypatch.setattr(
+            workspace_module, "require_credentials", lambda: fake_credentials
+        )
+        monkeypatch.setattr(workspace_module, "select_list", lambda *a, **kw: None)
+
+        class FakeClient:
+            def list_training_runs(self, *, workspace_id, credentials=None):
+                assert workspace_id == WORKSPACE_ID
+                assert credentials is fake_credentials
+                return PaginatedTrainingRuns(
+                    training_runs=[
+                        TrainingRun(
+                            id="run-1",
+                            name="demo-run",
+                            status="running",
+                        )
+                    ],
+                    total_count=1,
+                    has_more=False,
+                )
+
+        monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+
+        workspace_module._browse_runs("my-ws", WORKSPACE_ID)
+
+    def test_browse_models_passes_workspace_id(self, monkeypatch):
+        import osmosis_ai.platform.api.client as api_client_module
+        import osmosis_ai.platform.cli.workspace as workspace_module
+
+        fake_credentials = object()
+        monkeypatch.setattr(
+            workspace_module, "require_credentials", lambda: fake_credentials
+        )
+        monkeypatch.setattr(workspace_module, "select_list", lambda *a, **kw: None)
+
+        class FakeClient:
+            def list_base_models(self, *, workspace_id, credentials=None):
+                assert workspace_id == WORKSPACE_ID
+                assert credentials is fake_credentials
+                return PaginatedBaseModels(
+                    models=[
+                        BaseModelInfo(
+                            id="model-1",
+                            model_name="demo-model",
+                            status="ready",
+                        )
+                    ],
+                    total_count=1,
+                    has_more=False,
+                )
+
+        monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+
+        workspace_module._browse_models("my-ws", WORKSPACE_ID)
+
+
+# ---------------------------------------------------------------------------
 # _perform_upload — extracted core upload logic
 # ---------------------------------------------------------------------------
 
@@ -189,17 +320,23 @@ class TestPerformUpload:
         fake_dataset = _make_fake_dataset(file_size=file_size)
 
         class FakeClient:
-            def create_dataset(self, file_name, file_size, ext, *, credentials=None):
+            def create_dataset(
+                self, file_name, file_size, ext, *, workspace_id, credentials=None
+            ):
                 calls["create"] = True
                 assert file_name == "data"
                 assert ext == "jsonl"
+                assert workspace_id == WORKSPACE_ID
                 assert credentials is fake_credentials
                 return fake_dataset
 
-            def complete_upload(self, file_id, parts=None, *, credentials=None):
+            def complete_upload(
+                self, file_id, parts=None, *, workspace_id, credentials=None
+            ):
                 calls["complete"] = True
                 assert file_id == "dataset-1"
                 assert parts is None  # simple upload
+                assert workspace_id == WORKSPACE_ID
                 assert credentials is fake_credentials
                 return DatasetFile(
                     id=file_id,
@@ -228,6 +365,7 @@ class TestPerformUpload:
             file_path=file_path,
             ext="jsonl",
             file_size=file_size,
+            workspace_id=WORKSPACE_ID,
             credentials=fake_credentials,
         )
 
@@ -248,11 +386,17 @@ class TestPerformUpload:
         created: dict[str, str] = {}
 
         class FakeClient:
-            def create_dataset(self, file_name, file_size, ext, *, credentials=None):
+            def create_dataset(
+                self, file_name, file_size, ext, *, workspace_id, credentials=None
+            ):
+                assert workspace_id == WORKSPACE_ID
                 created["file_name"] = file_name
                 return _make_fake_dataset(file_name=file_name, file_size=file_size)
 
-            def complete_upload(self, file_id, parts=None, *, credentials=None):
+            def complete_upload(
+                self, file_id, parts=None, *, workspace_id, credentials=None
+            ):
+                assert workspace_id == WORKSPACE_ID
                 return DatasetFile(
                     id=file_id,
                     file_name="agent.eval.v2",
@@ -278,6 +422,7 @@ class TestPerformUpload:
             file_path=file_path,
             ext="jsonl",
             file_size=file_size,
+            workspace_id=WORKSPACE_ID,
             credentials=None,
         )
 
@@ -292,7 +437,8 @@ class TestPerformUpload:
         file_path.write_text("{}")
 
         class FakeClient:
-            def create_dataset(self, *args, **kwargs):
+            def create_dataset(self, *args, workspace_id, **kwargs):
+                assert workspace_id == WORKSPACE_ID
                 return DatasetFile(
                     id="dataset-1",
                     file_name="data",
@@ -310,6 +456,7 @@ class TestPerformUpload:
                 file_path=file_path,
                 ext="jsonl",
                 file_size=2,
+                workspace_id=WORKSPACE_ID,
                 credentials=None,
             )
 
@@ -326,10 +473,12 @@ class TestPerformUpload:
         aborted = {}
 
         class FakeClient:
-            def create_dataset(self, *args, **kwargs):
+            def create_dataset(self, *args, workspace_id, **kwargs):
+                assert workspace_id == WORKSPACE_ID
                 return _make_fake_dataset(file_size=file_size)
 
-            def abort_upload(self, file_id, *, credentials=None):
+            def abort_upload(self, file_id, *, workspace_id, credentials=None):
+                assert workspace_id == WORKSPACE_ID
                 aborted["called"] = True
 
             def complete_upload(self, *args, **kwargs):
@@ -356,6 +505,7 @@ class TestPerformUpload:
                 file_path=file_path,
                 ext="jsonl",
                 file_size=file_size,
+                workspace_id=WORKSPACE_ID,
                 credentials=None,
             )
 
@@ -403,8 +553,11 @@ class TestUploadDatasetInteractive:
 
         uploaded = {}
 
-        def fake_perform_upload(*, file_path, ext, file_size, credentials):
+        def fake_perform_upload(
+            *, file_path, ext, file_size, workspace_id, credentials
+        ):
             uploaded["called"] = True
+            uploaded["workspace_id"] = workspace_id
             return DatasetFile(
                 id="ds-1", file_name="data", file_size=2, status="uploaded"
             )
@@ -415,11 +568,13 @@ class TestUploadDatasetInteractive:
 
         result = _upload_dataset_interactive(
             ws_name="my-ws",
+            workspace_id=WORKSPACE_ID,
             credentials=object(),
         )
 
         assert result is True
         assert uploaded["called"]
+        assert uploaded["workspace_id"] == WORKSPACE_ID
         rendered = output.getvalue()
         assert "Upload complete. Dataset: data" in rendered
         assert "https://example.com/my-ws/datasets/ds-1" in rendered
@@ -434,6 +589,7 @@ class TestUploadDatasetInteractive:
 
         result = _upload_dataset_interactive(
             ws_name="my-ws",
+            workspace_id=WORKSPACE_ID,
             credentials=object(),
         )
 
@@ -451,6 +607,7 @@ class TestUploadDatasetInteractive:
 
         result = _upload_dataset_interactive(
             ws_name="my-ws",
+            workspace_id=WORKSPACE_ID,
             credentials=object(),
         )
 
@@ -469,6 +626,7 @@ class TestUploadDatasetInteractive:
 
         result = _upload_dataset_interactive(
             ws_name="my-ws",
+            workspace_id=WORKSPACE_ID,
             credentials=object(),
         )
 
@@ -491,6 +649,7 @@ class TestUploadDatasetInteractive:
 
         result = _upload_dataset_interactive(
             ws_name="my-ws",
+            workspace_id=WORKSPACE_ID,
             credentials=object(),
         )
 
