@@ -169,8 +169,8 @@ class ProjectMappingStore:
         platform_url: str | None = None,
     ) -> None:
         self.config_file = config_file
-        self.lock_file = config_file.with_suffix(f"{config_file.suffix}.lock")
-        self.platform_key = normalize_platform_key(platform_url)
+        self.lock_file: Path = config_file.with_suffix(f"{config_file.suffix}.lock")
+        self.platform_key: str = normalize_platform_key(platform_url)
 
     def get_project(self, project_path: str) -> ProjectLinkRecord | None:
         with self._lock():

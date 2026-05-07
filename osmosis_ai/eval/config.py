@@ -107,6 +107,13 @@ def _is_filesystem_grader_config(value: str) -> bool:
     if "://" in value:
         return False
     candidate = Path(value)
+    if (
+        ":" in value
+        and "/" not in value
+        and "\\" not in value
+        and not candidate.is_absolute()
+    ):
+        return False
     return (
         candidate.is_absolute()
         or "/" in value

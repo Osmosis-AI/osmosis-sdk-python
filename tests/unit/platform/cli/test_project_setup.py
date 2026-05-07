@@ -330,8 +330,8 @@ class TestWriteScaffold:
         assert "codex plugin install my-marketplace" in content
         assert "codex plugin install osmosis" not in content
 
-    def test_gitignore_has_python_sections(self, tmp_path: Path) -> None:
-        """.gitignore includes Python-related patterns."""
+    def test_gitignore_has_python_and_osmosis_sections(self, tmp_path: Path) -> None:
+        """.gitignore includes Python patterns and ignores local Osmosis state."""
         from osmosis_ai.platform.cli.init import _write_scaffold
 
         target = tmp_path / "project"
@@ -342,7 +342,9 @@ class TestWriteScaffold:
         assert "__pycache__" in content
         assert ".venv" in content
         assert ".env" in content
-        assert "!.osmosis/research/program.md" in content
+        assert ".osmosis/**" in content
+        assert "!.osmosis/project.toml" in content
+        assert "!.osmosis/research/program.md" not in content
 
     def test_readme_contains_project_name(self, tmp_path: Path) -> None:
         """README.md contains the project name."""
