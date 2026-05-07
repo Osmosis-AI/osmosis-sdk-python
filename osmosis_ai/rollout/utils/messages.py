@@ -15,9 +15,7 @@ def map_initial_messages_to_content_blocks(
     for message in messages:
         content = message.get("content")
         if isinstance(content, str):
-            converted.append(
-                {"role": message["role"], "content": [{"text": content}]}
-            )
+            converted.append({"role": message["role"], "content": [{"text": content}]})
         else:
             converted.append(message)
     return converted
