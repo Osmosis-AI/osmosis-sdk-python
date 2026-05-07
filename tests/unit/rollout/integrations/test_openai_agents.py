@@ -38,7 +38,9 @@ class TestOpenAIAgentsIntegration:
         assert samples["main"].id == "main"
         assert samples["main"].messages == items
 
-    async def test_memory_session_registers_lazily_when_used_in_rollout_context(self):
+    async def test_memory_session_raises_when_used_in_rollout_context_after_creation(
+        self,
+    ):
         from osmosis_ai.rollout.integrations.agents.openai_agents import (
             OsmosisMemorySession,
         )
@@ -51,10 +53,8 @@ class TestOpenAIAgentsIntegration:
         )
 
         with ctx:
-            await session.add_items([{"role": "user", "content": "hello"}])
-
-        samples = await ctx.get_samples()
-        assert samples["main"].messages == [{"role": "user", "content": "hello"}]
+            with pytest.raises(RuntimeError, match="not registered"):
+                await session.add_items([{"role": "user", "content": "hello"}])
 
     def test_agent_swaps_placeholder_model_inside_rollout_context(
         self, rollout_context
