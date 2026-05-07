@@ -4,7 +4,7 @@ Installing the SDK provides a lightweight CLI as `osmosis` (aliases: `osmosis_ai
 
 ## Authentication
 
-Credentials are stored at `~/.config/osmosis/credentials.json` (workspace-aware).
+Credentials are stored at `~/.config/osmosis/credentials.json`.
 
 ### osmosis auth login
 
@@ -28,19 +28,73 @@ osmosis auth logout -y
 osmosis auth whoami
 ```
 
+`whoami` verifies the active credentials and reports the authenticated account.
+It does not inspect local project links. Use `osmosis project info` for the
+current project link or `osmosis project list` for the local link table.
+
 > Top-level `osmosis login`, `osmosis logout`, and `osmosis whoami` still work as hidden aliases during the transition.
 
 ### osmosis workspace
 
-Manage platform workspaces interactively. Launches a TUI that shows your current workspace context and lets you switch workspace, browse training runs, datasets, and models.
+Open the interactive workspace browser. The TUI lets you choose an accessible workspace, then browse training runs, datasets, and models.
 
 ```bash
 osmosis workspace
 ```
 
-In non-interactive environments, prints current context and exits.
+In non-interactive environments, use a specific subcommand such as `osmosis workspace list`, `osmosis workspace create <name>`, or `osmosis workspace delete <name> --yes`. To link this project with a workspace for platform commands, use `osmosis project link --workspace <workspace-id-or-name>`.
 
 ## Project
+
+### osmosis project link
+
+Link this project with an Osmosis workspace. The workspace must have a Git
+Sync connected repository, and the command must be run from a checkout whose
+`origin` remote matches that repository. Platform commands resolve their
+workspace from the current project.
+
+```bash
+osmosis project link --workspace <workspace-id-or-name>
+osmosis project link --workspace <workspace-id-or-name> --yes
+```
+
+The project mapping is stored in `~/.osmosis/config.json`.
+
+### osmosis project info
+
+Show the local workspace link for the current project. This reads local metadata
+by default and only contacts the platform when `--refresh` is passed.
+
+```bash
+osmosis project info
+osmosis project info --refresh
+```
+
+### osmosis project list
+
+List project-to-workspace links stored on this machine. This command reads the
+local mapping table and does not require authentication.
+
+```bash
+osmosis project list
+osmosis project list --all-platforms
+```
+
+For CI:
+
+```bash
+export OSMOSIS_TOKEN=<token>
+osmosis project link --workspace <workspace-id-or-name> --yes
+osmosis train submit configs/training/default.toml --yes
+```
+
+To create a project in the current directory, run `init --here` from a
+completely empty directory:
+
+```bash
+osmosis init --here <name>
+osmosis project link --workspace <workspace-id-or-name>
+```
 
 ### osmosis project validate
 
@@ -53,8 +107,7 @@ osmosis project validate ./path/to/project
 ```
 
 The command checks for `.osmosis/project.toml` and the required `rollouts/`,
-`configs/training/`, `configs/eval/`, `data/`, and `.osmosis/research/`
-directories.
+`configs/training/`, `configs/eval/`, and `data/` directories.
 
 ## Rollout
 
@@ -78,7 +131,7 @@ The command only accepts configs under these canonical project paths:
 
 ### osmosis rollout list
 
-List rollouts in the current platform workspace.
+List rollouts in the linked project workspace.
 
 ```bash
 osmosis rollout list

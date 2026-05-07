@@ -36,7 +36,6 @@ from .constants import (
     VALID_EXTENSIONS,
 )
 from .utils import (
-    _require_auth,
     _require_subscription,
     build_dataset_detail_rows,
     format_dataset_status,
@@ -44,6 +43,7 @@ from .utils import (
     format_size,
     platform_call,
     platform_entity_url,
+    require_workspace_context,
 )
 
 
@@ -51,11 +51,16 @@ def _abort_upload(
     client: Any,
     dataset_id: str,
     *,
+    workspace_id: str,
     credentials: Any | None = None,
 ) -> None:
     """Best-effort abort of an in-progress upload."""
     try:
-        client.abort_upload(dataset_id, credentials=credentials)
+        client.abort_upload(
+            dataset_id,
+            credentials=credentials,
+            workspace_id=workspace_id,
+        )
     except Exception as exc:
         console.print(
             f"Warning: failed to abort upload: {exc}",
@@ -81,10 +86,19 @@ PARQUET_VALIDATION_SKIPPED_WARNING = (
 )
 
 
+def _workspace_result_context(workspace: Any) -> dict[str, Any]:
+    return {
+        "workspace": {"id": workspace.workspace_id, "name": workspace.workspace_name},
+        "project_root": str(workspace.project_root),
+    }
+
+
 def _complete_with_retry(
     client: Any,
     dataset_id: str,
     parts: list[dict] | None = None,
+    *,
+    workspace_id: str,
     credentials: Any | None = None,
 ) -> Any:
     """Call ``client.complete_upload`` with automatic retry on transient errors.
@@ -108,6 +122,7 @@ def _complete_with_retry(
                     dataset_id,
                     parts=parts,
                     credentials=credentials,
+                    workspace_id=workspace_id,
                 ),
                 output_console=console,
             )
@@ -187,6 +202,7 @@ def _perform_upload(
     file_path: Path,
     ext: str,
     file_size: int,
+    workspace_id: str,
     credentials: Any | None = None,
 ) -> Any:
     """Core upload: create dataset record → S3 upload → complete.
@@ -211,6 +227,7 @@ def _perform_upload(
             file_size,
             ext,
             credentials=credentials,
+            workspace_id=workspace_id,
         ),
         output_console=console,
     )
@@ -242,16 +259,27 @@ def _perform_upload(
                     file_path, upload_info, progress_callback=progress_cb
                 )
         except KeyboardInterrupt:
-            _abort_upload(client, dataset.id, credentials=credentials)
+            _abort_upload(
+                client,
+                dataset.id,
+                credentials=credentials,
+                workspace_id=workspace_id,
+            )
             raise CLIError("Upload cancelled by user.") from None
         except Exception as e:
-            _abort_upload(client, dataset.id, credentials=credentials)
+            _abort_upload(
+                client,
+                dataset.id,
+                credentials=credentials,
+                workspace_id=workspace_id,
+            )
             raise CLIError(f"Upload failed: {e}") from e
         completed = _complete_with_retry(
             client,
             dataset.id,
             parts=parts,
             credentials=credentials,
+            workspace_id=workspace_id,
         )
     else:
         try:
@@ -261,15 +289,26 @@ def _perform_upload(
                 )
         except KeyboardInterrupt:
             console.print("\nUpload interrupted.")
-            _abort_upload(client, dataset.id, credentials=credentials)
+            _abort_upload(
+                client,
+                dataset.id,
+                credentials=credentials,
+                workspace_id=workspace_id,
+            )
             raise CLIError("Upload cancelled by user.") from None
         except Exception as e:
-            _abort_upload(client, dataset.id, credentials=credentials)
+            _abort_upload(
+                client,
+                dataset.id,
+                credentials=credentials,
+                workspace_id=workspace_id,
+            )
             raise CLIError(f"Upload failed: {e}") from e
         completed = _complete_with_retry(
             client,
             dataset.id,
             credentials=credentials,
+            workspace_id=workspace_id,
         )
 
     return completed or dataset
@@ -279,8 +318,11 @@ def upload(
     file: str,
 ) -> CommandResult:
     """Upload a dataset file."""
-    ws_name, credentials = _require_auth()
-    _require_subscription(workspace_name=ws_name)
+    workspace = require_workspace_context()
+    ws_name = workspace.workspace_name
+    credentials = workspace.credentials
+    workspace_id = workspace.workspace_id
+    _require_subscription(workspace_id=workspace_id, workspace_name=ws_name)
     output = get_output_context()
 
     file_path, ext, file_size = _check_file_basics(file)
@@ -316,13 +358,16 @@ def upload(
         ext=ext,
         file_size=file_size,
         credentials=credentials,
+        workspace_id=workspace_id,
     )
 
     url = platform_entity_url(ws_name, "datasets", dataset.id)
+    resource = serialize_dataset(dataset)
+    resource.update(_workspace_result_context(workspace))
     return OperationResult(
         operation="dataset.upload",
         status="success",
-        resource=serialize_dataset(dataset),
+        resource=resource,
         message=f"Dataset uploaded: {dataset.file_name}",
         display_next_steps=[
             f"Processing will continue on the platform. Check status at: {url}"
@@ -345,7 +390,9 @@ def list_datasets(limit: int = DEFAULT_PAGE_SIZE, all_: bool = False) -> Command
 
     effective_limit, fetch_all = validate_list_options(limit=limit, all_=all_)
 
-    _ws_name, credentials = _require_auth()
+    workspace = require_workspace_context()
+    credentials = workspace.credentials
+    workspace_id = workspace.workspace_id
     from osmosis_ai.platform.api.client import OsmosisClient
 
     client = OsmosisClient()
@@ -354,7 +401,10 @@ def list_datasets(limit: int = DEFAULT_PAGE_SIZE, all_: bool = False) -> Command
         if fetch_all:
             datasets, total_count = fetch_all_pages(
                 lambda lim, off: client.list_datasets(
-                    limit=lim, offset=off, credentials=credentials
+                    limit=lim,
+                    offset=off,
+                    credentials=credentials,
+                    workspace_id=workspace_id,
                 ),
                 items_attr="datasets",
             )
@@ -365,6 +415,7 @@ def list_datasets(limit: int = DEFAULT_PAGE_SIZE, all_: bool = False) -> Command
                 limit=effective_limit,
                 offset=0,
                 credentials=credentials,
+                workspace_id=workspace_id,
             )
             datasets = page.datasets
             total_count = page.total_count
@@ -377,6 +428,7 @@ def list_datasets(limit: int = DEFAULT_PAGE_SIZE, all_: bool = False) -> Command
         total_count=total_count,
         has_more=has_more,
         next_offset=next_offset,
+        extra=_workspace_result_context(workspace),
         columns=[
             ListColumn(key="file_name", label="File"),
             ListColumn(key="status", label="Status"),
@@ -400,20 +452,28 @@ def info(
     name: str,
 ) -> CommandResult:
     """Show dataset details and processing status."""
-    _ws_name, credentials = _require_auth()
+    workspace = require_workspace_context()
+    credentials = workspace.credentials
+    workspace_id = workspace.workspace_id
     from osmosis_ai.platform.api.client import OsmosisClient
 
     client = OsmosisClient()
     ds = platform_call(
         "Fetching dataset...",
-        lambda: client.get_dataset(name, credentials=credentials),
+        lambda: client.get_dataset(
+            name,
+            credentials=credentials,
+            workspace_id=workspace_id,
+        ),
         output_console=console,
     )
 
     rows = build_dataset_detail_rows(ds)
+    data = serialize_dataset(ds)
+    data.update(_workspace_result_context(workspace))
     return DetailResult(
         title="Dataset",
-        data=serialize_dataset(ds),
+        data=data,
         fields=_detail_fields(rows),
     )
 
@@ -423,13 +483,19 @@ def preview(
     rows: int = 5,
 ) -> CommandResult:
     """Preview dataset rows."""
-    _ws_name, credentials = _require_auth()
+    workspace = require_workspace_context()
+    credentials = workspace.credentials
+    workspace_id = workspace.workspace_id
     from osmosis_ai.platform.api.client import OsmosisClient
 
     client = OsmosisClient()
     ds = platform_call(
         "Fetching dataset...",
-        lambda: client.get_dataset(name, credentials=credentials),
+        lambda: client.get_dataset(
+            name,
+            credentials=credentials,
+            workspace_id=workspace_id,
+        ),
         output_console=console,
     )
 
@@ -447,6 +513,7 @@ def preview(
                 "returned_rows": 0,
                 "available": False,
                 "message": message,
+                **_workspace_result_context(workspace),
             },
             fields=[
                 DetailField(label="Dataset", value=ds.file_name),
@@ -482,6 +549,7 @@ def preview(
             "requested_rows": rows,
             "returned_rows": len(preview_rows) if isinstance(preview_rows, list) else 1,
             "available": True,
+            **_workspace_result_context(workspace),
         },
         fields=fields,
     )
@@ -504,14 +572,20 @@ def download(
     overwrite: bool = False,
 ) -> CommandResult:
     """Download a dataset file."""
-    _ws_name, credentials = _require_auth()
+    workspace = require_workspace_context()
+    credentials = workspace.credentials
+    workspace_id = workspace.workspace_id
     from osmosis_ai.platform.api.client import OsmosisClient
     from osmosis_ai.platform.api.download import download_file
 
     client = OsmosisClient()
     ds = platform_call(
         "Fetching dataset...",
-        lambda: client.get_dataset(name, credentials=credentials),
+        lambda: client.get_dataset(
+            name,
+            credentials=credentials,
+            workspace_id=workspace_id,
+        ),
         output_console=console,
     )
     if ds.status != "uploaded":
@@ -524,7 +598,11 @@ def download(
 
     info = platform_call(
         "Preparing download...",
-        lambda: client.get_dataset_download_url(name, credentials=credentials),
+        lambda: client.get_dataset_download_url(
+            name,
+            credentials=credentials,
+            workspace_id=workspace_id,
+        ),
         output_console=console,
     )
     default_filename = _default_download_filename(
@@ -552,6 +630,7 @@ def download(
 
     resource = serialize_dataset(ds)
     resource["output_path"] = str(destination)
+    resource.update(_workspace_result_context(workspace))
     return OperationResult(
         operation="dataset.download",
         status="success",
@@ -572,7 +651,9 @@ def delete(
             code="INTERACTIVE_REQUIRED",
         )
 
-    _ws_name, credentials = _require_auth()
+    workspace = require_workspace_context()
+    credentials = workspace.credentials
+    workspace_id = workspace.workspace_id
     from osmosis_ai.platform.api.client import OsmosisClient
 
     client = OsmosisClient()
@@ -582,7 +663,9 @@ def delete(
         affected = platform_call(
             "Checking dataset dependencies...",
             lambda: client.get_dataset_affected_resources(
-                name, credentials=credentials
+                name,
+                credentials=credentials,
+                workspace_id=workspace_id,
             ),
             output_console=console,
         )
@@ -617,7 +700,11 @@ def delete(
     if not yes:
         ds = platform_call(
             "Fetching dataset...",
-            lambda: client.get_dataset(name, credentials=credentials),
+            lambda: client.get_dataset(
+                name,
+                credentials=credentials,
+                workspace_id=workspace_id,
+            ),
             output_console=console,
         )
         console.print(
@@ -630,13 +717,17 @@ def delete(
 
     platform_call(
         "Deleting dataset...",
-        lambda: client.delete_dataset(name, credentials=credentials),
+        lambda: client.delete_dataset(
+            name,
+            credentials=credentials,
+            workspace_id=workspace_id,
+        ),
         output_console=console,
     )
     return OperationResult(
         operation="dataset.delete",
         status="success",
-        resource={"id": name},
+        resource={"id": name, **_workspace_result_context(workspace)},
         message=f'Dataset "{name}" deleted.',
     )
 

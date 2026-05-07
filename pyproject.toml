@@ -132,6 +132,26 @@ omit = [
 ]
 
 [tool.coverage.report]
+omit = [
+    "tests/*",
+    "*/consts.py",
+    # CLI command groups (thin Typer shells) + interactive prompts
+    "osmosis_ai/cli/commands/*",
+    "osmosis_ai/cli/main.py",
+    "osmosis_ai/cli/upgrade.py",
+    "osmosis_ai/cli/prompts.py",
+    # Platform CLI business logic (API calls, OAuth, interactive prompts)
+    "osmosis_ai/platform/cli/*",
+    # Rollout — ABCs, type defs, integrations, harbor backend
+    "osmosis_ai/rollout/agent_workflow.py",
+    "osmosis_ai/rollout/grader.py",
+    "osmosis_ai/rollout/backend/base.py",
+    "osmosis_ai/rollout/types/*",
+    "osmosis_ai/rollout/integrations/*",
+    "osmosis_ai/rollout/backend/harbor/*",
+    # Templates cookbook ships as data (starter recipes), not SDK code.
+    "osmosis_ai/templates/cookbook/*",
+]
 fail_under = 70
 show_missing = true
 exclude_lines = [

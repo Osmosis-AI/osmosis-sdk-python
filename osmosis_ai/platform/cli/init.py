@@ -6,7 +6,7 @@ bundled templates, initialise git, and print next steps.
 
 A "project" is the local on-disk directory created by this command —
 distinct from a platform workspace (the remote tenant managed via
-``osmosis workspace``).
+the platform and linked to a local project with ``osmosis project link``).
 """
 
 from __future__ import annotations
@@ -22,7 +22,6 @@ from typing import Any
 from osmosis_ai.cli.console import console
 from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.platform.auth.config import PLATFORM_URL
-from osmosis_ai.platform.auth.local_config import get_active_workspace_id
 from osmosis_ai.platform.cli.constants import validate_name
 
 # ── Prerequisites ────────────────────────────────────────────────
@@ -86,13 +85,14 @@ class ScaffoldEntry:
 
 SCAFFOLD: list[ScaffoldEntry] = [
     # Directory placeholders
-    ScaffoldEntry("", ".osmosis/research/experiments/.gitkeep"),
+    ScaffoldEntry("", ".osmosis/cache/.gitkeep"),
     ScaffoldEntry("", "rollouts/.gitkeep"),
     ScaffoldEntry("", "configs/eval/.gitkeep"),
+    ScaffoldEntry("", "configs/training/.gitkeep"),
     ScaffoldEntry("", "data/.gitkeep"),
     # Rendered templates (project.toml handled separately on update)
     ScaffoldEntry("project.toml.tpl", ".osmosis/project.toml", render=True),
-    ScaffoldEntry("research/program.md.tpl", ".osmosis/research/program.md"),
+    ScaffoldEntry("program.md.tpl", ".osmosis/research/program.md"),
     ScaffoldEntry("pyproject.toml.tpl", "pyproject.toml", render=True),
     ScaffoldEntry("README.md.tpl", "README.md", render=True),
     # Static files — configs (skip on update)
@@ -114,6 +114,13 @@ SCAFFOLD: list[ScaffoldEntry] = [
         overwrite_on_update=True,
     ),
 ]
+
+AGENT_REFRESH_PATHS = {
+    "AGENTS.md",
+    "CLAUDE.md",
+    "configs/AGENTS.md",
+    ".claude/settings.json",
+}
 
 
 # ── Scaffold generation ─────────────────────────────────────────
@@ -201,9 +208,10 @@ def _update_project_metadata(target: Path) -> None:
 def _git_init(target: Path) -> None:
     """Initialise a git repository in the target directory.
 
-    Skips if ``.git/`` already exists.
+    Skips if ``.git`` already exists as either a directory or a file. Git
+    worktrees and submodules use a file that points at the real gitdir.
     """
-    if (target / ".git").is_dir():
+    if (target / ".git").exists():
         return
 
     _subprocess.run(
@@ -248,66 +256,6 @@ def _git_initial_commit(target: Path) -> None:
     )
 
 
-def _resolve_workspace_git_context(
-    *,
-    workspace_name: str,
-    workspace_id: str | None,
-    credentials: Any,
-) -> dict[str, str | bool | None]:
-    """Fetch the active workspace's Git Sync metadata from the platform.
-
-    The caller is responsible for ensuring an active workspace exists
-    (typically via :func:`_require_auth`); this function only refreshes
-    the connected-repo state and GitHub App installation flag used to
-    drive the post-init CTA and the connected-repo guard.
-
-    Network/auth errors during the metadata refresh degrade the
-    returned context (no connected repo, no GitHub App), but the
-    workspace identity and Git Sync URL are always preserved so the
-    CTA still points at the right page. The connected-repo guard only
-    blocks when the platform confirms a connected repo, so a transient
-    outage doesn't spuriously block init.
-    """
-    from osmosis_ai.platform.api.client import OsmosisClient
-    from osmosis_ai.platform.auth import (
-        AuthenticationExpiredError,
-        PlatformAPIError,
-    )
-    from osmosis_ai.platform.cli.utils import platform_call
-
-    context: dict[str, str | bool | None] = {
-        "workspace_id": workspace_id,
-        "workspace_name": workspace_name,
-        "git_sync_url": f"{PLATFORM_URL}/{workspace_name}/integrations/git",
-        "has_github_app_installation": False,
-        "connected_repo_url": None,
-    }
-
-    client = OsmosisClient()
-    try:
-        info = platform_call(
-            "Loading workspace Git Sync status...",
-            lambda: client.refresh_workspace_info(
-                credentials=credentials,
-                workspace_name=workspace_name,
-                cleanup_on_401=False,
-            ),
-            output_console=console,
-        )
-    except (AuthenticationExpiredError, PlatformAPIError):
-        return context
-
-    context["has_github_app_installation"] = bool(
-        info.get("has_github_app_installation")
-    )
-    connected_repo = info.get("connected_repo")
-    if isinstance(connected_repo, dict):
-        repo_url = connected_repo.get("repo_url")
-        if isinstance(repo_url, str) and repo_url:
-            context["connected_repo_url"] = repo_url
-    return context
-
-
 def _git_sync_cta_text(git_context: dict[str, str | bool | None]) -> Any:
     """Build the Git Sync CTA shown after project scaffolding."""
     from rich.text import Text
@@ -337,31 +285,20 @@ def _git_sync_cta_text(git_context: dict[str, str | bool | None]) -> Any:
     )
 
 
-def _raise_if_selected_workspace_has_connected_repo(
-    git_context: dict[str, str | bool | None],
-) -> None:
-    """Block fresh init when the active platform workspace already has a connected repo."""
-    workspace_name = git_context.get("workspace_name")
-    connected_repo_url = git_context.get("connected_repo_url")
+def _target_for_init(name: str, *, here: bool) -> tuple[Path, bool]:
+    """Return the target project path and whether init creates a new directory."""
+    if here:
+        return Path.cwd().resolve(), False
+    return (Path.cwd() / name).resolve(), True
 
-    if not (
-        isinstance(workspace_name, str)
-        and workspace_name
-        and isinstance(connected_repo_url, str)
-        and connected_repo_url
-    ):
-        return
 
-    raise CLIError(
-        f"Workspace '{workspace_name}' is already connected to:\n"
-        f"  {connected_repo_url}\n"
-        "\n"
-        "Clone the connected repo instead:\n"
-        f"  git clone {connected_repo_url}\n"
-        "\n"
-        "Or switch to another workspace first:\n"
-        "  osmosis workspace switch"
-    )
+def _remove_directory_contents(root: Path) -> None:
+    """Remove all files and directories under *root*."""
+    for path in sorted(root.iterdir(), key=lambda path: len(path.parts), reverse=True):
+        if path.is_dir():
+            shutil.rmtree(path)
+        else:
+            path.unlink(missing_ok=True)
 
 
 def _print_next_steps(
@@ -497,24 +434,6 @@ def _created_paths_for_result(target: Path) -> list[str]:
     return [str(path.resolve()) for path in paths]
 
 
-def _workspace_for_result(
-    git_context: dict[str, str | bool | None],
-) -> dict[str, str] | None:
-    """Shape workspace metadata for the JSON/plain ``init`` result envelope.
-
-    ``init`` requires an active workspace, so ``workspace_name`` is
-    expected to always be set; ``workspace_id`` may be missing when the
-    locally cached id wasn't returned by ``_require_auth``.
-    """
-    workspace_id = git_context.get("workspace_id")
-    workspace_name = git_context.get("workspace_name")
-    if not (isinstance(workspace_name, str) and workspace_name):
-        return None
-    if isinstance(workspace_id, str) and workspace_id:
-        return {"id": workspace_id, "name": workspace_name}
-    return {"name": workspace_name}
-
-
 def _init_next_steps_structured(
     project_name: str,
     *,
@@ -585,19 +504,15 @@ def _init_display_next_steps(project_name: str, *, here: bool) -> list[str]:
 # ── Main entry point ─────────────────────────────────────────────
 
 
-def init(name: str, here: bool = False) -> Any:
+def init(
+    name: str,
+    here: bool = False,
+) -> Any:
     """Initialise a new local Osmosis project directory.
 
     This is the main entry point for ``osmosis init <name>``.
-
-    Requires an authenticated session with an active platform
-    workspace. The connected-repo guard then runs against authoritative
-    platform state instead of best-effort local cache, so we never
-    silently scaffold a fresh project into a workspace that's already
-    wired to a different repo.
     """
     from osmosis_ai.cli.output import OperationResult, OutputFormat, get_output_context
-    from osmosis_ai.platform.cli.utils import _require_auth
 
     output = get_output_context()
     _check_git_installed()
@@ -606,58 +521,55 @@ def init(name: str, here: bool = False) -> Any:
     if name_error:
         raise CLIError(name_error)
 
-    # Auth + active workspace are required before any directory work so
-    # the connected-repo guard runs on every fresh init path. The same
-    # gating is used by `osmosis train submit` for consistency.
-    workspace_name, credentials = _require_auth()
-    git_context = _resolve_workspace_git_context(
-        workspace_name=workspace_name,
-        workspace_id=get_active_workspace_id(),
-        credentials=credentials,
-    )
-
+    target, creates_subdir = _target_for_init(name, here=here)
     created_dir = False
+    git_context: dict[str, str | bool | None] = {
+        "workspace_id": None,
+        "workspace_name": None,
+        "git_sync_url": None,
+        "has_github_app_installation": False,
+        "connected_repo_url": None,
+    }
 
     if here:
-        target = Path.cwd()
-        if any(p.name != ".git" for p in target.iterdir()):
+        if any(target.iterdir()):
             raise CLIError(
                 "Current directory is not empty. "
-                "Use 'osmosis init <name>' (without --here) to create a new directory, "
+                "Use 'osmosis init <name>' without --here to create a new directory, "
                 "or empty this directory first."
             )
-        _raise_if_selected_workspace_has_connected_repo(git_context)
-    else:
-        target = Path.cwd() / name
-        if target.exists():
-            if (target / ".osmosis" / "project.toml").is_file():
-                # Re-entry: update mode
-                if output.format is OutputFormat.rich:
-                    console.print(
-                        f"Updating existing project in [cyan]./{name}[/cyan]...",
-                    )
-            else:
-                raise CLIError(
-                    f"Directory ./{name} already exists. "
-                    "Use --here to initialize in the current directory."
-                )
-        else:
-            _raise_if_selected_workspace_has_connected_repo(git_context)
+    elif target.exists():
+        if (target / ".osmosis" / "project.toml").is_file():
+            raise CLIError(
+                "Already an Osmosis project. Use 'osmosis project link' to change "
+                "workspace links, or 'osmosis project doctor --fix' to repair "
+                "project scaffolding."
+            )
+        raise CLIError(
+            f"Directory ./{name} already exists. "
+            "Use --here to initialize in the current directory."
+        )
+
+    if (target / ".osmosis" / "project.toml").is_file():
+        raise CLIError(
+            "Already an Osmosis project. Use 'osmosis project link' to change "
+            "workspace links, or 'osmosis project doctor --fix' to repair "
+            "project scaffolding."
+        )
+
+    try:
+        if creates_subdir:
             target.mkdir()
             created_dir = True
 
-    is_update = (target / ".osmosis" / "project.toml").is_file()
-
-    try:
-        _write_scaffold(target, name, update=is_update)
-        if is_update:
-            _update_project_metadata(target)
-        else:
-            _git_init(target)
-            _git_initial_commit(target)
+        _write_scaffold(target, name, update=False)
+        _git_init(target)
+        _git_initial_commit(target)
     except Exception:
         if created_dir and target.exists():
             shutil.rmtree(target)
+        elif not creates_subdir:
+            _remove_directory_contents(target)
         raise
 
     if output.format is OutputFormat.rich:
@@ -667,20 +579,15 @@ def init(name: str, here: bool = False) -> Any:
     resource = {
         "path": str(target.resolve()),
         "created_paths": _created_paths_for_result(target),
-        "workspace": _workspace_for_result(git_context),
-        "git_sync_url": git_context.get("git_sync_url"),
-        "connected_repo_url": git_context.get("connected_repo_url"),
-        "mode": "update" if is_update else "create",
+        "workspace": None,
+        "linked": False,
+        "mode": "create",
     }
     return OperationResult(
         operation="init",
         status="success",
         resource=resource,
-        message=(
-            f"Updated project in {target.resolve()}."
-            if is_update
-            else f"Initialized project in {target.resolve()}."
-        ),
+        message=f"Initialized project in {target.resolve()}.",
         display_next_steps=_init_display_next_steps(name, here=here),
         next_steps_structured=_init_next_steps_structured(
             name,
