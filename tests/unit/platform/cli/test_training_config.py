@@ -187,6 +187,8 @@ def _training_config(
         sampling_rollout_top_p=None,
         checkpoints_eval_interval=None,
         checkpoints_checkpoint_save_freq=None,
+        rollout_env={},
+        rollout_secret_refs={},
     )
 
 

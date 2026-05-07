@@ -487,6 +487,7 @@ class TestSubmitTrainingRun:
             dataset="ds1",
             rollout_name="rollout1",
             entrypoint="rollouts/main.py",
+            workspace_id="ws_test",
         )
         assert result.id == "run-1"
         payload = mock_request.call_args.kwargs["data"]
@@ -511,6 +512,7 @@ class TestSubmitTrainingRun:
             rollout_name="rollout1",
             entrypoint="rollouts/main.py",
             rollout_env=rollout_env,
+            workspace_id="ws_test",
         )
         payload = mock_request.call_args.kwargs["data"]
         assert payload["rollout_env"] == rollout_env
@@ -530,6 +532,7 @@ class TestSubmitTrainingRun:
             rollout_name="rollout1",
             entrypoint="rollouts/main.py",
             rollout_secret_refs=secret_refs,
+            workspace_id="ws_test",
         )
         payload = mock_request.call_args.kwargs["data"]
         assert payload["rollout_secret_refs"] == secret_refs
@@ -549,6 +552,7 @@ class TestSubmitTrainingRun:
             entrypoint="rollouts/main.py",
             rollout_env={},
             rollout_secret_refs={},
+            workspace_id="ws_test",
         )
         payload = mock_request.call_args.kwargs["data"]
         assert "rollout_env" not in payload
@@ -570,6 +574,7 @@ class TestSubmitTrainingRun:
             config={"lr": 0.001},
             rollout_env={"FOO": "bar"},
             rollout_secret_refs={"OPENAI_API_KEY": "openai-prod"},
+            workspace_id="ws_test",
         )
         payload = mock_request.call_args.kwargs["data"]
         assert payload["commit_sha"] == "abc123"
