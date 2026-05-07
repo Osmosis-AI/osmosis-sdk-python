@@ -26,6 +26,33 @@ Then fill in the required fields:
 - `model_path` must be a supported base model
 - `dataset` must be a platform dataset name
 
+### Environment variables and secrets (optional)
+
+Add `[rollout.env]` and/or `[rollout.secrets]` sections to inject environment
+variables into the rollout container at training time.
+
+```toml
+[rollout.env]
+# Literal values — visible in this file. Do NOT put secrets here.
+LOG_LEVEL = "INFO"
+MY_CONFIG = "some-value"
+
+[rollout.secrets]
+# Value is the *name* of a workspace environment_secret record, not the secret
+# value itself. The platform resolves and injects it server-side.
+# Pre-register the secret at /:orgName/secrets before submitting.
+OPENAI_API_KEY = "openai-api-key"
+```
+
+Rules:
+- Keys must match `^[A-Z_][A-Z0-9_]*$`
+- The same key cannot appear in both sections
+- Reserved names (managed by the platform) are forbidden:
+  `GITHUB_CLONE_URL`, `GITHUB_TOKEN`, `ENTRYPOINT_SCRIPT`, `REPOSITORY_PATH`,
+  `TRAINING_RUN_ID`, `ROLLOUT_NAME`, `ROLLOUT_PORT`
+
+Inside the rollout container both sets of vars are available via `os.environ`.
+
 ## Eval configs (`eval/*.toml`)
 
 Use one eval config per rollout baseline. `entrypoint` should usually be `main.py`.
