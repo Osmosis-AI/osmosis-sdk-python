@@ -142,6 +142,112 @@ osmosis eval rubric -d data.jsonl \
 | `--timeout` | Seconds |
 | `--score-min` / `--score-max` | Score range |
 
+## Training
+
+### osmosis train submit
+
+Submit a training run from a TOML config.
+
+```bash
+osmosis train submit configs/training/my-run.toml
+osmosis train submit configs/training/my-run.toml --yes   # skip confirmation
+```
+
+The config file must live under `configs/training/` inside a structured Osmosis
+project. The CLI reads the config locally and sends it to the platform, which
+clones the workspace's connected Git repository for the actual rollout code.
+
+#### Required `[experiment]` fields
+
+| Key | Description |
+|-----|-------------|
+| `rollout` | Directory name under `rollouts/` |
+| `entrypoint` | Python file relative to the rollout directory |
+| `model_path` | Supported base model path |
+| `dataset` | Platform dataset name (`osmosis dataset list`) |
+
+#### Environment variables — `[rollout.env]`
+
+Literal key/value pairs injected verbatim into the rollout container. Values
+are visible in the config file and in CLI output — do **not** use this section
+for secrets.
+
+```toml
+[rollout.env]
+LOG_LEVEL = "INFO"
+DEFAULT_REGION = "us-west-2"
+```
+
+#### Secrets — `[rollout.secrets]`
+
+Maps env-var names to workspace `environment_secret` **record names**. The
+platform resolves the actual secret value server-side from the workspace's
+encrypted secret store and injects it into the container. Secret values never
+appear in the config file, in the API payload, or in CLI output.
+
+Pre-register secrets at `/:orgName/secrets` in the platform UI before
+submitting a run that references them.
+
+```toml
+[rollout.secrets]
+OPENAI_API_KEY = "openai-api-key"   # "openai-api-key" is the record name
+```
+
+#### Rules for both sections
+
+- Keys must match `^[A-Z_][A-Z0-9_]*$`.
+- A key cannot appear in both `[rollout.env]` and `[rollout.secrets]`.
+- Reserved names that cannot be used (managed by the platform):
+  `GITHUB_CLONE_URL`, `GITHUB_TOKEN`, `ENTRYPOINT_SCRIPT`, `REPOSITORY_PATH`,
+  `TRAINING_RUN_ID`, `ROLLOUT_NAME`, `ROLLOUT_PORT`.
+- Both sections are optional.
+
+### osmosis train status
+
+Show details for a training run.
+
+```bash
+osmosis train status <run-name>
+osmosis --json train status <run-name>
+```
+
+### osmosis train list
+
+List training runs in the current workspace.
+
+```bash
+osmosis train list
+osmosis train list --limit 50
+osmosis train list --all
+```
+
+### osmosis train stop
+
+Stop a pending or running training run.
+
+```bash
+osmosis train stop <run-name>
+osmosis train stop <run-name> --yes
+```
+
+### osmosis train delete
+
+Delete a training run.
+
+```bash
+osmosis train delete <run-name>
+osmosis train delete <run-name> --yes
+```
+
+### osmosis train metrics
+
+Export training run metrics to a JSON file.
+
+```bash
+osmosis train metrics <run-name>
+osmosis train metrics <run-name> -o ./my-metrics.json
+```
+
 ## See also
 
 - [Eval](./eval.md)
