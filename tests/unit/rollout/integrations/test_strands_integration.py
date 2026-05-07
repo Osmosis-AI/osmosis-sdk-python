@@ -1,14 +1,9 @@
-"""Tests for osmosis_ai.rollout.integrations.agents.strands."""
-
 from __future__ import annotations
 
 from unittest.mock import patch
 
 
 class TestOsmosisStrandsAgentPromptConversion:
-    """The constructor treats ``messages`` as ``ctx.prompt`` (OpenAI chat
-    format) and converts it to Strands' content-block format."""
-
     def test_converts_openai_format(self):
         from osmosis_ai.rollout.integrations.agents.strands import (
             OsmosisStrandsAgent,

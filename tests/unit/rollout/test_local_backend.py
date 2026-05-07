@@ -231,8 +231,6 @@ class TestLocalBackend:
         assert backend.workflow_cls is StubWorkflow
 
     async def test_prompt_passes_through_unchanged(self):
-        """LocalBackend must not mutate the prompt format — it is canonically
-        OpenAI chat format and integrations convert at their own boundary."""
         captured: dict = {}
 
         class CapturingWorkflow(AgentWorkflow):

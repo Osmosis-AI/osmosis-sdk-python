@@ -1,5 +1,3 @@
-"""Tests for osmosis_ai.rollout.integrations.agents.openai_agents."""
-
 from __future__ import annotations
 
 from types import SimpleNamespace

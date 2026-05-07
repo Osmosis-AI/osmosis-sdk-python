@@ -98,11 +98,16 @@ class SessionSampleSource(SampleSource):
 
 
 class OsmosisRolloutModel(LitellmModel):
-    """Placeholder ``Model`` that carries litellm kwargs for workflow configs.
+    """Placeholder ``Model`` that carries litellm kwargs for use in workflow configs.
 
-    This is not a usable model on its own: ``OsmosisAgent`` replaces it
-    with a real :class:`OsmosisLitellmModel` wired to the active
-    ``RolloutContext`` at agent construction time.
+    This is *not* a usable model on its own: ``OsmosisAgent`` replaces it
+    with a real :class:`OsmosisLitellmModel` (wired to the active
+    ``RolloutContext``) at agent construction time. Any direct call into
+    ``stream_response`` / ``get_response`` raises ``NotImplementedError``
+    because the placeholder has no connection params.
+
+    Subclassing ``LitellmModel`` (without invoking its ``__init__``) is purely
+    a typing convenience so the placeholder satisfies ``Agent.model: Model``.
     """
 
     def __init__(self, **litellm_kwargs: Any) -> None:
@@ -127,9 +132,17 @@ class OsmosisRolloutModel(LitellmModel):
 class OsmosisLitellmModel(LitellmModel):
     """Streaming-only LitellmModel pre-wired for the Osmosis completions server.
 
-    The Osmosis completions server is streaming-only, so ``get_response``
-    aggregates ``stream_response`` events. This lets upstream ``Runner.run``
-    and ``Runner.run_sync`` work without a custom Runner wrapper.
+    Stateless across calls: the per-call session name is read from a
+    ContextVar that ``OsmosisMemorySession`` publishes when the runner interacts
+    with it. One instance can be safely shared across agents and runs (within
+    the rollout context that constructed it).
+
+    Caveats this class handles for the user:
+    - The Osmosis completions server is streaming-only, so ``get_response``
+      is implemented by aggregating ``stream_response`` events. This makes
+      ``Runner.run`` and ``Runner.run_sync`` work without forcing the user
+      to switch to ``Runner.run_streamed``.
+    - Per-rollout bookkeeping headers are injected on every model call.
     """
 
     def __init__(self, **litellm_kwargs: Any) -> None:
@@ -194,6 +207,9 @@ class OsmosisAgent(Agent):
     If the ``model`` argument is an ``OsmosisRolloutModel`` placeholder, it is
     swapped for a fresh ``OsmosisLitellmModel`` bound to the active
     ``RolloutContext``. Otherwise it behaves exactly like ``Agent``.
+
+    Construct inside your workflow ``run`` (where the rollout context is
+    active), passing the model from your config.
     """
 
     def __init__(self, *args: Any, model: Any = None, **kwargs: Any) -> None:
