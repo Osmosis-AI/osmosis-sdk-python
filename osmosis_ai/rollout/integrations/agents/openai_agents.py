@@ -43,17 +43,28 @@ class OsmosisMemorySession(SessionABC):
         self.name: str = name or uuid.uuid4().hex
         self.session_id: str = self.name
         self.items: list[TResponseInputItem] = []
+        self._registered_context_ids: set[int] = set()
+        self._bind_rollout_context()
+
+    def _bind_rollout_context(self) -> None:
         ctx = get_rollout_context()
-        if ctx is not None:
-            ctx.register_sample_source(self.name, SessionSampleSource(self))
+        if ctx is None:
+            return
+        ctx_id = id(ctx)
+        if ctx_id in self._registered_context_ids:
+            return
+        ctx.register_sample_source(self.name, SessionSampleSource(self))
+        self._registered_context_ids.add(ctx_id)
 
     async def get_items(self, limit: int | None = None) -> list[TResponseInputItem]:
+        self._bind_rollout_context()
         current_sample_id.set(self.name)
         if limit is None:
             return list(self.items)
         return list(self.items[-limit:])
 
     async def add_items(self, items: list[TResponseInputItem]) -> None:
+        self._bind_rollout_context()
         current_sample_id.set(self.name)
         self.items.extend(items)
 

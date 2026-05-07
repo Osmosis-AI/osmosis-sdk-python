@@ -5,6 +5,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
+from agents import RunConfig, Runner
 from agents.model_settings import ModelSettings
 from agents.models.interface import ModelTracing
 from openai.types.responses.response_output_message import ResponseOutputMessage
@@ -38,6 +39,24 @@ class TestOpenAIAgentsIntegration:
         samples = await rollout_context.get_samples()
         assert samples["main"].id == "main"
         assert samples["main"].messages == items
+
+    async def test_memory_session_registers_lazily_when_used_in_rollout_context(self):
+        from osmosis_ai.rollout.integrations.agents.openai_agents import (
+            OsmosisMemorySession,
+        )
+
+        session = OsmosisMemorySession(name="main")
+        ctx = RolloutContext(
+            chat_completions_url="http://controller:9",
+            api_key="test-key",
+            rollout_id="rollout-xyz",
+        )
+
+        with ctx:
+            await session.add_items([{"role": "user", "content": "hello"}])
+
+        samples = await ctx.get_samples()
+        assert samples["main"].messages == [{"role": "user", "content": "hello"}]
 
     def test_agent_swaps_placeholder_model_inside_rollout_context(
         self, rollout_context
@@ -139,6 +158,60 @@ class TestOpenAIAgentsIntegration:
         assert response.usage.input_tokens == 3
         assert response.usage.output_tokens == 5
         assert response.usage.total_tokens == 8
+
+    async def test_upstream_runner_run_records_session_sample(
+        self, rollout_context, monkeypatch
+    ):
+        from osmosis_ai.rollout.integrations.agents.openai_agents import (
+            OsmosisAgent,
+            OsmosisLitellmModel,
+            OsmosisMemorySession,
+            OsmosisRolloutModel,
+        )
+
+        output = [
+            ResponseOutputMessage(
+                id="msg_1",
+                content=[
+                    ResponseOutputText(
+                        annotations=[],
+                        text="hello from rollout",
+                        type="output_text",
+                    )
+                ],
+                role="assistant",
+                status="completed",
+                type="message",
+            )
+        ]
+
+        async def fake_stream_response(self, *_args, **_kwargs):
+            yield SimpleNamespace(
+                type="response.completed",
+                response=SimpleNamespace(output=output, usage=None),
+            )
+
+        monkeypatch.setattr(
+            OsmosisLitellmModel,
+            "stream_response",
+            fake_stream_response,
+        )
+
+        agent = OsmosisAgent(name="main", model=OsmosisRolloutModel())
+        session = OsmosisMemorySession(name="main")
+
+        result = await Runner.run(
+            agent,
+            "hello",
+            session=session,
+            run_config=RunConfig(tracing_disabled=True),
+        )
+
+        samples = await rollout_context.get_samples()
+        assert result.final_output == "hello from rollout"
+        assert samples["main"].id == "main"
+        assert any(item.get("role") == "user" for item in samples["main"].messages)
+        assert any(item.get("role") == "assistant" for item in samples["main"].messages)
 
     async def test_placeholder_model_direct_use_raises(self):
         from osmosis_ai.rollout.integrations.agents.openai_agents import (
