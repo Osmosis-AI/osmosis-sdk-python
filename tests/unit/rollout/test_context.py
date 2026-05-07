@@ -9,10 +9,20 @@ from osmosis_ai.rollout.context import (
     GraderContext,
     HarborAgentWorkflowContext,
     RolloutContext,
+    SampleSource,
     get_rollout_context,
     rollout_contextvar,
 )
 from osmosis_ai.rollout.types import AgentWorkflowConfig, RolloutSample
+
+
+class StaticSampleSource(SampleSource):
+    def __init__(self, messages):
+        self.messages = messages
+
+    async def get_sample(self, name: str) -> RolloutSample:
+        return RolloutSample(id=name, messages=self.messages)
+
 
 # ---------------------------------------------------------------------------
 # RolloutContext
@@ -70,65 +80,35 @@ class TestRolloutContext:
 
         assert get_rollout_context() is None
 
-    def test_register_agent_and_get_samples(self):
+    async def test_register_sample_source_and_get_samples(self):
         ctx = RolloutContext(chat_completions_url="http://llm", rollout_id="r1")
-        agent = MagicMock()
-        agent.messages = [{"role": "user", "content": "hi"}]
+        messages = [{"role": "user", "content": "hi"}]
 
-        ctx.register_agent("s1", agent)
-        samples = ctx.get_samples()
-        assert "s1" in samples
-        assert isinstance(samples["s1"], RolloutSample)
-        assert samples["s1"].id == "s1"
-        assert samples["s1"].messages == agent.messages
-
-    def test_record_sample_and_get_samples(self):
-        ctx = RolloutContext(chat_completions_url="http://llm", rollout_id="r1")
-        messages = [{"role": "assistant", "content": "done"}]
-        ctx.record_sample("s1", messages)
-
-        samples = ctx.get_samples()
+        ctx.register_sample_source("s1", StaticSampleSource(messages))
+        samples = await ctx.get_samples()
         assert "s1" in samples
         assert isinstance(samples["s1"], RolloutSample)
         assert samples["s1"].id == "s1"
         assert samples["s1"].messages == messages
 
-    def test_get_samples_merges_both_tracks(self):
+    async def test_get_samples_merges_sample_sources(self):
         ctx = RolloutContext(chat_completions_url="http://llm", rollout_id="r1")
+        first_messages = [{"role": "user", "content": [{"text": "hi"}]}]
+        second_messages = [{"role": "assistant", "content": "done"}]
 
-        strands_agent = MagicMock()
-        strands_agent.messages = [{"role": "user", "content": [{"text": "hi"}]}]
-        ctx.register_agent("strands-sample", strands_agent)
+        ctx.register_sample_source("strands-sample", StaticSampleSource(first_messages))
+        ctx.register_sample_source("openai-sample", StaticSampleSource(second_messages))
 
-        oa_messages = [{"role": "assistant", "content": "done"}]
-        ctx.record_sample("openai-sample", oa_messages)
-
-        samples = ctx.get_samples()
+        samples = await ctx.get_samples()
         assert set(samples) == {"strands-sample", "openai-sample"}
-        assert samples["strands-sample"].messages == strands_agent.messages
-        assert samples["openai-sample"].messages == oa_messages
+        assert samples["strands-sample"].messages == first_messages
+        assert samples["openai-sample"].messages == second_messages
 
-    def test_record_sample_raises_on_duplicate(self):
+    def test_register_sample_source_raises_on_duplicate(self):
         ctx = RolloutContext(chat_completions_url="http://llm", rollout_id="r1")
-        ctx.record_sample("s1", [])
-        with pytest.raises(ValueError, match="already used"):
-            ctx.record_sample("s1", [])
-
-    def test_record_sample_raises_on_register_agent_collision(self):
-        ctx = RolloutContext(chat_completions_url="http://llm", rollout_id="r1")
-        agent = MagicMock()
-        agent.messages = []
-        ctx.register_agent("s1", agent)
-        with pytest.raises(ValueError, match="already used"):
-            ctx.record_sample("s1", [])
-
-    def test_register_agent_raises_on_record_sample_collision(self):
-        ctx = RolloutContext(chat_completions_url="http://llm", rollout_id="r1")
-        ctx.record_sample("s1", [])
-        agent = MagicMock()
-        agent.messages = []
-        with pytest.raises(ValueError, match="already used"):
-            ctx.register_agent("s1", agent)
+        ctx.register_sample_source("s1", StaticSampleSource([]))
+        with pytest.raises(ValueError, match="already exists"):
+            ctx.register_sample_source("s1", StaticSampleSource([]))
 
 
 # ---------------------------------------------------------------------------
