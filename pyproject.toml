@@ -20,6 +20,7 @@ classifiers = [
 ]
 requires-python = ">=3.12"
 dependencies = [
+    "PyYAML>=6.0,<7.0",
     "python-dotenv>=0.1.0,<2.0.0",
     "requests>=2.0.0,<3.0.0",
     "litellm>=1.83.0,<2.0.0",
@@ -30,6 +31,8 @@ dependencies = [
     # Eval cache dependencies
     "filelock>=3.0.0,<4.0.0",
     "xxhash>=3.0.0",
+    "strands-agents[litellm]>=1.29.0",
+    "openai-agents[litellm]>=0.14,<0.15",
     "rich>=14.2.0",
     # Secure credential storage (system keychain)
     "keyring>=25.0.0",
@@ -38,6 +41,7 @@ dependencies = [
     # CLI framework
     "typer>=0.16.0",
     "rich>=13.0.0",
+    "harbor==0.3.0",
 ]
 
 [project.optional-dependencies]
@@ -49,14 +53,9 @@ platform = [
 # Server dependencies for rollout serving
 server = [
     "osmosis-ai[platform]",
-    "PyYAML>=6.0,<7.0",
     "fastapi>=0.100.0,<1.0.0",
     "uvicorn>=0.23.0,<1.0.0",
     "pydantic-settings>=2.0.0,<3.0.0",
-    "harbor==0.3.0",
-    # Agent integrations (strands and openai-agents)
-    "strands-agents[litellm]>=1.29.0",
-    "openai-agents[litellm]>=0.14,<0.15",
 ]
 
 # Development dependencies (testing, formatting, type checking, etc.)
