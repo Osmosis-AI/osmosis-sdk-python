@@ -52,7 +52,7 @@ def list_runs(
     ),
     all_: bool = typer.Option(False, "--all", help="Show all training runs."),
 ) -> Any:
-    """List training runs in the current workspace."""
+    """List training runs in the current platform workspace."""
     from osmosis_ai.cli.output import (
         ListColumn,
         ListResult,
@@ -219,29 +219,29 @@ def submit(
 ) -> Any:
     """Submit a new training run."""
     from osmosis_ai.cli.output import OperationResult, get_output_context
+    from osmosis_ai.platform.cli.project_contract import (
+        ensure_project_config_path,
+        resolve_project_root,
+        validate_project_contract,
+        validate_rollout_backend,
+    )
     from osmosis_ai.platform.cli.training_config import load_training_config
     from osmosis_ai.platform.cli.utils import (
         _require_auth,
         platform_entity_url,
     )
-    from osmosis_ai.platform.cli.workspace_contract import (
-        ensure_workspace_config_path,
-        resolve_workspace_root,
-        validate_rollout_backend,
-        validate_workspace_contract,
-    )
 
-    workspace_root = resolve_workspace_root(config_path)
-    validate_workspace_contract(workspace_root)
-    ensure_workspace_config_path(
+    project_root = resolve_project_root(config_path)
+    validate_project_contract(project_root)
+    ensure_project_config_path(
         config_path,
-        workspace_root,
+        project_root,
         config_dir="configs/training",
         command_label="`osmosis train submit`",
     )
     config = load_training_config(config_path)
     validate_rollout_backend(
-        workspace_root=workspace_root,
+        project_root=project_root,
         rollout=config.experiment_rollout,
         entrypoint=config.experiment_entrypoint,
         command_label="`osmosis train submit`",
@@ -356,10 +356,10 @@ def _resolve_default_output(
     """Resolve the default output path under .osmosis/metrics/."""
     if cwd is None:
         cwd = Path.cwd()
-    workspace_toml = cwd / ".osmosis" / "workspace.toml"
-    if not workspace_toml.is_file():
+    project_toml = cwd / ".osmosis" / "project.toml"
+    if not project_toml.is_file():
         raise CLIError(
-            "Not in an Osmosis workspace directory.\n"
+            "Not in an Osmosis project directory.\n"
             "  Run from a directory created by 'osmosis init',"
             " or use -o to specify an output path."
         )

@@ -1,4 +1,5 @@
 import os
+from abc import ABC, abstractmethod
 from contextvars import ContextVar
 from dataclasses import dataclass, field
 from typing import Any
@@ -7,6 +8,26 @@ from osmosis_ai.rollout.types import (
     AgentWorkflowConfig,
     RolloutSample,
 )
+
+
+class SampleSource(ABC):
+    """Produces a ``RolloutSample`` for grading from a framework-specific object.
+
+    Each integration ships a small source class that wraps its underlying
+    object (an Agent, a Session, etc.) and produces a sample on demand.
+    The source is decoupled from the integration's framework classes so
+    they do not need to inherit from this ABC.
+
+    RolloutContext indexes registered sources by name and calls
+    ``get_sample`` lazily at sample collection time, passing the
+    registration name so the source can stamp it onto the returned
+    ``RolloutSample.id``.
+    """
+
+    @abstractmethod
+    async def get_sample(self, name: str) -> RolloutSample:
+        """Return the current rollout sample for the given registration name."""
+
 
 rollout_contextvar: ContextVar["RolloutContext | None"] = ContextVar(
     "rollout_contextvar", default=None
@@ -29,8 +50,7 @@ class RolloutContext:
     chat_completions_url: str = ""
     api_key: str | None = None
     rollout_id: str = ""
-    registered_agents: dict[str, Any] = field(default_factory=dict)
-    recorded_samples: dict[str, list[dict[str, Any]]] = field(default_factory=dict)
+    sample_sources: dict[str, SampleSource] = field(default_factory=dict)
 
     def __post_init__(self) -> None:
         if not self.chat_completions_url:
@@ -47,34 +67,24 @@ class RolloutContext:
     def __exit__(self, *_: Any) -> None:
         rollout_contextvar.set(None)
 
-    def register_agent(self, sample_id: str, agent: Any) -> None:
-        """Lazy path for frameworks (Strands) whose ``agent.messages`` is
-        mutated in place; read at ``get_samples()`` time."""
-        if sample_id in self.recorded_samples:
+    def register_sample_source(self, name: str, source: SampleSource) -> None:
+        """Register a sample source under the given name. The context calls
+        ``source.get_sample(name)`` lazily when ``get_samples()`` is invoked,
+        so the source can keep reflecting state that mutates until the
+        rollout ends.
+        """
+        if name in self.sample_sources:
             raise ValueError(
-                f"sample_id '{sample_id}' already used in this rollout; "
-                f"pass sample_id= explicitly to disambiguate."
+                f"Session with {name} already exists, please give your session "
+                "or agent a unique name in the workflow"
             )
-        self.registered_agents[sample_id] = agent
+        self.sample_sources[name] = source
 
-    def record_sample(self, sample_id: str, messages: list[dict[str, Any]]) -> None:
-        """Eager path for frameworks (openai-agents) whose trajectory is
-        only observable after the SDK's run call returns."""
-        if sample_id in self.recorded_samples or sample_id in self.registered_agents:
-            raise ValueError(
-                f"sample_id '{sample_id}' already used in this rollout; "
-                f"pass sample_id= explicitly to disambiguate."
-            )
-        self.recorded_samples[sample_id] = messages
-
-    def get_samples(self) -> dict[str, RolloutSample]:
-        samples: dict[str, RolloutSample] = {
-            sample_id: RolloutSample(id=sample_id, messages=agent.messages)
-            for sample_id, agent in self.registered_agents.items()
-        }
-        for sample_id, messages in self.recorded_samples.items():
-            samples[sample_id] = RolloutSample(id=sample_id, messages=messages)
-        return samples
+    async def get_samples(self) -> dict[str, RolloutSample]:
+        out: dict[str, RolloutSample] = {}
+        for name, source in self.sample_sources.items():
+            out[name] = await source.get_sample(name)
+        return out
 
 
 def get_rollout_context() -> RolloutContext | None:
@@ -85,7 +95,7 @@ def get_rollout_context() -> RolloutContext | None:
 class GraderContext:
     label: str | None = None
     samples: dict[str, RolloutSample] = field(default_factory=dict)
-    workspace_path: str | None = None
+    project_path: str | None = None
 
     def get_samples(self) -> dict[str, RolloutSample]:
         return self.samples

@@ -4,7 +4,7 @@
 [eval]
 rollout = "<your-rollout>"                 # Rollout name (directory under rollouts/)
 entrypoint = "<your-entrypoint-file>"      # Entrypoint file (relative to rollout dir)
-dataset = "<your-dataset>.jsonl"           # Dataset path (relative to workspace root)
+dataset = "<your-dataset>.jsonl"           # Dataset path (relative to project root)
 # limit =                                  # Max rows to evaluate
 # offset = 0                               # Skip first N rows
 # fresh = false                            # Discard cached results

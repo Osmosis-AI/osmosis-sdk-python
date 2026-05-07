@@ -10,7 +10,7 @@ rollout to improve.
 
 ## Constraints
 
-- Keep workspace changes inside canonical paths.
+- Keep project changes inside canonical paths.
 - Prefer small diffs and quick local evals.
 - Avoid expensive platform training until the local baseline looks healthy.
 

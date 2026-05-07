@@ -113,7 +113,7 @@ class LocalBackend(ExecutionBackend):
 
         return ExecutionResult(
             status=RolloutStatus.SUCCESS,
-            samples=rollout_ctx.get_samples(),
+            samples=await rollout_ctx.get_samples(),
         )
 
     async def run_grader(

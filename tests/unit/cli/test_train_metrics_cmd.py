@@ -310,7 +310,7 @@ class TestMetricsCommandWritesFile:
 
     @patch(_PATCH_CLIENT)
     @patch(_PATCH_AUTH)
-    def test_writes_to_default_path_in_workspace(
+    def test_writes_to_default_path_in_project(
         self,
         mock_auth: MagicMock,
         mock_client_cls: MagicMock,
@@ -322,10 +322,10 @@ class TestMetricsCommandWritesFile:
         client.get_training_run.return_value = _make_run_detail()
         client.get_training_run_metrics.return_value = _make_metrics()
 
-        # Create workspace marker
+        # Create project marker
         osmosis_dir = tmp_path / ".osmosis"
         osmosis_dir.mkdir()
-        (osmosis_dir / "workspace.toml").write_text("[workspace]\n")
+        (osmosis_dir / "project.toml").write_text("[project]\n")
         monkeypatch.chdir(tmp_path)
 
         from osmosis_ai.cli.commands.train import metrics
@@ -449,12 +449,12 @@ class TestMetricsCommandErrors:
         assert "Training is in progress" in _field_value(result, "Note")
         assert output.exists()
 
-    def test_no_workspace_no_output_raises(self, tmp_path: Path) -> None:
-        """Without .osmosis/workspace.toml and no -o flag, should error."""
+    def test_no_project_no_output_raises(self, tmp_path: Path) -> None:
+        """Without .osmosis/project.toml and no -o flag, should error."""
         from osmosis_ai.cli.commands.train import _resolve_default_output
         from osmosis_ai.cli.errors import CLIError
 
-        with pytest.raises(CLIError, match="Not in an Osmosis workspace"):
+        with pytest.raises(CLIError, match="Not in an Osmosis project"):
             _resolve_default_output("my-run", "abc12345", cwd=tmp_path)
 
     @patch(_PATCH_CLIENT)
@@ -482,20 +482,20 @@ class TestMetricsCommandErrors:
 
     @patch(_PATCH_CLIENT)
     @patch(_PATCH_AUTH)
-    def test_no_output_outside_workspace_prints_warning(
+    def test_no_output_outside_project_prints_warning(
         self,
         mock_auth: MagicMock,
         mock_client_cls: MagicMock,
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """Without -o and outside a workspace dir, metrics still print."""
+        """Without -o and outside a project dir, metrics still print."""
         mock_auth.return_value = ("ws", MagicMock())
         client = mock_client_cls.return_value
         client.get_training_run.return_value = _make_run_detail()
         client.get_training_run_metrics.return_value = _make_metrics()
 
-        monkeypatch.chdir(tmp_path)  # no .osmosis/workspace.toml here
+        monkeypatch.chdir(tmp_path)  # no .osmosis/project.toml here
 
         buf = io.StringIO()
         with _patch_train_console(buf, force_terminal=False, width=80):

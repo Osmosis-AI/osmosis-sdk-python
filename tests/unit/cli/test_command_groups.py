@@ -15,6 +15,7 @@ from osmosis_ai.cli.main import main
         ["--version"],
         ["auth", "--help"],
         ["workspace", "--help"],
+        ["project", "--help"],
         ["dataset", "--help"],
         ["train", "--help"],
         ["model", "--help"],
@@ -69,6 +70,7 @@ def test_all_groups_in_help_output(capfd):
     for group in [
         "auth",
         "workspace",
+        "project",
         "dataset",
         "train",
         "model",

@@ -1,169 +1,200 @@
-import dataclasses
-from typing import Any, cast
+import uuid
+from collections.abc import AsyncIterator
+from contextvars import ContextVar
+from typing import Any
 
-from agents import Agent, RunConfig
-from agents import Runner as OpenAIRunner
+from agents import Agent
 from agents.extensions.models.litellm_model import LitellmModel
-from agents.models.interface import Model, ModelProvider
-from agents.models.multi_provider import MultiProvider
-from agents.result import RunResultBase, RunResultStreaming
+from agents.items import ModelResponse, TResponseInputItem, TResponseStreamEvent
+from agents.memory.session import SessionABC
+from agents.model_settings import ModelSettings
+from agents.usage import Usage
+from openai.types.responses.response_usage import (
+    InputTokensDetails,
+    OutputTokensDetails,
+)
 
-from osmosis_ai.rollout.context import RolloutContext, get_rollout_context
+from osmosis_ai.rollout.context import SampleSource, get_rollout_context
+from osmosis_ai.rollout.types import RolloutSample
+
+current_sample_id: ContextVar[str | None] = ContextVar(
+    "osmosis_current_sample_id", default=None
+)
+
+
+class OsmosisMemorySession(SessionABC):
+    """In-memory session that doubles as the sample source for an Osmosis rollout.
+
+    Behavior:
+    - Inside a ``RolloutContext``: registers itself for sample collection
+      (via ``SessionSampleSource``) and publishes its sample id
+      to a ContextVar each time the runner reads from or writes to it.
+      ``OsmosisRolloutModel`` reads that ContextVar to stamp per-rollout
+      headers.
+    - Outside a ``RolloutContext``: behaves as a plain in-memory
+      ``SessionABC`` implementation, so the same workflow code can run
+      locally without an Osmosis rollout.
+
+    Pass exactly one ``OsmosisMemorySession`` per ``Runner.run`` when using
+    ``OsmosisRolloutModel``.
+    """
+
+    def __init__(self, name: str | None = None) -> None:
+        self.name: str = name or uuid.uuid4().hex
+        self.session_id: str = self.name
+        self.items: list[TResponseInputItem] = []
+        ctx = get_rollout_context()
+        if ctx is not None:
+            ctx.register_sample_source(self.name, SessionSampleSource(self))
+
+    async def get_items(self, limit: int | None = None) -> list[TResponseInputItem]:
+        current_sample_id.set(self.name)
+        if limit is None:
+            return list(self.items)
+        return list(self.items[-limit:])
+
+    async def add_items(self, items: list[TResponseInputItem]) -> None:
+        current_sample_id.set(self.name)
+        self.items.extend(items)
+
+    async def pop_item(self) -> TResponseInputItem | None:
+        return self.items.pop() if self.items else None
+
+    async def clear_session(self) -> None:
+        self.items.clear()
+
+
+class SessionSampleSource(SampleSource):
+    """Produces a ``RolloutSample`` from any OpenAI Agents SDK ``Session``.
+
+    Works against any ``SessionABC`` by returning the items the runner
+    persisted via ``add_items`` (canonical Responses-API ``TResponseInputItem``
+    shape). We deliberately do not run ``Converter.items_to_messages`` here:
+    that converter is lossy (collapses reasoning into ``reasoning_content``,
+    rewrites ``file_search_call`` into a synthetic function call) and raises
+    ``UserError`` for hosted-tool items, ``ItemReference``s, compaction
+    items, and any unknown content shape, which would crash sample
+    collection on perfectly successful runs. The canonical shape is the
+    SDK's stable persisted format and is what graders should walk.
+    """
+
+    def __init__(self, session: SessionABC) -> None:
+        self.session = session
+
+    async def get_sample(self, name: str) -> RolloutSample:
+        items = await self.session.get_items()
+        return RolloutSample(id=name, messages=items)
 
 
 class OsmosisRolloutModel(LitellmModel):
-    """LiteLLM model pointed at the rollout controller with sample headers."""
+    """Placeholder ``Model`` that carries litellm kwargs for workflow configs.
 
-    def __init__(self, *, rollout_ctx: RolloutContext, sample_id: str) -> None:
-        super().__init__(
-            model="openai/osmosis-rollout",
-            base_url=rollout_ctx.chat_completions_url,
-            api_key=rollout_ctx.api_key,
-        )
-        self.rollout_ctx = rollout_ctx
-        self.sample_id = sample_id
-
-    def _merge_headers(self, model_settings: Any) -> dict[str, str]:
-        return {
-            **super()._merge_headers(model_settings),
-            "x-rollout-id": self.rollout_ctx.rollout_id,
-            "x-sample-id": self.sample_id,
-        }
-
-
-class OsmosisRolloutProvider(ModelProvider):
-    """Returns the rollout model when no model name is given; defers named lookups.
-
-    Upstream resolves models in the order ``run_config.model > agent.model >
-    run_config.model_provider``, so handling only the unnamed case leaves
-    explicit user models routed through their original provider.
+    This is not a usable model on its own: ``OsmosisAgent`` replaces it
+    with a real :class:`OsmosisLitellmModel` wired to the active
+    ``RolloutContext`` at agent construction time.
     """
 
-    def __init__(
-        self,
-        *,
-        fallback: ModelProvider,
-        rollout_ctx: RolloutContext,
-        sample_id: str,
-    ) -> None:
-        self.fallback = fallback
-        self.rollout_ctx = rollout_ctx
-        self.sample_id = sample_id
+    def __init__(self, **litellm_kwargs: Any) -> None:
+        self.litellm_kwargs = litellm_kwargs
 
-    def get_model(self, model_name: str | None) -> Model:
-        if model_name is not None:
-            return self.fallback.get_model(model_name)
-        return OsmosisRolloutModel(
-            rollout_ctx=self.rollout_ctx, sample_id=self.sample_id
-        )
-
-
-class Runner:
-    """Drop-in replacement for ``agents.Runner`` that records rollout samples."""
-
-    @classmethod
-    async def run(
-        cls,
-        starting_agent: Agent[Any],
-        input: Any,
-        *,
-        sample_id: str | None = None,
-        **kwargs: Any,
-    ) -> RunResultBase:
-        rollout_ctx = get_rollout_context()
-        if rollout_ctx is None:
-            return await OpenAIRunner.run(starting_agent, input, **kwargs)
-
-        sid = sample_id or starting_agent.name
-        base_rc = kwargs.pop("run_config", None) or RunConfig()
-
-        # Explicit model bypasses the SSE-only controller; record sample manually.
-        if base_rc.model is not None or starting_agent.model is not None:
-            run_config = _build_run_config(rollout_ctx, base_rc, sid)
-            result = await OpenAIRunner.run(
-                starting_agent, input, run_config=run_config, **kwargs
-            )
-            rollout_ctx.record_sample(
-                sid, cast(list[dict[str, Any]], result.to_input_list())
-            )
-            return result
-
-        streaming = cls.run_streamed(
-            starting_agent, input, sample_id=sid, run_config=base_rc, **kwargs
-        )
-        async for _ in streaming.stream_events():
-            pass
-        return streaming
-
-    @classmethod
-    def run_streamed(
-        cls,
-        starting_agent: Agent[Any],
-        input: Any,
-        *,
-        sample_id: str | None = None,
-        **kwargs: Any,
-    ) -> RunResultStreaming:
-        rollout_ctx = get_rollout_context()
-        run_config = kwargs.pop("run_config", None)
-        if rollout_ctx is None:
-            return OpenAIRunner.run_streamed(
-                starting_agent, input, run_config=run_config, **kwargs
-            )
-
-        sid = sample_id or starting_agent.name
-        streaming = OpenAIRunner.run_streamed(
-            starting_agent,
-            input,
-            run_config=_build_run_config(rollout_ctx, run_config, sid),
-            **kwargs,
-        )
-        _record_sample_on_drain(streaming, rollout_ctx, sid)
-        return streaming
-
-    @classmethod
-    def run_sync(cls, *_args: Any, **_kwargs: Any) -> Any:
+    async def stream_response(
+        self, *args: Any, **kwargs: Any
+    ) -> AsyncIterator[TResponseStreamEvent]:
         raise NotImplementedError(
-            "Runner.run_sync is not supported; use 'await Runner.run(...)'."
+            "OsmosisRolloutModel is a placeholder. Wrap your agent with "
+            "OsmosisAgent so the model is bound to the active RolloutContext."
+        )
+        yield  # pragma: no cover
+
+    async def get_response(self, *args: Any, **kwargs: Any) -> ModelResponse:
+        raise NotImplementedError(
+            "OsmosisRolloutModel is a placeholder. Wrap your agent with "
+            "OsmosisAgent so the model is bound to the active RolloutContext."
         )
 
 
-def _build_run_config(
-    rollout_ctx: RolloutContext,
-    base: RunConfig | None,
-    sample_id: str,
-) -> RunConfig:
-    base = base or RunConfig()
-    return dataclasses.replace(
-        base,
-        model_provider=OsmosisRolloutProvider(
-            fallback=base.model_provider or MultiProvider(),
-            rollout_ctx=rollout_ctx,
-            sample_id=sample_id,
-        ),
-    )
+class OsmosisLitellmModel(LitellmModel):
+    """Streaming-only LitellmModel pre-wired for the Osmosis completions server.
 
+    The Osmosis completions server is streaming-only, so ``get_response``
+    aggregates ``stream_response`` events. This lets upstream ``Runner.run``
+    and ``Runner.run_sync`` work without a custom Runner wrapper.
+    """
 
-def _record_sample_on_drain(
-    streaming: RunResultStreaming,
-    rollout_ctx: RolloutContext,
-    sample_id: str,
-) -> None:
-    """Patch ``stream_events`` so the sample is recorded once the stream drains."""
-    inner = streaming.stream_events
-    drained = False
-
-    async def stream_events():
-        nonlocal drained
-        async for event in inner():
-            yield event
-        if drained:
-            return
-        drained = True
-        if streaming.run_loop_exception is not None:
-            raise streaming.run_loop_exception
-        rollout_ctx.record_sample(
-            sample_id, cast(list[dict[str, Any]], streaming.to_input_list())
+    def __init__(self, **litellm_kwargs: Any) -> None:
+        ctx = get_rollout_context()
+        if ctx is None:
+            raise RuntimeError(
+                "OsmosisLitellmModel requires an active RolloutContext. "
+                "Construct it inside your workflow run, where the execution "
+                "backend has set up the context."
+            )
+        self.rollout_id = ctx.rollout_id
+        super().__init__(
+            model="openai/osmosis-rollout",
+            base_url=ctx.chat_completions_url,
+            api_key=ctx.api_key,
+            **litellm_kwargs,
         )
 
-    streaming.stream_events = stream_events
+    def _merge_headers(self, model_settings: ModelSettings) -> dict[str, str]:
+        sample_id = current_sample_id.get()
+        if sample_id is None:
+            raise RuntimeError(
+                "OsmosisLitellmModel was called without an active OsmosisMemorySession.\n"
+                "Pass `session=OsmosisMemorySession()` to Runner.run() so the "
+                "model can stamp per-rollout headers and the runner can "
+                "persist the conversation for grading."
+            )
+        return {
+            **super()._merge_headers(model_settings),
+            "x-sample-id": sample_id,
+            "x-rollout-id": self.rollout_id,
+        }
+
+    async def get_response(self, *args: Any, **kwargs: Any) -> ModelResponse:
+        output_items: list[Any] = []
+        usage = Usage()
+        async for event in self.stream_response(*args, **kwargs):
+            if event.type == "response.completed":
+                final = event.response
+                output_items = list(final.output)
+                if final.usage:
+                    usage = Usage(
+                        requests=1,
+                        input_tokens=final.usage.input_tokens,
+                        output_tokens=final.usage.output_tokens,
+                        total_tokens=final.usage.total_tokens,
+                        input_tokens_details=(
+                            final.usage.input_tokens_details
+                            or InputTokensDetails(cached_tokens=0)
+                        ),
+                        output_tokens_details=(
+                            final.usage.output_tokens_details
+                            or OutputTokensDetails(reasoning_tokens=0)
+                        ),
+                    )
+        return ModelResponse(output=output_items, usage=usage, response_id=None)
+
+
+class OsmosisAgent(Agent):
+    """Drop-in replacement for ``Agent`` that materializes ``OsmosisRolloutModel``.
+
+    If the ``model`` argument is an ``OsmosisRolloutModel`` placeholder, it is
+    swapped for a fresh ``OsmosisLitellmModel`` bound to the active
+    ``RolloutContext``. Otherwise it behaves exactly like ``Agent``.
+    """
+
+    def __init__(self, *args: Any, model: Any = None, **kwargs: Any) -> None:
+        if isinstance(model, OsmosisRolloutModel):
+            model = OsmosisLitellmModel(**model.litellm_kwargs)
+        super().__init__(*args, model=model, **kwargs)
+
+
+__all__ = [
+    "OsmosisAgent",
+    "OsmosisLitellmModel",
+    "OsmosisMemorySession",
+    "OsmosisRolloutModel",
+    "SessionSampleSource",
+]

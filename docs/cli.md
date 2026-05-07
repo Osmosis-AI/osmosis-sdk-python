@@ -32,13 +32,29 @@ osmosis auth whoami
 
 ### osmosis workspace
 
-Manage workspaces interactively. Launches a TUI that shows your current workspace context and lets you switch workspace, browse training runs, datasets, and models.
+Manage platform workspaces interactively. Launches a TUI that shows your current workspace context and lets you switch workspace, browse training runs, datasets, and models.
 
 ```bash
 osmosis workspace
 ```
 
 In non-interactive environments, prints current context and exits.
+
+## Project
+
+### osmosis project validate
+
+Validate the canonical layout of a local Osmosis project (the directory created
+by `osmosis init`).
+
+```bash
+osmosis project validate
+osmosis project validate ./path/to/project
+```
+
+The command checks for `.osmosis/project.toml` and the required `rollouts/`,
+`configs/training/`, `configs/eval/`, `data/`, and `.osmosis/research/`
+directories.
 
 ## Rollout
 
@@ -55,14 +71,14 @@ osmosis rollout validate configs/eval/my-rollout.toml
 osmosis rollout validate configs/training/my-run.toml
 ```
 
-The command only accepts configs under these canonical workspace paths:
+The command only accepts configs under these canonical project paths:
 
 - `configs/eval/<name>.toml`
 - `configs/training/<name>.toml`
 
 ### osmosis rollout list
 
-List rollouts in the current workspace.
+List rollouts in the current platform workspace.
 
 ```bash
 osmosis rollout list
@@ -77,7 +93,7 @@ osmosis rollout list --all
 Evaluate using a TOML config. The workflow is loaded from the entrypoint module, and the grader is usually auto-discovered from that same module, so most configs do not need a separate `[grader]` table. If the grader lives elsewhere, set `[grader].module` and optional `[grader].config`.
 
 `osmosis eval run` expects the config file to live under `configs/eval/` inside a
-structured Osmosis workspace.
+structured Osmosis project.
 
 ```bash
 osmosis eval run configs/eval/my-rollout.toml
