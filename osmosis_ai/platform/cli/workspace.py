@@ -658,6 +658,14 @@ def workspace() -> None:
 
     ws_id = None
     ws_name = None
+    with contextlib.suppress(CLIError):
+        from osmosis_ai.platform.cli.workspace_context import (
+            resolve_linked_workspace_context,
+        )
+
+        linked_workspace = resolve_linked_workspace_context()
+        ws_id = linked_workspace.workspace_id
+        ws_name = linked_workspace.workspace_name
 
     _show_context(ws_name)
 

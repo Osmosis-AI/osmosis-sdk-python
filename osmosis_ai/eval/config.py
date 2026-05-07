@@ -104,7 +104,7 @@ class EvalConfig(BaseModel):
 
 def _is_filesystem_grader_config(value: str) -> bool:
     """Return True when [grader].config looks like a local filesystem path."""
-    if ":" in value:
+    if "://" in value:
         return False
     candidate = Path(value)
     return (

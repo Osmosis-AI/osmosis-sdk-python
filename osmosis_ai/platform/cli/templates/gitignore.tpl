@@ -37,10 +37,8 @@ coverage.xml
 .claude/settings.local.json
 
 # ── Osmosis local state ──────────────────────────────
-.osmosis/*
+.osmosis/**
 !.osmosis/project.toml
-!.osmosis/research/
-!.osmosis/research/program.md
 
 # ── OS ──────────────────────────────────────────────
 .DS_Store

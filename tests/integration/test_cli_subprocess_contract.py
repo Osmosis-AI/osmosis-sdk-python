@@ -37,7 +37,6 @@ def _run_json_command(
 ) -> subprocess.CompletedProcess[str]:
     project = _make_project(tmp_path / "project")
     env = {**os.environ}
-    env.pop("OSMOSIS_CACHE_DIR", None)
     env["PYTHONPATH"] = os.pathsep.join(
         [str(ROOT), *(path for path in [env.get("PYTHONPATH")] if path)]
     )

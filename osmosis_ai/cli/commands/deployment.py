@@ -28,7 +28,7 @@ import typer
 from osmosis_ai.cli.console import console
 from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.cli.output import OutputFormat
-from osmosis_ai.cli.prompts import Choice, Separator, select_list
+from osmosis_ai.cli.prompts import Choice, Separator, confirm, select_list
 from osmosis_ai.platform.cli.workspace_context import WorkspaceContext
 from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE
 
@@ -36,6 +36,8 @@ app: typer.Typer = typer.Typer(
     help="Manage LoRA deployments (list, info, rename, delete).",
     no_args_is_help=True,
 )
+
+_CANCEL_ACTION = "__cancel__"
 
 
 def _detail_fields(rows: list[tuple[str, str]]) -> list[Any]:
@@ -110,7 +112,7 @@ def _format_deployment_status(status: str) -> str:
     return console.escape(label)
 
 
-def _select_checkpoint_for_deploy(workspace: WorkspaceContext) -> str:
+def _select_checkpoint_for_deploy(workspace: WorkspaceContext) -> str | None:
     from osmosis_ai.platform.api.client import OsmosisClient
 
     client = OsmosisClient()
@@ -128,10 +130,10 @@ def _select_checkpoint_for_deploy(workspace: WorkspaceContext) -> str:
         selected_run = select_list(
             "Choose a training run",
             items=run_choices,
-            actions=[Choice("Cancel", value=None)],
+            actions=[Choice("Cancel", value=_CANCEL_ACTION)],
         )
-        if selected_run is None:
-            raise CLIError("Deploy cancelled.")
+        if selected_run is None or selected_run == _CANCEL_ACTION:
+            return None
         checkpoints = client.list_training_run_checkpoints(
             selected_run.id,
             credentials=workspace.credentials,
@@ -139,9 +141,12 @@ def _select_checkpoint_for_deploy(workspace: WorkspaceContext) -> str:
         ).checkpoints
         if not checkpoints:
             run_label = selected_run.name or selected_run.id
-            raise CLIError(
+            console.print(
                 f'No deployable checkpoints found for training run "{run_label}".'
             )
+            if not confirm("Choose another training run?"):
+                return None
+            continue
 
         checkpoint_choices: list[str | Choice | Separator] = [
             Choice(cp.checkpoint_name or cp.id, value=cp) for cp in checkpoints
@@ -149,12 +154,15 @@ def _select_checkpoint_for_deploy(workspace: WorkspaceContext) -> str:
         selected_checkpoint = select_list(
             "Choose a checkpoint",
             items=checkpoint_choices,
-            actions=[Choice("Back", value="__back__"), Choice("Cancel", value=None)],
+            actions=[
+                Choice("Back", value="__back__"),
+                Choice("Cancel", value=_CANCEL_ACTION),
+            ],
         )
         if selected_checkpoint == "__back__":
             continue
-        if selected_checkpoint is None:
-            raise CLIError("Deploy cancelled.")
+        if selected_checkpoint is None or selected_checkpoint == _CANCEL_ACTION:
+            return None
         return selected_checkpoint.checkpoint_name or selected_checkpoint.id
 
 
@@ -307,6 +315,13 @@ def deploy(
     workspace_id = workspace.workspace_id
     if checkpoint is None:
         checkpoint = _select_checkpoint_for_deploy(workspace)
+        if checkpoint is None:
+            return OperationResult(
+                operation="deploy",
+                status="cancelled",
+                resource=_workspace_result_context(workspace),
+                message="Deploy cancelled.",
+            )
 
     client = OsmosisClient()
 

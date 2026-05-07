@@ -8,6 +8,8 @@ from io import StringIO
 import pytest
 
 from osmosis_ai.cli.console import Console
+from osmosis_ai.cli.errors import CLIError
+from osmosis_ai.cli.output import OutputFormat, override_output_context
 from osmosis_ai.platform.api.models import (
     BaseModelInfo,
     DatasetFile,
@@ -18,6 +20,64 @@ from osmosis_ai.platform.api.models import (
 )
 
 WORKSPACE_ID = "ws_1"
+
+
+# ---------------------------------------------------------------------------
+# Workspace entrypoint — linked project context
+# ---------------------------------------------------------------------------
+
+
+class TestWorkspaceEntrypoint:
+    def test_initializes_from_linked_project_workspace(self, monkeypatch):
+        import osmosis_ai.platform.cli.workspace as workspace_module
+
+        output = StringIO()
+        monkeypatch.setattr(
+            workspace_module,
+            "console",
+            Console(file=output, force_terminal=True, no_color=True, width=80),
+        )
+        monkeypatch.setattr(workspace_module, "load_credentials", lambda: object())
+        monkeypatch.setattr(workspace_module, "is_interactive", lambda: False)
+
+        class LinkedWorkspace:
+            workspace_id = WORKSPACE_ID
+            workspace_name = "team-alpha"
+
+        monkeypatch.setattr(
+            "osmosis_ai.platform.cli.workspace_context.resolve_linked_workspace_context",
+            lambda: LinkedWorkspace(),
+        )
+
+        with override_output_context(format=OutputFormat.rich, interactive=True):
+            workspace_module.workspace()
+
+        rendered = output.getvalue()
+        assert "Current:" in rendered
+        assert "team-alpha" in rendered
+        assert "not linked" not in rendered
+
+    def test_unlinked_or_outside_project_keeps_browse_only_context(self, monkeypatch):
+        import osmosis_ai.platform.cli.workspace as workspace_module
+
+        output = StringIO()
+        monkeypatch.setattr(
+            workspace_module,
+            "console",
+            Console(file=output, force_terminal=True, no_color=True, width=80),
+        )
+        monkeypatch.setattr(workspace_module, "load_credentials", lambda: object())
+        monkeypatch.setattr(workspace_module, "is_interactive", lambda: False)
+        monkeypatch.setattr(
+            "osmosis_ai.platform.cli.workspace_context.resolve_linked_workspace_context",
+            lambda: (_ for _ in ()).throw(CLIError("Not in an Osmosis project.")),
+        )
+
+        with override_output_context(format=OutputFormat.rich, interactive=True):
+            workspace_module.workspace()
+
+        assert "not linked" in output.getvalue()
+
 
 # ---------------------------------------------------------------------------
 # _clean_file_path — drag-and-drop path normalization

@@ -12,7 +12,6 @@ from unittest.mock import patch
 
 import pytest
 
-from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.eval.evaluation.cache import (
     _CACHE_VERSION,
     CacheConfig,
@@ -545,34 +544,16 @@ class TestGetCacheRoot:
     def test_default_path(self, monkeypatch, tmp_path):
         project = _make_project(tmp_path / "project")
         monkeypatch.chdir(project)
-        monkeypatch.delenv("OSMOSIS_CACHE_DIR", raising=False)
         monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
         root = _get_cache_root()
         assert root == (project / ".osmosis" / "cache" / "eval").resolve()
 
-    def test_osmosis_cache_dir(self, monkeypatch, tmp_path):
-        project = _make_project(tmp_path / "project")
-        monkeypatch.chdir(project)
-        monkeypatch.setenv("OSMOSIS_CACHE_DIR", str(tmp_path))
-        root = _get_cache_root()
-        assert root == tmp_path.resolve() / "eval"
-
     def test_xdg_cache_home_is_ignored(self, monkeypatch, tmp_path):
         project = _make_project(tmp_path / "project")
         monkeypatch.chdir(project)
-        monkeypatch.delenv("OSMOSIS_CACHE_DIR", raising=False)
         monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
         root = _get_cache_root()
         assert root == (project / ".osmosis" / "cache" / "eval").resolve()
-
-    def test_osmosis_takes_priority_over_xdg(self, monkeypatch, tmp_path):
-        project = _make_project(tmp_path / "project")
-        monkeypatch.chdir(project)
-        monkeypatch.setenv("OSMOSIS_CACHE_DIR", str(tmp_path / "osmosis"))
-        monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "xdg"))
-        root = _get_cache_root()
-        assert "osmosis" in str(root)
-        assert "xdg" not in str(root)
 
 
 def test_eval_cache_default_root_is_project_local(
@@ -581,20 +562,8 @@ def test_eval_cache_default_root_is_project_local(
 ) -> None:
     project = _make_project(tmp_path / "project")
     monkeypatch.chdir(project)
-    monkeypatch.delenv("OSMOSIS_CACHE_DIR", raising=False)
 
     assert _get_cache_root() == (project / ".osmosis" / "cache" / "eval").resolve()
-
-
-def test_eval_cache_env_override_still_requires_project(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("OSMOSIS_CACHE_DIR", str(tmp_path / "cache"))
-
-    with pytest.raises(CLIError, match="Not in an Osmosis project"):
-        _get_cache_root()
 
 
 # ============================================================

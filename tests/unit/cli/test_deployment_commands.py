@@ -190,13 +190,16 @@ class TestDeployWizardHelper:
         def fake_select_list(message, *, items, actions):
             assert message == "Choose a training run"
             assert items
-            return None
+            assert actions[0].title == "Cancel"
+            return actions[0].value
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
         monkeypatch.setattr(deployment_module, "select_list", fake_select_list)
 
-        with pytest.raises(CLIError, match="Deploy cancelled"):
+        assert (
             deployment_module._select_checkpoint_for_deploy(mock_workspace_context)
+            is None
+        )
 
     def test_select_checkpoint_cancel_at_checkpoint(
         self, monkeypatch: pytest.MonkeyPatch, mock_workspace_context: SimpleNamespace
@@ -234,14 +237,17 @@ class TestDeployWizardHelper:
             if message == "Choose a training run":
                 return run
             if message == "Choose a checkpoint":
-                return None
+                assert actions[-1].title == "Cancel"
+                return actions[-1].value
             raise AssertionError(f"unexpected prompt: {message}")
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
         monkeypatch.setattr(deployment_module, "select_list", fake_select_list)
 
-        with pytest.raises(CLIError, match="Deploy cancelled"):
+        assert (
             deployment_module._select_checkpoint_for_deploy(mock_workspace_context)
+            is None
+        )
 
     def test_select_checkpoint_back_returns_to_run_selection(
         self, monkeypatch: pytest.MonkeyPatch, mock_workspace_context: SimpleNamespace
@@ -318,10 +324,81 @@ class TestDeployWizardHelper:
         with pytest.raises(CLIError, match="No training runs"):
             deployment_module._select_checkpoint_for_deploy(mock_workspace_context)
 
-    def test_select_checkpoint_no_checkpoints_raises_before_checkpoint_prompt(
-        self, monkeypatch: pytest.MonkeyPatch, mock_workspace_context: SimpleNamespace
+    def test_select_checkpoint_no_checkpoints_confirms_return_to_run_selection(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        mock_workspace_context: SimpleNamespace,
+        console_capture: StringIO,
     ) -> None:
-        run = TrainingRun(id="run_1", name="reward-run", status="finished")
+        first_run = TrainingRun(id="run_1", name="empty-run", status="finished")
+        second_run = TrainingRun(id="run_2", name="reward-run", status="finished")
+        checkpoint = LoraCheckpointInfo(
+            id="cp_2",
+            checkpoint_name="reward-run-step-100",
+            checkpoint_step=100,
+            status="ready",
+        )
+        selected_runs = iter([first_run, second_run])
+        checkpoint_calls: list[str] = []
+        confirm_messages: list[str] = []
+
+        class FakeClient:
+            def list_training_runs(self, *, workspace_id, credentials=None):
+                assert credentials is AUTH_CREDENTIALS
+                assert workspace_id == WORKSPACE_ID
+                return PaginatedTrainingRuns(
+                    training_runs=[first_run, second_run],
+                    total_count=2,
+                    has_more=False,
+                )
+
+            def list_training_run_checkpoints(
+                self, run_id, *, workspace_id, credentials=None
+            ):
+                checkpoint_calls.append(run_id)
+                assert credentials is AUTH_CREDENTIALS
+                assert workspace_id == WORKSPACE_ID
+                checkpoints = [] if run_id == "run_1" else [checkpoint]
+                return TrainingRunCheckpoints(
+                    training_run_id=run_id,
+                    training_run_name=run_id,
+                    checkpoints=checkpoints,
+                )
+
+        def fake_select_list(message, *, items, actions):
+            assert items
+            if message == "Choose a training run":
+                return next(selected_runs)
+            if message == "Choose a checkpoint":
+                return checkpoint
+            raise AssertionError(f"unexpected prompt: {message}")
+
+        def fake_confirm(message, *, default=True):
+            confirm_messages.append(message)
+            assert default is True
+            return True
+
+        monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(deployment_module, "select_list", fake_select_list)
+        monkeypatch.setattr(deployment_module, "confirm", fake_confirm)
+
+        selected = deployment_module._select_checkpoint_for_deploy(
+            mock_workspace_context
+        )
+
+        assert selected == "reward-run-step-100"
+        assert checkpoint_calls == ["run_1", "run_2"]
+        assert confirm_messages == ["Choose another training run?"]
+        output = console_capture.getvalue()
+        assert 'No deployable checkpoints found for training run "empty-run".' in output
+
+    def test_select_checkpoint_no_checkpoints_decline_cancels_deploy(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        mock_workspace_context: SimpleNamespace,
+        console_capture: StringIO,
+    ) -> None:
+        run = TrainingRun(id="run_1", name="empty-run", status="finished")
 
         class FakeClient:
             def list_training_runs(self, *, workspace_id, credentials=None):
@@ -339,21 +416,27 @@ class TestDeployWizardHelper:
                 assert workspace_id == WORKSPACE_ID
                 return TrainingRunCheckpoints(
                     training_run_id=run_id,
-                    training_run_name="reward-run",
+                    training_run_name="empty-run",
                     checkpoints=[],
                 )
 
         def fake_select_list(message, *, items, actions):
-            if message == "Choose a training run":
-                assert items
-                return run
-            raise AssertionError("checkpoint prompt should not be shown")
+            assert message == "Choose a training run"
+            assert items
+            return run
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
         monkeypatch.setattr(deployment_module, "select_list", fake_select_list)
+        monkeypatch.setattr(deployment_module, "confirm", lambda _message: False)
 
-        with pytest.raises(CLIError, match="No deployable checkpoints"):
+        assert (
             deployment_module._select_checkpoint_for_deploy(mock_workspace_context)
+            is None
+        )
+
+        assert 'No deployable checkpoints found for training run "empty-run".' in (
+            console_capture.getvalue()
+        )
 
 
 @pytest.mark.usefixtures("mock_workspace_context")
@@ -525,6 +608,33 @@ class TestDeploy:
             "project_root": str(PROJECT_ROOT),
         }
         assert result.message == "Deployment qwen3-run1-step-100 active"
+
+    def test_deploy_interactive_cancel_returns_cancelled_result(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        class FakeClient:
+            def deploy_checkpoint(self, checkpoint, *, workspace_id, credentials=None):
+                raise AssertionError("checkpoint should not be deployed")
+
+        monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(
+            deployment_module,
+            "_select_checkpoint_for_deploy",
+            lambda _workspace: None,
+        )
+
+        with override_output_context(format=OutputFormat.rich, interactive=True):
+            result = deployment_module.deploy(checkpoint=None)
+
+        assert isinstance(result, OperationResult)
+        assert result.operation == "deploy"
+        assert result.status == "cancelled"
+        assert result.exit_code == 0
+        assert result.message == "Deploy cancelled."
+        assert result.resource == {
+            "workspace": {"id": WORKSPACE_ID, "name": WORKSPACE_NAME},
+            "project_root": str(PROJECT_ROOT),
+        }
 
     def test_deploy_escapes_checkpoint_in_spinner(
         self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
