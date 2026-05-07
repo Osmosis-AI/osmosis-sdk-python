@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -65,8 +66,19 @@ def _make_metrics(**overrides) -> TrainingRunMetrics:
 
 
 # Patch at source modules since train.py uses function-level lazy imports.
-_PATCH_AUTH = "osmosis_ai.platform.cli.utils._require_auth"
+_PATCH_AUTH = "osmosis_ai.platform.cli.utils.require_workspace_context"
 _PATCH_CLIENT = "osmosis_ai.platform.api.client.OsmosisClient"
+
+
+def _make_workspace_context(
+    *, project_root: Path | None = None, credentials: object | None = None
+) -> SimpleNamespace:
+    return SimpleNamespace(
+        project_root=project_root or Path.cwd(),
+        workspace_id="ws",
+        workspace_name="ws",
+        credentials=credentials or MagicMock(),
+    )
 
 
 def _patch_train_console(
@@ -112,7 +124,7 @@ class TestMetricsCommandPlatformUrl:
     def test_platform_url_printed(
         self, mock_auth: MagicMock, mock_client_cls: MagicMock, tmp_path: Path
     ) -> None:
-        mock_auth.return_value = ("ws", MagicMock())
+        mock_auth.return_value = _make_workspace_context(project_root=tmp_path)
         client = mock_client_cls.return_value
         client.get_training_run.return_value = _make_run_detail()
         client.get_training_run_metrics.return_value = _make_metrics()
@@ -141,7 +153,7 @@ class TestMetricsCommandTrendGraphs:
     def test_graphs_render_after_summary_when_tty_and_width_sufficient(
         self, mock_auth: MagicMock, mock_client_cls: MagicMock, tmp_path: Path
     ) -> None:
-        mock_auth.return_value = ("ws", MagicMock())
+        mock_auth.return_value = _make_workspace_context(project_root=tmp_path)
         client = mock_client_cls.return_value
         client.get_training_run.return_value = _make_run_detail()
         client.get_training_run_metrics.return_value = _make_metrics()
@@ -171,7 +183,7 @@ class TestMetricsCommandTrendGraphs:
     ) -> None:
         """Bracket characters in metric titles must not be interpreted as Rich markup."""
         bracket_title = "Loss [eval]"
-        mock_auth.return_value = ("ws", MagicMock())
+        mock_auth.return_value = _make_workspace_context(project_root=tmp_path)
         client = mock_client_cls.return_value
         client.get_training_run.return_value = _make_run_detail()
         client.get_training_run_metrics.return_value = _make_metrics(
@@ -208,7 +220,7 @@ class TestMetricsCommandTrendGraphs:
     def test_graphs_skipped_when_not_tty(
         self, mock_auth: MagicMock, mock_client_cls: MagicMock, tmp_path: Path
     ) -> None:
-        mock_auth.return_value = ("ws", MagicMock())
+        mock_auth.return_value = _make_workspace_context(project_root=tmp_path)
         client = mock_client_cls.return_value
         client.get_training_run.return_value = _make_run_detail()
         client.get_training_run_metrics.return_value = _make_metrics()
@@ -232,7 +244,7 @@ class TestMetricsCommandTrendGraphs:
     def test_graphs_skipped_when_terminal_narrow(
         self, mock_auth: MagicMock, mock_client_cls: MagicMock, tmp_path: Path
     ) -> None:
-        mock_auth.return_value = ("ws", MagicMock())
+        mock_auth.return_value = _make_workspace_context(project_root=tmp_path)
         client = mock_client_cls.return_value
         client.get_training_run.return_value = _make_run_detail()
         client.get_training_run_metrics.return_value = _make_metrics()
@@ -256,7 +268,7 @@ class TestMetricsCommandTrendGraphs:
     def test_no_metric_data_unchanged_no_graphs(
         self, mock_auth: MagicMock, mock_client_cls: MagicMock, tmp_path: Path
     ) -> None:
-        mock_auth.return_value = ("ws", MagicMock())
+        mock_auth.return_value = _make_workspace_context(project_root=tmp_path)
         client = mock_client_cls.return_value
         client.get_training_run.return_value = _make_run_detail()
         client.get_training_run_metrics.return_value = _make_metrics(metrics=[])
@@ -288,7 +300,7 @@ class TestMetricsCommandWritesFile:
     def test_writes_json_to_explicit_output(
         self, mock_auth: MagicMock, mock_client_cls: MagicMock, tmp_path: Path
     ) -> None:
-        mock_auth.return_value = ("ws", MagicMock())
+        mock_auth.return_value = _make_workspace_context(project_root=tmp_path)
         client = mock_client_cls.return_value
         client.get_training_run.return_value = _make_run_detail()
         client.get_training_run_metrics.return_value = _make_metrics()
@@ -317,7 +329,7 @@ class TestMetricsCommandWritesFile:
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        mock_auth.return_value = ("ws", MagicMock())
+        mock_auth.return_value = _make_workspace_context(project_root=tmp_path)
         client = mock_client_cls.return_value
         client.get_training_run.return_value = _make_run_detail()
         client.get_training_run_metrics.return_value = _make_metrics()
@@ -339,6 +351,39 @@ class TestMetricsCommandWritesFile:
         assert expected.exists()
         data = json.loads(expected.read_text())
         assert data["training_run"]["id"] == "550e8400-e29b-41d4-a716-446655440000"
+
+    @patch(_PATCH_CLIENT)
+    @patch(_PATCH_AUTH)
+    def test_writes_to_default_path_from_project_subdirectory(
+        self,
+        mock_auth: MagicMock,
+        mock_client_cls: MagicMock,
+        tmp_path: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        mock_auth.return_value = _make_workspace_context(project_root=tmp_path)
+        client = mock_client_cls.return_value
+        client.get_training_run.return_value = _make_run_detail()
+        client.get_training_run_metrics.return_value = _make_metrics()
+
+        osmosis_dir = tmp_path / ".osmosis"
+        osmosis_dir.mkdir()
+        (osmosis_dir / "project.toml").write_text("[project]\n")
+        nested = tmp_path / "configs" / "training"
+        nested.mkdir(parents=True)
+        monkeypatch.chdir(nested)
+
+        from osmosis_ai.cli.commands.train import metrics
+
+        result = metrics(
+            name="reward-tuning-v3",
+            output=None,
+        )
+
+        expected = osmosis_dir / "metrics" / "reward-tuning-v3_550e8400.json"
+        assert expected.exists()
+        assert result.data["output_path"] == str(expected)
+        assert result.data["save_warning"] is None
 
 
 class TestResolveOutputPath:
@@ -412,7 +457,7 @@ class TestMetricsCommandErrors:
     def test_pending_run_raises(
         self, mock_auth: MagicMock, mock_client_cls: MagicMock
     ) -> None:
-        mock_auth.return_value = ("ws", MagicMock())
+        mock_auth.return_value = _make_workspace_context()
         client = mock_client_cls.return_value
         client.get_training_run.return_value = _make_run_detail(status="pending")
 
@@ -430,7 +475,7 @@ class TestMetricsCommandErrors:
     def test_running_run_shows_snapshot_note(
         self, mock_auth: MagicMock, mock_client_cls: MagicMock, tmp_path: Path
     ) -> None:
-        mock_auth.return_value = ("ws", MagicMock())
+        mock_auth.return_value = _make_workspace_context(project_root=tmp_path)
         client = mock_client_cls.return_value
         client.get_training_run.return_value = _make_run_detail(status="running")
         client.get_training_run_metrics.return_value = _make_metrics(status="running")
@@ -463,7 +508,7 @@ class TestMetricsCommandErrors:
         self, mock_auth: MagicMock, mock_client_cls: MagicMock
     ) -> None:
         """Unreachable save path prints warning instead of crashing."""
-        mock_auth.return_value = ("ws", MagicMock())
+        mock_auth.return_value = _make_workspace_context()
         client = mock_client_cls.return_value
         client.get_training_run.return_value = _make_run_detail()
         client.get_training_run_metrics.return_value = _make_metrics()
@@ -490,7 +535,7 @@ class TestMetricsCommandErrors:
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
         """Without -o and outside a project dir, metrics still print."""
-        mock_auth.return_value = ("ws", MagicMock())
+        mock_auth.return_value = _make_workspace_context(project_root=tmp_path)
         client = mock_client_cls.return_value
         client.get_training_run.return_value = _make_run_detail()
         client.get_training_run_metrics.return_value = _make_metrics()

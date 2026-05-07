@@ -102,6 +102,13 @@ class EvalCommand:
             result = [e for e in result if e.get("status") == status]
         return result
 
+    @staticmethod
+    def _cache_display_model_dataset(entry: dict[str, Any]) -> tuple[str, str]:
+        config = entry.get("config", {}) or {}
+        model = config.get("llm_model") or config.get("model", "")
+        dataset = config.get("eval_dataset") or config.get("dataset", "")
+        return str(model), str(dataset)
+
     def _run_cache_ls(
         self,
         *,
@@ -156,14 +163,14 @@ class EvalCommand:
             table.add_column("RUNS", justify="right")
             table.add_column("CREATED")
             for e in entries:
-                config = e.get("config", {})
+                model, dataset = self._cache_display_model_dataset(e)
                 created = e.get("created_at", "")
                 if created and len(created) >= 16:
                     created = created[:16].replace("T", " ")
                 table.add_row(
                     e.get("task_id", ""),
-                    config.get("model", ""),
-                    config.get("dataset", ""),
+                    model,
+                    dataset,
                     e.get("status", ""),
                     str(e.get("runs_count", 0)),
                     created,
@@ -172,15 +179,15 @@ class EvalCommand:
         else:
             # Tab-separated output for piping
             for e in entries:
-                config = e.get("config", {})
+                model, dataset = self._cache_display_model_dataset(e)
                 created = e.get("created_at", "")
                 if created and len(created) >= 16:
                     created = created[:16].replace("T", " ")
                 line = "\t".join(
                     [
                         e.get("task_id", ""),
-                        config.get("model", ""),
-                        config.get("dataset", ""),
+                        model,
+                        dataset,
                         e.get("status", ""),
                         str(e.get("runs_count", 0)),
                         created,
@@ -242,11 +249,11 @@ class EvalCommand:
                 )
             self.console.print(f"Will delete {len(targets)} cached evaluation(s):")
             for e in targets:
-                config = e.get("config", {})
+                model, dataset = self._cache_display_model_dataset(e)
                 self.console.print(
                     f"  {e.get('task_id', '')}"
-                    f"  {config.get('model', '')}"
-                    f"  {config.get('dataset', '')}"
+                    f"  {model}"
+                    f"  {dataset}"
                     f"  ({e.get('status', '')})"
                 )
             try:
@@ -489,22 +496,20 @@ class EvalCommand:
             load_workflow,
             truncate_error,
         )
-        from osmosis_ai.eval.config import load_eval_config
+        from osmosis_ai.eval.config import load_eval_config, resolve_eval_context_paths
         from osmosis_ai.platform.cli.project_contract import (
             ensure_project_config_path,
-            resolve_project_root,
+            resolve_project_root_from_cwd,
             validate_project_contract,
         )
 
-        # 1. Load TOML config
+        # 1. Validate project-local config path
         config_path = Path(args.config_path)
         try:
-            config = load_eval_config(config_path)
-        except CLIError as e:
-            return self._fail(f"Error: {e}")
-
-        try:
-            project_root = resolve_project_root(config_path)
+            project_root = resolve_project_root_from_cwd()
+            config_path = (
+                config_path if config_path.is_absolute() else project_root / config_path
+            )
             validate_project_contract(project_root)
             ensure_project_config_path(
                 config_path,
@@ -512,6 +517,12 @@ class EvalCommand:
                 config_dir="configs/eval",
                 command_label="`osmosis eval run`",
             )
+        except CLIError as e:
+            return self._fail(f"Error: {e}")
+
+        try:
+            config = load_eval_config(config_path)
+            config = resolve_eval_context_paths(config, project_root)
         except CLIError as e:
             return self._fail(f"Error: {e}")
 
@@ -692,12 +703,15 @@ class EvalCommand:
             _get_cache_root,
             compute_dataset_fingerprint,
             compute_module_fingerprint,
+            compute_rollout_package_fingerprint,
             compute_task_id,
         )
 
         dataset_fingerprint = compute_dataset_fingerprint(config.eval_dataset)
 
-        module_fingerprint = compute_module_fingerprint(entrypoint_module) or ""
+        module_fingerprint = (
+            compute_rollout_package_fingerprint(entrypoint_module) or ""
+        )
 
         grader_fingerprint = compute_module_fingerprint(grader_cls.__module__)
 

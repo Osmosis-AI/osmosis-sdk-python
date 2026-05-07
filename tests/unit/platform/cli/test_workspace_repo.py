@@ -274,7 +274,49 @@ class TestSummarizeLocalGitState:
 
 
 # ---------------------------------------------------------------------------
-# validate_active_workspace_repo
+# require_git_top_level
+# ---------------------------------------------------------------------------
+
+
+class TestRequireGitTopLevel:
+    def test_allows_project_at_git_top_level(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        monkeypatch.setattr(
+            workspace_repo,
+            "git_worktree_top_level",
+            lambda _root: tmp_path.resolve(),
+            raising=False,
+        )
+
+        workspace_repo.require_git_top_level(
+            tmp_path,
+            command_label="`osmosis train submit`",
+        )
+
+    def test_rejects_project_below_git_top_level(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        project = tmp_path / "project"
+        project.mkdir()
+        monkeypatch.setattr(
+            workspace_repo,
+            "git_worktree_top_level",
+            lambda _root: tmp_path.resolve(),
+            raising=False,
+        )
+
+        with pytest.raises(CLIError) as exc:
+            workspace_repo.require_git_top_level(
+                project,
+                command_label="`osmosis train submit`",
+            )
+
+        assert "Git worktree top-level Osmosis project" in str(exc.value)
+
+
+# ---------------------------------------------------------------------------
+# validate_workspace_repo
 # ---------------------------------------------------------------------------
 
 
@@ -301,10 +343,11 @@ def _patch_refresh(
     monkeypatch.setattr("osmosis_ai.platform.api.client.OsmosisClient", _FakeClient)
 
 
-class TestValidateActiveWorkspaceRepo:
+class TestValidateWorkspaceRepo:
     def _call(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-        workspace_repo.validate_active_workspace_repo(
+        workspace_repo.validate_workspace_repo(
             project_root=tmp_path,
+            workspace_id="ws_123",
             workspace_name="team-alpha",
             credentials=object(),  # type: ignore[arg-type]
             command_label="`osmosis train submit`",
@@ -325,20 +368,32 @@ class TestValidateActiveWorkspaceRepo:
         assert "no connected repo" in message
         assert "team-alpha" in message
         assert "/team-alpha/integrations/git" in message
+        assert "osmosis project unlink" in message
+        assert "osmosis project link" in message
+        assert "osmosis workspace switch" not in message
 
-    def test_workspace_not_found_raises(
+    def test_workspace_not_found_raises_stale_link_guidance(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        # When the workspace can't be matched, the API response omits
-        # `connected_repo` entirely. Treat it the same as "no connected repo".
+        # When the linked workspace can't be matched, guide the user to
+        # refresh the project mapping rather than configure Git Sync.
         _patch_refresh(monkeypatch, {"found": False})
 
         def _fail(*args: Any, **kwargs: Any) -> str:
             raise AssertionError("git remote should not be checked")
 
         monkeypatch.setattr(workspace_repo, "get_local_git_remote_url", _fail)
-        with pytest.raises(CLIError, match="no connected repo"):
+        with pytest.raises(CLIError) as exc:
             self._call(monkeypatch, tmp_path)
+        message = str(exc.value)
+        assert "no longer accessible" in message
+        assert "team-alpha" in message
+        assert "ws_123" in message
+        assert "osmosis project unlink" in message
+        assert "osmosis project link" in message
+        assert "no connected repo" not in message
+        assert "/team-alpha/integrations/git" not in message
+        assert "osmosis workspace switch" not in message
 
     def test_platform_unreachable_is_noop(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -402,6 +457,9 @@ class TestValidateActiveWorkspaceRepo:
         assert "team-alpha" in message
         assert "https://github.com/acme/rollouts" in message
         assert "no `origin` remote" in message
+        assert "osmosis project unlink" in message
+        assert "osmosis project link" in message
+        assert "osmosis workspace switch" not in message
 
     def test_mismatched_remote_raises(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -426,6 +484,9 @@ class TestValidateActiveWorkspaceRepo:
         assert "team-alpha" in message
         assert "https://github.com/acme/rollouts" in message
         assert "https://github.com/other/repo.git" in message
+        assert "osmosis project unlink" in message
+        assert "osmosis project link" in message
+        assert "osmosis workspace switch" not in message
 
     def test_unparseable_platform_url_is_noop(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -465,3 +526,5 @@ class TestValidateActiveWorkspaceRepo:
             self._call(monkeypatch, tmp_path)
 
         assert captured.get("cleanup_on_401") is False
+        assert captured.get("workspace_id") == "ws_123"
+        assert "workspace_name" not in captured

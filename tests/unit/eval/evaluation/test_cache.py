@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import json
+import sys
 import types
 from contextlib import redirect_stdout
 from pathlib import Path
@@ -30,9 +31,32 @@ from osmosis_ai.eval.evaluation.cache import (
     compute_dataset_fingerprint,
     compute_eval_fns_fingerprint,
     compute_module_fingerprint,
+    compute_rollout_package_fingerprint,
     compute_task_id,
     sanitize_path_part,
 )
+
+
+def _make_project(root: Path) -> Path:
+    for rel_path in (
+        ".osmosis",
+        ".osmosis/research",
+        "rollouts",
+        "configs",
+        "configs/eval",
+        "configs/training",
+        "data",
+    ):
+        (root / rel_path).mkdir(parents=True, exist_ok=True)
+    (root / ".osmosis" / "project.toml").write_text(
+        "[project]\nname='test'\n",
+        encoding="utf-8",
+    )
+    (root / ".osmosis" / "research" / "program.md").write_text(
+        "# Test\n", encoding="utf-8"
+    )
+    return root
+
 
 # ============================================================
 # _deterministic_json tests
@@ -409,6 +433,38 @@ class TestComputeModuleFingerprint:
         assert result is not None
 
 
+class TestComputeRolloutPackageFingerprint:
+    def test_hashes_synthetic_rollout_package_tree(self, tmp_path: Path) -> None:
+        """Synthetic rollout entrypoints should fingerprint imported files too."""
+        rollout_dir = tmp_path / "rollout"
+        rollout_dir.mkdir()
+        entrypoint = rollout_dir / "workflow.py"
+        helper = rollout_dir / "helper.py"
+        entrypoint.write_text("from helper import VALUE\n", encoding="utf-8")
+        helper.write_text("VALUE = 1\n", encoding="utf-8")
+
+        package_name = "_osmosis_rollout_test_fingerprint"
+        module_name = f"{package_name}.workflow"
+        package = types.ModuleType(package_name)
+        package.__path__ = [str(rollout_dir)]  # type: ignore[attr-defined]
+        module = types.ModuleType(module_name)
+        module.__file__ = str(entrypoint)
+        try:
+            sys.modules[package_name] = package
+            sys.modules[module_name] = module
+
+            before = compute_rollout_package_fingerprint(module_name)
+            helper.write_text("VALUE = 2\n", encoding="utf-8")
+            after = compute_rollout_package_fingerprint(module_name)
+        finally:
+            sys.modules.pop(module_name, None)
+            sys.modules.pop(package_name, None)
+
+        assert before is not None
+        assert after is not None
+        assert before != after
+
+
 # ============================================================
 # compute_eval_fns_fingerprint tests
 # ============================================================
@@ -485,29 +541,29 @@ class TestComputeEvalFnsFingerprint:
 
 
 class TestGetCacheRoot:
-    def test_default_path(self, monkeypatch):
-        monkeypatch.delenv("OSMOSIS_CACHE_DIR", raising=False)
+    def test_default_path(self, monkeypatch, tmp_path):
+        project = _make_project(tmp_path / "project")
+        monkeypatch.chdir(project)
         monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
         root = _get_cache_root()
-        assert root == Path.home() / ".cache" / "osmosis" / "eval"
+        assert root == (project / ".osmosis" / "cache" / "eval").resolve()
 
-    def test_osmosis_cache_dir(self, monkeypatch, tmp_path):
-        monkeypatch.setenv("OSMOSIS_CACHE_DIR", str(tmp_path))
-        root = _get_cache_root()
-        assert root == tmp_path.resolve() / "eval"
-
-    def test_xdg_cache_home(self, monkeypatch, tmp_path):
-        monkeypatch.delenv("OSMOSIS_CACHE_DIR", raising=False)
+    def test_xdg_cache_home_is_ignored(self, monkeypatch, tmp_path):
+        project = _make_project(tmp_path / "project")
+        monkeypatch.chdir(project)
         monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
         root = _get_cache_root()
-        assert root == tmp_path.resolve() / "osmosis" / "eval"
+        assert root == (project / ".osmosis" / "cache" / "eval").resolve()
 
-    def test_osmosis_takes_priority_over_xdg(self, monkeypatch, tmp_path):
-        monkeypatch.setenv("OSMOSIS_CACHE_DIR", str(tmp_path / "osmosis"))
-        monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "xdg"))
-        root = _get_cache_root()
-        assert "osmosis" in str(root)
-        assert "xdg" not in str(root)
+
+def test_eval_cache_default_root_is_project_local(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project = _make_project(tmp_path / "project")
+    monkeypatch.chdir(project)
+
+    assert _get_cache_root() == (project / ".osmosis" / "cache" / "eval").resolve()
 
 
 # ============================================================
@@ -1374,6 +1430,35 @@ class TestCacheLs:
         cmd = self._make_command()
         ret = cmd._run_cache_ls()
         assert ret == 0
+
+    def test_ls_human_output_uses_new_config_field_names(
+        self, tmp_path: Path, monkeypatch, capsys
+    ):
+        """Human cache listings should display new cache config keys."""
+        cache_path = _make_cache_entry(
+            tmp_path,
+            "abc123",
+            "unused-model",
+            "unused-dataset.jsonl",
+        )
+        data = json.loads(cache_path.read_text())
+        data["config"] = {
+            "llm_model": "openai/gpt-5-mini",
+            "eval_dataset": "data/eval.jsonl",
+        }
+        cache_path.write_text(json.dumps(data))
+        monkeypatch.setattr(
+            "osmosis_ai.eval.evaluation.cache._get_cache_root",
+            lambda: tmp_path,
+        )
+
+        cmd = self._make_command()
+        ret = cmd._run_cache_ls()
+        captured = capsys.readouterr()
+
+        assert ret == 0
+        assert "openai/gpt-5-mini" in captured.out
+        assert "data/eval.jsonl" in captured.out
 
     def test_ls_filter_by_model(self, tmp_path: Path):
         """--model filters by model substring."""

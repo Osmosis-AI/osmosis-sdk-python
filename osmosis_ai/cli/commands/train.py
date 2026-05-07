@@ -15,6 +15,13 @@ from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE
 app: typer.Typer = typer.Typer(help="Manage training runs.", no_args_is_help=True)
 
 
+def _workspace_result_context(workspace: Any) -> dict[str, Any]:
+    return {
+        "workspace": {"id": workspace.workspace_id, "name": workspace.workspace_name},
+        "project_root": str(workspace.project_root),
+    }
+
+
 def _detail_fields(rows: list[tuple[str, str]]) -> list[Any]:
     from osmosis_ai.cli.output import DetailField
 
@@ -198,7 +205,7 @@ def list_runs(
     ),
     all_: bool = typer.Option(False, "--all", help="Show all training runs."),
 ) -> Any:
-    """List training runs in the current platform workspace."""
+    """List training runs in the linked project workspace."""
     from osmosis_ai.cli.output import (
         ListColumn,
         ListResult,
@@ -206,14 +213,15 @@ def list_runs(
         serialize_training_run,
     )
     from osmosis_ai.platform.cli.utils import (
-        _require_auth,
         fetch_all_pages,
+        require_workspace_context,
         validate_list_options,
     )
 
     effective_limit, fetch_all = validate_list_options(limit=limit, all_=all_)
 
-    _, credentials = _require_auth()
+    workspace = require_workspace_context()
+    credentials = workspace.credentials
 
     from osmosis_ai.platform.api.client import OsmosisClient
 
@@ -223,7 +231,10 @@ def list_runs(
         if fetch_all:
             training_runs, total_count = fetch_all_pages(
                 lambda lim, off: client.list_training_runs(
-                    limit=lim, offset=off, credentials=credentials
+                    limit=lim,
+                    offset=off,
+                    credentials=credentials,
+                    workspace_id=workspace.workspace_id,
                 ),
                 items_attr="training_runs",
             )
@@ -231,7 +242,10 @@ def list_runs(
             next_offset = None
         else:
             page = client.list_training_runs(
-                limit=effective_limit, offset=0, credentials=credentials
+                limit=effective_limit,
+                offset=0,
+                credentials=credentials,
+                workspace_id=workspace.workspace_id,
             )
             training_runs = page.training_runs
             total_count = page.total_count
@@ -244,6 +258,7 @@ def list_runs(
         total_count=total_count,
         has_more=has_more,
         next_offset=next_offset,
+        extra=_workspace_result_context(workspace),
         columns=[
             ListColumn(key="name", label="Name"),
             ListColumn(key="status", label="Status"),
@@ -271,17 +286,22 @@ def status(
     from osmosis_ai.platform.api.models import RUN_STATUSES_TERMINAL
     from osmosis_ai.platform.auth.platform_client import PlatformAPIError
     from osmosis_ai.platform.cli.utils import (
-        _require_auth,
         build_run_detail_rows,
         format_date,
+        require_workspace_context,
     )
 
-    _, credentials = _require_auth()
+    workspace = require_workspace_context()
+    credentials = workspace.credentials
 
     client = OsmosisClient()
     output = get_output_context()
     with output.status("Fetching training run..."):
-        run = client.get_training_run(name, credentials=credentials)
+        run = client.get_training_run(
+            name,
+            credentials=credentials,
+            workspace_id=workspace.workspace_id,
+        )
 
     rows = build_run_detail_rows(run)
     if run.examples_processed_count is not None:
@@ -301,7 +321,9 @@ def status(
         try:
             with output.status("Fetching checkpoints..."):
                 ckpts = client.list_training_run_checkpoints(
-                    name, credentials=credentials
+                    name,
+                    credentials=credentials,
+                    workspace_id=workspace.workspace_id,
                 )
         except PlatformAPIError:
             ckpts = None
@@ -336,6 +358,7 @@ def status(
             "notes": run.notes,
             "hf_status": run.hf_status,
             "checkpoints": [serialize_checkpoint(cp) for cp in checkpoints],
+            **_workspace_result_context(workspace),
         }
     )
 
@@ -354,11 +377,11 @@ def info(
 def submit(
     config_path: Path = typer.Argument(
         ...,
-        exists=True,
+        exists=False,
         file_okay=True,
         dir_okay=False,
-        readable=True,
-        resolve_path=True,
+        readable=False,
+        resolve_path=False,
         help="Path to training config TOML file.",
     ),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
@@ -367,40 +390,52 @@ def submit(
     from osmosis_ai.cli.output import OperationResult, get_output_context
     from osmosis_ai.platform.cli.project_contract import (
         ensure_project_config_path,
-        resolve_project_root,
+        resolve_project_root_from_cwd,
         validate_project_contract,
         validate_rollout_backend,
     )
-    from osmosis_ai.platform.cli.training_config import load_training_config
+    from osmosis_ai.platform.cli.training_config import (
+        load_training_config,
+        validate_training_context_paths,
+    )
     from osmosis_ai.platform.cli.utils import (
-        _require_auth,
         platform_entity_url,
+        require_workspace_context,
     )
     from osmosis_ai.platform.cli.workspace_repo import (
-        validate_active_workspace_repo,
+        require_git_top_level,
+        validate_workspace_repo,
     )
 
     command_label = "`osmosis train submit`"
 
-    project_root = resolve_project_root(config_path)
+    project_root = resolve_project_root_from_cwd()
     validate_project_contract(project_root)
+    config_path = Path(config_path)
+    resolved_config_path = (
+        config_path if config_path.is_absolute() else project_root / config_path
+    )
     ensure_project_config_path(
-        config_path,
+        resolved_config_path,
         project_root,
         config_dir="configs/training",
         command_label=command_label,
     )
-    config = load_training_config(config_path)
+    config = load_training_config(resolved_config_path)
+    validate_training_context_paths(config, project_root)
     validate_rollout_backend(
         project_root=project_root,
         rollout=config.experiment_rollout,
         entrypoint=config.experiment_entrypoint,
         command_label=command_label,
     )
-    ws_name, credentials = _require_auth()
-    validate_active_workspace_repo(
+    workspace = require_workspace_context()
+    credentials = workspace.credentials
+    require_git_top_level(project_root, command_label)
+    validate_workspace_repo(
         project_root=project_root,
-        workspace_name=ws_name,
+        workspace_id=workspace.workspace_id,
+        workspace_name=workspace.workspace_name,
         credentials=credentials,
         command_label=command_label,
     )
@@ -461,9 +496,10 @@ def submit(
             rollout_env=config.rollout_env or None,
             rollout_secret_refs=config.rollout_secret_refs or None,
             credentials=credentials,
+            workspace_id=workspace.workspace_id,
         )
 
-    url = platform_entity_url(ws_name, "training", result.id)
+    url = platform_entity_url(workspace.workspace_name, "training", result.id)
     return OperationResult(
         operation="train.submit",
         status="success",
@@ -473,6 +509,7 @@ def submit(
             "status": result.status,
             "created_at": result.created_at,
             "url": url,
+            **_workspace_result_context(workspace),
             "config": {
                 "rollout": config.experiment_rollout,
                 "entrypoint": config.experiment_entrypoint,
@@ -585,16 +622,21 @@ def metrics(
     from osmosis_ai.platform.api.models import RUN_STATUSES_IN_PROGRESS
     from osmosis_ai.platform.auth.platform_client import PlatformAPIError
     from osmosis_ai.platform.cli.utils import (
-        _require_auth,
         platform_entity_url,
+        require_workspace_context,
     )
 
-    ws_name, credentials = _require_auth()
+    workspace = require_workspace_context()
+    credentials = workspace.credentials
     client = OsmosisClient()
     output_ctx = get_output_context()
 
     with output_ctx.status("Fetching training run..."):
-        run = client.get_training_run(name, credentials=credentials)
+        run = client.get_training_run(
+            name,
+            credentials=credentials,
+            workspace_id=workspace.workspace_id,
+        )
 
     if run.status == "pending":
         raise CLIError("Metrics are not yet available for pending training runs.")
@@ -602,7 +644,7 @@ def metrics(
     is_in_progress = run.status in RUN_STATUSES_IN_PROGRESS
 
     # ── Platform URL (no metrics dependency) ─────────────────────
-    url = platform_entity_url(ws_name, "training", run.id)
+    url = platform_entity_url(workspace.workspace_name, "training", run.id)
 
     # ── Fetch metrics (best-effort) ──────────────────────────────
     metrics_data = None
@@ -610,7 +652,9 @@ def metrics(
     try:
         with output_ctx.status("Fetching metrics..."):
             metrics_data = client.get_training_run_metrics(
-                run.id, credentials=credentials
+                run.id,
+                credentials=credentials,
+                workspace_id=workspace.workspace_id,
             )
     except (PlatformAPIError, KeyError) as exc:
         metrics_error = str(exc) or "Could not fetch metrics data."
@@ -689,7 +733,11 @@ def metrics(
                 out_path = (
                     _resolve_output_path(output, run.name, run.id)
                     if output
-                    else _resolve_default_output(run.name, run.id)
+                    else _resolve_default_output(
+                        run.name,
+                        run.id,
+                        cwd=workspace.project_root,
+                    )
                 )
                 out_path.write_text(
                     json.dumps(export, indent=2, ensure_ascii=False) + "\n"
@@ -711,6 +759,7 @@ def metrics(
             "metrics": export,
             "output_path": output_path,
             "save_warning": save_warning,
+            **_workspace_result_context(workspace),
         },
         fields=fields,
     )
@@ -729,9 +778,10 @@ def stop(
 ) -> Any:
     """Stop a training run."""
     from osmosis_ai.cli.output import OperationResult, get_output_context
-    from osmosis_ai.platform.cli.utils import _require_auth
+    from osmosis_ai.platform.cli.utils import require_workspace_context
 
-    _, credentials = _require_auth()
+    workspace = require_workspace_context()
+    credentials = workspace.credentials
 
     from osmosis_ai.platform.api.client import OsmosisClient
 
@@ -745,11 +795,15 @@ def stop(
 
     output = get_output_context()
     with output.status("Stopping training run..."):
-        client.stop_training_run(name, credentials=credentials)
+        client.stop_training_run(
+            name,
+            credentials=credentials,
+            workspace_id=workspace.workspace_id,
+        )
     return OperationResult(
         operation="train.stop",
         status="success",
-        resource={"name": name},
+        resource={"name": name, **_workspace_result_context(workspace)},
         message=f'Training run "{name}" stopped.',
     )
 
@@ -761,9 +815,10 @@ def delete(
 ) -> Any:
     """Delete a training run."""
     from osmosis_ai.cli.output import OperationResult, get_output_context
-    from osmosis_ai.platform.cli.utils import _require_auth
+    from osmosis_ai.platform.cli.utils import require_workspace_context
 
-    _, credentials = _require_auth()
+    workspace = require_workspace_context()
+    credentials = workspace.credentials
 
     from osmosis_ai.platform.api.client import OsmosisClient
 
@@ -777,10 +832,14 @@ def delete(
 
     output = get_output_context()
     with output.status("Deleting training run..."):
-        client.delete_training_run(name, credentials=credentials)
+        client.delete_training_run(
+            name,
+            credentials=credentials,
+            workspace_id=workspace.workspace_id,
+        )
     return OperationResult(
         operation="train.delete",
         status="success",
-        resource={"name": name},
+        resource={"name": name, **_workspace_result_context(workspace)},
         message=f'Training run "{name}" deleted.',
     )

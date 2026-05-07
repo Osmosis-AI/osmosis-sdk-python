@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import os
 from io import StringIO
+from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -20,14 +22,30 @@ from osmosis_ai.platform.api.models import (
     UploadInfo,
 )
 
+WORKSPACE_ID = "ws_b_id"
+WORKSPACE_NAME = "ws-b"
+PROJECT_ROOT = Path("/tmp/osmosis-project")
 
-def test_list_datasets_uses_active_workspace(monkeypatch) -> None:
-    calls: dict[str, object | None] = {}
+
+def _stub_workspace_context(monkeypatch: pytest.MonkeyPatch) -> object:
     fake_credentials = object()
-
-    monkeypatch.setattr(
-        dataset_module, "_require_auth", lambda: ("ws-b", fake_credentials)
+    workspace = SimpleNamespace(
+        project_root=PROJECT_ROOT,
+        workspace_id=WORKSPACE_ID,
+        workspace_name=WORKSPACE_NAME,
+        credentials=fake_credentials,
     )
+    monkeypatch.setattr(
+        dataset_module,
+        "require_workspace_context",
+        lambda: workspace,
+    )
+    return fake_credentials
+
+
+def test_list_datasets_uses_linked_workspace_context(monkeypatch) -> None:
+    calls: dict[str, object | None] = {}
+    fake_credentials = _stub_workspace_context(monkeypatch)
 
     class FakeClient:
         def list_datasets(
@@ -36,8 +54,10 @@ def test_list_datasets_uses_active_workspace(monkeypatch) -> None:
             offset: int = 0,
             *,
             credentials=None,
+            workspace_id: str,
         ) -> PaginatedDatasets:
             calls["credentials"] = credentials
+            calls["workspace_id"] = workspace_id
             return PaginatedDatasets(datasets=[], total_count=0, has_more=False)
 
     monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
@@ -46,26 +66,24 @@ def test_list_datasets_uses_active_workspace(monkeypatch) -> None:
 
     assert calls == {
         "credentials": fake_credentials,
+        "workspace_id": WORKSPACE_ID,
     }
     assert result.total_count == 0
 
 
-def test_upload_passes_active_workspace_context_to_subscription_and_api_calls(
+def test_upload_passes_linked_workspace_context_to_subscription_and_api_calls(
     monkeypatch,
     tmp_path,
 ) -> None:
     calls: dict[str, object] = {}
-    fake_credentials = object()
+    fake_credentials = _stub_workspace_context(monkeypatch)
     output = StringIO()
 
     file_path = tmp_path / "data.jsonl"
     file_path.write_text("{}", encoding="utf-8")
 
-    monkeypatch.setattr(
-        dataset_module, "_require_auth", lambda: ("ws-b", fake_credentials)
-    )
-
-    def fake_require_subscription(*, workspace_name: str) -> None:
+    def fake_require_subscription(*, workspace_id: str, workspace_name: str) -> None:
+        calls["subscription_workspace_id"] = workspace_id
         calls["workspace_name"] = workspace_name
 
     monkeypatch.setattr(
@@ -101,11 +119,13 @@ def test_upload_passes_active_workspace_context_to_subscription_and_api_calls(
             extension: str,
             *,
             credentials=None,
+            workspace_id: str,
         ) -> DatasetFile:
             assert file_name == "data"
             assert file_size > 0
             assert extension == "jsonl"
             calls["create_credentials"] = credentials
+            calls["create_workspace_id"] = workspace_id
             return DatasetFile(
                 id="dataset-1",
                 file_name=file_name,
@@ -124,10 +144,12 @@ def test_upload_passes_active_workspace_context_to_subscription_and_api_calls(
             parts: list[dict] | None = None,
             *,
             credentials=None,
+            workspace_id: str,
         ) -> DatasetFile:
             assert file_id == "dataset-1"
             assert parts is None
             calls["complete_credentials"] = credentials
+            calls["complete_workspace_id"] = workspace_id
             return DatasetFile(
                 id=file_id,
                 file_name="data",
@@ -140,28 +162,31 @@ def test_upload_passes_active_workspace_context_to_subscription_and_api_calls(
     result = dataset_module.upload(str(file_path))
 
     assert calls == {
-        "workspace_name": "ws-b",
+        "subscription_workspace_id": WORKSPACE_ID,
+        "workspace_name": WORKSPACE_NAME,
         "create_credentials": fake_credentials,
+        "create_workspace_id": WORKSPACE_ID,
         "complete_credentials": fake_credentials,
+        "complete_workspace_id": WORKSPACE_ID,
     }
     assert result.operation == "dataset.upload"
     assert result.status == "success"
     assert result.resource["id"] == "dataset-1"
     assert result.resource["status"] == "uploaded"
-    assert "https://example.com/ws-b/datasets/dataset-1" in result.display_next_steps[0]
+    assert (
+        f"https://example.com/{WORKSPACE_NAME}/datasets/dataset-1"
+        in result.display_next_steps[0]
+    )
 
 
-def test_download_uses_active_workspace_context_and_saves_file(
+def test_download_uses_linked_workspace_context_and_saves_file(
     monkeypatch,
     tmp_path,
 ) -> None:
     calls: dict[str, object] = {}
-    fake_credentials = object()
+    fake_credentials = _stub_workspace_context(monkeypatch)
     output = StringIO()
 
-    monkeypatch.setattr(
-        dataset_module, "_require_auth", lambda: ("ws-b", fake_credentials)
-    )
     monkeypatch.setattr(
         dataset_module,
         "console",
@@ -174,9 +199,11 @@ def test_download_uses_active_workspace_context_and_saves_file(
             file_id: str,
             *,
             credentials=None,
+            workspace_id: str,
         ) -> DatasetFile:
             assert file_id == "dataset-1"
             calls["get_credentials"] = credentials
+            calls["get_workspace_id"] = workspace_id
             return DatasetFile(
                 id="dataset-1",
                 file_name="data",
@@ -189,9 +216,11 @@ def test_download_uses_active_workspace_context_and_saves_file(
             file_id: str,
             *,
             credentials=None,
+            workspace_id: str,
         ) -> DatasetDownloadInfo:
             assert file_id == "dataset-1"
             calls["download_url_credentials"] = credentials
+            calls["download_url_workspace_id"] = workspace_id
             return DatasetDownloadInfo(
                 presigned_url="https://example.com/data.jsonl",
                 expires_in=3600,
@@ -221,7 +250,9 @@ def test_download_uses_active_workspace_context_and_saves_file(
 
     assert calls == {
         "get_credentials": fake_credentials,
+        "get_workspace_id": WORKSPACE_ID,
         "download_url_credentials": fake_credentials,
+        "download_url_workspace_id": WORKSPACE_ID,
         "download_url": "https://example.com/data.jsonl",
         "output": tmp_path,
         "default_filename": "data.jsonl",
@@ -239,11 +270,7 @@ def test_download_preserves_trailing_separator_as_directory_intent(
     tmp_path,
 ) -> None:
     calls: dict[str, object] = {}
-    fake_credentials = object()
-
-    monkeypatch.setattr(
-        dataset_module, "_require_auth", lambda: ("ws-b", fake_credentials)
-    )
+    fake_credentials = _stub_workspace_context(monkeypatch)
 
     class FakeClient:
         def get_dataset(
@@ -251,8 +278,11 @@ def test_download_preserves_trailing_separator_as_directory_intent(
             file_id: str,
             *,
             credentials=None,
+            workspace_id: str,
         ) -> DatasetFile:
             assert file_id == "dataset-1"
+            assert credentials is fake_credentials
+            calls["get_workspace_id"] = workspace_id
             return DatasetFile(
                 id="dataset-1",
                 file_name="data",
@@ -265,8 +295,11 @@ def test_download_preserves_trailing_separator_as_directory_intent(
             file_id: str,
             *,
             credentials=None,
+            workspace_id: str,
         ) -> DatasetDownloadInfo:
             assert file_id == "dataset-1"
+            assert credentials is fake_credentials
+            calls["download_url_workspace_id"] = workspace_id
             return DatasetDownloadInfo(
                 presigned_url="https://example.com/data.jsonl",
                 expires_in=3600,
@@ -292,17 +325,16 @@ def test_download_preserves_trailing_separator_as_directory_intent(
     dataset_module.download("dataset-1", output=f"{missing_dir}{os.sep}")
 
     assert calls == {
+        "get_workspace_id": WORKSPACE_ID,
+        "download_url_workspace_id": WORKSPACE_ID,
         "output": missing_dir,
         "output_is_directory": True,
     }
 
 
 def test_download_rejects_processing_dataset(monkeypatch) -> None:
-    fake_credentials = object()
-
-    monkeypatch.setattr(
-        dataset_module, "_require_auth", lambda: ("ws-b", fake_credentials)
-    )
+    calls: dict[str, object] = {}
+    fake_credentials = _stub_workspace_context(monkeypatch)
 
     class FakeClient:
         def get_dataset(
@@ -310,7 +342,10 @@ def test_download_rejects_processing_dataset(monkeypatch) -> None:
             file_id: str,
             *,
             credentials=None,
+            workspace_id: str,
         ) -> DatasetFile:
+            assert credentials is fake_credentials
+            calls["workspace_id"] = workspace_id
             return DatasetFile(
                 id=file_id,
                 file_name="data",
@@ -322,3 +357,5 @@ def test_download_rejects_processing_dataset(monkeypatch) -> None:
 
     with pytest.raises(CLIError, match="still processing"):
         dataset_module.download("dataset-1")
+
+    assert calls == {"workspace_id": WORKSPACE_ID}

@@ -1,4 +1,4 @@
-"""Validate that the local project's git remote matches the active workspace's
+"""Validate that the local project's git remote matches the linked workspace's
 connected repository.
 
 Used by commands that submit work to the platform (e.g. ``osmosis train submit``)
@@ -100,6 +100,35 @@ def get_local_git_remote_url(project_root: Path) -> str | None:
     return url or None
 
 
+def git_worktree_top_level(project_root: Path) -> Path | None:
+    """Return the Git worktree top-level containing ``project_root``, if any."""
+    if shutil.which("git") is None:
+        return None
+
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(project_root), "rev-parse", "--show-toplevel"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError:
+        return None
+
+    if result.returncode != 0:
+        return None
+    top = result.stdout.strip()
+    return Path(top).resolve() if top else None
+
+
+def require_git_top_level(project_root: Path, command_label: str) -> None:
+    top = git_worktree_top_level(project_root)
+    if top != project_root.resolve():
+        raise CLIError(
+            f"{command_label} must be run from a Git worktree top-level Osmosis project."
+        )
+
+
 @dataclass(frozen=True, slots=True)
 class LocalGitState:
     """Best-effort summary of a local git working tree.
@@ -190,31 +219,50 @@ def _git_sync_url(workspace_name: str) -> str:
 
 def _raise_no_connected_repo(workspace_name: str, command_label: str) -> None:
     raise CLIError(
-        f"{command_label} requires the active workspace to have a Git Sync "
+        f"{command_label} requires the linked workspace to have a Git Sync "
         "connected repository (the platform pulls training code from there).\n"
         f"  Workspace '{workspace_name}' has no connected repo configured.\n"
         "\n"
         "  Connect a repo via Git Sync at:\n"
         f"    {_git_sync_url(workspace_name)}\n"
-        "  Or switch to a workspace that already has one:\n"
-        "    osmosis workspace switch"
+        "  Or relink this project to a workspace that already has one:\n"
+        "    osmosis project unlink\n"
+        "    osmosis project link"
     )
 
 
-def validate_active_workspace_repo(
+def _raise_workspace_not_found(
+    workspace_id: str,
+    workspace_name: str,
+    command_label: str,
+) -> None:
+    raise CLIError(
+        f"{command_label} requires a valid linked workspace.\n"
+        f"  This project is linked to workspace '{workspace_name}' ({workspace_id}), "
+        "but that workspace is no longer accessible.\n"
+        "\n"
+        "  Run 'osmosis auth login' if you logged in as a different user, "
+        "or relink this project:\n"
+        "    osmosis project unlink\n"
+        "    osmosis project link"
+    )
+
+
+def validate_workspace_repo(
     *,
     project_root: Path,
+    workspace_id: str,
     workspace_name: str,
     credentials: Credentials,
     command_label: str,
 ) -> None:
-    """Ensure ``project_root`` is a clone of the active workspace's connected repo.
+    """Ensure ``project_root`` is a clone of the linked workspace's connected repo.
 
     The platform pulls training code from the workspace's Git Sync repo, so a
     workspace without a connected repo cannot run a training submission at all.
     This function therefore enforces both:
 
-    * The active workspace has a ``connected_repo`` configured, and
+    * The linked workspace has a ``connected_repo`` configured, and
     * The local project's ``origin`` remote points at that same repository.
 
     Raises :class:`CLIError` on any mismatch. Network/auth errors are swallowed
@@ -228,7 +276,7 @@ def validate_active_workspace_repo(
             "Checking workspace Git Sync...",
             lambda: client.refresh_workspace_info(
                 credentials=credentials,
-                workspace_name=workspace_name,
+                workspace_id=workspace_id,
                 # Pre-flight check: a transient 401 must not wipe local
                 # credentials/workspace state. Defer auth handling to the
                 # actual submit call below.
@@ -238,6 +286,10 @@ def validate_active_workspace_repo(
     except (AuthenticationExpiredError, PlatformAPIError):
         # Defer to the actual submit call to surface platform/auth errors.
         return
+
+    if info.get("found") is False:
+        _raise_workspace_not_found(workspace_id, workspace_name, command_label)
+        return  # pragma: no cover - _raise_workspace_not_found always raises
 
     connected_repo = info.get("connected_repo")
     repo_url: str | None = None
@@ -267,8 +319,9 @@ def validate_active_workspace_repo(
             "\n"
             "  Clone the connected repo:\n"
             f"    git clone {repo_url}\n"
-            "  Or switch workspaces:\n"
-            "    osmosis workspace switch"
+            "  Or relink this project:\n"
+            "    osmosis project unlink\n"
+            "    osmosis project link"
         )
 
     if normalize_git_url(local_remote) != expected:
@@ -280,15 +333,18 @@ def validate_active_workspace_repo(
             f"  Local `origin` remote:\n"
             f"    {local_remote}\n"
             "\n"
-            "  Run from the connected repo, or switch workspaces:\n"
-            "    osmosis workspace switch"
+            "  Run from the connected repo, or relink this project:\n"
+            "    osmosis project unlink\n"
+            "    osmosis project link"
         )
 
 
 __all__ = [
     "LocalGitState",
     "get_local_git_remote_url",
+    "git_worktree_top_level",
     "normalize_git_url",
+    "require_git_top_level",
     "summarize_local_git_state",
-    "validate_active_workspace_repo",
+    "validate_workspace_repo",
 ]

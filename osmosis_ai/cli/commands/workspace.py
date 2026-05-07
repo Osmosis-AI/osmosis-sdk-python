@@ -7,7 +7,7 @@ from typing import Any
 import typer
 
 app: typer.Typer = typer.Typer(
-    help="Manage platform workspaces (list, create, delete, switch).",
+    help="Manage platform workspaces (list, create, delete).",
     invoke_without_command=True,
     no_args_is_help=False,
 )
@@ -19,17 +19,16 @@ def workspace_default(ctx: typer.Context) -> None:
     if ctx.invoked_subcommand is None:
         from osmosis_ai.cli.errors import CLIError
         from osmosis_ai.cli.output import OutputFormat, get_output_context
-        from osmosis_ai.platform.cli.workspace import workspace as interactive_workspace
+        from osmosis_ai.platform.cli.workspace import workspace as workspace_ui
 
         output = get_output_context()
         if output.format is not OutputFormat.rich:
             raise CLIError(
                 "Interactive workspace UI is unavailable in this mode. "
-                "Use 'osmosis workspace list', 'osmosis workspace switch <name>', "
-                "or 'osmosis workspace create <name>'.",
+                "Use 'osmosis workspace list' or 'osmosis workspace create <name>'.",
                 code="INTERACTIVE_REQUIRED",
             )
-        interactive_workspace()
+        workspace_ui()
 
 
 @app.command("list")
@@ -64,13 +63,3 @@ def delete(
     from osmosis_ai.platform.cli.workspace import delete_workspace
 
     return delete_workspace(name=name, yes=yes)
-
-
-@app.command("switch")
-def switch(
-    workspace: str = typer.Argument(..., help="Workspace name to switch to."),
-) -> Any:
-    """Switch to a different platform workspace."""
-    from osmosis_ai.platform.cli.workspace import switch_workspace
-
-    return switch_workspace(workspace=workspace)

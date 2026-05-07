@@ -70,18 +70,41 @@ class _FakeOrchestrator:
         )
 
 
+def _make_project(root: Path) -> Path:
+    for rel_path in (
+        ".osmosis",
+        ".osmosis/research",
+        "rollouts",
+        "rollouts/demo_rollout",
+        "configs",
+        "configs/eval",
+        "configs/training",
+        "data",
+    ):
+        (root / rel_path).mkdir(parents=True, exist_ok=True)
+    (root / ".osmosis" / "project.toml").write_text(
+        "[project]\nname='test'\n",
+        encoding="utf-8",
+    )
+    (root / ".osmosis" / "research" / "program.md").write_text(
+        "# Test\n", encoding="utf-8"
+    )
+    return root
+
+
 def test_eval_run_json_returns_final_summary(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path,
     capsys,
 ) -> None:
-    config_path = tmp_path / "eval.toml"
-    dataset_path = tmp_path / "data.jsonl"
+    project = _make_project(tmp_path / "project")
+    config_path = project / "configs" / "eval" / "eval.toml"
+    dataset_path = project / "data" / "data.jsonl"
     config_path.write_text("[eval]\n", encoding="utf-8")
     dataset_path.write_text('{"input": "x"}\n', encoding="utf-8")
 
     config = EvalConfig(
-        eval_dataset=str(dataset_path),
+        eval_dataset="data/data.jsonl",
         eval_rollout="demo_rollout",
         eval_entrypoint="workflow.py",
         llm_model="openai/gpt-5.4",
@@ -92,18 +115,6 @@ def test_eval_run_json_returns_final_summary(
     fake_grader = type("FakeGrader", (), {})
 
     monkeypatch.setattr("osmosis_ai.eval.config.load_eval_config", lambda path: config)
-    monkeypatch.setattr(
-        "osmosis_ai.platform.cli.project_contract.resolve_project_root",
-        lambda path: path.parent,
-    )
-    monkeypatch.setattr(
-        "osmosis_ai.platform.cli.project_contract.validate_project_contract",
-        lambda project_root: None,
-    )
-    monkeypatch.setattr(
-        "osmosis_ai.platform.cli.project_contract.ensure_project_config_path",
-        lambda *args, **kwargs: None,
-    )
     monkeypatch.setattr(
         "osmosis_ai.eval.common.cli.load_dataset_rows",
         lambda **kwargs: ([{"input": "x"}, {"input": "y"}], None),
@@ -133,6 +144,7 @@ def test_eval_run_json_returns_final_summary(
         "osmosis_ai.eval.evaluation.orchestrator.EvalOrchestrator",
         _FakeOrchestrator,
     )
+    monkeypatch.chdir(project)
 
     exit_code = cli.main(["--json", "eval", "run", str(config_path)])
 

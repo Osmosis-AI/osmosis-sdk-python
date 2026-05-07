@@ -38,11 +38,20 @@ Credentials path: `~/.config/osmosis/credentials.json`.
 Not logged in. Run 'osmosis auth login' first.
 ```
 
-Run `osmosis auth login` again before using workspace-scoped platform commands.
+Run `osmosis auth login` again before using platform commands that use the linked project workspace.
 
-### Wrong workspace
+### Wrong linked workspace
 
-Run `osmosis workspace` to inspect or switch context.
+From the project directory, link this project with the intended workspace:
+
+```bash
+osmosis project link --workspace <workspace-id-or-name> --yes
+```
+
+Use `osmosis project info` to inspect the workspace linked to the current
+project, or `osmosis project list` to see every local project link stored for
+the current platform. Add `--refresh` to `project info` when you need to
+refresh cached workspace metadata from the platform.
 
 ## Reward and grader issues
 

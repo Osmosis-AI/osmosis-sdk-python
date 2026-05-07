@@ -16,18 +16,25 @@ app: typer.Typer = typer.Typer(
 )
 
 
+def _workspace_result_context(workspace: Any) -> dict[str, Any]:
+    return {
+        "workspace": {"id": workspace.workspace_id, "name": workspace.workspace_name},
+        "project_root": str(workspace.project_root),
+    }
+
+
 def _resolve_validation_target(
     config_path: Path,
 ) -> tuple[str, Path, str, str, str | None, str | None]:
     from osmosis_ai.eval.config import load_eval_config
     from osmosis_ai.platform.cli.project_contract import (
         ensure_project_config_path,
-        resolve_project_root,
+        resolve_project_root_from_cwd,
         validate_project_contract,
     )
     from osmosis_ai.platform.cli.training_config import load_training_config
 
-    project_root = resolve_project_root(config_path)
+    project_root = resolve_project_root_from_cwd()
     validate_project_contract(project_root)
 
     resolved_path = config_path.resolve()
@@ -154,7 +161,7 @@ def list_rollouts(
     ),
     all_: bool = typer.Option(False, "--all", help="Show all rollouts."),
 ) -> Any:
-    """List rollouts in the current platform workspace."""
+    """List rollouts in the linked project workspace."""
     from osmosis_ai.cli.output import (
         ListColumn,
         ListResult,
@@ -162,14 +169,16 @@ def list_rollouts(
         serialize_rollout,
     )
     from osmosis_ai.platform.cli.utils import (
-        _require_auth,
         fetch_all_pages,
+        require_workspace_context,
         validate_list_options,
     )
 
     effective_limit, fetch_all = validate_list_options(limit=limit, all_=all_)
 
-    _, credentials = _require_auth()
+    workspace = require_workspace_context()
+    credentials = workspace.credentials
+    workspace_id = workspace.workspace_id
 
     from osmosis_ai.platform.api.client import OsmosisClient
 
@@ -179,7 +188,10 @@ def list_rollouts(
         if fetch_all:
             rollouts, total_count = fetch_all_pages(
                 lambda lim, off: client.list_rollouts(
-                    limit=lim, offset=off, credentials=credentials
+                    limit=lim,
+                    offset=off,
+                    credentials=credentials,
+                    workspace_id=workspace_id,
                 ),
                 items_attr="rollouts",
             )
@@ -187,7 +199,10 @@ def list_rollouts(
             next_offset = None
         else:
             page = client.list_rollouts(
-                limit=effective_limit, offset=0, credentials=credentials
+                limit=effective_limit,
+                offset=0,
+                credentials=credentials,
+                workspace_id=workspace_id,
             )
             rollouts = page.rollouts
             total_count = page.total_count
@@ -200,6 +215,7 @@ def list_rollouts(
         total_count=total_count,
         has_more=has_more,
         next_offset=next_offset,
+        extra=_workspace_result_context(workspace),
         columns=[
             ListColumn(key="name", label="Name"),
             ListColumn(key="is_active", label="Active"),
