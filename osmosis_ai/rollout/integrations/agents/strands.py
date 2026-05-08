@@ -1,6 +1,6 @@
 import uuid
 from collections.abc import AsyncGenerator
-from typing import Any, TypeVar
+from typing import Any, TypeVar, cast
 
 from strands import Agent as StrandsAgent
 from strands.models.litellm import LiteLLMModel
@@ -9,9 +9,29 @@ from strands.types.content import Messages, SystemContentBlock
 from strands.types.streaming import StreamEvent
 from strands.types.tools import ToolChoice, ToolSpec
 
-from osmosis_ai.rollout.context import RolloutContext, get_rollout_context
+from osmosis_ai.rollout.context import (
+    RolloutContext,
+    SampleSource,
+    get_rollout_context,
+)
+from osmosis_ai.rollout.types import RolloutSample
+from osmosis_ai.rollout.utils.messages import map_initial_messages_to_content_blocks
 
 T = TypeVar("T")
+
+
+class StrandsAgentSampleSource(SampleSource):
+    """Produces a ``RolloutSample`` from a Strands agent's ``messages`` field.
+
+    Strands agents accumulate the conversation history on ``agent.messages``
+    in chat-completion format, so the source just wraps that list.
+    """
+
+    def __init__(self, agent: StrandsAgent) -> None:
+        self.agent = agent
+
+    async def get_sample(self, name: str) -> RolloutSample:
+        return RolloutSample(id=name, messages=list(self.agent.messages))
 
 
 class OsmosisRolloutModel(LiteLLMModel):
@@ -72,8 +92,15 @@ class OsmosisStrandsAgent(StrandsAgent):
     """
 
     def __init__(
-        self, *args: Any, model: Model | str | None = None, **kwargs: Any
+        self,
+        *args: Any,
+        messages: list[dict[str, Any]] | None = None,
+        model: Model | str | None = None,
+        **kwargs: Any,
     ) -> None:
+        if messages:
+            messages = map_initial_messages_to_content_blocks(messages)
+
         if isinstance(model, OsmosisRolloutModel):
             rollout_ctx = get_rollout_context()
             if rollout_ctx is None:
@@ -81,8 +108,13 @@ class OsmosisStrandsAgent(StrandsAgent):
                     "OsmosisRolloutModel requires an active RolloutContext. "
                     "Ensure the execution backend sets up the context before running the workflow."
                 )
-            sample_id = kwargs.get("name") or kwargs.get("agent_id") or uuid.uuid4().hex
-            model = model.for_sample(sample_id, rollout_ctx)
-            rollout_ctx.register_agent(sample_id, self)
+            name = kwargs.get("name") or kwargs.get("agent_id") or uuid.uuid4().hex
+            model = model.for_sample(name, rollout_ctx)
+            rollout_ctx.register_sample_source(name, StrandsAgentSampleSource(self))
 
-        super().__init__(*args, model=model, **kwargs)
+        super().__init__(
+            *args,
+            model=model,
+            messages=cast(Messages | None, messages),
+            **kwargs,
+        )

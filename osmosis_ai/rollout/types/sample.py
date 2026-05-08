@@ -1,14 +1,16 @@
+from collections.abc import Mapping, Sequence
 from enum import StrEnum
 from typing import Any
 
 from pydantic import BaseModel, Field
 
 MessageDict = dict[str, Any]
+SampleMessage = Mapping[str, Any]
 
 
 class RolloutSample(BaseModel):
     id: str
-    messages: list[MessageDict] = Field(default_factory=list)
+    messages: Sequence[SampleMessage] = Field(default_factory=list)
     label: str | None = None
     reward: float | None = None
 

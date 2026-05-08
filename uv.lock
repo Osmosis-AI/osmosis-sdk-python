@@ -897,6 +897,15 @@ wheels = [
 ]
 
 [[package]]
+name = "griffelib"
+version = "2.0.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/9d/82/74f4a3310cdabfbb10da554c3a672847f1ed33c6f61dd472681ce7f1fe67/griffelib-2.0.2.tar.gz", hash = "sha256:3cf20b3bc470e83763ffbf236e0076b1211bac1bc67de13daf494640f2de707e", size = 166461, upload-time = "2026-03-27T11:34:51.091Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/11/8c/c9138d881c79aa0ea9ed83cbd58d5ca75624378b38cee225dcf5c42cc91f/griffelib-2.0.2-py3-none-any.whl", hash = "sha256:925c857658fb1ba40c0772c37acbc2ab650bd794d9c1b9726922e36ea4117ea1", size = 142357, upload-time = "2026-03-27T11:34:46.275Z" },
+]
+
+[[package]]
 name = "h11"
 version = "0.16.0"
 source = { registry = "https://pypi.org/simple" }
@@ -1341,7 +1350,7 @@ wheels = [
 
 [[package]]
 name = "litellm"
-version = "1.82.6"
+version = "1.83.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aiohttp" },
@@ -1357,9 +1366,9 @@ dependencies = [
     { name = "tiktoken" },
     { name = "tokenizers" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/29/75/1c537aa458426a9127a92bc2273787b2f987f4e5044e21f01f2eed5244fd/litellm-1.82.6.tar.gz", hash = "sha256:2aa1c2da21fe940c33613aa447119674a3ad4d2ad5eb064e4d5ce5ee42420136", size = 17414147, upload-time = "2026-03-22T06:36:00.452Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/22/92/6ce9737554994ca8e536e5f4f6a87cc7c4774b656c9eb9add071caf7d54b/litellm-1.83.0.tar.gz", hash = "sha256:860bebc76c4bb27b4cf90b4a77acd66dba25aced37e3db98750de8a1766bfb7a", size = 17333062, upload-time = "2026-03-31T05:08:25.331Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/02/6c/5327667e6dbe9e98cbfbd4261c8e91386a52e38f41419575854248bbab6a/litellm-1.82.6-py3-none-any.whl", hash = "sha256:164a3ef3e19f309e3cabc199bef3d2045212712fefdfa25fc7f75884a5b5b205", size = 15591595, upload-time = "2026-03-22T06:35:56.795Z" },
+    { url = "https://files.pythonhosted.org/packages/19/2c/a670cc050fcd6f45c6199eb99e259c73aea92edba8d5c2fc1b3686d36217/litellm-1.83.0-py3-none-any.whl", hash = "sha256:88c536d339248f3987571493015784671ba3f193a328e1ea6780dbebaa2094a8", size = 15610306, upload-time = "2026-03-31T05:08:21.987Z" },
 ]
 
 [[package]]
@@ -1885,6 +1894,30 @@ wheels = [
 ]
 
 [[package]]
+name = "openai-agents"
+version = "0.14.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "griffelib" },
+    { name = "mcp" },
+    { name = "openai" },
+    { name = "pydantic" },
+    { name = "requests" },
+    { name = "types-requests" },
+    { name = "typing-extensions" },
+    { name = "websockets" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/e2/2c/74fea5c1b20f107d19742af400045542e17eb449d044f950758a6f68f32f/openai_agents-0.14.2.tar.gz", hash = "sha256:fd4e1ae84e00aef4339ad39913468a0da34cba8ff5382925d38028ac3b435ef2", size = 5288888, upload-time = "2026-04-18T00:17:39.709Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/0b/02/bb3ddff9bca543cbcca0d362a645b03a0708b6c2cd6eb620d5f3de810bb3/openai_agents-0.14.2-py3-none-any.whl", hash = "sha256:acd75132f2ec70413a4e95680b629ccbc6f4f5d0d63414980153de09d409e695", size = 807364, upload-time = "2026-04-18T00:17:37.505Z" },
+]
+
+[package.optional-dependencies]
+litellm = [
+    { name = "litellm" },
+]
+
+[[package]]
 name = "opentelemetry-api"
 version = "1.39.1"
 source = { registry = "https://pypi.org/simple" }
@@ -2029,6 +2062,7 @@ dependencies = [
     { name = "httpx" },
     { name = "keyring" },
     { name = "litellm" },
+    { name = "openai-agents", extra = ["litellm"] },
     { name = "pydantic" },
     { name = "python-dotenv" },
     { name = "pyyaml" },
@@ -2082,8 +2116,9 @@ requires-dist = [
     { name = "harbor", extras = ["daytona"], specifier = "==0.6.1" },
     { name = "httpx", specifier = ">=0.25.0,<1.0.0" },
     { name = "keyring", specifier = ">=25.0.0" },
-    { name = "litellm", specifier = "==1.82.6" },
+    { name = "litellm", specifier = ">=1.83.0,<2.0.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = "==1.20.2" },
+    { name = "openai-agents", extras = ["litellm"], specifier = ">=0.14,<0.15" },
     { name = "osmosis-ai", extras = ["platform"], marker = "extra == 'server'" },
     { name = "osmosis-ai", extras = ["server"], marker = "extra == 'dev'" },
     { name = "osmosis-ai", extras = ["server"], marker = "extra == 'full'" },
@@ -3150,7 +3185,7 @@ wheels = [
 
 [[package]]
 name = "strands-agents"
-version = "1.34.1"
+version = "1.32.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "boto3" },
@@ -3166,9 +3201,9 @@ dependencies = [
     { name = "typing-extensions" },
     { name = "watchdog" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/be/22/f958d52a794e508a31ace8b8cbba0379226a98fac9826f3b757f95912b70/strands_agents-1.34.1.tar.gz", hash = "sha256:d1ff614dc364ce54348c24b011bbef6c466a0dd33e19996bd1a4ec4aab846cb1", size = 796829, upload-time = "2026-04-01T20:37:29.755Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/d4/b9/c18d13bbf85c23eb66d9f61bced0c1f5a3ac18916331eabde049f6c4dd33/strands_agents-1.32.0.tar.gz", hash = "sha256:2e399bc5ea98d91dbcdf79913115aa579a6bb3251dfe6c15be114821cad893a4", size = 776171, upload-time = "2026-03-20T14:07:41.75Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/19/eb/b0db0fb9ae691d3ed0ac9f9604b60f9154671baf4c61853c0b6607e2a91e/strands_agents-1.34.1-py3-none-any.whl", hash = "sha256:edc5ccd4fbc64bf203ced282083ed011953f628cf8f060e1c88e6a2fd8429f3a", size = 393990, upload-time = "2026-04-01T20:37:27.906Z" },
+    { url = "https://files.pythonhosted.org/packages/6b/a9/7e00371130dec1ae16df3fd0f7450aa2b92859b625818c793d178b2f1835/strands_agents-1.32.0-py3-none-any.whl", hash = "sha256:60c0eaae32ee1fc366ecebb10bca07681015104c111472a7378f71bbcdedbba4", size = 387030, upload-time = "2026-03-20T14:07:39.754Z" },
 ]
 
 [package.optional-dependencies]

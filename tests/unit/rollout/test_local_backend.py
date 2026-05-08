@@ -11,6 +11,7 @@ from osmosis_ai.rollout.backend.local.backend import (
 from osmosis_ai.rollout.context import (
     AgentWorkflowContext,
     GraderContext,
+    SampleSource,
 )
 from osmosis_ai.rollout.grader import Grader
 from osmosis_ai.rollout.types import (
@@ -18,6 +19,7 @@ from osmosis_ai.rollout.types import (
     ExecutionRequest,
     GraderConfig,
     RolloutErrorCategory,
+    RolloutSample,
     RolloutStatus,
 )
 
@@ -26,18 +28,24 @@ from osmosis_ai.rollout.types import (
 # ---------------------------------------------------------------------------
 
 
+class StaticSampleSource(SampleSource):
+    def __init__(self, messages: list[dict[str, Any]]) -> None:
+        self.messages = messages
+
+    async def get_sample(self, name: str) -> RolloutSample:
+        return RolloutSample(id=name, messages=self.messages)
+
+
 class StubWorkflow(AgentWorkflow):
     async def run(self, ctx: AgentWorkflowContext) -> Any:
-        # Register a fake agent with the rollout context
-        from unittest.mock import MagicMock
-
         from osmosis_ai.rollout.context import get_rollout_context
 
         rollout_ctx = get_rollout_context()
         if rollout_ctx:
-            agent = MagicMock()
-            agent.messages = [{"role": "assistant", "content": "done"}]
-            rollout_ctx.register_agent("sample-1", agent)
+            rollout_ctx.register_sample_source(
+                "sample-1",
+                StaticSampleSource([{"role": "assistant", "content": "done"}]),
+            )
 
 
 class FailingWorkflow(AgentWorkflow):
@@ -221,3 +229,27 @@ class TestLocalBackend:
             workflow_config=AgentWorkflowConfig(name="test"),
         )
         assert backend.workflow_cls is StubWorkflow
+
+    async def test_prompt_passes_through_unchanged(self):
+        captured: dict = {}
+
+        class CapturingWorkflow(AgentWorkflow):
+            async def run(self, ctx: AgentWorkflowContext) -> Any:
+                captured["prompt"] = ctx.prompt
+
+        backend = LocalBackend(
+            workflow=CapturingWorkflow,
+            workflow_config=AgentWorkflowConfig(name="passthrough"),
+        )
+        on_complete = AsyncMock()
+
+        original_prompt = [
+            {"role": "system", "content": "you are helpful"},
+            {"role": "user", "content": "hi"},
+        ]
+        request = ExecutionRequest(id="r1", prompt=original_prompt)
+        await backend.execute(request, on_workflow_complete=on_complete)
+
+        # Byte-for-byte identical: no content-block conversion, no copy-and-mutate.
+        assert captured["prompt"] == original_prompt
+        assert captured["prompt"][0]["content"] == "you are helpful"
