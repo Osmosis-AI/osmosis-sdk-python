@@ -1,0 +1,23 @@
+docs/troubleshooting.md
+  s_98f3e1807d65c8::t_52483547da1522 102-132
+osmosis_ai/templates/cookbook/multiply/configs/training/multiply.toml
+  s_98f3e1807d65c8::t_a4bea199265f95 27-31,34-35
+docs/cli.md
+  s_98f3e1807d65c8::t_5c18c383b1ff15 222-252
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "28add01e384d046228168fe5c473026e02108823",
+  "prompts": {},
+  "sessions": {
+    "s_98f3e1807d65c8": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "175f1539-c7f6-465b-a699-d6bb1880642e",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "Jacob Trock <jgh@geocrypt.me>"
+    }
+  }
+}
