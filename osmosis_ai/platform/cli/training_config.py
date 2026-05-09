@@ -46,7 +46,8 @@ class _TrainingSection(BaseModel):
     rollout_batch_size: int | None = None
     max_prompt_length: int | None = None
     max_response_length: int | None = None
-    agent_timeout: float | None = None
+    agent_workflow_timeout_s: float | None = None
+    grader_timeout_s: float | None = None
 
 
 class _SamplingSection(BaseModel):
@@ -87,7 +88,8 @@ class TrainingConfig(BaseModel):
     training_rollout_batch_size: int | None
     training_max_prompt_length: int | None
     training_max_response_length: int | None
-    training_agent_timeout: float | None
+    training_agent_workflow_timeout_s: float | None
+    training_grader_timeout_s: float | None
 
     # sampling
     sampling_rollout_temperature: float | None
@@ -208,7 +210,8 @@ def load_training_config(path: Path) -> TrainingConfig:
         training_rollout_batch_size=training.rollout_batch_size,
         training_max_prompt_length=training.max_prompt_length,
         training_max_response_length=training.max_response_length,
-        training_agent_timeout=training.agent_timeout,
+        training_agent_workflow_timeout_s=training.agent_workflow_timeout_s,
+        training_grader_timeout_s=training.grader_timeout_s,
         sampling_rollout_temperature=sampling.rollout_temperature,
         sampling_rollout_top_p=sampling.rollout_top_p,
         checkpoints_eval_interval=checkpoints.eval_interval,
