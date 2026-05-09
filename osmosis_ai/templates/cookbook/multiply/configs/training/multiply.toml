@@ -24,9 +24,15 @@ dataset = "<your-multiply-dataset>"   # Replace with the uploaded dataset name.
 # lr = 1e-6
 total_epochs = 1
 n_samples_per_prompt = 8
-rollout_batch_size = 64
+# rollout_batch_size controls how many prompts are rolled out per training step.
+# Total concurrent LLM calls = rollout_batch_size × n_samples_per_prompt.
+# Keep this low for remote rollout servers to avoid overwhelming the inference
+# engine (512+ concurrent calls will cause all rollouts to timeout).
+rollout_batch_size = 8
 max_prompt_length = 2048
 max_response_length = 2048
+# agent_workflow_timeout_s = 900  # increase for long-horizon agent tasks (default: 450)
+# grader_timeout_s = 300          # increase if your grader runs slow verification (default: 150)
 
 [sampling]
 rollout_temperature = 1.0

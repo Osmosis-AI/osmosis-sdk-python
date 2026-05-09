@@ -219,6 +219,37 @@ clones the workspace's connected Git repository for the actual rollout code.
 | `model_path` | Supported base model path |
 | `dataset` | Platform dataset name (`osmosis dataset list`) |
 
+#### Optional `[training]` fields
+
+All fields are optional. Omitted fields use platform defaults.
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `total_epochs` | int | Number of passes over the dataset |
+| `n_samples_per_prompt` | int | Rollout samples generated per prompt (GRPO group size) |
+| `rollout_batch_size` | int | Prompts rolled out per training step. **Controls how many rollouts run concurrently on the rollout server** — set this to avoid overwhelming the LLM inference engine. Default: 64. For a 32-row dataset with a remote rollout server, `8` or `32` is a safe starting point. |
+| `max_prompt_length` | int | Token limit for prompt inputs |
+| `max_response_length` | int | Token limit for model responses |
+| `lr` | float | Learning rate |
+| `agent_workflow_timeout_s` | float | Seconds osmosis waits for the rollout server to complete one rollout before marking it failed (default: 450 s). Increase for long-horizon agent tasks where each rollout can take several minutes. |
+| `grader_timeout_s` | float | Seconds osmosis waits for the grader callback after rollout completes (default: 150 s). Increase if your grader runs expensive verification. |
+
+> **Sizing `rollout_batch_size`**: the rollout server processes `rollout_batch_size × n_samples_per_prompt` concurrent LLM calls per step. Too high a value overwhelms the inference engine and causes all rollouts to timeout. A good rule of thumb: `rollout_batch_size ≤ 32` when using a remote MCP-based rollout server with a 35B+ model.
+
+#### Optional `[sampling]` fields
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `rollout_temperature` | float | Sampling temperature (default: 1.0) |
+| `rollout_top_p` | float | Top-p nucleus sampling (default: 1.0) |
+
+#### Optional `[checkpoints]` fields
+
+| Key | Type | Description |
+|-----|------|-------------|
+| `checkpoint_save_freq` | int | Save a checkpoint every N rollout steps |
+| `eval_interval` | int | Run evaluation every N rollout steps |
+
 #### Environment variables — `[rollout.env]`
 
 Literal key/value pairs injected verbatim into the rollout container. Values
