@@ -99,6 +99,37 @@ Use `--fresh` after mutating the dataset file.
 
 Upgrade the package or delete the specific cache file after `osmosis eval cache ls`.
 
+## Training run rollout failures
+
+### All rollouts timeout / zero reward across the board
+
+If a training run completes with `rollout/raw_reward = 0` and `rollout/response_len/mean = 0`, every rollout timed out before producing output. This usually means the LLM inference engine was overwhelmed with too many concurrent requests.
+
+**Cause:** `rollout_batch_size` defaults to 64. With `n_samples_per_prompt = 8` that's 512 concurrent LLM calls hitting the rollout server simultaneously, which saturates the SGLang engine and causes every rollout to exceed `agent_workflow_timeout_s`.
+
+**Fix:** Reduce `rollout_batch_size` in your training config:
+
+```toml
+[training]
+n_samples_per_prompt = 8
+rollout_batch_size = 8    # 8 × 8 = 64 concurrent calls instead of 512
+```
+
+If rollouts are still timing out with a smaller batch size (e.g. because your agent takes many turns), increase the timeout:
+
+```toml
+[training]
+agent_workflow_timeout_s = 900   # 15 minutes instead of the default 7.5
+```
+
+### Some rollouts timeout (a few rows show zero reward / no output)
+
+A small number of samples failing intermittently (2–5 rows out of 500+) indicates a resource contention issue on the rollout server rather than a total overload.
+
+Common causes:
+- **Event loop blocking**: synchronous calls inside an `async` rollout workflow (e.g. `mcp.list_tools_sync()`) freeze the uvicorn event loop. New HTTP requests from slime cannot get a 200 OK within the 30 s httpx connect timeout. Fix: wrap blocking calls in `asyncio.get_running_loop().run_in_executor(None, ...)`.
+- **Subprocess exhaustion**: too many concurrent MCP subprocesses saturating OS limits. Set `ConcurrencyConfig(max_concurrent=64)` in your `AgentWorkflowConfig`.
+
 ## Rollout validation
 
 ### Validation failures
