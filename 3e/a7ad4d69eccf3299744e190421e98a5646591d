@@ -1,0 +1,362 @@
+tests/unit/cli/test_train_commands.py
+  07f47c186110dfce 116-126,128-129,588-604,606-642,644-677,679-712,714-734,739-750,752-806
+  a5f097a3689abe88 358-359,476-479,522-527,531,535,553,557,577-580,735-738
+  b6f000910df11e43 5,17,81-86,88,605,643,678,713,751,904-939,941-1027
+  775e86010494f6ae 56
+  b146a2b272a8a935 352,447,454,517,940
+  6b9a4b312864b603 841-884
+osmosis_ai/platform/cli/workspace_repo.py
+  07f47c186110dfce 2-79,86-277,284-350
+  b6f000910df11e43 80-85,278-283
+.github/workflows/tests.yml
+  92beec84d3d871f5 46-51,54-58
+tests/unit/cli/test_command_groups.py
+  ffe1a843aecfd0e5 26,80
+osmosis_ai/platform/cli/templates/configs/training/default.toml.tpl
+  b146a2b272a8a935 7
+osmosis_ai/platform/api/client.py
+  283e6c4412ff9074 320-321,323,325-331,342-345
+osmosis_ai/eval/evaluation/cache.py
+  174f9009090a30bf 255
+osmosis_ai/templates/cookbook/multiply/configs/eval/multiply.toml
+  ffe1a843aecfd0e5 1-10,14-40
+  97efac375d31d859 11-13
+osmosis_ai/cli/main.py
+  ffe1a843aecfd0e5 187,201
+osmosis_ai/cli/commands/train.py
+  b6f000910df11e43 31-47,55-80,84,102-104,107-117,127-130,135,139-140,143,145-147,149,151-152,156-181,184-198,443-447,450,466-469,471,476-482,790-794,798-802,806,818,820-821,828-830
+  283e6c4412ff9074 451-465,496-497
+  07f47c186110dfce 98-101,105-106,118-126,131-134,136-138,141-142,144,148,150,153-155,182-183,199-200,208,217,223-224,234-237,245-248,261,291,294-295,300-304,324-326,361,380,383-384,393,397-400,403,405-410,412,414-417,419,422,424-425,430-440,472-475
+osmosis_ai/templates/cookbook/multiply/configs/training/multiply.toml
+  b146a2b272a8a935 18
+  ffe1a843aecfd0e5 1-17,19-37
+tests/unit/cli/test_rollout_validate_command.py
+  a5f097a3689abe88 149-152,205-208,234-237
+  b146a2b272a8a935 147,203,232
+tests/unit/platform/cli/test_workspace_repo.py
+  07f47c186110dfce 1-54,60-62,64,70-74,76-93,95-109,111-119,134-323,328,330,335-336,339-506
+  b6f000910df11e43 55-59,63,65-69,75,94,110,120-133,324-327,329,331-334,337-338,507-528
+tests/unit/cli/test_command_result_migration_train_model_deployment_rollout.py
+  775e86010494f6ae 68-70
+  a5f097a3689abe88 402-405
+examples/rollout/submit_with_env_vars_example.py
+  s_5be153eb2f94cd::t_6afe3da1bea7a4 1-145
+osmosis_ai/platform/cli/project_mapping.py
+  s_174f9009090a30::t_fa94bd0d48630d 172-173
+osmosis_ai/platform/cli/init.py
+  07f47c186110dfce 259,288-292,295-301,308,507-510,524,526-532,535,538,541-551,553-558,561-567,571-572,576,582-584,590,595
+osmosis_ai/templates/cli.py
+  86e8ef0ca82f688f 3-4,31,83,93,105,125-130,133-136,143,210,219,231-233,249
+  c9d4ce8149e651ae 131-132
+  ffe1a843aecfd0e5 1-2,5-30,32-82,84-92,94-104,106-124,137-142,144-209,211-218,220-230,234-248,250-256
+docs/eval.md
+  174f9009090a30bf 129
+osmosis_ai/templates/registry.py
+  86e8ef0ca82f688f 1,11,19,24,38,49
+  ffe1a843aecfd0e5 2-10,12-18,20-23,25-37,39-48,50-68
+tests/unit/platform/cli/test_training_config.py
+  s_5be153eb2f94cd::t_5c35266899240a 190-191
+  b146a2b272a8a935 28,36,55,61,77
+  6b9a4b312864b603 183
+  a5f097a3689abe88 79-82,92-93,116-117,133-134,149-152,158-161,309-320,322,330,337-339,342,354,360
+osmosis_ai/rollout/backend/harbor/backend.py
+  09f94d78afd9a43f 492-501,511
+osmosis_ai/platform/cli/utils.py
+  b6f000910df11e43 320-323,332-335
+tests/unit/platform/cli/test_workspace_upload.py
+  174f9009090a30bf 11-12,16-17,22-80
+osmosis_ai/eval/common/cli.py
+  b6f000910df11e43 149-163,176
+tests/unit/platform/cli/test_project_setup.py
+  s_174f9009090a30::t_6ad7fc30607ea5 333-334,345-347
+  07f47c186110dfce 12-32,36-37,52,56-58,62-63,65,67-68,653-655,664-678,689-700,710-721,732-743,755-760,774-779,782
+  a4dda1860e6405a7 34-35,51,53-55,59-61,64,66,121,150,153,156,160,163-164,830-848,862,864-868,872-873,876-919,922-923,943-944
+tests/unit/platform/cli/test_utils.py
+  b6f000910df11e43 304-422
+osmosis_ai/templates/cookbook/multiply/rollouts/multiply/pyproject.toml
+  86e8ef0ca82f688f 13,15-17
+  ffe1a843aecfd0e5 1-12,14,18-36
+osmosis_ai/cli/commands/template.py
+  ffe1a843aecfd0e5 1-49
+tests/unit/templates/test_registry.py
+  ffe1a843aecfd0e5 1-72
+osmosis_ai/platform/cli/training_config.py
+  283e6c4412ff9074 5,10,14-28,46,65-71,86,98-101,106,117-145,175,182,186-187,213-214
+  a5f097a3689abe88 195
+osmosis_ai/cli/commands/deployment.py
+  174f9009090a30bf 31-32,40-41,49-55,115-168,176,186,192-194,202-205,213-216,229,254,256-258,263-267,285-286,289,295-296,302,305-324
+tests/unit/eval/common/test_multi_candidate.py
+  b6f000910df11e43 187-243
+pyproject.toml
+  ffe1a843aecfd0e5 97-100,103-107,131-132,167-173,204-211,219-224
+  s_174f9009090a30::t_2d08e9f84d3632 136-155
+tests/unit/platform/api/test_client.py
+  s_5be153eb2f94cd::t_9c53ece06215f4 577
+  66f1db14cbc1b47e 6,27-29,52-54,75-77,88,94-191,228,236,249,261,270,280,296,308,421-422,437-489,491-514,516-534,536-554,556-576,578-584
+  s_5be153eb2f94cd::t_aca8e958be681f 515
+  s_5be153eb2f94cd::t_0a70602af6adca 535
+  s_5be153eb2f94cd::t_b19b5047e9cba6 490
+  s_5be153eb2f94cd::t_a93ea4f3b4a694 555
+osmosis_ai/platform/cli/templates/gitignore.tpl
+  174f9009090a30bf 40
+osmosis_ai/rollout/backend/local/backend.py
+  09f94d78afd9a43f 130-131,134
+tests/unit/cli/test_project_link_commands.py
+  775e86010494f6ae 25-529
+osmosis_ai/platform/cli/workspace.py
+  b6f000910df11e43 106-112,138,182,202,213-216,246-250,256-259,279,294-297,337,346-349,415,418,445-448
+  174f9009090a30bf 661-668
+tests/unit/cli/test_init_json.py
+  07f47c186110dfce 10-11,20-27,37-39,48
+osmosis_ai/eval/config.py
+  174f9009090a30bf 107
+  s_174f9009090a30::t_acb8e33160811d 110-115
+  s_174f9009090a30::t_7d08f3a8894c57 116
+tests/unit/cli/test_deployment_commands.py
+  174f9009090a30bf 193-265,267-442,448-452,465-468,484-486,490,501,509,518,521,538,545-549,555-556,575,583,586,598,607-608,612-638
+tests/unit/templates/test_cli.py
+  ffe1a843aecfd0e5 1-74,76-88,90-91,100-194
+  97efac375d31d859 75,89
+  86e8ef0ca82f688f 92-95,98-99
+  c9d4ce8149e651ae 96-97
+osmosis_ai/templates/cookbook/multiply/rollouts/multiply/README.md
+  c9d4ce8149e651ae 42-51
+  86e8ef0ca82f688f 30,32,34,36,38,40,53,58-61
+  15e5d0bde2407183 72
+  ffe1a843aecfd0e5 1-29,31,33,35,37,39,41,52,54-57,62-70
+  97efac375d31d859 71
+tests/unit/cli/test_template_cmd.py
+  ffe1a843aecfd0e5 1-169
+osmosis_ai/templates/__init__.py
+  ffe1a843aecfd0e5 2-17
+  86e8ef0ca82f688f 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.1",
+  "base_commit_sha": "3ea7ad4d69eccf3299744e190421e98a5646591d",
+  "prompts": {
+    "07f47c186110dfce": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "b43d455c-9c86-4a2b-b2b6-d59319d47903",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "JoyboyBrian",
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 1038,
+      "overriden_lines": 0
+    },
+    "09f94d78afd9a43f": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "6257f0b5-1201-4f92-b108-c2a32114e9ce",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "JoyboyBrian",
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 12,
+      "overriden_lines": 0
+    },
+    "15e5d0bde2407183": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019ddd47-86bb-7d51-8dc5-9aebfcd2ed1d",
+        "model": "gpt-5.5"
+      },
+      "human_author": "JoyboyBrian",
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 1,
+      "overriden_lines": 0
+    },
+    "174f9009090a30bf": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "f49c6b5a-b1da-45bb-aa07-b33e18247244",
+        "model": "gpt-5.5-extra-high"
+      },
+      "human_author": "JoyboyBrian",
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 218,
+      "overriden_lines": 0
+    },
+    "283e6c4412ff9074": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "96304fec-0b56-468f-9283-85780b78b675",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Jacob Trock",
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 94,
+      "overriden_lines": 0
+    },
+    "66f1db14cbc1b47e": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "217eea2c-ce40-468a-92c3-a1a8bc948bdf",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "Jacob Trock",
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 116,
+      "overriden_lines": 0
+    },
+    "6b9a4b312864b603": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019dfe5a-e5fd-7273-bc37-58d00352b6e3",
+        "model": "gpt-5.5"
+      },
+      "human_author": "JoyboyBrian",
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 21,
+      "overriden_lines": 0
+    },
+    "775e86010494f6ae": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019dfe68-3b00-7de3-b909-748b3fdb8d25",
+        "model": "gpt-5.5"
+      },
+      "human_author": "JoyboyBrian",
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 126,
+      "overriden_lines": 0
+    },
+    "86e8ef0ca82f688f": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019ddd24-e16a-7f03-b4df-d0a9e4a9afd7",
+        "model": "gpt-5.5"
+      },
+      "human_author": "JoyboyBrian",
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 51,
+      "overriden_lines": 0
+    },
+    "92beec84d3d871f5": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "bb43f331-3ecd-46f5-8465-d95ab9385c57",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "JoyboyBrian",
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 11,
+      "overriden_lines": 0
+    },
+    "97efac375d31d859": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019ddd2c-d543-7aa1-891d-d3c9f5472fad",
+        "model": "gpt-5.5"
+      },
+      "human_author": "JoyboyBrian",
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 6,
+      "overriden_lines": 0
+    },
+    "a4dda1860e6405a7": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019dfeb5-3796-7f52-a667-d730630a6d1f",
+        "model": "gpt-5.5"
+      },
+      "human_author": "JoyboyBrian",
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 23,
+      "overriden_lines": 0
+    },
+    "a5f097a3689abe88": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "ff7bc293-3ffc-49de-b078-2c9fc89726c7",
+        "model": "gpt-5.5-extra-high"
+      },
+      "human_author": "JoyboyBrian",
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 75,
+      "overriden_lines": 0
+    },
+    "b146a2b272a8a935": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "b4953eec-72e6-4d40-b761-689e90929330",
+        "model": "gpt-5.5-extra-high"
+      },
+      "human_author": "Jacob Trock",
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 13,
+      "overriden_lines": 0
+    },
+    "b6f000910df11e43": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "3d096318-65e3-463e-8834-6783b2c016a4",
+        "model": "gpt-5.5"
+      },
+      "human_author": "JoyboyBrian",
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 580,
+      "overriden_lines": 0
+    },
+    "c9d4ce8149e651ae": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019ddd3e-f6e3-7923-bf05-0f089a280ef4",
+        "model": "gpt-5.5"
+      },
+      "human_author": "JoyboyBrian",
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 14,
+      "overriden_lines": 0
+    },
+    "ffe1a843aecfd0e5": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "371aa968-c4e5-4e43-82f3-8e53619d97bd",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "JoyboyBrian",
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 965,
+      "overriden_lines": 0
+    }
+  },
+  "sessions": {
+    "s_174f9009090a30": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "f49c6b5a-b1da-45bb-aa07-b33e18247244",
+        "model": "gpt-5.5-extra-high"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    },
+    "s_5be153eb2f94cd": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "34077c44-c006-4cb4-af33-10b2790be2e2",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "Jacob Trock <jgh@geocrypt.me>"
+    }
+  }
+}

@@ -1,0 +1,36 @@
+osmosis_ai/platform/cli/project_contract.py
+  s_6762e407d9ec18::t_15e66e2bc0f017 75,102
+osmosis_ai/platform/api/client.py
+  2eaaabc457ec0f9d 513-514,517
+tests/unit/platform/cli/test_project_setup.py
+  s_6762e407d9ec18::t_15e66e2bc0f017 65-67,106,121,609-611,700,721,743,755-757,760,775-776,779,844-845,872,917,919
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.1",
+  "base_commit_sha": "bf66ec64dd90b77d4c52ae7d1c9e88374a74796d",
+  "prompts": {
+    "2eaaabc457ec0f9d": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "fc38b9ff-ddb5-4f90-ae5b-9654d0350bd3",
+        "model": "claude-opus-4-7-thinking-xhigh"
+      },
+      "human_author": null,
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 197,
+      "overriden_lines": 1
+    }
+  },
+  "sessions": {
+    "s_6762e407d9ec18": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019e03ad-1cac-7fa1-a1ed-1059dad66355",
+        "model": "gpt-5.5"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}

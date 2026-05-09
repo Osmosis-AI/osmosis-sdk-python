@@ -1,0 +1,109 @@
+tests/unit/cli/test_train_metrics_cmd.py
+  s_6762e407d9ec18::t_15e66e2bc0f017 313,325,328,452-453,457,485,492,498
+osmosis_ai/platform/cli/init.py
+  s_6762e407d9ec18::t_15e66e2bc0f017 1,6-9,51,75,80,97-98,132,144,166,171-172,178-181,189-190,193,223,244,256,367,401,428,445,472,577,584-586,629,632,647,656,662-663,684,688,700,705,732,734
+tests/unit/platform/cli/test_project_setup.py
+  s_6762e407d9ec18::t_15e66e2bc0f017 1-1089
+examples/rollout/multiply_rollout_openai/grader.py
+  s_6762e407d9ec18::t_15e66e2bc0f017 1-56
+osmosis_ai/rollout/utils/messages.py
+  s_6762e407d9ec18::t_15e66e2bc0f017 7-12,14-23
+osmosis_ai/cli/commands/workspace.py
+  s_6762e407d9ec18::t_15e66e2bc0f017 1,10,18,37,52,63,73
+tests/unit/cli/test_project_commands.py
+  s_6762e407d9ec18::t_15e66e2bc0f017 1-41
+osmosis_ai/eval/evaluation/cli.py
+  s_6762e407d9ec18::t_15e66e2bc0f017 482-485,496-498,500,576
+docs/eval.md
+  s_6762e407d9ec18::t_15e66e2bc0f017 8
+osmosis_ai/platform/cli/project_contract.py
+  s_6762e407d9ec18::t_15e66e2bc0f017 1-170
+tests/unit/eval/evaluation/test_cli.py
+  s_6762e407d9ec18::t_15e66e2bc0f017 70,74-75,78
+tests/unit/cli/test_project_json.py
+  s_6762e407d9ec18::t_15e66e2bc0f017 1-33
+tests/unit/cli/test_train_commands.py
+  s_6762e407d9ec18::t_15e66e2bc0f017 220,230-231,254-255,359-360,414,434-435,446
+examples/rollout/multiply_rollout_openai/tools.py
+  s_6762e407d9ec18::t_15e66e2bc0f017 1-15
+osmosis_ai/cli/commands/train.py
+  s_6762e407d9ec18::t_15e66e2bc0f017 55,222-227,234-236,238,244,359-360,362
+osmosis_ai/cli/commands/init.py
+  s_6762e407d9ec18::t_15e66e2bc0f017 12,20
+osmosis_ai/platform/cli/templates/pyproject.toml.tpl
+  s_6762e407d9ec18::t_15e66e2bc0f017 3
+tests/unit/cli/test_eval_run_json.py
+  s_6762e407d9ec18::t_15e66e2bc0f017 96,100-101,104
+osmosis_ai/eval/common/cli.py
+  s_6762e407d9ec18::t_15e66e2bc0f017 51,54-55,144,150,193,213,260,273
+osmosis_ai/rollout/backend/harbor/agent_runner.py
+  s_6762e407d9ec18::t_15e66e2bc0f017 69
+tests/unit/cli/test_command_result_migration_train_model_deployment_rollout.py
+  s_6762e407d9ec18::t_15e66e2bc0f017 36,45-46,110,313-314
+osmosis_ai/cli/main.py
+  s_6762e407d9ec18::t_15e66e2bc0f017 185,193
+examples/rollout/multiply_rollout_openai/workflow.py
+  s_6762e407d9ec18::t_15e66e2bc0f017 1-49
+osmosis_ai/rollout/integrations/agents/__init__.py
+  s_6762e407d9ec18::t_11f22a67821317 1-9
+tests/unit/cli/test_command_groups.py
+  s_6762e407d9ec18::t_15e66e2bc0f017 18,73
+osmosis_ai/cli/commands/rollout.py
+  s_6762e407d9ec18::t_15e66e2bc0f017 23-26,28,30-31,34-35,42,44,51,63,65,72,87,91,99,157
+osmosis_ai/cli/output/error.py
+  s_6762e407d9ec18::t_15e66e2bc0f017 108
+osmosis_ai/platform/cli/templates/AGENTS.md.tpl
+  s_6762e407d9ec18::t_15e66e2bc0f017 1,3,6,9,30,46,65
+osmosis_ai/platform/cli/templates/configs/AGENTS.md.tpl
+  s_6762e407d9ec18::t_15e66e2bc0f017 3,50
+osmosis_ai/rollout/backend/local/backend.py
+  s_6762e407d9ec18::t_09cd841efa3ef9 116
+osmosis_ai/rollout/context.py
+  s_6762e407d9ec18::t_09cd841efa3ef9 2,12-31,53,70-76,78-79,81,83-87,98
+examples/rollout/local_rollout_server_openai_example.py
+  s_6762e407d9ec18::t_15e66e2bc0f017 1-31
+osmosis_ai/cli/commands/deployment.py
+  s_6762e407d9ec18::t_15e66e2bc0f017 109
+osmosis_ai/platform/cli/project.py
+  s_6762e407d9ec18::t_15e66e2bc0f017 1-62
+tests/unit/cli/test_init_json.py
+  s_6762e407d9ec18::t_15e66e2bc0f017 76
+osmosis_ai/cli/commands/model.py
+  s_6762e407d9ec18::t_15e66e2bc0f017 55
+osmosis_ai/platform/cli/templates/research/program.md.tpl
+  s_6762e407d9ec18::t_15e66e2bc0f017 13
+tests/unit/cli/test_rollout_validate_command.py
+  s_6762e407d9ec18::t_15e66e2bc0f017 10,20-21,70-71,92-93,116-117,138-139
+docs/cli.md
+  s_6762e407d9ec18::t_15e66e2bc0f017 35,43-58,74,81,96
+examples/rollout/multiply_rollout_openai/utils.py
+  s_6762e407d9ec18::t_15e66e2bc0f017 1-8
+osmosis_ai/platform/cli/templates/CLAUDE.md.tpl
+  s_6762e407d9ec18::t_15e66e2bc0f017 1,3
+osmosis_ai/platform/cli/templates/configs/eval/default.toml.tpl
+  s_6762e407d9ec18::t_15e66e2bc0f017 7
+osmosis_ai/cli/commands/project.py
+  s_6762e407d9ec18::t_15e66e2bc0f017 1-34
+osmosis_ai/platform/cli/templates/project.toml.tpl
+  s_6762e407d9ec18::t_15e66e2bc0f017 1-7
+osmosis_ai/platform/cli/templates/README.md.tpl
+  s_6762e407d9ec18::t_15e66e2bc0f017 3,14-15,22
+tests/unit/cli/test_workspace_json.py
+  s_6762e407d9ec18::t_15e66e2bc0f017 1
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.1",
+  "base_commit_sha": "5e23d8a567bd0742e1921ffa38188d893200a412",
+  "prompts": {},
+  "sessions": {
+    "s_6762e407d9ec18": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019e03ad-1cac-7fa1-a1ed-1059dad66355",
+        "model": "gpt-5.5"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}
