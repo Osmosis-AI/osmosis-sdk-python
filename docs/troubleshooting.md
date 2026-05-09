@@ -127,7 +127,7 @@ agent_workflow_timeout_s = 900   # 15 minutes instead of the default 7.5
 A small number of samples failing intermittently (2–5 rows out of 500+) indicates a resource contention issue on the rollout server rather than a total overload.
 
 Common causes:
-- **Event loop blocking**: synchronous calls inside an `async` rollout workflow (e.g. `mcp.list_tools_sync()`) freeze the uvicorn event loop. New HTTP requests from slime cannot get a 200 OK within the 30 s httpx connect timeout. Fix: wrap blocking calls in `asyncio.get_running_loop().run_in_executor(None, ...)`.
+- **Event loop blocking**: synchronous calls inside an `async` rollout workflow (e.g. `mcp.list_tools_sync()`) freeze the uvicorn event loop. New HTTP requests from our trainer cannot get a 200 OK within the 30 s httpx connect timeout. Fix: wrap blocking calls in `asyncio.get_running_loop().run_in_executor(None, ...)`.
 - **Subprocess exhaustion**: too many concurrent MCP subprocesses saturating OS limits. Set `ConcurrencyConfig(max_concurrent=64)` in your `AgentWorkflowConfig`.
 
 ## Rollout validation
