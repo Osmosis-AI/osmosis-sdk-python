@@ -231,8 +231,8 @@ All fields are optional. Omitted fields use platform defaults.
 | `max_prompt_length` | int | Token limit for prompt inputs |
 | `max_response_length` | int | Token limit for model responses |
 | `lr` | float | Learning rate |
-| `agent_workflow_timeout_s` | float | Seconds slime waits for the rollout server to complete one rollout before marking it failed (default: 450 s). Increase for long-horizon agent tasks where each rollout can take several minutes. |
-| `grader_timeout_s` | float | Seconds slime waits for the grader callback after rollout completes (default: 150 s). Increase if your grader runs expensive verification. |
+| `agent_workflow_timeout_s` | float | Seconds osmosis waits for the rollout server to complete one rollout before marking it failed (default: 450 s). Increase for long-horizon agent tasks where each rollout can take several minutes. |
+| `grader_timeout_s` | float | Seconds osmosis waits for the grader callback after rollout completes (default: 150 s). Increase if your grader runs expensive verification. |
 
 > **Sizing `rollout_batch_size`**: the rollout server processes `rollout_batch_size × n_samples_per_prompt` concurrent LLM calls per step. Too high a value overwhelms the inference engine and causes all rollouts to timeout. A good rule of thumb: `rollout_batch_size ≤ 32` when using a remote MCP-based rollout server with a 35B+ model.
 
