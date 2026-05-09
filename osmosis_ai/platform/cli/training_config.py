@@ -88,8 +88,8 @@ class TrainingConfig(BaseModel):
     training_rollout_batch_size: int | None
     training_max_prompt_length: int | None
     training_max_response_length: int | None
-    training_agent_workflow_timeout_s: float | None
-    training_grader_timeout_s: float | None
+    training_agent_workflow_timeout_s: float | None = None
+    training_grader_timeout_s: float | None = None
 
     # sampling
     sampling_rollout_temperature: float | None
