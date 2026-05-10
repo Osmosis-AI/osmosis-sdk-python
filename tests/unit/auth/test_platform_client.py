@@ -116,21 +116,6 @@ class TestExceptionClasses:
 class TestPlatformRequest:
     """Tests for the platform_request function."""
 
-    @pytest.fixture(autouse=True)
-    def _mock_active_workspace(self) -> Any:
-        """Provide a default workspace ID so require_workspace=True doesn't fail."""
-        with (
-            patch(
-                "osmosis_ai.platform.auth.platform_client.get_active_workspace_id",
-                return_value="default_ws_test",
-            ),
-            patch(
-                "osmosis_ai.platform.auth.platform_client.get_active_workspace",
-                return_value={"id": "default_ws_test", "name": "default-workspace"},
-            ),
-        ):
-            yield
-
     # -------------------------------------------------------------------------
     # Credential Loading
     # -------------------------------------------------------------------------
@@ -153,7 +138,7 @@ class TestPlatformRequest:
         mock_load.return_value = creds
         mock_urlopen.return_value = _make_http_response({"ok": True})
 
-        platform_request("/api/test")
+        platform_request("/api/test", workspace_id="ws_test")
 
         mock_load.assert_called_once()
         # Verify the loaded token was used in the request
@@ -169,7 +154,9 @@ class TestPlatformRequest:
         explicit_creds = _make_credentials(access_token="explicit-token")
         mock_urlopen.return_value = _make_http_response({"ok": True})
 
-        platform_request("/api/test", credentials=explicit_creds)
+        platform_request(
+            "/api/test", credentials=explicit_creds, workspace_id="ws_test"
+        )
 
         mock_load.assert_not_called()
         request_obj = mock_urlopen.call_args[0][0]
@@ -189,7 +176,9 @@ class TestPlatformRequest:
             "osmosis_ai.platform.auth.platform_client.PLATFORM_URL",
             "https://test.osmosis.ai",
         ):
-            platform_request("/api/v1/verify", credentials=creds)
+            platform_request(
+                "/api/v1/verify", credentials=creds, workspace_id="ws_test"
+            )
 
         request_obj = mock_urlopen.call_args[0][0]
         assert request_obj.full_url == "https://test.osmosis.ai/api/v1/verify"
@@ -200,7 +189,7 @@ class TestPlatformRequest:
         mock_urlopen.return_value = _make_http_response({"ok": True})
         creds = _make_credentials(access_token="my-token")
 
-        platform_request("/api/test", credentials=creds)
+        platform_request("/api/test", credentials=creds, workspace_id="ws_test")
 
         request_obj = mock_urlopen.call_args[0][0]
         assert request_obj.get_header("Authorization") == "Bearer my-token"
@@ -217,16 +206,16 @@ class TestPlatformRequest:
             "/api/test",
             headers={"X-Custom": "value123"},
             credentials=creds,
+            workspace_id="ws_test",
         )
 
         request_obj = mock_urlopen.call_args[0][0]
         assert request_obj.get_header("X-custom") == "value123"
 
     @patch("osmosis_ai.platform.auth.platform_client.urlopen")
-    def test_adds_workspace_header_when_workspace_id_provided(
+    def test_adds_workspace_header_from_explicit_workspace_id(
         self, mock_urlopen: MagicMock
     ) -> None:
-        """Verify X-Osmosis-Org header uses explicit workspace_id over active workspace."""
         mock_urlopen.return_value = _make_http_response({"ok": True})
         creds = _make_credentials()
 
@@ -235,19 +224,13 @@ class TestPlatformRequest:
         request_obj = mock_urlopen.call_args[0][0]
         assert request_obj.get_header("X-osmosis-org") == "ws_123"
 
-    @patch("osmosis_ai.platform.auth.platform_client.urlopen")
-    def test_adds_workspace_header_from_active_workspace(
-        self, mock_urlopen: MagicMock
+    def test_require_workspace_true_requires_explicit_workspace_id(
+        self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Verify X-Osmosis-Org header uses active workspace when no workspace_id provided."""
-        mock_urlopen.return_value = _make_http_response({"ok": True})
         creds = _make_credentials()
 
-        # The autouse fixture provides "default_ws_test" as the active workspace
-        platform_request("/api/test", credentials=creds)
-
-        request_obj = mock_urlopen.call_args[0][0]
-        assert request_obj.get_header("X-osmosis-org") == "default_ws_test"
+        with pytest.raises(PlatformAPIError, match="explicit workspace_id"):
+            platform_request("/api/test", credentials=creds)
 
     @patch("osmosis_ai.platform.auth.platform_client.urlopen")
     def test_no_workspace_header_when_require_workspace_false(
@@ -262,98 +245,15 @@ class TestPlatformRequest:
         request_obj = mock_urlopen.call_args[0][0]
         assert "X-osmosis-org" not in request_obj.headers
 
-    def test_raises_when_require_workspace_true_but_no_workspace(self) -> None:
-        """Verify PlatformAPIError when require_workspace=True but no workspace is available."""
-        creds = _make_credentials()
-
-        with (
-            patch(
-                "osmosis_ai.platform.auth.platform_client.get_active_workspace_id",
-                return_value=None,
-            ),
-            patch(
-                "osmosis_ai.platform.auth.platform_client.ensure_active_workspace",
-                return_value=None,
-            ),
-        ):
-            with pytest.raises(PlatformAPIError, match="No workspace selected"):
-                platform_request("/api/test", credentials=creds)
-
-    @patch("osmosis_ai.platform.auth.platform_client.set_active_workspace")
-    @patch("osmosis_ai.platform.auth.platform_client.urlopen")
-    def test_auto_selects_single_workspace_when_none_active(
-        self,
-        mock_urlopen: MagicMock,
-        mock_set_active_workspace: MagicMock,
-    ) -> None:
-        """Verify a single available workspace is auto-selected and reused."""
-        creds = _make_credentials()
-        mock_urlopen.side_effect = [
-            _make_http_response(
-                {"workspaces": [{"id": "ws_only", "name": "solo-workspace"}]}
-            ),
-            _make_http_response({"ok": True}),
-        ]
-
-        with (
-            patch(
-                "osmosis_ai.platform.auth.platform_client.get_active_workspace_id",
-                return_value=None,
-            ),
-            patch(
-                "osmosis_ai.platform.auth.platform_client.get_active_workspace",
-                return_value=None,
-            ),
-        ):
-            platform_request("/api/test", credentials=creds)
-
-        mock_set_active_workspace.assert_called_once_with("ws_only", "solo-workspace")
-        workspace_lookup = mock_urlopen.call_args_list[0][0][0]
-        api_request = mock_urlopen.call_args_list[1][0][0]
-        assert workspace_lookup.full_url.endswith("/api/cli/workspaces")
-        assert api_request.get_header("X-osmosis-org") == "ws_only"
-
-    @patch("osmosis_ai.platform.auth.platform_client.set_active_workspace")
-    @patch("osmosis_ai.platform.auth.platform_client.urlopen")
-    def test_does_not_auto_select_when_multiple_workspaces_available(
-        self,
-        mock_urlopen: MagicMock,
-        mock_set_active_workspace: MagicMock,
-    ) -> None:
-        """Verify multiple workspaces still require an explicit user selection."""
-        creds = _make_credentials()
-        mock_urlopen.return_value = _make_http_response(
-            {
-                "workspaces": [
-                    {"id": "ws_1", "name": "first-workspace"},
-                    {"id": "ws_2", "name": "second-workspace"},
-                ]
-            }
-        )
-
-        with (
-            patch(
-                "osmosis_ai.platform.auth.platform_client.get_active_workspace_id",
-                return_value=None,
-            ),
-            patch(
-                "osmosis_ai.platform.auth.platform_client.get_active_workspace",
-                return_value=None,
-            ),
-        ):
-            with pytest.raises(PlatformAPIError, match="No workspace selected"):
-                platform_request("/api/test", credentials=creds)
-
-        mock_set_active_workspace.assert_not_called()
-        assert mock_urlopen.call_count == 1
-
     @patch("osmosis_ai.platform.auth.platform_client.urlopen")
     def test_get_request_has_no_body(self, mock_urlopen: MagicMock) -> None:
         """Verify GET requests send no request body."""
         mock_urlopen.return_value = _make_http_response({"ok": True})
         creds = _make_credentials()
 
-        platform_request("/api/test", method="GET", credentials=creds)
+        platform_request(
+            "/api/test", method="GET", credentials=creds, workspace_id="ws_test"
+        )
 
         request_obj = mock_urlopen.call_args[0][0]
         assert request_obj.data is None
@@ -367,7 +267,11 @@ class TestPlatformRequest:
         payload = {"host": "10.0.0.1", "port": 8080}
 
         platform_request(
-            "/api/register", method="POST", data=payload, credentials=creds
+            "/api/register",
+            method="POST",
+            data=payload,
+            credentials=creds,
+            workspace_id="ws_test",
         )
 
         request_obj = mock_urlopen.call_args[0][0]
@@ -381,7 +285,9 @@ class TestPlatformRequest:
         mock_urlopen.return_value = _make_http_response({"ok": True})
         creds = _make_credentials()
 
-        platform_request("/api/test", timeout=5.0, credentials=creds)
+        platform_request(
+            "/api/test", timeout=5.0, credentials=creds, workspace_id="ws_test"
+        )
 
         _, kwargs = mock_urlopen.call_args
         assert kwargs["timeout"] == 5.0
@@ -392,7 +298,7 @@ class TestPlatformRequest:
         mock_urlopen.return_value = _make_http_response({"ok": True})
         creds = _make_credentials()
 
-        platform_request("/api/test", credentials=creds)
+        platform_request("/api/test", credentials=creds, workspace_id="ws_test")
 
         _, kwargs = mock_urlopen.call_args
         assert kwargs["timeout"] == 30.0
@@ -408,7 +314,9 @@ class TestPlatformRequest:
         mock_urlopen.return_value = _make_http_response(expected)
         creds = _make_credentials()
 
-        result = platform_request("/api/test", credentials=creds)
+        result = platform_request(
+            "/api/test", credentials=creds, workspace_id="ws_test"
+        )
 
         assert result == expected
 
@@ -426,7 +334,7 @@ class TestPlatformRequest:
         creds = _make_credentials()
 
         with pytest.raises(AuthenticationExpiredError, match="session has expired"):
-            platform_request("/api/test", credentials=creds)
+            platform_request("/api/test", credentials=creds, workspace_id="ws_test")
 
         mock_reset.assert_called_once()
 
@@ -440,7 +348,12 @@ class TestPlatformRequest:
         creds = _make_credentials()
 
         with pytest.raises(AuthenticationExpiredError, match="session has expired"):
-            platform_request("/api/test", credentials=creds, cleanup_on_401=False)
+            platform_request(
+                "/api/test",
+                credentials=creds,
+                workspace_id="ws_test",
+                cleanup_on_401=False,
+            )
 
         mock_reset.assert_not_called()
 
@@ -463,7 +376,7 @@ class TestPlatformRequest:
             ) as mock_reset,
         ):
             with pytest.raises(AuthenticationExpiredError) as exc_info:
-                platform_request("/api/test", credentials=creds)
+                platform_request("/api/test", credentials=creds, workspace_id="ws_test")
 
         assert "OSMOSIS_TOKEN environment variable has expired" in str(exc_info.value)
         assert "unset OSMOSIS_TOKEN" in str(exc_info.value)
@@ -475,17 +388,17 @@ class TestPlatformRequest:
             (
                 400,
                 "WORKSPACE_HEADER_MISSING",
-                "No workspace selected",
+                "linked Osmosis project",
             ),
             (
                 400,
                 "WORKSPACE_HEADER_INVALID",
-                "workspace context is invalid",
+                "workspace that is no longer accessible",
             ),
             (
                 403,
                 "WORKSPACE_ACCESS_DENIED",
-                "do not have access to this workspace",
+                "workspace that is no longer accessible",
             ),
         ],
     )
@@ -504,12 +417,29 @@ class TestPlatformRequest:
         creds = _make_credentials()
 
         with pytest.raises(PlatformAPIError) as exc_info:
-            platform_request("/api/test", credentials=creds)
+            platform_request("/api/test", credentials=creds, workspace_id="ws_test")
 
         assert exc_info.value.status_code == status_code
         assert exc_info.value.error_code == error_code
         assert exc_info.value.details == {"code": error_code}
         assert expected_message in str(exc_info.value)
+
+    @patch("osmosis_ai.platform.auth.platform_client.urlopen")
+    def test_generic_workspace_access_403_uses_project_link_guidance(
+        self, mock_urlopen: MagicMock
+    ) -> None:
+        """Verify unstructured workspace access errors point at project linking."""
+        mock_urlopen.side_effect = _make_http_error(
+            403, json.dumps({"error": "Workspace access denied"})
+        )
+        creds = _make_credentials()
+
+        with pytest.raises(PlatformAPIError) as exc_info:
+            platform_request("/api/test", credentials=creds, workspace_id="ws_test")
+
+        message = str(exc_info.value)
+        assert "osmosis project link" in message
+        assert "osmosis workspace" not in message
 
     @patch("osmosis_ai.platform.auth.platform_client.urlopen")
     def test_non_401_http_error_raises_platform_api_error(
@@ -520,7 +450,7 @@ class TestPlatformRequest:
         creds = _make_credentials()
 
         with pytest.raises(PlatformAPIError) as exc_info:
-            platform_request("/api/test", credentials=creds)
+            platform_request("/api/test", credentials=creds, workspace_id="ws_test")
 
         assert exc_info.value.status_code == 500
         assert "HTTP 500" in str(exc_info.value)
@@ -535,7 +465,7 @@ class TestPlatformRequest:
         creds = _make_credentials()
 
         with pytest.raises(PlatformAPIError) as exc_info:
-            platform_request("/api/test", credentials=creds)
+            platform_request("/api/test", credentials=creds, workspace_id="ws_test")
 
         assert "Agent not found" in str(exc_info.value)
         assert exc_info.value.status_code == 404
@@ -556,7 +486,7 @@ class TestPlatformRequest:
         creds = _make_credentials()
 
         with pytest.raises(PlatformAPIError) as exc_info:
-            platform_request("/api/test", credentials=creds)
+            platform_request("/api/test", credentials=creds, workspace_id="ws_test")
 
         assert exc_info.value.status_code == 409
         assert exc_info.value.error_code == "CONFLICT"
@@ -583,7 +513,7 @@ class TestPlatformRequest:
         creds = _make_credentials()
 
         with pytest.raises(SubscriptionRequiredError) as exc_info:
-            platform_request("/api/test", credentials=creds)
+            platform_request("/api/test", credentials=creds, workspace_id="ws_test")
 
         assert exc_info.value.status_code == 403
         assert exc_info.value.error_code == "FORBIDDEN"
@@ -603,7 +533,7 @@ class TestPlatformRequest:
         creds = _make_credentials()
 
         with pytest.raises(PlatformAPIError) as exc_info:
-            platform_request("/api/test", credentials=creds)
+            platform_request("/api/test", credentials=creds, workspace_id="ws_test")
 
         msg = str(exc_info.value)
         assert "(truncated)" in msg
@@ -615,7 +545,7 @@ class TestPlatformRequest:
         creds = _make_credentials()
 
         with pytest.raises(PlatformAPIError) as exc_info:
-            platform_request("/api/test", credentials=creds)
+            platform_request("/api/test", credentials=creds, workspace_id="ws_test")
 
         assert "HTTP 502" in str(exc_info.value)
         assert exc_info.value.status_code == 502
@@ -632,7 +562,7 @@ class TestPlatformRequest:
         creds = _make_credentials()
 
         with pytest.raises(PlatformAPIError) as exc_info:
-            platform_request("/api/test", credentials=creds)
+            platform_request("/api/test", credentials=creds, workspace_id="ws_test")
 
         # Should still get a PlatformAPIError with the status code
         assert exc_info.value.status_code == 503
@@ -649,7 +579,7 @@ class TestPlatformRequest:
         creds = _make_credentials()
 
         with pytest.raises(PlatformAPIError, match="Connection error"):
-            platform_request("/api/test", credentials=creds)
+            platform_request("/api/test", credentials=creds, workspace_id="ws_test")
 
     @patch("osmosis_ai.platform.auth.platform_client.urlopen")
     def test_url_error_does_not_include_status_code(
@@ -660,7 +590,7 @@ class TestPlatformRequest:
         creds = _make_credentials()
 
         with pytest.raises(PlatformAPIError) as exc_info:
-            platform_request("/api/test", credentials=creds)
+            platform_request("/api/test", credentials=creds, workspace_id="ws_test")
 
         assert exc_info.value.status_code is None
 
@@ -681,7 +611,7 @@ class TestPlatformRequest:
         creds = _make_credentials()
 
         with pytest.raises(PlatformAPIError, match="Invalid JSON response"):
-            platform_request("/api/test", credentials=creds)
+            platform_request("/api/test", credentials=creds, workspace_id="ws_test")
 
     # -------------------------------------------------------------------------
     # Integration-style: Credential flow
@@ -697,7 +627,7 @@ class TestPlatformRequest:
         mock_load.return_value = creds
         mock_urlopen.return_value = _make_http_response({"ok": True})
 
-        platform_request("/api/test", credentials=None)
+        platform_request("/api/test", credentials=None, workspace_id="ws_test")
 
         mock_load.assert_called_once()
 

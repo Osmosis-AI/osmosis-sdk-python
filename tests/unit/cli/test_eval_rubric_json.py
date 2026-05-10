@@ -172,3 +172,44 @@ def test_eval_rubric_plain_allows_tty_progress(
     captured = capsys.readouterr()
     assert exit_code == 0
     assert captured.err != ""
+
+
+def test_eval_rubric_does_not_require_project(
+    tmp_path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys,
+) -> None:
+    from osmosis_ai.cli.output import OperationResult
+
+    calls = []
+
+    def fake_run(self, **kwargs):
+        calls.append(kwargs)
+        return OperationResult(
+            operation="eval.rubric",
+            status="success",
+            resource={"statistics": {}, "records": []},
+        )
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("osmosis_ai.eval.rubric.cli.RubricCommand.run", fake_run)
+
+    exit_code = cli.main(
+        [
+            "--json",
+            "eval",
+            "rubric",
+            "-d",
+            "records.jsonl",
+            "--rubric",
+            "Score quality.",
+            "--model",
+            "openai/gpt-5.4",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert captured.err == ""
+    assert calls
+    assert calls[0]["data"] == "records.jsonl"

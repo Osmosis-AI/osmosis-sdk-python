@@ -52,7 +52,16 @@ def _resolve_rollout_entrypoint(
 ) -> tuple[Path, Path]:
     """Resolve and validate the rollout root and entrypoint file path."""
     project_root = (project_root or Path.cwd()).resolve()
-    rollout_dir = (project_root / "rollouts" / rollout).resolve()
+    rollouts_root = (project_root / "rollouts").resolve()
+    rollout_path = Path(rollout)
+    rollout_dir = (
+        rollout_path if rollout_path.is_absolute() else rollouts_root / rollout_path
+    ).resolve()
+    try:
+        rollout_dir.relative_to(rollouts_root)
+    except ValueError as exc:
+        raise CLIError(f"Rollout must stay within rollouts/, got: {rollout}") from exc
+
     if not rollout_dir.is_dir():
         raise CLIError(
             f"Rollout directory not found: rollouts/{rollout}/\n"

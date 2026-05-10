@@ -1,6 +1,5 @@
-"""Local configuration for user preferences (e.g. active workspace).
+"""Local configuration for legacy auth-local cache files.
 
-Stored separately from credentials to keep secrets and preferences apart.
 File: ~/.config/osmosis/config.json
 
 Cache data (subscription status) is stored as individual JSON files under
@@ -21,42 +20,6 @@ from ._fileutil import atomic_write_json
 from .config import CACHE_DIR, CONFIG_DIR
 
 CONFIG_FILE = CONFIG_DIR / "config.json"
-
-
-# ── Internal helpers ────────────────────────────────────────────────
-
-
-def _load_config() -> dict[str, Any]:
-    try:
-        with open(CONFIG_FILE, encoding="utf-8") as f:
-            data = json.load(f)
-    except FileNotFoundError:
-        return {}
-    except json.JSONDecodeError:
-        import sys
-
-        print(
-            f"Warning: config file is corrupted ({CONFIG_FILE}), using defaults.",
-            file=sys.stderr,
-        )
-        return {}
-    except OSError as exc:
-        import sys
-
-        print(
-            f"Warning: cannot read config file ({CONFIG_FILE}): {exc}",
-            file=sys.stderr,
-        )
-        return {}
-
-    if not isinstance(data, dict):
-        return {}
-
-    return data
-
-
-def _save_config(data: dict[str, Any]) -> None:
-    atomic_write_json(CONFIG_FILE, data, mode=0o600)
 
 
 def _safe_ws_name(name: str) -> str:
@@ -130,72 +93,12 @@ def load_subscription_status(
     return data.get("has_subscription")
 
 
-# ── Active workspace management ──────────────────────────────────────
-
-
-def get_active_workspace() -> dict[str, str] | None:
-    """Get the active workspace.
-
-    Returns:
-        Dict with 'id' and 'name' keys, or None if no active workspace.
-    """
-    config = _load_config()
-    workspace = config.get("active_workspace")
-    if (
-        workspace
-        and isinstance(workspace, dict)
-        and "id" in workspace
-        and "name" in workspace
-    ):
-        return workspace
-    return None
-
-
-def get_active_workspace_id() -> str | None:
-    """Get the active workspace ID from config file.
-
-    Returns:
-        The workspace ID, or None if no active workspace.
-    """
-    workspace = get_active_workspace()
-    return workspace["id"] if workspace else None
-
-
-def get_active_workspace_name() -> str | None:
-    """Get the active workspace name from config file.
-
-    Returns:
-        The workspace name, or None if no active workspace.
-    """
-    workspace = get_active_workspace()
-    return workspace["name"] if workspace else None
-
-
-def set_active_workspace(workspace_id: str, workspace_name: str) -> None:
-    """Set the active workspace.
-
-    Args:
-        workspace_id: The workspace ID.
-        workspace_name: The workspace name.
-    """
-    config = _load_config()
-    config["active_workspace"] = {"id": workspace_id, "name": workspace_name}
-    _save_config(config)
-
-
-def clear_active_workspace() -> None:
-    """Remove the active workspace from config."""
-    config = _load_config()
-    if "active_workspace" in config:
-        del config["active_workspace"]
-        _save_config(config)
-
-
 def clear_all_local_data() -> None:
-    """Remove all local state: config.json and all cache files.
+    """Remove legacy auth-local preferences and cache files.
 
-    Called on logout to prevent stale workspace context from leaking into a
-    subsequent login (possibly as a different user).
+    This is intentionally scoped to ~/.config/osmosis/config.json and cache
+    files. Project-to-workspace mappings live under ~/.osmosis/config.json and
+    must survive logout/session reset.
     """
     with contextlib.suppress(OSError):
         CONFIG_FILE.unlink()
@@ -206,10 +109,11 @@ def clear_all_local_data() -> None:
 
 
 def reset_session() -> None:
-    """Complete session teardown: credentials and local preferences/cache.
+    """Complete session teardown: credentials and legacy preferences/cache.
 
     Single entry point for all "end session" paths (logout, login --force,
-    401 expiry, user identity change) to ensure no stale state remains.
+    401 expiry, user identity change) to ensure no stale auth-local state
+    remains.
     """
     from .credentials import delete_credentials
 

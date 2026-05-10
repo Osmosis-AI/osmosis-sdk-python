@@ -9,5 +9,6 @@
 
 - [Dataset format](./datasets.md) — Parquet / JSONL / CSV columns
 - [Eval](./eval.md) — `osmosis eval run`, caching, pass@k
-- [CLI reference](./cli.md) — all `osmosis` commands and options
+- [CLI reference](./cli.md) — all `osmosis` commands and options, including
+  `train submit` with `[rollout.env]` / `[rollout.secrets]`
 - [Troubleshooting](./troubleshooting.md)

@@ -23,7 +23,7 @@ dependencies = [
     "PyYAML>=6.0,<7.0",
     "python-dotenv>=0.1.0,<2.0.0",
     "requests>=2.0.0,<3.0.0",
-    "litellm==1.82.6", # avoids compromised 1.82.7/1.82.8
+    "litellm>=1.83.0,<2.0.0",
     "tqdm>=4.0.0,<5.0.0",
     # Remote rollout SDK dependencies
     "httpx>=0.25.0,<1.0.0",
@@ -32,6 +32,7 @@ dependencies = [
     "filelock>=3.0.0,<4.0.0",
     "xxhash>=3.0.0",
     "strands-agents[litellm]>=1.29.0",
+    "openai-agents[litellm]>=0.14,<0.15",
     "rich>=14.2.0",
     # Secure credential storage (system keychain)
     "keyring>=25.0.0",
@@ -40,7 +41,7 @@ dependencies = [
     # CLI framework
     "typer>=0.16.0",
     "rich>=13.0.0",
-    "harbor==0.3.0",
+    "harbor[daytona]==0.6.1",
 ]
 
 [project.optional-dependencies]
@@ -132,6 +133,26 @@ omit = [
 ]
 
 [tool.coverage.report]
+omit = [
+    "tests/*",
+    "*/consts.py",
+    # CLI command groups (thin Typer shells) + interactive prompts
+    "osmosis_ai/cli/commands/*",
+    "osmosis_ai/cli/main.py",
+    "osmosis_ai/cli/upgrade.py",
+    "osmosis_ai/cli/prompts.py",
+    # Platform CLI business logic (API calls, OAuth, interactive prompts)
+    "osmosis_ai/platform/cli/*",
+    # Rollout — ABCs, type defs, integrations, harbor backend
+    "osmosis_ai/rollout/agent_workflow.py",
+    "osmosis_ai/rollout/grader.py",
+    "osmosis_ai/rollout/backend/base.py",
+    "osmosis_ai/rollout/types/*",
+    "osmosis_ai/rollout/integrations/*",
+    "osmosis_ai/rollout/backend/harbor/*",
+    # Templates cookbook ships as data (starter recipes), not SDK code.
+    "osmosis_ai/templates/cookbook/*",
+]
 fail_under = 70
 show_missing = true
 exclude_lines = [

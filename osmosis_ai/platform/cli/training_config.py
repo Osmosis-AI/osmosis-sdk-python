@@ -2,13 +2,29 @@
 
 from __future__ import annotations
 
+import re
 import tomllib
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from osmosis_ai.cli.errors import CLIError
+
+# Names the platform-app reserves for built-in env vars on the rollout container.
+_RESERVED_ROLLOUT_ENV_NAMES: frozenset[str] = frozenset(
+    {
+        "GITHUB_CLONE_URL",
+        "GITHUB_TOKEN",
+        "ENTRYPOINT_SCRIPT",
+        "REPOSITORY_PATH",
+        "TRAINING_RUN_ID",
+        "ROLLOUT_NAME",
+        "ROLLOUT_PORT",
+    }
+)
+
+_ENV_VAR_NAME_RE = re.compile(r"^[A-Z_][A-Z0-9_]*$")
 
 
 class _ExperimentSection(BaseModel):
@@ -27,9 +43,11 @@ class _TrainingSection(BaseModel):
     lr: float | None = None
     total_epochs: int | None = None
     n_samples_per_prompt: int | None = None
-    global_batch_size: int | None = None
+    rollout_batch_size: int | None = None
     max_prompt_length: int | None = None
     max_response_length: int | None = None
+    agent_workflow_timeout_s: float | None = None
+    grader_timeout_s: float | None = None
 
 
 class _SamplingSection(BaseModel):
@@ -46,6 +64,13 @@ class _CheckpointsSection(BaseModel):
     checkpoint_save_freq: int | None = None
 
 
+class _RolloutSection(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    env: dict[str, str] = Field(default_factory=dict)
+    secrets: dict[str, str] = Field(default_factory=dict)
+
+
 class TrainingConfig(BaseModel):
     """Parsed training TOML configuration with flattened section fields."""
 
@@ -60,9 +85,11 @@ class TrainingConfig(BaseModel):
     training_lr: float | None
     training_total_epochs: int | None
     training_n_samples_per_prompt: int | None
-    training_global_batch_size: int | None
+    training_rollout_batch_size: int | None
     training_max_prompt_length: int | None
     training_max_response_length: int | None
+    training_agent_workflow_timeout_s: float | None = None
+    training_grader_timeout_s: float | None = None
 
     # sampling
     sampling_rollout_temperature: float | None
@@ -72,10 +99,15 @@ class TrainingConfig(BaseModel):
     checkpoints_eval_interval: int | None
     checkpoints_checkpoint_save_freq: int | None
 
+    # rollout container launch arguments
+    rollout_env: dict[str, str]
+    rollout_secret_refs: dict[str, str]
+
     def to_api_config(self) -> dict[str, Any]:
         """Build the ``config`` dict for the training-runs API payload.
 
         Merges training, sampling, and checkpoints fields, omitting None values.
+        Rollout env/secrets are submitted as separate top-level fields, not here.
         """
         fields: dict[str, Any] = {}
         dump = self.model_dump()
@@ -84,6 +116,35 @@ class TrainingConfig(BaseModel):
                 if key.startswith(prefix) and value is not None:
                     fields[key.removeprefix(prefix)] = value
         return fields
+
+
+def _validate_rollout_env_keys(
+    *,
+    env: dict[str, str],
+    secrets: dict[str, str],
+    path: Path,
+) -> None:
+    """Reject invalid env-var names, reserved names, and overlap between sections."""
+    for section_name, section in (("rollout.env", env), ("rollout.secrets", secrets)):
+        for key in section:
+            if not _ENV_VAR_NAME_RE.match(key):
+                raise CLIError(
+                    f"Invalid env var name '{key}' in [{section_name}] of {path}: "
+                    "must match ^[A-Z_][A-Z0-9_]*$"
+                )
+            if key in _RESERVED_ROLLOUT_ENV_NAMES:
+                raise CLIError(
+                    f"'{key}' in [{section_name}] of {path} is reserved by "
+                    "the rollout container runtime; choose a different name."
+                )
+
+    overlap = sorted(set(env) & set(secrets))
+    if overlap:
+        names = ", ".join(overlap)
+        raise CLIError(
+            f"Key(s) appear in both [rollout.env] and [rollout.secrets] of {path}: "
+            f"{names}. Each env var name must come from exactly one section."
+        )
 
 
 def load_training_config(path: Path) -> TrainingConfig:
@@ -115,14 +176,18 @@ def load_training_config(path: Path) -> TrainingConfig:
     training_section = raw.get("training", {})
     sampling_section = raw.get("sampling", {})
     checkpoints_section = raw.get("checkpoints", {})
+    rollout_section = raw.get("rollout", {})
 
     try:
         experiment = _ExperimentSection(**experiment_section)
         training = _TrainingSection(**training_section)
         sampling = _SamplingSection(**sampling_section)
         checkpoints = _CheckpointsSection(**checkpoints_section)
+        rollout = _RolloutSection(**rollout_section)
     except Exception as e:
         raise CLIError(f"Invalid config in {path}: {e}") from e
+
+    _validate_rollout_env_keys(env=rollout.env, secrets=rollout.secrets, path=path)
 
     # ── Cross-field validation ───────────────────────────────────
     if training.n_samples_per_prompt is not None and training.n_samples_per_prompt <= 0:
@@ -130,15 +195,8 @@ def load_training_config(path: Path) -> TrainingConfig:
             f"n_samples_per_prompt must be a positive integer, "
             f"got {training.n_samples_per_prompt} in {path}"
         )
-    if (
-        training.global_batch_size is not None
-        and training.n_samples_per_prompt is not None
-        and training.global_batch_size % training.n_samples_per_prompt != 0
-    ):
-        raise CLIError(
-            f"global_batch_size ({training.global_batch_size}) must be divisible "
-            f"by n_samples_per_prompt ({training.n_samples_per_prompt}) in {path}"
-        )
+    if training.rollout_batch_size is None or training.n_samples_per_prompt is None:
+        raise CLIError("rollout_batch_size and n_samples_per_prompt must both be set")
 
     return TrainingConfig(
         experiment_rollout=experiment.rollout,
@@ -149,14 +207,44 @@ def load_training_config(path: Path) -> TrainingConfig:
         training_lr=training.lr,
         training_total_epochs=training.total_epochs,
         training_n_samples_per_prompt=training.n_samples_per_prompt,
-        training_global_batch_size=training.global_batch_size,
+        training_rollout_batch_size=training.rollout_batch_size,
         training_max_prompt_length=training.max_prompt_length,
         training_max_response_length=training.max_response_length,
+        training_agent_workflow_timeout_s=training.agent_workflow_timeout_s,
+        training_grader_timeout_s=training.grader_timeout_s,
         sampling_rollout_temperature=sampling.rollout_temperature,
         sampling_rollout_top_p=sampling.rollout_top_p,
         checkpoints_eval_interval=checkpoints.eval_interval,
         checkpoints_checkpoint_save_freq=checkpoints.checkpoint_save_freq,
+        rollout_env=dict(rollout.env),
+        rollout_secret_refs=dict(rollout.secrets),
     )
 
 
-__all__ = ["TrainingConfig", "load_training_config"]
+def validate_training_context_paths(config: TrainingConfig, project_root: Path) -> None:
+    if Path(config.experiment_rollout).is_absolute():
+        raise CLIError("Training rollout must be a logical rollout name.")
+
+    rollouts_root = (project_root / "rollouts").resolve()
+    rollout_root = (project_root / "rollouts" / config.experiment_rollout).resolve()
+    try:
+        rollout_root.relative_to(rollouts_root)
+    except ValueError as exc:
+        raise CLIError(
+            "Training rollout must resolve under the current project's rollouts directory."
+        ) from exc
+
+    rollout_path = (rollout_root / config.experiment_entrypoint).resolve()
+    try:
+        rollout_path.relative_to(rollout_root)
+    except ValueError as exc:
+        raise CLIError(
+            "Training entrypoint must resolve under rollouts/<rollout>/ within the current project."
+        ) from exc
+
+
+__all__ = [
+    "TrainingConfig",
+    "load_training_config",
+    "validate_training_context_paths",
+]

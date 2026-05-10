@@ -181,8 +181,8 @@ def test_main_without_subcommand_shows_help(capsys):
     assert "osmosis" in captured.out.lower()
 
 
-def test_eval_run_rejects_missing_config(capsys):
-    """eval run fails when config file does not exist."""
+def test_eval_run_requires_project_context_before_config_lookup(capsys):
+    """eval run first requires a current Osmosis project."""
     exit_code = cli.main(
         [
             "eval",
@@ -190,6 +190,34 @@ def test_eval_run_rejects_missing_config(capsys):
             "nonexistent.toml",
         ]
     )
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    assert "Not in an Osmosis project" in captured.err
+
+
+def test_eval_run_rejects_missing_config_inside_project(tmp_path, monkeypatch, capsys):
+    """eval run fails when a project-local config file does not exist."""
+    for rel_path in (
+        ".osmosis",
+        ".osmosis/research",
+        "rollouts",
+        "configs",
+        "configs/eval",
+        "configs/training",
+        "data",
+    ):
+        (tmp_path / rel_path).mkdir(parents=True, exist_ok=True)
+    (tmp_path / ".osmosis" / "project.toml").write_text(
+        "[project]\nname='test'\n",
+        encoding="utf-8",
+    )
+    (tmp_path / ".osmosis" / "research" / "program.md").write_text(
+        "# Test\n", encoding="utf-8"
+    )
+    monkeypatch.chdir(tmp_path)
+
+    exit_code = cli.main(["eval", "run", "configs/eval/nonexistent.toml"])
     captured = capsys.readouterr()
 
     assert exit_code == 1

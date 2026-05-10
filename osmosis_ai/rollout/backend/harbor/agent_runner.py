@@ -15,7 +15,6 @@ from typing import Any
 
 from osmosis_ai.rollout.context import AgentWorkflowContext, RolloutContext
 from osmosis_ai.rollout.utils.imports import resolve_object
-from osmosis_ai.rollout.utils.messages import map_initial_messages_to_content_blocks
 
 AGENT_LOGS_DIR = Path("/logs/agent")
 
@@ -56,7 +55,7 @@ async def run_workflow(
     )
 
     ctx = AgentWorkflowContext(
-        prompt=map_initial_messages_to_content_blocks(prompt),
+        prompt=prompt,
         config=workflow_config,
     )
 
@@ -67,7 +66,7 @@ async def run_workflow(
         with rollout_ctx:
             await workflow.run(ctx)
 
-        samples = rollout_ctx.get_samples()
+        samples = await rollout_ctx.get_samples()
         samples_data = {sid: s.model_dump() for sid, s in samples.items()}
 
         (AGENT_LOGS_DIR / "samples.json").write_text(

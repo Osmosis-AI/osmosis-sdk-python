@@ -8,6 +8,7 @@ is correct end-to-end.
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -32,6 +33,43 @@ def _make_credentials(*, expired: bool = False) -> Credentials:
         user=UserInfo(id="u1", email="test@test.com", name="Test"),
         token_id=None,
     )
+
+
+def test_reset_session_does_not_delete_project_mapping(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from osmosis_ai.platform.auth.local_config import reset_session
+
+    legacy_config = tmp_path / ".config" / "osmosis" / "config.json"
+    legacy_cache = tmp_path / ".config" / "osmosis" / "cache"
+    legacy_config.parent.mkdir(parents=True)
+    legacy_cache.mkdir()
+    legacy_config.write_text(
+        '{"active_workspace":{"id":"legacy","name":"legacy"}}',
+        encoding="utf-8",
+    )
+
+    project_mapping = tmp_path / ".osmosis" / "config.json"
+    project_mapping.parent.mkdir()
+    project_mapping.write_text('{"version":1,"platforms":{}}', encoding="utf-8")
+
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.local_config.CONFIG_FILE",
+        legacy_config,
+    )
+    monkeypatch.setattr("osmosis_ai.platform.auth.local_config.CACHE_DIR", legacy_cache)
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.credentials.delete_credentials", lambda: True
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.cli.project_mapping.CONFIG_FILE",
+        project_mapping,
+    )
+
+    reset_session()
+
+    assert not legacy_config.exists()
+    assert project_mapping.exists()
 
 
 class TestRequireCredentialsMessages:
@@ -67,118 +105,80 @@ class TestRequireCredentialsMessages:
         assert result is creds
 
 
-class TestGetActiveWorkspaceMessages:
-    """Test _get_active_workspace_name() error message."""
+def test_global_active_workspace_helpers_are_not_public_context_api() -> None:
+    """Production modules must not expose global active workspace context APIs."""
+    import osmosis_ai.platform.auth as auth_module
+    import osmosis_ai.platform.auth.local_config as local_config
+    import osmosis_ai.platform.auth.platform_client as platform_client
+    import osmosis_ai.platform.cli.utils as cli_utils
 
-    @patch(
-        "osmosis_ai.platform.cli.utils.get_active_workspace_name",
-        return_value=None,
-    )
-    @patch(
-        "osmosis_ai.platform.cli.utils.ensure_active_workspace",
-        return_value=None,
-    )
-    def test_no_workspace_raises_correct_message(
-        self, _auto_mock: object, _mock: object
-    ) -> None:
-        from osmosis_ai.platform.cli.utils import _get_active_workspace_name
-
-        with pytest.raises(CLIError, match="No workspace selected"):
-            _get_active_workspace_name()
-
-    @patch(
-        "osmosis_ai.platform.cli.utils.get_active_workspace_name",
-        return_value=None,
-    )
-    @patch(
-        "osmosis_ai.platform.cli.utils.ensure_active_workspace",
-        return_value=None,
-    )
-    def test_no_workspace_does_not_say_not_logged_in(
-        self, _auto_mock: object, _mock: object
-    ) -> None:
-        from osmosis_ai.platform.cli.utils import _get_active_workspace_name
-
-        with pytest.raises(CLIError) as exc_info:
-            _get_active_workspace_name()
-
-        assert "Not logged in" not in str(exc_info.value)
-        assert "login" not in str(exc_info.value).lower()
-
-    @patch(
-        "osmosis_ai.platform.cli.utils.get_active_workspace_name",
-        return_value=None,
-    )
-    @patch(
-        "osmosis_ai.platform.cli.utils.ensure_active_workspace",
-        return_value={"id": "ws_only", "name": "solo-workspace"},
-    )
-    def test_single_workspace_is_auto_selected(
-        self, _auto_mock: object, _mock: object
-    ) -> None:
-        from osmosis_ai.platform.cli.utils import _get_active_workspace_name
-
-        assert _get_active_workspace_name() == "solo-workspace"
+    removed_symbols = [
+        (auth_module, "ensure_active_workspace"),
+        (auth_module, "get_active_workspace"),
+        (auth_module, "get_active_workspace_id"),
+        (local_config, "get_active_workspace"),
+        (local_config, "get_active_workspace_id"),
+        (local_config, "get_active_workspace_name"),
+        (local_config, "set_active_workspace"),
+        (local_config, "clear_active_workspace"),
+        (platform_client, "ensure_active_workspace"),
+        (platform_client, "get_active_workspace_id"),
+        (cli_utils, "_get_active_workspace_name"),
+    ]
+    for module, symbol in removed_symbols:
+        assert not hasattr(module, symbol), f"{module.__name__}.{symbol} remains"
 
 
 class TestRequireAuthMessages:
-    """Test _require_auth() checks credentials before workspace."""
+    """Test _require_auth() no-arg calls require linked-project migration."""
 
     @patch("osmosis_ai.platform.cli.utils.load_credentials", return_value=None)
-    @patch(
-        "osmosis_ai.platform.cli.utils.get_active_workspace_name",
-        return_value=None,
-    )
-    def test_no_login_says_not_logged_in_not_no_workspace(
-        self, _ws_mock: object, _cred_mock: object
+    def test_no_arg_requires_linked_project_before_login(
+        self, cred_mock: object
     ) -> None:
-        """When both credentials and workspace are missing, error should say 'Not logged in'."""
+        """No-arg _require_auth is no longer an auth/workspace selector."""
+        from osmosis_ai.platform.cli.utils import _require_auth
+
+        with pytest.raises(CLIError, match="linked Osmosis project"):
+            _require_auth()
+
+        cred_mock.assert_not_called()
+
+    @patch("osmosis_ai.platform.cli.utils.platform_call")
+    def test_no_arg_does_not_auto_select_workspace(
+        self, platform_call_mock: object
+    ) -> None:
+        """No-arg _require_auth must not fall back to global active workspace."""
+        from osmosis_ai.platform.cli.utils import _require_auth
+
+        with pytest.raises(CLIError, match="linked Osmosis project"):
+            _require_auth()
+
+        platform_call_mock.assert_not_called()
+
+    @patch("osmosis_ai.platform.cli.utils.load_credentials", return_value=None)
+    def test_explicit_workspace_name_still_checks_login(self, _mock: object) -> None:
+        """Bootstrap flows passing workspace_name keep credential validation."""
         from osmosis_ai.platform.cli.utils import _require_auth
 
         with pytest.raises(CLIError, match="Not logged in"):
-            _require_auth()
+            _require_auth(workspace_name="bootstrap-workspace")
 
     @patch("osmosis_ai.platform.cli.utils.load_credentials")
-    @patch(
-        "osmosis_ai.platform.cli.utils.get_active_workspace_name",
-        return_value=None,
-    )
-    @patch(
-        "osmosis_ai.platform.cli.utils.ensure_active_workspace",
-        return_value=None,
-    )
-    def test_logged_in_but_no_workspace_says_no_workspace(
-        self, _auto_mock: object, _ws_mock: object, mock_load: object
+    def test_explicit_workspace_name_returns_credentials(
+        self, mock_load: object
     ) -> None:
-        """When logged in but no workspace, error should say 'No workspace selected'."""
-        from osmosis_ai.platform.cli.utils import _require_auth
-
-        mock_load.return_value = _make_credentials()
-
-        with pytest.raises(CLIError, match="No workspace selected"):
-            _require_auth()
-
-    @patch("osmosis_ai.platform.cli.utils.load_credentials")
-    @patch(
-        "osmosis_ai.platform.cli.utils.get_active_workspace_name",
-        return_value=None,
-    )
-    @patch(
-        "osmosis_ai.platform.cli.utils.ensure_active_workspace",
-        return_value={"id": "ws_only", "name": "solo-workspace"},
-    )
-    def test_logged_in_with_single_workspace_auto_selects(
-        self, _auto_mock: object, _ws_mock: object, mock_load: object
-    ) -> None:
-        """When only one workspace exists, _require_auth should resolve it automatically."""
+        """Bootstrap flows can still pass an already-resolved workspace name."""
         from osmosis_ai.platform.cli.utils import _require_auth
 
         creds = _make_credentials()
         mock_load.return_value = creds
 
-        workspace_name, resolved_credentials = _require_auth()
+        workspace_name, resolved_credentials = _require_auth(
+            workspace_name="bootstrap-workspace"
+        )
 
-        assert workspace_name == "solo-workspace"
+        assert workspace_name == "bootstrap-workspace"
         assert resolved_credentials is creds
 
 
@@ -194,22 +194,23 @@ class TestPlatformRequestMessages:
         with pytest.raises(CLIError, match="Not logged in"):
             platform_request("/api/test")
 
-    @patch(
-        "osmosis_ai.platform.auth.platform_client.get_active_workspace_id",
-        return_value=None,
-    )
-    @patch(
-        "osmosis_ai.platform.auth.platform_client.ensure_active_workspace",
-        return_value=None,
-    )
-    def test_no_workspace_says_workspace_not_expired(
-        self, _auto_mock: object, _mock: object
+    def test_workspace_required_ignores_legacy_active_workspace_fallback(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         from osmosis_ai.platform.auth.platform_client import platform_request
 
+        legacy_config = tmp_path / "config.json"
+        legacy_config.write_text(
+            '{"active_workspace":{"id":"legacy-ws","name":"legacy-workspace"}}',
+            encoding="utf-8",
+        )
+        monkeypatch.setattr(
+            "osmosis_ai.platform.auth.local_config.CONFIG_FILE",
+            legacy_config,
+        )
         creds = _make_credentials()
 
-        with pytest.raises(PlatformAPIError, match="No workspace selected"):
+        with pytest.raises(PlatformAPIError, match="explicit workspace_id"):
             platform_request("/api/test", credentials=creds)
 
 
@@ -225,13 +226,14 @@ class TestMainExceptionHandlerMessages:
         with patch(
             "osmosis_ai.cli.main.app",
             side_effect=CLIError(
-                "No workspace selected. Run 'osmosis workspace' to select a workspace."
+                "This project is not linked to an Osmosis workspace for the "
+                "current platform. Run 'osmosis project link' from the project root."
             ),
         ):
             code = main([])
 
         assert code == 1
-        assert "No workspace selected" in capsys.readouterr().err
+        assert "This project is not linked" in capsys.readouterr().err
 
     @patch("osmosis_ai.cli.main._registered", True)
     def test_cli_error_preserves_bracketed_section_names(

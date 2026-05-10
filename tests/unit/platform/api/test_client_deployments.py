@@ -12,6 +12,8 @@ from unittest.mock import MagicMock, patch
 
 from osmosis_ai.platform.api.client import OsmosisClient
 
+WORKSPACE_ID = "ws_test"
+
 
 class TestListDeployments:
     @patch("osmosis_ai.platform.api.client.platform_request")
@@ -23,12 +25,13 @@ class TestListDeployments:
             "next_offset": None,
         }
         client = OsmosisClient()
-        result = client.list_deployments(limit=10, offset=5)
+        result = client.list_deployments(limit=10, offset=5, workspace_id=WORKSPACE_ID)
         assert result.total_count == 0
-        args, _kwargs = mock_req.call_args
+        args, kwargs = mock_req.call_args
         assert "/api/cli/deployments?" in args[0]
         assert "limit=10" in args[0]
         assert "offset=5" in args[0]
+        assert kwargs["workspace_id"] == WORKSPACE_ID
 
     @patch("osmosis_ai.platform.api.client.platform_request")
     def test_defaults(self, mock_req: MagicMock) -> None:
@@ -39,11 +42,12 @@ class TestListDeployments:
             "next_offset": None,
         }
         client = OsmosisClient()
-        client.list_deployments()
-        args, _ = mock_req.call_args
+        client.list_deployments(workspace_id=WORKSPACE_ID)
+        args, kwargs = mock_req.call_args
         assert "/api/cli/deployments?" in args[0]
         assert "limit=" in args[0]
         assert "offset=0" in args[0]
+        assert kwargs["workspace_id"] == WORKSPACE_ID
 
 
 class TestGetDeployment:
@@ -59,10 +63,11 @@ class TestGetDeployment:
             }
         }
         client = OsmosisClient()
-        result = client.get_deployment("qwen3-step-100")
+        result = client.get_deployment("qwen3-step-100", workspace_id=WORKSPACE_ID)
         assert result.checkpoint_name == "qwen3-step-100"
-        args, _ = mock_req.call_args
+        args, kwargs = mock_req.call_args
         assert args[0] == "/api/cli/deployments/qwen3-step-100"
+        assert kwargs["workspace_id"] == WORKSPACE_ID
 
     @patch("osmosis_ai.platform.api.client.platform_request")
     def test_urlencodes_path(self, mock_req: MagicMock) -> None:
@@ -76,9 +81,10 @@ class TestGetDeployment:
             }
         }
         client = OsmosisClient()
-        client.get_deployment("../bad")
-        args, _ = mock_req.call_args
+        client.get_deployment("../bad", workspace_id=WORKSPACE_ID)
+        args, kwargs = mock_req.call_args
         assert "../" not in args[0]
+        assert kwargs["workspace_id"] == WORKSPACE_ID
 
 
 class TestDeployCheckpoint:
@@ -92,13 +98,14 @@ class TestDeployCheckpoint:
             }
         }
         client = OsmosisClient()
-        result = client.deploy_checkpoint("qwen3-step-100")
+        result = client.deploy_checkpoint("qwen3-step-100", workspace_id=WORKSPACE_ID)
         assert result.id == "dep_1"
         assert result.status == "active"
         args, kwargs = mock_req.call_args
         assert args[0] == "/api/cli/deployments/qwen3-step-100/deploy"
         assert kwargs["method"] == "POST"
         assert kwargs["data"] == {}
+        assert kwargs["workspace_id"] == WORKSPACE_ID
 
     @patch("osmosis_ai.platform.api.client.platform_request")
     def test_deploy_urlencodes_path(self, mock_req: MagicMock) -> None:
@@ -106,9 +113,10 @@ class TestDeployCheckpoint:
             "deployment": {"id": "d", "checkpoint_name": "x", "status": "active"}
         }
         client = OsmosisClient()
-        client.deploy_checkpoint("../bad")
-        args, _ = mock_req.call_args
+        client.deploy_checkpoint("../bad", workspace_id=WORKSPACE_ID)
+        args, kwargs = mock_req.call_args
         assert "../" not in args[0]
+        assert kwargs["workspace_id"] == WORKSPACE_ID
 
 
 class TestUndeployCheckpoint:
@@ -120,12 +128,13 @@ class TestUndeployCheckpoint:
             "status": "inactive",
         }
         client = OsmosisClient()
-        result = client.undeploy_checkpoint("qwen3-step-100")
+        result = client.undeploy_checkpoint("qwen3-step-100", workspace_id=WORKSPACE_ID)
         assert result.status == "inactive"
         args, kwargs = mock_req.call_args
         assert args[0] == "/api/cli/deployments/qwen3-step-100/undeploy"
         assert kwargs["method"] == "POST"
         assert kwargs["data"] == {}
+        assert kwargs["workspace_id"] == WORKSPACE_ID
 
 
 class TestRenameCheckpoint:
@@ -138,13 +147,16 @@ class TestRenameCheckpoint:
             "status": "active",
         }
         client = OsmosisClient()
-        result = client.rename_checkpoint("old-name", "new-name")
+        result = client.rename_checkpoint(
+            "old-name", "new-name", workspace_id=WORKSPACE_ID
+        )
         assert result.checkpoint_name == "new-name"
         assert result.old_checkpoint_name == "old-name"
         args, kwargs = mock_req.call_args
         assert args[0] == "/api/cli/deployments/old-name"
         assert kwargs["method"] == "PATCH"
         assert kwargs["data"] == {"checkpoint_name": "new-name"}
+        assert kwargs["workspace_id"] == WORKSPACE_ID
 
 
 class TestDeleteDeployment:
@@ -152,10 +164,14 @@ class TestDeleteDeployment:
     def test_delete(self, mock_req: MagicMock) -> None:
         mock_req.return_value = {"deleted": True}
         client = OsmosisClient()
-        assert client.delete_deployment("qwen3-step-100") is True
+        assert (
+            client.delete_deployment("qwen3-step-100", workspace_id=WORKSPACE_ID)
+            is True
+        )
         args, kwargs = mock_req.call_args
         assert args[0] == "/api/cli/deployments/qwen3-step-100"
         assert kwargs["method"] == "DELETE"
+        assert kwargs["workspace_id"] == WORKSPACE_ID
 
 
 class TestListTrainingRunCheckpoints:
@@ -174,7 +190,10 @@ class TestListTrainingRunCheckpoints:
             ],
         }
         client = OsmosisClient()
-        result = client.list_training_run_checkpoints("qwen3-run1")
+        result = client.list_training_run_checkpoints(
+            "qwen3-run1", workspace_id=WORKSPACE_ID
+        )
         assert len(result.checkpoints) == 1
-        args, _ = mock_req.call_args
+        args, kwargs = mock_req.call_args
         assert args[0] == "/api/cli/training-runs/qwen3-run1/checkpoints"
+        assert kwargs["workspace_id"] == WORKSPACE_ID

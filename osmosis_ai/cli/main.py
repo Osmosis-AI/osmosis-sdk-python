@@ -205,8 +205,11 @@ def _register_commands() -> None:
 
     # -- Top-level commands --
     from osmosis_ai.cli.commands.init import init
+    from osmosis_ai.cli.commands.project import link, unlink
 
     app.command("init", rich_help_panel=_WORKFLOW)(init)
+    app.command("link", rich_help_panel=_WORKFLOW)(link)
+    app.command("unlink", rich_help_panel=_WORKFLOW)(unlink)
 
     # `deploy` and `undeploy` are verbs, not CRUD on the deployment resource,
     # so they are promoted to top-level to avoid `osmosis deployment deploy`.

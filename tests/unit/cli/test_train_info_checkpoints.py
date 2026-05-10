@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from io import StringIO
+from pathlib import Path
 
 import pytest
 
@@ -16,6 +17,11 @@ from osmosis_ai.platform.api.models import (
     TrainingRunCheckpoints,
     TrainingRunDetail,
 )
+from osmosis_ai.platform.cli.workspace_context import WorkspaceContext
+
+WORKSPACE_ID = "ws-test"
+WORKSPACE_NAME = "ws-test"
+FAKE_CREDENTIALS = object()
 
 
 @pytest.fixture()
@@ -28,10 +34,19 @@ def console_capture(monkeypatch: pytest.MonkeyPatch) -> StringIO:
 
 
 @pytest.fixture(autouse=True)
-def _mock_auth(monkeypatch: pytest.MonkeyPatch) -> None:
+def _mock_workspace_context(monkeypatch: pytest.MonkeyPatch) -> None:
+    def _context() -> WorkspaceContext:
+        return WorkspaceContext(
+            project_root=Path.cwd().resolve(),
+            workspace_id=WORKSPACE_ID,
+            workspace_name=WORKSPACE_NAME,
+            repo_url=None,
+            credentials=FAKE_CREDENTIALS,
+        )
+
     monkeypatch.setattr(
-        "osmosis_ai.platform.cli.utils._require_auth",
-        lambda: ("ws-test", object()),
+        "osmosis_ai.platform.cli.utils.require_workspace_context",
+        _context,
     )
 
 
@@ -70,10 +85,14 @@ class TestStatusCheckpoints:
         self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
     ) -> None:
         class FakeClient:
-            def get_training_run(self, name, *, credentials=None):
+            def get_training_run(self, name, *, workspace_id, credentials=None):
+                assert workspace_id == WORKSPACE_ID
                 return _make_finished_run()
 
-            def list_training_run_checkpoints(self, name, *, credentials=None):
+            def list_training_run_checkpoints(
+                self, name, *, workspace_id, credentials=None
+            ):
+                assert workspace_id == WORKSPACE_ID
                 return TrainingRunCheckpoints(
                     training_run_id="run_1",
                     training_run_name="qwen3-run1",
@@ -112,12 +131,14 @@ class TestStatusCheckpoints:
         called = {"ckpts": False}
 
         class FakeClient:
-            def get_training_run(self, name, *, credentials=None):
+            def get_training_run(self, name, *, workspace_id, credentials=None):
+                assert workspace_id == WORKSPACE_ID
                 return _make_running_run()
 
             def list_training_run_checkpoints(
-                self, name, *, credentials=None
+                self, name, *, workspace_id, credentials=None
             ):  # pragma: no cover
+                assert workspace_id == WORKSPACE_ID
                 called["ckpts"] = True
                 raise AssertionError("should not call for running run")
 
@@ -133,10 +154,14 @@ class TestStatusCheckpoints:
         self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
     ) -> None:
         class FakeClient:
-            def get_training_run(self, name, *, credentials=None):
+            def get_training_run(self, name, *, workspace_id, credentials=None):
+                assert workspace_id == WORKSPACE_ID
                 return _make_stopped_run()
 
-            def list_training_run_checkpoints(self, name, *, credentials=None):
+            def list_training_run_checkpoints(
+                self, name, *, workspace_id, credentials=None
+            ):
+                assert workspace_id == WORKSPACE_ID
                 return TrainingRunCheckpoints(
                     training_run_id="run_1",
                     training_run_name="qwen3-run1",
@@ -166,10 +191,14 @@ class TestStatusCheckpoints:
         from osmosis_ai.platform.auth.platform_client import PlatformAPIError
 
         class FakeClient:
-            def get_training_run(self, name, *, credentials=None):
+            def get_training_run(self, name, *, workspace_id, credentials=None):
+                assert workspace_id == WORKSPACE_ID
                 return _make_finished_run()
 
-            def list_training_run_checkpoints(self, name, *, credentials=None):
+            def list_training_run_checkpoints(
+                self, name, *, workspace_id, credentials=None
+            ):
+                assert workspace_id == WORKSPACE_ID
                 raise PlatformAPIError("Internal server error", 500)
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
@@ -184,10 +213,14 @@ class TestStatusCheckpoints:
         self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
     ) -> None:
         class FakeClient:
-            def get_training_run(self, name, *, credentials=None):
+            def get_training_run(self, name, *, workspace_id, credentials=None):
+                assert workspace_id == WORKSPACE_ID
                 return _make_finished_run()
 
-            def list_training_run_checkpoints(self, name, *, credentials=None):
+            def list_training_run_checkpoints(
+                self, name, *, workspace_id, credentials=None
+            ):
+                assert workspace_id == WORKSPACE_ID
                 return TrainingRunCheckpoints(
                     training_run_id="run_1",
                     training_run_name="qwen3-run1",
