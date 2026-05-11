@@ -34,6 +34,14 @@ class RolloutOutcome:
     duration_ms: float = 0.0
     tokens: int = 0
     systemic_error: str | None = None
+    rollout_id: str | None = None
+    controller_created_sample_ids: list[str] = field(default_factory=list)
+    completion_counts: dict[str, int] = field(default_factory=dict)
+    full_callback_sample_ids: list[str] = field(default_factory=list)
+    scored_sample_ids: list[str] = field(default_factory=list)
+    skipped_sample_ids: list[str] = field(default_factory=list)
+    callback_diagnostics: dict[str, Any] = field(default_factory=dict)
+    skipped: bool = False
 
 
 class RolloutDriver(ABC):
