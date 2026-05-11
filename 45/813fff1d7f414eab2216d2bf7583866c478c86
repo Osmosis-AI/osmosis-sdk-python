@@ -1,0 +1,29 @@
+osmosis_ai/platform/cli/templates/AGENTS.md.tpl
+  s_536cf86e4a9129::t_e02386ab0fabeb 29,84-86,91-96
+osmosis_ai/platform/cli/templates/configs/training/default.toml.tpl
+  s_536cf86e4a9129::t_4b2f2ec9105a65 4-5,15
+osmosis_ai/platform/cli/templates/README.md.tpl
+  s_536cf86e4a9129::t_d2b31c686a704d 15,18-20,26-27
+osmosis_ai/platform/cli/templates/configs/AGENTS.md.tpl
+  s_536cf86e4a9129::t_99700718ff668f 11-12,77-82
+osmosis_ai/platform/cli/templates/configs/eval/default.toml.tpl
+  s_536cf86e4a9129::t_b27180ecb51033 9
+  s_536cf86e4a9129::t_48944ebab992e7 2-3,8,10-14,17-19,22-26,29-30,33-36
+  s_536cf86e4a9129::t_3efc33822c8e56 5
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "45813fff1d7f414eab2216d2bf7583866c478c86",
+  "prompts": {},
+  "sessions": {
+    "s_536cf86e4a9129": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "24dc9525-de13-4c64-b668-35f511a68075",
+        "model": "gpt-5.5-extra-high"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}
