@@ -26,7 +26,7 @@ top-level layout.
   server. Eval configs do not support `[grader]` overrides.
 - Tools should be async Python functions with type hints and docstrings.
 - `Grader.grade` must be async and return a float in `[0.0, 1.0]`.
-- Before `osmosis --json train submit`, validate the project and run a local eval.
+- Before `osmosis train submit`, validate the project and run a local eval.
 
 ## Environment variables and secrets
 
@@ -81,17 +81,17 @@ before modifying plugin state.
 
 ## CLI output
 
-- When you run `osmosis` commands as an AI agent or in automation, use the
-  global `--json` flag before the command.
-- Use the default rich output only for interactive human sessions.
+- The commands below use the default rich output for interactive human sessions.
+- For AI agents or automation, prefer `osmosis --json ...` for structured output
+  or `osmosis --plain ...` for low-noise text.
 
 ## Common commands
 
 ```bash
-osmosis --json project validate
-osmosis --json rollout validate configs/eval/<name>.toml
-osmosis --json rollout validate configs/training/<run>.toml
-osmosis --json eval run configs/eval/<name>.toml
-osmosis --json train submit configs/training/<run>.toml
-osmosis --json train status <run-name>
+osmosis project validate
+osmosis rollout validate configs/eval/<name>.toml
+osmosis rollout validate configs/training/<run>.toml
+osmosis eval run configs/eval/<name>.toml
+osmosis train submit configs/training/<run>.toml
+osmosis train status <run-name>
 ```
