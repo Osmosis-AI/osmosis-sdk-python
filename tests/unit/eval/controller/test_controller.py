@@ -340,6 +340,35 @@ async def test_run_grader_callback_timeout_returns_failure_and_cleans_state(
 
 
 @pytest.mark.asyncio
+async def test_run_controller_error_returns_without_waiting_for_timeout(
+    config: EvalControllerConfig,
+) -> None:
+    driver = EvalController(config=config)
+    config.agent_timeout_sec = 60.0
+
+    async def fake_post_rollout(
+        url: str, json: dict[str, Any], timeout: float
+    ) -> httpx.Response:
+        state = driver.server.get_rollout_state(json["rollout_id"])
+        assert state is not None
+        state.mark_controller_error("provider authentication failed")
+        return httpx.Response(200, json={})
+
+    driver._new_rollout_id = lambda: "protocol-controller-error"  # type: ignore[method-assign]
+    driver._post_rollout = fake_post_rollout  # type: ignore[method-assign]
+
+    outcome = await asyncio.wait_for(
+        driver.run([{"role": "user", "content": "hello"}]),
+        timeout=0.2,
+    )
+
+    assert outcome.status == RolloutStatus.FAILURE
+    assert outcome.error == "provider authentication failed"
+    assert outcome.systemic_error == "provider authentication failed"
+    assert driver.server.get_rollout_state("protocol-controller-error") is None
+
+
+@pytest.mark.asyncio
 async def test_post_rollout_uses_httpx_async_client(
     config: EvalControllerConfig, monkeypatch: pytest.MonkeyPatch
 ) -> None:

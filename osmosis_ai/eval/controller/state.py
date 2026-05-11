@@ -7,6 +7,7 @@ from typing import Any
 from osmosis_ai.rollout.driver import RolloutOutcome
 from osmosis_ai.rollout.types import (
     GraderCompleteRequest,
+    GraderStatus,
     RolloutCompleteRequest,
     RolloutSample,
     RolloutStatus,
@@ -120,6 +121,28 @@ class ControllerRolloutState:
     def mark_systemic_error(self, message: str) -> None:
         self.systemic_error = message
         self.primary_error = self.primary_error or message
+
+    def mark_controller_error(self, message: str) -> None:
+        self.mark_systemic_error(message)
+        if self.rollout_callback is None:
+            self.mark_rollout_completed(
+                RolloutCompleteRequest(
+                    rollout_id=self.rollout_id,
+                    status=RolloutStatus.FAILURE,
+                    err_message=message,
+                )
+            )
+            return
+
+        if self.grader_callback is None:
+            self.mark_grader_completed(
+                GraderCompleteRequest(
+                    rollout_id=self.rollout_id,
+                    status=GraderStatus.FAILURE,
+                    samples={},
+                    err_message=message,
+                )
+            )
 
     def mark_rollout_completed(self, request: RolloutCompleteRequest) -> None:
         if self.rollout_callback is not None:

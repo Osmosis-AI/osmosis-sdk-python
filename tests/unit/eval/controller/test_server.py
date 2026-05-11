@@ -291,6 +291,9 @@ async def test_bridge_exception_json_collects_systemic_error(client) -> None:
     async_client, server, bridge = client
     bridge.exc = RuntimeError("provider down")
     bridge.systemic_errors["r1"] = "bad auth"
+    state = server.get_rollout_state("r1")
+    assert state is not None
+    rollout_future = state.rollout_future
 
     response = await async_client.post(
         "/chat/completions",
@@ -300,13 +303,21 @@ async def test_bridge_exception_json_collects_systemic_error(client) -> None:
 
     assert response.status_code == 502
     assert response.json() == {"error": "provider down"}
-    assert server.get_rollout_state("r1").systemic_error == "bad auth"
+    assert state.systemic_error == "bad auth"
+    callback = await asyncio.wait_for(rollout_future, timeout=0.1)
+    assert callback.status is RolloutStatus.FAILURE
+    assert callback.err_message == "bad auth"
 
 
 @pytest.mark.asyncio
-async def test_bridge_exception_sse_yields_error_and_done(client) -> None:
-    async_client, _, bridge = client
+async def test_bridge_exception_sse_yields_error_done_and_resolves_waiter(
+    client,
+) -> None:
+    async_client, server, bridge = client
     bridge.exc = RuntimeError("provider down")
+    state = server.get_rollout_state("r1")
+    assert state is not None
+    rollout_future = state.rollout_future
 
     response = await async_client.post(
         "/chat/completions",
@@ -317,6 +328,9 @@ async def test_bridge_exception_sse_yields_error_and_done(client) -> None:
     assert response.status_code == 200
     assert 'event: error\ndata: {"error":"provider down"}' in response.text
     assert response.text.endswith("data: [DONE]\n\n")
+    callback = await asyncio.wait_for(rollout_future, timeout=0.1)
+    assert callback.status is RolloutStatus.FAILURE
+    assert callback.err_message == "provider down"
 
 
 @pytest.mark.asyncio

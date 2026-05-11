@@ -1,3 +1,5 @@
+import asyncio
+
 import pytest
 
 from osmosis_ai.eval.controller.state import ControllerRolloutState
@@ -166,6 +168,43 @@ async def test_duplicate_callbacks_are_stale_and_do_not_overwrite_outcome() -> N
     assert accepted.samples["s1"].reward == 1.0
     assert outcome.samples["s1"].reward == 1.0
     assert outcome.callback_diagnostics["stale_callbacks"] == ["grader"]
+
+
+@pytest.mark.asyncio
+async def test_controller_error_resolves_rollout_future_and_marks_failure() -> None:
+    state = ControllerRolloutState(rollout_id="r1")
+    rollout_future = state.rollout_future
+
+    state.mark_controller_error("provider authentication failed")
+
+    callback = await asyncio.wait_for(rollout_future, timeout=0.1)
+    outcome = state.to_outcome(duration_ms=5.0)
+
+    assert callback.status is RolloutStatus.FAILURE
+    assert callback.err_message == "provider authentication failed"
+    assert outcome.status is RolloutStatus.FAILURE
+    assert outcome.error == "provider authentication failed"
+    assert outcome.systemic_error == "provider authentication failed"
+
+
+@pytest.mark.asyncio
+async def test_controller_error_after_rollout_resolves_grader_future() -> None:
+    state = ControllerRolloutState(rollout_id="r1")
+    state.mark_rollout_completed(
+        RolloutCompleteRequest(rollout_id="r1", status=RolloutStatus.SUCCESS)
+    )
+    grader_future = state.grader_future
+
+    state.mark_controller_error("provider down during grading wait")
+
+    callback = await asyncio.wait_for(grader_future, timeout=0.1)
+    outcome = state.to_outcome(duration_ms=5.0)
+
+    assert callback.status is GraderStatus.FAILURE
+    assert callback.samples == {}
+    assert callback.err_message == "provider down during grading wait"
+    assert outcome.status is RolloutStatus.FAILURE
+    assert outcome.error == "provider down during grading wait"
 
 
 def test_missing_unknown_none_rewards_and_empty_samples_fail() -> None:

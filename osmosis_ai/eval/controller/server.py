@@ -218,7 +218,7 @@ class EvalControllerServer:
         except HTTPException:
             raise
         except Exception as exc:
-            self._mark_systemic_error(rollout_id)
+            self._mark_controller_error(rollout_id, str(exc))
             return JSONResponse(status_code=502, content={"error": str(exc)})
         return JSONResponse(content=payload)
 
@@ -240,7 +240,7 @@ class EvalControllerServer:
             try:
                 _, payload = await task
             except Exception as exc:
-                self._mark_systemic_error(rollout_id)
+                self._mark_controller_error(rollout_id, str(exc))
                 if isinstance(exc, HTTPException) and exc.detail == "rollout not found":
                     yield build_sse_error_event("rollout not found")
                 else:
@@ -256,16 +256,17 @@ class EvalControllerServer:
                 with contextlib.suppress(asyncio.CancelledError):
                     await task
 
-    def _mark_systemic_error(self, rollout_id: str) -> None:
+    def _mark_controller_error(self, rollout_id: str, fallback_message: str) -> None:
         state = self.get_rollout_state(rollout_id)
         if state is None:
             return
+        message = fallback_message
         collect = getattr(self.bridge, "collect_systemic_error", None)
-        if not callable(collect):
-            return
-        message = collect(rollout_id)
-        if isinstance(message, str) and message:
-            state.mark_systemic_error(message)
+        if callable(collect):
+            collected = collect(rollout_id)
+            if isinstance(collected, str) and collected:
+                message = collected
+        state.mark_controller_error(message)
 
 
 __all__ = ["EvalControllerServer"]
