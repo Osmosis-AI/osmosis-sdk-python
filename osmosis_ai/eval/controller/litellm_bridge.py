@@ -7,7 +7,7 @@ from typing import Any
 
 from osmosis_ai.cli.errors import CLIError
 
-logger = logging.getLogger(__name__)
+logger: logging.Logger = logging.getLogger(__name__)
 
 SLIME_CONSUMED_PROVIDER_FIELDS = frozenset(
     {"messages", "temperature", "top_p", "max_tokens", "tools"}

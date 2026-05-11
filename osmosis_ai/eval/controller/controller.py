@@ -63,13 +63,15 @@ def _create_embedded_uvicorn_server(uvicorn_module: Any, config: Any) -> Any:
 class EvalController(RolloutDriver):
     def __init__(self, *, config: EvalControllerConfig) -> None:
         self.config = config
-        self.api_key = secrets.token_urlsafe(32)
-        self.bridge = LiteLLMBridge(
+        self.api_key: str = secrets.token_urlsafe(32)
+        self.bridge: LiteLLMBridge = LiteLLMBridge(
             model=config.llm_model,
             api_key=config.api_key,
             base_url=config.base_url,
         )
-        self.server = EvalControllerServer(api_key=self.api_key, bridge=self.bridge)
+        self.server: EvalControllerServer = EvalControllerServer(
+            api_key=self.api_key, bridge=self.bridge
+        )
         self.controller_port = config.controller_port
         self._server_task: asyncio.Task[Any] | None = None
         self._uvicorn_server: Any | None = None

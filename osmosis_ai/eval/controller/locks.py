@@ -36,7 +36,7 @@ def fixed_port_lock_path() -> Path:
 
 class FixedPortLock:
     def __init__(self, *, timeout: int = 30, lock_path: Path | None = None) -> None:
-        self.lock_path = lock_path or fixed_port_lock_path()
+        self.lock_path: Path = lock_path or fixed_port_lock_path()
         self.lock_path.parent.mkdir(parents=True, exist_ok=True)
         self._lock = FileLock(str(self.lock_path), timeout=timeout)
 

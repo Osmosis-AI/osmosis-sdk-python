@@ -40,7 +40,7 @@ class EvalControllerServer:
         self.api_key = api_key
         self.bridge = bridge
         self._states: dict[str, ControllerRolloutState] = {}
-        self.app = self._build_app()
+        self.app: FastAPI = self._build_app()
 
     def register_rollout_state(self, state: ControllerRolloutState) -> None:
         self._states[state.rollout_id] = state
