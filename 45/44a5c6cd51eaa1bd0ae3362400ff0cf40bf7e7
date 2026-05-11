@@ -1,0 +1,28 @@
+tests/unit/eval/controller/test_controller.py
+  s_536cf86e4a9129::t_677bbbabc1d375 343-370
+osmosis_ai/eval/controller/state.py
+  s_536cf86e4a9129::t_ffe116132fbb8b 10,125-145
+osmosis_ai/eval/controller/server.py
+  s_536cf86e4a9129::t_3e165c13de9f16 221,243,259,263,265-269
+tests/unit/eval/controller/test_state.py
+  s_536cf86e4a9129::t_a4d632a64a59f5 1-2
+  s_536cf86e4a9129::t_4e4dd758349db0 173-209
+tests/unit/eval/controller/test_server.py
+  s_536cf86e4a9129::t_a74c999fa87f46 294-296,306-309,313,315-316,318-320,331-333
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "4544a5c6cd51eaa1bd0ae3362400ff0cf40bf7e7",
+  "prompts": {},
+  "sessions": {
+    "s_536cf86e4a9129": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "24dc9525-de13-4c64-b668-35f511a68075",
+        "model": "gpt-5.5-extra-high"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}
