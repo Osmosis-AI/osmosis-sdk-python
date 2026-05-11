@@ -14,6 +14,7 @@ import pytest
 
 from osmosis_ai.eval.evaluation.cache import (
     _CACHE_VERSION,
+    CONTROLLER_PROTOCOL_VERSION,
     CacheConfig,
     CacheFlushController,
     DatasetIntegrityChecker,
@@ -31,6 +32,7 @@ from osmosis_ai.eval.evaluation.cache import (
     compute_dataset_fingerprint,
     compute_eval_fns_fingerprint,
     compute_module_fingerprint,
+    compute_rollout_filesystem_fingerprint,
     compute_rollout_package_fingerprint,
     compute_task_id,
     sanitize_path_part,
@@ -121,17 +123,14 @@ class TestDeterministicJson:
 class TestComputeTaskId:
     BASE_KWARGS = {
         "config": {
-            "model": "gpt-4",
-            "module": "my_agent:Agent",
-            "dataset": "data.jsonl",
-            "eval_fns": ["eval_mod:fn1", "eval_mod:fn2"],
-            "n_runs": 3,
-            "max_turns": 10,
-            "pass_threshold": 0.5,
+            "llm_model": "openai/gpt-5-mini",
+            "runs_n": 3,
+            "runs_max_turns": 10,
+            "eval_pass_threshold": 0.5,
         },
-        "workflow_fingerprint": "wf_abc123",
-        "grader_fingerprint": "gr_def456",
+        "rollout_fingerprint": "rollout_abc123",
         "dataset_fingerprint": "ds_ghi789",
+        "entrypoint": "main.py",
     }
 
     def test_deterministic(self) -> None:
@@ -148,7 +147,10 @@ class TestComputeTaskId:
         # Change model in config
         changed = {
             **self.BASE_KWARGS,
-            "config": {**self.BASE_KWARGS["config"], "model": "gpt-3.5"},
+            "config": {
+                **self.BASE_KWARGS["config"],
+                "llm_model": "openai/gpt-5-mini-different",
+            },
         }
         tid_diff, _ = compute_task_id(**changed)
         assert tid_diff != tid_base
@@ -156,7 +158,7 @@ class TestComputeTaskId:
         # Change n_runs in config
         changed2 = {
             **self.BASE_KWARGS,
-            "config": {**self.BASE_KWARGS["config"], "n_runs": 5},
+            "config": {**self.BASE_KWARGS["config"], "runs_n": 5},
         }
         tid_diff2, _ = compute_task_id(**changed2)
         assert tid_diff2 != tid_base
@@ -164,7 +166,7 @@ class TestComputeTaskId:
         # Change pass_threshold in config
         changed3 = {
             **self.BASE_KWARGS,
-            "config": {**self.BASE_KWARGS["config"], "pass_threshold": 0.9},
+            "config": {**self.BASE_KWARGS["config"], "eval_pass_threshold": 0.9},
         }
         tid_diff3, _ = compute_task_id(**changed3)
         assert tid_diff3 != tid_base
@@ -180,20 +182,18 @@ class TestComputeTaskId:
         tid, config_hash = compute_task_id(**self.BASE_KWARGS)
         assert config_hash.startswith(tid)
 
-    def test_workflow_fingerprint_affects_hash(self) -> None:
-        """Changing workflow_fingerprint changes task_id."""
+    def test_rollout_fingerprint_affects_hash(self) -> None:
+        """Changing rollout_fingerprint changes task_id."""
         tid_base, _ = compute_task_id(**self.BASE_KWARGS)
         tid_diff, _ = compute_task_id(
-            **{**self.BASE_KWARGS, "workflow_fingerprint": "different"}
+            **{**self.BASE_KWARGS, "rollout_fingerprint": "different"}
         )
         assert tid_diff != tid_base
 
-    def test_grader_fingerprint_affects_hash(self) -> None:
-        """Changing grader_fingerprint changes task_id."""
+    def test_entrypoint_affects_hash(self) -> None:
+        """Changing entrypoint changes task_id."""
         tid_base, _ = compute_task_id(**self.BASE_KWARGS)
-        tid_diff, _ = compute_task_id(
-            **{**self.BASE_KWARGS, "grader_fingerprint": "different"}
-        )
+        tid_diff, _ = compute_task_id(**{**self.BASE_KWARGS, "entrypoint": "alt.py"})
         assert tid_diff != tid_base
 
     def test_dataset_fingerprint_affects_hash(self) -> None:
@@ -204,16 +204,13 @@ class TestComputeTaskId:
         )
         assert tid_diff != tid_base
 
-    def test_none_grader_included_in_hash(self) -> None:
-        """None grader_fingerprint is part of the hash identity (not filtered)."""
-        tid_none, hash_none = compute_task_id(
-            **{**self.BASE_KWARGS, "grader_fingerprint": None}
+    def test_controller_protocol_version_affects_hash(self) -> None:
+        """Changing controller_protocol_version changes task_id."""
+        tid_base, _ = compute_task_id(**self.BASE_KWARGS)
+        tid_diff, _ = compute_task_id(
+            **{**self.BASE_KWARGS, "controller_protocol_version": "different"}
         )
-        tid_str, hash_str = compute_task_id(
-            **{**self.BASE_KWARGS, "grader_fingerprint": "some_grader"}
-        )
-        assert tid_none != tid_str
-        assert hash_none != hash_str
+        assert tid_diff != tid_base
 
 
 # ============================================================
@@ -463,6 +460,74 @@ class TestComputeRolloutPackageFingerprint:
         assert before is not None
         assert after is not None
         assert before != after
+
+
+def test_rollout_filesystem_fingerprint_includes_behavior_files(
+    tmp_path: Path,
+) -> None:
+    rollout = tmp_path / "rollouts" / "demo"
+    rollout.mkdir(parents=True)
+    for rel, content in {
+        "main.py": "print('v1')\n",
+        "pyproject.toml": "[project]\nname='demo'\n",
+        "data.json": '{"a":1}\n',
+        "samples.jsonl": '{"a":1}\n',
+        "prompt.yaml": "name: demo\n",
+        "prompt.yml": "name: demo\n",
+    }.items():
+        (rollout / rel).write_text(content, encoding="utf-8")
+
+    first = compute_rollout_filesystem_fingerprint(rollout, entrypoint="main.py")
+    (rollout / "main.py").write_text("print('v2')\n", encoding="utf-8")
+    second = compute_rollout_filesystem_fingerprint(rollout, entrypoint="main.py")
+
+    assert first != second
+
+
+def test_rollout_filesystem_fingerprint_skips_caches_logs_and_external_symlinks(
+    tmp_path: Path,
+) -> None:
+    rollout = tmp_path / "rollouts" / "demo"
+    rollout.mkdir(parents=True)
+    (rollout / "main.py").write_text("print('v1')\n", encoding="utf-8")
+    (rollout / "pyproject.toml").write_text(
+        "[project]\nname='demo'\n", encoding="utf-8"
+    )
+    (rollout / "__pycache__").mkdir()
+    (rollout / "__pycache__" / "main.py").write_text("ignored\n", encoding="utf-8")
+    for dirname in (".cache", ".venv", "cache", "log", "logs", "venv"):
+        (rollout / dirname).mkdir()
+        (rollout / dirname / "dep.py").write_text("ignored\n", encoding="utf-8")
+    (rollout / "debug.log").write_text("ignored\n", encoding="utf-8")
+    external = tmp_path / "external.py"
+    external.write_text("ignored\n", encoding="utf-8")
+    (rollout / "external.py").symlink_to(external)
+
+    first = compute_rollout_filesystem_fingerprint(rollout, entrypoint="main.py")
+    (rollout / "__pycache__" / "main.py").write_text("changed\n", encoding="utf-8")
+    for dirname in (".cache", ".venv", "cache", "log", "logs", "venv"):
+        (rollout / dirname / "dep.py").write_text("changed\n", encoding="utf-8")
+    (rollout / "debug.log").write_text("changed\n", encoding="utf-8")
+    external.write_text("changed\n", encoding="utf-8")
+    second = compute_rollout_filesystem_fingerprint(rollout, entrypoint="main.py")
+
+    assert first == second
+
+
+def test_controller_protocol_version_participates_in_task_id() -> None:
+    assert CONTROLLER_PROTOCOL_VERSION == "eval-controller-v1"
+    base = {
+        "config": {"llm_model": "openai/gpt-5-mini"},
+        "rollout_fingerprint": "rollout",
+        "dataset_fingerprint": "dataset",
+        "entrypoint": "main.py",
+        "controller_protocol_version": CONTROLLER_PROTOCOL_VERSION,
+    }
+
+    first, _ = compute_task_id(**base)
+    second, _ = compute_task_id(**{**base, "controller_protocol_version": "different"})
+
+    assert first != second
 
 
 # ============================================================
@@ -1777,11 +1842,11 @@ def test_build_summary_v2_all_failed():
     assert summary.get("reward_stats") is None
 
 
-def test_cache_version_2_rejects_v1():
-    """v2 cache rejects v1 cache files."""
+def test_cache_version_3_rejects_older_cache_files():
+    """v3 cache rejects older cache files."""
     from osmosis_ai.eval.evaluation.cache import _CACHE_VERSION
 
-    assert _CACHE_VERSION == 2
+    assert _CACHE_VERSION == 3
 
 
 # ============================================================
@@ -1795,35 +1860,35 @@ def test_compute_task_id_changes_with_config():
 
     tid1, hash1 = compute_task_id(
         config={"llm_model": "openai/gpt-5.4", "runs_n": 1, "runs_batch_size": 1},
-        workflow_fingerprint="abc123",
-        grader_fingerprint=None,
+        rollout_fingerprint="abc123",
         dataset_fingerprint="ds_hash",
+        entrypoint="main.py",
     )
     tid2, hash2 = compute_task_id(
         config={"llm_model": "openai/gpt-5.4", "runs_n": 4, "runs_batch_size": 1},
-        workflow_fingerprint="abc123",
-        grader_fingerprint=None,
+        rollout_fingerprint="abc123",
         dataset_fingerprint="ds_hash",
+        entrypoint="main.py",
     )
     assert tid1 != tid2
     assert hash1 != hash2
 
 
-def test_compute_task_id_changes_with_grader_code():
-    """Grader code change invalidates cache."""
+def test_compute_task_id_changes_with_rollout_filesystem():
+    """Rollout filesystem changes invalidate cache."""
     from osmosis_ai.eval.evaluation.cache import compute_task_id
 
     tid1, hash1 = compute_task_id(
         config={"llm_model": "openai/gpt-5.4"},
-        workflow_fingerprint="abc123",
-        grader_fingerprint="grader_v1",
+        rollout_fingerprint="rollout_v1",
         dataset_fingerprint="ds_hash",
+        entrypoint="main.py",
     )
     tid2, hash2 = compute_task_id(
         config={"llm_model": "openai/gpt-5.4"},
-        workflow_fingerprint="abc123",
-        grader_fingerprint="grader_v2",
+        rollout_fingerprint="rollout_v2",
         dataset_fingerprint="ds_hash",
+        entrypoint="main.py",
     )
     assert tid1 != tid2
     assert hash1 != hash2
@@ -1835,9 +1900,9 @@ def test_compute_task_id_stable():
 
     kwargs = dict(
         config={"llm_model": "openai/gpt-5.4"},
-        workflow_fingerprint="abc123",
-        grader_fingerprint=None,
+        rollout_fingerprint="abc123",
         dataset_fingerprint="ds_hash",
+        entrypoint="main.py",
     )
     assert compute_task_id(**kwargs) == compute_task_id(**kwargs)
 
@@ -1848,9 +1913,9 @@ def test_compute_task_id_is_prefix_of_config_hash():
 
     tid, chash = compute_task_id(
         config={"llm_model": "openai/gpt-5.4"},
-        workflow_fingerprint="abc123",
-        grader_fingerprint=None,
+        rollout_fingerprint="abc123",
         dataset_fingerprint="ds_hash",
+        entrypoint="main.py",
     )
     assert tid == chash[:12]
 
@@ -1863,21 +1928,21 @@ def test_compute_task_id_changes_with_offset_limit():
 
     tid1, _ = compute_task_id(
         config={**base, "offset": 0, "limit": 10},
-        workflow_fingerprint="abc",
-        grader_fingerprint=None,
+        rollout_fingerprint="abc",
         dataset_fingerprint="ds",
+        entrypoint="main.py",
     )
     tid2, _ = compute_task_id(
         config={**base, "offset": 0, "limit": 50},
-        workflow_fingerprint="abc",
-        grader_fingerprint=None,
+        rollout_fingerprint="abc",
         dataset_fingerprint="ds",
+        entrypoint="main.py",
     )
     tid3, _ = compute_task_id(
         config={**base, "offset": 10, "limit": 10},
-        workflow_fingerprint="abc",
-        grader_fingerprint=None,
+        rollout_fingerprint="abc",
         dataset_fingerprint="ds",
+        entrypoint="main.py",
     )
     assert tid1 != tid2  # different limit
     assert tid1 != tid3  # different offset

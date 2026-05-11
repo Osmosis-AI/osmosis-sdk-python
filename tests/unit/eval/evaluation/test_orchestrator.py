@@ -184,6 +184,81 @@ def _make_orchestrator(
     )
 
 
+def test_plan_pending_work_keeps_cache_lock() -> None:
+    cache_backend = MockCacheBackend()
+    orch = _make_orchestrator(cache_backend=cache_backend, rows=_make_rows(1))
+
+    plan = orch.plan()
+
+    assert plan.has_pending_work is True
+    assert cache_backend.lock.released is False
+    plan.release()
+    assert cache_backend.lock.released is True
+
+
+def test_plan_cached_only_releases_lock_immediately() -> None:
+    cache_backend = MockCacheBackend(
+        cache_data={
+            "status": "completed",
+            "runs": [{"row_index": 0, "run_index": 0, "success": True, "reward": 1.0}],
+            "summary": {"total_runs": 1},
+        },
+        completed_runs={(0, 0, None)},
+    )
+    orch = _make_orchestrator(cache_backend=cache_backend, rows=_make_rows(1))
+
+    plan = orch.plan()
+
+    assert plan.has_pending_work is False
+    assert cache_backend.lock.released is True
+
+
+@pytest.mark.asyncio
+async def test_plan_all_completed_in_progress_finalizes_before_releasing_lock(
+    tmp_path: Path,
+) -> None:
+    cache_path = tmp_path / "cache.json"
+    cache_data = {
+        "status": "in_progress",
+        "runs": [{"row_index": 0, "run_index": 0, "success": True, "reward": 1.0}],
+        "summary": None,
+    }
+    cache_backend = MockCacheBackend(
+        cache_path=cache_path,
+        cache_data=cache_data,
+        completed_runs={(0, 0, None)},
+    )
+    orch = _make_orchestrator(cache_backend=cache_backend, rows=_make_rows(1))
+
+    plan = orch.plan()
+
+    assert plan.has_pending_work is False
+    assert cache_backend.lock.released is True
+    assert plan.cache_data["status"] == "completed"
+    assert plan.cache_data["summary"] is not None
+    assert len(cache_backend.write_cache_calls) == 1
+
+    result = await orch.run_prepared(plan)
+
+    assert result.status == "completed"
+    assert result.summary is not None
+    assert len(cache_backend.write_cache_calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_run_prepared_rejects_released_pending_plan() -> None:
+    cache_backend = MockCacheBackend()
+    orch = _make_orchestrator(cache_backend=cache_backend, rows=_make_rows(1))
+    plan = orch.plan()
+    plan.release()
+
+    with pytest.raises(
+        RuntimeError,
+        match="Cannot execute pending eval plan after cache lock has been released",
+    ):
+        await orch.run_prepared(plan)
+
+
 # ---------------------------------------------------------------------------
 # Test: Case A — fresh eval with no cache
 # ---------------------------------------------------------------------------

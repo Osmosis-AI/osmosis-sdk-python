@@ -67,6 +67,28 @@ class OrchestratorResult:
     dataset_fingerprint_warning: str | None = None
 
 
+@dataclass
+class EvalRunPlan:
+    cache_path: Path
+    cache_data: dict[str, Any]
+    completed_runs: set[tuple[int, int, str | None]]
+    work_items: list[tuple[DatasetRow, int, int, str | None, RolloutDriver]]
+    samples_path: Path | None
+    total_expected: int
+    lock: Any | None
+    already_completed: bool = False
+    dataset_fingerprint_warning: str | None = None
+
+    @property
+    def has_pending_work(self) -> bool:
+        return bool(self.work_items)
+
+    def release(self) -> None:
+        if self.lock is not None:
+            self.lock.release()
+            self.lock = None
+
+
 class EvalOrchestrator:
     """Orchestrates an evaluation run with caching, resumption, and signal handling.
 
@@ -121,15 +143,10 @@ class EvalOrchestrator:
         self._original_sigint_handler: Any = None
         self._original_sigterm_handler: Any = None
 
-    async def run(self) -> OrchestratorResult:
-        """Execute the evaluation orchestration.
-
-        Returns:
-            An :class:`OrchestratorResult` describing the outcome.
-        """
+    def plan(self) -> EvalRunPlan:
+        """Prepare cache state and work items while holding the cache lock."""
         cfg = self.cache_config
         total_expected = len(self.rows) * self.n_runs * len(self.drivers)
-
         lock = self.cache_backend.acquire_lock(cfg.task_id, cfg.model, cfg.dataset_path)
         try:
             cache_path, cache_data, completed_runs = (
@@ -150,7 +167,6 @@ class EvalOrchestrator:
             )
             self._samples_path = samples_path
 
-            # Handle --retry-failed: keep only successful runs in completed set.
             if self.retry_failed and completed_runs:
                 all_runs = cache_data.get("runs", [])
                 successful_runs = [r for r in all_runs if r.get("success", True)]
@@ -167,7 +183,6 @@ class EvalOrchestrator:
                     cache_data["status"] = "in_progress"
                     self.cache_backend.write_cache(cache_path, cache_data)
 
-            # Case C: already completed
             if cache_data.get("status") == "completed":
                 dataset_fingerprint_warning: str | None = None
                 if self.dataset_fingerprint is not None:
@@ -178,38 +193,23 @@ class EvalOrchestrator:
                             f"  Cached: {cached_fp[:16]}... | Current: {self.dataset_fingerprint[:16]}...\n"
                             f"  Results below are from the original dataset."
                         )
-                return OrchestratorResult(
-                    status="already_completed",
+                plan = EvalRunPlan(
                     cache_path=cache_path,
-                    samples_path=samples_path,
-                    summary=cache_data.get("summary"),
-                    total_completed=len(completed_runs),
-                    total_expected=total_expected,
                     cache_data=cache_data,
+                    completed_runs=completed_runs,
+                    work_items=[],
+                    samples_path=samples_path,
+                    total_expected=total_expected,
+                    lock=lock,
+                    already_completed=True,
                     dataset_fingerprint_warning=dataset_fingerprint_warning,
                 )
+                plan.release()
+                return plan
 
-            # Build work items, skipping already-completed runs
             work_items = self._build_work_items(completed_runs)
-
-            # Strip prior runs from in-memory cache_data so CacheFlushController
-            # can properly merge old (from disk) + new (in-memory) without duplication.
-            # The flush controller reads old runs from disk and prepends them,
-            # so cache_data["runs"] must only contain newly-appended runs.
-            # Save original runs first as fallback for the no-work-items path.
-            prior_runs_snapshot = list(cache_data.get("runs", []))
-            if completed_runs:
-                cache_data["runs"] = []
-
             if not work_items:
-                # All runs already completed but status wasn't "completed".
-                # Re-read runs from disk since we may have cleared cache_data["runs"]
-                # above for the flush controller.
-                try:
-                    disk_data = json.loads(cache_path.read_text())
-                    all_runs = disk_data.get("runs", [])
-                except (ValueError, OSError):
-                    all_runs = prior_runs_snapshot
+                all_runs = list(cache_data.get("runs", []))
                 summary = build_summary(
                     all_runs,
                     self.pass_threshold,
@@ -219,15 +219,87 @@ class EvalOrchestrator:
                 cache_data["status"] = "completed"
                 cache_data["summary"] = summary
                 self.cache_backend.write_cache(cache_path, cache_data)
+                plan = EvalRunPlan(
+                    cache_path=cache_path,
+                    cache_data=cache_data,
+                    completed_runs=completed_runs,
+                    work_items=[],
+                    samples_path=samples_path,
+                    total_expected=total_expected,
+                    lock=lock,
+                )
+                plan.release()
+                return plan
+
+            plan = EvalRunPlan(
+                cache_path=cache_path,
+                cache_data=cache_data,
+                completed_runs=completed_runs,
+                work_items=work_items,
+                samples_path=samples_path,
+                total_expected=total_expected,
+                lock=lock,
+            )
+            return plan
+        except BaseException:
+            lock.release()
+            raise
+
+    async def run(self) -> OrchestratorResult:
+        """Execute the evaluation orchestration.
+
+        Returns:
+            An :class:`OrchestratorResult` describing the outcome.
+        """
+        plan = self.plan()
+        return await self.run_prepared(plan)
+
+    async def run_prepared(self, plan: EvalRunPlan) -> OrchestratorResult:
+        """Execute a previously prepared eval plan."""
+        if plan.has_pending_work and plan.lock is None:
+            raise RuntimeError(
+                "Cannot execute pending eval plan after cache lock has been released."
+            )
+
+        cache_path = plan.cache_path
+        cache_data = plan.cache_data
+        completed_runs = plan.completed_runs
+        samples_path = plan.samples_path
+        total_expected = plan.total_expected
+        work_items = plan.work_items
+
+        try:
+            if plan.already_completed:
+                return OrchestratorResult(
+                    status="already_completed",
+                    cache_path=cache_path,
+                    samples_path=samples_path,
+                    summary=cache_data.get("summary"),
+                    total_completed=len(completed_runs),
+                    total_expected=total_expected,
+                    cache_data=cache_data,
+                    dataset_fingerprint_warning=plan.dataset_fingerprint_warning,
+                )
+
+            if not work_items:
                 return OrchestratorResult(
                     status="completed",
                     cache_path=cache_path,
                     samples_path=samples_path,
-                    summary=summary,
+                    summary=cache_data.get("summary"),
                     total_completed=len(completed_runs),
                     total_expected=total_expected,
                     cache_data=cache_data,
                 )
+
+            # Strip prior runs from in-memory cache_data so CacheFlushController
+            # can properly merge old (from disk) + new (in-memory) without duplication.
+            # The flush controller reads old runs from disk and prepends them,
+            # so cache_data["runs"] must only contain newly-appended runs.
+            # Save original runs first as fallback for the no-work-items path.
+            prior_runs_snapshot = list(cache_data.get("runs", []))
+            if completed_runs:
+                cache_data["runs"] = []
 
             # Install signal handlers for graceful shutdown
             self._shutdown_event = asyncio.Event()
@@ -310,7 +382,7 @@ class EvalOrchestrator:
             )
         finally:
             self._remove_signal_handlers()
-            lock.release()
+            plan.release()
 
     def _build_work_items(
         self, completed_runs: set[tuple[int, int, str | None]]
@@ -625,5 +697,6 @@ class EvalOrchestrator:
 
 __all__ = [
     "EvalOrchestrator",
+    "EvalRunPlan",
     "OrchestratorResult",
 ]

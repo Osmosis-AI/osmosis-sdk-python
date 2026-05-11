@@ -6,6 +6,7 @@ Run agent loop evaluations against datasets using TOML config.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import shutil
 import sys
@@ -30,6 +31,21 @@ from osmosis_ai.cli.output import (
 
 if TYPE_CHECKING:
     from osmosis_ai.eval.evaluation.cache import BuildSummaryResult
+
+
+def _compute_legacy_rollout_fingerprint(
+    *,
+    module_fingerprint: str,
+    grader_fingerprint: str | None,
+) -> str:
+    return json.dumps(
+        {
+            "module_fingerprint": module_fingerprint,
+            "grader_fingerprint": grader_fingerprint,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    )
 
 
 class EvalCommand:
@@ -735,12 +751,16 @@ class EvalCommand:
         }
         config_for_hash["offset"] = offset
         config_for_hash["limit"] = limit
+        legacy_rollout_fingerprint = _compute_legacy_rollout_fingerprint(
+            module_fingerprint=module_fingerprint,
+            grader_fingerprint=grader_fingerprint,
+        )
 
         task_id, config_hash = compute_task_id(
             config=config_for_hash,
-            workflow_fingerprint=module_fingerprint,
-            grader_fingerprint=grader_fingerprint,
+            rollout_fingerprint=legacy_rollout_fingerprint,
             dataset_fingerprint=dataset_fingerprint,
+            entrypoint=config.eval_entrypoint,
         )
 
         config_dict = {

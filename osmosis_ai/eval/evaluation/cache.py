@@ -28,6 +28,35 @@ import xxhash
 
 logger: logging.Logger = logging.getLogger(__name__)
 
+CONTROLLER_PROTOCOL_VERSION = "eval-controller-v1"
+_CACHE_VERSION = 3
+
+_ROLLOUT_FINGERPRINT_SUFFIXES = {
+    ".py",
+    ".toml",
+    ".json",
+    ".jsonl",
+    ".yaml",
+    ".yml",
+}
+_ROLLOUT_FINGERPRINT_SKIP_DIRS = {
+    ".cache",
+    ".git",
+    ".hg",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".tox",
+    ".venv",
+    "__pycache__",
+    "build",
+    "cache",
+    "dist",
+    "log",
+    "logs",
+    "venv",
+}
+
 
 # ============================================================
 # Deterministic JSON serialization
@@ -70,9 +99,10 @@ def _deterministic_json(obj: object) -> bytes:
 def compute_task_id(
     *,
     config: dict[str, Any],
-    workflow_fingerprint: str,
-    grader_fingerprint: str | None,
+    rollout_fingerprint: str,
     dataset_fingerprint: str,
+    entrypoint: str,
+    controller_protocol_version: str = CONTROLLER_PROTOCOL_VERSION,
 ) -> tuple[str, str]:
     """Compute (task_id, config_hash) from effective eval configuration.
 
@@ -81,21 +111,22 @@ def compute_task_id(
 
     Hash inputs:
     - config: Dict containing EvalConfig fields that affect result semantics
-    - workflow_fingerprint: Hash of workflow module source code
-    - grader_fingerprint: Hash of grader module source code (None if no grader)
+    - rollout_fingerprint: Hash of rollout filesystem content
     - dataset_fingerprint: Hash of dataset file content
+    - entrypoint: Rollout entrypoint path relative to rollout directory
+    - controller_protocol_version: Eval controller protocol/cache identity version
     """
     payload = _deterministic_json(
         {
             "config": config,
-            "workflow": workflow_fingerprint,
-            "grader": grader_fingerprint,
+            "rollout": rollout_fingerprint,
             "dataset": dataset_fingerprint,
+            "entrypoint": entrypoint,
+            "controller_protocol_version": controller_protocol_version,
         }
     )
     config_hash = xxhash.xxh3_128_hexdigest(payload)
-    task_id = config_hash[:12]
-    return task_id, config_hash
+    return config_hash[:12], config_hash
 
 
 # ============================================================
@@ -120,6 +151,58 @@ def compute_dataset_fingerprint(path: str | Path) -> str:
             if not chunk:
                 break
             hasher.update(chunk)
+    return hasher.hexdigest()
+
+
+def compute_rollout_filesystem_fingerprint(
+    rollout_dir: str | Path,
+    *,
+    entrypoint: str,
+) -> str:
+    """Hash behavior-affecting rollout files for controller-backed eval cache."""
+    root = Path(rollout_dir).resolve()
+    if not root.is_dir():
+        raise FileNotFoundError(f"Rollout directory not found: {root}")
+
+    entrypoint_path = (root / entrypoint).resolve()
+    try:
+        entrypoint_path.relative_to(root)
+    except ValueError as exc:
+        raise ValueError(
+            f"Entrypoint must stay inside rollout directory: {entrypoint}"
+        ) from exc
+    if not entrypoint_path.is_file():
+        raise FileNotFoundError(f"Entrypoint file not found: {entrypoint_path}")
+
+    hasher = xxhash.xxh3_128()
+    hasher.update(b"protocol\0")
+    protocol = CONTROLLER_PROTOCOL_VERSION.encode()
+    hasher.update(len(protocol).to_bytes(8, "big"))
+    hasher.update(protocol)
+
+    for path in sorted(root.rglob("*")):
+        rel = path.relative_to(root)
+        if any(part in _ROLLOUT_FINGERPRINT_SKIP_DIRS for part in rel.parts):
+            continue
+        if path.is_symlink():
+            try:
+                target = path.resolve()
+                target.relative_to(root)
+            except (OSError, ValueError):
+                continue
+        if not path.is_file():
+            continue
+        if path.suffix not in _ROLLOUT_FINGERPRINT_SUFFIXES:
+            continue
+        rel_bytes = str(rel).encode()
+        hasher.update(b"file\0")
+        hasher.update(len(rel_bytes).to_bytes(8, "big"))
+        hasher.update(rel_bytes)
+        hasher.update(path.stat().st_size.to_bytes(8, "big"))
+        with path.open("rb") as file:
+            while chunk := file.read(128 * 1024):
+                hasher.update(chunk)
+
     return hasher.hexdigest()
 
 
@@ -731,8 +814,6 @@ def build_summary(
 # ============================================================
 # JSON file cache backend
 # ============================================================
-
-_CACHE_VERSION = 2
 
 
 class _FileLock:

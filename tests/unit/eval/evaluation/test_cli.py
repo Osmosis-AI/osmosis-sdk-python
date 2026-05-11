@@ -8,7 +8,10 @@ from types import SimpleNamespace
 
 import pytest
 
-from osmosis_ai.eval.evaluation.cli import EvalCommand
+from osmosis_ai.eval.evaluation.cli import (
+    EvalCommand,
+    _compute_legacy_rollout_fingerprint,
+)
 
 
 class _StopEval(Exception):
@@ -210,6 +213,19 @@ def test_run_auto_discovers_grader_from_entrypoint(
     config._expected_grader_config = discovered_config
 
     _run_command(monkeypatch, config)
+
+
+def test_legacy_rollout_fingerprint_changes_with_grader_fingerprint() -> None:
+    first = _compute_legacy_rollout_fingerprint(
+        module_fingerprint="module",
+        grader_fingerprint="grader-v1",
+    )
+    second = _compute_legacy_rollout_fingerprint(
+        module_fingerprint="module",
+        grader_fingerprint="grader-v2",
+    )
+
+    assert first != second
 
 
 def test_eval_run_config_path_must_be_under_current_project(
