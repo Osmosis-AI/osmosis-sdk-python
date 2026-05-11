@@ -26,8 +26,8 @@ model = "openai/gpt-5-mini"                # Model passed to LiteLLM
 # pass_threshold = 1.0                     # Fraction of attempts required to pass
 
 [timeouts]
-# agent_sec = 450                          # Agent rollout timeout per row
-# grader_sec = 150                         # Grader timeout per row
+# agent_workflow_timeout_s = 450           # Agent rollout timeout per row
+# grader_timeout_s = 150                   # Grader timeout per row
 
 [output]
 # log_samples = false                      # Persist full sample records in cache

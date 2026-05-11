@@ -52,8 +52,8 @@ class _OutputSection(BaseModel):
 class _TimeoutsSection(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    agent_sec: Annotated[float, Field(gt=0)] = 450.0
-    grader_sec: Annotated[float, Field(gt=0)] = 150.0
+    agent_workflow_timeout_s: Annotated[float, Field(gt=0)] = 450.0
+    grader_timeout_s: Annotated[float, Field(gt=0)] = 150.0
 
 
 class EvalConfig(BaseModel):
@@ -161,8 +161,8 @@ def load_eval_config(path: Path) -> EvalConfig:
         output_path=output.output_path,
         output_quiet=output.quiet,
         output_debug=output.debug,
-        timeout_agent_sec=timeouts.agent_sec,
-        timeout_grader_sec=timeouts.grader_sec,
+        timeout_agent_sec=timeouts.agent_workflow_timeout_s,
+        timeout_grader_sec=timeouts.grader_timeout_s,
     )
 
 
