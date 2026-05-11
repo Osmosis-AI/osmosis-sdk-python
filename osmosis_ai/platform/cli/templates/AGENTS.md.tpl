@@ -22,8 +22,8 @@ top-level layout.
 ## Rollout contract
 
 - Each rollout entrypoint must expose exactly one concrete `AgentWorkflow`.
-- Local eval and managed training require a concrete `Grader` as well (or an
-  explicit grader override where supported).
+- Local eval and managed training require a concrete `Grader` in the rollout
+  server. Eval configs do not support `[grader]` overrides.
 - Tools should be async Python functions with type hints and docstrings.
 - `Grader.grade` must be async and return a float in `[0.0, 1.0]`.
 - Before `osmosis --json train submit`, validate the project and run a local eval.

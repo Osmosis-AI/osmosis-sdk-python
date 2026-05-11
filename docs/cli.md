@@ -115,12 +115,18 @@ The command checks for `.osmosis/project.toml` and the required `rollouts/`,
 
 Validate the rollout entrypoint referenced by a training or eval config.
 
-`osmosis rollout validate` requires the resolved entrypoint module to expose a
-concrete `AgentWorkflow` and a concrete `Grader` (unless an eval config
-provides an explicit grader override).
+For training configs, `osmosis rollout validate` checks the configured rollout
+backend before submit. For eval configs, the default static check verifies that
+the entrypoint is a Python script under `rollouts/<rollout>/` and that the
+rollout directory contains `pyproject.toml`.
+
+Use `--server` with eval configs to start the local rollout server with
+`uv run python <entrypoint>` from `rollouts/<rollout>/` and require
+`GET /health` on fixed port `8000`.
 
 ```bash
 osmosis rollout validate configs/eval/my-rollout.toml
+osmosis rollout validate --server configs/eval/my-rollout.toml
 osmosis rollout validate configs/training/my-run.toml
 ```
 
@@ -143,10 +149,16 @@ osmosis rollout list --all
 
 ### osmosis eval run
 
-Evaluate using a TOML config. The workflow is loaded from the entrypoint module, and the grader is usually auto-discovered from that same module, so most configs do not need a separate `[grader]` table. If the grader lives elsewhere, set `[grader].module` and optional `[grader].config`.
+Evaluate using a TOML config. Controller-backed eval starts the configured
+rollout entrypoint as a local HTTP server with `uv run python <entrypoint>` from
+`rollouts/<rollout>/`, sends `POST /rollout`, provides model calls through the
+controller's `/chat/completions` endpoint, and waits for rollout and grader
+callback URLs.
 
 `osmosis eval run` expects the config file to live under `configs/eval/` inside a
-structured Osmosis project.
+structured Osmosis project. Eval configs use `[eval]`, `[llm]`, `[runs]`,
+`[timeouts]`, and `[output]`; `[grader]` and `[baseline]` are no longer
+supported.
 
 ```bash
 osmosis eval run configs/eval/my-rollout.toml
@@ -156,7 +168,8 @@ osmosis eval run configs/eval/my-rollout.toml --limit 20 --batch-size 4
 osmosis eval run configs/eval/my-rollout.toml -o ./results --log-samples
 ```
 
-See [Eval](./eval.md) for the full `[eval]`, `[llm]`, `[runs]`, `[baseline]`, and `[output]` sections.
+See [Eval](./eval.md) for the full `[eval]`, `[llm]`, `[runs]`, `[timeouts]`,
+and `[output]` sections.
 
 ### osmosis eval cache
 
