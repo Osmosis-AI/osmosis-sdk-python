@@ -1,0 +1,35 @@
+docs/cli.md
+  90e57adb47e902eb 159
+  9bd21126f82148e5 118-125
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "6356dd2bd97dd5c2a0740ac06419035a61811c4c",
+  "prompts": {
+    "90e57adb47e902eb": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "8e82f7dc-12cb-4b4b-9c79-a05a5466ab60",
+        "model": "claude-opus-4-7-thinking-high"
+      },
+      "human_author": "JoyboyBrian",
+      "total_additions": 491,
+      "total_deletions": 426,
+      "accepted_lines": 17,
+      "overriden_lines": 0
+    },
+    "9bd21126f82148e5": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "0e1f97b0-fe3d-41ca-aa6d-5dc989e3cab4",
+        "model": "default"
+      },
+      "human_author": "JoyboyBrian",
+      "total_additions": 1041,
+      "total_deletions": 1425,
+      "accepted_lines": 29,
+      "overriden_lines": 0
+    }
+  }
+}
