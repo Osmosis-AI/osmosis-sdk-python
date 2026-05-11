@@ -54,3 +54,43 @@ def test_preprocess_missing_role_uses_unknown_for_diagnostics() -> None:
     assert preprocess_controller_messages([{"content": "hello"}]) == [
         {"role": "unknown", "content": "hello"}
     ]
+
+
+def test_preprocess_preserves_openai_tool_message_linkage() -> None:
+    messages = [
+        {
+            "role": "assistant",
+            "content": None,
+            "tool_calls": [
+                {
+                    "id": "call_123",
+                    "type": "function",
+                    "function": {"name": "multiply", "arguments": '{"a":2,"b":3}'},
+                }
+            ],
+        },
+        {
+            "role": "tool",
+            "content": "6",
+            "tool_call_id": "call_123",
+        },
+    ]
+
+    assert preprocess_controller_messages(messages) == [
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call_123",
+                    "type": "function",
+                    "function": {"name": "multiply", "arguments": '{"a":2,"b":3}'},
+                }
+            ],
+        },
+        {
+            "role": "tool",
+            "content": "6",
+            "tool_call_id": "call_123",
+        },
+    ]
