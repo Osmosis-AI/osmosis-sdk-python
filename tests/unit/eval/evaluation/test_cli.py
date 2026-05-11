@@ -51,17 +51,6 @@ class _FakeEvalConfig(SimpleNamespace):
         return {k: v for k, v in vars(self).items() if not k.startswith("_")}
 
 
-class _FakeProxy:
-    async def preflight_check(self) -> None:
-        return None
-
-    async def start(self) -> None:
-        return None
-
-    async def stop(self) -> None:
-        return None
-
-
 def _make_config(**overrides):
     values = {
         "eval_dataset": "dataset.jsonl",
@@ -74,8 +63,6 @@ def _make_config(**overrides):
         "llm_model": "openai/gpt-5-mini",
         "llm_base_url": None,
         "llm_api_key_env": None,
-        "grader_module": None,
-        "grader_config": None,
         "runs_n": 1,
         "runs_batch_size": 1,
         "runs_pass_threshold": 1.0,
@@ -85,9 +72,6 @@ def _make_config(**overrides):
         "output_debug": False,
         "timeout_agent_sec": 450.0,
         "timeout_grader_sec": 150.0,
-        "baseline_model": None,
-        "baseline_base_url": None,
-        "baseline_api_key_env": None,
     }
     values.update(overrides)
     return _FakeEvalConfig(**values)
@@ -152,23 +136,7 @@ def _patch_eval_run_common(
         lambda rollout_dir, *, entrypoint: "rollout-fingerprint",
     )
     monkeypatch.setattr(
-        "osmosis_ai.eval.evaluation.cache.compute_rollout_package_fingerprint",
-        _fail_if_old_eval_flow_called,
-    )
-    monkeypatch.setattr(
-        "osmosis_ai.eval.evaluation.cache.compute_module_fingerprint",
-        _fail_if_old_eval_flow_called,
-    )
-    monkeypatch.setattr(
-        "osmosis_ai.eval.llm_proxy.LiteLLMProxy",
-        _fail_if_old_eval_flow_called,
-    )
-    monkeypatch.setattr(
         "osmosis_ai.rollout.backend.local.backend.LocalBackend",
-        _fail_if_old_eval_flow_called,
-    )
-    monkeypatch.setattr(
-        "osmosis_ai.rollout.driver.InProcessDriver",
         _fail_if_old_eval_flow_called,
     )
     monkeypatch.setattr(
@@ -290,6 +258,80 @@ def test_cached_only_eval_skips_api_key_port_and_startup(
     else:
         assert result.data["status"] == "already_completed"
     assert events == ["plan"]
+
+
+def test_eval_run_hash_payload_preserves_legacy_none_keys(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    project = _make_project(tmp_path / "project")
+    monkeypatch.chdir(project)
+    config = _make_config()
+    captured_config: dict[str, Any] = {}
+
+    _patch_eval_run_common(monkeypatch, project, config)
+
+    def _compute_task_id(
+        *,
+        config: dict[str, Any],
+        rollout_fingerprint: str,
+        dataset_fingerprint: str,
+        entrypoint: str,
+    ) -> tuple[str, str]:
+        captured_config.update(config)
+        assert rollout_fingerprint == "rollout-fingerprint"
+        assert dataset_fingerprint == "dataset-fingerprint"
+        assert entrypoint == "workflow.py"
+        return "task-id", "config-hash"
+
+    class _CachedOnlyOrchestrator:
+        def __init__(self, **kwargs: Any) -> None:
+            pass
+
+        def plan(self) -> _FakePlan:
+            return _FakePlan(has_pending_work=False, already_completed=True)
+
+        async def run_prepared(self, plan: _FakePlan) -> Any:
+            raise AssertionError("cached-only eval should not execute")
+
+    monkeypatch.setattr(
+        "osmosis_ai.eval.evaluation.cache.compute_task_id",
+        _compute_task_id,
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.eval.evaluation.orchestrator.EvalOrchestrator",
+        _CachedOnlyOrchestrator,
+    )
+
+    result = EvalCommand().run(**_eval_run_kwargs())
+
+    if isinstance(result, int):
+        assert result == 0
+    else:
+        assert result.data["status"] == "already_completed"
+
+    for legacy_key in (
+        "grader_module",
+        "grader_config",
+        "baseline_model",
+        "baseline_base_url",
+        "baseline_api_key_env",
+    ):
+        assert legacy_key in captured_config
+        assert captured_config[legacy_key] is None
+
+    assert captured_config.keys().isdisjoint(
+        {
+            "eval_fresh",
+            "eval_retry_failed",
+            "llm_api_key_env",
+            "runs_batch_size",
+            "output_log_samples",
+            "output_path",
+            "output_quiet",
+            "output_debug",
+        }
+    )
 
 
 def test_pending_eval_checks_fixed_port_before_api_key(
@@ -454,43 +496,3 @@ def test_eval_run_config_path_must_be_under_current_project(
 
     assert rc == 1
     assert "configs/eval" in capsys.readouterr().err
-
-
-def test_resolve_eval_context_paths_preserves_dotted_grader_config(
-    tmp_path: Path,
-) -> None:
-    from osmosis_ai.eval.config import EvalConfig, resolve_eval_context_paths
-
-    project = _make_project(tmp_path / "project")
-    config = EvalConfig(
-        eval_dataset="data/x.jsonl",
-        eval_rollout="demo",
-        eval_entrypoint="main.py",
-        llm_model="openai/test",
-        grader_config="my_rollout.grader:grader_config",
-    )
-
-    resolved = resolve_eval_context_paths(config, project)
-
-    assert resolved.grader_config == "my_rollout.grader:grader_config"
-
-
-def test_resolve_eval_context_paths_resolves_filesystem_grader_config(
-    tmp_path: Path,
-) -> None:
-    from osmosis_ai.eval.config import EvalConfig, resolve_eval_context_paths
-
-    project = _make_project(tmp_path / "project")
-    config = EvalConfig(
-        eval_dataset="data/x.jsonl",
-        eval_rollout="demo",
-        eval_entrypoint="main.py",
-        llm_model="openai/test",
-        grader_config="configs/grader.toml",
-    )
-
-    resolved = resolve_eval_context_paths(config, project)
-
-    assert resolved.grader_config == str(
-        (project / "configs" / "grader.toml").resolve()
-    )

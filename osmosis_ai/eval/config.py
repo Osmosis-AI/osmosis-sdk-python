@@ -73,10 +73,6 @@ class EvalConfig(BaseModel):
     llm_base_url: str | None = None
     llm_api_key_env: str | None = None
 
-    # [grader] (auto-discovered when using rollout+entrypoint)
-    grader_module: str | None = None
-    grader_config: str | None = None
-
     # [runs]
     runs_n: Annotated[int, Field(ge=1)] = 1
     runs_batch_size: Annotated[int, Field(ge=1)] = 1
@@ -91,31 +87,6 @@ class EvalConfig(BaseModel):
     # [timeouts]
     timeout_agent_sec: Annotated[float, Field(gt=0)] = 450.0
     timeout_grader_sec: Annotated[float, Field(gt=0)] = 150.0
-
-    # [baseline]
-    baseline_model: str | None = None
-    baseline_base_url: str | None = None
-    baseline_api_key_env: str | None = None
-
-
-def _is_filesystem_grader_config(value: str) -> bool:
-    """Return True when [grader].config looks like a local filesystem path."""
-    if "://" in value:
-        return False
-    candidate = Path(value)
-    if (
-        ":" in value
-        and "/" not in value
-        and "\\" not in value
-        and not candidate.is_absolute()
-    ):
-        return False
-    return (
-        candidate.is_absolute()
-        or "/" in value
-        or "\\" in value
-        or bool(candidate.suffix)
-    )
 
 
 def load_eval_config(path: Path) -> EvalConfig:
@@ -183,8 +154,6 @@ def load_eval_config(path: Path) -> EvalConfig:
         llm_model=llm_section["model"],
         llm_base_url=llm_section.get("base_url"),
         llm_api_key_env=llm_section.get("api_key_env"),
-        grader_module=None,
-        grader_config=None,
         runs_n=runs.n,
         runs_batch_size=runs.batch_size,
         runs_pass_threshold=runs.pass_threshold,
@@ -194,9 +163,6 @@ def load_eval_config(path: Path) -> EvalConfig:
         output_debug=output.debug,
         timeout_agent_sec=timeouts.agent_sec,
         timeout_grader_sec=timeouts.grader_sec,
-        baseline_model=None,
-        baseline_base_url=None,
-        baseline_api_key_env=None,
     )
 
 
@@ -222,26 +188,12 @@ def resolve_eval_context_paths(config: EvalConfig, project_root: Path) -> EvalCo
             "`osmosis eval run`. Local eval starts the server with "
             f"`uv run python {config.eval_entrypoint}` from {rollout_dir}."
         )
-    grader_config = config.grader_config
-    if grader_config:
-        candidate = Path(grader_config)
-        if _is_filesystem_grader_config(grader_config):
-            grader_config = str(
-                ensure_context_path(
-                    candidate,
-                    project_root,
-                    required_dir=".",
-                    label="[grader].config",
-                )
-            )
-
     return config.model_copy(
         update={
             "eval_dataset": str(dataset),
             "eval_entrypoint": str(
                 entrypoint.relative_to(project_root / "rollouts" / config.eval_rollout)
             ),
-            "grader_config": grader_config,
         }
     )
 

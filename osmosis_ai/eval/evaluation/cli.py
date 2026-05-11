@@ -617,6 +617,16 @@ class EvalCommand:
                 "output_debug",
             }
         }
+        # Preserve pre-removal cache identity without restoring legacy EvalConfig fields.
+        config_for_hash.update(
+            {
+                "grader_module": None,
+                "grader_config": None,
+                "baseline_model": None,
+                "baseline_base_url": None,
+                "baseline_api_key_env": None,
+            }
+        )
         config_for_hash["offset"] = offset
         config_for_hash["limit"] = limit
 

@@ -3,7 +3,11 @@ from pathlib import Path
 import pytest
 
 from osmosis_ai.cli.errors import CLIError
-from osmosis_ai.eval.config import load_eval_config, resolve_eval_context_paths
+from osmosis_ai.eval.config import (
+    EvalConfig,
+    load_eval_config,
+    resolve_eval_context_paths,
+)
 
 
 @pytest.fixture
@@ -88,6 +92,18 @@ debug = true
     assert config.output_path == "/tmp/eval_output"
     assert config.output_quiet is True
     assert config.output_debug is True
+
+
+def test_eval_config_omits_legacy_in_process_fields():
+    legacy_fields = {
+        "grader_module",
+        "grader_config",
+        "baseline_model",
+        "baseline_base_url",
+        "baseline_api_key_env",
+    }
+
+    assert legacy_fields.isdisjoint(EvalConfig.model_fields)
 
 
 def test_load_config_missing_file():

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import io
 import json
-import sys
 import types
 from contextlib import redirect_stdout
 from pathlib import Path
@@ -24,16 +23,12 @@ from osmosis_ai.eval.evaluation.cache import (
     _deterministic_json,
     _get_cache_root,
     _get_lock_timeout,
-    _hash_directory_tree,
-    _hash_file,
     _resolve_source_file,
     atomic_write_json,
     build_summary,
     compute_dataset_fingerprint,
     compute_eval_fns_fingerprint,
-    compute_module_fingerprint,
     compute_rollout_filesystem_fingerprint,
-    compute_rollout_package_fingerprint,
     compute_task_id,
     sanitize_path_part,
 )
@@ -254,67 +249,6 @@ class TestComputeDatasetFingerprint:
 
 
 # ============================================================
-# _hash_directory_tree tests
-# ============================================================
-
-
-class TestHashDirectoryTree:
-    def test_deterministic(self, tmp_path: Path) -> None:
-        """Hashing a directory with .py files is deterministic."""
-        (tmp_path / "a.py").write_text("print('a')")
-        (tmp_path / "b.py").write_text("print('b')")
-        h1 = _hash_directory_tree(tmp_path)
-        h2 = _hash_directory_tree(tmp_path)
-        assert h1 is not None
-        assert h1 == h2
-
-    def test_includes_subdirectories(self, tmp_path: Path) -> None:
-        """Files in subdirectories are included in the hash."""
-        sub = tmp_path / "sub"
-        sub.mkdir()
-        (tmp_path / "a.py").write_text("print('a')")
-        (sub / "b.py").write_text("print('b')")
-        h = _hash_directory_tree(tmp_path)
-        assert h is not None
-
-    def test_skips_symlinks(self, tmp_path: Path) -> None:
-        """Symlinks are skipped during directory hashing."""
-        (tmp_path / "real.py").write_text("print('real')")
-        target = tmp_path / "target.py"
-        target.write_text("print('target')")
-        link = tmp_path / "link.py"
-        link.symlink_to(target)
-
-        h_with_link = _hash_directory_tree(tmp_path)
-        assert h_with_link is not None
-
-        # Hash without the link target should differ
-        # (the symlink itself is skipped, only real.py and target.py are hashed)
-        # Verify symlink is actually skipped by checking file count
-        py_files = sorted(f for f in tmp_path.rglob("*.py") if not f.is_symlink())
-        assert link not in py_files
-
-    def test_empty_directory(self, tmp_path: Path) -> None:
-        """Returns None for empty directory (no .py files)."""
-        assert _hash_directory_tree(tmp_path) is None
-
-    def test_no_py_files(self, tmp_path: Path) -> None:
-        """Returns None when directory has no .py files."""
-        (tmp_path / "data.txt").write_text("not python")
-        (tmp_path / "config.json").write_text("{}")
-        assert _hash_directory_tree(tmp_path) is None
-
-    def test_content_change_changes_hash(self, tmp_path: Path) -> None:
-        """Changing file content changes the directory hash."""
-        f = tmp_path / "mod.py"
-        f.write_text("v1")
-        h1 = _hash_directory_tree(tmp_path)
-        f.write_text("v2")
-        h2 = _hash_directory_tree(tmp_path)
-        assert h1 != h2
-
-
-# ============================================================
 # _resolve_source_file tests
 # ============================================================
 
@@ -375,91 +309,6 @@ class TestResolveSourceFile:
         # Don't set __file__
         result = _resolve_source_file(mod)
         assert result is None
-
-
-# ============================================================
-# _hash_file tests
-# ============================================================
-
-
-class TestHashFile:
-    def test_deterministic(self, tmp_path: Path) -> None:
-        f = tmp_path / "test.py"
-        f.write_text("content")
-        assert _hash_file(f) == _hash_file(f)
-
-    def test_different_content(self, tmp_path: Path) -> None:
-        f1 = tmp_path / "a.py"
-        f2 = tmp_path / "b.py"
-        f1.write_text("aaa")
-        f2.write_text("bbb")
-        assert _hash_file(f1) != _hash_file(f2)
-
-
-# ============================================================
-# compute_module_fingerprint tests
-# ============================================================
-
-
-class TestComputeModuleFingerprint:
-    def test_returns_string_for_real_module(self) -> None:
-        """Fingerprinting a real importable module returns a string."""
-        # Use a known module from this project
-        result = compute_module_fingerprint("osmosis_ai.eval.evaluation.cache")
-        assert result is not None
-        assert isinstance(result, str)
-        assert len(result) == 32
-
-    def test_import_error_returns_none(self) -> None:
-        """Non-existent module returns None."""
-        result = compute_module_fingerprint("nonexistent_module_xyz_12345:Agent")
-        assert result is None
-
-    def test_package_module_hashes_directory(self) -> None:
-        """Package (with __init__.py) should hash entire directory tree."""
-        # osmosis_ai.eval.evaluation is a package
-        result = compute_module_fingerprint("osmosis_ai.eval.evaluation")
-        assert result is not None
-        assert isinstance(result, str)
-
-    def test_colon_separated_path(self) -> None:
-        """module_path with colon separator should work (module:attribute)."""
-        result = compute_module_fingerprint(
-            "osmosis_ai.eval.evaluation.cache:compute_task_id"
-        )
-        assert result is not None
-
-
-class TestComputeRolloutPackageFingerprint:
-    def test_hashes_synthetic_rollout_package_tree(self, tmp_path: Path) -> None:
-        """Synthetic rollout entrypoints should fingerprint imported files too."""
-        rollout_dir = tmp_path / "rollout"
-        rollout_dir.mkdir()
-        entrypoint = rollout_dir / "workflow.py"
-        helper = rollout_dir / "helper.py"
-        entrypoint.write_text("from helper import VALUE\n", encoding="utf-8")
-        helper.write_text("VALUE = 1\n", encoding="utf-8")
-
-        package_name = "_osmosis_rollout_test_fingerprint"
-        module_name = f"{package_name}.workflow"
-        package = types.ModuleType(package_name)
-        package.__path__ = [str(rollout_dir)]  # type: ignore[attr-defined]
-        module = types.ModuleType(module_name)
-        module.__file__ = str(entrypoint)
-        try:
-            sys.modules[package_name] = package
-            sys.modules[module_name] = module
-
-            before = compute_rollout_package_fingerprint(module_name)
-            helper.write_text("VALUE = 2\n", encoding="utf-8")
-            after = compute_rollout_package_fingerprint(module_name)
-        finally:
-            sys.modules.pop(module_name, None)
-            sys.modules.pop(package_name, None)
-
-        assert before is not None
-        assert after is not None
-        assert before != after
 
 
 def test_rollout_filesystem_fingerprint_includes_behavior_files(
