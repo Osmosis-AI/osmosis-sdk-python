@@ -1,0 +1,22 @@
+osmosis_ai/eval/evaluation/cli.py
+  607c270601d19654 41-50
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "9c2c680f73ff3d379bec135b9ebe14e7cbc762cc",
+  "prompts": {
+    "607c270601d19654": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "fae047a0-b6c2-48ac-90e0-df57a00f9110",
+        "model": "gpt-5.5-extra-high"
+      },
+      "human_author": "JoyboyBrian",
+      "total_additions": 145,
+      "total_deletions": 12,
+      "accepted_lines": 226,
+      "overriden_lines": 0
+    }
+  }
+}
