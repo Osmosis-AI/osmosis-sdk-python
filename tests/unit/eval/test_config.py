@@ -2,7 +2,8 @@ from pathlib import Path
 
 import pytest
 
-from osmosis_ai.eval.config import load_eval_config
+from osmosis_ai.cli.errors import CLIError
+from osmosis_ai.eval.config import load_eval_config, resolve_eval_context_paths
 
 
 @pytest.fixture
@@ -61,8 +62,6 @@ model = "openai/gpt-5.4"
 base_url = "http://localhost:8080"
 api_key_env = "MY_KEY"
 
-[grader]
-
 [runs]
 n = 4
 batch_size = 2
@@ -73,9 +72,6 @@ log_samples = true
 output_path = "/tmp/eval_output"
 quiet = true
 debug = true
-
-[baseline]
-model = "openai/gpt-3.5-turbo"
 """)
     config = load_eval_config(path)
     assert config.llm_base_url == "http://localhost:8080"
@@ -84,7 +80,6 @@ model = "openai/gpt-3.5-turbo"
     assert config.runs_batch_size == 2
     assert config.runs_pass_threshold == 0.8
     assert config.output_log_samples is True
-    assert config.baseline_model == "openai/gpt-3.5-turbo"
     # CLI-overridable flags from TOML
     assert config.eval_limit == 10
     assert config.eval_offset == 5
@@ -179,7 +174,7 @@ dataset = "data.jsonl"
         load_eval_config(path)
 
 
-def test_grader_with_explicit_module(tmp_toml):
+def test_load_config_rejects_grader_with_explicit_module(tmp_toml):
     path = tmp_toml("""
 [eval]
 rollout = "my_rollout"
@@ -193,9 +188,8 @@ model = "openai/gpt-5.4"
 module = "my_rollout:MyGrader"
 config = "my_rollout:grader_config"
 """)
-    config = load_eval_config(path)
-    assert config.grader_module == "my_rollout:MyGrader"
-    assert config.grader_config == "my_rollout:grader_config"
+    with pytest.raises(CLIError, match=r"\[grader\].*no longer supported"):
+        load_eval_config(path)
 
 
 def test_load_config_invalid_runs_n_type(tmp_toml):
@@ -256,3 +250,101 @@ pass_threshold = 2.0
 """)
     with pytest.raises(CLIError, match="Invalid config"):
         load_eval_config(path)
+
+
+def _write_eval_config(path: Path, extra: str = "") -> None:
+    path.write_text(
+        """
+[eval]
+rollout = "demo"
+entrypoint = "main.py"
+dataset = "data/demo.jsonl"
+
+[llm]
+model = "openai/gpt-5-mini"
+""".strip()
+        + "\n"
+        + extra,
+        encoding="utf-8",
+    )
+
+
+def _make_project(root: Path) -> Path:
+    for rel in ("data", "rollouts/demo", "configs/eval"):
+        (root / rel).mkdir(parents=True, exist_ok=True)
+    (root / "data" / "demo.jsonl").write_text(
+        '{"user_prompt":"hi"}\n', encoding="utf-8"
+    )
+    (root / "rollouts" / "demo" / "main.py").write_text(
+        "print('server')\n", encoding="utf-8"
+    )
+    return root
+
+
+def test_load_eval_config_rejects_legacy_grader_section(tmp_path: Path) -> None:
+    config_path = tmp_path / "eval.toml"
+    _write_eval_config(config_path, "\n[grader]\nmodule = 'demo:Grader'\n")
+
+    with pytest.raises(CLIError, match=r"\[grader\].*no longer supported"):
+        load_eval_config(config_path)
+
+
+def test_load_eval_config_rejects_legacy_baseline_section(tmp_path: Path) -> None:
+    config_path = tmp_path / "eval.toml"
+    _write_eval_config(config_path, "\n[baseline]\nmodel = 'openai/gpt-5-mini'\n")
+
+    with pytest.raises(CLIError, match=r"\[baseline\].*no longer supported"):
+        load_eval_config(config_path)
+
+
+def test_load_eval_config_timeout_defaults(tmp_path: Path) -> None:
+    config_path = tmp_path / "eval.toml"
+    _write_eval_config(config_path)
+
+    config = load_eval_config(config_path)
+
+    assert config.timeout_agent_sec == 450.0
+    assert config.timeout_grader_sec == 150.0
+
+
+def test_load_eval_config_timeout_overrides(tmp_path: Path) -> None:
+    config_path = tmp_path / "eval.toml"
+    _write_eval_config(config_path, "\n[timeouts]\nagent_sec = 12.5\ngrader_sec = 7\n")
+
+    config = load_eval_config(config_path)
+
+    assert config.timeout_agent_sec == 12.5
+    assert config.timeout_grader_sec == 7.0
+
+
+def test_load_eval_config_rejects_invalid_timeout_values(tmp_path: Path) -> None:
+    config_path = tmp_path / "eval.toml"
+    _write_eval_config(config_path, "\n[timeouts]\nagent_sec = 0\ngrader_sec = -1\n")
+
+    with pytest.raises(CLIError, match="Invalid config"):
+        load_eval_config(config_path)
+
+
+def test_resolve_eval_context_paths_requires_rollout_pyproject(tmp_path: Path) -> None:
+    project = _make_project(tmp_path)
+    config_path = project / "configs" / "eval" / "demo.toml"
+    _write_eval_config(config_path)
+    config = load_eval_config(config_path)
+
+    with pytest.raises(CLIError, match=r"pyproject\.toml"):
+        resolve_eval_context_paths(config, project)
+
+
+def test_resolve_eval_context_paths_accepts_rollout_pyproject(tmp_path: Path) -> None:
+    project = _make_project(tmp_path)
+    (project / "rollouts" / "demo" / "pyproject.toml").write_text(
+        "[project]\nname='demo'\n", encoding="utf-8"
+    )
+    config_path = project / "configs" / "eval" / "demo.toml"
+    _write_eval_config(config_path)
+    config = load_eval_config(config_path)
+
+    resolved = resolve_eval_context_paths(config, project)
+
+    assert resolved.eval_dataset == str(project / "data" / "demo.jsonl")
+    assert resolved.eval_entrypoint == "main.py"

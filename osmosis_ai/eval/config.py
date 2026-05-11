@@ -32,13 +32,6 @@ class _LLMSection(BaseModel):
     api_key_env: str | None = None
 
 
-class _GraderSection(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    module: str | None = None
-    config: str | None = None
-
-
 class _RunsSection(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -56,12 +49,11 @@ class _OutputSection(BaseModel):
     debug: bool = False
 
 
-class _BaselineSection(BaseModel):
+class _TimeoutsSection(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    model: str
-    base_url: str | None = None
-    api_key_env: str | None = None
+    agent_sec: Annotated[float, Field(gt=0)] = 450.0
+    grader_sec: Annotated[float, Field(gt=0)] = 150.0
 
 
 class EvalConfig(BaseModel):
@@ -95,6 +87,10 @@ class EvalConfig(BaseModel):
     output_path: str | None = None
     output_quiet: bool = False
     output_debug: bool = False
+
+    # [timeouts]
+    timeout_agent_sec: Annotated[float, Field(gt=0)] = 450.0
+    timeout_grader_sec: Annotated[float, Field(gt=0)] = 150.0
 
     # [baseline]
     baseline_model: str | None = None
@@ -152,20 +148,27 @@ def load_eval_config(path: Path) -> EvalConfig:
     if "model" not in llm_section:
         raise CLIError(f"Missing [llm].model in {path}")
 
-    grader_section = raw.get("grader")
+    if raw.get("grader") is not None:
+        raise CLIError(
+            "[grader] is no longer supported in eval configs. Grading must be "
+            "performed by the rollout server and reported through the grader callback."
+        )
+    if raw.get("baseline") is not None:
+        raise CLIError(
+            "[baseline] is no longer supported in eval configs. Run separate eval "
+            "configs when comparing models."
+        )
+
     runs_section = raw.get("runs", {})
     output_section = raw.get("output", {})
-    baseline_section = raw.get("baseline", {})
+    timeouts_section = raw.get("timeouts", {})
 
     try:
         eval_parsed = _EvalSection(**eval_section)
         _LLMSection(**llm_section)
-        if grader_section:
-            _GraderSection(**grader_section)
         runs = _RunsSection(**runs_section)
         output = _OutputSection(**output_section)
-        if baseline_section:
-            _BaselineSection(**baseline_section)
+        timeouts = _TimeoutsSection(**timeouts_section)
     except Exception as e:
         raise CLIError(f"Invalid config in {path}: {e}") from e
 
@@ -180,8 +183,8 @@ def load_eval_config(path: Path) -> EvalConfig:
         llm_model=llm_section["model"],
         llm_base_url=llm_section.get("base_url"),
         llm_api_key_env=llm_section.get("api_key_env"),
-        grader_module=grader_section.get("module") if grader_section else None,
-        grader_config=grader_section.get("config") if grader_section else None,
+        grader_module=None,
+        grader_config=None,
         runs_n=runs.n,
         runs_batch_size=runs.batch_size,
         runs_pass_threshold=runs.pass_threshold,
@@ -189,13 +192,11 @@ def load_eval_config(path: Path) -> EvalConfig:
         output_path=output.output_path,
         output_quiet=output.quiet,
         output_debug=output.debug,
-        baseline_model=baseline_section.get("model") if baseline_section else None,
-        baseline_base_url=baseline_section.get("base_url")
-        if baseline_section
-        else None,
-        baseline_api_key_env=baseline_section.get("api_key_env")
-        if baseline_section
-        else None,
+        timeout_agent_sec=timeouts.agent_sec,
+        timeout_grader_sec=timeouts.grader_sec,
+        baseline_model=None,
+        baseline_base_url=None,
+        baseline_api_key_env=None,
     )
 
 
@@ -213,6 +214,14 @@ def resolve_eval_context_paths(config: EvalConfig, project_root: Path) -> EvalCo
         required_dir=f"rollouts/{config.eval_rollout}",
         label="[eval].entrypoint",
     )
+    rollout_dir = project_root / "rollouts" / config.eval_rollout
+    pyproject_path = rollout_dir / "pyproject.toml"
+    if not pyproject_path.is_file():
+        raise CLIError(
+            f"rollouts/{config.eval_rollout}/pyproject.toml is required for "
+            "`osmosis eval run`. Local eval starts the server with "
+            f"`uv run python {config.eval_entrypoint}` from {rollout_dir}."
+        )
     grader_config = config.grader_config
     if grader_config:
         candidate = Path(grader_config)

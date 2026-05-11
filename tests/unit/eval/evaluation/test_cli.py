@@ -35,6 +35,7 @@ def _make_project(root: Path) -> Path:
         "configs/eval",
         "configs/training",
         "data",
+        "rollouts/demo",
     ):
         (root / rel_path).mkdir(parents=True, exist_ok=True)
     (root / ".osmosis" / "project.toml").write_text(
@@ -43,6 +44,10 @@ def _make_project(root: Path) -> Path:
     )
     (root / ".osmosis" / "research" / "program.md").write_text(
         "# Test\n", encoding="utf-8"
+    )
+    (root / "rollouts" / "demo" / "pyproject.toml").write_text(
+        "[project]\nname='demo'\n",
+        encoding="utf-8",
     )
     return root
 
