@@ -4,9 +4,14 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from osmosis_ai.eval.controller.messages import preprocess_controller_messages
+    from osmosis_ai.eval.controller.server import EvalControllerServer
     from osmosis_ai.eval.controller.state import ControllerRolloutState
 
-__all__ = ["ControllerRolloutState", "preprocess_controller_messages"]
+__all__ = [
+    "ControllerRolloutState",
+    "EvalControllerServer",
+    "preprocess_controller_messages",
+]
 
 
 def __getattr__(name: str):
@@ -14,6 +19,10 @@ def __getattr__(name: str):
         from osmosis_ai.eval.controller.state import ControllerRolloutState
 
         return ControllerRolloutState
+    if name == "EvalControllerServer":
+        from osmosis_ai.eval.controller.server import EvalControllerServer
+
+        return EvalControllerServer
     if name == "preprocess_controller_messages":
         from osmosis_ai.eval.controller.messages import preprocess_controller_messages
 
