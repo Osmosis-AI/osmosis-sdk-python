@@ -1082,6 +1082,99 @@ class TestBuildSummary:
         # Only 1 of 3 runs has a non-None reward, so pass@1 should not be 1.0
         assert pak[1] < 1.0
 
+    def test_skipped_runs_are_excluded_from_reward_and_failure_stats(self):
+        """Skipped runs count toward totals but not reward/pass/fail stats."""
+        runs = [
+            {
+                "row_index": 0,
+                "run_index": 0,
+                "status": "success",
+                "reward": 1.0,
+                "success": True,
+                "tokens": 100,
+                "duration_ms": 50.0,
+            },
+            {
+                "row_index": 1,
+                "run_index": 0,
+                "status": "failure",
+                "reward": 0.0,
+                "success": False,
+                "tokens": 10,
+                "duration_ms": 5.0,
+            },
+            {
+                "row_index": 2,
+                "run_index": 0,
+                "status": "skipped",
+                "reward": None,
+                "success": True,
+                "tokens": 7,
+                "duration_ms": 3.0,
+            },
+        ]
+
+        result = build_summary(runs, pass_threshold=0.5, n_runs=1)
+
+        assert result["total_runs"] == 3
+        assert result["total_tokens"] == 117
+        assert result["total_duration_ms"] == 58.0
+        assert result["skipped"] == 1
+        assert result["passed"] == 1
+        assert result["failed"] == 1
+        stats = result["reward_stats"]
+        assert stats is not None
+        assert stats["mean"] == 0.5
+
+    def test_skipped_runs_do_not_affect_pass_at_k_denominator(self):
+        """Skipped runs should not dilute pass@k after being filtered out."""
+        runs = [
+            {
+                "row_index": 0,
+                "run_index": 0,
+                "status": "success",
+                "reward": 1.0,
+                "success": True,
+            },
+            {
+                "row_index": 0,
+                "run_index": 1,
+                "status": "skipped",
+                "reward": None,
+                "success": True,
+            },
+        ]
+
+        result = build_summary(runs, pass_threshold=0.5, n_runs=2)
+
+        stats = result["reward_stats"]
+        assert stats is not None
+        pak = stats.get("pass_at_k", {})
+        assert pak[1] == pytest.approx(1.0)
+        assert 2 not in pak
+
+    def test_skipped_only_summary_has_no_failures(self):
+        """Skipped-only runs should not be counted as failed no-reward runs."""
+        runs = [
+            {
+                "row_index": 0,
+                "run_index": 0,
+                "status": "skipped",
+                "reward": None,
+                "success": True,
+                "tokens": 7,
+                "duration_ms": 3.0,
+            }
+        ]
+
+        result = build_summary(runs, pass_threshold=0.5, n_runs=1)
+
+        assert result["total_runs"] == 1
+        assert result["skipped"] == 1
+        assert result["passed"] == 0
+        assert result["failed"] == 0
+        assert result["reward_stats"] is None
+
 
 # ============================================================
 # JsonFileCacheBackend tests

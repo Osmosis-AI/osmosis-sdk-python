@@ -720,6 +720,7 @@ class BuildSummaryResult(TypedDict, total=False):
     total_runs: int
     passed: int
     failed: int
+    skipped: int
     total_tokens: int
     total_duration_ms: float
     reward_stats: RewardStatsDict | None
@@ -736,14 +737,17 @@ def build_summary(
     total_runs = len(runs)
     total_tokens = sum(r.get("tokens", 0) for r in runs)
     total_duration_ms = sum(r.get("duration_ms", 0.0) for r in runs)
+    skipped = sum(1 for r in runs if r.get("status") == "skipped")
+    scored_runs = [r for r in runs if r.get("status") != "skipped"]
 
-    rewards = [r["reward"] for r in runs if r.get("reward") is not None]
+    rewards = [r["reward"] for r in scored_runs if r.get("reward") is not None]
 
     if not rewards:
         return BuildSummaryResult(
             total_runs=total_runs,
             passed=0,
-            failed=total_runs,
+            failed=len(scored_runs),
+            skipped=skipped,
             total_tokens=total_tokens,
             total_duration_ms=total_duration_ms,
             reward_stats=None,
@@ -772,7 +776,7 @@ def build_summary(
         from osmosis_ai.eval.evaluation.report import pass_at_k
 
         rows: dict[tuple[int, str | None], list[dict]] = defaultdict(list)
-        for r in runs:
+        for r in scored_runs:
             key = (r["row_index"], r.get("model_tag"))
             rows[key].append(r)
 
@@ -793,7 +797,7 @@ def build_summary(
                     for r in row_runs
                     if r.get("reward") is not None and r["reward"] >= pass_threshold
                 )
-                n = max(len(row_runs), n_runs)
+                n = len(row_runs)
                 if n > 0 and k <= n:
                     row_pass_at_k.append(pass_at_k(n, c, k))
             if row_pass_at_k:
@@ -804,7 +808,8 @@ def build_summary(
     return BuildSummaryResult(
         total_runs=total_runs,
         passed=passed,
-        failed=total_runs - passed,
+        failed=len(scored_runs) - passed,
+        skipped=skipped,
         total_tokens=total_tokens,
         total_duration_ms=total_duration_ms,
         reward_stats=reward_stats,

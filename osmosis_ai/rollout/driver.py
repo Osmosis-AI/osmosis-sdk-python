@@ -10,9 +10,10 @@ via in-process callbacks instead of HTTP.
 from __future__ import annotations
 
 import time
+import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from osmosis_ai.rollout.types import RolloutSample, RolloutStatus
 
@@ -88,15 +89,16 @@ class InProcessDriver(RolloutDriver):
         from osmosis_ai.rollout.types import ExecutionRequest, ExecutionResult
 
         start = time.monotonic()
+        effective_rollout_id = rollout_id or f"in-process-{uuid.uuid4().hex}"
 
         rollout_ctx = RolloutContext(
             chat_completions_url=self.proxy.url,
             api_key=self.proxy.api_key,
-            rollout_id=rollout_id,
+            rollout_id=effective_rollout_id,
         )
 
         request = ExecutionRequest(
-            id=rollout_id,
+            id=effective_rollout_id,
             prompt=messages,
             label=label,
         )
@@ -120,34 +122,55 @@ class InProcessDriver(RolloutDriver):
                 on_grader_complete=on_grader_complete,
             )
         except Exception as e:
-            systemic = self.proxy.collect_systemic_error(rollout_id)
+            systemic = self.proxy.collect_systemic_error(effective_rollout_id)
             return RolloutOutcome(
                 status=RolloutStatus.FAILURE,
                 error=str(e),
                 duration_ms=(time.monotonic() - start) * 1000,
                 systemic_error=systemic,
+                rollout_id=effective_rollout_id,
             )
         finally:
             rollout_contextvar.reset(token)
 
-        final = grader_result or workflow_result
+        final = grader_result if grader_result is not None else workflow_result
         if final is None:
             return RolloutOutcome(
                 status=RolloutStatus.FAILURE,
                 error="No result from backend",
                 duration_ms=(time.monotonic() - start) * 1000,
+                rollout_id=effective_rollout_id,
             )
 
-        tokens = self.proxy.collect_tokens(rollout_id)
-        systemic = self.proxy.collect_systemic_error(rollout_id)
+        tokens = self.proxy.collect_tokens(effective_rollout_id)
+        systemic = self.proxy.collect_systemic_error(effective_rollout_id)
+        samples = cast(dict[str, RolloutSample], final.samples)
+        sample_ids = sorted(samples)
+        scored_sample_ids: list[str] = []
+        skipped_sample_ids: list[str] = []
+        for sample_id in samples:
+            rollout_sample = samples[sample_id]
+            if rollout_sample.remove_sample:
+                skipped_sample_ids.append(sample_id)
+            else:
+                scored_sample_ids.append(sample_id)
+        scored_sample_ids.sort()
+        skipped_sample_ids.sort()
 
         return RolloutOutcome(
             status=final.status,
-            samples=final.samples,
+            samples=samples,
             error=final.err_message,
             duration_ms=(time.monotonic() - start) * 1000,
             tokens=tokens,
             systemic_error=systemic,
+            rollout_id=effective_rollout_id,
+            full_callback_sample_ids=sample_ids,
+            scored_sample_ids=scored_sample_ids,
+            skipped_sample_ids=skipped_sample_ids,
+            skipped=final.status == RolloutStatus.SUCCESS
+            and bool(samples)
+            and not scored_sample_ids,
         )
 
 

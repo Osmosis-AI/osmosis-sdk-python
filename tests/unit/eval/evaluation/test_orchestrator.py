@@ -34,6 +34,7 @@ class FakeDriver(RolloutDriver):
         self._max_conc = max_conc
         self._concurrent = 0
         self._peak_concurrent = 0
+        self.rollout_ids: list[str] = []
 
     @property
     def max_concurrency(self) -> int:
@@ -45,6 +46,7 @@ class FakeDriver(RolloutDriver):
         label: str | None = None,
         rollout_id: str = "",
     ) -> RolloutOutcome:
+        self.rollout_ids.append(rollout_id)
         self._concurrent += 1
         self._peak_concurrent = max(self._peak_concurrent, self._concurrent)
         try:
@@ -613,6 +615,91 @@ class TestOrchestratorInterrupted:
         assert result.total_completed >= 1
         assert len(result.cache_data.get("runs", [])) >= 1
 
+    @pytest.mark.asyncio
+    async def test_sequential_interrupt_cancels_inflight_run(self) -> None:
+        """Sequential execution should poll shutdown while a rollout task is active."""
+
+        class HangingDriver(RolloutDriver):
+            cancelled = False
+
+            async def run(
+                self,
+                messages: list[dict[str, Any]],
+                label: str | None = None,
+                rollout_id: str = "",
+            ) -> RolloutOutcome:
+                try:
+                    await asyncio.sleep(60)
+                except asyncio.CancelledError:
+                    self.cancelled = True
+                    raise
+                raise AssertionError("unreachable")
+
+        driver = HangingDriver()
+        orch = _make_orchestrator(drivers=[(None, driver)], rows=_make_rows(1))
+
+        original_execute_one = orch._execute_one
+
+        async def execute_and_interrupt(*args: Any, **kwargs: Any) -> dict[str, Any]:
+            assert orch._shutdown_event is not None
+            orch._shutdown_event.set()
+            return await original_execute_one(*args, **kwargs)
+
+        orch._execute_one = execute_and_interrupt  # type: ignore[assignment]
+
+        result = await orch.run()
+
+        assert result.status == "interrupted"
+        assert result.total_completed == 0
+        assert driver.cancelled is True
+
+    @pytest.mark.asyncio
+    async def test_concurrent_interrupt_cancels_pending_tasks(self) -> None:
+        """Concurrent execution should cancel active rollout tasks on shutdown."""
+
+        class HangingDriver(RolloutDriver):
+            def __init__(self) -> None:
+                self.cancelled = 0
+
+            @property
+            def max_concurrency(self) -> int:
+                return 0
+
+            async def run(
+                self,
+                messages: list[dict[str, Any]],
+                label: str | None = None,
+                rollout_id: str = "",
+            ) -> RolloutOutcome:
+                try:
+                    await asyncio.sleep(60)
+                except asyncio.CancelledError:
+                    self.cancelled += 1
+                    raise
+                raise AssertionError("unreachable")
+
+        driver = HangingDriver()
+        orch = _make_orchestrator(
+            drivers=[(None, driver)],
+            rows=_make_rows(2),
+            batch_size=2,
+        )
+
+        original_execute_one = orch._execute_one
+
+        async def execute_and_interrupt(*args: Any, **kwargs: Any) -> dict[str, Any]:
+            assert orch._shutdown_event is not None
+            orch._shutdown_event.set()
+            return await original_execute_one(*args, **kwargs)
+
+        orch._execute_one = execute_and_interrupt  # type: ignore[assignment]
+
+        result = await orch.run()
+
+        assert result.status == "interrupted"
+        assert result.total_completed == 0
+        assert driver.cancelled == 2
+
 
 # ---------------------------------------------------------------------------
 # Test: Dataset modified
@@ -878,7 +965,7 @@ class TestBuildWorkItems:
 
 class TestRecordResult:
     def test_record_with_log_samples_and_messages(self) -> None:
-        """With log_samples=True and samples with messages, append_sample should be called."""
+        """With log_samples=True, append_sample should get full sample records."""
         cache_backend = MockCacheBackend()
         orch = _make_orchestrator(cache_backend=cache_backend, log_samples=True)
         orch._samples_path = Path("/tmp/fake_cache.jsonl")
@@ -893,6 +980,10 @@ class TestRecordResult:
             "tokens": 50,
             "model_tag": None,
             "error": None,
+            "rollout_id": "r1",
+            "controller_created_sample_ids": ["s1"],
+            "scored_sample_ids": ["s1"],
+            "skipped_sample_ids": [],
             "samples": {
                 "s1": RolloutSample(
                     id="s1",
@@ -907,7 +998,23 @@ class TestRecordResult:
         assert len(cache_backend.append_sample_calls) == 1
         _, sample = cache_backend.append_sample_calls[0]
         assert sample["row_index"] == 0
+        assert sample["model_tag"] is None
+        assert sample["rollout_id"] == "r1"
         assert sample["messages"] == [{"role": "assistant", "content": "hello"}]
+        assert sample["samples"] == {
+            "s1": {
+                "id": "s1",
+                "messages": [{"role": "assistant", "content": "hello"}],
+                "label": None,
+                "reward": 1.0,
+                "remove_sample": False,
+                "metrics": {},
+                "extra_fields": {},
+            }
+        }
+        assert sample["controller_created_sample_ids"] == ["s1"]
+        assert sample["scored_sample_ids"] == ["s1"]
+        assert sample["skipped_sample_ids"] == []
 
     def test_record_without_log_samples(self) -> None:
         """With log_samples=False, append_sample should NOT be called."""
@@ -1038,6 +1145,157 @@ class TestRecordResult:
         orch._record_result(result_dict, cache_data, row_index=0, run_index=0)
 
         assert cache_data["runs"][0]["error"] == "something broke"
+
+    def test_record_persists_controller_diagnostics(self) -> None:
+        """Run dict should persist controller diagnostic fields."""
+        orch = _make_orchestrator()
+        cache_data: dict[str, Any] = {"runs": []}
+
+        result_dict = {
+            "row_index": 0,
+            "run_index": 0,
+            "status": "skipped",
+            "success": True,
+            "reward": None,
+            "duration_ms": 123.0,
+            "tokens": 42,
+            "model_tag": "primary",
+            "error": None,
+            "rollout_id": "rollout-123",
+            "controller_created_sample_ids": ["s1"],
+            "completion_counts": {"s1": 2},
+            "full_callback_sample_ids": ["s1"],
+            "scored_sample_ids": [],
+            "skipped_sample_ids": ["s1"],
+            "callback_diagnostics": {"grader": {"status": "success"}},
+            "samples": {},
+        }
+
+        orch._record_result(result_dict, cache_data, row_index=0, run_index=0)
+
+        run = cache_data["runs"][0]
+        assert run["status"] == "skipped"
+        assert run["rollout_id"] == "rollout-123"
+        assert run["controller_created_sample_ids"] == ["s1"]
+        assert run["completion_counts"] == {"s1": 2}
+        assert run["full_callback_sample_ids"] == ["s1"]
+        assert run["scored_sample_ids"] == []
+        assert run["skipped_sample_ids"] == ["s1"]
+        assert run["callback_diagnostics"] == {"grader": {"status": "success"}}
+
+
+# ---------------------------------------------------------------------------
+# Test: _execute_one
+# ---------------------------------------------------------------------------
+
+
+class TestExecuteOne:
+    @pytest.mark.asyncio
+    async def test_execute_one_returns_controller_diagnostics(self) -> None:
+        """Controller diagnostic fields should flow through from RolloutOutcome."""
+        driver = FakeDriver(
+            outcomes=[
+                RolloutOutcome(
+                    status=RolloutStatus.SUCCESS,
+                    samples={
+                        "s1": RolloutSample(id="s1", reward=1.0),
+                        "s2": RolloutSample(id="s2", reward=0.0),
+                    },
+                    duration_ms=10,
+                    tokens=20,
+                    rollout_id="controller-r1",
+                    controller_created_sample_ids=["s1", "s2"],
+                    completion_counts={"s1": 1, "s2": 1},
+                    full_callback_sample_ids=["s1", "s2"],
+                    scored_sample_ids=["s1"],
+                    skipped_sample_ids=["s2"],
+                    callback_diagnostics={"grader": {"status": "success"}},
+                )
+            ]
+        )
+        orch = _make_orchestrator(drivers=[("primary", driver)], rows=_make_rows(1))
+
+        result = await orch._execute_one(
+            _make_rows(1)[0],
+            row_index=0,
+            run_index=0,
+            model_tag="primary",
+            driver=driver,
+        )
+
+        assert driver.rollout_ids == [""]
+        assert result["status"] == "success"
+        assert result["success"] is True
+        assert result["reward"] == 1.0
+        assert result["rollout_id"] == "controller-r1"
+        assert result["controller_created_sample_ids"] == ["s1", "s2"]
+        assert result["completion_counts"] == {"s1": 1, "s2": 1}
+        assert result["full_callback_sample_ids"] == ["s1", "s2"]
+        assert result["scored_sample_ids"] == ["s1"]
+        assert result["skipped_sample_ids"] == ["s2"]
+        assert result["callback_diagnostics"] == {"grader": {"status": "success"}}
+
+    @pytest.mark.asyncio
+    async def test_execute_one_serializes_skipped_outcome(self) -> None:
+        """Skipped controller outcomes should be successful skipped runs with no reward."""
+        driver = FakeDriver(
+            outcomes=[
+                RolloutOutcome(
+                    status=RolloutStatus.SUCCESS,
+                    samples={
+                        "s1": RolloutSample(
+                            id="s1",
+                            reward=None,
+                            remove_sample=True,
+                        )
+                    },
+                    duration_ms=10,
+                    tokens=20,
+                    rollout_id="controller-r1",
+                    scored_sample_ids=[],
+                    skipped_sample_ids=["s1"],
+                    skipped=True,
+                )
+            ]
+        )
+        orch = _make_orchestrator(drivers=[(None, driver)], rows=_make_rows(1))
+
+        result = await orch._execute_one(
+            _make_rows(1)[0],
+            row_index=0,
+            run_index=0,
+            model_tag=None,
+            driver=driver,
+        )
+
+        assert result["status"] == "skipped"
+        assert result["success"] is True
+        assert result["reward"] is None
+
+    @pytest.mark.asyncio
+    async def test_execute_one_empty_scored_ids_has_no_reward(self) -> None:
+        """An explicit empty scored id list should not fall back to all samples."""
+        driver = FakeDriver(
+            outcomes=[
+                RolloutOutcome(
+                    status=RolloutStatus.SUCCESS,
+                    samples={"s1": RolloutSample(id="s1", reward=1.0)},
+                    scored_sample_ids=[],
+                )
+            ]
+        )
+        orch = _make_orchestrator(drivers=[(None, driver)], rows=_make_rows(1))
+
+        result = await orch._execute_one(
+            _make_rows(1)[0],
+            row_index=0,
+            run_index=0,
+            model_tag=None,
+            driver=driver,
+        )
+
+        assert result["status"] == "success"
+        assert result["reward"] is None
 
 
 # ---------------------------------------------------------------------------

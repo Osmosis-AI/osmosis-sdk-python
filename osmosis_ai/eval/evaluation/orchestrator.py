@@ -30,9 +30,16 @@ from osmosis_ai.rollout.driver import RolloutDriver
 from osmosis_ai.rollout.types import RolloutSample, RolloutStatus
 
 
-def _extract_mean_reward(samples: dict[str, RolloutSample]) -> float | None:
+def _extract_mean_reward(
+    samples: dict[str, RolloutSample],
+    scored_sample_ids: list[str] | None = None,
+) -> float | None:
     """Compute the mean reward from a samples dict, ignoring None rewards."""
-    rewards = [s.reward for s in samples.values() if s.reward is not None]
+    if scored_sample_ids is None:
+        selected_samples = samples.values()
+    else:
+        selected_samples = (samples[sid] for sid in scored_sample_ids if sid in samples)
+    rewards = [s.reward for s in selected_samples if s.reward is not None]
     if not rewards:
         return None
     return sum(rewards) / len(rewards)
@@ -412,22 +419,33 @@ class EvalOrchestrator:
         """Execute a single rollout and return a result dict."""
         from osmosis_ai.eval.common.dataset import dataset_row_to_prompt
 
-        rollout_id = f"eval-{row_index}-run-{run_index}"
-        if model_tag:
-            rollout_id += f"-{model_tag}"
-
         outcome = await driver.run(
             messages=dataset_row_to_prompt(row),
             label=row.get("ground_truth"),
-            rollout_id=rollout_id,
+            rollout_id="",
         )
 
-        reward = _extract_mean_reward(outcome.samples) if outcome.samples else None
+        if outcome.skipped:
+            status = "skipped"
+            success = True
+            reward = None
+        else:
+            success = outcome.status == RolloutStatus.SUCCESS
+            status = "success" if success else "failure"
+            reward = (
+                _extract_mean_reward(
+                    outcome.samples,
+                    outcome.scored_sample_ids,
+                )
+                if outcome.samples
+                else None
+            )
 
         return {
             "row_index": row_index,
             "run_index": run_index,
-            "success": outcome.status == RolloutStatus.SUCCESS,
+            "status": status,
+            "success": success,
             "reward": reward,
             "duration_ms": outcome.duration_ms,
             "tokens": outcome.tokens,
@@ -435,7 +453,71 @@ class EvalOrchestrator:
             "error": outcome.error,
             "systemic_error": outcome.systemic_error,
             "samples": outcome.samples,
+            "rollout_id": outcome.rollout_id,
+            "controller_created_sample_ids": outcome.controller_created_sample_ids,
+            "completion_counts": outcome.completion_counts,
+            "full_callback_sample_ids": outcome.full_callback_sample_ids,
+            "scored_sample_ids": outcome.scored_sample_ids,
+            "skipped_sample_ids": outcome.skipped_sample_ids,
+            "callback_diagnostics": outcome.callback_diagnostics,
         }
+
+    async def _wait_for_tasks_or_shutdown(
+        self,
+        tasks: list[asyncio.Task[Any]],
+    ) -> bool:
+        """Wait for tasks while letting the shutdown event cancel pending work."""
+        pending: set[asyncio.Task[Any]] = set(tasks)
+        shutdown_task: asyncio.Task[bool] | None = None
+        if self._shutdown_event is not None:
+            shutdown_task = asyncio.create_task(self._shutdown_event.wait())
+
+        try:
+            while pending:
+                wait_set: set[asyncio.Task[Any]] = set(pending)
+                if shutdown_task is not None:
+                    wait_set.add(shutdown_task)
+
+                done, _ = await asyncio.wait(
+                    wait_set,
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+
+                completed = done & pending
+                for task in completed:
+                    if task.cancelled():
+                        raise asyncio.CancelledError
+                    exc = task.exception()
+                    if exc is not None:
+                        for pending_task in pending:
+                            if pending_task is not task and not pending_task.done():
+                                pending_task.cancel()
+                        await asyncio.gather(*tasks, return_exceptions=True)
+                        raise exc
+                pending -= completed
+
+                if shutdown_task is not None and shutdown_task in done:
+                    if not pending:
+                        break
+                    for task in pending:
+                        if not task.done():
+                            task.cancel()
+                    results = await asyncio.gather(*tasks, return_exceptions=True)
+                    for result in results:
+                        if isinstance(result, Exception):
+                            raise result
+                    return True
+
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            for result in results:
+                if isinstance(result, Exception):
+                    raise result
+            return False
+        finally:
+            if shutdown_task is not None and not shutdown_task.done():
+                shutdown_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await shutdown_task
 
     async def _run_all(
         self,
@@ -486,9 +568,13 @@ class EvalOrchestrator:
                         break
 
                 row, row_index, run_idx, tag, driver = item
-                result_dict = await self._execute_one(
-                    row, row_index, run_idx, tag, driver
+                result_task = asyncio.create_task(
+                    self._execute_one(row, row_index, run_idx, tag, driver)
                 )
+                interrupted = await self._wait_for_tasks_or_shutdown([result_task])
+                if interrupted:
+                    break
+                result_dict = result_task.result()
 
                 self._record_result(result_dict, cache_data, row_index, run_idx)
                 current += 1
@@ -558,14 +644,7 @@ class EvalOrchestrator:
                     for idx, (row, row_index, run_idx, tag, drv) in enumerate(batch)
                 ]
 
-                try:
-                    await asyncio.gather(*tasks)
-                except Exception:
-                    for t in tasks:
-                        if not t.done():
-                            t.cancel()
-                    await asyncio.gather(*tasks, return_exceptions=True)
-                    raise
+                batch_interrupted = await self._wait_for_tasks_or_shutdown(tasks)
 
                 # Process batch results
                 batch_has_systemic = False
@@ -597,6 +676,9 @@ class EvalOrchestrator:
                         all_zero_tokens = False
 
                 flush_ctl.maybe_flush(runs_completed=completed_in_batch)
+                if batch_interrupted:
+                    interrupted = True
+                    break
                 cursor += len(batch)
 
                 if batch_has_systemic:
@@ -627,28 +709,56 @@ class EvalOrchestrator:
         if self.log_samples and self._samples_path is not None:
             samples = result_dict.get("samples", {})
             if samples:
+                sample = {
+                    "row_index": row_index,
+                    "run_index": run_index,
+                    "model_tag": result_dict.get("model_tag"),
+                    "rollout_id": result_dict.get("rollout_id"),
+                    "samples": {
+                        sid: (
+                            s.model_dump(mode="json") if hasattr(s, "model_dump") else s
+                        )
+                        for sid, s in samples.items()
+                    },
+                    "controller_created_sample_ids": result_dict.get(
+                        "controller_created_sample_ids", []
+                    ),
+                    "scored_sample_ids": result_dict.get("scored_sample_ids", []),
+                    "skipped_sample_ids": result_dict.get("skipped_sample_ids", []),
+                }
                 messages: list[Any] = []
-                for s in samples.values():
-                    msgs = s.messages if hasattr(s, "messages") else []
-                    messages.extend(msgs)
+                for sample_result in samples.values():
+                    sample_messages = (
+                        sample_result.messages
+                        if hasattr(sample_result, "messages")
+                        else []
+                    )
+                    messages.extend(sample_messages)
                 if messages:
-                    sample = {
-                        "row_index": row_index,
-                        "run_index": run_index,
-                        "model_tag": result_dict.get("model_tag"),
-                        "messages": messages,
-                    }
-                    self.cache_backend.append_sample(self._samples_path, sample)
+                    sample["messages"] = messages
+                self.cache_backend.append_sample(self._samples_path, sample)
 
         run_dict: dict[str, Any] = {
             "row_index": row_index,
             "run_index": run_index,
+            "status": result_dict.get(
+                "status", "success" if result_dict["success"] else "failure"
+            ),
             "success": result_dict["success"],
             "reward": result_dict.get("reward"),
             "duration_ms": result_dict.get("duration_ms", 0),
             "tokens": result_dict.get("tokens", 0),
             "model_tag": result_dict.get("model_tag"),
             "error": result_dict.get("error"),
+            "rollout_id": result_dict.get("rollout_id"),
+            "controller_created_sample_ids": result_dict.get(
+                "controller_created_sample_ids", []
+            ),
+            "completion_counts": result_dict.get("completion_counts", {}),
+            "full_callback_sample_ids": result_dict.get("full_callback_sample_ids", []),
+            "scored_sample_ids": result_dict.get("scored_sample_ids", []),
+            "skipped_sample_ids": result_dict.get("skipped_sample_ids", []),
+            "callback_diagnostics": result_dict.get("callback_diagnostics", {}),
         }
 
         cache_data["runs"].append(run_dict)
