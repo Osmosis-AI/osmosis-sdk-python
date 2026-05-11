@@ -1297,6 +1297,36 @@ class TestExecuteOne:
         assert result["status"] == "success"
         assert result["reward"] is None
 
+    @pytest.mark.asyncio
+    async def test_execute_one_weights_duplicate_scored_ids_like_multi_sample(
+        self,
+    ) -> None:
+        """Repeated scored ids should count like flattened slime multi-samples."""
+        driver = FakeDriver(
+            outcomes=[
+                RolloutOutcome(
+                    status=RolloutStatus.SUCCESS,
+                    samples={
+                        "s1": RolloutSample(id="s1", reward=1.0),
+                        "s2": RolloutSample(id="s2", reward=0.0),
+                    },
+                    scored_sample_ids=["s1", "s1", "s2"],
+                )
+            ]
+        )
+        orch = _make_orchestrator(drivers=[(None, driver)], rows=_make_rows(1))
+
+        result = await orch._execute_one(
+            _make_rows(1)[0],
+            row_index=0,
+            run_index=0,
+            model_tag=None,
+            driver=driver,
+        )
+
+        assert result["status"] == "success"
+        assert result["reward"] == pytest.approx(2 / 3)
+
 
 # ---------------------------------------------------------------------------
 # Test: Lock release

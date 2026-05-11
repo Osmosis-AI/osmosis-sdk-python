@@ -189,6 +189,15 @@ class ControllerRolloutState:
             return f"Grader returned None as reward for sample IDs: {none_rewards}"
         return None
 
+    def _expanded_sample_ids(self, sample_ids: list[str]) -> list[str]:
+        expanded: list[str] = []
+        for sample_id in sample_ids:
+            count = self.completion_counts.get(sample_id, 1)
+            if self.latest_multi_turn_mode.get(sample_id) != "multi_sample":
+                count = 1
+            expanded.extend([sample_id] * max(count, 1))
+        return expanded
+
     def to_outcome(self, duration_ms: float) -> RolloutOutcome:
         samples = (
             self.grader_callback.samples if self.grader_callback is not None else {}
@@ -218,10 +227,12 @@ class ControllerRolloutState:
                 },
             )
 
-        scored = sorted(
-            sid for sid, sample in samples.items() if not sample.remove_sample
+        scored = self._expanded_sample_ids(
+            sorted(sid for sid, sample in samples.items() if not sample.remove_sample)
         )
-        skipped = sorted(sid for sid, sample in samples.items() if sample.remove_sample)
+        skipped = self._expanded_sample_ids(
+            sorted(sid for sid, sample in samples.items() if sample.remove_sample)
+        )
         return RolloutOutcome(
             status=RolloutStatus.SUCCESS,
             rollout_id=self.rollout_id,

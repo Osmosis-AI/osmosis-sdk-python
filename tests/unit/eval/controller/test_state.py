@@ -96,6 +96,31 @@ def test_multi_sample_reuse_after_completion_uses_current_tools() -> None:
     assert reused == [{"name": "second"}]
 
 
+def test_multi_sample_outcome_repeats_scored_ids_per_completion() -> None:
+    state = ControllerRolloutState(rollout_id="r1")
+
+    state.register_chat_create_branch("s1", "multi_sample", [], None)
+    state.mark_chat_completion("s1", tokens=1)
+    state.register_chat_create_branch("s1", "multi_sample", [], None)
+    state.mark_chat_completion("s1", tokens=1)
+    state.register_chat_create_branch("s2", "multi_sample", [], None)
+    state.mark_chat_completion("s2", tokens=1)
+    state.mark_grader_completed(
+        GraderCompleteRequest(
+            rollout_id="r1",
+            status=GraderStatus.SUCCESS,
+            samples={
+                "s1": RolloutSample(id="s1", reward=1.0),
+                "s2": RolloutSample(id="s2", reward=0.0),
+            },
+        )
+    )
+
+    outcome = state.to_outcome(duration_ms=1.0)
+
+    assert outcome.scored_sample_ids == ["s1", "s1", "s2"]
+
+
 def test_created_but_not_completed_single_sample_uses_current_tools_without_overwriting_first_tools() -> (
     None
 ):
