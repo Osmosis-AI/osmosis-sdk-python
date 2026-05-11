@@ -6,6 +6,7 @@ import secrets
 import socket
 import time
 import uuid
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -43,6 +44,20 @@ def _is_port_occupied(port: int) -> bool:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.settimeout(0.2)
         return sock.connect_ex(("127.0.0.1", port)) == 0
+
+
+def _create_embedded_uvicorn_server(uvicorn_module: Any, config: Any) -> Any:
+    # The eval orchestrator owns SIGINT/SIGTERM so it can persist partial
+    # progress and print resumable interruption output.
+    class EmbeddedUvicornServer(uvicorn_module.Server):
+        @contextlib.contextmanager
+        def capture_signals(self) -> Iterator[None]:
+            yield
+
+        def install_signal_handlers(self) -> None:
+            return None
+
+    return EmbeddedUvicornServer(config)
 
 
 class EvalController(RolloutDriver):
@@ -91,8 +106,10 @@ class EvalController(RolloutDriver):
             port=self.controller_port,
             log_level="warning",
         )
-        self._uvicorn_server = uvicorn.Server(config)
-        self._server_task = asyncio.create_task(self._uvicorn_server.serve())
+
+        server = _create_embedded_uvicorn_server(uvicorn, config)
+        self._uvicorn_server = server
+        self._server_task = asyncio.create_task(server.serve())
 
         deadline = time.monotonic() + 10.0
         while time.monotonic() < deadline:

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import socket
 import subprocess
 import sys
+import types
 from pathlib import Path
 from typing import Any
 
@@ -415,6 +417,65 @@ async def test_start_rejects_occupied_controller_port(
 
         assert driver._server_task is None
         assert driver._uvicorn_server is None
+
+
+@pytest.mark.asyncio
+async def test_start_does_not_let_internal_uvicorn_capture_process_signals(
+    config: EvalControllerConfig,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeConfig:
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+    class FakeServer:
+        instances: list[FakeServer] = []
+
+        def __init__(self, config: FakeConfig) -> None:
+            self.config = config
+            self.started = False
+            self.should_exit = False
+            self.serve_called = False
+            self._serve_called = False
+            self.capture_signals_called = False
+            FakeServer.instances.append(self)
+
+        @contextlib.contextmanager
+        def capture_signals(self):
+            self.capture_signals_called = True
+            yield
+
+        async def serve(self) -> None:
+            self.serve_called = True
+            with self.capture_signals():
+                await self._serve()
+
+        async def _serve(self) -> None:
+            self._serve_called = True
+            self.started = True
+            while not self.should_exit:
+                await asyncio.sleep(0.01)
+
+    monkeypatch.setitem(
+        sys.modules,
+        "uvicorn",
+        types.SimpleNamespace(Config=FakeConfig, Server=FakeServer),
+    )
+    config.controller_port = None
+    monkeypatch.setattr(controller_mod, "_find_free_port", lambda: 12345)
+    monkeypatch.setattr(controller_mod, "_is_port_occupied", lambda port: False)
+
+    driver = EvalController(config=config)
+    await driver.start()
+    try:
+        server = FakeServer.instances[-1]
+        assert server.serve_called is True
+        assert server._serve_called is True
+        assert server.capture_signals_called is False
+        assert "capture_signals" not in server.__dict__
+        assert "install_signal_handlers" not in server.__dict__
+    finally:
+        await driver.stop()
 
 
 def test_controller_package_lazily_exports_driver_without_heavy_imports() -> None:
