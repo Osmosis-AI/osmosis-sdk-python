@@ -1,0 +1,27 @@
+osmosis_ai/eval/controller/server.py
+  s_536cf86e4a9129::t_f0aa3099e6e4ed 43
+osmosis_ai/eval/controller/__init__.py
+  s_536cf86e4a9129::t_ba60c35b9ddbaf 23
+osmosis_ai/eval/controller/litellm_bridge.py
+  s_536cf86e4a9129::t_a624316a9cdd80 10
+osmosis_ai/eval/controller/controller.py
+  s_536cf86e4a9129::t_d4175eb76f46bf 66-67,72-74
+osmosis_ai/eval/controller/locks.py
+  s_536cf86e4a9129::t_00bab4ae277089 39
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "77ed06e3b29ef5e437d7ae9eae2ed11bce88cacd",
+  "prompts": {},
+  "sessions": {
+    "s_536cf86e4a9129": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "24dc9525-de13-4c64-b668-35f511a68075",
+        "model": "gpt-5.5-extra-high"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}
