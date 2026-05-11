@@ -30,9 +30,16 @@ from osmosis_ai.rollout.driver import RolloutDriver
 from osmosis_ai.rollout.types import RolloutSample, RolloutStatus
 
 
-def _extract_mean_reward(samples: dict[str, RolloutSample]) -> float | None:
+def _extract_mean_reward(
+    samples: dict[str, RolloutSample],
+    scored_sample_ids: list[str] | None = None,
+) -> float | None:
     """Compute the mean reward from a samples dict, ignoring None rewards."""
-    rewards = [s.reward for s in samples.values() if s.reward is not None]
+    if scored_sample_ids is None:
+        selected_samples = samples.values()
+    else:
+        selected_samples = (samples[sid] for sid in scored_sample_ids if sid in samples)
+    rewards = [s.reward for s in selected_samples if s.reward is not None]
     if not rewards:
         return None
     return sum(rewards) / len(rewards)
@@ -65,6 +72,28 @@ class OrchestratorResult:
     cache_data: dict[str, Any]
     stop_reason: str | None = None
     dataset_fingerprint_warning: str | None = None
+
+
+@dataclass
+class EvalRunPlan:
+    cache_path: Path
+    cache_data: dict[str, Any]
+    completed_runs: set[tuple[int, int, str | None]]
+    work_items: list[tuple[DatasetRow, int, int, str | None, RolloutDriver]]
+    samples_path: Path | None
+    total_expected: int
+    lock: Any | None
+    already_completed: bool = False
+    dataset_fingerprint_warning: str | None = None
+
+    @property
+    def has_pending_work(self) -> bool:
+        return bool(self.work_items)
+
+    def release(self) -> None:
+        if self.lock is not None:
+            self.lock.release()
+            self.lock = None
 
 
 class EvalOrchestrator:
@@ -121,15 +150,10 @@ class EvalOrchestrator:
         self._original_sigint_handler: Any = None
         self._original_sigterm_handler: Any = None
 
-    async def run(self) -> OrchestratorResult:
-        """Execute the evaluation orchestration.
-
-        Returns:
-            An :class:`OrchestratorResult` describing the outcome.
-        """
+    def plan(self) -> EvalRunPlan:
+        """Prepare cache state and work items while holding the cache lock."""
         cfg = self.cache_config
         total_expected = len(self.rows) * self.n_runs * len(self.drivers)
-
         lock = self.cache_backend.acquire_lock(cfg.task_id, cfg.model, cfg.dataset_path)
         try:
             cache_path, cache_data, completed_runs = (
@@ -150,7 +174,6 @@ class EvalOrchestrator:
             )
             self._samples_path = samples_path
 
-            # Handle --retry-failed: keep only successful runs in completed set.
             if self.retry_failed and completed_runs:
                 all_runs = cache_data.get("runs", [])
                 successful_runs = [r for r in all_runs if r.get("success", True)]
@@ -167,7 +190,6 @@ class EvalOrchestrator:
                     cache_data["status"] = "in_progress"
                     self.cache_backend.write_cache(cache_path, cache_data)
 
-            # Case C: already completed
             if cache_data.get("status") == "completed":
                 dataset_fingerprint_warning: str | None = None
                 if self.dataset_fingerprint is not None:
@@ -178,38 +200,23 @@ class EvalOrchestrator:
                             f"  Cached: {cached_fp[:16]}... | Current: {self.dataset_fingerprint[:16]}...\n"
                             f"  Results below are from the original dataset."
                         )
-                return OrchestratorResult(
-                    status="already_completed",
+                plan = EvalRunPlan(
                     cache_path=cache_path,
-                    samples_path=samples_path,
-                    summary=cache_data.get("summary"),
-                    total_completed=len(completed_runs),
-                    total_expected=total_expected,
                     cache_data=cache_data,
+                    completed_runs=completed_runs,
+                    work_items=[],
+                    samples_path=samples_path,
+                    total_expected=total_expected,
+                    lock=lock,
+                    already_completed=True,
                     dataset_fingerprint_warning=dataset_fingerprint_warning,
                 )
+                plan.release()
+                return plan
 
-            # Build work items, skipping already-completed runs
             work_items = self._build_work_items(completed_runs)
-
-            # Strip prior runs from in-memory cache_data so CacheFlushController
-            # can properly merge old (from disk) + new (in-memory) without duplication.
-            # The flush controller reads old runs from disk and prepends them,
-            # so cache_data["runs"] must only contain newly-appended runs.
-            # Save original runs first as fallback for the no-work-items path.
-            prior_runs_snapshot = list(cache_data.get("runs", []))
-            if completed_runs:
-                cache_data["runs"] = []
-
             if not work_items:
-                # All runs already completed but status wasn't "completed".
-                # Re-read runs from disk since we may have cleared cache_data["runs"]
-                # above for the flush controller.
-                try:
-                    disk_data = json.loads(cache_path.read_text())
-                    all_runs = disk_data.get("runs", [])
-                except (ValueError, OSError):
-                    all_runs = prior_runs_snapshot
+                all_runs = list(cache_data.get("runs", []))
                 summary = build_summary(
                     all_runs,
                     self.pass_threshold,
@@ -219,15 +226,87 @@ class EvalOrchestrator:
                 cache_data["status"] = "completed"
                 cache_data["summary"] = summary
                 self.cache_backend.write_cache(cache_path, cache_data)
+                plan = EvalRunPlan(
+                    cache_path=cache_path,
+                    cache_data=cache_data,
+                    completed_runs=completed_runs,
+                    work_items=[],
+                    samples_path=samples_path,
+                    total_expected=total_expected,
+                    lock=lock,
+                )
+                plan.release()
+                return plan
+
+            plan = EvalRunPlan(
+                cache_path=cache_path,
+                cache_data=cache_data,
+                completed_runs=completed_runs,
+                work_items=work_items,
+                samples_path=samples_path,
+                total_expected=total_expected,
+                lock=lock,
+            )
+            return plan
+        except BaseException:
+            lock.release()
+            raise
+
+    async def run(self) -> OrchestratorResult:
+        """Execute the evaluation orchestration.
+
+        Returns:
+            An :class:`OrchestratorResult` describing the outcome.
+        """
+        plan = self.plan()
+        return await self.run_prepared(plan)
+
+    async def run_prepared(self, plan: EvalRunPlan) -> OrchestratorResult:
+        """Execute a previously prepared eval plan."""
+        if plan.has_pending_work and plan.lock is None:
+            raise RuntimeError(
+                "Cannot execute pending eval plan after cache lock has been released."
+            )
+
+        cache_path = plan.cache_path
+        cache_data = plan.cache_data
+        completed_runs = plan.completed_runs
+        samples_path = plan.samples_path
+        total_expected = plan.total_expected
+        work_items = plan.work_items
+
+        try:
+            if plan.already_completed:
+                return OrchestratorResult(
+                    status="already_completed",
+                    cache_path=cache_path,
+                    samples_path=samples_path,
+                    summary=cache_data.get("summary"),
+                    total_completed=len(completed_runs),
+                    total_expected=total_expected,
+                    cache_data=cache_data,
+                    dataset_fingerprint_warning=plan.dataset_fingerprint_warning,
+                )
+
+            if not work_items:
                 return OrchestratorResult(
                     status="completed",
                     cache_path=cache_path,
                     samples_path=samples_path,
-                    summary=summary,
+                    summary=cache_data.get("summary"),
                     total_completed=len(completed_runs),
                     total_expected=total_expected,
                     cache_data=cache_data,
                 )
+
+            # Strip prior runs from in-memory cache_data so CacheFlushController
+            # can properly merge old (from disk) + new (in-memory) without duplication.
+            # The flush controller reads old runs from disk and prepends them,
+            # so cache_data["runs"] must only contain newly-appended runs.
+            # Save original runs first as fallback for the no-work-items path.
+            prior_runs_snapshot = list(cache_data.get("runs", []))
+            if completed_runs:
+                cache_data["runs"] = []
 
             # Install signal handlers for graceful shutdown
             self._shutdown_event = asyncio.Event()
@@ -310,7 +389,7 @@ class EvalOrchestrator:
             )
         finally:
             self._remove_signal_handlers()
-            lock.release()
+            plan.release()
 
     def _build_work_items(
         self, completed_runs: set[tuple[int, int, str | None]]
@@ -340,22 +419,33 @@ class EvalOrchestrator:
         """Execute a single rollout and return a result dict."""
         from osmosis_ai.eval.common.dataset import dataset_row_to_prompt
 
-        rollout_id = f"eval-{row_index}-run-{run_index}"
-        if model_tag:
-            rollout_id += f"-{model_tag}"
-
         outcome = await driver.run(
             messages=dataset_row_to_prompt(row),
             label=row.get("ground_truth"),
-            rollout_id=rollout_id,
+            rollout_id="",
         )
 
-        reward = _extract_mean_reward(outcome.samples) if outcome.samples else None
+        if outcome.skipped:
+            status = "skipped"
+            success = True
+            reward = None
+        else:
+            success = outcome.status == RolloutStatus.SUCCESS
+            status = "success" if success else "failure"
+            reward = (
+                _extract_mean_reward(
+                    outcome.samples,
+                    outcome.scored_sample_ids,
+                )
+                if outcome.samples
+                else None
+            )
 
         return {
             "row_index": row_index,
             "run_index": run_index,
-            "success": outcome.status == RolloutStatus.SUCCESS,
+            "status": status,
+            "success": success,
             "reward": reward,
             "duration_ms": outcome.duration_ms,
             "tokens": outcome.tokens,
@@ -363,7 +453,71 @@ class EvalOrchestrator:
             "error": outcome.error,
             "systemic_error": outcome.systemic_error,
             "samples": outcome.samples,
+            "rollout_id": outcome.rollout_id,
+            "controller_created_sample_ids": outcome.controller_created_sample_ids,
+            "completion_counts": outcome.completion_counts,
+            "full_callback_sample_ids": outcome.full_callback_sample_ids,
+            "scored_sample_ids": outcome.scored_sample_ids,
+            "skipped_sample_ids": outcome.skipped_sample_ids,
+            "callback_diagnostics": outcome.callback_diagnostics,
         }
+
+    async def _wait_for_tasks_or_shutdown(
+        self,
+        tasks: list[asyncio.Task[Any]],
+    ) -> bool:
+        """Wait for tasks while letting the shutdown event cancel pending work."""
+        pending: set[asyncio.Task[Any]] = set(tasks)
+        shutdown_task: asyncio.Task[bool] | None = None
+        if self._shutdown_event is not None:
+            shutdown_task = asyncio.create_task(self._shutdown_event.wait())
+
+        try:
+            while pending:
+                wait_set: set[asyncio.Task[Any]] = set(pending)
+                if shutdown_task is not None:
+                    wait_set.add(shutdown_task)
+
+                done, _ = await asyncio.wait(
+                    wait_set,
+                    return_when=asyncio.FIRST_COMPLETED,
+                )
+
+                completed = done & pending
+                for task in completed:
+                    if task.cancelled():
+                        raise asyncio.CancelledError
+                    exc = task.exception()
+                    if exc is not None:
+                        for pending_task in pending:
+                            if pending_task is not task and not pending_task.done():
+                                pending_task.cancel()
+                        await asyncio.gather(*tasks, return_exceptions=True)
+                        raise exc
+                pending -= completed
+
+                if shutdown_task is not None and shutdown_task in done:
+                    if not pending:
+                        break
+                    for task in pending:
+                        if not task.done():
+                            task.cancel()
+                    results = await asyncio.gather(*tasks, return_exceptions=True)
+                    for result in results:
+                        if isinstance(result, Exception):
+                            raise result
+                    return True
+
+            results = await asyncio.gather(*tasks, return_exceptions=True)
+            for result in results:
+                if isinstance(result, Exception):
+                    raise result
+            return False
+        finally:
+            if shutdown_task is not None and not shutdown_task.done():
+                shutdown_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await shutdown_task
 
     async def _run_all(
         self,
@@ -414,9 +568,13 @@ class EvalOrchestrator:
                         break
 
                 row, row_index, run_idx, tag, driver = item
-                result_dict = await self._execute_one(
-                    row, row_index, run_idx, tag, driver
+                result_task = asyncio.create_task(
+                    self._execute_one(row, row_index, run_idx, tag, driver)
                 )
+                interrupted = await self._wait_for_tasks_or_shutdown([result_task])
+                if interrupted:
+                    break
+                result_dict = result_task.result()
 
                 self._record_result(result_dict, cache_data, row_index, run_idx)
                 current += 1
@@ -486,14 +644,7 @@ class EvalOrchestrator:
                     for idx, (row, row_index, run_idx, tag, drv) in enumerate(batch)
                 ]
 
-                try:
-                    await asyncio.gather(*tasks)
-                except Exception:
-                    for t in tasks:
-                        if not t.done():
-                            t.cancel()
-                    await asyncio.gather(*tasks, return_exceptions=True)
-                    raise
+                batch_interrupted = await self._wait_for_tasks_or_shutdown(tasks)
 
                 # Process batch results
                 batch_has_systemic = False
@@ -525,6 +676,9 @@ class EvalOrchestrator:
                         all_zero_tokens = False
 
                 flush_ctl.maybe_flush(runs_completed=completed_in_batch)
+                if batch_interrupted:
+                    interrupted = True
+                    break
                 cursor += len(batch)
 
                 if batch_has_systemic:
@@ -555,28 +709,56 @@ class EvalOrchestrator:
         if self.log_samples and self._samples_path is not None:
             samples = result_dict.get("samples", {})
             if samples:
+                sample = {
+                    "row_index": row_index,
+                    "run_index": run_index,
+                    "model_tag": result_dict.get("model_tag"),
+                    "rollout_id": result_dict.get("rollout_id"),
+                    "samples": {
+                        sid: (
+                            s.model_dump(mode="json") if hasattr(s, "model_dump") else s
+                        )
+                        for sid, s in samples.items()
+                    },
+                    "controller_created_sample_ids": result_dict.get(
+                        "controller_created_sample_ids", []
+                    ),
+                    "scored_sample_ids": result_dict.get("scored_sample_ids", []),
+                    "skipped_sample_ids": result_dict.get("skipped_sample_ids", []),
+                }
                 messages: list[Any] = []
-                for s in samples.values():
-                    msgs = s.messages if hasattr(s, "messages") else []
-                    messages.extend(msgs)
+                for sample_result in samples.values():
+                    sample_messages = (
+                        sample_result.messages
+                        if hasattr(sample_result, "messages")
+                        else []
+                    )
+                    messages.extend(sample_messages)
                 if messages:
-                    sample = {
-                        "row_index": row_index,
-                        "run_index": run_index,
-                        "model_tag": result_dict.get("model_tag"),
-                        "messages": messages,
-                    }
-                    self.cache_backend.append_sample(self._samples_path, sample)
+                    sample["messages"] = messages
+                self.cache_backend.append_sample(self._samples_path, sample)
 
         run_dict: dict[str, Any] = {
             "row_index": row_index,
             "run_index": run_index,
+            "status": result_dict.get(
+                "status", "success" if result_dict["success"] else "failure"
+            ),
             "success": result_dict["success"],
             "reward": result_dict.get("reward"),
             "duration_ms": result_dict.get("duration_ms", 0),
             "tokens": result_dict.get("tokens", 0),
             "model_tag": result_dict.get("model_tag"),
             "error": result_dict.get("error"),
+            "rollout_id": result_dict.get("rollout_id"),
+            "controller_created_sample_ids": result_dict.get(
+                "controller_created_sample_ids", []
+            ),
+            "completion_counts": result_dict.get("completion_counts", {}),
+            "full_callback_sample_ids": result_dict.get("full_callback_sample_ids", []),
+            "scored_sample_ids": result_dict.get("scored_sample_ids", []),
+            "skipped_sample_ids": result_dict.get("skipped_sample_ids", []),
+            "callback_diagnostics": result_dict.get("callback_diagnostics", {}),
         }
 
         cache_data["runs"].append(run_dict)
@@ -625,5 +807,6 @@ class EvalOrchestrator:
 
 __all__ = [
     "EvalOrchestrator",
+    "EvalRunPlan",
     "OrchestratorResult",
 ]

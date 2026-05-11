@@ -28,6 +28,35 @@ import xxhash
 
 logger: logging.Logger = logging.getLogger(__name__)
 
+CONTROLLER_PROTOCOL_VERSION = "eval-controller-v1"
+_CACHE_VERSION = 3
+
+_ROLLOUT_FINGERPRINT_SUFFIXES = {
+    ".py",
+    ".toml",
+    ".json",
+    ".jsonl",
+    ".yaml",
+    ".yml",
+}
+_ROLLOUT_FINGERPRINT_SKIP_DIRS = {
+    ".cache",
+    ".git",
+    ".hg",
+    ".mypy_cache",
+    ".pytest_cache",
+    ".ruff_cache",
+    ".tox",
+    ".venv",
+    "__pycache__",
+    "build",
+    "cache",
+    "dist",
+    "log",
+    "logs",
+    "venv",
+}
+
 
 # ============================================================
 # Deterministic JSON serialization
@@ -70,9 +99,10 @@ def _deterministic_json(obj: object) -> bytes:
 def compute_task_id(
     *,
     config: dict[str, Any],
-    workflow_fingerprint: str,
-    grader_fingerprint: str | None,
+    rollout_fingerprint: str,
     dataset_fingerprint: str,
+    entrypoint: str,
+    controller_protocol_version: str = CONTROLLER_PROTOCOL_VERSION,
 ) -> tuple[str, str]:
     """Compute (task_id, config_hash) from effective eval configuration.
 
@@ -81,21 +111,22 @@ def compute_task_id(
 
     Hash inputs:
     - config: Dict containing EvalConfig fields that affect result semantics
-    - workflow_fingerprint: Hash of workflow module source code
-    - grader_fingerprint: Hash of grader module source code (None if no grader)
+    - rollout_fingerprint: Hash of rollout filesystem content
     - dataset_fingerprint: Hash of dataset file content
+    - entrypoint: Rollout entrypoint path relative to rollout directory
+    - controller_protocol_version: Eval controller protocol/cache identity version
     """
     payload = _deterministic_json(
         {
             "config": config,
-            "workflow": workflow_fingerprint,
-            "grader": grader_fingerprint,
+            "rollout": rollout_fingerprint,
             "dataset": dataset_fingerprint,
+            "entrypoint": entrypoint,
+            "controller_protocol_version": controller_protocol_version,
         }
     )
     config_hash = xxhash.xxh3_128_hexdigest(payload)
-    task_id = config_hash[:12]
-    return task_id, config_hash
+    return config_hash[:12], config_hash
 
 
 # ============================================================
@@ -123,6 +154,58 @@ def compute_dataset_fingerprint(path: str | Path) -> str:
     return hasher.hexdigest()
 
 
+def compute_rollout_filesystem_fingerprint(
+    rollout_dir: str | Path,
+    *,
+    entrypoint: str,
+) -> str:
+    """Hash behavior-affecting rollout files for controller-backed eval cache."""
+    root = Path(rollout_dir).resolve()
+    if not root.is_dir():
+        raise FileNotFoundError(f"Rollout directory not found: {root}")
+
+    entrypoint_path = (root / entrypoint).resolve()
+    try:
+        entrypoint_path.relative_to(root)
+    except ValueError as exc:
+        raise ValueError(
+            f"Entrypoint must stay inside rollout directory: {entrypoint}"
+        ) from exc
+    if not entrypoint_path.is_file():
+        raise FileNotFoundError(f"Entrypoint file not found: {entrypoint_path}")
+
+    hasher = xxhash.xxh3_128()
+    hasher.update(b"protocol\0")
+    protocol = CONTROLLER_PROTOCOL_VERSION.encode()
+    hasher.update(len(protocol).to_bytes(8, "big"))
+    hasher.update(protocol)
+
+    for path in sorted(root.rglob("*")):
+        rel = path.relative_to(root)
+        if any(part in _ROLLOUT_FINGERPRINT_SKIP_DIRS for part in rel.parts):
+            continue
+        if path.is_symlink():
+            try:
+                target = path.resolve()
+                target.relative_to(root)
+            except (OSError, ValueError):
+                continue
+        if not path.is_file():
+            continue
+        if path.suffix not in _ROLLOUT_FINGERPRINT_SUFFIXES:
+            continue
+        rel_bytes = str(rel).encode()
+        hasher.update(b"file\0")
+        hasher.update(len(rel_bytes).to_bytes(8, "big"))
+        hasher.update(rel_bytes)
+        hasher.update(path.stat().st_size.to_bytes(8, "big"))
+        with path.open("rb") as file:
+            while chunk := file.read(128 * 1024):
+                hasher.update(chunk)
+
+    return hasher.hexdigest()
+
+
 def _resolve_source_file(mod: object) -> Path | None:
     """Resolve the .py source file for a module, handling .pyc and __pycache__."""
     try:
@@ -141,81 +224,6 @@ def _resolve_source_file(mod: object) -> Path | None:
                 return parent_py
         return None
     return p
-
-
-def _hash_file(path: Path) -> str:
-    """Hash a single file with xxh3_128."""
-    return xxhash.xxh3_128_hexdigest(path.read_bytes())
-
-
-def _hash_directory_tree(directory: Path) -> str | None:
-    """Hash all .py files in a directory tree, sorted for determinism.
-
-    Returns None if no .py files found or any file cannot be read.
-    Skips symlinks to avoid infinite loops and external files.
-    """
-    hasher = xxhash.xxh3_128()
-    try:
-        py_files = sorted(f for f in directory.rglob("*.py") if not f.is_symlink())
-    except OSError:
-        return None
-    if not py_files:
-        return None
-    for py_file in py_files:
-        try:
-            rel_path = py_file.relative_to(directory)
-            hasher.update(str(rel_path).encode())
-            hasher.update(py_file.read_bytes())
-        except (PermissionError, OSError):
-            return None
-    return hasher.hexdigest()
-
-
-def compute_module_fingerprint(module_path: str) -> str | None:
-    """Hash the agent module's source code.
-
-    - Package (__init__.py entry) -> hash entire directory tree
-    - Single .py file -> hash just that file
-    - Returns None if source cannot be located
-    """
-    module_name, _, _ = module_path.partition(":")
-    try:
-        mod = importlib.import_module(module_name)
-    except ImportError:
-        return None
-    source_file = _resolve_source_file(mod)
-    if source_file is None:
-        return None
-    if source_file.name == "__init__.py":
-        return _hash_directory_tree(source_file.parent)
-    return _hash_file(source_file)
-
-
-def compute_rollout_package_fingerprint(module_path: str) -> str | None:
-    """Hash the full rollout package for a loaded eval entrypoint.
-
-    Eval entrypoints are loaded under a synthetic package whose root path is the
-    rollout directory. Hashing that directory keeps imported workflow/grader
-    implementation changes from reusing stale cache entries.
-    """
-    module_name, _, _ = module_path.partition(":")
-    try:
-        importlib.import_module(module_name)
-    except ImportError:
-        return None
-
-    root_name = module_name.split(".", 1)[0]
-    root_mod = sys.modules.get(root_name)
-    root_paths = getattr(root_mod, "__path__", None)
-    if root_paths:
-        try:
-            root_path = Path(next(iter(root_paths)))
-        except (StopIteration, TypeError):
-            root_path = None
-        if root_path is not None and root_path.is_dir():
-            return _hash_directory_tree(root_path)
-
-    return compute_module_fingerprint(module_path)
 
 
 def compute_eval_fns_fingerprint(eval_fn_paths: list[str]) -> str | None:
@@ -637,6 +645,7 @@ class BuildSummaryResult(TypedDict, total=False):
     total_runs: int
     passed: int
     failed: int
+    skipped: int
     total_tokens: int
     total_duration_ms: float
     reward_stats: RewardStatsDict | None
@@ -653,14 +662,17 @@ def build_summary(
     total_runs = len(runs)
     total_tokens = sum(r.get("tokens", 0) for r in runs)
     total_duration_ms = sum(r.get("duration_ms", 0.0) for r in runs)
+    skipped = sum(1 for r in runs if r.get("status") == "skipped")
+    scored_runs = [r for r in runs if r.get("status") != "skipped"]
 
-    rewards = [r["reward"] for r in runs if r.get("reward") is not None]
+    rewards = [r["reward"] for r in scored_runs if r.get("reward") is not None]
 
     if not rewards:
         return BuildSummaryResult(
             total_runs=total_runs,
             passed=0,
-            failed=total_runs,
+            failed=len(scored_runs),
+            skipped=skipped,
             total_tokens=total_tokens,
             total_duration_ms=total_duration_ms,
             reward_stats=None,
@@ -689,7 +701,7 @@ def build_summary(
         from osmosis_ai.eval.evaluation.report import pass_at_k
 
         rows: dict[tuple[int, str | None], list[dict]] = defaultdict(list)
-        for r in runs:
+        for r in scored_runs:
             key = (r["row_index"], r.get("model_tag"))
             rows[key].append(r)
 
@@ -710,7 +722,7 @@ def build_summary(
                     for r in row_runs
                     if r.get("reward") is not None and r["reward"] >= pass_threshold
                 )
-                n = max(len(row_runs), n_runs)
+                n = len(row_runs)
                 if n > 0 and k <= n:
                     row_pass_at_k.append(pass_at_k(n, c, k))
             if row_pass_at_k:
@@ -721,7 +733,8 @@ def build_summary(
     return BuildSummaryResult(
         total_runs=total_runs,
         passed=passed,
-        failed=total_runs - passed,
+        failed=len(scored_runs) - passed,
+        skipped=skipped,
         total_tokens=total_tokens,
         total_duration_ms=total_duration_ms,
         reward_stats=reward_stats,
@@ -731,8 +744,6 @@ def build_summary(
 # ============================================================
 # JSON file cache backend
 # ============================================================
-
-_CACHE_VERSION = 2
 
 
 class _FileLock:

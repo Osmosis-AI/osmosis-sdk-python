@@ -8,8 +8,8 @@ Configs are project-scoped and must stay in their canonical directories.
 - Eval: `configs/eval/<name>.toml`
 
 Do not place these configs elsewhere. The CLI validates these locations.
-When running `osmosis` commands as an AI agent or in automation, use the global
-`--json` flag before the command.
+For AI agents or automation, prefer `osmosis --json ...` for structured output
+or `osmosis --plain ...` for low-noise text.
 
 ## Training configs (`training/*.toml`)
 
@@ -74,10 +74,10 @@ batch_size = 2
 ## Commands
 
 ```bash
-osmosis --json project validate
-osmosis --json rollout validate configs/training/<config>.toml
-osmosis --json rollout validate configs/eval/<config>.toml
-osmosis --json train submit configs/training/<config>.toml
-osmosis --json eval run configs/eval/<config>.toml
-osmosis --json train status <run-name>
+osmosis project validate
+osmosis rollout validate configs/training/<config>.toml
+osmosis rollout validate configs/eval/<config>.toml
+osmosis train submit configs/training/<config>.toml
+osmosis eval run configs/eval/<config>.toml
+osmosis train status <run-name>
 ```

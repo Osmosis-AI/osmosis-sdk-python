@@ -1,7 +1,8 @@
 # Osmosis Training Configuration
 # Copy and customize this file for your training run.
 #
-# Usage: osmosis --json train submit configs/training/<your-config>.toml
+# Usage: osmosis train submit configs/training/<your-config>.toml
+# For AI agents or automation, use `osmosis --json ...` or `osmosis --plain ...`.
 #
 # Supported models:
 #   - Qwen/Qwen3.6-35B-A3B
@@ -11,7 +12,7 @@
 rollout = "<your-rollout>"             # Rollout name (directory under rollouts/)
 entrypoint = "<your-entrypoint-file>" # Entrypoint file name
 model_path = "<your-model-path>"      # Must be a supported model (see above)
-dataset = "<your-dataset-name>"       # Dataset name from `osmosis --json dataset list`
+dataset = "<your-dataset-name>"       # Dataset name from `osmosis dataset list`
 # commit_sha =                        # Pin to a specific commit (default: latest on default branch)
 
 [training]

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import io
 import json
-import sys
 import types
 from contextlib import redirect_stdout
 from pathlib import Path
@@ -14,6 +13,7 @@ import pytest
 
 from osmosis_ai.eval.evaluation.cache import (
     _CACHE_VERSION,
+    CONTROLLER_PROTOCOL_VERSION,
     CacheConfig,
     CacheFlushController,
     DatasetIntegrityChecker,
@@ -23,15 +23,12 @@ from osmosis_ai.eval.evaluation.cache import (
     _deterministic_json,
     _get_cache_root,
     _get_lock_timeout,
-    _hash_directory_tree,
-    _hash_file,
     _resolve_source_file,
     atomic_write_json,
     build_summary,
     compute_dataset_fingerprint,
     compute_eval_fns_fingerprint,
-    compute_module_fingerprint,
-    compute_rollout_package_fingerprint,
+    compute_rollout_filesystem_fingerprint,
     compute_task_id,
     sanitize_path_part,
 )
@@ -121,17 +118,14 @@ class TestDeterministicJson:
 class TestComputeTaskId:
     BASE_KWARGS = {
         "config": {
-            "model": "gpt-4",
-            "module": "my_agent:Agent",
-            "dataset": "data.jsonl",
-            "eval_fns": ["eval_mod:fn1", "eval_mod:fn2"],
-            "n_runs": 3,
-            "max_turns": 10,
-            "pass_threshold": 0.5,
+            "llm_model": "openai/gpt-5-mini",
+            "runs_n": 3,
+            "runs_max_turns": 10,
+            "eval_pass_threshold": 0.5,
         },
-        "workflow_fingerprint": "wf_abc123",
-        "grader_fingerprint": "gr_def456",
+        "rollout_fingerprint": "rollout_abc123",
         "dataset_fingerprint": "ds_ghi789",
+        "entrypoint": "main.py",
     }
 
     def test_deterministic(self) -> None:
@@ -148,7 +142,10 @@ class TestComputeTaskId:
         # Change model in config
         changed = {
             **self.BASE_KWARGS,
-            "config": {**self.BASE_KWARGS["config"], "model": "gpt-3.5"},
+            "config": {
+                **self.BASE_KWARGS["config"],
+                "llm_model": "openai/gpt-5-mini-different",
+            },
         }
         tid_diff, _ = compute_task_id(**changed)
         assert tid_diff != tid_base
@@ -156,7 +153,7 @@ class TestComputeTaskId:
         # Change n_runs in config
         changed2 = {
             **self.BASE_KWARGS,
-            "config": {**self.BASE_KWARGS["config"], "n_runs": 5},
+            "config": {**self.BASE_KWARGS["config"], "runs_n": 5},
         }
         tid_diff2, _ = compute_task_id(**changed2)
         assert tid_diff2 != tid_base
@@ -164,7 +161,7 @@ class TestComputeTaskId:
         # Change pass_threshold in config
         changed3 = {
             **self.BASE_KWARGS,
-            "config": {**self.BASE_KWARGS["config"], "pass_threshold": 0.9},
+            "config": {**self.BASE_KWARGS["config"], "eval_pass_threshold": 0.9},
         }
         tid_diff3, _ = compute_task_id(**changed3)
         assert tid_diff3 != tid_base
@@ -180,20 +177,18 @@ class TestComputeTaskId:
         tid, config_hash = compute_task_id(**self.BASE_KWARGS)
         assert config_hash.startswith(tid)
 
-    def test_workflow_fingerprint_affects_hash(self) -> None:
-        """Changing workflow_fingerprint changes task_id."""
+    def test_rollout_fingerprint_affects_hash(self) -> None:
+        """Changing rollout_fingerprint changes task_id."""
         tid_base, _ = compute_task_id(**self.BASE_KWARGS)
         tid_diff, _ = compute_task_id(
-            **{**self.BASE_KWARGS, "workflow_fingerprint": "different"}
+            **{**self.BASE_KWARGS, "rollout_fingerprint": "different"}
         )
         assert tid_diff != tid_base
 
-    def test_grader_fingerprint_affects_hash(self) -> None:
-        """Changing grader_fingerprint changes task_id."""
+    def test_entrypoint_affects_hash(self) -> None:
+        """Changing entrypoint changes task_id."""
         tid_base, _ = compute_task_id(**self.BASE_KWARGS)
-        tid_diff, _ = compute_task_id(
-            **{**self.BASE_KWARGS, "grader_fingerprint": "different"}
-        )
+        tid_diff, _ = compute_task_id(**{**self.BASE_KWARGS, "entrypoint": "alt.py"})
         assert tid_diff != tid_base
 
     def test_dataset_fingerprint_affects_hash(self) -> None:
@@ -204,16 +199,13 @@ class TestComputeTaskId:
         )
         assert tid_diff != tid_base
 
-    def test_none_grader_included_in_hash(self) -> None:
-        """None grader_fingerprint is part of the hash identity (not filtered)."""
-        tid_none, hash_none = compute_task_id(
-            **{**self.BASE_KWARGS, "grader_fingerprint": None}
+    def test_controller_protocol_version_affects_hash(self) -> None:
+        """Changing controller_protocol_version changes task_id."""
+        tid_base, _ = compute_task_id(**self.BASE_KWARGS)
+        tid_diff, _ = compute_task_id(
+            **{**self.BASE_KWARGS, "controller_protocol_version": "different"}
         )
-        tid_str, hash_str = compute_task_id(
-            **{**self.BASE_KWARGS, "grader_fingerprint": "some_grader"}
-        )
-        assert tid_none != tid_str
-        assert hash_none != hash_str
+        assert tid_diff != tid_base
 
 
 # ============================================================
@@ -254,67 +246,6 @@ class TestComputeDatasetFingerprint:
         h = compute_dataset_fingerprint(f)
         assert isinstance(h, str)
         assert len(h) == 32
-
-
-# ============================================================
-# _hash_directory_tree tests
-# ============================================================
-
-
-class TestHashDirectoryTree:
-    def test_deterministic(self, tmp_path: Path) -> None:
-        """Hashing a directory with .py files is deterministic."""
-        (tmp_path / "a.py").write_text("print('a')")
-        (tmp_path / "b.py").write_text("print('b')")
-        h1 = _hash_directory_tree(tmp_path)
-        h2 = _hash_directory_tree(tmp_path)
-        assert h1 is not None
-        assert h1 == h2
-
-    def test_includes_subdirectories(self, tmp_path: Path) -> None:
-        """Files in subdirectories are included in the hash."""
-        sub = tmp_path / "sub"
-        sub.mkdir()
-        (tmp_path / "a.py").write_text("print('a')")
-        (sub / "b.py").write_text("print('b')")
-        h = _hash_directory_tree(tmp_path)
-        assert h is not None
-
-    def test_skips_symlinks(self, tmp_path: Path) -> None:
-        """Symlinks are skipped during directory hashing."""
-        (tmp_path / "real.py").write_text("print('real')")
-        target = tmp_path / "target.py"
-        target.write_text("print('target')")
-        link = tmp_path / "link.py"
-        link.symlink_to(target)
-
-        h_with_link = _hash_directory_tree(tmp_path)
-        assert h_with_link is not None
-
-        # Hash without the link target should differ
-        # (the symlink itself is skipped, only real.py and target.py are hashed)
-        # Verify symlink is actually skipped by checking file count
-        py_files = sorted(f for f in tmp_path.rglob("*.py") if not f.is_symlink())
-        assert link not in py_files
-
-    def test_empty_directory(self, tmp_path: Path) -> None:
-        """Returns None for empty directory (no .py files)."""
-        assert _hash_directory_tree(tmp_path) is None
-
-    def test_no_py_files(self, tmp_path: Path) -> None:
-        """Returns None when directory has no .py files."""
-        (tmp_path / "data.txt").write_text("not python")
-        (tmp_path / "config.json").write_text("{}")
-        assert _hash_directory_tree(tmp_path) is None
-
-    def test_content_change_changes_hash(self, tmp_path: Path) -> None:
-        """Changing file content changes the directory hash."""
-        f = tmp_path / "mod.py"
-        f.write_text("v1")
-        h1 = _hash_directory_tree(tmp_path)
-        f.write_text("v2")
-        h2 = _hash_directory_tree(tmp_path)
-        assert h1 != h2
 
 
 # ============================================================
@@ -380,89 +311,72 @@ class TestResolveSourceFile:
         assert result is None
 
 
-# ============================================================
-# _hash_file tests
-# ============================================================
+def test_rollout_filesystem_fingerprint_includes_behavior_files(
+    tmp_path: Path,
+) -> None:
+    rollout = tmp_path / "rollouts" / "demo"
+    rollout.mkdir(parents=True)
+    for rel, content in {
+        "main.py": "print('v1')\n",
+        "pyproject.toml": "[project]\nname='demo'\n",
+        "data.json": '{"a":1}\n',
+        "samples.jsonl": '{"a":1}\n',
+        "prompt.yaml": "name: demo\n",
+        "prompt.yml": "name: demo\n",
+    }.items():
+        (rollout / rel).write_text(content, encoding="utf-8")
+
+    first = compute_rollout_filesystem_fingerprint(rollout, entrypoint="main.py")
+    (rollout / "main.py").write_text("print('v2')\n", encoding="utf-8")
+    second = compute_rollout_filesystem_fingerprint(rollout, entrypoint="main.py")
+
+    assert first != second
 
 
-class TestHashFile:
-    def test_deterministic(self, tmp_path: Path) -> None:
-        f = tmp_path / "test.py"
-        f.write_text("content")
-        assert _hash_file(f) == _hash_file(f)
+def test_rollout_filesystem_fingerprint_skips_caches_logs_and_external_symlinks(
+    tmp_path: Path,
+) -> None:
+    rollout = tmp_path / "rollouts" / "demo"
+    rollout.mkdir(parents=True)
+    (rollout / "main.py").write_text("print('v1')\n", encoding="utf-8")
+    (rollout / "pyproject.toml").write_text(
+        "[project]\nname='demo'\n", encoding="utf-8"
+    )
+    (rollout / "__pycache__").mkdir()
+    (rollout / "__pycache__" / "main.py").write_text("ignored\n", encoding="utf-8")
+    for dirname in (".cache", ".venv", "cache", "log", "logs", "venv"):
+        (rollout / dirname).mkdir()
+        (rollout / dirname / "dep.py").write_text("ignored\n", encoding="utf-8")
+    (rollout / "debug.log").write_text("ignored\n", encoding="utf-8")
+    external = tmp_path / "external.py"
+    external.write_text("ignored\n", encoding="utf-8")
+    (rollout / "external.py").symlink_to(external)
 
-    def test_different_content(self, tmp_path: Path) -> None:
-        f1 = tmp_path / "a.py"
-        f2 = tmp_path / "b.py"
-        f1.write_text("aaa")
-        f2.write_text("bbb")
-        assert _hash_file(f1) != _hash_file(f2)
+    first = compute_rollout_filesystem_fingerprint(rollout, entrypoint="main.py")
+    (rollout / "__pycache__" / "main.py").write_text("changed\n", encoding="utf-8")
+    for dirname in (".cache", ".venv", "cache", "log", "logs", "venv"):
+        (rollout / dirname / "dep.py").write_text("changed\n", encoding="utf-8")
+    (rollout / "debug.log").write_text("changed\n", encoding="utf-8")
+    external.write_text("changed\n", encoding="utf-8")
+    second = compute_rollout_filesystem_fingerprint(rollout, entrypoint="main.py")
 
-
-# ============================================================
-# compute_module_fingerprint tests
-# ============================================================
-
-
-class TestComputeModuleFingerprint:
-    def test_returns_string_for_real_module(self) -> None:
-        """Fingerprinting a real importable module returns a string."""
-        # Use a known module from this project
-        result = compute_module_fingerprint("osmosis_ai.eval.evaluation.cache")
-        assert result is not None
-        assert isinstance(result, str)
-        assert len(result) == 32
-
-    def test_import_error_returns_none(self) -> None:
-        """Non-existent module returns None."""
-        result = compute_module_fingerprint("nonexistent_module_xyz_12345:Agent")
-        assert result is None
-
-    def test_package_module_hashes_directory(self) -> None:
-        """Package (with __init__.py) should hash entire directory tree."""
-        # osmosis_ai.eval.evaluation is a package
-        result = compute_module_fingerprint("osmosis_ai.eval.evaluation")
-        assert result is not None
-        assert isinstance(result, str)
-
-    def test_colon_separated_path(self) -> None:
-        """module_path with colon separator should work (module:attribute)."""
-        result = compute_module_fingerprint(
-            "osmosis_ai.eval.evaluation.cache:compute_task_id"
-        )
-        assert result is not None
+    assert first == second
 
 
-class TestComputeRolloutPackageFingerprint:
-    def test_hashes_synthetic_rollout_package_tree(self, tmp_path: Path) -> None:
-        """Synthetic rollout entrypoints should fingerprint imported files too."""
-        rollout_dir = tmp_path / "rollout"
-        rollout_dir.mkdir()
-        entrypoint = rollout_dir / "workflow.py"
-        helper = rollout_dir / "helper.py"
-        entrypoint.write_text("from helper import VALUE\n", encoding="utf-8")
-        helper.write_text("VALUE = 1\n", encoding="utf-8")
+def test_controller_protocol_version_participates_in_task_id() -> None:
+    assert CONTROLLER_PROTOCOL_VERSION == "eval-controller-v1"
+    base = {
+        "config": {"llm_model": "openai/gpt-5-mini"},
+        "rollout_fingerprint": "rollout",
+        "dataset_fingerprint": "dataset",
+        "entrypoint": "main.py",
+        "controller_protocol_version": CONTROLLER_PROTOCOL_VERSION,
+    }
 
-        package_name = "_osmosis_rollout_test_fingerprint"
-        module_name = f"{package_name}.workflow"
-        package = types.ModuleType(package_name)
-        package.__path__ = [str(rollout_dir)]  # type: ignore[attr-defined]
-        module = types.ModuleType(module_name)
-        module.__file__ = str(entrypoint)
-        try:
-            sys.modules[package_name] = package
-            sys.modules[module_name] = module
+    first, _ = compute_task_id(**base)
+    second, _ = compute_task_id(**{**base, "controller_protocol_version": "different"})
 
-            before = compute_rollout_package_fingerprint(module_name)
-            helper.write_text("VALUE = 2\n", encoding="utf-8")
-            after = compute_rollout_package_fingerprint(module_name)
-        finally:
-            sys.modules.pop(module_name, None)
-            sys.modules.pop(package_name, None)
-
-        assert before is not None
-        assert after is not None
-        assert before != after
+    assert first != second
 
 
 # ============================================================
@@ -1016,6 +930,99 @@ class TestBuildSummary:
         pak = stats.get("pass_at_k", {})
         # Only 1 of 3 runs has a non-None reward, so pass@1 should not be 1.0
         assert pak[1] < 1.0
+
+    def test_skipped_runs_are_excluded_from_reward_and_failure_stats(self):
+        """Skipped runs count toward totals but not reward/pass/fail stats."""
+        runs = [
+            {
+                "row_index": 0,
+                "run_index": 0,
+                "status": "success",
+                "reward": 1.0,
+                "success": True,
+                "tokens": 100,
+                "duration_ms": 50.0,
+            },
+            {
+                "row_index": 1,
+                "run_index": 0,
+                "status": "failure",
+                "reward": 0.0,
+                "success": False,
+                "tokens": 10,
+                "duration_ms": 5.0,
+            },
+            {
+                "row_index": 2,
+                "run_index": 0,
+                "status": "skipped",
+                "reward": None,
+                "success": True,
+                "tokens": 7,
+                "duration_ms": 3.0,
+            },
+        ]
+
+        result = build_summary(runs, pass_threshold=0.5, n_runs=1)
+
+        assert result["total_runs"] == 3
+        assert result["total_tokens"] == 117
+        assert result["total_duration_ms"] == 58.0
+        assert result["skipped"] == 1
+        assert result["passed"] == 1
+        assert result["failed"] == 1
+        stats = result["reward_stats"]
+        assert stats is not None
+        assert stats["mean"] == 0.5
+
+    def test_skipped_runs_do_not_affect_pass_at_k_denominator(self):
+        """Skipped runs should not dilute pass@k after being filtered out."""
+        runs = [
+            {
+                "row_index": 0,
+                "run_index": 0,
+                "status": "success",
+                "reward": 1.0,
+                "success": True,
+            },
+            {
+                "row_index": 0,
+                "run_index": 1,
+                "status": "skipped",
+                "reward": None,
+                "success": True,
+            },
+        ]
+
+        result = build_summary(runs, pass_threshold=0.5, n_runs=2)
+
+        stats = result["reward_stats"]
+        assert stats is not None
+        pak = stats.get("pass_at_k", {})
+        assert pak[1] == pytest.approx(1.0)
+        assert 2 not in pak
+
+    def test_skipped_only_summary_has_no_failures(self):
+        """Skipped-only runs should not be counted as failed no-reward runs."""
+        runs = [
+            {
+                "row_index": 0,
+                "run_index": 0,
+                "status": "skipped",
+                "reward": None,
+                "success": True,
+                "tokens": 7,
+                "duration_ms": 3.0,
+            }
+        ]
+
+        result = build_summary(runs, pass_threshold=0.5, n_runs=1)
+
+        assert result["total_runs"] == 1
+        assert result["skipped"] == 1
+        assert result["passed"] == 0
+        assert result["failed"] == 0
+        assert result["reward_stats"] is None
 
 
 # ============================================================
@@ -1777,11 +1784,11 @@ def test_build_summary_v2_all_failed():
     assert summary.get("reward_stats") is None
 
 
-def test_cache_version_2_rejects_v1():
-    """v2 cache rejects v1 cache files."""
+def test_cache_version_3_rejects_older_cache_files():
+    """v3 cache rejects older cache files."""
     from osmosis_ai.eval.evaluation.cache import _CACHE_VERSION
 
-    assert _CACHE_VERSION == 2
+    assert _CACHE_VERSION == 3
 
 
 # ============================================================
@@ -1795,35 +1802,35 @@ def test_compute_task_id_changes_with_config():
 
     tid1, hash1 = compute_task_id(
         config={"llm_model": "openai/gpt-5.4", "runs_n": 1, "runs_batch_size": 1},
-        workflow_fingerprint="abc123",
-        grader_fingerprint=None,
+        rollout_fingerprint="abc123",
         dataset_fingerprint="ds_hash",
+        entrypoint="main.py",
     )
     tid2, hash2 = compute_task_id(
         config={"llm_model": "openai/gpt-5.4", "runs_n": 4, "runs_batch_size": 1},
-        workflow_fingerprint="abc123",
-        grader_fingerprint=None,
+        rollout_fingerprint="abc123",
         dataset_fingerprint="ds_hash",
+        entrypoint="main.py",
     )
     assert tid1 != tid2
     assert hash1 != hash2
 
 
-def test_compute_task_id_changes_with_grader_code():
-    """Grader code change invalidates cache."""
+def test_compute_task_id_changes_with_rollout_filesystem():
+    """Rollout filesystem changes invalidate cache."""
     from osmosis_ai.eval.evaluation.cache import compute_task_id
 
     tid1, hash1 = compute_task_id(
         config={"llm_model": "openai/gpt-5.4"},
-        workflow_fingerprint="abc123",
-        grader_fingerprint="grader_v1",
+        rollout_fingerprint="rollout_v1",
         dataset_fingerprint="ds_hash",
+        entrypoint="main.py",
     )
     tid2, hash2 = compute_task_id(
         config={"llm_model": "openai/gpt-5.4"},
-        workflow_fingerprint="abc123",
-        grader_fingerprint="grader_v2",
+        rollout_fingerprint="rollout_v2",
         dataset_fingerprint="ds_hash",
+        entrypoint="main.py",
     )
     assert tid1 != tid2
     assert hash1 != hash2
@@ -1835,9 +1842,9 @@ def test_compute_task_id_stable():
 
     kwargs = dict(
         config={"llm_model": "openai/gpt-5.4"},
-        workflow_fingerprint="abc123",
-        grader_fingerprint=None,
+        rollout_fingerprint="abc123",
         dataset_fingerprint="ds_hash",
+        entrypoint="main.py",
     )
     assert compute_task_id(**kwargs) == compute_task_id(**kwargs)
 
@@ -1848,9 +1855,9 @@ def test_compute_task_id_is_prefix_of_config_hash():
 
     tid, chash = compute_task_id(
         config={"llm_model": "openai/gpt-5.4"},
-        workflow_fingerprint="abc123",
-        grader_fingerprint=None,
+        rollout_fingerprint="abc123",
         dataset_fingerprint="ds_hash",
+        entrypoint="main.py",
     )
     assert tid == chash[:12]
 
@@ -1863,21 +1870,21 @@ def test_compute_task_id_changes_with_offset_limit():
 
     tid1, _ = compute_task_id(
         config={**base, "offset": 0, "limit": 10},
-        workflow_fingerprint="abc",
-        grader_fingerprint=None,
+        rollout_fingerprint="abc",
         dataset_fingerprint="ds",
+        entrypoint="main.py",
     )
     tid2, _ = compute_task_id(
         config={**base, "offset": 0, "limit": 50},
-        workflow_fingerprint="abc",
-        grader_fingerprint=None,
+        rollout_fingerprint="abc",
         dataset_fingerprint="ds",
+        entrypoint="main.py",
     )
     tid3, _ = compute_task_id(
         config={**base, "offset": 10, "limit": 10},
-        workflow_fingerprint="abc",
-        grader_fingerprint=None,
+        rollout_fingerprint="abc",
         dataset_fingerprint="ds",
+        entrypoint="main.py",
     )
     assert tid1 != tid2  # different limit
     assert tid1 != tid3  # different offset

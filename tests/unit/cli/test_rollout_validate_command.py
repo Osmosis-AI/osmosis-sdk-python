@@ -18,6 +18,17 @@ WORKSPACE_ID = "ws-test"
 WORKSPACE_NAME = "team-test"
 
 
+EVAL_CONFIG = """
+[eval]
+rollout = "demo"
+entrypoint = "main.py"
+dataset = "data/demo.jsonl"
+
+[llm]
+model = "openai/gpt-5-mini"
+""".strip()
+
+
 def _make_project(root: Path, *, with_grader: bool = True) -> Path:
     for rel_path in (
         ".osmosis/research",
@@ -166,20 +177,13 @@ def test_validate_eval_config_success(
     tmp_path, monkeypatch: pytest.MonkeyPatch, capsys
 ) -> None:
     project_root = _make_project(tmp_path)
-    monkeypatch.chdir(project_root)
-    config_path = project_root / "configs" / "eval" / "demo.toml"
-    config_path.write_text(
-        """
-[eval]
-rollout = "demo"
-entrypoint = "main.py"
-dataset = "data/demo.jsonl"
-
-[llm]
-model = "openai/gpt-5-mini"
-""".strip(),
+    (project_root / "rollouts" / "demo" / "pyproject.toml").write_text(
+        "[project]\nname='demo'\n",
         encoding="utf-8",
     )
+    monkeypatch.chdir(project_root)
+    config_path = project_root / "configs" / "eval" / "demo.toml"
+    config_path.write_text(EVAL_CONFIG, encoding="utf-8")
 
     rc = main(["rollout", "validate", str(config_path)])
     captured = capsys.readouterr()
@@ -187,6 +191,248 @@ model = "openai/gpt-5-mini"
     assert rc == 0
     assert "Validation passed." in captured.out
     assert "eval" in captured.out
+
+
+def test_validate_eval_static_requires_pyproject_not_grader(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    project_root = _make_project(tmp_path, with_grader=False)
+    (project_root / "rollouts" / "demo" / "pyproject.toml").write_text(
+        "[project]\nname='demo'\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(project_root)
+    config_path = project_root / "configs" / "eval" / "demo.toml"
+    config_path.write_text(EVAL_CONFIG, encoding="utf-8")
+
+    rc = main(["rollout", "validate", str(config_path)])
+    captured = capsys.readouterr()
+
+    assert rc == 0
+    assert "Validation passed." in captured.out
+    assert "server entrypoint" in captured.out
+
+
+def test_validate_eval_static_fails_without_pyproject(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    project_root = _make_project(tmp_path, with_grader=False)
+    monkeypatch.chdir(project_root)
+    config_path = project_root / "configs" / "eval" / "demo.toml"
+    config_path.write_text(EVAL_CONFIG, encoding="utf-8")
+
+    rc = main(["rollout", "validate", str(config_path)])
+
+    assert rc != 0
+    assert "pyproject.toml" in capsys.readouterr().err
+
+
+def test_validate_server_flag_starts_dynamic_check(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys
+) -> None:
+    project_root = _make_project(tmp_path, with_grader=False)
+    (project_root / "rollouts" / "demo" / "pyproject.toml").write_text(
+        "[project]\nname='demo'\n",
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(project_root)
+    config_path = project_root / "configs" / "eval" / "demo.toml"
+    config_path.write_text(EVAL_CONFIG, encoding="utf-8")
+    calls = []
+
+    async def fake_validate(*, project_root, rollout, entrypoint):
+        calls.append((project_root, rollout, entrypoint))
+
+    monkeypatch.setattr(
+        "osmosis_ai.cli.commands.rollout._validate_eval_server_entrypoint",
+        fake_validate,
+    )
+
+    rc = main(["rollout", "validate", "--server", str(config_path)])
+
+    assert rc == 0
+    assert calls == [(project_root, "demo", "main.py")]
+    assert "eval run" in capsys.readouterr().out
+
+
+def test_validate_eval_server_entrypoint_uses_fixed_port_lock(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import asyncio
+
+    from osmosis_ai.cli.commands.rollout import _validate_eval_server_entrypoint
+
+    project_root = _make_project(tmp_path, with_grader=False)
+    calls: list[str] = []
+
+    class FakeFixedPortLock:
+        def acquire(self) -> None:
+            calls.append("lock")
+
+        def release(self) -> None:
+            calls.append("unlock")
+
+    class FakeProcess:
+        async def terminate(self) -> None:
+            calls.append("terminate")
+
+    async def fake_start_user_server_process(**kwargs):
+        calls.append("start")
+        return FakeProcess()
+
+    async def fake_wait_for_user_server_health(*, timeout_sec, process):
+        calls.append(f"health:{timeout_sec}:{process.__class__.__name__}")
+
+    monkeypatch.setattr(
+        "osmosis_ai.eval.controller.locks.FixedPortLock",
+        lambda: FakeFixedPortLock(),
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.eval.controller.locks.assert_user_server_port_free",
+        lambda: calls.append("port"),
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.eval.controller.process.start_user_server_process",
+        fake_start_user_server_process,
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.eval.controller.process.wait_for_user_server_health",
+        fake_wait_for_user_server_health,
+    )
+
+    asyncio.run(
+        _validate_eval_server_entrypoint(
+            project_root=project_root,
+            rollout="demo",
+            entrypoint="main.py",
+        )
+    )
+
+    assert calls == [
+        "lock",
+        "port",
+        "start",
+        "health:30.0:FakeProcess",
+        "terminate",
+        "unlock",
+    ]
+
+
+def test_validate_eval_server_entrypoint_health_failure_is_cli_error(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import asyncio
+
+    from osmosis_ai.cli.commands.rollout import _validate_eval_server_entrypoint
+
+    project_root = _make_project(tmp_path, with_grader=False)
+    calls: list[str] = []
+
+    class FakeFixedPortLock:
+        def acquire(self) -> None:
+            calls.append("lock")
+
+        def release(self) -> None:
+            calls.append("unlock")
+
+    class FakeProcess:
+        async def terminate(self) -> None:
+            calls.append("terminate")
+
+    async def fake_start_user_server_process(**kwargs):
+        calls.append("start")
+        return FakeProcess()
+
+    async def fake_wait_for_user_server_health(*, timeout_sec, process):
+        calls.append("health")
+        raise TimeoutError("server did not become healthy")
+
+    monkeypatch.setattr(
+        "osmosis_ai.eval.controller.locks.FixedPortLock",
+        lambda: FakeFixedPortLock(),
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.eval.controller.locks.assert_user_server_port_free",
+        lambda: calls.append("port"),
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.eval.controller.process.start_user_server_process",
+        fake_start_user_server_process,
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.eval.controller.process.wait_for_user_server_health",
+        fake_wait_for_user_server_health,
+    )
+
+    with pytest.raises(CLIError, match="health check failed") as exc_info:
+        asyncio.run(
+            _validate_eval_server_entrypoint(
+                project_root=project_root,
+                rollout="demo",
+                entrypoint="main.py",
+            )
+        )
+
+    assert "server did not become healthy" in str(exc_info.value)
+    assert calls == ["lock", "port", "start", "health", "terminate", "unlock"]
+
+
+def test_validate_eval_server_entrypoint_lock_failure_is_cli_error(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    import asyncio
+
+    from osmosis_ai.cli.commands.rollout import _validate_eval_server_entrypoint
+
+    project_root = _make_project(tmp_path, with_grader=False)
+
+    class FakeFixedPortLock:
+        def acquire(self) -> None:
+            raise TimeoutError("lock busy")
+
+        def release(self) -> None:
+            raise AssertionError("unacquired lock should not be released")
+
+    monkeypatch.setattr(
+        "osmosis_ai.eval.controller.locks.FixedPortLock",
+        lambda: FakeFixedPortLock(),
+    )
+
+    with pytest.raises(CLIError, match="lock busy"):
+        asyncio.run(
+            _validate_eval_server_entrypoint(
+                project_root=project_root,
+                rollout="demo",
+                entrypoint="main.py",
+            )
+        )
+
+
+def test_validate_training_config_rejects_server_flag(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    project_root = _make_project(tmp_path)
+    monkeypatch.chdir(project_root)
+    config_path = project_root / "configs" / "training" / "demo.toml"
+    config_path.write_text(
+        """
+[experiment]
+rollout = "demo"
+entrypoint = "main.py"
+model_path = "Qwen/Qwen3.6-35B-A3B"
+dataset = "demo-dataset"
+
+[training]
+n_samples_per_prompt = 8
+rollout_batch_size = 64
+""".strip(),
+        encoding="utf-8",
+    )
+
+    rc = main(["rollout", "validate", "--server", str(config_path)])
+
+    assert rc != 0
+    assert "--server is only supported for eval configs." in capsys.readouterr().err
 
 
 def test_validate_rejects_noncanonical_config_path(

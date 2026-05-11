@@ -53,9 +53,19 @@ project, or `osmosis project list` to see every local project link stored for
 the current platform. Add `--refresh` to `project info` when you need to
 refresh cached workspace metadata from the platform.
 
-## Reward and grader issues
+## Eval server and grader issues
 
-For **`osmosis eval run`**, scoring comes from your **Grader** implementation discovered next to the workflow — see [Eval](./eval.md).
+### Eval Fails Because 127.0.0.1:8000 Is Occupied
+
+Controller-backed eval owns the rollout server process and uses fixed port `8000`. Stop the existing local server or wait for the other eval run to finish. Cached-only eval runs return cached results without touching port `8000`.
+
+### Eval Server Starts But `/health` Never Passes
+
+Check the user-server subprocess log. For `osmosis eval run`, it is stored next to the eval cache under `.osmosis/cache/eval/<sanitized-model>/<sanitized-dataset-stem>/user-server-<task_id>.log`; for example, `openai/gpt-5-mini` appears as `openai-gpt-5-mini`. For `osmosis rollout validate --server`, it is stored under `.osmosis/logs/rollout-validate/user-server-validate-<id>.log`. Eval starts the server with `uv run python <entrypoint>` from `rollouts/<rollout>`, so imports that only worked when eval loaded code in-process must be changed to work from the rollout directory. The rollout folder must contain `pyproject.toml`.
+
+### Missing Grader Rewards
+
+The controller tracks sample IDs when `/chat/completions` reaches the sample-create point. The grader callback must include a sample entry for every controller-created sample ID. Normal samples need a non-null reward. Skipped or removed samples can set `remove_sample=true` with `reward=None`.
 
 ## Rubric (`osmosis eval rubric`)
 
@@ -140,11 +150,13 @@ Run a one-shot check:
 osmosis rollout validate configs/training/<run>.toml
 ```
 
-Fix reported workflow/grader issues before submitting training.
+Fix reported rollout backend issues before submitting training.
 
-`osmosis rollout validate` requires a concrete `Grader` discoverable from the
-resolved entrypoint module. If validation reports that no grader was found, add
-one there; in most projects you will also define a `GraderConfig`.
+For training configs, `osmosis rollout validate` checks that the configured
+entrypoint resolves to a valid rollout backend. For eval configs, static
+validation checks that the server entrypoint is a Python script under the
+rollout directory and that the rollout folder contains `pyproject.toml`; add
+`--server` to start it and verify `/health`.
 
 ## See also
 

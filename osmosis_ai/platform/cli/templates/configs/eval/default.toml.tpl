@@ -1,35 +1,36 @@
 # Osmosis Eval Configuration
-# Usage: osmosis --json eval run configs/eval/<your-config>.toml
+# Copy and customize this file for a local eval run.
+#
+# Usage: osmosis eval run configs/eval/<your-config>.toml
+# For AI agents or automation, use `osmosis --json ...` or `osmosis --plain ...`.
 
 [eval]
 rollout = "<your-rollout>"                 # Rollout name (directory under rollouts/)
-entrypoint = "<your-entrypoint-file>"      # Entrypoint file (relative to rollout dir)
-dataset = "<your-dataset>.jsonl"           # Dataset path (relative to project root)
-# limit =                                  # Max rows to evaluate
-# offset = 0                               # Skip first N rows
-# fresh = false                            # Discard cached results
-# retry_failed = false                     # Re-run only failed
+entrypoint = "<your-entrypoint-file>"      # Entrypoint file relative to the rollout
+dataset = "data/<your-dataset>.jsonl"      # Dataset path under data/
+# limit = 100                              # Evaluate at most N rows
+# offset = 0                               # Skip the first N rows
+# fresh = false                            # Ignore cached results and rerun
+# retry_failed = false                     # Retry cached failed rows
 
 [llm]
-model = "openai/gpt-5.4"                   # LiteLLM model name (required)
-# base_url =                               # Custom OpenAI-compatible endpoint
-# api_key_env = "OPENAI_API_KEY"           # Env var name for API key
-
-# Grader is auto-discovered from the rollout package.
-# No [grader] section needed — define a Grader subclass in your rollout.
+model = "openai/gpt-5-mini"                # Model passed to LiteLLM
+# base_url = "https://api.openai.com/v1"    # Override the provider base URL
+# api_key_env = "OPENAI_API_KEY"            # Require this env var before eval
 
 [runs]
-# n = 1                                    # Runs per row (for pass@n)
-# batch_size = 1                           # Concurrent batch size
-# pass_threshold = 1.0                     # Score threshold for pass@k
+# Uncomment and adjust as needed. Defaults are shown.
+#
+# n = 1                                    # Attempts per dataset row
+# batch_size = 1                           # Rows evaluated concurrently
+# pass_threshold = 1.0                     # Fraction of attempts required to pass
+
+[timeouts]
+# agent_sec = 450                          # Agent rollout timeout per row
+# grader_sec = 150                         # Grader timeout per row
 
 [output]
-log_samples = false                        # Save conversations to JSONL (or use --log-samples flag)
-# output_path =                            # Structured output directory
-# quiet = false                            # Suppress progress output
-# debug = false                            # Enable debug logging + trace
-
-# [baseline]
-# model = "openai/gpt-3.5-turbo"          # Baseline model for comparison
-# base_url =                               # Baseline endpoint
-# api_key_env =                            # Baseline API key env var
+# log_samples = false                      # Persist full sample records in cache
+# output_path = "eval-results.json"         # Optional summary JSON output path
+# quiet = false                            # Reduce console output
+# debug = false                            # Show debug details
