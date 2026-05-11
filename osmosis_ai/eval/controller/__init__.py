@@ -3,18 +3,32 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    from osmosis_ai.eval.controller.controller import (
+        EvalController,
+        EvalControllerConfig,
+    )
     from osmosis_ai.eval.controller.messages import preprocess_controller_messages
     from osmosis_ai.eval.controller.server import EvalControllerServer
     from osmosis_ai.eval.controller.state import ControllerRolloutState
 
 __all__ = [
     "ControllerRolloutState",
+    "EvalController",
+    "EvalControllerConfig",
     "EvalControllerServer",
     "preprocess_controller_messages",
 ]
 
 
 def __getattr__(name: str):
+    if name == "EvalController":
+        from osmosis_ai.eval.controller.controller import EvalController
+
+        return EvalController
+    if name == "EvalControllerConfig":
+        from osmosis_ai.eval.controller.controller import EvalControllerConfig
+
+        return EvalControllerConfig
     if name == "ControllerRolloutState":
         from osmosis_ai.eval.controller.state import ControllerRolloutState
 
