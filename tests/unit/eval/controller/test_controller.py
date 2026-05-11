@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import socket
 import subprocess
 import sys
 from pathlib import Path
@@ -97,6 +98,21 @@ def _complete_failed_state(controller: EvalController, rollout_id: str) -> None:
             samples={"s1": RolloutSample(id="s1", reward=1.0)},
         )
     )
+
+
+def test_controller_defers_dynamic_port_selection(
+    config: EvalControllerConfig, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config.controller_port = None
+    monkeypatch.setattr(
+        controller_mod,
+        "_find_free_port",
+        lambda: (_ for _ in ()).throw(AssertionError("should not be called")),
+    )
+
+    driver = EvalController(config=config)
+
+    assert driver.controller_port is None
 
 
 @pytest.mark.asyncio
@@ -352,6 +368,24 @@ async def test_post_rollout_uses_httpx_async_client(
     assert response.status_code == 200
     assert seen["url"] == "http://127.0.0.1:8000/rollout"
     assert seen["json"] == '{"rollout_id":"r1"}'
+
+
+@pytest.mark.asyncio
+async def test_start_rejects_occupied_controller_port(
+    config: EvalControllerConfig,
+) -> None:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as server:
+        server.bind(("127.0.0.1", 0))
+        server.listen(1)
+        _, port = server.getsockname()
+        config.controller_port = port
+        driver = EvalController(config=config)
+
+        with pytest.raises(TimeoutError, match="already occupied"):
+            await driver.start()
+
+        assert driver._server_task is None
+        assert driver._uvicorn_server is None
 
 
 def test_controller_package_lazily_exports_driver_without_heavy_imports() -> None:

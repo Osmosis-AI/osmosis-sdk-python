@@ -1,32 +1,15 @@
 from __future__ import annotations
 
 import os
-import sys
-import types
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
-from osmosis_ai.eval.evaluation.cli import (
-    EvalCommand,
-    _compute_legacy_rollout_fingerprint,
-)
-
-
-class _StopEval(Exception):
-    pass
-
-
-class _FakeProxy:
-    def __init__(self, *args, **kwargs) -> None:
-        pass
-
-    async def preflight_check(self) -> None:
-        return None
-
-    async def start(self) -> None:
-        return None
+from osmosis_ai.cli.errors import CLIError
+from osmosis_ai.cli.output import OutputFormat, override_output_context
+from osmosis_ai.eval.evaluation.cli import EvalCommand
 
 
 def _make_project(root: Path) -> Path:
@@ -52,13 +35,37 @@ def _make_project(root: Path) -> Path:
         "[project]\nname='demo'\n",
         encoding="utf-8",
     )
+    (root / "rollouts" / "demo" / "workflow.py").write_text(
+        "# demo workflow\n",
+        encoding="utf-8",
+    )
+    (root / "data" / "dataset.jsonl").write_text(
+        '{"input": "x"}\n',
+        encoding="utf-8",
+    )
     return root
+
+
+class _FakeEvalConfig(SimpleNamespace):
+    def model_dump(self) -> dict[str, Any]:
+        return {k: v for k, v in vars(self).items() if not k.startswith("_")}
+
+
+class _FakeProxy:
+    async def preflight_check(self) -> None:
+        return None
+
+    async def start(self) -> None:
+        return None
+
+    async def stop(self) -> None:
+        return None
 
 
 def _make_config(**overrides):
     values = {
         "eval_dataset": "dataset.jsonl",
-        "eval_rollout": "demo_rollout",
+        "eval_rollout": "demo",
         "eval_entrypoint": "workflow.py",
         "eval_limit": None,
         "eval_offset": 0,
@@ -69,15 +76,21 @@ def _make_config(**overrides):
         "llm_api_key_env": None,
         "grader_module": None,
         "grader_config": None,
+        "runs_n": 1,
         "runs_batch_size": 1,
+        "runs_pass_threshold": 1.0,
         "output_log_samples": False,
         "output_path": None,
         "output_quiet": True,
         "output_debug": False,
+        "timeout_agent_sec": 450.0,
+        "timeout_grader_sec": 150.0,
         "baseline_model": None,
+        "baseline_base_url": None,
+        "baseline_api_key_env": None,
     }
     values.update(overrides)
-    return SimpleNamespace(**values)
+    return _FakeEvalConfig(**values)
 
 
 def test_load_project_dotenv_sets_missing_env(
@@ -102,8 +115,13 @@ def test_load_project_dotenv_does_not_override_shell_env(
     assert os.environ["OPENAI_API_KEY"] == "from-shell"
 
 
-def _run_command(monkeypatch: pytest.MonkeyPatch, config: SimpleNamespace) -> None:
-    fake_workflow = type("FakeWorkflow", (), {})
+def _patch_eval_run_common(
+    monkeypatch: pytest.MonkeyPatch,
+    project: Path,
+    config: SimpleNamespace,
+) -> None:
+    def _fail_if_old_eval_flow_called(*args: Any, **kwargs: Any) -> None:
+        raise AssertionError("old in-process eval flow should not be called")
 
     monkeypatch.setattr(
         "osmosis_ai.eval.config.load_eval_config",
@@ -119,13 +137,43 @@ def _run_command(monkeypatch: pytest.MonkeyPatch, config: SimpleNamespace) -> No
     )
     monkeypatch.setattr(
         "osmosis_ai.eval.common.cli.load_workflow",
-        lambda **kwargs: (fake_workflow, None, "fake_entrypoint", None),
+        _fail_if_old_eval_flow_called,
     )
-    monkeypatch.setattr(EvalCommand, "_resolve_api_key", lambda self, cfg: None)
-    monkeypatch.setattr("osmosis_ai.eval.llm_proxy.LiteLLMProxy", _FakeProxy)
+    monkeypatch.setattr(
+        "osmosis_ai.eval.common.cli._resolve_grader",
+        _fail_if_old_eval_flow_called,
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.eval.evaluation.cache.compute_dataset_fingerprint",
+        lambda path: "dataset-fingerprint",
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.eval.evaluation.cache.compute_rollout_filesystem_fingerprint",
+        lambda rollout_dir, *, entrypoint: "rollout-fingerprint",
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.eval.evaluation.cache.compute_rollout_package_fingerprint",
+        _fail_if_old_eval_flow_called,
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.eval.evaluation.cache.compute_module_fingerprint",
+        _fail_if_old_eval_flow_called,
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.eval.llm_proxy.LiteLLMProxy",
+        _fail_if_old_eval_flow_called,
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.rollout.backend.local.backend.LocalBackend",
+        _fail_if_old_eval_flow_called,
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.rollout.driver.InProcessDriver",
+        _fail_if_old_eval_flow_called,
+    )
     monkeypatch.setattr(
         "osmosis_ai.platform.cli.project_contract.resolve_project_root_from_cwd",
-        lambda: Path.cwd(),
+        lambda: project,
     )
     monkeypatch.setattr(
         "osmosis_ai.platform.cli.project_contract.validate_project_contract",
@@ -136,96 +184,250 @@ def _run_command(monkeypatch: pytest.MonkeyPatch, config: SimpleNamespace) -> No
         lambda *args, **kwargs: None,
     )
 
-    def _fake_local_backend(*, workflow, workflow_config, grader, grader_config):
-        assert workflow is fake_workflow
-        assert grader is config._expected_grader
-        assert grader_config is config._expected_grader_config
-        raise _StopEval
+
+class _FakePlan:
+    def __init__(self, *, has_pending_work: bool, already_completed: bool) -> None:
+        self._has_pending_work = has_pending_work
+        self.already_completed = already_completed
+        self.cache_path = Path("/tmp/eval-cache.json")
+        self.samples_path = None
+        self.completed_runs = {(0, 0, None)} if not has_pending_work else set()
+        self.total_expected = 1
+        self.cache_data = {
+            "runs": [
+                {
+                    "row_index": 0,
+                    "run_index": 0,
+                    "model_tag": None,
+                    "success": True,
+                    "reward": 1.0,
+                }
+            ],
+            "summary": {"total_runs": 1, "passed": 1, "failed": 0},
+        }
+        self.dataset_fingerprint_warning = None
+        self.released = False
+
+    @property
+    def has_pending_work(self) -> bool:
+        return self._has_pending_work
+
+    def release(self) -> None:
+        self.released = True
+
+
+def _eval_run_kwargs() -> dict[str, Any]:
+    return {
+        "config_path": "configs/eval/eval.toml",
+        "fresh": False,
+        "retry_failed": False,
+        "limit": None,
+        "offset": None,
+        "quiet": True,
+        "debug": False,
+        "output_path": None,
+        "log_samples": False,
+        "batch_size_override": None,
+    }
+
+
+def test_cached_only_eval_skips_api_key_port_and_startup(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    project = _make_project(tmp_path / "project")
+    monkeypatch.chdir(project)
+    config = _make_config()
+    events: list[str] = []
+
+    _patch_eval_run_common(monkeypatch, project, config)
+
+    def _fail_if_called(*args: Any, **kwargs: Any) -> None:
+        raise AssertionError("startup dependency should not be touched")
+
+    class _CachedOnlyOrchestrator:
+        def __init__(self, **kwargs: Any) -> None:
+            pass
+
+        def plan(self) -> _FakePlan:
+            events.append("plan")
+            return _FakePlan(has_pending_work=False, already_completed=True)
+
+        async def run_prepared(self, plan: _FakePlan) -> Any:
+            raise AssertionError("cached-only eval should not execute")
 
     monkeypatch.setattr(
-        "osmosis_ai.rollout.backend.local.backend.LocalBackend",
-        _fake_local_backend,
+        "osmosis_ai.eval.evaluation.orchestrator.EvalOrchestrator",
+        _CachedOnlyOrchestrator,
+    )
+    monkeypatch.setattr(EvalCommand, "_resolve_api_key", _fail_if_called)
+    monkeypatch.setattr(
+        "osmosis_ai.eval.controller.locks.FixedPortLock",
+        lambda *args, **kwargs: _fail_if_called(),
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.eval.controller.locks.assert_user_server_port_free",
+        _fail_if_called,
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.eval.controller.controller.EvalController.start",
+        _fail_if_called,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.eval.controller.process.start_user_server_process",
+        _fail_if_called,
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.eval.controller.process.wait_for_user_server_health",
+        _fail_if_called,
     )
 
-    with pytest.raises(_StopEval):
-        EvalCommand().run(
-            config_path="eval.toml",
-            fresh=False,
-            retry_failed=False,
-            limit=None,
-            offset=None,
-            quiet=True,
-            debug=False,
-            output_path=None,
-            log_samples=False,
-            batch_size_override=None,
-        )
+    result = EvalCommand().run(**_eval_run_kwargs())
+
+    if isinstance(result, int):
+        assert result == 0
+    else:
+        assert result.data["status"] == "already_completed"
+    assert events == ["plan"]
 
 
-def test_run_uses_explicit_grader_override(monkeypatch: pytest.MonkeyPatch) -> None:
-    from osmosis_ai.rollout.context import GraderContext
-    from osmosis_ai.rollout.grader import Grader
-    from osmosis_ai.rollout.types import GraderConfig
-
-    explicit_module = types.ModuleType("explicit_grader_mod")
-
-    class ExplicitGrader(Grader):
-        async def grade(self, ctx: GraderContext):
-            return None
-
-    explicit_grader = ExplicitGrader
-    explicit_config = GraderConfig(name="explicit-grader")
-    explicit_module.ExplicitGrader = explicit_grader
-    explicit_module.grader_config = explicit_config
-    monkeypatch.setitem(sys.modules, "explicit_grader_mod", explicit_module)
-
-    config = _make_config(
-        grader_module="explicit_grader_mod:ExplicitGrader",
-        grader_config="explicit_grader_mod:grader_config",
-    )
-    config._expected_grader = explicit_grader
-    config._expected_grader_config = explicit_config
-
-    _run_command(monkeypatch, config)
-
-
-def test_run_auto_discovers_grader_from_entrypoint(
+def test_pending_eval_checks_fixed_port_before_api_key(
     monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
-    from osmosis_ai.rollout.context import GraderContext
-    from osmosis_ai.rollout.grader import Grader
-    from osmosis_ai.rollout.types import GraderConfig
+    project = _make_project(tmp_path / "project")
+    monkeypatch.chdir(project)
+    config = _make_config()
+    events: list[str] = []
 
-    entrypoint_module = types.ModuleType("fake_entrypoint")
+    _patch_eval_run_common(monkeypatch, project, config)
 
-    class DiscoveredGrader(Grader):
-        async def grade(self, ctx: GraderContext):
-            return None
+    class _PendingOrchestrator:
+        def __init__(self, **kwargs: Any) -> None:
+            pass
 
-    discovered_grader = DiscoveredGrader
-    discovered_config = GraderConfig(name="fake-grader")
-    entrypoint_module.DiscoveredGrader = discovered_grader
-    entrypoint_module.grader_config = discovered_config
-    monkeypatch.setitem(sys.modules, "fake_entrypoint", entrypoint_module)
+        def plan(self) -> _FakePlan:
+            events.append("plan")
+            return _FakePlan(has_pending_work=True, already_completed=False)
 
-    config = _make_config(eval_entrypoint="fake_entrypoint.py")
-    config._expected_grader = discovered_grader
-    config._expected_grader_config = discovered_config
+        async def run_prepared(self, plan: _FakePlan) -> Any:
+            raise AssertionError("missing API key should stop before execution")
 
-    _run_command(monkeypatch, config)
+    class _FakeFixedPortLock:
+        def acquire(self) -> None:
+            events.append("fixed_lock")
 
+        def release(self) -> None:
+            events.append("release_fixed_lock")
 
-def test_legacy_rollout_fingerprint_changes_with_grader_fingerprint() -> None:
-    first = _compute_legacy_rollout_fingerprint(
-        module_fingerprint="module",
-        grader_fingerprint="grader-v1",
+    def _assert_port_free() -> None:
+        events.append("port")
+
+    def _resolve_api_key(self: EvalCommand, cfg: Any) -> None:
+        events.append("api_key")
+        return None
+
+    async def _fail_if_called(*args: Any, **kwargs: Any) -> None:
+        raise AssertionError("startup should not happen without an API key")
+
+    monkeypatch.setattr(
+        "osmosis_ai.eval.evaluation.orchestrator.EvalOrchestrator",
+        _PendingOrchestrator,
     )
-    second = _compute_legacy_rollout_fingerprint(
-        module_fingerprint="module",
-        grader_fingerprint="grader-v2",
+    monkeypatch.setattr(
+        "osmosis_ai.eval.controller.locks.FixedPortLock",
+        lambda *args, **kwargs: _FakeFixedPortLock(),
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.eval.controller.locks.assert_user_server_port_free",
+        _assert_port_free,
+    )
+    monkeypatch.setattr(EvalCommand, "_resolve_api_key", _resolve_api_key)
+    monkeypatch.setattr(
+        "osmosis_ai.eval.controller.litellm_bridge.LiteLLMBridge.preflight_check",
+        _fail_if_called,
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.eval.controller.controller.EvalController.start",
+        _fail_if_called,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.eval.controller.process.start_user_server_process",
+        _fail_if_called,
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.eval.controller.process.wait_for_user_server_health",
+        _fail_if_called,
     )
 
-    assert first != second
+    result = EvalCommand().run(**_eval_run_kwargs())
+
+    assert result == 1
+    assert events[:4] == ["plan", "fixed_lock", "port", "api_key"]
+
+
+def test_pending_eval_missing_api_key_json_is_validation_error(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    project = _make_project(tmp_path / "project")
+    monkeypatch.chdir(project)
+    config = _make_config()
+    events: list[str] = []
+
+    _patch_eval_run_common(monkeypatch, project, config)
+
+    class _PendingOrchestrator:
+        def __init__(self, **kwargs: Any) -> None:
+            pass
+
+        def plan(self) -> _FakePlan:
+            events.append("plan")
+            return _FakePlan(has_pending_work=True, already_completed=False)
+
+        async def run_prepared(self, plan: _FakePlan) -> Any:
+            raise AssertionError("missing API key should stop before execution")
+
+    class _FakeFixedPortLock:
+        def acquire(self) -> None:
+            events.append("fixed_lock")
+
+        def release(self) -> None:
+            events.append("release_fixed_lock")
+
+    monkeypatch.setattr(
+        "osmosis_ai.eval.evaluation.orchestrator.EvalOrchestrator",
+        _PendingOrchestrator,
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.eval.controller.locks.FixedPortLock",
+        lambda *args, **kwargs: _FakeFixedPortLock(),
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.eval.controller.locks.assert_user_server_port_free",
+        lambda: events.append("port"),
+    )
+    monkeypatch.setattr(
+        EvalCommand,
+        "_resolve_api_key",
+        lambda self, cfg: events.append("api_key") or None,
+    )
+
+    with override_output_context(format=OutputFormat.json):
+        with pytest.raises(CLIError) as exc_info:
+            EvalCommand().run(**_eval_run_kwargs())
+
+    assert exc_info.value.code == "VALIDATION"
+    assert "LLM API key is required" in exc_info.value.message
+    assert events == [
+        "plan",
+        "fixed_lock",
+        "port",
+        "api_key",
+        "release_fixed_lock",
+    ]
 
 
 def test_eval_run_config_path_must_be_under_current_project(

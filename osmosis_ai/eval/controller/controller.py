@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import secrets
+import socket
 import time
 import uuid
 from dataclasses import dataclass
@@ -31,6 +33,18 @@ class EvalControllerConfig:
     controller_port: int | None = None
 
 
+def _find_free_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        return int(sock.getsockname()[1])
+
+
+def _is_port_occupied(port: int) -> bool:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.settimeout(0.2)
+        return sock.connect_ex(("127.0.0.1", port)) == 0
+
+
 class EvalController(RolloutDriver):
     def __init__(self, *, config: EvalControllerConfig) -> None:
         self.config = config
@@ -41,7 +55,7 @@ class EvalController(RolloutDriver):
             base_url=config.base_url,
         )
         self.server = EvalControllerServer(api_key=self.api_key, bridge=self.bridge)
-        self.controller_port = config.controller_port or 8067
+        self.controller_port = config.controller_port
         self._server_task: asyncio.Task[Any] | None = None
         self._uvicorn_server: Any | None = None
 
@@ -51,10 +65,68 @@ class EvalController(RolloutDriver):
 
     @property
     def base_url(self) -> str:
+        if self.controller_port is None:
+            raise RuntimeError("EvalController has not been assigned a port")
         return f"http://127.0.0.1:{self.controller_port}"
 
     def _new_rollout_id(self) -> str:
         return uuid.uuid4().hex
+
+    async def start(self) -> None:
+        if self._server_task is not None:
+            raise RuntimeError("EvalController is already started")
+        if self.controller_port is None:
+            self.controller_port = _find_free_port()
+        if _is_port_occupied(self.controller_port):
+            raise TimeoutError(
+                f"EvalControllerServer did not bind 127.0.0.1:{self.controller_port}: "
+                "port is already occupied"
+            )
+
+        import uvicorn
+
+        config = uvicorn.Config(
+            self.server.app,
+            host="127.0.0.1",
+            port=self.controller_port,
+            log_level="warning",
+        )
+        self._uvicorn_server = uvicorn.Server(config)
+        self._server_task = asyncio.create_task(self._uvicorn_server.serve())
+
+        deadline = time.monotonic() + 10.0
+        while time.monotonic() < deadline:
+            if self._uvicorn_server is not None and self._uvicorn_server.started:
+                return
+            if self._server_task.done():
+                task_error: BaseException | None = None
+                with contextlib.suppress(asyncio.CancelledError):
+                    task_error = self._server_task.exception()
+                self._server_task = None
+                self._uvicorn_server = None
+                raise TimeoutError(
+                    f"EvalControllerServer did not bind 127.0.0.1:{self.controller_port}"
+                ) from task_error
+            await asyncio.sleep(0.05)
+
+        await self.stop()
+        raise TimeoutError(
+            f"EvalControllerServer did not bind 127.0.0.1:{self.controller_port}"
+        )
+
+    async def stop(self) -> None:
+        for state in list(self.server._states.values()):
+            state.cancel_pending()
+
+        if self._uvicorn_server is not None:
+            self._uvicorn_server.should_exit = True
+
+        if self._server_task is not None:
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._server_task
+
+        self._server_task = None
+        self._uvicorn_server = None
 
     async def _post_rollout(
         self, url: str, json: dict[str, Any], timeout: float
