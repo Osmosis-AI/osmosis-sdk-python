@@ -457,6 +457,87 @@ def test_pending_eval_allows_missing_api_key_for_no_auth_providers(
     ]
 
 
+def test_pending_eval_cli_error_from_run_prepared_returns_clean_rich_error(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys,
+) -> None:
+    project = _make_project(tmp_path / "project")
+    monkeypatch.chdir(project)
+    config = _make_config()
+
+    _patch_eval_run_common(monkeypatch, project, config)
+
+    class _FailingOrchestrator:
+        def __init__(self, **kwargs: Any) -> None:
+            pass
+
+        def plan(self) -> _FakePlan:
+            return _FakePlan(has_pending_work=True, already_completed=False)
+
+        async def run_prepared(self, plan: _FakePlan) -> Any:
+            raise CLIError("controller rejected callback")
+
+    class _FakeFixedPortLock:
+        def acquire(self) -> None:
+            return None
+
+        def release(self) -> None:
+            return None
+
+    class _FakeUserServerProcess:
+        async def terminate(self) -> None:
+            return None
+
+    async def _noop_async(*args: Any, **kwargs: Any) -> None:
+        return None
+
+    async def _start_user_server_process(*args: Any, **kwargs: Any) -> Any:
+        return _FakeUserServerProcess()
+
+    monkeypatch.setattr(
+        "osmosis_ai.eval.evaluation.orchestrator.EvalOrchestrator",
+        _FailingOrchestrator,
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.eval.controller.locks.FixedPortLock",
+        lambda *args, **kwargs: _FakeFixedPortLock(),
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.eval.controller.locks.assert_user_server_port_free",
+        lambda: None,
+    )
+    monkeypatch.setattr(EvalCommand, "_resolve_api_key", lambda self, cfg: None)
+    monkeypatch.setattr(
+        "osmosis_ai.eval.controller.litellm_bridge.LiteLLMBridge.preflight_check",
+        _noop_async,
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.eval.controller.controller.EvalController.start",
+        _noop_async,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.eval.controller.controller.EvalController.stop",
+        _noop_async,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.eval.controller.process.start_user_server_process",
+        _start_user_server_process,
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.eval.controller.process.wait_for_user_server_health",
+        _noop_async,
+    )
+
+    with override_output_context(format=OutputFormat.rich):
+        result = EvalCommand().run(**_eval_run_kwargs())
+
+    assert result == 1
+    assert "Error: controller rejected callback" in capsys.readouterr().err
+
+
 def test_pending_eval_configured_empty_api_key_env_json_is_validation_error(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

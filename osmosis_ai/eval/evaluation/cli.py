@@ -819,8 +819,8 @@ class EvalCommand:
                 await wait_for_user_server_health(process=user_server_process)
 
                 orch_result = await orchestrator.run_prepared(plan)
-            except CLIError:
-                raise
+            except CLIError as e:
+                return self._fail(f"Error: {e}", code=e.code)
             except Exception as e:
                 if debug:
                     import traceback

@@ -64,6 +64,7 @@ class EvalControllerServer:
             self._require_auth(request)
             rollout_id, sample_id = self._required_chat_headers(request)
             mode = self._multi_turn_mode(body)
+            self._chat_messages(body)
             stream = bool(body.get("stream", True))
             if stream:
                 return StreamingResponse(
@@ -159,6 +160,16 @@ class EvalControllerServer:
             )
         return mode
 
+    def _chat_messages(self, body: dict[str, Any]) -> list[dict[str, Any]]:
+        messages = body.get("messages", [])
+        if not isinstance(messages, list) or not all(
+            isinstance(message, dict) for message in messages
+        ):
+            raise HTTPException(
+                status_code=400, detail="messages must be a list of objects"
+            )
+        return messages
+
     def _register_request(
         self,
         state: ControllerRolloutState,
@@ -167,7 +178,7 @@ class EvalControllerServer:
         mode: str,
         body: dict[str, Any],
     ) -> dict[str, Any]:
-        messages = preprocess_controller_messages(body.get("messages", []))
+        messages = preprocess_controller_messages(self._chat_messages(body))
         if mode == "single_sample" and sample_id in state.completed_sample_ids:
             tools = state.register_chat_reuse_branch(
                 sample_id, mode, messages, body.get("tools")

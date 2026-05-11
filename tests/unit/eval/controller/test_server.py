@@ -200,6 +200,27 @@ async def test_invalid_multi_turn_mode_returns_400_with_allowed_values(client) -
 
 
 @pytest.mark.asyncio
+async def test_invalid_message_item_returns_400_before_streaming(client) -> None:
+    async_client, server, bridge = client
+    state = server.get_rollout_state("r1")
+    assert state is not None
+
+    response = await async_client.post(
+        "/chat/completions",
+        headers=auth_headers(),
+        json={
+            "model": "openai/osmosis-rollout",
+            "messages": ["bad"],
+        },
+    )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "messages must be a list of objects"
+    assert bridge.calls == []
+    assert state.systemic_error is None
+
+
+@pytest.mark.asyncio
 async def test_single_sample_reuses_completed_branch_tools(client) -> None:
     async_client, server, bridge = client
 
