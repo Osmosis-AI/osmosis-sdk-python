@@ -699,8 +699,11 @@ class EvalCommand:
                 tag_prefix = f"[{result['model_tag']}] "
 
             reward_str = ""
+            rich_reward_str = ""
             if result["success"] and result.get("reward") is not None:
-                reward_str = f" [reward={result['reward']:.3f}]"
+                reward_label = f"[reward={result['reward']:.3f}]"
+                reward_str = f" {reward_label}"
+                rich_reward_str = f" {self.console.escape(reward_label)}"
 
             error_suffix = ""
             if not result["success"] and result.get("error"):
@@ -715,9 +718,12 @@ class EvalCommand:
                 self._stderr_line(line)
                 return
             status_styled = self.console.format_styled(status, status_style)
+            rich_prefix = self.console.escape(f"[{current}/{total}] {tag_prefix}")
+            rich_body = self.console.escape(f"({duration}, {tokens:,} tokens)")
+            rich_error_suffix = self.console.escape(error_suffix)
             self.console.print(
-                f"[{current}/{total}] {tag_prefix}{status_styled} "
-                f"({duration}, {tokens:,} tokens){reward_str}{error_suffix}"
+                f"{rich_prefix}{status_styled} "
+                f"{rich_body}{rich_reward_str}{rich_error_suffix}"
             )
 
         if not quiet and output.format is not OutputFormat.json:

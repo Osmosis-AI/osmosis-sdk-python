@@ -514,6 +514,108 @@ def test_pending_eval_configured_empty_api_key_env_json_is_validation_error(
     ]
 
 
+def test_pending_eval_progress_prints_reward_in_rich_output(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys,
+) -> None:
+    project = _make_project(tmp_path / "project")
+    monkeypatch.chdir(project)
+    config = _make_config(output_quiet=False)
+
+    _patch_eval_run_common(monkeypatch, project, config)
+
+    class _ProgressOrchestrator:
+        def __init__(self, **kwargs: Any) -> None:
+            self.on_progress = kwargs["on_progress"]
+
+        def plan(self) -> _FakePlan:
+            return _FakePlan(has_pending_work=True, already_completed=False)
+
+        async def run_prepared(self, plan: _FakePlan) -> Any:
+            self.on_progress(
+                1,
+                1,
+                {
+                    "success": True,
+                    "duration_ms": 3100,
+                    "tokens": 610,
+                    "reward": 1.0,
+                    "model_tag": None,
+                    "error": None,
+                },
+            )
+            return SimpleNamespace(
+                status="completed",
+                cache_path=plan.cache_path,
+                samples_path=plan.samples_path,
+                summary=plan.cache_data["summary"],
+                total_completed=1,
+                total_expected=1,
+                cache_data=plan.cache_data,
+                dataset_fingerprint_warning=None,
+            )
+
+    class _FakeFixedPortLock:
+        def acquire(self) -> None:
+            return None
+
+        def release(self) -> None:
+            return None
+
+    class _FakeUserServerProcess:
+        async def terminate(self) -> None:
+            return None
+
+    async def _noop_async(*args: Any, **kwargs: Any) -> None:
+        return None
+
+    async def _start_user_server_process(*args: Any, **kwargs: Any) -> Any:
+        return _FakeUserServerProcess()
+
+    monkeypatch.setattr(
+        "osmosis_ai.eval.evaluation.orchestrator.EvalOrchestrator",
+        _ProgressOrchestrator,
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.eval.controller.locks.FixedPortLock",
+        lambda *args, **kwargs: _FakeFixedPortLock(),
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.eval.controller.locks.assert_user_server_port_free",
+        lambda: None,
+    )
+    monkeypatch.setattr(EvalCommand, "_resolve_api_key", lambda self, cfg: None)
+    monkeypatch.setattr(
+        "osmosis_ai.eval.controller.litellm_bridge.LiteLLMBridge.preflight_check",
+        _noop_async,
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.eval.controller.controller.EvalController.start",
+        _noop_async,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.eval.controller.controller.EvalController.stop",
+        _noop_async,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.eval.controller.process.start_user_server_process",
+        _start_user_server_process,
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.eval.controller.process.wait_for_user_server_health",
+        _noop_async,
+    )
+
+    with override_output_context(format=OutputFormat.rich):
+        result = EvalCommand().run(**{**_eval_run_kwargs(), "quiet": False})
+
+    assert result == 0
+    assert "[reward=1.000]" in capsys.readouterr().out
+
+
 def test_eval_run_config_path_must_be_under_current_project(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
