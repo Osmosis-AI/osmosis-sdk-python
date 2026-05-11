@@ -58,6 +58,7 @@ def test_build_kwargs_uses_configured_model_and_filters_ignored_fields() -> None
         "temperature": 0.2,
         "top_p": 0.9,
         "max_tokens": 5,
+        "drop_params": True,
     }
 
 
@@ -73,7 +74,22 @@ def test_build_kwargs_forwards_tools() -> None:
         "model": "openai/real-model",
         "messages": [],
         "tools": [{"type": "function", "function": {"name": "lookup"}}],
+        "drop_params": True,
     }
+
+
+def test_build_kwargs_lets_litellm_drop_provider_unsupported_params() -> None:
+    bridge = LiteLLMBridge(model="openai/gpt-5-mini")
+
+    kwargs = bridge.build_kwargs(
+        {
+            "messages": [{"role": "user", "content": "hi"}],
+            "top_p": 1.0,
+        }
+    )
+
+    assert kwargs["top_p"] == 1.0
+    assert kwargs["drop_params"] is True
 
 
 def test_model_response_payload_mirrors_request_model_and_stream_delta_shape() -> None:

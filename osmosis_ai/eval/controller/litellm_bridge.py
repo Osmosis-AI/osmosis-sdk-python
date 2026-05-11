@@ -165,6 +165,7 @@ class LiteLLMBridge:
         kwargs: dict[str, Any] = {
             "model": self.model,
             "messages": body.get("messages", []),
+            "drop_params": True,
         }
         if self.api_key:
             kwargs["api_key"] = self.api_key
