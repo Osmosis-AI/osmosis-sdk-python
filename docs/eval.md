@@ -46,8 +46,8 @@ use separate eval configs.
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `agent_sec` | `450` | Max seconds to wait for the rollout completion callback. |
-| `grader_sec` | `150` | Max seconds to wait for the grader completion callback. |
+| `agent_workflow_timeout_s` | `450` | Max seconds to wait for the rollout completion callback. |
+| `grader_timeout_s` | `150` | Max seconds to wait for the grader completion callback. |
 
 **`[output]`**
 
@@ -85,8 +85,8 @@ batch_size = 1
 pass_threshold = 1.0
 
 [timeouts]
-agent_sec = 450
-grader_sec = 150
+agent_workflow_timeout_s = 450
+grader_timeout_s = 150
 
 [output]
 log_samples = false

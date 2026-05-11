@@ -325,7 +325,10 @@ def test_load_eval_config_timeout_defaults(tmp_path: Path) -> None:
 
 def test_load_eval_config_timeout_overrides(tmp_path: Path) -> None:
     config_path = tmp_path / "eval.toml"
-    _write_eval_config(config_path, "\n[timeouts]\nagent_sec = 12.5\ngrader_sec = 7\n")
+    _write_eval_config(
+        config_path,
+        "\n[timeouts]\nagent_workflow_timeout_s = 12.5\ngrader_timeout_s = 7\n",
+    )
 
     config = load_eval_config(config_path)
 
@@ -335,7 +338,10 @@ def test_load_eval_config_timeout_overrides(tmp_path: Path) -> None:
 
 def test_load_eval_config_rejects_invalid_timeout_values(tmp_path: Path) -> None:
     config_path = tmp_path / "eval.toml"
-    _write_eval_config(config_path, "\n[timeouts]\nagent_sec = 0\ngrader_sec = -1\n")
+    _write_eval_config(
+        config_path,
+        "\n[timeouts]\nagent_workflow_timeout_s = 0\ngrader_timeout_s = -1\n",
+    )
 
     with pytest.raises(CLIError, match="Invalid config"):
         load_eval_config(config_path)
