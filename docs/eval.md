@@ -23,9 +23,9 @@ project.
 
 | Key | Description |
 |-----|-------------|
-| `model` | Model id in LiteLLM form (e.g. `openai/gpt-5-mini`) or the model name expected by the OpenAI-compatible endpoint configured in `[llm].base_url`. |
-| `base_url` | Optional OpenAI-compatible API base. |
-| `api_key_env` | Optional environment variable name holding the API key. |
+| `model` | Model id in LiteLLM provider/model form, such as `openai/gpt-5-mini` or `hosted_vllm/Qwen/Qwen2.5-7B-Instruct`. |
+| `base_url` | Optional OpenAI-compatible API base for the selected LiteLLM provider. |
+| `api_key_env` | Optional environment variable name holding the API key; omit only for LiteLLM providers/endpoints that do not require credentials. |
 
 ### Optional sections
 
@@ -140,14 +140,15 @@ Each rollout directory must contain `pyproject.toml` so `uv run python
 
 ## Connecting to model endpoints
 
-Use `[llm].base_url` for OpenAI-compatible servers:
+Use `[llm].base_url` for OpenAI-compatible servers. The `model` still uses
+LiteLLM provider/model form; for no-auth local servers, omit `api_key_env`.
 
-| Serving | Example `base_url` |
-|---------|-------------------|
-| vLLM | `http://localhost:8001/v1` |
-| SGLang | `http://localhost:30000/v1` |
-| Ollama | `http://localhost:11434/v1` |
-| Osmosis inference | Use the URL provided for your deployment |
+| Serving | Example `model` | Example `base_url` |
+|---------|-----------------|--------------------|
+| vLLM | `hosted_vllm/Qwen/Qwen2.5-7B-Instruct` | `http://localhost:8001/v1` |
+| SGLang | `hosted_vllm/Qwen/Qwen2.5-7B-Instruct` | `http://localhost:30000/v1` |
+| Ollama | `ollama_chat/llama3.1` | `http://localhost:11434` |
+| Osmosis inference | Provider/model id for your deployment | URL provided for your deployment |
 
 ## pass@k
 
