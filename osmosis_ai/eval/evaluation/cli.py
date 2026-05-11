@@ -793,12 +793,6 @@ class EvalCommand:
                     api_key = self._resolve_api_key(config)
                 except CLIError as e:
                     return self._fail(f"Error: {e}")
-                if api_key is None:
-                    return self._fail(
-                        "Error: LLM API key is required for evaluation. "
-                        "Set [llm].api_key_env to an environment variable "
-                        "containing the provider API key."
-                    )
                 controller.config.api_key = api_key
                 controller.bridge.api_key = api_key
 
@@ -816,7 +810,7 @@ class EvalCommand:
                     invocation_id=task_id,
                     log_dir=plan.cache_path.parent,
                 )
-                await wait_for_user_server_health()
+                await wait_for_user_server_health(process=user_server_process)
 
                 orch_result = await orchestrator.run_prepared(plan)
             except CLIError:

@@ -280,8 +280,8 @@ def test_validate_eval_server_entrypoint_uses_fixed_port_lock(
         calls.append("start")
         return FakeProcess()
 
-    async def fake_wait_for_user_server_health(*, timeout_sec):
-        calls.append(f"health:{timeout_sec}")
+    async def fake_wait_for_user_server_health(*, timeout_sec, process):
+        calls.append(f"health:{timeout_sec}:{process.__class__.__name__}")
 
     monkeypatch.setattr(
         "osmosis_ai.eval.controller.locks.FixedPortLock",
@@ -308,7 +308,14 @@ def test_validate_eval_server_entrypoint_uses_fixed_port_lock(
         )
     )
 
-    assert calls == ["lock", "port", "start", "health:30.0", "terminate", "unlock"]
+    assert calls == [
+        "lock",
+        "port",
+        "start",
+        "health:30.0:FakeProcess",
+        "terminate",
+        "unlock",
+    ]
 
 
 def test_validate_eval_server_entrypoint_health_failure_is_cli_error(
@@ -336,7 +343,7 @@ def test_validate_eval_server_entrypoint_health_failure_is_cli_error(
         calls.append("start")
         return FakeProcess()
 
-    async def fake_wait_for_user_server_health(*, timeout_sec):
+    async def fake_wait_for_user_server_health(*, timeout_sec, process):
         calls.append("health")
         raise TimeoutError("server did not become healthy")
 

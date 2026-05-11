@@ -142,7 +142,7 @@ async def _validate_eval_server_entrypoint(
             raise CLIError(f"Eval server validation failed: {exc}") from exc
         try:
             try:
-                await wait_for_user_server_health(timeout_sec=30.0)
+                await wait_for_user_server_health(timeout_sec=30.0, process=process)
             except Exception as exc:
                 raise CLIError(f"Eval server health check failed: {exc}") from exc
         finally:

@@ -334,7 +334,7 @@ def test_eval_run_hash_payload_preserves_legacy_none_keys(
     )
 
 
-def test_pending_eval_checks_fixed_port_before_api_key(
+def test_pending_eval_allows_missing_api_key_for_no_auth_providers(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -354,7 +354,17 @@ def test_pending_eval_checks_fixed_port_before_api_key(
             return _FakePlan(has_pending_work=True, already_completed=False)
 
         async def run_prepared(self, plan: _FakePlan) -> Any:
-            raise AssertionError("missing API key should stop before execution")
+            events.append("run_prepared")
+            return SimpleNamespace(
+                status="completed",
+                cache_path=plan.cache_path,
+                samples_path=plan.samples_path,
+                summary=plan.cache_data["summary"],
+                total_completed=1,
+                total_expected=1,
+                cache_data=plan.cache_data,
+                dataset_fingerprint_warning=None,
+            )
 
     class _FakeFixedPortLock:
         def acquire(self) -> None:
@@ -370,8 +380,27 @@ def test_pending_eval_checks_fixed_port_before_api_key(
         events.append("api_key")
         return None
 
-    async def _fail_if_called(*args: Any, **kwargs: Any) -> None:
-        raise AssertionError("startup should not happen without an API key")
+    async def _preflight(self: Any) -> None:
+        events.append(f"preflight:{self.api_key!r}")
+
+    async def _start_controller(self: Any) -> None:
+        events.append("controller_start")
+
+    async def _stop_controller(self: Any) -> None:
+        events.append("controller_stop")
+
+    class _FakeUserServerProcess:
+        async def terminate(self) -> None:
+            events.append("terminate_user_server")
+
+    async def _start_user_server_process(*args: Any, **kwargs: Any) -> Any:
+        events.append("start_user_server")
+        return _FakeUserServerProcess()
+
+    async def _wait_for_user_server_health(
+        *, process: Any, timeout_sec: float = 30.0
+    ) -> None:
+        events.append(f"health:{process.__class__.__name__}")
 
     monkeypatch.setattr(
         "osmosis_ai.eval.evaluation.orchestrator.EvalOrchestrator",
@@ -388,35 +417,53 @@ def test_pending_eval_checks_fixed_port_before_api_key(
     monkeypatch.setattr(EvalCommand, "_resolve_api_key", _resolve_api_key)
     monkeypatch.setattr(
         "osmosis_ai.eval.controller.litellm_bridge.LiteLLMBridge.preflight_check",
-        _fail_if_called,
+        _preflight,
     )
     monkeypatch.setattr(
         "osmosis_ai.eval.controller.controller.EvalController.start",
-        _fail_if_called,
+        _start_controller,
+        raising=False,
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.eval.controller.controller.EvalController.stop",
+        _stop_controller,
         raising=False,
     )
     monkeypatch.setattr(
         "osmosis_ai.eval.controller.process.start_user_server_process",
-        _fail_if_called,
+        _start_user_server_process,
     )
     monkeypatch.setattr(
         "osmosis_ai.eval.controller.process.wait_for_user_server_health",
-        _fail_if_called,
+        _wait_for_user_server_health,
     )
 
     result = EvalCommand().run(**_eval_run_kwargs())
 
-    assert result == 1
-    assert events[:4] == ["plan", "fixed_lock", "port", "api_key"]
+    assert result == 0
+    assert events == [
+        "plan",
+        "fixed_lock",
+        "port",
+        "api_key",
+        "preflight:None",
+        "controller_start",
+        "start_user_server",
+        "health:_FakeUserServerProcess",
+        "run_prepared",
+        "terminate_user_server",
+        "controller_stop",
+        "release_fixed_lock",
+    ]
 
 
-def test_pending_eval_missing_api_key_json_is_validation_error(
+def test_pending_eval_configured_empty_api_key_env_json_is_validation_error(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
     project = _make_project(tmp_path / "project")
     monkeypatch.chdir(project)
-    config = _make_config()
+    config = _make_config(llm_api_key_env="MISSING_KEY")
     events: list[str] = []
 
     _patch_eval_run_common(monkeypatch, project, config)
@@ -430,7 +477,9 @@ def test_pending_eval_missing_api_key_json_is_validation_error(
             return _FakePlan(has_pending_work=True, already_completed=False)
 
         async def run_prepared(self, plan: _FakePlan) -> Any:
-            raise AssertionError("missing API key should stop before execution")
+            raise AssertionError(
+                "empty configured API key should stop before execution"
+            )
 
     class _FakeFixedPortLock:
         def acquire(self) -> None:
@@ -451,23 +500,16 @@ def test_pending_eval_missing_api_key_json_is_validation_error(
         "osmosis_ai.eval.controller.locks.assert_user_server_port_free",
         lambda: events.append("port"),
     )
-    monkeypatch.setattr(
-        EvalCommand,
-        "_resolve_api_key",
-        lambda self, cfg: events.append("api_key") or None,
-    )
-
     with override_output_context(format=OutputFormat.json):
         with pytest.raises(CLIError) as exc_info:
             EvalCommand().run(**_eval_run_kwargs())
 
     assert exc_info.value.code == "VALIDATION"
-    assert "LLM API key is required" in exc_info.value.message
+    assert "Environment variable 'MISSING_KEY'" in exc_info.value.message
     assert events == [
         "plan",
         "fixed_lock",
         "port",
-        "api_key",
         "release_fixed_lock",
     ]
 

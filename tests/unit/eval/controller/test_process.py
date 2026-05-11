@@ -7,7 +7,11 @@ import httpx
 import pytest
 
 import osmosis_ai.eval.controller.process as process_mod
-from osmosis_ai.eval.controller.locks import FixedPortLock, assert_user_server_port_free
+from osmosis_ai.eval.controller.locks import (
+    FixedPortLock,
+    assert_user_server_port_free,
+    fixed_port_lock_path,
+)
 from osmosis_ai.eval.controller.process import (
     UserServerProcess,
     build_user_server_command,
@@ -72,6 +76,29 @@ def test_fixed_port_lock_accepts_timeout_and_custom_path(tmp_path: Path) -> None
     lock.release()
 
 
+def test_fixed_port_lock_path_is_shared_across_projects(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    project_a = tmp_path / "project-a"
+    project_b = tmp_path / "project-b"
+    for project in (project_a, project_b):
+        (project / ".osmosis").mkdir(parents=True)
+        (project / ".osmosis" / "project.toml").write_text(
+            "[project]\nname='test'\n",
+            encoding="utf-8",
+        )
+
+    monkeypatch.chdir(project_a)
+    lock_a = fixed_port_lock_path()
+    monkeypatch.chdir(project_b)
+    lock_b = fixed_port_lock_path()
+
+    assert lock_a == lock_b
+    assert project_a.resolve() not in lock_a.parents
+    assert project_b.resolve() not in lock_a.parents
+    assert lock_a.name == "user-server-8000.lock"
+
+
 def test_process_lifecycle_helpers_are_async() -> None:
     assert inspect.iscoroutinefunction(start_user_server_process)
     assert inspect.iscoroutinefunction(wait_for_user_server_health)
@@ -96,6 +123,36 @@ async def test_wait_for_user_server_health_requires_200(
 
     with pytest.raises(TimeoutError, match=r"127\.0\.0\.1:8000"):
         await wait_for_user_server_health(timeout_sec=0.01)
+
+
+@pytest.mark.asyncio
+async def test_wait_for_user_server_health_rejects_healthy_response_after_process_exit(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeProcess:
+        returncode = None
+
+    fake_process = FakeProcess()
+
+    class FakeClient:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return None
+
+        async def get(self, url, timeout):
+            fake_process.returncode = 2
+            return httpx.Response(200)
+
+    monkeypatch.setattr(process_mod.httpx, "AsyncClient", lambda: FakeClient())
+
+    user_server = UserServerProcess(
+        process=fake_process,  # type: ignore[arg-type]
+        log_path=Path("server.log"),
+    )
+    with pytest.raises(RuntimeError, match="exited before becoming healthy"):
+        await wait_for_user_server_health(timeout_sec=1.0, process=user_server)
 
 
 async def _instant_sleep():

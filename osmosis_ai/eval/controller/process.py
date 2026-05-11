@@ -70,6 +70,31 @@ class UserServerProcess:
             await self.process.wait()
 
 
+def _user_server_returncode(
+    process: UserServerProcess | asyncio.subprocess.Process | object,
+) -> int | None:
+    raw_process = process.process if isinstance(process, UserServerProcess) else process
+    return getattr(raw_process, "returncode", None)
+
+
+def _raise_if_user_server_exited(
+    process: UserServerProcess | asyncio.subprocess.Process | None,
+) -> None:
+    if process is None:
+        return
+    returncode = _user_server_returncode(process)
+    if returncode is None:
+        return
+
+    message = (
+        "User rollout server exited before becoming healthy on "
+        f"127.0.0.1:{USER_SERVER_PORT} (exit code {returncode})."
+    )
+    if isinstance(process, UserServerProcess):
+        message += f" See log: {process.log_path}"
+    raise RuntimeError(message)
+
+
 async def start_user_server_process(
     *,
     project_root: Path,
@@ -109,20 +134,27 @@ async def start_user_server_process(
     return UserServerProcess(process=process, log_path=log_path)
 
 
-async def wait_for_user_server_health(*, timeout_sec: float = 30.0) -> None:
+async def wait_for_user_server_health(
+    *,
+    timeout_sec: float = 30.0,
+    process: UserServerProcess | asyncio.subprocess.Process | None = None,
+) -> None:
     deadline = time.monotonic() + timeout_sec
     last_error: Exception | None = None
     async with httpx.AsyncClient() as client:
         while time.monotonic() < deadline:
+            _raise_if_user_server_exited(process)
             try:
                 response = await client.get(
                     f"http://127.0.0.1:{USER_SERVER_PORT}/health",
                     timeout=0.5,
                 )
-                if response.status_code == 200:
-                    return
             except Exception as exc:
                 last_error = exc
+            else:
+                if response.status_code == 200:
+                    _raise_if_user_server_exited(process)
+                    return
             await asyncio.sleep(0.1)
     raise TimeoutError(
         "User rollout server did not become healthy on "

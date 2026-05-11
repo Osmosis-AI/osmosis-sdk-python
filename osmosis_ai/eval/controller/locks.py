@@ -1,11 +1,11 @@
 from __future__ import annotations
 
+import os
 import socket
+import tempfile
 from pathlib import Path
 
 from filelock import FileLock
-
-from osmosis_ai.eval.evaluation.cache import _get_cache_root
 
 USER_SERVER_HOST = "127.0.0.1"
 USER_SERVER_PORT = 8000
@@ -21,7 +21,17 @@ def assert_user_server_port_free(
 
 
 def fixed_port_lock_path() -> Path:
-    return _get_cache_root() / "locks" / "user-server-8000.lock"
+    if os.name == "nt":
+        root = Path(os.environ.get("LOCALAPPDATA") or tempfile.gettempdir())
+        return root / "OsmosisAI" / "locks" / f"user-server-{USER_SERVER_PORT}.lock"
+
+    runtime_dir = os.environ.get("XDG_RUNTIME_DIR")
+    if runtime_dir:
+        root = Path(runtime_dir) / "osmosis-ai"
+    else:
+        uid = os.getuid() if hasattr(os, "getuid") else os.environ.get("USER", "user")
+        root = Path(tempfile.gettempdir()) / f"osmosis-ai-{uid}"
+    return root / "locks" / f"user-server-{USER_SERVER_PORT}.lock"
 
 
 class FixedPortLock:
