@@ -1,0 +1,45 @@
+osmosis_ai/platform/auth/local_config.py
+  s_9477fa0c8717da::t_d17aff2ddf6090 1,7,12,14,18-19,23,26-27,32
+tests/unit/cli/test_command_result_migration_train_model_deployment_rollout.py
+  s_9477fa0c8717da::t_d4680d46cf856a 214-216,249-251,259-261
+  s_9477fa0c8717da::t_fb6434371fdbbe 36-39,57-61,63,234,292
+osmosis_ai/platform/cli/templates/AGENTS.md.tpl
+  s_9477fa0c8717da::t_19e827b30fe55e 9
+tests/unit/cli/test_dataset_commands_json.py
+  s_9477fa0c8717da::t_8fdf84bf486f1a 98
+tests/unit/cli/test_train_info_checkpoints.py
+  s_9477fa0c8717da::t_431fff8cef76b1 7,22-23,37,39-40,42-45,84-86,90,92-93,132-134,138,140-141,157-159,163,165-166,196-198,202,204-205,220-222,226,228-229
+  s_9477fa0c8717da::t_422e680b11fd83 41
+tests/unit/cli/test_whoami.py
+  s_9477fa0c8717da::t_a6c12e96878533 117,217,408
+osmosis_ai/platform/cli/templates/gitignore.tpl
+  s_9477fa0c8717da::t_1da6567eb7497c 41
+tests/unit/platform/cli/test_utils.py
+  s_9477fa0c8717da::t_0a24c09e35bcbc 24-32
+tests/unit/auth/test_error_messages.py
+  s_9477fa0c8717da::t_f8a49646d98361 130,142
+  s_9477fa0c8717da::t_04d0ea24381109 185,201
+  s_9477fa0c8717da::t_6638aa3b59db72 38,216,221
+tests/unit/auth/test_local_config.py
+  s_9477fa0c8717da::t_186731f6c3763a 14,28,31-38,40-44,46,48-49,52-56,58,60
+  s_9477fa0c8717da::t_ca976d847b099b 22-25
+osmosis_ai/platform/cli/utils.py
+  s_9477fa0c8717da::t_10a3abf872be10 60-62
+  s_9477fa0c8717da::t_519670e6fefc87 314-315
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "65e940749356226b515593527cad631f7a81d127",
+  "prompts": {},
+  "sessions": {
+    "s_9477fa0c8717da": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "a15c2361-d4d8-4e57-b365-2161f14671da",
+        "model": "gpt-5.5-extra-high"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}
