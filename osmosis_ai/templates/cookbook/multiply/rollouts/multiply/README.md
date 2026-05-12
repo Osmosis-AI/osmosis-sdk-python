@@ -39,14 +39,23 @@ Step 3 — run a local eval against a JSONL dataset:
 
     osmosis --json eval run configs/eval/multiply.toml
 
-Step 4 — commit and push the rollout code from the Platform-created repository:
+Step 4 — upload or select the training dataset, then edit the training config:
+
+    osmosis --json dataset upload data/multiply.jsonl
+
+Update `configs/training/multiply.toml` with the uploaded dataset ID and the
+target `model_path` before submitting. The shipped config includes placeholder
+values that must be replaced for your project.
+
+Step 5 — commit and push the rollout code and configured training file from the
+Platform-created repository:
 
     git push
 
 Training submissions fetch code from the repository identified by the checkout's
 `origin` remote, so pushed code is required.
 
-Step 5 — submit a managed training run:
+Step 6 — submit a managed training run:
 
     osmosis --json train submit configs/training/multiply.toml
 

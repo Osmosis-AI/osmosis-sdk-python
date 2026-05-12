@@ -60,6 +60,11 @@ def test_next_steps_use_git_scoped_training_flow() -> None:
     assert ".osmosis/project.toml" not in rendered
     assert "linked workspace" not in rendered
     assert "X-Osmosis-Org" not in rendered
+    assert "osmosis dataset upload data/multiply.jsonl" in next_steps
+    assert (
+        "Edit configs/training/multiply.toml with the uploaded dataset ID and target model"
+        in next_steps
+    )
     assert "osmosis train submit configs/training/multiply.toml" in next_steps
 
 
@@ -106,6 +111,8 @@ def test_apply_command_writes_directly_into_project_canonical_layout(
     assert result.display_next_steps == [
         "pip install -e rollouts/multiply",
         "osmosis eval run configs/eval/multiply.toml --limit 1",
+        "osmosis dataset upload data/multiply.jsonl",
+        "Edit configs/training/multiply.toml with the uploaded dataset ID and target model",
         'git add . && git commit -m "add rollout template"',
         "git push",
         "osmosis train submit configs/training/multiply.toml",
