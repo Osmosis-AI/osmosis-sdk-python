@@ -117,59 +117,6 @@ def test_global_active_workspace_helpers_are_not_public_context_api() -> None:
         assert not hasattr(module, symbol), f"{module.__name__}.{symbol} remains"
 
 
-class TestRequireAuthMessages:
-    """Test _require_auth() no-arg calls require linked-project migration."""
-
-    @patch("osmosis_ai.platform.cli.utils.load_credentials", return_value=None)
-    def test_no_arg_requires_linked_project_before_login(
-        self, cred_mock: object
-    ) -> None:
-        """No-arg _require_auth is no longer an auth/workspace selector."""
-        from osmosis_ai.platform.cli.utils import _require_auth
-
-        with pytest.raises(CLIError, match="cloned Osmosis repository"):
-            _require_auth()
-
-        cred_mock.assert_not_called()
-
-    @patch("osmosis_ai.platform.cli.utils.platform_call")
-    def test_no_arg_does_not_auto_select_workspace(
-        self, platform_call_mock: object
-    ) -> None:
-        """No-arg _require_auth must not fall back to global active workspace."""
-        from osmosis_ai.platform.cli.utils import _require_auth
-
-        with pytest.raises(CLIError, match="cloned Osmosis repository"):
-            _require_auth()
-
-        platform_call_mock.assert_not_called()
-
-    @patch("osmosis_ai.platform.cli.utils.load_credentials", return_value=None)
-    def test_explicit_workspace_name_still_checks_login(self, _mock: object) -> None:
-        """Bootstrap flows passing workspace_name keep credential validation."""
-        from osmosis_ai.platform.cli.utils import _require_auth
-
-        with pytest.raises(CLIError, match="Not logged in"):
-            _require_auth(workspace_name="bootstrap-workspace")
-
-    @patch("osmosis_ai.platform.cli.utils.load_credentials")
-    def test_explicit_workspace_name_returns_credentials(
-        self, mock_load: object
-    ) -> None:
-        """Bootstrap flows can still pass an already-resolved workspace name."""
-        from osmosis_ai.platform.cli.utils import _require_auth
-
-        creds = _make_credentials()
-        mock_load.return_value = creds
-
-        workspace_name, resolved_credentials = _require_auth(
-            workspace_name="bootstrap-workspace"
-        )
-
-        assert workspace_name == "bootstrap-workspace"
-        assert resolved_credentials is creds
-
-
 class TestPlatformRequestMessages:
     """Test platform_request() error messages for each failure mode."""
 

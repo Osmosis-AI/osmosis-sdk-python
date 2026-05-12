@@ -297,17 +297,3 @@ def validate_list_options(
     if all_ and limit != DEFAULT_PAGE_SIZE:
         raise CLIError("--all and --limit are mutually exclusive.")
     return limit, all_
-
-
-def _require_auth(
-    *,
-    workspace_name: str | None = None,
-) -> tuple[str, Credentials]:
-    """Check that user is authenticated for legacy bootstrap flows."""
-    if workspace_name is None:
-        raise CLIError(
-            "This command requires a cloned Osmosis repository. "
-            "Run from the project root."
-        )
-    credentials = require_credentials()
-    return workspace_name, credentials

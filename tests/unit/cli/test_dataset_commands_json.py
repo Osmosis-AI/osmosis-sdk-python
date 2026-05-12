@@ -83,22 +83,6 @@ def test_dataset_validate_is_project_independent(
     assert rc == 0
 
 
-def test_require_auth_no_workspace_reports_linked_project_before_credentials(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    import osmosis_ai.platform.cli.utils as utils_module
-    from osmosis_ai.cli.errors import CLIError
-
-    monkeypatch.setattr(
-        utils_module,
-        "require_credentials",
-        lambda: pytest.fail("credentials should not be loaded"),
-    )
-
-    with pytest.raises(CLIError, match="cloned Osmosis repository"):
-        utils_module._require_auth()
-
-
 def _dataset(
     *,
     id: str = "ds_1",
