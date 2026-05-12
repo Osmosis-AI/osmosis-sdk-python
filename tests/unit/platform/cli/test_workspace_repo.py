@@ -87,6 +87,7 @@ class TestNormalizeGitIdentity:
             "https://github.com/acme/white space.git",
             "https://github.com/-bad/rollouts.git",
             "https://github.com/acme/bad~repo.git",
+            "https://[github.com/acme/rollouts.git",
         ],
     )
     def test_invalid_remote_rejected(self, url: str | None) -> None:

@@ -62,7 +62,10 @@ def _parse_git_remote_url(url: str) -> SplitResult:
             f"ssh://{scp_like.group('user')}@{scp_like.group('host')}/"
             f"{scp_like.group('path')}"
         )
-    return urlsplit(url)
+    try:
+        return urlsplit(url)
+    except ValueError as exc:
+        raise CLIError("Git remote URL must be a valid URL.") from exc
 
 
 def _normalized_github_path(path: str) -> str:

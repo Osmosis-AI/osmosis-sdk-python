@@ -116,6 +116,16 @@ def test_local_context_ignores_invalid_origin(tmp_path: Path) -> None:
     assert ctx.repo_url is None
 
 
+def test_local_context_ignores_malformed_origin(tmp_path: Path) -> None:
+    _repo(tmp_path, origin="https://[github.com/acme/rollouts.git")
+    _scaffold(tmp_path)
+
+    ctx = project_context.resolve_local_project_context(cwd=tmp_path)
+
+    assert ctx.git_identity is None
+    assert ctx.repo_url is None
+
+
 def test_platform_context_requires_credentials(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
