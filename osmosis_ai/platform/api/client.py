@@ -9,24 +9,19 @@ from osmosis_ai.platform.auth.platform_client import platform_request
 from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE
 
 from .models import (
-    DatasetAffectedResources,
     DatasetDownloadInfo,
     DatasetFile,
-    DeleteTrainingRunResult,
     DeploymentInfo,
     DeploymentSummary,
-    ModelAffectedResources,
     PaginatedBaseModels,
     PaginatedDatasets,
     PaginatedDeployments,
     PaginatedRollouts,
     PaginatedTrainingRuns,
-    RenameDeploymentResult,
     SubmitTrainingRunResult,
     TrainingRunCheckpoints,
     TrainingRunDetail,
     TrainingRunMetrics,
-    WorkspaceDeletionStatus,
 )
 
 if TYPE_CHECKING:
@@ -94,63 +89,6 @@ class OsmosisClient:
                         "connected_repo": ws.get("connected_repo"),
                     }
         return {"found": False}
-
-    def list_workspaces(
-        self,
-        *,
-        credentials: Credentials | None = None,
-    ) -> dict[str, Any]:
-        """List all workspaces the user belongs to."""
-        return platform_request(
-            "/api/cli/workspaces",
-            credentials=credentials,
-            require_workspace=False,
-        )
-
-    def create_workspace(
-        self,
-        name: str,
-        timezone: str = "UTC",
-        *,
-        credentials: Credentials | None = None,
-    ) -> dict[str, Any]:
-        """Create a new workspace (organization)."""
-        return platform_request(
-            "/api/cli/workspaces",
-            method="POST",
-            data={"name": name, "timezone": timezone},
-            credentials=credentials,
-            require_workspace=False,
-        )
-
-    def delete_workspace(
-        self,
-        workspace_id: str,
-        *,
-        credentials: Credentials | None = None,
-    ) -> bool:
-        """Delete a workspace (organization)."""
-        platform_request(
-            f"/api/cli/workspaces/{_safe_path(workspace_id)}",
-            method="DELETE",
-            credentials=credentials,
-            require_workspace=False,
-        )
-        return True
-
-    def get_workspace_deletion_status(
-        self,
-        workspace_id: str,
-        *,
-        credentials: Credentials | None = None,
-    ) -> WorkspaceDeletionStatus:
-        """Get workspace deletion readiness status."""
-        data = platform_request(
-            f"/api/cli/workspaces/{_safe_path(workspace_id)}/deletion-status",
-            credentials=credentials,
-            require_workspace=False,
-        )
-        return WorkspaceDeletionStatus.from_dict(data)
 
     # ── Datasets ─────────────────────────────────────────────────────
 
@@ -276,36 +214,6 @@ class OsmosisClient:
         )
         return DatasetDownloadInfo.from_dict(data)
 
-    def delete_dataset(
-        self,
-        file_id: str,
-        *,
-        credentials: Credentials | None = None,
-        workspace_id: str,
-    ) -> bool:
-        platform_request(
-            f"/api/cli/datasets/{_safe_path(file_id)}",
-            method="DELETE",
-            credentials=credentials,
-            workspace_id=workspace_id,
-        )
-        return True
-
-    def get_dataset_affected_resources(
-        self,
-        file_id: str,
-        *,
-        credentials: Credentials | None = None,
-        workspace_id: str,
-    ) -> DatasetAffectedResources:
-        """Get affected resources for a dataset deletion confirmation."""
-        data = platform_request(
-            f"/api/cli/datasets/{_safe_path(file_id)}/affected-resources",
-            credentials=credentials,
-            workspace_id=workspace_id,
-        )
-        return DatasetAffectedResources.from_dict(data)
-
     # ── Training Runs ─────────────────────────────────────────────
 
     def submit_training_run(
@@ -398,22 +306,6 @@ class OsmosisClient:
             workspace_id=workspace_id,
         )
 
-    def delete_training_run(
-        self,
-        run_id: str,
-        *,
-        credentials: Credentials | None = None,
-        workspace_id: str,
-    ) -> DeleteTrainingRunResult:
-        """Delete a training run (stops it first if active)."""
-        data = platform_request(
-            f"/api/cli/training-runs/{_safe_path(run_id)}",
-            method="DELETE",
-            credentials=credentials,
-            workspace_id=workspace_id,
-        )
-        return DeleteTrainingRunResult.from_dict(data)
-
     def get_training_run_metrics(
         self,
         run_id: str,
@@ -464,37 +356,6 @@ class OsmosisClient:
             workspace_id=workspace_id,
         )
         return PaginatedBaseModels.from_dict(data)
-
-    def delete_model(
-        self,
-        model_id: str,
-        *,
-        credentials: Credentials | None = None,
-        workspace_id: str,
-    ) -> bool:
-        """Delete a model with full cascade cleanup."""
-        platform_request(
-            f"/api/cli/models/{_safe_path(model_id)}",
-            method="DELETE",
-            credentials=credentials,
-            workspace_id=workspace_id,
-        )
-        return True
-
-    def get_model_affected_resources(
-        self,
-        model_id: str,
-        *,
-        credentials: Credentials | None = None,
-        workspace_id: str,
-    ) -> ModelAffectedResources:
-        """Get affected resources for a model deletion."""
-        data = platform_request(
-            f"/api/cli/models/{_safe_path(model_id)}/affected-resources",
-            credentials=credentials,
-            workspace_id=workspace_id,
-        )
-        return ModelAffectedResources.from_dict(data)
 
     # ── Deployments ───────────────────────────────────────────────
     # All mutating endpoints key off `checkpoint` (UUID or checkpoint_name).
@@ -569,44 +430,6 @@ class OsmosisClient:
             workspace_id=workspace_id,
         )
         return DeploymentSummary.from_dict(data)
-
-    def rename_checkpoint(
-        self,
-        checkpoint: str,
-        new_name: str,
-        *,
-        credentials: Credentials | None = None,
-        workspace_id: str,
-    ) -> RenameDeploymentResult:
-        """Rename a LoRA checkpoint.
-
-        Renaming an ``active`` deployment also re-registers the LoRA with
-        inference under the new name.
-        """
-        data = platform_request(
-            f"/api/cli/deployments/{_safe_path(checkpoint)}",
-            method="PATCH",
-            data={"checkpoint_name": new_name},
-            credentials=credentials,
-            workspace_id=workspace_id,
-        )
-        return RenameDeploymentResult.from_dict(data)
-
-    def delete_deployment(
-        self,
-        checkpoint: str,
-        *,
-        credentials: Credentials | None = None,
-        workspace_id: str,
-    ) -> bool:
-        """Delete a deployment record (idempotent)."""
-        platform_request(
-            f"/api/cli/deployments/{_safe_path(checkpoint)}",
-            method="DELETE",
-            credentials=credentials,
-            workspace_id=workspace_id,
-        )
-        return True
 
     # ── Training-run checkpoints ──────────────────────────────────
     # Still used by `osmosis train status` to list deployable checkpoints.

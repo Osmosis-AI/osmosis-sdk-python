@@ -121,36 +121,6 @@ def test_project_link_by_workspace_id_writes_mapping(
     )
 
 
-def test_link_alias_matches_project_link(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    isolated_mapping: Path,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    project = _make_project(tmp_path / "project")
-    monkeypatch.chdir(project)
-    monkeypatch.setattr(
-        "osmosis_ai.platform.cli.project.load_credentials", lambda: _Creds()
-    )
-    monkeypatch.setattr(
-        "osmosis_ai.platform.cli.project.list_accessible_workspaces",
-        lambda *, credentials: [_workspace()],
-    )
-    _allow_matching_origin(monkeypatch)
-
-    assert main(["--json", "link", "--workspace", "ws_1", "--yes"]) == 0
-    payload = json.loads(capsys.readouterr().out)
-    assert "data" not in payload
-    assert payload["resource"]["workspace"]["id"] == "ws_1"
-    raw = json.loads(isolated_mapping.read_text(encoding="utf-8"))
-    assert (
-        raw["platforms"]["https://platform.osmosis.ai"]["projects"][
-            str(project.resolve())
-        ]["workspaceId"]
-        == "ws_1"
-    )
-
-
 def test_project_link_non_interactive_requires_workspace_and_yes(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -164,6 +134,64 @@ def test_project_link_non_interactive_requires_workspace_and_yes(
 
     assert rc == 1
     assert "INTERACTIVE_REQUIRED" in capsys.readouterr().err
+
+
+def test_project_link_no_accessible_workspaces_points_to_platform_setup(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    isolated_mapping: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    project = _make_project(tmp_path / "project")
+    monkeypatch.chdir(project)
+    monkeypatch.setattr(
+        "osmosis_ai.platform.cli.project.load_credentials", lambda: _Creds()
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.cli.project.list_accessible_workspaces",
+        lambda *, credentials: [],
+    )
+
+    rc = main(["--json", "project", "link", "--workspace", "ws_1", "--yes"])
+
+    assert rc == 1
+    error = json.loads(capsys.readouterr().err)["error"]
+    assert "No accessible Osmosis workspaces" in error["message"]
+    assert "Platform" in error["message"]
+    assert "Git Sync" in error["message"]
+    assert "osmosis workspace" not in error["message"]
+    assert "workspace create" not in error["message"]
+    assert "workspace list" not in error["message"]
+    assert not isolated_mapping.exists()
+
+
+def test_project_link_workspace_not_found_points_to_platform_setup(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    isolated_mapping: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    project = _make_project(tmp_path / "project")
+    monkeypatch.chdir(project)
+    monkeypatch.setattr(
+        "osmosis_ai.platform.cli.project.load_credentials", lambda: _Creds()
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.cli.project.list_accessible_workspaces",
+        lambda *, credentials: [_workspace(workspace_id="ws_other", name="other")],
+    )
+
+    rc = main(["--json", "project", "link", "--workspace", "missing", "--yes"])
+
+    assert rc == 1
+    error = json.loads(capsys.readouterr().err)["error"]
+    assert "Workspace 'missing' not found" in error["message"]
+    assert "Platform" in error["message"]
+    assert "Git Sync" in error["message"]
+    assert "osmosis workspace" not in error["message"]
+    assert "workspace create" not in error["message"]
+    assert "workspace list" not in error["message"]
+    assert not isolated_mapping.exists()
 
 
 def test_project_unlink_is_idempotent_without_login(
@@ -272,6 +300,63 @@ def test_project_link_requires_connected_repo(
     assert not isolated_mapping.exists()
 
 
+def test_project_link_invalid_connected_repo_url_mentions_git_sync_settings(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    isolated_mapping: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    project = _make_project(tmp_path / "project")
+    monkeypatch.chdir(project)
+    monkeypatch.setattr(
+        "osmosis_ai.platform.cli.project.load_credentials", lambda: _Creds()
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.cli.project.list_accessible_workspaces",
+        lambda *, credentials: [_workspace(repo_url="not-a-git-url")],
+    )
+
+    rc = main(["--json", "project", "link", "--workspace", "ws_1", "--yes"])
+
+    assert rc == 1
+    error = json.loads(capsys.readouterr().err)["error"]
+    assert "Platform/Git Sync connected repository URL" in error["message"]
+    assert "Update Git Sync settings" in error["message"]
+    assert "https://platform.osmosis.ai/team-alpha/integrations/git" in error["message"]
+    assert not isolated_mapping.exists()
+
+
+def test_project_link_requires_origin_for_git_sync_repo_checkout(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    isolated_mapping: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    project = _make_project(tmp_path / "project")
+    monkeypatch.chdir(project)
+    monkeypatch.setattr(
+        "osmosis_ai.platform.cli.project.load_credentials", lambda: _Creds()
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.cli.project.list_accessible_workspaces",
+        lambda *, credentials: [_workspace()],
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.cli.workspace_repo.get_local_git_remote_url",
+        lambda project_root: None,
+    )
+
+    rc = main(["--json", "project", "link", "--workspace", "ws_1", "--yes"])
+
+    assert rc == 1
+    error = json.loads(capsys.readouterr().err)["error"]
+    assert "Platform/Git Sync connected repository" in error["message"]
+    assert "Git Sync repo" in error["message"]
+    assert "has no `origin` remote" in error["message"]
+    assert _CONNECTED_REPO in error["message"]
+    assert not isolated_mapping.exists()
+
+
 def test_project_link_requires_matching_origin(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -297,51 +382,11 @@ def test_project_link_requires_matching_origin(
     assert rc == 1
     error = json.loads(capsys.readouterr().err)["error"]
     assert "must be run from a clone" in error["message"]
+    assert "Platform/Git Sync connected repository" in error["message"]
+    assert "Git Sync repo" in error["message"]
     assert _CONNECTED_REPO in error["message"]
     assert "https://github.com/acme/other.git" in error["message"]
     assert not isolated_mapping.exists()
-
-
-def test_project_info_refresh_updates_cached_workspace_metadata(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    isolated_mapping: Path,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    project = _make_project(tmp_path / "project")
-    _seed_link(
-        isolated_mapping,
-        project,
-        workspace_name="old-name",
-        repo_url="https://github.com/acme/old",
-    )
-    monkeypatch.chdir(project)
-    monkeypatch.setattr(
-        "osmosis_ai.platform.cli.project.load_credentials", lambda: _Creds()
-    )
-    monkeypatch.setattr(
-        "osmosis_ai.platform.cli.project.refresh_workspace_by_id",
-        lambda *, workspace_id, credentials: {
-            "id": workspace_id,
-            "name": "new-name",
-            "connected_repo": {
-                "repo_url": "https://user:token@github.com/acme/new.git?secret=x#main"
-            },
-        },
-    )
-
-    rc = main(["--json", "project", "info", "--refresh"])
-
-    assert rc == 0
-    payload = json.loads(capsys.readouterr().out)
-    assert payload["data"]["workspace"]["name"] == "new-name"
-    assert payload["data"]["workspace"]["repo_url"] == "https://github.com/acme/new.git"
-    raw = json.loads(isolated_mapping.read_text(encoding="utf-8"))
-    stored = raw["platforms"]["https://platform.osmosis.ai"]["projects"][
-        str(project.resolve())
-    ]
-    assert stored["workspaceName"] == "new-name"
-    assert stored["repoUrl"] == "https://github.com/acme/new.git"
 
 
 def test_project_link_rich_output_escapes_workspace_name(
@@ -395,135 +440,3 @@ def test_project_unlink_rich_output_escapes_workspace_name(
 
     assert rc == 0
     assert messages == ["Unlinked project from workspace: \\[red]team\\[/red]"]
-
-
-def test_project_info_shows_unlinked_success(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    isolated_mapping: Path,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    project = _make_project(tmp_path / "project")
-    monkeypatch.chdir(project)
-
-    rc = main(["--json", "project", "info"])
-
-    assert rc == 0
-    payload = json.loads(capsys.readouterr().out)
-    assert payload["data"]["project_root"] == str(project.resolve())
-    assert payload["data"]["linked"] is False
-
-
-def test_project_list_reads_local_mappings_without_login(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    isolated_mapping: Path,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    current_project = _make_project(tmp_path / "current")
-    archived_project = tmp_path / "archived"
-    _seed_link(
-        isolated_mapping,
-        current_project,
-        workspace_id="ws_current",
-        workspace_name="current-team",
-        repo_url="https://github.com/acme/current",
-    )
-    _seed_link(
-        isolated_mapping,
-        archived_project,
-        workspace_id="ws_archived",
-        workspace_name="archived-team",
-    )
-    monkeypatch.chdir(current_project)
-    monkeypatch.setattr(
-        "osmosis_ai.platform.cli.project.load_credentials",
-        lambda: pytest.fail("project list should not require credentials"),
-    )
-
-    rc = main(["--json", "project", "list"])
-
-    assert rc == 0
-    payload = json.loads(capsys.readouterr().out)
-    assert payload["total_count"] == 2
-    by_workspace = {item["workspace"]["id"]: item for item in payload["items"]}
-    current = by_workspace["ws_current"]
-    assert current["project_root"] == str(current_project.resolve())
-    assert current["workspace"] == {
-        "id": "ws_current",
-        "name": "current-team",
-        "repo_url": "https://github.com/acme/current",
-    }
-    assert current["platform"] == "https://platform.osmosis.ai"
-    assert current["exists"] is True
-    assert current["current"] is True
-    archived = by_workspace["ws_archived"]
-    assert archived["project_root"] == str(archived_project.resolve())
-    assert archived["exists"] is False
-    assert archived["current"] is False
-
-
-def test_project_list_filters_to_current_platform_by_default(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    isolated_mapping: Path,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    current_project = _make_project(tmp_path / "current")
-    staging_project = _make_project(tmp_path / "staging")
-    _seed_link(
-        isolated_mapping,
-        current_project,
-        workspace_id="ws_current",
-        workspace_name="current-team",
-    )
-    _seed_link(
-        isolated_mapping,
-        staging_project,
-        workspace_id="ws_staging",
-        workspace_name="staging-team",
-        platform_url="https://staging.osmosis.ai",
-    )
-    monkeypatch.chdir(tmp_path)
-
-    rc = main(["--json", "project", "list"])
-
-    assert rc == 0
-    payload = json.loads(capsys.readouterr().out)
-    assert [item["workspace"]["id"] for item in payload["items"]] == ["ws_current"]
-
-
-def test_project_list_all_platforms_includes_every_bucket(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    isolated_mapping: Path,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    current_project = _make_project(tmp_path / "current")
-    staging_project = _make_project(tmp_path / "staging")
-    _seed_link(
-        isolated_mapping,
-        current_project,
-        workspace_id="ws_current",
-        workspace_name="current-team",
-    )
-    _seed_link(
-        isolated_mapping,
-        staging_project,
-        workspace_id="ws_staging",
-        workspace_name="staging-team",
-        platform_url="https://staging.osmosis.ai",
-    )
-    monkeypatch.chdir(tmp_path)
-
-    rc = main(["--json", "project", "list", "--all-platforms"])
-
-    assert rc == 0
-    payload = json.loads(capsys.readouterr().out)
-    platforms_by_workspace = {
-        item["workspace"]["id"]: item["platform"] for item in payload["items"]
-    }
-    assert platforms_by_workspace == {
-        "ws_current": "https://platform.osmosis.ai",
-        "ws_staging": "https://staging.osmosis.ai",
-    }

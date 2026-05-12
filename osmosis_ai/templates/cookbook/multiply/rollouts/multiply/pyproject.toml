@@ -12,7 +12,7 @@
 #
 # After install, run the rollout through the project-rooted CLI workflow:
 #
-#   osmosis --json rollout validate configs/eval/multiply.toml
+#   osmosis --json eval run configs/eval/multiply.toml --limit 1
 #   osmosis --json eval run configs/eval/multiply.toml
 #   osmosis --json train submit configs/training/multiply.toml
 

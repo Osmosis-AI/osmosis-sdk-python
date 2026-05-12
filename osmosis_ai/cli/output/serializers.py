@@ -89,14 +89,6 @@ def serialize_model(model: BaseModelInfo) -> dict[str, Any]:
     }
 
 
-def serialize_workspace(workspace: dict[str, Any]) -> dict[str, Any]:
-    """Serialize a workspace dict."""
-    return {
-        "id": workspace["id"],
-        "name": workspace["name"],
-    }
-
-
 def serialize_rollout(rollout: RolloutInfo) -> dict[str, Any]:
     """Serialize a rollout for the public JSON contract."""
     return {

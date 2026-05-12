@@ -17,7 +17,6 @@ from osmosis_ai.cli.output import (
     ListColumn,
     ListResult,
     OperationResult,
-    OutputFormat,
     get_output_context,
     serialize_dataset,
 )
@@ -636,99 +635,6 @@ def download(
         status="success",
         resource=resource,
         message=f"Dataset downloaded: {destination}",
-    )
-
-
-def delete(
-    name: str,
-    yes: bool = False,
-) -> CommandResult:
-    """Delete a dataset."""
-    output = get_output_context()
-    if not yes and (output.format is not OutputFormat.rich or not output.interactive):
-        raise CLIError(
-            "Use --yes to confirm in non-interactive mode.",
-            code="INTERACTIVE_REQUIRED",
-        )
-
-    workspace = require_workspace_context()
-    credentials = workspace.credentials
-    workspace_id = workspace.workspace_id
-    from osmosis_ai.platform.api.client import OsmosisClient
-
-    client = OsmosisClient()
-
-    # Blocking preflight: abort if active training runs use this dataset
-    try:
-        affected = platform_call(
-            "Checking dataset dependencies...",
-            lambda: client.get_dataset_affected_resources(
-                name,
-                credentials=credentials,
-                workspace_id=workspace_id,
-            ),
-            output_console=console,
-        )
-    except Exception as e:
-        raise CLIError(f"Unable to verify dataset dependencies: {e}") from e
-
-    if affected.has_blocking_runs:
-        blocking_runs = [
-            {
-                "id": run.id,
-                "training_run_name": run.training_run_name,
-            }
-            for run in affected.affected_training_runs
-        ]
-        if output.format is not OutputFormat.rich:
-            raise CLIError(
-                "Cannot delete this dataset because training runs depend on it.",
-                code="CONFLICT",
-                details={"training_runs": blocking_runs},
-            )
-        lines = ["Cannot delete — active training runs depend on this dataset:"]
-        for run in affected.affected_training_runs:
-            run_name = (
-                console.escape(run.training_run_name)
-                if run.training_run_name
-                else "(unnamed)"
-            )
-            lines.append(f"  {run_name}")
-        lines.append("\nStop these training runs first, then retry.")
-        raise CLIError("\n".join(lines))
-
-    if not yes:
-        ds = platform_call(
-            "Fetching dataset...",
-            lambda: client.get_dataset(
-                name,
-                credentials=credentials,
-                workspace_id=workspace_id,
-            ),
-            output_console=console,
-        )
-        console.print(
-            f"  Dataset: {console.escape(ds.file_name)} ({format_size(ds.file_size)})"
-        )
-
-    from osmosis_ai.cli.prompts import require_confirmation
-
-    require_confirmation(f'Delete dataset "{name}"? This cannot be undone.', yes=yes)
-
-    platform_call(
-        "Deleting dataset...",
-        lambda: client.delete_dataset(
-            name,
-            credentials=credentials,
-            workspace_id=workspace_id,
-        ),
-        output_console=console,
-    )
-    return OperationResult(
-        operation="dataset.delete",
-        status="success",
-        resource={"id": name, **_workspace_result_context(workspace)},
-        message=f'Dataset "{name}" deleted.',
     )
 
 

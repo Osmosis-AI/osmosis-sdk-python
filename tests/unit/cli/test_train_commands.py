@@ -16,7 +16,6 @@ from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.cli.output import DetailResult, ListResult, OperationResult
 from osmosis_ai.cli.output.context import OutputFormat, override_output_context
 from osmosis_ai.platform.api.models import (
-    DeleteTrainingRunResult,
     PaginatedTrainingRuns,
     SubmitTrainingRunResult,
     TrainingRun,
@@ -1112,27 +1111,3 @@ class TestStop:
         assert result.status == "success"
         assert result.resource == {"name": "my-run", **_workspace_extra(Path.cwd())}
         assert result.message == 'Training run "my-run" stopped.'
-
-
-# ---------------------------------------------------------------------------
-# delete
-# ---------------------------------------------------------------------------
-
-
-class TestDelete:
-    def test_delete_basic(
-        self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
-    ) -> None:
-        class FakeClient:
-            def delete_training_run(self, run_id, *, workspace_id, credentials=None):
-                assert workspace_id == WORKSPACE_ID
-                return DeleteTrainingRunResult(deleted=True)
-
-        monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-        result = train_module.delete(name="my-run", yes=True)
-
-        assert isinstance(result, OperationResult)
-        assert result.operation == "train.delete"
-        assert result.status == "success"
-        assert result.resource == {"name": "my-run", **_workspace_extra(Path.cwd())}
-        assert result.message == 'Training run "my-run" deleted.'

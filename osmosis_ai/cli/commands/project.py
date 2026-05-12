@@ -1,8 +1,4 @@
-"""Local project management commands.
-
-A "project" is the on-disk directory created by ``osmosis init`` —
-distinct from a platform workspace linked via ``osmosis project link``.
-"""
+"""Local project management commands."""
 
 from __future__ import annotations
 
@@ -15,23 +11,6 @@ app: typer.Typer = typer.Typer(
     help="Manage the local Osmosis project.",
     no_args_is_help=True,
 )
-
-
-@app.command("init")
-def init(
-    name: str = typer.Argument(
-        ..., help="Project name (used for directory and config)."
-    ),
-    here: bool = typer.Option(
-        False,
-        "--here",
-        help="Initialize in current directory instead of creating a subdirectory.",
-    ),
-) -> Any:
-    """Initialize a new Osmosis project directory."""
-    from osmosis_ai.platform.cli.init import init as do_init
-
-    return do_init(name=name, here=here)
 
 
 @app.command("validate")
@@ -105,31 +84,3 @@ def unlink(
     from osmosis_ai.platform.cli.project import unlink_project
 
     return unlink_project(yes=yes)
-
-
-@app.command("info")
-def info(
-    refresh: bool = typer.Option(
-        False,
-        "--refresh",
-        help="Refresh cached workspace metadata from the platform when linked.",
-    ),
-) -> Any:
-    """Show project link information."""
-    from osmosis_ai.platform.cli.project import project_info
-
-    return project_info(refresh=refresh)
-
-
-@app.command("list")
-def list_(
-    all_platforms: bool = typer.Option(
-        False,
-        "--all-platforms",
-        help="Include linked projects for every platform URL in local config.",
-    ),
-) -> Any:
-    """List local project-to-workspace mappings."""
-    from osmosis_ai.platform.cli.project import list_projects
-
-    return list_projects(all_platforms=all_platforms)

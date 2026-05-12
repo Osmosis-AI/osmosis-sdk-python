@@ -19,6 +19,7 @@ from osmosis_ai.platform.api.models import (
     PaginatedRollouts,
     PaginatedTrainingRuns,
     RolloutInfo,
+    SubmitTrainingRunResult,
     TrainingRun,
     TrainingRunDetail,
     TrainingRunMetrics,
@@ -126,6 +127,90 @@ def test_train_list_json_returns_single_list_envelope(
     assert captured.out.count("\n") == 1
 
 
+def test_train_status_json_returns_detail_envelope(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _stub_workspace_context(monkeypatch)
+
+    class FakeClient:
+        def get_training_run(self, name, *, workspace_id, credentials=None):
+            assert workspace_id == WORKSPACE_ID
+            return TrainingRunDetail(
+                id="run_1",
+                name=name,
+                status="running",
+                model_name="Qwen/Qwen3",
+            )
+
+    monkeypatch.setattr("osmosis_ai.platform.api.client.OsmosisClient", FakeClient)
+
+    exit_code = cli.main(["--json", "train", "status", "reward-run"])
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    payload = json.loads(captured.out)
+    assert payload["data"]["name"] == "reward-run"
+    assert payload["data"]["status"] == "running"
+    _assert_workspace_context(payload["data"], Path.cwd())
+
+
+def test_train_submit_json_returns_operation_envelope(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    project = _make_rollout_project(tmp_path)
+    config_path = project / "configs" / "training" / "demo.toml"
+    config_path.write_text(
+        """
+[experiment]
+rollout = "demo"
+entrypoint = "main.py"
+model_path = "Qwen/Qwen3"
+dataset = "demo-dataset"
+
+[training]
+n_samples_per_prompt = 8
+rollout_batch_size = 64
+""".strip(),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(project)
+    _stub_workspace_context(monkeypatch)
+    monkeypatch.setattr(
+        "osmosis_ai.platform.cli.workspace_repo.require_git_top_level",
+        lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.cli.workspace_repo.validate_workspace_repo",
+        lambda **kwargs: None,
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.cli.workspace_repo.summarize_local_git_state",
+        lambda _root: None,
+    )
+
+    class FakeClient:
+        def submit_training_run(self, **kwargs):
+            assert kwargs["workspace_id"] == WORKSPACE_ID
+            assert kwargs["rollout_name"] == "demo"
+            return SubmitTrainingRunResult(
+                id="run_1",
+                name="reward-run",
+                status="pending",
+                created_at="2026-04-26T00:00:00Z",
+            )
+
+    monkeypatch.setattr("osmosis_ai.platform.api.client.OsmosisClient", FakeClient)
+
+    exit_code = cli.main(["--json", "train", "submit", str(config_path), "--yes"])
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    payload = json.loads(captured.out)
+    assert payload["operation"] == "train.submit"
+    assert payload["resource"]["name"] == "reward-run"
+    _assert_workspace_context(payload["resource"], project)
+
+
 def test_train_metrics_json_does_not_write_default_file(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -183,15 +268,27 @@ def test_train_metrics_json_does_not_write_default_file(
     assert not (osmosis_dir / "metrics").exists()
 
 
-def test_train_traces_json_returns_structured_not_implemented_error(capsys) -> None:
-    exit_code = cli.main(["--json", "train", "traces"])
+def test_train_stop_json_returns_operation_envelope(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _stub_workspace_context(monkeypatch)
+
+    class FakeClient:
+        def stop_training_run(self, name, *, workspace_id, credentials=None):
+            assert name == "reward-run"
+            assert workspace_id == WORKSPACE_ID
+            return {"stopped": True}
+
+    monkeypatch.setattr("osmosis_ai.platform.api.client.OsmosisClient", FakeClient)
+
+    exit_code = cli.main(["--json", "train", "stop", "reward-run", "--yes"])
     captured = capsys.readouterr()
 
-    assert exit_code == 1
-    assert captured.out == ""
-    payload = json.loads(captured.err)
-    assert payload["error"]["code"] == "NOT_IMPLEMENTED"
-    assert "train traces" in payload["error"]["message"]
+    assert exit_code == 0
+    payload = json.loads(captured.out)
+    assert payload["operation"] == "train.stop"
+    assert payload["resource"]["name"] == "reward-run"
+    _assert_workspace_context(payload["resource"], Path.cwd())
 
 
 def test_model_list_plain_is_tab_separated_rows(
@@ -290,10 +387,27 @@ def test_deployment_commands_json_return_results(
                 has_more=False,
             )
 
+        def get_deployment(self, checkpoint, *, workspace_id, credentials=None):
+            assert workspace_id == WORKSPACE_ID
+            return DeploymentInfo(
+                id="dep_1",
+                checkpoint_name=checkpoint,
+                status="active",
+                checkpoint_step=1,
+                base_model="Qwen/Qwen3",
+                training_run_name="reward-run",
+            )
+
         def deploy_checkpoint(self, checkpoint, *, workspace_id, credentials=None):
             assert workspace_id == WORKSPACE_ID
             return DeploymentSummary(
                 id="dep_1", checkpoint_name=checkpoint, status="active"
+            )
+
+        def undeploy_checkpoint(self, checkpoint, *, workspace_id, credentials=None):
+            assert workspace_id == WORKSPACE_ID
+            return DeploymentSummary(
+                id="dep_1", checkpoint_name=checkpoint, status="inactive"
             )
 
     monkeypatch.setattr("osmosis_ai.platform.api.client.OsmosisClient", FakeClient)
@@ -304,11 +418,25 @@ def test_deployment_commands_json_return_results(
     assert payload["items"][0]["checkpoint_name"] == "run-step-1"
     _assert_workspace_context(payload, Path.cwd())
 
+    exit_code = cli.main(["--json", "deployment", "info", "run-step-1"])
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert payload["data"]["checkpoint_name"] == "run-step-1"
+    _assert_workspace_context(payload["data"], Path.cwd())
+
     exit_code = cli.main(["--json", "deploy", "run-step-1"])
     payload = json.loads(capsys.readouterr().out)
     assert exit_code == 0
     assert payload["operation"] == "deploy"
     assert payload["resource"]["checkpoint_name"] == "run-step-1"
+    _assert_workspace_context(payload["resource"], Path.cwd())
+
+    exit_code = cli.main(["--json", "undeploy", "run-step-1"])
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert payload["operation"] == "undeploy"
+    assert payload["resource"]["checkpoint_name"] == "run-step-1"
+    assert payload["resource"]["status"] == "inactive"
     _assert_workspace_context(payload["resource"], Path.cwd())
 
 
@@ -335,20 +463,6 @@ def test_failed_deploy_json_exits_nonzero(
     assert payload["operation"] == "deploy"
     assert payload["status"] == "failed"
     _assert_workspace_context(payload["resource"], Path.cwd())
-
-
-def test_destructive_command_requires_yes_in_json(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    _stub_workspace_context(monkeypatch)
-
-    exit_code = cli.main(["--json", "deployment", "delete", "run-step-1"])
-    captured = capsys.readouterr()
-
-    assert exit_code != 0
-    assert captured.out == ""
-    payload = json.loads(captured.err)
-    assert payload["error"]["code"] == "INTERACTIVE_REQUIRED"
 
 
 def test_rollout_list_json_returns_envelope(
@@ -384,33 +498,3 @@ def test_rollout_list_json_returns_envelope(
     assert payload["items"][0]["name"] == "demo"
     assert payload["next_offset"] is None
     _assert_workspace_context(payload, Path.cwd())
-
-
-def test_rollout_validate_json_returns_detail_result(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    project = _make_rollout_project(tmp_path)
-    monkeypatch.chdir(project)
-    config_path = project / "configs" / "training" / "demo.toml"
-    config_path.write_text(
-        """
-[experiment]
-rollout = "demo"
-entrypoint = "main.py"
-model_path = "Qwen/Qwen3"
-dataset = "demo-dataset"
-
-[training]
-n_samples_per_prompt = 8
-rollout_batch_size = 64
-""".strip(),
-        encoding="utf-8",
-    )
-
-    exit_code = cli.main(["--json", "rollout", "validate", str(config_path)])
-    captured = capsys.readouterr()
-
-    assert exit_code == 0
-    payload = json.loads(captured.out)
-    assert payload["data"]["valid"] is True
-    assert payload["data"]["kind"] == "training"

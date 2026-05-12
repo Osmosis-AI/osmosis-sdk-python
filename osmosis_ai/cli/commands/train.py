@@ -9,7 +9,7 @@ from typing import Any
 import typer
 
 from osmosis_ai.cli.console import console
-from osmosis_ai.cli.errors import CLIError, not_implemented
+from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE
 
 app: typer.Typer = typer.Typer(help="Manage training runs.", no_args_is_help=True)
@@ -365,14 +365,6 @@ def status(
     return DetailResult(title="Training Run", data=data, fields=fields)
 
 
-@app.command("info", hidden=True)
-def info(
-    name: str = typer.Argument(..., help="Training run name."),
-) -> Any:
-    """Deprecated alias for `osmosis train status`."""
-    return status(name=name)
-
-
 @app.command("submit")
 def submit(
     config_path: Path = typer.Argument(
@@ -585,8 +577,8 @@ def _resolve_default_output(
     if not project_toml.is_file():
         raise CLIError(
             "Not in an Osmosis project directory.\n"
-            "  Run from a directory created by 'osmosis init',"
-            " or use -o to specify an output path."
+            "  Run from an existing or cloned Osmosis project repo linked with "
+            "'osmosis project link', or use -o to specify an output path."
         )
     metrics_dir = cwd / ".osmosis" / "metrics"
     metrics_dir.mkdir(exist_ok=True)
@@ -765,12 +757,6 @@ def metrics(
     )
 
 
-@app.command("traces")
-def traces() -> None:
-    """Show training run traces."""
-    not_implemented("train", "traces")
-
-
 @app.command("stop")
 def stop(
     name: str = typer.Argument(..., help="Training run name."),
@@ -805,41 +791,4 @@ def stop(
         status="success",
         resource={"name": name, **_workspace_result_context(workspace)},
         message=f'Training run "{name}" stopped.',
-    )
-
-
-@app.command("delete")
-def delete(
-    name: str = typer.Argument(..., help="Training run name."),
-    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
-) -> Any:
-    """Delete a training run."""
-    from osmosis_ai.cli.output import OperationResult, get_output_context
-    from osmosis_ai.platform.cli.utils import require_workspace_context
-
-    workspace = require_workspace_context()
-    credentials = workspace.credentials
-
-    from osmosis_ai.platform.api.client import OsmosisClient
-
-    client = OsmosisClient()
-
-    _require_confirmation(
-        f'Delete training run "{name}"? This cannot be undone.',
-        yes=yes,
-        summary=[("Name", name)],
-    )
-
-    output = get_output_context()
-    with output.status("Deleting training run..."):
-        client.delete_training_run(
-            name,
-            credentials=credentials,
-            workspace_id=workspace.workspace_id,
-        )
-    return OperationResult(
-        operation="train.delete",
-        status="success",
-        resource={"name": name, **_workspace_result_context(workspace)},
-        message=f'Training run "{name}" deleted.',
     )

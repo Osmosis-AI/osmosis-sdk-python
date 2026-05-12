@@ -1,9 +1,10 @@
 # Osmosis SDK documentation
 
-## Rollout
+## Project workflow
 
-- Validate a training or eval entrypoint: `osmosis rollout validate configs/training/<config>.toml`
-- Validate an eval entrypoint: `osmosis rollout validate configs/eval/<config>.toml`
+- Start from a Platform/Git Sync managed Osmosis project repo, or clone an existing Osmosis project.
+- Run an eval smoke test: `osmosis eval run configs/eval/<config>.toml --limit 1`
+- Submit training after Git Sync is connected: `osmosis train submit configs/training/<config>.toml`
 
 ## Workflow commands
 

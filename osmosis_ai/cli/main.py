@@ -43,8 +43,14 @@ class OsmosisGroup(typer.core.TyperGroup):
         except click.UsageError:
             if args:
                 cmd_name = args[0]
+                candidates = []
+                for name in self.list_commands(ctx):
+                    command = self.get_command(ctx, name)
+                    if command is None or getattr(command, "hidden", False):
+                        continue
+                    candidates.append(name)
                 matches = difflib.get_close_matches(
-                    cmd_name, self.list_commands(ctx), n=1, cutoff=0.5
+                    cmd_name, candidates, n=1, cutoff=0.5
                 )
                 if matches:
                     raise click.UsageError(
@@ -157,9 +163,10 @@ def _handle_cli_error(
     if output.format is OutputFormat.json:
         raw_ctx = getattr(exc, "ctx", None)
         ctx = raw_ctx if isinstance(raw_ctx, click.Context) else None
+        command_argv = argv if argv is not None else sys.argv[1:]
         emit_structured_error_to_stderr(
             classify_error(exc),
-            command=command_path_for_error(ctx),
+            command=command_path_for_error(ctx, argv=command_argv),
         )
     else:
         if isinstance(exc, AuthenticationExpiredError):
@@ -186,7 +193,6 @@ def _register_commands() -> None:
     from osmosis_ai.cli.commands.rollout import app as rollout_app
     from osmosis_ai.cli.commands.template import app as template_app
     from osmosis_ai.cli.commands.train import app as train_app
-    from osmosis_ai.cli.commands.workspace import app as workspace_app
 
     _WORKFLOW = "Workflow Commands"
     _PLATFORM = "Platform Commands"
@@ -201,15 +207,6 @@ def _register_commands() -> None:
     app.add_typer(template_app, name="template", rich_help_panel=_WORKFLOW)
 
     app.add_typer(auth_app, name="auth", rich_help_panel=_PLATFORM)
-    app.add_typer(workspace_app, name="workspace", rich_help_panel=_PLATFORM)
-
-    # -- Top-level commands --
-    from osmosis_ai.cli.commands.init import init
-    from osmosis_ai.cli.commands.project import link, unlink
-
-    app.command("init", rich_help_panel=_WORKFLOW)(init)
-    app.command("link", rich_help_panel=_WORKFLOW)(link)
-    app.command("unlink", rich_help_panel=_WORKFLOW)(unlink)
 
     # `deploy` and `undeploy` are verbs, not CRUD on the deployment resource,
     # so they are promoted to top-level to avoid `osmosis deployment deploy`.
@@ -221,15 +218,6 @@ def _register_commands() -> None:
     from osmosis_ai.cli.upgrade import upgrade
 
     app.command("upgrade", rich_help_panel=_PLATFORM)(upgrade)
-
-    # -- Transitional: deprecated aliases (hidden from help) --
-    from osmosis_ai.cli.commands.auth import login as auth_login
-    from osmosis_ai.cli.commands.auth import logout as auth_logout
-    from osmosis_ai.cli.commands.auth import whoami as auth_whoami
-
-    app.command("login", hidden=True)(auth_login)
-    app.command("logout", hidden=True)(auth_logout)
-    app.command("whoami", hidden=True)(auth_whoami)
 
 
 def main(argv: list[str] | None = None) -> int:

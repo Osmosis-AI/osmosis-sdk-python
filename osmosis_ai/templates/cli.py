@@ -1,7 +1,7 @@
 """Business logic for ``osmosis template`` commands.
 
 Templates are local cookbook recipes copied directly into the canonical
-project layout for ``rollout validate``, ``eval run``, and ``train submit``.
+project layout for ``eval run`` and ``train submit``.
 """
 
 from __future__ import annotations
@@ -126,10 +126,9 @@ def _next_steps(name: str) -> list[str]:
     """Commands to run after applying a template."""
     return [
         f"pip install -e rollouts/{name}",
-        f"osmosis rollout validate configs/eval/{name}.toml",
-        f"osmosis eval run configs/eval/{name}.toml",
+        f"osmosis eval run configs/eval/{name}.toml --limit 1",
         "git push",
-        "osmosis workspace  # connect Git Sync before submitting",
+        "Confirm Git Sync is connected in the Osmosis Platform",
         f"osmosis train submit configs/training/{name}.toml",
     ]
 

@@ -261,17 +261,6 @@ class PaginatedTrainingRuns:
 
 
 @dataclass
-class DeleteTrainingRunResult:
-    """Result of deleting a training run."""
-
-    deleted: bool
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> DeleteTrainingRunResult:
-        return cls(deleted=data["deleted"])
-
-
-@dataclass
 class SubmitTrainingRunResult:
     """Result of submitting a new training run."""
 
@@ -288,62 +277,6 @@ class SubmitTrainingRunResult:
             status=data["status"],
             created_at=data["created_at"],
         )
-
-
-@dataclass
-class AffectedTrainingRun:
-    """A training run affected by a resource deletion."""
-
-    id: str
-    training_run_name: str | None = None
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> AffectedTrainingRun:
-        return cls(
-            id=data["id"],
-            training_run_name=data.get("training_run_name"),
-        )
-
-
-@dataclass
-class DatasetAffectedResources:
-    """Affected resources for a dataset deletion."""
-
-    affected_training_runs: list[AffectedTrainingRun]
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> DatasetAffectedResources:
-        return cls(
-            affected_training_runs=[
-                AffectedTrainingRun.from_dict(r)
-                for r in data.get("affected_training_runs", [])
-            ],
-        )
-
-    @property
-    def has_blocking_runs(self) -> bool:
-        return len(self.affected_training_runs) > 0
-
-
-@dataclass
-class ModelAffectedResources:
-    """Affected resources for a model deletion."""
-
-    training_runs_using_model: list[AffectedTrainingRun]
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> ModelAffectedResources:
-        return cls(
-            training_runs_using_model=[
-                AffectedTrainingRun.from_dict(r)
-                for r in data.get("training_runs_using_model", [])
-            ],
-        )
-
-    @property
-    def has_blocking_runs(self) -> bool:
-        """Whether there are training runs that block deletion."""
-        return len(self.training_runs_using_model) > 0
 
 
 # ── Training run metrics ─────────────────────────────────────────
@@ -426,43 +359,6 @@ class TrainingRunMetrics:
             status=data["status"],
             overview=TrainingRunMetricsOverview.from_dict(data["overview"]),
             metrics=[MetricHistory.from_dict(m) for m in data.get("metrics", [])],
-        )
-
-
-@dataclass
-class ProcessCount:
-    """Running process counts for a workspace-scoped resource category."""
-
-    count: int
-    valid: bool
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> ProcessCount:
-        return cls(count=data.get("count", 0), valid=data.get("valid", True))
-
-
-@dataclass
-class WorkspaceDeletionStatus:
-    """Workspace deletion readiness status."""
-
-    can_delete: bool
-    is_owner: bool
-    is_last_workspace: bool
-    has_running_processes: bool
-    feature_pipelines: ProcessCount
-    training_runs: ProcessCount
-    models: ProcessCount
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> WorkspaceDeletionStatus:
-        return cls(
-            can_delete=data.get("can_delete", False),
-            is_owner=data.get("is_owner", False),
-            is_last_workspace=data.get("is_last_workspace", False),
-            has_running_processes=data.get("has_running_processes", False),
-            feature_pipelines=ProcessCount.from_dict(data.get("feature_pipelines", {})),
-            training_runs=ProcessCount.from_dict(data.get("training_runs", {})),
-            models=ProcessCount.from_dict(data.get("models", {})),
         )
 
 
@@ -583,25 +479,6 @@ class DeploymentSummary:
     def from_dict(cls, data: dict[str, Any]) -> DeploymentSummary:
         return cls(
             id=data["id"],
-            checkpoint_name=data.get("checkpoint_name", ""),
-            status=data.get("status", ""),
-        )
-
-
-@dataclass
-class RenameDeploymentResult:
-    """Result of renaming a checkpoint via PATCH /api/cli/deployments/[checkpointId]."""
-
-    id: str
-    old_checkpoint_name: str
-    checkpoint_name: str
-    status: str
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> RenameDeploymentResult:
-        return cls(
-            id=data["id"],
-            old_checkpoint_name=data.get("old_checkpoint_name", ""),
             checkpoint_name=data.get("checkpoint_name", ""),
             status=data.get("status", ""),
         )

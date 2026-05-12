@@ -26,7 +26,8 @@ top-level layout.
   server. Eval configs do not support `[grader]` overrides.
 - Tools should be async Python functions with type hints and docstrings.
 - `Grader.grade` must be async and return a float in `[0.0, 1.0]`.
-- Before `osmosis train submit`, validate the project and run a local eval.
+- Before `osmosis train submit`, validate the project and run an end-to-end
+  eval smoke test.
 
 ## Environment variables and secrets
 
@@ -89,9 +90,7 @@ before modifying plugin state.
 
 ```bash
 osmosis project validate
-osmosis rollout validate configs/eval/<name>.toml
-osmosis rollout validate configs/training/<run>.toml
-osmosis eval run configs/eval/<name>.toml
+osmosis eval run configs/eval/<name>.toml --limit 1
 osmosis train submit configs/training/<run>.toml
 osmosis train status <run-name>
 ```
