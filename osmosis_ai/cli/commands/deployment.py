@@ -138,7 +138,7 @@ def list_deployments(
     ),
     all_: bool = typer.Option(False, "--all", help="Show all deployments."),
 ) -> Any:
-    """List LoRA deployments in the linked project workspace."""
+    """List LoRA deployments for the current Git-scoped project."""
     from osmosis_ai.cli.output import (
         ListColumn,
         ListResult,

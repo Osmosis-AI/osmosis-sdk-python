@@ -205,7 +205,7 @@ def list_runs(
     ),
     all_: bool = typer.Option(False, "--all", help="Show all training runs."),
 ) -> Any:
-    """List training runs in the linked project workspace."""
+    """List training runs for the current Git-scoped project."""
     from osmosis_ai.cli.output import (
         ListColumn,
         ListResult,

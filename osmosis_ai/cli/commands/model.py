@@ -24,7 +24,7 @@ def list_models(
     ),
     all_: bool = typer.Option(False, "--all", help="Show all base models."),
 ) -> Any:
-    """List base models in the linked project workspace."""
+    """List base models for the current Git-scoped project."""
     from osmosis_ai.cli.output import (
         ListColumn,
         ListResult,

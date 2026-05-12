@@ -21,7 +21,7 @@ def list_rollouts(
     ),
     all_: bool = typer.Option(False, "--all", help="Show all rollouts."),
 ) -> Any:
-    """List rollouts in the linked project workspace."""
+    """List rollouts for the current Git-scoped project."""
     from osmosis_ai.cli.output import (
         ListColumn,
         ListResult,
