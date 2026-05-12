@@ -38,7 +38,7 @@ LOG_LEVEL = "INFO"
 MY_CONFIG = "some-value"
 
 [rollout.secrets]
-# Value is the *name* of a workspace environment_secret record, not the secret
+# Value is the *name* of a Platform environment_secret record, not the secret
 # value itself. The platform resolves and injects it server-side.
 # Pre-register the secret at /:orgName/secrets before submitting.
 OPENAI_API_KEY = "openai-api-key"

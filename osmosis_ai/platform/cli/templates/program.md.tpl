@@ -21,4 +21,4 @@ Describe the behavior this project is training or evaluating.
 
 1. Build a baseline rollout under `rollouts/`.
 2. Run local evals with `osmosis eval run configs/eval/<name>.toml`.
-3. Submit training with `osmosis train submit configs/training/<name>.toml --yes` after the linked workspace Git Sync repository is configured and pushed.
+3. Submit training with `osmosis train submit configs/training/<name>.toml --yes` after the Platform-created repository is committed and pushed.

@@ -47,8 +47,8 @@ dataset = "<your-dataset-name>"       # Dataset name from `osmosis dataset list`
 #   DEFAULT_REGION = "us-west-2"
 #
 # [rollout.secrets]
-# Maps env-var names to workspace environment_secret record *names*.
-# Values are resolved server-side from the workspace's encrypted secret store
+# Maps env-var names to Platform environment_secret record *names*.
+# Values are resolved server-side from encrypted secret storage
 # and injected into the container — they never appear in this file or in transit.
 # Pre-register secrets at /:orgName/secrets in the platform UI before submitting.
 #

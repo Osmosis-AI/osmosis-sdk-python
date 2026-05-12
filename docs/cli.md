@@ -29,52 +29,60 @@ osmosis auth whoami
 ```
 
 `whoami` verifies the active credentials and reports the authenticated account.
-Manage workspaces, Git Sync connections, and workspace settings in the Osmosis
+Manage projects, repositories, secrets, and account settings in the Osmosis
 Platform product.
 
-## Project
+## Project Flow
 
-### osmosis project link
-
-Link this project with an Osmosis workspace. The workspace must have a Git
-Sync connected repository, and the command must be run from a checkout whose
-`origin` remote matches that repository. Platform commands resolve their
-workspace from the current project.
+Create the project in the Osmosis Platform, clone the repository created there,
+then run CLI commands from that checkout.
 
 ```bash
-osmosis project link --workspace <workspace-id-or-name>
-osmosis project link --workspace <workspace-id-or-name> --yes
+git clone <repo-url>
+cd <repo>
+osmosis auth login
+osmosis project validate
+osmosis train submit configs/training/default.toml
 ```
 
-The project mapping is stored in `~/.osmosis/config.json`. Manage workspace
-membership and Git Sync connections in the Osmosis Platform.
+Platform-scoped commands derive scope from the checkout's `origin` remote and
+send `X-Osmosis-Git: namespace/repo_name`. The CLI does not store or send a
+workspace ID for repo-scoped commands.
 
 For CI:
 
 ```bash
 export OSMOSIS_TOKEN=<token>
-osmosis project link --workspace <workspace-id-or-name> --yes
 osmosis train submit configs/training/default.toml --yes
 ```
 
 ### osmosis project validate
 
-Validate the canonical layout of a local Osmosis project from a Platform/Git
-Sync managed repo or an existing cloned project.
+Validate the canonical layout of a local Osmosis project from a
+Platform-created repository checkout.
 
 ```bash
 osmosis project validate
 osmosis project validate ./path/to/project
 ```
 
-The command checks for `.osmosis/project.toml` and the required `rollouts/`,
-`configs/training/`, `configs/eval/`, and `data/` directories.
+The command checks for the required `rollouts/`, `configs/training/`,
+`configs/eval/`, and `data/` directories.
+
+### osmosis project doctor
+
+```bash
+osmosis project doctor
+osmosis project doctor --fix --yes
+```
+
+Inspect and optionally repair the scaffold in the current Git checkout.
 
 ## Rollout
 
 ### osmosis rollout list
 
-List rollouts in the linked project workspace.
+List rollouts for the current project repository.
 
 ```bash
 osmosis rollout list
@@ -159,7 +167,8 @@ osmosis train submit configs/training/my-run.toml --yes   # skip confirmation
 
 The config file must live under `configs/training/` inside a structured Osmosis
 project. The CLI reads the config locally and sends it to the platform, which
-clones the workspace's connected Git repository for the actual rollout code.
+clones the repository identified by the checkout's `origin` remote for the
+actual rollout code.
 `osmosis train submit` includes the training preflight checks before launch; run
 `osmosis eval run configs/eval/<name>.toml --limit 1` first when you want an
 end-to-end local smoke test of the rollout server and grader.
@@ -218,9 +227,9 @@ DEFAULT_REGION = "us-west-2"
 
 #### Secrets — `[rollout.secrets]`
 
-Maps env-var names to workspace `environment_secret` **record names**. The
-platform resolves the actual secret value server-side from the workspace's
-encrypted secret store and injects it into the container. Secret values never
+Maps env-var names to Platform `environment_secret` **record names**. The
+platform resolves the actual secret value server-side from encrypted secret
+storage and injects it into the container. Secret values never
 appear in the config file, in the API payload, or in CLI output.
 
 Pre-register secrets at `/:orgName/secrets` in the platform UI before
@@ -251,7 +260,7 @@ osmosis --json train status <run-name>
 
 ### osmosis train list
 
-List training runs in the current workspace.
+List training runs for the current project repository.
 
 ```bash
 osmosis train list
@@ -284,7 +293,7 @@ UUID or checkpoint name anywhere `<checkpoint>` appears.
 
 ### osmosis deployment list
 
-List deployments in the current workspace.
+List deployments for the current project repository.
 
 ```bash
 osmosis deployment list

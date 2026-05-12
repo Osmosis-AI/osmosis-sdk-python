@@ -10,7 +10,7 @@ import pytest
 from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.cli.output import OutputFormat
 from osmosis_ai.cli.output.context import override_output_context
-from osmosis_ai.templates.cli import apply_command, list_command
+from osmosis_ai.templates.cli import _next_steps, apply_command, list_command
 
 
 def _make_project(root: Path) -> Path:
@@ -48,6 +48,16 @@ def test_list_command_returns_none_in_rich() -> None:
 
 
 # ── apply_command ────────────────────────────────────────────────
+
+
+def test_next_steps_use_git_scoped_training_flow() -> None:
+    next_steps = _next_steps("multiply")
+    rendered = "\n".join(next_steps)
+
+    assert "Git Sync" not in rendered
+    assert "project link" not in rendered
+    assert ".osmosis/project.toml" not in rendered
+    assert "osmosis train submit configs/training/multiply.toml" in next_steps
 
 
 def test_apply_command_writes_directly_into_project_canonical_layout(

@@ -10,7 +10,7 @@
 # Before running:
 #   1. Upload a multiplication dataset (questions + numeric ground-truth labels)
 #      via `osmosis dataset upload <file>` and put its name below.
-#   2. Pin model_path to a model your workspace has access to.
+#   2. Pin model_path to a model your Osmosis account can access.
 
 [experiment]
 rollout = "multiply"

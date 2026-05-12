@@ -38,19 +38,31 @@ Credentials path: `~/.config/osmosis/credentials.json`.
 Not logged in. Run 'osmosis auth login' first.
 ```
 
-Run `osmosis auth login` again before using platform commands that use the linked project workspace.
+Run `osmosis auth login` again before using platform-scoped commands from a
+project repository checkout.
 
-### Wrong linked workspace
+## Project Flow
 
-From the project directory, link this project with the intended workspace:
+Create the project in the Osmosis Platform, clone the repository created there,
+then run CLI commands from that checkout.
 
 ```bash
-osmosis project link --workspace <workspace-id-or-name> --yes
+git clone <repo-url>
+cd <repo>
+osmosis auth login
+osmosis project validate
+osmosis train submit configs/training/default.toml
 ```
 
-Confirm the workspace and Git Sync repository in the Osmosis Platform, then
-re-run `osmosis project link --workspace <workspace-id-or-name> --yes` from the
-matching local checkout.
+Platform-scoped commands derive scope from the checkout's `origin` remote and
+send `X-Osmosis-Git: namespace/repo_name`. The CLI does not store or send a
+workspace ID for repo-scoped commands.
+
+### Wrong project repository
+
+Confirm that the checkout's `origin` remote matches the repository created for
+the intended Osmosis Platform project. If it does not, clone the correct
+repository and rerun the command from that checkout.
 
 ## Eval server and grader issues
 
@@ -156,7 +168,7 @@ osmosis train submit configs/training/<run>.toml
 ```
 
 Training submission performs its own preflight checks before launching the
-managed run. Fix reported rollout, config, dataset, or Git Sync issues before
+managed run. Fix reported rollout, config, dataset, or repository scope issues before
 submitting again.
 
 ## See also

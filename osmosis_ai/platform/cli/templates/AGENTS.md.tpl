@@ -3,10 +3,13 @@
 This is a **structured Osmosis project**. Do not invent a different
 top-level layout.
 
+This repository was created from an Osmosis Platform project scaffold. Run
+platform-scoped CLI commands from this checkout so scope is derived from the
+`origin` remote.
+
 ## Project contract
 
 - Required paths:
-  - The project TOML file in `.osmosis/`
   - `rollouts/`
   - `configs/training/`
   - `configs/eval/`
@@ -15,8 +18,9 @@ top-level layout.
 - The canonical rollout entrypoint is `rollouts/<name>/main.py`.
 - Eval configs live in `configs/eval/<name>.toml`.
 - Training configs live in `configs/training/<name>.toml`.
-- Local training guidance lives in `.osmosis/research/program.md`.
-- Local cache state lives in `.osmosis/cache/` and should not be treated as source.
+- Local training guidance lives in `research/program.md`.
+- Local runtime state lives in `.osmosis/`, is ignored by Git, and should not be
+  treated as source.
 - Do not create new top-level directories unless the user explicitly asks.
 
 ## Rollout contract
@@ -41,7 +45,7 @@ two optional TOML sections:
 LOG_LEVEL = "INFO"
 
 [rollout.secrets]
-# Maps env-var name → workspace environment_secret *record name*.
+# Maps env-var name → Platform environment_secret *record name*.
 # The platform resolves the actual value server-side; it never appears
 # in this file or in transit.
 # Pre-register secrets at /:orgName/secrets before submitting.

@@ -1,10 +1,21 @@
 # Osmosis SDK documentation
 
-## Project workflow
+## Project Flow
 
-- Start from a Platform/Git Sync managed Osmosis project repo, or clone an existing Osmosis project.
-- Run an eval smoke test: `osmosis eval run configs/eval/<config>.toml --limit 1`
-- Submit training after Git Sync is connected: `osmosis train submit configs/training/<config>.toml`
+Create the project in the Osmosis Platform, clone the repository created there,
+then run CLI commands from that checkout.
+
+```bash
+git clone <repo-url>
+cd <repo>
+osmosis auth login
+osmosis project validate
+osmosis train submit configs/training/default.toml
+```
+
+Platform-scoped commands derive scope from the checkout's `origin` remote and
+send `X-Osmosis-Git: namespace/repo_name`. The CLI does not store or send a
+workspace ID for repo-scoped commands.
 
 ## Workflow commands
 

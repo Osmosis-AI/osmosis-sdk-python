@@ -39,13 +39,12 @@ Step 3 — run a local eval against a JSONL dataset:
 
     osmosis --json eval run configs/eval/multiply.toml
 
-Step 4 — push the rollout code to GitHub and confirm the repository is connected
-to the Osmosis Platform with Git Sync before submitting:
+Step 4 — commit and push the rollout code from the Platform-created repository:
 
     git push
 
-Training submissions fetch code from the workspace's connected Git repository,
-so pushed code and Git Sync setup are required.
+Training submissions fetch code from the repository identified by the checkout's
+`origin` remote, so pushed code is required.
 
 Step 5 — submit a managed training run:
 
