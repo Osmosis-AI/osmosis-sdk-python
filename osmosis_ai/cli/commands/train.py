@@ -15,13 +15,6 @@ from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE
 app: typer.Typer = typer.Typer(help="Manage training runs.", no_args_is_help=True)
 
 
-def _workspace_result_context(workspace: Any) -> dict[str, Any]:
-    return {
-        "workspace": {"id": workspace.workspace_id, "name": workspace.workspace_name},
-        "project_root": str(workspace.project_root),
-    }
-
-
 def _detail_fields(rows: list[tuple[str, str]]) -> list[Any]:
     from osmosis_ai.cli.output import DetailField
 
@@ -95,6 +88,11 @@ def _require_confirmation(
     require_confirmation(message, yes=yes)
 
 
+def _require_train_submit_cwd(project_root: Path) -> None:
+    if Path.cwd().resolve() != project_root.resolve():
+        raise CLIError("Run `osmosis train submit` from the project root.")
+
+
 def _print_remote_fetch_notice(
     project_root: Path,
     *,
@@ -103,13 +101,13 @@ def _print_remote_fetch_notice(
     """Remind the user that submit pulls *code* from the connected Git remote
     while reading *config values* from the local TOML file.
 
-    The platform clones the workspace's connected Git repository (or
-    fetches a pinned commit) before training, so local *code* changes
-    that haven't been pushed will silently be ignored. The config TOML
-    passed to ``osmosis train submit``, by contrast, is read from disk
-    and its values are sent verbatim in the submit payload — local
-    edits to the config take effect immediately, even if they are
-    uncommitted.
+    The platform resolves training code from the Platform-connected
+    repository (or fetches a pinned commit) before training, so local
+    *code* changes that haven't been pushed will silently be ignored.
+    The config TOML passed to ``osmosis train submit``, by contrast, is
+    read from disk and its values are sent verbatim in the submit
+    payload — local edits to the config take effect immediately, even
+    if they are uncommitted.
 
     Returns ``(notes, warnings)`` as plain-text lists so callers can
     surface the same context in non-rich modes (e.g. the JSON error
@@ -144,17 +142,20 @@ def _print_remote_fetch_notice(
     if pinned_commit_sha:
         notes.append(
             f"Osmosis will fetch commit {pinned_commit_sha} from the "
-            "workspace's connected Git repository for training code."
+            "Platform-connected repository for training code."
         )
-        notes.append("Make sure that commit is already pushed to the remote.")
+        notes.append("Make sure that commit is pushed to origin.")
     else:
         notes.append(
-            "Osmosis will fetch the latest training code from the workspace's "
-            "connected Git repository."
+            "Osmosis will fetch training code from the Platform-connected repository."
         )
         if state is not None and state.branch and state.head_sha:
             notes.append(f"Local branch: {state.branch} @ {state.head_sha[:8]}")
         notes.append("Make sure your code changes are committed and pushed.")
+        warnings.append(
+            "Platform source selection may differ from your local branch when no "
+            "commit_sha is set."
+        )
     notes.append(
         "Config values come from your local TOML file and are submitted "
         "as-is — uncommitted edits to the config still apply."
@@ -165,13 +166,12 @@ def _print_remote_fetch_notice(
         if pinned_commit_sha:
             body_lines.append(
                 f"Osmosis will fetch commit [bold]{console.escape(pinned_commit_sha)}[/bold] "
-                "from the workspace's connected Git repository for training code."
+                "from the Platform-connected repository for training code."
             )
-            body_lines.append("Make sure that commit is already pushed to the remote.")
+            body_lines.append("Make sure that commit is pushed to origin.")
         else:
             body_lines.append(
-                "Osmosis will fetch the latest training code from the workspace's "
-                "connected Git repository."
+                "Osmosis will fetch training code from the Platform-connected repository."
             )
             if state is not None and state.branch and state.head_sha:
                 body_lines.append(
@@ -384,7 +384,6 @@ def submit(
     from osmosis_ai.cli.output import OperationResult, get_output_context
     from osmosis_ai.platform.cli.project_contract import (
         ensure_project_config_path,
-        resolve_project_root_from_cwd,
         validate_project_contract,
         validate_rollout_backend,
     )
@@ -393,14 +392,16 @@ def submit(
         validate_training_context_paths,
     )
     from osmosis_ai.platform.cli.utils import (
+        git_result_context,
         platform_entity_url,
-        require_workspace_context,
+        require_git_project_context,
     )
-    from osmosis_ai.platform.cli.workspace_repo import require_git_top_level
 
     command_label = "`osmosis train submit`"
 
-    project_root = resolve_project_root_from_cwd()
+    context = require_git_project_context()
+    project_root = context.project_root
+    _require_train_submit_cwd(project_root)
     validate_project_contract(project_root)
     config_path = Path(config_path)
     resolved_config_path = (
@@ -420,9 +421,7 @@ def submit(
         entrypoint=config.experiment_entrypoint,
         command_label=command_label,
     )
-    workspace = require_workspace_context()
-    credentials = workspace.credentials
-    require_git_top_level(project_root, command_label)
+    credentials = context.credentials
 
     summary_rows: list[tuple[str, str]] = [
         ("Rollout", config.experiment_rollout),
@@ -480,10 +479,10 @@ def submit(
             rollout_env=config.rollout_env or None,
             rollout_secret_refs=config.rollout_secret_refs or None,
             credentials=credentials,
-            workspace_id=workspace.workspace_id,
+            git_identity=context.git_identity,
         )
 
-    url = platform_entity_url(workspace.workspace_name, "training", result.id)
+    url = platform_entity_url(context.git_identity, "training", result.id)
     return OperationResult(
         operation="train.submit",
         status="success",
@@ -493,7 +492,7 @@ def submit(
             "status": result.status,
             "created_at": result.created_at,
             "url": url,
-            **_workspace_result_context(workspace),
+            **git_result_context(context),
             "config": {
                 "rollout": config.experiment_rollout,
                 "entrypoint": config.experiment_entrypoint,
@@ -560,20 +559,11 @@ def _resolve_output_path(output: str, run_name: str | None, run_id: str) -> Path
 
 
 def _resolve_default_output(
-    run_name: str | None, run_id: str, *, cwd: Path | None = None
+    run_name: str | None, run_id: str, *, project_root: Path
 ) -> Path:
     """Resolve the default output path under .osmosis/metrics/."""
-    if cwd is None:
-        cwd = Path.cwd()
-    project_toml = cwd / ".osmosis" / "project.toml"
-    if not project_toml.is_file():
-        raise CLIError(
-            "Not in an Osmosis project directory.\n"
-            "  Run from an existing or cloned Osmosis project repo linked with "
-            "'osmosis project link', or use -o to specify an output path."
-        )
-    metrics_dir = cwd / ".osmosis" / "metrics"
-    metrics_dir.mkdir(exist_ok=True)
+    metrics_dir = project_root / ".osmosis" / "metrics"
+    metrics_dir.mkdir(parents=True, exist_ok=True)
     return metrics_dir / _default_filename(run_name, run_id)
 
 
@@ -606,12 +596,13 @@ def metrics(
     from osmosis_ai.platform.api.models import RUN_STATUSES_IN_PROGRESS
     from osmosis_ai.platform.auth.platform_client import PlatformAPIError
     from osmosis_ai.platform.cli.utils import (
+        git_result_context,
         platform_entity_url,
-        require_workspace_context,
+        require_git_project_context,
     )
 
-    workspace = require_workspace_context()
-    credentials = workspace.credentials
+    context = require_git_project_context()
+    credentials = context.credentials
     client = OsmosisClient()
     output_ctx = get_output_context()
 
@@ -619,7 +610,7 @@ def metrics(
         run = client.get_training_run(
             name,
             credentials=credentials,
-            workspace_id=workspace.workspace_id,
+            git_identity=context.git_identity,
         )
 
     if run.status == "pending":
@@ -628,7 +619,7 @@ def metrics(
     is_in_progress = run.status in RUN_STATUSES_IN_PROGRESS
 
     # ── Platform URL (no metrics dependency) ─────────────────────
-    url = platform_entity_url(workspace.workspace_name, "training", run.id)
+    url = platform_entity_url(context.git_identity, "training", run.id)
 
     # ── Fetch metrics (best-effort) ──────────────────────────────
     metrics_data = None
@@ -638,7 +629,7 @@ def metrics(
             metrics_data = client.get_training_run_metrics(
                 run.id,
                 credentials=credentials,
-                workspace_id=workspace.workspace_id,
+                git_identity=context.git_identity,
             )
     except (PlatformAPIError, KeyError) as exc:
         metrics_error = str(exc) or "Could not fetch metrics data."
@@ -720,7 +711,7 @@ def metrics(
                     else _resolve_default_output(
                         run.name,
                         run.id,
-                        cwd=workspace.project_root,
+                        project_root=context.project_root,
                     )
                 )
                 out_path.write_text(
@@ -743,7 +734,7 @@ def metrics(
             "metrics": export,
             "output_path": output_path,
             "save_warning": save_warning,
-            **_workspace_result_context(workspace),
+            **git_result_context(context),
         },
         fields=fields,
     )

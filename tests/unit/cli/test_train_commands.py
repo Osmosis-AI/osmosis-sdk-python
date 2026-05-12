@@ -51,6 +51,18 @@ def assert_git_context(data: dict[str, object]) -> None:
     assert data == _git_extra()
 
 
+def _find_temp_project_root(start: Path) -> Path | None:
+    current = start.resolve()
+    for candidate in (current, *current.parents):
+        if (
+            (candidate / ".osmosis").is_dir()
+            and (candidate / "configs" / "training").is_dir()
+            and (candidate / "rollouts").is_dir()
+        ):
+            return candidate
+    return None
+
+
 def _make_project(root: Path, *, rollout: str = "demo") -> Path:
     for rel_path in (
         ".osmosis/research",
@@ -123,18 +135,23 @@ def _mock_workspace_context(
         "osmosis_ai.platform.cli.utils.require_workspace_context",
         _context,
     )
-    monkeypatch.setattr(
-        "osmosis_ai.platform.cli.utils.require_git_project_context",
-        lambda: type(
+
+    def _git_context():
+        project_root = _find_temp_project_root(Path.cwd()) or Path("/repo")
+        return type(
             "GitContext",
             (),
             {
-                "project_root": Path("/repo"),
+                "project_root": project_root.resolve(),
                 "git_identity": GIT_IDENTITY,
                 "repo_url": REPO_URL,
                 "credentials": FAKE_CREDENTIALS,
             },
-        )(),
+        )()
+
+    monkeypatch.setattr(
+        "osmosis_ai.platform.cli.utils.require_git_project_context",
+        _git_context,
     )
 
 
@@ -407,7 +424,8 @@ rollout_batch_size = 64
 
         class FakeClient:
             def submit_training_run(self, **kwargs):
-                assert kwargs["workspace_id"] == WORKSPACE_ID
+                assert kwargs["git_identity"] == GIT_IDENTITY
+                assert "workspace_id" not in kwargs
                 return result
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
@@ -421,9 +439,9 @@ rollout_batch_size = 64
         assert command_result.resource["id"] == "550e8400-e29b-41d4-a716-446655440000"
         assert command_result.resource["status"] == "pending"
         assert "/training/" in command_result.resource["url"]
-        assert command_result.resource["workspace"] == {
-            "id": WORKSPACE_ID,
-            "name": WORKSPACE_NAME,
+        assert command_result.resource["git"] == {
+            "identity": GIT_IDENTITY,
+            "remote_url": REPO_URL,
         }
         assert command_result.resource["project_root"] == str(
             config_path.parents[2].resolve()
@@ -441,14 +459,15 @@ rollout_batch_size = 64
 
         class FakeClient:
             def submit_training_run(self, **kwargs):
-                assert kwargs["workspace_id"] == WORKSPACE_ID
+                assert kwargs["git_identity"] == GIT_IDENTITY
+                assert "workspace_id" not in kwargs
                 return result
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
         command_result = train_module.submit(config_path=config_path, yes=True)
 
         expected_url = utils_module.platform_entity_url(
-            WORKSPACE_NAME,
+            GIT_IDENTITY,
             "training",
             result.id,
         )
@@ -468,7 +487,8 @@ rollout_batch_size = 64
 
         class FakeClient:
             def submit_training_run(self, **kwargs):
-                assert kwargs["workspace_id"] == WORKSPACE_ID
+                assert kwargs["git_identity"] == GIT_IDENTITY
+                assert "workspace_id" not in kwargs
                 return self.SUBMIT_RESULT
 
         FakeClient.SUBMIT_RESULT = self.SUBMIT_RESULT
@@ -524,7 +544,8 @@ rollout_batch_size = 64
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
         result = train_module.submit(config_path=path, yes=True)
         assert captured_kwargs["commit_sha"] == "deadbeef"
-        assert captured_kwargs["workspace_id"] == WORKSPACE_ID
+        assert captured_kwargs["git_identity"] == GIT_IDENTITY
+        assert "workspace_id" not in captured_kwargs
         assert "deadbeef" in console_capture.getvalue()
         assert isinstance(result, OperationResult)
         assert result.resource is not None
@@ -551,7 +572,8 @@ rollout_batch_size = 64
         assert captured_kwargs["dataset"] == "abc-123"
         assert captured_kwargs["rollout_name"] == "calculator"
         assert captured_kwargs["entrypoint"] == "main.py"
-        assert captured_kwargs["workspace_id"] == WORKSPACE_ID
+        assert captured_kwargs["git_identity"] == GIT_IDENTITY
+        assert "workspace_id" not in captured_kwargs
         assert captured_kwargs["config"] == {
             "lr": 1e-6,
             "total_epochs": 1,
@@ -629,17 +651,16 @@ rollout_batch_size = 64
 
         class FakeClient:
             def submit_training_run(self, **kwargs):
-                assert kwargs["workspace_id"] == WORKSPACE_ID
+                assert kwargs["git_identity"] == GIT_IDENTITY
+                assert "workspace_id" not in kwargs
                 return TestSubmit.SUBMIT_RESULT
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
         train_module.submit(config_path=config_path, yes=True)
 
         out = console_capture.getvalue()
-        # Reminder always renders; "Before you submit" is the calm
-        # variant when no warnings are detected.
-        assert "Before you submit" in out
-        assert "connected Git repository" in out
+        assert "Platform source selection may differ from your local branch" in out
+        assert "Platform-connected repository" in out
         assert "committed and pushed" in out
 
     def test_submit_warns_about_unpushed_commits(
@@ -667,7 +688,8 @@ rollout_batch_size = 64
 
         class FakeClient:
             def submit_training_run(self, **kwargs):
-                assert kwargs["workspace_id"] == WORKSPACE_ID
+                assert kwargs["git_identity"] == GIT_IDENTITY
+                assert "workspace_id" not in kwargs
                 return TestSubmit.SUBMIT_RESULT
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
@@ -702,7 +724,8 @@ rollout_batch_size = 64
 
         class FakeClient:
             def submit_training_run(self, **kwargs):
-                assert kwargs["workspace_id"] == WORKSPACE_ID
+                assert kwargs["git_identity"] == GIT_IDENTITY
+                assert "workspace_id" not in kwargs
                 return TestSubmit.SUBMIT_RESULT
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
@@ -737,7 +760,8 @@ rollout_batch_size = 64
 
         class FakeClient:
             def submit_training_run(self, **kwargs):
-                assert kwargs["workspace_id"] == WORKSPACE_ID
+                assert kwargs["git_identity"] == GIT_IDENTITY
+                assert "workspace_id" not in kwargs
                 return TestSubmit.SUBMIT_RESULT
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
@@ -775,7 +799,8 @@ rollout_batch_size = 64
 
         class FakeClient:
             def submit_training_run(self, **kwargs):
-                assert kwargs["workspace_id"] == WORKSPACE_ID
+                assert kwargs["git_identity"] == GIT_IDENTITY
+                assert "workspace_id" not in kwargs
                 return TestSubmit.SUBMIT_RESULT
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
@@ -783,58 +808,23 @@ rollout_batch_size = 64
 
         out = console_capture.getvalue()
         assert "deadbeef1234" in out
-        assert "already pushed to the remote" in out
+        assert "Platform-connected repository" in out
+        assert "pushed to origin" in out
 
-    def test_submit_passes_project_to_git_top_level_check(
-        self,
-        monkeypatch: pytest.MonkeyPatch,
-        console_capture: StringIO,
-        tmp_path: Path,
-    ) -> None:
-        config_path = self._write_config(tmp_path)
-        monkeypatch.chdir(config_path.parents[2])
-        captured: dict = {}
-
-        def _capture(project_root: Path, command_label: str) -> None:
-            captured["project_root"] = project_root
-            captured["command_label"] = command_label
-
-        monkeypatch.setattr(
-            "osmosis_ai.platform.cli.workspace_repo.require_git_top_level",
-            _capture,
-        )
-
-        class FakeClient:
-            def submit_training_run(self, **kwargs):
-                assert kwargs["workspace_id"] == WORKSPACE_ID
-                return TestSubmit.SUBMIT_RESULT
-
-        monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-        train_module.submit(config_path=config_path, yes=True)
-
-        assert captured["project_root"] == config_path.parent.parent.parent
-        assert captured["command_label"] == "`osmosis train submit`"
-
-    def test_submit_propagates_git_top_level_error(
+    def test_submit_rejects_project_subdirectory_cwd(
         self,
         monkeypatch: pytest.MonkeyPatch,
         tmp_path: Path,
     ) -> None:
         config_path = self._write_config(tmp_path)
-        monkeypatch.chdir(config_path.parents[2])
+        monkeypatch.chdir(config_path.parents[2] / "rollouts" / "calculator")
 
-        def _fail(project_root: Path, command_label: str) -> None:
-            raise CLIError(
-                "`osmosis train submit` must be run from a Git worktree top-level Osmosis project."
-            )
-
-        monkeypatch.setattr(
-            "osmosis_ai.platform.cli.workspace_repo.require_git_top_level",
-            _fail,
-        )
-
-        with pytest.raises(CLIError, match="Git worktree top-level"):
+        with pytest.raises(CLIError) as exc_info:
             train_module.submit(config_path=config_path, yes=True)
+
+        assert (
+            str(exc_info.value) == "Run `osmosis train submit` from the project root."
+        )
 
 
 def test_train_submit_resolves_project_from_cwd_not_config_path(
@@ -891,10 +881,12 @@ def test_train_submit_requires_linked_project(
     rc = main(["--json", "train", "submit", "configs/training/default.toml", "--yes"])
 
     assert rc == 1
-    assert "not linked" in capsys.readouterr().err
+    assert (
+        "Set `origin` to the Platform-connected repository" in capsys.readouterr().err
+    )
 
 
-def test_train_submit_resolves_relative_config_from_project_subdirectory(
+def test_train_submit_rejects_project_subdirectory(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -918,19 +910,11 @@ def test_train_submit_resolves_relative_config_from_project_subdirectory(
     )
     monkeypatch.chdir(project / "rollouts" / "demo")
 
-    class FakeClient:
-        def submit_training_run(self, **kwargs):
-            assert kwargs["workspace_id"] == WORKSPACE_ID
-            return TestSubmit.SUBMIT_RESULT
-
-    monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-
     rc = main(["--json", "train", "submit", "configs/training/default.toml", "--yes"])
     captured = capsys.readouterr()
 
-    assert rc == 0
-    payload = json.loads(captured.out)
-    assert payload["operation"] == "train.submit"
+    assert rc == 1
+    assert "Run `osmosis train submit` from the project root." in captured.err
 
 
 class TestSubmitNonInteractiveContext:
@@ -972,7 +956,11 @@ class TestSubmitNonInteractiveContext:
             "Model": "Qwen/Qwen3.6-35B-A3B",
             "Dataset": "abc-123",
         }
-        assert any("connected Git repository" in note for note in details["notes"])
+        assert any("Platform-connected repository" in note for note in details["notes"])
+        assert any(
+            "Platform source selection may differ from your local branch" in warning
+            for warning in details["warnings"]
+        )
 
     def test_submit_json_includes_git_warnings(
         self,
@@ -1064,7 +1052,7 @@ class TestSubmitNonInteractiveContext:
 
 
 class TestMetrics:
-    def test_metrics_passes_workspace_id(
+    def test_metrics_passes_git_identity(
         self,
         monkeypatch: pytest.MonkeyPatch,
         console_capture: StringIO,
@@ -1092,14 +1080,14 @@ class TestMetrics:
         )
 
         class FakeClient:
-            def get_training_run(self, run_id, *, workspace_id, credentials=None):
-                assert workspace_id == WORKSPACE_ID
+            def get_training_run(self, run_id, *, git_identity, credentials=None):
+                assert git_identity == GIT_IDENTITY
                 return detail
 
             def get_training_run_metrics(
-                self, run_id, *, workspace_id, credentials=None
+                self, run_id, *, git_identity, credentials=None
             ):
-                assert workspace_id == WORKSPACE_ID
+                assert git_identity == GIT_IDENTITY
                 return metrics
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
@@ -1111,15 +1099,13 @@ class TestMetrics:
         assert isinstance(result, DetailResult)
         assert result.title == "Training Run Metrics"
         assert result.data["platform_url"] == utils_module.platform_entity_url(
-            WORKSPACE_NAME,
+            GIT_IDENTITY,
             "training",
             detail.id,
         )
-        assert result.data["workspace"] == {
-            "id": WORKSPACE_ID,
-            "name": WORKSPACE_NAME,
-        }
-        assert result.data["project_root"] == str(Path.cwd().resolve())
+        assert {
+            key: result.data[key] for key in ("git", "project_root")
+        } == _git_extra()
 
 
 # ---------------------------------------------------------------------------
