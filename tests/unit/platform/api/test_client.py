@@ -47,7 +47,7 @@ class TestCompleteUploadValidation:
         }
         client = OsmosisClient()
         result = client.complete_upload(
-            file_id="file-1", parts=None, workspace_id="ws_test"
+            file_id="file-1", parts=None, git_identity="git_test"
         )
         assert result.id == "file-1"
         assert result.status == "uploaded"
@@ -72,7 +72,7 @@ class TestCompleteUploadValidation:
         ]
         client = OsmosisClient()
         result = client.complete_upload(
-            file_id="file-2", parts=parts, workspace_id="ws_test"
+            file_id="file-2", parts=parts, git_identity="git_test"
         )
         assert result.id == "file-2"
         assert result.status == "uploaded"
@@ -95,7 +95,7 @@ class TestCompleteUploadValidation:
         ]
         with pytest.raises(ValueError, match="Duplicate part numbers"):
             client.complete_upload(
-                file_id="file-1", parts=parts, workspace_id="ws_test"
+                file_id="file-1", parts=parts, git_identity="git_test"
             )
 
 
@@ -107,7 +107,7 @@ class TestAbortUpload:
         """Verify abort sends empty body (server reads upload_id from DB)."""
         mock_request.return_value = None
         client = OsmosisClient()
-        client.abort_upload(file_id="file-1", workspace_id="ws_test")
+        client.abort_upload(file_id="file-1", git_identity="git_test")
         call_kwargs = mock_request.call_args
         payload = call_kwargs.kwargs.get("data") or call_kwargs[1].get("data")
         assert payload == {}
@@ -117,23 +117,24 @@ class TestListDatasets:
     """Tests for OsmosisClient.list_datasets."""
 
     @patch("osmosis_ai.platform.api.client.platform_request")
-    def test_list_datasets_passes_workspace_id(self, mock_request: MagicMock) -> None:
+    def test_list_datasets_passes_git_identity(self, mock_request: MagicMock) -> None:
         mock_request.return_value = {"datasets": [], "total_count": 0}
 
-        OsmosisClient().list_datasets(credentials=object(), workspace_id="ws_123")
+        OsmosisClient().list_datasets(credentials=object(), git_identity="git_123")
 
-        assert mock_request.call_args.kwargs["workspace_id"] == "ws_123"
+        assert mock_request.call_args.kwargs["git_identity"] == "git_123"
+        assert "workspace_id" not in mock_request.call_args.kwargs
 
 
-class TestWorkspaceIdPassthrough:
-    """Tests representative workspace-scoped methods pass workspace_id."""
+class TestGitIdentityPassthrough:
+    """Tests representative repo-scoped methods pass git_identity."""
 
     @pytest.mark.parametrize(
         ("call_client", "response"),
         [
             (
                 lambda client: client.create_dataset(
-                    "data.jsonl", 100, "jsonl", workspace_id="ws_123"
+                    "data.jsonl", 100, "jsonl", git_identity="git_123"
                 ),
                 {
                     "id": "file-1",
@@ -148,7 +149,7 @@ class TestWorkspaceIdPassthrough:
                     dataset="dataset-1",
                     rollout_name="rollout",
                     entrypoint="rollout.py",
-                    workspace_id="ws_123",
+                    git_identity="git_123",
                 ),
                 {
                     "id": "run-1",
@@ -158,24 +159,24 @@ class TestWorkspaceIdPassthrough:
                 },
             ),
             (
-                lambda client: client.list_training_runs(workspace_id="ws_123"),
+                lambda client: client.list_training_runs(git_identity="git_123"),
                 {"training_runs": [], "total_count": 0},
             ),
             (
-                lambda client: client.list_rollouts(workspace_id="ws_123"),
+                lambda client: client.list_rollouts(git_identity="git_123"),
                 {"rollouts": [], "total_count": 0},
             ),
             (
-                lambda client: client.list_base_models(workspace_id="ws_123"),
+                lambda client: client.list_base_models(git_identity="git_123"),
                 {"models": [], "total_count": 0},
             ),
             (
-                lambda client: client.list_deployments(workspace_id="ws_123"),
+                lambda client: client.list_deployments(git_identity="git_123"),
                 {"deployments": [], "total_count": 0},
             ),
             (
                 lambda client: client.deploy_checkpoint(
-                    "checkpoint-1", workspace_id="ws_123"
+                    "checkpoint-1", git_identity="git_123"
                 ),
                 {
                     "deployment": {
@@ -187,7 +188,7 @@ class TestWorkspaceIdPassthrough:
             ),
             (
                 lambda client: client.list_training_run_checkpoints(
-                    "run-1", workspace_id="ws_123"
+                    "run-1", git_identity="git_123"
                 ),
                 {
                     "training_run_id": "run-1",
@@ -198,7 +199,7 @@ class TestWorkspaceIdPassthrough:
         ],
     )
     @patch("osmosis_ai.platform.api.client.platform_request")
-    def test_workspace_scoped_methods_pass_workspace_id(
+    def test_repo_scoped_methods_pass_git_identity(
         self,
         mock_request: MagicMock,
         call_client: Callable[[OsmosisClient], object],
@@ -208,7 +209,8 @@ class TestWorkspaceIdPassthrough:
 
         call_client(OsmosisClient())
 
-        assert mock_request.call_args.kwargs["workspace_id"] == "ws_123"
+        assert mock_request.call_args.kwargs["git_identity"] == "git_123"
+        assert "workspace_id" not in mock_request.call_args.kwargs
 
 
 class TestSafePath:
@@ -247,7 +249,7 @@ class TestURLPathSafety:
             "status": "uploaded",
         }
         client = OsmosisClient()
-        client.complete_upload(file_id="a/b", workspace_id="ws_test")
+        client.complete_upload(file_id="a/b", git_identity="git_test")
         path = mock_request.call_args[0][0]
         assert path == "/api/cli/datasets/a%2Fb/complete"
 
@@ -255,7 +257,7 @@ class TestURLPathSafety:
     def test_abort_upload_encodes_id(self, mock_request: MagicMock) -> None:
         mock_request.return_value = None
         client = OsmosisClient()
-        client.abort_upload(file_id="a/b", workspace_id="ws_test")
+        client.abort_upload(file_id="a/b", git_identity="git_test")
         path = mock_request.call_args[0][0]
         assert path == "/api/cli/datasets/a%2Fb/abort"
 
@@ -268,7 +270,7 @@ class TestURLPathSafety:
             "status": "uploaded",
         }
         client = OsmosisClient()
-        client.get_dataset("a/b", workspace_id="ws_test")
+        client.get_dataset("a/b", git_identity="git_test")
         path = mock_request.call_args[0][0]
         assert path == "/api/cli/datasets/a%2Fb"
 
@@ -280,7 +282,7 @@ class TestURLPathSafety:
             "file_name": "f.jsonl",
         }
         client = OsmosisClient()
-        result = client.get_dataset_download_url("a/b", workspace_id="ws_test")
+        result = client.get_dataset_download_url("a/b", git_identity="git_test")
         path = mock_request.call_args[0][0]
         assert path == "/api/cli/datasets/a%2Fb/download"
         assert result.presigned_url == "https://example.com/download"
@@ -291,7 +293,7 @@ class TestURLPathSafety:
             "training_run": {"id": "r1", "status": "running"},
         }
         client = OsmosisClient()
-        client.get_training_run("a/b", workspace_id="ws_test")
+        client.get_training_run("a/b", git_identity="git_test")
         path = mock_request.call_args[0][0]
         assert path == "/api/cli/training-runs/a%2Fb"
 
@@ -331,7 +333,7 @@ class TestRefreshWorkspaceInfo:
         )
         call_kwargs = mock_request.call_args
         assert call_kwargs.args[0] == "/api/cli/workspaces"
-        assert call_kwargs.kwargs["require_workspace"] is False
+        assert call_kwargs.kwargs["require_git_repo"] is False
 
     @patch("osmosis_ai.platform.api.client.platform_request")
     def test_defaults_new_fields_for_older_platform_response(
@@ -419,7 +421,7 @@ class TestSubmitTrainingRun:
             dataset="ds1",
             rollout_name="rollout1",
             entrypoint="rollouts/main.py",
-            workspace_id="ws_test",
+            git_identity="git_test",
         )
         assert result.id == "run-1"
         payload = mock_request.call_args.kwargs["data"]
@@ -444,7 +446,7 @@ class TestSubmitTrainingRun:
             rollout_name="rollout1",
             entrypoint="rollouts/main.py",
             rollout_env=rollout_env,
-            workspace_id="ws_test",
+            git_identity="git_test",
         )
         payload = mock_request.call_args.kwargs["data"]
         assert payload["rollout_env"] == rollout_env
@@ -464,7 +466,7 @@ class TestSubmitTrainingRun:
             rollout_name="rollout1",
             entrypoint="rollouts/main.py",
             rollout_secret_refs=secret_refs,
-            workspace_id="ws_test",
+            git_identity="git_test",
         )
         payload = mock_request.call_args.kwargs["data"]
         assert payload["rollout_secret_refs"] == secret_refs
@@ -484,7 +486,7 @@ class TestSubmitTrainingRun:
             entrypoint="rollouts/main.py",
             rollout_env={},
             rollout_secret_refs={},
-            workspace_id="ws_test",
+            git_identity="git_test",
         )
         payload = mock_request.call_args.kwargs["data"]
         assert "rollout_env" not in payload
@@ -506,7 +508,7 @@ class TestSubmitTrainingRun:
             config={"lr": 0.001},
             rollout_env={"FOO": "bar"},
             rollout_secret_refs={"OPENAI_API_KEY": "openai-prod"},
-            workspace_id="ws_test",
+            git_identity="git_test",
         )
         payload = mock_request.call_args.kwargs["data"]
         assert payload["commit_sha"] == "abc123"
@@ -543,7 +545,7 @@ class TestGetTrainingRunMetrics:
             ],
         }
         client = OsmosisClient()
-        result = client.get_training_run_metrics("run-1", workspace_id="ws_test")
+        result = client.get_training_run_metrics("run-1", git_identity="git_test")
         assert result.training_run_id == "run-1"
         assert result.overview.reward == 0.85
         assert len(result.metrics) == 1
@@ -567,6 +569,6 @@ class TestGetTrainingRunMetrics:
             "metrics": [],
         }
         client = OsmosisClient()
-        client.get_training_run_metrics("a/b", workspace_id="ws_test")
+        client.get_training_run_metrics("a/b", git_identity="git_test")
         path = mock_request.call_args[0][0]
         assert path == "/api/cli/training-runs/a%2Fb/metrics"
