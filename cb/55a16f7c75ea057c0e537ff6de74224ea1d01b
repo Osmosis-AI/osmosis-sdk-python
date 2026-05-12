@@ -1,0 +1,22 @@
+tests/unit/platform/cli/test_project_contract.py
+  s_9477fa0c8717da::t_81dcb0fbe3ded6 3,9,18-28,30-31,36,38-47,50-51,53,61,64,75,77-100
+osmosis_ai/platform/cli/project_contract.py
+  s_9477fa0c8717da::t_1ccfec0acc2d56 189
+  s_9477fa0c8717da::t_c380f50c56fa94 15-18,21-24,28-29,31,36,39,41,45-46,49,51,57-60,66,69
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "cb55a16f7c75ea057c0e537ff6de74224ea1d01b",
+  "prompts": {},
+  "sessions": {
+    "s_9477fa0c8717da": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "a15c2361-d4d8-4e57-b365-2161f14671da",
+        "model": "gpt-5.5-extra-high"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}
