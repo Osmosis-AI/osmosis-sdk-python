@@ -56,7 +56,10 @@ def test_next_steps_use_git_scoped_training_flow() -> None:
 
     assert "Git Sync" not in rendered
     assert "project link" not in rendered
+    assert "project unlink" not in rendered
     assert ".osmosis/project.toml" not in rendered
+    assert "linked workspace" not in rendered
+    assert "X-Osmosis-Org" not in rendered
     assert "osmosis train submit configs/training/multiply.toml" in next_steps
 
 

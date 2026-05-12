@@ -32,7 +32,7 @@ Python SDK for [Osmosis AI](https://platform.osmosis.ai), a platform for trainin
 | **Smoke test** | `osmosis eval run configs/eval/<name>.toml --limit 1` — exercises the same rollout server protocol used by training. |
 | **Evaluate** | `osmosis eval run configs/eval/<name>.toml` — run the full eval with optional pass@k and caching. |
 
-**Example repositories:** [osmosis-git-sync-example](https://github.com/Osmosis-AI/osmosis-git-sync-example) (synced agent repo patterns) · [osmosis-remote-rollout-example](https://github.com/Osmosis-AI/osmosis-remote-rollout-example) (reference server usage — align with current SDK exports when upgrading).
+**Example repository:** [osmosis-remote-rollout-example](https://github.com/Osmosis-AI/osmosis-remote-rollout-example) (reference server usage - align with current SDK exports when upgrading).
 
 **Documentation index:** [docs/README.md](docs/README.md)
 
