@@ -10,8 +10,6 @@ from osmosis_ai.platform.cli.scaffold import write_scaffold
 
 def _make_existing_project(root: Path) -> Path:
     root.mkdir()
-    (root / ".osmosis").mkdir()
-    (root / ".osmosis" / "project.toml").write_text("[project]\n", encoding="utf-8")
     return root
 
 
@@ -20,10 +18,8 @@ def test_write_scaffold_creates_repair_paths(tmp_path: Path) -> None:
 
     write_scaffold(target, "project")
 
-    assert (target / ".osmosis" / "project.toml").read_text(
-        encoding="utf-8"
-    ) == "[project]\n"
-    assert (target / ".osmosis" / "research" / "program.md").is_file()
+    assert not (target / ".osmosis" / "project.toml").exists()
+    assert (target / "research" / "program.md").is_file()
     assert (target / ".osmosis" / "cache" / ".gitkeep").is_file()
     assert (target / "rollouts" / ".gitkeep").is_file()
     assert (target / "configs" / "eval" / ".gitkeep").is_file()
@@ -47,9 +43,7 @@ def test_write_scaffold_renders_project_files(tmp_path: Path) -> None:
     pyproject = (target / "pyproject.toml").read_text(encoding="utf-8")
     readme = (target / "README.md").read_text(encoding="utf-8")
 
-    assert (target / ".osmosis" / "project.toml").read_text(
-        encoding="utf-8"
-    ) == "[project]\n"
+    assert not (target / ".osmosis" / "project.toml").exists()
     assert 'name = "cool-project"' in pyproject
     assert f'"osmosis-ai>={PACKAGE_VERSION}"' in pyproject
     assert "cool-project" in readme
@@ -60,10 +54,10 @@ def test_write_scaffold_does_not_overwrite_existing_files(tmp_path: Path) -> Non
     write_scaffold(target, "project")
 
     existing_files = {
-        ".osmosis/project.toml": "custom project",
         "pyproject.toml": "custom pyproject",
         ".gitignore": "custom gitignore",
         "README.md": "custom readme",
+        "research/program.md": "custom research",
         "rollouts/.gitkeep": "custom marker",
         "AGENTS.md": "custom agents",
     }
@@ -87,8 +81,8 @@ def test_write_scaffold_update_refreshes_agent_files_only(tmp_path: Path) -> Non
         ".claude/settings.json": "{}",
     }
     preserved_files = {
-        ".osmosis/project.toml": "custom project",
         "README.md": "custom readme",
+        "research/program.md": "custom research",
         "configs/training/default.toml": "custom training",
     }
     for rel_path, content in {**refreshed_files, **preserved_files}.items():

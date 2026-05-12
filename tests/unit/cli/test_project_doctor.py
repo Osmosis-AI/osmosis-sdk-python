@@ -1,14 +1,18 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 
 from osmosis_ai.cli.main import main
 
 
 def _make_project(root: Path) -> Path:
-    (root / ".osmosis").mkdir(parents=True)
-    (root / ".osmosis" / "project.toml").write_text("[project]\n", encoding="utf-8")
+    subprocess.run(
+        ["git", "init", "-b", "main", str(root)],
+        check=True,
+        capture_output=True,
+    )
     return root
 
 
@@ -22,10 +26,10 @@ def test_project_doctor_dry_run_reports_missing_paths(
 
     assert rc == 0
     payload = json.loads(capsys.readouterr().out)
-    assert ".osmosis/research/program.md" in payload["resource"]["missing"]
-    assert "rollouts/.gitkeep" in payload["resource"]["missing"]
+    assert "rollouts/" in payload["resource"]["missing"]
+    assert "configs/training/" in payload["resource"]["missing"]
     assert payload["resource"]["fixed"] is False
-    assert not (project / ".osmosis" / "research" / "program.md").exists()
+    assert not (project / "research" / "program.md").exists()
 
 
 def test_project_doctor_fix_creates_missing_paths(
@@ -38,9 +42,10 @@ def test_project_doctor_fix_creates_missing_paths(
 
     payload = json.loads(capsys.readouterr().out)
     assert rc == 0
-    assert (project / ".osmosis" / "research" / "program.md").is_file()
+    assert (project / "research" / "program.md").is_file()
     assert (project / "configs" / "training").is_dir()
     assert payload["resource"]["missing"] == []
+    assert not (project / ".osmosis" / "project.toml").exists()
 
 
 def test_project_doctor_fix_outside_project_does_not_create_project(
@@ -55,8 +60,7 @@ def test_project_doctor_fix_outside_project_does_not_create_project(
     assert captured.out == ""
     assert not (tmp_path / ".osmosis" / "project.toml").exists()
     message = json.loads(captured.err)["error"]["message"]
-    assert "Not in an Osmosis project" in message
-    assert "existing Osmosis project" in message
+    assert "cloned Osmosis repository" in message
     assert "osmosis init" not in message
 
 
@@ -64,7 +68,7 @@ def test_project_doctor_fix_preserves_existing_research_program(
     tmp_path: Path, monkeypatch, capsys
 ) -> None:
     project = _make_project(tmp_path / "project")
-    program = project / ".osmosis" / "research" / "program.md"
+    program = project / "research" / "program.md"
     program.parent.mkdir(parents=True)
     program.write_text("# Research Brief\n\nKeep this content.\n", encoding="utf-8")
     monkeypatch.chdir(project)
@@ -94,6 +98,6 @@ def test_project_doctor_declining_refresh_preserves_agents_but_repairs_missing_p
         result = doctor_project(fix=True, yes=False)
 
     assert (project / "AGENTS.md").read_text(encoding="utf-8") == "custom agents"
-    assert (project / ".osmosis" / "research" / "program.md").is_file()
+    assert (project / "research" / "program.md").is_file()
     assert (project / "configs" / "training").is_dir()
     assert result.resource["refreshed"] == []

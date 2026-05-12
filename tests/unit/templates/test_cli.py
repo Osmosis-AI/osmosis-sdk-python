@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -14,10 +15,10 @@ from osmosis_ai.templates.cli import apply_command, list_command
 
 def _make_project(root: Path) -> Path:
     """Create the minimum directory layout that resolve_project_root accepts."""
-    (root / ".osmosis").mkdir(parents=True, exist_ok=True)
-    (root / ".osmosis" / "project.toml").write_text(
-        "[project]\nsetup_source = 'test'\n",
-        encoding="utf-8",
+    subprocess.run(
+        ["git", "init", "-b", "main", str(root)],
+        check=True,
+        capture_output=True,
     )
     return root
 
@@ -92,8 +93,8 @@ def test_apply_command_writes_directly_into_project_canonical_layout(
     assert result.display_next_steps == [
         "pip install -e rollouts/multiply",
         "osmosis eval run configs/eval/multiply.toml --limit 1",
+        'git add . && git commit -m "add rollout template"',
         "git push",
-        "Confirm Git Sync is connected in the Osmosis Platform",
         "osmosis train submit configs/training/multiply.toml",
     ]
 

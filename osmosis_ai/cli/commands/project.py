@@ -18,13 +18,13 @@ def validate(
     path: Path = typer.Argument(
         Path("."),
         exists=True,
-        file_okay=False,
+        file_okay=True,
         dir_okay=True,
         resolve_path=True,
-        help="Project path (defaults to current directory).",
+        help="Path inside the project (defaults to current directory).",
     ),
 ) -> Any:
-    """Validate the canonical Osmosis project structure."""
+    """Validate the Osmosis Git repository scaffold."""
     from osmosis_ai.platform.cli.project import validate_project
 
     return validate_project(path)
@@ -48,39 +48,3 @@ def doctor(
     from osmosis_ai.platform.cli.project import doctor_project
 
     return doctor_project(fix=fix, yes=yes)
-
-
-@app.command("link")
-def link(
-    workspace: str | None = typer.Option(
-        None,
-        "--workspace",
-        "-w",
-        help="Workspace ID or name to link to.",
-    ),
-    yes: bool = typer.Option(
-        False,
-        "--yes",
-        "-y",
-        help="Confirm link without prompting.",
-    ),
-) -> Any:
-    """Link the current project to an Osmosis workspace."""
-    from osmosis_ai.platform.cli.project import link_project
-
-    return link_project(workspace=workspace, yes=yes)
-
-
-@app.command("unlink")
-def unlink(
-    yes: bool = typer.Option(
-        False,
-        "--yes",
-        "-y",
-        help="Confirm unlink without prompting.",
-    ),
-) -> Any:
-    """Unlink the current project from its Osmosis workspace."""
-    from osmosis_ai.platform.cli.project import unlink_project
-
-    return unlink_project(yes=yes)

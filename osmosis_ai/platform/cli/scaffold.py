@@ -45,7 +45,7 @@ SCAFFOLD: list[ScaffoldEntry] = [
     ScaffoldEntry("", "configs/eval/.gitkeep"),
     ScaffoldEntry("", "configs/training/.gitkeep"),
     ScaffoldEntry("", "data/.gitkeep"),
-    ScaffoldEntry("program.md.tpl", ".osmosis/research/program.md"),
+    ScaffoldEntry("program.md.tpl", "research/program.md"),
     ScaffoldEntry("pyproject.toml.tpl", "pyproject.toml", render=True),
     ScaffoldEntry("README.md.tpl", "README.md", render=True),
     ScaffoldEntry("gitignore.tpl", ".gitignore"),
