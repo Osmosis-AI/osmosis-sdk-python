@@ -1,0 +1,39 @@
+tests/unit/platform/api/test_client.py
+  s_9477fa0c8717da::t_3d94ab745c4da2 50,75,98,110,120,123,125-126,129-130,137,152,162,166,170,174,179,191,202,212-213
+  s_9477fa0c8717da::t_290900b39be0cc 252,260,273,285,296,336,424,449,469,489,511,548,572
+tests/unit/platform/api/test_client_deployments.py
+  s_9477fa0c8717da::t_a0b61e3d157f44 14,27,33-34,45,50-51,67,71-72,86,89-90,104,111-112,120,123-124,136,142-143,163,168-169
+tests/unit/auth/test_platform_client.py
+  s_9477fa0c8717da::t_d749a0c176605b 459,462,464-470,474-475,478-480,492,507,528
+  s_9477fa0c8717da::t_d1e8fcf077847f 141,158,180,192,209
+  s_9477fa0c8717da::t_2af1cb3f2ddaeb 416-417,421-427,431-432,437,444,451
+  s_9477fa0c8717da::t_981aab64e2cd7b 279,298,313,325,342,361,378,403-405
+  s_9477fa0c8717da::t_4f8062e29752e5 216,222,225,227,232,236,239,243,246-270
+  s_9477fa0c8717da::t_294e0972b43dea 548,555,558,562
+  s_9477fa0c8717da::t_acfea2aa4c4ff9 575,587,604,621,632,653,669
+osmosis_ai/platform/auth/platform_client.py
+  s_9477fa0c8717da::t_a77703f41db8cd 188-189,204-207,221-222,237-238,240-241,243
+  s_9477fa0c8717da::t_ea4b708f949f05 113-116,118-119,121-123,128-137
+  s_9477fa0c8717da::t_051c2de9495225 326-332
+  s_9477fa0c8717da::t_fe7c49bfc9972a 302,304,311-322
+osmosis_ai/platform/api/client.py
+  s_9477fa0c8717da::t_8a0b9bd37e83ec 39-40,63,102,113,123,149,158,170,179,185,194,199,208,213
+  s_9477fa0c8717da::t_f1e7fd46c87fb4 372
+  s_9477fa0c8717da::t_f45fdc8eeb0cc7 231,259,269,275,284,289,298,306,314,320,332,338,350,356,370,377,386,392,401,413,422,430,442,447
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "492d6f49706ef5e0c18eb597787b6669d05b1799",
+  "prompts": {},
+  "sessions": {
+    "s_9477fa0c8717da": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "a15c2361-d4d8-4e57-b365-2161f14671da",
+        "model": "gpt-5.5-extra-high"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}
