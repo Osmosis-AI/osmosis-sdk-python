@@ -12,78 +12,61 @@ from typing import Any
 from osmosis_ai.cli.errors import CLIError
 
 _REQUIRED_DIRS = (
-    ".osmosis",
-    "rollouts",
-    "configs",
-    "configs/eval",
-    "configs/training",
-    "data",
+    "rollouts/",
+    "configs/training/",
+    "configs/eval/",
+    "data/",
 )
 
-_PROJECT_TOML = ".osmosis/project.toml"
-_REQUIRED_FILES = (_PROJECT_TOML,)
+
+def _start_dir(start: Path) -> Path:
+    current = start.resolve()
+    return current.parent if current.is_file() else current
 
 
 def find_project_root(start: Path) -> Path | None:
-    """Return the nearest ancestor that looks like an Osmosis project."""
-    current = start.resolve()
-    if current.is_file():
-        current = current.parent
+    """Return the Git worktree top-level containing start, if any."""
+    from osmosis_ai.platform.cli.workspace_repo import git_worktree_top_level
 
-    for candidate in (current, *current.parents):
-        if (candidate / _PROJECT_TOML).is_file():
-            return candidate
-    return None
+    return git_worktree_top_level(_start_dir(start))
 
 
 def resolve_project_root(start: Path | None = None) -> Path:
     """Resolve the active Osmosis project root from a path or the cwd."""
-    candidate = start or Path.cwd()
-    project_root = find_project_root(candidate)
+    project_root = find_project_root(start or Path.cwd())
     if project_root is None:
         raise CLIError(
-            "Not in an Osmosis project.\n"
-            "  Expected to find .osmosis/project.toml in this directory or an ancestor."
-        )
-    return project_root
-
-
-def resolve_project_root_from_cwd(cwd: Path | None = None) -> Path:
-    """Resolve the active Osmosis project root only from cwd ancestry."""
-    project_root = find_project_root(cwd or Path.cwd())
-    if project_root is None:
-        raise CLIError(
-            "Not in an Osmosis project. Run from an existing Osmosis project "
-            "repository created by Platform/Git Sync, or cd into a clone of an "
-            "existing project."
+            "Run this command from a cloned Osmosis repository created by Platform."
         )
     return project_root.resolve()
 
 
-def validate_project_contract(project_root: Path) -> None:
-    """Ensure the canonical project layout exists."""
-    project_root = project_root.resolve()
+def resolve_project_root_from_cwd(cwd: Path | None = None) -> Path:
+    """Resolve the active Osmosis project root from cwd's Git worktree."""
+    return resolve_project_root(cwd or Path.cwd())
 
-    missing_paths = [
+
+def missing_project_paths(project_root: Path) -> list[str]:
+    project_root = project_root.resolve()
+    return [
         rel_path
         for rel_path in _REQUIRED_DIRS
         if not (project_root / rel_path).is_dir()
     ]
-    missing_paths.extend(
-        rel_path
-        for rel_path in _REQUIRED_FILES
-        if not (project_root / rel_path).is_file()
-    )
 
+
+def validate_project_contract(project_root: Path) -> None:
+    """Ensure the Git checkout contains the required Osmosis scaffold paths."""
+    missing_paths = missing_project_paths(project_root)
     if not missing_paths:
         return
 
     formatted = "\n".join(f"  - {path}" for path in missing_paths)
     raise CLIError(
-        "Project is missing required Osmosis paths.\n"
+        "This checkout is missing required Osmosis scaffold paths.\n"
         f"{formatted}\n"
         "\n"
-        "Run `osmosis project doctor --fix` in this project to restore the canonical layout."
+        "Run `osmosis project doctor --fix` in this Git repository to restore the scaffold."
     )
 
 
@@ -203,6 +186,7 @@ __all__ = [
     "ensure_context_path",
     "ensure_project_config_path",
     "find_project_root",
+    "missing_project_paths",
     "resolve_project_root",
     "resolve_project_root_from_cwd",
     "validate_project_contract",
