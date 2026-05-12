@@ -270,7 +270,7 @@ def test_login_json_with_malformed_verify_response_is_platform_error(
     assert envelope["error"]["message"] == "Invalid response from platform"
 
 
-def test_login_json_replaces_session_before_revoking_old_token(
+def test_login_json_force_revokes_and_cleans_before_saving_new_token(
     monkeypatch, capsys, fake_verify_result
 ) -> None:
     monkeypatch.delenv("OSMOSIS_TOKEN", raising=False)
@@ -297,7 +297,39 @@ def test_login_json_replaces_session_before_revoking_old_token(
 
     assert exit_code == 0
     assert json.loads(captured.out)["status"] == "success"
-    assert calls[:2] == ["save_credentials", "revoke_cli_token"]
+    assert calls == ["revoke_cli_token", "clear_all_local_data", "save_credentials"]
+
+
+def test_login_json_force_with_token_leaves_new_credentials_saved(
+    monkeypatch, capsys, fake_verify_result
+) -> None:
+    monkeypatch.delenv("OSMOSIS_TOKEN", raising=False)
+    saved_tokens: list[str] = ["old-token"]
+    calls: list[str] = []
+    monkeypatch.setattr("osmosis_ai.platform.auth.load_credentials", _credentials)
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.verify_token", lambda token: fake_verify_result
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.credentials.save_credentials",
+        lambda creds: saved_tokens.append(creds.access_token) or "keyring",
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.local_config.clear_all_local_data",
+        lambda: (calls.append("clear_all_local_data"), saved_tokens.clear()),
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.platform_client.revoke_cli_token",
+        lambda creds: calls.append("revoke_cli_token") or True,
+    )
+
+    exit_code = cli.main(["--json", "auth", "login", "--force", "--token", "secret"])
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert json.loads(captured.out)["status"] == "success"
+    assert saved_tokens == ["secret"]
+    assert calls == ["revoke_cli_token", "clear_all_local_data"]
 
 
 def test_login_json_with_token_loads_stored_credentials_when_env_is_set(

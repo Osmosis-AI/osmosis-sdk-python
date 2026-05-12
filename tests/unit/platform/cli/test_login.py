@@ -85,6 +85,39 @@ def test_force_login_clears_workspace_data(monkeypatch) -> None:
     assert clear_calls, "clear_all_local_data must be called when --force is used"
 
 
+def test_force_login_leaves_new_credentials_saved(monkeypatch) -> None:
+    """Destructive local cleanup must not delete newly saved credentials."""
+    old_creds = _make_credentials(user_id="user_1")
+    new_creds = _make_credentials(user_id="user_1")
+    result = _make_login_result()
+    saved_tokens: list[str] = ["old-token"]
+    calls: list[str] = []
+
+    monkeypatch.delenv("OSMOSIS_TOKEN", raising=False)
+    monkeypatch.setattr("osmosis_ai.platform.auth.load_credentials", lambda: old_creds)
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.credentials.save_credentials",
+        lambda c: saved_tokens.append(c.access_token) or "keyring",
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.device_login",
+        lambda **kw: (result, new_creds),
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.local_config.clear_all_local_data",
+        lambda: (calls.append("clear_all_local_data"), saved_tokens.clear()),
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.platform_client.revoke_cli_token",
+        lambda creds: calls.append("revoke_cli_token") or True,
+    )
+
+    auth_module.login(force=True, token=None)
+
+    assert saved_tokens == [new_creds.access_token]
+    assert calls == ["clear_all_local_data"]
+
+
 # ---------------------------------------------------------------------------
 # User identity change triggers cleanup (non-force)
 # ---------------------------------------------------------------------------
