@@ -92,6 +92,17 @@ def test_validate_contract_reports_missing_scaffold_without_requiring_dot_osmosi
     assert missing == ["configs/training/", "configs/eval/", "data/"]
     assert ".osmosis/project.toml" not in missing
 
+    with pytest.raises(CLIError) as exc:
+        project_contract.validate_project_contract(tmp_path)
+
+    message = str(exc.value)
+    assert "This checkout is missing required Osmosis scaffold paths." in message
+    assert "configs/training/" in message
+    assert "configs/eval/" in message
+    assert "data/" in message
+    assert "osmosis project doctor --fix" in message
+    assert ".osmosis/project.toml" not in message
+
 
 def test_resolve_project_root_rejects_non_git_directory(tmp_path: Path) -> None:
     with pytest.raises(CLIError) as exc:
