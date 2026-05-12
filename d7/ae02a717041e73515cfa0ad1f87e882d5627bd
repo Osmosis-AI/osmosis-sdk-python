@@ -1,0 +1,56 @@
+tests/unit/cli/test_project_doctor.py
+  s_50a7205edb0b9e::t_7cda4d17af2e45 47-55
+  s_50a7205edb0b9e::t_c4853821e9bbf3 69-72
+  s_50a7205edb0b9e::t_27afd100d50d05 32-38,42-46,56-68
+docs/cli.md
+  s_50a7205edb0b9e::t_d172b9df62a60e 44,69,73-76
+osmosis_ai/platform/cli/templates/AGENTS.md.tpl
+  s_50a7205edb0b9e::t_3665a3fee4eeb1 96
+tests/unit/cli/test_auth_login_json.py
+  s_50a7205edb0b9e::t_2a3c79688e4ace 114,119,144,146,172
+  s_50a7205edb0b9e::t_c64b33ed125f20 82
+  s_50a7205edb0b9e::t_f742df78297b38 90,123
+docs/README.md
+  s_50a7205edb0b9e::t_f2ed1d49af03f9 12
+tests/unit/cli/test_project_commands.py
+  s_50a7205edb0b9e::t_1d8a48d6c1d2d1 25,28,34,39-41,49
+osmosis_ai/platform/cli/templates/configs/AGENTS.md.tpl
+  s_50a7205edb0b9e::t_0388cf275e41fa 77
+tests/unit/platform/cli/test_login.py
+  s_50a7205edb0b9e::t_249a309cabaa0f 216,219
+  s_50a7205edb0b9e::t_ef0e826cc45328 243,245,276,307,342
+tests/unit/cli/test_project_json.py
+  s_50a7205edb0b9e::t_55ab597b3937f9 34,40,45-47,49-50,52-53,56,65,70-71
+README.md
+  s_50a7205edb0b9e::t_cd368355837710 31,64
+osmosis_ai/platform/cli/project.py
+  s_50a7205edb0b9e::t_6520f1a6e80d59 37-39
+  s_50a7205edb0b9e::t_76f90a1bda4222 45,52-53,86-87,89
+osmosis_ai/cli/commands/auth.py
+  s_50a7205edb0b9e::t_14006f493935ce 45,78,86-87
+  s_50a7205edb0b9e::t_6347507da7e815 312
+osmosis_ai/cli/commands/project.py
+  s_50a7205edb0b9e::t_93bd6afd02b3bc 16-17,41
+tests/unit/cli/test_command_groups.py
+  s_50a7205edb0b9e::t_317d7705b06a09 80,146
+osmosis_ai/platform/cli/templates/README.md.tpl
+  s_50a7205edb0b9e::t_c4804f8c4fd081 21-22
+docs/troubleshooting.md
+  s_50a7205edb0b9e::t_202e86dff38b02 53
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "d7ae02a717041e73515cfa0ad1f87e882d5627bd",
+  "prompts": {},
+  "sessions": {
+    "s_50a7205edb0b9e": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "8aef248c-e8c2-4afe-b27d-01324fae2903",
+        "model": "gpt-5.5-extra-high"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}
