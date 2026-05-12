@@ -168,24 +168,26 @@ def _machine_login_with_token(*, token: str, force: bool) -> Any:
     local_data_cleared = bool(
         force or (old_credentials and old_credentials.user.id != creds.user.id)
     )
-    should_revoke_old = bool(
+    old_credentials_to_revoke = (
         old_credentials
+        if old_credentials is not None
         and not old_credentials.is_expired()
         and old_credentials.token_id
         and old_credentials.token_id != creds.token_id
+        else None
     )
-    if should_revoke_old and local_data_cleared:
+    if old_credentials_to_revoke is not None and local_data_cleared:
         with output.status("Revoking old session..."):
-            revoke_cli_token(old_credentials)
+            revoke_cli_token(old_credentials_to_revoke)
 
     if local_data_cleared:
         clear_all_local_data()
 
     token_store = save_credentials(creds)
 
-    if should_revoke_old and not local_data_cleared:
+    if old_credentials_to_revoke is not None and not local_data_cleared:
         with output.status("Revoking old session..."):
-            revoke_cli_token(old_credentials)
+            revoke_cli_token(old_credentials_to_revoke)
 
     return _login_operation_result(
         email=result.user.email,
@@ -273,27 +275,29 @@ def _rich_login(force: bool, token: str | None) -> Any:
         local_data_cleared = bool(
             force or (old_credentials and old_credentials.user.id != creds.user.id)
         )
-        should_revoke_old = bool(
+        old_credentials_to_revoke = (
             old_credentials
+            if old_credentials is not None
             and not old_credentials.is_expired()
             and old_credentials.token_id
             and old_credentials.token_id != creds.token_id
+            else None
         )
 
         # Once the replacement token/device login has been verified, destructive
         # local cleanup must happen before saving the new credentials.
-        if should_revoke_old and local_data_cleared:
+        if old_credentials_to_revoke is not None and local_data_cleared:
             with console.spinner("Revoking old session..."):
-                revoke_cli_token(old_credentials)
+                revoke_cli_token(old_credentials_to_revoke)
 
         if local_data_cleared:
             clear_all_local_data()
 
         save_credentials(creds)
 
-        if should_revoke_old and not local_data_cleared:
+        if old_credentials_to_revoke is not None and not local_data_cleared:
             with console.spinner("Revoking old session..."):
-                revoke_cli_token(old_credentials)
+                revoke_cli_token(old_credentials_to_revoke)
 
         # Display login success
         esc = console.escape

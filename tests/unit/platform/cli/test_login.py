@@ -342,7 +342,7 @@ def test_login_does_not_attempt_workspace_lookup(monkeypatch) -> None:
 
 
 def test_whoami_prints_local_identity_outside_project(monkeypatch) -> None:
-    """whoami should not require a workspace or project link outside projects."""
+    """whoami should not require project setup outside projects."""
     creds = _make_credentials(user_id="user_1")
     output = io.StringIO()
 

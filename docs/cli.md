@@ -126,7 +126,6 @@ and `[output]` sections.
 ### osmosis eval cache
 
 ```bash
-osmosis eval cache dir
 osmosis eval cache ls
 osmosis eval cache ls --model gpt-4 --status completed
 osmosis eval cache rm <task_id>
@@ -135,7 +134,6 @@ osmosis eval cache rm --all --yes
 
 | Subcommand / option | Description |
 |---------------------|-------------|
-| `dir` | Print cache root |
 | `ls` | List caches (`--model`, `--dataset`, `--status`) |
 | `rm` | Delete by `task_id`, `--all`, or filters (`-y` skips prompt) |
 

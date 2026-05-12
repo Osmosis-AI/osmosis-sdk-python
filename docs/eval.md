@@ -180,7 +180,6 @@ other rollout assets or external dependencies may not invalidate the cache; use
 ### Cache CLI
 
 ```bash
-osmosis eval cache dir
 osmosis eval cache ls
 osmosis eval cache rm <task_id>
 osmosis eval cache rm --all --yes
