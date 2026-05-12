@@ -93,6 +93,25 @@ class TestNormalizeGitIdentity:
         with pytest.raises(CLIError):
             workspace_repo.normalize_git_identity(url)
 
+    @pytest.mark.parametrize("control_character", ["\x7f", "\x80", "\x9f"])
+    @pytest.mark.parametrize(
+        "url_template",
+        [
+            "https://github.com/acme/rollouts.git?token={control_character}",
+            "https://github.com/acme/rollouts.git#{control_character}",
+            "https://user{control_character}:token@github.com/acme/rollouts.git",
+            "https://github.com/acme/rollouts{control_character}.git",
+            "git@github.com:acme/rollouts{control_character}.git",
+        ],
+    )
+    def test_control_characters_rejected_anywhere_in_remote_url(
+        self, control_character: str, url_template: str
+    ) -> None:
+        with pytest.raises(CLIError):
+            workspace_repo.normalize_git_identity(
+                url_template.format(control_character=control_character)
+            )
+
     def test_header_identity_does_not_include_host_or_token(self) -> None:
         result = workspace_repo.normalize_git_identity(
             "https://token:secret@github.com/Acme/Rollouts.git"

@@ -32,7 +32,9 @@ def normalize_git_identity(url: str | None) -> GitRemoteIdentity:
     if url is None or not isinstance(url, str) or not url:
         raise CLIError("Git remote URL must be a GitHub repository URL.")
     if _has_whitespace_or_control(url):
-        raise CLIError("Git remote URL must not contain whitespace.")
+        raise CLIError(
+            "Git remote URL must not contain whitespace or control characters."
+        )
 
     parsed = _parse_git_remote_url(url)
     if parsed.hostname is None or parsed.hostname.lower() != "github.com":
@@ -71,6 +73,10 @@ def _normalized_github_path(path: str) -> str:
     normalized = path.strip("/")
     if normalized.endswith(".git"):
         normalized = normalized[: -len(".git")]
+    if _has_whitespace_or_control(normalized):
+        raise CLIError(
+            "Git remote URL path must not contain whitespace or control characters."
+        )
     return normalized
 
 
@@ -82,7 +88,14 @@ def _display_url_without_credentials(parsed: SplitResult) -> str:
 
 
 def _has_whitespace_or_control(value: str) -> bool:
-    return any(character.isspace() or ord(character) < 32 for character in value)
+    return any(
+        character.isspace() or _is_control_character(character) for character in value
+    )
+
+
+def _is_control_character(character: str) -> bool:
+    codepoint = ord(character)
+    return codepoint < 32 or codepoint == 127 or 128 <= codepoint <= 159
 
 
 def get_local_git_remote_url(project_root: Path) -> str | None:
