@@ -1,8 +1,7 @@
-"""Project contract helpers for structured Osmosis projects.
+"""Project contract helpers for structured Osmosis project checkouts.
 
-A "project" is the local on-disk directory created by `osmosis init` —
-distinct from a Platform workspace (the remote tenant managed via
-the platform and linked with `osmosis project link`).
+A "project" is the local on-disk repository linked to a Platform workspace,
+distinct from the remote tenant managed by the platform.
 """
 
 from __future__ import annotations
@@ -54,7 +53,9 @@ def resolve_project_root_from_cwd(cwd: Path | None = None) -> Path:
     project_root = find_project_root(cwd or Path.cwd())
     if project_root is None:
         raise CLIError(
-            "Not in an Osmosis project. Run 'osmosis init' or cd into a cloned Osmosis project."
+            "Not in an Osmosis project. Run from an existing Osmosis project "
+            "repository created by Platform/Git Sync, or cd into a clone of an "
+            "existing project."
         )
     return project_root.resolve()
 

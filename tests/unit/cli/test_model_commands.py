@@ -12,11 +12,9 @@ import osmosis_ai.cli.commands.model as model_module
 import osmosis_ai.platform.api.client as api_client_module
 import osmosis_ai.platform.cli.utils as utils_module
 from osmosis_ai.cli.console import Console
-from osmosis_ai.cli.output import ListResult, OperationResult
+from osmosis_ai.cli.output import ListResult
 from osmosis_ai.platform.api.models import (
-    AffectedTrainingRun,
     BaseModelInfo,
-    ModelAffectedResources,
     PaginatedBaseModels,
 )
 
@@ -30,7 +28,6 @@ PROJECT_ROOT = Path("/tmp/osmosis-project")
 def console_capture(monkeypatch: pytest.MonkeyPatch) -> StringIO:
     output = StringIO()
     console = Console(file=output, force_terminal=False)
-    monkeypatch.setattr(model_module, "console", console)
     monkeypatch.setattr(utils_module, "console", console)
     return output
 
@@ -139,89 +136,3 @@ class TestListModels:
         assert len(result.items) == 1
         assert result.total_count == 5
         assert result.has_more is True
-
-
-@pytest.mark.usefixtures("mock_workspace_context")
-class TestDeleteModel:
-    def test_happy_path(
-        self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
-    ) -> None:
-        captured: dict[str, object] = {}
-
-        class FakeClient:
-            def get_model_affected_resources(
-                self, name, *, workspace_id, credentials=None
-            ):
-                assert credentials is AUTH_CREDENTIALS
-                assert workspace_id == WORKSPACE_ID
-                return ModelAffectedResources(training_runs_using_model=[])
-
-            def delete_model(self, name, *, workspace_id, credentials=None):
-                assert credentials is AUTH_CREDENTIALS
-                assert workspace_id == WORKSPACE_ID
-                captured["deleted"] = name
-                return True
-
-        monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-        result = model_module.delete(name="Qwen/Qwen3", yes=True)
-
-        assert captured["deleted"] == "Qwen/Qwen3"
-        assert isinstance(result, OperationResult)
-        assert result.operation == "model.delete"
-        assert result.status == "success"
-        assert result.resource == {
-            "name": "Qwen/Qwen3",
-            "workspace": {"id": WORKSPACE_ID, "name": WORKSPACE_NAME},
-            "project_root": str(PROJECT_ROOT),
-        }
-        assert result.message == 'Model "Qwen/Qwen3" deleted.'
-
-    def test_blocked_by_training_runs(
-        self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
-    ) -> None:
-        import typer
-
-        class FakeClient:
-            def get_model_affected_resources(
-                self, name, *, workspace_id, credentials=None
-            ):
-                assert workspace_id == WORKSPACE_ID
-                return ModelAffectedResources(
-                    training_runs_using_model=[
-                        AffectedTrainingRun(id="run_abcdef12", training_run_name="r1"),
-                    ]
-                )
-
-            def delete_model(
-                self, name, *, workspace_id, credentials=None
-            ):  # pragma: no cover — blocked
-                raise AssertionError("should not delete when blocked")
-
-        monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-        with pytest.raises(typer.Exit):
-            model_module.delete(name="Qwen/Qwen3", yes=True)
-        out = console_capture.getvalue()
-        assert "Cannot delete this model" in out
-        assert "r1" in out
-
-    def test_affected_resources_api_error(
-        self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
-    ) -> None:
-        from osmosis_ai.cli.errors import CLIError
-        from osmosis_ai.platform.auth.platform_client import PlatformAPIError
-
-        class FakeClient:
-            def get_model_affected_resources(
-                self, name, *, workspace_id, credentials=None
-            ):
-                assert workspace_id == WORKSPACE_ID
-                raise PlatformAPIError("boom", 500)
-
-            def delete_model(  # pragma: no cover
-                self, name, *, workspace_id, credentials=None
-            ):
-                raise AssertionError("should not delete")
-
-        monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-        with pytest.raises(CLIError, match="verify model dependencies"):
-            model_module.delete(name="Qwen/Qwen3", yes=True)

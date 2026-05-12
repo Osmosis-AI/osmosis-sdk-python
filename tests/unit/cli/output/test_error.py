@@ -8,9 +8,11 @@ from contextlib import redirect_stderr
 from pathlib import Path
 from typing import Any
 
+import click
 import pytest
 
 from osmosis_ai.cli.errors import CLIError
+from osmosis_ai.cli.main import _handle_cli_error, main
 from osmosis_ai.cli.output.error import (
     classify_error,
     command_path_for_error,
@@ -29,6 +31,21 @@ def _capture_envelope(err: CLIError) -> dict[str, Any]:
     with redirect_stderr(buf):
         emit_structured_error_to_stderr(err, command="dataset list")
     return json.loads(buf.getvalue())
+
+
+def _capture_json_usage_error_for_argv(
+    argv: list[str],
+    capsys: pytest.CaptureFixture[str],
+) -> dict[str, Any]:
+    rc = _handle_cli_error(
+        click.UsageError("No such command."),
+        argv=argv,
+        exit_code=2,
+    )
+    assert rc == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    return json.loads(captured.err)
 
 
 def test_envelope_keys_match_golden() -> None:
@@ -125,3 +142,76 @@ def test_command_path_uses_click_context_when_available() -> None:
 def test_command_path_root_when_argv_empty(monkeypatch) -> None:
     monkeypatch.setattr("sys.argv", ["osmosis"])
     assert command_path_for_error(None) == "<root>"
+
+
+@pytest.mark.parametrize(
+    ("argv", "expected_command"),
+    [
+        (["--json", "workspace"], "workspace"),
+        (["--json", "workspace", "list"], "workspace list"),
+        (["--json", "workspace", "create", "team"], "workspace create"),
+        (["--json", "workspace", "delete", "team"], "workspace delete"),
+        (["--json", "workspace", "switch", "team"], "workspace switch"),
+        (["--json", "login"], "login"),
+        (["--json", "logout"], "logout"),
+        (["--json", "whoami"], "whoami"),
+        (["--json", "init"], "init"),
+        (["--json", "link"], "link"),
+        (["--json", "unlink"], "unlink"),
+        (["--json", "project", "init"], "project init"),
+        (["--json", "project", "info"], "project info"),
+        (["--json", "project", "list"], "project list"),
+        (["--json", "dataset", "delete", "name"], "dataset delete"),
+        (["--json", "train", "delete", "run"], "train delete"),
+        (["--json", "train", "info", "run"], "train info"),
+        (["--json", "train", "traces"], "train traces"),
+        (["--json", "model", "delete", "name"], "model delete"),
+        (["--json", "deployment", "rename", "old", "new"], "deployment rename"),
+        (["--json", "deployment", "delete", "checkpoint"], "deployment delete"),
+        (["--json", "rollout", "validate", "config.toml"], "rollout validate"),
+    ],
+)
+def test_json_unknown_removed_command_uses_explicit_main_argv(
+    argv: list[str],
+    expected_command: str,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr("sys.argv", ["osmosis", "--json", "dataset", "list"])
+
+    envelope = _capture_json_usage_error_for_argv(argv, capsys)
+
+    assert envelope["command"] == expected_command
+    assert envelope["error"]["code"] == "VALIDATION"
+
+
+def test_json_unknown_command_from_main_uses_explicit_argv(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr("sys.argv", ["osmosis", "--json", "dataset", "list"])
+
+    rc = main(["--json", "definitely-unknown", "extra"])
+
+    assert rc == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    envelope = json.loads(captured.err)
+    assert envelope["command"] == "definitely-unknown"
+    assert envelope["error"]["code"] == "VALIDATION"
+
+
+def test_json_unknown_command_from_main_without_argv_uses_process_argv(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr("sys.argv", ["osmosis", "--json", "workspace", "list"])
+
+    rc = main()
+
+    assert rc == 2
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    envelope = json.loads(captured.err)
+    assert envelope["command"] == "workspace list"
+    assert envelope["error"]["code"] == "VALIDATION"

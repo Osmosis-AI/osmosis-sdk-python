@@ -29,20 +29,8 @@ osmosis auth whoami
 ```
 
 `whoami` verifies the active credentials and reports the authenticated account.
-It does not inspect local project links. Use `osmosis project info` for the
-current project link or `osmosis project list` for the local link table.
-
-> Top-level `osmosis login`, `osmosis logout`, and `osmosis whoami` still work as hidden aliases during the transition.
-
-### osmosis workspace
-
-Open the interactive workspace browser. The TUI lets you choose an accessible workspace, then browse training runs, datasets, and models.
-
-```bash
-osmosis workspace
-```
-
-In non-interactive environments, use a specific subcommand such as `osmosis workspace list`, `osmosis workspace create <name>`, or `osmosis workspace delete <name> --yes`. To link this project with a workspace for platform commands, use `osmosis project link --workspace <workspace-id-or-name>`.
+Manage workspaces, Git Sync connections, and workspace settings in the Osmosis
+Platform product.
 
 ## Project
 
@@ -58,27 +46,8 @@ osmosis project link --workspace <workspace-id-or-name>
 osmosis project link --workspace <workspace-id-or-name> --yes
 ```
 
-The project mapping is stored in `~/.osmosis/config.json`.
-
-### osmosis project info
-
-Show the local workspace link for the current project. This reads local metadata
-by default and only contacts the platform when `--refresh` is passed.
-
-```bash
-osmosis project info
-osmosis project info --refresh
-```
-
-### osmosis project list
-
-List project-to-workspace links stored on this machine. This command reads the
-local mapping table and does not require authentication.
-
-```bash
-osmosis project list
-osmosis project list --all-platforms
-```
+The project mapping is stored in `~/.osmosis/config.json`. Manage workspace
+membership and Git Sync connections in the Osmosis Platform.
 
 For CI:
 
@@ -88,18 +57,10 @@ osmosis project link --workspace <workspace-id-or-name> --yes
 osmosis train submit configs/training/default.toml --yes
 ```
 
-To create a project in the current directory, run `init --here` from a
-completely empty directory:
-
-```bash
-osmosis init --here <name>
-osmosis project link --workspace <workspace-id-or-name>
-```
-
 ### osmosis project validate
 
-Validate the canonical layout of a local Osmosis project (the directory created
-by `osmosis init`).
+Validate the canonical layout of a local Osmosis project from a Platform/Git
+Sync managed repo or an existing cloned project.
 
 ```bash
 osmosis project validate
@@ -110,30 +71,6 @@ The command checks for `.osmosis/project.toml` and the required `rollouts/`,
 `configs/training/`, `configs/eval/`, and `data/` directories.
 
 ## Rollout
-
-### osmosis rollout validate
-
-Validate the rollout entrypoint referenced by a training or eval config.
-
-For training configs, `osmosis rollout validate` checks the configured rollout
-backend before submit. For eval configs, the default static check verifies that
-the entrypoint is a Python script under `rollouts/<rollout>/` and that the
-rollout directory contains `pyproject.toml`.
-
-Use `--server` with eval configs to start the local rollout server with
-`uv run python <entrypoint>` from `rollouts/<rollout>/` and require
-`GET /health` on fixed port `8000`.
-
-```bash
-osmosis rollout validate configs/eval/my-rollout.toml
-osmosis rollout validate --server configs/eval/my-rollout.toml
-osmosis rollout validate configs/training/my-run.toml
-```
-
-The command only accepts configs under these canonical project paths:
-
-- `configs/eval/<name>.toml`
-- `configs/training/<name>.toml`
 
 ### osmosis rollout list
 
@@ -161,6 +98,7 @@ structured Osmosis project. Eval configs use `[eval]`, `[llm]`, `[runs]`,
 supported.
 
 ```bash
+osmosis eval run configs/eval/my-rollout.toml --limit 1
 osmosis eval run configs/eval/my-rollout.toml
 osmosis eval run configs/eval/my-rollout.toml --fresh
 osmosis eval run configs/eval/my-rollout.toml --retry-failed
@@ -222,6 +160,9 @@ osmosis train submit configs/training/my-run.toml --yes   # skip confirmation
 The config file must live under `configs/training/` inside a structured Osmosis
 project. The CLI reads the config locally and sends it to the platform, which
 clones the workspace's connected Git repository for the actual rollout code.
+`osmosis train submit` includes the training preflight checks before launch; run
+`osmosis eval run configs/eval/<name>.toml --limit 1` first when you want an
+end-to-end local smoke test of the rollout server and grader.
 
 #### Required `[experiment]` fields
 
@@ -327,15 +268,6 @@ osmosis train stop <run-name>
 osmosis train stop <run-name> --yes
 ```
 
-### osmosis train delete
-
-Delete a training run.
-
-```bash
-osmosis train delete <run-name>
-osmosis train delete <run-name> --yes
-```
-
 ### osmosis train metrics
 
 Export training run metrics to a JSON file.
@@ -343,6 +275,46 @@ Export training run metrics to a JSON file.
 ```bash
 osmosis train metrics <run-name>
 osmosis train metrics <run-name> -o ./my-metrics.json
+```
+
+## Deployment
+
+Deployments expose trained checkpoint adapters for inference. Use the checkpoint
+UUID or checkpoint name anywhere `<checkpoint>` appears.
+
+### osmosis deployment list
+
+List deployments in the current workspace.
+
+```bash
+osmosis deployment list
+osmosis deployment list --limit 50
+osmosis deployment list --all
+```
+
+### osmosis deployment info
+
+Show deployment details for a checkpoint.
+
+```bash
+osmosis deployment info <checkpoint>
+osmosis --json deployment info <checkpoint>
+```
+
+### osmosis deploy
+
+Deploy or reactivate a checkpoint.
+
+```bash
+osmosis deploy <checkpoint>
+```
+
+### osmosis undeploy
+
+Transition a checkpoint deployment to inactive.
+
+```bash
+osmosis undeploy <checkpoint>
 ```
 
 ## See also

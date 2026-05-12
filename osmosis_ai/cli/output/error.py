@@ -11,6 +11,51 @@ import click
 from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.consts import PACKAGE_VERSION
 
+_SUPPORTED_TOP_LEVEL_COMMANDS = {
+    "deploy",
+    "undeploy",
+    "upgrade",
+}
+
+_SUPPORTED_COMMAND_GROUPS = {
+    "auth",
+    "dataset",
+    "deployment",
+    "eval",
+    "model",
+    "project",
+    "rollout",
+    "template",
+    "train",
+}
+
+_REMOVED_TOP_LEVEL_COMMANDS = {
+    "init",
+    "link",
+    "login",
+    "logout",
+    "unlink",
+    "whoami",
+}
+
+_REMOVED_TWO_TOKEN_COMMANDS = {
+    ("dataset", "delete"),
+    ("deployment", "delete"),
+    ("deployment", "rename"),
+    ("model", "delete"),
+    ("project", "info"),
+    ("project", "init"),
+    ("project", "list"),
+    ("rollout", "validate"),
+    ("train", "delete"),
+    ("train", "info"),
+    ("train", "traces"),
+    ("workspace", "create"),
+    ("workspace", "delete"),
+    ("workspace", "list"),
+    ("workspace", "switch"),
+}
+
 
 def _classify_platform_status(status: int | None) -> str:
     if status == 401:
@@ -90,39 +135,30 @@ def _argv_command_path(argv: list[str]) -> str:
     if not tokens:
         return "<root>"
 
-    top_level_commands = {
-        "deploy",
-        "init",
-        "login",
-        "logout",
-        "undeploy",
-        "upgrade",
-        "whoami",
-    }
-    command_groups = {
-        "auth",
-        "dataset",
-        "deployment",
-        "eval",
-        "model",
-        "project",
-        "rollout",
-        "train",
-        "workspace",
-    }
-
     command = tokens[0]
-    if command in top_level_commands or len(tokens) == 1:
+    if command in _SUPPORTED_TOP_LEVEL_COMMANDS:
         return command
+    if command in _REMOVED_TOP_LEVEL_COMMANDS:
+        return command
+    if len(tokens) == 1:
+        return command
+    if (command, tokens[1]) in _REMOVED_TWO_TOKEN_COMMANDS:
+        return " ".join(tokens[:2])
     if command == "eval" and tokens[1] == "cache" and len(tokens) >= 3:
         return " ".join(tokens[:3])
-    if command in command_groups:
+    if command in _SUPPORTED_COMMAND_GROUPS:
         return " ".join(tokens[:2])
     return command
 
 
-def command_path_for_error(ctx: click.Context | None) -> str:
+def command_path_for_error(
+    ctx: click.Context | None,
+    *,
+    argv: list[str] | None = None,
+) -> str:
     """Resolve the command path for the error envelope."""
+    if argv is not None:
+        return _argv_command_path(argv)
     if ctx is not None:
         path = ctx.command_path
         parts = path.split(" ", 1)

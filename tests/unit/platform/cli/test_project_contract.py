@@ -38,8 +38,14 @@ def test_resolve_project_root_from_cwd_reports_missing_project(
 ) -> None:
     monkeypatch.chdir(tmp_path)
 
-    with pytest.raises(CLIError, match="Not in an Osmosis project"):
+    with pytest.raises(CLIError, match="Not in an Osmosis project") as exc:
         resolve_project_root_from_cwd()
+
+    message = str(exc.value)
+    assert "existing Osmosis project" in message
+    assert "Platform/Git Sync" in message
+    assert "clone of an existing project" in message
+    assert "osmosis init" not in message
 
 
 def test_validate_project_contract_does_not_require_training_brief(

@@ -2,8 +2,7 @@
 
 Covers the checkpoint-centric API:
     list_deployments / get_deployment / deploy_checkpoint /
-    undeploy_checkpoint / rename_checkpoint / delete_deployment /
-    list_training_run_checkpoints
+    undeploy_checkpoint / list_training_run_checkpoints
 """
 
 from __future__ import annotations
@@ -134,43 +133,6 @@ class TestUndeployCheckpoint:
         assert args[0] == "/api/cli/deployments/qwen3-step-100/undeploy"
         assert kwargs["method"] == "POST"
         assert kwargs["data"] == {}
-        assert kwargs["workspace_id"] == WORKSPACE_ID
-
-
-class TestRenameCheckpoint:
-    @patch("osmosis_ai.platform.api.client.platform_request")
-    def test_rename(self, mock_req: MagicMock) -> None:
-        mock_req.return_value = {
-            "id": "dep_1",
-            "old_checkpoint_name": "old-name",
-            "checkpoint_name": "new-name",
-            "status": "active",
-        }
-        client = OsmosisClient()
-        result = client.rename_checkpoint(
-            "old-name", "new-name", workspace_id=WORKSPACE_ID
-        )
-        assert result.checkpoint_name == "new-name"
-        assert result.old_checkpoint_name == "old-name"
-        args, kwargs = mock_req.call_args
-        assert args[0] == "/api/cli/deployments/old-name"
-        assert kwargs["method"] == "PATCH"
-        assert kwargs["data"] == {"checkpoint_name": "new-name"}
-        assert kwargs["workspace_id"] == WORKSPACE_ID
-
-
-class TestDeleteDeployment:
-    @patch("osmosis_ai.platform.api.client.platform_request")
-    def test_delete(self, mock_req: MagicMock) -> None:
-        mock_req.return_value = {"deleted": True}
-        client = OsmosisClient()
-        assert (
-            client.delete_deployment("qwen3-step-100", workspace_id=WORKSPACE_ID)
-            is True
-        )
-        args, kwargs = mock_req.call_args
-        assert args[0] == "/api/cli/deployments/qwen3-step-100"
-        assert kwargs["method"] == "DELETE"
         assert kwargs["workspace_id"] == WORKSPACE_ID
 
 

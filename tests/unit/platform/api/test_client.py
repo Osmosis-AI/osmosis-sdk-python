@@ -10,6 +10,28 @@ import pytest
 
 from osmosis_ai.platform.api.client import OsmosisClient, _safe_path
 
+REMOVED_CLIENT_METHODS = (
+    "list_workspaces",
+    "create_workspace",
+    "delete_workspace",
+    "get_workspace_deletion_status",
+    "delete_dataset",
+    "get_dataset_affected_resources",
+    "delete_training_run",
+    "delete_model",
+    "get_model_affected_resources",
+    "rename_checkpoint",
+    "delete_deployment",
+)
+
+
+class TestRemovedClientMethods:
+    """Destructive API methods must not be exposed by OsmosisClient."""
+
+    @pytest.mark.parametrize("method_name", REMOVED_CLIENT_METHODS)
+    def test_removed_method_is_not_exposed(self, method_name: str) -> None:
+        assert not hasattr(OsmosisClient, method_name)
+
 
 class TestCompleteUploadValidation:
     """Tests for parameter validation in OsmosisClient.complete_upload."""
@@ -264,14 +286,6 @@ class TestURLPathSafety:
         assert result.presigned_url == "https://example.com/download"
 
     @patch("osmosis_ai.platform.api.client.platform_request")
-    def test_delete_dataset_encodes_id(self, mock_request: MagicMock) -> None:
-        mock_request.return_value = None
-        client = OsmosisClient()
-        client.delete_dataset("a/b", workspace_id="ws_test")
-        path = mock_request.call_args[0][0]
-        assert path == "/api/cli/datasets/a%2Fb"
-
-    @patch("osmosis_ai.platform.api.client.platform_request")
     def test_get_training_run_encodes_id(self, mock_request: MagicMock) -> None:
         mock_request.return_value = {
             "training_run": {"id": "r1", "status": "running"},
@@ -280,88 +294,6 @@ class TestURLPathSafety:
         client.get_training_run("a/b", workspace_id="ws_test")
         path = mock_request.call_args[0][0]
         assert path == "/api/cli/training-runs/a%2Fb"
-
-
-class TestGetModelAffectedResources:
-    """Tests for OsmosisClient.get_model_affected_resources."""
-
-    @patch("osmosis_ai.platform.api.client.platform_request")
-    def test_model_with_blocking_runs(self, mock_request: MagicMock) -> None:
-        mock_request.return_value = {
-            "training_runs_using_model": [
-                {"id": "r1", "training_run_name": "Run 1"},
-            ],
-        }
-        client = OsmosisClient()
-        result = client.get_model_affected_resources("m1", workspace_id="ws_test")
-        assert len(result.training_runs_using_model) == 1
-        assert result.has_blocking_runs is True
-        path = mock_request.call_args[0][0]
-        assert "/api/cli/models/m1/affected-resources" in path
-
-    @patch("osmosis_ai.platform.api.client.platform_request")
-    def test_path_encodes_model_id(self, mock_request: MagicMock) -> None:
-        mock_request.return_value = {
-            "training_runs_using_model": [],
-        }
-        client = OsmosisClient()
-        client.get_model_affected_resources("a/b", workspace_id="ws_test")
-        path = mock_request.call_args[0][0]
-        assert "a%2Fb" in path
-
-
-class TestGetWorkspaceDeletionStatus:
-    """Tests for OsmosisClient.get_workspace_deletion_status."""
-
-    @patch("osmosis_ai.platform.api.client.platform_request")
-    def test_can_delete(self, mock_request: MagicMock) -> None:
-        mock_request.return_value = {
-            "can_delete": True,
-            "is_owner": True,
-            "is_last_workspace": False,
-            "has_running_processes": False,
-            "feature_pipelines": {"count": 0, "valid": True},
-            "training_runs": {"count": 0, "valid": True},
-            "models": {"count": 0, "valid": True},
-        }
-        client = OsmosisClient()
-        result = client.get_workspace_deletion_status("ws-1")
-        assert result.can_delete is True
-        path = mock_request.call_args[0][0]
-        assert path == "/api/cli/workspaces/ws-1/deletion-status"
-
-    @patch("osmosis_ai.platform.api.client.platform_request")
-    def test_with_running_processes(self, mock_request: MagicMock) -> None:
-        mock_request.return_value = {
-            "can_delete": False,
-            "is_owner": True,
-            "is_last_workspace": False,
-            "has_running_processes": True,
-            "feature_pipelines": {"count": 1, "valid": False},
-            "training_runs": {"count": 0, "valid": True},
-            "models": {"count": 0, "valid": True},
-        }
-        client = OsmosisClient()
-        result = client.get_workspace_deletion_status("ws-2")
-        assert result.can_delete is False
-        assert result.has_running_processes is True
-
-    @patch("osmosis_ai.platform.api.client.platform_request")
-    def test_require_workspace_false(self, mock_request: MagicMock) -> None:
-        """Verify deletion-status does not require workspace header."""
-        mock_request.return_value = {
-            "can_delete": True,
-            "is_owner": True,
-            "is_last_workspace": False,
-            "has_running_processes": False,
-            "feature_pipelines": {"count": 0, "valid": True},
-            "training_runs": {"count": 0, "valid": True},
-            "models": {"count": 0, "valid": True},
-        }
-        client = OsmosisClient()
-        client.get_workspace_deletion_status("ws-1")
-        call_kwargs = mock_request.call_args
-        assert call_kwargs.kwargs.get("require_workspace") is False
 
 
 class TestRefreshWorkspaceInfo:

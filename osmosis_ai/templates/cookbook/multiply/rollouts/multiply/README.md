@@ -31,19 +31,18 @@ Step 1 — install the rollout's deps from the project root:
 
     pip install -e rollouts/multiply
 
-Step 2 — validate the rollout against the project contract:
+Step 2 — run an end-to-end eval smoke test:
 
-    osmosis --json rollout validate configs/eval/multiply.toml
+    osmosis --json eval run configs/eval/multiply.toml --limit 1
 
 Step 3 — run a local eval against a JSONL dataset:
 
     osmosis --json eval run configs/eval/multiply.toml
 
-Step 4 — push the rollout code to GitHub and connect the repository to your
-active Osmosis workspace with Git Sync before submitting:
+Step 4 — push the rollout code to GitHub and confirm the repository is connected
+to the Osmosis Platform with Git Sync before submitting:
 
     git push
-    osmosis workspace
 
 Training submissions fetch code from the workspace's connected Git repository,
 so pushed code and Git Sync setup are required.
@@ -57,8 +56,7 @@ The eval and training configs (`configs/eval/multiply.toml`,
 `rollout = "multiply"` / `entrypoint = "main.py"`.
 
 For ad-hoc server testing, you can still run `python rollouts/multiply/main.py`;
-the template workflow above uses the validate, eval, and managed training
-commands.
+the template workflow above uses eval and managed training commands.
 
 ## Customizing
 

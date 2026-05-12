@@ -41,6 +41,18 @@ _AUTH_LOGIN_ERROR_CODES = {
     "TOKEN_REVOKED",
     "UNKNOWN_AUTH_ERROR",
 }
+_EXISTING_PROJECT_LINK_STEP = (
+    "From an existing Osmosis project repo:\n  "
+    "osmosis project link --workspace <workspace-id-or-name>"
+)
+_PLATFORM_WORKSPACE_SETUP_STEP = (
+    "Set up a workspace in the Osmosis Platform and connect a project repository "
+    "with Git Sync."
+)
+_PLATFORM_PROJECT_REPO_STEP = (
+    "Clone the Platform/Git Sync managed project repo, then run Osmosis project "
+    "commands from that checkout."
+)
 
 
 def _normalize_workspaces(raw_workspaces: Any) -> list[dict[str, str]]:
@@ -119,16 +131,30 @@ def _login_operation_result(
     next_steps: list[str] = []
     next_steps_structured: list[dict[str, Any]] = []
     if saved:
-        next_steps.append(
-            "Link a project with: "
-            "osmosis project link --workspace <workspace-id-or-name>"
-        )
-        next_steps_structured.append(
-            {
-                "action": "project.link",
-                "workspace": "<workspace-id-or-name>",
-            }
-        )
+        if workspace_count == 0:
+            next_steps.extend(
+                [_PLATFORM_WORKSPACE_SETUP_STEP, _PLATFORM_PROJECT_REPO_STEP]
+            )
+            next_steps_structured.extend(
+                [
+                    {
+                        "action": "platform.setup_workspace",
+                        "description": _PLATFORM_WORKSPACE_SETUP_STEP,
+                    },
+                    {
+                        "action": "git_sync.clone_project_repo",
+                        "description": _PLATFORM_PROJECT_REPO_STEP,
+                    },
+                ]
+            )
+        else:
+            next_steps.append(_EXISTING_PROJECT_LINK_STEP)
+            next_steps_structured.append(
+                {
+                    "action": "project.link",
+                    "workspace": "<workspace-id-or-name>",
+                }
+            )
 
     return OperationResult(
         operation="auth.login",
@@ -353,16 +379,12 @@ def _rich_login(force: bool, token: str | None) -> Any:
         elif workspaces == []:
             console.print(
                 "\nNo workspaces were found for this account. "
-                "Run 'osmosis workspace create <name>' to create one, "
-                "or 'osmosis workspace list' to inspect workspace access.",
+                f"{_PLATFORM_WORKSPACE_SETUP_STEP} {_PLATFORM_PROJECT_REPO_STEP}",
                 style="dim",
             )
 
-        console.print(
-            "\nLink a project with: "
-            "osmosis project link --workspace <workspace-id-or-name>",
-            style="dim",
-        )
+        if workspaces != []:
+            console.print(f"\n{_EXISTING_PROJECT_LINK_STEP}", style="dim")
 
     except LoginError as e:
         console.print_error(str(e))

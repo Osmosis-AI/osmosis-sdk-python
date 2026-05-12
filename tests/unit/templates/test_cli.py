@@ -91,10 +91,9 @@ def test_apply_command_writes_directly_into_project_canonical_layout(
     assert any(dest.endswith("/rollouts/multiply") for dest in destinations)
     assert result.display_next_steps == [
         "pip install -e rollouts/multiply",
-        "osmosis rollout validate configs/eval/multiply.toml",
-        "osmosis eval run configs/eval/multiply.toml",
+        "osmosis eval run configs/eval/multiply.toml --limit 1",
         "git push",
-        "osmosis workspace  # connect Git Sync before submitting",
+        "Confirm Git Sync is connected in the Osmosis Platform",
         "osmosis train submit configs/training/multiply.toml",
     ]
 

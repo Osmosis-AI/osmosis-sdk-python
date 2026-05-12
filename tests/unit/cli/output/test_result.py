@@ -69,16 +69,18 @@ def test_operation_result_minimal() -> None:
 
 def test_operation_result_with_structured_next_steps() -> None:
     result = OperationResult(
-        operation="init",
+        operation="deploy",
         status="success",
-        message="Workspace created.",
+        message="Checkpoint deployed.",
         next_steps_structured=[
-            {"action": "open", "target": "https://app.osmosis.ai/ws"},
+            {"action": "deployment_info", "checkpoint_name": "run-step-40"},
         ],
-        display_next_steps=["Open the dashboard."],
+        display_next_steps=["Inspect with: osmosis deployment info run-step-40"],
     )
-    assert result.next_steps_structured[0]["action"] == "open"
-    assert result.display_next_steps == ["Open the dashboard."]
+    assert result.next_steps_structured[0]["action"] == "deployment_info"
+    assert result.display_next_steps == [
+        "Inspect with: osmosis deployment info run-step-40"
+    ]
 
 
 def test_message_result() -> None:

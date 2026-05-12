@@ -16,8 +16,6 @@ import osmosis_ai.platform.api.download as download_module
 import osmosis_ai.platform.api.upload as upload_module
 import osmosis_ai.platform.cli.dataset as dataset_module
 from osmosis_ai.platform.api.models import (
-    AffectedTrainingRun,
-    DatasetAffectedResources,
     DatasetDownloadInfo,
     DatasetFile,
     PaginatedDatasets,
@@ -384,70 +382,3 @@ def test_dataset_download_json_includes_output_path(
         "name": WORKSPACE_NAME,
     }
     assert payload["resource"]["project_root"] == str(PROJECT_ROOT)
-
-
-def test_dataset_delete_json_with_yes_returns_operation(
-    monkeypatch,
-    capsys,
-) -> None:
-    _stub_workspace_context(monkeypatch)
-
-    class FakeClient:
-        def get_dataset_affected_resources(
-            self, name, *, workspace_id, credentials=None
-        ):
-            assert workspace_id == WORKSPACE_ID
-            return DatasetAffectedResources(affected_training_runs=[])
-
-        def delete_dataset(self, name, *, workspace_id, credentials=None):
-            assert workspace_id == WORKSPACE_ID
-            return True
-
-    monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-
-    exit_code = cli.main(["--json", "dataset", "delete", "ds_1", "--yes"])
-    captured = capsys.readouterr()
-
-    assert exit_code == 0
-    payload = json.loads(captured.out)
-    assert payload["operation"] == "dataset.delete"
-    assert payload["status"] == "success"
-    assert payload["resource"]["id"] == "ds_1"
-    assert payload["resource"]["workspace"] == {
-        "id": WORKSPACE_ID,
-        "name": WORKSPACE_NAME,
-    }
-    assert payload["resource"]["project_root"] == str(PROJECT_ROOT)
-
-
-def test_dataset_delete_json_conflict_includes_blocking_runs(
-    monkeypatch,
-    capsys,
-) -> None:
-    _stub_workspace_context(monkeypatch)
-
-    class FakeClient:
-        def get_dataset_affected_resources(
-            self, name, *, workspace_id, credentials=None
-        ):
-            assert workspace_id == WORKSPACE_ID
-            return DatasetAffectedResources(
-                affected_training_runs=[
-                    AffectedTrainingRun(
-                        id="run_1",
-                        training_run_name="active-run",
-                    )
-                ]
-            )
-
-    monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-
-    exit_code = cli.main(["--json", "dataset", "delete", "ds_1", "--yes"])
-    captured = capsys.readouterr()
-
-    assert exit_code == 1
-    payload = json.loads(captured.err)
-    assert payload["error"]["code"] == "CONFLICT"
-    assert payload["error"]["details"]["training_runs"] == [
-        {"id": "run_1", "training_run_name": "active-run"}
-    ]

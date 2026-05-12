@@ -14,15 +14,14 @@ from osmosis_ai.platform.auth.config import PLATFORM_URL
 from osmosis_ai.platform.cli.project_mapping import (
     CONFIG_FILE,
     ProjectLinkRecord,
-    ProjectMappingEntry,
     ProjectMappingStore,
     normalize_platform_key,
     now_linked_at,
     sanitize_repo_url,
 )
 from osmosis_ai.platform.cli.workspace_context import (
+    WorkspaceRefResolutionError,
     list_accessible_workspaces,
-    refresh_workspace_by_id,
     resolve_workspace_ref,
 )
 
@@ -81,12 +80,12 @@ def doctor_project(*, fix: bool = False, yes: bool = False) -> Any:
     """Inspect and optionally repair the canonical project scaffold."""
     from osmosis_ai.cli.output import OperationResult, OutputFormat, get_output_context
     from osmosis_ai.cli.prompts import confirm
-    from osmosis_ai.platform.cli.init import (
+    from osmosis_ai.platform.cli.project_contract import resolve_project_root_from_cwd
+    from osmosis_ai.platform.cli.scaffold import (
         AGENT_REFRESH_PATHS,
         SCAFFOLD,
-        _write_scaffold,
+        write_scaffold,
     )
-    from osmosis_ai.platform.cli.project_contract import resolve_project_root_from_cwd
 
     project_root = resolve_project_root_from_cwd()
     missing = _missing_scaffold_paths(project_root)
@@ -115,7 +114,7 @@ def doctor_project(*, fix: bool = False, yes: bool = False) -> Any:
         ):
             refreshed = []
             refresh_agents = False
-        _write_scaffold(project_root, project_root.name, update=refresh_agents)
+        write_scaffold(project_root, project_root.name, update=refresh_agents)
         missing = _missing_scaffold_paths(project_root)
 
     return OperationResult(
@@ -132,7 +131,7 @@ def doctor_project(*, fix: bool = False, yes: bool = False) -> Any:
 
 
 def _missing_scaffold_paths(project_root: Path) -> list[str]:
-    from osmosis_ai.platform.cli.init import SCAFFOLD
+    from osmosis_ai.platform.cli.scaffold import SCAFFOLD
 
     return [
         entry.dest for entry in SCAFFOLD if not (project_root / entry.dest).exists()
@@ -173,48 +172,6 @@ def _link_data(
         "platform_key": normalize_platform_key(PLATFORM_URL),
         "linked": linked,
         "workspace": _record_workspace(record) if record is not None else None,
-    }
-
-
-def _current_project_root() -> Path | None:
-    from osmosis_ai.platform.cli.project_contract import resolve_project_root_from_cwd
-
-    try:
-        return resolve_project_root_from_cwd()
-    except CLIError:
-        return None
-
-
-def _project_list_item(
-    entry: ProjectMappingEntry, *, current_project_root: Path | None
-) -> dict[str, Any]:
-    record = entry.record
-    project_root = Path(record.project_path)
-    workspace = {
-        "id": record.workspace_id,
-        "name": record.workspace_name,
-        "repo_url": record.repo_url,
-    }
-    return {
-        "project_root": record.project_path,
-        "platform": entry.platform_key,
-        "workspace": workspace,
-        "linked_at": record.linked_at,
-        "exists": project_root.exists(),
-        "current": (
-            current_project_root is not None
-            and record.project_path == str(current_project_root)
-        ),
-    }
-
-
-def _project_list_display_item(item: dict[str, Any]) -> dict[str, Any]:
-    workspace = item["workspace"]
-    return {
-        **item,
-        "current": "*" if item["current"] else "",
-        "workspace": f"{workspace['name']} ({workspace['id']})",
-        "exists": "yes" if item["exists"] else "no",
     }
 
 
@@ -272,6 +229,14 @@ def _git_sync_url(workspace_name: str) -> str:
     return f"{PLATFORM_URL}/{workspace_name}/integrations/git"
 
 
+def _platform_project_setup_guidance() -> str:
+    return (
+        "Set up a workspace in the Osmosis Platform, connect a project repository "
+        "with Git Sync, then clone that Platform/Git Sync managed project repo "
+        "and run project link from the checkout."
+    )
+
+
 def _require_connected_repo_checkout(
     *,
     project_root: Path,
@@ -300,11 +265,11 @@ def _require_connected_repo_checkout(
     expected = normalize_git_url(repo_url)
     if expected is None:
         raise CLIError(
-            "Unable to validate the workspace's Git Sync connected repository URL.\n"
+            "Unable to validate the Platform/Git Sync connected repository URL.\n"
             f"  Workspace '{workspace_name}' is connected to:\n"
             f"    {repo_url}\n"
             "\n"
-            "Reconnect the repo in Git Sync, then run project link again:\n"
+            "Update Git Sync settings, then run project link again:\n"
             f"  {_git_sync_url(workspace_name)}"
         )
 
@@ -314,25 +279,25 @@ def _require_connected_repo_checkout(
 
     if local_remote is None:
         raise CLIError(
-            "Project link must be run from a clone of the workspace's "
-            "connected Git repository.\n"
-            f"  Workspace '{workspace_name}' is connected to:\n"
+            "Project link must be run from a clone of the Platform/Git Sync "
+            "connected repository.\n"
+            f"  Workspace '{workspace_name}' Git Sync repo:\n"
             f"    {repo_url}\n"
             f"  Local project at {project_root} has no `origin` remote.\n"
             "\n"
-            "Clone the connected repo:\n"
+            "Clone the Git Sync repo:\n"
             f"  git clone {repo_url}"
         )
 
     raise CLIError(
-        "Project link must be run from a clone of the workspace's "
-        "connected Git repository.\n"
-        f"  Workspace '{workspace_name}' is connected to:\n"
+        "Project link must be run from a clone of the Platform/Git Sync "
+        "connected repository.\n"
+        f"  Workspace '{workspace_name}' Git Sync repo:\n"
         f"    {repo_url}\n"
         "  Local `origin` remote:\n"
         f"    {local_remote}\n"
         "\n"
-        "Run from the connected repo checkout, then link again."
+        "Run from the Git Sync repo checkout, then link again."
     )
 
 
@@ -342,7 +307,11 @@ def _select_workspace_interactive(
     from osmosis_ai.cli.prompts import select
 
     if not workspaces:
-        raise CLIError("No accessible Osmosis workspaces found.", code="NOT_FOUND")
+        raise CLIError(
+            "No accessible Osmosis workspaces found.\n\n"
+            f"{_platform_project_setup_guidance()}",
+            code="NOT_FOUND",
+        )
 
     choices: list[str | Choice | Separator] = [
         Choice(
@@ -379,11 +348,22 @@ def link_project(workspace: str | None = None, yes: bool = False) -> Any:
 
     credentials = _require_link_credentials()
     workspaces = list_accessible_workspaces(credentials=credentials)
-    selected = (
-        resolve_workspace_ref(workspace, workspaces)
-        if workspace
-        else _select_workspace_interactive(workspaces)
-    )
+    if not workspaces:
+        raise CLIError(
+            "No accessible Osmosis workspaces found.\n\n"
+            f"{_platform_project_setup_guidance()}",
+            code="NOT_FOUND",
+        )
+    if workspace:
+        try:
+            selected = resolve_workspace_ref(workspace, workspaces)
+        except WorkspaceRefResolutionError as exc:
+            raise CLIError(
+                f"{exc}\n\n{_platform_project_setup_guidance()}",
+                code="NOT_FOUND",
+            ) from exc
+    else:
+        selected = _select_workspace_interactive(workspaces)
     workspace_summary = _workspace_summary(selected)
     _require_connected_repo_checkout(
         project_root=project_root,
@@ -476,100 +456,10 @@ def unlink_project(yes: bool = False) -> Any:
     )
 
 
-def project_info(refresh: bool = False) -> Any:
-    """Show project link information."""
-    from osmosis_ai.cli.output import DetailField, DetailResult
-    from osmosis_ai.platform.cli.project_contract import (
-        resolve_project_root_from_cwd,
-        validate_project_contract,
-    )
-
-    project_root = resolve_project_root_from_cwd()
-    validate_project_contract(project_root)
-    store = ProjectMappingStore(config_file=CONFIG_FILE, platform_url=PLATFORM_URL)
-    record = store.get_project(str(project_root))
-    if refresh and record is not None:
-        credentials = _require_link_credentials()
-        workspace = refresh_workspace_by_id(
-            workspace_id=record.workspace_id,
-            credentials=credentials,
-        )
-        workspace_summary = _workspace_summary(workspace)
-        record = store.update_workspace_cache(
-            str(project_root),
-            workspace_name=workspace_summary["name"],
-            repo_url=_repo_url_from_workspace(workspace),
-        )
-
-    data = _link_data(
-        project_root=project_root, linked=record is not None, record=record
-    )
-    return DetailResult(
-        title="Project Info",
-        data=data,
-        fields=[
-            DetailField(label="CWD", value=data["cwd"]),
-            DetailField(label="Project root", value=data["project_root"]),
-            DetailField(label="Platform", value=data["platform_key"]),
-            DetailField(label="Linked", value=data["linked"]),
-            DetailField(
-                label="Workspace",
-                value=(
-                    f"{record.workspace_name} ({record.workspace_id})"
-                    if record is not None
-                    else None
-                ),
-            ),
-        ],
-    )
-
-
-def list_projects(*, all_platforms: bool = False) -> Any:
-    """List local project-to-workspace mappings."""
-    from osmosis_ai.cli.output import ListColumn, ListResult
-
-    store = ProjectMappingStore(config_file=CONFIG_FILE, platform_url=PLATFORM_URL)
-    if all_platforms:
-        entries = store.list_all_projects()
-    else:
-        entries = [
-            ProjectMappingEntry(platform_key=store.platform_key, record=record)
-            for record in store.list_projects()
-        ]
-    current_project_root = _current_project_root()
-    items = [
-        _project_list_item(entry, current_project_root=current_project_root)
-        for entry in entries
-    ]
-    return ListResult(
-        title="Linked Projects",
-        items=items,
-        total_count=len(items),
-        has_more=False,
-        next_offset=None,
-        columns=[
-            ListColumn(key="current", label="", no_wrap=True),
-            ListColumn(key="project_root", label="Project"),
-            ListColumn(key="workspace", label="Workspace"),
-            ListColumn(key="platform", label="Platform", no_wrap=True),
-            ListColumn(key="exists", label="Exists", no_wrap=True),
-            ListColumn(key="linked_at", label="Linked At", no_wrap=True),
-        ],
-        display_items=[_project_list_display_item(item) for item in items],
-        extra={
-            "platform": PLATFORM_URL,
-            "platform_key": store.platform_key,
-            "all_platforms": all_platforms,
-        },
-    )
-
-
 __all__ = [
     "CONFIG_FILE",
     "doctor_project",
     "link_project",
-    "list_projects",
-    "project_info",
     "unlink_project",
     "validate_project",
 ]

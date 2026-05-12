@@ -43,6 +43,23 @@ def test_project_doctor_fix_creates_missing_paths(
     assert payload["resource"]["missing"] == []
 
 
+def test_project_doctor_fix_outside_project_does_not_create_project(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    rc = main(["--json", "project", "doctor", "--fix", "--yes"])
+
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert captured.out == ""
+    assert not (tmp_path / ".osmosis" / "project.toml").exists()
+    message = json.loads(captured.err)["error"]["message"]
+    assert "Not in an Osmosis project" in message
+    assert "existing Osmosis project" in message
+    assert "osmosis init" not in message
+
+
 def test_project_doctor_fix_preserves_existing_research_program(
     tmp_path: Path, monkeypatch, capsys
 ) -> None:

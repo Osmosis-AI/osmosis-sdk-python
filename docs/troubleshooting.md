@@ -48,10 +48,9 @@ From the project directory, link this project with the intended workspace:
 osmosis project link --workspace <workspace-id-or-name> --yes
 ```
 
-Use `osmosis project info` to inspect the workspace linked to the current
-project, or `osmosis project list` to see every local project link stored for
-the current platform. Add `--refresh` to `project info` when you need to
-refresh cached workspace metadata from the platform.
+Confirm the workspace and Git Sync repository in the Osmosis Platform, then
+re-run `osmosis project link --workspace <workspace-id-or-name> --yes` from the
+matching local checkout.
 
 ## Eval server and grader issues
 
@@ -61,7 +60,7 @@ Controller-backed eval owns the rollout server process and uses fixed port `8000
 
 ### Eval Server Starts But `/health` Never Passes
 
-Check the user-server subprocess log. For `osmosis eval run`, it is stored next to the eval cache under `.osmosis/cache/eval/<sanitized-model>/<sanitized-dataset-stem>/user-server-<task_id>.log`; for example, `openai/gpt-5-mini` appears as `openai-gpt-5-mini`. For `osmosis rollout validate --server`, it is stored under `.osmosis/logs/rollout-validate/user-server-validate-<id>.log`. Eval starts the server with `uv run python <entrypoint>` from `rollouts/<rollout>`, so imports that only worked when eval loaded code in-process must be changed to work from the rollout directory. The rollout folder must contain `pyproject.toml`.
+Check the user-server subprocess log. For `osmosis eval run`, it is stored next to the eval cache under `.osmosis/cache/eval/<sanitized-model>/<sanitized-dataset-stem>/user-server-<task_id>.log`; for example, `openai/gpt-5-mini` appears as `openai-gpt-5-mini`. Eval starts the server with `uv run python <entrypoint>` from `rollouts/<rollout>`, so imports that only worked when eval loaded code in-process must be changed to work from the rollout directory. The rollout folder must contain `pyproject.toml`.
 
 ### Missing Grader Rewards
 
@@ -140,23 +139,25 @@ Common causes:
 - **Event loop blocking**: synchronous calls inside an `async` rollout workflow (e.g. `mcp.list_tools_sync()`) freeze the uvicorn event loop. New HTTP requests from our trainer cannot get a 200 OK within the 30 s httpx connect timeout. Fix: wrap blocking calls in `asyncio.get_running_loop().run_in_executor(None, ...)`.
 - **Subprocess exhaustion**: too many concurrent MCP subprocesses saturating OS limits. Set `ConcurrencyConfig(max_concurrent=64)` in your `AgentWorkflowConfig`.
 
-## Rollout validation
+## Training submission preflight
 
-### Validation failures
+### Preflight failures
 
-Run a one-shot check:
+Run an eval smoke test before submitting:
 
 ```bash
-osmosis rollout validate configs/training/<run>.toml
+osmosis eval run configs/eval/<run>.toml --limit 1
 ```
 
-Fix reported rollout backend issues before submitting training.
+Then submit the training config:
 
-For training configs, `osmosis rollout validate` checks that the configured
-entrypoint resolves to a valid rollout backend. For eval configs, static
-validation checks that the server entrypoint is a Python script under the
-rollout directory and that the rollout folder contains `pyproject.toml`; add
-`--server` to start it and verify `/health`.
+```bash
+osmosis train submit configs/training/<run>.toml
+```
+
+Training submission performs its own preflight checks before launching the
+managed run. Fix reported rollout, config, dataset, or Git Sync issues before
+submitting again.
 
 ## See also
 

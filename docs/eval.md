@@ -108,7 +108,7 @@ osmosis eval run configs/eval/my-rollout.toml --limit 50 --batch-size 4 -o ./res
 
 Eval configs no longer contain `[grader]` or `[baseline]`. Grading is part of the rollout server. To compare two models, run two eval configs separately.
 
-Use `osmosis rollout validate configs/eval/<name>.toml` for static checks. Use `osmosis rollout validate --server configs/eval/<name>.toml` to verify server startup and `/health`. Use `osmosis eval run configs/eval/<name>.toml --limit 1` for the end-to-end smoke test that covers `/rollout`, `/chat/completions`, callbacks, provider credentials, and grading.
+Use `osmosis eval run configs/eval/<name>.toml --limit 1` for the end-to-end smoke test that covers server startup, `/health`, `/rollout`, `/chat/completions`, callbacks, provider credentials, and grading.
 
 ## Rollout server contract
 

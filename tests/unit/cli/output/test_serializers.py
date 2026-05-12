@@ -13,7 +13,6 @@ from osmosis_ai.cli.output.serializers import (
     serialize_model,
     serialize_rollout,
     serialize_training_run,
-    serialize_workspace,
 )
 from osmosis_ai.platform.api.models import (
     BaseModelInfo,
@@ -140,10 +139,10 @@ def test_serialize_model_keys() -> None:
     _assert_keys_match_golden(payload, "model_serializer.json")
 
 
-def test_serialize_workspace_minimal() -> None:
-    payload = serialize_workspace({"id": "ws_1", "name": "default"})
-    _assert_keys_match_golden(payload, "workspace_serializer.json")
-    assert payload == {"id": "ws_1", "name": "default"}
+def test_workspace_serializer_is_not_exported() -> None:
+    import osmosis_ai.cli.output as output
+
+    assert not hasattr(output, "serialize_workspace")
 
 
 def test_serialize_rollout_keys() -> None:

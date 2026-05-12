@@ -89,9 +89,9 @@ def test_rich_operation_renders_message() -> None:
 
 def test_rich_operation_renders_message_markup_as_text() -> None:
     result = OperationResult(
-        operation="model.delete",
+        operation="deploy",
         status="success",
-        message='Model "[red]danger[/red]" deleted.',
+        message='Checkpoint "[red]danger[/red]" deployed.',
     )
     stdout, _ = _render(result)
-    assert 'Model "[red]danger[/red]" deleted.' in stdout
+    assert 'Checkpoint "[red]danger[/red]" deployed.' in stdout

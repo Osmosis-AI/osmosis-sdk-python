@@ -10,12 +10,9 @@ from typing import Any
 
 import typer
 
-from osmosis_ai.cli.console import console
 from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE
 
-app: typer.Typer = typer.Typer(
-    help="Manage base models (list, delete).", no_args_is_help=True
-)
+app: typer.Typer = typer.Typer(help="Manage base models (list).", no_args_is_help=True)
 
 
 def _workspace_result_context(workspace: Any) -> dict[str, Any]:
@@ -23,31 +20,6 @@ def _workspace_result_context(workspace: Any) -> dict[str, Any]:
         "workspace": {"id": workspace.workspace_id, "name": workspace.workspace_name},
         "project_root": str(workspace.project_root),
     }
-
-
-def _require_confirmation(message: str, *, yes: bool) -> None:
-    if yes:
-        return
-
-    from osmosis_ai.cli.errors import CLIError
-    from osmosis_ai.cli.output import OutputFormat, get_output_context
-
-    output = get_output_context()
-    if output.format is not OutputFormat.rich or not output.interactive:
-        err = CLIError(
-            "Use --yes to confirm in non-interactive mode.",
-            code="INTERACTIVE_REQUIRED",
-        )
-        if output.format is OutputFormat.json:
-            from osmosis_ai.cli.output import emit_structured_error_to_stderr
-
-            emit_structured_error_to_stderr(err)
-            raise typer.Exit(1)
-        raise err
-
-    from osmosis_ai.cli.prompts import require_confirmation
-
-    require_confirmation(message, yes=yes)
 
 
 @app.command("list")
@@ -122,75 +94,4 @@ def list_models(
             ListColumn(key="created_at", label="Created"),
             ListColumn(key="id", label="ID", no_wrap=True),
         ],
-    )
-
-
-@app.command("delete")
-def delete(
-    name: str = typer.Argument(..., help="Model path (e.g. google/gemma-2-9b-it)."),
-    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
-) -> Any:
-    """Delete a base model."""
-    from osmosis_ai.cli.errors import CLIError
-    from osmosis_ai.cli.output import OperationResult, OutputFormat, get_output_context
-    from osmosis_ai.platform.api.client import OsmosisClient
-    from osmosis_ai.platform.auth.platform_client import PlatformAPIError
-    from osmosis_ai.platform.cli.utils import require_workspace_context
-
-    workspace = require_workspace_context()
-    credentials = workspace.credentials
-    workspace_id = workspace.workspace_id
-    client = OsmosisClient()
-    output = get_output_context()
-
-    try:
-        with output.status("Checking model dependencies..."):
-            affected = client.get_model_affected_resources(
-                name,
-                credentials=credentials,
-                workspace_id=workspace_id,
-            )
-    except PlatformAPIError as e:
-        raise CLIError(f"Unable to verify model dependencies: {e}") from e
-
-    if affected.has_blocking_runs:
-        blocking_runs = [
-            {
-                "id": run.id,
-                "training_run_name": run.training_run_name,
-            }
-            for run in affected.training_runs_using_model
-        ]
-        if output.format is not OutputFormat.rich:
-            raise CLIError(
-                "Cannot delete this model because training runs depend on it.",
-                details={"training_runs": blocking_runs},
-            )
-        console.print(
-            "Cannot delete this model — the following training runs depend on it:",
-            style="red",
-        )
-        for run in affected.training_runs_using_model:
-            short_id = run.id[:8]
-            label = (
-                console.escape(run.training_run_name)
-                if run.training_run_name
-                else f"(unnamed: {short_id})"
-            )
-            console.print(f"  {label}  {console.format_styled(short_id, 'dim')}")
-        console.print("\nDelete these training runs first, then retry.", style="dim")
-        raise typer.Exit(1)
-
-    _require_confirmation(f'Delete model "{name}"? This cannot be undone.', yes=yes)
-    with output.status("Deleting model..."):
-        client.delete_model(
-            name,
-            credentials=credentials,
-            workspace_id=workspace_id,
-        )
-    return OperationResult(
-        operation="model.delete",
-        status="success",
-        resource={"name": name, **_workspace_result_context(workspace)},
-        message=f'Model "{name}" deleted.',
     )

@@ -254,6 +254,42 @@ def test_login_omits_switch_commands_for_multiple_workspaces(
     assert "workspace switch" not in rendered
 
 
+def test_login_zero_workspaces_points_to_platform_setup(monkeypatch, capsys) -> None:
+    """Login should send users to Platform/Git Sync setup before project linking."""
+    new_creds = _make_credentials(user_id="user_1")
+    result = _make_login_result()
+
+    monkeypatch.delenv("OSMOSIS_TOKEN", raising=False)
+    monkeypatch.setattr("osmosis_ai.platform.auth.load_credentials", lambda: None)
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.credentials.save_credentials", lambda c: "keyring"
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.device_login",
+        lambda **kw: (result, new_creds),
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.platform_request",
+        lambda *args, **kwargs: {"workspaces": []},
+    )
+    monkeypatch.setattr(
+        auth_module,
+        "console",
+        Console(force_terminal=False, no_color=True, width=100),
+    )
+
+    auth_module.login(force=False, token=None)
+
+    rendered = capsys.readouterr().out
+    assert "Login Successful" in rendered
+    assert "Platform" in rendered
+    assert "Git Sync" in rendered
+    assert "osmosis workspace" not in rendered
+    assert "workspace create" not in rendered
+    assert "workspace list" not in rendered
+    assert "osmosis project link --workspace <workspace-id-or-name>" not in rendered
+
+
 @pytest.mark.parametrize(
     "error",
     [

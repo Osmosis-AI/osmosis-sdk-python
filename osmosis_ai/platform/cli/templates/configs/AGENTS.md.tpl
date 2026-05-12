@@ -75,8 +75,7 @@ batch_size = 2
 
 ```bash
 osmosis project validate
-osmosis rollout validate configs/training/<config>.toml
-osmosis rollout validate configs/eval/<config>.toml
+osmosis eval run configs/eval/<config>.toml --limit 1
 osmosis train submit configs/training/<config>.toml
 osmosis eval run configs/eval/<config>.toml
 osmosis train status <run-name>
