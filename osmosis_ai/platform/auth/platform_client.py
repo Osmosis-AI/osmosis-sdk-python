@@ -238,7 +238,7 @@ def platform_request(
         if not git_identity:
             raise PlatformAPIError(
                 "Git-scoped platform requests require an explicit git_identity.",
-                error_code="GIT_IDENTITY_REQUIRED",
+                error_code="GIT_SCOPE_REQUIRED",
             )
         req_headers["X-Osmosis-Git"] = git_identity
 

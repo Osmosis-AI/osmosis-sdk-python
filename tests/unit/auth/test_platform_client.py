@@ -229,8 +229,10 @@ class TestPlatformRequest:
     ) -> None:
         creds = _make_credentials()
 
-        with pytest.raises(PlatformAPIError, match="explicit git_identity"):
+        with pytest.raises(PlatformAPIError, match="explicit git_identity") as exc_info:
             platform_request("/api/test", credentials=creds)
+
+        assert exc_info.value.error_code == "GIT_SCOPE_REQUIRED"
 
     @patch("osmosis_ai.platform.auth.platform_client.urlopen")
     def test_no_scope_header_when_require_git_repo_false(
