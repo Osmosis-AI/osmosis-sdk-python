@@ -44,6 +44,17 @@ def test_resolve_project_root_uses_git_top_level_for_subdirectory(
     assert project_contract.resolve_project_root(nested) == tmp_path.resolve()
 
 
+def test_resolve_project_root_uses_git_top_level_for_file_path(
+    tmp_path: Path,
+) -> None:
+    _make_git_repo(tmp_path)
+    _write_required_scaffold(tmp_path)
+    config = tmp_path / "configs" / "training" / "default.toml"
+    config.write_text("[training]\n", encoding="utf-8")
+
+    assert project_contract.resolve_project_root(config) == tmp_path.resolve()
+
+
 def test_resolve_project_root_from_cwd_uses_git_top_level(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
