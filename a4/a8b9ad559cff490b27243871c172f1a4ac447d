@@ -1,0 +1,21 @@
+tests/unit/cli/test_train_commands.py
+  s_9477fa0c8717da::t_05d3932667487d 111
+tests/unit/cli/test_command_result_migration_train_model_deployment_rollout.py
+  s_9477fa0c8717da::t_7e15661f3b4696 49,121,160,205,245,313,337,371,374,411,492,518
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "a4a8b9ad559cff490b27243871c172f1a4ac447d",
+  "prompts": {},
+  "sessions": {
+    "s_9477fa0c8717da": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "a15c2361-d4d8-4e57-b365-2161f14671da",
+        "model": "gpt-5.5-extra-high"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}
