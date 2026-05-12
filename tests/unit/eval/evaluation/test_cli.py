@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -13,6 +14,11 @@ from osmosis_ai.eval.evaluation.cli import EvalCommand
 
 
 def _make_project(root: Path) -> Path:
+    subprocess.run(
+        ["git", "init", "-b", "main", str(root)],
+        check=True,
+        capture_output=True,
+    )
     for rel_path in (
         ".osmosis",
         ".osmosis/research",

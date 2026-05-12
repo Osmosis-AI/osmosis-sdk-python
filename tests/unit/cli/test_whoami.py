@@ -105,6 +105,12 @@ def _link_project_mapping(
     )
 
 
+def _assert_no_project_context(data: dict) -> None:
+    assert "workspace" not in data
+    assert "linked_project" not in data
+    assert "local_linked_project" not in data
+
+
 @pytest.fixture
 def fake_verify_result() -> VerifyResult:
     return VerifyResult(
@@ -130,9 +136,7 @@ def test_whoami_json_outside_linked_project_has_no_workspace(
     data = payload["data"]
     assert data["email"] == "brian@example.com"
     assert data["name"] == "Brian"
-    assert data["workspace"] is None
-    assert data["linked_project"] is None
-    assert data["local_linked_project"] is None
+    _assert_no_project_context(data)
     assert data["account"]["email"] == "brian@example.com"
     assert data["account"]["source"] == "credentials"
     assert data["source"] == "credentials"
@@ -160,9 +164,7 @@ def test_whoami_json_inside_linked_project_stays_auth_only(
     assert exit_code == 0
     payload = json.loads(captured.out)
     data = payload["data"]
-    assert data["workspace"] is None
-    assert data["linked_project"] is None
-    assert data["local_linked_project"] is None
+    _assert_no_project_context(data)
 
 
 def test_whoami_json_with_stored_credentials_verifies_token(
@@ -210,9 +212,7 @@ def test_whoami_json_with_env_token_uses_verified_identity(
     data = payload["data"]
     assert data["email"] == "env@example.com"
     assert data["name"] == "Env User"
-    assert data["workspace"] is None
-    assert data["linked_project"] is None
-    assert data["local_linked_project"] is None
+    _assert_no_project_context(data)
     assert data["account"]["email"] == "env@example.com"
     assert data["account"]["source"] == "environment"
     assert data["source"] == "environment"
@@ -246,8 +246,7 @@ def test_whoami_json_with_env_token_ignores_cached_workspace_resolution(
     payload = json.loads(captured.out)
     data = payload["data"]
     assert data["email"] == "env@example.com"
-    assert data["workspace"] is None
-    assert data["linked_project"] is None
+    _assert_no_project_context(data)
     assert data["source"] == "environment"
 
 
@@ -285,9 +284,7 @@ def test_whoami_json_with_env_token_stays_auth_only_inside_linked_project(
     assert exit_code == 0
     data = json.loads(captured.out)["data"]
     assert data["account"]["email"] == "env@example.com"
-    assert data["workspace"] is None
-    assert data["linked_project"] is None
-    assert data["local_linked_project"] is None
+    _assert_no_project_context(data)
 
 
 def test_whoami_json_with_env_token_ignores_mismatched_local_workspace(
@@ -317,8 +314,7 @@ def test_whoami_json_with_env_token_ignores_mismatched_local_workspace(
     payload = json.loads(captured.out)
     data = payload["data"]
     assert data["email"] == "env@example.com"
-    assert data["workspace"] is None
-    assert data["linked_project"] is None
+    _assert_no_project_context(data)
     assert data["source"] == "environment"
 
 

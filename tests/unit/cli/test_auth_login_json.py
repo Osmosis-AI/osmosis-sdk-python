@@ -21,6 +21,16 @@ def fake_verify_result() -> VerifyResult:
     )
 
 
+@pytest.fixture(autouse=True)
+def _fail_workspace_lookup(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.platform_request",
+        lambda *args, **kwargs: pytest.fail(
+            "auth login must not look up platform workspaces"
+        ),
+    )
+
+
 def _credentials(
     *,
     access_token: str = "t",
@@ -53,10 +63,6 @@ def test_login_json_with_token_returns_operation_result(
     monkeypatch.setattr(
         "osmosis_ai.platform.auth.credentials.save_credentials", lambda creds: "keyring"
     )
-    monkeypatch.setattr(
-        "osmosis_ai.cli.commands.auth._load_login_workspaces",
-        lambda creds: ([{"id": "ws_1", "name": "default"}], None),
-    )
 
     exit_code = cli.main(["--json", "auth", "login", "--token", "secret"])
 
@@ -67,16 +73,21 @@ def test_login_json_with_token_returns_operation_result(
     assert payload["operation"] == "auth.login"
     assert payload["resource"]["email"] == "brian@example.com"
     assert payload["resource"]["workspace"] is None
-    assert payload["resource"]["workspace_count"] == 1
+    assert "workspace_count" not in payload["resource"]
+    assert "workspace_lookup_error" not in payload["resource"]
     assert payload["resource"]["verified"] is True
     assert payload["resource"]["saved"] is True
-    assert payload["next_steps_structured"] == [
-        {"action": "project.link", "workspace": "<workspace-id-or-name>"}
+    assert [step["action"] for step in payload["next_steps_structured"]] == [
+        "platform.clone_repository",
+        "project.validate",
     ]
-    assert "workspace.switch" not in json.dumps(payload)
+    serialized = json.dumps(payload)
+    assert "project.link" not in serialized
+    assert "project link" not in serialized
+    assert "workspace.switch" not in serialized
 
 
-def test_login_json_with_token_zero_workspaces_points_to_platform_setup(
+def test_login_json_with_token_points_to_clone_and_validate(
     monkeypatch, capsys, fake_verify_result
 ) -> None:
     monkeypatch.delenv("OSMOSIS_TOKEN", raising=False)
@@ -89,10 +100,6 @@ def test_login_json_with_token_zero_workspaces_points_to_platform_setup(
     )
     monkeypatch.setattr(
         "osmosis_ai.platform.auth.credentials.save_credentials", lambda creds: "keyring"
-    )
-    monkeypatch.setattr(
-        "osmosis_ai.cli.commands.auth._load_login_workspaces",
-        lambda creds: ([], None),
     )
 
     exit_code = cli.main(["--json", "auth", "login", "--token", "secret"])
@@ -101,16 +108,18 @@ def test_login_json_with_token_zero_workspaces_points_to_platform_setup(
     assert exit_code == 0
     payload = json.loads(captured.out)
     serialized = json.dumps(payload)
-    assert payload["resource"]["workspace_count"] == 0
-    assert "Platform" in serialized
-    assert "Git Sync" in serialized
+    assert "workspace_count" not in payload["resource"]
+    assert "workspace_lookup_error" not in payload["resource"]
+    assert "Create or open a project in the Osmosis Platform" in serialized
+    assert "osmosis project validate" in serialized
     assert "osmosis workspace" not in serialized
     assert "workspace create" not in serialized
     assert "workspace list" not in serialized
     assert "osmosis project link --workspace <workspace-id-or-name>" not in serialized
+    assert "project.link" not in serialized
 
 
-def test_login_plain_with_token_prints_project_link_next_step(
+def test_login_plain_with_token_prints_clone_and_validate_next_steps(
     monkeypatch, capsys, fake_verify_result
 ) -> None:
     monkeypatch.delenv("OSMOSIS_TOKEN", raising=False)
@@ -124,21 +133,20 @@ def test_login_plain_with_token_prints_project_link_next_step(
     monkeypatch.setattr(
         "osmosis_ai.platform.auth.credentials.save_credentials", lambda creds: "keyring"
     )
-    monkeypatch.setattr(
-        "osmosis_ai.cli.commands.auth._load_login_workspaces",
-        lambda creds: ([{"id": "ws_1", "name": "default"}], None),
-    )
 
     exit_code = cli.main(["--plain", "auth", "login", "--token", "secret"])
 
     captured = capsys.readouterr()
     assert exit_code == 0
     assert "Logged in as brian@example.com." in captured.out
-    assert "osmosis project link --workspace <workspace-id-or-name>" in captured.out
+    assert "Create or open a project in the Osmosis Platform" in captured.out
+    assert "osmosis project validate" in captured.out
+    assert "osmosis project link --workspace <workspace-id-or-name>" not in captured.out
+    assert "project.link" not in captured.out
     assert "workspace switch" not in captured.out
 
 
-def test_login_plain_with_token_zero_workspaces_points_to_platform_setup(
+def test_login_plain_with_token_omits_workspace_lookup_fields(
     monkeypatch, capsys, fake_verify_result
 ) -> None:
     monkeypatch.delenv("OSMOSIS_TOKEN", raising=False)
@@ -152,18 +160,16 @@ def test_login_plain_with_token_zero_workspaces_points_to_platform_setup(
     monkeypatch.setattr(
         "osmosis_ai.platform.auth.credentials.save_credentials", lambda creds: "keyring"
     )
-    monkeypatch.setattr(
-        "osmosis_ai.cli.commands.auth._load_login_workspaces",
-        lambda creds: ([], None),
-    )
 
     exit_code = cli.main(["--plain", "auth", "login", "--token", "secret"])
 
     captured = capsys.readouterr()
     assert exit_code == 0
     assert "Logged in as brian@example.com." in captured.out
-    assert "Platform" in captured.out
-    assert "Git Sync" in captured.out
+    assert "Create or open a project in the Osmosis Platform" in captured.out
+    assert "osmosis project validate" in captured.out
+    assert "workspace_count" not in captured.out
+    assert "workspace_lookup_error" not in captured.out
     assert "osmosis workspace" not in captured.out
     assert "workspace create" not in captured.out
     assert "workspace list" not in captured.out
@@ -197,12 +203,6 @@ def test_login_json_force_with_invalid_token_preserves_existing_session(
     monkeypatch.setattr(
         "osmosis_ai.platform.auth.platform_client.revoke_cli_token",
         lambda creds: side_effects.append("revoke_cli_token"),
-    )
-    monkeypatch.setattr(
-        "osmosis_ai.cli.commands.auth._load_login_workspaces",
-        lambda creds: pytest.fail(
-            "workspace lookup should not run after verify failure"
-        ),
     )
 
     exit_code = cli.main(["--json", "auth", "login", "--force", "--token", "bad"])
@@ -291,9 +291,6 @@ def test_login_json_replaces_session_before_revoking_old_token(
         "osmosis_ai.platform.auth.local_config.clear_all_local_data",
         lambda: calls.append("clear_all_local_data"),
     )
-    monkeypatch.setattr(
-        "osmosis_ai.cli.commands.auth._load_login_workspaces", lambda creds: ([], None)
-    )
 
     exit_code = cli.main(["--json", "auth", "login", "--force", "--token", "secret"])
     captured = capsys.readouterr()
@@ -338,9 +335,6 @@ def test_login_json_with_token_loads_stored_credentials_when_env_is_set(
     monkeypatch.setattr(
         "osmosis_ai.platform.auth.local_config.clear_all_local_data",
         lambda: calls.append(("clear_all_local_data",)),
-    )
-    monkeypatch.setattr(
-        "osmosis_ai.cli.commands.auth._load_login_workspaces", lambda creds: ([], None)
     )
 
     exit_code = cli.main(["--json", "auth", "login", "--token", "new-token"])

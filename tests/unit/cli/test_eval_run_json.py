@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -59,6 +60,11 @@ class _FakeOrchestrator:
 
 
 def _make_project(root: Path) -> Path:
+    subprocess.run(
+        ["git", "init", "-b", "main", str(root)],
+        check=True,
+        capture_output=True,
+    )
     for rel_path in (
         ".osmosis",
         ".osmosis/research",
@@ -124,6 +130,10 @@ def test_eval_run_json_returns_final_summary(
         "osmosis_ai.eval.evaluation.orchestrator.EvalOrchestrator",
         _FakeOrchestrator,
     )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.load_credentials",
+        lambda: pytest.fail("eval run must not require credentials"),
+    )
     monkeypatch.chdir(project)
 
     exit_code = cli.main(["--json", "eval", "run", str(config_path)])
@@ -146,3 +156,23 @@ def test_eval_run_json_returns_final_summary(
             "error": "boom",
         }
     ]
+
+
+def test_eval_run_json_resolves_local_project_before_eval_command(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        "osmosis_ai.eval.evaluation.cli.EvalCommand.run",
+        lambda self, **kwargs: pytest.fail(
+            "eval run should resolve local project context before EvalCommand.run"
+        ),
+    )
+
+    exit_code = cli.main(["--json", "eval", "run", "configs/eval/eval.toml"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert "cloned Osmosis repository" in captured.err

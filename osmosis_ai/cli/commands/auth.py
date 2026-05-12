@@ -3,15 +3,12 @@
 from __future__ import annotations
 
 import os
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import typer
 
 from osmosis_ai.cli.console import console
 from osmosis_ai.cli.errors import CLIError
-
-if TYPE_CHECKING:
-    from osmosis_ai.platform.auth.credentials import Credentials
 
 app: typer.Typer = typer.Typer(
     help="Manage authentication (login, logout, whoami).", no_args_is_help=True
@@ -41,58 +38,11 @@ _AUTH_LOGIN_ERROR_CODES = {
     "TOKEN_REVOKED",
     "UNKNOWN_AUTH_ERROR",
 }
-_EXISTING_PROJECT_LINK_STEP = (
-    "From an existing Osmosis project repo:\n  "
-    "osmosis project link --workspace <workspace-id-or-name>"
+_PLATFORM_CREATE_REPO_STEP = (
+    "Create or open a project in the Osmosis Platform, then clone the repository "
+    "created there."
 )
-_PLATFORM_WORKSPACE_SETUP_STEP = (
-    "Set up a workspace in the Osmosis Platform and connect a project repository "
-    "with Git Sync."
-)
-_PLATFORM_PROJECT_REPO_STEP = (
-    "Clone the Platform/Git Sync managed project repo, then run Osmosis project "
-    "commands from that checkout."
-)
-
-
-def _normalize_workspaces(raw_workspaces: Any) -> list[dict[str, str]]:
-    """Return workspace entries that have both an ID and a name."""
-    if not isinstance(raw_workspaces, list):
-        return []
-
-    workspaces: list[dict[str, str]] = []
-    for workspace in raw_workspaces:
-        if not isinstance(workspace, dict):
-            continue
-        ws_id = workspace.get("id")
-        ws_name = workspace.get("name")
-        if isinstance(ws_id, str) and ws_id and isinstance(ws_name, str) and ws_name:
-            workspaces.append({"id": ws_id, "name": ws_name})
-    return workspaces
-
-
-def _load_login_workspaces(
-    creds: Credentials,
-) -> tuple[list[dict[str, str]] | None, str | None]:
-    """Best-effort workspace lookup for post-login messaging."""
-    from osmosis_ai.platform.auth import (
-        AuthenticationExpiredError,
-        PlatformAPIError,
-        platform_request,
-    )
-
-    try:
-        with console.spinner("Loading workspaces..."):
-            data = platform_request(
-                "/api/cli/workspaces",
-                credentials=creds,
-                require_workspace=False,
-                cleanup_on_401=False,
-            )
-    except (AuthenticationExpiredError, PlatformAPIError) as exc:
-        return None, str(exc)
-
-    return _normalize_workspaces(data.get("workspaces")), None
+_VALIDATE_CLONE_STEP = "From the cloned repository, run `osmosis project validate`."
 
 
 def _login_operation_result(
@@ -103,9 +53,7 @@ def _login_operation_result(
     source: str,
     saved: bool,
     token_store: str | None = None,
-    workspace_lookup_error: str | None = None,
     local_data_cleared: bool = False,
-    workspace_count: int | None = None,
 ) -> Any:
     """Build the structured login result for JSON/plain output."""
     from osmosis_ai.cli.output import OperationResult
@@ -121,40 +69,25 @@ def _login_operation_result(
     }
     if token_store is not None:
         resource["token_store"] = token_store
-    if workspace_lookup_error is not None:
-        resource["workspace_lookup_error"] = workspace_lookup_error
     if local_data_cleared:
         resource["local_data_cleared"] = True
-    if workspace_count is not None:
-        resource["workspace_count"] = workspace_count
 
     next_steps: list[str] = []
     next_steps_structured: list[dict[str, Any]] = []
     if saved:
-        if workspace_count == 0:
-            next_steps.extend(
-                [_PLATFORM_WORKSPACE_SETUP_STEP, _PLATFORM_PROJECT_REPO_STEP]
-            )
-            next_steps_structured.extend(
-                [
-                    {
-                        "action": "platform.setup_workspace",
-                        "description": _PLATFORM_WORKSPACE_SETUP_STEP,
-                    },
-                    {
-                        "action": "git_sync.clone_project_repo",
-                        "description": _PLATFORM_PROJECT_REPO_STEP,
-                    },
-                ]
-            )
-        else:
-            next_steps.append(_EXISTING_PROJECT_LINK_STEP)
-            next_steps_structured.append(
+        next_steps.extend([_PLATFORM_CREATE_REPO_STEP, _VALIDATE_CLONE_STEP])
+        next_steps_structured.extend(
+            [
                 {
-                    "action": "project.link",
-                    "workspace": "<workspace-id-or-name>",
-                }
-            )
+                    "action": "platform.clone_repository",
+                    "description": _PLATFORM_CREATE_REPO_STEP,
+                },
+                {
+                    "action": "project.validate",
+                    "description": _VALIDATE_CLONE_STEP,
+                },
+            ]
+        )
 
     return OperationResult(
         operation="auth.login",
@@ -243,8 +176,6 @@ def _machine_login_with_token(*, token: str, force: bool) -> Any:
         with output.status("Revoking old session..."):
             revoke_cli_token(old_credentials)
 
-    workspaces, workspace_lookup_error = _load_login_workspaces(creds)
-
     local_data_cleared = force or (
         old_credentials and old_credentials.user.id != creds.user.id
     )
@@ -258,9 +189,7 @@ def _machine_login_with_token(*, token: str, force: bool) -> Any:
         source="token",
         saved=True,
         token_store=token_store,
-        workspace_lookup_error=workspace_lookup_error,
         local_data_cleared=bool(local_data_cleared),
-        workspace_count=len(workspaces) if workspaces is not None else None,
     )
 
 
@@ -351,8 +280,6 @@ def _rich_login(force: bool, token: str | None) -> Any:
             with console.spinner("Revoking old session..."):
                 revoke_cli_token(old_credentials)
 
-        workspaces, workspace_lookup_error = _load_login_workspaces(creds)
-
         # Clear legacy auth-local state when user identity changes or when
         # explicitly forcing a fresh start.
         local_data_cleared = force or (
@@ -370,21 +297,10 @@ def _rich_login(force: bool, token: str | None) -> Any:
         info_lines.append(f"Expires: {result.expires_at.strftime('%Y-%m-%d')}")
 
         console.panel("Login Successful", "\n".join(info_lines), style="green")
-
-        if workspace_lookup_error is not None:
-            console.print(
-                "\nAuthenticated, but could not load your workspaces yet.",
-                style="yellow",
-            )
-        elif workspaces == []:
-            console.print(
-                "\nNo workspaces were found for this account. "
-                f"{_PLATFORM_WORKSPACE_SETUP_STEP} {_PLATFORM_PROJECT_REPO_STEP}",
-                style="dim",
-            )
-
-        if workspaces != []:
-            console.print(f"\n{_EXISTING_PROJECT_LINK_STEP}", style="dim")
+        console.print(
+            f"\n{_PLATFORM_CREATE_REPO_STEP}\n{_VALIDATE_CLONE_STEP}",
+            style="dim",
+        )
 
     except LoginError as e:
         console.print_error(str(e))
@@ -591,11 +507,8 @@ def whoami() -> Any:
         account["token_id"] = credentials.token_id
     data = {
         "account": account,
-        "local_linked_project": None,
         "email": credentials.user.email,
         "name": credentials.user.name,
-        "workspace": None,
-        "linked_project": None,
         "expires_at": credentials.expires_at.isoformat(),
         "source": source,
     }
