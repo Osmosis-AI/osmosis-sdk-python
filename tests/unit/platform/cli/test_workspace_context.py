@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -39,12 +40,18 @@ def _make_project(root: Path) -> Path:
     (root / ".osmosis" / "research" / "program.md").write_text(
         "# Program\n", encoding="utf-8"
     )
+    subprocess.run(
+        ["git", "init", "-b", "main", str(root)], check=True, capture_output=True
+    )
     return root
 
 
 def _make_minimal_project(root: Path) -> Path:
     (root / ".osmosis").mkdir(parents=True)
     (root / ".osmosis" / "project.toml").write_text("[project]\n", encoding="utf-8")
+    subprocess.run(
+        ["git", "init", "-b", "main", str(root)], check=True, capture_output=True
+    )
     return root
 
 
@@ -118,7 +125,7 @@ def test_linked_project_with_missing_contract_paths_reports_contract_error(
         "osmosis_ai.platform.cli.workspace_context.load_credentials", lambda: _Creds()
     )
 
-    with pytest.raises(CLIError, match="Project is missing required Osmosis paths"):
+    with pytest.raises(CLIError, match="missing required Osmosis scaffold paths"):
         resolve_linked_workspace_context()
 
 

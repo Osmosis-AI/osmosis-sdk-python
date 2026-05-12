@@ -27,6 +27,12 @@ from osmosis_ai.platform.auth.local_config import (
     load_subscription_status,
     save_subscription_status,
 )
+from osmosis_ai.platform.cli.project_context import (
+    GitProjectContext,
+    LocalProjectContext,
+    resolve_git_project_context,
+    resolve_local_project_context,
+)
 from osmosis_ai.platform.cli.workspace_context import (
     WorkspaceContext,
     resolve_linked_workspace_context,
@@ -64,6 +70,18 @@ def require_credentials() -> Credentials:
 def require_workspace_context() -> WorkspaceContext:
     """Resolve the current linked Osmosis project workspace."""
     return resolve_linked_workspace_context()
+
+
+def require_git_project_context() -> GitProjectContext:
+    """Resolve the current Git-scoped Osmosis project for platform commands."""
+    return resolve_git_project_context()
+
+
+def require_local_project_context(
+    *, require_scaffold: bool = True
+) -> LocalProjectContext:
+    """Resolve the current Git project for local-only commands."""
+    return resolve_local_project_context(require_scaffold=require_scaffold)
 
 
 def format_dataset_status(d: Any, *, for_prompt: bool = False) -> str:
