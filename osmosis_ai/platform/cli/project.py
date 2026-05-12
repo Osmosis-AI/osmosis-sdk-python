@@ -5,7 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from osmosis_ai.cli.console import console
 from osmosis_ai.cli.errors import CLIError
 
 _REQUIRED_PATHS = [
@@ -35,82 +34,23 @@ def _optional_git_context(project_root: Path) -> dict[str, str | None]:
     }
 
 
-def validate_project(path: Any) -> Any:
-    """Validate the active Git worktree's Osmosis scaffold."""
-    from osmosis_ai.cli.output import (
-        DetailField,
-        DetailResult,
-        OutputFormat,
-        get_output_context,
-    )
-    from osmosis_ai.platform.cli.project_contract import (
-        missing_project_paths,
-        resolve_project_root,
-    )
-
-    output = get_output_context()
-    project_root = resolve_project_root(path)
-    git = _optional_git_context(project_root)
-    missing_paths = missing_project_paths(project_root)
-    data = {
-        "project_root": str(project_root),
-        "git": git,
-        "required_paths": _REQUIRED_PATHS,
-        "missing_paths": missing_paths,
-        "valid": not missing_paths,
-    }
-    if output.format is OutputFormat.rich:
-        console.table(
-            [
-                ("Project root", console.format_text(project_root)),
-                ("Git identity", git["identity"] or "-"),
-                ("Git remote URL", git["remote_url"] or "-"),
-                ("Required paths", ", ".join(_REQUIRED_PATHS)),
-                ("Missing paths", ", ".join(missing_paths) if missing_paths else "-"),
-                ("Valid", "yes" if data["valid"] else "no"),
-            ],
-            title="Osmosis Git Repository Scaffold",
-        )
-        if missing_paths:
-            console.print("Missing scaffold paths:", style="yellow")
-            for path in missing_paths:
-                console.print(f"  - {path}", style="yellow")
-            console.print("Run `osmosis project doctor --fix` to restore them.")
-        else:
-            console.print("Osmosis Git repository scaffold is valid.", style="green")
-        return None
-
-    return DetailResult(
-        title="Osmosis Git Repository Scaffold",
-        data=data,
-        fields=[
-            DetailField(label="Project root", value=str(project_root)),
-            DetailField(label="Git identity", value=git["identity"] or "-"),
-            DetailField(label="Git remote URL", value=git["remote_url"] or "-"),
-            DetailField(label="Required paths", value=", ".join(_REQUIRED_PATHS)),
-            DetailField(
-                label="Missing paths",
-                value=", ".join(missing_paths) if missing_paths else "-",
-            ),
-            DetailField(label="Valid", value="yes" if data["valid"] else "no"),
-        ],
-    )
-
-
-def doctor_project(*, fix: bool = False, yes: bool = False) -> Any:
+def doctor_project(
+    path: Any | None = None, *, fix: bool = False, yes: bool = False
+) -> Any:
     """Inspect and optionally repair the canonical project scaffold."""
     from osmosis_ai.cli.output import OperationResult, OutputFormat, get_output_context
     from osmosis_ai.cli.prompts import confirm
     from osmosis_ai.platform.cli.project_contract import (
         missing_project_paths,
-        resolve_project_root_from_cwd,
+        resolve_project_root,
     )
     from osmosis_ai.platform.cli.scaffold import (
         AGENT_REFRESH_PATHS,
         write_scaffold,
     )
 
-    project_root = resolve_project_root_from_cwd()
+    project_root = resolve_project_root(path)
+    git = _optional_git_context(project_root)
     missing = missing_project_paths(project_root)
     refreshed = [
         path for path in sorted(AGENT_REFRESH_PATHS) if (project_root / path).exists()
@@ -143,7 +83,10 @@ def doctor_project(*, fix: bool = False, yes: bool = False) -> Any:
         status="success",
         resource={
             "project_root": str(project_root),
+            "git": git,
+            "required_paths": _REQUIRED_PATHS,
             "missing": missing,
+            "valid": not missing,
             "refreshed": refreshed if fix else [],
             "fixed": fix,
         },
@@ -153,5 +96,4 @@ def doctor_project(*, fix: bool = False, yes: bool = False) -> Any:
 
 __all__ = [
     "doctor_project",
-    "validate_project",
 ]

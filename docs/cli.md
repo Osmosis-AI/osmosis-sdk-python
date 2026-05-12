@@ -41,7 +41,7 @@ then run CLI commands from that checkout.
 git clone <repo-url>
 cd <repo>
 osmosis auth login
-osmosis project validate
+osmosis project doctor
 osmosis template apply multiply              # or add your rollout under rollouts/
 cp configs/training/default.toml configs/training/<run>.toml
 $EDITOR configs/training/<run>.toml          # set rollout, dataset, and model_path
@@ -62,27 +62,18 @@ export OSMOSIS_TOKEN=<token>
 osmosis train submit configs/training/<run>.toml --yes
 ```
 
-### osmosis project validate
-
-Validate the canonical layout of a local Osmosis project from a
-Platform-created repository checkout.
-
-```bash
-osmosis project validate
-osmosis project validate ./path/to/project
-```
-
-The command checks for the required `rollouts/`, `configs/training/`,
-`configs/eval/`, and `data/` directories.
-
 ### osmosis project doctor
 
 ```bash
 osmosis project doctor
+osmosis project doctor ./path/to/project
 osmosis project doctor --fix --yes
 ```
 
-Inspect and optionally repair the scaffold in the current Git checkout.
+Inspect and optionally repair the scaffold in the current Git checkout. Without
+`--fix`, the command reports the project root, Git identity, required scaffold
+paths, and missing paths. Add `--fix --yes` to create missing scaffold paths and
+refresh agent scaffold files without prompting.
 
 ## Rollout
 

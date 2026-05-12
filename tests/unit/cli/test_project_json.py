@@ -31,27 +31,29 @@ def _project_root(root: Path, *, origin: str | None = None) -> Path:
     return root
 
 
-def test_project_validate_json_returns_detail_result(tmp_path, capsys) -> None:
+def test_project_doctor_json_returns_diagnostic_resource(tmp_path, capsys) -> None:
     project_root = _project_root(
         tmp_path,
         origin="https://github.com/Acme/Rollouts.git",
     )
 
-    exit_code = cli.main(["--json", "project", "validate", str(project_root)])
+    exit_code = cli.main(["--json", "project", "doctor", str(project_root)])
 
     captured = capsys.readouterr()
     assert exit_code == 0
     payload = json.loads(captured.out)
-    assert payload["data"]["valid"] is True
-    assert payload["data"]["project_root"] == str(project_root)
-    assert payload["data"]["git"]["identity"] == "acme/rollouts"
+    assert payload["resource"]["valid"] is True
+    assert payload["resource"]["project_root"] == str(project_root)
+    assert payload["resource"]["git"]["identity"] == "acme/rollouts"
     assert (
-        payload["data"]["git"]["remote_url"] == "https://github.com/Acme/Rollouts.git"
+        payload["resource"]["git"]["remote_url"]
+        == "https://github.com/Acme/Rollouts.git"
     )
-    assert "workspace" not in payload["data"]
+    assert payload["resource"]["missing"] == []
+    assert "workspace" not in payload["resource"]
 
 
-def test_project_validate_json_reports_missing_paths_without_error(
+def test_project_doctor_json_reports_missing_paths_without_error(
     tmp_path, capsys
 ) -> None:
     subprocess.run(
@@ -60,13 +62,13 @@ def test_project_validate_json_reports_missing_paths_without_error(
         capture_output=True,
     )
 
-    exit_code = cli.main(["--json", "project", "validate", str(tmp_path)])
+    exit_code = cli.main(["--json", "project", "doctor", str(tmp_path)])
 
     captured = capsys.readouterr()
     assert exit_code == 0
     payload = json.loads(captured.out)
-    assert payload["data"]["valid"] is False
-    assert payload["data"]["missing_paths"] == [
+    assert payload["resource"]["valid"] is False
+    assert payload["resource"]["missing"] == [
         "rollouts/",
         "configs/training/",
         "configs/eval/",

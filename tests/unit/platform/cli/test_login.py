@@ -213,10 +213,10 @@ def test_first_login_does_not_clear_workspace(monkeypatch) -> None:
     assert not clear_calls, "no cleanup needed for first-time login"
 
 
-def test_login_success_prompts_clone_and_validate_not_project_link(
+def test_login_success_prompts_clone_and_doctor_not_project_link(
     monkeypatch, capsys
 ) -> None:
-    """Login should point users at Platform clones and project validation."""
+    """Login should point users at Platform clones and project doctor."""
     new_creds = _make_credentials(user_id="user_1")
     result = _make_login_result()
 
@@ -240,8 +240,9 @@ def test_login_success_prompts_clone_and_validate_not_project_link(
     rendered = capsys.readouterr().out
     assert "Login Successful" in rendered
     assert "Create or open a project in the Osmosis Platform" in rendered
-    assert "osmosis project validate" in rendered
+    assert "osmosis project doctor" in rendered
     assert "osmosis project link --workspace <workspace-id-or-name>" not in rendered
+    assert "project.validate" not in rendered
     assert "project.link" not in rendered
     assert "workspace switch" not in rendered
 
@@ -272,7 +273,7 @@ def test_login_omits_switch_commands_for_multiple_workspaces(
 
     rendered = capsys.readouterr().out
     assert "Create or open a project in the Osmosis Platform" in rendered
-    assert "osmosis project validate" in rendered
+    assert "osmosis project doctor" in rendered
     assert "osmosis project link --workspace <workspace-id-or-name>" not in rendered
     assert "workspace switch" not in rendered
 
@@ -303,7 +304,7 @@ def test_login_next_steps_omit_workspace_specific_guidance(monkeypatch, capsys) 
     assert "Login Successful" in rendered
     assert "Create or open a project in the Osmosis Platform" in rendered
     assert "clone the repository created there" in rendered
-    assert "osmosis project validate" in rendered
+    assert "osmosis project doctor" in rendered
     assert "Git Sync" not in rendered
     assert "osmosis workspace" not in rendered
     assert "workspace create" not in rendered
@@ -338,7 +339,7 @@ def test_login_does_not_attempt_workspace_lookup(monkeypatch) -> None:
     rendered = output.getvalue()
     assert "Login Successful" in rendered
     assert "Authenticated, but could not load your workspaces yet." not in rendered
-    assert "osmosis project validate" in rendered
+    assert "osmosis project doctor" in rendered
 
 
 def test_whoami_prints_local_identity_outside_project(monkeypatch) -> None:

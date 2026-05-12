@@ -93,7 +93,7 @@ before modifying plugin state.
 ## Common commands
 
 ```bash
-osmosis project validate
+osmosis project doctor
 osmosis eval run configs/eval/<name>.toml --limit 1
 osmosis train submit configs/training/<run>.toml
 osmosis train status <run-name>

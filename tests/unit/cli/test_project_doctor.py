@@ -29,7 +29,47 @@ def test_project_doctor_dry_run_reports_missing_paths(
     assert "rollouts/" in payload["resource"]["missing"]
     assert "configs/training/" in payload["resource"]["missing"]
     assert payload["resource"]["fixed"] is False
+    assert payload["resource"]["valid"] is False
+    assert payload["resource"]["required_paths"] == [
+        "rollouts/",
+        "configs/training/",
+        "configs/eval/",
+        "data/",
+    ]
     assert not (project / "research" / "program.md").exists()
+
+
+def test_project_doctor_reports_git_context(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    project = _make_project(tmp_path / "project")
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(project),
+            "remote",
+            "add",
+            "origin",
+            "git@github.com:Acme/Rollouts.git",
+        ],
+        check=True,
+        capture_output=True,
+    )
+    for rel_path in ("rollouts", "configs/training", "configs/eval", "data"):
+        (project / rel_path).mkdir(parents=True, exist_ok=True)
+    monkeypatch.chdir(project)
+
+    rc = main(["--json", "project", "doctor"])
+
+    payload = json.loads(capsys.readouterr().out)
+    assert rc == 0
+    assert payload["resource"]["valid"] is True
+    assert payload["resource"]["git"]["identity"] == "acme/rollouts"
+    assert (
+        payload["resource"]["git"]["remote_url"]
+        == "ssh://git@github.com/Acme/Rollouts.git"
+    )
 
 
 def test_project_doctor_fix_creates_missing_paths(

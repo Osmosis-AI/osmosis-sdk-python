@@ -18,8 +18,8 @@ pip install -e .
 # Authenticate with Osmosis
 osmosis auth login
 
-# Verify the canonical project layout
-osmosis project validate
+# Inspect the canonical project layout
+osmosis project doctor
 
 # Add or edit rollouts under rollouts/
 osmosis template apply multiply              # or add your own rollout

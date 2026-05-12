@@ -74,7 +74,7 @@ batch_size = 2
 ## Commands
 
 ```bash
-osmosis project validate
+osmosis project doctor
 osmosis eval run configs/eval/<config>.toml --limit 1
 osmosis train submit configs/training/<config>.toml
 osmosis eval run configs/eval/<config>.toml

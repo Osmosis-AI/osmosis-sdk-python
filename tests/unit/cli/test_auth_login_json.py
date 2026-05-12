@@ -79,7 +79,7 @@ def test_login_json_with_token_returns_operation_result(
     assert payload["resource"]["saved"] is True
     assert [step["action"] for step in payload["next_steps_structured"]] == [
         "platform.clone_repository",
-        "project.validate",
+        "project.doctor",
     ]
     serialized = json.dumps(payload)
     assert "project.link" not in serialized
@@ -87,7 +87,7 @@ def test_login_json_with_token_returns_operation_result(
     assert "workspace.switch" not in serialized
 
 
-def test_login_json_with_token_points_to_clone_and_validate(
+def test_login_json_with_token_points_to_clone_and_doctor(
     monkeypatch, capsys, fake_verify_result
 ) -> None:
     monkeypatch.delenv("OSMOSIS_TOKEN", raising=False)
@@ -111,15 +111,16 @@ def test_login_json_with_token_points_to_clone_and_validate(
     assert "workspace_count" not in payload["resource"]
     assert "workspace_lookup_error" not in payload["resource"]
     assert "Create or open a project in the Osmosis Platform" in serialized
-    assert "osmosis project validate" in serialized
+    assert "osmosis project doctor" in serialized
     assert "osmosis workspace" not in serialized
     assert "workspace create" not in serialized
     assert "workspace list" not in serialized
     assert "osmosis project link --workspace <workspace-id-or-name>" not in serialized
+    assert "project.validate" not in serialized
     assert "project.link" not in serialized
 
 
-def test_login_plain_with_token_prints_clone_and_validate_next_steps(
+def test_login_plain_with_token_prints_clone_and_doctor_next_steps(
     monkeypatch, capsys, fake_verify_result
 ) -> None:
     monkeypatch.delenv("OSMOSIS_TOKEN", raising=False)
@@ -140,8 +141,9 @@ def test_login_plain_with_token_prints_clone_and_validate_next_steps(
     assert exit_code == 0
     assert "Logged in as brian@example.com." in captured.out
     assert "Create or open a project in the Osmosis Platform" in captured.out
-    assert "osmosis project validate" in captured.out
+    assert "osmosis project doctor" in captured.out
     assert "osmosis project link --workspace <workspace-id-or-name>" not in captured.out
+    assert "project.validate" not in captured.out
     assert "project.link" not in captured.out
     assert "workspace switch" not in captured.out
 
@@ -167,7 +169,7 @@ def test_login_plain_with_token_omits_workspace_lookup_fields(
     assert exit_code == 0
     assert "Logged in as brian@example.com." in captured.out
     assert "Create or open a project in the Osmosis Platform" in captured.out
-    assert "osmosis project validate" in captured.out
+    assert "osmosis project doctor" in captured.out
     assert "workspace_count" not in captured.out
     assert "workspace_lookup_error" not in captured.out
     assert "osmosis workspace" not in captured.out

@@ -42,7 +42,7 @@ _PLATFORM_CREATE_REPO_STEP = (
     "Create or open a project in the Osmosis Platform, then clone the repository "
     "created there."
 )
-_VALIDATE_CLONE_STEP = "From the cloned repository, run `osmosis project validate`."
+_DOCTOR_CLONE_STEP = "From the cloned repository, run `osmosis project doctor`."
 
 
 def _login_operation_result(
@@ -75,7 +75,7 @@ def _login_operation_result(
     next_steps: list[str] = []
     next_steps_structured: list[dict[str, Any]] = []
     if saved:
-        next_steps.extend([_PLATFORM_CREATE_REPO_STEP, _VALIDATE_CLONE_STEP])
+        next_steps.extend([_PLATFORM_CREATE_REPO_STEP, _DOCTOR_CLONE_STEP])
         next_steps_structured.extend(
             [
                 {
@@ -83,8 +83,8 @@ def _login_operation_result(
                     "description": _PLATFORM_CREATE_REPO_STEP,
                 },
                 {
-                    "action": "project.validate",
-                    "description": _VALIDATE_CLONE_STEP,
+                    "action": "project.doctor",
+                    "description": _DOCTOR_CLONE_STEP,
                 },
             ]
         )
@@ -309,7 +309,7 @@ def _rich_login(force: bool, token: str | None) -> Any:
 
         console.panel("Login Successful", "\n".join(info_lines), style="green")
         console.print(
-            f"\n{_PLATFORM_CREATE_REPO_STEP}\n{_VALIDATE_CLONE_STEP}",
+            f"\n{_PLATFORM_CREATE_REPO_STEP}\n{_DOCTOR_CLONE_STEP}",
             style="dim",
         )
 

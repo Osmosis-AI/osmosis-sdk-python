@@ -13,8 +13,8 @@ app: typer.Typer = typer.Typer(
 )
 
 
-@app.command("validate")
-def validate(
+@app.command("doctor")
+def doctor(
     path: Path = typer.Argument(
         Path("."),
         exists=True,
@@ -23,15 +23,6 @@ def validate(
         resolve_path=True,
         help="Path inside the project (defaults to current directory).",
     ),
-) -> Any:
-    """Validate the Osmosis Git repository scaffold."""
-    from osmosis_ai.platform.cli.project import validate_project
-
-    return validate_project(path)
-
-
-@app.command("doctor")
-def doctor(
     fix: bool = typer.Option(
         False,
         "--fix",
@@ -47,4 +38,4 @@ def doctor(
     """Inspect and optionally repair the canonical project scaffold."""
     from osmosis_ai.platform.cli.project import doctor_project
 
-    return doctor_project(fix=fix, yes=yes)
+    return doctor_project(path=path, fix=fix, yes=yes)
