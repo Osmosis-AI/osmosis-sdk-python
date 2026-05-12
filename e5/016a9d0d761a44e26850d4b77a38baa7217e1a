@@ -1,0 +1,47 @@
+README.md
+  s_9477fa0c8717da::t_ac60f9e3cb2277 22,30-31,55,57-58,61-63,65,68-73,85
+osmosis_ai/platform/cli/templates/configs/AGENTS.md.tpl
+  s_9477fa0c8717da::t_d812a47a717e8e 41
+docs/README.md
+  s_9477fa0c8717da::t_5fcf19fe84064f 3,5-18
+tests/integration/test_cli_subprocess_contract.py
+  s_9477fa0c8717da::t_bb816a5ef38c92 54-90
+osmosis_ai/templates/cookbook/multiply/configs/training/multiply.toml
+  s_9477fa0c8717da::t_05cf939d3c0bd6 13
+osmosis_ai/templates/cookbook/multiply/rollouts/multiply/README.md
+  s_9477fa0c8717da::t_c07673b2e7ca0b 42,46-47
+osmosis_ai/platform/cli/templates/README.md.tpl
+  s_9477fa0c8717da::t_fe30ac9f126e5d 5-7,11-14,23-28,31-33,40
+tests/unit/templates/test_cli.py
+  s_9477fa0c8717da::t_cbbd249f6066a5 13,53-60
+osmosis_ai/platform/cli/templates/CLAUDE.md.tpl
+  s_9477fa0c8717da::t_ad61bbd4ef16b2 3-4
+osmosis_ai/platform/cli/templates/AGENTS.md.tpl
+  s_9477fa0c8717da::t_ea0d1dd091ab15 6-9,21-23,48
+osmosis_ai/platform/cli/templates/program.md.tpl
+  s_9477fa0c8717da::t_a9e6323d83be46 24
+docs/cli.md
+  s_9477fa0c8717da::t_83d56065c4e27e 32,35,37-38,41-45,48-50,61-62,69-79,85,170-171,230-232,263,296
+osmosis_ai/platform/cli/templates/configs/training/default.toml.tpl
+  s_9477fa0c8717da::t_46b0bb2066a179 50-51
+osmosis_ai/platform/cli/templates/gitignore.tpl
+  s_9477fa0c8717da::t_3780e5e1e5e061 40
+docs/troubleshooting.md
+  s_9477fa0c8717da::t_f1add6d7e36748 41-42,44,46-47,50-54,57-65,171
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "e5016a9d0d761a44e26850d4b77a38baa7217e1a",
+  "prompts": {},
+  "sessions": {
+    "s_9477fa0c8717da": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "a15c2361-d4d8-4e57-b365-2161f14671da",
+        "model": "gpt-5.5-extra-high"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}
