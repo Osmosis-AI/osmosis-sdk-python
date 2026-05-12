@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -77,6 +78,11 @@ def _stub_workspace_context(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def _make_rollout_project(root: Path) -> Path:
+    subprocess.run(
+        ["git", "init", "-b", "main", str(root)],
+        check=True,
+        capture_output=True,
+    )
     for rel_path in (
         ".osmosis",
         ".osmosis/research",
@@ -86,9 +92,6 @@ def _make_rollout_project(root: Path) -> Path:
         "data",
     ):
         (root / rel_path).mkdir(parents=True, exist_ok=True)
-    (root / ".osmosis" / "project.toml").write_text(
-        "[project]\nsetup_source = 'test'\n", encoding="utf-8"
-    )
     (root / ".osmosis" / "research" / "program.md").write_text(
         "# Test Program\n", encoding="utf-8"
     )
@@ -240,9 +243,20 @@ def test_train_metrics_json_does_not_write_default_file(
     tmp_path: Path,
 ) -> None:
     _stub_workspace_context(monkeypatch)
+    subprocess.run(
+        ["git", "init", "-b", "main", str(tmp_path)],
+        check=True,
+        capture_output=True,
+    )
+    for rel_path in (
+        ".osmosis/research",
+        "rollouts",
+        "configs/eval",
+        "configs/training",
+        "data",
+    ):
+        (tmp_path / rel_path).mkdir(parents=True, exist_ok=True)
     osmosis_dir = tmp_path / ".osmosis"
-    osmosis_dir.mkdir()
-    (osmosis_dir / "project.toml").write_text("[project]\n", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
 
     class FakeClient:

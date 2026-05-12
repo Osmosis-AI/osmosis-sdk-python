@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -56,6 +57,11 @@ def _write_legacy_active_workspace(
 
 
 def _create_canonical_project(project_root: Path) -> None:
+    subprocess.run(
+        ["git", "init", "-b", "main", str(project_root)],
+        check=True,
+        capture_output=True,
+    )
     for relative in (
         ".osmosis",
         ".osmosis/research",
@@ -66,10 +72,6 @@ def _create_canonical_project(project_root: Path) -> None:
         "data",
     ):
         (project_root / relative).mkdir(parents=True, exist_ok=True)
-    (project_root / ".osmosis" / "project.toml").write_text(
-        '[project]\nname = "demo"\n',
-        encoding="utf-8",
-    )
     (project_root / ".osmosis" / "research" / "program.md").write_text(
         "# Program\n",
         encoding="utf-8",

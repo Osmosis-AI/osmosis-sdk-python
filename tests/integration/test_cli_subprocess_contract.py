@@ -12,6 +12,11 @@ ROOT = Path(__file__).resolve().parents[2]
 
 
 def _make_project(root: Path) -> Path:
+    subprocess.run(
+        ["git", "init", "-b", "main", str(root)],
+        check=True,
+        capture_output=True,
+    )
     for rel_path in (
         ".osmosis",
         ".osmosis/research",
@@ -22,10 +27,6 @@ def _make_project(root: Path) -> Path:
         "data",
     ):
         (root / rel_path).mkdir(parents=True, exist_ok=True)
-    (root / ".osmosis" / "project.toml").write_text(
-        "[project]\nname='test'\n",
-        encoding="utf-8",
-    )
     (root / ".osmosis" / "research" / "program.md").write_text(
         "# Test\n", encoding="utf-8"
     )
@@ -50,17 +51,16 @@ def _run_json_command(
     )
 
 
-def test_eval_cache_dir_json_is_single_stdout_envelope(tmp_path: Path) -> None:
-    proc = _run_json_command(["eval", "cache", "dir"], tmp_path)
+def test_eval_cache_ls_with_filter_json_is_single_stdout_envelope(
+    tmp_path: Path,
+) -> None:
+    proc = _run_json_command(["eval", "cache", "ls", "--model", "missing"], tmp_path)
 
     assert proc.returncode == 0
     assert proc.stderr == ""
     payload = json.loads(proc.stdout)
     assert payload["schema_version"] == 1
-    assert (
-        Path(payload["data"]["cache_root"])
-        == (tmp_path / "project" / ".osmosis" / "cache" / "eval").resolve()
-    )
+    assert payload["items"] == []
 
 
 def test_eval_cache_ls_json_is_single_stdout_envelope(tmp_path: Path) -> None:

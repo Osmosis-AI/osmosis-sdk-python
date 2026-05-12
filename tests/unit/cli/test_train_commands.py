@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from io import StringIO
 from pathlib import Path
 
@@ -54,6 +55,11 @@ def _find_temp_project_root(start: Path) -> Path | None:
 
 
 def _make_project(root: Path, *, rollout: str = "demo") -> Path:
+    subprocess.run(
+        ["git", "init", "-b", "main", str(root)],
+        check=True,
+        capture_output=True,
+    )
     for rel_path in (
         ".osmosis/research",
         f"rollouts/{rollout}",
@@ -63,10 +69,6 @@ def _make_project(root: Path, *, rollout: str = "demo") -> Path:
     ):
         (root / rel_path).mkdir(parents=True, exist_ok=True)
 
-    (root / ".osmosis" / "project.toml").write_text(
-        "[project]\nsetup_source = 'test'\n",
-        encoding="utf-8",
-    )
     (root / ".osmosis" / "research" / "program.md").write_text(
         "# Test Program\n",
         encoding="utf-8",

@@ -57,11 +57,6 @@ def require_credentials() -> Credentials:
     return credentials
 
 
-def require_workspace_context() -> Any:
-    """Legacy workspace-link context is no longer available."""
-    raise CLIError("Workspace-link state has been removed; use Git-scoped context.")
-
-
 def require_git_project_context() -> GitProjectContext:
     """Resolve the current Git-scoped Osmosis project for platform commands."""
     return resolve_git_project_context()

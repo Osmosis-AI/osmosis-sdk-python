@@ -52,10 +52,6 @@ def _make_project(root: Path) -> Path:
         "data",
     ):
         (root / rel_path).mkdir(parents=True, exist_ok=True)
-    (root / ".osmosis" / "project.toml").write_text(
-        "[project]\nname='test'\n",
-        encoding="utf-8",
-    )
     (root / ".osmosis" / "research" / "program.md").write_text(
         "# Test\n", encoding="utf-8"
     )
