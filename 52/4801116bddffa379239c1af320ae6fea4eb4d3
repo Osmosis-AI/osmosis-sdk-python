@@ -1,0 +1,19 @@
+tests/unit/platform/cli/test_project_contract.py
+  s_9477fa0c8717da::t_6cceb8c42ae74b 47-57
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "524801116bddffa379239c1af320ae6fea4eb4d3",
+  "prompts": {},
+  "sessions": {
+    "s_9477fa0c8717da": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "a15c2361-d4d8-4e57-b365-2161f14671da",
+        "model": "gpt-5.5-extra-high"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}

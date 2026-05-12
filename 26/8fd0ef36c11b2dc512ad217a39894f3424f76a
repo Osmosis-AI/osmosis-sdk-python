@@ -1,0 +1,21 @@
+tests/unit/templates/test_cli.py
+  s_9477fa0c8717da::t_67829f27de9fc6 59,61-62
+README.md
+  s_9477fa0c8717da::t_37bf0e5b8dbb0b 35
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.4",
+  "base_commit_sha": "268fd0ef36c11b2dc512ad217a39894f3424f76a",
+  "prompts": {},
+  "sessions": {
+    "s_9477fa0c8717da": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "a15c2361-d4d8-4e57-b365-2161f14671da",
+        "model": "gpt-5.5-extra-high"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}
