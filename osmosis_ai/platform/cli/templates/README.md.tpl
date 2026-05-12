@@ -21,11 +21,17 @@ osmosis auth login
 # Verify the canonical project layout
 osmosis project validate
 
-# Edit rollouts under rollouts/
+# Add or edit rollouts under rollouts/
+osmosis template apply multiply              # or add your own rollout
 $EDITOR rollouts/
 
-# Submit the default training config
-osmosis train submit configs/training/default.toml
+# Configure and submit a training config
+cp configs/training/default.toml configs/training/<run>.toml
+$EDITOR configs/training/<run>.toml          # set rollout, dataset, and model_path
+git add rollouts configs data research
+git commit -m "configure training run"
+git push
+osmosis train submit configs/training/<run>.toml
 ```
 
 Platform-scoped commands derive scope from this checkout's `origin` remote.

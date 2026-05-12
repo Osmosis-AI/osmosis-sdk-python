@@ -51,7 +51,13 @@ git clone <repo-url>
 cd <repo>
 osmosis auth login
 osmosis project validate
-osmosis train submit configs/training/default.toml
+osmosis template apply multiply              # or add your rollout under rollouts/
+cp configs/training/default.toml configs/training/<run>.toml
+$EDITOR configs/training/<run>.toml          # set rollout, dataset, and model_path
+git add rollouts configs data research
+git commit -m "configure training run"
+git push
+osmosis train submit configs/training/<run>.toml
 ```
 
 Platform-scoped commands derive scope from the checkout's `origin` remote and
