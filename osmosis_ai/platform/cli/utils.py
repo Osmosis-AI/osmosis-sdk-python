@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import contextlib
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
@@ -19,23 +18,14 @@ from osmosis_ai.platform.api.models import (
 )
 from osmosis_ai.platform.auth import (
     AuthenticationExpiredError,
-    PlatformAPIError,
     load_credentials,
 )
 from osmosis_ai.platform.auth.config import PLATFORM_URL
-from osmosis_ai.platform.auth.local_config import (
-    load_subscription_status,
-    save_subscription_status,
-)
 from osmosis_ai.platform.cli.project_context import (
     GitProjectContext,
     LocalProjectContext,
     resolve_git_project_context,
     resolve_local_project_context,
-)
-from osmosis_ai.platform.cli.workspace_context import (
-    WorkspaceContext,
-    resolve_linked_workspace_context,
 )
 from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE
 
@@ -67,9 +57,9 @@ def require_credentials() -> Credentials:
     return credentials
 
 
-def require_workspace_context() -> WorkspaceContext:
-    """Resolve the current linked Osmosis project workspace."""
-    return resolve_linked_workspace_context()
+def require_workspace_context() -> Any:
+    """Legacy workspace-link context is no longer available."""
+    raise CLIError("Workspace-link state has been removed; use Git-scoped context.")
 
 
 def require_git_project_context() -> GitProjectContext:
@@ -321,70 +311,8 @@ def _require_auth(
     """Check that user is authenticated for legacy bootstrap flows."""
     if workspace_name is None:
         raise CLIError(
-            "This command requires a linked Osmosis project. "
-            "Run 'osmosis project link' from the project root."
+            "This command requires a cloned Osmosis repository. "
+            "Run from the project root."
         )
     credentials = require_credentials()
     return workspace_name, credentials
-
-
-def _require_subscription(*, workspace_id: str, workspace_name: str) -> None:
-    """Check that a workspace has an active subscription.
-
-    Uses cached status with TTL. If the cache is expired, stale, or False,
-    refreshes from the platform to avoid blocking users who just subscribed.
-    """
-    from osmosis_ai.platform.cli.constants import CACHE_TTL_SECONDS
-
-    cached = load_subscription_status(workspace_name, max_age=CACHE_TTL_SECONDS)
-    if cached is True:
-        return
-
-    refreshed = False
-    api_reached = False
-    workspace_found = False
-    # Intentionally do NOT suppress AuthenticationExpiredError here: a real
-    # 401 must surface as "session expired" rather than be silently swallowed
-    # and reported below as the misleading "subscription required" error
-    # when a stale `False` subscription cache is present.
-    with contextlib.suppress(PlatformAPIError, OSError):
-        credentials = require_credentials()
-        from osmosis_ai.platform.api.client import OsmosisClient
-
-        client = OsmosisClient()
-        info = platform_call(
-            "Checking subscription...",
-            lambda: client.refresh_workspace_info(
-                credentials=credentials,
-                workspace_id=workspace_id,
-                workspace_name=workspace_name,
-                cleanup_on_401=False,
-            ),
-        )
-        api_reached = True
-        workspace_found = info.get("found", False)
-        has_subscription = info.get("has_subscription")
-        if has_subscription is not None:
-            save_subscription_status(workspace_name, bool(has_subscription))
-            refreshed = True
-
-    status = load_subscription_status(workspace_name, max_age=CACHE_TTL_SECONDS)
-    if status is True:
-        return
-
-    if not refreshed and status is None:
-        if api_reached and not workspace_found:
-            raise CLIError(
-                f"Workspace '{workspace_name}' ({workspace_id}) not found. "
-                "It may have been deleted, renamed, or become inaccessible.\n"
-                "  Run 'osmosis auth login' if you logged in as a different user, "
-                "or relink this project:\n"
-                "    osmosis project unlink\n"
-                "    osmosis project link"
-            )
-        return
-
-    raise CLIError(
-        "Your workspace requires an active subscription for this action.\n"
-        f"  Upgrade at: {PLATFORM_URL}/{workspace_name}/settings/billing"
-    )

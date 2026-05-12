@@ -13,7 +13,6 @@ import osmosis_ai.platform.api.client as api_client_module
 import osmosis_ai.platform.api.download as download_module
 import osmosis_ai.platform.api.upload as upload_module
 import osmosis_ai.platform.cli.dataset as dataset_module
-import osmosis_ai.platform.cli.utils as utils_module
 from osmosis_ai.cli.console import Console
 from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.platform.api.models import (
@@ -93,11 +92,6 @@ def test_upload_passes_git_context_to_api_calls_without_subscription_preflight(
     file_path = tmp_path / "data.jsonl"
     file_path.write_text("{}", encoding="utf-8")
 
-    monkeypatch.setattr(
-        utils_module,
-        "load_subscription_status",
-        lambda *_args, **_kwargs: pytest.fail("subscription cache should not be read"),
-    )
     monkeypatch.setattr(dataset_module, "_validate_file", lambda _path, _ext: [])
     monkeypatch.setattr(
         dataset_module, "console", Console(file=output, force_terminal=False)

@@ -1,21 +1,13 @@
 from __future__ import annotations
 
-import subprocess
-from pathlib import Path
 from typing import Any
 
 import pytest
 
 from osmosis_ai.cli.errors import CLIError
-from osmosis_ai.platform.cli.project_mapping import (
-    ProjectLinkRecord,
-    ProjectMappingStore,
-)
 from osmosis_ai.platform.cli.workspace_context import (
     WorkspaceRefResolutionError,
     list_accessible_workspaces,
-    refresh_workspace_by_id,
-    resolve_linked_workspace_context,
     resolve_workspace_ref,
 )
 
@@ -23,136 +15,6 @@ from osmosis_ai.platform.cli.workspace_context import (
 class _Creds:
     def is_expired(self) -> bool:
         return False
-
-
-def _make_project(root: Path) -> Path:
-    for rel_path in (
-        ".osmosis",
-        ".osmosis/research",
-        "rollouts",
-        "configs",
-        "configs/eval",
-        "configs/training",
-        "data",
-    ):
-        (root / rel_path).mkdir(parents=True)
-    (root / ".osmosis" / "project.toml").write_text("[project]\n", encoding="utf-8")
-    (root / ".osmosis" / "research" / "program.md").write_text(
-        "# Program\n", encoding="utf-8"
-    )
-    subprocess.run(
-        ["git", "init", "-b", "main", str(root)], check=True, capture_output=True
-    )
-    return root
-
-
-def _make_minimal_project(root: Path) -> Path:
-    (root / ".osmosis").mkdir(parents=True)
-    (root / ".osmosis" / "project.toml").write_text("[project]\n", encoding="utf-8")
-    subprocess.run(
-        ["git", "init", "-b", "main", str(root)], check=True, capture_output=True
-    )
-    return root
-
-
-def test_resolve_linked_workspace_context_reads_current_platform_bucket(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    project = _make_project(tmp_path / "project")
-    store_path = tmp_path / "config.json"
-    store = ProjectMappingStore(
-        config_file=store_path, platform_url="https://platform.osmosis.ai"
-    )
-    store.link(
-        ProjectLinkRecord(
-            str(project.resolve()),
-            "ws_1",
-            "team-alpha",
-            None,
-            "2026-05-03T00:00:00+00:00",
-        )
-    )
-    monkeypatch.chdir(project)
-    monkeypatch.setattr(
-        "osmosis_ai.platform.cli.workspace_context.CONFIG_FILE", store_path
-    )
-    monkeypatch.setattr(
-        "osmosis_ai.platform.cli.workspace_context.load_credentials", lambda: _Creds()
-    )
-
-    ctx = resolve_linked_workspace_context()
-
-    assert ctx.project_root == project.resolve()
-    assert ctx.workspace_id == "ws_1"
-    assert ctx.workspace_name == "team-alpha"
-
-
-def test_unlinked_project_reports_project_link_command(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    project = _make_project(tmp_path / "project")
-    monkeypatch.chdir(project)
-    monkeypatch.setattr(
-        "osmosis_ai.platform.cli.workspace_context.CONFIG_FILE",
-        tmp_path / "config.json",
-    )
-
-    with pytest.raises(CLIError, match="This project is not linked"):
-        resolve_linked_workspace_context()
-
-
-def test_linked_project_with_missing_contract_paths_reports_contract_error(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    project = _make_minimal_project(tmp_path / "project")
-    store_path = tmp_path / "config.json"
-    ProjectMappingStore(
-        config_file=store_path, platform_url="https://platform.osmosis.ai"
-    ).link(
-        ProjectLinkRecord(
-            str(project.resolve()),
-            "ws_1",
-            "team-alpha",
-            None,
-            "2026-05-03T00:00:00+00:00",
-        )
-    )
-    monkeypatch.chdir(project)
-    monkeypatch.setattr(
-        "osmosis_ai.platform.cli.workspace_context.CONFIG_FILE", store_path
-    )
-    monkeypatch.setattr(
-        "osmosis_ai.platform.cli.workspace_context.load_credentials", lambda: _Creds()
-    )
-
-    with pytest.raises(CLIError, match="missing required Osmosis scaffold paths"):
-        resolve_linked_workspace_context()
-
-
-def test_nested_unlinked_project_does_not_use_parent_link(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    parent = _make_project(tmp_path / "parent")
-    child = _make_project(parent / "child")
-    store_path = tmp_path / "config.json"
-    ProjectMappingStore(
-        config_file=store_path, platform_url="https://platform.osmosis.ai"
-    ).link(
-        ProjectLinkRecord(
-            str(parent.resolve()),
-            "ws_parent",
-            "parent",
-            None,
-            "2026-05-03T00:00:00+00:00",
-        )
-    )
-    monkeypatch.chdir(child)
-    monkeypatch.setattr(
-        "osmosis_ai.platform.cli.workspace_context.CONFIG_FILE", store_path
-    )
-
-    with pytest.raises(CLIError, match="This project is not linked"):
-        resolve_linked_workspace_context()
 
 
 def test_resolve_workspace_ref_matches_id_before_name() -> None:
@@ -254,33 +116,3 @@ def test_list_accessible_workspaces_rejects_malformed_workspace_item(
 
     with pytest.raises(CLIError, match="Invalid workspace entry"):
         list_accessible_workspaces(credentials=_Creds())
-
-
-def test_refresh_workspace_by_id_returns_matching_workspace(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    workspaces = [
-        {"id": "ws_1", "name": "team-alpha"},
-        {"id": "ws_2", "name": "team-beta"},
-    ]
-    monkeypatch.setattr(
-        "osmosis_ai.platform.cli.workspace_context.list_accessible_workspaces",
-        lambda *, credentials: workspaces,
-    )
-
-    assert refresh_workspace_by_id(workspace_id="ws_2", credentials=_Creds()) == {
-        "id": "ws_2",
-        "name": "team-beta",
-    }
-
-
-def test_refresh_workspace_by_id_reports_stale_or_inaccessible_link(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(
-        "osmosis_ai.platform.cli.workspace_context.list_accessible_workspaces",
-        lambda *, credentials: [{"id": "ws_1", "name": "team-alpha"}],
-    )
-
-    with pytest.raises(CLIError, match="no longer accessible"):
-        refresh_workspace_by_id(workspace_id="ws_missing", credentials=_Creds())

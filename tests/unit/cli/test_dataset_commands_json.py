@@ -15,7 +15,6 @@ import osmosis_ai.platform.api.client as api_client_module
 import osmosis_ai.platform.api.download as download_module
 import osmosis_ai.platform.api.upload as upload_module
 import osmosis_ai.platform.cli.dataset as dataset_module
-import osmosis_ai.platform.cli.utils as utils_module
 from osmosis_ai.platform.api.models import (
     DatasetDownloadInfo,
     DatasetFile,
@@ -96,7 +95,7 @@ def test_require_auth_no_workspace_reports_linked_project_before_credentials(
         lambda: pytest.fail("credentials should not be loaded"),
     )
 
-    with pytest.raises(CLIError, match="linked Osmosis project"):
+    with pytest.raises(CLIError, match="cloned Osmosis repository"):
         utils_module._require_auth()
 
 
@@ -269,11 +268,6 @@ def test_dataset_upload_json_stdout_is_one_envelope(
     capsys,
 ) -> None:
     fake_credentials = _stub_git_context(monkeypatch)
-    monkeypatch.setattr(
-        utils_module,
-        "load_subscription_status",
-        lambda *_args, **_kwargs: pytest.fail("subscription cache should not be read"),
-    )
     file_path = tmp_path / "train.jsonl"
     file_path.write_text(
         json.dumps({"system_prompt": "s", "user_prompt": "u", "ground_truth": "g"})

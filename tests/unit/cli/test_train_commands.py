@@ -24,20 +24,10 @@ from osmosis_ai.platform.api.models import (
     TrainingRunMetricsOverview,
 )
 from osmosis_ai.platform.auth import PlatformAPIError
-from osmosis_ai.platform.cli.workspace_context import WorkspaceContext
 
-WORKSPACE_ID = "ws_123"
-WORKSPACE_NAME = "ws-test"
 GIT_IDENTITY = "acme/rollouts"
 REPO_URL = "https://github.com/acme/rollouts.git"
 FAKE_CREDENTIALS = object()
-
-
-def _workspace_extra(project_root: Path) -> dict[str, object]:
-    return {
-        "workspace": {"id": WORKSPACE_ID, "name": WORKSPACE_NAME},
-        "project_root": str(project_root.resolve()),
-    }
 
 
 def _git_extra() -> dict[str, object]:
@@ -121,20 +111,6 @@ def _mock_workspace_context(
 ) -> None:
     if request.node.name == "test_train_submit_requires_linked_project":
         return
-
-    def _context() -> WorkspaceContext:
-        return WorkspaceContext(
-            project_root=Path.cwd().resolve(),
-            workspace_id=WORKSPACE_ID,
-            workspace_name=WORKSPACE_NAME,
-            repo_url=None,
-            credentials=FAKE_CREDENTIALS,
-        )
-
-    monkeypatch.setattr(
-        "osmosis_ai.platform.cli.utils.require_workspace_context",
-        _context,
-    )
 
     def _git_context():
         project_root = _find_temp_project_root(Path.cwd()) or Path("/repo")
@@ -873,10 +849,6 @@ def test_train_submit_requires_linked_project(
         encoding="utf-8",
     )
     monkeypatch.chdir(project)
-    monkeypatch.setattr(
-        "osmosis_ai.platform.cli.workspace_context.CONFIG_FILE",
-        tmp_path / "workspace_config.json",
-    )
 
     rc = main(["--json", "train", "submit", "configs/training/default.toml", "--yes"])
 

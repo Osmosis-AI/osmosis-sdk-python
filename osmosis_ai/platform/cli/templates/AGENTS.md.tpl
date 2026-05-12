@@ -6,7 +6,7 @@ top-level layout.
 ## Project contract
 
 - Required paths:
-  - `.osmosis/project.toml`
+  - The project TOML file in `.osmosis/`
   - `rollouts/`
   - `configs/training/`
   - `configs/eval/`

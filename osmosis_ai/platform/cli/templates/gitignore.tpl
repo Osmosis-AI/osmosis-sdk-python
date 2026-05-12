@@ -38,7 +38,7 @@ coverage.xml
 
 # ── Osmosis local state ──────────────────────────────
 .osmosis/**
-!.osmosis/project.toml
+!.osmosis/*.toml
 
 # ── OS ──────────────────────────────────────────────
 .DS_Store

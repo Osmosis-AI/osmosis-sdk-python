@@ -26,23 +26,18 @@ from osmosis_ai.platform.api.models import (
     TrainingRunMetrics,
     TrainingRunMetricsOverview,
 )
-from osmosis_ai.platform.cli.workspace_context import WorkspaceContext
 
-WORKSPACE_ID = "ws-test"
-WORKSPACE_NAME = "ws-test"
 GIT_IDENTITY = "acme/rollouts"
 REPO_URL = "https://github.com/acme/rollouts.git"
 GIT_PROJECT_ROOT = Path("/repo")
 FAKE_CREDENTIALS = object()
 
 
-def _assert_workspace_context(payload: dict, project_root: Path) -> None:
-    assert payload["workspace"] == {"id": WORKSPACE_ID, "name": WORKSPACE_NAME}
+def _assert_git_context(
+    payload: dict[str, object],
+    project_root: Path = GIT_PROJECT_ROOT,
+) -> None:
     assert payload["project_root"] == str(project_root.resolve())
-
-
-def _assert_git_context(payload: dict[str, object]) -> None:
-    assert payload["project_root"] == "/repo"
     assert payload["git"] == {
         "identity": GIT_IDENTITY,
         "remote_url": REPO_URL,
@@ -58,27 +53,19 @@ def _stub_workspace_context(monkeypatch: pytest.MonkeyPatch) -> None:
                 return candidate
         return None
 
-    def _context() -> WorkspaceContext:
-        return WorkspaceContext(
-            project_root=Path.cwd().resolve(),
-            workspace_id=WORKSPACE_ID,
-            workspace_name=WORKSPACE_NAME,
-            repo_url=None,
-            credentials=FAKE_CREDENTIALS,
-        )
-
     def _git_context() -> SimpleNamespace:
+        project_root = (
+            Path.cwd().resolve()
+            if (Path.cwd() / ".osmosis").is_dir()
+            else GIT_PROJECT_ROOT
+        )
         return SimpleNamespace(
-            project_root=GIT_PROJECT_ROOT,
+            project_root=project_root,
             git_identity=GIT_IDENTITY,
             repo_url=REPO_URL,
             credentials=FAKE_CREDENTIALS,
         )
 
-    monkeypatch.setattr(
-        "osmosis_ai.platform.cli.utils.require_workspace_context",
-        _context,
-    )
     monkeypatch.setattr(
         "osmosis_ai.platform.cli.utils.require_git_project_context",
         _git_context,
@@ -224,7 +211,9 @@ rollout_batch_size = 64
 
     class FakeClient:
         def submit_training_run(self, **kwargs):
-            assert kwargs["workspace_id"] == WORKSPACE_ID
+            assert kwargs["credentials"] is FAKE_CREDENTIALS
+            assert kwargs["git_identity"] == GIT_IDENTITY
+            assert "workspace_id" not in kwargs
             assert kwargs["rollout_name"] == "demo"
             return SubmitTrainingRunResult(
                 id="run_1",
@@ -242,7 +231,7 @@ rollout_batch_size = 64
     payload = json.loads(captured.out)
     assert payload["operation"] == "train.submit"
     assert payload["resource"]["name"] == "reward-run"
-    _assert_workspace_context(payload["resource"], project)
+    _assert_git_context(payload["resource"], project)
 
 
 def test_train_metrics_json_does_not_write_default_file(
@@ -257,8 +246,9 @@ def test_train_metrics_json_does_not_write_default_file(
     monkeypatch.chdir(tmp_path)
 
     class FakeClient:
-        def get_training_run(self, name, *, workspace_id, credentials=None):
-            assert workspace_id == WORKSPACE_ID
+        def get_training_run(self, name, *, git_identity, credentials=None):
+            assert credentials is FAKE_CREDENTIALS
+            assert git_identity == GIT_IDENTITY
             return TrainingRunDetail(
                 id="run_1",
                 name=name,
@@ -266,8 +256,9 @@ def test_train_metrics_json_does_not_write_default_file(
                 model_name="Qwen/Qwen3",
             )
 
-        def get_training_run_metrics(self, run_id, *, workspace_id, credentials=None):
-            assert workspace_id == WORKSPACE_ID
+        def get_training_run_metrics(self, run_id, *, git_identity, credentials=None):
+            assert credentials is FAKE_CREDENTIALS
+            assert git_identity == GIT_IDENTITY
             return TrainingRunMetrics(
                 training_run_id=run_id,
                 status="finished",
@@ -298,7 +289,7 @@ def test_train_metrics_json_does_not_write_default_file(
     payload = json.loads(captured.out)
     assert payload["data"]["metrics_available"] is True
     assert payload["data"]["output_path"] is None
-    _assert_workspace_context(payload["data"], tmp_path)
+    _assert_git_context(payload["data"], tmp_path)
     assert not (osmosis_dir / "metrics").exists()
 
 

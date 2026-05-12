@@ -40,56 +40,6 @@ class OsmosisClient:
     be tied to the trusted Git project context.
     """
 
-    # ── Workspace ────────────────────────────────────────────────────
-
-    def refresh_workspace_info(
-        self,
-        *,
-        credentials: Credentials | None = None,
-        workspace_id: str | None = None,
-        workspace_name: str | None = None,
-        cleanup_on_401: bool = True,
-    ) -> dict[str, Any]:
-        """Fetch workspace metadata via /api/cli/workspaces.
-
-        Returns a dict with ``has_subscription`` plus optional Git integration
-        fields for the matched workspace, or an empty dict if the workspace is
-        not found. When both ``workspace_id`` and ``workspace_name`` are passed,
-        ``workspace_id`` takes precedence.
-        """
-        data = platform_request(
-            "/api/cli/workspaces",
-            credentials=credentials,
-            require_git_repo=False,
-            cleanup_on_401=cleanup_on_401,
-        )
-        for ws in data.get("workspaces", []):
-            if workspace_id is not None and ws.get("id") == workspace_id:
-                return {
-                    "found": True,
-                    "id": ws.get("id"),
-                    "name": ws.get("name"),
-                    "has_subscription": ws.get("has_subscription"),
-                    "has_github_app_installation": ws.get(
-                        "has_github_app_installation", False
-                    ),
-                    "connected_repo": ws.get("connected_repo"),
-                }
-        if workspace_id is None and workspace_name is not None:
-            for ws in data.get("workspaces", []):
-                if ws.get("name") == workspace_name:
-                    return {
-                        "found": True,
-                        "id": ws.get("id"),
-                        "name": ws.get("name"),
-                        "has_subscription": ws.get("has_subscription"),
-                        "has_github_app_installation": ws.get(
-                            "has_github_app_installation", False
-                        ),
-                        "connected_repo": ws.get("connected_repo"),
-                    }
-        return {"found": False}
-
     # ── Datasets ─────────────────────────────────────────────────────
 
     def create_dataset(
