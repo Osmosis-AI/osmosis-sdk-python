@@ -108,7 +108,7 @@ def console_capture(monkeypatch: pytest.MonkeyPatch) -> StringIO:
 
 
 @pytest.fixture(autouse=True)
-def _mock_workspace_context(
+def _mock_git_context(
     monkeypatch: pytest.MonkeyPatch, request: pytest.FixtureRequest
 ) -> None:
     if request.node.name == "test_train_submit_requires_linked_project":

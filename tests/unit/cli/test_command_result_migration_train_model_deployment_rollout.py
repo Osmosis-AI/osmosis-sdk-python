@@ -46,7 +46,7 @@ def _assert_git_context(
     assert "workspace" not in payload
 
 
-def _stub_workspace_context(monkeypatch: pytest.MonkeyPatch) -> None:
+def _stub_git_context(monkeypatch: pytest.MonkeyPatch) -> None:
     def _git_top_level(start: Path) -> Path | None:
         current = start.resolve()
         for candidate in (current, *current.parents):
@@ -118,7 +118,7 @@ class DemoGrader(Grader):
 def test_train_list_json_returns_single_list_envelope(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    _stub_workspace_context(monkeypatch)
+    _stub_git_context(monkeypatch)
 
     class FakeClient:
         def list_training_runs(
@@ -157,7 +157,7 @@ def test_train_list_json_returns_single_list_envelope(
 def test_train_status_json_returns_detail_envelope(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    _stub_workspace_context(monkeypatch)
+    _stub_git_context(monkeypatch)
 
     class FakeClient:
         def get_training_run(self, name, *, git_identity, credentials=None):
@@ -202,7 +202,7 @@ rollout_batch_size = 64
         encoding="utf-8",
     )
     monkeypatch.chdir(project)
-    _stub_workspace_context(monkeypatch)
+    _stub_git_context(monkeypatch)
     monkeypatch.setattr(
         "osmosis_ai.platform.cli.workspace_repo.require_git_top_level",
         lambda *args, **kwargs: None,
@@ -242,7 +242,7 @@ def test_train_metrics_json_does_not_write_default_file(
     capsys: pytest.CaptureFixture[str],
     tmp_path: Path,
 ) -> None:
-    _stub_workspace_context(monkeypatch)
+    _stub_git_context(monkeypatch)
     subprocess.run(
         ["git", "init", "-b", "main", str(tmp_path)],
         check=True,
@@ -310,7 +310,7 @@ def test_train_metrics_json_does_not_write_default_file(
 def test_train_stop_json_returns_operation_envelope(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    _stub_workspace_context(monkeypatch)
+    _stub_git_context(monkeypatch)
 
     class FakeClient:
         def stop_training_run(self, name, *, git_identity, credentials=None):
@@ -334,7 +334,7 @@ def test_train_stop_json_returns_operation_envelope(
 def test_model_list_plain_is_tab_separated_rows(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    _stub_workspace_context(monkeypatch)
+    _stub_git_context(monkeypatch)
 
     class FakeClient:
         def list_base_models(
@@ -368,10 +368,10 @@ def test_model_list_plain_is_tab_separated_rows(
     ]
 
 
-def test_model_list_json_includes_linked_workspace_context(
+def test_model_list_json_includes_git_context(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    _stub_workspace_context(monkeypatch)
+    _stub_git_context(monkeypatch)
 
     class FakeClient:
         def list_base_models(
@@ -408,7 +408,7 @@ def test_model_list_json_includes_linked_workspace_context(
 def test_deployment_commands_json_return_results(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    _stub_workspace_context(monkeypatch)
+    _stub_git_context(monkeypatch)
 
     class FakeClient:
         def list_deployments(
@@ -489,7 +489,7 @@ def test_deployment_commands_json_return_results(
 def test_failed_deploy_json_exits_nonzero(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    _stub_workspace_context(monkeypatch)
+    _stub_git_context(monkeypatch)
 
     class FakeClient:
         def deploy_checkpoint(self, checkpoint, *, git_identity, credentials=None):
@@ -515,7 +515,7 @@ def test_failed_deploy_json_exits_nonzero(
 def test_rollout_list_json_returns_envelope(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    _stub_workspace_context(monkeypatch)
+    _stub_git_context(monkeypatch)
 
     class FakeClient:
         def list_rollouts(self, limit=30, offset=0, *, git_identity, credentials=None):
