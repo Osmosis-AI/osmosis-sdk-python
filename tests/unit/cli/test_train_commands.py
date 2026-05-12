@@ -28,6 +28,8 @@ from osmosis_ai.platform.cli.workspace_context import WorkspaceContext
 
 WORKSPACE_ID = "ws_123"
 WORKSPACE_NAME = "ws-test"
+GIT_IDENTITY = "acme/rollouts"
+REPO_URL = "https://github.com/acme/rollouts.git"
 FAKE_CREDENTIALS = object()
 
 
@@ -36,6 +38,17 @@ def _workspace_extra(project_root: Path) -> dict[str, object]:
         "workspace": {"id": WORKSPACE_ID, "name": WORKSPACE_NAME},
         "project_root": str(project_root.resolve()),
     }
+
+
+def _git_extra() -> dict[str, object]:
+    return {
+        "git": {"identity": GIT_IDENTITY, "remote_url": REPO_URL},
+        "project_root": "/repo",
+    }
+
+
+def assert_git_context(data: dict[str, object]) -> None:
+    assert data == _git_extra()
 
 
 def _make_project(root: Path, *, rollout: str = "demo") -> Path:
@@ -110,22 +123,40 @@ def _mock_workspace_context(
         "osmosis_ai.platform.cli.utils.require_workspace_context",
         _context,
     )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.cli.utils.require_git_project_context",
+        lambda: type(
+            "GitContext",
+            (),
+            {
+                "project_root": Path("/repo"),
+                "git_identity": GIT_IDENTITY,
+                "repo_url": REPO_URL,
+                "credentials": FAKE_CREDENTIALS,
+            },
+        )(),
+    )
 
 
 @pytest.fixture(autouse=True)
 def _mock_workspace_repo(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Default `train submit` to skip the workspace<->git-repo check.
+    """Default `train submit` to treat temp Osmosis projects as Git roots."""
 
-    Individual tests can re-mock this when exercising the validator.
-    """
+    def _git_top_level(start: Path) -> Path | None:
+        current = start.resolve()
+        for candidate in (current, *current.parents):
+            if (candidate / ".osmosis").is_dir():
+                return candidate
+        return None
+
     monkeypatch.setattr(
-        "osmosis_ai.platform.cli.workspace_repo.require_git_top_level",
-        lambda *args, **kwargs: None,
+        "osmosis_ai.platform.cli.workspace_repo.git_worktree_top_level",
+        _git_top_level,
         raising=False,
     )
     monkeypatch.setattr(
-        "osmosis_ai.platform.cli.workspace_repo.validate_workspace_repo",
-        lambda **kwargs: None,
+        "osmosis_ai.platform.cli.workspace_repo.require_git_top_level",
+        lambda *args, **kwargs: None,
         raising=False,
     )
 
@@ -141,9 +172,10 @@ class TestListRuns:
     ) -> None:
         class FakeClient:
             def list_training_runs(
-                self, limit=30, offset=0, *, workspace_id, credentials=None
+                self, limit=30, offset=0, *, git_identity, credentials=None
             ):
-                assert workspace_id == WORKSPACE_ID
+                assert credentials is FAKE_CREDENTIALS
+                assert git_identity == GIT_IDENTITY
                 return PaginatedTrainingRuns(
                     training_runs=[], total_count=0, has_more=False
                 )
@@ -156,7 +188,7 @@ class TestListRuns:
         assert result.items == []
         assert result.total_count == 0
         assert result.has_more is False
-        assert result.extra == _workspace_extra(Path.cwd())
+        assert_git_context(result.extra)
 
     def test_list_with_runs(
         self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
@@ -172,9 +204,9 @@ class TestListRuns:
 
         class FakeClient:
             def list_training_runs(
-                self, limit=30, offset=0, *, workspace_id, credentials=None
+                self, limit=30, offset=0, *, git_identity, credentials=None
             ):
-                assert workspace_id == WORKSPACE_ID
+                assert git_identity == GIT_IDENTITY
                 return PaginatedTrainingRuns(
                     training_runs=[run], total_count=1, has_more=False
                 )
@@ -198,9 +230,9 @@ class TestListRuns:
 
         class FakeClient:
             def list_training_runs(
-                self, limit=30, offset=0, *, workspace_id, credentials=None
+                self, limit=30, offset=0, *, git_identity, credentials=None
             ):
-                assert workspace_id == WORKSPACE_ID
+                assert git_identity == GIT_IDENTITY
                 return PaginatedTrainingRuns(
                     training_runs=[run], total_count=1, has_more=False
                 )
@@ -223,9 +255,9 @@ class TestListRuns:
 
         class FakeClient:
             def list_training_runs(
-                self, limit=30, offset=0, *, workspace_id, credentials=None
+                self, limit=30, offset=0, *, git_identity, credentials=None
             ):
-                assert workspace_id == WORKSPACE_ID
+                assert git_identity == GIT_IDENTITY
                 return PaginatedTrainingRuns(
                     training_runs=[run], total_count=5, has_more=True
                 )
@@ -256,14 +288,14 @@ class TestStatus:
         )
 
         class FakeClient:
-            def get_training_run(self, run_id, *, workspace_id, credentials=None):
-                assert workspace_id == WORKSPACE_ID
+            def get_training_run(self, run_id, *, git_identity, credentials=None):
+                assert git_identity == GIT_IDENTITY
                 return detail
 
             def list_training_run_checkpoints(
-                self, run_id, *, workspace_id, credentials=None
+                self, run_id, *, git_identity, credentials=None
             ):
-                assert workspace_id == WORKSPACE_ID
+                assert git_identity == GIT_IDENTITY
                 raise PlatformAPIError("not available")
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
@@ -273,8 +305,10 @@ class TestStatus:
         assert result.title == "Training Run"
         assert result.data["name"] == "run-1"
         assert result.data["status"] == "completed"
-        assert result.data["workspace"] == {"id": WORKSPACE_ID, "name": WORKSPACE_NAME}
-        assert result.data["project_root"] == str(Path.cwd().resolve())
+        assert {
+            key: result.data[key] for key in ("git", "project_root")
+        } == _git_extra()
+        assert "workspace" not in result.data
 
     def test_status_with_all_optional_fields(
         self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
@@ -297,14 +331,14 @@ class TestStatus:
         )
 
         class FakeClient:
-            def get_training_run(self, run_id, *, workspace_id, credentials=None):
-                assert workspace_id == WORKSPACE_ID
+            def get_training_run(self, run_id, *, git_identity, credentials=None):
+                assert git_identity == GIT_IDENTITY
                 return detail
 
             def list_training_run_checkpoints(
-                self, run_id, *, workspace_id, credentials=None
+                self, run_id, *, git_identity, credentials=None
             ):
-                assert workspace_id == WORKSPACE_ID
+                assert git_identity == GIT_IDENTITY
                 raise PlatformAPIError("not available")
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
@@ -751,7 +785,7 @@ rollout_batch_size = 64
         assert "deadbeef1234" in out
         assert "already pushed to the remote" in out
 
-    def test_submit_passes_workspace_and_project_to_validator(
+    def test_submit_passes_project_to_git_top_level_check(
         self,
         monkeypatch: pytest.MonkeyPatch,
         console_capture: StringIO,
@@ -761,11 +795,12 @@ rollout_batch_size = 64
         monkeypatch.chdir(config_path.parents[2])
         captured: dict = {}
 
-        def _capture(**kwargs: object) -> None:
-            captured.update(kwargs)
+        def _capture(project_root: Path, command_label: str) -> None:
+            captured["project_root"] = project_root
+            captured["command_label"] = command_label
 
         monkeypatch.setattr(
-            "osmosis_ai.platform.cli.workspace_repo.validate_workspace_repo",
+            "osmosis_ai.platform.cli.workspace_repo.require_git_top_level",
             _capture,
         )
 
@@ -777,12 +812,10 @@ rollout_batch_size = 64
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
         train_module.submit(config_path=config_path, yes=True)
 
-        assert captured["workspace_id"] == WORKSPACE_ID
-        assert captured["workspace_name"] == WORKSPACE_NAME
         assert captured["project_root"] == config_path.parent.parent.parent
         assert captured["command_label"] == "`osmosis train submit`"
 
-    def test_submit_propagates_workspace_repo_error(
+    def test_submit_propagates_git_top_level_error(
         self,
         monkeypatch: pytest.MonkeyPatch,
         tmp_path: Path,
@@ -790,17 +823,17 @@ rollout_batch_size = 64
         config_path = self._write_config(tmp_path)
         monkeypatch.chdir(config_path.parents[2])
 
-        def _fail(**kwargs: object) -> None:
+        def _fail(project_root: Path, command_label: str) -> None:
             raise CLIError(
-                "`osmosis train submit` must be run from a clone of the workspace's connected Git repository."
+                "`osmosis train submit` must be run from a Git worktree top-level Osmosis project."
             )
 
         monkeypatch.setattr(
-            "osmosis_ai.platform.cli.workspace_repo.validate_workspace_repo",
+            "osmosis_ai.platform.cli.workspace_repo.require_git_top_level",
             _fail,
         )
 
-        with pytest.raises(CLIError, match="connected Git repository"):
+        with pytest.raises(CLIError, match="Git worktree top-level"):
             train_module.submit(config_path=config_path, yes=True)
 
 
@@ -1099,8 +1132,8 @@ class TestStop:
         self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
     ) -> None:
         class FakeClient:
-            def stop_training_run(self, run_id, *, workspace_id, credentials=None):
-                assert workspace_id == WORKSPACE_ID
+            def stop_training_run(self, run_id, *, git_identity, credentials=None):
+                assert git_identity == GIT_IDENTITY
                 return {"stopped": True}
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
@@ -1109,5 +1142,5 @@ class TestStop:
         assert isinstance(result, OperationResult)
         assert result.operation == "train.stop"
         assert result.status == "success"
-        assert result.resource == {"name": "my-run", **_workspace_extra(Path.cwd())}
+        assert result.resource == {"name": "my-run", **_git_extra()}
         assert result.message == 'Training run "my-run" stopped.'

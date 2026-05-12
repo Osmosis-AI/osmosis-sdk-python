@@ -84,6 +84,14 @@ def require_local_project_context(
     return resolve_local_project_context(require_scaffold=require_scaffold)
 
 
+def git_result_context(context: Any) -> dict[str, Any]:
+    """Return the shared Git context shape for structured command output."""
+    return {
+        "git": {"identity": context.git_identity, "remote_url": context.repo_url},
+        "project_root": str(context.project_root),
+    }
+
+
 def format_dataset_status(d: Any, *, for_prompt: bool = False) -> str:
     """Format a dataset status string with optional color styling.
 

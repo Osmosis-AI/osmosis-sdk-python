@@ -214,14 +214,15 @@ def list_runs(
     )
     from osmosis_ai.platform.cli.utils import (
         fetch_all_pages,
-        require_workspace_context,
+        git_result_context,
+        require_git_project_context,
         validate_list_options,
     )
 
     effective_limit, fetch_all = validate_list_options(limit=limit, all_=all_)
 
-    workspace = require_workspace_context()
-    credentials = workspace.credentials
+    context = require_git_project_context()
+    credentials = context.credentials
 
     from osmosis_ai.platform.api.client import OsmosisClient
 
@@ -234,7 +235,7 @@ def list_runs(
                     limit=lim,
                     offset=off,
                     credentials=credentials,
-                    workspace_id=workspace.workspace_id,
+                    git_identity=context.git_identity,
                 ),
                 items_attr="training_runs",
             )
@@ -245,7 +246,7 @@ def list_runs(
                 limit=effective_limit,
                 offset=0,
                 credentials=credentials,
-                workspace_id=workspace.workspace_id,
+                git_identity=context.git_identity,
             )
             training_runs = page.training_runs
             total_count = page.total_count
@@ -258,7 +259,7 @@ def list_runs(
         total_count=total_count,
         has_more=has_more,
         next_offset=next_offset,
-        extra=_workspace_result_context(workspace),
+        extra=git_result_context(context),
         columns=[
             ListColumn(key="name", label="Name"),
             ListColumn(key="status", label="Status"),
@@ -288,11 +289,12 @@ def status(
     from osmosis_ai.platform.cli.utils import (
         build_run_detail_rows,
         format_date,
-        require_workspace_context,
+        git_result_context,
+        require_git_project_context,
     )
 
-    workspace = require_workspace_context()
-    credentials = workspace.credentials
+    context = require_git_project_context()
+    credentials = context.credentials
 
     client = OsmosisClient()
     output = get_output_context()
@@ -300,7 +302,7 @@ def status(
         run = client.get_training_run(
             name,
             credentials=credentials,
-            workspace_id=workspace.workspace_id,
+            git_identity=context.git_identity,
         )
 
     rows = build_run_detail_rows(run)
@@ -323,7 +325,7 @@ def status(
                 ckpts = client.list_training_run_checkpoints(
                     name,
                     credentials=credentials,
-                    workspace_id=workspace.workspace_id,
+                    git_identity=context.git_identity,
                 )
         except PlatformAPIError:
             ckpts = None
@@ -358,7 +360,7 @@ def status(
             "notes": run.notes,
             "hf_status": run.hf_status,
             "checkpoints": [serialize_checkpoint(cp) for cp in checkpoints],
-            **_workspace_result_context(workspace),
+            **git_result_context(context),
         }
     )
 
@@ -394,10 +396,7 @@ def submit(
         platform_entity_url,
         require_workspace_context,
     )
-    from osmosis_ai.platform.cli.workspace_repo import (
-        require_git_top_level,
-        validate_workspace_repo,
-    )
+    from osmosis_ai.platform.cli.workspace_repo import require_git_top_level
 
     command_label = "`osmosis train submit`"
 
@@ -424,13 +423,6 @@ def submit(
     workspace = require_workspace_context()
     credentials = workspace.credentials
     require_git_top_level(project_root, command_label)
-    validate_workspace_repo(
-        project_root=project_root,
-        workspace_id=workspace.workspace_id,
-        workspace_name=workspace.workspace_name,
-        credentials=credentials,
-        command_label=command_label,
-    )
 
     summary_rows: list[tuple[str, str]] = [
         ("Rollout", config.experiment_rollout),
@@ -764,10 +756,13 @@ def stop(
 ) -> Any:
     """Stop a training run."""
     from osmosis_ai.cli.output import OperationResult, get_output_context
-    from osmosis_ai.platform.cli.utils import require_workspace_context
+    from osmosis_ai.platform.cli.utils import (
+        git_result_context,
+        require_git_project_context,
+    )
 
-    workspace = require_workspace_context()
-    credentials = workspace.credentials
+    context = require_git_project_context()
+    credentials = context.credentials
 
     from osmosis_ai.platform.api.client import OsmosisClient
 
@@ -784,11 +779,11 @@ def stop(
         client.stop_training_run(
             name,
             credentials=credentials,
-            workspace_id=workspace.workspace_id,
+            git_identity=context.git_identity,
         )
     return OperationResult(
         operation="train.stop",
         status="success",
-        resource={"name": name, **_workspace_result_context(workspace)},
+        resource={"name": name, **git_result_context(context)},
         message=f'Training run "{name}" stopped.',
     )

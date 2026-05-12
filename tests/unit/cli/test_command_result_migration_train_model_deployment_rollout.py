@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -29,6 +30,9 @@ from osmosis_ai.platform.cli.workspace_context import WorkspaceContext
 
 WORKSPACE_ID = "ws-test"
 WORKSPACE_NAME = "ws-test"
+GIT_IDENTITY = "acme/rollouts"
+REPO_URL = "https://github.com/acme/rollouts.git"
+GIT_PROJECT_ROOT = Path("/repo")
 FAKE_CREDENTIALS = object()
 
 
@@ -37,7 +41,23 @@ def _assert_workspace_context(payload: dict, project_root: Path) -> None:
     assert payload["project_root"] == str(project_root.resolve())
 
 
+def _assert_git_context(payload: dict[str, object]) -> None:
+    assert payload["project_root"] == "/repo"
+    assert payload["git"] == {
+        "identity": GIT_IDENTITY,
+        "remote_url": REPO_URL,
+    }
+    assert "workspace" not in payload
+
+
 def _stub_workspace_context(monkeypatch: pytest.MonkeyPatch) -> None:
+    def _git_top_level(start: Path) -> Path | None:
+        current = start.resolve()
+        for candidate in (current, *current.parents):
+            if (candidate / ".osmosis").is_dir():
+                return candidate
+        return None
+
     def _context() -> WorkspaceContext:
         return WorkspaceContext(
             project_root=Path.cwd().resolve(),
@@ -47,9 +67,25 @@ def _stub_workspace_context(monkeypatch: pytest.MonkeyPatch) -> None:
             credentials=FAKE_CREDENTIALS,
         )
 
+    def _git_context() -> SimpleNamespace:
+        return SimpleNamespace(
+            project_root=GIT_PROJECT_ROOT,
+            git_identity=GIT_IDENTITY,
+            repo_url=REPO_URL,
+            credentials=FAKE_CREDENTIALS,
+        )
+
     monkeypatch.setattr(
         "osmosis_ai.platform.cli.utils.require_workspace_context",
         _context,
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.cli.utils.require_git_project_context",
+        _git_context,
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.cli.workspace_repo.git_worktree_top_level",
+        _git_top_level,
     )
 
 
@@ -96,9 +132,10 @@ def test_train_list_json_returns_single_list_envelope(
 
     class FakeClient:
         def list_training_runs(
-            self, limit=30, offset=0, *, workspace_id, credentials=None
+            self, limit=30, offset=0, *, git_identity, credentials=None
         ):
-            assert workspace_id == WORKSPACE_ID
+            assert credentials is FAKE_CREDENTIALS
+            assert git_identity == GIT_IDENTITY
             return PaginatedTrainingRuns(
                 training_runs=[
                     TrainingRun(
@@ -123,7 +160,7 @@ def test_train_list_json_returns_single_list_envelope(
     assert payload["schema_version"] == 1
     assert payload["items"][0]["name"] == "reward-run"
     assert payload["total_count"] == 1
-    _assert_workspace_context(payload, Path.cwd())
+    _assert_git_context(payload)
     assert captured.out.count("\n") == 1
 
 
@@ -133,8 +170,9 @@ def test_train_status_json_returns_detail_envelope(
     _stub_workspace_context(monkeypatch)
 
     class FakeClient:
-        def get_training_run(self, name, *, workspace_id, credentials=None):
-            assert workspace_id == WORKSPACE_ID
+        def get_training_run(self, name, *, git_identity, credentials=None):
+            assert credentials is FAKE_CREDENTIALS
+            assert git_identity == GIT_IDENTITY
             return TrainingRunDetail(
                 id="run_1",
                 name=name,
@@ -151,7 +189,7 @@ def test_train_status_json_returns_detail_envelope(
     payload = json.loads(captured.out)
     assert payload["data"]["name"] == "reward-run"
     assert payload["data"]["status"] == "running"
-    _assert_workspace_context(payload["data"], Path.cwd())
+    _assert_git_context(payload["data"])
 
 
 def test_train_submit_json_returns_operation_envelope(
@@ -178,10 +216,6 @@ rollout_batch_size = 64
     monkeypatch.setattr(
         "osmosis_ai.platform.cli.workspace_repo.require_git_top_level",
         lambda *args, **kwargs: None,
-    )
-    monkeypatch.setattr(
-        "osmosis_ai.platform.cli.workspace_repo.validate_workspace_repo",
-        lambda **kwargs: None,
     )
     monkeypatch.setattr(
         "osmosis_ai.platform.cli.workspace_repo.summarize_local_git_state",
@@ -274,9 +308,10 @@ def test_train_stop_json_returns_operation_envelope(
     _stub_workspace_context(monkeypatch)
 
     class FakeClient:
-        def stop_training_run(self, name, *, workspace_id, credentials=None):
+        def stop_training_run(self, name, *, git_identity, credentials=None):
             assert name == "reward-run"
-            assert workspace_id == WORKSPACE_ID
+            assert credentials is FAKE_CREDENTIALS
+            assert git_identity == GIT_IDENTITY
             return {"stopped": True}
 
     monkeypatch.setattr("osmosis_ai.platform.api.client.OsmosisClient", FakeClient)
@@ -288,7 +323,7 @@ def test_train_stop_json_returns_operation_envelope(
     payload = json.loads(captured.out)
     assert payload["operation"] == "train.stop"
     assert payload["resource"]["name"] == "reward-run"
-    _assert_workspace_context(payload["resource"], Path.cwd())
+    _assert_git_context(payload["resource"])
 
 
 def test_model_list_plain_is_tab_separated_rows(
@@ -298,9 +333,10 @@ def test_model_list_plain_is_tab_separated_rows(
 
     class FakeClient:
         def list_base_models(
-            self, limit=30, offset=0, *, workspace_id, credentials=None
+            self, limit=30, offset=0, *, git_identity, credentials=None
         ):
-            assert workspace_id == WORKSPACE_ID
+            assert credentials is FAKE_CREDENTIALS
+            assert git_identity == GIT_IDENTITY
             return PaginatedBaseModels(
                 models=[
                     BaseModelInfo(
@@ -334,9 +370,10 @@ def test_model_list_json_includes_linked_workspace_context(
 
     class FakeClient:
         def list_base_models(
-            self, limit=30, offset=0, *, workspace_id, credentials=None
+            self, limit=30, offset=0, *, git_identity, credentials=None
         ):
-            assert workspace_id == WORKSPACE_ID
+            assert credentials is FAKE_CREDENTIALS
+            assert git_identity == GIT_IDENTITY
             return PaginatedBaseModels(
                 models=[
                     BaseModelInfo(
@@ -360,7 +397,7 @@ def test_model_list_json_includes_linked_workspace_context(
     assert exit_code == 0
     payload = json.loads(captured.out)
     assert payload["items"][0]["model_name"] == "Qwen/Qwen3"
-    _assert_workspace_context(payload, Path.cwd())
+    _assert_git_context(payload)
 
 
 def test_deployment_commands_json_return_results(
@@ -370,9 +407,10 @@ def test_deployment_commands_json_return_results(
 
     class FakeClient:
         def list_deployments(
-            self, limit=30, offset=0, *, workspace_id, credentials=None
+            self, limit=30, offset=0, *, git_identity, credentials=None
         ):
-            assert workspace_id == WORKSPACE_ID
+            assert credentials is FAKE_CREDENTIALS
+            assert git_identity == GIT_IDENTITY
             return PaginatedDeployments(
                 deployments=[
                     DeploymentInfo(
@@ -387,8 +425,9 @@ def test_deployment_commands_json_return_results(
                 has_more=False,
             )
 
-        def get_deployment(self, checkpoint, *, workspace_id, credentials=None):
-            assert workspace_id == WORKSPACE_ID
+        def get_deployment(self, checkpoint, *, git_identity, credentials=None):
+            assert credentials is FAKE_CREDENTIALS
+            assert git_identity == GIT_IDENTITY
             return DeploymentInfo(
                 id="dep_1",
                 checkpoint_name=checkpoint,
@@ -398,14 +437,16 @@ def test_deployment_commands_json_return_results(
                 training_run_name="reward-run",
             )
 
-        def deploy_checkpoint(self, checkpoint, *, workspace_id, credentials=None):
-            assert workspace_id == WORKSPACE_ID
+        def deploy_checkpoint(self, checkpoint, *, git_identity, credentials=None):
+            assert credentials is FAKE_CREDENTIALS
+            assert git_identity == GIT_IDENTITY
             return DeploymentSummary(
                 id="dep_1", checkpoint_name=checkpoint, status="active"
             )
 
-        def undeploy_checkpoint(self, checkpoint, *, workspace_id, credentials=None):
-            assert workspace_id == WORKSPACE_ID
+        def undeploy_checkpoint(self, checkpoint, *, git_identity, credentials=None):
+            assert credentials is FAKE_CREDENTIALS
+            assert git_identity == GIT_IDENTITY
             return DeploymentSummary(
                 id="dep_1", checkpoint_name=checkpoint, status="inactive"
             )
@@ -416,20 +457,20 @@ def test_deployment_commands_json_return_results(
     payload = json.loads(capsys.readouterr().out)
     assert exit_code == 0
     assert payload["items"][0]["checkpoint_name"] == "run-step-1"
-    _assert_workspace_context(payload, Path.cwd())
+    _assert_git_context(payload)
 
     exit_code = cli.main(["--json", "deployment", "info", "run-step-1"])
     payload = json.loads(capsys.readouterr().out)
     assert exit_code == 0
     assert payload["data"]["checkpoint_name"] == "run-step-1"
-    _assert_workspace_context(payload["data"], Path.cwd())
+    _assert_git_context(payload["data"])
 
     exit_code = cli.main(["--json", "deploy", "run-step-1"])
     payload = json.loads(capsys.readouterr().out)
     assert exit_code == 0
     assert payload["operation"] == "deploy"
     assert payload["resource"]["checkpoint_name"] == "run-step-1"
-    _assert_workspace_context(payload["resource"], Path.cwd())
+    _assert_git_context(payload["resource"])
 
     exit_code = cli.main(["--json", "undeploy", "run-step-1"])
     payload = json.loads(capsys.readouterr().out)
@@ -437,7 +478,7 @@ def test_deployment_commands_json_return_results(
     assert payload["operation"] == "undeploy"
     assert payload["resource"]["checkpoint_name"] == "run-step-1"
     assert payload["resource"]["status"] == "inactive"
-    _assert_workspace_context(payload["resource"], Path.cwd())
+    _assert_git_context(payload["resource"])
 
 
 def test_failed_deploy_json_exits_nonzero(
@@ -446,8 +487,9 @@ def test_failed_deploy_json_exits_nonzero(
     _stub_workspace_context(monkeypatch)
 
     class FakeClient:
-        def deploy_checkpoint(self, checkpoint, *, workspace_id, credentials=None):
-            assert workspace_id == WORKSPACE_ID
+        def deploy_checkpoint(self, checkpoint, *, git_identity, credentials=None):
+            assert credentials is FAKE_CREDENTIALS
+            assert git_identity == GIT_IDENTITY
             return DeploymentSummary(
                 id="dep_1",
                 checkpoint_name=checkpoint,
@@ -462,7 +504,7 @@ def test_failed_deploy_json_exits_nonzero(
     assert exit_code == 1
     assert payload["operation"] == "deploy"
     assert payload["status"] == "failed"
-    _assert_workspace_context(payload["resource"], Path.cwd())
+    _assert_git_context(payload["resource"])
 
 
 def test_rollout_list_json_returns_envelope(
@@ -471,8 +513,9 @@ def test_rollout_list_json_returns_envelope(
     _stub_workspace_context(monkeypatch)
 
     class FakeClient:
-        def list_rollouts(self, limit=30, offset=0, *, workspace_id, credentials=None):
-            assert workspace_id == WORKSPACE_ID
+        def list_rollouts(self, limit=30, offset=0, *, git_identity, credentials=None):
+            assert credentials is FAKE_CREDENTIALS
+            assert git_identity == GIT_IDENTITY
             return PaginatedRollouts(
                 rollouts=[
                     RolloutInfo(
@@ -497,4 +540,4 @@ def test_rollout_list_json_returns_envelope(
     payload = json.loads(captured.out)
     assert payload["items"][0]["name"] == "demo"
     assert payload["next_offset"] is None
-    _assert_workspace_context(payload, Path.cwd())
+    _assert_git_context(payload)

@@ -19,9 +19,18 @@ from osmosis_ai.platform.api.models import (
 )
 
 AUTH_CREDENTIALS = object()
-WORKSPACE_ID = "ws-test"
-WORKSPACE_NAME = "team-test"
-PROJECT_ROOT = Path("/tmp/osmosis-project")
+GIT_IDENTITY = "acme/rollouts"
+REPO_URL = "https://github.com/acme/rollouts.git"
+PROJECT_ROOT = Path("/repo")
+
+
+def assert_git_context(data: dict[str, object]) -> None:
+    assert data["project_root"] == "/repo"
+    assert data["git"] == {
+        "identity": GIT_IDENTITY,
+        "remote_url": REPO_URL,
+    }
+    assert "workspace" not in data
 
 
 @pytest.fixture()
@@ -33,16 +42,16 @@ def console_capture(monkeypatch: pytest.MonkeyPatch) -> StringIO:
 
 
 @pytest.fixture()
-def mock_workspace_context(monkeypatch: pytest.MonkeyPatch) -> None:
-    workspace = SimpleNamespace(
+def mock_git_context(monkeypatch: pytest.MonkeyPatch) -> None:
+    context = SimpleNamespace(
         project_root=PROJECT_ROOT,
-        workspace_id=WORKSPACE_ID,
-        workspace_name=WORKSPACE_NAME,
+        git_identity=GIT_IDENTITY,
+        repo_url=REPO_URL,
         credentials=AUTH_CREDENTIALS,
     )
     monkeypatch.setattr(
-        "osmosis_ai.platform.cli.utils.require_workspace_context",
-        lambda: workspace,
+        "osmosis_ai.platform.cli.utils.require_git_project_context",
+        lambda: context,
     )
 
 
@@ -56,20 +65,20 @@ def test_model_list_requires_linked_project(
     rc = main(["--json", "model", "list"])
 
     assert rc == 1
-    assert "Not in an Osmosis project" in capsys.readouterr().err
+    assert "cloned Osmosis repository" in capsys.readouterr().err
 
 
-@pytest.mark.usefixtures("mock_workspace_context")
+@pytest.mark.usefixtures("mock_git_context")
 class TestListModels:
     def test_empty_list(
         self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
     ) -> None:
         class FakeClient:
             def list_base_models(
-                self, limit=30, offset=0, *, workspace_id, credentials=None
+                self, limit=30, offset=0, *, git_identity, credentials=None
             ):
                 assert credentials is AUTH_CREDENTIALS
-                assert workspace_id == WORKSPACE_ID
+                assert git_identity == GIT_IDENTITY
                 return PaginatedBaseModels(models=[], total_count=0, has_more=False)
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
@@ -80,10 +89,7 @@ class TestListModels:
         assert result.items == []
         assert result.total_count == 0
         assert result.has_more is False
-        assert result.extra == {
-            "workspace": {"id": WORKSPACE_ID, "name": WORKSPACE_NAME},
-            "project_root": str(PROJECT_ROOT),
-        }
+        assert_git_context(result.extra)
 
     def test_list_with_base_models(
         self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
@@ -98,10 +104,10 @@ class TestListModels:
 
         class FakeClient:
             def list_base_models(
-                self, limit=30, offset=0, *, workspace_id, credentials=None
+                self, limit=30, offset=0, *, git_identity, credentials=None
             ):
                 assert credentials is AUTH_CREDENTIALS
-                assert workspace_id == WORKSPACE_ID
+                assert git_identity == GIT_IDENTITY
                 return PaginatedBaseModels(models=[base], total_count=1, has_more=False)
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
@@ -124,9 +130,9 @@ class TestListModels:
 
         class FakeClient:
             def list_base_models(
-                self, limit=1, offset=0, *, workspace_id, credentials=None
+                self, limit=1, offset=0, *, git_identity, credentials=None
             ):
-                assert workspace_id == WORKSPACE_ID
+                assert git_identity == GIT_IDENTITY
                 return PaginatedBaseModels(models=[base], total_count=5, has_more=True)
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)

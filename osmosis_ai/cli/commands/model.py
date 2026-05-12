@@ -15,13 +15,6 @@ from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE
 app: typer.Typer = typer.Typer(help="Manage base models (list).", no_args_is_help=True)
 
 
-def _workspace_result_context(workspace: Any) -> dict[str, Any]:
-    return {
-        "workspace": {"id": workspace.workspace_id, "name": workspace.workspace_name},
-        "project_root": str(workspace.project_root),
-    }
-
-
 @app.command("list")
 def list_models(
     limit: int = typer.Option(
@@ -40,15 +33,16 @@ def list_models(
     )
     from osmosis_ai.platform.cli.utils import (
         fetch_all_pages,
-        require_workspace_context,
+        git_result_context,
+        require_git_project_context,
         validate_list_options,
     )
 
     effective_limit, fetch_all = validate_list_options(limit=limit, all_=all_)
 
-    workspace = require_workspace_context()
-    credentials = workspace.credentials
-    workspace_id = workspace.workspace_id
+    context = require_git_project_context()
+    credentials = context.credentials
+    git_identity = context.git_identity
 
     from osmosis_ai.platform.api.client import OsmosisClient
 
@@ -61,7 +55,7 @@ def list_models(
                     limit=lim,
                     offset=off,
                     credentials=credentials,
-                    workspace_id=workspace_id,
+                    git_identity=git_identity,
                 ),
                 items_attr="models",
             )
@@ -72,7 +66,7 @@ def list_models(
                 limit=effective_limit,
                 offset=0,
                 credentials=credentials,
-                workspace_id=workspace_id,
+                git_identity=git_identity,
             )
             models = result.models
             total = result.total_count
@@ -85,7 +79,7 @@ def list_models(
         total_count=total,
         has_more=has_more,
         next_offset=next_offset,
-        extra=_workspace_result_context(workspace),
+        extra=git_result_context(context),
         columns=[
             ListColumn(key="model_name", label="Model"),
             ListColumn(key="base_model", label="Base"),
