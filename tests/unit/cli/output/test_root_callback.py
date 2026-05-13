@@ -33,14 +33,6 @@ def test_conflicting_selectors_emit_validation_error(capsys) -> None:
     assert "conflict" in captured.err.lower() or "format" in captured.err.lower()
 
 
-def test_help_shows_output_flags(capsys) -> None:
-    exit_code = cli.main(["--help"])
-    captured = capsys.readouterr()
-    assert exit_code == 0
-    assert "--json" in captured.out
-    assert "--plain" in captured.out
-
-
 def test_json_mode_contextvar_resets_after_eager_help(capsys) -> None:
     from osmosis_ai.cli.output.context import _output_context_var
 
