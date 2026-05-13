@@ -503,3 +503,44 @@ def test_rollout_list_json_returns_envelope(
     assert payload["items"][0]["name"] == "demo"
     assert payload["next_offset"] is None
     _assert_workspace_context(payload, Path.cwd())
+
+
+def test_rollout_list_columns_prioritize_name_over_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _stub_workspace_context(monkeypatch)
+
+    class FakeClient:
+        def list_rollouts(self, limit=30, offset=0, *, workspace_id, credentials=None):
+            assert workspace_id == WORKSPACE_ID
+            return PaginatedRollouts(
+                rollouts=[
+                    RolloutInfo(
+                        id="rollout_1",
+                        name="demo",
+                        is_active=True,
+                        repo_full_name="osmosis/demo",
+                        last_synced_commit_sha="abc123",
+                        created_at="2026-04-26T00:00:00Z",
+                    )
+                ],
+                total_count=1,
+                has_more=False,
+            )
+
+    monkeypatch.setattr("osmosis_ai.platform.api.client.OsmosisClient", FakeClient)
+
+    from osmosis_ai.cli.commands.rollout import list_rollouts
+
+    result = list_rollouts(limit=30, all_=False)
+
+    assert [column.key for column in result.columns] == [
+        "name",
+        "is_active",
+        "repo_full_name",
+        "last_synced_commit_sha",
+        "created_at",
+    ]
+    name_column = result.columns[0]
+    assert name_column.ratio == 4
+    assert name_column.overflow == "fold"

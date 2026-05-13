@@ -84,11 +84,10 @@ def list_rollouts(
         next_offset=next_offset,
         extra=_workspace_result_context(workspace),
         columns=[
-            ListColumn(key="name", label="Name"),
+            ListColumn(key="name", label="Name", ratio=4, overflow="fold"),
             ListColumn(key="is_active", label="Active"),
             ListColumn(key="repo_full_name", label="Repository"),
             ListColumn(key="last_synced_commit_sha", label="Commit"),
             ListColumn(key="created_at", label="Created"),
-            ListColumn(key="id", label="ID", no_wrap=True),
         ],
     )

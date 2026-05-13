@@ -101,9 +101,7 @@ def _callback(
 ) -> None:
     """Osmosis AI CLI.
 
-    Rich output is the default for humans. For AI agents, CI/CD, and scripts,
-    prefer global output flags before the command, for example:
-    `osmosis --json dataset list` or `osmosis --format plain dataset list`.
+    Rich output is the default for humans. For AI agents, CI/CD, and scripts, prefer global output flags before the command, for example: `osmosis --json dataset list` or `osmosis --format plain dataset list`.
     """
     warnings.filterwarnings("ignore")
     if version:
