@@ -1,4 +1,4 @@
-"""Root callback tests for --format/--json/--plain parsing."""
+"""Root callback tests for --json/--plain parsing."""
 
 from __future__ import annotations
 
@@ -31,6 +31,14 @@ def test_conflicting_selectors_emit_validation_error(capsys) -> None:
     assert exit_code != 0
     assert captured.out == ""
     assert "conflict" in captured.err.lower() or "format" in captured.err.lower()
+
+
+def test_help_shows_output_flags(capsys) -> None:
+    exit_code = cli.main(["--help"])
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert "--json" in captured.out
+    assert "--plain" in captured.out
 
 
 def test_json_mode_contextvar_resets_after_eager_help(capsys) -> None:

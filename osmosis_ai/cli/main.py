@@ -79,29 +79,20 @@ def _callback(
         help="Show version and exit.",
         is_eager=True,
     ),
-    output_format: OutputFormat | None = typer.Option(
-        None,
-        "--format",
-        help=(
-            "Global output format: rich, json, or plain. Use json/plain for "
-            "AI agents, CI/CD, and scripts."
-        ),
-        case_sensitive=False,
-    ),
     json_alias: bool = typer.Option(
         False,
         "--json",
-        help="Shortcut for --format json; recommended for AI agents and CI/CD.",
+        help="Emit structured JSON; recommended for AI agents and CI/CD.",
     ),
     plain_alias: bool = typer.Option(
         False,
         "--plain",
-        help="Shortcut for --format plain; low-noise text for shell pipelines.",
+        help="Emit low-noise text for shell pipelines.",
     ),
 ) -> None:
     """Osmosis AI CLI.
 
-    Rich output is the default for humans. For AI agents, CI/CD, and scripts, prefer global output flags before the command, for example: `osmosis --json dataset list` or `osmosis --format plain dataset list`.
+    Rich output is the default for humans. For AI agents, CI/CD, and scripts, put a global output flag before the command, for example: `osmosis --json dataset list` or `osmosis --plain dataset list`.
     """
     warnings.filterwarnings("ignore")
     if version:
@@ -109,7 +100,6 @@ def _callback(
         raise typer.Exit()
 
     selected_format = resolve_format_selectors(
-        output_format,
         json_alias=json_alias,
         plain_alias=plain_alias,
     )
