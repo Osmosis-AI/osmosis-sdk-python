@@ -181,23 +181,14 @@ def _training_config(
     entrypoint: str = "workers/main.py",
 ) -> TrainingConfig:
     return TrainingConfig(
-        experiment_rollout=rollout,
-        experiment_entrypoint=entrypoint,
-        experiment_model_path="m",
-        experiment_dataset="d",
-        experiment_commit_sha=None,
-        training_lr=None,
-        training_total_epochs=None,
-        training_n_samples_per_prompt=None,
-        training_rollout_batch_size=None,
-        training_max_prompt_length=None,
-        training_max_response_length=None,
-        sampling_rollout_temperature=None,
-        sampling_rollout_top_p=None,
-        checkpoints_eval_interval=None,
-        checkpoints_checkpoint_save_freq=None,
-        rollout_env={},
-        rollout_secret_refs={},
+        experiment={
+            "rollout": rollout,
+            "entrypoint": entrypoint,
+            "model_path": "m",
+            "dataset": "d",
+        },
+        params={},
+        rollout={},
     )
 
 
@@ -442,4 +433,30 @@ total_epochs = "not-a-number"
 
     with pytest.raises(CLIError) as exc_info:
         load_training_config(path)
-    assert "Invalid config" in str(exc_info.value)
+    message = str(exc_info.value)
+    assert f"total_epochs in [training] of {path}" in message
+    assert "must be an integer" in message
+    assert "got 'not-a-number'" in message
+    assert "pydantic" not in message.lower()
+
+
+def test_unknown_training_field_has_friendly_error(tmp_path: Path) -> None:
+    path = tmp_path / "unknown_field.toml"
+    path.write_text(
+        """
+[experiment]
+rollout = "r"
+entrypoint = "e.py"
+model_path = "m"
+dataset = "d"
+
+[training]
+unexpected = 1
+""".strip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(CLIError) as exc_info:
+        load_training_config(path)
+    message = str(exc_info.value)
+    assert message == f"Unknown key 'unexpected' in [training] of {path}"
