@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import pytest
@@ -22,12 +22,10 @@ def test_local_timezone_label_returns_non_empty_text() -> None:
     assert local_timezone_label()
 
 
-def test_format_local_date_uses_injected_now_timezone() -> None:
-    now = datetime(2026, 5, 13, 12, 0, tzinfo=UTC).astimezone()
-    formatted = format_local_date("2026-05-13T12:34:56Z", now=now)
+def test_format_local_date_uses_explicit_timezone() -> None:
+    formatted = format_local_date("2026-05-13T12:34:56Z", tz=ZoneInfo("UTC"))
 
-    assert formatted.startswith("2026-05-13 ")
-    assert len(formatted) == 16
+    assert formatted == "2026-05-13 12:34"
 
 
 def test_format_local_datetime_falls_back_for_invalid_input() -> None:

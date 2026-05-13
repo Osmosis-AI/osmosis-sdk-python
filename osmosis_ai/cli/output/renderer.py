@@ -207,10 +207,11 @@ def _render_rich(result: CommandResult, output: OutputContext) -> None:
 
         table = Table(show_header=True, header_style="bold")
         for column in result.columns:
+            overflow = column.overflow if column.overflow is not None else "ellipsis"
             table.add_column(
                 column.label,
                 no_wrap=column.no_wrap,
-                overflow=column.overflow,
+                overflow=overflow,
                 ratio=column.ratio,
                 min_width=column.min_width,
                 max_width=column.max_width,
