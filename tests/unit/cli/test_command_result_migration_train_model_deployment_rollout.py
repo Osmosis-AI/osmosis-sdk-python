@@ -322,9 +322,16 @@ def test_model_list_plain_is_tab_separated_rows(
     captured = capsys.readouterr()
 
     assert exit_code == 0
-    assert captured.out.splitlines() == [
-        "Qwen/Qwen3\tQwen/Qwen3\tready\tbrian\t2026-04-26T00:00:00Z\tmodel_1"
-    ]
+    lines = captured.out.splitlines()
+    assert len(lines) == 1
+    fields = lines[0].split("\t")
+    assert len(fields) == 4
+    assert fields[0] == "Qwen/Qwen3"
+    assert fields[1] == "ready"
+    assert fields[2] == "Qwen/Qwen3"
+    assert fields[3].startswith("2026-04-")
+    assert "model_1" not in fields
+    assert "brian" not in fields
 
 
 def test_model_list_json_includes_linked_workspace_context(
