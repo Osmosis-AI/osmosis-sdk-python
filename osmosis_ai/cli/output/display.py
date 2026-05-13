@@ -41,7 +41,7 @@ def local_timezone_label(
 def created_column_label(
     *, now: datetime | None = None, tz: tzinfo | None = None
 ) -> str:
-    return f"Created ({local_timezone_label(now=now, tz=tz)})"
+    return "Created (local)"
 
 
 def format_local_date(
@@ -50,7 +50,7 @@ def format_local_date(
     parsed = _parse_iso_datetime(value)
     if parsed is None:
         return "" if value is None else str(value)[:10]
-    return _localize(parsed, tz=tz).strftime("%Y-%m-%d %H:%M")
+    return _localize(parsed, tz=tz).strftime("%Y-%m-%d %H:%M %Z")
 
 
 def format_local_datetime(

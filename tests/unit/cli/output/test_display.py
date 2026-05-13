@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import pytest
 
 from osmosis_ai.cli.output.display import (
+    created_column_label,
     format_local_date,
     format_local_datetime,
     format_reward,
@@ -25,7 +26,25 @@ def test_local_timezone_label_returns_non_empty_text() -> None:
 def test_format_local_date_uses_explicit_timezone() -> None:
     formatted = format_local_date("2026-05-13T12:34:56Z", tz=ZoneInfo("UTC"))
 
-    assert formatted == "2026-05-13 12:34"
+    assert formatted == "2026-05-13 12:34 UTC"
+
+
+def test_created_column_label_uses_stable_local_label() -> None:
+    assert created_column_label() == "Created (local)"
+
+
+def test_format_local_date_includes_per_timestamp_timezone_rules() -> None:
+    try:
+        pacific = ZoneInfo("America/Los_Angeles")
+    except ZoneInfoNotFoundError:
+        pytest.skip("America/Los_Angeles timezone data is unavailable")
+
+    assert (
+        format_local_date("2026-01-01T12:00:00Z", tz=pacific) == "2026-01-01 04:00 PST"
+    )
+    assert (
+        format_local_date("2026-07-01T12:00:00Z", tz=pacific) == "2026-07-01 05:00 PDT"
+    )
 
 
 def test_format_local_datetime_falls_back_for_invalid_input() -> None:
