@@ -1,0 +1,20 @@
+tests/unit/cli/test_command_result_migration_train_model_deployment_rollout.py
+  s_98b68a7bd6e3b2::t_014ab33ef01e3a 325-327,329-332
+  s_98b68a7bd6e3b2::t_567ed69d6524e9 328,333-334
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "3210a77183fcb5143e1d4103063f8f9f553e6002",
+  "prompts": {},
+  "sessions": {
+    "s_98b68a7bd6e3b2": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019e22df-18da-77f1-978e-7582d73491ff",
+        "model": "gpt-5.5"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}
