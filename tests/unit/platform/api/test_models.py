@@ -217,6 +217,31 @@ class TestSubmitTrainingRunResult:
         assert result.created_at == "2026-04-10T12:00:00Z"
 
 
+class TestTrainingRun:
+    def test_from_dict_parses_reward(self) -> None:
+        run = api_models.TrainingRun.from_dict(
+            {
+                "id": "run_1",
+                "name": "reward-run",
+                "status": "finished",
+                "reward": 0.875,
+            }
+        )
+
+        assert run.reward == 0.875
+
+    def test_from_dict_defaults_missing_reward_to_none(self) -> None:
+        run = api_models.TrainingRun.from_dict(
+            {
+                "id": "run_1",
+                "name": "legacy-run",
+                "status": "finished",
+            }
+        )
+
+        assert run.reward is None
+
+
 class TestMetricDataPoint:
     def test_from_dict(self) -> None:
         data = {"step": 10, "value": 0.85, "timestamp": 1711800060000}

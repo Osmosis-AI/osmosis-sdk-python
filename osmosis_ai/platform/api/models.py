@@ -170,6 +170,7 @@ class TrainingRun:
     started_at: str | None = None
     completed_at: str | None = None
     eval_accuracy: float | None = None
+    reward: float | None = None
     reward_increase_delta: float | None = None
     processing_step: str | None = None
     processing_percent: float | None = None
@@ -190,6 +191,7 @@ class TrainingRun:
             started_at=data.get("started_at"),
             completed_at=data.get("completed_at"),
             eval_accuracy=data.get("eval_accuracy"),
+            reward=data.get("reward"),
             reward_increase_delta=data.get("reward_increase_delta"),
             processing_step=data.get("processing_step"),
             processing_percent=data.get("processing_percent"),
@@ -227,6 +229,7 @@ class TrainingRunDetail(TrainingRun):
             started_at=run.get("started_at"),
             completed_at=run.get("completed_at"),
             eval_accuracy=run.get("eval_accuracy"),
+            reward=run.get("reward"),
             reward_increase_delta=run.get("reward_increase_delta"),
             processing_step=run.get("processing_step"),
             processing_percent=run.get("processing_percent"),

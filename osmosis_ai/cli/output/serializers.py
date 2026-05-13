@@ -38,6 +38,7 @@ def serialize_training_run(run: TrainingRun) -> dict[str, Any]:
         "model_id": run.model_id,
         "model_name": run.model_name,
         "eval_accuracy": run.eval_accuracy,
+        "reward": run.reward,
         "reward_increase_delta": run.reward_increase_delta,
         "processing_step": run.processing_step,
         "processing_percent": run.processing_percent,

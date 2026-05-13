@@ -75,6 +75,7 @@ def test_serialize_training_run_keys() -> None:
             "model_id": "model_1",
             "model": {"model_name": "Qwen/Qwen3-30B-A3B-Instruct-2507-FP8"},
             "eval_accuracy": 0.4,
+            "reward": 0.875,
             "reward_increase_delta": 0.02,
             "processing_step": "training",
             "processing_percent": 50.0,
@@ -89,6 +90,7 @@ def test_serialize_training_run_keys() -> None:
     payload = serialize_training_run(run)
     _assert_keys_match_golden(payload, "training_run_serializer.json")
     assert payload["model_name"] == "Qwen/Qwen3-30B-A3B-Instruct-2507-FP8"
+    assert payload["reward"] == 0.875
 
 
 def test_serialize_checkpoint_keys() -> None:
