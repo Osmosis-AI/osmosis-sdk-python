@@ -61,6 +61,28 @@ def test_plain_detail_prints_section_plain_lines_and_hints() -> None:
     ]
 
 
+def test_plain_detail_section_lines_preserve_literal_bracket_text() -> None:
+    result = DetailResult(
+        title="Training Run",
+        data={"id": "run_1"},
+        sections=[
+            DetailSection(plain_lines=["Checkpoint: [red]danger[/red]"]),
+        ],
+    )
+    stdout, _ = _render(result)
+    assert stdout == "Checkpoint: [red]danger[/red]\n"
+
+
+def test_plain_detail_display_hints_preserve_literal_bracket_text() -> None:
+    result = DetailResult(
+        title="Training Run Metrics",
+        data={"id": "run_1"},
+        display_hints=["Saved metrics to /tmp/[red]metrics[/red].json"],
+    )
+    stdout, _ = _render(result)
+    assert stdout == "Saved metrics to /tmp/[red]metrics[/red].json\n"
+
+
 def test_list_renders_tab_separated_without_heading() -> None:
     result = ListResult(
         title="Datasets",

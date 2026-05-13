@@ -147,9 +147,9 @@ def _render_plain(result: CommandResult, output: OutputContext) -> None:
             sys.stdout.write(f"{field.label}: {value}\n")
         for section in result.sections:
             for line in section.plain_lines:
-                sys.stdout.write(_normalise_plain_value(line, rich_display=True) + "\n")
+                sys.stdout.write(_normalise_plain_value(line) + "\n")
         for hint in result.display_hints:
-            sys.stdout.write(_normalise_plain_value(hint, rich_display=True) + "\n")
+            sys.stdout.write(_normalise_plain_value(hint) + "\n")
         return
 
     if isinstance(result, ListResult):
