@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Literal
 
 
 @dataclass(frozen=True)
@@ -23,6 +23,18 @@ class ListColumn:
     plain: bool = True
     no_wrap: bool = False
     align: str | None = None
+    overflow: Literal["fold", "crop", "ellipsis"] | None = None
+    ratio: int | None = None
+    min_width: int | None = None
+    max_width: int | None = None
+
+
+@dataclass(frozen=True)
+class DetailSection:
+    """Post-table detail content with Rich and plain representations."""
+
+    rich: Any | None = None
+    plain_lines: list[str] = field(default_factory=list)
 
 
 class CommandResult:
@@ -36,6 +48,8 @@ class DetailResult(CommandResult):
     title: str
     data: dict[str, Any]
     fields: list[DetailField] = field(default_factory=list)
+    sections: list[DetailSection] = field(default_factory=list)
+    display_hints: list[str] = field(default_factory=list)
     exit_code: int = 0
 
 
@@ -51,6 +65,7 @@ class ListResult(CommandResult):
     columns: list[ListColumn] = field(default_factory=list)
     extra: dict[str, Any] = field(default_factory=dict)
     display_items: list[dict[str, Any]] | None = None
+    display_hints: list[str] = field(default_factory=list)
     exit_code: int = 0
 
 
