@@ -310,6 +310,7 @@ def status(
     from osmosis_ai.platform.auth.platform_client import PlatformAPIError
     from osmosis_ai.platform.cli.utils import (
         build_run_detail_rows,
+        platform_entity_url,
         require_workspace_context,
     )
 
@@ -326,6 +327,7 @@ def status(
         )
 
     rows = build_run_detail_rows(run)
+    url = platform_entity_url(workspace.workspace_name, "training", run.id)
     if run.examples_processed_count is not None:
         rows.append(("Examples", str(run.examples_processed_count)))
     if run.notes:
@@ -356,6 +358,7 @@ def status(
             checkpoints = ckpts.checkpoints
 
     fields = _detail_fields(rows)
+    display_hints.append(f"View: {url}")
     if checkpoints:
         from rich.table import Table
         from rich.text import Text
@@ -390,6 +393,7 @@ def status(
             "examples_processed_count": run.examples_processed_count,
             "notes": run.notes,
             "hf_status": run.hf_status,
+            "platform_url": url,
             "checkpoints": [serialize_checkpoint(cp) for cp in checkpoints],
             **_workspace_result_context(workspace),
         }
@@ -718,9 +722,8 @@ def metrics(
             rows.append(("Steps", f"{total_steps:,}"))
 
     fields = _detail_fields(rows)
-    fields.insert(0, DetailField(label="View", value=url))
     sections: list[DetailSection] = []
-    display_hints: list[str] = []
+    display_hints: list[str] = [f"View: {url}"]
 
     # ── Metric trends ─────────────────────────────────────────────
     if metrics_data is not None and metrics_data.metrics:

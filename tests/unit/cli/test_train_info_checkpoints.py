@@ -119,7 +119,11 @@ class TestStatusCheckpoints:
         assert all(field.label != "Checkpoint" for field in result.fields)
         assert all(field.label != "Deploy" for field in result.fields)
         assert result.sections
+        expected_url = utils_module.platform_entity_url(
+            WORKSPACE_NAME, "training", "run_1"
+        )
         assert result.display_hints == [
+            f"View: {expected_url}",
             "Deploy with: osmosis deploy <checkpoint-name>",
         ]
         checkpoint_line = result.sections[0].plain_lines[0]
@@ -240,4 +244,7 @@ class TestStatusCheckpoints:
             field.label not in {"Checkpoint", "Deploy"} for field in result.fields
         )
         assert result.sections == []
-        assert result.display_hints == []
+        expected_url = utils_module.platform_entity_url(
+            WORKSPACE_NAME, "training", "run_1"
+        )
+        assert result.display_hints == [f"View: {expected_url}"]

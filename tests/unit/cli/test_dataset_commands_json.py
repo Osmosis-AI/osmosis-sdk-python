@@ -199,6 +199,25 @@ def test_dataset_info_json_envelope(monkeypatch, capsys) -> None:
     assert payload["data"]["project_root"] == str(PROJECT_ROOT)
 
 
+def test_dataset_info_places_platform_url_after_table(monkeypatch) -> None:
+    _stub_workspace_context(monkeypatch)
+
+    class FakeClient:
+        def get_dataset(self, name, *, workspace_id, credentials=None):
+            assert name == "ds_1"
+            assert workspace_id == WORKSPACE_ID
+            return _dataset(file_size=12345)
+
+    monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+
+    result = dataset_module.info("ds_1")
+    expected_url = f"https://platform.osmosis.ai/{WORKSPACE_NAME}/datasets/ds_1"
+
+    assert result.data["platform_url"] == expected_url
+    assert all(field.value != expected_url for field in result.fields)
+    assert result.display_hints == [f"View: {expected_url}"]
+
+
 def test_dataset_preview_json_includes_rows(monkeypatch, capsys) -> None:
     _stub_workspace_context(monkeypatch)
     rows = [{"system_prompt": "s", "user_prompt": "u", "ground_truth": "g"}]

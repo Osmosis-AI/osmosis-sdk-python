@@ -122,7 +122,7 @@ def _render_section_text(result: DetailResult) -> str:
 
 
 class TestMetricsCommandPlatformUrl:
-    """Platform URL is printed at the top of output."""
+    """Platform URL is printed after the summary table."""
 
     @patch(_PATCH_CLIENT)
     @patch(_PATCH_AUTH)
@@ -145,9 +145,10 @@ class TestMetricsCommandPlatformUrl:
             )
 
         assert isinstance(result, DetailResult)
-        view = _field_value(result, "View")
-        assert "ws/training/" in view
-        assert "550e8400-e29b-41d4-a716-446655440000" in view
+        assert all(field.label != "View" for field in result.fields)
+        assert result.display_hints
+        assert "ws/training/" in result.display_hints[0]
+        assert "550e8400-e29b-41d4-a716-446655440000" in result.display_hints[0]
 
 
 class TestMetricsCommandTrendGraphs:

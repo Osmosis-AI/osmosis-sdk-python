@@ -472,12 +472,15 @@ def info(
     )
 
     rows = build_dataset_detail_rows(ds)
+    url = platform_entity_url(workspace.workspace_name, "datasets", ds.id)
     data = serialize_dataset(ds)
+    data["platform_url"] = url
     data.update(_workspace_result_context(workspace))
     return DetailResult(
         title="Dataset",
         data=data,
         fields=_detail_fields(rows),
+        display_hints=[f"View: {url}"],
     )
 
 

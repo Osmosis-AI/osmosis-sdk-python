@@ -313,6 +313,12 @@ class TestStatus:
         assert result.data["status"] == "completed"
         assert result.data["workspace"] == {"id": WORKSPACE_ID, "name": WORKSPACE_NAME}
         assert result.data["project_root"] == str(Path.cwd().resolve())
+        expected_url = utils_module.platform_entity_url(
+            WORKSPACE_NAME, "training", detail.id
+        )
+        assert result.data["platform_url"] == expected_url
+        assert all(field.value != expected_url for field in result.fields)
+        assert result.display_hints == [f"View: {expected_url}"]
 
     def test_status_renders_checkpoints_as_sections(
         self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
@@ -349,7 +355,13 @@ class TestStatus:
         assert all(field.label != "Checkpoint" for field in result.fields)
         assert all(field.label != "Deploy" for field in result.fields)
         assert result.sections
-        assert result.display_hints == ["Deploy with: osmosis deploy <checkpoint-name>"]
+        expected_url = utils_module.platform_entity_url(
+            WORKSPACE_NAME, "training", detail.id
+        )
+        assert result.display_hints == [
+            f"View: {expected_url}",
+            "Deploy with: osmosis deploy <checkpoint-name>",
+        ]
         assert result.data["checkpoints"][0]["checkpoint_name"] == "run-1-step-100"
 
     def test_status_checkpoint_section_escapes_names_and_uses_detailed_timestamps(
