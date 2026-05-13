@@ -1,0 +1,30 @@
+tests/unit/cli/test_command_result_migration_train_model_deployment_rollout.py
+  s_486c47884a47ff::t_d373ecbc3a6ae9 535,563-564
+  s_486c47884a47ff::t_b2f78398b07f99 511,524-525,547,549-561
+tests/unit/cli/output/test_renderer_rich.py
+  s_486c47884a47ff::t_a75df6b6f718e7 75-103
+tests/unit/cli/test_train_info_checkpoints.py
+  s_486c47884a47ff::t_0a055700d946cd 122
+osmosis_ai/cli/commands/train.py
+  s_486c47884a47ff::t_8aac936e72b76b 366
+osmosis_ai/cli/commands/rollout.py
+  s_486c47884a47ff::t_56c4e854f68a73 38,80-81,84,90-135
+osmosis_ai/cli/output/renderer.py
+  s_486c47884a47ff::t_4c7e95a7e48481 208
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "967b7659b37ee0d0bac3268dd50cf3bf1d57447e",
+  "prompts": {},
+  "sessions": {
+    "s_486c47884a47ff": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "7835f124-f508-4346-b8ae-4379e1140f96",
+        "model": "gpt-5.5-extra-high"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}
