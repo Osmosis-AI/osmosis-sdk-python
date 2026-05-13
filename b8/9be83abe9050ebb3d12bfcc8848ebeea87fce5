@@ -1,0 +1,21 @@
+tests/unit/cli/output/test_renderer_plain.py
+  s_88b95f2cf3e12a::t_2b131b379a9a96 64-85
+osmosis_ai/cli/output/renderer.py
+  s_88b95f2cf3e12a::t_03df9f884dface 150,152
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "b89be83abe9050ebb3d12bfcc8848ebeea87fce5",
+  "prompts": {},
+  "sessions": {
+    "s_88b95f2cf3e12a": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019e22f2-c7e1-7d21-8fac-7f3124d09d02",
+        "model": "gpt-5.5"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}
