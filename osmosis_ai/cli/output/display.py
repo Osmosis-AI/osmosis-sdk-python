@@ -13,20 +13,17 @@ def _parse_iso_datetime(value: str | None) -> datetime | None:
     if normalized.endswith("Z"):
         normalized = f"{normalized[:-1]}+00:00"
     try:
-        return datetime.fromisoformat(normalized)
+        parsed = datetime.fromisoformat(normalized)
     except ValueError:
         return None
+    if parsed.tzinfo is None:
+        return None
+    return parsed
 
 
-def _localize(
-    dt: datetime, *, now: datetime | None = None, tz: tzinfo | None = None
-) -> datetime:
-    if dt.tzinfo is None:
-        return dt
+def _localize(dt: datetime, *, tz: tzinfo | None = None) -> datetime:
     if tz is not None:
         return dt.astimezone(tz)
-    if now is not None and now.tzinfo is not None:
-        return dt.astimezone(now.tzinfo)
     return dt.astimezone()
 
 
@@ -53,7 +50,7 @@ def format_local_date(
     parsed = _parse_iso_datetime(value)
     if parsed is None:
         return "" if value is None else str(value)[:10]
-    return _localize(parsed, now=now, tz=tz).strftime("%Y-%m-%d %H:%M")
+    return _localize(parsed, tz=tz).strftime("%Y-%m-%d %H:%M")
 
 
 def format_local_datetime(
@@ -62,7 +59,7 @@ def format_local_datetime(
     parsed = _parse_iso_datetime(value)
     if parsed is None:
         return "" if value is None else str(value)
-    return _localize(parsed, now=now, tz=tz).strftime("%Y-%m-%d %H:%M:%S %Z")
+    return _localize(parsed, tz=tz).strftime("%Y-%m-%d %H:%M:%S %Z")
 
 
 def format_reward(value: Any) -> str:
