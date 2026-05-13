@@ -1,0 +1,25 @@
+tests/unit/cli/test_train_commands.py
+  s_88b95f2cf3e12a::t_8b6f9c61bc3521 317-379,419-420
+osmosis_ai/platform/cli/utils.py
+  s_88b95f2cf3e12a::t_33ff8636c67ac5 11,189
+osmosis_ai/cli/commands/train.py
+  s_88b95f2cf3e12a::t_8725ea6c2c8b11 302,307,336,338,341-342,360-377,379-384,397-403,647,721-722,740,779,782,798-799
+tests/unit/cli/test_train_metrics_cmd.py
+  s_88b95f2cf3e12a::t_6f42bbfd2ae99e 119-123,180-182,222-223,395-396,536-539,569-572
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "72a60cef2b6aa2d1390fbd0e4a74ac5f26bb5f11",
+  "prompts": {},
+  "sessions": {
+    "s_88b95f2cf3e12a": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019e22f2-c7e1-7d21-8fac-7f3124d09d02",
+        "model": "gpt-5.5"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}
