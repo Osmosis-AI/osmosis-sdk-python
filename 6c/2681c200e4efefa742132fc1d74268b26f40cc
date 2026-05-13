@@ -1,0 +1,28 @@
+tests/unit/cli/output/test_root_callback.py
+  s_486c47884a47ff::t_fcf641a47701f9 36
+  s_486c47884a47ff::t_86d121a878f203 1,37-41
+osmosis_ai/cli/main.py
+  s_486c47884a47ff::t_ab4e872ab42d83 85,90,95
+tests/unit/cli/output/test_context.py
+  s_486c47884a47ff::t_34954f915f52e8 79,107,114,121,128
+osmosis_ai/cli/output/context.py
+  s_486c47884a47ff::t_2de7bd750255b4 133,146
+README.md
+  s_486c47884a47ff::t_9529ff6cea5f6a 46,51
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "6c2681c200e4efefa742132fc1d74268b26f40cc",
+  "prompts": {},
+  "sessions": {
+    "s_486c47884a47ff": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "7835f124-f508-4346-b8ae-4379e1140f96",
+        "model": "gpt-5.5-extra-high"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}
