@@ -72,6 +72,20 @@ def test_rich_list_prints_display_hints() -> None:
     assert "Use osmosis train status <name> for details." in stdout
 
 
+def test_rich_list_prints_display_hints_with_literal_brackets() -> None:
+    result = ListResult(
+        title="Training Runs",
+        items=[{"name": "run-a"}],
+        total_count=1,
+        has_more=False,
+        next_offset=None,
+        columns=[ListColumn(key="name", label="Name")],
+        display_hints=["Use [name] literally"],
+    )
+    stdout, _ = _render(result)
+    assert "[name]" in stdout
+
+
 def test_rich_detail_prints_sections_after_table() -> None:
     from rich.table import Table
 

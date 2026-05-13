@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Literal, get_args, get_origin, get_type_hints
+
 from osmosis_ai.cli.output.result import (
     DetailField,
     DetailResult,
@@ -26,6 +28,10 @@ def test_detail_result_basic() -> None:
     assert len(result.fields) == 2
 
 
+def test_detail_result_preserves_positional_exit_code() -> None:
+    assert DetailResult("T", {"id": "x"}, [], 7).exit_code == 7
+
+
 def test_list_result_carries_pagination() -> None:
     result = ListResult(
         title="Datasets",
@@ -42,6 +48,22 @@ def test_list_result_carries_pagination() -> None:
     assert result.has_more is True
     assert result.next_offset == 2
     assert [column.key for column in result.columns] == ["id", "status"]
+
+
+def test_list_result_preserves_positional_exit_code() -> None:
+    result = ListResult("T", [], 0, False, None, [], {}, None, 7)
+
+    assert result.exit_code == 7
+
+
+def test_list_column_overflow_supports_rich_ignore() -> None:
+    overflow_type = get_type_hints(ListColumn)["overflow"]
+    literal_values: list[str] = []
+    for arg in get_args(overflow_type):
+        if get_origin(arg) is Literal:
+            literal_values.extend(get_args(arg))
+
+    assert "ignore" in literal_values
 
 
 def test_list_result_next_offset_required_even_when_unsupported() -> None:

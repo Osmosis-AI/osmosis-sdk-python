@@ -234,7 +234,7 @@ def _render_rich(result: CommandResult, output: OutputContext) -> None:
                 style="dim",
             )
         for hint in result.display_hints:
-            console.print(hint, style="dim")
+            console.rich.print(_rich_text(hint, style="dim"))
         return
 
     if isinstance(result, OperationResult):

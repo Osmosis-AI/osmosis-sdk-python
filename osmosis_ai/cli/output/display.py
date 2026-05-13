@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, tzinfo
 from typing import Any
 
 
@@ -18,36 +18,51 @@ def _parse_iso_datetime(value: str | None) -> datetime | None:
         return None
 
 
-def _localize(dt: datetime, *, now: datetime | None = None) -> datetime:
-    local_tz = (now or datetime.now().astimezone()).tzinfo
+def _localize(
+    dt: datetime, *, now: datetime | None = None, tz: tzinfo | None = None
+) -> datetime:
     if dt.tzinfo is None:
         return dt
-    if local_tz is None:
-        return dt.astimezone()
-    return dt.astimezone(local_tz)
+    if tz is not None:
+        return dt.astimezone(tz)
+    if now is not None and now.tzinfo is not None:
+        return dt.astimezone(now.tzinfo)
+    return dt.astimezone()
 
 
-def local_timezone_label(*, now: datetime | None = None) -> str:
-    local_now = now or datetime.now().astimezone()
+def local_timezone_label(
+    *, now: datetime | None = None, tz: tzinfo | None = None
+) -> str:
+    if tz is not None:
+        base_now = now or datetime.now(tz)
+        local_now = base_now.astimezone(tz) if base_now.tzinfo else base_now
+    else:
+        local_now = now or datetime.now().astimezone()
     return local_now.tzname() or "Local"
 
 
-def created_column_label(*, now: datetime | None = None) -> str:
-    return f"Created ({local_timezone_label(now=now)})"
+def created_column_label(
+    *, now: datetime | None = None, tz: tzinfo | None = None
+) -> str:
+    return f"Created ({local_timezone_label(now=now, tz=tz)})"
 
 
-def format_local_date(value: str | None, *, now: datetime | None = None) -> str:
+def format_local_date(
+    value: str | None, *, now: datetime | None = None, tz: tzinfo | None = None
+) -> str:
     parsed = _parse_iso_datetime(value)
     if parsed is None:
         return "" if value is None else str(value)[:10]
-    return _localize(parsed, now=now).strftime("%Y-%m-%d %H:%M")
+    return _localize(parsed, now=now, tz=tz).strftime("%Y-%m-%d %H:%M")
 
 
-def format_local_datetime(value: str | None, *, now: datetime | None = None) -> str:
+def format_local_datetime(
+    value: str | None, *, now: datetime | None = None, tz: tzinfo | None = None
+) -> str:
     parsed = _parse_iso_datetime(value)
     if parsed is None:
         return "" if value is None else str(value)
-    return _localize(parsed, now=now).strftime("%Y-%m-%d %H:%M:%S %Z")
+    return _localize(parsed, now=now, tz=tz).strftime("%Y-%m-%d %H:%M:%S %Z")
 
 
 def format_reward(value: Any) -> str:

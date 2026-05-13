@@ -23,7 +23,7 @@ class ListColumn:
     plain: bool = True
     no_wrap: bool = False
     align: str | None = None
-    overflow: Literal["fold", "crop", "ellipsis"] | None = None
+    overflow: Literal["fold", "crop", "ellipsis", "ignore"] | None = None
     ratio: int | None = None
     min_width: int | None = None
     max_width: int | None = None
@@ -48,9 +48,9 @@ class DetailResult(CommandResult):
     title: str
     data: dict[str, Any]
     fields: list[DetailField] = field(default_factory=list)
+    exit_code: int = 0
     sections: list[DetailSection] = field(default_factory=list)
     display_hints: list[str] = field(default_factory=list)
-    exit_code: int = 0
 
 
 @dataclass
@@ -65,8 +65,8 @@ class ListResult(CommandResult):
     columns: list[ListColumn] = field(default_factory=list)
     extra: dict[str, Any] = field(default_factory=dict)
     display_items: list[dict[str, Any]] | None = None
-    display_hints: list[str] = field(default_factory=list)
     exit_code: int = 0
+    display_hints: list[str] = field(default_factory=list)
 
 
 @dataclass
