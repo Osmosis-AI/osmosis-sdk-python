@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Literal
 
 # ── Dataset status constants ─────────────────────────────────────
@@ -170,13 +170,13 @@ class TrainingRun:
     started_at: str | None = None
     completed_at: str | None = None
     eval_accuracy: float | None = None
-    reward: float | None = None
     reward_increase_delta: float | None = None
     processing_step: str | None = None
     processing_percent: float | None = None
     error_message: str | None = None
     creator_name: str | None = None
     creator_email: str | None = None
+    reward: float | None = field(default=None, kw_only=True)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> TrainingRun:

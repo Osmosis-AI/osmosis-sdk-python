@@ -241,6 +241,14 @@ class TestTrainingRun:
 
         assert run.reward is None
 
+    def test_positional_constructor_preserves_reward_increase_delta(self) -> None:
+        run = api_models.TrainingRun(
+            "run_1", "run", "finished", None, None, "", None, None, 0.1, 0.2
+        )
+
+        assert run.reward_increase_delta == 0.2
+        assert run.reward is None
+
 
 class TestMetricDataPoint:
     def test_from_dict(self) -> None:
