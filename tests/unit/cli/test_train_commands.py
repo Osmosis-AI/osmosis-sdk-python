@@ -187,6 +187,44 @@ class TestListRuns:
         assert result.items[0]["model_name"] == "gpt-2"
         assert result.items[0]["eval_accuracy"] == 0.95
 
+    def test_list_display_columns_prioritize_name_status_reward_created(
+        self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
+    ) -> None:
+        run = TrainingRun(
+            id="abcdef1234567890abcdef1234567890",
+            name="long-human-readable-run-name",
+            status="running",
+            reward=0.875,
+            created_at="2026-01-01T00:00:00Z",
+        )
+
+        class FakeClient:
+            def list_training_runs(
+                self, limit=30, offset=0, *, workspace_id, credentials=None
+            ):
+                return PaginatedTrainingRuns(
+                    training_runs=[run], total_count=1, has_more=False
+                )
+
+        monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        result = train_module.list_runs(limit=30, all_=False)
+
+        assert [column.label for column in result.columns] == [
+            "Name",
+            "Status",
+            "Reward",
+            result.columns[3].label,
+        ]
+        assert result.columns[0].key == "name"
+        assert result.columns[0].ratio == 4
+        assert result.columns[0].overflow == "fold"
+        assert result.columns[3].label.startswith("Created (")
+        assert result.display_items is not None
+        assert result.display_items[0]["reward"] == "0.88"
+        assert result.display_hints == [
+            "Use osmosis train status <name> or osmosis train metrics <name> for details."
+        ]
+
     def test_list_unnamed_run(
         self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
     ) -> None:

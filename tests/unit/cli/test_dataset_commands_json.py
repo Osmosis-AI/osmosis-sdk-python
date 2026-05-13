@@ -167,10 +167,13 @@ def test_dataset_list_plain_emits_tab_separated_rows(monkeypatch, capsys) -> Non
     captured = capsys.readouterr()
 
     assert exit_code == 0
-    assert captured.out.splitlines() == [
-        "a.jsonl\t[uploaded]\t100 B\t2026-04-26\tds_1",
-        "b.jsonl\t[pending]\t100 B\t2026-04-26\tds_2",
-    ]
+    lines = captured.out.splitlines()
+    assert len(lines[0].split("\t")) == 4
+    assert lines[0].startswith("a.jsonl\t[uploaded]\t100 B\t")
+    assert len(lines[1].split("\t")) == 4
+    assert lines[1].startswith("b.jsonl\t[pending]\t100 B\t")
+    assert "\tds_1" not in lines[0]
+    assert "\tds_2" not in lines[1]
 
 
 def test_dataset_info_json_envelope(monkeypatch, capsys) -> None:

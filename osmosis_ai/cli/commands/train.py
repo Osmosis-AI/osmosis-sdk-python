@@ -212,8 +212,14 @@ def list_runs(
         get_output_context,
         serialize_training_run,
     )
+    from osmosis_ai.cli.output.display import (
+        created_column_label,
+        format_local_date,
+        format_reward,
+    )
     from osmosis_ai.platform.cli.utils import (
         fetch_all_pages,
+        format_run_status,
         require_workspace_context,
         validate_list_options,
     )
@@ -260,12 +266,28 @@ def list_runs(
         next_offset=next_offset,
         extra=_workspace_result_context(workspace),
         columns=[
-            ListColumn(key="name", label="Name"),
-            ListColumn(key="status", label="Status"),
-            ListColumn(key="model_name", label="Model"),
-            ListColumn(key="eval_accuracy", label="Accuracy"),
-            ListColumn(key="created_at", label="Created"),
-            ListColumn(key="id", label="ID", no_wrap=True),
+            ListColumn(key="name", label="Name", ratio=4, overflow="fold"),
+            ListColumn(key="status", label="Status", no_wrap=True, ratio=1),
+            ListColumn(key="reward", label="Reward", no_wrap=True, ratio=1),
+            ListColumn(
+                key="created_at",
+                label=created_column_label(),
+                no_wrap=True,
+                ratio=1,
+            ),
+        ],
+        display_items=[
+            {
+                **serialize_training_run(run),
+                "name": run.name or "(unnamed)",
+                "status": format_run_status(run),
+                "reward": format_reward(run.reward),
+                "created_at": format_local_date(run.created_at),
+            }
+            for run in training_runs
+        ],
+        display_hints=[
+            "Use osmosis train status <name> or osmosis train metrics <name> for details."
         ],
     )
 
