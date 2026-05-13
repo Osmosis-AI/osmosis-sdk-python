@@ -298,18 +298,18 @@ def status(
 ) -> Any:
     """Show training run details."""
     from osmosis_ai.cli.output import (
-        DetailField,
         DetailResult,
+        DetailSection,
         get_output_context,
         serialize_checkpoint,
         serialize_training_run,
     )
+    from osmosis_ai.cli.output.display import format_local_date, format_local_datetime
     from osmosis_ai.platform.api.client import OsmosisClient
     from osmosis_ai.platform.api.models import RUN_STATUSES_TERMINAL
     from osmosis_ai.platform.auth.platform_client import PlatformAPIError
     from osmosis_ai.platform.cli.utils import (
         build_run_detail_rows,
-        format_date,
         require_workspace_context,
     )
 
@@ -333,11 +333,13 @@ def status(
     if run.hf_status:
         rows.append(("HF Status", run.hf_status))
     if run.started_at:
-        rows.append(("Started", format_date(run.started_at)))
+        rows.append(("Started", format_local_datetime(run.started_at)))
     if run.completed_at:
-        rows.append(("Completed", format_date(run.completed_at)))
+        rows.append(("Completed", format_local_datetime(run.completed_at)))
 
     checkpoints = []
+    sections: list[DetailSection] = []
+    display_hints: list[str] = []
 
     if run.status in RUN_STATUSES_TERMINAL:
         try:
@@ -354,24 +356,32 @@ def status(
             checkpoints = ckpts.checkpoints
 
     fields = _detail_fields(rows)
-    for cp in checkpoints:
-        cp_name = cp.checkpoint_name or "(unnamed)"
-        fields.append(
-            DetailField(
-                label="Checkpoint",
-                value=(
-                    f"{cp_name}  step {cp.checkpoint_step}  [{cp.status}]"
-                    f"  {cp.id[:8]}  {format_date(cp.created_at)}"
-                ),
-            )
-        )
     if checkpoints:
-        fields.append(
-            DetailField(
-                label="Deploy",
-                value="osmosis deploy <checkpoint-name>",
+        from rich.table import Table
+
+        table = Table(show_header=True, header_style="bold")
+        table.add_column("Checkpoint", ratio=4, overflow="fold")
+        table.add_column("Step", no_wrap=True)
+        table.add_column("Status", no_wrap=True)
+        table.add_column("ID", no_wrap=True)
+        table.add_column("Created", no_wrap=True)
+        plain_lines = []
+        for cp in checkpoints:
+            cp_name = cp.checkpoint_name or "(unnamed)"
+            created = format_local_date(cp.created_at)
+            table.add_row(
+                cp_name,
+                str(cp.checkpoint_step),
+                cp.status,
+                cp.id[:8],
+                created,
             )
-        )
+            plain_lines.append(
+                f"Checkpoint: {cp_name} step {cp.checkpoint_step} "
+                f"[{cp.status}] {cp.id[:8]} {created}"
+            )
+        sections.append(DetailSection(rich=table, plain_lines=plain_lines))
+        display_hints.append("Deploy with: osmosis deploy <checkpoint-name>")
 
     data = serialize_training_run(run)
     data.update(
@@ -384,7 +394,13 @@ def status(
         }
     )
 
-    return DetailResult(title="Training Run", data=data, fields=fields)
+    return DetailResult(
+        title="Training Run",
+        data=data,
+        fields=fields,
+        sections=sections,
+        display_hints=display_hints,
+    )
 
 
 @app.command("submit")
@@ -628,6 +644,7 @@ def metrics(
     from osmosis_ai.cli.output import (
         DetailField,
         DetailResult,
+        DetailSection,
         OutputFormat,
         get_output_context,
         serialize_training_run,
@@ -701,6 +718,8 @@ def metrics(
 
     fields = _detail_fields(rows)
     fields.insert(0, DetailField(label="View", value=url))
+    sections: list[DetailSection] = []
+    display_hints: list[str] = []
 
     # ── Metric trends ─────────────────────────────────────────────
     if metrics_data is not None and metrics_data.metrics:
@@ -718,7 +737,7 @@ def metrics(
                 metrics_data.metrics, terminal_width=console.width
             )
             if trends:
-                fields.append(DetailField(label="Metric Trends", value=trends))
+                sections.append(DetailSection(rich=trends))
     elif metrics_data is not None:
         fields.append(DetailField(label="Metrics", value="No metric data found."))
 
@@ -757,10 +776,10 @@ def metrics(
                     json.dumps(export, indent=2, ensure_ascii=False) + "\n"
                 )
                 output_path = str(out_path)
-                fields.append(DetailField(label="Saved", value=output_path))
+                display_hints.append(f"Saved metrics to {output_path}")
             except (CLIError, OSError) as exc:
                 save_warning = f"Could not save metrics: {exc}"
-                fields.append(DetailField(label="Warning", value=save_warning))
+                display_hints.append(save_warning)
 
     return DetailResult(
         title="Training Run Metrics",
@@ -776,6 +795,8 @@ def metrics(
             **_workspace_result_context(workspace),
         },
         fields=fields,
+        sections=sections,
+        display_hints=display_hints,
     )
 
 

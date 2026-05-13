@@ -116,6 +116,11 @@ def _render_rich_text(value: object) -> str:
     return buffer.getvalue()
 
 
+def _render_section_text(result: DetailResult) -> str:
+    assert result.sections
+    return _render_rich_text(result.sections[0].rich)
+
+
 class TestMetricsCommandPlatformUrl:
     """Platform URL is printed at the top of output."""
 
@@ -172,7 +177,9 @@ class TestMetricsCommandTrendGraphs:
 
         assert isinstance(result, DetailResult)
         assert result.title == "Training Run Metrics"
-        trends = _render_rich_text(_field_value(result, "Metric Trends"))
+        assert all(field.label != "Metric Trends" for field in result.fields)
+        assert result.sections
+        trends = _render_section_text(result)
         assert "Training Reward" in trends
         assert any(c in trends for c in SPARKLINE_BLOCKS)
 
@@ -212,7 +219,8 @@ class TestMetricsCommandTrendGraphs:
             )
 
         assert isinstance(result, DetailResult)
-        trends = _render_rich_text(_field_value(result, "Metric Trends"))
+        assert all(field.label != "Metric Trends" for field in result.fields)
+        trends = _render_section_text(result)
         assert bracket_title in trends
 
     @patch(_PATCH_CLIENT)
@@ -384,6 +392,8 @@ class TestMetricsCommandWritesFile:
         assert expected.exists()
         assert result.data["output_path"] == str(expected)
         assert result.data["save_warning"] is None
+        assert all(field.label != "Saved" for field in result.fields)
+        assert any(str(expected) in hint for hint in result.display_hints)
 
 
 class TestResolveOutputPath:
@@ -523,7 +533,10 @@ class TestMetricsCommandErrors:
             )
 
         assert isinstance(result, DetailResult)
-        assert "Could not save metrics" in _field_value(result, "Warning")
+        assert all(field.label != "Warning" for field in result.fields)
+        assert result.data["save_warning"] is not None
+        assert "Could not save metrics" in result.data["save_warning"]
+        assert any("Could not save metrics" in hint for hint in result.display_hints)
 
     @patch(_PATCH_CLIENT)
     @patch(_PATCH_AUTH)
@@ -553,4 +566,7 @@ class TestMetricsCommandErrors:
 
         assert isinstance(result, DetailResult)
         assert result.title == "Training Run Metrics"
-        assert "Could not save metrics" in _field_value(result, "Warning")
+        assert all(field.label != "Warning" for field in result.fields)
+        assert result.data["save_warning"] is not None
+        assert "Could not save metrics" in result.data["save_warning"]
+        assert any("Could not save metrics" in hint for hint in result.display_hints)
