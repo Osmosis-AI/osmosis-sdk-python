@@ -307,7 +307,6 @@ def test_model_list_plain_is_tab_separated_rows(
                         id="model_1",
                         model_name="Qwen/Qwen3",
                         base_model="Qwen/Qwen3",
-                        status="ready",
                         creator_name="brian",
                         created_at="2026-04-26T00:00:00Z",
                     )
@@ -325,11 +324,10 @@ def test_model_list_plain_is_tab_separated_rows(
     lines = captured.out.splitlines()
     assert len(lines) == 1
     fields = lines[0].split("\t")
-    assert len(fields) == 4
+    assert len(fields) == 3
     assert fields[0] == "Qwen/Qwen3"
-    assert fields[1] == "ready"
-    assert fields[2] == "Qwen/Qwen3"
-    assert fields[3].startswith("2026-04-")
+    assert fields[1] == "Qwen/Qwen3"
+    assert fields[2].startswith("2026-04-")
     assert "model_1" not in fields
     assert "brian" not in fields
 
@@ -350,7 +348,6 @@ def test_model_list_json_includes_linked_workspace_context(
                         id="model_1",
                         model_name="Qwen/Qwen3",
                         base_model="Qwen/Qwen3",
-                        status="ready",
                         creator_name="brian",
                         created_at="2026-04-26T00:00:00Z",
                     )
@@ -367,6 +364,7 @@ def test_model_list_json_includes_linked_workspace_context(
     assert exit_code == 0
     payload = json.loads(captured.out)
     assert payload["items"][0]["model_name"] == "Qwen/Qwen3"
+    assert "status" not in payload["items"][0]
     _assert_workspace_context(payload, Path.cwd())
 
 

@@ -10,7 +10,6 @@ from typing import Any
 
 import typer
 
-from osmosis_ai.cli.console import console
 from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE
 
 app: typer.Typer = typer.Typer(help="Manage base models (list).", no_args_is_help=True)
@@ -41,7 +40,6 @@ def list_models(
     )
     from osmosis_ai.cli.output.display import created_column_label, format_local_date
     from osmosis_ai.platform.cli.utils import (
-        entity_status_style,
         fetch_all_pages,
         require_workspace_context,
         validate_list_options,
@@ -91,7 +89,6 @@ def list_models(
         extra=_workspace_result_context(workspace),
         columns=[
             ListColumn(key="model_name", label="Name", ratio=4, overflow="fold"),
-            ListColumn(key="status", label="Status", no_wrap=True, ratio=1),
             ListColumn(key="base_model", label="Base", ratio=2, overflow="fold"),
             ListColumn(
                 key="created_at",
@@ -103,11 +100,6 @@ def list_models(
         display_items=[
             {
                 **serialize_model(model),
-                "status": (
-                    console.format_styled(model.status, status_style)
-                    if (status_style := entity_status_style(model.status))
-                    else console.escape(model.status)
-                ),
                 "created_at": format_local_date(model.created_at),
             }
             for model in models

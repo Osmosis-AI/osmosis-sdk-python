@@ -91,7 +91,6 @@ class TestListModels:
         base = BaseModelInfo(
             id="model_base_12345678901234567890",
             model_name="gpt-2",
-            status="available",
             creator_name="openai",
             created_at="2025-06-01T00:00:00Z",
         )
@@ -110,7 +109,7 @@ class TestListModels:
         assert isinstance(result, ListResult)
         assert result.title == "Base Models"
         assert result.items[0]["model_name"] == "gpt-2"
-        assert result.items[0]["status"] == "available"
+        assert "status" not in result.items[0]
 
     def test_list_display_columns_use_name_label_and_hide_id(
         self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
@@ -119,7 +118,6 @@ class TestListModels:
             id="model_base_12345678901234567890",
             model_name="Qwen/Qwen3-8B",
             base_model="Qwen/Qwen3",
-            status="available",
             created_at="2025-06-01T00:00:00Z",
         )
 
@@ -134,15 +132,15 @@ class TestListModels:
 
         assert [column.label for column in result.columns] == [
             "Name",
-            "Status",
             "Base",
-            result.columns[3].label,
+            result.columns[2].label,
         ]
         assert result.columns[0].key == "model_name"
         assert result.columns[0].ratio == 4
         assert result.columns[0].overflow == "fold"
-        assert result.columns[3].label.startswith("Created (")
+        assert result.columns[2].label.startswith("Created (")
         assert all(column.key != "id" for column in result.columns)
+        assert all(column.key != "status" for column in result.columns)
 
     def test_list_has_more_truncation(
         self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
@@ -150,7 +148,6 @@ class TestListModels:
         base = BaseModelInfo(
             id="model_base_12345678901234567890",
             model_name="model-a",
-            status="available",
             created_at="2025-01-01",
         )
 

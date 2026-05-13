@@ -83,7 +83,6 @@ def serialize_model(model: BaseModelInfo) -> dict[str, Any]:
         "id": model.id,
         "model_name": model.model_name,
         "base_model": model.base_model,
-        "status": model.status,
         "creator_name": model.creator_name,
         "created_at": model.created_at,
         "updated_at": model.updated_at,

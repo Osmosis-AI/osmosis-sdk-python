@@ -131,7 +131,6 @@ def test_serialize_model_keys() -> None:
             "id": "model_1",
             "model_name": "Qwen/Qwen3-30B-A3B-Instruct-2507-FP8",
             "base_model": "Qwen/Qwen3",
-            "status": "ready",
             "creator_name": "brian",
             "created_at": "2026-04-26T00:00:00Z",
             "updated_at": "2026-04-26T00:00:01Z",
