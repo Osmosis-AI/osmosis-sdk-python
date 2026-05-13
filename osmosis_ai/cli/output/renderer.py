@@ -205,7 +205,7 @@ def _render_rich(result: CommandResult, output: OutputContext) -> None:
     if isinstance(result, ListResult):
         from rich.table import Table
 
-        table = Table(show_header=True, header_style="bold")
+        table = Table(show_header=True, header_style="bold", expand=True)
         for column in result.columns:
             overflow = column.overflow if column.overflow is not None else "ellipsis"
             table.add_column(

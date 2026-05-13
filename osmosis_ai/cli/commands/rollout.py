@@ -35,6 +35,7 @@ def list_rollouts(
         get_output_context,
         serialize_rollout,
     )
+    from osmosis_ai.cli.output.display import format_local_date
     from osmosis_ai.platform.cli.utils import (
         fetch_all_pages,
         require_workspace_context,
@@ -76,18 +77,61 @@ def list_rollouts(
             has_more = page.has_more
             next_offset = page.next_offset
 
+    items = [serialize_rollout(rollout) for rollout in rollouts]
+
     return ListResult(
         title="Rollouts",
-        items=[serialize_rollout(rollout) for rollout in rollouts],
+        items=items,
         total_count=total_count,
         has_more=has_more,
         next_offset=next_offset,
         extra=_workspace_result_context(workspace),
         columns=[
-            ListColumn(key="name", label="Name", ratio=4, overflow="fold"),
-            ListColumn(key="is_active", label="Active"),
-            ListColumn(key="repo_full_name", label="Repository"),
-            ListColumn(key="last_synced_commit_sha", label="Commit"),
-            ListColumn(key="created_at", label="Created"),
+            ListColumn(
+                key="name",
+                label="Name",
+                ratio=6,
+                overflow="fold",
+                min_width=20,
+            ),
+            ListColumn(
+                key="is_active",
+                label="Active",
+                no_wrap=True,
+                min_width=6,
+                max_width=6,
+            ),
+            ListColumn(
+                key="repo_full_name",
+                label="Repo",
+                no_wrap=True,
+                overflow="ellipsis",
+                ratio=2,
+                min_width=10,
+                max_width=10,
+            ),
+            ListColumn(
+                key="last_synced_commit_sha",
+                label="Commit",
+                no_wrap=True,
+                min_width=8,
+                max_width=8,
+            ),
+            ListColumn(
+                key="created_at",
+                label="Created",
+                no_wrap=True,
+                min_width=10,
+                max_width=10,
+            ),
+        ],
+        display_items=[
+            {
+                **item,
+                "is_active": "yes" if item["is_active"] else "no",
+                "last_synced_commit_sha": (item["last_synced_commit_sha"] or "")[:8],
+                "created_at": format_local_date(item["created_at"]).split(" ", 1)[0],
+            }
+            for item in items
         ],
     )

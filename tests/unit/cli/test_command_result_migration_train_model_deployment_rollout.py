@@ -508,6 +508,7 @@ def test_rollout_list_json_returns_envelope(
 def test_rollout_list_columns_prioritize_name_over_id(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    created_at = "2026-04-26T00:00:00Z"
     _stub_workspace_context(monkeypatch)
 
     class FakeClient:
@@ -520,8 +521,8 @@ def test_rollout_list_columns_prioritize_name_over_id(
                         name="demo",
                         is_active=True,
                         repo_full_name="osmosis/demo",
-                        last_synced_commit_sha="abc123",
-                        created_at="2026-04-26T00:00:00Z",
+                        last_synced_commit_sha="abcdef123456",
+                        created_at=created_at,
                     )
                 ],
                 total_count=1,
@@ -531,6 +532,7 @@ def test_rollout_list_columns_prioritize_name_over_id(
     monkeypatch.setattr("osmosis_ai.platform.api.client.OsmosisClient", FakeClient)
 
     from osmosis_ai.cli.commands.rollout import list_rollouts
+    from osmosis_ai.cli.output.display import format_local_date
 
     result = list_rollouts(limit=30, all_=False)
 
@@ -542,5 +544,22 @@ def test_rollout_list_columns_prioritize_name_over_id(
         "created_at",
     ]
     name_column = result.columns[0]
-    assert name_column.ratio == 4
+    assert name_column.ratio == 6
     assert name_column.overflow == "fold"
+    assert name_column.min_width == 20
+    assert result.columns[1].no_wrap is True
+    assert result.columns[1].min_width == 6
+    assert result.columns[1].max_width == 6
+    assert result.columns[2].label == "Repo"
+    assert result.columns[2].no_wrap is True
+    assert result.columns[2].overflow == "ellipsis"
+    assert result.columns[3].max_width == 8
+    assert result.columns[4].max_width == 10
+    assert result.items[0]["last_synced_commit_sha"] == "abcdef123456"
+    assert result.display_items is not None
+    assert result.display_items[0]["is_active"] == "yes"
+    assert result.display_items[0]["last_synced_commit_sha"] == "abcdef12"
+    assert (
+        result.display_items[0]["created_at"]
+        == format_local_date(created_at).split(" ", 1)[0]
+    )

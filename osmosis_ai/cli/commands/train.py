@@ -363,7 +363,7 @@ def status(
         from rich.table import Table
         from rich.text import Text
 
-        table = Table(show_header=True, header_style="bold")
+        table = Table(show_header=True, header_style="bold", expand=True)
         table.add_column("Checkpoint", ratio=4, overflow="fold")
         table.add_column("Step", no_wrap=True)
         table.add_column("Status", no_wrap=True)

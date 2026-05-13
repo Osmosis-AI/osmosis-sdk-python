@@ -72,6 +72,35 @@ def test_rich_list_prints_display_hints() -> None:
     assert "Use osmosis train status <name> for details." in stdout
 
 
+def test_rich_list_expands_table_so_column_ratios_apply(monkeypatch) -> None:
+    from rich.table import Table as RichTable
+
+    created_tables = []
+
+    class RecordingTable(RichTable):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            created_tables.append(self)
+
+    monkeypatch.setattr("rich.table.Table", RecordingTable)
+    result = ListResult(
+        title="Training Runs",
+        items=[{"name": "a-very-long-training-run-name", "status": "running"}],
+        total_count=1,
+        has_more=False,
+        next_offset=None,
+        columns=[
+            ListColumn(key="name", label="Name", ratio=4, overflow="fold"),
+            ListColumn(key="status", label="Status", no_wrap=True, ratio=1),
+        ],
+    )
+
+    _render(result)
+
+    assert created_tables
+    assert created_tables[0].expand is True
+
+
 def test_rich_list_prints_display_hints_with_literal_brackets() -> None:
     result = ListResult(
         title="Training Runs",

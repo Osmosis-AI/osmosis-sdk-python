@@ -119,6 +119,7 @@ class TestStatusCheckpoints:
         assert all(field.label != "Checkpoint" for field in result.fields)
         assert all(field.label != "Deploy" for field in result.fields)
         assert result.sections
+        assert result.sections[0].rich.expand is True
         expected_url = utils_module.platform_entity_url(
             WORKSPACE_NAME, "training", "run_1"
         )
