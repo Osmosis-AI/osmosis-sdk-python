@@ -304,7 +304,7 @@ def status(
         serialize_checkpoint,
         serialize_training_run,
     )
-    from osmosis_ai.cli.output.display import format_local_date, format_local_datetime
+    from osmosis_ai.cli.output.display import format_local_datetime
     from osmosis_ai.platform.api.client import OsmosisClient
     from osmosis_ai.platform.api.models import RUN_STATUSES_TERMINAL
     from osmosis_ai.platform.auth.platform_client import PlatformAPIError
@@ -358,6 +358,7 @@ def status(
     fields = _detail_fields(rows)
     if checkpoints:
         from rich.table import Table
+        from rich.text import Text
 
         table = Table(show_header=True, header_style="bold")
         table.add_column("Checkpoint", ratio=4, overflow="fold")
@@ -368,9 +369,9 @@ def status(
         plain_lines = []
         for cp in checkpoints:
             cp_name = cp.checkpoint_name or "(unnamed)"
-            created = format_local_date(cp.created_at)
+            created = format_local_datetime(cp.created_at)
             table.add_row(
-                cp_name,
+                Text(cp_name),
                 str(cp.checkpoint_step),
                 cp.status,
                 cp.id[:8],

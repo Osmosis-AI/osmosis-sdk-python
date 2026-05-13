@@ -352,6 +352,53 @@ class TestStatus:
         assert result.display_hints == ["Deploy with: osmosis deploy <checkpoint-name>"]
         assert result.data["checkpoints"][0]["checkpoint_name"] == "run-1-step-100"
 
+    def test_status_checkpoint_section_escapes_names_and_uses_detailed_timestamps(
+        self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
+    ) -> None:
+        from rich.console import Console as RichConsole
+
+        from osmosis_ai.platform.api.models import LoraCheckpointInfo
+
+        detail = TrainingRunDetail(
+            id="abcdef1234567890abcdef1234567890",
+            name="run-1",
+            status="finished",
+            model_name="gpt-2",
+            created_at="2026-01-01T00:00:00Z",
+        )
+        checkpoint = LoraCheckpointInfo(
+            id="ckpt_abcdef123456",
+            checkpoint_name="[red]danger[/red]",
+            checkpoint_step=100,
+            status="uploaded",
+            created_at="2026-01-01T12:34:00Z",
+        )
+
+        class FakeClient:
+            def get_training_run(self, run_id, *, workspace_id, credentials=None):
+                return detail
+
+            def list_training_run_checkpoints(
+                self, run_id, *, workspace_id, credentials=None
+            ):
+                return type("CheckpointPage", (), {"checkpoints": [checkpoint]})()
+
+        monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        result = train_module.status(name="run-1")
+
+        assert result.sections
+        section = result.sections[0]
+        output = StringIO()
+        rich = RichConsole(file=output, force_terminal=False, no_color=True, width=200)
+        rich.print(section.rich)
+        rendered = output.getvalue()
+
+        assert "[red]danger[/red]" in rendered
+        assert section.plain_lines
+        plain_line = section.plain_lines[0]
+        assert "2026-01-01" in plain_line
+        assert ":00 " in plain_line
+
     def test_status_uses_detailed_local_timestamps(
         self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
     ) -> None:
