@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 
 from osmosis_ai.cli.console import Console, console
 from osmosis_ai.cli.errors import CLIError
+from osmosis_ai.cli.output.display import format_local_datetime
 from osmosis_ai.platform.api.models import (
     RUN_STATUSES_ERROR,
     RUN_STATUSES_IN_PROGRESS,
@@ -185,7 +186,7 @@ def build_run_detail_rows(r: Any) -> list[tuple[str, str]]:
     if r.creator_name:
         rows.append(("Creator", console.escape(r.creator_name)))
     if r.created_at:
-        rows.append(("Created", format_date(r.created_at)))
+        rows.append(("Created", format_local_datetime(r.created_at)))
     return rows
 
 

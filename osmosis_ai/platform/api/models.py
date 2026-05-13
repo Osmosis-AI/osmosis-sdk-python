@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Literal
 
 # ── Dataset status constants ─────────────────────────────────────
@@ -176,6 +176,7 @@ class TrainingRun:
     error_message: str | None = None
     creator_name: str | None = None
     creator_email: str | None = None
+    reward: float | None = field(default=None, kw_only=True)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> TrainingRun:
@@ -190,6 +191,7 @@ class TrainingRun:
             started_at=data.get("started_at"),
             completed_at=data.get("completed_at"),
             eval_accuracy=data.get("eval_accuracy"),
+            reward=data.get("reward"),
             reward_increase_delta=data.get("reward_increase_delta"),
             processing_step=data.get("processing_step"),
             processing_percent=data.get("processing_percent"),
@@ -227,6 +229,7 @@ class TrainingRunDetail(TrainingRun):
             started_at=run.get("started_at"),
             completed_at=run.get("completed_at"),
             eval_accuracy=run.get("eval_accuracy"),
+            reward=run.get("reward"),
             reward_increase_delta=run.get("reward_increase_delta"),
             processing_step=run.get("processing_step"),
             processing_percent=run.get("processing_percent"),

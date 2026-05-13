@@ -12,6 +12,7 @@ import osmosis_ai.platform.api.client as api_client_module
 import osmosis_ai.platform.cli.utils as utils_module
 from osmosis_ai.cli.console import Console
 from osmosis_ai.cli.output import DetailResult
+from osmosis_ai.cli.output.display import format_local_datetime
 from osmosis_ai.platform.api.models import (
     LoraCheckpointInfo,
     TrainingRunCheckpoints,
@@ -115,15 +116,23 @@ class TestStatusCheckpoints:
         assert checkpoint["checkpoint_name"] == "qwen3-run1-step-100"
         assert checkpoint["checkpoint_step"] == 100
         assert checkpoint["id"] == "cp_1"
-        checkpoint_fields = [
-            field.value for field in result.fields if field.label == "Checkpoint"
+        assert all(field.label != "Checkpoint" for field in result.fields)
+        assert all(field.label != "Deploy" for field in result.fields)
+        assert result.sections
+        assert result.sections[0].rich.expand is True
+        expected_url = utils_module.platform_entity_url(
+            WORKSPACE_NAME, "training", "run_1"
+        )
+        assert result.display_hints == [
+            f"View: {expected_url}",
+            "Deploy with: osmosis deploy <checkpoint-name>",
         ]
-        assert checkpoint_fields == [
-            "qwen3-run1-step-100  step 100  [uploaded]  cp_1  2026-04-20"
-        ]
-        assert ("Deploy", "osmosis deploy <checkpoint-name>") in [
-            (field.label, field.value) for field in result.fields
-        ]
+        checkpoint_line = result.sections[0].plain_lines[0]
+        assert "qwen3-run1-step-100" in checkpoint_line
+        assert "step 100" in checkpoint_line
+        assert "[uploaded]" in checkpoint_line
+        assert "cp_1" in checkpoint_line
+        assert format_local_datetime("2026-04-20T00:00:00Z") in checkpoint_line
 
     def test_running_run_skips_checkpoints(
         self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
@@ -235,3 +244,8 @@ class TestStatusCheckpoints:
         assert all(
             field.label not in {"Checkpoint", "Deploy"} for field in result.fields
         )
+        assert result.sections == []
+        expected_url = utils_module.platform_entity_url(
+            WORKSPACE_NAME, "training", "run_1"
+        )
+        assert result.display_hints == [f"View: {expected_url}"]

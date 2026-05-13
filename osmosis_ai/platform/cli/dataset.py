@@ -20,6 +20,7 @@ from osmosis_ai.cli.output import (
     get_output_context,
     serialize_dataset,
 )
+from osmosis_ai.cli.output.display import created_column_label, format_local_date
 from osmosis_ai.cli.paths import parse_cli_path
 from osmosis_ai.cli.prompts import confirm
 from osmosis_ai.platform.api.models import STATUSES_IN_PROGRESS
@@ -38,7 +39,6 @@ from .utils import (
     _require_subscription,
     build_dataset_detail_rows,
     format_dataset_status,
-    format_dim_date,
     format_size,
     platform_call,
     platform_entity_url,
@@ -429,18 +429,22 @@ def list_datasets(limit: int = DEFAULT_PAGE_SIZE, all_: bool = False) -> Command
         next_offset=next_offset,
         extra=_workspace_result_context(workspace),
         columns=[
-            ListColumn(key="file_name", label="File"),
-            ListColumn(key="status", label="Status"),
-            ListColumn(key="file_size", label="Size"),
-            ListColumn(key="created_at", label="Created"),
-            ListColumn(key="id", label="ID", no_wrap=True),
+            ListColumn(key="file_name", label="Name", ratio=4, overflow="fold"),
+            ListColumn(key="status", label="Status", no_wrap=True, ratio=1),
+            ListColumn(key="file_size", label="Size", no_wrap=True, ratio=1),
+            ListColumn(
+                key="created_at",
+                label=created_column_label(),
+                no_wrap=True,
+                ratio=1,
+            ),
         ],
         display_items=[
             {
                 **serialize_dataset(d),
                 "status": format_dataset_status(d),
                 "file_size": format_size(d.file_size),
-                "created_at": format_dim_date(d.created_at),
+                "created_at": format_local_date(d.created_at),
             }
             for d in datasets
         ],
@@ -468,12 +472,15 @@ def info(
     )
 
     rows = build_dataset_detail_rows(ds)
+    url = platform_entity_url(workspace.workspace_name, "datasets", ds.id)
     data = serialize_dataset(ds)
+    data["platform_url"] = url
     data.update(_workspace_result_context(workspace))
     return DetailResult(
         title="Dataset",
         data=data,
         fields=_detail_fields(rows),
+        display_hints=[f"View: {url}"],
     )
 
 

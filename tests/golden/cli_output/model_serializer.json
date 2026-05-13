@@ -4,7 +4,6 @@
     "id",
     "model_name",
     "base_model",
-    "status",
     "creator_name",
     "created_at",
     "updated_at"

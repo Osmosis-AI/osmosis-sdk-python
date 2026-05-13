@@ -187,6 +187,44 @@ class TestListRuns:
         assert result.items[0]["model_name"] == "gpt-2"
         assert result.items[0]["eval_accuracy"] == 0.95
 
+    def test_list_display_columns_prioritize_name_status_reward_created(
+        self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
+    ) -> None:
+        run = TrainingRun(
+            id="abcdef1234567890abcdef1234567890",
+            name="long-human-readable-run-name",
+            status="running",
+            reward=0.875,
+            created_at="2026-01-01T00:00:00Z",
+        )
+
+        class FakeClient:
+            def list_training_runs(
+                self, limit=30, offset=0, *, workspace_id, credentials=None
+            ):
+                return PaginatedTrainingRuns(
+                    training_runs=[run], total_count=1, has_more=False
+                )
+
+        monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        result = train_module.list_runs(limit=30, all_=False)
+
+        assert [column.label for column in result.columns] == [
+            "Name",
+            "Status",
+            "Reward",
+            result.columns[3].label,
+        ]
+        assert result.columns[0].key == "name"
+        assert result.columns[0].ratio == 4
+        assert result.columns[0].overflow == "fold"
+        assert result.columns[3].label.startswith("Created (")
+        assert result.display_items is not None
+        assert result.display_items[0]["reward"] == "0.88"
+        assert result.display_hints == [
+            "Use osmosis train status <name> or osmosis train metrics <name> for details."
+        ]
+
     def test_list_unnamed_run(
         self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
     ) -> None:
@@ -275,6 +313,128 @@ class TestStatus:
         assert result.data["status"] == "completed"
         assert result.data["workspace"] == {"id": WORKSPACE_ID, "name": WORKSPACE_NAME}
         assert result.data["project_root"] == str(Path.cwd().resolve())
+        expected_url = utils_module.platform_entity_url(
+            WORKSPACE_NAME, "training", detail.id
+        )
+        assert result.data["platform_url"] == expected_url
+        assert all(field.value != expected_url for field in result.fields)
+        assert result.display_hints == [f"View: {expected_url}"]
+
+    def test_status_renders_checkpoints_as_sections(
+        self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
+    ) -> None:
+        from osmosis_ai.platform.api.models import LoraCheckpointInfo
+
+        detail = TrainingRunDetail(
+            id="abcdef1234567890abcdef1234567890",
+            name="run-1",
+            status="finished",
+            model_name="gpt-2",
+            created_at="2026-01-01T00:00:00Z",
+        )
+        checkpoint = LoraCheckpointInfo(
+            id="ckpt_abcdef123456",
+            checkpoint_name="run-1-step-100",
+            checkpoint_step=100,
+            status="uploaded",
+            created_at="2026-01-01T01:00:00Z",
+        )
+
+        class FakeClient:
+            def get_training_run(self, run_id, *, workspace_id, credentials=None):
+                return detail
+
+            def list_training_run_checkpoints(
+                self, run_id, *, workspace_id, credentials=None
+            ):
+                return type("CheckpointPage", (), {"checkpoints": [checkpoint]})()
+
+        monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        result = train_module.status(name="run-1")
+
+        assert all(field.label != "Checkpoint" for field in result.fields)
+        assert all(field.label != "Deploy" for field in result.fields)
+        assert result.sections
+        expected_url = utils_module.platform_entity_url(
+            WORKSPACE_NAME, "training", detail.id
+        )
+        assert result.display_hints == [
+            f"View: {expected_url}",
+            "Deploy with: osmosis deploy <checkpoint-name>",
+        ]
+        assert result.data["checkpoints"][0]["checkpoint_name"] == "run-1-step-100"
+
+    def test_status_checkpoint_section_escapes_names_and_uses_detailed_timestamps(
+        self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
+    ) -> None:
+        from rich.console import Console as RichConsole
+
+        from osmosis_ai.platform.api.models import LoraCheckpointInfo
+
+        detail = TrainingRunDetail(
+            id="abcdef1234567890abcdef1234567890",
+            name="run-1",
+            status="finished",
+            model_name="gpt-2",
+            created_at="2026-01-01T00:00:00Z",
+        )
+        checkpoint = LoraCheckpointInfo(
+            id="ckpt_abcdef123456",
+            checkpoint_name="[red]danger[/red]",
+            checkpoint_step=100,
+            status="uploaded",
+            created_at="2026-01-01T12:34:00Z",
+        )
+
+        class FakeClient:
+            def get_training_run(self, run_id, *, workspace_id, credentials=None):
+                return detail
+
+            def list_training_run_checkpoints(
+                self, run_id, *, workspace_id, credentials=None
+            ):
+                return type("CheckpointPage", (), {"checkpoints": [checkpoint]})()
+
+        monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        result = train_module.status(name="run-1")
+
+        assert result.sections
+        section = result.sections[0]
+        output = StringIO()
+        rich = RichConsole(file=output, force_terminal=False, no_color=True, width=200)
+        rich.print(section.rich)
+        rendered = output.getvalue()
+
+        assert "[red]danger[/red]" in rendered
+        assert section.plain_lines
+        plain_line = section.plain_lines[0]
+        assert "2026-01-01" in plain_line
+        assert ":00 " in plain_line
+
+    def test_status_uses_detailed_local_timestamps(
+        self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
+    ) -> None:
+        detail = TrainingRunDetail(
+            id="abcdef1234567890abcdef1234567890",
+            name="timed-run",
+            status="running",
+            model_name="gpt-2",
+            created_at="2026-01-01T00:00:00Z",
+            started_at="2026-01-01T00:01:02Z",
+            completed_at="2026-01-01T00:02:03Z",
+        )
+
+        class FakeClient:
+            def get_training_run(self, run_id, *, workspace_id, credentials=None):
+                return detail
+
+        monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        result = train_module.status(name="timed-run")
+        fields = {field.label: field.value for field in result.fields}
+
+        assert len(fields["Created"]) >= len("2026-01-01 00:00:00")
+        assert len(fields["Started"]) >= len("2026-01-01 00:01:02")
+        assert len(fields["Completed"]) >= len("2026-01-01 00:02:03")
 
     def test_status_with_all_optional_fields(
         self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
@@ -315,8 +475,8 @@ class TestStatus:
         assert fields["Examples"] == "100"
         assert fields["Notes"] == "experiment notes"
         assert fields["HF Status"] == "uploaded"
-        assert fields["Started"] == "2026-01-01"
-        assert fields["Completed"] == "2026-01-02"
+        assert len(fields["Started"]) >= len("2026-01-01 00:00:00")
+        assert len(fields["Completed"]) >= len("2026-01-02 00:00:00")
         assert result.data["examples_processed_count"] == 100
         assert result.data["notes"] == "experiment notes"
         assert result.data["hf_status"] == "uploaded"

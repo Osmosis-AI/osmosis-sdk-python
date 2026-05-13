@@ -307,7 +307,6 @@ def test_model_list_plain_is_tab_separated_rows(
                         id="model_1",
                         model_name="Qwen/Qwen3",
                         base_model="Qwen/Qwen3",
-                        status="ready",
                         creator_name="brian",
                         created_at="2026-04-26T00:00:00Z",
                     )
@@ -322,9 +321,15 @@ def test_model_list_plain_is_tab_separated_rows(
     captured = capsys.readouterr()
 
     assert exit_code == 0
-    assert captured.out.splitlines() == [
-        "Qwen/Qwen3\tQwen/Qwen3\tready\tbrian\t2026-04-26T00:00:00Z\tmodel_1"
-    ]
+    lines = captured.out.splitlines()
+    assert len(lines) == 1
+    fields = lines[0].split("\t")
+    assert len(fields) == 3
+    assert fields[0] == "Qwen/Qwen3"
+    assert fields[1] == "Qwen/Qwen3"
+    assert fields[2].startswith("2026-04-")
+    assert "model_1" not in fields
+    assert "brian" not in fields
 
 
 def test_model_list_json_includes_linked_workspace_context(
@@ -343,7 +348,6 @@ def test_model_list_json_includes_linked_workspace_context(
                         id="model_1",
                         model_name="Qwen/Qwen3",
                         base_model="Qwen/Qwen3",
-                        status="ready",
                         creator_name="brian",
                         created_at="2026-04-26T00:00:00Z",
                     )
@@ -360,6 +364,7 @@ def test_model_list_json_includes_linked_workspace_context(
     assert exit_code == 0
     payload = json.loads(captured.out)
     assert payload["items"][0]["model_name"] == "Qwen/Qwen3"
+    assert "status" not in payload["items"][0]
     _assert_workspace_context(payload, Path.cwd())
 
 
@@ -498,3 +503,63 @@ def test_rollout_list_json_returns_envelope(
     assert payload["items"][0]["name"] == "demo"
     assert payload["next_offset"] is None
     _assert_workspace_context(payload, Path.cwd())
+
+
+def test_rollout_list_columns_prioritize_name_over_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    created_at = "2026-04-26T00:00:00Z"
+    _stub_workspace_context(monkeypatch)
+
+    class FakeClient:
+        def list_rollouts(self, limit=30, offset=0, *, workspace_id, credentials=None):
+            assert workspace_id == WORKSPACE_ID
+            return PaginatedRollouts(
+                rollouts=[
+                    RolloutInfo(
+                        id="rollout_1",
+                        name="demo",
+                        is_active=True,
+                        repo_full_name="osmosis/demo",
+                        last_synced_commit_sha="abcdef123456",
+                        created_at=created_at,
+                    )
+                ],
+                total_count=1,
+                has_more=False,
+            )
+
+    monkeypatch.setattr("osmosis_ai.platform.api.client.OsmosisClient", FakeClient)
+
+    from osmosis_ai.cli.commands.rollout import list_rollouts
+    from osmosis_ai.cli.output.display import format_local_date
+
+    result = list_rollouts(limit=30, all_=False)
+
+    assert [column.key for column in result.columns] == [
+        "name",
+        "is_active",
+        "repo_full_name",
+        "last_synced_commit_sha",
+        "created_at",
+    ]
+    name_column = result.columns[0]
+    assert name_column.ratio == 6
+    assert name_column.overflow == "fold"
+    assert name_column.min_width == 20
+    assert result.columns[1].no_wrap is True
+    assert result.columns[1].min_width == 6
+    assert result.columns[1].max_width == 6
+    assert result.columns[2].label == "Repo"
+    assert result.columns[2].no_wrap is True
+    assert result.columns[2].overflow == "ellipsis"
+    assert result.columns[3].max_width == 8
+    assert result.columns[4].max_width == 10
+    assert result.items[0]["last_synced_commit_sha"] == "abcdef123456"
+    assert result.display_items is not None
+    assert result.display_items[0]["is_active"] == "yes"
+    assert result.display_items[0]["last_synced_commit_sha"] == "abcdef12"
+    assert (
+        result.display_items[0]["created_at"]
+        == format_local_date(created_at).split(" ", 1)[0]
+    )

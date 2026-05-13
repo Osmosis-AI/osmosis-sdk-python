@@ -212,8 +212,14 @@ def list_runs(
         get_output_context,
         serialize_training_run,
     )
+    from osmosis_ai.cli.output.display import (
+        created_column_label,
+        format_local_date,
+        format_reward,
+    )
     from osmosis_ai.platform.cli.utils import (
         fetch_all_pages,
+        format_run_status,
         require_workspace_context,
         validate_list_options,
     )
@@ -260,12 +266,28 @@ def list_runs(
         next_offset=next_offset,
         extra=_workspace_result_context(workspace),
         columns=[
-            ListColumn(key="name", label="Name"),
-            ListColumn(key="status", label="Status"),
-            ListColumn(key="model_name", label="Model"),
-            ListColumn(key="eval_accuracy", label="Accuracy"),
-            ListColumn(key="created_at", label="Created"),
-            ListColumn(key="id", label="ID", no_wrap=True),
+            ListColumn(key="name", label="Name", ratio=4, overflow="fold"),
+            ListColumn(key="status", label="Status", no_wrap=True, ratio=1),
+            ListColumn(key="reward", label="Reward", no_wrap=True, ratio=1),
+            ListColumn(
+                key="created_at",
+                label=created_column_label(),
+                no_wrap=True,
+                ratio=1,
+            ),
+        ],
+        display_items=[
+            {
+                **serialize_training_run(run),
+                "name": run.name or "(unnamed)",
+                "status": format_run_status(run),
+                "reward": format_reward(run.reward),
+                "created_at": format_local_date(run.created_at),
+            }
+            for run in training_runs
+        ],
+        display_hints=[
+            "Use osmosis train status <name> or osmosis train metrics <name> for details."
         ],
     )
 
@@ -276,18 +298,19 @@ def status(
 ) -> Any:
     """Show training run details."""
     from osmosis_ai.cli.output import (
-        DetailField,
         DetailResult,
+        DetailSection,
         get_output_context,
         serialize_checkpoint,
         serialize_training_run,
     )
+    from osmosis_ai.cli.output.display import format_local_datetime
     from osmosis_ai.platform.api.client import OsmosisClient
     from osmosis_ai.platform.api.models import RUN_STATUSES_TERMINAL
     from osmosis_ai.platform.auth.platform_client import PlatformAPIError
     from osmosis_ai.platform.cli.utils import (
         build_run_detail_rows,
-        format_date,
+        platform_entity_url,
         require_workspace_context,
     )
 
@@ -304,6 +327,7 @@ def status(
         )
 
     rows = build_run_detail_rows(run)
+    url = platform_entity_url(workspace.workspace_name, "training", run.id)
     if run.examples_processed_count is not None:
         rows.append(("Examples", str(run.examples_processed_count)))
     if run.notes:
@@ -311,11 +335,13 @@ def status(
     if run.hf_status:
         rows.append(("HF Status", run.hf_status))
     if run.started_at:
-        rows.append(("Started", format_date(run.started_at)))
+        rows.append(("Started", format_local_datetime(run.started_at)))
     if run.completed_at:
-        rows.append(("Completed", format_date(run.completed_at)))
+        rows.append(("Completed", format_local_datetime(run.completed_at)))
 
     checkpoints = []
+    sections: list[DetailSection] = []
+    display_hints: list[str] = []
 
     if run.status in RUN_STATUSES_TERMINAL:
         try:
@@ -332,24 +358,34 @@ def status(
             checkpoints = ckpts.checkpoints
 
     fields = _detail_fields(rows)
-    for cp in checkpoints:
-        cp_name = cp.checkpoint_name or "(unnamed)"
-        fields.append(
-            DetailField(
-                label="Checkpoint",
-                value=(
-                    f"{cp_name}  step {cp.checkpoint_step}  [{cp.status}]"
-                    f"  {cp.id[:8]}  {format_date(cp.created_at)}"
-                ),
-            )
-        )
+    display_hints.append(f"View: {url}")
     if checkpoints:
-        fields.append(
-            DetailField(
-                label="Deploy",
-                value="osmosis deploy <checkpoint-name>",
+        from rich.table import Table
+        from rich.text import Text
+
+        table = Table(show_header=True, header_style="bold", expand=True)
+        table.add_column("Checkpoint", ratio=4, overflow="fold")
+        table.add_column("Step", no_wrap=True)
+        table.add_column("Status", no_wrap=True)
+        table.add_column("ID", no_wrap=True)
+        table.add_column("Created", no_wrap=True)
+        plain_lines = []
+        for cp in checkpoints:
+            cp_name = cp.checkpoint_name or "(unnamed)"
+            created = format_local_datetime(cp.created_at)
+            table.add_row(
+                Text(cp_name),
+                str(cp.checkpoint_step),
+                cp.status,
+                cp.id[:8],
+                created,
             )
-        )
+            plain_lines.append(
+                f"Checkpoint: {cp_name} step {cp.checkpoint_step} "
+                f"[{cp.status}] {cp.id[:8]} {created}"
+            )
+        sections.append(DetailSection(rich=table, plain_lines=plain_lines))
+        display_hints.append("Deploy with: osmosis deploy <checkpoint-name>")
 
     data = serialize_training_run(run)
     data.update(
@@ -357,12 +393,19 @@ def status(
             "examples_processed_count": run.examples_processed_count,
             "notes": run.notes,
             "hf_status": run.hf_status,
+            "platform_url": url,
             "checkpoints": [serialize_checkpoint(cp) for cp in checkpoints],
             **_workspace_result_context(workspace),
         }
     )
 
-    return DetailResult(title="Training Run", data=data, fields=fields)
+    return DetailResult(
+        title="Training Run",
+        data=data,
+        fields=fields,
+        sections=sections,
+        display_hints=display_hints,
+    )
 
 
 @app.command("submit")
@@ -606,6 +649,7 @@ def metrics(
     from osmosis_ai.cli.output import (
         DetailField,
         DetailResult,
+        DetailSection,
         OutputFormat,
         get_output_context,
         serialize_training_run,
@@ -678,7 +722,8 @@ def metrics(
             rows.append(("Steps", f"{total_steps:,}"))
 
     fields = _detail_fields(rows)
-    fields.insert(0, DetailField(label="View", value=url))
+    sections: list[DetailSection] = []
+    display_hints: list[str] = [f"View: {url}"]
 
     # ── Metric trends ─────────────────────────────────────────────
     if metrics_data is not None and metrics_data.metrics:
@@ -696,7 +741,7 @@ def metrics(
                 metrics_data.metrics, terminal_width=console.width
             )
             if trends:
-                fields.append(DetailField(label="Metric Trends", value=trends))
+                sections.append(DetailSection(rich=trends))
     elif metrics_data is not None:
         fields.append(DetailField(label="Metrics", value="No metric data found."))
 
@@ -735,10 +780,10 @@ def metrics(
                     json.dumps(export, indent=2, ensure_ascii=False) + "\n"
                 )
                 output_path = str(out_path)
-                fields.append(DetailField(label="Saved", value=output_path))
+                display_hints.append(f"Saved metrics to {output_path}")
             except (CLIError, OSError) as exc:
                 save_warning = f"Could not save metrics: {exc}"
-                fields.append(DetailField(label="Warning", value=save_warning))
+                display_hints.append(save_warning)
 
     return DetailResult(
         title="Training Run Metrics",
@@ -754,6 +799,8 @@ def metrics(
             **_workspace_result_context(workspace),
         },
         fields=fields,
+        sections=sections,
+        display_hints=display_hints,
     )
 
 

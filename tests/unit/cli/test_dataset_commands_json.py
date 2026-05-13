@@ -167,10 +167,13 @@ def test_dataset_list_plain_emits_tab_separated_rows(monkeypatch, capsys) -> Non
     captured = capsys.readouterr()
 
     assert exit_code == 0
-    assert captured.out.splitlines() == [
-        "a.jsonl\t[uploaded]\t100 B\t2026-04-26\tds_1",
-        "b.jsonl\t[pending]\t100 B\t2026-04-26\tds_2",
-    ]
+    lines = captured.out.splitlines()
+    assert len(lines[0].split("\t")) == 4
+    assert lines[0].startswith("a.jsonl\t[uploaded]\t100 B\t")
+    assert len(lines[1].split("\t")) == 4
+    assert lines[1].startswith("b.jsonl\t[pending]\t100 B\t")
+    assert "\tds_1" not in lines[0]
+    assert "\tds_2" not in lines[1]
 
 
 def test_dataset_info_json_envelope(monkeypatch, capsys) -> None:
@@ -194,6 +197,25 @@ def test_dataset_info_json_envelope(monkeypatch, capsys) -> None:
     assert payload["data"]["file_size"] == 12345
     assert payload["data"]["workspace"] == {"id": WORKSPACE_ID, "name": WORKSPACE_NAME}
     assert payload["data"]["project_root"] == str(PROJECT_ROOT)
+
+
+def test_dataset_info_places_platform_url_after_table(monkeypatch) -> None:
+    _stub_workspace_context(monkeypatch)
+
+    class FakeClient:
+        def get_dataset(self, name, *, workspace_id, credentials=None):
+            assert name == "ds_1"
+            assert workspace_id == WORKSPACE_ID
+            return _dataset(file_size=12345)
+
+    monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+
+    result = dataset_module.info("ds_1")
+    expected_url = f"https://platform.osmosis.ai/{WORKSPACE_NAME}/datasets/ds_1"
+
+    assert result.data["platform_url"] == expected_url
+    assert all(field.value != expected_url for field in result.fields)
+    assert result.display_hints == [f"View: {expected_url}"]
 
 
 def test_dataset_preview_json_includes_rows(monkeypatch, capsys) -> None:
