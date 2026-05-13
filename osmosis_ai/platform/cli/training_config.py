@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import tomllib
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +26,92 @@ _RESERVED_ROLLOUT_ENV_NAMES: frozenset[str] = frozenset(
 )
 
 _ENV_VAR_NAME_RE = re.compile(r"^[A-Z_][A-Z0-9_]*$")
+
+
+@dataclass(frozen=True)
+class _NumericParamSpec:
+    section: str
+    default: int | float | None
+    min_value: int | float
+    max_value: int | float
+    min_exclusive: bool = False
+
+
+_TRAINING_PARAM_SPECS: dict[str, _NumericParamSpec] = {
+    "lr": _NumericParamSpec(
+        section="training",
+        default=1e-6,
+        min_value=0.0,
+        max_value=1.0,
+        min_exclusive=True,
+    ),
+    "total_epochs": _NumericParamSpec(
+        section="training",
+        default=1,
+        min_value=1,
+        max_value=10_000,
+    ),
+    "n_samples_per_prompt": _NumericParamSpec(
+        section="training",
+        default=8,
+        min_value=1,
+        max_value=1_024,
+    ),
+    "rollout_batch_size": _NumericParamSpec(
+        section="training",
+        default=64,
+        min_value=1,
+        max_value=1_000_000,
+    ),
+    "max_prompt_length": _NumericParamSpec(
+        section="training",
+        default=8_192,
+        min_value=1,
+        max_value=262_144,
+    ),
+    "max_response_length": _NumericParamSpec(
+        section="training",
+        default=8_192,
+        min_value=1,
+        max_value=262_144,
+    ),
+    "agent_workflow_timeout_s": _NumericParamSpec(
+        section="training",
+        default=450,
+        min_value=1,
+        max_value=86_400,
+    ),
+    "grader_timeout_s": _NumericParamSpec(
+        section="training",
+        default=150,
+        min_value=1,
+        max_value=86_400,
+    ),
+    "rollout_temperature": _NumericParamSpec(
+        section="sampling",
+        default=1.0,
+        min_value=0.0,
+        max_value=2.0,
+    ),
+    "rollout_top_p": _NumericParamSpec(
+        section="sampling",
+        default=1.0,
+        min_value=0.0,
+        max_value=1.0,
+    ),
+    "eval_interval": _NumericParamSpec(
+        section="checkpoints",
+        default=None,
+        min_value=1,
+        max_value=1_000_000,
+    ),
+    "checkpoint_save_freq": _NumericParamSpec(
+        section="checkpoints",
+        default=20,
+        min_value=1,
+        max_value=1_000_000,
+    ),
+}
 
 
 class _ExperimentSection(BaseModel):
@@ -69,6 +156,62 @@ class _RolloutSection(BaseModel):
 
     env: dict[str, str] = Field(default_factory=dict)
     secrets: dict[str, str] = Field(default_factory=dict)
+
+
+def _format_bound(value: int | float) -> str:
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    return str(value)
+
+
+def _validate_numeric_param(
+    *,
+    name: str,
+    value: int | float | None,
+    spec: _NumericParamSpec,
+    path: Path,
+) -> None:
+    if value is None:
+        return
+
+    lower_ok = value > spec.min_value if spec.min_exclusive else value >= spec.min_value
+    upper_ok = value <= spec.max_value
+    if lower_ok and upper_ok:
+        return
+
+    min_operator = ">" if spec.min_exclusive else ">="
+    raise CLIError(
+        f"{name} in [{spec.section}] of {path} must be "
+        f"{min_operator} {_format_bound(spec.min_value)} and "
+        f"<= {_format_bound(spec.max_value)}, got {value}"
+    )
+
+
+def _validate_training_params(
+    params: dict[str, int | float | None], path: Path
+) -> None:
+    for name, spec in _TRAINING_PARAM_SPECS.items():
+        _validate_numeric_param(name=name, value=params[name], spec=spec, path=path)
+
+    if params["rollout_batch_size"] is None or params["n_samples_per_prompt"] is None:
+        raise CLIError("rollout_batch_size and n_samples_per_prompt must both be set")
+
+
+def _build_training_params(
+    *,
+    training: _TrainingSection,
+    sampling: _SamplingSection,
+    checkpoints: _CheckpointsSection,
+    path: Path,
+) -> dict[str, int | float | None]:
+    params = {name: spec.default for name, spec in _TRAINING_PARAM_SPECS.items()}
+    for section in (training, sampling, checkpoints):
+        for key, value in section.model_dump().items():
+            if value is not None:
+                params[key] = value
+
+    _validate_training_params(params, path)
+    return params
 
 
 class TrainingConfig(BaseModel):
@@ -189,14 +332,12 @@ def load_training_config(path: Path) -> TrainingConfig:
 
     _validate_rollout_env_keys(env=rollout.env, secrets=rollout.secrets, path=path)
 
-    # ── Cross-field validation ───────────────────────────────────
-    if training.n_samples_per_prompt is not None and training.n_samples_per_prompt <= 0:
-        raise CLIError(
-            f"n_samples_per_prompt must be a positive integer, "
-            f"got {training.n_samples_per_prompt} in {path}"
-        )
-    if training.rollout_batch_size is None or training.n_samples_per_prompt is None:
-        raise CLIError("rollout_batch_size and n_samples_per_prompt must both be set")
+    params = _build_training_params(
+        training=training,
+        sampling=sampling,
+        checkpoints=checkpoints,
+        path=path,
+    )
 
     return TrainingConfig(
         experiment_rollout=experiment.rollout,
@@ -204,18 +345,18 @@ def load_training_config(path: Path) -> TrainingConfig:
         experiment_model_path=experiment.model_path,
         experiment_dataset=experiment.dataset,
         experiment_commit_sha=experiment.commit_sha,
-        training_lr=training.lr,
-        training_total_epochs=training.total_epochs,
-        training_n_samples_per_prompt=training.n_samples_per_prompt,
-        training_rollout_batch_size=training.rollout_batch_size,
-        training_max_prompt_length=training.max_prompt_length,
-        training_max_response_length=training.max_response_length,
-        training_agent_workflow_timeout_s=training.agent_workflow_timeout_s,
-        training_grader_timeout_s=training.grader_timeout_s,
-        sampling_rollout_temperature=sampling.rollout_temperature,
-        sampling_rollout_top_p=sampling.rollout_top_p,
-        checkpoints_eval_interval=checkpoints.eval_interval,
-        checkpoints_checkpoint_save_freq=checkpoints.checkpoint_save_freq,
+        training_lr=params["lr"],
+        training_total_epochs=params["total_epochs"],
+        training_n_samples_per_prompt=params["n_samples_per_prompt"],
+        training_rollout_batch_size=params["rollout_batch_size"],
+        training_max_prompt_length=params["max_prompt_length"],
+        training_max_response_length=params["max_response_length"],
+        training_agent_workflow_timeout_s=params["agent_workflow_timeout_s"],
+        training_grader_timeout_s=params["grader_timeout_s"],
+        sampling_rollout_temperature=params["rollout_temperature"],
+        sampling_rollout_top_p=params["rollout_top_p"],
+        checkpoints_eval_interval=params["eval_interval"],
+        checkpoints_checkpoint_save_freq=params["checkpoint_save_freq"],
         rollout_env=dict(rollout.env),
         rollout_secret_refs=dict(rollout.secrets),
     )
