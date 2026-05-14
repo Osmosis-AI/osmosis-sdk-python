@@ -170,13 +170,13 @@ def _register_commands() -> None:
     if _registered:
         return
     _registered = True
-    # ``add_completion=False`` only hides install/show options; shell completion
-    # still reaches the CLI through Typer's completion environment variables.
-    # Register Typer's public completion hooks so zsh/fish use their expected
-    # env contract instead of Click's COMP_WORDS-based default.
-    from typer.completion import completion_init
+    # Typer's documented ``add_completion=True`` path initializes shell classes
+    # through this public helper, but also exposes install/show completion
+    # options. Keep those options hidden while preserving Typer's zsh/fish env
+    # contract instead of Click's COMP_WORDS-based default.
+    from typer.completion import get_completion_inspect_parameters
 
-    completion_init()
+    get_completion_inspect_parameters()
     # -- Command groups --
     from osmosis_ai.cli.commands.auth import app as auth_app
     from osmosis_ai.cli.commands.dataset import app as dataset_app

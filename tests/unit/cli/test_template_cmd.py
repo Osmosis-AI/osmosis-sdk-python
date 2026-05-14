@@ -146,7 +146,9 @@ def test_completion_registration_uses_public_typer_api() -> None:
     main_source = Path(cli.__file__).read_text(encoding="utf-8")
 
     assert "typer._completion_classes" not in main_source
-    assert "from typer.completion import completion_init" in main_source
+    assert (
+        "from typer.completion import get_completion_inspect_parameters" in main_source
+    )
 
 
 # ── apply ────────────────────────────────────────────────────────
