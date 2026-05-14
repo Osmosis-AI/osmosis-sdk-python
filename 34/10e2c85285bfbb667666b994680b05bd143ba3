@@ -1,0 +1,21 @@
+tests/unit/templates/test_cli.py
+  s_f784ae5966447f::t_3d021241db5b69 230
+osmosis_ai/templates/cli.py
+  s_f784ae5966447f::t_a5902bab8dd048 129
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "3410e2c85285bfbb667666b994680b05bd143ba3",
+  "prompts": {},
+  "sessions": {
+    "s_f784ae5966447f": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "4972846f-78e8-4856-83b3-b7873ca37680",
+        "model": "gpt-5.5-extra-high"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}
