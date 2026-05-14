@@ -78,44 +78,31 @@ def validate_project(path: Any) -> Any:
 
 def doctor_project(*, fix: bool = False, yes: bool = False) -> Any:
     """Inspect and optionally repair the canonical project scaffold."""
-    from osmosis_ai.cli.output import OperationResult, OutputFormat, get_output_context
-    from osmosis_ai.cli.prompts import confirm
+    from osmosis_ai.cli.output import OperationResult
     from osmosis_ai.platform.cli.project_contract import resolve_project_root_from_cwd
     from osmosis_ai.platform.cli.scaffold import (
-        AGENT_REFRESH_PATHS,
-        SCAFFOLD,
+        official_scaffold_updates,
         write_scaffold,
     )
 
+    del yes
     project_root = resolve_project_root_from_cwd()
     missing = _missing_scaffold_paths(project_root)
-    refreshed = [
-        entry.dest
-        for entry in SCAFFOLD
-        if entry.dest in AGENT_REFRESH_PATHS and (project_root / entry.dest).exists()
-    ]
 
     if fix:
-        output = get_output_context()
-        if (
-            refreshed
-            and not yes
-            and (output.format is not OutputFormat.rich or not output.interactive)
-        ):
-            raise CLIError(
-                "Use --yes to refresh agent scaffold in non-interactive mode.",
-                code="INTERACTIVE_REQUIRED",
-            )
-        refresh_agents = bool(refreshed)
-        if (
-            refreshed
-            and not yes
-            and not confirm("Refresh agent scaffold files?", default=False)
-        ):
-            refreshed = []
-            refresh_agents = False
-        write_scaffold(project_root, project_root.name, update=refresh_agents)
+        write_scaffold(project_root, project_root.name)
         missing = _missing_scaffold_paths(project_root)
+
+    updates_available = official_scaffold_updates(project_root)
+    next_steps = (
+        [
+            f"Official scaffold updates available for: {', '.join(updates_available)}",
+            "Review local edits, then run `osmosis project refresh-agents --force` "
+            "to replace official scaffold files.",
+        ]
+        if updates_available
+        else []
+    )
 
     return OperationResult(
         operation="project.doctor",
@@ -123,18 +110,36 @@ def doctor_project(*, fix: bool = False, yes: bool = False) -> Any:
         resource={
             "project_root": str(project_root),
             "missing": missing,
-            "refreshed": refreshed if fix else [],
+            "updates_available": updates_available,
             "fixed": fix,
         },
         message="Project doctor completed.",
+        display_next_steps=next_steps,
+    )
+
+
+def refresh_agent_files(*, force: bool = False) -> Any:
+    """Refresh official agent scaffold files in the current project."""
+    from osmosis_ai.cli.output import OperationResult
+    from osmosis_ai.platform.cli.project_contract import resolve_project_root_from_cwd
+    from osmosis_ai.platform.cli.scaffold import refresh_agent_scaffold
+
+    project_root = resolve_project_root_from_cwd()
+    result = refresh_agent_scaffold(project_root, force=force)
+    return OperationResult(
+        operation="project.refresh_agents",
+        status="success",
+        resource={"project_root": str(project_root), **result},
+        message="Project agent scaffold refresh completed.",
     )
 
 
 def _missing_scaffold_paths(project_root: Path) -> list[str]:
-    from osmosis_ai.platform.cli.scaffold import SCAFFOLD
+    from osmosis_ai.platform.cli.scaffold import load_scaffold_entries
 
+    scaffold, _agent_refresh_paths = load_scaffold_entries()
     return [
-        entry.dest for entry in SCAFFOLD if not (project_root / entry.dest).exists()
+        entry.dest for entry in scaffold if not (project_root / entry.dest).exists()
     ]
 
 
@@ -460,6 +465,7 @@ __all__ = [
     "CONFIG_FILE",
     "doctor_project",
     "link_project",
+    "refresh_agent_files",
     "unlink_project",
     "validate_project",
 ]

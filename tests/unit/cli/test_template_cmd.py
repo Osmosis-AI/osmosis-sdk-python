@@ -5,7 +5,37 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from osmosis_ai.cli import main as cli
+
+
+def _write_workspace_template(root: Path) -> Path:
+    """Create a minimal workspace-template checkout for CLI contract tests."""
+    rollout_root = root / "rollouts" / "multiply-local-strands"
+    rollout_root.mkdir(parents=True)
+    (rollout_root / "main.py").write_text("# rollout\n", encoding="utf-8")
+    (rollout_root / "pyproject.toml").write_text(
+        "[project]\nname = 'multiply-local-strands'\n", encoding="utf-8"
+    )
+    (root / "configs" / "eval").mkdir(parents=True)
+    (root / "configs" / "eval" / "multiply-local-strands.toml").write_text(
+        "[eval]\n", encoding="utf-8"
+    )
+    (root / "configs" / "training").mkdir(parents=True)
+    (root / "configs" / "training" / "multiply-local-strands.toml").write_text(
+        "[experiment]\n", encoding="utf-8"
+    )
+    (root / "data").mkdir()
+    (root / "data" / "multiply.jsonl").write_text("{}\n", encoding="utf-8")
+    return root
+
+
+@pytest.fixture
+def workspace_template(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    root = _write_workspace_template(tmp_path / "workspace-template")
+    monkeypatch.setenv("OSMOSIS_WORKSPACE_TEMPLATE_PATH", str(root))
+    return root
 
 
 def _make_project(root: Path) -> Path:
@@ -32,7 +62,7 @@ def test_template_help_lists_subcommands(capfd) -> None:
 # ── list ─────────────────────────────────────────────────────────
 
 
-def test_template_list_json_returns_items_envelope(capsys) -> None:
+def test_template_list_json_returns_items_envelope(capsys, workspace_template) -> None:
     rc = cli.main(["--json", "template", "list"])
     captured = capsys.readouterr()
 
@@ -40,21 +70,23 @@ def test_template_list_json_returns_items_envelope(capsys) -> None:
     payload = json.loads(captured.out)
     assert payload["schema_version"] == 1
     names = [item["name"] for item in payload["items"]]
-    assert "multiply" in names
+    assert "multiply-local-strands" in names
     assert payload["total_count"] == len(names)
     assert payload["has_more"] is False
 
 
-def test_template_list_plain_emits_one_name_per_line(capsys) -> None:
+def test_template_list_plain_emits_one_name_per_line(
+    capsys, workspace_template
+) -> None:
     rc = cli.main(["--plain", "template", "list"])
     captured = capsys.readouterr()
 
     assert rc == 0
     lines = [line for line in captured.out.splitlines() if line.strip()]
-    assert "multiply" in lines
+    assert "multiply-local-strands" in lines
 
 
-def test_template_list_rich_exits_zero() -> None:
+def test_template_list_rich_exits_zero(workspace_template) -> None:
     # Rich-mode output goes through the shared Console (which caches
     # sys.stdout at module import) so capsys/capfd can't reliably observe
     # it; assert the contract by exit code and rely on the JSON/plain
@@ -67,12 +99,12 @@ def test_template_list_rich_exits_zero() -> None:
 
 
 def test_template_apply_json_writes_into_project_canonical_layout(
-    monkeypatch, tmp_path, capsys
+    monkeypatch, tmp_path, capsys, workspace_template
 ) -> None:
     project_root = _make_project(tmp_path)
     monkeypatch.chdir(project_root)
 
-    rc = cli.main(["--json", "template", "apply", "multiply"])
+    rc = cli.main(["--json", "template", "apply", "multiply-local-strands"])
     captured = capsys.readouterr()
 
     assert rc == 0
@@ -80,52 +112,55 @@ def test_template_apply_json_writes_into_project_canonical_layout(
     assert payload["schema_version"] == 1
     assert payload["status"] == "success"
     assert payload["operation"] == "template.apply"
-    assert payload["resource"]["name"] == "multiply"
+    assert payload["resource"]["name"] == "multiply-local-strands"
     files = payload["resource"]["files"]
-    assert "rollouts/multiply/main.py" in files
-    assert "rollouts/multiply/pyproject.toml" in files
-    assert "configs/eval/multiply.toml" in files
+    assert "rollouts/multiply-local-strands/main.py" in files
+    assert "rollouts/multiply-local-strands/pyproject.toml" in files
+    assert "configs/eval/multiply-local-strands.toml" in files
+    assert "configs/training/multiply-local-strands.toml" in files
+    assert "data/multiply.jsonl" in files
 
-    assert (project_root / "rollouts" / "multiply" / "main.py").is_file()
-    assert (project_root / "configs" / "eval" / "multiply.toml").is_file()
+    assert (project_root / "rollouts" / "multiply-local-strands" / "main.py").is_file()
+    assert (project_root / "configs" / "eval" / "multiply-local-strands.toml").is_file()
+    assert (project_root / "data" / "multiply.jsonl").is_file()
     # The legacy staging directory must NOT be created.
     assert not (project_root / "templates").exists()
 
 
 def test_template_apply_refuses_overwrite_without_force(
-    monkeypatch, tmp_path, capsys
+    monkeypatch, tmp_path, capsys, workspace_template
 ) -> None:
     project_root = _make_project(tmp_path)
     monkeypatch.chdir(project_root)
 
-    rollout_root = project_root / "rollouts" / "multiply"
+    rollout_root = project_root / "rollouts" / "multiply-local-strands"
     rollout_root.mkdir(parents=True)
     (rollout_root / "main.py").write_text("# user\n", encoding="utf-8")
 
-    rc = cli.main(["--json", "template", "apply", "multiply"])
+    rc = cli.main(["--json", "template", "apply", "multiply-local-strands"])
     captured = capsys.readouterr()
 
     assert rc != 0
     err = json.loads(captured.err)
     assert err["error"]["code"] == "CONFLICT"
-    assert "rollouts/multiply/" in err["error"]["message"]
+    assert "rollouts/multiply-local-strands/" in err["error"]["message"]
     assert "--force" in err["error"]["message"]
     # User edits left intact.
     assert (rollout_root / "main.py").read_text(encoding="utf-8") == "# user\n"
 
 
 def test_template_apply_force_overwrites_existing_rollout(
-    monkeypatch, tmp_path
+    monkeypatch, tmp_path, workspace_template
 ) -> None:
     project_root = _make_project(tmp_path)
     monkeypatch.chdir(project_root)
 
-    rollout_root = project_root / "rollouts" / "multiply"
+    rollout_root = project_root / "rollouts" / "multiply-local-strands"
     rollout_root.mkdir(parents=True)
     stale = rollout_root / "STALE.txt"
     stale.write_text("stale", encoding="utf-8")
 
-    rc = cli.main(["--json", "template", "apply", "multiply", "--force"])
+    rc = cli.main(["--json", "template", "apply", "multiply-local-strands", "--force"])
 
     assert rc == 0
     assert not stale.exists()
@@ -133,7 +168,7 @@ def test_template_apply_force_overwrites_existing_rollout(
 
 
 def test_template_apply_unknown_template_returns_not_found_in_json(
-    monkeypatch, tmp_path, capsys
+    monkeypatch, tmp_path, capsys, workspace_template
 ) -> None:
     project_root = _make_project(tmp_path)
     monkeypatch.chdir(project_root)

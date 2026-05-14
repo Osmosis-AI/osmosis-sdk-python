@@ -1,13 +1,13 @@
 """Business logic for ``osmosis template`` commands.
 
-Templates are local cookbook recipes copied directly into the canonical
-project layout for ``eval run`` and ``train submit``.
+Recipes are read from the SDK-owned catalog and copied from the public
+workspace template into the canonical project layout for ``eval run`` and
+``train submit``.
 """
 
 from __future__ import annotations
 
 import shutil
-from importlib.resources import as_file
 from pathlib import Path
 
 from osmosis_ai.cli.console import console
@@ -22,9 +22,11 @@ from osmosis_ai.cli.output import (
 )
 from osmosis_ai.templates.registry import (
     TemplateNotFoundError,
+    iter_template_files,
     list_templates,
-    template_path,
+    template_recipe,
 )
+from osmosis_ai.templates.source import workspace_template_root
 
 
 def _require_project_root() -> Path:
@@ -40,7 +42,7 @@ def _format_unknown_template(name: str) -> CLIError:
         listing = ", ".join(available)
         hint = f"Available templates: {listing}."
     else:
-        hint = "No templates are currently bundled with this SDK release."
+        hint = "No recipes are currently available from the workspace template."
     return CLIError(
         f"Template '{name}' not found. {hint}",
         code="NOT_FOUND",
@@ -51,14 +53,14 @@ def _format_unknown_template(name: str) -> CLIError:
 
 
 def list_command() -> CommandResult | None:
-    """List bundled cookbook templates."""
+    """List workspace template recipes."""
     names = list_templates()
 
     output = get_output_context()
     if output.format is OutputFormat.rich:
         if not names:
             console.print(
-                "No templates are bundled with this SDK release.",
+                "No recipes are currently available from the workspace template.",
                 style="dim",
             )
             return None
@@ -79,26 +81,12 @@ def list_command() -> CommandResult | None:
 # ── osmosis template apply <name> ────────────────────────────────
 
 
-def _iter_template_files(concrete_root: Path) -> list[tuple[Path, Path]]:
-    """List files under a concrete template root."""
-    pairs: list[tuple[Path, Path]] = []
-    for src_path in sorted(concrete_root.rglob("*")):
-        if not src_path.is_file():
-            continue
-        pairs.append((src_path, src_path.relative_to(concrete_root)))
-    return pairs
-
-
-def _rollout_dest_dirs(concrete_root: Path, project_root: Path) -> list[Path]:
-    """List rollout directories this template writes."""
-    rollouts_src = concrete_root / "rollouts"
-    if not rollouts_src.is_dir():
-        return []
-    dests: list[Path] = []
-    for rollout_dir in sorted(rollouts_src.iterdir()):
-        if rollout_dir.is_dir():
-            dests.append(project_root / "rollouts" / rollout_dir.name)
-    return dests
+def _is_under(path: Path, directory: Path) -> bool:
+    try:
+        path.relative_to(directory)
+    except ValueError:
+        return False
+    return True
 
 
 def _ensure_within_project(dest: Path, project_root: Path) -> None:
@@ -124,6 +112,12 @@ def _format_conflicts(conflicts: list[str], name: str) -> CLIError:
 
 def _next_steps(name: str) -> list[str]:
     """Commands to run after applying a template."""
+    try:
+        recipe = template_recipe(name)
+    except TemplateNotFoundError:
+        recipe = None
+    if recipe is not None and recipe.next_steps:
+        return list(recipe.next_steps)
     return [
         f"pip install -e rollouts/{name}",
         f"osmosis eval run configs/eval/{name}.toml --limit 1",
@@ -141,72 +135,66 @@ def _copy_template(
 ) -> tuple[list[Path], list[str]]:
     """Copy template files and return destinations plus written paths."""
     try:
-        src_resource = template_path(name)
+        recipe = template_recipe(name)
     except TemplateNotFoundError as exc:
         raise _format_unknown_template(name) from exc
 
     project_root_resolved = project_root.resolve()
     written: list[str] = []
+    template_root = workspace_template_root()
+    file_rels = iter_template_files(name)
+    owned_dests = [project_root_resolved / rel for rel in recipe.owned_dirs]
 
-    with as_file(src_resource) as concrete_src:
-        concrete_root = Path(concrete_src)
-        file_pairs = _iter_template_files(concrete_root)
-        rollout_dests = _rollout_dest_dirs(concrete_root, project_root_resolved)
+    # Containment guard upfront.
+    for rel in file_rels:
+        _ensure_within_project(project_root_resolved / rel, project_root_resolved)
+    for owned_dest in owned_dests:
+        _ensure_within_project(owned_dest, project_root_resolved)
 
-        # Containment guard upfront.
-        for _src, rel in file_pairs:
-            _ensure_within_project(project_root_resolved / rel, project_root_resolved)
-        for rollout_dest in rollout_dests:
-            _ensure_within_project(rollout_dest, project_root_resolved)
-
-        if not force:
-            conflicts: list[str] = []
-            for rollout_dest in rollout_dests:
-                if rollout_dest.exists():
-                    conflicts.append(
-                        rollout_dest.relative_to(project_root_resolved).as_posix() + "/"
-                    )
-            for _src, rel in file_pairs:
-                # Files inside a rollout dir are already covered by the
-                # whole-directory conflict above; surface only "loose" files
-                # (configs/, top-level metadata) so the message stays focused.
-                if rel.parts and rel.parts[0] == "rollouts":
-                    continue
-                if (project_root_resolved / rel).exists():
-                    conflicts.append(rel.as_posix())
-            if conflicts:
-                raise _format_conflicts(conflicts, name)
-
-        # Reset rollout dirs wholesale: the template owns these directories.
-        for rollout_dest in rollout_dests:
-            if rollout_dest.exists():
-                shutil.rmtree(rollout_dest)
-
-        # Copy every template file into the project root.
-        for src_path, rel in file_pairs:
+    if not force:
+        conflicts: list[str] = []
+        for owned_dest in owned_dests:
+            if owned_dest.exists():
+                conflicts.append(
+                    owned_dest.relative_to(project_root_resolved).as_posix() + "/"
+                )
+        for rel in file_rels:
             dest = project_root_resolved / rel
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(src_path, dest)
-            written.append(rel.as_posix())
-
-        # Top-level destinations: rollout dirs + the unique parent dirs of
-        # any non-rollout files (typically ``configs/training``,
-        # ``configs/eval``). Used for human-readable output only.
-        top_level: list[Path] = list(rollout_dests)
-        seen: set[Path] = set(top_level)
-        for _src, rel in file_pairs:
-            if rel.parts and rel.parts[0] == "rollouts":
+            if any(_is_under(dest, owned_dest) for owned_dest in owned_dests):
                 continue
-            parent = (project_root_resolved / rel).parent
-            if parent not in seen:
-                seen.add(parent)
-                top_level.append(parent)
+            if dest.exists():
+                conflicts.append(rel.as_posix())
+        if conflicts:
+            raise _format_conflicts(conflicts, name)
+
+    # Reset only SDK-catalog-owned directories wholesale.
+    for owned_dest in owned_dests:
+        if owned_dest.exists():
+            shutil.rmtree(owned_dest)
+
+    for rel in file_rels:
+        src = template_root / rel
+        dest = project_root_resolved / rel
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dest)
+        written.append(rel.as_posix())
+
+    top_level: list[Path] = list(owned_dests)
+    seen: set[Path] = set(top_level)
+    for rel in file_rels:
+        dest = project_root_resolved / rel
+        if any(_is_under(dest, owned_dest) for owned_dest in owned_dests):
+            continue
+        parent = dest.parent
+        if parent not in seen:
+            seen.add(parent)
+            top_level.append(parent)
 
     return top_level, written
 
 
 def apply_command(name: str, *, force: bool = False) -> CommandResult | None:
-    """Apply a cookbook template into the active project's canonical layout."""
+    """Apply a workspace template recipe into the active project layout."""
     project_root = _require_project_root()
     destinations, written = _copy_template(name, project_root, force=force)
 

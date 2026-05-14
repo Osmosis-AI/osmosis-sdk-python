@@ -11,14 +11,14 @@ from typing import Any
 import typer
 
 app: typer.Typer = typer.Typer(
-    help="Add starter templates into your Osmosis project.",
+    help="Add workspace template recipes into your Osmosis project.",
     no_args_is_help=True,
 )
 
 
 @app.command("list")
 def list_templates() -> Any:
-    """List bundled cookbook templates."""
+    """List workspace template recipes."""
     from osmosis_ai.templates.cli import list_command
 
     return list_command()
@@ -39,7 +39,7 @@ def apply(
         ),
     ),
 ) -> Any:
-    """Copy a bundled template directly into the project's canonical layout.
+    """Copy a workspace template recipe into the project's canonical layout.
 
     Files land at ``rollouts/<name>/`` and ``configs/{training,eval}/<name>.toml``
     so the rollout is immediately runnable.
