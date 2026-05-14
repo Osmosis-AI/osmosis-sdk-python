@@ -35,19 +35,28 @@ def doctor(
     fix: bool = typer.Option(
         False,
         "--fix",
-        help="Create missing scaffold paths and refresh agent scaffold files.",
-    ),
-    yes: bool = typer.Option(
-        False,
-        "--yes",
-        "-y",
-        help="Confirm scaffold refresh without prompting.",
+        help="Create missing scaffold paths. Existing files are never overwritten.",
     ),
 ) -> Any:
     """Inspect and optionally repair the canonical project scaffold."""
     from osmosis_ai.platform.cli.project import doctor_project
 
-    return doctor_project(fix=fix, yes=yes)
+    return doctor_project(fix=fix)
+
+
+@app.command("refresh-agents")
+def refresh_agents(
+    force: bool = typer.Option(
+        False,
+        "--force",
+        "-f",
+        help="Overwrite local edits in official agent scaffold files.",
+    ),
+) -> Any:
+    """Refresh official agent scaffold files after reviewing local edits."""
+    from osmosis_ai.platform.cli.project import refresh_agent_files
+
+    return refresh_agent_files(force=force)
 
 
 @app.command("link")
