@@ -76,7 +76,7 @@ def validate_project(path: Any) -> Any:
     )
 
 
-def doctor_project(*, fix: bool = False, yes: bool = False) -> Any:
+def doctor_project(*, fix: bool = False) -> Any:
     """Inspect and optionally repair the canonical project scaffold."""
     from osmosis_ai.cli.output import OperationResult
     from osmosis_ai.platform.cli.project_contract import resolve_project_root_from_cwd
@@ -85,7 +85,6 @@ def doctor_project(*, fix: bool = False, yes: bool = False) -> Any:
         write_scaffold,
     )
 
-    del yes
     project_root = resolve_project_root_from_cwd()
     missing = _missing_scaffold_paths(project_root)
 

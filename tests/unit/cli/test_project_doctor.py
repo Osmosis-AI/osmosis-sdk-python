@@ -70,13 +70,27 @@ def test_project_doctor_dry_run_does_not_require_workspace_template(
     assert "AGENTS.md" in payload["resource"]["missing"]
 
 
+def test_project_doctor_rejects_yes_option(tmp_path: Path, monkeypatch, capsys) -> None:
+    project = _make_project(tmp_path / "project")
+    monkeypatch.chdir(project)
+
+    rc = main(["--json", "project", "doctor", "--yes"])
+
+    captured = capsys.readouterr()
+    assert rc == 2
+    assert captured.out == ""
+    error = json.loads(captured.err)["error"]
+    assert error["code"] == "VALIDATION"
+    assert "--yes" in error["message"]
+
+
 def test_project_doctor_fix_creates_missing_paths(
     tmp_path: Path, monkeypatch, capsys, workspace_template: Path
 ) -> None:
     project = _make_project(tmp_path / "project")
     monkeypatch.chdir(project)
 
-    rc = main(["--json", "project", "doctor", "--fix", "--yes"])
+    rc = main(["--json", "project", "doctor", "--fix"])
 
     payload = json.loads(capsys.readouterr().out)
     assert rc == 0
@@ -92,7 +106,7 @@ def test_project_doctor_fix_outside_project_does_not_create_project(
 ) -> None:
     monkeypatch.chdir(tmp_path)
 
-    rc = main(["--json", "project", "doctor", "--fix", "--yes"])
+    rc = main(["--json", "project", "doctor", "--fix"])
 
     captured = capsys.readouterr()
     assert rc == 1
@@ -113,7 +127,7 @@ def test_project_doctor_fix_preserves_existing_research_program(
     program.write_text("# Research Brief\n\nKeep this content.\n", encoding="utf-8")
     monkeypatch.chdir(project)
 
-    rc = main(["--json", "project", "doctor", "--fix", "--yes"])
+    rc = main(["--json", "project", "doctor", "--fix"])
 
     capsys.readouterr()
     assert rc == 0
@@ -134,7 +148,7 @@ def test_project_doctor_reports_agent_updates_without_overwriting(
     monkeypatch.chdir(project)
 
     with override_output_context(format=OutputFormat.rich, interactive=True):
-        result = doctor_project(fix=True, yes=False)
+        result = doctor_project(fix=True)
 
     assert (project / "AGENTS.md").read_text(encoding="utf-8") == "custom agents"
     assert (project / "configs" / "training").is_dir()

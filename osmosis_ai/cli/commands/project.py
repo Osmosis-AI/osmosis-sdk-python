@@ -37,17 +37,11 @@ def doctor(
         "--fix",
         help="Create missing scaffold paths. Existing files are never overwritten.",
     ),
-    yes: bool = typer.Option(
-        False,
-        "--yes",
-        "-y",
-        help="Confirm scaffold refresh without prompting.",
-    ),
 ) -> Any:
     """Inspect and optionally repair the canonical project scaffold."""
     from osmosis_ai.platform.cli.project import doctor_project
 
-    return doctor_project(fix=fix, yes=yes)
+    return doctor_project(fix=fix)
 
 
 @app.command("refresh-agents")
