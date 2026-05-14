@@ -93,15 +93,6 @@ def doctor_project(*, fix: bool = False) -> Any:
         missing = _missing_scaffold_paths(project_root)
 
     updates_available = official_scaffold_updates(project_root) if fix else []
-    next_steps = (
-        [
-            f"Official scaffold updates available for: {', '.join(updates_available)}",
-            "Review local edits, then run `osmosis project refresh-agents --force` "
-            "to replace official scaffold files.",
-        ]
-        if updates_available
-        else []
-    )
 
     return OperationResult(
         operation="project.doctor",
@@ -113,7 +104,12 @@ def doctor_project(*, fix: bool = False) -> Any:
             "fixed": fix,
         },
         message="Project doctor completed.",
-        display_next_steps=next_steps,
+        display_next_steps=_doctor_display_lines(
+            project_root=project_root,
+            missing=missing,
+            updates_available=updates_available,
+            fixed=fix,
+        ),
     )
 
 
@@ -147,13 +143,50 @@ def _agent_refresh_display_lines(result: dict[str, list[str]]) -> list[str]:
     return lines
 
 
+def _doctor_display_lines(
+    *,
+    project_root: Path,
+    missing: list[str],
+    updates_available: list[str],
+    fixed: bool,
+) -> list[str]:
+    lines = [f"Project root: {project_root}"]
+    if missing:
+        lines.append("Missing scaffold paths:")
+        lines.extend(f"  - {path}" for path in missing)
+        if not fixed:
+            lines.append(
+                "Run `osmosis project doctor --fix` to create missing scaffold paths."
+            )
+    else:
+        lines.append("No missing scaffold paths.")
+
+    if updates_available:
+        lines.append(
+            f"Official scaffold updates available for: {', '.join(updates_available)}"
+        )
+        lines.append(
+            "Review local edits, then run `osmosis project refresh-agents --force` "
+            "to replace official scaffold files."
+        )
+    return lines
+
+
 def _missing_scaffold_paths(project_root: Path) -> list[str]:
     from osmosis_ai.platform.cli.scaffold import load_scaffold_entries
 
     scaffold, _agent_refresh_paths = load_scaffold_entries()
-    return [
-        entry.dest for entry in scaffold if not (project_root / entry.dest).exists()
-    ]
+    missing: list[str] = []
+    for entry in scaffold:
+        rel_path = Path(entry.dest)
+        if rel_path.name == ".gitkeep":
+            directory = rel_path.parent
+            if not (project_root / directory).is_dir():
+                missing.append(f"{directory.as_posix()}/")
+            continue
+        if not (project_root / entry.dest).exists():
+            missing.append(entry.dest)
+    return missing
 
 
 def _workspace_summary(workspace: dict[str, Any]) -> dict[str, Any]:

@@ -43,10 +43,46 @@ def test_project_doctor_dry_run_reports_missing_paths(
 
     assert rc == 0
     payload = json.loads(capsys.readouterr().out)
-    assert "rollouts/.gitkeep" in payload["resource"]["missing"]
+    assert "rollouts/" in payload["resource"]["missing"]
+    assert "rollouts/.gitkeep" not in payload["resource"]["missing"]
     assert "AGENTS.md" in payload["resource"]["missing"]
     assert payload["resource"]["fixed"] is False
     assert not (project / ".osmosis" / "research" / "program.md").exists()
+
+
+def test_project_doctor_does_not_report_missing_gitkeep_for_existing_directory(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    project = _make_project(tmp_path / "project")
+    (project / "rollouts").mkdir()
+    monkeypatch.chdir(project)
+
+    rc = main(["--json", "project", "doctor"])
+
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert "rollouts/" not in payload["resource"]["missing"]
+    assert "rollouts/.gitkeep" not in payload["resource"]["missing"]
+
+
+def test_project_doctor_plain_reports_actionable_summary(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    project = _make_project(tmp_path / "project")
+    monkeypatch.chdir(project)
+
+    rc = main(["--plain", "project", "doctor"])
+
+    assert rc == 0
+    output = capsys.readouterr().out
+    assert "Project doctor completed." in output
+    assert f"Project root: {project}" in output
+    assert "Missing scaffold paths:" in output
+    assert "rollouts/" in output
+    assert ".gitkeep" not in output
+    assert (
+        "Run `osmosis project doctor --fix` to create missing scaffold paths." in output
+    )
 
 
 def test_project_doctor_dry_run_does_not_require_workspace_template(
