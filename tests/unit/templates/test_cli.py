@@ -227,6 +227,7 @@ def test_apply_command_force_rejects_file_at_owned_directory_path(
 
     assert exc_info.value.code == "CONFLICT"
     assert "rollouts/multiply-local-strands" in str(exc_info.value)
+    assert "`--force` only replaces existing directories" in str(exc_info.value)
     assert rollout_root.read_text(encoding="utf-8") == "not a directory\n"
 
 

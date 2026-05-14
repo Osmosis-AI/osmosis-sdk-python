@@ -126,7 +126,7 @@ def _format_blocked_owned_paths(blocked_paths: list[str]) -> CLIError:
     return CLIError(
         "Refusing to replace non-directory template-owned paths:\n"
         f"  {listing}\n"
-        "\nMove or replace these paths before re-running with `--force`.",
+        "\nMove or replace these paths; `--force` only replaces existing directories.",
         code="CONFLICT",
     )
 
