@@ -1,0 +1,25 @@
+tests/unit/platform/cli/test_project_setup.py
+  s_e630805b5ee8d3::t_28669cfb0c0ea2 187-203
+osmosis_ai/platform/cli/scaffold.py
+  s_e630805b5ee8d3::t_2ee78fedaf0adc 139-140,145,152,163-169
+osmosis_ai/platform/cli/project.py
+  s_e630805b5ee8d3::t_f3c787de8c82fa 133,137-147
+tests/unit/cli/test_project_doctor.py
+  s_e630805b5ee8d3::t_1ae8b93913dd99 187-202
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "e1469a0638d32296d4b950d2422538b92714dc8a",
+  "prompts": {},
+  "sessions": {
+    "s_e630805b5ee8d3": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019e282a-b081-7830-a18a-7230d8e771a0",
+        "model": "gpt-5.5"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}
