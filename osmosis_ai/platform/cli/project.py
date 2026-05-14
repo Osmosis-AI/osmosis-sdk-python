@@ -130,7 +130,21 @@ def refresh_agent_files(*, force: bool = False) -> Any:
         status="success",
         resource={"project_root": str(project_root), **result},
         message="Project agent scaffold refresh completed.",
+        display_next_steps=_agent_refresh_display_lines(result),
     )
+
+
+def _agent_refresh_display_lines(result: dict[str, list[str]]) -> list[str]:
+    lines: list[str] = []
+    added = result.get("added", [])
+    refreshed = result.get("refreshed", [])
+    if added:
+        lines.append(f"Added: {', '.join(added)}")
+    if refreshed:
+        lines.append(f"Refreshed: {', '.join(refreshed)}")
+    if not lines:
+        lines.append("No agent scaffold files changed.")
+    return lines
 
 
 def _missing_scaffold_paths(project_root: Path) -> list[str]:

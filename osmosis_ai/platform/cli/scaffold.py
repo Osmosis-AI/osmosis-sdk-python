@@ -136,21 +136,20 @@ def refresh_agent_scaffold(
     added: list[str] = []
     refreshed: list[str] = []
     conflicts: list[str] = []
+    pending_adds: list[tuple[str, Path, str]] = []
+    pending_refreshes: list[tuple[str, Path, str]] = []
 
     for rel_path, content in official.items():
         path = project_root / rel_path
         if not path.exists():
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(content, encoding="utf-8")
-            added.append(rel_path)
+            pending_adds.append((rel_path, path, content))
             continue
         if path.read_text(encoding="utf-8") == content:
             continue
         if not force:
             conflicts.append(rel_path)
             continue
-        path.write_text(content, encoding="utf-8")
-        refreshed.append(rel_path)
+        pending_refreshes.append((rel_path, path, content))
 
     if conflicts:
         listing = "\n  ".join(conflicts)
@@ -161,6 +160,13 @@ def refresh_agent_scaffold(
             "your local changes.",
             code="CONFLICT",
         )
+    for rel_path, path, content in pending_adds:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+        added.append(rel_path)
+    for rel_path, path, content in pending_refreshes:
+        path.write_text(content, encoding="utf-8")
+        refreshed.append(rel_path)
     return {"added": added, "refreshed": refreshed}
 
 

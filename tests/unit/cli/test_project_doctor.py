@@ -184,3 +184,19 @@ def test_project_refresh_agents_force_overwrites_local_edits(
     assert rc == 0
     assert payload["resource"]["refreshed"] == ["AGENTS.md"]
     assert (project / "AGENTS.md").read_text(encoding="utf-8") == "template agents\n"
+
+
+def test_project_refresh_agents_plain_reports_changed_files(
+    tmp_path: Path, monkeypatch, capsys, workspace_template: Path
+) -> None:
+    project = _make_project(tmp_path / "project")
+    (project / "AGENTS.md").write_text("custom agents", encoding="utf-8")
+    monkeypatch.chdir(project)
+
+    rc = main(["--plain", "project", "refresh-agents", "--force"])
+
+    captured = capsys.readouterr()
+    assert rc == 0
+    assert "Project agent scaffold refresh completed." in captured.out
+    assert "Added: CLAUDE.md, configs/AGENTS.md, .claude/settings.json" in captured.out
+    assert "Refreshed: AGENTS.md" in captured.out

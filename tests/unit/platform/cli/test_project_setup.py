@@ -184,6 +184,23 @@ def test_refresh_agent_scaffold_refuses_local_edits_without_force(
     assert (target / "AGENTS.md").read_text(encoding="utf-8") == "custom agents"
 
 
+def test_refresh_agent_scaffold_does_not_add_missing_files_when_conflicts_exist(
+    tmp_path: Path,
+) -> None:
+    target = _make_existing_project(tmp_path / "project")
+    write_scaffold(target, "project")
+    (target / "AGENTS.md").unlink()
+    (target / "CLAUDE.md").write_text("custom claude", encoding="utf-8")
+
+    with pytest.raises(CLIError) as exc_info:
+        refresh_agent_scaffold(target)
+
+    assert exc_info.value.code == "CONFLICT"
+    assert "CLAUDE.md" in str(exc_info.value)
+    assert not (target / "AGENTS.md").exists()
+    assert (target / "CLAUDE.md").read_text(encoding="utf-8") == "custom claude"
+
+
 def test_refresh_agent_scaffold_force_overwrites_local_edits(tmp_path: Path) -> None:
     target = _make_existing_project(tmp_path / "project")
     write_scaffold(target, "project")
