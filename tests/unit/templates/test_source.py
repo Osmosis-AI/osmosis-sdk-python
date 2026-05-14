@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import shutil
+import tarfile
 from pathlib import Path
 
 from osmosis_ai.templates import source
@@ -39,3 +40,26 @@ def test_workspace_template_root_refresh_redownloads_cached_checkout(
     assert second == first
     assert calls == [first, first]
     assert (second / "version.txt").read_text(encoding="utf-8") == "2"
+
+
+def test_safe_extract_uses_data_filter(tmp_path: Path, monkeypatch) -> None:
+    archive_path = tmp_path / "template.tar"
+    payload = tmp_path / "payload.txt"
+    payload.write_text("ok", encoding="utf-8")
+    with tarfile.open(archive_path, "w") as archive:
+        archive.add(payload, arcname="workspace-template-main/payload.txt")
+
+    calls: list[object] = []
+
+    def fake_extractall(
+        self, path=".", members=None, *, numeric_owner=False, filter=None
+    ):
+        del self, path, members, numeric_owner
+        calls.append(filter)
+
+    monkeypatch.setattr(tarfile.TarFile, "extractall", fake_extractall)
+
+    with tarfile.open(archive_path, "r") as archive:
+        source._safe_extract(archive, tmp_path / "extract")
+
+    assert calls == ["data"]

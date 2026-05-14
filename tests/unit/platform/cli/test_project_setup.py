@@ -184,6 +184,20 @@ def test_refresh_agent_scaffold_refuses_local_edits_without_force(
     assert (target / "AGENTS.md").read_text(encoding="utf-8") == "custom agents"
 
 
+def test_refresh_agent_scaffold_rejects_directory_at_scaffold_file_path(
+    tmp_path: Path,
+) -> None:
+    target = _make_existing_project(tmp_path / "project")
+    (target / "AGENTS.md").mkdir()
+
+    with pytest.raises(CLIError) as exc_info:
+        refresh_agent_scaffold(target)
+
+    assert exc_info.value.code == "CONFLICT"
+    assert "AGENTS.md" in str(exc_info.value)
+    assert (target / "AGENTS.md").is_dir()
+
+
 def test_refresh_agent_scaffold_does_not_add_missing_files_when_conflicts_exist(
     tmp_path: Path,
 ) -> None:

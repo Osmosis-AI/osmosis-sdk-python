@@ -56,7 +56,7 @@ def _safe_extract(archive: tarfile.TarFile, target: Path) -> None:
                 f"Workspace template archive contains an unsafe path: {member.name}",
                 code="VALIDATION",
             ) from exc
-    archive.extractall(target)
+    archive.extractall(target, filter="data")
 
 
 def _download_workspace_template(repo: str, ref: str, destination: Path) -> None:

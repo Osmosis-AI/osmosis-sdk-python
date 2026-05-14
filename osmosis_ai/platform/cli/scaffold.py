@@ -136,6 +136,7 @@ def refresh_agent_scaffold(
     added: list[str] = []
     refreshed: list[str] = []
     conflicts: list[str] = []
+    blocked_paths: list[str] = []
     pending_adds: list[tuple[str, Path, str]] = []
     pending_refreshes: list[tuple[str, Path, str]] = []
 
@@ -144,6 +145,9 @@ def refresh_agent_scaffold(
         if not path.exists():
             pending_adds.append((rel_path, path, content))
             continue
+        if not path.is_file():
+            blocked_paths.append(rel_path)
+            continue
         if path.read_text(encoding="utf-8") == content:
             continue
         if not force:
@@ -151,6 +155,14 @@ def refresh_agent_scaffold(
             continue
         pending_refreshes.append((rel_path, path, content))
 
+    if blocked_paths:
+        listing = "\n  ".join(blocked_paths)
+        raise CLIError(
+            "Refusing to overwrite non-file paths in official scaffold locations:\n"
+            f"  {listing}\n"
+            "\nMove or remove these paths before refreshing the agent scaffold.",
+            code="CONFLICT",
+        )
     if conflicts:
         listing = "\n  ".join(conflicts)
         raise CLIError(
