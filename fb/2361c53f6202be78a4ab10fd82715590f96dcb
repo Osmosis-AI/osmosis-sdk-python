@@ -1,0 +1,47 @@
+tests/unit/cli/test_template_cmd.py
+  s_d0edee83738eef::t_083f34db2e0d12 9-10,100-120,208-223
+osmosis_ai/cli/commands/template.py
+  s_d0edee83738eef::t_25d0abe3958b17 39
+  s_d0edee83738eef::t_cb1f4cc7962e7e 19-20
+  s_d0edee83738eef::t_a6531ac171be70 21-25,37-38
+osmosis_ai/templates/cli.py
+  s_d0edee83738eef::t_3e81263a9d1d5c 156-157
+  s_76988f5d760b10::t_53ab90a8787039 23,93-94,100-103,158,175,180-181
+  s_76988f5d760b10::t_c69480d68b6964 95-99
+tests/unit/templates/test_cli.py
+  s_76988f5d760b10::t_76d3fcbb10af3e 32-38,45-47,56-58,288-295
+  s_d0edee83738eef::t_5deba4c85a67a6 251-252
+  s_d0edee83738eef::t_f4b8f56535917d 5,216-250
+  s_76988f5d760b10::t_d653b19e9949a4 25-31,43-44,53-55,276-287
+osmosis_ai/cli/main.py
+  s_d0edee83738eef::t_09d62cf5c2fe90 173-177,179
+osmosis_ai/templates/catalog.py
+  s_76988f5d760b10::t_cc30a88a12fcd3 10,117-128,140
+osmosis_ai/templates/registry.py
+  s_d0edee83738eef::t_bc84d542fe0dbb 30,35,78-80,86
+  s_d0edee83738eef::t_dc899a3e402020 83-85
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "fb2361c53f6202be78a4ab10fd82715590f96dcb",
+  "prompts": {},
+  "sessions": {
+    "s_76988f5d760b10": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019e2823-4712-72a3-a7f5-c7cee881201d",
+        "model": "gpt-5.5"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    },
+    "s_d0edee83738eef": {
+      "agent_id": {
+        "tool": "codex",
+        "id": "019e2803-9124-7b81-a0e1-98fd93fbcfcf",
+        "model": "gpt-5.5"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}
