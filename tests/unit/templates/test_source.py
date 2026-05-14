@@ -13,6 +13,14 @@ from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.templates import source
 
 
+def test_cache_key_distinguishes_repo_ref_pairs_with_slashes_and_underscores() -> None:
+    left = source._cache_key("owner/name", "feature/a_b")
+    right = source._cache_key("owner/name", "feature/a/b")
+
+    assert left != right
+    assert left == source._cache_key("owner/name", "feature/a_b")
+
+
 def test_workspace_template_root_refresh_redownloads_cached_checkout(
     tmp_path: Path, monkeypatch
 ) -> None:

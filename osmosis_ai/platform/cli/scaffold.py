@@ -123,7 +123,10 @@ def official_scaffold_updates(
         if symlink_path is not None:
             _append_unique(blocked_paths, symlink_path)
             continue
+        if not path.exists():
+            continue
         if not path.is_file():
+            _append_unique(blocked_paths, rel_path)
             continue
         if path.read_text(encoding="utf-8") != official:
             updates.append(rel_path)

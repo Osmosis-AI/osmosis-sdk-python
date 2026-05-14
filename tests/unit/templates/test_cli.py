@@ -209,6 +209,27 @@ def test_apply_command_force_overwrites_existing_rollout(
     assert (rollout_root / "pyproject.toml").is_file()
 
 
+def test_apply_command_force_rejects_file_at_owned_directory_path(
+    tmp_path, monkeypatch, workspace_template
+) -> None:
+    project_root = _make_project(tmp_path)
+    monkeypatch.chdir(project_root)
+
+    rollout_root = project_root / "rollouts" / "multiply-local-strands"
+    rollout_root.parent.mkdir(parents=True)
+    rollout_root.write_text("not a directory\n", encoding="utf-8")
+
+    with (
+        override_output_context(format=OutputFormat.json),
+        pytest.raises(CLIError) as exc_info,
+    ):
+        apply_command("multiply-local-strands", force=True)
+
+    assert exc_info.value.code == "CONFLICT"
+    assert "rollouts/multiply-local-strands" in str(exc_info.value)
+    assert rollout_root.read_text(encoding="utf-8") == "not a directory\n"
+
+
 def test_apply_command_force_overwrites_existing_config(
     tmp_path, monkeypatch, workspace_template
 ) -> None:

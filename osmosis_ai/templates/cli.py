@@ -121,6 +121,16 @@ def _format_conflicts(conflicts: list[str], name: str) -> CLIError:
     )
 
 
+def _format_blocked_owned_paths(blocked_paths: list[str]) -> CLIError:
+    listing = "\n  ".join(sorted(set(blocked_paths)))
+    return CLIError(
+        "Refusing to replace non-directory template-owned paths:\n"
+        f"  {listing}\n"
+        "\nMove or replace these paths before re-running with `--force`.",
+        code="CONFLICT",
+    )
+
+
 def _next_steps(name: str) -> list[str]:
     """Commands to run after applying a template."""
     try:
@@ -183,8 +193,16 @@ def _copy_template(
             raise _format_conflicts(conflicts, name)
 
     # Reset only SDK-catalog-owned directories wholesale.
+    blocked_owned_paths: list[str] = []
     for owned_dest in owned_dests:
-        if owned_dest.exists():
+        if owned_dest.is_symlink() or (owned_dest.exists() and not owned_dest.is_dir()):
+            blocked_owned_paths.append(
+                owned_dest.relative_to(project_root_resolved).as_posix()
+            )
+    if blocked_owned_paths:
+        raise _format_blocked_owned_paths(blocked_owned_paths)
+    for owned_dest in owned_dests:
+        if owned_dest.is_dir():
             shutil.rmtree(owned_dest)
 
     for rel in file_rels:

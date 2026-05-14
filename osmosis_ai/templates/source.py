@@ -8,6 +8,7 @@ behavior. Tests and local development can point at a checkout with
 
 from __future__ import annotations
 
+import hashlib
 import os
 import shutil
 import tarfile
@@ -36,7 +37,8 @@ def _template_ref() -> str:
 
 
 def _cache_key(repo: str, ref: str) -> str:
-    return "__".join(part.replace("/", "_") for part in (repo, ref))
+    payload = f"{repo}\0{ref}".encode()
+    return hashlib.sha256(payload).hexdigest()
 
 
 def _safe_extract(archive: tarfile.TarFile, target: Path) -> None:

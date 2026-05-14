@@ -231,6 +231,21 @@ def test_official_scaffold_updates_rejects_symlinked_official_file(
     assert "AGENTS.md" in str(exc_info.value)
 
 
+def test_official_scaffold_updates_rejects_directory_at_official_file_path(
+    tmp_path: Path,
+) -> None:
+    target = _make_existing_project(tmp_path / "project")
+    write_scaffold(target, "project")
+    (target / "AGENTS.md").unlink()
+    (target / "AGENTS.md").mkdir()
+
+    with pytest.raises(CLIError) as exc_info:
+        official_scaffold_updates(target)
+
+    assert exc_info.value.code == "CONFLICT"
+    assert "AGENTS.md" in str(exc_info.value)
+
+
 def test_refresh_agent_scaffold_refuses_local_edits_without_force(
     tmp_path: Path,
 ) -> None:
