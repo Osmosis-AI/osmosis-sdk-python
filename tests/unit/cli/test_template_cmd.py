@@ -142,6 +142,13 @@ def test_zsh_completion_for_template_commands_does_not_require_comp_words(
     assert "list" in result.output
 
 
+def test_completion_registration_uses_public_typer_api() -> None:
+    main_source = Path(cli.__file__).read_text(encoding="utf-8")
+
+    assert "typer._completion_classes" not in main_source
+    assert "from typer.completion import completion_init" in main_source
+
+
 # ── apply ────────────────────────────────────────────────────────
 
 

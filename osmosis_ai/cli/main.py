@@ -172,9 +172,9 @@ def _register_commands() -> None:
     _registered = True
     # ``add_completion=False`` only hides install/show options; shell completion
     # still reaches the CLI through Typer's completion environment variables.
-    # Register Typer's completion classes so zsh/fish use their expected env
-    # contract instead of Click's COMP_WORDS-based default.
-    from typer._completion_classes import completion_init
+    # Register Typer's public completion hooks so zsh/fish use their expected
+    # env contract instead of Click's COMP_WORDS-based default.
+    from typer.completion import completion_init
 
     completion_init()
     # -- Command groups --
