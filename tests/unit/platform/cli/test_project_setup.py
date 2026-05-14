@@ -113,6 +113,37 @@ def test_write_scaffold_does_not_overwrite_existing_files(
         assert (target / rel_path).read_text(encoding="utf-8") == content
 
 
+def test_write_scaffold_rejects_broken_symlinked_official_file(
+    tmp_path: Path,
+) -> None:
+    target = _make_existing_project(tmp_path / "project")
+    outside_file = tmp_path / "missing-agents.md"
+    (target / "AGENTS.md").symlink_to(outside_file)
+
+    with pytest.raises(CLIError) as exc_info:
+        write_scaffold(target, "project")
+
+    assert exc_info.value.code == "CONFLICT"
+    assert "AGENTS.md" in str(exc_info.value)
+    assert not outside_file.exists()
+
+
+def test_write_scaffold_rejects_symlinked_official_parent_directory(
+    tmp_path: Path,
+) -> None:
+    target = _make_existing_project(tmp_path / "project")
+    outside_dir = tmp_path / "outside-claude"
+    outside_dir.mkdir()
+    (target / ".claude").symlink_to(outside_dir, target_is_directory=True)
+
+    with pytest.raises(CLIError) as exc_info:
+        write_scaffold(target, "project")
+
+    assert exc_info.value.code == "CONFLICT"
+    assert ".claude" in str(exc_info.value)
+    assert not (outside_dir / "settings.json").exists()
+
+
 def test_write_scaffold_update_does_not_overwrite_agent_files(
     tmp_path: Path,
 ) -> None:
@@ -183,6 +214,23 @@ def test_official_scaffold_updates_reports_local_edits(tmp_path: Path) -> None:
     assert official_scaffold_updates(target) == ["AGENTS.md"]
 
 
+def test_official_scaffold_updates_rejects_symlinked_official_file(
+    tmp_path: Path,
+) -> None:
+    target = _make_existing_project(tmp_path / "project")
+    write_scaffold(target, "project")
+    outside_file = tmp_path / "outside-agents.md"
+    outside_file.write_text("outside agents", encoding="utf-8")
+    (target / "AGENTS.md").unlink()
+    (target / "AGENTS.md").symlink_to(outside_file)
+
+    with pytest.raises(CLIError) as exc_info:
+        official_scaffold_updates(target)
+
+    assert exc_info.value.code == "CONFLICT"
+    assert "AGENTS.md" in str(exc_info.value)
+
+
 def test_refresh_agent_scaffold_refuses_local_edits_without_force(
     tmp_path: Path,
 ) -> None:
@@ -240,3 +288,57 @@ def test_refresh_agent_scaffold_force_overwrites_local_edits(tmp_path: Path) -> 
     agents = (target / "AGENTS.md").read_text(encoding="utf-8")
     assert "custom agents" not in agents
     assert agents.startswith("template agents\n")
+
+
+def test_refresh_agent_scaffold_rejects_symlinked_official_file(
+    tmp_path: Path,
+) -> None:
+    target = _make_existing_project(tmp_path / "project")
+    write_scaffold(target, "project")
+    outside_file = tmp_path / "outside-agents.md"
+    outside_file.write_text("outside agents", encoding="utf-8")
+    (target / "AGENTS.md").unlink()
+    (target / "AGENTS.md").symlink_to(outside_file)
+
+    with pytest.raises(CLIError) as exc_info:
+        refresh_agent_scaffold(target, force=True)
+
+    assert exc_info.value.code == "CONFLICT"
+    assert "AGENTS.md" in str(exc_info.value)
+    assert outside_file.read_text(encoding="utf-8") == "outside agents"
+
+
+def test_refresh_agent_scaffold_rejects_broken_symlinked_official_file(
+    tmp_path: Path,
+) -> None:
+    target = _make_existing_project(tmp_path / "project")
+    write_scaffold(target, "project")
+    outside_file = tmp_path / "missing-agents.md"
+    (target / "AGENTS.md").unlink()
+    (target / "AGENTS.md").symlink_to(outside_file)
+
+    with pytest.raises(CLIError) as exc_info:
+        refresh_agent_scaffold(target, force=True)
+
+    assert exc_info.value.code == "CONFLICT"
+    assert "AGENTS.md" in str(exc_info.value)
+    assert not outside_file.exists()
+
+
+def test_refresh_agent_scaffold_rejects_symlinked_official_parent_directory(
+    tmp_path: Path,
+) -> None:
+    target = _make_existing_project(tmp_path / "project")
+    write_scaffold(target, "project")
+    outside_dir = tmp_path / "outside-claude"
+    outside_dir.mkdir()
+    (target / ".claude" / "settings.json").unlink()
+    (target / ".claude").rmdir()
+    (target / ".claude").symlink_to(outside_dir, target_is_directory=True)
+
+    with pytest.raises(CLIError) as exc_info:
+        refresh_agent_scaffold(target, force=True)
+
+    assert exc_info.value.code == "CONFLICT"
+    assert ".claude" in str(exc_info.value)
+    assert not (outside_dir / "settings.json").exists()

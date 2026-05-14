@@ -67,6 +67,30 @@ def _read_agent_scaffold_files(*, refresh_template: bool) -> dict[str, str]:
     return contents
 
 
+def _first_symlinked_path(project_root: Path, rel_path: str) -> str | None:
+    current = project_root
+    for part in Path(rel_path).parts:
+        current = current / part
+        if current.is_symlink():
+            return current.relative_to(project_root).as_posix()
+    return None
+
+
+def _append_unique(paths: list[str], path: str) -> None:
+    if path not in paths:
+        paths.append(path)
+
+
+def _raise_blocked_scaffold_paths(blocked_paths: list[str]) -> None:
+    listing = "\n  ".join(blocked_paths)
+    raise CLIError(
+        "Refusing to follow symlinked or non-file scaffold paths:\n"
+        f"  {listing}\n"
+        "\nMove or replace these paths before repairing the agent scaffold.",
+        code="CONFLICT",
+    )
+
+
 def load_scaffold_entries() -> tuple[list[ScaffoldEntry], set[str]]:
     """Load scaffold entries and official paths from the SDK catalog."""
     official_paths = {path.as_posix() for path in OFFICIAL_AGENT_SCAFFOLD_PATHS}
@@ -92,12 +116,19 @@ def official_scaffold_updates(
     """Return official scaffold files whose local content differs from the template."""
     official_contents = _read_agent_scaffold_files(refresh_template=refresh_template)
     updates: list[str] = []
+    blocked_paths: list[str] = []
     for rel_path, official in official_contents.items():
         path = project_root / rel_path
+        symlink_path = _first_symlinked_path(project_root, rel_path)
+        if symlink_path is not None:
+            _append_unique(blocked_paths, symlink_path)
+            continue
         if not path.is_file():
             continue
         if path.read_text(encoding="utf-8") != official:
             updates.append(rel_path)
+    if blocked_paths:
+        _raise_blocked_scaffold_paths(blocked_paths)
     return updates
 
 
@@ -111,6 +142,13 @@ def write_scaffold(target: Path, project_name: str, *, update: bool = False) -> 
     """
     del project_name, update
     entries, _official_paths = load_scaffold_entries()
+    blocked_paths: list[str] = []
+    for entry in entries:
+        symlink_path = _first_symlinked_path(target, entry.dest)
+        if symlink_path is not None:
+            _append_unique(blocked_paths, symlink_path)
+    if blocked_paths:
+        _raise_blocked_scaffold_paths(blocked_paths)
     missing_official = [
         entry.dest
         for entry in entries
@@ -142,11 +180,15 @@ def refresh_agent_scaffold(
 
     for rel_path, content in official.items():
         path = project_root / rel_path
+        symlink_path = _first_symlinked_path(project_root, rel_path)
+        if symlink_path is not None:
+            _append_unique(blocked_paths, symlink_path)
+            continue
         if not path.exists():
             pending_adds.append((rel_path, path, content))
             continue
         if not path.is_file():
-            blocked_paths.append(rel_path)
+            _append_unique(blocked_paths, rel_path)
             continue
         if path.read_text(encoding="utf-8") == content:
             continue
@@ -156,13 +198,7 @@ def refresh_agent_scaffold(
         pending_refreshes.append((rel_path, path, content))
 
     if blocked_paths:
-        listing = "\n  ".join(blocked_paths)
-        raise CLIError(
-            "Refusing to overwrite non-file paths in official scaffold locations:\n"
-            f"  {listing}\n"
-            "\nMove or remove these paths before refreshing the agent scaffold.",
-            code="CONFLICT",
-        )
+        _raise_blocked_scaffold_paths(blocked_paths)
     if conflicts:
         listing = "\n  ".join(conflicts)
         raise CLIError(
