@@ -27,12 +27,12 @@ def list_templates() -> list[str]:
     return sorted(recipes_by_name())
 
 
-def template_path(name: str) -> Path:
+def template_path(name: str, *, refresh: bool = False) -> Path:
     """Resolve a recipe name to the workspace template root."""
     _validate_template_name(name)
     if name not in recipes_by_name():
         raise TemplateNotFoundError(name)
-    return workspace_template_root()
+    return workspace_template_root(refresh=refresh)
 
 
 def template_recipe(name: str) -> TemplateRecipe:
@@ -75,10 +75,15 @@ def _expand_catalog_files(root: Path, patterns: tuple[Path, ...]) -> list[Path]:
     return sorted(rel_paths, key=lambda path: path.as_posix())
 
 
-def iter_template_files(name: str) -> list[Path]:
+def iter_template_files(
+    name: str, *, root: Path | None = None, refresh: bool = False
+) -> list[Path]:
     """Return relative file paths declared by the SDK recipe catalog."""
     recipe = template_recipe(name)
-    return _expand_catalog_files(workspace_template_root(), recipe.files)
+    template_root = (
+        root if root is not None else workspace_template_root(refresh=refresh)
+    )
+    return _expand_catalog_files(template_root, recipe.files)
 
 
 __all__ = [

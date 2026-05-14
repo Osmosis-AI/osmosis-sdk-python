@@ -7,6 +7,7 @@ in the SDK so local user edits cannot change CLI behavior.
 
 from __future__ import annotations
 
+from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -113,6 +114,18 @@ def recipes_by_name() -> dict[str, TemplateRecipe]:
     return {recipe.name: recipe for recipe in TEMPLATE_RECIPES}
 
 
+def _has_glob(path: Path) -> bool:
+    return any("*" in part for part in path.parts)
+
+
+def shared_template_files() -> frozenset[Path]:
+    """Files explicitly shared by multiple SDK-owned template recipes."""
+    counts: Counter[Path] = Counter()
+    for recipe in TEMPLATE_RECIPES:
+        counts.update(path for path in recipe.files if not _has_glob(path))
+    return frozenset(path for path, count in counts.items() if count > 1)
+
+
 def official_agent_scaffold_paths() -> tuple[Path, ...]:
     return OFFICIAL_AGENT_SCAFFOLD_PATHS
 
@@ -124,4 +137,5 @@ __all__ = [
     "TemplateRecipe",
     "official_agent_scaffold_paths",
     "recipes_by_name",
+    "shared_template_files",
 ]

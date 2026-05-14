@@ -6,6 +6,8 @@ import json
 from pathlib import Path
 
 import pytest
+from click.testing import CliRunner
+from typer.main import get_command
 
 from osmosis_ai.cli import main as cli
 
@@ -95,6 +97,27 @@ def test_template_list_rich_exits_zero(workspace_template) -> None:
     assert rc == 0
 
 
+def test_zsh_completion_for_template_commands_does_not_require_comp_words(
+    workspace_template,
+) -> None:
+    cli._register_commands()
+    result = CliRunner().invoke(
+        get_command(cli.app),
+        [],
+        prog_name="osmosis",
+        env={
+            "_OSMOSIS_COMPLETE": "complete_zsh",
+            "_TYPER_COMPLETE_ARGS": "osmosis template ",
+        },
+    )
+
+    assert result.exit_code == 0
+    assert result.exception is None
+    assert "COMP_WORDS" not in result.output
+    assert "apply" in result.output
+    assert "list" in result.output
+
+
 # ── apply ────────────────────────────────────────────────────────
 
 
@@ -180,6 +203,24 @@ def test_template_apply_unknown_template_returns_not_found_in_json(
     err = json.loads(captured.err)
     assert err["error"]["code"] == "NOT_FOUND"
     assert "Available templates" in err["error"]["message"]
+
+
+def test_zsh_completion_for_template_apply_names(workspace_template) -> None:
+    cli._register_commands()
+    result = CliRunner().invoke(
+        get_command(cli.app),
+        [],
+        prog_name="osmosis",
+        env={
+            "_OSMOSIS_COMPLETE": "complete_zsh",
+            "_TYPER_COMPLETE_ARGS": "osmosis template apply multiply-local",
+        },
+    )
+
+    assert result.exit_code == 0
+    assert result.exception is None
+    assert "multiply-local-strands" in result.output
+    assert "multiply-local-openai" in result.output
 
 
 def test_template_apply_outside_project_errors(monkeypatch, tmp_path, capsys) -> None:

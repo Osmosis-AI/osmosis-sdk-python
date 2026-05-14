@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import shutil
 from pathlib import Path
 
 import pytest
@@ -21,13 +22,39 @@ def _write_workspace_template(root: Path) -> Path:
         "[project]\nname = 'multiply-local-strands'\n", encoding="utf-8"
     )
     (rollout_root / "README.md").write_text("# Multiply\n", encoding="utf-8")
+    openai_root = root / "rollouts" / "multiply-local-openai"
+    openai_root.mkdir(parents=True)
+    (openai_root / "main.py").write_text("# openai rollout\n", encoding="utf-8")
+    (openai_root / "pyproject.toml").write_text(
+        "[project]\nname = 'multiply-local-openai'\n", encoding="utf-8"
+    )
+    (openai_root / "README.md").write_text("# Multiply OpenAI\n", encoding="utf-8")
+    harbor_root = root / "rollouts" / "multiply-harbor-strands"
+    harbor_root.mkdir(parents=True)
+    (harbor_root / "main.py").write_text("# harbor rollout\n", encoding="utf-8")
+    (harbor_root / "pyproject.toml").write_text(
+        "[project]\nname = 'multiply-harbor-strands'\n", encoding="utf-8"
+    )
+    (harbor_root / "README.md").write_text("# Multiply Harbor\n", encoding="utf-8")
     (root / "configs" / "eval").mkdir(parents=True)
     (root / "configs" / "eval" / "multiply-local-strands.toml").write_text(
         'rollout = "multiply-local-strands"\n', encoding="utf-8"
     )
+    (root / "configs" / "eval" / "multiply-local-openai.toml").write_text(
+        'rollout = "multiply-local-openai"\n', encoding="utf-8"
+    )
+    (root / "configs" / "eval" / "multiply-harbor-strands.toml").write_text(
+        'rollout = "multiply-harbor-strands"\n', encoding="utf-8"
+    )
     (root / "configs" / "training").mkdir(parents=True)
     (root / "configs" / "training" / "multiply-local-strands.toml").write_text(
         'rollout = "multiply-local-strands"\n', encoding="utf-8"
+    )
+    (root / "configs" / "training" / "multiply-local-openai.toml").write_text(
+        'rollout = "multiply-local-openai"\n', encoding="utf-8"
+    )
+    (root / "configs" / "training" / "multiply-harbor-strands.toml").write_text(
+        'rollout = "multiply-harbor-strands"\n', encoding="utf-8"
     )
     (root / "data").mkdir()
     (root / "data" / "multiply.jsonl").write_text("{}\n", encoding="utf-8")
@@ -186,6 +213,45 @@ def test_apply_command_force_overwrites_existing_config(
     assert 'rollout = "multiply-local-strands"' in refreshed
 
 
+def test_apply_command_refreshes_workspace_template_before_copy(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from osmosis_ai.templates import source
+
+    monkeypatch.delenv("OSMOSIS_WORKSPACE_TEMPLATE_PATH", raising=False)
+    monkeypatch.setattr(source, "CACHE_DIR", tmp_path / "cache")
+    downloads: list[Path] = []
+
+    def fake_download_workspace_template(
+        repo: str, ref: str, destination: Path
+    ) -> None:
+        del repo, ref
+        downloads.append(destination)
+        if destination.exists():
+            shutil.rmtree(destination)
+        _write_workspace_template(destination)
+        rollout = destination / "rollouts" / "multiply-local-strands" / "main.py"
+        rollout.write_text(f"# rollout {len(downloads)}\n", encoding="utf-8")
+
+    monkeypatch.setattr(
+        source, "_download_workspace_template", fake_download_workspace_template
+    )
+    project_root = _make_project(tmp_path / "project")
+    monkeypatch.chdir(project_root)
+
+    with override_output_context(format=OutputFormat.json):
+        apply_command("multiply-local-strands")
+    first = project_root / "rollouts" / "multiply-local-strands" / "main.py"
+    assert first.read_text(encoding="utf-8") == "# rollout 1\n"
+
+    with override_output_context(format=OutputFormat.json):
+        apply_command("multiply-local-strands", force=True)
+
+    assert first.read_text(encoding="utf-8") == "# rollout 2\n"
+    assert len(downloads) == 2
+    assert downloads[0] == downloads[1]
+
+
 def test_apply_command_refuses_existing_data_without_force(
     tmp_path, monkeypatch, workspace_template
 ) -> None:
@@ -205,6 +271,28 @@ def test_apply_command_refuses_existing_data_without_force(
     assert exc_info.value.code == "CONFLICT"
     assert "data/multiply.jsonl" in str(exc_info.value)
     assert data.read_text(encoding="utf-8") == "user data\n"
+
+
+def test_apply_command_reuses_shared_dataset_from_another_template(
+    tmp_path, monkeypatch, workspace_template
+) -> None:
+    project_root = _make_project(tmp_path)
+    monkeypatch.chdir(project_root)
+
+    with override_output_context(format=OutputFormat.json):
+        apply_command("multiply-local-strands")
+
+    data = project_root / "data" / "multiply.jsonl"
+    assert data.read_text(encoding="utf-8") == "{}\n"
+
+    for name in ("multiply-local-openai", "multiply-harbor-strands"):
+        with override_output_context(format=OutputFormat.json):
+            result = apply_command(name)
+
+        assert result is not None
+        assert result.status == "success"
+        assert (project_root / "rollouts" / name / "main.py").is_file()
+        assert data.read_text(encoding="utf-8") == "{}\n"
 
 
 def test_apply_command_preserves_unrelated_user_files(

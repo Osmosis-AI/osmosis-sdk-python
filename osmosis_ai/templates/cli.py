@@ -20,6 +20,7 @@ from osmosis_ai.cli.output import (
     OutputFormat,
     get_output_context,
 )
+from osmosis_ai.templates.catalog import shared_template_files
 from osmosis_ai.templates.registry import (
     TemplateNotFoundError,
     iter_template_files,
@@ -89,6 +90,17 @@ def _is_under(path: Path, directory: Path) -> bool:
     return True
 
 
+def _same_file_contents(left: Path, right: Path) -> bool:
+    try:
+        return (
+            left.is_file()
+            and right.is_file()
+            and left.read_bytes() == right.read_bytes()
+        )
+    except OSError:
+        return False
+
+
 def _ensure_within_project(dest: Path, project_root: Path) -> None:
     """Refuse writes outside the project root."""
     try:
@@ -141,8 +153,9 @@ def _copy_template(
 
     project_root_resolved = project_root.resolve()
     written: list[str] = []
-    template_root = workspace_template_root()
-    file_rels = iter_template_files(name)
+    template_root = workspace_template_root(refresh=True)
+    file_rels = iter_template_files(name, root=template_root)
+    shared_file_rels = shared_template_files()
     owned_dests = [project_root_resolved / rel for rel in recipe.owned_dirs]
 
     # Containment guard upfront.
@@ -159,10 +172,13 @@ def _copy_template(
                     owned_dest.relative_to(project_root_resolved).as_posix() + "/"
                 )
         for rel in file_rels:
+            src = template_root / rel
             dest = project_root_resolved / rel
             if any(_is_under(dest, owned_dest) for owned_dest in owned_dests):
                 continue
             if dest.exists():
+                if rel in shared_file_rels and _same_file_contents(src, dest):
+                    continue
                 conflicts.append(rel.as_posix())
         if conflicts:
             raise _format_conflicts(conflicts, name)
