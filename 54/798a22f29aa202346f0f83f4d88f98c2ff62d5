@@ -1,0 +1,25 @@
+osmosis_ai/platform/cli/scaffold.py
+  s_f784ae5966447f::t_862f63947e3a48 87
+  s_f784ae5966447f::t_4107500cc78d51 89
+  s_f784ae5966447f::t_cd40279842f813 70-86,88,90-93,119,122-125,130-131,145-151,183-186,191,201
+tests/unit/platform/cli/test_project_setup.py
+  s_f784ae5966447f::t_9cccc35768b650 116-146
+  s_f784ae5966447f::t_66d39b723b8105 291-344
+  s_f784ae5966447f::t_fcb2c43c920e05 217-233
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "54798a22f29aa202346f0f83f4d88f98c2ff62d5",
+  "prompts": {},
+  "sessions": {
+    "s_f784ae5966447f": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "4972846f-78e8-4856-83b3-b7873ca37680",
+        "model": "gpt-5.5-extra-high"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}
