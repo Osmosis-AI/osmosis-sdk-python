@@ -3,7 +3,28 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from osmosis_ai.cli.main import main
+
+
+def _write_workspace_template(root: Path) -> Path:
+    (root / "configs").mkdir(parents=True)
+    (root / ".claude").mkdir()
+    (root / "AGENTS.md").write_text("template agents\n", encoding="utf-8")
+    (root / "CLAUDE.md").write_text("template claude\n", encoding="utf-8")
+    (root / "configs" / "AGENTS.md").write_text(
+        "template config agents\n", encoding="utf-8"
+    )
+    (root / ".claude" / "settings.json").write_text("{}\n", encoding="utf-8")
+    return root
+
+
+@pytest.fixture
+def workspace_template(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    root = _write_workspace_template(tmp_path / "workspace-template")
+    monkeypatch.setenv("OSMOSIS_WORKSPACE_TEMPLATE_PATH", str(root))
+    return root
 
 
 def _make_project(root: Path) -> Path:
@@ -28,8 +49,29 @@ def test_project_doctor_dry_run_reports_missing_paths(
     assert not (project / ".osmosis" / "research" / "program.md").exists()
 
 
-def test_project_doctor_fix_creates_missing_paths(
+def test_project_doctor_dry_run_does_not_require_workspace_template(
     tmp_path: Path, monkeypatch, capsys
+) -> None:
+    from osmosis_ai.templates import source
+
+    def fail_download(*args, **kwargs) -> None:
+        del args, kwargs
+        raise AssertionError("dry-run doctor must not fetch workspace-template")
+
+    project = _make_project(tmp_path / "project")
+    monkeypatch.chdir(project)
+    monkeypatch.delenv("OSMOSIS_WORKSPACE_TEMPLATE_PATH", raising=False)
+    monkeypatch.setattr(source, "_download_workspace_template", fail_download)
+
+    rc = main(["--json", "project", "doctor"])
+
+    assert rc == 0
+    payload = json.loads(capsys.readouterr().out)
+    assert "AGENTS.md" in payload["resource"]["missing"]
+
+
+def test_project_doctor_fix_creates_missing_paths(
+    tmp_path: Path, monkeypatch, capsys, workspace_template: Path
 ) -> None:
     project = _make_project(tmp_path / "project")
     monkeypatch.chdir(project)
@@ -41,6 +83,7 @@ def test_project_doctor_fix_creates_missing_paths(
     assert not (project / ".osmosis" / "research" / "program.md").exists()
     assert (project / "configs" / "training").is_dir()
     assert (project / "AGENTS.md").is_file()
+    assert (project / "AGENTS.md").read_text(encoding="utf-8") == "template agents\n"
     assert payload["resource"]["missing"] == []
 
 
@@ -62,7 +105,7 @@ def test_project_doctor_fix_outside_project_does_not_create_project(
 
 
 def test_project_doctor_fix_preserves_existing_research_program(
-    tmp_path: Path, monkeypatch, capsys
+    tmp_path: Path, monkeypatch, capsys, workspace_template: Path
 ) -> None:
     project = _make_project(tmp_path / "project")
     program = project / ".osmosis" / "research" / "program.md"
@@ -81,7 +124,7 @@ def test_project_doctor_fix_preserves_existing_research_program(
 
 
 def test_project_doctor_reports_agent_updates_without_overwriting(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch, workspace_template: Path
 ) -> None:
     from osmosis_ai.cli.output import OutputFormat, override_output_context
     from osmosis_ai.platform.cli.project import doctor_project
@@ -100,7 +143,7 @@ def test_project_doctor_reports_agent_updates_without_overwriting(
 
 
 def test_project_refresh_agents_refuses_local_edits_without_force(
-    tmp_path: Path, monkeypatch, capsys
+    tmp_path: Path, monkeypatch, capsys, workspace_template: Path
 ) -> None:
     project = _make_project(tmp_path / "project")
     (project / "AGENTS.md").write_text("custom agents", encoding="utf-8")
@@ -115,7 +158,7 @@ def test_project_refresh_agents_refuses_local_edits_without_force(
 
 
 def test_project_refresh_agents_force_overwrites_local_edits(
-    tmp_path: Path, monkeypatch, capsys
+    tmp_path: Path, monkeypatch, capsys, workspace_template: Path
 ) -> None:
     project = _make_project(tmp_path / "project")
     (project / "AGENTS.md").write_text("custom agents", encoding="utf-8")
@@ -126,4 +169,4 @@ def test_project_refresh_agents_force_overwrites_local_edits(
     payload = json.loads(capsys.readouterr().out)
     assert rc == 0
     assert payload["resource"]["refreshed"] == ["AGENTS.md"]
-    assert "custom agents" not in (project / "AGENTS.md").read_text(encoding="utf-8")
+    assert (project / "AGENTS.md").read_text(encoding="utf-8") == "template agents\n"

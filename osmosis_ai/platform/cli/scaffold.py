@@ -12,11 +12,11 @@ from pathlib import Path
 
 from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.templates.catalog import (
-    OFFICIAL_SCAFFOLD_FILES,
+    OFFICIAL_AGENT_SCAFFOLD_PATHS,
     REQUIRED_SCAFFOLD_DIRS,
     ScaffoldEntry,
-    official_files_by_path,
 )
+from osmosis_ai.templates.source import workspace_template_root
 
 _PLUGIN_REPO_DEFAULT = "Osmosis-AI/osmosis-plugins"
 _PLUGIN_MARKETPLACE_DEFAULT = "osmosis"
@@ -48,9 +48,28 @@ def _render_official_scaffold(text: str) -> str:
     )
 
 
+def _read_agent_scaffold_files(*, refresh_template: bool) -> dict[str, str]:
+    """Read SDK-allowed agent scaffold files from the workspace template."""
+    root = workspace_template_root(refresh=refresh_template)
+    contents: dict[str, str] = {}
+    for rel_path in OFFICIAL_AGENT_SCAFFOLD_PATHS:
+        rel_path_text = rel_path.as_posix()
+        source_path = root / rel_path
+        if not source_path.is_file():
+            raise CLIError(
+                "Workspace template is missing an official agent scaffold file: "
+                f"{rel_path_text}",
+                code="NOT_FOUND",
+            )
+        contents[rel_path_text] = _render_official_scaffold(
+            source_path.read_text(encoding="utf-8")
+        )
+    return contents
+
+
 def load_scaffold_entries() -> tuple[list[ScaffoldEntry], set[str]]:
     """Load scaffold entries and official paths from the SDK catalog."""
-    official_paths = {file.path.as_posix() for file in OFFICIAL_SCAFFOLD_FILES}
+    official_paths = {path.as_posix() for path in OFFICIAL_AGENT_SCAFFOLD_PATHS}
     entries = [
         ScaffoldEntry(
             dest=directory.joinpath(".gitkeep").as_posix(),
@@ -59,57 +78,67 @@ def load_scaffold_entries() -> tuple[list[ScaffoldEntry], set[str]]:
     ]
     entries.extend(
         ScaffoldEntry(
-            dest=file.path.as_posix(),
-            content=_render_official_scaffold(file.content),
+            dest=path.as_posix(),
             official=True,
         )
-        for file in OFFICIAL_SCAFFOLD_FILES
+        for path in OFFICIAL_AGENT_SCAFFOLD_PATHS
     )
     return entries, official_paths
 
 
-def official_scaffold_updates(project_root: Path) -> list[str]:
-    """Return official scaffold files whose local content differs from the SDK."""
+def official_scaffold_updates(
+    project_root: Path, *, refresh_template: bool = True
+) -> list[str]:
+    """Return official scaffold files whose local content differs from the template."""
+    official_contents = _read_agent_scaffold_files(refresh_template=refresh_template)
     updates: list[str] = []
-    for file in OFFICIAL_SCAFFOLD_FILES:
-        path = project_root / file.path
+    for rel_path, official in official_contents.items():
+        path = project_root / rel_path
         if not path.is_file():
             continue
-        official = _render_official_scaffold(file.content)
         if path.read_text(encoding="utf-8") != official:
-            updates.append(file.path.as_posix())
+            updates.append(rel_path)
     return updates
 
 
 def write_scaffold(target: Path, project_name: str, *, update: bool = False) -> None:
-    """Write missing scaffold files into *target* from the SDK catalog.
+    """Write missing scaffold paths into *target*.
 
-    Existing files are never overwritten here. Official file updates are reported
-    by ``official_scaffold_updates`` and can be applied with
-    ``refresh_agent_scaffold``.
+    The SDK controls the allowed paths; agent scaffold content comes from the
+    latest workspace template. Existing files are never overwritten here.
+    Official file updates are reported by ``official_scaffold_updates`` and can
+    be applied with ``refresh_agent_scaffold``.
     """
     del project_name, update
     entries, _official_paths = load_scaffold_entries()
+    missing_official = [
+        entry.dest
+        for entry in entries
+        if entry.official and not (target / entry.dest).exists()
+    ]
+    official_contents = (
+        _read_agent_scaffold_files(refresh_template=True) if missing_official else {}
+    )
     for entry in entries:
         dest = target / entry.dest
         if dest.exists():
             continue
+        content = official_contents[entry.dest] if entry.official else entry.content
         dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_text(entry.content, encoding="utf-8")
+        dest.write_text(content, encoding="utf-8")
 
 
 def refresh_agent_scaffold(
     project_root: Path, *, force: bool = False
 ) -> dict[str, list[str]]:
     """Refresh official agent scaffold files, protecting local edits by default."""
-    official = official_files_by_path()
+    official = _read_agent_scaffold_files(refresh_template=True)
     added: list[str] = []
     refreshed: list[str] = []
     conflicts: list[str] = []
 
-    for rel_path, file in official.items():
+    for rel_path, content in official.items():
         path = project_root / rel_path
-        content = _render_official_scaffold(file.content)
         if not path.exists():
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(content, encoding="utf-8")

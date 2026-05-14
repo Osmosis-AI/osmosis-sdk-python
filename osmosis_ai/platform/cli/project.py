@@ -93,7 +93,7 @@ def doctor_project(*, fix: bool = False, yes: bool = False) -> Any:
         write_scaffold(project_root, project_root.name)
         missing = _missing_scaffold_paths(project_root)
 
-    updates_available = official_scaffold_updates(project_root)
+    updates_available = official_scaffold_updates(project_root) if fix else []
     next_steps = (
         [
             f"Official scaffold updates available for: {', '.join(updates_available)}",

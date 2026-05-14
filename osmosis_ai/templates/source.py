@@ -97,8 +97,12 @@ def _download_workspace_template(repo: str, ref: str, destination: Path) -> None
         shutil.move(str(roots[0]), destination)
 
 
-def workspace_template_root() -> Path:
-    """Return a local directory containing the workspace template checkout."""
+def workspace_template_root(*, refresh: bool = False) -> Path:
+    """Return a local directory containing the workspace template checkout.
+
+    ``refresh=True`` re-fetches the configured repo/ref so scaffold repair can
+    use the latest template contents instead of a stale cache.
+    """
     override = os.environ.get(_PATH_ENV)
     if override:
         root = Path(override).expanduser().resolve()
@@ -111,8 +115,8 @@ def workspace_template_root() -> Path:
 
     repo = _template_repo()
     ref = _template_ref()
-    cache_root = CACHE_DIR / "workspace-template" / _cache_key(repo, ref)
-    if not cache_root.is_dir():
+    cache_root = Path(CACHE_DIR) / "workspace-template" / _cache_key(repo, ref)
+    if refresh or not cache_root.is_dir():
         _download_workspace_template(repo, ref, cache_root)
     return cache_root
 

@@ -15,6 +15,45 @@ from osmosis_ai.platform.cli.scaffold import (
 )
 
 
+def _write_workspace_template(root: Path) -> Path:
+    (root / "configs").mkdir(parents=True)
+    (root / ".claude").mkdir()
+    (root / "AGENTS.md").write_text(
+        "template agents\n"
+        "codex plugin marketplace add Osmosis-AI/osmosis-plugins\n"
+        "codex plugin install osmosis\n",
+        encoding="utf-8",
+    )
+    (root / "CLAUDE.md").write_text("template claude\n", encoding="utf-8")
+    (root / "configs" / "AGENTS.md").write_text(
+        "template config agents\n", encoding="utf-8"
+    )
+    (root / ".claude" / "settings.json").write_text(
+        json.dumps(
+            {
+                "extraKnownMarketplaces": {
+                    "osmosis": {
+                        "source": {
+                            "source": "github",
+                            "repo": "Osmosis-AI/osmosis-plugins",
+                        }
+                    }
+                },
+                "enabledPlugins": {"osmosis@osmosis": True},
+            }
+        ),
+        encoding="utf-8",
+    )
+    return root
+
+
+@pytest.fixture(autouse=True)
+def workspace_template(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    root = _write_workspace_template(tmp_path / "workspace-template")
+    monkeypatch.setenv("OSMOSIS_WORKSPACE_TEMPLATE_PATH", str(root))
+    return root
+
+
 def _make_existing_project(root: Path) -> Path:
     root.mkdir()
     (root / ".osmosis").mkdir()
@@ -43,6 +82,11 @@ def test_write_scaffold_creates_repair_paths(
     assert (target / "CLAUDE.md").is_file()
     assert (target / "configs" / "AGENTS.md").is_file()
     assert (target / ".claude" / "settings.json").is_file()
+    assert (
+        (target / "AGENTS.md")
+        .read_text(encoding="utf-8")
+        .startswith("template agents\n")
+    )
     assert not (target / ".git").exists()
 
 
@@ -148,4 +192,6 @@ def test_refresh_agent_scaffold_force_overwrites_local_edits(tmp_path: Path) -> 
     result = refresh_agent_scaffold(target, force=True)
 
     assert result["refreshed"] == ["AGENTS.md"]
-    assert "custom agents" not in (target / "AGENTS.md").read_text(encoding="utf-8")
+    agents = (target / "AGENTS.md").read_text(encoding="utf-8")
+    assert "custom agents" not in agents
+    assert agents.startswith("template agents\n")
