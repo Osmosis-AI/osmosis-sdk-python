@@ -46,7 +46,7 @@ def template_recipe(name: str) -> TemplateRecipe:
 
 
 def _expand_catalog_files(root: Path, patterns: tuple[Path, ...]) -> list[Path]:
-    """Expand SDK catalog file patterns against the workspace template checkout."""
+    """Expand SDK catalog file patterns against the template source checkout."""
     rel_paths: set[Path] = set()
     for pattern in patterns:
         pattern_text = pattern.as_posix()
@@ -58,7 +58,7 @@ def _expand_catalog_files(root: Path, patterns: tuple[Path, ...]) -> list[Path]:
             file_matches = [path for path in matches if path.is_file()]
             if not file_matches:
                 raise CLIError(
-                    f"Workspace template pattern matched no files: {pattern_text}",
+                    f"Template pattern matched no files: {pattern_text}",
                     code="NOT_FOUND",
                 )
             for match in file_matches:
@@ -68,7 +68,7 @@ def _expand_catalog_files(root: Path, patterns: tuple[Path, ...]) -> list[Path]:
         candidate = root / pattern
         if not candidate.is_file():
             raise CLIError(
-                f"Workspace template file does not exist: {pattern_text}",
+                f"Template file does not exist: {pattern_text}",
                 code="NOT_FOUND",
             )
         rel_paths.add(pattern)

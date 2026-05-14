@@ -1,4 +1,4 @@
-"""Unit tests for workspace template source resolution."""
+"""Unit tests for template source resolution."""
 
 from __future__ import annotations
 
@@ -6,6 +6,10 @@ import shutil
 import tarfile
 from pathlib import Path
 
+import pytest
+import requests
+
+from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.templates import source
 
 
@@ -63,3 +67,36 @@ def test_safe_extract_uses_data_filter(tmp_path: Path, monkeypatch) -> None:
         source._safe_extract(archive, tmp_path / "extract")
 
     assert calls == ["data"]
+
+
+def test_missing_override_path_uses_user_facing_template_terms(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    missing = tmp_path / "missing"
+    monkeypatch.setenv("OSMOSIS_WORKSPACE_TEMPLATE_PATH", str(missing))
+
+    with pytest.raises(CLIError) as exc_info:
+        source.workspace_template_root()
+
+    message = str(exc_info.value).lower()
+    assert "configured template path does not exist" in message
+    assert "workspace template" not in message
+
+
+def test_download_failure_uses_user_facing_template_terms(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def fail_get(*args, **kwargs):
+        del args, kwargs
+        raise requests.RequestException("offline")
+
+    monkeypatch.setattr(source.requests, "get", fail_get)
+
+    with pytest.raises(CLIError) as exc_info:
+        source._download_workspace_template(
+            "Osmosis-AI/workspace-template", "main", tmp_path / "templates"
+        )
+
+    message = str(exc_info.value).lower()
+    assert "unable to fetch starter templates" in message
+    assert "workspace template" not in message

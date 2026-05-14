@@ -1,8 +1,7 @@
 """Business logic for ``osmosis template`` commands.
 
-Recipes are read from the SDK-owned catalog and copied from the public
-workspace template into the canonical project layout for ``eval run`` and
-``train submit``.
+Templates are read from the SDK-owned catalog and copied into the canonical
+project layout for ``eval run`` and ``train submit``.
 """
 
 from __future__ import annotations
@@ -43,7 +42,7 @@ def _format_unknown_template(name: str) -> CLIError:
         listing = ", ".join(available)
         hint = f"Available templates: {listing}."
     else:
-        hint = "No recipes are currently available from the workspace template."
+        hint = "No templates are currently available."
     return CLIError(
         f"Template '{name}' not found. {hint}",
         code="NOT_FOUND",
@@ -54,14 +53,14 @@ def _format_unknown_template(name: str) -> CLIError:
 
 
 def list_command() -> CommandResult | None:
-    """List workspace template recipes."""
+    """List templates."""
     names = list_templates()
 
     output = get_output_context()
     if output.format is OutputFormat.rich:
         if not names:
             console.print(
-                "No recipes are currently available from the workspace template.",
+                "No templates are currently available.",
                 style="dim",
             )
             return None
@@ -210,7 +209,7 @@ def _copy_template(
 
 
 def apply_command(name: str, *, force: bool = False) -> CommandResult | None:
-    """Apply a workspace template recipe into the active project layout."""
+    """Apply a template into the active project layout."""
     project_root = _require_project_root()
     destinations, written = _copy_template(name, project_root, force=force)
 

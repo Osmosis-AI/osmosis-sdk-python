@@ -11,7 +11,7 @@ from typing import Any
 import typer
 
 app: typer.Typer = typer.Typer(
-    help="Add workspace template recipes into your Osmosis project.",
+    help="Add starter templates into your Osmosis project.",
     no_args_is_help=True,
 )
 
@@ -25,7 +25,7 @@ def _complete_template_names(ctx: Any, args: list[str], incomplete: str) -> list
 
 @app.command("list")
 def list_templates() -> Any:
-    """List workspace template recipes."""
+    """List starter templates."""
     from osmosis_ai.templates.cli import list_command
 
     return list_command()
@@ -48,7 +48,7 @@ def apply(
         ),
     ),
 ) -> Any:
-    """Copy a workspace template recipe into the project's canonical layout.
+    """Copy a starter template into the project's canonical layout.
 
     Files land at ``rollouts/<name>/`` and ``configs/{training,eval}/<name>.toml``
     so the rollout is immediately runnable.

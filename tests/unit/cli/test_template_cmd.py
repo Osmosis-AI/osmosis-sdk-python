@@ -61,6 +61,30 @@ def test_template_help_lists_subcommands(capfd) -> None:
     assert "apply" in out
 
 
+def test_template_help_uses_user_facing_template_terms(capfd) -> None:
+    rc = cli.main(["template", "--help"])
+    out = capfd.readouterr().out.lower()
+
+    assert rc == 0
+    assert "recipe" not in out
+    assert "workspace template" not in out
+
+
+@pytest.mark.parametrize(
+    "args",
+    [["template", "list", "--help"], ["template", "apply", "--help"]],
+)
+def test_template_subcommand_help_uses_user_facing_template_terms(
+    args: list[str], capfd
+) -> None:
+    rc = cli.main(args)
+    out = capfd.readouterr().out.lower()
+
+    assert rc == 0
+    assert "recipe" not in out
+    assert "workspace template" not in out
+
+
 # ── list ─────────────────────────────────────────────────────────
 
 
@@ -203,6 +227,9 @@ def test_template_apply_unknown_template_returns_not_found_in_json(
     err = json.loads(captured.err)
     assert err["error"]["code"] == "NOT_FOUND"
     assert "Available templates" in err["error"]["message"]
+    message = err["error"]["message"].lower()
+    assert "recipe" not in message
+    assert "workspace template" not in message
 
 
 def test_zsh_completion_for_template_apply_names(workspace_template) -> None:

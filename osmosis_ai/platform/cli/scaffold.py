@@ -49,7 +49,7 @@ def _render_official_scaffold(text: str) -> str:
 
 
 def _read_agent_scaffold_files(*, refresh_template: bool) -> dict[str, str]:
-    """Read SDK-allowed agent scaffold files from the workspace template."""
+    """Read SDK-allowed agent scaffold files from the template source."""
     root = workspace_template_root(refresh=refresh_template)
     contents: dict[str, str] = {}
     for rel_path in OFFICIAL_AGENT_SCAFFOLD_PATHS:
@@ -57,7 +57,7 @@ def _read_agent_scaffold_files(*, refresh_template: bool) -> dict[str, str]:
         source_path = root / rel_path
         if not source_path.is_file():
             raise CLIError(
-                "Workspace template is missing an official agent scaffold file: "
+                "Template source is missing an official agent scaffold file: "
                 f"{rel_path_text}",
                 code="NOT_FOUND",
             )
@@ -105,7 +105,7 @@ def write_scaffold(target: Path, project_name: str, *, update: bool = False) -> 
     """Write missing scaffold paths into *target*.
 
     The SDK controls the allowed paths; agent scaffold content comes from the
-    latest workspace template. Existing files are never overwritten here.
+    latest template source. Existing files are never overwritten here.
     Official file updates are reported by ``official_scaffold_updates`` and can
     be applied with ``refresh_agent_scaffold``.
     """

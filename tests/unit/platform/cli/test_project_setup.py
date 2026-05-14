@@ -161,6 +161,20 @@ def test_write_scaffold_respects_plugin_env_overrides(
     assert settings["enabledPlugins"]["osmosis@my-marketplace"] is True
 
 
+def test_write_scaffold_missing_official_file_uses_user_facing_template_terms(
+    tmp_path: Path, workspace_template: Path
+) -> None:
+    (workspace_template / "AGENTS.md").unlink()
+    target = _make_existing_project(tmp_path / "project")
+
+    with pytest.raises(CLIError) as exc_info:
+        write_scaffold(target, "project")
+
+    message = str(exc_info.value).lower()
+    assert "template source is missing an official agent scaffold file" in message
+    assert "workspace template" not in message
+
+
 def test_official_scaffold_updates_reports_local_edits(tmp_path: Path) -> None:
     target = _make_existing_project(tmp_path / "project")
     write_scaffold(target, "project")

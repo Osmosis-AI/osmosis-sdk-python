@@ -10,6 +10,7 @@ import pytest
 from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.cli.output import OutputFormat
 from osmosis_ai.cli.output.context import override_output_context
+from osmosis_ai.templates import cli as template_cli
 from osmosis_ai.templates.cli import apply_command, list_command
 
 
@@ -100,6 +101,19 @@ def test_list_command_returns_none_in_rich(workspace_template: Path) -> None:
         result = list_command()
 
     assert result is None
+
+
+def test_list_command_empty_message_uses_user_facing_template_terms(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(template_cli, "list_templates", lambda: [])
+
+    error = template_cli._format_unknown_template("missing")
+    message = str(error).lower()
+
+    assert "no templates are currently available" in message
+    assert "recipe" not in message
+    assert "workspace template" not in message
 
 
 # ── apply_command ────────────────────────────────────────────────
@@ -331,6 +345,9 @@ def test_apply_command_unknown_template_raises_not_found(
 
     assert exc_info.value.code == "NOT_FOUND"
     assert "Available templates" in str(exc_info.value)
+    message = str(exc_info.value).lower()
+    assert "recipe" not in message
+    assert "workspace template" not in message
 
 
 def test_apply_command_outside_project_raises(tmp_path, monkeypatch) -> None:

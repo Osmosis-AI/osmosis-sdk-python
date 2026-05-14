@@ -1,9 +1,9 @@
-"""Workspace template source resolution.
+"""Template source resolution.
 
-The public ``Osmosis-AI/workspace-template`` repository provides starter file
-contents. Control metadata stays in the SDK catalog so user-editable repos
-cannot change CLI behavior. Tests and local development can point at a checkout
-with ``OSMOSIS_WORKSPACE_TEMPLATE_PATH``.
+The configured upstream repository provides starter file contents. Control
+metadata stays in the SDK catalog so user-editable repos cannot change CLI
+behavior. Tests and local development can point at a checkout with
+``OSMOSIS_WORKSPACE_TEMPLATE_PATH``.
 """
 
 from __future__ import annotations
@@ -45,7 +45,7 @@ def _safe_extract(archive: tarfile.TarFile, target: Path) -> None:
     for member in archive.getmembers():
         if member.issym() or member.islnk():
             raise CLIError(
-                f"Workspace template archive contains an unsafe link: {member.name}",
+                f"Template archive contains an unsafe link: {member.name}",
                 code="VALIDATION",
             )
         member_path = target / member.name
@@ -53,7 +53,7 @@ def _safe_extract(archive: tarfile.TarFile, target: Path) -> None:
             member_path.resolve().relative_to(target_resolved)
         except ValueError as exc:
             raise CLIError(
-                f"Workspace template archive contains an unsafe path: {member.name}",
+                f"Template archive contains an unsafe path: {member.name}",
                 code="VALIDATION",
             ) from exc
     archive.extractall(target, filter="data")
@@ -66,7 +66,7 @@ def _download_workspace_template(repo: str, ref: str, destination: Path) -> None
         response.raise_for_status()
     except requests.RequestException as exc:
         raise CLIError(
-            f"Unable to fetch workspace template from {url}: {exc}",
+            f"Unable to fetch starter templates from {url}: {exc}",
             code="NETWORK",
         ) from exc
 
@@ -82,14 +82,14 @@ def _download_workspace_template(repo: str, ref: str, destination: Path) -> None
                 _safe_extract(archive, extract_dir)
         except tarfile.TarError as exc:
             raise CLIError(
-                f"Workspace template archive from {url} is invalid: {exc}",
+                f"Template archive from {url} is invalid: {exc}",
                 code="VALIDATION",
             ) from exc
 
         roots = [path for path in extract_dir.iterdir() if path.is_dir()]
         if len(roots) != 1:
             raise CLIError(
-                "Workspace template archive must contain exactly one root directory.",
+                "Template archive must contain exactly one root directory.",
                 code="VALIDATION",
             )
         if destination.exists():
@@ -98,7 +98,7 @@ def _download_workspace_template(repo: str, ref: str, destination: Path) -> None
 
 
 def workspace_template_root(*, refresh: bool = False) -> Path:
-    """Return a local directory containing the workspace template checkout.
+    """Return a local directory containing the template source checkout.
 
     ``refresh=True`` re-fetches the configured repo/ref so scaffold repair can
     use the latest template contents instead of a stale cache.
@@ -108,7 +108,7 @@ def workspace_template_root(*, refresh: bool = False) -> Path:
         root = Path(override).expanduser().resolve()
         if not root.is_dir():
             raise CLIError(
-                f"Workspace template path does not exist: {root}",
+                f"Configured template path does not exist: {root}",
                 code="NOT_FOUND",
             )
         return root

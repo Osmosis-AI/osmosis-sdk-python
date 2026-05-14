@@ -1,4 +1,4 @@
-"""Unit tests for the SDK-owned workspace template registry."""
+"""Unit tests for the SDK-owned template registry."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.templates.registry import (
     TemplateNotFoundError,
     iter_template_files,
@@ -86,3 +87,16 @@ def test_iter_template_files_returns_catalog_relative_paths(
     for rel in files:
         assert isinstance(rel, Path)
         assert not rel.is_absolute()
+
+
+def test_iter_template_files_missing_catalog_file_uses_user_facing_template_terms(
+    workspace_template: Path,
+) -> None:
+    (workspace_template / "configs" / "eval" / "multiply-local-strands.toml").unlink()
+
+    with pytest.raises(CLIError) as exc_info:
+        iter_template_files("multiply-local-strands")
+
+    message = str(exc_info.value).lower()
+    assert "template file does not exist" in message
+    assert "workspace template" not in message
