@@ -8,7 +8,7 @@ import shutil
 import subprocess
 import tomllib
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import toml
 from harbor.models.trial.config import (
@@ -43,9 +43,13 @@ from osmosis_ai.rollout.utils.rewards import validate_samples_have_rewards
 
 logger: logging.Logger = logging.getLogger(__name__)
 
-AGENT_IMPORT_PATH = (
+HOSTED_AGENT_IMPORT_PATH = (
+    "osmosis_ai.rollout.backend.harbor.agent_adapter:OsmosisHostedAgent"
+)
+INSTALLED_AGENT_IMPORT_PATH = (
     "osmosis_ai.rollout.backend.harbor.agent_adapter:OsmosisInstalledAgent"
 )
+AGENT_IMPORT_PATH = INSTALLED_AGENT_IMPORT_PATH
 TRIAL_NAME_PREFIX = "trial-"
 
 TEST_SH_TEMPLATE = """\
@@ -75,7 +79,12 @@ class PendingTrial:
 
 
 class HarborBackend(ExecutionBackend):
-    """Execution backend that runs workflows inside Harbor containers.
+    """Execution backend that runs workflows with Harbor environments.
+
+    By default, the AgentWorkflow loop runs inside the Harbor environment using
+    the installed container-side runner. Pass workflow_execution_mode="hosted"
+    to run the workflow in the rollout server process with Harbor's environment
+    object available on the workflow context.
 
     With prebuild_local_image (default for Docker), the Docker image is built
     once at init and Harbor skips docker compose build on every trial. With
@@ -100,6 +109,7 @@ class HarborBackend(ExecutionBackend):
         prebuild_local_image: bool | None = None,
         symlink_environment: bool | None = None,
         cleanup_successful_trials: bool = True,
+        workflow_execution_mode: Literal["hosted", "installed"] = "installed",
         _sdk_source_dir: Path | None = None,  # local dev only
     ) -> None:
         self.orchestrator: TrialQueue = orchestrator
@@ -128,6 +138,12 @@ class HarborBackend(ExecutionBackend):
         self.prebuild_local_image: bool = prebuild_local_image
         self.symlink_environment: bool = symlink_environment
         self.cleanup_successful_trials: bool = cleanup_successful_trials
+        self.workflow_execution_mode = workflow_execution_mode
+
+        if self.workflow_execution_mode not in ("hosted", "installed"):
+            raise ValueError(
+                "workflow_execution_mode must be either 'hosted' or 'installed'"
+            )
 
         if not uses_local_docker and self.prebuild_local_image:
             raise ValueError(
@@ -347,7 +363,10 @@ class HarborBackend(ExecutionBackend):
         if ctx:
             if ctx.chat_completions_url:
                 url = ctx.chat_completions_url
-                if uses_local_docker_runtime(self.environment_config):
+                if (
+                    self.workflow_execution_mode == "installed"
+                    and uses_local_docker_runtime(self.environment_config)
+                ):
                     url = rewrite_url_for_docker(url)
                 config["chat_completions_url"] = url
             if ctx.api_key:
@@ -391,8 +410,13 @@ class HarborBackend(ExecutionBackend):
     def build_trial_config(
         self, task_dir: Path, request: ExecutionRequest
     ) -> TrialConfig:
+        agent_import_path = (
+            HOSTED_AGENT_IMPORT_PATH
+            if self.workflow_execution_mode == "hosted"
+            else INSTALLED_AGENT_IMPORT_PATH
+        )
         agent_config = HarborAgentConfig(
-            import_path=AGENT_IMPORT_PATH,
+            import_path=agent_import_path,
             kwargs={
                 "rollout_config_path": str(task_dir / "rollout_config.json"),
             },

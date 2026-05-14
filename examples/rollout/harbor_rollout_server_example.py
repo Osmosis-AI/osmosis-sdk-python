@@ -42,6 +42,7 @@ def main():
         grader_config=multiply_grader_config,
         environment_config=EnvironmentConfig(type=EnvironmentType.DAYTONA),
         cleanup_successful_trials=True,
+        workflow_execution_mode="hosted",
         _sdk_source_dir=SDK_ROOT,  # local dev only
     )
 

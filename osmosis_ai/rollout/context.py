@@ -136,7 +136,7 @@ class HarborAgentWorkflowContext[TConfig: AgentWorkflowConfig](
     def __init__(
         self,
         prompt: list[dict[str, Any]],
-        config: TConfig,
+        config: TConfig | None = None,
         environment: Any = None,
     ):
         super().__init__(prompt=prompt, config=config)
