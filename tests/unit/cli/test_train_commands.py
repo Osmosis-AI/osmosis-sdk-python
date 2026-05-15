@@ -714,6 +714,13 @@ rollout_batch_size = 64
             "total_epochs": 1,
             "n_samples_per_prompt": 8,
             "rollout_batch_size": 64,
+            "max_prompt_length": 8192,
+            "max_response_length": 8192,
+            "agent_workflow_timeout_s": 450.0,
+            "grader_timeout_s": 150.0,
+            "rollout_temperature": 1.0,
+            "rollout_top_p": 1.0,
+            "checkpoint_save_freq": 20,
         }
 
     def test_submit_rejects_non_canonical_training_config_path(

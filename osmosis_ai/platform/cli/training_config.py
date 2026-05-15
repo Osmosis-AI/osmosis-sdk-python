@@ -5,9 +5,9 @@ from __future__ import annotations
 import re
 import tomllib
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from osmosis_ai.cli.errors import CLIError
 
@@ -40,28 +40,28 @@ class _ExperimentSection(BaseModel):
 class _TrainingSection(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    lr: float | None = None
-    total_epochs: int | None = None
-    n_samples_per_prompt: int | None = None
-    rollout_batch_size: int | None = None
-    max_prompt_length: int | None = None
-    max_response_length: int | None = None
-    agent_workflow_timeout_s: float | None = None
-    grader_timeout_s: float | None = None
+    lr: Annotated[float, Field(gt=0.0, le=1.0)] = 1e-6
+    total_epochs: Annotated[int, Field(ge=1, le=10_000)] = 1
+    n_samples_per_prompt: Annotated[int, Field(ge=1, le=1_024)] = 8
+    rollout_batch_size: Annotated[int, Field(ge=1, le=1_000_000)] = 64
+    max_prompt_length: Annotated[int, Field(ge=1, le=262_144)] = 8_192
+    max_response_length: Annotated[int, Field(ge=1, le=262_144)] = 8_192
+    agent_workflow_timeout_s: Annotated[float, Field(ge=1, le=86_400)] = 450.0
+    grader_timeout_s: Annotated[float, Field(ge=1, le=86_400)] = 150.0
 
 
 class _SamplingSection(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    rollout_temperature: float | None = None
-    rollout_top_p: float | None = None
+    rollout_temperature: Annotated[float, Field(ge=0.0, le=2.0)] = 1.0
+    rollout_top_p: Annotated[float, Field(ge=0.0, le=1.0)] = 1.0
 
 
 class _CheckpointsSection(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    eval_interval: int | None = None
-    checkpoint_save_freq: int | None = None
+    eval_interval: Annotated[int | None, Field(ge=1, le=1_000_000)] = None
+    checkpoint_save_freq: Annotated[int, Field(ge=1, le=1_000_000)] = 20
 
 
 class _RolloutSection(BaseModel):
@@ -71,37 +71,254 @@ class _RolloutSection(BaseModel):
     secrets: dict[str, str] = Field(default_factory=dict)
 
 
+class _TrainingRunParams(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    training: _TrainingSection = Field(default_factory=_TrainingSection)
+    sampling: _SamplingSection = Field(default_factory=_SamplingSection)
+    checkpoints: _CheckpointsSection = Field(default_factory=_CheckpointsSection)
+
+    def to_api_config(self) -> dict[str, Any]:
+        fields: dict[str, Any] = {}
+        for section in (self.training, self.sampling, self.checkpoints):
+            fields.update(section.model_dump(exclude_none=True))
+        return fields
+
+
+def _format_bound(value: int | float) -> str:
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    return str(value)
+
+
+def _format_input(value: Any) -> str:
+    return repr(value)
+
+
+def _format_field_path(loc: tuple[Any, ...]) -> str:
+    return ".".join(str(part) for part in loc)
+
+
+def _format_field_bounds(model_type: type[BaseModel], field_name: str) -> str | None:
+    field = model_type.model_fields.get(field_name)
+    if field is None:
+        return None
+
+    lower: list[str] = []
+    upper: list[str] = []
+    for metadata in field.metadata:
+        gt = getattr(metadata, "gt", None)
+        ge = getattr(metadata, "ge", None)
+        lt = getattr(metadata, "lt", None)
+        le = getattr(metadata, "le", None)
+        if gt is not None:
+            lower.append(f"> {_format_bound(gt)}")
+        if ge is not None:
+            lower.append(f">= {_format_bound(ge)}")
+        if lt is not None:
+            upper.append(f"< {_format_bound(lt)}")
+        if le is not None:
+            upper.append(f"<= {_format_bound(le)}")
+
+    bounds = [*lower, *upper]
+    if not bounds:
+        return None
+    return " and ".join(bounds)
+
+
+def _format_validation_issue(
+    *,
+    error: dict[str, Any],
+    section_name: str,
+    model_type: type[BaseModel],
+    path: Path,
+) -> str:
+    loc = tuple(error.get("loc") or ())
+    field_path = _format_field_path(loc)
+    field_name = str(loc[0]) if loc else section_name
+    error_type = str(error.get("type"))
+
+    if error_type == "extra_forbidden":
+        return f"Unknown key '{field_name}' in [{section_name}] of {path}"
+
+    subject = f"{field_path} in [{section_name}] of {path}"
+    value = _format_input(error.get("input"))
+
+    bounds = _format_field_bounds(model_type, field_name)
+    if (
+        error_type
+        in {
+            "greater_than",
+            "greater_than_equal",
+            "less_than",
+            "less_than_equal",
+        }
+        and bounds is not None
+    ):
+        return f"{subject} must be {bounds}, got {value}"
+
+    expected_types = {
+        "bool_parsing": "a boolean",
+        "bool_type": "a boolean",
+        "dict_type": "a table",
+        "float_parsing": "a number",
+        "float_type": "a number",
+        "int_parsing": "an integer",
+        "int_type": "an integer",
+        "string_type": "a string",
+    }
+    expected_type = expected_types.get(error_type)
+    if expected_type is not None:
+        return f"{subject} must be {expected_type}, got {value}"
+
+    return f"{subject} is invalid: {error.get('msg', 'invalid value')}"
+
+
+def _config_validation_error(
+    *,
+    error: ValidationError,
+    section_name: str,
+    model_type: type[BaseModel],
+    path: Path,
+) -> CLIError:
+    issues = [
+        _format_validation_issue(
+            error=validation_issue,
+            section_name=section_name,
+            model_type=model_type,
+            path=path,
+        )
+        for validation_issue in error.errors()
+    ]
+    if len(issues) == 1:
+        return CLIError(issues[0])
+    lines = [
+        f"Invalid [{section_name}] section in {path}:",
+        *[f"- {i}" for i in issues],
+    ]
+    return CLIError("\n".join(lines))
+
+
+def _read_table(
+    raw: dict[str, Any],
+    section_name: str,
+    path: Path,
+    *,
+    required: bool = False,
+) -> dict[str, Any]:
+    if section_name not in raw:
+        if required:
+            raise CLIError(f"Missing [{section_name}] section in {path}")
+        return {}
+
+    section = raw[section_name]
+    if not isinstance(section, dict):
+        raise CLIError(f"[{section_name}] must be a table in {path}")
+    return section
+
+
+def _parse_section(
+    *,
+    section_name: str,
+    model_type: type[BaseModel],
+    data: dict[str, Any],
+    path: Path,
+) -> BaseModel:
+    try:
+        return model_type(**data)
+    except ValidationError as e:
+        raise _config_validation_error(
+            error=e,
+            section_name=section_name,
+            model_type=model_type,
+            path=path,
+        ) from e
+
+
 class TrainingConfig(BaseModel):
-    """Parsed training TOML configuration with flattened section fields."""
+    """Parsed training TOML configuration."""
 
-    # experiment
-    experiment_rollout: str
-    experiment_entrypoint: str
-    experiment_model_path: str
-    experiment_dataset: str
-    experiment_commit_sha: str | None
+    model_config = ConfigDict(extra="forbid")
 
-    # training
-    training_lr: float | None
-    training_total_epochs: int | None
-    training_n_samples_per_prompt: int | None
-    training_rollout_batch_size: int | None
-    training_max_prompt_length: int | None
-    training_max_response_length: int | None
-    training_agent_workflow_timeout_s: float | None = None
-    training_grader_timeout_s: float | None = None
+    experiment: _ExperimentSection
+    params: _TrainingRunParams
+    rollout: _RolloutSection
 
-    # sampling
-    sampling_rollout_temperature: float | None
-    sampling_rollout_top_p: float | None
+    @property
+    def experiment_rollout(self) -> str:
+        return self.experiment.rollout
 
-    # checkpoints
-    checkpoints_eval_interval: int | None
-    checkpoints_checkpoint_save_freq: int | None
+    @property
+    def experiment_entrypoint(self) -> str:
+        return self.experiment.entrypoint
 
-    # rollout container launch arguments
-    rollout_env: dict[str, str]
-    rollout_secret_refs: dict[str, str]
+    @property
+    def experiment_model_path(self) -> str:
+        return self.experiment.model_path
+
+    @property
+    def experiment_dataset(self) -> str:
+        return self.experiment.dataset
+
+    @property
+    def experiment_commit_sha(self) -> str | None:
+        return self.experiment.commit_sha
+
+    @property
+    def training_lr(self) -> float:
+        return self.params.training.lr
+
+    @property
+    def training_total_epochs(self) -> int:
+        return self.params.training.total_epochs
+
+    @property
+    def training_n_samples_per_prompt(self) -> int:
+        return self.params.training.n_samples_per_prompt
+
+    @property
+    def training_rollout_batch_size(self) -> int:
+        return self.params.training.rollout_batch_size
+
+    @property
+    def training_max_prompt_length(self) -> int:
+        return self.params.training.max_prompt_length
+
+    @property
+    def training_max_response_length(self) -> int:
+        return self.params.training.max_response_length
+
+    @property
+    def training_agent_workflow_timeout_s(self) -> float:
+        return self.params.training.agent_workflow_timeout_s
+
+    @property
+    def training_grader_timeout_s(self) -> float:
+        return self.params.training.grader_timeout_s
+
+    @property
+    def sampling_rollout_temperature(self) -> float:
+        return self.params.sampling.rollout_temperature
+
+    @property
+    def sampling_rollout_top_p(self) -> float:
+        return self.params.sampling.rollout_top_p
+
+    @property
+    def checkpoints_eval_interval(self) -> int | None:
+        return self.params.checkpoints.eval_interval
+
+    @property
+    def checkpoints_checkpoint_save_freq(self) -> int:
+        return self.params.checkpoints.checkpoint_save_freq
+
+    @property
+    def rollout_env(self) -> dict[str, str]:
+        return dict(self.rollout.env)
+
+    @property
+    def rollout_secret_refs(self) -> dict[str, str]:
+        return dict(self.rollout.secrets)
 
     def to_api_config(self) -> dict[str, Any]:
         """Build the ``config`` dict for the training-runs API payload.
@@ -109,13 +326,7 @@ class TrainingConfig(BaseModel):
         Merges training, sampling, and checkpoints fields, omitting None values.
         Rollout env/secrets are submitted as separate top-level fields, not here.
         """
-        fields: dict[str, Any] = {}
-        dump = self.model_dump()
-        for prefix in ("training_", "sampling_", "checkpoints_"):
-            for key, value in dump.items():
-                if key.startswith(prefix) and value is not None:
-                    fields[key.removeprefix(prefix)] = value
-        return fields
+        return self.params.to_api_config()
 
 
 def _validate_rollout_env_keys(
@@ -159,65 +370,59 @@ def load_training_config(path: Path) -> TrainingConfig:
     except OSError as e:
         raise CLIError(f"Cannot read config file {path}: {e}") from e
 
-    # ── Validate [experiment] section ────────────────────────────
-    if "experiment" not in raw:
-        raise CLIError(f"Missing [experiment] section in {path}")
-
-    experiment_section = raw["experiment"]
-    if not isinstance(experiment_section, dict):
-        raise CLIError(f"[experiment] must be a table in {path}")
-
+    experiment_section = _read_table(raw, "experiment", path, required=True)
     for required_key in ("rollout", "entrypoint", "model_path", "dataset"):
         if required_key not in experiment_section:
             raise CLIError(
                 f"Missing '{required_key}' in [experiment] section of {path}"
             )
 
-    training_section = raw.get("training", {})
-    sampling_section = raw.get("sampling", {})
-    checkpoints_section = raw.get("checkpoints", {})
-    rollout_section = raw.get("rollout", {})
-
-    try:
-        experiment = _ExperimentSection(**experiment_section)
-        training = _TrainingSection(**training_section)
-        sampling = _SamplingSection(**sampling_section)
-        checkpoints = _CheckpointsSection(**checkpoints_section)
-        rollout = _RolloutSection(**rollout_section)
-    except Exception as e:
-        raise CLIError(f"Invalid config in {path}: {e}") from e
+    experiment = _parse_section(
+        section_name="experiment",
+        model_type=_ExperimentSection,
+        data=experiment_section,
+        path=path,
+    )
+    training = _parse_section(
+        section_name="training",
+        model_type=_TrainingSection,
+        data=_read_table(raw, "training", path),
+        path=path,
+    )
+    sampling = _parse_section(
+        section_name="sampling",
+        model_type=_SamplingSection,
+        data=_read_table(raw, "sampling", path),
+        path=path,
+    )
+    checkpoints = _parse_section(
+        section_name="checkpoints",
+        model_type=_CheckpointsSection,
+        data=_read_table(raw, "checkpoints", path),
+        path=path,
+    )
+    rollout = _parse_section(
+        section_name="rollout",
+        model_type=_RolloutSection,
+        data=_read_table(raw, "rollout", path),
+        path=path,
+    )
+    assert isinstance(experiment, _ExperimentSection)
+    assert isinstance(training, _TrainingSection)
+    assert isinstance(sampling, _SamplingSection)
+    assert isinstance(checkpoints, _CheckpointsSection)
+    assert isinstance(rollout, _RolloutSection)
 
     _validate_rollout_env_keys(env=rollout.env, secrets=rollout.secrets, path=path)
 
-    # ── Cross-field validation ───────────────────────────────────
-    if training.n_samples_per_prompt is not None and training.n_samples_per_prompt <= 0:
-        raise CLIError(
-            f"n_samples_per_prompt must be a positive integer, "
-            f"got {training.n_samples_per_prompt} in {path}"
-        )
-    if training.rollout_batch_size is None or training.n_samples_per_prompt is None:
-        raise CLIError("rollout_batch_size and n_samples_per_prompt must both be set")
-
     return TrainingConfig(
-        experiment_rollout=experiment.rollout,
-        experiment_entrypoint=experiment.entrypoint,
-        experiment_model_path=experiment.model_path,
-        experiment_dataset=experiment.dataset,
-        experiment_commit_sha=experiment.commit_sha,
-        training_lr=training.lr,
-        training_total_epochs=training.total_epochs,
-        training_n_samples_per_prompt=training.n_samples_per_prompt,
-        training_rollout_batch_size=training.rollout_batch_size,
-        training_max_prompt_length=training.max_prompt_length,
-        training_max_response_length=training.max_response_length,
-        training_agent_workflow_timeout_s=training.agent_workflow_timeout_s,
-        training_grader_timeout_s=training.grader_timeout_s,
-        sampling_rollout_temperature=sampling.rollout_temperature,
-        sampling_rollout_top_p=sampling.rollout_top_p,
-        checkpoints_eval_interval=checkpoints.eval_interval,
-        checkpoints_checkpoint_save_freq=checkpoints.checkpoint_save_freq,
-        rollout_env=dict(rollout.env),
-        rollout_secret_refs=dict(rollout.secrets),
+        experiment=experiment,
+        params=_TrainingRunParams(
+            training=training,
+            sampling=sampling,
+            checkpoints=checkpoints,
+        ),
+        rollout=rollout,
     )
 
 

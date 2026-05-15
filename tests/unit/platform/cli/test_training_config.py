@@ -13,6 +13,20 @@ from osmosis_ai.platform.cli.training_config import (
     validate_training_context_paths,
 )
 
+DEFAULT_API_CONFIG = {
+    "lr": 1e-6,
+    "total_epochs": 1,
+    "n_samples_per_prompt": 8,
+    "rollout_batch_size": 64,
+    "max_prompt_length": 8192,
+    "max_response_length": 8192,
+    "agent_workflow_timeout_s": 450,
+    "grader_timeout_s": 150,
+    "rollout_temperature": 1.0,
+    "rollout_top_p": 1.0,
+    "checkpoint_save_freq": 20,
+}
+
 # ---------------------------------------------------------------------------
 # Valid configs
 # ---------------------------------------------------------------------------
@@ -76,10 +90,6 @@ rollout = "r"
 entrypoint = "e.py"
 model_path = "Qwen/Qwen3.6-35B-A3B"
 dataset = "id-1"
-
-[training]
-n_samples_per_prompt = 1
-rollout_batch_size = 1
 """.strip(),
         encoding="utf-8",
     )
@@ -87,11 +97,12 @@ rollout_batch_size = 1
     cfg = load_training_config(path)
     assert cfg.experiment_rollout == "r"
     assert cfg.experiment_commit_sha is None
-    assert cfg.training_lr is None
-    assert cfg.training_total_epochs is None
-    assert cfg.training_n_samples_per_prompt == 1
-    assert cfg.training_rollout_batch_size == 1
-    assert cfg.sampling_rollout_temperature is None
+    assert cfg.training_lr == 1e-6
+    assert cfg.training_total_epochs == 1
+    assert cfg.training_n_samples_per_prompt == 8
+    assert cfg.training_rollout_batch_size == 64
+    assert cfg.sampling_rollout_temperature == 1.0
+    assert cfg.checkpoints_checkpoint_save_freq == 20
     assert cfg.checkpoints_eval_interval is None
 
 
@@ -132,7 +143,12 @@ checkpoint_save_freq = 10
         "total_epochs": 1,
         "n_samples_per_prompt": 8,
         "rollout_batch_size": 64,
+        "max_prompt_length": 8192,
+        "max_response_length": 8192,
+        "agent_workflow_timeout_s": 450,
+        "grader_timeout_s": 150,
         "rollout_temperature": 0.9,
+        "rollout_top_p": 1.0,
         "checkpoint_save_freq": 10,
     }
 
@@ -146,19 +162,12 @@ rollout = "r"
 entrypoint = "e.py"
 model_path = "m"
 dataset = "d"
-
-[training]
-n_samples_per_prompt = 1
-rollout_batch_size = 1
 """.strip(),
         encoding="utf-8",
     )
 
     cfg = load_training_config(path)
-    assert cfg.to_api_config() == {
-        "n_samples_per_prompt": 1,
-        "rollout_batch_size": 1,
-    }
+    assert cfg.to_api_config() == DEFAULT_API_CONFIG
 
 
 # ---------------------------------------------------------------------------
@@ -172,23 +181,14 @@ def _training_config(
     entrypoint: str = "workers/main.py",
 ) -> TrainingConfig:
     return TrainingConfig(
-        experiment_rollout=rollout,
-        experiment_entrypoint=entrypoint,
-        experiment_model_path="m",
-        experiment_dataset="d",
-        experiment_commit_sha=None,
-        training_lr=None,
-        training_total_epochs=None,
-        training_n_samples_per_prompt=None,
-        training_rollout_batch_size=None,
-        training_max_prompt_length=None,
-        training_max_response_length=None,
-        sampling_rollout_temperature=None,
-        sampling_rollout_top_p=None,
-        checkpoints_eval_interval=None,
-        checkpoints_checkpoint_save_freq=None,
-        rollout_env={},
-        rollout_secret_refs={},
+        experiment={
+            "rollout": rollout,
+            "entrypoint": entrypoint,
+            "model_path": "m",
+            "dataset": "d",
+        },
+        params={},
+        rollout={},
     )
 
 
@@ -307,17 +307,20 @@ def test_directory_path_raises(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize(
-    "training_body",
+    ("training_body", "expected_config"),
     [
-        "rollout_batch_size = 64",
-        "n_samples_per_prompt = 8",
-        "",
+        ("rollout_batch_size = 32", {**DEFAULT_API_CONFIG, "rollout_batch_size": 32}),
+        (
+            "n_samples_per_prompt = 4",
+            {**DEFAULT_API_CONFIG, "n_samples_per_prompt": 4},
+        ),
+        ("", DEFAULT_API_CONFIG),
     ],
 )
-def test_required_batch_fields_cannot_be_missing(
-    tmp_path: Path, training_body: str
+def test_optional_training_fields_use_defaults_and_can_be_set_independently(
+    tmp_path: Path, training_body: str, expected_config: dict[str, int | float]
 ) -> None:
-    path = tmp_path / "missing_batch_fields.toml"
+    path = tmp_path / "optional_training_fields.toml"
     path.write_text(
         f"""
 [experiment]
@@ -332,11 +335,62 @@ dataset = "d"
         encoding="utf-8",
     )
 
+    cfg = load_training_config(path)
+    assert cfg.to_api_config() == expected_config
+
+
+@pytest.mark.parametrize(
+    ("section", "field", "value"),
+    [
+        ("training", "lr", "0"),
+        ("training", "lr", "1.1"),
+        ("training", "total_epochs", "0"),
+        ("training", "total_epochs", "10001"),
+        ("training", "n_samples_per_prompt", "0"),
+        ("training", "n_samples_per_prompt", "1025"),
+        ("training", "rollout_batch_size", "0"),
+        ("training", "rollout_batch_size", "1000001"),
+        ("training", "max_prompt_length", "0"),
+        ("training", "max_prompt_length", "262145"),
+        ("training", "max_response_length", "0"),
+        ("training", "max_response_length", "262145"),
+        ("training", "agent_workflow_timeout_s", "0"),
+        ("training", "agent_workflow_timeout_s", "86401"),
+        ("training", "grader_timeout_s", "0"),
+        ("training", "grader_timeout_s", "86401"),
+        ("sampling", "rollout_temperature", "-0.1"),
+        ("sampling", "rollout_temperature", "2.1"),
+        ("sampling", "rollout_top_p", "-0.1"),
+        ("sampling", "rollout_top_p", "1.1"),
+        ("checkpoints", "eval_interval", "0"),
+        ("checkpoints", "eval_interval", "1000001"),
+        ("checkpoints", "checkpoint_save_freq", "0"),
+        ("checkpoints", "checkpoint_save_freq", "1000001"),
+    ],
+)
+def test_training_param_bounds_are_validated(
+    tmp_path: Path, section: str, field: str, value: str
+) -> None:
+    path = tmp_path / "bad_bounds.toml"
+    path.write_text(
+        f"""
+[experiment]
+rollout = "r"
+entrypoint = "e.py"
+model_path = "m"
+dataset = "d"
+
+[{section}]
+{field} = {value}
+""".strip(),
+        encoding="utf-8",
+    )
+
     with pytest.raises(CLIError) as exc_info:
         load_training_config(path)
-    assert "rollout_batch_size and n_samples_per_prompt must both be set" in str(
-        exc_info.value
-    )
+    message = str(exc_info.value)
+    assert field in message
+    assert "must be" in message
 
 
 def test_rollout_batch_size_not_required_to_be_divisible(tmp_path: Path) -> None:
@@ -379,4 +433,30 @@ total_epochs = "not-a-number"
 
     with pytest.raises(CLIError) as exc_info:
         load_training_config(path)
-    assert "Invalid config" in str(exc_info.value)
+    message = str(exc_info.value)
+    assert f"total_epochs in [training] of {path}" in message
+    assert "must be an integer" in message
+    assert "got 'not-a-number'" in message
+    assert "pydantic" not in message.lower()
+
+
+def test_unknown_training_field_has_friendly_error(tmp_path: Path) -> None:
+    path = tmp_path / "unknown_field.toml"
+    path.write_text(
+        """
+[experiment]
+rollout = "r"
+entrypoint = "e.py"
+model_path = "m"
+dataset = "d"
+
+[training]
+unexpected = 1
+""".strip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(CLIError) as exc_info:
+        load_training_config(path)
+    message = str(exc_info.value)
+    assert message == f"Unknown key 'unexpected' in [training] of {path}"
