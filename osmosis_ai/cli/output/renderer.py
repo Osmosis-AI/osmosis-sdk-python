@@ -145,6 +145,11 @@ def _render_plain(result: CommandResult, output: OutputContext) -> None:
         for field in result.fields:
             value = _normalise_plain_value(field.value, rich_display=True)
             sys.stdout.write(f"{field.label}: {value}\n")
+        for section in result.sections:
+            for line in section.plain_lines:
+                sys.stdout.write(_normalise_plain_value(line) + "\n")
+        for hint in result.display_hints:
+            sys.stdout.write(_normalise_plain_value(hint) + "\n")
         return
 
     if isinstance(result, ListResult):
@@ -190,14 +195,27 @@ def _render_rich(result: CommandResult, output: OutputContext) -> None:
         console.table(
             [(field.label, _rich_text(field.value)) for field in result.fields]
         )
+        for section in result.sections:
+            if section.rich is not None:
+                console.rich.print(section.rich)
+        for hint in result.display_hints:
+            console.rich.print(_rich_text(hint, style="dim"))
         return
 
     if isinstance(result, ListResult):
         from rich.table import Table
 
-        table = Table(show_header=True, header_style="bold")
+        table = Table(show_header=True, header_style="bold", expand=True)
         for column in result.columns:
-            table.add_column(column.label, no_wrap=column.no_wrap)
+            overflow = column.overflow if column.overflow is not None else "ellipsis"
+            table.add_column(
+                column.label,
+                no_wrap=column.no_wrap,
+                overflow=overflow,
+                ratio=column.ratio,
+                min_width=column.min_width,
+                max_width=column.max_width,
+            )
         for idx, item in enumerate(_display_items(result)):
             raw_item = result.items[idx] if idx < len(result.items) else {}
             table.add_row(
@@ -216,6 +234,8 @@ def _render_rich(result: CommandResult, output: OutputContext) -> None:
                 "Use --all to show all, or --limit to adjust.",
                 style="dim",
             )
+        for hint in result.display_hints:
+            console.rich.print(_rich_text(hint, style="dim"))
         return
 
     if isinstance(result, OperationResult):

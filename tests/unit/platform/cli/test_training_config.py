@@ -214,7 +214,7 @@ def test_validate_training_context_paths_rejects_rollout_escape(
 ) -> None:
     cfg = _training_config(rollout="../outside", entrypoint="main.py")
 
-    with pytest.raises(CLIError, match="current project's rollouts"):
+    with pytest.raises(CLIError, match="current workspace directory's rollouts"):
         validate_training_context_paths(cfg, tmp_path)
 
 

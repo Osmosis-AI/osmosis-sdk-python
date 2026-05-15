@@ -27,7 +27,6 @@ from osmosis_ai.cli.console import console
 from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.cli.output import OutputFormat
 from osmosis_ai.cli.prompts import Choice, Separator, confirm, select_list
-from osmosis_ai.platform.cli.workspace_context import WorkspaceContext
 from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE
 
 app: typer.Typer = typer.Typer(
@@ -42,13 +41,6 @@ def _detail_fields(rows: list[tuple[str, str]]) -> list[Any]:
     from osmosis_ai.cli.output import DetailField
 
     return [DetailField(label=label, value=value) for label, value in rows]
-
-
-def _workspace_result_context(workspace: Any) -> dict[str, Any]:
-    return {
-        "workspace": {"id": workspace.workspace_id, "name": workspace.workspace_name},
-        "project_root": str(workspace.project_root),
-    }
 
 
 def _deployment_summary_resource(result: Any) -> dict[str, Any]:
@@ -85,13 +77,13 @@ def _format_deployment_status(status: str) -> str:
     return console.escape(label)
 
 
-def _select_checkpoint_for_deploy(workspace: WorkspaceContext) -> str | None:
+def _select_checkpoint_for_deploy(context: Any) -> str | None:
     from osmosis_ai.platform.api.client import OsmosisClient
 
     client = OsmosisClient()
     runs = client.list_training_runs(
-        credentials=workspace.credentials,
-        workspace_id=workspace.workspace_id,
+        credentials=context.credentials,
+        git_identity=context.git_identity,
     ).training_runs
     if not runs:
         raise CLIError("No training runs with deployable checkpoints found.")
@@ -109,8 +101,8 @@ def _select_checkpoint_for_deploy(workspace: WorkspaceContext) -> str | None:
             return None
         checkpoints = client.list_training_run_checkpoints(
             selected_run.id,
-            credentials=workspace.credentials,
-            workspace_id=workspace.workspace_id,
+            credentials=context.credentials,
+            git_identity=context.git_identity,
         ).checkpoints
         if not checkpoints:
             run_label = selected_run.name or selected_run.id
@@ -146,7 +138,7 @@ def list_deployments(
     ),
     all_: bool = typer.Option(False, "--all", help="Show all deployments."),
 ) -> Any:
-    """List LoRA deployments in the linked project workspace."""
+    """List LoRA deployments for the current workspace directory."""
     from osmosis_ai.cli.output import (
         ListColumn,
         ListResult,
@@ -156,15 +148,16 @@ def list_deployments(
     from osmosis_ai.platform.api.client import OsmosisClient
     from osmosis_ai.platform.cli.utils import (
         fetch_all_pages,
-        require_workspace_context,
+        require_git_workspace_directory_context,
         validate_list_options,
     )
+    from osmosis_ai.platform.cli.workspace_directory_context import git_result_context
 
     effective_limit, fetch_all = validate_list_options(limit=limit, all_=all_)
 
-    workspace = require_workspace_context()
-    credentials = workspace.credentials
-    workspace_id = workspace.workspace_id
+    context = require_git_workspace_directory_context()
+    credentials = context.credentials
+    git_identity = context.git_identity
 
     output = get_output_context()
     client = OsmosisClient()
@@ -175,7 +168,7 @@ def list_deployments(
                     limit=lim,
                     offset=off,
                     credentials=credentials,
-                    workspace_id=workspace_id,
+                    git_identity=git_identity,
                 ),
                 items_attr="deployments",
             )
@@ -186,7 +179,7 @@ def list_deployments(
                 limit=effective_limit,
                 offset=0,
                 credentials=credentials,
-                workspace_id=workspace_id,
+                git_identity=git_identity,
             )
             deployments = page.deployments
             total_count = page.total_count
@@ -199,7 +192,7 @@ def list_deployments(
         total_count=total_count,
         has_more=has_more,
         next_offset=next_offset,
-        extra=_workspace_result_context(workspace),
+        extra=git_result_context(context),
         columns=[
             ListColumn(key="checkpoint_name", label="Checkpoint"),
             ListColumn(key="status", label="Status"),
@@ -224,11 +217,15 @@ def info(
         serialize_deployment,
     )
     from osmosis_ai.platform.api.client import OsmosisClient
-    from osmosis_ai.platform.cli.utils import format_date, require_workspace_context
+    from osmosis_ai.platform.cli.utils import (
+        format_date,
+        require_git_workspace_directory_context,
+    )
+    from osmosis_ai.platform.cli.workspace_directory_context import git_result_context
 
-    workspace = require_workspace_context()
-    credentials = workspace.credentials
-    workspace_id = workspace.workspace_id
+    context = require_git_workspace_directory_context()
+    credentials = context.credentials
+    git_identity = context.git_identity
 
     client = OsmosisClient()
     output = get_output_context()
@@ -236,7 +233,7 @@ def info(
         d = client.get_deployment(
             checkpoint,
             credentials=credentials,
-            workspace_id=workspace_id,
+            git_identity=git_identity,
         )
 
     rows: list[tuple[str, str]] = [
@@ -256,7 +253,7 @@ def info(
         rows.append(("Created", format_date(d.created_at)))
 
     data = serialize_deployment(d)
-    data.update(_workspace_result_context(workspace))
+    data.update(git_result_context(context))
     return DetailResult(
         title="Deployment",
         data=data,
@@ -272,7 +269,8 @@ def deploy(
     """Deploy (or reactivate) a LoRA checkpoint."""
     from osmosis_ai.cli.output import OperationResult, get_output_context
     from osmosis_ai.platform.api.client import OsmosisClient
-    from osmosis_ai.platform.cli.utils import require_workspace_context
+    from osmosis_ai.platform.cli.utils import require_git_workspace_directory_context
+    from osmosis_ai.platform.cli.workspace_directory_context import git_result_context
 
     output = get_output_context()
     if checkpoint is None and (
@@ -283,16 +281,16 @@ def deploy(
             code="INTERACTIVE_REQUIRED",
         )
 
-    workspace = require_workspace_context()
-    credentials = workspace.credentials
-    workspace_id = workspace.workspace_id
+    context = require_git_workspace_directory_context()
+    credentials = context.credentials
+    git_identity = context.git_identity
     if checkpoint is None:
-        checkpoint = _select_checkpoint_for_deploy(workspace)
+        checkpoint = _select_checkpoint_for_deploy(context)
         if checkpoint is None:
             return OperationResult(
                 operation="deploy",
                 status="cancelled",
-                resource=_workspace_result_context(workspace),
+                resource=git_result_context(context),
                 message="Deploy cancelled.",
             )
 
@@ -302,12 +300,12 @@ def deploy(
         result = client.deploy_checkpoint(
             checkpoint,
             credentials=credentials,
-            workspace_id=workspace_id,
+            git_identity=git_identity,
         )
 
     op_status = "failed" if result.status == "failed" else "success"
     resource = _deployment_summary_resource(result)
-    resource.update(_workspace_result_context(workspace))
+    resource.update(git_result_context(context))
     return OperationResult(
         operation="deploy",
         status=op_status,
@@ -335,11 +333,12 @@ def undeploy(
     """Undeploy a LoRA checkpoint (transition to ``inactive``)."""
     from osmosis_ai.cli.output import OperationResult, get_output_context
     from osmosis_ai.platform.api.client import OsmosisClient
-    from osmosis_ai.platform.cli.utils import require_workspace_context
+    from osmosis_ai.platform.cli.utils import require_git_workspace_directory_context
+    from osmosis_ai.platform.cli.workspace_directory_context import git_result_context
 
-    workspace = require_workspace_context()
-    credentials = workspace.credentials
-    workspace_id = workspace.workspace_id
+    context = require_git_workspace_directory_context()
+    credentials = context.credentials
+    git_identity = context.git_identity
     client = OsmosisClient()
     output = get_output_context()
 
@@ -347,12 +346,12 @@ def undeploy(
         result = client.undeploy_checkpoint(
             checkpoint,
             credentials=credentials,
-            workspace_id=workspace_id,
+            git_identity=git_identity,
         )
 
     op_status = "failed" if result.status == "failed" else "success"
     resource = _deployment_summary_resource(result)
-    resource.update(_workspace_result_context(workspace))
+    resource.update(git_result_context(context))
     return OperationResult(
         operation="undeploy",
         status=op_status,

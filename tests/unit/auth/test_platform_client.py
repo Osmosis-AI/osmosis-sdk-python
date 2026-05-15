@@ -138,7 +138,7 @@ class TestPlatformRequest:
         mock_load.return_value = creds
         mock_urlopen.return_value = _make_http_response({"ok": True})
 
-        platform_request("/api/test", workspace_id="ws_test")
+        platform_request("/api/test", git_identity="git_test")
 
         mock_load.assert_called_once()
         # Verify the loaded token was used in the request
@@ -155,7 +155,7 @@ class TestPlatformRequest:
         mock_urlopen.return_value = _make_http_response({"ok": True})
 
         platform_request(
-            "/api/test", credentials=explicit_creds, workspace_id="ws_test"
+            "/api/test", credentials=explicit_creds, git_identity="git_test"
         )
 
         mock_load.assert_not_called()
@@ -177,7 +177,7 @@ class TestPlatformRequest:
             "https://test.osmosis.ai",
         ):
             platform_request(
-                "/api/v1/verify", credentials=creds, workspace_id="ws_test"
+                "/api/v1/verify", credentials=creds, git_identity="git_test"
             )
 
         request_obj = mock_urlopen.call_args[0][0]
@@ -189,7 +189,7 @@ class TestPlatformRequest:
         mock_urlopen.return_value = _make_http_response({"ok": True})
         creds = _make_credentials(access_token="my-token")
 
-        platform_request("/api/test", credentials=creds, workspace_id="ws_test")
+        platform_request("/api/test", credentials=creds, git_identity="git_test")
 
         request_obj = mock_urlopen.call_args[0][0]
         assert request_obj.get_header("Authorization") == "Bearer my-token"
@@ -206,44 +206,70 @@ class TestPlatformRequest:
             "/api/test",
             headers={"X-Custom": "value123"},
             credentials=creds,
-            workspace_id="ws_test",
+            git_identity="git_test",
         )
 
         request_obj = mock_urlopen.call_args[0][0]
         assert request_obj.get_header("X-custom") == "value123"
 
     @patch("osmosis_ai.platform.auth.platform_client.urlopen")
-    def test_adds_workspace_header_from_explicit_workspace_id(
+    def test_adds_git_header_from_trusted_git_identity(
         self, mock_urlopen: MagicMock
     ) -> None:
         mock_urlopen.return_value = _make_http_response({"ok": True})
         creds = _make_credentials()
 
-        platform_request("/api/test", credentials=creds, workspace_id="ws_123")
+        platform_request("/api/test", credentials=creds, git_identity="git_123")
 
         request_obj = mock_urlopen.call_args[0][0]
-        assert request_obj.get_header("X-osmosis-org") == "ws_123"
+        assert request_obj.get_header("X-osmosis-git") == "git_123"
 
-    def test_require_workspace_true_requires_explicit_workspace_id(
+    def test_require_git_repo_true_requires_explicit_git_identity(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         creds = _make_credentials()
 
-        with pytest.raises(PlatformAPIError, match="explicit workspace_id"):
+        with pytest.raises(PlatformAPIError, match="explicit git_identity") as exc_info:
             platform_request("/api/test", credentials=creds)
 
+        assert exc_info.value.error_code == "GIT_SCOPE_HEADER_REQUIRED"
+
     @patch("osmosis_ai.platform.auth.platform_client.urlopen")
-    def test_no_workspace_header_when_require_workspace_false(
+    def test_no_scope_header_when_require_git_repo_false(
         self, mock_urlopen: MagicMock
     ) -> None:
-        """Verify X-Osmosis-Org header is omitted when require_workspace=False."""
+        """Verify scope headers are omitted when require_git_repo=False."""
         mock_urlopen.return_value = _make_http_response({"ok": True})
         creds = _make_credentials()
 
-        platform_request("/api/test", credentials=creds, require_workspace=False)
+        platform_request("/api/test", credentials=creds, require_git_repo=False)
 
         request_obj = mock_urlopen.call_args[0][0]
-        assert "X-osmosis-org" not in request_obj.headers
+        header_names = {name.casefold() for name in request_obj.headers}
+        assert "x-osmosis-org" not in header_names
+        assert "x-osmosis-git" not in header_names
+
+    @pytest.mark.parametrize(
+        "header_name",
+        ["X-Osmosis-Org", "x-osmosis-org", "X-Osmosis-Git", "x-osmosis-git"],
+    )
+    @patch("osmosis_ai.platform.auth.platform_client.urlopen")
+    def test_rejects_caller_supplied_scope_headers_case_insensitively(
+        self, mock_urlopen: MagicMock, header_name: str
+    ) -> None:
+        creds = _make_credentials()
+
+        with pytest.raises(PlatformAPIError) as exc_info:
+            platform_request(
+                "/api/test",
+                credentials=creds,
+                headers={header_name: "caller-value"},
+                require_git_repo=False,
+            )
+
+        assert exc_info.value.error_code == "SCOPE_HEADER_FORBIDDEN"
+        assert "managed by the SDK" in str(exc_info.value)
+        mock_urlopen.assert_not_called()
 
     @patch("osmosis_ai.platform.auth.platform_client.urlopen")
     def test_get_request_has_no_body(self, mock_urlopen: MagicMock) -> None:
@@ -252,7 +278,7 @@ class TestPlatformRequest:
         creds = _make_credentials()
 
         platform_request(
-            "/api/test", method="GET", credentials=creds, workspace_id="ws_test"
+            "/api/test", method="GET", credentials=creds, git_identity="git_test"
         )
 
         request_obj = mock_urlopen.call_args[0][0]
@@ -271,7 +297,7 @@ class TestPlatformRequest:
             method="POST",
             data=payload,
             credentials=creds,
-            workspace_id="ws_test",
+            git_identity="git_test",
         )
 
         request_obj = mock_urlopen.call_args[0][0]
@@ -286,7 +312,7 @@ class TestPlatformRequest:
         creds = _make_credentials()
 
         platform_request(
-            "/api/test", timeout=5.0, credentials=creds, workspace_id="ws_test"
+            "/api/test", timeout=5.0, credentials=creds, git_identity="git_test"
         )
 
         _, kwargs = mock_urlopen.call_args
@@ -298,7 +324,7 @@ class TestPlatformRequest:
         mock_urlopen.return_value = _make_http_response({"ok": True})
         creds = _make_credentials()
 
-        platform_request("/api/test", credentials=creds, workspace_id="ws_test")
+        platform_request("/api/test", credentials=creds, git_identity="git_test")
 
         _, kwargs = mock_urlopen.call_args
         assert kwargs["timeout"] == 30.0
@@ -315,7 +341,7 @@ class TestPlatformRequest:
         creds = _make_credentials()
 
         result = platform_request(
-            "/api/test", credentials=creds, workspace_id="ws_test"
+            "/api/test", credentials=creds, git_identity="git_test"
         )
 
         assert result == expected
@@ -334,7 +360,7 @@ class TestPlatformRequest:
         creds = _make_credentials()
 
         with pytest.raises(AuthenticationExpiredError, match="session has expired"):
-            platform_request("/api/test", credentials=creds, workspace_id="ws_test")
+            platform_request("/api/test", credentials=creds, git_identity="git_test")
 
         mock_reset.assert_called_once()
 
@@ -351,7 +377,7 @@ class TestPlatformRequest:
             platform_request(
                 "/api/test",
                 credentials=creds,
-                workspace_id="ws_test",
+                git_identity="git_test",
                 cleanup_on_401=False,
             )
 
@@ -376,7 +402,9 @@ class TestPlatformRequest:
             ) as mock_reset,
         ):
             with pytest.raises(AuthenticationExpiredError) as exc_info:
-                platform_request("/api/test", credentials=creds, workspace_id="ws_test")
+                platform_request(
+                    "/api/test", credentials=creds, git_identity="git_test"
+                )
 
         assert "OSMOSIS_TOKEN environment variable has expired" in str(exc_info.value)
         assert "unset OSMOSIS_TOKEN" in str(exc_info.value)
@@ -387,37 +415,57 @@ class TestPlatformRequest:
         [
             (
                 400,
-                "WORKSPACE_HEADER_MISSING",
-                "linked Osmosis project",
+                "GIT_SCOPE_REQUIRED",
+                "requires an Osmosis workspace directory",
             ),
             (
                 400,
-                "WORKSPACE_HEADER_INVALID",
-                "workspace that is no longer accessible",
+                "GIT_SCOPE_HEADER_REQUIRED",
+                "requires an Osmosis workspace directory",
+            ),
+            (
+                400,
+                "GIT_SCOPE_INVALID",
+                "workspace directory's Git repository identity is invalid",
+            ),
+            (
+                400,
+                "GIT_SCOPE_HEADER_INVALID",
+                "workspace directory's Git repository identity is invalid",
+            ),
+            (
+                404,
+                "GIT_REPOSITORY_NOT_CONNECTED",
+                "could not resolve this workspace directory's repository",
             ),
             (
                 403,
-                "WORKSPACE_ACCESS_DENIED",
-                "workspace that is no longer accessible",
+                "GIT_REPOSITORY_ACCESS_DENIED",
+                "does not have access to the Platform workspace connected",
+            ),
+            (
+                403,
+                "GIT_SCOPE_HEADER_ACCESS_DENIED",
+                "could not resolve this workspace directory's repository",
             ),
         ],
     )
     @patch("osmosis_ai.platform.auth.platform_client.urlopen")
-    def test_workspace_auth_codes_use_sdk_guidance(
+    def test_repo_scope_codes_use_sdk_guidance(
         self,
         mock_urlopen: MagicMock,
         status_code: int,
         error_code: str,
         expected_message: str,
     ) -> None:
-        """Verify monolith workspace auth codes map to actionable CLI errors."""
+        """Verify monolith Git-scope codes map to actionable CLI errors."""
         mock_urlopen.side_effect = _make_http_error(
             status_code, json.dumps({"code": error_code})
         )
         creds = _make_credentials()
 
         with pytest.raises(PlatformAPIError) as exc_info:
-            platform_request("/api/test", credentials=creds, workspace_id="ws_test")
+            platform_request("/api/test", credentials=creds, git_identity="git_test")
 
         assert exc_info.value.status_code == status_code
         assert exc_info.value.error_code == error_code
@@ -425,20 +473,61 @@ class TestPlatformRequest:
         assert expected_message in str(exc_info.value)
 
     @patch("osmosis_ai.platform.auth.platform_client.urlopen")
-    def test_generic_workspace_access_403_uses_project_link_guidance(
-        self, mock_urlopen: MagicMock
+    def test_repo_scope_error_suggests_remote_update_when_github_repo_was_renamed(
+        self, mock_urlopen: MagicMock, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """Verify unstructured workspace access errors point at project linking."""
+        """Verify rename diagnosis only runs after the platform rejects local scope."""
+        from osmosis_ai.platform.cli import workspace_repo
+
+        def _fake_resolve(identity: str) -> str | None:
+            assert identity == "acme/old-name"
+            return "Acme/new-name"
+
+        monkeypatch.setattr(
+            workspace_repo,
+            "resolve_canonical_git_identity",
+            _fake_resolve,
+            raising=False,
+        )
         mock_urlopen.side_effect = _make_http_error(
-            403, json.dumps({"error": "Workspace access denied"})
+            404, json.dumps({"code": "GIT_REPOSITORY_NOT_CONNECTED"})
         )
         creds = _make_credentials()
 
         with pytest.raises(PlatformAPIError) as exc_info:
-            platform_request("/api/test", credentials=creds, workspace_id="ws_test")
+            platform_request(
+                "/api/test",
+                credentials=creds,
+                git_identity="acme/old-name",
+            )
 
         message = str(exc_info.value)
-        assert "osmosis project link" in message
+        assert "repository may have been renamed on GitHub" in message
+        assert "git remote set-url origin git@github.com:Acme/new-name.git" in message
+
+    @patch("osmosis_ai.platform.auth.platform_client.urlopen")
+    def test_billing_codes_preserve_platform_message_without_scope_guidance(
+        self, mock_urlopen: MagicMock
+    ) -> None:
+        """Verify billing errors do not add project or workspace guidance."""
+        mock_urlopen.side_effect = _make_http_error(
+            403,
+            json.dumps(
+                {
+                    "error": "Billing required for this workspace",
+                    "code": "BILLING_REQUIRED",
+                }
+            ),
+        )
+        creds = _make_credentials()
+
+        with pytest.raises(SubscriptionRequiredError) as exc_info:
+            platform_request("/api/test", credentials=creds, git_identity="git_test")
+
+        message = str(exc_info.value)
+        assert message == "Billing required for this workspace"
+        assert exc_info.value.error_code == "BILLING_REQUIRED"
+        assert "osmosis workspace link" not in message
         assert "osmosis workspace" not in message
 
     @patch("osmosis_ai.platform.auth.platform_client.urlopen")
@@ -450,7 +539,7 @@ class TestPlatformRequest:
         creds = _make_credentials()
 
         with pytest.raises(PlatformAPIError) as exc_info:
-            platform_request("/api/test", credentials=creds, workspace_id="ws_test")
+            platform_request("/api/test", credentials=creds, git_identity="git_test")
 
         assert exc_info.value.status_code == 500
         assert "HTTP 500" in str(exc_info.value)
@@ -465,7 +554,7 @@ class TestPlatformRequest:
         creds = _make_credentials()
 
         with pytest.raises(PlatformAPIError) as exc_info:
-            platform_request("/api/test", credentials=creds, workspace_id="ws_test")
+            platform_request("/api/test", credentials=creds, git_identity="git_test")
 
         assert "Agent not found" in str(exc_info.value)
         assert exc_info.value.status_code == 404
@@ -486,7 +575,7 @@ class TestPlatformRequest:
         creds = _make_credentials()
 
         with pytest.raises(PlatformAPIError) as exc_info:
-            platform_request("/api/test", credentials=creds, workspace_id="ws_test")
+            platform_request("/api/test", credentials=creds, git_identity="git_test")
 
         assert exc_info.value.status_code == 409
         assert exc_info.value.error_code == "CONFLICT"
@@ -506,21 +595,21 @@ class TestPlatformRequest:
         error_body = json.dumps(
             {
                 "error": "Active subscription required to create deployments",
-                "code": "FORBIDDEN",
+                "code": "SUBSCRIPTION_REQUIRED",
             }
         )
         mock_urlopen.side_effect = _make_http_error(403, error_body)
         creds = _make_credentials()
 
         with pytest.raises(SubscriptionRequiredError) as exc_info:
-            platform_request("/api/test", credentials=creds, workspace_id="ws_test")
+            platform_request("/api/test", credentials=creds, git_identity="git_test")
 
         assert exc_info.value.status_code == 403
-        assert exc_info.value.error_code == "FORBIDDEN"
+        assert exc_info.value.error_code == "SUBSCRIPTION_REQUIRED"
         assert exc_info.value.field is None
         assert exc_info.value.details == {
             "error": "Active subscription required to create deployments",
-            "code": "FORBIDDEN",
+            "code": "SUBSCRIPTION_REQUIRED",
         }
 
     @patch("osmosis_ai.platform.auth.platform_client.urlopen")
@@ -533,7 +622,7 @@ class TestPlatformRequest:
         creds = _make_credentials()
 
         with pytest.raises(PlatformAPIError) as exc_info:
-            platform_request("/api/test", credentials=creds, workspace_id="ws_test")
+            platform_request("/api/test", credentials=creds, git_identity="git_test")
 
         msg = str(exc_info.value)
         assert "(truncated)" in msg
@@ -545,7 +634,7 @@ class TestPlatformRequest:
         creds = _make_credentials()
 
         with pytest.raises(PlatformAPIError) as exc_info:
-            platform_request("/api/test", credentials=creds, workspace_id="ws_test")
+            platform_request("/api/test", credentials=creds, git_identity="git_test")
 
         assert "HTTP 502" in str(exc_info.value)
         assert exc_info.value.status_code == 502
@@ -562,7 +651,7 @@ class TestPlatformRequest:
         creds = _make_credentials()
 
         with pytest.raises(PlatformAPIError) as exc_info:
-            platform_request("/api/test", credentials=creds, workspace_id="ws_test")
+            platform_request("/api/test", credentials=creds, git_identity="git_test")
 
         # Should still get a PlatformAPIError with the status code
         assert exc_info.value.status_code == 503
@@ -579,7 +668,7 @@ class TestPlatformRequest:
         creds = _make_credentials()
 
         with pytest.raises(PlatformAPIError, match="Connection error"):
-            platform_request("/api/test", credentials=creds, workspace_id="ws_test")
+            platform_request("/api/test", credentials=creds, git_identity="git_test")
 
     @patch("osmosis_ai.platform.auth.platform_client.urlopen")
     def test_url_error_does_not_include_status_code(
@@ -590,7 +679,7 @@ class TestPlatformRequest:
         creds = _make_credentials()
 
         with pytest.raises(PlatformAPIError) as exc_info:
-            platform_request("/api/test", credentials=creds, workspace_id="ws_test")
+            platform_request("/api/test", credentials=creds, git_identity="git_test")
 
         assert exc_info.value.status_code is None
 
@@ -611,7 +700,7 @@ class TestPlatformRequest:
         creds = _make_credentials()
 
         with pytest.raises(PlatformAPIError, match="Invalid JSON response"):
-            platform_request("/api/test", credentials=creds, workspace_id="ws_test")
+            platform_request("/api/test", credentials=creds, git_identity="git_test")
 
     # -------------------------------------------------------------------------
     # Integration-style: Credential flow
@@ -627,7 +716,7 @@ class TestPlatformRequest:
         mock_load.return_value = creds
         mock_urlopen.return_value = _make_http_response({"ok": True})
 
-        platform_request("/api/test", credentials=None, workspace_id="ws_test")
+        platform_request("/api/test", credentials=None, git_identity="git_test")
 
         mock_load.assert_called_once()
 

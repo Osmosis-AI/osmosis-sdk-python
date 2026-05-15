@@ -53,20 +53,6 @@ class EvalCommand:
         sys.stderr.write(message + "\n")
         sys.stderr.flush()
 
-    def _run_cache_dir(self) -> int | DetailResult:
-        from osmosis_ai.eval.evaluation.cache import JsonFileCacheBackend
-
-        backend = JsonFileCacheBackend()
-        if self._structured_output():
-            path = str(backend.cache_root)
-            return DetailResult(
-                title="Eval Cache",
-                data={"cache_root": path},
-                fields=[DetailField(label="Cache root", value=path)],
-            )
-        self.console.print(str(backend.cache_root))
-        return 0
-
     @staticmethod
     def _filter_caches(
         entries: list[dict],
@@ -302,9 +288,9 @@ class EvalCommand:
         return asyncio.run(self._run_async(args))
 
     @staticmethod
-    def _load_project_dotenv(project_root: Path) -> None:
-        """Load project-local .env for eval runs without overriding shell env."""
-        dotenv_path = project_root / ".env"
+    def _load_workspace_directory_dotenv(workspace_directory: Path) -> None:
+        """Load workspace-directory .env for eval runs without overriding shell env."""
+        dotenv_path = workspace_directory / ".env"
         if not dotenv_path.is_file():
             return
 
@@ -495,23 +481,25 @@ class EvalCommand:
             truncate_error,
         )
         from osmosis_ai.eval.config import load_eval_config, resolve_eval_context_paths
-        from osmosis_ai.platform.cli.project_contract import (
-            ensure_project_config_path,
-            resolve_project_root_from_cwd,
-            validate_project_contract,
+        from osmosis_ai.platform.cli.workspace_directory_contract import (
+            ensure_workspace_directory_config_path,
+            resolve_workspace_directory_from_cwd,
+            validate_workspace_directory_contract,
         )
 
-        # 1. Validate project-local config path
+        # 1. Validate workspace-directory config path
         config_path = Path(args.config_path)
         try:
-            project_root = resolve_project_root_from_cwd()
+            workspace_directory = resolve_workspace_directory_from_cwd()
             config_path = (
-                config_path if config_path.is_absolute() else project_root / config_path
+                config_path
+                if config_path.is_absolute()
+                else workspace_directory / config_path
             )
-            validate_project_contract(project_root)
-            ensure_project_config_path(
+            validate_workspace_directory_contract(workspace_directory)
+            ensure_workspace_directory_config_path(
                 config_path,
-                project_root,
+                workspace_directory,
                 config_dir="configs/eval",
                 command_label="`osmosis eval run`",
             )
@@ -520,11 +508,11 @@ class EvalCommand:
 
         try:
             config = load_eval_config(config_path)
-            config = resolve_eval_context_paths(config, project_root)
+            config = resolve_eval_context_paths(config, workspace_directory)
         except CLIError as e:
             return self._fail(f"Error: {e}")
 
-        self._load_project_dotenv(project_root)
+        self._load_workspace_directory_dotenv(workspace_directory)
 
         # Apply CLI overrides (CLI flags take precedence over TOML).
         # Optional values: CLI wins when not None.
@@ -591,7 +579,7 @@ class EvalCommand:
             compute_task_id,
         )
 
-        rollout_dir = project_root / "rollouts" / config.eval_rollout
+        rollout_dir = workspace_directory / "rollouts" / config.eval_rollout
         dataset_fingerprint = compute_dataset_fingerprint(config.eval_dataset)
         rollout_fingerprint = compute_rollout_filesystem_fingerprint(
             rollout_dir,
@@ -671,7 +659,7 @@ class EvalCommand:
 
         controller = EvalController(
             config=EvalControllerConfig(
-                project_root=project_root,
+                workspace_directory=workspace_directory,
                 rollout_name=config.eval_rollout,
                 rollout_dir=rollout_dir,
                 entrypoint=config.eval_entrypoint,
@@ -809,7 +797,7 @@ class EvalCommand:
 
                 await controller.start()
                 user_server_process = await start_user_server_process(
-                    project_root=project_root,
+                    workspace_directory=workspace_directory,
                     rollout_dir=rollout_dir,
                     rollout_name=config.eval_rollout,
                     entrypoint=config.eval_entrypoint,

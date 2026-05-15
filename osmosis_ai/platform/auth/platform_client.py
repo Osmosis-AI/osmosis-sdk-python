@@ -110,19 +110,89 @@ def _auth_error_message(error_code: str | None, *, using_env_token: bool) -> str
     return MSG_SESSION_EXPIRED
 
 
-_WORKSPACE_AUTH_ERROR_MESSAGES: dict[str, str] = {
-    "WORKSPACE_HEADER_MISSING": (
-        "This command requires a linked Osmosis project. Run 'osmosis project link' from the project root."
+_REPO_SCOPE_ERROR_MESSAGES: dict[str, str] = {
+    "GIT_SCOPE_REQUIRED": "This command requires an Osmosis workspace directory.",
+    "GIT_SCOPE_HEADER_REQUIRED": (
+        "This command requires an Osmosis workspace directory."
     ),
-    "WORKSPACE_HEADER_INVALID": (
-        "This project is linked to a workspace that is no longer accessible. "
-        "Run 'osmosis auth login' if you changed users, or unlink and run 'osmosis project link' again."
+    "GIT_SCOPE_INVALID": (
+        "The workspace directory's Git repository identity is invalid. "
+        "Run from the Platform-connected GitHub repository."
     ),
-    "WORKSPACE_ACCESS_DENIED": (
-        "This project is linked to a workspace that is no longer accessible. "
-        "Run 'osmosis auth login' if you changed users, or unlink and run 'osmosis project link' again."
+    "GIT_SCOPE_HEADER_INVALID": (
+        "The workspace directory's Git repository identity is invalid. "
+        "Run from the Platform-connected GitHub repository."
+    ),
+    "GIT_REPOSITORY_NOT_CONNECTED": (
+        "Platform could not resolve this workspace directory's repository. "
+        "Clone the repository created by Platform or reconnect it there."
+    ),
+    "GIT_REPOSITORY_ACCESS_DENIED": (
+        "Your account does not have access to the Platform workspace connected "
+        "to this workspace directory's repository. Run `osmosis auth login` "
+        "with the correct account."
+    ),
+    "GIT_SCOPE_HEADER_ACCESS_DENIED": (
+        "Platform could not resolve this workspace directory's repository, or "
+        "your account does not have access to its Platform workspace. Clone the "
+        "Platform-connected repository or run `osmosis auth login` with the "
+        "correct account."
     ),
 }
+
+_REPO_SCOPE_RENAME_DIAGNOSTIC_CODES = {
+    "GIT_REPOSITORY_NOT_CONNECTED",
+    "GIT_SCOPE_HEADER_ACCESS_DENIED",
+}
+
+
+def _reject_scope_headers(headers: dict[str, str] | None) -> None:
+    if not headers:
+        return
+    forbidden = {"x-osmosis-org", "x-osmosis-git"}
+    supplied = {name.casefold() for name in headers}
+    if supplied & forbidden:
+        raise PlatformAPIError(
+            "Osmosis scope headers are managed by the SDK and cannot be supplied by callers.",
+            error_code="SCOPE_HEADER_FORBIDDEN",
+        )
+
+
+def _repo_scope_error_message(error_code: str, git_identity: str | None) -> str:
+    message = _REPO_SCOPE_ERROR_MESSAGES[error_code]
+    if error_code not in _REPO_SCOPE_RENAME_DIAGNOSTIC_CODES:
+        return message
+
+    guidance = _renamed_github_repo_guidance(git_identity)
+    if guidance is None:
+        return message
+    return f"{message}\n\n{guidance}"
+
+
+def _renamed_github_repo_guidance(git_identity: str | None) -> str | None:
+    if not git_identity:
+        return None
+
+    try:
+        from osmosis_ai.platform.cli.workspace_repo import (
+            resolve_canonical_git_identity,
+        )
+
+        canonical_identity = resolve_canonical_git_identity(git_identity)
+    except Exception:
+        return None
+
+    if (
+        canonical_identity is None
+        or canonical_identity.casefold() == git_identity.casefold()
+    ):
+        return None
+
+    return (
+        "This repository may have been renamed on GitHub. "
+        "Update your local origin with:\n"
+        f"  git remote set-url origin git@github.com:{canonical_identity}.git"
+    )
 
 
 def revoke_cli_token(credentials: Credentials) -> bool:
@@ -173,8 +243,8 @@ def platform_request(
     headers: dict[str, str] | None = None,
     timeout: float = 30.0,
     credentials: Credentials | None = None,
-    workspace_id: str | None = None,
-    require_workspace: bool = True,
+    git_identity: str | None = None,
+    require_git_repo: bool = True,
     cleanup_on_401: bool = True,
 ) -> dict[str, Any]:
     """Make an authenticated request to the Osmosis Platform API.
@@ -189,10 +259,10 @@ def platform_request(
         timeout: Request timeout in seconds
         credentials: Optional explicit credentials override. If not provided,
             uses credentials from local storage.
-        workspace_id: Explicit workspace ID for X-Osmosis-Org header when
-            require_workspace is True.
-        require_workspace: If True, requires a workspace context and adds
-            X-Osmosis-Org header. If False, omits workspace context.
+        git_identity: Explicit Git repository identity for X-Osmosis-Git header
+            when require_git_repo is True.
+        require_git_repo: If True, requires a Git repository context and adds
+            X-Osmosis-Git header. If False, omits repository scope.
         cleanup_on_401: If True (default), a 401 response triggers
             ``reset_session()`` which deletes credentials and local config.
             Set to False for non-critical calls (e.g. post-login validation)
@@ -206,6 +276,8 @@ def platform_request(
             when cleanup_on_401 is True)
         PlatformAPIError: For other API errors
     """
+    _reject_scope_headers(headers)
+
     if credentials is None:
         credentials = load_credentials()
     if credentials is None:
@@ -220,13 +292,13 @@ def platform_request(
         "User-Agent": f"osmosis-cli/{PACKAGE_VERSION}",
     }
 
-    if require_workspace:
-        if not workspace_id:
+    if require_git_repo:
+        if not git_identity:
             raise PlatformAPIError(
-                "Workspace-scoped platform requests require an explicit workspace_id.",
-                error_code="WORKSPACE_ID_REQUIRED",
+                "Git-scoped platform requests require an explicit git_identity.",
+                error_code="GIT_SCOPE_HEADER_REQUIRED",
             )
-        req_headers["X-Osmosis-Org"] = workspace_id
+        req_headers["X-Osmosis-Git"] = git_identity
 
     if headers:
         req_headers.update(headers)
@@ -285,10 +357,22 @@ def platform_request(
         except Exception:
             pass
 
-        if error_code in _WORKSPACE_AUTH_ERROR_MESSAGES:
+        if error_code in _REPO_SCOPE_ERROR_MESSAGES:
             raise PlatformAPIError(
-                _WORKSPACE_AUTH_ERROR_MESSAGES[error_code],
+                _repo_scope_error_message(error_code, git_identity),
                 e.code,
+                error_code=error_code,
+                field=field,
+                details=error_body or None,
+            ) from e
+
+        if e.code == 403 and error_code in {
+            "SUBSCRIPTION_REQUIRED",
+            "BILLING_REQUIRED",
+        }:
+            error_msg = error_body.get("error") or error_body.get("message")
+            raise SubscriptionRequiredError(
+                error_msg if isinstance(error_msg, str) else None,
                 error_code=error_code,
                 field=field,
                 details=error_body or None,
@@ -297,25 +381,13 @@ def platform_request(
         # Detect subscription-required responses (403 with subscription message)
         if e.code == 403 and isinstance(error_body, dict):
             error_msg = error_body.get("error", "")
-            if isinstance(error_msg, str):
-                if "subscription" in error_msg.lower():
-                    raise SubscriptionRequiredError(
-                        error_msg,
-                        error_code=error_code,
-                        field=field,
-                        details=error_body or None,
-                    ) from e
-                if "workspace" in error_msg.lower() and "access" in error_msg.lower():
-                    raise PlatformAPIError(
-                        f"{error_msg}\n"
-                        "This project is linked to a workspace that is no longer accessible. "
-                        "Run 'osmosis auth login' if you changed users, or unlink and run "
-                        "'osmosis project link' again.",
-                        e.code,
-                        error_code=error_code,
-                        field=field,
-                        details=error_body or None,
-                    ) from e
+            if isinstance(error_msg, str) and "subscription" in error_msg.lower():
+                raise SubscriptionRequiredError(
+                    error_msg,
+                    error_code=error_code,
+                    field=field,
+                    details=error_body or None,
+                ) from e
 
         raise PlatformAPIError(
             f"API error: HTTP {e.code}.{detail}",

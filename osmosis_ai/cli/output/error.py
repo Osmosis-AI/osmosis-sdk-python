@@ -12,6 +12,7 @@ from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.consts import PACKAGE_VERSION
 
 _SUPPORTED_TOP_LEVEL_COMMANDS = {
+    "doctor",
     "deploy",
     "undeploy",
     "upgrade",
@@ -23,7 +24,6 @@ _SUPPORTED_COMMAND_GROUPS = {
     "deployment",
     "eval",
     "model",
-    "project",
     "rollout",
     "template",
     "train",
@@ -35,6 +35,7 @@ _REMOVED_TOP_LEVEL_COMMANDS = {
     "login",
     "logout",
     "unlink",
+    "workspace",
     "whoami",
 }
 
@@ -43,17 +44,10 @@ _REMOVED_TWO_TOKEN_COMMANDS = {
     ("deployment", "delete"),
     ("deployment", "rename"),
     ("model", "delete"),
-    ("project", "info"),
-    ("project", "init"),
-    ("project", "list"),
     ("rollout", "validate"),
     ("train", "delete"),
     ("train", "info"),
     ("train", "traces"),
-    ("workspace", "create"),
-    ("workspace", "delete"),
-    ("workspace", "list"),
-    ("workspace", "switch"),
 }
 
 
@@ -112,18 +106,11 @@ def classify_error(exc: BaseException) -> CLIError:
 
 
 def _argv_command_path(argv: list[str]) -> str:
-    skip_flags_with_value = {"--format"}
     skip_flags = {"--json", "--plain", "--version", "-V", "--help", "-h"}
     tokens: list[str] = []
     i = 0
     while i < len(argv):
         token = argv[i]
-        if token in skip_flags_with_value:
-            i += 2
-            continue
-        if any(token.startswith(f"{flag}=") for flag in skip_flags_with_value):
-            i += 1
-            continue
         if token in skip_flags:
             i += 1
             continue

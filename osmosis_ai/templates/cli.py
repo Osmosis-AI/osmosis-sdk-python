@@ -1,13 +1,12 @@
 """Business logic for ``osmosis template`` commands.
 
-Templates are local cookbook recipes copied directly into the canonical
-project layout for ``eval run`` and ``train submit``.
+Templates are read from the SDK-owned catalog and copied into the canonical
+workspace directory layout for ``eval run`` and ``train submit``.
 """
 
 from __future__ import annotations
 
 import shutil
-from importlib.resources import as_file
 from pathlib import Path
 
 from osmosis_ai.cli.console import console
@@ -20,18 +19,23 @@ from osmosis_ai.cli.output import (
     OutputFormat,
     get_output_context,
 )
+from osmosis_ai.templates.catalog import shared_template_files
 from osmosis_ai.templates.registry import (
     TemplateNotFoundError,
+    iter_template_files,
     list_templates,
-    template_path,
+    template_recipe,
 )
+from osmosis_ai.templates.source import workspace_template_root
 
 
-def _require_project_root() -> Path:
-    """Resolve the active project root."""
-    from osmosis_ai.platform.cli.project_contract import resolve_project_root
+def _require_workspace_directory() -> Path:
+    """Resolve the active workspace directory."""
+    from osmosis_ai.platform.cli.workspace_directory_contract import (
+        resolve_workspace_directory,
+    )
 
-    return resolve_project_root()
+    return resolve_workspace_directory()
 
 
 def _format_unknown_template(name: str) -> CLIError:
@@ -40,7 +44,7 @@ def _format_unknown_template(name: str) -> CLIError:
         listing = ", ".join(available)
         hint = f"Available templates: {listing}."
     else:
-        hint = "No templates are currently bundled with this SDK release."
+        hint = "No templates are currently available."
     return CLIError(
         f"Template '{name}' not found. {hint}",
         code="NOT_FOUND",
@@ -51,14 +55,14 @@ def _format_unknown_template(name: str) -> CLIError:
 
 
 def list_command() -> CommandResult | None:
-    """List bundled cookbook templates."""
+    """List templates."""
     names = list_templates()
 
     output = get_output_context()
     if output.format is OutputFormat.rich:
         if not names:
             console.print(
-                "No templates are bundled with this SDK release.",
+                "No templates are currently available.",
                 style="dim",
             )
             return None
@@ -79,35 +83,32 @@ def list_command() -> CommandResult | None:
 # ── osmosis template apply <name> ────────────────────────────────
 
 
-def _iter_template_files(concrete_root: Path) -> list[tuple[Path, Path]]:
-    """List files under a concrete template root."""
-    pairs: list[tuple[Path, Path]] = []
-    for src_path in sorted(concrete_root.rglob("*")):
-        if not src_path.is_file():
-            continue
-        pairs.append((src_path, src_path.relative_to(concrete_root)))
-    return pairs
-
-
-def _rollout_dest_dirs(concrete_root: Path, project_root: Path) -> list[Path]:
-    """List rollout directories this template writes."""
-    rollouts_src = concrete_root / "rollouts"
-    if not rollouts_src.is_dir():
-        return []
-    dests: list[Path] = []
-    for rollout_dir in sorted(rollouts_src.iterdir()):
-        if rollout_dir.is_dir():
-            dests.append(project_root / "rollouts" / rollout_dir.name)
-    return dests
-
-
-def _ensure_within_project(dest: Path, project_root: Path) -> None:
-    """Refuse writes outside the project root."""
+def _is_under(path: Path, directory: Path) -> bool:
     try:
-        dest.resolve().relative_to(project_root)
+        path.relative_to(directory)
+    except ValueError:
+        return False
+    return True
+
+
+def _same_file_contents(left: Path, right: Path) -> bool:
+    try:
+        return (
+            left.is_file()
+            and right.is_file()
+            and left.read_bytes() == right.read_bytes()
+        )
+    except OSError:
+        return False
+
+
+def _ensure_within_workspace_directory(dest: Path, workspace_directory: Path) -> None:
+    """Refuse writes outside the workspace directory."""
+    try:
+        dest.resolve().relative_to(workspace_directory)
     except ValueError as exc:
         raise CLIError(
-            f"Refusing to write template file outside the project root: {dest}",
+            f"Refusing to write template file outside the workspace directory: {dest}",
             code="VALIDATION",
         ) from exc
 
@@ -115,103 +116,130 @@ def _ensure_within_project(dest: Path, project_root: Path) -> None:
 def _format_conflicts(conflicts: list[str], name: str) -> CLIError:
     listing = "\n  ".join(sorted(set(conflicts)))
     return CLIError(
-        "Refusing to overwrite existing files in the project:\n"
+        "Refusing to overwrite existing files in the workspace directory:\n"
         f"  {listing}\n"
         f"\nRe-run with `osmosis template apply {name} --force` to replace them.",
         code="CONFLICT",
     )
 
 
+def _format_blocked_owned_paths(blocked_paths: list[str]) -> CLIError:
+    listing = "\n  ".join(sorted(set(blocked_paths)))
+    return CLIError(
+        "Refusing to replace non-directory template-owned paths:\n"
+        f"  {listing}\n"
+        "\nMove or replace these paths; `--force` only replaces existing directories.",
+        code="CONFLICT",
+    )
+
+
 def _next_steps(name: str) -> list[str]:
     """Commands to run after applying a template."""
+    try:
+        recipe = template_recipe(name)
+    except TemplateNotFoundError:
+        recipe = None
+    if recipe is not None and recipe.next_steps:
+        return list(recipe.next_steps)
     return [
         f"pip install -e rollouts/{name}",
         f"osmosis eval run configs/eval/{name}.toml --limit 1",
+        f"osmosis dataset upload data/{name}.jsonl",
+        f"Edit configs/training/{name}.toml with the uploaded dataset ID and target model",
+        'git add . && git commit -m "add rollout template"',
         "git push",
-        "Confirm Git Sync is connected in the Osmosis Platform",
         f"osmosis train submit configs/training/{name}.toml",
     ]
 
 
 def _copy_template(
     name: str,
-    project_root: Path,
+    workspace_directory: Path,
     *,
     force: bool = False,
 ) -> tuple[list[Path], list[str]]:
     """Copy template files and return destinations plus written paths."""
     try:
-        src_resource = template_path(name)
+        recipe = template_recipe(name)
     except TemplateNotFoundError as exc:
         raise _format_unknown_template(name) from exc
 
-    project_root_resolved = project_root.resolve()
+    workspace_directory_resolved = workspace_directory.resolve()
     written: list[str] = []
+    template_root = workspace_template_root(refresh=True)
+    file_rels = iter_template_files(name, root=template_root)
+    shared_file_rels = shared_template_files()
+    owned_dests = [workspace_directory_resolved / rel for rel in recipe.owned_dirs]
 
-    with as_file(src_resource) as concrete_src:
-        concrete_root = Path(concrete_src)
-        file_pairs = _iter_template_files(concrete_root)
-        rollout_dests = _rollout_dest_dirs(concrete_root, project_root_resolved)
+    # Containment guard upfront.
+    for rel in file_rels:
+        _ensure_within_workspace_directory(
+            workspace_directory_resolved / rel, workspace_directory_resolved
+        )
+    for owned_dest in owned_dests:
+        _ensure_within_workspace_directory(owned_dest, workspace_directory_resolved)
 
-        # Containment guard upfront.
-        for _src, rel in file_pairs:
-            _ensure_within_project(project_root_resolved / rel, project_root_resolved)
-        for rollout_dest in rollout_dests:
-            _ensure_within_project(rollout_dest, project_root_resolved)
-
-        if not force:
-            conflicts: list[str] = []
-            for rollout_dest in rollout_dests:
-                if rollout_dest.exists():
-                    conflicts.append(
-                        rollout_dest.relative_to(project_root_resolved).as_posix() + "/"
-                    )
-            for _src, rel in file_pairs:
-                # Files inside a rollout dir are already covered by the
-                # whole-directory conflict above; surface only "loose" files
-                # (configs/, top-level metadata) so the message stays focused.
-                if rel.parts and rel.parts[0] == "rollouts":
-                    continue
-                if (project_root_resolved / rel).exists():
-                    conflicts.append(rel.as_posix())
-            if conflicts:
-                raise _format_conflicts(conflicts, name)
-
-        # Reset rollout dirs wholesale: the template owns these directories.
-        for rollout_dest in rollout_dests:
-            if rollout_dest.exists():
-                shutil.rmtree(rollout_dest)
-
-        # Copy every template file into the project root.
-        for src_path, rel in file_pairs:
-            dest = project_root_resolved / rel
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            shutil.copy2(src_path, dest)
-            written.append(rel.as_posix())
-
-        # Top-level destinations: rollout dirs + the unique parent dirs of
-        # any non-rollout files (typically ``configs/training``,
-        # ``configs/eval``). Used for human-readable output only.
-        top_level: list[Path] = list(rollout_dests)
-        seen: set[Path] = set(top_level)
-        for _src, rel in file_pairs:
-            if rel.parts and rel.parts[0] == "rollouts":
+    if not force:
+        conflicts: list[str] = []
+        for owned_dest in owned_dests:
+            if owned_dest.exists():
+                conflicts.append(
+                    owned_dest.relative_to(workspace_directory_resolved).as_posix()
+                    + "/"
+                )
+        for rel in file_rels:
+            src = template_root / rel
+            dest = workspace_directory_resolved / rel
+            if any(_is_under(dest, owned_dest) for owned_dest in owned_dests):
                 continue
-            parent = (project_root_resolved / rel).parent
-            if parent not in seen:
-                seen.add(parent)
-                top_level.append(parent)
+            if dest.exists():
+                if rel in shared_file_rels and _same_file_contents(src, dest):
+                    continue
+                conflicts.append(rel.as_posix())
+        if conflicts:
+            raise _format_conflicts(conflicts, name)
+
+    # Reset only SDK-catalog-owned directories wholesale.
+    blocked_owned_paths: list[str] = []
+    for owned_dest in owned_dests:
+        if owned_dest.is_symlink() or (owned_dest.exists() and not owned_dest.is_dir()):
+            blocked_owned_paths.append(
+                owned_dest.relative_to(workspace_directory_resolved).as_posix()
+            )
+    if blocked_owned_paths:
+        raise _format_blocked_owned_paths(blocked_owned_paths)
+    for owned_dest in owned_dests:
+        if owned_dest.is_dir():
+            shutil.rmtree(owned_dest)
+
+    for rel in file_rels:
+        src = template_root / rel
+        dest = workspace_directory_resolved / rel
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dest)
+        written.append(rel.as_posix())
+
+    top_level: list[Path] = list(owned_dests)
+    seen: set[Path] = set(top_level)
+    for rel in file_rels:
+        dest = workspace_directory_resolved / rel
+        if any(_is_under(dest, owned_dest) for owned_dest in owned_dests):
+            continue
+        parent = dest.parent
+        if parent not in seen:
+            seen.add(parent)
+            top_level.append(parent)
 
     return top_level, written
 
 
 def apply_command(name: str, *, force: bool = False) -> CommandResult | None:
-    """Apply a cookbook template into the active project's canonical layout."""
-    project_root = _require_project_root()
-    destinations, written = _copy_template(name, project_root, force=force)
+    """Apply a template into the active workspace directory layout."""
+    workspace_directory = _require_workspace_directory()
+    destinations, written = _copy_template(name, workspace_directory, force=force)
 
     rel_destinations = [
-        dest.relative_to(project_root).as_posix() + "/" for dest in destinations
+        dest.relative_to(workspace_directory).as_posix() + "/" for dest in destinations
     ]
 
     output = get_output_context()

@@ -147,20 +147,21 @@ def test_command_path_root_when_argv_empty(monkeypatch) -> None:
 @pytest.mark.parametrize(
     ("argv", "expected_command"),
     [
+        (["--json", "doctor"], "doctor"),
         (["--json", "workspace"], "workspace"),
-        (["--json", "workspace", "list"], "workspace list"),
-        (["--json", "workspace", "create", "team"], "workspace create"),
-        (["--json", "workspace", "delete", "team"], "workspace delete"),
-        (["--json", "workspace", "switch", "team"], "workspace switch"),
+        (["--json", "workspace", "list"], "workspace"),
+        (["--json", "workspace", "create", "team"], "workspace"),
+        (["--json", "workspace", "delete", "team"], "workspace"),
+        (["--json", "workspace", "switch", "team"], "workspace"),
         (["--json", "login"], "login"),
         (["--json", "logout"], "logout"),
         (["--json", "whoami"], "whoami"),
         (["--json", "init"], "init"),
         (["--json", "link"], "link"),
         (["--json", "unlink"], "unlink"),
-        (["--json", "project", "init"], "project init"),
-        (["--json", "project", "info"], "project info"),
-        (["--json", "project", "list"], "project list"),
+        (["--json", "project", "init"], "project"),
+        (["--json", "project", "info"], "project"),
+        (["--json", "project", "list"], "project"),
         (["--json", "dataset", "delete", "name"], "dataset delete"),
         (["--json", "train", "delete", "run"], "train delete"),
         (["--json", "train", "info", "run"], "train info"),
@@ -213,5 +214,5 @@ def test_json_unknown_command_from_main_without_argv_uses_process_argv(
     captured = capsys.readouterr()
     assert captured.out == ""
     envelope = json.loads(captured.err)
-    assert envelope["command"] == "workspace list"
+    assert envelope["command"] == "workspace"
     assert envelope["error"]["code"] == "VALIDATION"

@@ -180,7 +180,7 @@ async def test_eval_controller_fake_rollout_server_round_trip(tmp_path: Path) ->
     async with _fake_rollout_server(app):
         controller = EvalController(
             config=EvalControllerConfig(
-                project_root=tmp_path,
+                workspace_directory=tmp_path,
                 rollout_name="demo",
                 rollout_dir=tmp_path,
                 entrypoint="main.py",
@@ -286,7 +286,7 @@ async def _run_fake_rollout_scenario(
     async with _fake_rollout_server(app):
         controller = EvalController(
             config=EvalControllerConfig(
-                project_root=tmp_path,
+                workspace_directory=tmp_path,
                 rollout_name="demo",
                 rollout_dir=tmp_path,
                 entrypoint="main.py",

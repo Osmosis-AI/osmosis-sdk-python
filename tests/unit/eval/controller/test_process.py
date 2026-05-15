@@ -1,6 +1,7 @@
 import inspect
 import os
 import socket
+import subprocess
 from pathlib import Path
 
 import httpx
@@ -43,13 +44,13 @@ def test_build_user_server_command_uses_uv_python_entrypoint() -> None:
 def test_build_user_server_env_sets_contract_and_pythonpath(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    project_root = tmp_path / "project"
+    workspace_directory = tmp_path / "project"
     rollout_dir = tmp_path / "project" / "rollouts" / "demo"
     monkeypatch.setenv("PYTHONPATH", "/existing")
     monkeypatch.setenv("KEEP_ME", "yes")
 
     env = build_user_server_env(
-        project_root=project_root,
+        workspace_directory=workspace_directory,
         rollout_dir=rollout_dir,
         rollout_name="demo",
         entrypoint="rollout.py",
@@ -64,7 +65,7 @@ def test_build_user_server_env_sets_contract_and_pythonpath(
     assert env["KEEP_ME"] == "yes"
     assert env["PYTHONPATH"].split(os.pathsep) == [
         str(rollout_dir),
-        str(project_root),
+        str(workspace_directory),
         "/existing",
     ]
 
@@ -82,11 +83,19 @@ def test_fixed_port_lock_path_is_shared_across_projects(
     project_a = tmp_path / "project-a"
     project_b = tmp_path / "project-b"
     for project in (project_a, project_b):
-        (project / ".osmosis").mkdir(parents=True)
-        (project / ".osmosis" / "project.toml").write_text(
-            "[project]\nname='test'\n",
-            encoding="utf-8",
+        subprocess.run(
+            ["git", "init", "-b", "main", str(project)],
+            check=True,
+            capture_output=True,
         )
+        for rel_path in (
+            ".osmosis/research",
+            "rollouts",
+            "configs/eval",
+            "configs/training",
+            "data",
+        ):
+            (project / rel_path).mkdir(parents=True, exist_ok=True)
 
     monkeypatch.chdir(project_a)
     lock_a = fixed_port_lock_path()

@@ -13,18 +13,19 @@ REMOVED_COMMAND_PROBE = "--__removed-command-probe"
 ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*m")
 
 REMOVED_ROOT_COMMANDS = [
-    "workspace",
+    "project",
     "init",
     "link",
     "unlink",
     "login",
     "logout",
     "whoami",
+    "workspace",
 ]
 
 PRESERVED_ROOT_COMMANDS = [
     "auth",
-    "project",
+    "doctor",
     "dataset",
     "train",
     "model",
@@ -43,7 +44,7 @@ PRESERVED_HELP_COMMANDS = [
     ["--help"],
     ["--version"],
     ["auth", "--help"],
-    ["project", "--help"],
+    ["doctor", "--help"],
     ["dataset", "--help"],
     ["train", "--help"],
     ["model", "--help"],
@@ -63,6 +64,7 @@ REMOVED_COMMANDS = [
     ["workspace", "create", REMOVED_COMMAND_PROBE, "team"],
     ["workspace", "delete", REMOVED_COMMAND_PROBE, "team"],
     ["workspace", "switch", REMOVED_COMMAND_PROBE, "team"],
+    ["workspace", "doctor", REMOVED_COMMAND_PROBE],
     ["dataset", "delete", REMOVED_COMMAND_PROBE, "data"],
     ["train", "delete", REMOVED_COMMAND_PROBE, "run"],
     ["train", "info", REMOVED_COMMAND_PROBE, "run"],
@@ -74,12 +76,16 @@ REMOVED_COMMANDS = [
     ["login", REMOVED_COMMAND_PROBE],
     ["logout", REMOVED_COMMAND_PROBE],
     ["whoami", REMOVED_COMMAND_PROBE],
+    ["project", REMOVED_COMMAND_PROBE],
+    ["project", "doctor", REMOVED_COMMAND_PROBE],
     ["project", "init", REMOVED_COMMAND_PROBE, "demo"],
     ["project", "info", REMOVED_COMMAND_PROBE],
     ["project", "list", REMOVED_COMMAND_PROBE],
+    ["project", "validate", REMOVED_COMMAND_PROBE],
     ["deployment", "rename", REMOVED_COMMAND_PROBE, "old", "new"],
     ["deployment", "delete", REMOVED_COMMAND_PROBE, "checkpoint"],
     ["rollout", "validate", REMOVED_COMMAND_PROBE, "configs/eval/demo.toml"],
+    ["eval", "cache", "dir", REMOVED_COMMAND_PROBE],
 ]
 
 
@@ -122,11 +128,11 @@ def test_removed_commands_are_unknown(args, capfd):
 @pytest.mark.parametrize(
     "args",
     [
-        ["workspace", "--help"],
         ["workspace", "list", "--help"],
         ["workspace", "create", "--help"],
         ["workspace", "delete", "--help"],
         ["workspace", "switch", "--help"],
+        ["workspace", "doctor", "--help"],
         ["dataset", "delete", "--help"],
         ["train", "delete", "--help"],
         ["train", "info", "--help"],
@@ -138,12 +144,16 @@ def test_removed_commands_are_unknown(args, capfd):
         ["login", "--help"],
         ["logout", "--help"],
         ["whoami", "--help"],
+        ["project", "--help"],
+        ["project", "doctor", "--help"],
         ["project", "init", "--help"],
         ["project", "info", "--help"],
         ["project", "list", "--help"],
+        ["project", "validate", "--help"],
         ["deployment", "rename", "--help"],
         ["deployment", "delete", "--help"],
         ["rollout", "validate", "--help"],
+        ["eval", "cache", "dir", "--help"],
     ],
 )
 def test_removed_help_paths_are_unknown(args, capfd):
@@ -181,6 +191,7 @@ def test_root_help_surface_does_not_list_removed_groups_or_aliases(capfd):
     ("args", "not_expected"),
     [
         (["loginn"], "Did you mean 'login'?"),
+        (["projec"], "Did you mean 'project'?"),
         (["workspac"], "Did you mean 'workspace'?"),
         (["train", "tracess"], "Did you mean 'traces'?"),
         (["deployment", "renam"], "Did you mean 'rename'?"),

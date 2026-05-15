@@ -19,7 +19,7 @@
 
 > ⚠️ **Warning**: osmosis-ai is still in active development. APIs may change between versions.
 
-Python SDK for [Osmosis AI](https://platform.osmosis.ai), a platform for training LLMs with reinforcement learning. Implement an **AgentWorkflow** in Python, add a concrete **Grader** for local eval and managed training flows, run an eval smoke test locally with the CLI, then let Osmosis managed hosting load it through Git Sync.
+Python SDK for [Osmosis AI](https://platform.osmosis.ai), a platform for training LLMs with reinforcement learning. Implement an **AgentWorkflow** in Python, add a concrete **Grader** for local eval and managed training flows, run an eval smoke test locally with the CLI, then submit training from an Osmosis workspace directory.
 
 ## Quick start
 
@@ -27,12 +27,12 @@ Python SDK for [Osmosis AI](https://platform.osmosis.ai), a platform for trainin
 |------|-------------|
 | **Define agents** | One `AgentWorkflow` subclass (+ optional `AgentWorkflowConfig`) in your repo. The training/eval entrypoint must also expose a concrete `Grader` (typically with a `GraderConfig`). |
 | **Layout** | Use a rollout pack directory under `rollouts/<name>/` when loading by rollout name; the CLI adds that directory to `sys.path`. |
-| **Project repo** | Start from an Osmosis project repo created and connected through Git Sync in the Platform, or clone an existing Osmosis project. |
-| **Link project** | `osmosis project link --workspace <workspace-id-or-name>` — run from the workspace's connected Git Sync repo checkout so platform commands resolve the correct workspace. |
+| **Workspace directory** | Create or open a workspace in the Osmosis Platform, then clone the repository created there. |
+| **Check workspace** | `osmosis doctor` — run from the workspace directory so platform commands resolve the repository from the `origin` remote. Add `--fix` to restore missing scaffold paths. |
 | **Smoke test** | `osmosis eval run configs/eval/<name>.toml --limit 1` — exercises the same rollout server protocol used by training. |
 | **Evaluate** | `osmosis eval run configs/eval/<name>.toml` — run the full eval with optional pass@k and caching. |
 
-**Example repositories:** [osmosis-git-sync-example](https://github.com/Osmosis-AI/osmosis-git-sync-example) (synced agent repo patterns) · [osmosis-remote-rollout-example](https://github.com/Osmosis-AI/osmosis-remote-rollout-example) (reference server usage — align with current SDK exports when upgrading).
+**Example repository:** [osmosis-remote-rollout-example](https://github.com/Osmosis-AI/osmosis-remote-rollout-example) (reference server usage - align with current SDK exports when upgrading).
 
 **Documentation index:** [docs/README.md](docs/README.md)
 
@@ -43,36 +43,44 @@ The `osmosis` CLI keeps Rich as the default output for humans, but every public 
 ```bash
 osmosis dataset list                         # human-friendly Rich table
 osmosis --json dataset list                  # recommended for AI agents and CI/CD
-osmosis --format plain dataset list          # low-noise text for shell pipelines
+osmosis --plain dataset list                 # low-noise text for shell pipelines
 ```
 
 JSON is the stable machine contract: every successful response includes `schema_version: 1`; list envelopes include `items`, `total_count`, `has_more`, and `next_offset`; detail envelopes include `data`; operation envelopes include `status`, `operation`, optional `resource`, and optional `next_steps_structured`. Errors are JSON-structured on stderr with `code`, `message`, `details`, optional `request_id`, plus the command path and SDK `cli_version`.
 
-Plain mode is for humans and simple shell pipelines, not a strict schema. `--format` and its `--json` / `--plain` aliases are global flags parsed before subcommands; prefer `osmosis --json <command>` or `osmosis --format plain <command>` over the default Rich output in non-interactive environments. Command-local `--output` always means a file path, not a format selector, so `osmosis dataset download my-dataset --output ./data.jsonl` works in every mode.
+Plain mode is for humans and simple shell pipelines, not a strict schema. `--json` and `--plain` are global flags parsed before subcommands; prefer `osmosis --json <command>` or `osmosis --plain <command>` over the default Rich output in non-interactive environments. Command-local `--output` always means a file path, not a format selector, so `osmosis dataset download my-dataset --output ./data.jsonl` works in every mode.
 
 In JSON or plain mode, interactive commands fail fast with `INTERACTIVE_REQUIRED` unless a non-interactive flow exists, typically by passing `--yes` or `--token`. `OSMOSIS_TOKEN` is verify-only across the CLI: it activates authentication for the current process but is never written to the on-disk credentials store, never revoked, and never deletes existing credentials.
 
-## Project setup and CI
+## Workspace Directory Flow
 
-Create and connect an Osmosis project repository through Git Sync in the
-Platform, then clone that repository locally. You can also start from an
-existing cloned Osmosis project that already has `.osmosis/project.toml`,
-`rollouts/`, `configs/`, and `data/`.
+Create or open a workspace in the Osmosis Platform, clone the repository created there,
+then run CLI commands from that workspace directory.
 
 ```bash
-osmosis project validate
-osmosis project link --workspace <workspace-id-or-name>
-osmosis eval run configs/eval/<name>.toml --limit 1
+git clone <repo-url>
+cd <repo>
+osmosis auth login
+osmosis doctor
+osmosis template apply multiply              # or add your rollout under rollouts/
+cp configs/training/default.toml configs/training/<run>.toml
+$EDITOR configs/training/<run>.toml          # set rollout, dataset, and model_path
+git add rollouts configs data research
+git commit -m "configure training run"
+git push
+osmosis train submit configs/training/<run>.toml
 ```
 
-Before submitting training, push the repo and confirm Git Sync is connected in
-the Osmosis Platform. Submit from CI with a project link and non-interactive
-confirmation:
+Platform-scoped commands derive scope from the workspace directory's `origin` remote and
+send `X-Osmosis-Git: namespace/repo_name`. The CLI does not store or send a
+workspace ID for commands scoped by the workspace directory.
+
+Before submitting training from CI, push the repository and authenticate with a
+token:
 
 ```bash
 export OSMOSIS_TOKEN=<token>
-osmosis project link --workspace <workspace-id-or-name> --yes
-osmosis train submit configs/training/default.toml --yes
+osmosis train submit configs/training/<run>.toml --yes
 ```
 
 ## Installation
@@ -80,7 +88,7 @@ osmosis train submit configs/training/default.toml --yes
 Requires **Python 3.12+**. For development setup, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 - **An LLM API key** (e.g., OpenAI, Anthropic, Groq) — required for `osmosis eval run` when using hosted models. See [supported providers](https://docs.litellm.ai/docs/providers).
-- **Osmosis account** (optional) — needed for `osmosis auth login`, project links, and platform-backed commands such as datasets, models, and training runs. Sign up at [platform.osmosis.ai](https://platform.osmosis.ai).
+- **Osmosis account** (optional) — needed for `osmosis auth login` and platform-backed commands such as datasets, models, and training runs. Sign up at [platform.osmosis.ai](https://platform.osmosis.ai).
 
 **pip**
 

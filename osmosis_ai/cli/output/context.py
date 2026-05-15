@@ -74,18 +74,6 @@ def _argv_format_prescan(argv: list[str]) -> OutputFormat | None:
             return OutputFormat.json
         if token == "--plain":
             return OutputFormat.plain
-        if token == "--format":
-            if i + 1 >= len(argv):
-                return None
-            try:
-                return OutputFormat(argv[i + 1])
-            except ValueError:
-                return None
-        if token.startswith("--format="):
-            try:
-                return OutputFormat(token.split("=", 1)[1])
-            except ValueError:
-                return None
         if not token.startswith("-"):
             return None
         i += 1
@@ -138,17 +126,14 @@ def override_output_context(
 
 
 def resolve_format_selectors(
-    format_value: OutputFormat | None,
     *,
     json_alias: bool,
     plain_alias: bool,
 ) -> OutputFormat:
-    """Reconcile --format / --json / --plain."""
+    """Reconcile the global output selector flags."""
     from osmosis_ai.cli.errors import CLIError
 
     selected: set[OutputFormat] = set()
-    if format_value is not None:
-        selected.add(format_value)
     if json_alias:
         selected.add(OutputFormat.json)
     if plain_alias:
@@ -158,7 +143,7 @@ def resolve_format_selectors(
         raise CLIError(
             "Conflicting output format selectors: "
             f"{', '.join(sorted(f.value for f in selected))}. "
-            "Choose at most one of --format, --json, --plain.",
+            "Choose at most one of --json or --plain.",
             code="VALIDATION",
         )
 

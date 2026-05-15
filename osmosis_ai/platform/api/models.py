@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Literal
 
 # ── Dataset status constants ─────────────────────────────────────
@@ -72,6 +72,7 @@ class DatasetFile:
     organization_id: str | None = None
     created_at: str = ""
     updated_at: str = ""
+    platform_url: str | None = None
     # Upload info — only present in create_dataset response
     upload: UploadInfo | None = None
 
@@ -92,6 +93,7 @@ class DatasetFile:
             organization_id=data.get("organization_id"),
             created_at=data.get("created_at", ""),
             updated_at=data.get("updated_at", ""),
+            platform_url=data.get("platform_url"),
             upload=upload,
         )
 
@@ -176,6 +178,8 @@ class TrainingRun:
     error_message: str | None = None
     creator_name: str | None = None
     creator_email: str | None = None
+    platform_url: str | None = None
+    reward: float | None = field(default=None, kw_only=True)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> TrainingRun:
@@ -190,12 +194,14 @@ class TrainingRun:
             started_at=data.get("started_at"),
             completed_at=data.get("completed_at"),
             eval_accuracy=data.get("eval_accuracy"),
+            reward=data.get("reward"),
             reward_increase_delta=data.get("reward_increase_delta"),
             processing_step=data.get("processing_step"),
             processing_percent=data.get("processing_percent"),
             error_message=data.get("error_message"),
             creator_name=data.get("creator_name"),
             creator_email=data.get("creator_email"),
+            platform_url=data.get("platform_url"),
         )
 
     @property
@@ -227,12 +233,14 @@ class TrainingRunDetail(TrainingRun):
             started_at=run.get("started_at"),
             completed_at=run.get("completed_at"),
             eval_accuracy=run.get("eval_accuracy"),
+            reward=run.get("reward"),
             reward_increase_delta=run.get("reward_increase_delta"),
             processing_step=run.get("processing_step"),
             processing_percent=run.get("processing_percent"),
             error_message=run.get("error_message"),
             creator_name=run.get("creator_name"),
             creator_email=run.get("creator_email"),
+            platform_url=run.get("platform_url"),
             examples_processed_count=run.get("examples_processed_count"),
             notes=run.get("notes"),
             hf_status=run.get("hf_status"),
@@ -268,6 +276,7 @@ class SubmitTrainingRunResult:
     name: str
     status: str
     created_at: str
+    platform_url: str | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> SubmitTrainingRunResult:
@@ -276,6 +285,7 @@ class SubmitTrainingRunResult:
             name=data["name"],
             status=data["status"],
             created_at=data["created_at"],
+            platform_url=data.get("platform_url"),
         )
 
 

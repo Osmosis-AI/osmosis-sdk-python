@@ -16,7 +16,7 @@ from osmosis_ai.platform.api.models import (
 
 def serialize_dataset(df: DatasetFile) -> dict[str, Any]:
     """Serialize a dataset for the public JSON contract."""
-    return {
+    data = {
         "id": df.id,
         "file_name": df.file_name,
         "file_size": df.file_size,
@@ -27,17 +27,21 @@ def serialize_dataset(df: DatasetFile) -> dict[str, Any]:
         "created_at": df.created_at,
         "updated_at": df.updated_at,
     }
+    if df.platform_url:
+        data["platform_url"] = df.platform_url
+    return data
 
 
 def serialize_training_run(run: TrainingRun) -> dict[str, Any]:
     """Serialize a training run for the public JSON contract."""
-    return {
+    data = {
         "id": run.id,
         "name": run.name,
         "status": run.status,
         "model_id": run.model_id,
         "model_name": run.model_name,
         "eval_accuracy": run.eval_accuracy,
+        "reward": run.reward,
         "reward_increase_delta": run.reward_increase_delta,
         "processing_step": run.processing_step,
         "processing_percent": run.processing_percent,
@@ -48,6 +52,9 @@ def serialize_training_run(run: TrainingRun) -> dict[str, Any]:
         "started_at": run.started_at,
         "completed_at": run.completed_at,
     }
+    if run.platform_url:
+        data["platform_url"] = run.platform_url
+    return data
 
 
 def serialize_checkpoint(ckpt: LoraCheckpointInfo) -> dict[str, Any]:
@@ -82,7 +89,6 @@ def serialize_model(model: BaseModelInfo) -> dict[str, Any]:
         "id": model.id,
         "model_name": model.model_name,
         "base_model": model.base_model,
-        "status": model.status,
         "creator_name": model.creator_name,
         "created_at": model.created_at,
         "updated_at": model.updated_at,

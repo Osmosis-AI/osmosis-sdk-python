@@ -38,19 +38,37 @@ Credentials path: `~/.config/osmosis/credentials.json`.
 Not logged in. Run 'osmosis auth login' first.
 ```
 
-Run `osmosis auth login` again before using platform commands that use the linked project workspace.
+Run `osmosis auth login` again before using platform-scoped commands from a
+workspace directory.
 
-### Wrong linked workspace
+## Workspace Directory Flow
 
-From the project directory, link this project with the intended workspace:
+Create or open a workspace in the Osmosis Platform, clone the repository created there,
+then run CLI commands from that workspace directory.
 
 ```bash
-osmosis project link --workspace <workspace-id-or-name> --yes
+git clone <repo-url>
+cd <repo>
+osmosis auth login
+osmosis doctor
+osmosis template apply multiply              # or add your rollout under rollouts/
+cp configs/training/default.toml configs/training/<run>.toml
+$EDITOR configs/training/<run>.toml          # set rollout, dataset, and model_path
+git add rollouts configs data research
+git commit -m "configure training run"
+git push
+osmosis train submit configs/training/<run>.toml
 ```
 
-Confirm the workspace and Git Sync repository in the Osmosis Platform, then
-re-run `osmosis project link --workspace <workspace-id-or-name> --yes` from the
-matching local checkout.
+Platform-scoped commands derive scope from the workspace directory's `origin` remote and
+send `X-Osmosis-Git: namespace/repo_name`. The CLI does not store or send a
+workspace ID for commands scoped by the workspace directory.
+
+### Wrong workspace directory
+
+Confirm that the workspace directory's `origin` remote matches the repository created for
+the intended Osmosis Platform workspace. If it does not, clone the correct
+repository and rerun the command from that workspace directory.
 
 ## Eval server and grader issues
 
@@ -156,7 +174,7 @@ osmosis train submit configs/training/<run>.toml
 ```
 
 Training submission performs its own preflight checks before launching the
-managed run. Fix reported rollout, config, dataset, or Git Sync issues before
+managed run. Fix reported rollout, config, dataset, or repository scope issues before
 submitting again.
 
 ## See also

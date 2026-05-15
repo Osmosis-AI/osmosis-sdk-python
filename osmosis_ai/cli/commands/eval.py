@@ -15,6 +15,14 @@ cache_app: typer.Typer = typer.Typer(help="Manage eval cache.")
 app.add_typer(cache_app, name="cache")
 
 
+def _require_eval_local_project() -> None:
+    from osmosis_ai.platform.cli.workspace_directory_context import (
+        resolve_local_workspace_directory_context,
+    )
+
+    resolve_local_workspace_directory_context(require_scaffold=True)
+
+
 @app.command("run")
 def eval_run(
     config_path: str = typer.Argument(..., help="Path to TOML config file."),
@@ -39,6 +47,8 @@ def eval_run(
     ),
 ) -> Any:
     """Evaluate agent against dataset using TOML config."""
+    _require_eval_local_project()
+
     from osmosis_ai.cli.output import CommandResult
     from osmosis_ai.eval.evaluation.cli import EvalCommand
 
@@ -113,20 +123,6 @@ def eval_rubric(
     return None
 
 
-@cache_app.command("dir")
-def eval_cache_dir() -> Any:
-    """Print cache root directory path."""
-    from osmosis_ai.cli.output import CommandResult
-    from osmosis_ai.eval.evaluation.cli import EvalCommand
-
-    result = EvalCommand()._run_cache_dir()
-    if isinstance(result, CommandResult):
-        return result
-    if result:
-        raise typer.Exit(result)
-    return None
-
-
 @cache_app.command("ls")
 def eval_cache_ls(
     cache_model: str | None = typer.Option(
@@ -140,6 +136,8 @@ def eval_cache_ls(
     ),
 ) -> Any:
     """List cached evaluations."""
+    _require_eval_local_project()
+
     from osmosis_ai.cli.output import CommandResult
     from osmosis_ai.eval.evaluation.cli import EvalCommand
 
@@ -173,6 +171,8 @@ def eval_cache_rm(
     yes: bool = typer.Option(False, "-y", "--yes", help="Skip confirmation prompt."),
 ) -> Any:
     """Remove cached evaluations."""
+    _require_eval_local_project()
+
     from osmosis_ai.cli.output import CommandResult
     from osmosis_ai.eval.evaluation.cli import EvalCommand
 
