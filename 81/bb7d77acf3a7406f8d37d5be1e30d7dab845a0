@@ -1,0 +1,73 @@
+osmosis_ai/templates/_scaffolds/rollout/eval.toml.tpl
+  s_9482a1a0c26cf0::t_bd58df7a36ef28 1-28
+osmosis_ai/templates/_scaffolds/rollout/training.toml.tpl
+  s_f784ae5966447f::t_bc1e65694fb3fe 6-9,14
+  s_9482a1a0c26cf0::t_de9f556999304c 1-5,10-13,15-18,23-66
+  s_f784ae5966447f::t_b5239b558fcaea 19-22
+osmosis_ai/templates/_scaffolds/rollout/main.py.tpl
+  s_9482a1a0c26cf0::t_fdb611017172d4 1-2,5-32,34-64
+  s_f784ae5966447f::t_5f77337bc1968c 33
+  s_f784ae5966447f::t_1f0acadecd6c02 3-4
+tests/unit/cli/test_rollout_init.py
+  s_f784ae5966447f::t_56baaa589b9f28 34,318,328,359-361
+  s_9482a1a0c26cf0::t_caf1957fdbac6f 1-7,72,86-87,111,134,185,207,232,302,342-344,347-348,350-353,355-358,362-363,367-376,388
+  s_f784ae5966447f::t_cba5ef0a5ff3be 47-54,125-126,270-291
+  s_a5269c00bbb871::t_0b9e4d69e4addc 133,153-154
+  s_a5269c00bbb871::t_69fae4174e60fa 149-151
+  s_a5269c00bbb871::t_b75541e21bde6f 8-33,35-46,55-71,73-85,88-94,135-148,152,155-158,179-184,186-206,208-231,233-248,292-301,303-317,319-327,329-341,345-346,349,354,364-366,377-387,389-400
+  s_f784ae5966447f::t_0c169ff7b61ab1 159-160
+  s_f784ae5966447f::t_7ab862865f4935 95-109,127,161-178,249-269
+  s_a5269c00bbb871::t_255b7e5d36117f 110,112-124,128-132
+pyproject.toml
+  s_9482a1a0c26cf0::t_4e8520e4b45dd4 101
+osmosis_ai/cli/commands/rollout.py
+  s_f784ae5966447f::t_7bbfe8d25cfeb0 11-12,15,37
+  s_a5269c00bbb871::t_ae8c6f8c1452c6 17,22-36,38-46
+  s_f784ae5966447f::t_4c7ca4b12df919 13
+  s_f784ae5966447f::t_c347fcf298a5db 5,14
+osmosis_ai/templates/_scaffolds/rollout/README.md.tpl
+  s_9482a1a0c26cf0::t_5c999f23c61e56 1-18
+osmosis_ai/templates/init.py
+  s_9482a1a0c26cf0::t_7e3220e9bf9bde 3-6,13-14,29-39,60-64,92-93,96,98,100,103,105-109,114,126-127,173-174,181-183
+  s_9482a1a0c26cf0::t_85aceed343515b 99
+  s_f784ae5966447f::t_68efd56bde28fa 191-193,212-213,215-216
+  s_f784ae5966447f::t_56baaa589b9f28 133-135
+  s_a5269c00bbb871::t_bcd4aebd4d603c 116
+  s_a5269c00bbb871::t_69fae4174e60fa 97,101
+  s_a5269c00bbb871::t_6e33f8f02627f7 1-2,7-12,15-28,40-59,65-84,86-91,94-95,102,104,110-113,115,117-125,128-132,154-172,175-176,178-180,184-190,194-211,214,217-225
+  s_f784ae5966447f::t_6d1a4ef8ffc5c7 85,136-153,177
+osmosis_ai/templates/_scaffolds/rollout/pyproject.toml.tpl
+  s_9482a1a0c26cf0::t_c9f41e5cadad03 1-12
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "81bb7d77acf3a7406f8d37d5be1e30d7dab845a0",
+  "prompts": {},
+  "sessions": {
+    "s_9482a1a0c26cf0": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "f6487e30-6ecd-4cab-83ef-31f9d34c0d53",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    },
+    "s_a5269c00bbb871": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "9e385948-1791-478b-88dc-612dc28dd2a8",
+        "model": "claude-opus-4-7"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    },
+    "s_f784ae5966447f": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "4972846f-78e8-4856-83b3-b7873ca37680",
+        "model": "gpt-5.5-extra-high"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}
