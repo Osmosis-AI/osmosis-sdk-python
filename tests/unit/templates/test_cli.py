@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import shutil
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -11,7 +12,7 @@ from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.cli.output import OutputFormat
 from osmosis_ai.cli.output.context import override_output_context
 from osmosis_ai.templates import cli as template_cli
-from osmosis_ai.templates.cli import apply_command, list_command
+from osmosis_ai.templates.cli import _next_steps, apply_command, list_command
 
 
 def _write_workspace_template(root: Path) -> Path:
@@ -71,10 +72,10 @@ def workspace_template(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 def _make_project(root: Path) -> Path:
     """Create the minimum directory layout that resolve_project_root accepts."""
-    (root / ".osmosis").mkdir(parents=True, exist_ok=True)
-    (root / ".osmosis" / "project.toml").write_text(
-        "[project]\nsetup_source = 'test'\n",
-        encoding="utf-8",
+    subprocess.run(
+        ["git", "init", "-b", "main", str(root)],
+        check=True,
+        capture_output=True,
     )
     return root
 
@@ -117,6 +118,24 @@ def test_list_command_empty_message_uses_user_facing_template_terms(
 
 
 # ── apply_command ────────────────────────────────────────────────
+
+
+def test_next_steps_use_git_scoped_training_flow() -> None:
+    next_steps = _next_steps("multiply")
+    rendered = "\n".join(next_steps)
+
+    assert "Git Sync" not in rendered
+    assert "project link" not in rendered
+    assert "project unlink" not in rendered
+    assert ".osmosis/project.toml" not in rendered
+    assert "linked workspace" not in rendered
+    assert "X-Osmosis-Org" not in rendered
+    assert "osmosis dataset upload data/multiply.jsonl" in next_steps
+    assert (
+        "Edit configs/training/multiply.toml with the uploaded dataset ID and target model"
+        in next_steps
+    )
+    assert "osmosis train submit configs/training/multiply.toml" in next_steps
 
 
 def test_apply_command_writes_directly_into_project_canonical_layout(

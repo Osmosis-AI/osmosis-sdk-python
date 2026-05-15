@@ -9,6 +9,7 @@ to the wheel-corruption edge case below.
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -18,10 +19,10 @@ from osmosis_ai.cli import main as cli
 
 def _make_project(root: Path) -> Path:
     """Create a fully valid Osmosis project layout (matches validate_project_contract)."""
-    (root / ".osmosis").mkdir(parents=True, exist_ok=True)
-    (root / ".osmosis" / "project.toml").write_text(
-        "[project]\nsetup_source = 'test'\n",
-        encoding="utf-8",
+    subprocess.run(
+        ["git", "init", "-b", "main", str(root)],
+        check=True,
+        capture_output=True,
     )
     for rel in ("rollouts", "configs/eval", "configs/training", "data"):
         (root / rel).mkdir(parents=True, exist_ok=True)
@@ -322,15 +323,16 @@ def test_rollout_init_outside_project_errors(monkeypatch, tmp_path, capsys) -> N
     captured = capsys.readouterr()
 
     assert rc != 0
-    assert "Not in an Osmosis project" in captured.err
+    assert "cloned Osmosis repository" in captured.err
 
 
 def test_rollout_init_incomplete_project_errors(monkeypatch, tmp_path, capsys) -> None:
-    # `.osmosis/project.toml` exists but canonical directories are missing.
+    # The checkout is a Git worktree, but canonical directories are missing.
     project_root = tmp_path / "proj"
-    (project_root / ".osmosis").mkdir(parents=True)
-    (project_root / ".osmosis" / "project.toml").write_text(
-        "[project]\nsetup_source = 'test'\n", encoding="utf-8"
+    subprocess.run(
+        ["git", "init", "-b", "main", str(project_root)],
+        check=True,
+        capture_output=True,
     )
     monkeypatch.chdir(project_root)
 
@@ -338,7 +340,7 @@ def test_rollout_init_incomplete_project_errors(monkeypatch, tmp_path, capsys) -
     captured = capsys.readouterr()
 
     assert rc != 0
-    assert "missing required Osmosis paths" in captured.err
+    assert "missing required Osmosis scaffold paths" in captured.err
 
 
 # ── SDK package-data guard ──────────────────────────────────────

@@ -142,8 +142,10 @@ def _next_steps(name: str) -> list[str]:
     return [
         f"pip install -e rollouts/{name}",
         f"osmosis eval run configs/eval/{name}.toml --limit 1",
+        f"osmosis dataset upload data/{name}.jsonl",
+        f"Edit configs/training/{name}.toml with the uploaded dataset ID and target model",
+        'git add . && git commit -m "add rollout template"',
         "git push",
-        "Confirm Git Sync is connected in the Osmosis Platform",
         f"osmosis train submit configs/training/{name}.toml",
     ]
 

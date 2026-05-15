@@ -214,14 +214,14 @@ def test_format_url_uses_label_for_visible_text(monkeypatch) -> None:
     monkeypatch.setenv("TERM", "xterm-256color")
     output = StringIO()
     console = Console(file=output, force_terminal=True, width=120)
-    url = "https://platform.osmosis.ai/osmosis-shared/integrations/git"
+    url = "https://platform.osmosis.ai/osmosis-shared/datasets/dataset-1"
 
-    console.print("Open ", console.format_url(url, label="Git Sync"), sep="")
+    console.print("Open ", console.format_url(url, label="Dataset"), sep="")
 
     rendered = output.getvalue()
     assert "\x1b]8;" in rendered
     assert url in rendered
-    assert "Git Sync" in rendered
+    assert "Dataset" in rendered
 
 
 def test_non_tty_output_has_no_ansi() -> None:

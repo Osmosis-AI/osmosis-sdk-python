@@ -56,8 +56,6 @@ def workspace_template(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 def _make_existing_project(root: Path) -> Path:
     root.mkdir()
-    (root / ".osmosis").mkdir()
-    (root / ".osmosis" / "project.toml").write_text("[project]\n", encoding="utf-8")
     return root
 
 
@@ -68,9 +66,7 @@ def test_write_scaffold_creates_repair_paths(
 
     write_scaffold(target, "project")
 
-    assert (target / ".osmosis" / "project.toml").read_text(
-        encoding="utf-8"
-    ) == "[project]\n"
+    assert not (target / ".osmosis" / "project.toml").exists()
     assert not (target / ".osmosis" / "research" / "program.md").exists()
     assert (target / ".osmosis" / "cache" / ".gitkeep").is_file()
     assert (target / "rollouts" / ".gitkeep").is_file()
@@ -97,12 +93,11 @@ def test_write_scaffold_does_not_overwrite_existing_files(
     write_scaffold(target, "project")
 
     existing_files = {
-        ".osmosis/project.toml": "custom project",
-        "pyproject.toml": "custom pyproject",
-        ".gitignore": "custom gitignore",
-        "README.md": "custom readme",
         "rollouts/.gitkeep": "custom marker",
         "AGENTS.md": "custom agents",
+        "CLAUDE.md": "custom claude",
+        "configs/AGENTS.md": "custom config agents",
+        ".claude/settings.json": "{}",
     }
     for rel_path, content in existing_files.items():
         (target / rel_path).write_text(content, encoding="utf-8")
@@ -157,7 +152,6 @@ def test_write_scaffold_update_does_not_overwrite_agent_files(
         ".claude/settings.json": "{}",
     }
     preserved_files = {
-        ".osmosis/project.toml": "custom project",
         "README.md": "custom readme",
     }
     for rel_path, content in {**refreshed_files, **preserved_files}.items():

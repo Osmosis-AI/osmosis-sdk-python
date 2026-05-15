@@ -16,7 +16,7 @@ from osmosis_ai.platform.api.models import (
 
 def serialize_dataset(df: DatasetFile) -> dict[str, Any]:
     """Serialize a dataset for the public JSON contract."""
-    return {
+    data = {
         "id": df.id,
         "file_name": df.file_name,
         "file_size": df.file_size,
@@ -27,11 +27,14 @@ def serialize_dataset(df: DatasetFile) -> dict[str, Any]:
         "created_at": df.created_at,
         "updated_at": df.updated_at,
     }
+    if df.platform_url:
+        data["platform_url"] = df.platform_url
+    return data
 
 
 def serialize_training_run(run: TrainingRun) -> dict[str, Any]:
     """Serialize a training run for the public JSON contract."""
-    return {
+    data = {
         "id": run.id,
         "name": run.name,
         "status": run.status,
@@ -49,6 +52,9 @@ def serialize_training_run(run: TrainingRun) -> dict[str, Any]:
         "started_at": run.started_at,
         "completed_at": run.completed_at,
     }
+    if run.platform_url:
+        data["platform_url"] = run.platform_url
+    return data
 
 
 def serialize_checkpoint(ckpt: LoraCheckpointInfo) -> dict[str, Any]:

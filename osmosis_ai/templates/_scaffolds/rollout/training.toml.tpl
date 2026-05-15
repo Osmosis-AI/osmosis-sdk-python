@@ -9,16 +9,16 @@
 #   - Qwen/Qwen3.5-122B-A10B
 
 [experiment]
-rollout = "<your-rollout>"        # Rollout name (directory under rollouts/)
-entrypoint = "main.py"            # Entrypoint file name
+rollout = "<your-rollout>"  # Rollout name (directory under rollouts/)
+entrypoint = "main.py"  # Entrypoint file name
 model_path = "<your-model-path>"  # Must be a supported model (see above)
-dataset = "<your-dataset-name>"   # Platform dataset name from `osmosis dataset list`
+dataset = "<your-dataset-name>"  # Platform dataset name from `osmosis dataset list`
 # commit_sha =                        # Pin to a specific commit (default: latest on default branch)
 
 [training]
 # Starter values required by `osmosis train submit`.
-n_samples_per_prompt = 8               # Rollout samples per prompt
-rollout_batch_size = 64                # Rollout batch size
+n_samples_per_prompt = 8  # Rollout samples per prompt
+rollout_batch_size = 64  # Rollout batch size
 #
 # Optional. Commented values below are the SDK defaults used by `osmosis train submit`.
 # Uncomment a field only when you want to override the default.

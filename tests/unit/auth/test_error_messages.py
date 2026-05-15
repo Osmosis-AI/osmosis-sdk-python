@@ -35,41 +35,29 @@ def _make_credentials(*, expired: bool = False) -> Credentials:
     )
 
 
-def test_reset_session_does_not_delete_project_mapping(
+def test_reset_session_deletes_legacy_auth_local_config(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from osmosis_ai.platform.auth.local_config import reset_session
 
     legacy_config = tmp_path / ".config" / "osmosis" / "config.json"
-    legacy_cache = tmp_path / ".config" / "osmosis" / "cache"
     legacy_config.parent.mkdir(parents=True)
-    legacy_cache.mkdir()
     legacy_config.write_text(
         '{"active_workspace":{"id":"legacy","name":"legacy"}}',
         encoding="utf-8",
     )
 
-    project_mapping = tmp_path / ".osmosis" / "config.json"
-    project_mapping.parent.mkdir()
-    project_mapping.write_text('{"version":1,"platforms":{}}', encoding="utf-8")
-
     monkeypatch.setattr(
         "osmosis_ai.platform.auth.local_config.CONFIG_FILE",
         legacy_config,
     )
-    monkeypatch.setattr("osmosis_ai.platform.auth.local_config.CACHE_DIR", legacy_cache)
     monkeypatch.setattr(
         "osmosis_ai.platform.auth.credentials.delete_credentials", lambda: True
-    )
-    monkeypatch.setattr(
-        "osmosis_ai.platform.cli.project_mapping.CONFIG_FILE",
-        project_mapping,
     )
 
     reset_session()
 
     assert not legacy_config.exists()
-    assert project_mapping.exists()
 
 
 class TestRequireCredentialsMessages:
@@ -129,59 +117,6 @@ def test_global_active_workspace_helpers_are_not_public_context_api() -> None:
         assert not hasattr(module, symbol), f"{module.__name__}.{symbol} remains"
 
 
-class TestRequireAuthMessages:
-    """Test _require_auth() no-arg calls require linked-project migration."""
-
-    @patch("osmosis_ai.platform.cli.utils.load_credentials", return_value=None)
-    def test_no_arg_requires_linked_project_before_login(
-        self, cred_mock: object
-    ) -> None:
-        """No-arg _require_auth is no longer an auth/workspace selector."""
-        from osmosis_ai.platform.cli.utils import _require_auth
-
-        with pytest.raises(CLIError, match="linked Osmosis project"):
-            _require_auth()
-
-        cred_mock.assert_not_called()
-
-    @patch("osmosis_ai.platform.cli.utils.platform_call")
-    def test_no_arg_does_not_auto_select_workspace(
-        self, platform_call_mock: object
-    ) -> None:
-        """No-arg _require_auth must not fall back to global active workspace."""
-        from osmosis_ai.platform.cli.utils import _require_auth
-
-        with pytest.raises(CLIError, match="linked Osmosis project"):
-            _require_auth()
-
-        platform_call_mock.assert_not_called()
-
-    @patch("osmosis_ai.platform.cli.utils.load_credentials", return_value=None)
-    def test_explicit_workspace_name_still_checks_login(self, _mock: object) -> None:
-        """Bootstrap flows passing workspace_name keep credential validation."""
-        from osmosis_ai.platform.cli.utils import _require_auth
-
-        with pytest.raises(CLIError, match="Not logged in"):
-            _require_auth(workspace_name="bootstrap-workspace")
-
-    @patch("osmosis_ai.platform.cli.utils.load_credentials")
-    def test_explicit_workspace_name_returns_credentials(
-        self, mock_load: object
-    ) -> None:
-        """Bootstrap flows can still pass an already-resolved workspace name."""
-        from osmosis_ai.platform.cli.utils import _require_auth
-
-        creds = _make_credentials()
-        mock_load.return_value = creds
-
-        workspace_name, resolved_credentials = _require_auth(
-            workspace_name="bootstrap-workspace"
-        )
-
-        assert workspace_name == "bootstrap-workspace"
-        assert resolved_credentials is creds
-
-
 class TestPlatformRequestMessages:
     """Test platform_request() error messages for each failure mode."""
 
@@ -194,7 +129,7 @@ class TestPlatformRequestMessages:
         with pytest.raises(CLIError, match="Not logged in"):
             platform_request("/api/test")
 
-    def test_workspace_required_ignores_legacy_active_workspace_fallback(
+    def test_git_scope_required_ignores_legacy_active_workspace_fallback(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         from osmosis_ai.platform.auth.platform_client import platform_request
@@ -210,7 +145,7 @@ class TestPlatformRequestMessages:
         )
         creds = _make_credentials()
 
-        with pytest.raises(PlatformAPIError, match="explicit workspace_id"):
+        with pytest.raises(PlatformAPIError, match="explicit git_identity"):
             platform_request("/api/test", credentials=creds)
 
 
@@ -225,15 +160,12 @@ class TestMainExceptionHandlerMessages:
 
         with patch(
             "osmosis_ai.cli.main.app",
-            side_effect=CLIError(
-                "This project is not linked to an Osmosis workspace for the "
-                "current platform. Run 'osmosis project link' from the project root."
-            ),
+            side_effect=CLIError("This command requires a cloned Osmosis repository."),
         ):
             code = main([])
 
         assert code == 1
-        assert "This project is not linked" in capsys.readouterr().err
+        assert "cloned Osmosis repository" in capsys.readouterr().err
 
     @patch("osmosis_ai.cli.main._registered", True)
     def test_cli_error_preserves_bracketed_section_names(

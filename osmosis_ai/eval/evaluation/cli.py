@@ -53,20 +53,6 @@ class EvalCommand:
         sys.stderr.write(message + "\n")
         sys.stderr.flush()
 
-    def _run_cache_dir(self) -> int | DetailResult:
-        from osmosis_ai.eval.evaluation.cache import JsonFileCacheBackend
-
-        backend = JsonFileCacheBackend()
-        if self._structured_output():
-            path = str(backend.cache_root)
-            return DetailResult(
-                title="Eval Cache",
-                data={"cache_root": path},
-                fields=[DetailField(label="Cache root", value=path)],
-            )
-        self.console.print(str(backend.cache_root))
-        return 0
-
     @staticmethod
     def _filter_caches(
         entries: list[dict],

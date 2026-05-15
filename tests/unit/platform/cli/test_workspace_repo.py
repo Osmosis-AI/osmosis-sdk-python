@@ -4,46 +4,242 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
-from typing import Any
+from types import SimpleNamespace
 
 import pytest
 
 from osmosis_ai.cli.errors import CLIError
-from osmosis_ai.platform.auth import (
-    AuthenticationExpiredError,
-    PlatformAPIError,
-)
 from osmosis_ai.platform.cli import workspace_repo
 
 # ---------------------------------------------------------------------------
-# normalize_git_url
+# normalize_git_identity
 # ---------------------------------------------------------------------------
 
 
-class TestNormalizeGitUrl:
+class TestNormalizeGitIdentity:
     @pytest.mark.parametrize(
-        "url,expected",
+        ("url", "expected_identity", "expected_display"),
         [
-            ("https://github.com/acme/rollouts", "github.com/acme/rollouts"),
-            ("https://github.com/acme/rollouts.git", "github.com/acme/rollouts"),
-            ("https://github.com/acme/rollouts/", "github.com/acme/rollouts"),
-            ("git@github.com:acme/rollouts.git", "github.com/acme/rollouts"),
-            ("git@github.com:acme/rollouts", "github.com/acme/rollouts"),
-            ("ssh://git@github.com/acme/rollouts.git", "github.com/acme/rollouts"),
             (
-                "https://user:pat@github.com/acme/rollouts.git",
-                "github.com/acme/rollouts",
+                "https://github.com/acme/rollouts.git",
+                "acme/rollouts",
+                "https://github.com/acme/rollouts.git",
             ),
-            # Host comparison is case-insensitive.
-            ("https://GitHub.com/acme/rollouts", "github.com/acme/rollouts"),
+            (
+                "https://github.com/Acme/Rollouts.git",
+                "acme/rollouts",
+                "https://github.com/Acme/Rollouts.git",
+            ),
+            (
+                "https://user:token@github.com/acme/rollouts.git",
+                "acme/rollouts",
+                "https://github.com/acme/rollouts.git",
+            ),
+            (
+                "http://github.com/acme/rollouts",
+                "acme/rollouts",
+                "http://github.com/acme/rollouts",
+            ),
+            (
+                "git://github.com/acme/rollouts.git",
+                "acme/rollouts",
+                "git://github.com/acme/rollouts.git",
+            ),
+            (
+                "git@github.com:acme/rollouts.git",
+                "acme/rollouts",
+                "ssh://git@github.com/acme/rollouts.git",
+            ),
+            (
+                "ssh://git@github.com/acme/rollouts.git",
+                "acme/rollouts",
+                "ssh://git@github.com/acme/rollouts.git",
+            ),
+            (
+                "ssh://git@github.com/acme/repo_name.git/",
+                "acme/repo_name",
+                "ssh://git@github.com/acme/repo_name.git/",
+            ),
         ],
     )
-    def test_known_forms_normalize_to_host_path(self, url: str, expected: str) -> None:
-        assert workspace_repo.normalize_git_url(url) == expected
+    def test_github_remotes_normalize_to_hostless_lowercase_identity(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        url: str,
+        expected_identity: str,
+        expected_display: str,
+    ) -> None:
+        monkeypatch.setattr(
+            workspace_repo,
+            "_resolve_canonical_github_identity",
+            lambda _owner, _repo: None,
+            raising=False,
+        )
 
-    @pytest.mark.parametrize("url", ["", None, "   ", "not a url", "https://"])
-    def test_unparseable_input_returns_none(self, url: Any) -> None:
-        assert workspace_repo.normalize_git_url(url) is None
+        result = workspace_repo.normalize_git_identity(url)
+        assert result.identity == expected_identity
+        assert result.display_url == expected_display
+
+    def test_github_remotes_do_not_resolve_canonical_identity_on_hot_path(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def _raise_if_called(_owner: str, _repo: str) -> str | None:
+            raise AssertionError("canonical GitHub lookup should not run")
+
+        monkeypatch.setattr(
+            workspace_repo,
+            "_resolve_canonical_github_identity",
+            _raise_if_called,
+            raising=False,
+        )
+
+        result = workspace_repo.normalize_git_identity(
+            "https://github.com/Osmosis-AI/osmosis-workspace-internal.git"
+        )
+
+        assert result.identity == "osmosis-ai/osmosis-workspace-internal"
+
+    def test_resolve_canonical_identity_uses_gh_when_available(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            workspace_repo.shutil,
+            "which",
+            lambda name: "/usr/bin/gh" if name == "gh" else "/usr/bin/git",
+        )
+
+        def _fake_run(cmd, **kwargs):
+            assert cmd == [
+                "gh",
+                "api",
+                "repos/Osmosis-AI/osmosis-workspace-internal",
+                "--jq",
+                ".full_name",
+            ]
+            assert kwargs["capture_output"] is True
+            assert kwargs["text"] is True
+            return subprocess.CompletedProcess(
+                cmd,
+                0,
+                stdout="Osmosis-AI/osmosis-workspace-draft-internal\n",
+                stderr="",
+            )
+
+        monkeypatch.setattr(workspace_repo.subprocess, "run", _fake_run)
+
+        result = workspace_repo.resolve_canonical_git_identity(
+            "Osmosis-AI/osmosis-workspace-internal"
+        )
+
+        assert result == "Osmosis-AI/osmosis-workspace-draft-internal"
+
+    def test_resolve_canonical_identity_falls_back_to_git_credentials(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            workspace_repo.shutil,
+            "which",
+            lambda name: "/usr/bin/git" if name == "git" else None,
+        )
+
+        def _fake_run(cmd, **kwargs):
+            assert cmd == ["git", "credential", "fill"]
+            assert kwargs["input"] == "protocol=https\nhost=github.com\n"
+            return subprocess.CompletedProcess(
+                cmd,
+                0,
+                stdout="protocol=https\nhost=github.com\npassword=gho_token\n",
+                stderr="",
+            )
+
+        def _fake_get(url, **kwargs):
+            assert url == "https://api.github.com/repos/acme/old-name"
+            assert kwargs["headers"] == {"Authorization": "token gho_token"}
+            assert kwargs["allow_redirects"] is True
+            assert kwargs["timeout"] == 10
+
+            class _Response:
+                status_code = 200
+
+                @staticmethod
+                def json():
+                    return {"full_name": "Acme/new-name"}
+
+            return _Response()
+
+        monkeypatch.setattr(workspace_repo.subprocess, "run", _fake_run)
+        monkeypatch.setattr(
+            workspace_repo,
+            "requests",
+            SimpleNamespace(get=_fake_get, RequestException=Exception),
+            raising=False,
+        )
+
+        result = workspace_repo.resolve_canonical_git_identity("acme/old-name")
+
+        assert result == "Acme/new-name"
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "",
+            None,
+            "   ",
+            "not a url",
+            "https://",
+            "/Users/me/repo",
+            "../repo",
+            "git@github-work:acme/rollouts.git",
+            "https://gitlab.com/acme/rollouts.git",
+            "https://github.com/acme/team/rollouts.git",
+            "https://github.com/acme.git",
+            "https://github.com/acme/has%2fslash.git",
+            "https://github.com/acme/has%5cslash.git",
+            "https://github.com/acme/white space.git",
+            "https://github.com/-bad/rollouts.git",
+            "https://github.com/acme/bad~repo.git",
+            "https://[github.com/acme/rollouts.git",
+        ],
+    )
+    def test_invalid_remote_rejected(self, url: str | None) -> None:
+        with pytest.raises(CLIError):
+            workspace_repo.normalize_git_identity(url)
+
+    @pytest.mark.parametrize("control_character", ["\x7f", "\x80", "\x9f"])
+    @pytest.mark.parametrize(
+        "url_template",
+        [
+            "https://github.com/acme/rollouts.git?token={control_character}",
+            "https://github.com/acme/rollouts.git#{control_character}",
+            "https://user{control_character}:token@github.com/acme/rollouts.git",
+            "https://github.com/acme/rollouts{control_character}.git",
+            "git@github.com:acme/rollouts{control_character}.git",
+        ],
+    )
+    def test_control_characters_rejected_anywhere_in_remote_url(
+        self, control_character: str, url_template: str
+    ) -> None:
+        with pytest.raises(CLIError):
+            workspace_repo.normalize_git_identity(
+                url_template.format(control_character=control_character)
+            )
+
+    def test_header_identity_does_not_include_host_or_token(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            workspace_repo,
+            "_resolve_canonical_github_identity",
+            lambda _owner, _repo: None,
+        )
+
+        result = workspace_repo.normalize_git_identity(
+            "https://token:secret@github.com/Acme/Rollouts.git"
+        )
+        assert result.identity == "acme/rollouts"
+        assert "github.com" not in result.identity
+        assert "secret" not in result.identity
+        assert "secret" not in result.display_url
 
 
 # ---------------------------------------------------------------------------
@@ -52,27 +248,34 @@ class TestNormalizeGitUrl:
 
 
 class TestGetLocalGitRemoteUrl:
-    @staticmethod
-    def _make_dot_git(path: Path) -> None:
-        """Create a placeholder ``.git`` directory so the guard short-circuit allows the call through."""
-        (path / ".git").mkdir()
-
     def test_returns_none_when_git_missing(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        self._make_dot_git(tmp_path)
         monkeypatch.setattr(workspace_repo.shutil, "which", lambda _name: None)
         assert workspace_repo.get_local_git_remote_url(tmp_path) is None
 
-    def test_returns_none_when_not_a_repo(self, tmp_path: Path) -> None:
-        # Without ``.git`` we must short-circuit so ``git -C`` doesn't
-        # walk up and surface an unrelated parent repo's origin.
+    def test_returns_none_when_not_a_repo(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        monkeypatch.setattr(
+            workspace_repo.shutil, "which", lambda _name: "/usr/bin/git"
+        )
+        calls = []
+
+        def _fake_run(cmd, **kwargs):
+            calls.append(cmd)
+            return subprocess.CompletedProcess(
+                cmd, 128, stdout="", stderr="fatal: not a git repository"
+            )
+
+        monkeypatch.setattr(workspace_repo.subprocess, "run", _fake_run)
         assert workspace_repo.get_local_git_remote_url(tmp_path) is None
+        assert calls == []
 
     def test_returns_url_from_git(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        self._make_dot_git(tmp_path)
+        (tmp_path / ".git").mkdir()
         monkeypatch.setattr(
             workspace_repo.shutil, "which", lambda _name: "/usr/bin/git"
         )
@@ -91,7 +294,7 @@ class TestGetLocalGitRemoteUrl:
     def test_returns_none_on_git_failure(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        self._make_dot_git(tmp_path)
+        (tmp_path / ".git").mkdir()
         monkeypatch.setattr(
             workspace_repo.shutil, "which", lambda _name: "/usr/bin/git"
         )
@@ -107,7 +310,7 @@ class TestGetLocalGitRemoteUrl:
     def test_returns_none_on_oserror(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        self._make_dot_git(tmp_path)
+        (tmp_path / ".git").mkdir()
         monkeypatch.setattr(
             workspace_repo.shutil, "which", lambda _name: "/usr/bin/git"
         )
@@ -118,18 +321,46 @@ class TestGetLocalGitRemoteUrl:
         monkeypatch.setattr(workspace_repo.subprocess, "run", _raise)
         assert workspace_repo.get_local_git_remote_url(tmp_path) is None
 
-    def test_nested_dir_without_git_does_not_walk_up_to_parent(
+    def test_nested_dir_without_git_metadata_returns_none(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
-        # Nested project without its own ``.git`` must not surface the
-        # parent repo's origin via ``git -C``'s parent-walk behavior.
+        monkeypatch.setattr(
+            workspace_repo.shutil, "which", lambda _name: "/usr/bin/git"
+        )
+        nested = tmp_path / "nested"
+        nested.mkdir()
+        calls = []
+
+        def _fake_run(cmd, **kwargs):
+            calls.append(cmd)
+            return subprocess.CompletedProcess(
+                cmd, 128, stdout="", stderr="fatal: not a git repository"
+            )
+
+        monkeypatch.setattr(workspace_repo.subprocess, "run", _fake_run)
+        assert workspace_repo.get_local_git_remote_url(nested) is None
+        assert calls == []
+
+    def test_nested_dir_inside_parent_repo_does_not_use_parent_origin(
+        self, tmp_path: Path
+    ) -> None:
+        _make_repo(tmp_path)
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(tmp_path),
+                "remote",
+                "add",
+                "origin",
+                "https://github.com/acme/parent.git",
+            ],
+            check=True,
+            capture_output=True,
+        )
         nested = tmp_path / "nested"
         nested.mkdir()
 
-        def _fake_run(cmd, **kwargs):
-            raise AssertionError("subprocess must not run when .git is absent")
-
-        monkeypatch.setattr(workspace_repo.subprocess, "run", _fake_run)
         assert workspace_repo.get_local_git_remote_url(nested) is None
 
 
@@ -170,10 +401,23 @@ class TestSummarizeLocalGitState:
         monkeypatch.setattr(workspace_repo.shutil, "which", lambda _name: None)
         assert workspace_repo.summarize_local_git_state(tmp_path) is None
 
-    def test_returns_none_when_not_a_repo(self, tmp_path: Path) -> None:
-        # tmp_path has no .git/ — must short-circuit even if git would
-        # otherwise walk up to a parent repo.
+    def test_returns_none_when_not_a_repo(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        monkeypatch.setattr(
+            workspace_repo.shutil, "which", lambda _name: "/usr/bin/git"
+        )
+        calls = []
+
+        def _fake_run(cmd, **kwargs):
+            calls.append(cmd)
+            return subprocess.CompletedProcess(
+                cmd, 128, stdout="", stderr="fatal: not a git repository"
+            )
+
+        monkeypatch.setattr(workspace_repo.subprocess, "run", _fake_run)
         assert workspace_repo.summarize_local_git_state(tmp_path) is None
+        assert calls == []
 
     def test_clean_repo_with_commit(self, tmp_path: Path) -> None:
         _make_repo(tmp_path)
@@ -272,6 +516,14 @@ class TestSummarizeLocalGitState:
         assert state.branch is None
         assert state.head_sha == head_sha
 
+    def test_nested_dir_inside_parent_repo_returns_none(self, tmp_path: Path) -> None:
+        _make_repo(tmp_path)
+        _commit(tmp_path, "initial")
+        nested = tmp_path / "nested"
+        nested.mkdir()
+
+        assert workspace_repo.summarize_local_git_state(nested) is None
+
 
 # ---------------------------------------------------------------------------
 # require_git_top_level
@@ -313,218 +565,3 @@ class TestRequireGitTopLevel:
             )
 
         assert "Git worktree top-level Osmosis project" in str(exc.value)
-
-
-# ---------------------------------------------------------------------------
-# validate_workspace_repo
-# ---------------------------------------------------------------------------
-
-
-def _patch_refresh(
-    monkeypatch: pytest.MonkeyPatch,
-    return_value: dict[str, Any] | Exception,
-    *,
-    captured_kwargs: dict[str, Any] | None = None,
-) -> None:
-    """Replace OsmosisClient.refresh_workspace_info with a deterministic stub.
-
-    When *captured_kwargs* is provided, the stub records the kwargs of each
-    call into it so tests can assert e.g. ``cleanup_on_401`` was forwarded.
-    """
-
-    class _FakeClient:
-        def refresh_workspace_info(self, **kwargs: Any) -> dict[str, Any]:
-            if captured_kwargs is not None:
-                captured_kwargs.update(kwargs)
-            if isinstance(return_value, Exception):
-                raise return_value
-            return return_value
-
-    monkeypatch.setattr("osmosis_ai.platform.api.client.OsmosisClient", _FakeClient)
-
-
-class TestValidateWorkspaceRepo:
-    def _call(self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-        workspace_repo.validate_workspace_repo(
-            project_root=tmp_path,
-            workspace_id="ws_123",
-            workspace_name="team-alpha",
-            credentials=object(),  # type: ignore[arg-type]
-            command_label="`osmosis train submit`",
-        )
-
-    def test_no_connected_repo_raises(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
-        _patch_refresh(monkeypatch, {"found": True, "connected_repo": None})
-
-        def _fail(*args: Any, **kwargs: Any) -> str:
-            raise AssertionError("git remote should not be checked")
-
-        monkeypatch.setattr(workspace_repo, "get_local_git_remote_url", _fail)
-        with pytest.raises(CLIError) as exc:
-            self._call(monkeypatch, tmp_path)
-        message = str(exc.value)
-        assert "no connected repo" in message
-        assert "team-alpha" in message
-        assert "/team-alpha/integrations/git" in message
-        assert "osmosis project unlink" in message
-        assert "osmosis project link" in message
-        assert "osmosis workspace switch" not in message
-
-    def test_workspace_not_found_raises_stale_link_guidance(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
-        # When the linked workspace can't be matched, guide the user to
-        # refresh the project mapping rather than configure Git Sync.
-        _patch_refresh(monkeypatch, {"found": False})
-
-        def _fail(*args: Any, **kwargs: Any) -> str:
-            raise AssertionError("git remote should not be checked")
-
-        monkeypatch.setattr(workspace_repo, "get_local_git_remote_url", _fail)
-        with pytest.raises(CLIError) as exc:
-            self._call(monkeypatch, tmp_path)
-        message = str(exc.value)
-        assert "no longer accessible" in message
-        assert "team-alpha" in message
-        assert "ws_123" in message
-        assert "osmosis project unlink" in message
-        assert "osmosis project link" in message
-        assert "no connected repo" not in message
-        assert "/team-alpha/integrations/git" not in message
-        assert "osmosis workspace switch" not in message
-
-    def test_platform_unreachable_is_noop(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
-        _patch_refresh(monkeypatch, PlatformAPIError("boom"))
-        monkeypatch.setattr(
-            workspace_repo,
-            "get_local_git_remote_url",
-            lambda _root: "ignored",
-        )
-        self._call(monkeypatch, tmp_path)
-
-    def test_auth_error_is_noop(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
-        _patch_refresh(monkeypatch, AuthenticationExpiredError())
-        monkeypatch.setattr(
-            workspace_repo,
-            "get_local_git_remote_url",
-            lambda _root: "ignored",
-        )
-        self._call(monkeypatch, tmp_path)
-
-    def test_matching_remote_passes(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
-        _patch_refresh(
-            monkeypatch,
-            {
-                "found": True,
-                "connected_repo": {
-                    "repo_url": "https://github.com/acme/rollouts",
-                },
-            },
-        )
-        monkeypatch.setattr(
-            workspace_repo,
-            "get_local_git_remote_url",
-            lambda _root: "git@github.com:acme/rollouts.git",
-        )
-        self._call(monkeypatch, tmp_path)
-
-    def test_missing_local_remote_raises(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
-        _patch_refresh(
-            monkeypatch,
-            {
-                "found": True,
-                "connected_repo": {
-                    "repo_url": "https://github.com/acme/rollouts",
-                },
-            },
-        )
-        monkeypatch.setattr(
-            workspace_repo, "get_local_git_remote_url", lambda _root: None
-        )
-        with pytest.raises(CLIError) as exc:
-            self._call(monkeypatch, tmp_path)
-        message = str(exc.value)
-        assert "team-alpha" in message
-        assert "https://github.com/acme/rollouts" in message
-        assert "no `origin` remote" in message
-        assert "osmosis project unlink" in message
-        assert "osmosis project link" in message
-        assert "osmosis workspace switch" not in message
-
-    def test_mismatched_remote_raises(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
-        _patch_refresh(
-            monkeypatch,
-            {
-                "found": True,
-                "connected_repo": {
-                    "repo_url": "https://github.com/acme/rollouts",
-                },
-            },
-        )
-        monkeypatch.setattr(
-            workspace_repo,
-            "get_local_git_remote_url",
-            lambda _root: "https://github.com/other/repo.git",
-        )
-        with pytest.raises(CLIError) as exc:
-            self._call(monkeypatch, tmp_path)
-        message = str(exc.value)
-        assert "team-alpha" in message
-        assert "https://github.com/acme/rollouts" in message
-        assert "https://github.com/other/repo.git" in message
-        assert "osmosis project unlink" in message
-        assert "osmosis project link" in message
-        assert "osmosis workspace switch" not in message
-
-    def test_unparseable_platform_url_is_noop(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
-        _patch_refresh(
-            monkeypatch,
-            {
-                "found": True,
-                "connected_repo": {"repo_url": "garbage"},
-            },
-        )
-
-        def _fail(*args: Any, **kwargs: Any) -> str:
-            raise AssertionError("git remote should not be checked")
-
-        monkeypatch.setattr(workspace_repo, "get_local_git_remote_url", _fail)
-        self._call(monkeypatch, tmp_path)
-
-    def test_disables_cleanup_on_401(
-        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
-    ) -> None:
-        # A pre-flight check must never wipe local credentials/active
-        # workspace on a transient 401 — the actual submit call below
-        # surfaces real auth failures with full context.
-        captured: dict[str, Any] = {}
-        _patch_refresh(
-            monkeypatch,
-            {"found": True, "connected_repo": None},
-            captured_kwargs=captured,
-        )
-
-        def _fail(*args: Any, **kwargs: Any) -> str:
-            raise AssertionError("git remote should not be checked")
-
-        monkeypatch.setattr(workspace_repo, "get_local_git_remote_url", _fail)
-        with pytest.raises(CLIError):
-            self._call(monkeypatch, tmp_path)
-
-        assert captured.get("cleanup_on_401") is False
-        assert captured.get("workspace_id") == "ws_123"
-        assert "workspace_name" not in captured

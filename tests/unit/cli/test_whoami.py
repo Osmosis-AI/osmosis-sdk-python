@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -56,6 +57,11 @@ def _write_legacy_active_workspace(
 
 
 def _create_canonical_project(project_root: Path) -> None:
+    subprocess.run(
+        ["git", "init", "-b", "main", str(project_root)],
+        check=True,
+        capture_output=True,
+    )
     for relative in (
         ".osmosis",
         ".osmosis/research",
@@ -66,43 +72,16 @@ def _create_canonical_project(project_root: Path) -> None:
         "data",
     ):
         (project_root / relative).mkdir(parents=True, exist_ok=True)
-    (project_root / ".osmosis" / "project.toml").write_text(
-        '[project]\nname = "demo"\n',
-        encoding="utf-8",
-    )
     (project_root / ".osmosis" / "research" / "program.md").write_text(
         "# Program\n",
         encoding="utf-8",
     )
 
 
-def _link_project_mapping(
-    monkeypatch: pytest.MonkeyPatch,
-    *,
-    config_file: Path,
-    project_root: Path,
-    workspace_id: str = "ws_1",
-    workspace_name: str = "default",
-) -> None:
-    from osmosis_ai.platform.cli.project_mapping import (
-        ProjectLinkRecord,
-        ProjectMappingStore,
-        now_linked_at,
-    )
-
-    monkeypatch.setattr(
-        "osmosis_ai.platform.cli.project_mapping.CONFIG_FILE",
-        config_file,
-    )
-    ProjectMappingStore(config_file=config_file).link(
-        ProjectLinkRecord(
-            project_path=str(project_root.resolve()),
-            workspace_id=workspace_id,
-            workspace_name=workspace_name,
-            repo_url=None,
-            linked_at=now_linked_at(),
-        )
-    )
+def _assert_deprecated_project_context_is_empty(data: dict) -> None:
+    assert data["workspace"] is None
+    assert data["linked_project"] is None
+    assert data["local_linked_project"] is None
 
 
 @pytest.fixture
@@ -130,27 +109,18 @@ def test_whoami_json_outside_linked_project_has_no_workspace(
     data = payload["data"]
     assert data["email"] == "brian@example.com"
     assert data["name"] == "Brian"
-    assert data["workspace"] is None
-    assert data["linked_project"] is None
-    assert data["local_linked_project"] is None
+    _assert_deprecated_project_context_is_empty(data)
     assert data["account"]["email"] == "brian@example.com"
     assert data["account"]["source"] == "credentials"
     assert data["source"] == "credentials"
     assert "expires_at" in data
 
 
-def test_whoami_json_inside_linked_project_stays_auth_only(
+def test_whoami_json_inside_project_stays_auth_only(
     monkeypatch, capsys, tmp_path, fake_credentials
 ) -> None:
     project_root = tmp_path / "project"
     _create_canonical_project(project_root)
-    _link_project_mapping(
-        monkeypatch,
-        config_file=tmp_path / "home" / ".osmosis" / "config.json",
-        project_root=project_root,
-        workspace_id="ws_linked",
-        workspace_name="team-alpha",
-    )
     monkeypatch.chdir(project_root)
     _patch_auth(monkeypatch, fake_credentials)
 
@@ -160,9 +130,7 @@ def test_whoami_json_inside_linked_project_stays_auth_only(
     assert exit_code == 0
     payload = json.loads(captured.out)
     data = payload["data"]
-    assert data["workspace"] is None
-    assert data["linked_project"] is None
-    assert data["local_linked_project"] is None
+    _assert_deprecated_project_context_is_empty(data)
 
 
 def test_whoami_json_with_stored_credentials_verifies_token(
@@ -210,9 +178,7 @@ def test_whoami_json_with_env_token_uses_verified_identity(
     data = payload["data"]
     assert data["email"] == "env@example.com"
     assert data["name"] == "Env User"
-    assert data["workspace"] is None
-    assert data["linked_project"] is None
-    assert data["local_linked_project"] is None
+    _assert_deprecated_project_context_is_empty(data)
     assert data["account"]["email"] == "env@example.com"
     assert data["account"]["source"] == "environment"
     assert data["source"] == "environment"
@@ -246,23 +212,15 @@ def test_whoami_json_with_env_token_ignores_cached_workspace_resolution(
     payload = json.loads(captured.out)
     data = payload["data"]
     assert data["email"] == "env@example.com"
-    assert data["workspace"] is None
-    assert data["linked_project"] is None
+    _assert_deprecated_project_context_is_empty(data)
     assert data["source"] == "environment"
 
 
-def test_whoami_json_with_env_token_stays_auth_only_inside_linked_project(
+def test_whoami_json_with_env_token_stays_auth_only_inside_project(
     monkeypatch, capsys, tmp_path, fake_verify_result
 ) -> None:
     project_root = tmp_path / "project"
     _create_canonical_project(project_root)
-    _link_project_mapping(
-        monkeypatch,
-        config_file=tmp_path / "home" / ".osmosis" / "config.json",
-        project_root=project_root,
-        workspace_id="ws_linked",
-        workspace_name="team-alpha",
-    )
     monkeypatch.chdir(project_root)
     monkeypatch.setenv("OSMOSIS_TOKEN", "env-token")
     monkeypatch.setattr(
@@ -285,9 +243,7 @@ def test_whoami_json_with_env_token_stays_auth_only_inside_linked_project(
     assert exit_code == 0
     data = json.loads(captured.out)["data"]
     assert data["account"]["email"] == "env@example.com"
-    assert data["workspace"] is None
-    assert data["linked_project"] is None
-    assert data["local_linked_project"] is None
+    _assert_deprecated_project_context_is_empty(data)
 
 
 def test_whoami_json_with_env_token_ignores_mismatched_local_workspace(
@@ -317,8 +273,7 @@ def test_whoami_json_with_env_token_ignores_mismatched_local_workspace(
     payload = json.loads(captured.out)
     data = payload["data"]
     assert data["email"] == "env@example.com"
-    assert data["workspace"] is None
-    assert data["linked_project"] is None
+    _assert_deprecated_project_context_is_empty(data)
     assert data["source"] == "environment"
 
 
@@ -452,18 +407,11 @@ def test_whoami_plain_renders_label_value_lines(
     assert not any(line.startswith("Workspace:") for line in lines)
 
 
-def test_whoami_plain_inside_linked_project_stays_auth_only(
+def test_whoami_plain_inside_project_stays_auth_only(
     monkeypatch, capsys, tmp_path, fake_credentials
 ) -> None:
     project_root = tmp_path / "project"
     _create_canonical_project(project_root)
-    _link_project_mapping(
-        monkeypatch,
-        config_file=tmp_path / "home" / ".osmosis" / "config.json",
-        project_root=project_root,
-        workspace_id="ws_linked",
-        workspace_name="team-alpha",
-    )
     monkeypatch.chdir(project_root)
     _patch_auth(monkeypatch, fake_credentials)
 

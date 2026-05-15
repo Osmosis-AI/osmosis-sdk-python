@@ -1,70 +1,212 @@
-"""Validate that the local project's git remote matches the linked workspace's
-connected repository.
-
-Used by commands that submit work to the platform (e.g. ``osmosis train submit``)
-to guard against accidentally running from the wrong checkout when a workspace
-is wired up to a specific Git Sync repo.
-"""
+"""Helpers for reading and normalizing local Git repository state."""
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING
+from urllib.parse import SplitResult, urlsplit, urlunsplit
+
+import requests
 
 from osmosis_ai.cli.errors import CLIError
-from osmosis_ai.platform.auth import (
-    AuthenticationExpiredError,
-    PlatformAPIError,
-)
-from osmosis_ai.platform.auth.config import PLATFORM_URL
 
-from .utils import platform_call
-
-if TYPE_CHECKING:
-    from osmosis_ai.platform.auth.credentials import Credentials
-
-
-# Captures host + path from common Git URL forms:
-#   https://github.com/owner/repo[.git][/]
-#   http(s)://user[:pat]@host/owner/repo[.git]
-#   ssh://git@host/owner/repo[.git]
-#   git@host:owner/repo[.git]
-_GIT_URL_RE = re.compile(
-    r"""^
-    (?:[A-Za-z0-9+.\-]+://)?      # optional scheme (https://, ssh://, git://)
-    (?:[^@/]+@)?                  # optional user@ (e.g. git@, user:pat@)
-    (?P<host>[^:/]+)              # host
-    [:/]                          # separator (':' for SSH-style, '/' for URL)
-    (?P<path>.+?)                 # repo path (lazy)
-    (?:\.git)?                    # optional .git suffix
-    /?                            # optional trailing slash
-    $""",
-    re.VERBOSE,
+_SCP_LIKE_SSH_RE = re.compile(r"^(?P<user>[^@\s/]+)@(?P<host>[^:\s/]+):(?P<path>.+)$")
+_GITHUB_REPOSITORY_IDENTITY_RE = re.compile(
+    r"^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._-]+$"
 )
 
 
-def normalize_git_url(url: str | None) -> str | None:
-    """Reduce a Git URL to ``host/owner/repo`` for fuzzy-equality comparison.
+@dataclass(frozen=True, slots=True)
+class GitRemoteIdentity:
+    """Normalized GitHub repository identity and safe display URL."""
 
-    Returns ``None`` for empty or unparseable input. The host is lowercased so
-    case differences (``GitHub.com`` vs ``github.com``) don't trip the check.
+    identity: str
+    display_url: str
+
+
+def normalize_git_identity(url: str | None) -> GitRemoteIdentity:
+    """Return the GitHub ``owner/repo`` identity for a remote URL.
+
+    The identity is intentionally hostless and credential-free so it can be used
+    in API headers or payloads without leaking the raw remote URL.
     """
-    if not url:
+    if url is None or not isinstance(url, str) or not url:
+        raise CLIError("Git remote URL must be a GitHub repository URL.")
+    if _has_whitespace_or_control(url):
+        raise CLIError(
+            "Git remote URL must not contain whitespace or control characters."
+        )
+
+    parsed = _parse_git_remote_url(url)
+    if parsed.hostname is None or parsed.hostname.lower() != "github.com":
+        raise CLIError("Git remote URL must be hosted on github.com.")
+
+    normalized_path = _normalized_github_path(parsed.path)
+    segments = normalized_path.split("/")
+    if len(segments) != 2:
+        raise CLIError("Git remote URL must identify exactly one GitHub repository.")
+
+    owner, repo = segments
+    identity = f"{owner}/{repo}".lower()
+    if _GITHUB_REPOSITORY_IDENTITY_RE.fullmatch(identity) is None:
+        raise CLIError("Git remote URL contains an invalid GitHub repository name.")
+
+    return GitRemoteIdentity(
+        identity=identity,
+        display_url=_display_url_without_credentials(parsed),
+    )
+
+
+def _parse_git_remote_url(url: str) -> SplitResult:
+    scp_like = _SCP_LIKE_SSH_RE.fullmatch(url)
+    if scp_like is not None:
+        url = (
+            f"ssh://{scp_like.group('user')}@{scp_like.group('host')}/"
+            f"{scp_like.group('path')}"
+        )
+    try:
+        return urlsplit(url)
+    except ValueError as exc:
+        raise CLIError("Git remote URL must be a valid URL.") from exc
+
+
+def _normalized_github_path(path: str) -> str:
+    lowered_path = path.lower()
+    if "%2f" in lowered_path or "%5c" in lowered_path:
+        raise CLIError("Git remote URL path must not contain encoded path separators.")
+
+    normalized = path.strip("/")
+    if normalized.endswith(".git"):
+        normalized = normalized[: -len(".git")]
+    if _has_whitespace_or_control(normalized):
+        raise CLIError(
+            "Git remote URL path must not contain whitespace or control characters."
+        )
+    return normalized
+
+
+def _display_url_without_credentials(parsed: SplitResult) -> str:
+    netloc = parsed.netloc.rsplit("@", maxsplit=1)[-1]
+    if parsed.scheme == "ssh" and parsed.username == "git":
+        netloc = f"git@{netloc}"
+    return urlunsplit((parsed.scheme, netloc, parsed.path, "", ""))
+
+
+def _resolve_canonical_github_identity(owner: str, repo: str) -> str | None:
+    """Resolve canonical owner/repo, best-effort for renamed repositories."""
+    return _resolve_via_gh(owner, repo) or _resolve_via_git_credentials(owner, repo)
+
+
+def resolve_canonical_git_identity(identity: str) -> str | None:
+    """Resolve the current GitHub owner/repo for a local repository identity.
+
+    This may contact GitHub and is intentionally kept out of normal command
+    setup. Call it only after the platform rejects the local repository scope.
+    """
+    if _GITHUB_REPOSITORY_IDENTITY_RE.fullmatch(identity) is None:
         return None
 
-    match = _GIT_URL_RE.match(url.strip())
-    if match is None:
+    owner, repo = identity.split("/", maxsplit=1)
+    canonical_identity = _resolve_canonical_github_identity(owner, repo)
+    if (
+        canonical_identity is not None
+        and _GITHUB_REPOSITORY_IDENTITY_RE.fullmatch(canonical_identity) is not None
+    ):
+        return canonical_identity
+    return None
+
+
+def _resolve_via_gh(owner: str, repo: str) -> str | None:
+    if shutil.which("gh") is None:
+        return None
+    try:
+        result = subprocess.run(
+            ["gh", "api", f"repos/{owner}/{repo}", "--jq", ".full_name"],
+            capture_output=True,
+            env=_noninteractive_git_env(),
+            text=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired):
         return None
 
-    host = match.group("host").lower()
-    path = match.group("path").strip("/")
-    if not path:
+    if result.returncode != 0:
         return None
-    return f"{host}/{path}"
+    return result.stdout.strip() or None
+
+
+def _resolve_via_git_credentials(owner: str, repo: str) -> str | None:
+    if shutil.which("git") is None:
+        return None
+    try:
+        result = subprocess.run(
+            ["git", "credential", "fill"],
+            input="protocol=https\nhost=github.com\n",
+            capture_output=True,
+            env=_noninteractive_git_env(),
+            text=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+    if result.returncode != 0:
+        return None
+
+    token = _password_from_git_credentials(result.stdout)
+    if token is None:
+        return None
+
+    try:
+        response = requests.get(
+            f"https://api.github.com/repos/{owner}/{repo}",
+            headers={"Authorization": f"token {token}"},
+            allow_redirects=True,
+            timeout=10,
+        )
+    except requests.RequestException:
+        return None
+
+    if response.status_code != 200:
+        return None
+
+    try:
+        full_name = response.json().get("full_name")
+    except ValueError:
+        return None
+    return full_name if isinstance(full_name, str) and full_name else None
+
+
+def _password_from_git_credentials(output: str) -> str | None:
+    for line in output.splitlines():
+        if line.startswith("password="):
+            token = line.removeprefix("password=")
+            return token or None
+    return None
+
+
+def _noninteractive_git_env() -> dict[str, str]:
+    return {
+        **os.environ,
+        "GH_PROMPT_DISABLED": "1",
+        "GCM_INTERACTIVE": "never",
+        "GIT_TERMINAL_PROMPT": "0",
+    }
+
+
+def _has_whitespace_or_control(value: str) -> bool:
+    return any(
+        character.isspace() or _is_control_character(character) for character in value
+    )
+
+
+def _is_control_character(character: str) -> bool:
+    codepoint = ord(character)
+    return codepoint < 32 or codepoint == 127 or 128 <= codepoint <= 159
 
 
 def get_local_git_remote_url(project_root: Path) -> str | None:
@@ -72,18 +214,13 @@ def get_local_git_remote_url(project_root: Path) -> str | None:
 
     Returns ``None`` when:
     * ``git`` is not installed on PATH;
-    * the project is not a git repository;
+    * the project is not a git repository top-level;
     * there is no ``origin`` remote.
     """
     if shutil.which("git") is None:
         return None
-    # Anchor to *this* project. ``git -C`` walks up parent directories
-    # by default, which would otherwise pick up an unrelated parent
-    # repo's ``origin`` (e.g. when the project is nested inside another
-    # checkout). Mirrors the same guard in ``summarize_local_git_state``.
     if not (project_root / ".git").exists():
         return None
-
     try:
         result = subprocess.run(
             ["git", "-C", str(project_root), "remote", "get-url", "origin"],
@@ -156,17 +293,14 @@ def summarize_local_git_state(project_root: Path) -> LocalGitState | None:
 
     Used by command flows (e.g. ``osmosis train submit``) to surface a
     "push your changes first" reminder, since the platform always
-    pulls source from the workspace's connected Git remote.
+    pulls source from Git.
 
     Returns ``None`` when ``git`` is not on PATH or ``project_root`` is
-    not a git working tree (no ``.git`` entry); individual fields are
-    safely defaulted when sub-commands fail rather than raising.
+    not a git working tree top-level; individual fields are safely defaulted when
+    sub-commands fail rather than raising.
     """
     if shutil.which("git") is None:
         return None
-    # Anchor to *this* project. ``git -C`` walks up parent directories
-    # by default, which would otherwise pick up an unrelated parent
-    # repo (e.g. when a project is nested inside another checkout).
     if not (project_root / ".git").exists():
         return None
 
@@ -213,138 +347,13 @@ def summarize_local_git_state(project_root: Path) -> LocalGitState | None:
     )
 
 
-def _git_sync_url(workspace_name: str) -> str:
-    return f"{PLATFORM_URL}/{workspace_name}/integrations/git"
-
-
-def _raise_no_connected_repo(workspace_name: str, command_label: str) -> None:
-    raise CLIError(
-        f"{command_label} requires the linked workspace to have a Git Sync "
-        "connected repository (the platform pulls training code from there).\n"
-        f"  Workspace '{workspace_name}' has no connected repo configured.\n"
-        "\n"
-        "  Connect a repo via Git Sync at:\n"
-        f"    {_git_sync_url(workspace_name)}\n"
-        "  Or relink this project to a workspace that already has one:\n"
-        "    osmosis project unlink\n"
-        "    osmosis project link"
-    )
-
-
-def _raise_workspace_not_found(
-    workspace_id: str,
-    workspace_name: str,
-    command_label: str,
-) -> None:
-    raise CLIError(
-        f"{command_label} requires a valid linked workspace.\n"
-        f"  This project is linked to workspace '{workspace_name}' ({workspace_id}), "
-        "but that workspace is no longer accessible.\n"
-        "\n"
-        "  Run 'osmosis auth login' if you logged in as a different user, "
-        "or relink this project:\n"
-        "    osmosis project unlink\n"
-        "    osmosis project link"
-    )
-
-
-def validate_workspace_repo(
-    *,
-    project_root: Path,
-    workspace_id: str,
-    workspace_name: str,
-    credentials: Credentials,
-    command_label: str,
-) -> None:
-    """Ensure ``project_root`` is a clone of the linked workspace's connected repo.
-
-    The platform pulls training code from the workspace's Git Sync repo, so a
-    workspace without a connected repo cannot run a training submission at all.
-    This function therefore enforces both:
-
-    * The linked workspace has a ``connected_repo`` configured, and
-    * The local project's ``origin`` remote points at that same repository.
-
-    Raises :class:`CLIError` on any mismatch. Network/auth errors are swallowed
-    so the actual submit call surfaces them with full context.
-    """
-    from osmosis_ai.platform.api.client import OsmosisClient
-
-    client = OsmosisClient()
-    try:
-        info = platform_call(
-            "Checking workspace Git Sync...",
-            lambda: client.refresh_workspace_info(
-                credentials=credentials,
-                workspace_id=workspace_id,
-                # Pre-flight check: a transient 401 must not wipe local
-                # credentials/workspace state. Defer auth handling to the
-                # actual submit call below.
-                cleanup_on_401=False,
-            ),
-        )
-    except (AuthenticationExpiredError, PlatformAPIError):
-        # Defer to the actual submit call to surface platform/auth errors.
-        return
-
-    if info.get("found") is False:
-        _raise_workspace_not_found(workspace_id, workspace_name, command_label)
-        return  # pragma: no cover - _raise_workspace_not_found always raises
-
-    connected_repo = info.get("connected_repo")
-    repo_url: str | None = None
-    if isinstance(connected_repo, dict):
-        candidate = connected_repo.get("repo_url")
-        if isinstance(candidate, str) and candidate:
-            repo_url = candidate
-
-    if repo_url is None:
-        _raise_no_connected_repo(workspace_name, command_label)
-        return  # pragma: no cover - _raise_no_connected_repo always raises
-
-    expected = normalize_git_url(repo_url)
-    if expected is None:
-        # Platform returned a URL we can't parse; don't block on a format we
-        # don't understand.
-        return
-
-    local_remote = get_local_git_remote_url(project_root)
-    if local_remote is None:
-        raise CLIError(
-            f"{command_label} must be run from a clone of the workspace's "
-            "connected Git repository.\n"
-            f"  Workspace '{workspace_name}' is connected to:\n"
-            f"    {repo_url}\n"
-            f"  Local project at {project_root} has no `origin` remote.\n"
-            "\n"
-            "  Clone the connected repo:\n"
-            f"    git clone {repo_url}\n"
-            "  Or relink this project:\n"
-            "    osmosis project unlink\n"
-            "    osmosis project link"
-        )
-
-    if normalize_git_url(local_remote) != expected:
-        raise CLIError(
-            f"{command_label} must be run from a clone of the workspace's "
-            "connected Git repository.\n"
-            f"  Workspace '{workspace_name}' is connected to:\n"
-            f"    {repo_url}\n"
-            f"  Local `origin` remote:\n"
-            f"    {local_remote}\n"
-            "\n"
-            "  Run from the connected repo, or relink this project:\n"
-            "    osmosis project unlink\n"
-            "    osmosis project link"
-        )
-
-
 __all__ = [
+    "GitRemoteIdentity",
     "LocalGitState",
     "get_local_git_remote_url",
     "git_worktree_top_level",
-    "normalize_git_url",
+    "normalize_git_identity",
     "require_git_top_level",
+    "resolve_canonical_git_identity",
     "summarize_local_git_state",
-    "validate_workspace_repo",
 ]

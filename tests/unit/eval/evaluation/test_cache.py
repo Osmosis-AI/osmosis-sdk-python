@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import json
+import subprocess
 import types
 from contextlib import redirect_stdout
 from pathlib import Path
@@ -11,6 +12,7 @@ from unittest.mock import patch
 
 import pytest
 
+from osmosis_ai.cli import main as cli
 from osmosis_ai.eval.evaluation.cache import (
     _CACHE_VERSION,
     CONTROLLER_PROTOCOL_VERSION,
@@ -35,6 +37,11 @@ from osmosis_ai.eval.evaluation.cache import (
 
 
 def _make_project(root: Path) -> Path:
+    subprocess.run(
+        ["git", "init", "-b", "main", str(root)],
+        check=True,
+        capture_output=True,
+    )
     for rel_path in (
         ".osmosis",
         ".osmosis/research",
@@ -45,10 +52,6 @@ def _make_project(root: Path) -> Path:
         "data",
     ):
         (root / rel_path).mkdir(parents=True, exist_ok=True)
-    (root / ".osmosis" / "project.toml").write_text(
-        "[project]\nname='test'\n",
-        encoding="utf-8",
-    )
     (root / ".osmosis" / "research" / "program.md").write_text(
         "# Test\n", encoding="utf-8"
     )
@@ -478,6 +481,81 @@ def test_eval_cache_default_root_is_project_local(
     monkeypatch.chdir(project)
 
     assert _get_cache_root() == (project / ".osmosis" / "cache" / "eval").resolve()
+
+
+def test_eval_cache_dir_is_not_registered(capsys) -> None:
+    rc = cli.main(["eval", "cache", "dir"])
+
+    captured = capsys.readouterr()
+    assert rc != 0
+    assert "No such command" in captured.err
+
+
+def test_eval_cache_ls_resolves_local_project_before_listing(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys,
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(
+        "osmosis_ai.eval.evaluation.cli.EvalCommand._run_cache_ls",
+        lambda self, **kwargs: pytest.fail(
+            "eval cache ls should resolve local project context before listing"
+        ),
+    )
+
+    rc = cli.main(["--json", "eval", "cache", "ls"])
+
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert "cloned Osmosis repository" in captured.err
+
+
+def test_eval_cache_ls_allows_scaffold_without_credentials_or_origin(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys,
+) -> None:
+    project = _make_project(tmp_path / "project")
+    cache_root = project / ".osmosis" / "cache" / "eval"
+    _make_cache_entry(cache_root, "abc123", "openai/gpt-4", "data.jsonl")
+    monkeypatch.chdir(project)
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.load_credentials",
+        lambda: pytest.fail("eval cache ls must not require credentials"),
+    )
+
+    rc = cli.main(["--json", "eval", "cache", "ls"])
+
+    captured = capsys.readouterr()
+    assert rc == 0
+    payload = json.loads(captured.out)
+    assert payload["total_count"] == 1
+    assert payload["items"][0]["task_id"] == "abc123"
+
+
+def test_eval_cache_rm_allows_scaffold_without_credentials_or_origin(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    capsys,
+) -> None:
+    project = _make_project(tmp_path / "project")
+    cache_root = project / ".osmosis" / "cache" / "eval"
+    cache_path = _make_cache_entry(cache_root, "abc123", "openai/gpt-4", "data.jsonl")
+    monkeypatch.chdir(project)
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.load_credentials",
+        lambda: pytest.fail("eval cache rm must not require credentials"),
+    )
+
+    rc = cli.main(["--json", "eval", "cache", "rm", "abc123"])
+
+    captured = capsys.readouterr()
+    assert rc == 0
+    payload = json.loads(captured.out)
+    assert payload["operation"] == "eval.cache.rm"
+    assert payload["resource"] == {"deleted_count": 1}
+    assert not cache_path.exists()
 
 
 # ============================================================

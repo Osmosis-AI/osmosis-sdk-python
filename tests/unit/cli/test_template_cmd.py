@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -41,10 +42,10 @@ def workspace_template(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 def _make_project(root: Path) -> Path:
-    (root / ".osmosis").mkdir(parents=True, exist_ok=True)
-    (root / ".osmosis" / "project.toml").write_text(
-        "[project]\nsetup_source = 'test'\n",
-        encoding="utf-8",
+    subprocess.run(
+        ["git", "init", "-b", "main", str(root)],
+        check=True,
+        capture_output=True,
     )
     return root
 
@@ -183,6 +184,21 @@ def test_template_apply_json_writes_into_project_canonical_layout(
     assert not (project_root / "templates").exists()
 
 
+def test_template_apply_json_in_incomplete_git_checkout(
+    monkeypatch, tmp_path, capsys, workspace_template
+) -> None:
+    project_root = _make_project(tmp_path)
+    monkeypatch.chdir(project_root)
+
+    rc = cli.main(["--json", "template", "apply", "multiply-local-strands"])
+    captured = capsys.readouterr()
+
+    assert rc == 0
+    payload = json.loads(captured.out)
+    assert "rollouts/multiply-local-strands/main.py" in payload["resource"]["files"]
+    assert (project_root / "rollouts" / "multiply-local-strands" / "main.py").is_file()
+
+
 def test_template_apply_refuses_overwrite_without_force(
     monkeypatch, tmp_path, capsys, workspace_template
 ) -> None:
@@ -266,7 +282,7 @@ def test_template_apply_outside_project_errors(monkeypatch, tmp_path, capsys) ->
     captured = capsys.readouterr()
 
     assert rc != 0
-    assert "Not in an Osmosis project" in captured.err
+    assert "cloned Osmosis repository" in captured.err
 
 
 # ── bare `osmosis template` ──────────────────────────────────────

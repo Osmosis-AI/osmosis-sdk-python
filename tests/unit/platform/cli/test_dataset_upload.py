@@ -8,7 +8,7 @@ import pytest
 
 from osmosis_ai.platform.api.models import DatasetFile, UploadInfo
 
-WORKSPACE_ID = "ws_1"
+GIT_IDENTITY = "acme/rollouts"
 
 
 def _make_fake_dataset(
@@ -53,22 +53,22 @@ class TestPerformUpload:
 
         class FakeClient:
             def create_dataset(
-                self, file_name, file_size, ext, *, workspace_id, credentials=None
+                self, file_name, file_size, ext, *, git_identity, credentials=None
             ):
                 calls["create"] = True
                 assert file_name == "data"
                 assert ext == "jsonl"
-                assert workspace_id == WORKSPACE_ID
+                assert git_identity == GIT_IDENTITY
                 assert credentials is fake_credentials
                 return fake_dataset
 
             def complete_upload(
-                self, file_id, parts=None, *, workspace_id, credentials=None
+                self, file_id, parts=None, *, git_identity, credentials=None
             ):
                 calls["complete"] = True
                 assert file_id == "dataset-1"
                 assert parts is None
-                assert workspace_id == WORKSPACE_ID
+                assert git_identity == GIT_IDENTITY
                 assert credentials is fake_credentials
                 return DatasetFile(
                     id=file_id,
@@ -97,7 +97,7 @@ class TestPerformUpload:
             file_path=file_path,
             ext="jsonl",
             file_size=file_size,
-            workspace_id=WORKSPACE_ID,
+            git_identity=GIT_IDENTITY,
             credentials=fake_credentials,
         )
 
@@ -119,16 +119,16 @@ class TestPerformUpload:
 
         class FakeClient:
             def create_dataset(
-                self, file_name, file_size, ext, *, workspace_id, credentials=None
+                self, file_name, file_size, ext, *, git_identity, credentials=None
             ):
-                assert workspace_id == WORKSPACE_ID
+                assert git_identity == GIT_IDENTITY
                 created["file_name"] = file_name
                 return _make_fake_dataset(file_name=file_name, file_size=file_size)
 
             def complete_upload(
-                self, file_id, parts=None, *, workspace_id, credentials=None
+                self, file_id, parts=None, *, git_identity, credentials=None
             ):
-                assert workspace_id == WORKSPACE_ID
+                assert git_identity == GIT_IDENTITY
                 return DatasetFile(
                     id=file_id,
                     file_name="agent.eval.v2",
@@ -154,7 +154,7 @@ class TestPerformUpload:
             file_path=file_path,
             ext="jsonl",
             file_size=file_size,
-            workspace_id=WORKSPACE_ID,
+            git_identity=GIT_IDENTITY,
             credentials=None,
         )
 
@@ -169,8 +169,8 @@ class TestPerformUpload:
         file_path.write_text("{}")
 
         class FakeClient:
-            def create_dataset(self, *args, workspace_id, **kwargs):
-                assert workspace_id == WORKSPACE_ID
+            def create_dataset(self, *args, git_identity, **kwargs):
+                assert git_identity == GIT_IDENTITY
                 return DatasetFile(
                     id="dataset-1",
                     file_name="data",
@@ -188,7 +188,7 @@ class TestPerformUpload:
                 file_path=file_path,
                 ext="jsonl",
                 file_size=2,
-                workspace_id=WORKSPACE_ID,
+                git_identity=GIT_IDENTITY,
                 credentials=None,
             )
 
@@ -205,12 +205,12 @@ class TestPerformUpload:
         aborted = {}
 
         class FakeClient:
-            def create_dataset(self, *args, workspace_id, **kwargs):
-                assert workspace_id == WORKSPACE_ID
+            def create_dataset(self, *args, git_identity, **kwargs):
+                assert git_identity == GIT_IDENTITY
                 return _make_fake_dataset(file_size=file_size)
 
-            def abort_upload(self, file_id, *, workspace_id, credentials=None):
-                assert workspace_id == WORKSPACE_ID
+            def abort_upload(self, file_id, *, git_identity, credentials=None):
+                assert git_identity == GIT_IDENTITY
                 aborted["called"] = True
 
             def complete_upload(self, *args, **kwargs):
@@ -237,7 +237,7 @@ class TestPerformUpload:
                 file_path=file_path,
                 ext="jsonl",
                 file_size=file_size,
-                workspace_id=WORKSPACE_ID,
+                git_identity=GIT_IDENTITY,
                 credentials=None,
             )
 

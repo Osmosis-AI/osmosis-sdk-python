@@ -10,7 +10,6 @@ import pytest
 import osmosis_ai.cli.commands.auth as auth_module
 from osmosis_ai.cli.console import Console
 from osmosis_ai.cli.errors import CLIError
-from osmosis_ai.platform.auth import AuthenticationExpiredError, PlatformAPIError
 from osmosis_ai.platform.auth.credentials import Credentials, UserInfo
 from osmosis_ai.platform.auth.flow import LoginResult, VerifyResult
 
@@ -37,10 +36,12 @@ def _make_login_result(email: str = "a@example.com") -> LoginResult:
 
 @pytest.fixture(autouse=True)
 def _stub_workspace_resolution(monkeypatch) -> None:
-    """Keep login tests offline unless a test overrides workspace resolution."""
+    """Login is account-only and must not query workspace APIs."""
     monkeypatch.setattr(
         "osmosis_ai.platform.auth.platform_request",
-        lambda *args, **kwargs: {"workspaces": []},
+        lambda *args, **kwargs: pytest.fail(
+            "auth login must not look up platform workspaces"
+        ),
     )
     monkeypatch.setattr(
         "osmosis_ai.platform.auth.local_config.clear_all_local_data",
@@ -82,6 +83,79 @@ def test_force_login_clears_workspace_data(monkeypatch) -> None:
     auth_module.login(force=True, token=None)
 
     assert clear_calls, "clear_all_local_data must be called when --force is used"
+
+
+def test_force_login_leaves_new_credentials_saved(monkeypatch) -> None:
+    """Destructive local cleanup must not delete newly saved credentials."""
+    old_creds = _make_credentials(user_id="user_1")
+    new_creds = _make_credentials(user_id="user_1")
+    result = _make_login_result()
+    saved_tokens: list[str] = ["old-token"]
+    calls: list[str] = []
+
+    monkeypatch.delenv("OSMOSIS_TOKEN", raising=False)
+    monkeypatch.setattr("osmosis_ai.platform.auth.load_credentials", lambda: old_creds)
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.credentials.save_credentials",
+        lambda c: saved_tokens.append(c.access_token) or "keyring",
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.device_login",
+        lambda **kw: (result, new_creds),
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.local_config.clear_all_local_data",
+        lambda: (calls.append("clear_all_local_data"), saved_tokens.clear()),
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.platform_client.revoke_cli_token",
+        lambda creds: calls.append("revoke_cli_token") or True,
+    )
+
+    auth_module.login(force=True, token=None)
+
+    assert saved_tokens == [new_creds.access_token]
+    assert calls == ["clear_all_local_data"]
+
+
+def test_force_login_restores_old_credentials_when_new_save_fails(monkeypatch) -> None:
+    """A failed replacement save should not leave the user logged out locally."""
+    old_creds = _make_credentials(user_id="user_1")
+    new_creds = _make_credentials(user_id="user_1")
+    result = _make_login_result()
+    calls: list[str] = []
+
+    def save_credentials(creds: Credentials) -> str:
+        if creds is new_creds:
+            calls.append("save_new")
+            raise OSError("disk full")
+        if creds is old_creds:
+            calls.append("restore_old")
+            return "keyring"
+        raise AssertionError("unexpected credentials")
+
+    monkeypatch.delenv("OSMOSIS_TOKEN", raising=False)
+    monkeypatch.setattr("osmosis_ai.platform.auth.load_credentials", lambda: old_creds)
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.credentials.save_credentials", save_credentials
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.device_login",
+        lambda **kw: (result, new_creds),
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.local_config.clear_all_local_data",
+        lambda: calls.append("clear_all_local_data"),
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.platform_client.revoke_cli_token",
+        lambda creds: calls.append("revoke_cli_token") or True,
+    )
+
+    with pytest.raises(OSError, match="disk full"):
+        auth_module.login(force=True, token=None)
+
+    assert calls == ["clear_all_local_data", "save_new", "restore_old"]
 
 
 # ---------------------------------------------------------------------------
@@ -179,10 +253,10 @@ def test_first_login_does_not_clear_workspace(monkeypatch) -> None:
     assert not clear_calls, "no cleanup needed for first-time login"
 
 
-def test_login_success_prompts_project_link_not_workspace_switch(
+def test_login_success_prompts_clone_and_doctor_not_project_link(
     monkeypatch, capsys
 ) -> None:
-    """Login should point users at project linking, not global workspace selection."""
+    """Login should point users at Platform clones and project doctor."""
     new_creds = _make_credentials(user_id="user_1")
     result = _make_login_result()
 
@@ -196,12 +270,6 @@ def test_login_success_prompts_project_link_not_workspace_switch(
         lambda **kw: (result, new_creds),
     )
     monkeypatch.setattr(
-        "osmosis_ai.platform.auth.platform_request",
-        lambda *args, **kwargs: {
-            "workspaces": [{"id": "ws_only", "name": "solo-workspace"}]
-        },
-    )
-    monkeypatch.setattr(
         auth_module,
         "console",
         Console(force_terminal=False, no_color=True, width=100),
@@ -211,15 +279,18 @@ def test_login_success_prompts_project_link_not_workspace_switch(
 
     rendered = capsys.readouterr().out
     assert "Login Successful" in rendered
-    assert "osmosis project link --workspace <workspace-id-or-name>" in rendered
+    assert "Create or open a project in the Osmosis Platform" in rendered
+    assert "osmosis project doctor" in rendered
+    assert "osmosis project link --workspace <workspace-id-or-name>" not in rendered
+    assert "project.validate" not in rendered
+    assert "project.link" not in rendered
     assert "workspace switch" not in rendered
-    assert "Workspace: solo-workspace" not in rendered
 
 
 def test_login_omits_switch_commands_for_multiple_workspaces(
     monkeypatch, capsys
 ) -> None:
-    """Login should not print removed workspace switch commands."""
+    """Login should not print removed workspace switch or link commands."""
     new_creds = _make_credentials(user_id="user_1")
     result = _make_login_result()
 
@@ -231,15 +302,6 @@ def test_login_omits_switch_commands_for_multiple_workspaces(
     monkeypatch.setattr(
         "osmosis_ai.platform.auth.device_login",
         lambda **kw: (result, new_creds),
-    )
-    monkeypatch.setattr(
-        "osmosis_ai.platform.auth.platform_request",
-        lambda *args, **kwargs: {
-            "workspaces": [
-                {"id": "ws_alpha", "name": "team-alpha"},
-                {"id": "ws_beta", "name": "ML Team"},
-            ]
-        },
     )
     monkeypatch.setattr(
         auth_module,
@@ -250,12 +312,14 @@ def test_login_omits_switch_commands_for_multiple_workspaces(
     auth_module.login(force=False, token=None)
 
     rendered = capsys.readouterr().out
-    assert "osmosis project link --workspace <workspace-id-or-name>" in rendered
+    assert "Create or open a project in the Osmosis Platform" in rendered
+    assert "osmosis project doctor" in rendered
+    assert "osmosis project link --workspace <workspace-id-or-name>" not in rendered
     assert "workspace switch" not in rendered
 
 
-def test_login_zero_workspaces_points_to_platform_setup(monkeypatch, capsys) -> None:
-    """Login should send users to Platform/Git Sync setup before project linking."""
+def test_login_next_steps_omit_workspace_specific_guidance(monkeypatch, capsys) -> None:
+    """Login guidance should be generic account bootstrap guidance."""
     new_creds = _make_credentials(user_id="user_1")
     result = _make_login_result()
 
@@ -267,10 +331,6 @@ def test_login_zero_workspaces_points_to_platform_setup(monkeypatch, capsys) -> 
     monkeypatch.setattr(
         "osmosis_ai.platform.auth.device_login",
         lambda **kw: (result, new_creds),
-    )
-    monkeypatch.setattr(
-        "osmosis_ai.platform.auth.platform_request",
-        lambda *args, **kwargs: {"workspaces": []},
     )
     monkeypatch.setattr(
         auth_module,
@@ -282,23 +342,18 @@ def test_login_zero_workspaces_points_to_platform_setup(monkeypatch, capsys) -> 
 
     rendered = capsys.readouterr().out
     assert "Login Successful" in rendered
-    assert "Platform" in rendered
-    assert "Git Sync" in rendered
+    assert "Create or open a project in the Osmosis Platform" in rendered
+    assert "clone the repository created there" in rendered
+    assert "osmosis project doctor" in rendered
+    assert "Git Sync" not in rendered
     assert "osmosis workspace" not in rendered
     assert "workspace create" not in rendered
     assert "workspace list" not in rendered
     assert "osmosis project link --workspace <workspace-id-or-name>" not in rendered
 
 
-@pytest.mark.parametrize(
-    "error",
-    [
-        PlatformAPIError("workspace endpoint unavailable"),
-        AuthenticationExpiredError("session expired"),
-    ],
-)
-def test_login_does_not_fail_when_workspace_lookup_fails(monkeypatch, error) -> None:
-    """Workspace lookup errors should not turn a successful login into a failure."""
+def test_login_does_not_attempt_workspace_lookup(monkeypatch) -> None:
+    """Workspace lookup is removed from the successful login path."""
     new_creds = _make_credentials(user_id="user_1")
     result = _make_login_result()
     output = io.StringIO()
@@ -313,13 +368,6 @@ def test_login_does_not_fail_when_workspace_lookup_fails(monkeypatch, error) -> 
         lambda **kw: (result, new_creds),
     )
 
-    def raise_workspace_error(*args, **kwargs):
-        raise error
-
-    monkeypatch.setattr(
-        "osmosis_ai.platform.auth.platform_request",
-        raise_workspace_error,
-    )
     monkeypatch.setattr(
         auth_module,
         "console",
@@ -330,11 +378,12 @@ def test_login_does_not_fail_when_workspace_lookup_fails(monkeypatch, error) -> 
 
     rendered = output.getvalue()
     assert "Login Successful" in rendered
-    assert "Authenticated, but could not load your workspaces yet." in rendered
+    assert "Authenticated, but could not load your workspaces yet." not in rendered
+    assert "osmosis project doctor" in rendered
 
 
 def test_whoami_prints_local_identity_outside_project(monkeypatch) -> None:
-    """whoami should not require a workspace or project link outside projects."""
+    """whoami should not require project setup outside projects."""
     creds = _make_credentials(user_id="user_1")
     output = io.StringIO()
 

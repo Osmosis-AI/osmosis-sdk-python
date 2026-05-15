@@ -72,6 +72,7 @@ class DatasetFile:
     organization_id: str | None = None
     created_at: str = ""
     updated_at: str = ""
+    platform_url: str | None = None
     # Upload info — only present in create_dataset response
     upload: UploadInfo | None = None
 
@@ -92,6 +93,7 @@ class DatasetFile:
             organization_id=data.get("organization_id"),
             created_at=data.get("created_at", ""),
             updated_at=data.get("updated_at", ""),
+            platform_url=data.get("platform_url"),
             upload=upload,
         )
 
@@ -176,6 +178,7 @@ class TrainingRun:
     error_message: str | None = None
     creator_name: str | None = None
     creator_email: str | None = None
+    platform_url: str | None = None
     reward: float | None = field(default=None, kw_only=True)
 
     @classmethod
@@ -198,6 +201,7 @@ class TrainingRun:
             error_message=data.get("error_message"),
             creator_name=data.get("creator_name"),
             creator_email=data.get("creator_email"),
+            platform_url=data.get("platform_url"),
         )
 
     @property
@@ -236,6 +240,7 @@ class TrainingRunDetail(TrainingRun):
             error_message=run.get("error_message"),
             creator_name=run.get("creator_name"),
             creator_email=run.get("creator_email"),
+            platform_url=run.get("platform_url"),
             examples_processed_count=run.get("examples_processed_count"),
             notes=run.get("notes"),
             hf_status=run.get("hf_status"),
@@ -271,6 +276,7 @@ class SubmitTrainingRunResult:
     name: str
     status: str
     created_at: str
+    platform_url: str | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> SubmitTrainingRunResult:
@@ -279,6 +285,7 @@ class SubmitTrainingRunResult:
             name=data["name"],
             status=data["status"],
             created_at=data["created_at"],
+            platform_url=data.get("platform_url"),
         )
 
 

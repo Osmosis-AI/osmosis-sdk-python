@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -28,8 +29,11 @@ def workspace_template(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 
 
 def _make_project(root: Path) -> Path:
-    (root / ".osmosis").mkdir(parents=True)
-    (root / ".osmosis" / "project.toml").write_text("[project]\n", encoding="utf-8")
+    subprocess.run(
+        ["git", "init", "-b", "main", str(root)],
+        check=True,
+        capture_output=True,
+    )
     return root
 
 
@@ -44,10 +48,92 @@ def test_project_doctor_dry_run_reports_missing_paths(
     assert rc == 0
     payload = json.loads(capsys.readouterr().out)
     assert "rollouts/" in payload["resource"]["missing"]
+    assert "configs/training/" in payload["resource"]["missing"]
     assert "rollouts/.gitkeep" not in payload["resource"]["missing"]
     assert "AGENTS.md" in payload["resource"]["missing"]
     assert payload["resource"]["fixed"] is False
-    assert not (project / ".osmosis" / "research" / "program.md").exists()
+    assert payload["resource"]["updates_checked"] is False
+    assert payload["resource"]["valid"] is False
+    assert payload["resource"]["required_paths"] == [
+        "rollouts/",
+        "configs/training/",
+        "configs/eval/",
+        "data/",
+    ]
+    assert not (project / "research" / "program.md").exists()
+
+
+def test_project_doctor_reports_git_context(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    project = _make_project(tmp_path / "project")
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(project),
+            "remote",
+            "add",
+            "origin",
+            "git@github.com:Acme/Rollouts.git",
+        ],
+        check=True,
+        capture_output=True,
+    )
+    for rel_path in (
+        ".osmosis/cache",
+        "rollouts",
+        "configs/training",
+        "configs/eval",
+        "data",
+    ):
+        (project / rel_path).mkdir(parents=True, exist_ok=True)
+    (project / "configs" / "AGENTS.md").write_text("config agents\n", encoding="utf-8")
+    (project / ".claude").mkdir()
+    (project / ".claude" / "settings.json").write_text("{}\n", encoding="utf-8")
+    (project / "AGENTS.md").write_text("agents\n", encoding="utf-8")
+    (project / "CLAUDE.md").write_text("claude\n", encoding="utf-8")
+    monkeypatch.chdir(project)
+
+    rc = main(["--json", "project", "doctor"])
+
+    payload = json.loads(capsys.readouterr().out)
+    assert rc == 0
+    assert payload["resource"]["valid"] is True
+    assert payload["resource"]["git"]["identity"] == "acme/rollouts"
+    assert (
+        payload["resource"]["git"]["remote_url"]
+        == "ssh://git@github.com/Acme/Rollouts.git"
+    )
+    assert "warning" not in payload["resource"]["git"]
+
+
+def test_project_doctor_reports_invalid_git_origin_warning(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    project = _make_project(tmp_path / "project")
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(project),
+            "remote",
+            "add",
+            "origin",
+            "https://gitlab.com/acme/rollouts.git",
+        ],
+        check=True,
+        capture_output=True,
+    )
+    monkeypatch.chdir(project)
+
+    rc = main(["--json", "project", "doctor"])
+
+    payload = json.loads(capsys.readouterr().out)
+    assert rc == 0
+    assert payload["resource"]["git"]["identity"] is None
+    assert payload["resource"]["git"]["remote_url"] is None
+    assert "hosted on github.com" in payload["resource"]["git"]["warning"]
 
 
 def test_project_doctor_does_not_report_missing_gitkeep_for_existing_directory(
@@ -135,6 +221,8 @@ def test_project_doctor_fix_creates_missing_paths(
     assert (project / "AGENTS.md").is_file()
     assert (project / "AGENTS.md").read_text(encoding="utf-8") == "template agents\n"
     assert payload["resource"]["missing"] == []
+    assert payload["resource"]["updates_checked"] is True
+    assert not (project / ".osmosis" / "project.toml").exists()
 
 
 def test_project_doctor_fix_outside_project_does_not_create_project(
@@ -149,8 +237,7 @@ def test_project_doctor_fix_outside_project_does_not_create_project(
     assert captured.out == ""
     assert not (tmp_path / ".osmosis" / "project.toml").exists()
     message = json.loads(captured.err)["error"]["message"]
-    assert "Not in an Osmosis project" in message
-    assert "existing Osmosis project" in message
+    assert "cloned Osmosis repository" in message
     assert "osmosis init" not in message
 
 
@@ -158,7 +245,7 @@ def test_project_doctor_fix_preserves_existing_research_program(
     tmp_path: Path, monkeypatch, capsys, workspace_template: Path
 ) -> None:
     project = _make_project(tmp_path / "project")
-    program = project / ".osmosis" / "research" / "program.md"
+    program = project / "research" / "program.md"
     program.parent.mkdir(parents=True)
     program.write_text("# Research Brief\n\nKeep this content.\n", encoding="utf-8")
     monkeypatch.chdir(project)

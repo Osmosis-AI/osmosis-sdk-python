@@ -77,9 +77,11 @@ REMOVED_COMMANDS = [
     ["project", "init", REMOVED_COMMAND_PROBE, "demo"],
     ["project", "info", REMOVED_COMMAND_PROBE],
     ["project", "list", REMOVED_COMMAND_PROBE],
+    ["project", "validate", REMOVED_COMMAND_PROBE],
     ["deployment", "rename", REMOVED_COMMAND_PROBE, "old", "new"],
     ["deployment", "delete", REMOVED_COMMAND_PROBE, "checkpoint"],
     ["rollout", "validate", REMOVED_COMMAND_PROBE, "configs/eval/demo.toml"],
+    ["eval", "cache", "dir", REMOVED_COMMAND_PROBE],
 ]
 
 
@@ -141,9 +143,11 @@ def test_removed_commands_are_unknown(args, capfd):
         ["project", "init", "--help"],
         ["project", "info", "--help"],
         ["project", "list", "--help"],
+        ["project", "validate", "--help"],
         ["deployment", "rename", "--help"],
         ["deployment", "delete", "--help"],
         ["rollout", "validate", "--help"],
+        ["eval", "cache", "dir", "--help"],
     ],
 )
 def test_removed_help_paths_are_unknown(args, capfd):

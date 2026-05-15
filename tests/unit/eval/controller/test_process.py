@@ -1,6 +1,7 @@
 import inspect
 import os
 import socket
+import subprocess
 from pathlib import Path
 
 import httpx
@@ -82,11 +83,19 @@ def test_fixed_port_lock_path_is_shared_across_projects(
     project_a = tmp_path / "project-a"
     project_b = tmp_path / "project-b"
     for project in (project_a, project_b):
-        (project / ".osmosis").mkdir(parents=True)
-        (project / ".osmosis" / "project.toml").write_text(
-            "[project]\nname='test'\n",
-            encoding="utf-8",
+        subprocess.run(
+            ["git", "init", "-b", "main", str(project)],
+            check=True,
+            capture_output=True,
         )
+        for rel_path in (
+            ".osmosis/research",
+            "rollouts",
+            "configs/eval",
+            "configs/training",
+            "data",
+        ):
+            (project / rel_path).mkdir(parents=True, exist_ok=True)
 
     monkeypatch.chdir(project_a)
     lock_a = fixed_port_lock_path()

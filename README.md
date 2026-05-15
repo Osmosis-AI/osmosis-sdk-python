@@ -19,7 +19,7 @@
 
 > ⚠️ **Warning**: osmosis-ai is still in active development. APIs may change between versions.
 
-Python SDK for [Osmosis AI](https://platform.osmosis.ai), a platform for training LLMs with reinforcement learning. Implement an **AgentWorkflow** in Python, add a concrete **Grader** for local eval and managed training flows, run an eval smoke test locally with the CLI, then let Osmosis managed hosting load it through Git Sync.
+Python SDK for [Osmosis AI](https://platform.osmosis.ai), a platform for training LLMs with reinforcement learning. Implement an **AgentWorkflow** in Python, add a concrete **Grader** for local eval and managed training flows, run an eval smoke test locally with the CLI, then submit training from a Platform-created Git repository checkout.
 
 ## Quick start
 
@@ -27,12 +27,12 @@ Python SDK for [Osmosis AI](https://platform.osmosis.ai), a platform for trainin
 |------|-------------|
 | **Define agents** | One `AgentWorkflow` subclass (+ optional `AgentWorkflowConfig`) in your repo. The training/eval entrypoint must also expose a concrete `Grader` (typically with a `GraderConfig`). |
 | **Layout** | Use a rollout pack directory under `rollouts/<name>/` when loading by rollout name; the CLI adds that directory to `sys.path`. |
-| **Project repo** | Start from an Osmosis project repo created and connected through Git Sync in the Platform, or clone an existing Osmosis project. |
-| **Link project** | `osmosis project link --workspace <workspace-id-or-name>` — run from the workspace's connected Git Sync repo checkout so platform commands resolve the correct workspace. |
+| **Project repo** | Create the project in the Osmosis Platform, then clone the repository created there. |
+| **Check project** | `osmosis project doctor` — run from the cloned checkout so platform commands resolve the repository from the `origin` remote. Add `--fix` to restore missing scaffold paths. |
 | **Smoke test** | `osmosis eval run configs/eval/<name>.toml --limit 1` — exercises the same rollout server protocol used by training. |
 | **Evaluate** | `osmosis eval run configs/eval/<name>.toml` — run the full eval with optional pass@k and caching. |
 
-**Example repositories:** [osmosis-git-sync-example](https://github.com/Osmosis-AI/osmosis-git-sync-example) (synced agent repo patterns) · [osmosis-remote-rollout-example](https://github.com/Osmosis-AI/osmosis-remote-rollout-example) (reference server usage — align with current SDK exports when upgrading).
+**Example repository:** [osmosis-remote-rollout-example](https://github.com/Osmosis-AI/osmosis-remote-rollout-example) (reference server usage - align with current SDK exports when upgrading).
 
 **Documentation index:** [docs/README.md](docs/README.md)
 
@@ -52,27 +52,35 @@ Plain mode is for humans and simple shell pipelines, not a strict schema. `--jso
 
 In JSON or plain mode, interactive commands fail fast with `INTERACTIVE_REQUIRED` unless a non-interactive flow exists, typically by passing `--yes` or `--token`. `OSMOSIS_TOKEN` is verify-only across the CLI: it activates authentication for the current process but is never written to the on-disk credentials store, never revoked, and never deletes existing credentials.
 
-## Project setup and CI
+## Project Flow
 
-Create and connect an Osmosis project repository through Git Sync in the
-Platform, then clone that repository locally. You can also start from an
-existing cloned Osmosis project that already has `.osmosis/project.toml`,
-`rollouts/`, `configs/`, and `data/`.
+Create the project in the Osmosis Platform, clone the repository created there,
+then run CLI commands from that checkout.
 
 ```bash
-osmosis project validate
-osmosis project link --workspace <workspace-id-or-name>
-osmosis eval run configs/eval/<name>.toml --limit 1
+git clone <repo-url>
+cd <repo>
+osmosis auth login
+osmosis project doctor
+osmosis template apply multiply              # or add your rollout under rollouts/
+cp configs/training/default.toml configs/training/<run>.toml
+$EDITOR configs/training/<run>.toml          # set rollout, dataset, and model_path
+git add rollouts configs data research
+git commit -m "configure training run"
+git push
+osmosis train submit configs/training/<run>.toml
 ```
 
-Before submitting training, push the repo and confirm Git Sync is connected in
-the Osmosis Platform. Submit from CI with a project link and non-interactive
-confirmation:
+Platform-scoped commands derive scope from the checkout's `origin` remote and
+send `X-Osmosis-Git: namespace/repo_name`. The CLI does not store or send a
+workspace ID for repo-scoped commands.
+
+Before submitting training from CI, push the repository and authenticate with a
+token:
 
 ```bash
 export OSMOSIS_TOKEN=<token>
-osmosis project link --workspace <workspace-id-or-name> --yes
-osmosis train submit configs/training/default.toml --yes
+osmosis train submit configs/training/<run>.toml --yes
 ```
 
 ## Installation
@@ -80,7 +88,7 @@ osmosis train submit configs/training/default.toml --yes
 Requires **Python 3.12+**. For development setup, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 - **An LLM API key** (e.g., OpenAI, Anthropic, Groq) — required for `osmosis eval run` when using hosted models. See [supported providers](https://docs.litellm.ai/docs/providers).
-- **Osmosis account** (optional) — needed for `osmosis auth login`, project links, and platform-backed commands such as datasets, models, and training runs. Sign up at [platform.osmosis.ai](https://platform.osmosis.ai).
+- **Osmosis account** (optional) — needed for `osmosis auth login` and platform-backed commands such as datasets, models, and training runs. Sign up at [platform.osmosis.ai](https://platform.osmosis.ai).
 
 **pip**
 

@@ -1,4 +1,5 @@
 import json
+import subprocess
 import sys
 from pathlib import Path
 from unittest.mock import AsyncMock
@@ -15,6 +16,26 @@ from osmosis_ai.eval.rubric.types import RubricResult
 # =============================================================================
 # eval rubric — happy-path
 # =============================================================================
+
+
+def _make_git_project(root: Path) -> Path:
+    subprocess.run(
+        ["git", "init", "-b", "main", str(root)],
+        check=True,
+        capture_output=True,
+    )
+    for rel_path in (
+        ".osmosis/research",
+        "rollouts",
+        "configs/eval",
+        "configs/training",
+        "data",
+    ):
+        (root / rel_path).mkdir(parents=True, exist_ok=True)
+    (root / ".osmosis" / "research" / "program.md").write_text(
+        "# Test\n", encoding="utf-8"
+    )
+    return root
 
 
 def test_eval_rubric_basic(tmp_path, monkeypatch, capsys):
@@ -181,8 +202,11 @@ def test_main_without_subcommand_shows_help(capsys):
     assert "osmosis" in captured.out.lower()
 
 
-def test_eval_run_requires_project_context_before_config_lookup(capsys):
+def test_eval_run_requires_project_context_before_config_lookup(
+    tmp_path, monkeypatch, capsys
+):
     """eval run first requires a current Osmosis project."""
+    monkeypatch.chdir(tmp_path)
     exit_code = cli.main(
         [
             "eval",
@@ -193,28 +217,12 @@ def test_eval_run_requires_project_context_before_config_lookup(capsys):
     captured = capsys.readouterr()
 
     assert exit_code == 1
-    assert "Not in an Osmosis project" in captured.err
+    assert "cloned Osmosis repository" in captured.err
 
 
 def test_eval_run_rejects_missing_config_inside_project(tmp_path, monkeypatch, capsys):
     """eval run fails when a project-local config file does not exist."""
-    for rel_path in (
-        ".osmosis",
-        ".osmosis/research",
-        "rollouts",
-        "configs",
-        "configs/eval",
-        "configs/training",
-        "data",
-    ):
-        (tmp_path / rel_path).mkdir(parents=True, exist_ok=True)
-    (tmp_path / ".osmosis" / "project.toml").write_text(
-        "[project]\nname='test'\n",
-        encoding="utf-8",
-    )
-    (tmp_path / ".osmosis" / "research" / "program.md").write_text(
-        "# Test\n", encoding="utf-8"
-    )
+    _make_git_project(tmp_path)
     monkeypatch.chdir(tmp_path)
 
     exit_code = cli.main(["eval", "run", "configs/eval/nonexistent.toml"])
@@ -224,8 +232,10 @@ def test_eval_run_rejects_missing_config_inside_project(tmp_path, monkeypatch, c
     assert "Config file not found" in captured.err
 
 
-def test_eval_run_rejects_fresh_and_retry_failed(tmp_path, capsys):
+def test_eval_run_rejects_fresh_and_retry_failed(tmp_path, monkeypatch, capsys):
     """eval run rejects --fresh and --retry-failed together."""
+    project = _make_git_project(tmp_path / "project")
+    monkeypatch.chdir(project)
     config_path = tmp_path / "eval.toml"
     config_path.write_text(
         '[eval]\nmodule = "mod:Agent"\ndataset = "data.jsonl"\n\n[llm]\nmodel = "openai/gpt-5.4"\n',
