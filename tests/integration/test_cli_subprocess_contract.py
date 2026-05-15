@@ -83,7 +83,7 @@ def test_project_doctor_fix_in_git_repo_creates_runtime_free_scaffold(
 
     assert proc.returncode == 0, proc.stderr
     assert not (project / ".osmosis" / "project.toml").exists()
-    assert (project / ".osmosis" / "cache").is_dir()
+    assert not (project / ".osmosis" / "cache").exists()
     assert (project / "rollouts").is_dir()
 
 

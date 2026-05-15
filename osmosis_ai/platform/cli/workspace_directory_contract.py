@@ -10,13 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from osmosis_ai.cli.errors import CLIError
-
-_REQUIRED_DIRS = (
-    "rollouts/",
-    "configs/training/",
-    "configs/eval/",
-    "data/",
-)
+from osmosis_ai.templates.catalog import required_workspace_paths
 
 
 def _start_dir(start: Path) -> Path:
@@ -50,7 +44,7 @@ def missing_workspace_directory_paths(workspace_directory: Path) -> list[str]:
     workspace_directory = workspace_directory.resolve()
     return [
         rel_path
-        for rel_path in _REQUIRED_DIRS
+        for rel_path in required_workspace_paths()
         if not (workspace_directory / rel_path).is_dir()
     ]
 

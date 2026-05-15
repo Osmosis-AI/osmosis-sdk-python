@@ -49,6 +49,7 @@ def test_project_doctor_dry_run_reports_missing_paths(
     payload = json.loads(capsys.readouterr().out)
     assert "rollouts/" in payload["resource"]["missing"]
     assert "configs/training/" in payload["resource"]["missing"]
+    assert ".osmosis/cache/" not in payload["resource"]["missing"]
     assert "rollouts/.gitkeep" not in payload["resource"]["missing"]
     assert "AGENTS.md" in payload["resource"]["missing"]
     assert payload["resource"]["fixed"] is False

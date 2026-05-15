@@ -101,13 +101,17 @@ OFFICIAL_AGENT_SCAFFOLD_PATHS: tuple[Path, ...] = (
     _path(".claude/settings.json"),
 )
 
-REQUIRED_SCAFFOLD_DIRS: tuple[Path, ...] = (
-    _path(".osmosis/cache"),
+REQUIRED_WORKSPACE_DIRS: tuple[Path, ...] = (
     _path("rollouts"),
-    _path("configs/eval"),
     _path("configs/training"),
+    _path("configs/eval"),
     _path("data"),
 )
+
+
+def required_workspace_paths() -> tuple[str, ...]:
+    """Return canonical required workspace directories with display slashes."""
+    return tuple(f"{path.as_posix()}/" for path in REQUIRED_WORKSPACE_DIRS)
 
 
 def recipes_by_name() -> dict[str, TemplateRecipe]:
@@ -132,10 +136,11 @@ def official_agent_scaffold_paths() -> tuple[Path, ...]:
 
 __all__ = [
     "OFFICIAL_AGENT_SCAFFOLD_PATHS",
-    "REQUIRED_SCAFFOLD_DIRS",
+    "REQUIRED_WORKSPACE_DIRS",
     "ScaffoldEntry",
     "TemplateRecipe",
     "official_agent_scaffold_paths",
     "recipes_by_name",
+    "required_workspace_paths",
     "shared_template_files",
 ]

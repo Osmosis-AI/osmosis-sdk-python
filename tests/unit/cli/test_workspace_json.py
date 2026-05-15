@@ -75,10 +75,9 @@ def test_project_doctor_json_reports_missing_paths_without_error(
     payload = json.loads(captured.out)
     assert payload["resource"]["valid"] is False
     assert payload["resource"]["missing"] == [
-        ".osmosis/cache/",
         "rollouts/",
-        "configs/eval/",
         "configs/training/",
+        "configs/eval/",
         "data/",
         "AGENTS.md",
         "CLAUDE.md",

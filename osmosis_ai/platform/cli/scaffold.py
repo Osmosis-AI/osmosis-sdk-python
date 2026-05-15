@@ -13,7 +13,7 @@ from pathlib import Path
 from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.templates.catalog import (
     OFFICIAL_AGENT_SCAFFOLD_PATHS,
-    REQUIRED_SCAFFOLD_DIRS,
+    REQUIRED_WORKSPACE_DIRS,
     ScaffoldEntry,
 )
 from osmosis_ai.templates.source import workspace_template_root
@@ -98,7 +98,7 @@ def load_scaffold_entries() -> tuple[list[ScaffoldEntry], set[str]]:
         ScaffoldEntry(
             dest=directory.joinpath(".gitkeep").as_posix(),
         )
-        for directory in REQUIRED_SCAFFOLD_DIRS
+        for directory in REQUIRED_WORKSPACE_DIRS
     ]
     entries.extend(
         ScaffoldEntry(

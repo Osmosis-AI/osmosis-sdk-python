@@ -7,13 +7,6 @@ from typing import Any
 
 from osmosis_ai.cli.errors import CLIError
 
-_REQUIRED_PATHS = [
-    "rollouts/",
-    "configs/training/",
-    "configs/eval/",
-    "data/",
-]
-
 
 def _optional_git_context(workspace_directory: Path) -> dict[str, str | None]:
     from osmosis_ai.platform.cli.workspace_repo import (
@@ -65,7 +58,7 @@ def doctor_workspace_directory(path: Any | None = None, *, fix: bool = False) ->
         resource={
             "workspace_directory": str(workspace_directory),
             "git": git,
-            "required_paths": _REQUIRED_PATHS,
+            "required_paths": _required_workspace_paths(),
             "missing": missing,
             "valid": not missing,
             "updates_available": updates_available,
@@ -121,6 +114,12 @@ def _missing_scaffold_paths(workspace_directory: Path) -> list[str]:
         if not (workspace_directory / entry.dest).exists():
             missing.append(entry.dest)
     return missing
+
+
+def _required_workspace_paths() -> list[str]:
+    from osmosis_ai.templates.catalog import required_workspace_paths
+
+    return list(required_workspace_paths())
 
 
 __all__ = [
