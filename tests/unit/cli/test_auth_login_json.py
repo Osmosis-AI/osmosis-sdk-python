@@ -7,6 +7,7 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+import osmosis_ai.cli.commands.auth as auth_module
 from osmosis_ai.cli import main as cli
 from osmosis_ai.platform.auth.credentials import Credentials, UserInfo
 from osmosis_ai.platform.auth.flow import LoginError, VerifyResult
@@ -272,7 +273,7 @@ def test_login_json_with_malformed_verify_response_is_platform_error(
     assert envelope["error"]["message"] == "Invalid response from platform"
 
 
-def test_login_json_force_revokes_and_cleans_before_saving_new_token(
+def test_login_json_force_cleans_and_saves_before_revoking_old_token(
     monkeypatch, capsys, fake_verify_result
 ) -> None:
     monkeypatch.delenv("OSMOSIS_TOKEN", raising=False)
@@ -299,7 +300,7 @@ def test_login_json_force_revokes_and_cleans_before_saving_new_token(
 
     assert exit_code == 0
     assert json.loads(captured.out)["status"] == "success"
-    assert calls == ["revoke_cli_token", "clear_all_local_data", "save_credentials"]
+    assert calls == ["clear_all_local_data", "save_credentials", "revoke_cli_token"]
 
 
 def test_login_json_force_with_token_leaves_new_credentials_saved(
@@ -331,7 +332,48 @@ def test_login_json_force_with_token_leaves_new_credentials_saved(
     assert exit_code == 0
     assert json.loads(captured.out)["status"] == "success"
     assert saved_tokens == ["secret"]
-    assert calls == ["revoke_cli_token", "clear_all_local_data"]
+    assert calls == ["clear_all_local_data", "revoke_cli_token"]
+
+
+def test_login_json_force_restores_old_credentials_when_new_save_fails(
+    monkeypatch, fake_verify_result
+) -> None:
+    old_credentials = _credentials(user_id="old-user", access_token="old-token")
+    calls: list[str] = []
+
+    def save_credentials(creds: Credentials) -> str:
+        if creds.access_token == "new-token":
+            calls.append("save_new")
+            raise OSError("disk full")
+        if creds is old_credentials:
+            calls.append("restore_old")
+            return "keyring"
+        raise AssertionError("unexpected credentials")
+
+    monkeypatch.delenv("OSMOSIS_TOKEN", raising=False)
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.load_credentials",
+        lambda include_env=False: old_credentials,
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.verify_token", lambda token: fake_verify_result
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.credentials.save_credentials", save_credentials
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.platform_client.revoke_cli_token",
+        lambda creds: calls.append("revoke_cli_token") or True,
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.local_config.clear_all_local_data",
+        lambda: calls.append("clear_all_local_data"),
+    )
+
+    with pytest.raises(OSError, match="disk full"):
+        auth_module._machine_login_with_token(token="new-token", force=True)
+
+    assert calls == ["clear_all_local_data", "save_new", "restore_old"]
 
 
 def test_login_json_with_token_loads_stored_credentials_when_env_is_set(

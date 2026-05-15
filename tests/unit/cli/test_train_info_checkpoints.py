@@ -76,6 +76,7 @@ def _make_stopped_run() -> TrainingRunDetail:
         status="stopped",
         model_name="Qwen/Qwen3",
         created_at="2026-04-01T00:00:00Z",
+        platform_url="https://platform.osmosis.ai/ws/training/run_1",
     )
 
 
@@ -195,6 +196,10 @@ class TestStatusCheckpoints:
         assert result.data["checkpoints"][0]["checkpoint_name"] == (
             "qwen3-run1-step-100"
         )
+        assert result.display_hints == [
+            "View: https://platform.osmosis.ai/ws/training/run_1",
+            "Deploy with: osmosis deploy <checkpoint-name>",
+        ]
 
     def test_endpoint_error_is_non_fatal(
         self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO

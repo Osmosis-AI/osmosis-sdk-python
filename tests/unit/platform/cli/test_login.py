@@ -118,6 +118,46 @@ def test_force_login_leaves_new_credentials_saved(monkeypatch) -> None:
     assert calls == ["clear_all_local_data"]
 
 
+def test_force_login_restores_old_credentials_when_new_save_fails(monkeypatch) -> None:
+    """A failed replacement save should not leave the user logged out locally."""
+    old_creds = _make_credentials(user_id="user_1")
+    new_creds = _make_credentials(user_id="user_1")
+    result = _make_login_result()
+    calls: list[str] = []
+
+    def save_credentials(creds: Credentials) -> str:
+        if creds is new_creds:
+            calls.append("save_new")
+            raise OSError("disk full")
+        if creds is old_creds:
+            calls.append("restore_old")
+            return "keyring"
+        raise AssertionError("unexpected credentials")
+
+    monkeypatch.delenv("OSMOSIS_TOKEN", raising=False)
+    monkeypatch.setattr("osmosis_ai.platform.auth.load_credentials", lambda: old_creds)
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.credentials.save_credentials", save_credentials
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.device_login",
+        lambda **kw: (result, new_creds),
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.local_config.clear_all_local_data",
+        lambda: calls.append("clear_all_local_data"),
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.platform_client.revoke_cli_token",
+        lambda creds: calls.append("revoke_cli_token") or True,
+    )
+
+    with pytest.raises(OSError, match="disk full"):
+        auth_module.login(force=True, token=None)
+
+    assert calls == ["clear_all_local_data", "save_new", "restore_old"]
+
+
 # ---------------------------------------------------------------------------
 # User identity change triggers cleanup (non-force)
 # ---------------------------------------------------------------------------

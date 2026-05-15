@@ -212,10 +212,10 @@ def list_runs(
         format_local_date,
         format_reward,
     )
+    from osmosis_ai.platform.cli.project_context import git_result_context
     from osmosis_ai.platform.cli.utils import (
         fetch_all_pages,
         format_run_status,
-        git_result_context,
         require_git_project_context,
         validate_list_options,
     )
@@ -304,9 +304,9 @@ def status(
     from osmosis_ai.platform.api.client import OsmosisClient
     from osmosis_ai.platform.api.models import RUN_STATUSES_TERMINAL
     from osmosis_ai.platform.auth.platform_client import PlatformAPIError
+    from osmosis_ai.platform.cli.project_context import git_result_context
     from osmosis_ai.platform.cli.utils import (
         build_run_detail_rows,
-        git_result_context,
         require_git_project_context,
     )
 

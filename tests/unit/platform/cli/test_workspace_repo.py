@@ -151,11 +151,12 @@ class TestGetLocalGitRemoteUrl:
 
         monkeypatch.setattr(workspace_repo.subprocess, "run", _fake_run)
         assert workspace_repo.get_local_git_remote_url(tmp_path) is None
-        assert calls == [["git", "-C", str(tmp_path), "remote", "get-url", "origin"]]
+        assert calls == []
 
     def test_returns_url_from_git(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
+        (tmp_path / ".git").mkdir()
         monkeypatch.setattr(
             workspace_repo.shutil, "which", lambda _name: "/usr/bin/git"
         )
@@ -174,6 +175,7 @@ class TestGetLocalGitRemoteUrl:
     def test_returns_none_on_git_failure(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
+        (tmp_path / ".git").mkdir()
         monkeypatch.setattr(
             workspace_repo.shutil, "which", lambda _name: "/usr/bin/git"
         )
@@ -189,6 +191,7 @@ class TestGetLocalGitRemoteUrl:
     def test_returns_none_on_oserror(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
+        (tmp_path / ".git").mkdir()
         monkeypatch.setattr(
             workspace_repo.shutil, "which", lambda _name: "/usr/bin/git"
         )
@@ -199,7 +202,7 @@ class TestGetLocalGitRemoteUrl:
         monkeypatch.setattr(workspace_repo.subprocess, "run", _raise)
         assert workspace_repo.get_local_git_remote_url(tmp_path) is None
 
-    def test_nested_dir_uses_git_command_as_source_of_truth(
+    def test_nested_dir_without_git_metadata_returns_none(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
     ) -> None:
         monkeypatch.setattr(
@@ -217,7 +220,29 @@ class TestGetLocalGitRemoteUrl:
 
         monkeypatch.setattr(workspace_repo.subprocess, "run", _fake_run)
         assert workspace_repo.get_local_git_remote_url(nested) is None
-        assert calls == [["git", "-C", str(nested), "remote", "get-url", "origin"]]
+        assert calls == []
+
+    def test_nested_dir_inside_parent_repo_does_not_use_parent_origin(
+        self, tmp_path: Path
+    ) -> None:
+        _make_repo(tmp_path)
+        subprocess.run(
+            [
+                "git",
+                "-C",
+                str(tmp_path),
+                "remote",
+                "add",
+                "origin",
+                "https://github.com/acme/parent.git",
+            ],
+            check=True,
+            capture_output=True,
+        )
+        nested = tmp_path / "nested"
+        nested.mkdir()
+
+        assert workspace_repo.get_local_git_remote_url(nested) is None
 
 
 # ---------------------------------------------------------------------------
@@ -273,7 +298,7 @@ class TestSummarizeLocalGitState:
 
         monkeypatch.setattr(workspace_repo.subprocess, "run", _fake_run)
         assert workspace_repo.summarize_local_git_state(tmp_path) is None
-        assert calls == [["git", "-C", str(tmp_path), "rev-parse", "HEAD"]]
+        assert calls == []
 
     def test_clean_repo_with_commit(self, tmp_path: Path) -> None:
         _make_repo(tmp_path)
@@ -371,6 +396,14 @@ class TestSummarizeLocalGitState:
         assert state is not None
         assert state.branch is None
         assert state.head_sha == head_sha
+
+    def test_nested_dir_inside_parent_repo_returns_none(self, tmp_path: Path) -> None:
+        _make_repo(tmp_path)
+        _commit(tmp_path, "initial")
+        nested = tmp_path / "nested"
+        nested.mkdir()
+
+        assert workspace_repo.summarize_local_git_state(nested) is None
 
 
 # ---------------------------------------------------------------------------

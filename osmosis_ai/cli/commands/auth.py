@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import os
 from typing import Any
 
@@ -145,6 +146,28 @@ def _cli_error_from_login_error(exc: Any) -> CLIError:
     return CLIError(str(exc), code="PLATFORM_ERROR", details=details)
 
 
+def _save_replacement_credentials(
+    *,
+    creds: Any,
+    old_credentials: Any | None,
+    local_data_cleared: bool,
+    clear_all_local_data: Any,
+    save_credentials: Any,
+) -> str:
+    """Save new credentials after destructive cleanup, restoring old ones on failure."""
+    if not local_data_cleared:
+        return save_credentials(creds)
+
+    clear_all_local_data()
+    try:
+        return save_credentials(creds)
+    except Exception:
+        if old_credentials is not None:
+            with contextlib.suppress(Exception):
+                save_credentials(old_credentials)
+        raise
+
+
 def _machine_login_with_token(*, token: str, force: bool) -> Any:
     """Verify and persist an explicit token, returning structured output."""
     from osmosis_ai.cli.output import get_output_context
@@ -176,16 +199,16 @@ def _machine_login_with_token(*, token: str, force: bool) -> Any:
         and old_credentials.token_id != creds.token_id
         else None
     )
-    if old_credentials_to_revoke is not None and local_data_cleared:
-        with output.status("Revoking old session..."):
-            revoke_cli_token(old_credentials_to_revoke)
 
-    if local_data_cleared:
-        clear_all_local_data()
+    token_store = _save_replacement_credentials(
+        creds=creds,
+        old_credentials=old_credentials,
+        local_data_cleared=local_data_cleared,
+        clear_all_local_data=clear_all_local_data,
+        save_credentials=save_credentials,
+    )
 
-    token_store = save_credentials(creds)
-
-    if old_credentials_to_revoke is not None and not local_data_cleared:
+    if old_credentials_to_revoke is not None:
         with output.status("Revoking old session..."):
             revoke_cli_token(old_credentials_to_revoke)
 
@@ -284,18 +307,15 @@ def _rich_login(force: bool, token: str | None) -> Any:
             else None
         )
 
-        # Once the replacement token/device login has been verified, destructive
-        # local cleanup must happen before saving the new credentials.
-        if old_credentials_to_revoke is not None and local_data_cleared:
-            with console.spinner("Revoking old session..."):
-                revoke_cli_token(old_credentials_to_revoke)
+        _save_replacement_credentials(
+            creds=creds,
+            old_credentials=old_credentials,
+            local_data_cleared=local_data_cleared,
+            clear_all_local_data=clear_all_local_data,
+            save_credentials=save_credentials,
+        )
 
-        if local_data_cleared:
-            clear_all_local_data()
-
-        save_credentials(creds)
-
-        if old_credentials_to_revoke is not None and not local_data_cleared:
+        if old_credentials_to_revoke is not None:
             with console.spinner("Revoking old session..."):
                 revoke_cli_token(old_credentials_to_revoke)
 
@@ -522,6 +542,9 @@ def whoami() -> Any:
         "name": credentials.user.name,
         "expires_at": credentials.expires_at.isoformat(),
         "source": source,
+        "workspace": None,
+        "linked_project": None,
+        "local_linked_project": None,
     }
 
     fields = [

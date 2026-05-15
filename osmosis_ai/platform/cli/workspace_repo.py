@@ -106,10 +106,12 @@ def get_local_git_remote_url(project_root: Path) -> str | None:
 
     Returns ``None`` when:
     * ``git`` is not installed on PATH;
-    * the project is not a git repository;
+    * the project is not a git repository top-level;
     * there is no ``origin`` remote.
     """
     if shutil.which("git") is None:
+        return None
+    if not (project_root / ".git").exists():
         return None
     try:
         result = subprocess.run(
@@ -186,10 +188,12 @@ def summarize_local_git_state(project_root: Path) -> LocalGitState | None:
     pulls source from Git.
 
     Returns ``None`` when ``git`` is not on PATH or ``project_root`` is
-    not a git working tree; individual fields are safely defaulted when
+    not a git working tree top-level; individual fields are safely defaulted when
     sub-commands fail rather than raising.
     """
     if shutil.which("git") is None:
+        return None
+    if not (project_root / ".git").exists():
         return None
 
     def _run(*args: str) -> str | None:
