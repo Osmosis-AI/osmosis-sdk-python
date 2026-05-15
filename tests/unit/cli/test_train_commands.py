@@ -944,7 +944,7 @@ rollout_batch_size = 64
         assert "Platform-connected repository" in out
         assert "pushed to origin" in out
 
-    def test_submit_rejects_project_subdirectory_cwd(
+    def test_submit_accepts_project_subdirectory_cwd(
         self,
         monkeypatch: pytest.MonkeyPatch,
         tmp_path: Path,
@@ -952,12 +952,18 @@ rollout_batch_size = 64
         config_path = self._write_config(tmp_path)
         monkeypatch.chdir(config_path.parents[2] / "rollouts" / "calculator")
 
-        with pytest.raises(CLIError) as exc_info:
-            train_module.submit(config_path=config_path, yes=True)
+        class FakeClient:
+            def submit_training_run(self, **kwargs):
+                assert kwargs["git_identity"] == GIT_IDENTITY
+                assert "workspace_id" not in kwargs
+                return TestSubmit.SUBMIT_RESULT
 
-        assert (
-            str(exc_info.value) == "Run `osmosis train submit` from the project root."
-        )
+        monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        result = train_module.submit(config_path=config_path, yes=True)
+
+        assert isinstance(result, OperationResult)
+        assert result.resource is not None
+        assert result.resource["project_root"] == str(config_path.parents[2].resolve())
 
 
 def test_train_submit_resolves_project_from_cwd_not_config_path(
@@ -1015,7 +1021,7 @@ def test_train_submit_requires_linked_project(
     )
 
 
-def test_train_submit_rejects_project_subdirectory(
+def test_train_submit_accepts_project_subdirectory(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -1039,11 +1045,20 @@ def test_train_submit_rejects_project_subdirectory(
     )
     monkeypatch.chdir(project / "rollouts" / "demo")
 
+    class FakeClient:
+        def submit_training_run(self, **kwargs):
+            assert kwargs["git_identity"] == GIT_IDENTITY
+            assert "workspace_id" not in kwargs
+            return TestSubmit.SUBMIT_RESULT
+
+    monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
     rc = main(["--json", "train", "submit", "configs/training/default.toml", "--yes"])
     captured = capsys.readouterr()
 
-    assert rc == 1
-    assert "Run `osmosis train submit` from the project root." in captured.err
+    assert rc == 0
+    assert captured.err == ""
+    payload = json.loads(captured.out)
+    assert payload["resource"]["project_root"] == str(project.resolve())
 
 
 class TestSubmitNonInteractiveContext:

@@ -67,13 +67,14 @@ osmosis train submit configs/training/<run>.toml --yes
 ```bash
 osmosis project doctor
 osmosis project doctor ./path/to/project
-osmosis project doctor --fix --yes
+osmosis project doctor --fix
 ```
 
 Inspect and optionally repair the scaffold in the current Git checkout. Without
 `--fix`, the command reports the project root, Git identity, required scaffold
-paths, and missing paths. Add `--fix --yes` to create missing scaffold paths and
-refresh agent scaffold files without prompting.
+paths, and missing paths. Add `--fix` to create missing scaffold paths and
+check for official scaffold file updates; existing scaffold files are refreshed
+with `osmosis project refresh-agents --force` after reviewing local edits.
 
 ## Rollout
 

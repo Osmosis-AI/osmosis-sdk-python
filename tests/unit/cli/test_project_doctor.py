@@ -52,6 +52,7 @@ def test_project_doctor_dry_run_reports_missing_paths(
     assert "rollouts/.gitkeep" not in payload["resource"]["missing"]
     assert "AGENTS.md" in payload["resource"]["missing"]
     assert payload["resource"]["fixed"] is False
+    assert payload["resource"]["updates_checked"] is False
     assert payload["resource"]["valid"] is False
     assert payload["resource"]["required_paths"] == [
         "rollouts/",
@@ -104,6 +105,35 @@ def test_project_doctor_reports_git_context(
         payload["resource"]["git"]["remote_url"]
         == "ssh://git@github.com/Acme/Rollouts.git"
     )
+    assert "warning" not in payload["resource"]["git"]
+
+
+def test_project_doctor_reports_invalid_git_origin_warning(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    project = _make_project(tmp_path / "project")
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(project),
+            "remote",
+            "add",
+            "origin",
+            "https://gitlab.com/acme/rollouts.git",
+        ],
+        check=True,
+        capture_output=True,
+    )
+    monkeypatch.chdir(project)
+
+    rc = main(["--json", "project", "doctor"])
+
+    payload = json.loads(capsys.readouterr().out)
+    assert rc == 0
+    assert payload["resource"]["git"]["identity"] is None
+    assert payload["resource"]["git"]["remote_url"] is None
+    assert "hosted on github.com" in payload["resource"]["git"]["warning"]
 
 
 def test_project_doctor_does_not_report_missing_gitkeep_for_existing_directory(
@@ -191,6 +221,7 @@ def test_project_doctor_fix_creates_missing_paths(
     assert (project / "AGENTS.md").is_file()
     assert (project / "AGENTS.md").read_text(encoding="utf-8") == "template agents\n"
     assert payload["resource"]["missing"] == []
+    assert payload["resource"]["updates_checked"] is True
     assert not (project / ".osmosis" / "project.toml").exists()
 
 

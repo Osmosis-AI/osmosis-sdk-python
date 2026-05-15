@@ -26,8 +26,12 @@ def _optional_git_context(project_root: Path) -> dict[str, str | None]:
         return {"identity": None, "remote_url": None}
     try:
         normalized = normalize_git_identity(remote_url)
-    except CLIError:
-        return {"identity": None, "remote_url": None}
+    except CLIError as exc:
+        return {
+            "identity": None,
+            "remote_url": None,
+            "warning": str(exc),
+        }
     return {
         "identity": normalized.identity,
         "remote_url": normalized.display_url,
@@ -63,6 +67,7 @@ def doctor_project(path: Any | None = None, *, fix: bool = False) -> Any:
             "missing": missing,
             "valid": not missing,
             "updates_available": updates_available,
+            "updates_checked": fix,
             "fixed": fix,
         },
         message="Project doctor completed.",

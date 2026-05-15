@@ -88,11 +88,6 @@ def _require_confirmation(
     require_confirmation(message, yes=yes)
 
 
-def _require_train_submit_cwd(project_root: Path) -> None:
-    if Path.cwd().resolve() != project_root.resolve():
-        raise CLIError("Run `osmosis train submit` from the project root.")
-
-
 def _print_remote_fetch_notice(
     project_root: Path,
     *,
@@ -442,7 +437,6 @@ def submit(
 
     context = require_git_project_context()
     project_root = context.project_root
-    _require_train_submit_cwd(project_root)
     validate_project_contract(project_root)
     config_path = Path(config_path)
     resolved_config_path = (
