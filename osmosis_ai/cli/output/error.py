@@ -12,6 +12,7 @@ from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.consts import PACKAGE_VERSION
 
 _SUPPORTED_TOP_LEVEL_COMMANDS = {
+    "doctor",
     "deploy",
     "undeploy",
     "upgrade",
@@ -26,7 +27,6 @@ _SUPPORTED_COMMAND_GROUPS = {
     "rollout",
     "template",
     "train",
-    "workspace",
 }
 
 _REMOVED_TOP_LEVEL_COMMANDS = {
@@ -35,6 +35,7 @@ _REMOVED_TOP_LEVEL_COMMANDS = {
     "login",
     "logout",
     "unlink",
+    "workspace",
     "whoami",
 }
 
@@ -47,10 +48,6 @@ _REMOVED_TWO_TOKEN_COMMANDS = {
     ("train", "delete"),
     ("train", "info"),
     ("train", "traces"),
-    ("workspace", "create"),
-    ("workspace", "delete"),
-    ("workspace", "list"),
-    ("workspace", "switch"),
 }
 
 

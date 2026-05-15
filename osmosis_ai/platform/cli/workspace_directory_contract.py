@@ -66,7 +66,7 @@ def validate_workspace_directory_contract(workspace_directory: Path) -> None:
         "This workspace directory is missing required Osmosis scaffold paths.\n"
         f"{formatted}\n"
         "\n"
-        "Run `osmosis workspace doctor --fix` in this Git repository to restore the scaffold."
+        "Run `osmosis doctor --fix` in this Git repository to restore the scaffold."
     )
 
 

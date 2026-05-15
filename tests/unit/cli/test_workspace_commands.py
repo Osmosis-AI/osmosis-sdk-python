@@ -22,10 +22,10 @@ def _make_workspace_directory(root: Path) -> Path:
     return root
 
 
-def test_workspace_doctor_accepts_workspace_directory_path(tmp_path, capsys) -> None:
+def test_doctor_accepts_workspace_directory_path(tmp_path, capsys) -> None:
     workspace_directory = _make_workspace_directory(tmp_path)
 
-    rc = main(["workspace", "doctor", str(workspace_directory)])
+    rc = main(["doctor", str(workspace_directory)])
 
     capsys.readouterr()
     assert rc == 0
@@ -41,12 +41,9 @@ def test_project_validate_is_not_registered(tmp_path, capsys) -> None:
     assert "No such command" in captured.err
 
 
-def test_project_link_and_unlink_are_not_registered(capfd) -> None:
+def test_workspace_group_is_not_registered(capfd) -> None:
     rc = main(["workspace", "--help"])
-    output = capfd.readouterr().out
+    captured = capfd.readouterr()
 
-    assert rc == 0
-    assert "validate" not in output
-    assert "doctor" in output
-    assert "link" not in output
-    assert "unlink" not in output
+    assert rc != 0
+    assert "No such command" in captured.err

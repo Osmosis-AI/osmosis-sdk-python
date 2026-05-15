@@ -20,11 +20,12 @@ REMOVED_ROOT_COMMANDS = [
     "login",
     "logout",
     "whoami",
+    "workspace",
 ]
 
 PRESERVED_ROOT_COMMANDS = [
     "auth",
-    "workspace",
+    "doctor",
     "dataset",
     "train",
     "model",
@@ -43,7 +44,7 @@ PRESERVED_HELP_COMMANDS = [
     ["--help"],
     ["--version"],
     ["auth", "--help"],
-    ["workspace", "--help"],
+    ["doctor", "--help"],
     ["dataset", "--help"],
     ["train", "--help"],
     ["model", "--help"],
@@ -58,10 +59,12 @@ PRESERVED_HELP_COMMANDS = [
 
 
 REMOVED_COMMANDS = [
+    ["workspace", REMOVED_COMMAND_PROBE],
     ["workspace", "list", REMOVED_COMMAND_PROBE],
     ["workspace", "create", REMOVED_COMMAND_PROBE, "team"],
     ["workspace", "delete", REMOVED_COMMAND_PROBE, "team"],
     ["workspace", "switch", REMOVED_COMMAND_PROBE, "team"],
+    ["workspace", "doctor", REMOVED_COMMAND_PROBE],
     ["dataset", "delete", REMOVED_COMMAND_PROBE, "data"],
     ["train", "delete", REMOVED_COMMAND_PROBE, "run"],
     ["train", "info", REMOVED_COMMAND_PROBE, "run"],
@@ -75,7 +78,6 @@ REMOVED_COMMANDS = [
     ["whoami", REMOVED_COMMAND_PROBE],
     ["project", REMOVED_COMMAND_PROBE],
     ["project", "doctor", REMOVED_COMMAND_PROBE],
-    ["project", "refresh-agents", REMOVED_COMMAND_PROBE],
     ["project", "init", REMOVED_COMMAND_PROBE, "demo"],
     ["project", "info", REMOVED_COMMAND_PROBE],
     ["project", "list", REMOVED_COMMAND_PROBE],
@@ -130,6 +132,7 @@ def test_removed_commands_are_unknown(args, capfd):
         ["workspace", "create", "--help"],
         ["workspace", "delete", "--help"],
         ["workspace", "switch", "--help"],
+        ["workspace", "doctor", "--help"],
         ["dataset", "delete", "--help"],
         ["train", "delete", "--help"],
         ["train", "info", "--help"],
@@ -143,7 +146,6 @@ def test_removed_commands_are_unknown(args, capfd):
         ["whoami", "--help"],
         ["project", "--help"],
         ["project", "doctor", "--help"],
-        ["project", "refresh-agents", "--help"],
         ["project", "init", "--help"],
         ["project", "info", "--help"],
         ["project", "list", "--help"],
@@ -190,6 +192,7 @@ def test_root_help_surface_does_not_list_removed_groups_or_aliases(capfd):
     [
         (["loginn"], "Did you mean 'login'?"),
         (["projec"], "Did you mean 'project'?"),
+        (["workspac"], "Did you mean 'workspace'?"),
         (["train", "tracess"], "Did you mean 'traces'?"),
         (["deployment", "renam"], "Did you mean 'rename'?"),
     ],

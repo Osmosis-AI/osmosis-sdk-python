@@ -41,7 +41,7 @@ then run CLI commands from that workspace directory.
 git clone <repo-url>
 cd <repo>
 osmosis auth login
-osmosis workspace doctor
+osmosis doctor
 osmosis template apply multiply              # or add your rollout under rollouts/
 cp configs/training/default.toml configs/training/<run>.toml
 $EDITOR configs/training/<run>.toml          # set rollout, dataset, and model_path
@@ -62,19 +62,18 @@ export OSMOSIS_TOKEN=<token>
 osmosis train submit configs/training/<run>.toml --yes
 ```
 
-### osmosis workspace doctor
+### osmosis doctor
 
 ```bash
-osmosis workspace doctor
-osmosis workspace doctor ./path/to/workspace-directory
-osmosis workspace doctor --fix
+osmosis doctor
+osmosis doctor ./path/to/workspace-directory
+osmosis doctor --fix
 ```
 
 Inspect and optionally repair the scaffold in the current workspace directory. Without
 `--fix`, the command reports the workspace directory, Git identity, required scaffold
 paths, and missing paths. Add `--fix` to create missing scaffold paths and
-check for official scaffold file updates; existing scaffold files are refreshed
-with `osmosis workspace refresh-agents --force` after reviewing local edits.
+check for official scaffold file updates without overwriting local edits.
 
 ## Rollout
 

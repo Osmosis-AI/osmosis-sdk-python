@@ -50,7 +50,7 @@ then run CLI commands from that workspace directory.
 git clone <repo-url>
 cd <repo>
 osmosis auth login
-osmosis workspace doctor
+osmosis doctor
 osmosis template apply multiply              # or add your rollout under rollouts/
 cp configs/training/default.toml configs/training/<run>.toml
 $EDITOR configs/training/<run>.toml          # set rollout, dataset, and model_path

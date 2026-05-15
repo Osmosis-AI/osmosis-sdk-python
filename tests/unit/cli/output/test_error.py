@@ -147,11 +147,12 @@ def test_command_path_root_when_argv_empty(monkeypatch) -> None:
 @pytest.mark.parametrize(
     ("argv", "expected_command"),
     [
+        (["--json", "doctor"], "doctor"),
         (["--json", "workspace"], "workspace"),
-        (["--json", "workspace", "list"], "workspace list"),
-        (["--json", "workspace", "create", "team"], "workspace create"),
-        (["--json", "workspace", "delete", "team"], "workspace delete"),
-        (["--json", "workspace", "switch", "team"], "workspace switch"),
+        (["--json", "workspace", "list"], "workspace"),
+        (["--json", "workspace", "create", "team"], "workspace"),
+        (["--json", "workspace", "delete", "team"], "workspace"),
+        (["--json", "workspace", "switch", "team"], "workspace"),
         (["--json", "login"], "login"),
         (["--json", "logout"], "logout"),
         (["--json", "whoami"], "whoami"),
@@ -213,5 +214,5 @@ def test_json_unknown_command_from_main_without_argv_uses_process_argv(
     captured = capsys.readouterr()
     assert captured.out == ""
     envelope = json.loads(captured.err)
-    assert envelope["command"] == "workspace list"
+    assert envelope["command"] == "workspace"
     assert envelope["error"]["code"] == "VALIDATION"

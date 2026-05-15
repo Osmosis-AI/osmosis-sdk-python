@@ -120,7 +120,7 @@ def test_validate_contract_reports_missing_scaffold_without_requiring_dot_osmosi
     assert "configs/training/" in message
     assert "configs/eval/" in message
     assert "data/" in message
-    assert "osmosis workspace doctor --fix" in message
+    assert "osmosis doctor --fix" in message
     assert ".osmosis/project.toml" not in message
 
 

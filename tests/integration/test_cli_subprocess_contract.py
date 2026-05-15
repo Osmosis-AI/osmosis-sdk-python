@@ -71,7 +71,6 @@ def test_project_doctor_fix_in_git_repo_creates_runtime_free_scaffold(
             "-m",
             "osmosis_ai.cli.main",
             "--json",
-            "workspace",
             "doctor",
             "--fix",
         ],

@@ -43,7 +43,7 @@ def test_project_doctor_json_returns_diagnostic_resource(tmp_path, capsys) -> No
         origin="https://github.com/Acme/Rollouts.git",
     )
 
-    exit_code = cli.main(["--json", "workspace", "doctor", str(workspace_directory)])
+    exit_code = cli.main(["--json", "doctor", str(workspace_directory)])
 
     captured = capsys.readouterr()
     assert exit_code == 0
@@ -68,7 +68,7 @@ def test_project_doctor_json_reports_missing_paths_without_error(
         capture_output=True,
     )
 
-    exit_code = cli.main(["--json", "workspace", "doctor", str(tmp_path)])
+    exit_code = cli.main(["--json", "doctor", str(tmp_path)])
 
     captured = capsys.readouterr()
     assert exit_code == 0

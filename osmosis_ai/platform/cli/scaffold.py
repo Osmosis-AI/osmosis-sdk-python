@@ -207,8 +207,7 @@ def refresh_agent_scaffold(
         raise CLIError(
             "Refusing to overwrite local edits in official scaffold files:\n"
             f"  {listing}\n"
-            "\nRe-run with `osmosis workspace refresh-agents --force` after reviewing "
-            "your local changes.",
+            "\nReview your local changes before replacing official scaffold files.",
             code="CONFLICT",
         )
     for rel_path, path, content in pending_adds:

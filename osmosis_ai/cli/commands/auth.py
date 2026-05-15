@@ -43,7 +43,7 @@ _PLATFORM_CREATE_REPO_STEP = (
     "Create or open a workspace in the Osmosis Platform, then clone the repository "
     "created there."
 )
-_DOCTOR_CLONE_STEP = "From the workspace directory, run `osmosis workspace doctor`."
+_DOCTOR_CLONE_STEP = "From the workspace directory, run `osmosis doctor`."
 
 
 def _login_operation_result(
@@ -84,7 +84,7 @@ def _login_operation_result(
                     "description": _PLATFORM_CREATE_REPO_STEP,
                 },
                 {
-                    "action": "workspace.doctor",
+                    "action": "doctor",
                     "description": _DOCTOR_CLONE_STEP,
                 },
             ]

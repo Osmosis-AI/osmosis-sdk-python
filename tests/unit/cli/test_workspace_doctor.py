@@ -43,7 +43,7 @@ def test_project_doctor_dry_run_reports_missing_paths(
     project = _make_workspace_directory(tmp_path / "project")
     monkeypatch.chdir(project)
 
-    rc = main(["--json", "workspace", "doctor"])
+    rc = main(["--json", "doctor"])
 
     assert rc == 0
     payload = json.loads(capsys.readouterr().out)
@@ -95,7 +95,7 @@ def test_project_doctor_reports_git_context(
     (project / "CLAUDE.md").write_text("claude\n", encoding="utf-8")
     monkeypatch.chdir(project)
 
-    rc = main(["--json", "workspace", "doctor"])
+    rc = main(["--json", "doctor"])
 
     payload = json.loads(capsys.readouterr().out)
     assert rc == 0
@@ -127,7 +127,7 @@ def test_project_doctor_reports_invalid_git_origin_warning(
     )
     monkeypatch.chdir(project)
 
-    rc = main(["--json", "workspace", "doctor"])
+    rc = main(["--json", "doctor"])
 
     payload = json.loads(capsys.readouterr().out)
     assert rc == 0
@@ -143,7 +143,7 @@ def test_project_doctor_does_not_report_missing_gitkeep_for_existing_directory(
     (project / "rollouts").mkdir()
     monkeypatch.chdir(project)
 
-    rc = main(["--json", "workspace", "doctor"])
+    rc = main(["--json", "doctor"])
 
     assert rc == 0
     payload = json.loads(capsys.readouterr().out)
@@ -157,7 +157,7 @@ def test_project_doctor_plain_reports_actionable_summary(
     project = _make_workspace_directory(tmp_path / "project")
     monkeypatch.chdir(project)
 
-    rc = main(["--plain", "workspace", "doctor"])
+    rc = main(["--plain", "doctor"])
 
     assert rc == 0
     output = capsys.readouterr().out
@@ -166,10 +166,7 @@ def test_project_doctor_plain_reports_actionable_summary(
     assert "Missing scaffold paths:" in output
     assert "rollouts/" in output
     assert ".gitkeep" not in output
-    assert (
-        "Run `osmosis workspace doctor --fix` to create missing scaffold paths."
-        in output
-    )
+    assert "Run `osmosis doctor --fix` to create missing scaffold paths." in output
 
 
 def test_project_doctor_dry_run_does_not_require_workspace_template(
@@ -186,7 +183,7 @@ def test_project_doctor_dry_run_does_not_require_workspace_template(
     monkeypatch.delenv("OSMOSIS_WORKSPACE_TEMPLATE_PATH", raising=False)
     monkeypatch.setattr(source, "_download_workspace_template", fail_download)
 
-    rc = main(["--json", "workspace", "doctor"])
+    rc = main(["--json", "doctor"])
 
     assert rc == 0
     payload = json.loads(capsys.readouterr().out)
@@ -197,7 +194,7 @@ def test_project_doctor_rejects_yes_option(tmp_path: Path, monkeypatch, capsys) 
     project = _make_workspace_directory(tmp_path / "project")
     monkeypatch.chdir(project)
 
-    rc = main(["--json", "workspace", "doctor", "--yes"])
+    rc = main(["--json", "doctor", "--yes"])
 
     captured = capsys.readouterr()
     assert rc == 2
@@ -213,7 +210,7 @@ def test_project_doctor_fix_creates_missing_paths(
     project = _make_workspace_directory(tmp_path / "project")
     monkeypatch.chdir(project)
 
-    rc = main(["--json", "workspace", "doctor", "--fix"])
+    rc = main(["--json", "doctor", "--fix"])
 
     payload = json.loads(capsys.readouterr().out)
     assert rc == 0
@@ -231,7 +228,7 @@ def test_project_doctor_fix_outside_project_does_not_create_project(
 ) -> None:
     monkeypatch.chdir(tmp_path)
 
-    rc = main(["--json", "workspace", "doctor", "--fix"])
+    rc = main(["--json", "doctor", "--fix"])
 
     captured = capsys.readouterr()
     assert rc == 1
@@ -251,7 +248,7 @@ def test_project_doctor_fix_preserves_existing_research_program(
     program.write_text("# Research Brief\n\nKeep this content.\n", encoding="utf-8")
     monkeypatch.chdir(project)
 
-    rc = main(["--json", "workspace", "doctor", "--fix"])
+    rc = main(["--json", "doctor", "--fix"])
 
     capsys.readouterr()
     assert rc == 0
@@ -278,49 +275,3 @@ def test_project_doctor_reports_agent_updates_without_overwriting(
     assert (project / "configs" / "training").is_dir()
     assert result.resource["updates_available"] == ["AGENTS.md"]
     assert result.display_next_steps
-
-
-def test_project_refresh_agents_refuses_local_edits_without_force(
-    tmp_path: Path, monkeypatch, capsys, workspace_template: Path
-) -> None:
-    project = _make_workspace_directory(tmp_path / "project")
-    (project / "AGENTS.md").write_text("custom agents", encoding="utf-8")
-    monkeypatch.chdir(project)
-
-    rc = main(["--json", "workspace", "refresh-agents"])
-
-    captured = capsys.readouterr()
-    assert rc == 1
-    assert json.loads(captured.err)["error"]["code"] == "CONFLICT"
-    assert (project / "AGENTS.md").read_text(encoding="utf-8") == "custom agents"
-
-
-def test_project_refresh_agents_force_overwrites_local_edits(
-    tmp_path: Path, monkeypatch, capsys, workspace_template: Path
-) -> None:
-    project = _make_workspace_directory(tmp_path / "project")
-    (project / "AGENTS.md").write_text("custom agents", encoding="utf-8")
-    monkeypatch.chdir(project)
-
-    rc = main(["--json", "workspace", "refresh-agents", "--force"])
-
-    payload = json.loads(capsys.readouterr().out)
-    assert rc == 0
-    assert payload["resource"]["refreshed"] == ["AGENTS.md"]
-    assert (project / "AGENTS.md").read_text(encoding="utf-8") == "template agents\n"
-
-
-def test_project_refresh_agents_plain_reports_changed_files(
-    tmp_path: Path, monkeypatch, capsys, workspace_template: Path
-) -> None:
-    project = _make_workspace_directory(tmp_path / "project")
-    (project / "AGENTS.md").write_text("custom agents", encoding="utf-8")
-    monkeypatch.chdir(project)
-
-    rc = main(["--plain", "workspace", "refresh-agents", "--force"])
-
-    captured = capsys.readouterr()
-    assert rc == 0
-    assert "Workspace agent scaffold refresh completed." in captured.out
-    assert "Added: CLAUDE.md, configs/AGENTS.md, .claude/settings.json" in captured.out
-    assert "Refreshed: AGENTS.md" in captured.out

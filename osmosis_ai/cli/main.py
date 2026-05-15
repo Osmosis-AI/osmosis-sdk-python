@@ -186,12 +186,10 @@ def _register_commands() -> None:
     from osmosis_ai.cli.commands.rollout import app as rollout_app
     from osmosis_ai.cli.commands.template import app as template_app
     from osmosis_ai.cli.commands.train import app as train_app
-    from osmosis_ai.cli.commands.workspace import app as workspace_app
 
     _WORKFLOW = "Workflow Commands"
     _PLATFORM = "Platform Commands"
 
-    app.add_typer(workspace_app, name="workspace", rich_help_panel=_WORKFLOW)
     app.add_typer(dataset_app, name="dataset", rich_help_panel=_WORKFLOW)
     app.add_typer(train_app, name="train", rich_help_panel=_WORKFLOW)
     app.add_typer(model_app, name="model", rich_help_panel=_WORKFLOW)
@@ -205,8 +203,10 @@ def _register_commands() -> None:
     # `deploy` and `undeploy` are verbs, not CRUD on the deployment resource,
     # so they are promoted to top-level to avoid `osmosis deployment deploy`.
     from osmosis_ai.cli.commands.deployment import deploy, undeploy
+    from osmosis_ai.cli.commands.workspace import doctor
 
     app.command("deploy", rich_help_panel=_WORKFLOW)(deploy)
+    app.command("doctor", rich_help_panel=_WORKFLOW)(doctor)
     app.command("undeploy", rich_help_panel=_WORKFLOW)(undeploy)
 
     from osmosis_ai.cli.upgrade import upgrade

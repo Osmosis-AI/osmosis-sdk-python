@@ -60,7 +60,7 @@ def doctor_workspace_directory(path: Any | None = None, *, fix: bool = False) ->
     updates_available = official_scaffold_updates(workspace_directory) if fix else []
 
     return OperationResult(
-        operation="workspace.doctor",
+        operation="doctor",
         status="success",
         resource={
             "workspace_directory": str(workspace_directory),
@@ -82,38 +82,6 @@ def doctor_workspace_directory(path: Any | None = None, *, fix: bool = False) ->
     )
 
 
-def refresh_workspace_agent_files(*, force: bool = False) -> Any:
-    """Refresh official agent scaffold files in the current workspace directory."""
-    from osmosis_ai.cli.output import OperationResult
-    from osmosis_ai.platform.cli.scaffold import refresh_agent_scaffold
-    from osmosis_ai.platform.cli.workspace_directory_contract import (
-        resolve_workspace_directory_from_cwd,
-    )
-
-    workspace_directory = resolve_workspace_directory_from_cwd()
-    result = refresh_agent_scaffold(workspace_directory, force=force)
-    return OperationResult(
-        operation="workspace.refresh_agents",
-        status="success",
-        resource={"workspace_directory": str(workspace_directory), **result},
-        message="Workspace agent scaffold refresh completed.",
-        display_next_steps=_agent_refresh_display_lines(result),
-    )
-
-
-def _agent_refresh_display_lines(result: dict[str, list[str]]) -> list[str]:
-    lines: list[str] = []
-    added = result.get("added", [])
-    refreshed = result.get("refreshed", [])
-    if added:
-        lines.append(f"Added: {', '.join(added)}")
-    if refreshed:
-        lines.append(f"Refreshed: {', '.join(refreshed)}")
-    if not lines:
-        lines.append("No agent scaffold files changed.")
-    return lines
-
-
 def _doctor_display_lines(
     *,
     workspace_directory: Path,
@@ -126,9 +94,7 @@ def _doctor_display_lines(
         lines.append("Missing scaffold paths:")
         lines.extend(f"  - {path}" for path in missing)
         if not fixed:
-            lines.append(
-                "Run `osmosis workspace doctor --fix` to create missing scaffold paths."
-            )
+            lines.append("Run `osmosis doctor --fix` to create missing scaffold paths.")
     else:
         lines.append("No missing scaffold paths.")
 
@@ -136,10 +102,7 @@ def _doctor_display_lines(
         lines.append(
             f"Official scaffold updates available for: {', '.join(updates_available)}"
         )
-        lines.append(
-            "Review local edits, then run `osmosis workspace refresh-agents --force` "
-            "to replace official scaffold files."
-        )
+        lines.append("Review local edits before replacing official scaffold files.")
     return lines
 
 
@@ -162,5 +125,4 @@ def _missing_scaffold_paths(workspace_directory: Path) -> list[str]:
 
 __all__ = [
     "doctor_workspace_directory",
-    "refresh_workspace_agent_files",
 ]

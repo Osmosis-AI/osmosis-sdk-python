@@ -28,7 +28,7 @@ Python SDK for [Osmosis AI](https://platform.osmosis.ai), a platform for trainin
 | **Define agents** | One `AgentWorkflow` subclass (+ optional `AgentWorkflowConfig`) in your repo. The training/eval entrypoint must also expose a concrete `Grader` (typically with a `GraderConfig`). |
 | **Layout** | Use a rollout pack directory under `rollouts/<name>/` when loading by rollout name; the CLI adds that directory to `sys.path`. |
 | **Workspace directory** | Create or open a workspace in the Osmosis Platform, then clone the repository created there. |
-| **Check workspace** | `osmosis workspace doctor` — run from the workspace directory so platform commands resolve the repository from the `origin` remote. Add `--fix` to restore missing scaffold paths. |
+| **Check workspace** | `osmosis doctor` — run from the workspace directory so platform commands resolve the repository from the `origin` remote. Add `--fix` to restore missing scaffold paths. |
 | **Smoke test** | `osmosis eval run configs/eval/<name>.toml --limit 1` — exercises the same rollout server protocol used by training. |
 | **Evaluate** | `osmosis eval run configs/eval/<name>.toml` — run the full eval with optional pass@k and caching. |
 
@@ -61,7 +61,7 @@ then run CLI commands from that workspace directory.
 git clone <repo-url>
 cd <repo>
 osmosis auth login
-osmosis workspace doctor
+osmosis doctor
 osmosis template apply multiply              # or add your rollout under rollouts/
 cp configs/training/default.toml configs/training/<run>.toml
 $EDITOR configs/training/<run>.toml          # set rollout, dataset, and model_path

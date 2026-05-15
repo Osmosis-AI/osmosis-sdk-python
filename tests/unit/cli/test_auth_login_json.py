@@ -80,7 +80,7 @@ def test_login_json_with_token_returns_operation_result(
     assert payload["resource"]["saved"] is True
     assert [step["action"] for step in payload["next_steps_structured"]] == [
         "platform.clone_repository",
-        "workspace.doctor",
+        "doctor",
     ]
     serialized = json.dumps(payload)
     assert "workspace.link" not in serialized
@@ -112,7 +112,7 @@ def test_login_json_with_token_points_to_clone_and_doctor(
     assert "workspace_count" not in payload["resource"]
     assert "workspace_lookup_error" not in payload["resource"]
     assert "Create or open a workspace in the Osmosis Platform" in serialized
-    assert "osmosis workspace doctor" in serialized
+    assert "osmosis doctor" in serialized
     assert "workspace create" not in serialized
     assert "workspace list" not in serialized
     assert "workspace link" not in serialized
@@ -141,7 +141,7 @@ def test_login_plain_with_token_prints_clone_and_doctor_next_steps(
     assert exit_code == 0
     assert "Logged in as brian@example.com." in captured.out
     assert "Create or open a workspace in the Osmosis Platform" in captured.out
-    assert "osmosis workspace doctor" in captured.out
+    assert "osmosis doctor" in captured.out
     assert "workspace link" not in captured.out
     assert "workspace.validate" not in captured.out
     assert "workspace.link" not in captured.out
@@ -169,7 +169,7 @@ def test_login_plain_with_token_omits_workspace_lookup_fields(
     assert exit_code == 0
     assert "Logged in as brian@example.com." in captured.out
     assert "Create or open a workspace in the Osmosis Platform" in captured.out
-    assert "osmosis workspace doctor" in captured.out
+    assert "osmosis doctor" in captured.out
     assert "workspace_count" not in captured.out
     assert "workspace_lookup_error" not in captured.out
     assert "workspace create" not in captured.out
