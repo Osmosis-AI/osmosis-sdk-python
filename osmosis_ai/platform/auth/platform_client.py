@@ -133,6 +133,11 @@ _REPO_SCOPE_ERROR_MESSAGES: dict[str, str] = {
     ),
 }
 
+_REPO_SCOPE_RENAME_DIAGNOSTIC_CODES = {
+    "GIT_REPOSITORY_NOT_CONNECTED",
+    "GIT_SCOPE_HEADER_ACCESS_DENIED",
+}
+
 
 def _reject_scope_headers(headers: dict[str, str] | None) -> None:
     if not headers:
@@ -144,6 +149,43 @@ def _reject_scope_headers(headers: dict[str, str] | None) -> None:
             "Osmosis scope headers are managed by the SDK and cannot be supplied by callers.",
             error_code="SCOPE_HEADER_FORBIDDEN",
         )
+
+
+def _repo_scope_error_message(error_code: str, git_identity: str | None) -> str:
+    message = _REPO_SCOPE_ERROR_MESSAGES[error_code]
+    if error_code not in _REPO_SCOPE_RENAME_DIAGNOSTIC_CODES:
+        return message
+
+    guidance = _renamed_github_repo_guidance(git_identity)
+    if guidance is None:
+        return message
+    return f"{message}\n\n{guidance}"
+
+
+def _renamed_github_repo_guidance(git_identity: str | None) -> str | None:
+    if not git_identity:
+        return None
+
+    try:
+        from osmosis_ai.platform.cli.workspace_repo import (
+            resolve_canonical_git_identity,
+        )
+
+        canonical_identity = resolve_canonical_git_identity(git_identity)
+    except Exception:
+        return None
+
+    if (
+        canonical_identity is None
+        or canonical_identity.casefold() == git_identity.casefold()
+    ):
+        return None
+
+    return (
+        "This repository may have been renamed on GitHub. "
+        "Update your local origin with:\n"
+        f"  git remote set-url origin git@github.com:{canonical_identity}.git"
+    )
 
 
 def revoke_cli_token(credentials: Credentials) -> bool:
@@ -310,7 +352,7 @@ def platform_request(
 
         if error_code in _REPO_SCOPE_ERROR_MESSAGES:
             raise PlatformAPIError(
-                _REPO_SCOPE_ERROR_MESSAGES[error_code],
+                _repo_scope_error_message(error_code, git_identity),
                 e.code,
                 error_code=error_code,
                 field=field,

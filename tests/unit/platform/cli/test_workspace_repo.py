@@ -80,7 +80,26 @@ class TestNormalizeGitIdentity:
         assert result.identity == expected_identity
         assert result.display_url == expected_display
 
-    def test_canonical_identity_uses_gh_when_available(
+    def test_github_remotes_do_not_resolve_canonical_identity_on_hot_path(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        def _raise_if_called(_owner: str, _repo: str) -> str | None:
+            raise AssertionError("canonical GitHub lookup should not run")
+
+        monkeypatch.setattr(
+            workspace_repo,
+            "_resolve_canonical_github_identity",
+            _raise_if_called,
+            raising=False,
+        )
+
+        result = workspace_repo.normalize_git_identity(
+            "https://github.com/Osmosis-AI/osmosis-workspace-internal.git"
+        )
+
+        assert result.identity == "osmosis-ai/osmosis-workspace-internal"
+
+    def test_resolve_canonical_identity_uses_gh_when_available(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setattr(
@@ -108,13 +127,13 @@ class TestNormalizeGitIdentity:
 
         monkeypatch.setattr(workspace_repo.subprocess, "run", _fake_run)
 
-        result = workspace_repo.normalize_git_identity(
-            "https://github.com/Osmosis-AI/osmosis-workspace-internal.git"
+        result = workspace_repo.resolve_canonical_git_identity(
+            "Osmosis-AI/osmosis-workspace-internal"
         )
 
-        assert result.identity == "Osmosis-AI/osmosis-workspace-draft-internal"
+        assert result == "Osmosis-AI/osmosis-workspace-draft-internal"
 
-    def test_canonical_identity_falls_back_to_git_credentials(
+    def test_resolve_canonical_identity_falls_back_to_git_credentials(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         monkeypatch.setattr(
@@ -156,11 +175,9 @@ class TestNormalizeGitIdentity:
             raising=False,
         )
 
-        result = workspace_repo.normalize_git_identity(
-            "https://github.com/acme/old-name.git"
-        )
+        result = workspace_repo.resolve_canonical_git_identity("acme/old-name")
 
-        assert result.identity == "Acme/new-name"
+        assert result == "Acme/new-name"
 
     @pytest.mark.parametrize(
         "url",

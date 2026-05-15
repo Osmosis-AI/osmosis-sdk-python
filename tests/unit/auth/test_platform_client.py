@@ -473,6 +473,39 @@ class TestPlatformRequest:
         assert expected_message in str(exc_info.value)
 
     @patch("osmosis_ai.platform.auth.platform_client.urlopen")
+    def test_repo_scope_error_suggests_remote_update_when_github_repo_was_renamed(
+        self, mock_urlopen: MagicMock, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Verify rename diagnosis only runs after the platform rejects local scope."""
+        from osmosis_ai.platform.cli import workspace_repo
+
+        def _fake_resolve(identity: str) -> str | None:
+            assert identity == "acme/old-name"
+            return "Acme/new-name"
+
+        monkeypatch.setattr(
+            workspace_repo,
+            "resolve_canonical_git_identity",
+            _fake_resolve,
+            raising=False,
+        )
+        mock_urlopen.side_effect = _make_http_error(
+            404, json.dumps({"code": "GIT_REPOSITORY_NOT_CONNECTED"})
+        )
+        creds = _make_credentials()
+
+        with pytest.raises(PlatformAPIError) as exc_info:
+            platform_request(
+                "/api/test",
+                credentials=creds,
+                git_identity="acme/old-name",
+            )
+
+        message = str(exc_info.value)
+        assert "repository may have been renamed on GitHub" in message
+        assert "git remote set-url origin git@github.com:Acme/new-name.git" in message
+
+    @patch("osmosis_ai.platform.auth.platform_client.urlopen")
     def test_billing_codes_preserve_platform_message_without_scope_guidance(
         self, mock_urlopen: MagicMock
     ) -> None:

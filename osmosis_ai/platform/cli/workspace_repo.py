@@ -55,13 +55,6 @@ def normalize_git_identity(url: str | None) -> GitRemoteIdentity:
     if _GITHUB_REPOSITORY_IDENTITY_RE.fullmatch(identity) is None:
         raise CLIError("Git remote URL contains an invalid GitHub repository name.")
 
-    canonical_identity = _resolve_canonical_github_identity(owner, repo)
-    if (
-        canonical_identity is not None
-        and _GITHUB_REPOSITORY_IDENTITY_RE.fullmatch(canonical_identity) is not None
-    ):
-        identity = canonical_identity
-
     return GitRemoteIdentity(
         identity=identity,
         display_url=_display_url_without_credentials(parsed),
@@ -106,6 +99,25 @@ def _display_url_without_credentials(parsed: SplitResult) -> str:
 def _resolve_canonical_github_identity(owner: str, repo: str) -> str | None:
     """Resolve canonical owner/repo, best-effort for renamed repositories."""
     return _resolve_via_gh(owner, repo) or _resolve_via_git_credentials(owner, repo)
+
+
+def resolve_canonical_git_identity(identity: str) -> str | None:
+    """Resolve the current GitHub owner/repo for a local repository identity.
+
+    This may contact GitHub and is intentionally kept out of normal command
+    setup. Call it only after the platform rejects the local repository scope.
+    """
+    if _GITHUB_REPOSITORY_IDENTITY_RE.fullmatch(identity) is None:
+        return None
+
+    owner, repo = identity.split("/", maxsplit=1)
+    canonical_identity = _resolve_canonical_github_identity(owner, repo)
+    if (
+        canonical_identity is not None
+        and _GITHUB_REPOSITORY_IDENTITY_RE.fullmatch(canonical_identity) is not None
+    ):
+        return canonical_identity
+    return None
 
 
 def _resolve_via_gh(owner: str, repo: str) -> str | None:
@@ -342,5 +354,6 @@ __all__ = [
     "git_worktree_top_level",
     "normalize_git_identity",
     "require_git_top_level",
+    "resolve_canonical_git_identity",
     "summarize_local_git_state",
 ]
