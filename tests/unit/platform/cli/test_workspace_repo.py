@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -62,11 +63,104 @@ class TestNormalizeGitIdentity:
         ],
     )
     def test_github_remotes_normalize_to_hostless_lowercase_identity(
-        self, url: str, expected_identity: str, expected_display: str
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        url: str,
+        expected_identity: str,
+        expected_display: str,
     ) -> None:
+        monkeypatch.setattr(
+            workspace_repo,
+            "_resolve_canonical_github_identity",
+            lambda _owner, _repo: None,
+            raising=False,
+        )
+
         result = workspace_repo.normalize_git_identity(url)
         assert result.identity == expected_identity
         assert result.display_url == expected_display
+
+    def test_canonical_identity_uses_gh_when_available(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            workspace_repo.shutil,
+            "which",
+            lambda name: "/usr/bin/gh" if name == "gh" else "/usr/bin/git",
+        )
+
+        def _fake_run(cmd, **kwargs):
+            assert cmd == [
+                "gh",
+                "api",
+                "repos/Osmosis-AI/osmosis-workspace-internal",
+                "--jq",
+                ".full_name",
+            ]
+            assert kwargs["capture_output"] is True
+            assert kwargs["text"] is True
+            return subprocess.CompletedProcess(
+                cmd,
+                0,
+                stdout="Osmosis-AI/osmosis-workspace-draft-internal\n",
+                stderr="",
+            )
+
+        monkeypatch.setattr(workspace_repo.subprocess, "run", _fake_run)
+
+        result = workspace_repo.normalize_git_identity(
+            "https://github.com/Osmosis-AI/osmosis-workspace-internal.git"
+        )
+
+        assert result.identity == "Osmosis-AI/osmosis-workspace-draft-internal"
+
+    def test_canonical_identity_falls_back_to_git_credentials(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            workspace_repo.shutil,
+            "which",
+            lambda name: "/usr/bin/git" if name == "git" else None,
+        )
+
+        def _fake_run(cmd, **kwargs):
+            assert cmd == ["git", "credential", "fill"]
+            assert kwargs["input"] == "protocol=https\nhost=github.com\n"
+            return subprocess.CompletedProcess(
+                cmd,
+                0,
+                stdout="protocol=https\nhost=github.com\npassword=gho_token\n",
+                stderr="",
+            )
+
+        def _fake_get(url, **kwargs):
+            assert url == "https://api.github.com/repos/acme/old-name"
+            assert kwargs["headers"] == {"Authorization": "token gho_token"}
+            assert kwargs["allow_redirects"] is True
+            assert kwargs["timeout"] == 10
+
+            class _Response:
+                status_code = 200
+
+                @staticmethod
+                def json():
+                    return {"full_name": "Acme/new-name"}
+
+            return _Response()
+
+        monkeypatch.setattr(workspace_repo.subprocess, "run", _fake_run)
+        monkeypatch.setattr(
+            workspace_repo,
+            "requests",
+            SimpleNamespace(get=_fake_get, RequestException=Exception),
+            raising=False,
+        )
+
+        result = workspace_repo.normalize_git_identity(
+            "https://github.com/acme/old-name.git"
+        )
+
+        assert result.identity == "Acme/new-name"
 
     @pytest.mark.parametrize(
         "url",
@@ -113,7 +207,15 @@ class TestNormalizeGitIdentity:
                 url_template.format(control_character=control_character)
             )
 
-    def test_header_identity_does_not_include_host_or_token(self) -> None:
+    def test_header_identity_does_not_include_host_or_token(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setattr(
+            workspace_repo,
+            "_resolve_canonical_github_identity",
+            lambda _owner, _repo: None,
+        )
+
         result = workspace_repo.normalize_git_identity(
             "https://token:secret@github.com/Acme/Rollouts.git"
         )

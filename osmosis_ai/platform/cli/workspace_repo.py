@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import subprocess
@@ -9,10 +10,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from urllib.parse import SplitResult, urlsplit, urlunsplit
 
+import requests
+
 from osmosis_ai.cli.errors import CLIError
 
 _SCP_LIKE_SSH_RE = re.compile(r"^(?P<user>[^@\s/]+)@(?P<host>[^:\s/]+):(?P<path>.+)$")
-_GITHUB_REPOSITORY_IDENTITY_RE = re.compile(r"^[a-z0-9][a-z0-9-]*/[a-z0-9._-]+$")
+_GITHUB_REPOSITORY_IDENTITY_RE = re.compile(
+    r"^[A-Za-z0-9][A-Za-z0-9-]*/[A-Za-z0-9._-]+$"
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,9 +50,17 @@ def normalize_git_identity(url: str | None) -> GitRemoteIdentity:
     if len(segments) != 2:
         raise CLIError("Git remote URL must identify exactly one GitHub repository.")
 
-    identity = f"{segments[0]}/{segments[1]}".lower()
+    owner, repo = segments
+    identity = f"{owner}/{repo}".lower()
     if _GITHUB_REPOSITORY_IDENTITY_RE.fullmatch(identity) is None:
         raise CLIError("Git remote URL contains an invalid GitHub repository name.")
+
+    canonical_identity = _resolve_canonical_github_identity(owner, repo)
+    if (
+        canonical_identity is not None
+        and _GITHUB_REPOSITORY_IDENTITY_RE.fullmatch(canonical_identity) is not None
+    ):
+        identity = canonical_identity
 
     return GitRemoteIdentity(
         identity=identity,
@@ -88,6 +101,89 @@ def _display_url_without_credentials(parsed: SplitResult) -> str:
     if parsed.scheme == "ssh" and parsed.username == "git":
         netloc = f"git@{netloc}"
     return urlunsplit((parsed.scheme, netloc, parsed.path, "", ""))
+
+
+def _resolve_canonical_github_identity(owner: str, repo: str) -> str | None:
+    """Resolve canonical owner/repo, best-effort for renamed repositories."""
+    return _resolve_via_gh(owner, repo) or _resolve_via_git_credentials(owner, repo)
+
+
+def _resolve_via_gh(owner: str, repo: str) -> str | None:
+    if shutil.which("gh") is None:
+        return None
+    try:
+        result = subprocess.run(
+            ["gh", "api", f"repos/{owner}/{repo}", "--jq", ".full_name"],
+            capture_output=True,
+            env=_noninteractive_git_env(),
+            text=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip() or None
+
+
+def _resolve_via_git_credentials(owner: str, repo: str) -> str | None:
+    if shutil.which("git") is None:
+        return None
+    try:
+        result = subprocess.run(
+            ["git", "credential", "fill"],
+            input="protocol=https\nhost=github.com\n",
+            capture_output=True,
+            env=_noninteractive_git_env(),
+            text=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+    if result.returncode != 0:
+        return None
+
+    token = _password_from_git_credentials(result.stdout)
+    if token is None:
+        return None
+
+    try:
+        response = requests.get(
+            f"https://api.github.com/repos/{owner}/{repo}",
+            headers={"Authorization": f"token {token}"},
+            allow_redirects=True,
+            timeout=10,
+        )
+    except requests.RequestException:
+        return None
+
+    if response.status_code != 200:
+        return None
+
+    try:
+        full_name = response.json().get("full_name")
+    except ValueError:
+        return None
+    return full_name if isinstance(full_name, str) and full_name else None
+
+
+def _password_from_git_credentials(output: str) -> str | None:
+    for line in output.splitlines():
+        if line.startswith("password="):
+            token = line.removeprefix("password=")
+            return token or None
+    return None
+
+
+def _noninteractive_git_env() -> dict[str, str]:
+    return {
+        **os.environ,
+        "GH_PROMPT_DISABLED": "1",
+        "GCM_INTERACTIVE": "never",
+        "GIT_TERMINAL_PROMPT": "0",
+    }
 
 
 def _has_whitespace_or_control(value: str) -> bool:
