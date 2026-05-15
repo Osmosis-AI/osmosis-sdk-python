@@ -1,0 +1,28 @@
+README.md
+  s_8032c779241d68::t_7a3bd1175228a8 31
+osmosis_ai/platform/cli/project.py
+  s_8032c779241d68::t_e8a7d5802a1c93 29-34,70
+docs/cli.md
+  s_8032c779241d68::t_ee87be8ea16bba 70,75
+  s_8032c779241d68::t_47de6b4438d9a4 76-77
+tests/unit/cli/test_project_doctor.py
+  s_8032c779241d68::t_d56efaba52ae1d 55,108-136,224
+tests/unit/cli/test_train_commands.py
+  s_8032c779241d68::t_772cc8a2522619 947,955-959,961-966,1024,1048-1054,1058-1061
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "a5e3aec2a9d5cc501b83fd616daabb1bbf20787a",
+  "prompts": {},
+  "sessions": {
+    "s_8032c779241d68": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "148eded6-63fc-4951-aae0-99a7b7a0df70",
+        "model": "gpt-5.5-extra-high"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}
