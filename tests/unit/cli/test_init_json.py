@@ -1,4 +1,4 @@
-"""Negative CLI contracts for removed local project bootstrap commands."""
+"""Negative CLI contracts for removed local bootstrap commands."""
 
 from __future__ import annotations
 
@@ -7,7 +7,7 @@ from pathlib import Path
 from osmosis_ai.cli import main as cli
 
 
-def test_top_level_init_json_is_unknown_and_creates_no_project(
+def test_top_level_init_json_is_unknown_and_creates_no_workspace_directory(
     monkeypatch, tmp_path: Path, capsys
 ) -> None:
     monkeypatch.chdir(tmp_path)
@@ -21,7 +21,7 @@ def test_top_level_init_json_is_unknown_and_creates_no_project(
     assert not (tmp_path / ".osmosis" / "project.toml").exists()
 
 
-def test_project_init_json_is_unknown_and_creates_no_project(
+def test_project_init_json_is_unknown_and_creates_no_workspace_directory(
     monkeypatch, tmp_path: Path, capsys
 ) -> None:
     monkeypatch.chdir(tmp_path)

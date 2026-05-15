@@ -38,7 +38,7 @@ PROJECT_ROOT = Path("/repo")
 
 
 def assert_git_context(data: dict[str, object]) -> None:
-    assert data["project_root"] == "/repo"
+    assert data["workspace_directory"] == "/repo"
     assert data["git"] == {
         "identity": GIT_IDENTITY,
         "remote_url": REPO_URL,
@@ -58,13 +58,13 @@ def console_capture(monkeypatch: pytest.MonkeyPatch) -> StringIO:
 @pytest.fixture()
 def mock_git_context(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
     context = SimpleNamespace(
-        project_root=PROJECT_ROOT,
+        workspace_directory=PROJECT_ROOT,
         git_identity=GIT_IDENTITY,
         repo_url=REPO_URL,
         credentials=AUTH_CREDENTIALS,
     )
     monkeypatch.setattr(
-        "osmosis_ai.platform.cli.utils.require_git_project_context",
+        "osmosis_ai.platform.cli.utils.require_git_workspace_directory_context",
         lambda: context,
     )
     return context
@@ -121,7 +121,7 @@ def test_deployment_list_requires_linked_project(
     rc = main(["--json", "deployment", "list"])
 
     assert rc == 1
-    assert "cloned Osmosis repository" in capsys.readouterr().err
+    assert "Osmosis workspace directory" in capsys.readouterr().err
 
 
 class TestDeployWizardHelper:
@@ -591,7 +591,7 @@ class TestDeploy:
             "checkpoint_name": "qwen3-run1-step-100",
             "status": "active",
             "git": {"identity": GIT_IDENTITY, "remote_url": REPO_URL},
-            "project_root": "/repo",
+            "workspace_directory": "/repo",
         }
         assert result.message == "Deployment qwen3-run1-step-100 active"
 
@@ -619,7 +619,7 @@ class TestDeploy:
         assert result.message == "Deploy cancelled."
         assert result.resource == {
             "git": {"identity": GIT_IDENTITY, "remote_url": REPO_URL},
-            "project_root": "/repo",
+            "workspace_directory": "/repo",
         }
 
     def test_deploy_escapes_checkpoint_in_spinner(
@@ -712,7 +712,7 @@ class TestUndeploy:
             "checkpoint_name": "qwen3-run1-step-100",
             "status": "inactive",
             "git": {"identity": GIT_IDENTITY, "remote_url": REPO_URL},
-            "project_root": "/repo",
+            "workspace_directory": "/repo",
         }
         assert result.message == "Deployment qwen3-run1-step-100 inactive"
 

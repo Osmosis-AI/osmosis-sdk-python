@@ -6,7 +6,7 @@ from pathlib import Path
 from osmosis_ai.cli.main import main
 
 
-def _make_project(root: Path) -> Path:
+def _make_workspace_directory(root: Path) -> Path:
     subprocess.run(
         ["git", "init", "-b", "main", str(root)],
         check=True,
@@ -22,31 +22,28 @@ def _make_project(root: Path) -> Path:
     return root
 
 
-def test_project_doctor_accepts_project_path(tmp_path, capsys) -> None:
-    project_root = _make_project(tmp_path)
+def test_doctor_accepts_workspace_directory_path(tmp_path, capsys) -> None:
+    workspace_directory = _make_workspace_directory(tmp_path)
 
-    rc = main(["project", "doctor", str(project_root)])
+    rc = main(["doctor", str(workspace_directory)])
 
     capsys.readouterr()
     assert rc == 0
 
 
 def test_project_validate_is_not_registered(tmp_path, capsys) -> None:
-    project_root = _make_project(tmp_path)
+    workspace_directory = _make_workspace_directory(tmp_path)
 
-    rc = main(["project", "validate", str(project_root)])
+    rc = main(["project", "validate", str(workspace_directory)])
 
     captured = capsys.readouterr()
     assert rc != 0
     assert "No such command" in captured.err
 
 
-def test_project_link_and_unlink_are_not_registered(capfd) -> None:
-    rc = main(["project", "--help"])
-    output = capfd.readouterr().out
+def test_workspace_group_is_not_registered(capfd) -> None:
+    rc = main(["workspace", "--help"])
+    captured = capfd.readouterr()
 
-    assert rc == 0
-    assert "validate" not in output
-    assert "doctor" in output
-    assert "link" not in output
-    assert "unlink" not in output
+    assert rc != 0
+    assert "No such command" in captured.err

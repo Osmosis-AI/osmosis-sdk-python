@@ -37,7 +37,7 @@ class OsmosisClient:
     """Client for /api/cli/* endpoints.
 
     Repo-scoped methods require an explicit ``git_identity`` so calls can
-    be tied to the trusted Git project context.
+    be tied to the trusted workspace directory context.
     """
 
     # ── Datasets ─────────────────────────────────────────────────────

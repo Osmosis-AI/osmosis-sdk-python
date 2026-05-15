@@ -1,7 +1,7 @@
-"""Project contract helpers for structured Osmosis project checkouts.
+"""Workspace directory contract helpers for structured Osmosis directories.
 
-A "project" is the local on-disk repository linked to a Platform workspace,
-distinct from the remote tenant managed by the platform.
+A workspace directory is the local on-disk repository linked to a Platform
+workspace, distinct from the remote tenant managed by the platform.
 """
 
 from __future__ import annotations
@@ -10,13 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from osmosis_ai.cli.errors import CLIError
-
-_REQUIRED_DIRS = (
-    "rollouts/",
-    "configs/training/",
-    "configs/eval/",
-    "data/",
-)
+from osmosis_ai.templates.catalog import required_workspace_paths
 
 
 def _start_dir(start: Path) -> Path:
@@ -24,70 +18,70 @@ def _start_dir(start: Path) -> Path:
     return current.parent if current.is_file() else current
 
 
-def find_project_root(start: Path) -> Path | None:
+def find_workspace_directory(start: Path) -> Path | None:
     """Return the Git worktree top-level containing start, if any."""
     from osmosis_ai.platform.cli.workspace_repo import git_worktree_top_level
 
     return git_worktree_top_level(_start_dir(start))
 
 
-def resolve_project_root(start: Path | None = None) -> Path:
-    """Resolve the active Osmosis project root from a path or the cwd."""
-    project_root = find_project_root(start or Path.cwd())
-    if project_root is None:
+def resolve_workspace_directory(start: Path | None = None) -> Path:
+    """Resolve the active Osmosis workspace directory from a path or the cwd."""
+    workspace_directory = find_workspace_directory(start or Path.cwd())
+    if workspace_directory is None:
         raise CLIError(
-            "Run this command from a cloned Osmosis repository created by Platform."
+            "Run this command from an Osmosis workspace directory created by Platform."
         )
-    return project_root.resolve()
+    return workspace_directory.resolve()
 
 
-def resolve_project_root_from_cwd(cwd: Path | None = None) -> Path:
-    """Resolve the active Osmosis project root from cwd's Git worktree."""
-    return resolve_project_root(cwd or Path.cwd())
+def resolve_workspace_directory_from_cwd(cwd: Path | None = None) -> Path:
+    """Resolve the active Osmosis workspace directory from cwd's Git worktree."""
+    return resolve_workspace_directory(cwd or Path.cwd())
 
 
-def missing_project_paths(project_root: Path) -> list[str]:
-    project_root = project_root.resolve()
+def missing_workspace_directory_paths(workspace_directory: Path) -> list[str]:
+    workspace_directory = workspace_directory.resolve()
     return [
         rel_path
-        for rel_path in _REQUIRED_DIRS
-        if not (project_root / rel_path).is_dir()
+        for rel_path in required_workspace_paths()
+        if not (workspace_directory / rel_path).is_dir()
     ]
 
 
-def validate_project_contract(project_root: Path) -> None:
-    """Ensure the Git checkout contains the required Osmosis scaffold paths."""
-    missing_paths = missing_project_paths(project_root)
+def validate_workspace_directory_contract(workspace_directory: Path) -> None:
+    """Ensure the workspace directory contains the required Osmosis scaffold paths."""
+    missing_paths = missing_workspace_directory_paths(workspace_directory)
     if not missing_paths:
         return
 
     formatted = "\n".join(f"  - {path}" for path in missing_paths)
     raise CLIError(
-        "This checkout is missing required Osmosis scaffold paths.\n"
+        "This workspace directory is missing required Osmosis scaffold paths.\n"
         f"{formatted}\n"
         "\n"
-        "Run `osmosis project doctor --fix` in this Git repository to restore the scaffold."
+        "Run `osmosis doctor --fix` in this Git repository to restore the scaffold."
     )
 
 
 def ensure_context_path(
     path: Path,
-    project_root: Path,
+    workspace_directory: Path,
     *,
     required_dir: str,
     label: str,
     suffix: str | None = None,
 ) -> Path:
-    """Resolve a context-bearing path relative to project root and require containment."""
+    """Resolve a context-bearing path relative to workspace directory and require containment."""
     required_path = Path(required_dir)
     if required_path.is_absolute() or ".." in required_path.parts:
         raise CLIError(
             f"required_dir must be relative and must not contain '..': {required_dir}"
         )
 
-    candidate = path if path.is_absolute() else project_root / path
+    candidate = path if path.is_absolute() else workspace_directory / path
     resolved = candidate.resolve()
-    required_root = (project_root / required_path).resolve()
+    required_root = (workspace_directory / required_path).resolve()
     try:
         resolved.relative_to(required_root)
     except ValueError as exc:
@@ -103,17 +97,17 @@ def ensure_context_path(
     return resolved
 
 
-def ensure_project_config_path(
+def ensure_workspace_directory_config_path(
     config_path: Path,
-    project_root: Path,
+    workspace_directory: Path,
     *,
     config_dir: str,
     command_label: str,
 ) -> None:
-    """Require command configs to live under the canonical project directory."""
+    """Require command configs to live under the canonical workspace directory."""
     ensure_context_path(
         config_path,
-        project_root,
+        workspace_directory,
         required_dir=config_dir,
         label=f"{command_label} config",
         suffix=".toml",
@@ -126,14 +120,14 @@ def _format_backend_validation_errors(errors: list[Any]) -> str:
 
 def validate_rollout_backend(
     *,
-    project_root: Path,
+    workspace_directory: Path,
     rollout: str,
     entrypoint: str,
     command_label: str,
     grader_module: str | None = None,
     grader_config_ref: str | None = None,
 ) -> None:
-    """Load and validate a rollout backend against the project contract."""
+    """Load and validate a rollout backend against the workspace directory contract."""
     from osmosis_ai.eval.common.cli import _resolve_grader, load_workflow
     from osmosis_ai.rollout.validator import validate_backend
 
@@ -142,7 +136,7 @@ def validate_rollout_backend(
         entrypoint=entrypoint,
         quiet=True,
         console=None,
-        project_root=project_root,
+        workspace_directory=workspace_directory,
     )
     if workflow_error or workflow_cls is None or entrypoint_module is None:
         raise CLIError(
@@ -184,11 +178,11 @@ def validate_rollout_backend(
 
 __all__ = [
     "ensure_context_path",
-    "ensure_project_config_path",
-    "find_project_root",
-    "missing_project_paths",
-    "resolve_project_root",
-    "resolve_project_root_from_cwd",
-    "validate_project_contract",
+    "ensure_workspace_directory_config_path",
+    "find_workspace_directory",
+    "missing_workspace_directory_paths",
+    "resolve_workspace_directory",
+    "resolve_workspace_directory_from_cwd",
     "validate_rollout_backend",
+    "validate_workspace_directory_contract",
 ]

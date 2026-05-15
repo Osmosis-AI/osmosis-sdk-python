@@ -17,8 +17,8 @@ import pytest
 from osmosis_ai.cli import main as cli
 
 
-def _make_project(root: Path) -> Path:
-    """Create a fully valid Osmosis project layout (matches validate_project_contract)."""
+def _make_workspace_directory(root: Path) -> Path:
+    """Create a fully valid Osmosis workspace directory layout (matches validate_workspace_directory_contract)."""
     subprocess.run(
         ["git", "init", "-b", "main", str(root)],
         check=True,
@@ -33,8 +33,8 @@ def _make_project(root: Path) -> Path:
 
 
 def test_rollout_init_json_writes_full_scaffold(monkeypatch, tmp_path, capsys) -> None:
-    project_root = _make_project(tmp_path / "proj")
-    monkeypatch.chdir(project_root)
+    workspace_directory = _make_workspace_directory(tmp_path / "proj")
+    monkeypatch.chdir(workspace_directory)
 
     rc = cli.main(["--json", "rollout", "init", "my-agent"])
     captured = capsys.readouterr()
@@ -45,8 +45,8 @@ def test_rollout_init_json_writes_full_scaffold(monkeypatch, tmp_path, capsys) -
     assert payload["status"] == "success"
     assert payload["operation"] == "rollout.init"
     assert payload["resource"]["name"] == "my-agent"
-    assert payload["resource"]["project_root"] == str(project_root)
-    assert Path(payload["resource"]["project_root"]).is_absolute()
+    assert payload["resource"]["workspace_directory"] == str(workspace_directory)
+    assert Path(payload["resource"]["workspace_directory"]).is_absolute()
     assert payload["resource"]["rollout_dir"] == "rollouts/my-agent"
     assert not Path(payload["resource"]["rollout_dir"]).is_absolute()
     assert payload["resource"]["configs"] == {
@@ -61,24 +61,24 @@ def test_rollout_init_json_writes_full_scaffold(monkeypatch, tmp_path, capsys) -
     assert "configs/eval/my-agent.toml" in files
     assert "configs/training/my-agent.toml" in files
 
-    rollout_dir = project_root / "rollouts" / "my-agent"
+    rollout_dir = workspace_directory / "rollouts" / "my-agent"
     assert (rollout_dir / "main.py").is_file()
     assert (rollout_dir / "pyproject.toml").is_file()
     assert (rollout_dir / "README.md").is_file()
-    assert (project_root / "configs" / "eval" / "my-agent.toml").is_file()
-    assert (project_root / "configs" / "training" / "my-agent.toml").is_file()
+    assert (workspace_directory / "configs" / "eval" / "my-agent.toml").is_file()
+    assert (workspace_directory / "configs" / "training" / "my-agent.toml").is_file()
 
 
 def test_rollout_init_substitutes_rollout_name_in_emitted_files(
     monkeypatch, tmp_path
 ) -> None:
-    project_root = _make_project(tmp_path / "proj")
-    monkeypatch.chdir(project_root)
+    workspace_directory = _make_workspace_directory(tmp_path / "proj")
+    monkeypatch.chdir(workspace_directory)
 
     rc = cli.main(["--json", "rollout", "init", "my-agent"])
     assert rc == 0
 
-    rollout_dir = project_root / "rollouts" / "my-agent"
+    rollout_dir = workspace_directory / "rollouts" / "my-agent"
     pyproject = (rollout_dir / "pyproject.toml").read_text(encoding="utf-8")
     assert 'name = "my-agent"' in pyproject
     assert "<your-rollout>" not in pyproject
@@ -96,8 +96,8 @@ def test_rollout_init_substitutes_rollout_name_in_emitted_files(
 def test_rollout_init_plain_next_steps_use_existing_commands(
     monkeypatch, tmp_path, capsys
 ) -> None:
-    project_root = _make_project(tmp_path / "proj")
-    monkeypatch.chdir(project_root)
+    workspace_directory = _make_workspace_directory(tmp_path / "proj")
+    monkeypatch.chdir(workspace_directory)
 
     rc = cli.main(["--plain", "rollout", "init", "my-agent"])
     captured = capsys.readouterr()
@@ -112,13 +112,13 @@ def test_rollout_init_main_py_is_a_runnable_rollout_server(
     monkeypatch, tmp_path
 ) -> None:
     """Placeholder main.py must wire LocalBackend + uvicorn so users can run it."""
-    project_root = _make_project(tmp_path / "proj")
-    monkeypatch.chdir(project_root)
+    workspace_directory = _make_workspace_directory(tmp_path / "proj")
+    monkeypatch.chdir(workspace_directory)
 
     rc = cli.main(["--json", "rollout", "init", "my-agent"])
     assert rc == 0
 
-    main_py = (project_root / "rollouts" / "my-agent" / "main.py").read_text(
+    main_py = (workspace_directory / "rollouts" / "my-agent" / "main.py").read_text(
         encoding="utf-8"
     )
     assert "from osmosis_ai.rollout.backend.local import LocalBackend" in main_py
@@ -134,22 +134,22 @@ def test_rollout_init_main_py_is_a_runnable_rollout_server(
 def test_rollout_init_substitutes_rollout_name_in_configs(
     monkeypatch, tmp_path
 ) -> None:
-    project_root = _make_project(tmp_path / "proj")
-    monkeypatch.chdir(project_root)
+    workspace_directory = _make_workspace_directory(tmp_path / "proj")
+    monkeypatch.chdir(workspace_directory)
 
     rc = cli.main(["--json", "rollout", "init", "my-agent"])
     assert rc == 0
 
-    eval_toml = (project_root / "configs" / "eval" / "my-agent.toml").read_text(
+    eval_toml = (workspace_directory / "configs" / "eval" / "my-agent.toml").read_text(
         encoding="utf-8"
     )
     assert 'rollout = "my-agent"' in eval_toml
     # Dataset placeholder must remain (user must pick a dataset themselves).
     assert "<your-dataset>" in eval_toml
 
-    training_toml = (project_root / "configs" / "training" / "my-agent.toml").read_text(
-        encoding="utf-8"
-    )
+    training_toml = (
+        workspace_directory / "configs" / "training" / "my-agent.toml"
+    ).read_text(encoding="utf-8")
     assert 'rollout = "my-agent"' in training_toml
     # Entrypoint is a literal in the source TOML (not substituted), so it flows
     # through unchanged.
@@ -166,13 +166,13 @@ def test_rollout_init_training_config_loads_with_template_defaults(
 ) -> None:
     from osmosis_ai.platform.cli.training_config import load_training_config
 
-    project_root = _make_project(tmp_path / "proj")
-    monkeypatch.chdir(project_root)
+    workspace_directory = _make_workspace_directory(tmp_path / "proj")
+    monkeypatch.chdir(workspace_directory)
 
     rc = cli.main(["--json", "rollout", "init", "my-agent"])
     assert rc == 0
 
-    training_toml = project_root / "configs" / "training" / "my-agent.toml"
+    training_toml = workspace_directory / "configs" / "training" / "my-agent.toml"
     config = load_training_config(training_toml)
 
     assert config.training_n_samples_per_prompt == 8
@@ -185,10 +185,10 @@ def test_rollout_init_training_config_loads_with_template_defaults(
 def test_rollout_init_refuses_overwrite_without_force(
     monkeypatch, tmp_path, capsys
 ) -> None:
-    project_root = _make_project(tmp_path / "proj")
-    monkeypatch.chdir(project_root)
+    workspace_directory = _make_workspace_directory(tmp_path / "proj")
+    monkeypatch.chdir(workspace_directory)
 
-    rollout_dir = project_root / "rollouts" / "my-agent"
+    rollout_dir = workspace_directory / "rollouts" / "my-agent"
     rollout_dir.mkdir(parents=True)
     (rollout_dir / "main.py").write_text("# user code\n", encoding="utf-8")
 
@@ -207,13 +207,13 @@ def test_rollout_init_refuses_overwrite_without_force(
 def test_rollout_init_force_overwrites_rollout_and_configs(
     monkeypatch, tmp_path
 ) -> None:
-    project_root = _make_project(tmp_path / "proj")
-    monkeypatch.chdir(project_root)
+    workspace_directory = _make_workspace_directory(tmp_path / "proj")
+    monkeypatch.chdir(workspace_directory)
 
-    rollout_dir = project_root / "rollouts" / "my-agent"
+    rollout_dir = workspace_directory / "rollouts" / "my-agent"
     rollout_dir.mkdir(parents=True)
     (rollout_dir / "STALE.txt").write_text("stale", encoding="utf-8")
-    (project_root / "configs" / "eval" / "my-agent.toml").write_text(
+    (workspace_directory / "configs" / "eval" / "my-agent.toml").write_text(
         "[eval]\nstale = true\n", encoding="utf-8"
     )
 
@@ -222,7 +222,7 @@ def test_rollout_init_force_overwrites_rollout_and_configs(
     assert rc == 0
     assert not (rollout_dir / "STALE.txt").exists()
     assert (rollout_dir / "main.py").is_file()
-    fresh = (project_root / "configs" / "eval" / "my-agent.toml").read_text(
+    fresh = (workspace_directory / "configs" / "eval" / "my-agent.toml").read_text(
         encoding="utf-8"
     )
     assert "stale" not in fresh
@@ -232,11 +232,11 @@ def test_rollout_init_force_overwrites_rollout_and_configs(
 def test_rollout_init_force_refuses_non_directory_rollout_path(
     monkeypatch, tmp_path, capsys
 ) -> None:
-    project_root = _make_project(tmp_path / "proj")
-    monkeypatch.chdir(project_root)
+    workspace_directory = _make_workspace_directory(tmp_path / "proj")
+    monkeypatch.chdir(workspace_directory)
 
     # `rollouts/my-agent` exists as a regular file, not a directory.
-    bogus = project_root / "rollouts" / "my-agent"
+    bogus = workspace_directory / "rollouts" / "my-agent"
     bogus.write_text("oops", encoding="utf-8")
 
     rc = cli.main(["--json", "rollout", "init", "my-agent", "--force"])
@@ -252,12 +252,12 @@ def test_rollout_init_force_refuses_non_directory_rollout_path(
 def test_rollout_init_force_refuses_config_symlink(
     monkeypatch, tmp_path, capsys
 ) -> None:
-    project_root = _make_project(tmp_path / "proj")
-    monkeypatch.chdir(project_root)
+    workspace_directory = _make_workspace_directory(tmp_path / "proj")
+    monkeypatch.chdir(workspace_directory)
 
     outside = tmp_path / "outside.toml"
     outside.write_text("original", encoding="utf-8")
-    symlink = project_root / "configs" / "eval" / "my-agent.toml"
+    symlink = workspace_directory / "configs" / "eval" / "my-agent.toml"
     symlink.symlink_to(outside)
 
     rc = cli.main(["--json", "rollout", "init", "my-agent", "--force"])
@@ -273,14 +273,14 @@ def test_rollout_init_force_refuses_config_symlink(
 def test_rollout_init_force_refuses_config_directory_before_resetting_rollout(
     monkeypatch, tmp_path, capsys
 ) -> None:
-    project_root = _make_project(tmp_path / "proj")
-    monkeypatch.chdir(project_root)
+    workspace_directory = _make_workspace_directory(tmp_path / "proj")
+    monkeypatch.chdir(workspace_directory)
 
-    rollout_dir = project_root / "rollouts" / "my-agent"
+    rollout_dir = workspace_directory / "rollouts" / "my-agent"
     rollout_dir.mkdir(parents=True)
     user_code = rollout_dir / "main.py"
     user_code.write_text("# user code\n", encoding="utf-8")
-    (project_root / "configs" / "eval" / "my-agent.toml").mkdir()
+    (workspace_directory / "configs" / "eval" / "my-agent.toml").mkdir()
 
     rc = cli.main(["--json", "rollout", "init", "my-agent", "--force"])
     captured = capsys.readouterr()
@@ -302,8 +302,8 @@ def test_rollout_init_force_refuses_config_directory_before_resetting_rollout(
 def test_rollout_init_rejects_invalid_or_reserved_names(
     monkeypatch, tmp_path, capsys, bad_name: str
 ) -> None:
-    project_root = _make_project(tmp_path / "proj")
-    monkeypatch.chdir(project_root)
+    workspace_directory = _make_workspace_directory(tmp_path / "proj")
+    monkeypatch.chdir(workspace_directory)
 
     rc = cli.main(["--json", "rollout", "init", bad_name])
     captured = capsys.readouterr()
@@ -323,18 +323,18 @@ def test_rollout_init_outside_project_errors(monkeypatch, tmp_path, capsys) -> N
     captured = capsys.readouterr()
 
     assert rc != 0
-    assert "cloned Osmosis repository" in captured.err
+    assert "Osmosis workspace directory" in captured.err
 
 
 def test_rollout_init_incomplete_project_errors(monkeypatch, tmp_path, capsys) -> None:
     # The checkout is a Git worktree, but canonical directories are missing.
-    project_root = tmp_path / "proj"
+    workspace_directory = tmp_path / "proj"
     subprocess.run(
-        ["git", "init", "-b", "main", str(project_root)],
+        ["git", "init", "-b", "main", str(workspace_directory)],
         check=True,
         capture_output=True,
     )
-    monkeypatch.chdir(project_root)
+    monkeypatch.chdir(workspace_directory)
 
     rc = cli.main(["rollout", "init", "my-agent"])
     captured = capsys.readouterr()
@@ -378,8 +378,8 @@ def test_rollout_init_missing_source_files_returns_not_found(
         (("nonexistent-scaffold.tpl", "rollouts/{name}/oops"),),
     )
 
-    project_root = _make_project(tmp_path / "proj")
-    monkeypatch.chdir(project_root)
+    workspace_directory = _make_workspace_directory(tmp_path / "proj")
+    monkeypatch.chdir(workspace_directory)
 
     rc = cli.main(["--json", "rollout", "init", "my-agent"])
     captured = capsys.readouterr()

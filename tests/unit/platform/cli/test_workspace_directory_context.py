@@ -9,7 +9,7 @@ import pytest
 from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.platform.auth import AuthenticationExpiredError
 from osmosis_ai.platform.auth.credentials import Credentials, UserInfo
-from osmosis_ai.platform.cli import project_context
+from osmosis_ai.platform.cli import workspace_directory_context
 
 
 def _make_credentials(*, expired: bool = False) -> Credentials:
@@ -46,9 +46,11 @@ def test_local_context_allows_missing_origin(tmp_path: Path) -> None:
     _repo(tmp_path)
     _scaffold(tmp_path)
 
-    ctx = project_context.resolve_local_project_context(cwd=tmp_path)
+    ctx = workspace_directory_context.resolve_local_workspace_directory_context(
+        cwd=tmp_path
+    )
 
-    assert ctx.project_root == tmp_path.resolve()
+    assert ctx.workspace_directory == tmp_path.resolve()
     assert ctx.git_identity is None
     assert ctx.repo_url is None
 
@@ -59,12 +61,14 @@ def test_platform_context_requires_origin_and_credentials(
     _repo(tmp_path, origin="https://github.com/Acme/Rollouts.git")
     _scaffold(tmp_path)
     monkeypatch.setattr(
-        project_context, "load_credentials", lambda: _make_credentials()
+        workspace_directory_context, "load_credentials", lambda: _make_credentials()
     )
 
-    ctx = project_context.resolve_git_project_context(cwd=tmp_path)
+    ctx = workspace_directory_context.resolve_git_workspace_directory_context(
+        cwd=tmp_path
+    )
 
-    assert ctx.project_root == tmp_path.resolve()
+    assert ctx.workspace_directory == tmp_path.resolve()
     assert ctx.git_identity == "acme/rollouts"
     assert ctx.repo_url == "https://github.com/Acme/Rollouts.git"
     assert ctx.credentials.access_token == "token"
@@ -75,7 +79,9 @@ def test_platform_context_rejects_missing_origin(tmp_path: Path) -> None:
     _scaffold(tmp_path)
 
     with pytest.raises(CLIError) as exc:
-        project_context.resolve_git_project_context(cwd=tmp_path)
+        workspace_directory_context.resolve_git_workspace_directory_context(
+            cwd=tmp_path
+        )
 
     assert "Set `origin` to the Platform-connected repository" in str(exc.value)
 
@@ -84,7 +90,7 @@ def test_scaffold_required_context_rejects_missing_paths(tmp_path: Path) -> None
     _repo(tmp_path, origin="https://github.com/acme/rollouts.git")
 
     with pytest.raises(CLIError) as exc:
-        project_context.resolve_local_project_context(
+        workspace_directory_context.resolve_local_workspace_directory_context(
             cwd=tmp_path, require_scaffold=True
         )
 
@@ -96,12 +102,12 @@ def test_local_context_allows_missing_scaffold_when_not_required(
 ) -> None:
     _repo(tmp_path, origin="https://github.com/acme/rollouts.git")
 
-    ctx = project_context.resolve_local_project_context(
+    ctx = workspace_directory_context.resolve_local_workspace_directory_context(
         cwd=tmp_path,
         require_scaffold=False,
     )
 
-    assert ctx.project_root == tmp_path.resolve()
+    assert ctx.workspace_directory == tmp_path.resolve()
     assert ctx.git_identity == "acme/rollouts"
     assert ctx.repo_url == "https://github.com/acme/rollouts.git"
 
@@ -110,7 +116,9 @@ def test_local_context_ignores_invalid_origin(tmp_path: Path) -> None:
     _repo(tmp_path, origin="https://gitlab.com/acme/rollouts.git")
     _scaffold(tmp_path)
 
-    ctx = project_context.resolve_local_project_context(cwd=tmp_path)
+    ctx = workspace_directory_context.resolve_local_workspace_directory_context(
+        cwd=tmp_path
+    )
 
     assert ctx.git_identity is None
     assert ctx.repo_url is None
@@ -120,7 +128,9 @@ def test_local_context_ignores_malformed_origin(tmp_path: Path) -> None:
     _repo(tmp_path, origin="https://[github.com/acme/rollouts.git")
     _scaffold(tmp_path)
 
-    ctx = project_context.resolve_local_project_context(cwd=tmp_path)
+    ctx = workspace_directory_context.resolve_local_workspace_directory_context(
+        cwd=tmp_path
+    )
 
     assert ctx.git_identity is None
     assert ctx.repo_url is None
@@ -131,10 +141,12 @@ def test_platform_context_requires_credentials(
 ) -> None:
     _repo(tmp_path, origin="https://github.com/acme/rollouts.git")
     _scaffold(tmp_path)
-    monkeypatch.setattr(project_context, "load_credentials", lambda: None)
+    monkeypatch.setattr(workspace_directory_context, "load_credentials", lambda: None)
 
     with pytest.raises(CLIError, match="Not logged in"):
-        project_context.resolve_git_project_context(cwd=tmp_path)
+        workspace_directory_context.resolve_git_workspace_directory_context(
+            cwd=tmp_path
+        )
 
 
 def test_platform_context_rejects_expired_credentials(
@@ -143,28 +155,30 @@ def test_platform_context_rejects_expired_credentials(
     _repo(tmp_path, origin="https://github.com/acme/rollouts.git")
     _scaffold(tmp_path)
     monkeypatch.setattr(
-        project_context,
+        workspace_directory_context,
         "load_credentials",
         lambda: _make_credentials(expired=True),
     )
 
     with pytest.raises(AuthenticationExpiredError):
-        project_context.resolve_git_project_context(cwd=tmp_path)
+        workspace_directory_context.resolve_git_workspace_directory_context(
+            cwd=tmp_path
+        )
 
 
 def test_git_result_context_shape(tmp_path: Path) -> None:
-    ctx = project_context.LocalProjectContext(
-        project_root=tmp_path.resolve(),
+    ctx = workspace_directory_context.LocalWorkspaceDirectoryContext(
+        workspace_directory=tmp_path.resolve(),
         git_identity="acme/rollouts",
         repo_url="https://github.com/acme/rollouts.git",
     )
 
-    result: dict[str, Any] = project_context.git_result_context(ctx)
+    result: dict[str, Any] = workspace_directory_context.git_result_context(ctx)
 
     assert result == {
         "git": {
             "identity": "acme/rollouts",
             "remote_url": "https://github.com/acme/rollouts.git",
         },
-        "project_root": str(tmp_path.resolve()),
+        "workspace_directory": str(tmp_path.resolve()),
     }

@@ -9,7 +9,7 @@ from typing import Annotated
 from pydantic import BaseModel, ConfigDict, Field
 
 from osmosis_ai.cli.errors import CLIError
-from osmosis_ai.platform.cli.project_contract import ensure_context_path
+from osmosis_ai.platform.cli.workspace_directory_contract import ensure_context_path
 
 
 class _EvalSection(BaseModel):
@@ -166,21 +166,23 @@ def load_eval_config(path: Path) -> EvalConfig:
     )
 
 
-def resolve_eval_context_paths(config: EvalConfig, project_root: Path) -> EvalConfig:
-    """Resolve eval filesystem paths against the active project root."""
+def resolve_eval_context_paths(
+    config: EvalConfig, workspace_directory: Path
+) -> EvalConfig:
+    """Resolve eval filesystem paths against the active workspace directory."""
     dataset = ensure_context_path(
         Path(config.eval_dataset),
-        project_root,
+        workspace_directory,
         required_dir="data",
         label="[eval].dataset",
     )
     entrypoint = ensure_context_path(
         Path("rollouts") / config.eval_rollout / config.eval_entrypoint,
-        project_root,
+        workspace_directory,
         required_dir=f"rollouts/{config.eval_rollout}",
         label="[eval].entrypoint",
     )
-    rollout_dir = project_root / "rollouts" / config.eval_rollout
+    rollout_dir = workspace_directory / "rollouts" / config.eval_rollout
     pyproject_path = rollout_dir / "pyproject.toml"
     if not pyproject_path.is_file():
         raise CLIError(
@@ -192,7 +194,9 @@ def resolve_eval_context_paths(config: EvalConfig, project_root: Path) -> EvalCo
         update={
             "eval_dataset": str(dataset),
             "eval_entrypoint": str(
-                entrypoint.relative_to(project_root / "rollouts" / config.eval_rollout)
+                entrypoint.relative_to(
+                    workspace_directory / "rollouts" / config.eval_rollout
+                )
             ),
         }
     )

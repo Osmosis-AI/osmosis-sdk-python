@@ -285,7 +285,7 @@ model = "openai/gpt-5-mini"
     )
 
 
-def _make_project(root: Path) -> Path:
+def _make_workspace_directory(root: Path) -> Path:
     for rel in ("data", "rollouts/demo", "configs/eval"):
         (root / rel).mkdir(parents=True, exist_ok=True)
     (root / "data" / "demo.jsonl").write_text(
@@ -348,7 +348,7 @@ def test_load_eval_config_rejects_invalid_timeout_values(tmp_path: Path) -> None
 
 
 def test_resolve_eval_context_paths_requires_rollout_pyproject(tmp_path: Path) -> None:
-    project = _make_project(tmp_path)
+    project = _make_workspace_directory(tmp_path)
     config_path = project / "configs" / "eval" / "demo.toml"
     _write_eval_config(config_path)
     config = load_eval_config(config_path)
@@ -358,7 +358,7 @@ def test_resolve_eval_context_paths_requires_rollout_pyproject(tmp_path: Path) -
 
 
 def test_resolve_eval_context_paths_accepts_rollout_pyproject(tmp_path: Path) -> None:
-    project = _make_project(tmp_path)
+    project = _make_workspace_directory(tmp_path)
     (project / "rollouts" / "demo" / "pyproject.toml").write_text(
         "[project]\nname='demo'\n", encoding="utf-8"
     )

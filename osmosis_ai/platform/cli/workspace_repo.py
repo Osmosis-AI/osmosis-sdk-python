@@ -209,21 +209,21 @@ def _is_control_character(character: str) -> bool:
     return codepoint < 32 or codepoint == 127 or 128 <= codepoint <= 159
 
 
-def get_local_git_remote_url(project_root: Path) -> str | None:
-    """Return ``origin``'s URL for the project, or ``None`` if unavailable.
+def get_local_git_remote_url(workspace_directory: Path) -> str | None:
+    """Return ``origin``'s URL for the workspace directory, or ``None`` if unavailable.
 
     Returns ``None`` when:
     * ``git`` is not installed on PATH;
-    * the project is not a git repository top-level;
+    * the workspace directory is not a git repository top-level;
     * there is no ``origin`` remote.
     """
     if shutil.which("git") is None:
         return None
-    if not (project_root / ".git").exists():
+    if not (workspace_directory / ".git").exists():
         return None
     try:
         result = subprocess.run(
-            ["git", "-C", str(project_root), "remote", "get-url", "origin"],
+            ["git", "-C", str(workspace_directory), "remote", "get-url", "origin"],
             capture_output=True,
             text=True,
             check=False,
@@ -237,14 +237,14 @@ def get_local_git_remote_url(project_root: Path) -> str | None:
     return url or None
 
 
-def git_worktree_top_level(project_root: Path) -> Path | None:
-    """Return the Git worktree top-level containing ``project_root``, if any."""
+def git_worktree_top_level(workspace_directory: Path) -> Path | None:
+    """Return the Git worktree top-level containing ``workspace_directory``, if any."""
     if shutil.which("git") is None:
         return None
 
     try:
         result = subprocess.run(
-            ["git", "-C", str(project_root), "rev-parse", "--show-toplevel"],
+            ["git", "-C", str(workspace_directory), "rev-parse", "--show-toplevel"],
             capture_output=True,
             text=True,
             check=False,
@@ -258,11 +258,11 @@ def git_worktree_top_level(project_root: Path) -> Path | None:
     return Path(top).resolve() if top else None
 
 
-def require_git_top_level(project_root: Path, command_label: str) -> None:
-    top = git_worktree_top_level(project_root)
-    if top != project_root.resolve():
+def require_git_top_level(workspace_directory: Path, command_label: str) -> None:
+    top = git_worktree_top_level(workspace_directory)
+    if top != workspace_directory.resolve():
         raise CLIError(
-            f"{command_label} must be run from a Git worktree top-level Osmosis project."
+            f"{command_label} must be run from a Git worktree top-level Osmosis workspace directory."
         )
 
 
@@ -288,26 +288,26 @@ class LocalGitState:
     ahead: int
 
 
-def summarize_local_git_state(project_root: Path) -> LocalGitState | None:
-    """Return a best-effort snapshot of the local git state for the project.
+def summarize_local_git_state(workspace_directory: Path) -> LocalGitState | None:
+    """Return a best-effort snapshot of the local git state for the workspace directory.
 
     Used by command flows (e.g. ``osmosis train submit``) to surface a
     "push your changes first" reminder, since the platform always
     pulls source from Git.
 
-    Returns ``None`` when ``git`` is not on PATH or ``project_root`` is
+    Returns ``None`` when ``git`` is not on PATH or ``workspace_directory`` is
     not a git working tree top-level; individual fields are safely defaulted when
     sub-commands fail rather than raising.
     """
     if shutil.which("git") is None:
         return None
-    if not (project_root / ".git").exists():
+    if not (workspace_directory / ".git").exists():
         return None
 
     def _run(*args: str) -> str | None:
         try:
             result = subprocess.run(
-                ["git", "-C", str(project_root), *args],
+                ["git", "-C", str(workspace_directory), *args],
                 capture_output=True,
                 text=True,
                 check=False,

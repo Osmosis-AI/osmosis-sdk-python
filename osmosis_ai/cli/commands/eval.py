@@ -16,9 +16,11 @@ app.add_typer(cache_app, name="cache")
 
 
 def _require_eval_local_project() -> None:
-    from osmosis_ai.platform.cli.project_context import resolve_local_project_context
+    from osmosis_ai.platform.cli.workspace_directory_context import (
+        resolve_local_workspace_directory_context,
+    )
 
-    resolve_local_project_context(require_scaffold=True)
+    resolve_local_workspace_directory_context(require_scaffold=True)
 
 
 @app.command("run")

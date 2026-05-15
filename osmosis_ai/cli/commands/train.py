@@ -89,7 +89,7 @@ def _require_confirmation(
 
 
 def _print_remote_fetch_notice(
-    project_root: Path,
+    workspace_directory: Path,
     *,
     pinned_commit_sha: str | None,
 ) -> tuple[list[str], list[str]]:
@@ -112,7 +112,7 @@ def _print_remote_fetch_notice(
     from osmosis_ai.cli.output import OutputFormat, get_output_context
     from osmosis_ai.platform.cli.workspace_repo import summarize_local_git_state
 
-    state = summarize_local_git_state(project_root)
+    state = summarize_local_git_state(workspace_directory)
 
     warnings: list[str] = []
     if state is not None:
@@ -200,7 +200,7 @@ def list_runs(
     ),
     all_: bool = typer.Option(False, "--all", help="Show all training runs."),
 ) -> Any:
-    """List training runs for the current Git-scoped project."""
+    """List training runs for the current workspace directory."""
     from osmosis_ai.cli.output import (
         ListColumn,
         ListResult,
@@ -212,17 +212,17 @@ def list_runs(
         format_local_date,
         format_reward,
     )
-    from osmosis_ai.platform.cli.project_context import git_result_context
     from osmosis_ai.platform.cli.utils import (
         fetch_all_pages,
         format_run_status,
-        require_git_project_context,
+        require_git_workspace_directory_context,
         validate_list_options,
     )
+    from osmosis_ai.platform.cli.workspace_directory_context import git_result_context
 
     effective_limit, fetch_all = validate_list_options(limit=limit, all_=all_)
 
-    context = require_git_project_context()
+    context = require_git_workspace_directory_context()
     credentials = context.credentials
 
     from osmosis_ai.platform.api.client import OsmosisClient
@@ -304,13 +304,13 @@ def status(
     from osmosis_ai.platform.api.client import OsmosisClient
     from osmosis_ai.platform.api.models import RUN_STATUSES_TERMINAL
     from osmosis_ai.platform.auth.platform_client import PlatformAPIError
-    from osmosis_ai.platform.cli.project_context import git_result_context
     from osmosis_ai.platform.cli.utils import (
         build_run_detail_rows,
-        require_git_project_context,
+        require_git_workspace_directory_context,
     )
+    from osmosis_ai.platform.cli.workspace_directory_context import git_result_context
 
-    context = require_git_project_context()
+    context = require_git_workspace_directory_context()
     credentials = context.credentials
 
     client = OsmosisClient()
@@ -419,37 +419,37 @@ def submit(
 ) -> Any:
     """Submit a new training run."""
     from osmosis_ai.cli.output import OperationResult, get_output_context
-    from osmosis_ai.platform.cli.project_context import git_result_context
-    from osmosis_ai.platform.cli.project_contract import (
-        ensure_project_config_path,
-        validate_project_contract,
-        validate_rollout_backend,
-    )
     from osmosis_ai.platform.cli.training_config import (
         load_training_config,
         validate_training_context_paths,
     )
-    from osmosis_ai.platform.cli.utils import require_git_project_context
+    from osmosis_ai.platform.cli.utils import require_git_workspace_directory_context
+    from osmosis_ai.platform.cli.workspace_directory_context import git_result_context
+    from osmosis_ai.platform.cli.workspace_directory_contract import (
+        ensure_workspace_directory_config_path,
+        validate_rollout_backend,
+        validate_workspace_directory_contract,
+    )
 
     command_label = "`osmosis train submit`"
 
-    context = require_git_project_context()
-    project_root = context.project_root
-    validate_project_contract(project_root)
+    context = require_git_workspace_directory_context()
+    workspace_directory = context.workspace_directory
+    validate_workspace_directory_contract(workspace_directory)
     config_path = Path(config_path)
     resolved_config_path = (
-        config_path if config_path.is_absolute() else project_root / config_path
+        config_path if config_path.is_absolute() else workspace_directory / config_path
     )
-    ensure_project_config_path(
+    ensure_workspace_directory_config_path(
         resolved_config_path,
-        project_root,
+        workspace_directory,
         config_dir="configs/training",
         command_label=command_label,
     )
     config = load_training_config(resolved_config_path)
-    validate_training_context_paths(config, project_root)
+    validate_training_context_paths(config, workspace_directory)
     validate_rollout_backend(
-        project_root=project_root,
+        workspace_directory=workspace_directory,
         rollout=config.experiment_rollout,
         entrypoint=config.experiment_entrypoint,
         command_label=command_label,
@@ -485,7 +485,7 @@ def submit(
     )
 
     notes, warnings = _print_remote_fetch_notice(
-        project_root,
+        workspace_directory,
         pinned_commit_sha=config.experiment_commit_sha,
     )
 
@@ -599,10 +599,10 @@ def _resolve_output_path(output: str, run_name: str | None, run_id: str) -> Path
 
 
 def _resolve_default_output(
-    run_name: str | None, run_id: str, *, project_root: Path
+    run_name: str | None, run_id: str, *, workspace_directory: Path
 ) -> Path:
     """Resolve the default output path under .osmosis/metrics/."""
-    metrics_dir = project_root / ".osmosis" / "metrics"
+    metrics_dir = workspace_directory / ".osmosis" / "metrics"
     metrics_dir.mkdir(parents=True, exist_ok=True)
     return metrics_dir / _default_filename(run_name, run_id)
 
@@ -636,10 +636,10 @@ def metrics(
     from osmosis_ai.platform.api.client import OsmosisClient
     from osmosis_ai.platform.api.models import RUN_STATUSES_IN_PROGRESS
     from osmosis_ai.platform.auth.platform_client import PlatformAPIError
-    from osmosis_ai.platform.cli.project_context import git_result_context
-    from osmosis_ai.platform.cli.utils import require_git_project_context
+    from osmosis_ai.platform.cli.utils import require_git_workspace_directory_context
+    from osmosis_ai.platform.cli.workspace_directory_context import git_result_context
 
-    context = require_git_project_context()
+    context = require_git_workspace_directory_context()
     credentials = context.credentials
     client = OsmosisClient()
     output_ctx = get_output_context()
@@ -749,7 +749,7 @@ def metrics(
                     else _resolve_default_output(
                         run.name,
                         run.id,
-                        project_root=context.project_root,
+                        workspace_directory=context.workspace_directory,
                     )
                 )
                 out_path.write_text(
@@ -787,10 +787,10 @@ def stop(
 ) -> Any:
     """Stop a training run."""
     from osmosis_ai.cli.output import OperationResult, get_output_context
-    from osmosis_ai.platform.cli.project_context import git_result_context
-    from osmosis_ai.platform.cli.utils import require_git_project_context
+    from osmosis_ai.platform.cli.utils import require_git_workspace_directory_context
+    from osmosis_ai.platform.cli.workspace_directory_context import git_result_context
 
-    context = require_git_project_context()
+    context = require_git_workspace_directory_context()
     credentials = context.credentials
 
     from osmosis_ai.platform.api.client import OsmosisClient

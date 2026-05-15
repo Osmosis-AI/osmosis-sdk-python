@@ -202,10 +202,10 @@ def test_main_without_subcommand_shows_help(capsys):
     assert "osmosis" in captured.out.lower()
 
 
-def test_eval_run_requires_project_context_before_config_lookup(
+def test_eval_run_requires_workspace_directory_context_before_config_lookup(
     tmp_path, monkeypatch, capsys
 ):
-    """eval run first requires a current Osmosis project."""
+    """eval run first requires a current Osmosis workspace directory."""
     monkeypatch.chdir(tmp_path)
     exit_code = cli.main(
         [
@@ -217,11 +217,11 @@ def test_eval_run_requires_project_context_before_config_lookup(
     captured = capsys.readouterr()
 
     assert exit_code == 1
-    assert "cloned Osmosis repository" in captured.err
+    assert "Osmosis workspace directory" in captured.err
 
 
 def test_eval_run_rejects_missing_config_inside_project(tmp_path, monkeypatch, capsys):
-    """eval run fails when a project-local config file does not exist."""
+    """eval run fails when a workspace-directory config file does not exist."""
     _make_git_project(tmp_path)
     monkeypatch.chdir(tmp_path)
 

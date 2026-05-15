@@ -36,9 +36,9 @@ FAKE_CREDENTIALS = object()
 
 def _assert_git_context(
     payload: dict[str, object],
-    project_root: Path = GIT_PROJECT_ROOT,
+    workspace_directory: Path = GIT_PROJECT_ROOT,
 ) -> None:
-    assert payload["project_root"] == str(project_root.resolve())
+    assert payload["workspace_directory"] == str(workspace_directory.resolve())
     assert payload["git"] == {
         "identity": GIT_IDENTITY,
         "remote_url": REPO_URL,
@@ -55,20 +55,20 @@ def _stub_git_context(monkeypatch: pytest.MonkeyPatch) -> None:
         return None
 
     def _git_context() -> SimpleNamespace:
-        project_root = (
+        workspace_directory = (
             Path.cwd().resolve()
             if (Path.cwd() / ".osmosis").is_dir()
             else GIT_PROJECT_ROOT
         )
         return SimpleNamespace(
-            project_root=project_root,
+            workspace_directory=workspace_directory,
             git_identity=GIT_IDENTITY,
             repo_url=REPO_URL,
             credentials=FAKE_CREDENTIALS,
         )
 
     monkeypatch.setattr(
-        "osmosis_ai.platform.cli.utils.require_git_project_context",
+        "osmosis_ai.platform.cli.utils.require_git_workspace_directory_context",
         _git_context,
     )
     monkeypatch.setattr(

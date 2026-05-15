@@ -39,7 +39,7 @@ def init(
 
     Creates ``rollouts/<name>/{main.py,pyproject.toml,README.md}`` and
     ``configs/{eval,training}/<name>.toml`` so you can start editing right away.
-    Must run inside an Osmosis project (``.osmosis/project.toml`` must exist).
+    Must run inside an Osmosis workspace directory.
     """
     from osmosis_ai.templates.init import init_command
 
@@ -53,7 +53,7 @@ def list_rollouts(
     ),
     all_: bool = typer.Option(False, "--all", help="Show all rollouts."),
 ) -> Any:
-    """List rollouts for the current Git-scoped project."""
+    """List rollouts for the current workspace directory."""
     from osmosis_ai.cli.output import (
         ListColumn,
         ListResult,
@@ -61,16 +61,16 @@ def list_rollouts(
         serialize_rollout,
     )
     from osmosis_ai.cli.output.display import format_local_date
-    from osmosis_ai.platform.cli.project_context import git_result_context
     from osmosis_ai.platform.cli.utils import (
         fetch_all_pages,
-        require_git_project_context,
+        require_git_workspace_directory_context,
         validate_list_options,
     )
+    from osmosis_ai.platform.cli.workspace_directory_context import git_result_context
 
     effective_limit, fetch_all = validate_list_options(limit=limit, all_=all_)
 
-    context = require_git_project_context()
+    context = require_git_workspace_directory_context()
     credentials = context.credentials
     git_identity = context.git_identity
 

@@ -39,12 +39,12 @@ def test_list_datasets_preserves_uncategorized_status_brackets(
     monkeypatch.setattr(utils_module, "console", console)
     monkeypatch.setattr(
         dataset_module,
-        "require_git_project_context",
+        "require_git_workspace_directory_context",
         lambda: SimpleNamespace(
             credentials=fake_credentials,
             git_identity=GIT_IDENTITY,
             repo_url=REPO_URL,
-            project_root=tmp_path,
+            workspace_directory=tmp_path,
         ),
     )
 

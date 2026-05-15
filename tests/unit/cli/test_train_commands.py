@@ -34,7 +34,7 @@ FAKE_CREDENTIALS = object()
 def _git_extra() -> dict[str, object]:
     return {
         "git": {"identity": GIT_IDENTITY, "remote_url": REPO_URL},
-        "project_root": "/repo",
+        "workspace_directory": "/repo",
     }
 
 
@@ -42,7 +42,7 @@ def assert_git_context(data: dict[str, object]) -> None:
     assert data == _git_extra()
 
 
-def _find_temp_project_root(start: Path) -> Path | None:
+def _find_temp_workspace_directory(start: Path) -> Path | None:
     current = start.resolve()
     for candidate in (current, *current.parents):
         if (
@@ -54,7 +54,7 @@ def _find_temp_project_root(start: Path) -> Path | None:
     return None
 
 
-def _make_project(root: Path, *, rollout: str = "demo") -> Path:
+def _make_workspace_directory(root: Path, *, rollout: str = "demo") -> Path:
     subprocess.run(
         ["git", "init", "-b", "main", str(root)],
         check=True,
@@ -115,12 +115,14 @@ def _mock_git_context(
         return
 
     def _git_context():
-        project_root = _find_temp_project_root(Path.cwd()) or Path("/repo")
+        workspace_directory = _find_temp_workspace_directory(Path.cwd()) or Path(
+            "/repo"
+        )
         return type(
             "GitContext",
             (),
             {
-                "project_root": project_root.resolve(),
+                "workspace_directory": workspace_directory.resolve(),
                 "git_identity": GIT_IDENTITY,
                 "repo_url": REPO_URL,
                 "credentials": FAKE_CREDENTIALS,
@@ -128,14 +130,14 @@ def _mock_git_context(
         )()
 
     monkeypatch.setattr(
-        "osmosis_ai.platform.cli.utils.require_git_project_context",
+        "osmosis_ai.platform.cli.utils.require_git_workspace_directory_context",
         _git_context,
     )
 
 
 @pytest.fixture(autouse=True)
 def _mock_workspace_repo(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Default `train submit` to treat temp Osmosis projects as Git roots."""
+    """Default `train submit` to treat temp Osmosis workspace directories as Git roots."""
 
     def _git_top_level(start: Path) -> Path | None:
         current = start.resolve()
@@ -340,7 +342,7 @@ class TestStatus:
         assert result.data["name"] == "run-1"
         assert result.data["status"] == "completed"
         assert {
-            key: result.data[key] for key in ("git", "project_root")
+            key: result.data[key] for key in ("git", "workspace_directory")
         } == _git_extra()
         assert "workspace" not in result.data
 
@@ -525,12 +527,12 @@ class TestSubmit:
 
     @staticmethod
     def _write_project(tmp_path: Path, *, rollout: str = "calculator") -> Path:
-        return _make_project(tmp_path, rollout=rollout)
+        return _make_workspace_directory(tmp_path, rollout=rollout)
 
     @classmethod
     def _write_config(cls, tmp_path: Path) -> Path:
-        project_root = cls._write_project(tmp_path)
-        path = project_root / "configs" / "training" / "train.toml"
+        workspace_directory = cls._write_project(tmp_path)
+        path = workspace_directory / "configs" / "training" / "train.toml"
         path.write_text(
             """
 [experiment]
@@ -580,7 +582,7 @@ rollout_batch_size = 64
             "identity": GIT_IDENTITY,
             "remote_url": REPO_URL,
         }
-        assert command_result.resource["project_root"] == str(
+        assert command_result.resource["workspace_directory"] == str(
             config_path.parents[2].resolve()
         )
         assert command_result.message == "Training run submitted: my-training-run"
@@ -648,9 +650,9 @@ rollout_batch_size = 64
         console_capture: StringIO,
         tmp_path: Path,
     ) -> None:
-        project_root = self._write_project(tmp_path, rollout="r")
-        monkeypatch.chdir(project_root)
-        path = project_root / "configs" / "training" / "train.toml"
+        workspace_directory = self._write_project(tmp_path, rollout="r")
+        monkeypatch.chdir(workspace_directory)
+        path = workspace_directory / "configs" / "training" / "train.toml"
         path.write_text(
             """
 [experiment]
@@ -741,9 +743,9 @@ dataset = "d"
         monkeypatch: pytest.MonkeyPatch,
         tmp_path: Path,
     ) -> None:
-        project_root = self._write_project(tmp_path, rollout="graderless")
-        monkeypatch.chdir(project_root)
-        (project_root / "rollouts" / "graderless" / "main.py").write_text(
+        workspace_directory = self._write_project(tmp_path, rollout="graderless")
+        monkeypatch.chdir(workspace_directory)
+        (workspace_directory / "rollouts" / "graderless" / "main.py").write_text(
             """
 from osmosis_ai.rollout import AgentWorkflow
 
@@ -754,7 +756,7 @@ class TestWorkflow(AgentWorkflow):
 """.strip(),
             encoding="utf-8",
         )
-        path = project_root / "configs" / "training" / "graderless.toml"
+        path = workspace_directory / "configs" / "training" / "graderless.toml"
         path.write_text(
             """
 [experiment]
@@ -911,9 +913,9 @@ rollout_batch_size = 64
         console_capture: StringIO,
         tmp_path: Path,
     ) -> None:
-        project_root = self._write_project(tmp_path, rollout="r")
-        monkeypatch.chdir(project_root)
-        path = project_root / "configs" / "training" / "train.toml"
+        workspace_directory = self._write_project(tmp_path, rollout="r")
+        monkeypatch.chdir(workspace_directory)
+        path = workspace_directory / "configs" / "training" / "train.toml"
         path.write_text(
             """
 [experiment]
@@ -963,7 +965,9 @@ rollout_batch_size = 64
 
         assert isinstance(result, OperationResult)
         assert result.resource is not None
-        assert result.resource["project_root"] == str(config_path.parents[2].resolve())
+        assert result.resource["workspace_directory"] == str(
+            config_path.parents[2].resolve()
+        )
 
 
 def test_train_submit_resolves_project_from_cwd_not_config_path(
@@ -980,7 +984,7 @@ def test_train_submit_resolves_project_from_cwd_not_config_path(
         "[experiment]\nrollout='demo'\nentrypoint='main.py'\nmodel_path='m'\ndataset='ds'\n",
         encoding="utf-8",
     )
-    project = _make_project(tmp_path / "project")
+    project = _make_workspace_directory(tmp_path / "project")
     monkeypatch.chdir(project)
 
     rc = main(["--json", "train", "submit", str(config), "--yes"])
@@ -996,7 +1000,7 @@ def test_train_submit_requires_linked_project(
 ) -> None:
     from osmosis_ai.cli.main import main
 
-    project = _make_project(tmp_path / "project")
+    project = _make_workspace_directory(tmp_path / "project")
     config = project / "configs" / "training" / "default.toml"
     config.write_text(
         (
@@ -1028,7 +1032,7 @@ def test_train_submit_accepts_project_subdirectory(
 ) -> None:
     from osmosis_ai.cli.main import main
 
-    project = _make_project(tmp_path / "project")
+    project = _make_workspace_directory(tmp_path / "project")
     config = project / "configs" / "training" / "default.toml"
     config.write_text(
         (
@@ -1058,7 +1062,7 @@ def test_train_submit_accepts_project_subdirectory(
     assert rc == 0
     assert captured.err == ""
     payload = json.loads(captured.out)
-    assert payload["resource"]["project_root"] == str(project.resolve())
+    assert payload["resource"]["workspace_directory"] == str(project.resolve())
 
 
 class TestSubmitNonInteractiveContext:
@@ -1245,7 +1249,7 @@ class TestMetrics:
         assert result.title == "Training Run Metrics"
         assert result.data["platform_url"] == detail.platform_url
         assert {
-            key: result.data[key] for key in ("git", "project_root")
+            key: result.data[key] for key in ("git", "workspace_directory")
         } == _git_extra()
 
 

@@ -68,7 +68,7 @@ def test_write_scaffold_creates_repair_paths(
 
     assert not (target / ".osmosis" / "project.toml").exists()
     assert not (target / ".osmosis" / "research" / "program.md").exists()
-    assert (target / ".osmosis" / "cache" / ".gitkeep").is_file()
+    assert not (target / ".osmosis" / "cache").exists()
     assert (target / "rollouts" / ".gitkeep").is_file()
     assert (target / "configs" / "eval" / ".gitkeep").is_file()
     assert (target / "configs" / "training" / ".gitkeep").is_file()

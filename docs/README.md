@@ -1,15 +1,15 @@
 # Osmosis SDK documentation
 
-## Project Flow
+## Workspace Directory Flow
 
-Create the project in the Osmosis Platform, clone the repository created there,
-then run CLI commands from that checkout.
+Create or open a workspace in the Osmosis Platform, clone the repository created there,
+then run CLI commands from that workspace directory.
 
 ```bash
 git clone <repo-url>
 cd <repo>
 osmosis auth login
-osmosis project doctor
+osmosis doctor
 osmosis template apply multiply              # or add your rollout under rollouts/
 cp configs/training/default.toml configs/training/<run>.toml
 $EDITOR configs/training/<run>.toml          # set rollout, dataset, and model_path
@@ -19,9 +19,9 @@ git push
 osmosis train submit configs/training/<run>.toml
 ```
 
-Platform-scoped commands derive scope from the checkout's `origin` remote and
+Platform-scoped commands derive scope from the workspace directory's `origin` remote and
 send `X-Osmosis-Git: namespace/repo_name`. The CLI does not store or send a
-workspace ID for repo-scoped commands.
+workspace ID for commands scoped by the workspace directory.
 
 ## Workflow commands
 

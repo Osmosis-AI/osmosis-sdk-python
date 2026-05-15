@@ -36,7 +36,7 @@ from osmosis_ai.eval.evaluation.cache import (
 )
 
 
-def _make_project(root: Path) -> Path:
+def _make_workspace_directory(root: Path) -> Path:
     subprocess.run(
         ["git", "init", "-b", "main", str(root)],
         check=True,
@@ -459,14 +459,14 @@ class TestComputeEvalFnsFingerprint:
 
 class TestGetCacheRoot:
     def test_default_path(self, monkeypatch, tmp_path):
-        project = _make_project(tmp_path / "project")
+        project = _make_workspace_directory(tmp_path / "project")
         monkeypatch.chdir(project)
         monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
         root = _get_cache_root()
         assert root == (project / ".osmosis" / "cache" / "eval").resolve()
 
     def test_xdg_cache_home_is_ignored(self, monkeypatch, tmp_path):
-        project = _make_project(tmp_path / "project")
+        project = _make_workspace_directory(tmp_path / "project")
         monkeypatch.chdir(project)
         monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
         root = _get_cache_root()
@@ -477,7 +477,7 @@ def test_eval_cache_default_root_is_project_local(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    project = _make_project(tmp_path / "project")
+    project = _make_workspace_directory(tmp_path / "project")
     monkeypatch.chdir(project)
 
     assert _get_cache_root() == (project / ".osmosis" / "cache" / "eval").resolve()
@@ -491,7 +491,7 @@ def test_eval_cache_dir_is_not_registered(capsys) -> None:
     assert "No such command" in captured.err
 
 
-def test_eval_cache_ls_resolves_local_project_before_listing(
+def test_eval_cache_ls_resolves_workspace_directory_before_listing(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     capsys,
@@ -500,7 +500,7 @@ def test_eval_cache_ls_resolves_local_project_before_listing(
     monkeypatch.setattr(
         "osmosis_ai.eval.evaluation.cli.EvalCommand._run_cache_ls",
         lambda self, **kwargs: pytest.fail(
-            "eval cache ls should resolve local project context before listing"
+            "eval cache ls should resolve local workspace directory context before listing"
         ),
     )
 
@@ -508,7 +508,7 @@ def test_eval_cache_ls_resolves_local_project_before_listing(
 
     captured = capsys.readouterr()
     assert rc == 1
-    assert "cloned Osmosis repository" in captured.err
+    assert "Osmosis workspace directory" in captured.err
 
 
 def test_eval_cache_ls_allows_scaffold_without_credentials_or_origin(
@@ -516,7 +516,7 @@ def test_eval_cache_ls_allows_scaffold_without_credentials_or_origin(
     tmp_path: Path,
     capsys,
 ) -> None:
-    project = _make_project(tmp_path / "project")
+    project = _make_workspace_directory(tmp_path / "project")
     cache_root = project / ".osmosis" / "cache" / "eval"
     _make_cache_entry(cache_root, "abc123", "openai/gpt-4", "data.jsonl")
     monkeypatch.chdir(project)
@@ -539,7 +539,7 @@ def test_eval_cache_rm_allows_scaffold_without_credentials_or_origin(
     tmp_path: Path,
     capsys,
 ) -> None:
-    project = _make_project(tmp_path / "project")
+    project = _make_workspace_directory(tmp_path / "project")
     cache_root = project / ".osmosis" / "cache" / "eval"
     cache_path = _make_cache_entry(cache_root, "abc123", "openai/gpt-4", "data.jsonl")
     monkeypatch.chdir(project)

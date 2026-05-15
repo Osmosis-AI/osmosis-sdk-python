@@ -20,7 +20,7 @@ def build_user_server_command(entrypoint: str) -> list[str]:
 
 def build_user_server_env(
     *,
-    project_root: Path,
+    workspace_directory: Path,
     rollout_dir: Path,
     rollout_name: str,
     entrypoint: str,
@@ -28,7 +28,7 @@ def build_user_server_env(
 ) -> dict[str, str]:
     env = os.environ.copy()
     existing_pythonpath = env.get("PYTHONPATH")
-    path_parts = [str(rollout_dir), str(project_root)]
+    path_parts = [str(rollout_dir), str(workspace_directory)]
     if existing_pythonpath:
         path_parts.append(existing_pythonpath)
     env.update(
@@ -97,7 +97,7 @@ def _raise_if_user_server_exited(
 
 async def start_user_server_process(
     *,
-    project_root: Path,
+    workspace_directory: Path,
     rollout_dir: Path,
     rollout_name: str,
     entrypoint: str,
@@ -116,7 +116,7 @@ async def start_user_server_process(
             *build_user_server_command(entrypoint),
             cwd=rollout_dir,
             env=build_user_server_env(
-                project_root=project_root,
+                workspace_directory=workspace_directory,
                 rollout_dir=rollout_dir,
                 rollout_name=rollout_name,
                 entrypoint=entrypoint,

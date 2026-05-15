@@ -138,7 +138,7 @@ def list_deployments(
     ),
     all_: bool = typer.Option(False, "--all", help="Show all deployments."),
 ) -> Any:
-    """List LoRA deployments for the current Git-scoped project."""
+    """List LoRA deployments for the current workspace directory."""
     from osmosis_ai.cli.output import (
         ListColumn,
         ListResult,
@@ -146,16 +146,16 @@ def list_deployments(
         serialize_deployment,
     )
     from osmosis_ai.platform.api.client import OsmosisClient
-    from osmosis_ai.platform.cli.project_context import git_result_context
     from osmosis_ai.platform.cli.utils import (
         fetch_all_pages,
-        require_git_project_context,
+        require_git_workspace_directory_context,
         validate_list_options,
     )
+    from osmosis_ai.platform.cli.workspace_directory_context import git_result_context
 
     effective_limit, fetch_all = validate_list_options(limit=limit, all_=all_)
 
-    context = require_git_project_context()
+    context = require_git_workspace_directory_context()
     credentials = context.credentials
     git_identity = context.git_identity
 
@@ -217,13 +217,13 @@ def info(
         serialize_deployment,
     )
     from osmosis_ai.platform.api.client import OsmosisClient
-    from osmosis_ai.platform.cli.project_context import git_result_context
     from osmosis_ai.platform.cli.utils import (
         format_date,
-        require_git_project_context,
+        require_git_workspace_directory_context,
     )
+    from osmosis_ai.platform.cli.workspace_directory_context import git_result_context
 
-    context = require_git_project_context()
+    context = require_git_workspace_directory_context()
     credentials = context.credentials
     git_identity = context.git_identity
 
@@ -269,8 +269,8 @@ def deploy(
     """Deploy (or reactivate) a LoRA checkpoint."""
     from osmosis_ai.cli.output import OperationResult, get_output_context
     from osmosis_ai.platform.api.client import OsmosisClient
-    from osmosis_ai.platform.cli.project_context import git_result_context
-    from osmosis_ai.platform.cli.utils import require_git_project_context
+    from osmosis_ai.platform.cli.utils import require_git_workspace_directory_context
+    from osmosis_ai.platform.cli.workspace_directory_context import git_result_context
 
     output = get_output_context()
     if checkpoint is None and (
@@ -281,7 +281,7 @@ def deploy(
             code="INTERACTIVE_REQUIRED",
         )
 
-    context = require_git_project_context()
+    context = require_git_workspace_directory_context()
     credentials = context.credentials
     git_identity = context.git_identity
     if checkpoint is None:
@@ -333,10 +333,10 @@ def undeploy(
     """Undeploy a LoRA checkpoint (transition to ``inactive``)."""
     from osmosis_ai.cli.output import OperationResult, get_output_context
     from osmosis_ai.platform.api.client import OsmosisClient
-    from osmosis_ai.platform.cli.project_context import git_result_context
-    from osmosis_ai.platform.cli.utils import require_git_project_context
+    from osmosis_ai.platform.cli.utils import require_git_workspace_directory_context
+    from osmosis_ai.platform.cli.workspace_directory_context import git_result_context
 
-    context = require_git_project_context()
+    context = require_git_workspace_directory_context()
     credentials = context.credentials
     git_identity = context.git_identity
     client = OsmosisClient()

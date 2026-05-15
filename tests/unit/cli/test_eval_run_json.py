@@ -59,7 +59,7 @@ class _FakeOrchestrator:
         raise AssertionError("cached eval result should not execute pending work")
 
 
-def _make_project(root: Path) -> Path:
+def _make_workspace_directory(root: Path) -> Path:
     subprocess.run(
         ["git", "init", "-b", "main", str(root)],
         check=True,
@@ -95,7 +95,7 @@ def test_eval_run_json_returns_final_summary(
     tmp_path,
     capsys,
 ) -> None:
-    project = _make_project(tmp_path / "project")
+    project = _make_workspace_directory(tmp_path / "project")
     config_path = project / "configs" / "eval" / "eval.toml"
     dataset_path = project / "data" / "data.jsonl"
     config_path.write_text("[eval]\n", encoding="utf-8")
@@ -154,7 +154,7 @@ def test_eval_run_json_returns_final_summary(
     ]
 
 
-def test_eval_run_json_resolves_local_project_before_eval_command(
+def test_eval_run_json_resolves_workspace_directory_before_eval_command(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     capsys,
@@ -163,7 +163,7 @@ def test_eval_run_json_resolves_local_project_before_eval_command(
     monkeypatch.setattr(
         "osmosis_ai.eval.evaluation.cli.EvalCommand.run",
         lambda self, **kwargs: pytest.fail(
-            "eval run should resolve local project context before EvalCommand.run"
+            "eval run should resolve local workspace directory context before EvalCommand.run"
         ),
     )
 
@@ -171,4 +171,4 @@ def test_eval_run_json_resolves_local_project_before_eval_command(
 
     captured = capsys.readouterr()
     assert exit_code == 1
-    assert "cloned Osmosis repository" in captured.err
+    assert "Osmosis workspace directory" in captured.err

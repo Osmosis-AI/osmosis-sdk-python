@@ -564,4 +564,4 @@ class TestRequireGitTopLevel:
                 command_label="`osmosis train submit`",
             )
 
-        assert "Git worktree top-level Osmosis project" in str(exc.value)
+        assert "Git worktree top-level Osmosis workspace directory" in str(exc.value)

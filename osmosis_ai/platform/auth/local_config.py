@@ -15,7 +15,7 @@ def _clear_legacy_config_file() -> None:
 
 
 def clear_all_local_data() -> None:
-    """Clear local CLI credentials and non-project runtime state."""
+    """Clear local CLI credentials and non-workspace-directory runtime state."""
     reset_session()
 
 

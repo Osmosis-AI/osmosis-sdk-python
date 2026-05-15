@@ -37,9 +37,9 @@ def console_capture(monkeypatch: pytest.MonkeyPatch) -> StringIO:
 @pytest.fixture(autouse=True)
 def _mock_git_context(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
-        "osmosis_ai.platform.cli.utils.require_git_project_context",
+        "osmosis_ai.platform.cli.utils.require_git_workspace_directory_context",
         lambda: SimpleNamespace(
-            project_root=Path("/repo"),
+            workspace_directory=Path("/repo"),
             git_identity=GIT_IDENTITY,
             repo_url=REPO_URL,
             credentials=FAKE_CREDENTIALS,

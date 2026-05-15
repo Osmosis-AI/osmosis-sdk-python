@@ -111,25 +111,32 @@ def _auth_error_message(error_code: str | None, *, using_env_token: bool) -> str
 
 
 _REPO_SCOPE_ERROR_MESSAGES: dict[str, str] = {
-    "GIT_SCOPE_REQUIRED": "This command requires a cloned Osmosis Git repository.",
-    "GIT_SCOPE_HEADER_REQUIRED": "This command requires a cloned Osmosis Git repository.",
+    "GIT_SCOPE_REQUIRED": "This command requires an Osmosis workspace directory.",
+    "GIT_SCOPE_HEADER_REQUIRED": (
+        "This command requires an Osmosis workspace directory."
+    ),
     "GIT_SCOPE_INVALID": (
-        "The Git repository identity is invalid. Run from the Platform-connected GitHub repository."
+        "The workspace directory's Git repository identity is invalid. "
+        "Run from the Platform-connected GitHub repository."
     ),
     "GIT_SCOPE_HEADER_INVALID": (
-        "The Git repository identity is invalid. Run from the Platform-connected GitHub repository."
+        "The workspace directory's Git repository identity is invalid. "
+        "Run from the Platform-connected GitHub repository."
     ),
     "GIT_REPOSITORY_NOT_CONNECTED": (
-        "Platform could not resolve this repository. Clone the repository created by Platform or reconnect it there."
+        "Platform could not resolve this workspace directory's repository. "
+        "Clone the repository created by Platform or reconnect it there."
     ),
     "GIT_REPOSITORY_ACCESS_DENIED": (
-        "Your account does not have access to the workspace connected to this repository. "
-        "Run `osmosis auth login` with the correct account."
+        "Your account does not have access to the Platform workspace connected "
+        "to this workspace directory's repository. Run `osmosis auth login` "
+        "with the correct account."
     ),
     "GIT_SCOPE_HEADER_ACCESS_DENIED": (
-        "Platform could not resolve this repository, or your account does not have access "
-        "to its workspace. Clone the Platform-connected repository or run "
-        "`osmosis auth login` with the correct account."
+        "Platform could not resolve this workspace directory's repository, or "
+        "your account does not have access to its Platform workspace. Clone the "
+        "Platform-connected repository or run `osmosis auth login` with the "
+        "correct account."
     ),
 }
 

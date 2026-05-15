@@ -28,7 +28,7 @@ from osmosis_ai.platform.auth import (
     AuthenticationExpiredError,
     PlatformAPIError,
 )
-from osmosis_ai.platform.cli.project_context import git_result_context
+from osmosis_ai.platform.cli.workspace_directory_context import git_result_context
 from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE
 
 from .constants import (
@@ -41,7 +41,7 @@ from .utils import (
     format_dataset_status,
     format_size,
     platform_call,
-    require_git_project_context,
+    require_git_workspace_directory_context,
 )
 
 
@@ -309,7 +309,7 @@ def upload(
     file: str,
 ) -> CommandResult:
     """Upload a dataset file."""
-    context = require_git_project_context()
+    context = require_git_workspace_directory_context()
     credentials = context.credentials
     git_identity = context.git_identity
     output = get_output_context()
@@ -383,7 +383,7 @@ def list_datasets(limit: int = DEFAULT_PAGE_SIZE, all_: bool = False) -> Command
 
     effective_limit, fetch_all = validate_list_options(limit=limit, all_=all_)
 
-    context = require_git_project_context()
+    context = require_git_workspace_directory_context()
     credentials = context.credentials
     git_identity = context.git_identity
     from osmosis_ai.platform.api.client import OsmosisClient
@@ -449,7 +449,7 @@ def info(
     name: str,
 ) -> CommandResult:
     """Show dataset details and processing status."""
-    context = require_git_project_context()
+    context = require_git_workspace_directory_context()
     credentials = context.credentials
     git_identity = context.git_identity
     from osmosis_ai.platform.api.client import OsmosisClient
@@ -481,7 +481,7 @@ def preview(
     rows: int = 5,
 ) -> CommandResult:
     """Preview dataset rows."""
-    context = require_git_project_context()
+    context = require_git_workspace_directory_context()
     credentials = context.credentials
     git_identity = context.git_identity
     from osmosis_ai.platform.api.client import OsmosisClient
@@ -570,7 +570,7 @@ def download(
     overwrite: bool = False,
 ) -> CommandResult:
     """Download a dataset file."""
-    context = require_git_project_context()
+    context = require_git_workspace_directory_context()
     credentials = context.credentials
     git_identity = context.git_identity
     from osmosis_ai.platform.api.client import OsmosisClient

@@ -1,4 +1,4 @@
-"""Project command JSON/plain contracts (local project)."""
+"""Workspace command JSON/plain contracts (local workspace directory)."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from pathlib import Path
 from osmosis_ai.cli import main as cli
 
 
-def _project_root(root: Path, *, origin: str | None = None) -> Path:
+def _workspace_directory(root: Path, *, origin: str | None = None) -> Path:
     subprocess.run(
         ["git", "init", "-b", "main", str(root)],
         check=True,
@@ -38,18 +38,18 @@ def _project_root(root: Path, *, origin: str | None = None) -> Path:
 
 
 def test_project_doctor_json_returns_diagnostic_resource(tmp_path, capsys) -> None:
-    project_root = _project_root(
+    workspace_directory = _workspace_directory(
         tmp_path,
         origin="https://github.com/Acme/Rollouts.git",
     )
 
-    exit_code = cli.main(["--json", "project", "doctor", str(project_root)])
+    exit_code = cli.main(["--json", "doctor", str(workspace_directory)])
 
     captured = capsys.readouterr()
     assert exit_code == 0
     payload = json.loads(captured.out)
     assert payload["resource"]["valid"] is True
-    assert payload["resource"]["project_root"] == str(project_root)
+    assert payload["resource"]["workspace_directory"] == str(workspace_directory)
     assert payload["resource"]["git"]["identity"] == "acme/rollouts"
     assert (
         payload["resource"]["git"]["remote_url"]
@@ -68,17 +68,16 @@ def test_project_doctor_json_reports_missing_paths_without_error(
         capture_output=True,
     )
 
-    exit_code = cli.main(["--json", "project", "doctor", str(tmp_path)])
+    exit_code = cli.main(["--json", "doctor", str(tmp_path)])
 
     captured = capsys.readouterr()
     assert exit_code == 0
     payload = json.loads(captured.out)
     assert payload["resource"]["valid"] is False
     assert payload["resource"]["missing"] == [
-        ".osmosis/cache/",
         "rollouts/",
-        "configs/eval/",
         "configs/training/",
+        "configs/eval/",
         "data/",
         "AGENTS.md",
         "CLAUDE.md",

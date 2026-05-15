@@ -7,7 +7,10 @@ from typing import TYPE_CHECKING
 from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.platform.auth import AuthenticationExpiredError, load_credentials
 
-from .project_contract import resolve_project_root, validate_project_contract
+from .workspace_directory_contract import (
+    resolve_workspace_directory,
+    validate_workspace_directory_contract,
+)
 from .workspace_repo import get_local_git_remote_url, normalize_git_identity
 
 if TYPE_CHECKING:
@@ -15,22 +18,22 @@ if TYPE_CHECKING:
 
 
 @dataclass(frozen=True, slots=True)
-class GitProjectContext:
-    project_root: Path
+class GitWorkspaceDirectoryContext:
+    workspace_directory: Path
     git_identity: str
     repo_url: str | None
     credentials: Credentials
 
 
 @dataclass(frozen=True, slots=True)
-class LocalProjectContext:
-    project_root: Path
+class LocalWorkspaceDirectoryContext:
+    workspace_directory: Path
     git_identity: str | None
     repo_url: str | None
 
 
-def _optional_identity(project_root: Path) -> tuple[str | None, str | None]:
-    remote_url = get_local_git_remote_url(project_root)
+def _optional_identity(workspace_directory: Path) -> tuple[str | None, str | None]:
+    remote_url = get_local_git_remote_url(workspace_directory)
     if remote_url is None:
         return None, None
     try:
@@ -40,27 +43,29 @@ def _optional_identity(project_root: Path) -> tuple[str | None, str | None]:
     return normalized.identity, normalized.display_url
 
 
-def resolve_local_project_context(
+def resolve_local_workspace_directory_context(
     *,
     cwd: Path | None = None,
     require_scaffold: bool = True,
-) -> LocalProjectContext:
-    project_root = resolve_project_root(cwd)
+) -> LocalWorkspaceDirectoryContext:
+    workspace_directory = resolve_workspace_directory(cwd)
     if require_scaffold:
-        validate_project_contract(project_root)
-    git_identity, repo_url = _optional_identity(project_root)
-    return LocalProjectContext(
-        project_root=project_root,
+        validate_workspace_directory_contract(workspace_directory)
+    git_identity, repo_url = _optional_identity(workspace_directory)
+    return LocalWorkspaceDirectoryContext(
+        workspace_directory=workspace_directory,
         git_identity=git_identity,
         repo_url=repo_url,
     )
 
 
-def resolve_git_project_context(*, cwd: Path | None = None) -> GitProjectContext:
-    project_root = resolve_project_root(cwd)
-    validate_project_contract(project_root)
+def resolve_git_workspace_directory_context(
+    *, cwd: Path | None = None
+) -> GitWorkspaceDirectoryContext:
+    workspace_directory = resolve_workspace_directory(cwd)
+    validate_workspace_directory_contract(workspace_directory)
 
-    remote_url = get_local_git_remote_url(project_root)
+    remote_url = get_local_git_remote_url(workspace_directory)
     if remote_url is None:
         raise CLIError(
             "Set `origin` to the Platform-connected repository, or clone the repository from Platform."
@@ -75,8 +80,8 @@ def resolve_git_project_context(*, cwd: Path | None = None) -> GitProjectContext
     if credentials.is_expired():
         raise AuthenticationExpiredError()
 
-    return GitProjectContext(
-        project_root=project_root,
+    return GitWorkspaceDirectoryContext(
+        workspace_directory=workspace_directory,
         git_identity=normalized.identity,
         repo_url=normalized.display_url,
         credentials=credentials,
@@ -84,18 +89,18 @@ def resolve_git_project_context(*, cwd: Path | None = None) -> GitProjectContext
 
 
 def git_result_context(
-    ctx: GitProjectContext | LocalProjectContext,
+    ctx: GitWorkspaceDirectoryContext | LocalWorkspaceDirectoryContext,
 ) -> dict[str, object]:
     return {
         "git": {"identity": ctx.git_identity, "remote_url": ctx.repo_url},
-        "project_root": str(ctx.project_root),
+        "workspace_directory": str(ctx.workspace_directory),
     }
 
 
 __all__ = [
-    "GitProjectContext",
-    "LocalProjectContext",
+    "GitWorkspaceDirectoryContext",
+    "LocalWorkspaceDirectoryContext",
     "git_result_context",
-    "resolve_git_project_context",
-    "resolve_local_project_context",
+    "resolve_git_workspace_directory_context",
+    "resolve_local_workspace_directory_context",
 ]

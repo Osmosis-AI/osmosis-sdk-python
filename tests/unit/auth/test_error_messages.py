@@ -160,12 +160,14 @@ class TestMainExceptionHandlerMessages:
 
         with patch(
             "osmosis_ai.cli.main.app",
-            side_effect=CLIError("This command requires a cloned Osmosis repository."),
+            side_effect=CLIError(
+                "This command requires an Osmosis workspace directory."
+            ),
         ):
             code = main([])
 
         assert code == 1
-        assert "cloned Osmosis repository" in capsys.readouterr().err
+        assert "Osmosis workspace directory" in capsys.readouterr().err
 
     @patch("osmosis_ai.cli.main._registered", True)
     def test_cli_error_preserves_bracketed_section_names(
