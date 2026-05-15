@@ -146,9 +146,9 @@ def list_deployments(
         serialize_deployment,
     )
     from osmosis_ai.platform.api.client import OsmosisClient
+    from osmosis_ai.platform.cli.project_context import git_result_context
     from osmosis_ai.platform.cli.utils import (
         fetch_all_pages,
-        git_result_context,
         require_git_project_context,
         validate_list_options,
     )
@@ -217,9 +217,9 @@ def info(
         serialize_deployment,
     )
     from osmosis_ai.platform.api.client import OsmosisClient
+    from osmosis_ai.platform.cli.project_context import git_result_context
     from osmosis_ai.platform.cli.utils import (
         format_date,
-        git_result_context,
         require_git_project_context,
     )
 
@@ -269,10 +269,8 @@ def deploy(
     """Deploy (or reactivate) a LoRA checkpoint."""
     from osmosis_ai.cli.output import OperationResult, get_output_context
     from osmosis_ai.platform.api.client import OsmosisClient
-    from osmosis_ai.platform.cli.utils import (
-        git_result_context,
-        require_git_project_context,
-    )
+    from osmosis_ai.platform.cli.project_context import git_result_context
+    from osmosis_ai.platform.cli.utils import require_git_project_context
 
     output = get_output_context()
     if checkpoint is None and (
@@ -335,10 +333,8 @@ def undeploy(
     """Undeploy a LoRA checkpoint (transition to ``inactive``)."""
     from osmosis_ai.cli.output import OperationResult, get_output_context
     from osmosis_ai.platform.api.client import OsmosisClient
-    from osmosis_ai.platform.cli.utils import (
-        git_result_context,
-        require_git_project_context,
-    )
+    from osmosis_ai.platform.cli.project_context import git_result_context
+    from osmosis_ai.platform.cli.utils import require_git_project_context
 
     context = require_git_project_context()
     credentials = context.credentials

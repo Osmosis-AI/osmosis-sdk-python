@@ -61,9 +61,9 @@ def list_rollouts(
         serialize_rollout,
     )
     from osmosis_ai.cli.output.display import format_local_date
+    from osmosis_ai.platform.cli.project_context import git_result_context
     from osmosis_ai.platform.cli.utils import (
         fetch_all_pages,
-        git_result_context,
         require_git_project_context,
         validate_list_options,
     )

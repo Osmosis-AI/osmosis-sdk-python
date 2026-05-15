@@ -28,6 +28,7 @@ from osmosis_ai.platform.auth import (
     AuthenticationExpiredError,
     PlatformAPIError,
 )
+from osmosis_ai.platform.cli.project_context import git_result_context
 from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE
 
 from .constants import (
@@ -39,7 +40,6 @@ from .utils import (
     build_dataset_detail_rows,
     format_dataset_status,
     format_size,
-    git_result_context,
     platform_call,
     require_git_project_context,
 )

@@ -419,6 +419,7 @@ def submit(
 ) -> Any:
     """Submit a new training run."""
     from osmosis_ai.cli.output import OperationResult, get_output_context
+    from osmosis_ai.platform.cli.project_context import git_result_context
     from osmosis_ai.platform.cli.project_contract import (
         ensure_project_config_path,
         validate_project_contract,
@@ -428,10 +429,7 @@ def submit(
         load_training_config,
         validate_training_context_paths,
     )
-    from osmosis_ai.platform.cli.utils import (
-        git_result_context,
-        require_git_project_context,
-    )
+    from osmosis_ai.platform.cli.utils import require_git_project_context
 
     command_label = "`osmosis train submit`"
 
@@ -638,10 +636,8 @@ def metrics(
     from osmosis_ai.platform.api.client import OsmosisClient
     from osmosis_ai.platform.api.models import RUN_STATUSES_IN_PROGRESS
     from osmosis_ai.platform.auth.platform_client import PlatformAPIError
-    from osmosis_ai.platform.cli.utils import (
-        git_result_context,
-        require_git_project_context,
-    )
+    from osmosis_ai.platform.cli.project_context import git_result_context
+    from osmosis_ai.platform.cli.utils import require_git_project_context
 
     context = require_git_project_context()
     credentials = context.credentials
@@ -791,10 +787,8 @@ def stop(
 ) -> Any:
     """Stop a training run."""
     from osmosis_ai.cli.output import OperationResult, get_output_context
-    from osmosis_ai.platform.cli.utils import (
-        git_result_context,
-        require_git_project_context,
-    )
+    from osmosis_ai.platform.cli.project_context import git_result_context
+    from osmosis_ai.platform.cli.utils import require_git_project_context
 
     context = require_git_project_context()
     credentials = context.credentials
