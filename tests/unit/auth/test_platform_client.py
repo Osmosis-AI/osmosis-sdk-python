@@ -416,37 +416,37 @@ class TestPlatformRequest:
             (
                 400,
                 "GIT_SCOPE_REQUIRED",
-                "requires a cloned Osmosis Git repository",
+                "requires an Osmosis workspace directory",
             ),
             (
                 400,
                 "GIT_SCOPE_HEADER_REQUIRED",
-                "requires a cloned Osmosis Git repository",
+                "requires an Osmosis workspace directory",
             ),
             (
                 400,
                 "GIT_SCOPE_INVALID",
-                "Git repository identity is invalid",
+                "workspace directory's Git repository identity is invalid",
             ),
             (
                 400,
                 "GIT_SCOPE_HEADER_INVALID",
-                "Git repository identity is invalid",
+                "workspace directory's Git repository identity is invalid",
             ),
             (
                 404,
                 "GIT_REPOSITORY_NOT_CONNECTED",
-                "could not resolve this repository",
+                "could not resolve this workspace directory's repository",
             ),
             (
                 403,
                 "GIT_REPOSITORY_ACCESS_DENIED",
-                "does not have access to the workspace connected to this repository",
+                "does not have access to the Platform workspace connected",
             ),
             (
                 403,
                 "GIT_SCOPE_HEADER_ACCESS_DENIED",
-                "could not resolve this repository",
+                "could not resolve this workspace directory's repository",
             ),
         ],
     )

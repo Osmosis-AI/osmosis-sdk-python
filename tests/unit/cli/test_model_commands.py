@@ -65,7 +65,7 @@ def test_model_list_requires_linked_project(
     rc = main(["--json", "model", "list"])
 
     assert rc == 1
-    assert "cloned Osmosis repository" in capsys.readouterr().err
+    assert "Osmosis workspace directory" in capsys.readouterr().err
 
 
 @pytest.mark.usefixtures("mock_git_context")

@@ -3,7 +3,7 @@
 ## Workspace Directory Flow
 
 Create or open a workspace in the Osmosis Platform, clone the repository created there,
-then run CLI commands from that checkout.
+then run CLI commands from that workspace directory.
 
 ```bash
 git clone <repo-url>
@@ -19,9 +19,9 @@ git push
 osmosis train submit configs/training/<run>.toml
 ```
 
-Platform-scoped commands derive scope from the checkout's `origin` remote and
+Platform-scoped commands derive scope from the workspace directory's `origin` remote and
 send `X-Osmosis-Git: namespace/repo_name`. The CLI does not store or send a
-workspace ID for repo-scoped commands.
+workspace ID for commands scoped by the workspace directory.
 
 ## Workflow commands
 

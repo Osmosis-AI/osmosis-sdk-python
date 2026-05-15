@@ -1,4 +1,4 @@
-"""Workspace directory contract helpers for structured Osmosis checkouts.
+"""Workspace directory contract helpers for structured Osmosis directories.
 
 A workspace directory is the local on-disk repository linked to a Platform
 workspace, distinct from the remote tenant managed by the platform.
@@ -36,7 +36,7 @@ def resolve_workspace_directory(start: Path | None = None) -> Path:
     workspace_directory = find_workspace_directory(start or Path.cwd())
     if workspace_directory is None:
         raise CLIError(
-            "Run this command from a cloned Osmosis repository created by Platform."
+            "Run this command from an Osmosis workspace directory created by Platform."
         )
     return workspace_directory.resolve()
 
@@ -56,14 +56,14 @@ def missing_workspace_directory_paths(workspace_directory: Path) -> list[str]:
 
 
 def validate_workspace_directory_contract(workspace_directory: Path) -> None:
-    """Ensure the Git checkout contains the required Osmosis scaffold paths."""
+    """Ensure the workspace directory contains the required Osmosis scaffold paths."""
     missing_paths = missing_workspace_directory_paths(workspace_directory)
     if not missing_paths:
         return
 
     formatted = "\n".join(f"  - {path}" for path in missing_paths)
     raise CLIError(
-        "This checkout is missing required Osmosis scaffold paths.\n"
+        "This workspace directory is missing required Osmosis scaffold paths.\n"
         f"{formatted}\n"
         "\n"
         "Run `osmosis workspace doctor --fix` in this Git repository to restore the scaffold."

@@ -217,7 +217,7 @@ def test_eval_run_requires_workspace_directory_context_before_config_lookup(
     captured = capsys.readouterr()
 
     assert exit_code == 1
-    assert "cloned Osmosis repository" in captured.err
+    assert "Osmosis workspace directory" in captured.err
 
 
 def test_eval_run_rejects_missing_config_inside_project(tmp_path, monkeypatch, capsys):

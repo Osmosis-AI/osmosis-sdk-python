@@ -154,7 +154,7 @@ def test_eval_run_json_returns_final_summary(
     ]
 
 
-def test_eval_run_json_resolves_local_project_before_eval_command(
+def test_eval_run_json_resolves_workspace_directory_before_eval_command(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     capsys,
@@ -163,7 +163,7 @@ def test_eval_run_json_resolves_local_project_before_eval_command(
     monkeypatch.setattr(
         "osmosis_ai.eval.evaluation.cli.EvalCommand.run",
         lambda self, **kwargs: pytest.fail(
-            "eval run should resolve local project context before EvalCommand.run"
+            "eval run should resolve local workspace directory context before EvalCommand.run"
         ),
     )
 
@@ -171,4 +171,4 @@ def test_eval_run_json_resolves_local_project_before_eval_command(
 
     captured = capsys.readouterr()
     assert exit_code == 1
-    assert "cloned Osmosis repository" in captured.err
+    assert "Osmosis workspace directory" in captured.err

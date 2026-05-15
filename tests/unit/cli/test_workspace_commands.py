@@ -22,7 +22,7 @@ def _make_workspace_directory(root: Path) -> Path:
     return root
 
 
-def test_project_doctor_accepts_project_path(tmp_path, capsys) -> None:
+def test_workspace_doctor_accepts_workspace_directory_path(tmp_path, capsys) -> None:
     workspace_directory = _make_workspace_directory(tmp_path)
 
     rc = main(["workspace", "doctor", str(workspace_directory)])

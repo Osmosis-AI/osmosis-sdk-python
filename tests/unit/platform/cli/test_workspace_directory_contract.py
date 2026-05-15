@@ -70,7 +70,7 @@ def test_resolve_workspace_directory_from_cwd_uses_git_top_level(
     assert resolve_workspace_directory_from_cwd() == project.resolve()
 
 
-def test_resolve_workspace_directory_from_cwd_reports_missing_project(
+def test_resolve_workspace_directory_from_cwd_reports_missing_workspace_directory(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.chdir(tmp_path)
@@ -78,7 +78,7 @@ def test_resolve_workspace_directory_from_cwd_reports_missing_project(
     with pytest.raises(CLIError) as exc:
         resolve_workspace_directory_from_cwd()
 
-    assert "cloned Osmosis repository created by Platform" in str(exc.value)
+    assert "Osmosis workspace directory created by Platform" in str(exc.value)
 
 
 def test_validate_workspace_directory_contract_does_not_require_training_brief(
@@ -113,7 +113,10 @@ def test_validate_contract_reports_missing_scaffold_without_requiring_dot_osmosi
         workspace_directory_contract.validate_workspace_directory_contract(tmp_path)
 
     message = str(exc.value)
-    assert "This checkout is missing required Osmosis scaffold paths." in message
+    assert (
+        "This workspace directory is missing required Osmosis scaffold paths."
+        in message
+    )
     assert "configs/training/" in message
     assert "configs/eval/" in message
     assert "data/" in message
@@ -125,7 +128,7 @@ def test_resolve_workspace_directory_rejects_non_git_directory(tmp_path: Path) -
     with pytest.raises(CLIError) as exc:
         workspace_directory_contract.resolve_workspace_directory(tmp_path)
 
-    assert "cloned Osmosis repository created by Platform" in str(exc.value)
+    assert "Osmosis workspace directory created by Platform" in str(exc.value)
 
 
 def test_ensure_context_path_accepts_canonical_config(tmp_path: Path) -> None:

@@ -238,7 +238,7 @@ def test_project_doctor_fix_outside_project_does_not_create_project(
     assert captured.out == ""
     assert not (tmp_path / ".osmosis" / "project.toml").exists()
     message = json.loads(captured.err)["error"]["message"]
-    assert "cloned Osmosis repository" in message
+    assert "Osmosis workspace directory" in message
     assert "osmosis init" not in message
 
 

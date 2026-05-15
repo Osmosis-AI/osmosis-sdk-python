@@ -491,7 +491,7 @@ def test_eval_cache_dir_is_not_registered(capsys) -> None:
     assert "No such command" in captured.err
 
 
-def test_eval_cache_ls_resolves_local_project_before_listing(
+def test_eval_cache_ls_resolves_workspace_directory_before_listing(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     capsys,
@@ -500,7 +500,7 @@ def test_eval_cache_ls_resolves_local_project_before_listing(
     monkeypatch.setattr(
         "osmosis_ai.eval.evaluation.cli.EvalCommand._run_cache_ls",
         lambda self, **kwargs: pytest.fail(
-            "eval cache ls should resolve local project context before listing"
+            "eval cache ls should resolve local workspace directory context before listing"
         ),
     )
 
@@ -508,7 +508,7 @@ def test_eval_cache_ls_resolves_local_project_before_listing(
 
     captured = capsys.readouterr()
     assert rc == 1
-    assert "cloned Osmosis repository" in captured.err
+    assert "Osmosis workspace directory" in captured.err
 
 
 def test_eval_cache_ls_allows_scaffold_without_credentials_or_origin(

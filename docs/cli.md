@@ -35,7 +35,7 @@ Platform product.
 ## Workspace Directory Flow
 
 Create or open a workspace in the Osmosis Platform, clone the repository created there,
-then run CLI commands from that checkout.
+then run CLI commands from that workspace directory.
 
 ```bash
 git clone <repo-url>
@@ -51,9 +51,9 @@ git push
 osmosis train submit configs/training/<run>.toml
 ```
 
-Platform-scoped commands derive scope from the checkout's `origin` remote and
+Platform-scoped commands derive scope from the workspace directory's `origin` remote and
 send `X-Osmosis-Git: namespace/repo_name`. The CLI does not store or send a
-workspace ID for repo-scoped commands.
+workspace ID for commands scoped by the workspace directory.
 
 For CI:
 
@@ -70,7 +70,7 @@ osmosis workspace doctor ./path/to/workspace-directory
 osmosis workspace doctor --fix
 ```
 
-Inspect and optionally repair the scaffold in the current Git checkout. Without
+Inspect and optionally repair the scaffold in the current workspace directory. Without
 `--fix`, the command reports the workspace directory, Git identity, required scaffold
 paths, and missing paths. Add `--fix` to create missing scaffold paths and
 check for official scaffold file updates; existing scaffold files are refreshed
@@ -163,7 +163,7 @@ osmosis train submit configs/training/my-run.toml --yes   # skip confirmation
 
 The config file must live under `configs/training/` inside a structured Osmosis
 workspace directory. The CLI reads the config locally and sends it to the platform, which
-clones the repository identified by the checkout's `origin` remote for the
+clones the repository identified by the workspace directory's `origin` remote for the
 actual rollout code.
 `osmosis train submit` includes the training preflight checks before launch; run
 `osmosis eval run configs/eval/<name>.toml --limit 1` first when you want an

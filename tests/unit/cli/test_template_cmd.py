@@ -288,7 +288,7 @@ def test_template_apply_outside_project_errors(monkeypatch, tmp_path, capsys) ->
     captured = capsys.readouterr()
 
     assert rc != 0
-    assert "cloned Osmosis repository" in captured.err
+    assert "Osmosis workspace directory" in captured.err
 
 
 # ── bare `osmosis template` ──────────────────────────────────────

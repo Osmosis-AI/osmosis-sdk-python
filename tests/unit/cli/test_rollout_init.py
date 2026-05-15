@@ -323,7 +323,7 @@ def test_rollout_init_outside_project_errors(monkeypatch, tmp_path, capsys) -> N
     captured = capsys.readouterr()
 
     assert rc != 0
-    assert "cloned Osmosis repository" in captured.err
+    assert "Osmosis workspace directory" in captured.err
 
 
 def test_rollout_init_incomplete_project_errors(monkeypatch, tmp_path, capsys) -> None:

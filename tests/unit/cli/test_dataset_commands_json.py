@@ -62,7 +62,7 @@ def test_dataset_list_requires_linked_project(
     rc = main(["--json", "dataset", "list"])
 
     assert rc == 1
-    assert "cloned Osmosis repository" in capsys.readouterr().err
+    assert "Osmosis workspace directory" in capsys.readouterr().err
 
 
 def test_dataset_validate_is_project_independent(

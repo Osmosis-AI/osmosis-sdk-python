@@ -19,7 +19,7 @@
 
 > ⚠️ **Warning**: osmosis-ai is still in active development. APIs may change between versions.
 
-Python SDK for [Osmosis AI](https://platform.osmosis.ai), a platform for training LLMs with reinforcement learning. Implement an **AgentWorkflow** in Python, add a concrete **Grader** for local eval and managed training flows, run an eval smoke test locally with the CLI, then submit training from a Platform-created Git repository checkout.
+Python SDK for [Osmosis AI](https://platform.osmosis.ai), a platform for training LLMs with reinforcement learning. Implement an **AgentWorkflow** in Python, add a concrete **Grader** for local eval and managed training flows, run an eval smoke test locally with the CLI, then submit training from an Osmosis workspace directory.
 
 ## Quick start
 
@@ -28,7 +28,7 @@ Python SDK for [Osmosis AI](https://platform.osmosis.ai), a platform for trainin
 | **Define agents** | One `AgentWorkflow` subclass (+ optional `AgentWorkflowConfig`) in your repo. The training/eval entrypoint must also expose a concrete `Grader` (typically with a `GraderConfig`). |
 | **Layout** | Use a rollout pack directory under `rollouts/<name>/` when loading by rollout name; the CLI adds that directory to `sys.path`. |
 | **Workspace directory** | Create or open a workspace in the Osmosis Platform, then clone the repository created there. |
-| **Check workspace** | `osmosis workspace doctor` — run from the cloned checkout so platform commands resolve the repository from the `origin` remote. Add `--fix` to restore missing scaffold paths. |
+| **Check workspace** | `osmosis workspace doctor` — run from the workspace directory so platform commands resolve the repository from the `origin` remote. Add `--fix` to restore missing scaffold paths. |
 | **Smoke test** | `osmosis eval run configs/eval/<name>.toml --limit 1` — exercises the same rollout server protocol used by training. |
 | **Evaluate** | `osmosis eval run configs/eval/<name>.toml` — run the full eval with optional pass@k and caching. |
 
@@ -55,7 +55,7 @@ In JSON or plain mode, interactive commands fail fast with `INTERACTIVE_REQUIRED
 ## Workspace Directory Flow
 
 Create or open a workspace in the Osmosis Platform, clone the repository created there,
-then run CLI commands from that checkout.
+then run CLI commands from that workspace directory.
 
 ```bash
 git clone <repo-url>
@@ -71,9 +71,9 @@ git push
 osmosis train submit configs/training/<run>.toml
 ```
 
-Platform-scoped commands derive scope from the checkout's `origin` remote and
+Platform-scoped commands derive scope from the workspace directory's `origin` remote and
 send `X-Osmosis-Git: namespace/repo_name`. The CLI does not store or send a
-workspace ID for repo-scoped commands.
+workspace ID for commands scoped by the workspace directory.
 
 Before submitting training from CI, push the repository and authenticate with a
 token:

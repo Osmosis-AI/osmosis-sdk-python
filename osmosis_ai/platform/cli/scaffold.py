@@ -1,7 +1,7 @@
 """SDK-backed scaffold repair for existing Osmosis workspace directories.
 
 This module owns the retained scaffold primitives used to repair an
-already-created Osmosis workspace directory checkout. It is not a bootstrap flow: it does
+already-created Osmosis workspace directory. It is not a bootstrap flow: it does
 not create workspace directories, initialize git repositories, or make initial commits.
 """
 
