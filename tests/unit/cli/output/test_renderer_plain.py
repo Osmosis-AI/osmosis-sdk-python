@@ -11,6 +11,7 @@ from osmosis_ai.cli.output.renderer import render
 from osmosis_ai.cli.output.result import (
     DetailField,
     DetailResult,
+    DetailSection,
     ListColumn,
     ListResult,
     MessageResult,
@@ -38,6 +39,48 @@ def test_detail_renders_label_value_lines() -> None:
     stdout, stderr = _render(result)
     assert stdout == "ID: ds_1\nFile: train.jsonl\n"
     assert stderr == ""
+
+
+def test_plain_detail_prints_section_plain_lines_and_hints() -> None:
+    result = DetailResult(
+        title="Training Run",
+        data={"id": "run_1"},
+        fields=[DetailField(label="Name", value="run-a")],
+        sections=[
+            DetailSection(
+                plain_lines=["Checkpoint: ckpt-a"],
+            )
+        ],
+        display_hints=["Deploy: osmosis deploy ckpt-a"],
+    )
+    stdout, _ = _render(result)
+    assert stdout.splitlines() == [
+        "Name: run-a",
+        "Checkpoint: ckpt-a",
+        "Deploy: osmosis deploy ckpt-a",
+    ]
+
+
+def test_plain_detail_section_lines_preserve_literal_bracket_text() -> None:
+    result = DetailResult(
+        title="Training Run",
+        data={"id": "run_1"},
+        sections=[
+            DetailSection(plain_lines=["Checkpoint: [red]danger[/red]"]),
+        ],
+    )
+    stdout, _ = _render(result)
+    assert stdout == "Checkpoint: [red]danger[/red]\n"
+
+
+def test_plain_detail_display_hints_preserve_literal_bracket_text() -> None:
+    result = DetailResult(
+        title="Training Run Metrics",
+        data={"id": "run_1"},
+        display_hints=["Saved metrics to /tmp/[red]metrics[/red].json"],
+    )
+    stdout, _ = _render(result)
+    assert stdout == "Saved metrics to /tmp/[red]metrics[/red].json\n"
 
 
 def test_list_renders_tab_separated_without_heading() -> None:

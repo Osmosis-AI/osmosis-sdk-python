@@ -20,6 +20,7 @@ from osmosis_ai.cli.output import (
     get_output_context,
     serialize_dataset,
 )
+from osmosis_ai.cli.output.display import created_column_label, format_local_date
 from osmosis_ai.cli.paths import parse_cli_path
 from osmosis_ai.cli.prompts import confirm
 from osmosis_ai.platform.api.models import STATUSES_IN_PROGRESS
@@ -37,11 +38,9 @@ from .constants import (
 from .utils import (
     build_dataset_detail_rows,
     format_dataset_status,
-    format_dim_date,
     format_size,
     git_result_context,
     platform_call,
-    platform_entity_url,
     require_git_project_context,
 )
 
@@ -351,23 +350,27 @@ def upload(
         git_identity=git_identity,
     )
 
-    url = platform_entity_url(git_identity, "datasets", dataset.id)
     resource = serialize_dataset(dataset)
     resource.update(git_result_context(context))
+    display_next_steps = [
+        (
+            f"Processing will continue on the platform. Check status at: {dataset.platform_url}"
+            if dataset.platform_url
+            else f"Processing will continue on the platform. Check status with: osmosis dataset info {dataset.id}"
+        )
+    ]
+    next_steps_structured = (
+        [{"label": "View dataset", "url": dataset.platform_url}]
+        if dataset.platform_url
+        else [{"action": "dataset_info", "id": dataset.id}]
+    )
     return OperationResult(
         operation="dataset.upload",
         status="success",
         resource=resource,
         message=f"Dataset uploaded: {dataset.file_name}",
-        display_next_steps=[
-            f"Processing will continue on the platform. Check status at: {url}"
-        ],
-        next_steps_structured=[
-            {
-                "label": "View dataset",
-                "url": url,
-            }
-        ],
+        display_next_steps=display_next_steps,
+        next_steps_structured=next_steps_structured,
     )
 
 
@@ -420,18 +423,22 @@ def list_datasets(limit: int = DEFAULT_PAGE_SIZE, all_: bool = False) -> Command
         next_offset=next_offset,
         extra=git_result_context(context),
         columns=[
-            ListColumn(key="file_name", label="File"),
-            ListColumn(key="status", label="Status"),
-            ListColumn(key="file_size", label="Size"),
-            ListColumn(key="created_at", label="Created"),
-            ListColumn(key="id", label="ID", no_wrap=True),
+            ListColumn(key="file_name", label="Name", ratio=4, overflow="fold"),
+            ListColumn(key="status", label="Status", no_wrap=True, ratio=1),
+            ListColumn(key="file_size", label="Size", no_wrap=True, ratio=1),
+            ListColumn(
+                key="created_at",
+                label=created_column_label(),
+                no_wrap=True,
+                ratio=1,
+            ),
         ],
         display_items=[
             {
                 **serialize_dataset(d),
                 "status": format_dataset_status(d),
                 "file_size": format_size(d.file_size),
-                "created_at": format_dim_date(d.created_at),
+                "created_at": format_local_date(d.created_at),
             }
             for d in datasets
         ],
@@ -465,6 +472,7 @@ def info(
         title="Dataset",
         data=data,
         fields=_detail_fields(rows),
+        display_hints=[f"View: {ds.platform_url}"] if ds.platform_url else [],
     )
 
 

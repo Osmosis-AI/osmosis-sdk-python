@@ -112,7 +112,11 @@ def _auth_error_message(error_code: str | None, *, using_env_token: bool) -> str
 
 _REPO_SCOPE_ERROR_MESSAGES: dict[str, str] = {
     "GIT_SCOPE_REQUIRED": "This command requires a cloned Osmosis Git repository.",
+    "GIT_SCOPE_HEADER_REQUIRED": "This command requires a cloned Osmosis Git repository.",
     "GIT_SCOPE_INVALID": (
+        "The Git repository identity is invalid. Run from the Platform-connected GitHub repository."
+    ),
+    "GIT_SCOPE_HEADER_INVALID": (
         "The Git repository identity is invalid. Run from the Platform-connected GitHub repository."
     ),
     "GIT_REPOSITORY_NOT_CONNECTED": (
@@ -121,6 +125,11 @@ _REPO_SCOPE_ERROR_MESSAGES: dict[str, str] = {
     "GIT_REPOSITORY_ACCESS_DENIED": (
         "Your account does not have access to the workspace connected to this repository. "
         "Run `osmosis auth login` with the correct account."
+    ),
+    "GIT_SCOPE_HEADER_ACCESS_DENIED": (
+        "Platform could not resolve this repository, or your account does not have access "
+        "to its workspace. Clone the Platform-connected repository or run "
+        "`osmosis auth login` with the correct account."
     ),
 }
 
@@ -238,7 +247,7 @@ def platform_request(
         if not git_identity:
             raise PlatformAPIError(
                 "Git-scoped platform requests require an explicit git_identity.",
-                error_code="GIT_SCOPE_REQUIRED",
+                error_code="GIT_SCOPE_HEADER_REQUIRED",
             )
         req_headers["X-Osmosis-Git"] = git_identity
 

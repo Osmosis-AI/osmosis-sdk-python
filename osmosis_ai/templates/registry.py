@@ -1,10 +1,12 @@
-"""Discovery of bundled project templates."""
+"""Discovery of workspace template recipes."""
 
 from __future__ import annotations
 
-from importlib.resources import files
-from importlib.resources.abc import Traversable
 from pathlib import Path
+
+from osmosis_ai.cli.errors import CLIError
+from osmosis_ai.templates.catalog import TemplateRecipe, recipes_by_name
+from osmosis_ai.templates.source import workspace_template_root
 
 
 class TemplateNotFoundError(LookupError):
@@ -15,54 +17,79 @@ class TemplateNotFoundError(LookupError):
         self.name = name
 
 
-def cookbook_root() -> Traversable:
-    """Return the cookbook resource root."""
-    return files("osmosis_ai.templates") / "cookbook"
-
-
-def list_templates() -> list[str]:
-    """Return sorted visible template names."""
-    root = cookbook_root()
-    names: list[str] = []
-    for entry in root.iterdir():
-        if not entry.is_dir():
-            continue
-        if entry.name.startswith((".", "_")):
-            continue
-        names.append(entry.name)
-    names.sort()
-    return names
-
-
-def template_path(name: str) -> Traversable:
-    """Resolve a template name to its resource directory."""
+def _validate_template_name(name: str) -> None:
     if not name or name.startswith((".", "_")) or "/" in name or "\\" in name:
         raise TemplateNotFoundError(name)
 
-    candidate = cookbook_root() / name
-    if not candidate.is_dir():
+
+def list_templates() -> list[str]:
+    """Return sorted visible recipe names."""
+    return sorted(recipes_by_name())
+
+
+def template_path(name: str, *, refresh: bool = False) -> Path:
+    """Resolve a recipe name to the workspace template root."""
+    _validate_template_name(name)
+    if name not in recipes_by_name():
         raise TemplateNotFoundError(name)
-    return candidate
+    return workspace_template_root(refresh=refresh)
 
 
-def iter_template_files(name: str) -> list[Path]:
-    """Return relative file paths inside a template."""
-    from importlib.resources import as_file
+def template_recipe(name: str) -> TemplateRecipe:
+    """Resolve a recipe name to its SDK catalog entry."""
+    _validate_template_name(name)
+    recipes = recipes_by_name()
+    try:
+        return recipes[name]
+    except KeyError as exc:
+        raise TemplateNotFoundError(name) from exc
 
-    template_root = template_path(name)
-    rel_paths: list[Path] = []
-    with as_file(template_root) as concrete_root:
-        for fs_path in sorted(Path(concrete_root).rglob("*")):
-            if not fs_path.is_file():
-                continue
-            rel_paths.append(fs_path.relative_to(concrete_root))
-    return rel_paths
+
+def _expand_catalog_files(root: Path, patterns: tuple[Path, ...]) -> list[Path]:
+    """Expand SDK catalog file patterns against the template source checkout."""
+    rel_paths: set[Path] = set()
+    for pattern in patterns:
+        pattern_text = pattern.as_posix()
+        if any(part in {"*", "**"} or "*" in part for part in pattern.parts):
+            if pattern.parts[-1] == "**":
+                matches = sorted((root / Path(*pattern.parts[:-1])).rglob("*"))
+            else:
+                matches = sorted(root.glob(pattern_text))
+            file_matches = [path for path in matches if path.is_file()]
+            if not file_matches:
+                raise CLIError(
+                    f"Template pattern matched no files: {pattern_text}",
+                    code="NOT_FOUND",
+                )
+            for match in file_matches:
+                rel_paths.add(match.relative_to(root))
+            continue
+
+        candidate = root / pattern
+        if not candidate.is_file():
+            raise CLIError(
+                f"Template file does not exist: {pattern_text}",
+                code="NOT_FOUND",
+            )
+        rel_paths.add(pattern)
+    return sorted(rel_paths, key=lambda path: path.as_posix())
+
+
+def iter_template_files(
+    name: str, *, root: Path | None = None, refresh: bool = False
+) -> list[Path]:
+    """Return relative file paths declared by the SDK recipe catalog."""
+    recipe = template_recipe(name)
+    template_root = (
+        root if root is not None else workspace_template_root(refresh=refresh)
+    )
+    return _expand_catalog_files(template_root, recipe.files)
 
 
 __all__ = [
     "TemplateNotFoundError",
-    "cookbook_root",
     "iter_template_files",
     "list_templates",
     "template_path",
+    "template_recipe",
 ]

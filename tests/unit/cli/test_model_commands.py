@@ -97,7 +97,6 @@ class TestListModels:
         base = BaseModelInfo(
             id="model_base_12345678901234567890",
             model_name="gpt-2",
-            status="available",
             creator_name="openai",
             created_at="2025-06-01T00:00:00Z",
         )
@@ -116,7 +115,39 @@ class TestListModels:
         assert isinstance(result, ListResult)
         assert result.title == "Base Models"
         assert result.items[0]["model_name"] == "gpt-2"
-        assert result.items[0]["status"] == "available"
+        assert "status" not in result.items[0]
+
+    def test_list_display_columns_use_name_label_and_hide_id(
+        self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
+    ) -> None:
+        base = BaseModelInfo(
+            id="model_base_12345678901234567890",
+            model_name="Qwen/Qwen3-8B",
+            base_model="Qwen/Qwen3",
+            created_at="2025-06-01T00:00:00Z",
+        )
+
+        class FakeClient:
+            def list_base_models(
+                self, limit=30, offset=0, *, git_identity, credentials=None
+            ):
+                assert git_identity == GIT_IDENTITY
+                return PaginatedBaseModels(models=[base], total_count=1, has_more=False)
+
+        monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        result = model_module.list_models(limit=30, all_=False)
+
+        assert [column.label for column in result.columns] == [
+            "Name",
+            "Base",
+            result.columns[2].label,
+        ]
+        assert result.columns[0].key == "model_name"
+        assert result.columns[0].ratio == 4
+        assert result.columns[0].overflow == "fold"
+        assert result.columns[2].label.startswith("Created (")
+        assert all(column.key != "id" for column in result.columns)
+        assert all(column.key != "status" for column in result.columns)
 
     def test_list_has_more_truncation(
         self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
@@ -124,7 +155,6 @@ class TestListModels:
         base = BaseModelInfo(
             id="model_base_12345678901234567890",
             model_name="model-a",
-            status="available",
             created_at="2025-01-01",
         )
 

@@ -31,6 +31,7 @@ def list_models(
         get_output_context,
         serialize_model,
     )
+    from osmosis_ai.cli.output.display import created_column_label, format_local_date
     from osmosis_ai.platform.cli.utils import (
         fetch_all_pages,
         git_result_context,
@@ -81,11 +82,20 @@ def list_models(
         next_offset=next_offset,
         extra=git_result_context(context),
         columns=[
-            ListColumn(key="model_name", label="Model"),
-            ListColumn(key="base_model", label="Base"),
-            ListColumn(key="status", label="Status"),
-            ListColumn(key="creator_name", label="Creator"),
-            ListColumn(key="created_at", label="Created"),
-            ListColumn(key="id", label="ID", no_wrap=True),
+            ListColumn(key="model_name", label="Name", ratio=4, overflow="fold"),
+            ListColumn(key="base_model", label="Base", ratio=2, overflow="fold"),
+            ListColumn(
+                key="created_at",
+                label=created_column_label(),
+                no_wrap=True,
+                ratio=1,
+            ),
+        ],
+        display_items=[
+            {
+                **serialize_model(model),
+                "created_at": format_local_date(model.created_at),
+            }
+            for model in models
         ],
     )

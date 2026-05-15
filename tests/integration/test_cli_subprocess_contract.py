@@ -74,7 +74,6 @@ def test_project_doctor_fix_in_git_repo_creates_runtime_free_scaffold(
             "project",
             "doctor",
             "--fix",
-            "--yes",
         ],
         cwd=project,
         capture_output=True,
@@ -85,7 +84,8 @@ def test_project_doctor_fix_in_git_repo_creates_runtime_free_scaffold(
 
     assert proc.returncode == 0, proc.stderr
     assert not (project / ".osmosis" / "project.toml").exists()
-    assert (project / "research" / "program.md").is_file()
+    assert (project / ".osmosis" / "cache").is_dir()
+    assert (project / "rollouts").is_dir()
 
 
 def test_eval_cache_ls_with_filter_json_is_single_stdout_envelope(

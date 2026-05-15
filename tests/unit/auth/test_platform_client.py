@@ -232,7 +232,7 @@ class TestPlatformRequest:
         with pytest.raises(PlatformAPIError, match="explicit git_identity") as exc_info:
             platform_request("/api/test", credentials=creds)
 
-        assert exc_info.value.error_code == "GIT_SCOPE_REQUIRED"
+        assert exc_info.value.error_code == "GIT_SCOPE_HEADER_REQUIRED"
 
     @patch("osmosis_ai.platform.auth.platform_client.urlopen")
     def test_no_scope_header_when_require_git_repo_false(
@@ -420,7 +420,17 @@ class TestPlatformRequest:
             ),
             (
                 400,
+                "GIT_SCOPE_HEADER_REQUIRED",
+                "requires a cloned Osmosis Git repository",
+            ),
+            (
+                400,
                 "GIT_SCOPE_INVALID",
+                "Git repository identity is invalid",
+            ),
+            (
+                400,
+                "GIT_SCOPE_HEADER_INVALID",
                 "Git repository identity is invalid",
             ),
             (
@@ -432,6 +442,11 @@ class TestPlatformRequest:
                 403,
                 "GIT_REPOSITORY_ACCESS_DENIED",
                 "does not have access to the workspace connected to this repository",
+            ),
+            (
+                403,
+                "GIT_SCOPE_HEADER_ACCESS_DENIED",
+                "could not resolve this repository",
             ),
         ],
     )

@@ -96,13 +96,6 @@ def test_upload_passes_git_context_to_api_calls_without_subscription_preflight(
     monkeypatch.setattr(
         dataset_module, "console", Console(file=output, force_terminal=False)
     )
-    monkeypatch.setattr(
-        dataset_module,
-        "platform_entity_url",
-        lambda identity, entity, item_id: (
-            f"https://example.com/{identity}/{entity}/{item_id}"
-        ),
-    )
     from contextlib import nullcontext
 
     monkeypatch.setattr(
@@ -160,6 +153,7 @@ def test_upload_passes_git_context_to_api_calls_without_subscription_preflight(
                 file_name="data",
                 file_size=2,
                 status="uploaded",
+                platform_url="https://platform.osmosis.ai/ws/datasets/dataset-1",
             )
 
     monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
@@ -178,9 +172,15 @@ def test_upload_passes_git_context_to_api_calls_without_subscription_preflight(
     assert result.resource["status"] == "uploaded"
     assert_git_context(result.resource)
     assert (
-        f"https://example.com/{GIT_IDENTITY}/datasets/dataset-1"
+        "https://platform.osmosis.ai/ws/datasets/dataset-1"
         in result.display_next_steps[0]
     )
+    assert result.next_steps_structured == [
+        {
+            "label": "View dataset",
+            "url": "https://platform.osmosis.ai/ws/datasets/dataset-1",
+        }
+    ]
 
 
 def test_download_uses_git_context_and_saves_file(

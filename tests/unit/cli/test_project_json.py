@@ -22,12 +22,18 @@ def _project_root(root: Path, *, origin: str | None = None) -> Path:
             capture_output=True,
         )
     for rel_path in (
+        ".osmosis/cache",
         "rollouts",
         "configs/training",
         "configs/eval",
         "data",
     ):
         (root / rel_path).mkdir(parents=True, exist_ok=True)
+    (root / "configs" / "AGENTS.md").write_text("config agents\n", encoding="utf-8")
+    (root / ".claude").mkdir()
+    (root / ".claude" / "settings.json").write_text("{}\n", encoding="utf-8")
+    (root / "AGENTS.md").write_text("agents\n", encoding="utf-8")
+    (root / "CLAUDE.md").write_text("claude\n", encoding="utf-8")
     return root
 
 
@@ -69,8 +75,13 @@ def test_project_doctor_json_reports_missing_paths_without_error(
     payload = json.loads(captured.out)
     assert payload["resource"]["valid"] is False
     assert payload["resource"]["missing"] == [
+        ".osmosis/cache/",
         "rollouts/",
-        "configs/training/",
         "configs/eval/",
+        "configs/training/",
         "data/",
+        "AGENTS.md",
+        "CLAUDE.md",
+        "configs/AGENTS.md",
+        ".claude/settings.json",
     ]

@@ -38,6 +38,7 @@ if (
 # Configuration directory and credentials file
 CONFIG_DIR = Path.home() / ".config" / "osmosis"
 CREDENTIALS_FILE = CONFIG_DIR / "credentials.json"
+CACHE_DIR = CONFIG_DIR / "cache"
 
 # Token expiration (for display purposes, actual expiration is set by server)
 DEFAULT_TOKEN_EXPIRY_DAYS = 90

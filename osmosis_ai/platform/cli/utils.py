@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 from osmosis_ai.cli.console import Console, console
 from osmosis_ai.cli.errors import CLIError
+from osmosis_ai.cli.output.display import format_local_datetime
 from osmosis_ai.platform.api.models import (
     RUN_STATUSES_ERROR,
     RUN_STATUSES_IN_PROGRESS,
@@ -20,7 +21,6 @@ from osmosis_ai.platform.auth import (
     AuthenticationExpiredError,
     load_credentials,
 )
-from osmosis_ai.platform.auth.config import PLATFORM_URL
 from osmosis_ai.platform.cli.project_context import (
     GitProjectContext,
     LocalProjectContext,
@@ -152,14 +152,6 @@ def format_dim_date(iso_str: str | None) -> str:
     return console.format_styled(format_date(iso_str), "dim")
 
 
-def platform_entity_url(ws_name: str, *segments: str) -> str:
-    """Build a platform URL for a workspace entity."""
-    base = f"{PLATFORM_URL}/{ws_name}"
-    if segments:
-        base += "/" + "/".join(segments)
-    return base
-
-
 def build_dataset_detail_rows(ds: Any) -> list[tuple[str, str]]:
     """Build common detail rows for a dataset."""
     rows: list[tuple[str, str]] = [
@@ -196,7 +188,7 @@ def build_run_detail_rows(r: Any) -> list[tuple[str, str]]:
     if r.creator_name:
         rows.append(("Creator", console.escape(r.creator_name)))
     if r.created_at:
-        rows.append(("Created", format_date(r.created_at)))
+        rows.append(("Created", format_local_datetime(r.created_at)))
     return rows
 
 

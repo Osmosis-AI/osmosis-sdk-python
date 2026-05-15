@@ -90,6 +90,7 @@ def _dataset(
     file_size: int = 100,
     status: str = "uploaded",
     data_preview=None,
+    platform_url: str | None = None,
 ) -> DatasetFile:
     return DatasetFile(
         id=id,
@@ -99,6 +100,7 @@ def _dataset(
         data_preview=data_preview,
         created_at="2026-04-26T00:00:00Z",
         updated_at="2026-04-26T00:00:01Z",
+        platform_url=platform_url,
     )
 
 
@@ -154,10 +156,13 @@ def test_dataset_list_plain_emits_tab_separated_rows(monkeypatch, capsys) -> Non
     captured = capsys.readouterr()
 
     assert exit_code == 0
-    assert captured.out.splitlines() == [
-        "a.jsonl\t[uploaded]\t100 B\t2026-04-26\tds_1",
-        "b.jsonl\t[pending]\t100 B\t2026-04-26\tds_2",
-    ]
+    lines = captured.out.splitlines()
+    assert len(lines[0].split("\t")) == 4
+    assert lines[0].startswith("a.jsonl\t[uploaded]\t100 B\t")
+    assert len(lines[1].split("\t")) == 4
+    assert lines[1].startswith("b.jsonl\t[pending]\t100 B\t")
+    assert "\tds_1" not in lines[0]
+    assert "\tds_2" not in lines[1]
 
 
 def test_dataset_info_json_envelope(monkeypatch, capsys) -> None:
@@ -180,6 +185,25 @@ def test_dataset_info_json_envelope(monkeypatch, capsys) -> None:
     assert payload["data"]["id"] == "ds_1"
     assert payload["data"]["file_size"] == 12345
     assert_git_context(payload["data"])
+
+
+def test_dataset_info_places_platform_url_after_table(monkeypatch) -> None:
+    _stub_git_context(monkeypatch)
+    expected_url = "https://platform.osmosis.ai/ws/datasets/ds_1"
+
+    class FakeClient:
+        def get_dataset(self, name, *, git_identity, credentials=None):
+            assert name == "ds_1"
+            assert git_identity == GIT_IDENTITY
+            return _dataset(file_size=12345, platform_url=expected_url)
+
+    monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+
+    result = dataset_module.info("ds_1")
+
+    assert result.data["platform_url"] == expected_url
+    assert all(field.value != expected_url for field in result.fields)
+    assert result.display_hints == [f"View: {expected_url}"]
 
 
 def test_dataset_preview_json_includes_rows(monkeypatch, capsys) -> None:

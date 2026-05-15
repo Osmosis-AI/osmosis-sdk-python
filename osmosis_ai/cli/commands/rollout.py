@@ -2,16 +2,48 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import typer
 
 from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE
 
+if TYPE_CHECKING:
+    from osmosis_ai.cli.output import CommandResult
+else:
+    CommandResult = Any
+
 app: typer.Typer = typer.Typer(
-    help="Manage rollouts (list).",
+    help="Manage rollouts (init, list).",
     no_args_is_help=True,
 )
+
+
+@app.command("init")
+def init(
+    name: str = typer.Argument(
+        ...,
+        help="Rollout name (lowercase letters, digits, and hyphens).",
+    ),
+    force: bool = typer.Option(
+        False,
+        "--force",
+        "-f",
+        help=(
+            "Overwrite existing rollouts/<name>/ directory and configs/{eval,training}/"
+            "<name>.toml. Without --force, the command refuses to clobber existing paths."
+        ),
+    ),
+) -> CommandResult | None:
+    """Scaffold a new rollout from the workspace template placeholders.
+
+    Creates ``rollouts/<name>/{main.py,pyproject.toml,README.md}`` and
+    ``configs/{eval,training}/<name>.toml`` so you can start editing right away.
+    Must run inside an Osmosis project (``.osmosis/project.toml`` must exist).
+    """
+    from osmosis_ai.templates.init import init_command
+
+    return init_command(name=name, force=force)
 
 
 @app.command("list")
@@ -28,6 +60,7 @@ def list_rollouts(
         get_output_context,
         serialize_rollout,
     )
+    from osmosis_ai.cli.output.display import format_local_date
     from osmosis_ai.platform.cli.utils import (
         fetch_all_pages,
         git_result_context,
@@ -70,19 +103,61 @@ def list_rollouts(
             has_more = page.has_more
             next_offset = page.next_offset
 
+    items = [serialize_rollout(rollout) for rollout in rollouts]
+
     return ListResult(
         title="Rollouts",
-        items=[serialize_rollout(rollout) for rollout in rollouts],
+        items=items,
         total_count=total_count,
         has_more=has_more,
         next_offset=next_offset,
         extra=git_result_context(context),
         columns=[
-            ListColumn(key="name", label="Name"),
-            ListColumn(key="is_active", label="Active"),
-            ListColumn(key="repo_full_name", label="Repository"),
-            ListColumn(key="last_synced_commit_sha", label="Commit"),
-            ListColumn(key="created_at", label="Created"),
-            ListColumn(key="id", label="ID", no_wrap=True),
+            ListColumn(
+                key="name",
+                label="Name",
+                ratio=6,
+                overflow="fold",
+                min_width=20,
+            ),
+            ListColumn(
+                key="is_active",
+                label="Active",
+                no_wrap=True,
+                min_width=6,
+                max_width=6,
+            ),
+            ListColumn(
+                key="repo_full_name",
+                label="Repo",
+                no_wrap=True,
+                overflow="ellipsis",
+                ratio=2,
+                min_width=10,
+                max_width=10,
+            ),
+            ListColumn(
+                key="last_synced_commit_sha",
+                label="Commit",
+                no_wrap=True,
+                min_width=8,
+                max_width=8,
+            ),
+            ListColumn(
+                key="created_at",
+                label="Created",
+                no_wrap=True,
+                min_width=10,
+                max_width=10,
+            ),
+        ],
+        display_items=[
+            {
+                **item,
+                "is_active": "yes" if item["is_active"] else "no",
+                "last_synced_commit_sha": (item["last_synced_commit_sha"] or "")[:8],
+                "created_at": format_local_date(item["created_at"]).split(" ", 1)[0],
+            }
+            for item in items
         ],
     )
