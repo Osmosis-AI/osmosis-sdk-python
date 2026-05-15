@@ -1,0 +1,23 @@
+tests/unit/platform/cli/test_workspace_repo.py
+  s_8032c779241d68::t_e8161aa266140b 210-217
+  s_8032c779241d68::t_7a58d73579c85e 7,66-70,72-78,83-163
+osmosis_ai/platform/cli/workspace_repo.py
+  s_8032c779241d68::t_aacdf01ac4e8c3 13-14,18-20,53-54,58-64,106-117,119-137,139-177
+  s_8032c779241d68::t_866c33894c7fe5 5,118,138,178-186
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.8",
+  "base_commit_sha": "f11f5ed2aa1aa6efc767d305bb59e0c5ba08b96c",
+  "prompts": {},
+  "sessions": {
+    "s_8032c779241d68": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "148eded6-63fc-4951-aae0-99a7b7a0df70",
+        "model": "gpt-5.5-extra-high"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}
