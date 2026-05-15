@@ -23,10 +23,10 @@ _SUPPORTED_COMMAND_GROUPS = {
     "deployment",
     "eval",
     "model",
-    "project",
     "rollout",
     "template",
     "train",
+    "workspace",
 }
 
 _REMOVED_TOP_LEVEL_COMMANDS = {
@@ -43,9 +43,12 @@ _REMOVED_TWO_TOKEN_COMMANDS = {
     ("deployment", "delete"),
     ("deployment", "rename"),
     ("model", "delete"),
+    ("project", "doctor"),
+    ("project", "refresh-agents"),
     ("project", "info"),
     ("project", "init"),
     ("project", "list"),
+    ("project", "validate"),
     ("rollout", "validate"),
     ("train", "delete"),
     ("train", "info"),

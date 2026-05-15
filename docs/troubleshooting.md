@@ -39,18 +39,18 @@ Not logged in. Run 'osmosis auth login' first.
 ```
 
 Run `osmosis auth login` again before using platform-scoped commands from a
-project repository checkout.
+workspace directory checkout.
 
-## Project Flow
+## Workspace Directory Flow
 
-Create the project in the Osmosis Platform, clone the repository created there,
+Create or open a workspace in the Osmosis Platform, clone the repository created there,
 then run CLI commands from that checkout.
 
 ```bash
 git clone <repo-url>
 cd <repo>
 osmosis auth login
-osmosis project doctor
+osmosis workspace doctor
 osmosis template apply multiply              # or add your rollout under rollouts/
 cp configs/training/default.toml configs/training/<run>.toml
 $EDITOR configs/training/<run>.toml          # set rollout, dataset, and model_path
@@ -64,10 +64,10 @@ Platform-scoped commands derive scope from the checkout's `origin` remote and
 send `X-Osmosis-Git: namespace/repo_name`. The CLI does not store or send a
 workspace ID for repo-scoped commands.
 
-### Wrong project repository
+### Wrong workspace directory
 
 Confirm that the checkout's `origin` remote matches the repository created for
-the intended Osmosis Platform project. If it does not, clone the correct
+the intended Osmosis Platform workspace. If it does not, clone the correct
 repository and rerun the command from that checkout.
 
 ## Eval server and grader issues

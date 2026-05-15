@@ -13,7 +13,7 @@ REMOVED_COMMAND_PROBE = "--__removed-command-probe"
 ANSI_ESCAPE = re.compile(r"\x1b\[[0-9;]*m")
 
 REMOVED_ROOT_COMMANDS = [
-    "workspace",
+    "project",
     "init",
     "link",
     "unlink",
@@ -24,7 +24,7 @@ REMOVED_ROOT_COMMANDS = [
 
 PRESERVED_ROOT_COMMANDS = [
     "auth",
-    "project",
+    "workspace",
     "dataset",
     "train",
     "model",
@@ -43,7 +43,7 @@ PRESERVED_HELP_COMMANDS = [
     ["--help"],
     ["--version"],
     ["auth", "--help"],
-    ["project", "--help"],
+    ["workspace", "--help"],
     ["dataset", "--help"],
     ["train", "--help"],
     ["model", "--help"],
@@ -58,7 +58,6 @@ PRESERVED_HELP_COMMANDS = [
 
 
 REMOVED_COMMANDS = [
-    ["workspace", REMOVED_COMMAND_PROBE],
     ["workspace", "list", REMOVED_COMMAND_PROBE],
     ["workspace", "create", REMOVED_COMMAND_PROBE, "team"],
     ["workspace", "delete", REMOVED_COMMAND_PROBE, "team"],
@@ -74,6 +73,9 @@ REMOVED_COMMANDS = [
     ["login", REMOVED_COMMAND_PROBE],
     ["logout", REMOVED_COMMAND_PROBE],
     ["whoami", REMOVED_COMMAND_PROBE],
+    ["project", REMOVED_COMMAND_PROBE],
+    ["project", "doctor", REMOVED_COMMAND_PROBE],
+    ["project", "refresh-agents", REMOVED_COMMAND_PROBE],
     ["project", "init", REMOVED_COMMAND_PROBE, "demo"],
     ["project", "info", REMOVED_COMMAND_PROBE],
     ["project", "list", REMOVED_COMMAND_PROBE],
@@ -124,7 +126,6 @@ def test_removed_commands_are_unknown(args, capfd):
 @pytest.mark.parametrize(
     "args",
     [
-        ["workspace", "--help"],
         ["workspace", "list", "--help"],
         ["workspace", "create", "--help"],
         ["workspace", "delete", "--help"],
@@ -140,6 +141,9 @@ def test_removed_commands_are_unknown(args, capfd):
         ["login", "--help"],
         ["logout", "--help"],
         ["whoami", "--help"],
+        ["project", "--help"],
+        ["project", "doctor", "--help"],
+        ["project", "refresh-agents", "--help"],
         ["project", "init", "--help"],
         ["project", "info", "--help"],
         ["project", "list", "--help"],
@@ -185,7 +189,7 @@ def test_root_help_surface_does_not_list_removed_groups_or_aliases(capfd):
     ("args", "not_expected"),
     [
         (["loginn"], "Did you mean 'login'?"),
-        (["workspac"], "Did you mean 'workspace'?"),
+        (["projec"], "Did you mean 'project'?"),
         (["train", "tracess"], "Did you mean 'traces'?"),
         (["deployment", "renam"], "Did you mean 'rename'?"),
     ],

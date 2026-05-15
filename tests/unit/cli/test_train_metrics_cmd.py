@@ -67,15 +67,15 @@ def _make_metrics(**overrides) -> TrainingRunMetrics:
 
 
 # Patch at source modules since train.py uses function-level lazy imports.
-_PATCH_AUTH = "osmosis_ai.platform.cli.utils.require_git_project_context"
+_PATCH_AUTH = "osmosis_ai.platform.cli.utils.require_git_workspace_directory_context"
 _PATCH_CLIENT = "osmosis_ai.platform.api.client.OsmosisClient"
 
 
 def _make_git_context(
-    *, project_root: Path | None = None, credentials: object | None = None
+    *, workspace_directory: Path | None = None, credentials: object | None = None
 ) -> SimpleNamespace:
     return SimpleNamespace(
-        project_root=project_root or Path.cwd(),
+        workspace_directory=workspace_directory or Path.cwd(),
         git_identity="acme/rollouts",
         repo_url="https://github.com/acme/rollouts.git",
         credentials=credentials or MagicMock(),
@@ -130,7 +130,7 @@ class TestMetricsCommandPlatformUrl:
     def test_platform_url_printed(
         self, mock_auth: MagicMock, mock_client_cls: MagicMock, tmp_path: Path
     ) -> None:
-        mock_auth.return_value = _make_git_context(project_root=tmp_path)
+        mock_auth.return_value = _make_git_context(workspace_directory=tmp_path)
         client = mock_client_cls.return_value
         client.get_training_run.return_value = _make_run_detail()
         client.get_training_run_metrics.return_value = _make_metrics()
@@ -170,7 +170,7 @@ class TestMetricsCommandTrendGraphs:
     def test_graphs_render_after_summary_when_tty_and_width_sufficient(
         self, mock_auth: MagicMock, mock_client_cls: MagicMock, tmp_path: Path
     ) -> None:
-        mock_auth.return_value = _make_git_context(project_root=tmp_path)
+        mock_auth.return_value = _make_git_context(workspace_directory=tmp_path)
         client = mock_client_cls.return_value
         client.get_training_run.return_value = _make_run_detail()
         client.get_training_run_metrics.return_value = _make_metrics()
@@ -202,7 +202,7 @@ class TestMetricsCommandTrendGraphs:
     ) -> None:
         """Bracket characters in metric titles must not be interpreted as Rich markup."""
         bracket_title = "Loss [eval]"
-        mock_auth.return_value = _make_git_context(project_root=tmp_path)
+        mock_auth.return_value = _make_git_context(workspace_directory=tmp_path)
         client = mock_client_cls.return_value
         client.get_training_run.return_value = _make_run_detail()
         client.get_training_run_metrics.return_value = _make_metrics(
@@ -240,7 +240,7 @@ class TestMetricsCommandTrendGraphs:
     def test_graphs_skipped_when_not_tty(
         self, mock_auth: MagicMock, mock_client_cls: MagicMock, tmp_path: Path
     ) -> None:
-        mock_auth.return_value = _make_git_context(project_root=tmp_path)
+        mock_auth.return_value = _make_git_context(workspace_directory=tmp_path)
         client = mock_client_cls.return_value
         client.get_training_run.return_value = _make_run_detail()
         client.get_training_run_metrics.return_value = _make_metrics()
@@ -264,7 +264,7 @@ class TestMetricsCommandTrendGraphs:
     def test_graphs_skipped_when_terminal_narrow(
         self, mock_auth: MagicMock, mock_client_cls: MagicMock, tmp_path: Path
     ) -> None:
-        mock_auth.return_value = _make_git_context(project_root=tmp_path)
+        mock_auth.return_value = _make_git_context(workspace_directory=tmp_path)
         client = mock_client_cls.return_value
         client.get_training_run.return_value = _make_run_detail()
         client.get_training_run_metrics.return_value = _make_metrics()
@@ -288,7 +288,7 @@ class TestMetricsCommandTrendGraphs:
     def test_no_metric_data_unchanged_no_graphs(
         self, mock_auth: MagicMock, mock_client_cls: MagicMock, tmp_path: Path
     ) -> None:
-        mock_auth.return_value = _make_git_context(project_root=tmp_path)
+        mock_auth.return_value = _make_git_context(workspace_directory=tmp_path)
         client = mock_client_cls.return_value
         client.get_training_run.return_value = _make_run_detail()
         client.get_training_run_metrics.return_value = _make_metrics(metrics=[])
@@ -320,7 +320,7 @@ class TestMetricsCommandWritesFile:
     def test_writes_json_to_explicit_output(
         self, mock_auth: MagicMock, mock_client_cls: MagicMock, tmp_path: Path
     ) -> None:
-        mock_auth.return_value = _make_git_context(project_root=tmp_path)
+        mock_auth.return_value = _make_git_context(workspace_directory=tmp_path)
         client = mock_client_cls.return_value
         client.get_training_run.return_value = _make_run_detail()
         client.get_training_run_metrics.return_value = _make_metrics()
@@ -349,7 +349,7 @@ class TestMetricsCommandWritesFile:
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        mock_auth.return_value = _make_git_context(project_root=tmp_path)
+        mock_auth.return_value = _make_git_context(workspace_directory=tmp_path)
         client = mock_client_cls.return_value
         client.get_training_run.return_value = _make_run_detail()
         client.get_training_run_metrics.return_value = _make_metrics()
@@ -378,7 +378,7 @@ class TestMetricsCommandWritesFile:
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        mock_auth.return_value = _make_git_context(project_root=tmp_path)
+        mock_auth.return_value = _make_git_context(workspace_directory=tmp_path)
         client = mock_client_cls.return_value
         client.get_training_run.return_value = _make_run_detail()
         client.get_training_run_metrics.return_value = _make_metrics()
@@ -492,7 +492,7 @@ class TestMetricsCommandErrors:
     def test_running_run_shows_snapshot_note(
         self, mock_auth: MagicMock, mock_client_cls: MagicMock, tmp_path: Path
     ) -> None:
-        mock_auth.return_value = _make_git_context(project_root=tmp_path)
+        mock_auth.return_value = _make_git_context(workspace_directory=tmp_path)
         client = mock_client_cls.return_value
         client.get_training_run.return_value = _make_run_detail(status="running")
         client.get_training_run_metrics.return_value = _make_metrics(status="running")
@@ -516,7 +516,9 @@ class TestMetricsCommandErrors:
     ) -> None:
         from osmosis_ai.cli.commands.train import _resolve_default_output
 
-        result = _resolve_default_output("my-run", "abc12345", project_root=tmp_path)
+        result = _resolve_default_output(
+            "my-run", "abc12345", workspace_directory=tmp_path
+        )
 
         assert result == tmp_path / ".osmosis" / "metrics" / "my-run_abc12345.json"
         assert result.parent.is_dir()
@@ -556,7 +558,7 @@ class TestMetricsCommandErrors:
         tmp_path: Path,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        mock_auth.return_value = _make_git_context(project_root=tmp_path)
+        mock_auth.return_value = _make_git_context(workspace_directory=tmp_path)
         client = mock_client_cls.return_value
         client.get_training_run.return_value = _make_run_detail()
         client.get_training_run_metrics.return_value = _make_metrics()

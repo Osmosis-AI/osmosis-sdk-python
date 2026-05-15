@@ -24,7 +24,7 @@ def list_models(
     ),
     all_: bool = typer.Option(False, "--all", help="Show all base models."),
 ) -> Any:
-    """List base models for the current Git-scoped project."""
+    """List base models for the current workspace directory."""
     from osmosis_ai.cli.output import (
         ListColumn,
         ListResult,
@@ -32,16 +32,16 @@ def list_models(
         serialize_model,
     )
     from osmosis_ai.cli.output.display import created_column_label, format_local_date
-    from osmosis_ai.platform.cli.project_context import git_result_context
     from osmosis_ai.platform.cli.utils import (
         fetch_all_pages,
-        require_git_project_context,
+        require_git_workspace_directory_context,
         validate_list_options,
     )
+    from osmosis_ai.platform.cli.workspace_directory_context import git_result_context
 
     effective_limit, fetch_all = validate_list_options(limit=limit, all_=all_)
 
-    context = require_git_project_context()
+    context = require_git_workspace_directory_context()
     credentials = context.credentials
     git_identity = context.git_identity
 

@@ -260,12 +260,14 @@ def compute_eval_fns_fingerprint(eval_fn_paths: list[str]) -> str | None:
 def _get_cache_root() -> Path:
     """Resolve eval cache root directory.
 
-    Eval caches are stored under the active project's .osmosis directory.
+    Eval caches are stored under the active workspace directory's .osmosis directory.
     """
-    from osmosis_ai.platform.cli.project_contract import resolve_project_root_from_cwd
+    from osmosis_ai.platform.cli.workspace_directory_contract import (
+        resolve_workspace_directory_from_cwd,
+    )
 
-    project_root = resolve_project_root_from_cwd()
-    return (project_root / ".osmosis" / "cache" / "eval").resolve()
+    workspace_directory = resolve_workspace_directory_from_cwd()
+    return (workspace_directory / ".osmosis" / "cache" / "eval").resolve()
 
 
 _WINDOWS_RESERVED_NAMES = frozenset(

@@ -1,4 +1,4 @@
-"""Local project commands for the active Git worktree."""
+"""Local workspace directory commands for the active Git worktree."""
 
 from __future__ import annotations
 
@@ -15,13 +15,13 @@ _REQUIRED_PATHS = [
 ]
 
 
-def _optional_git_context(project_root: Path) -> dict[str, str | None]:
+def _optional_git_context(workspace_directory: Path) -> dict[str, str | None]:
     from osmosis_ai.platform.cli.workspace_repo import (
         get_local_git_remote_url,
         normalize_git_identity,
     )
 
-    remote_url = get_local_git_remote_url(project_root)
+    remote_url = get_local_git_remote_url(workspace_directory)
     if remote_url is None:
         return {"identity": None, "remote_url": None}
     try:
@@ -38,30 +38,32 @@ def _optional_git_context(project_root: Path) -> dict[str, str | None]:
     }
 
 
-def doctor_project(path: Any | None = None, *, fix: bool = False) -> Any:
-    """Inspect and optionally repair the canonical project scaffold."""
+def doctor_workspace_directory(path: Any | None = None, *, fix: bool = False) -> Any:
+    """Inspect and optionally repair the canonical workspace directory scaffold."""
     from osmosis_ai.cli.output import OperationResult
-    from osmosis_ai.platform.cli.project_contract import resolve_project_root
     from osmosis_ai.platform.cli.scaffold import (
         official_scaffold_updates,
         write_scaffold,
     )
+    from osmosis_ai.platform.cli.workspace_directory_contract import (
+        resolve_workspace_directory,
+    )
 
-    project_root = resolve_project_root(path)
-    git = _optional_git_context(project_root)
-    missing = _missing_scaffold_paths(project_root)
+    workspace_directory = resolve_workspace_directory(path)
+    git = _optional_git_context(workspace_directory)
+    missing = _missing_scaffold_paths(workspace_directory)
 
     if fix:
-        write_scaffold(project_root, project_root.name)
-        missing = _missing_scaffold_paths(project_root)
+        write_scaffold(workspace_directory, workspace_directory.name)
+        missing = _missing_scaffold_paths(workspace_directory)
 
-    updates_available = official_scaffold_updates(project_root) if fix else []
+    updates_available = official_scaffold_updates(workspace_directory) if fix else []
 
     return OperationResult(
-        operation="project.doctor",
+        operation="workspace.doctor",
         status="success",
         resource={
-            "project_root": str(project_root),
+            "workspace_directory": str(workspace_directory),
             "git": git,
             "required_paths": _REQUIRED_PATHS,
             "missing": missing,
@@ -70,9 +72,9 @@ def doctor_project(path: Any | None = None, *, fix: bool = False) -> Any:
             "updates_checked": fix,
             "fixed": fix,
         },
-        message="Project doctor completed.",
+        message="Workspace doctor completed.",
         display_next_steps=_doctor_display_lines(
-            project_root=project_root,
+            workspace_directory=workspace_directory,
             missing=missing,
             updates_available=updates_available,
             fixed=fix,
@@ -80,19 +82,21 @@ def doctor_project(path: Any | None = None, *, fix: bool = False) -> Any:
     )
 
 
-def refresh_agent_files(*, force: bool = False) -> Any:
-    """Refresh official agent scaffold files in the current project."""
+def refresh_workspace_agent_files(*, force: bool = False) -> Any:
+    """Refresh official agent scaffold files in the current workspace directory."""
     from osmosis_ai.cli.output import OperationResult
-    from osmosis_ai.platform.cli.project_contract import resolve_project_root_from_cwd
     from osmosis_ai.platform.cli.scaffold import refresh_agent_scaffold
+    from osmosis_ai.platform.cli.workspace_directory_contract import (
+        resolve_workspace_directory_from_cwd,
+    )
 
-    project_root = resolve_project_root_from_cwd()
-    result = refresh_agent_scaffold(project_root, force=force)
+    workspace_directory = resolve_workspace_directory_from_cwd()
+    result = refresh_agent_scaffold(workspace_directory, force=force)
     return OperationResult(
-        operation="project.refresh_agents",
+        operation="workspace.refresh_agents",
         status="success",
-        resource={"project_root": str(project_root), **result},
-        message="Project agent scaffold refresh completed.",
+        resource={"workspace_directory": str(workspace_directory), **result},
+        message="Workspace agent scaffold refresh completed.",
         display_next_steps=_agent_refresh_display_lines(result),
     )
 
@@ -112,18 +116,18 @@ def _agent_refresh_display_lines(result: dict[str, list[str]]) -> list[str]:
 
 def _doctor_display_lines(
     *,
-    project_root: Path,
+    workspace_directory: Path,
     missing: list[str],
     updates_available: list[str],
     fixed: bool,
 ) -> list[str]:
-    lines = [f"Project root: {project_root}"]
+    lines = [f"Workspace directory: {workspace_directory}"]
     if missing:
         lines.append("Missing scaffold paths:")
         lines.extend(f"  - {path}" for path in missing)
         if not fixed:
             lines.append(
-                "Run `osmosis project doctor --fix` to create missing scaffold paths."
+                "Run `osmosis workspace doctor --fix` to create missing scaffold paths."
             )
     else:
         lines.append("No missing scaffold paths.")
@@ -133,13 +137,13 @@ def _doctor_display_lines(
             f"Official scaffold updates available for: {', '.join(updates_available)}"
         )
         lines.append(
-            "Review local edits, then run `osmosis project refresh-agents --force` "
+            "Review local edits, then run `osmosis workspace refresh-agents --force` "
             "to replace official scaffold files."
         )
     return lines
 
 
-def _missing_scaffold_paths(project_root: Path) -> list[str]:
+def _missing_scaffold_paths(workspace_directory: Path) -> list[str]:
     from osmosis_ai.platform.cli.scaffold import load_scaffold_entries
 
     scaffold, _agent_refresh_paths = load_scaffold_entries()
@@ -148,15 +152,15 @@ def _missing_scaffold_paths(project_root: Path) -> list[str]:
         rel_path = Path(entry.dest)
         if rel_path.name == ".gitkeep":
             directory = rel_path.parent
-            if not (project_root / directory).is_dir():
+            if not (workspace_directory / directory).is_dir():
                 missing.append(f"{directory.as_posix()}/")
             continue
-        if not (project_root / entry.dest).exists():
+        if not (workspace_directory / entry.dest).exists():
             missing.append(entry.dest)
     return missing
 
 
 __all__ = [
-    "doctor_project",
-    "refresh_agent_files",
+    "doctor_workspace_directory",
+    "refresh_workspace_agent_files",
 ]

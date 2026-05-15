@@ -183,15 +183,15 @@ def _register_commands() -> None:
     from osmosis_ai.cli.commands.deployment import app as deployment_app
     from osmosis_ai.cli.commands.eval import app as eval_app
     from osmosis_ai.cli.commands.model import app as model_app
-    from osmosis_ai.cli.commands.project import app as project_app
     from osmosis_ai.cli.commands.rollout import app as rollout_app
     from osmosis_ai.cli.commands.template import app as template_app
     from osmosis_ai.cli.commands.train import app as train_app
+    from osmosis_ai.cli.commands.workspace import app as workspace_app
 
     _WORKFLOW = "Workflow Commands"
     _PLATFORM = "Platform Commands"
 
-    app.add_typer(project_app, name="project", rich_help_panel=_WORKFLOW)
+    app.add_typer(workspace_app, name="workspace", rich_help_panel=_WORKFLOW)
     app.add_typer(dataset_app, name="dataset", rich_help_panel=_WORKFLOW)
     app.add_typer(train_app, name="train", rich_help_panel=_WORKFLOW)
     app.add_typer(model_app, name="model", rich_help_panel=_WORKFLOW)

@@ -1,7 +1,7 @@
 """Business logic for ``osmosis template`` commands.
 
 Templates are read from the SDK-owned catalog and copied into the canonical
-project layout for ``eval run`` and ``train submit``.
+workspace directory layout for ``eval run`` and ``train submit``.
 """
 
 from __future__ import annotations
@@ -29,11 +29,13 @@ from osmosis_ai.templates.registry import (
 from osmosis_ai.templates.source import workspace_template_root
 
 
-def _require_project_root() -> Path:
-    """Resolve the active project root."""
-    from osmosis_ai.platform.cli.project_contract import resolve_project_root
+def _require_workspace_directory() -> Path:
+    """Resolve the active workspace directory."""
+    from osmosis_ai.platform.cli.workspace_directory_contract import (
+        resolve_workspace_directory,
+    )
 
-    return resolve_project_root()
+    return resolve_workspace_directory()
 
 
 def _format_unknown_template(name: str) -> CLIError:
@@ -100,13 +102,13 @@ def _same_file_contents(left: Path, right: Path) -> bool:
         return False
 
 
-def _ensure_within_project(dest: Path, project_root: Path) -> None:
-    """Refuse writes outside the project root."""
+def _ensure_within_workspace_directory(dest: Path, workspace_directory: Path) -> None:
+    """Refuse writes outside the workspace directory."""
     try:
-        dest.resolve().relative_to(project_root)
+        dest.resolve().relative_to(workspace_directory)
     except ValueError as exc:
         raise CLIError(
-            f"Refusing to write template file outside the project root: {dest}",
+            f"Refusing to write template file outside the workspace directory: {dest}",
             code="VALIDATION",
         ) from exc
 
@@ -114,7 +116,7 @@ def _ensure_within_project(dest: Path, project_root: Path) -> None:
 def _format_conflicts(conflicts: list[str], name: str) -> CLIError:
     listing = "\n  ".join(sorted(set(conflicts)))
     return CLIError(
-        "Refusing to overwrite existing files in the project:\n"
+        "Refusing to overwrite existing files in the workspace directory:\n"
         f"  {listing}\n"
         f"\nRe-run with `osmosis template apply {name} --force` to replace them.",
         code="CONFLICT",
@@ -152,7 +154,7 @@ def _next_steps(name: str) -> list[str]:
 
 def _copy_template(
     name: str,
-    project_root: Path,
+    workspace_directory: Path,
     *,
     force: bool = False,
 ) -> tuple[list[Path], list[str]]:
@@ -162,29 +164,32 @@ def _copy_template(
     except TemplateNotFoundError as exc:
         raise _format_unknown_template(name) from exc
 
-    project_root_resolved = project_root.resolve()
+    workspace_directory_resolved = workspace_directory.resolve()
     written: list[str] = []
     template_root = workspace_template_root(refresh=True)
     file_rels = iter_template_files(name, root=template_root)
     shared_file_rels = shared_template_files()
-    owned_dests = [project_root_resolved / rel for rel in recipe.owned_dirs]
+    owned_dests = [workspace_directory_resolved / rel for rel in recipe.owned_dirs]
 
     # Containment guard upfront.
     for rel in file_rels:
-        _ensure_within_project(project_root_resolved / rel, project_root_resolved)
+        _ensure_within_workspace_directory(
+            workspace_directory_resolved / rel, workspace_directory_resolved
+        )
     for owned_dest in owned_dests:
-        _ensure_within_project(owned_dest, project_root_resolved)
+        _ensure_within_workspace_directory(owned_dest, workspace_directory_resolved)
 
     if not force:
         conflicts: list[str] = []
         for owned_dest in owned_dests:
             if owned_dest.exists():
                 conflicts.append(
-                    owned_dest.relative_to(project_root_resolved).as_posix() + "/"
+                    owned_dest.relative_to(workspace_directory_resolved).as_posix()
+                    + "/"
                 )
         for rel in file_rels:
             src = template_root / rel
-            dest = project_root_resolved / rel
+            dest = workspace_directory_resolved / rel
             if any(_is_under(dest, owned_dest) for owned_dest in owned_dests):
                 continue
             if dest.exists():
@@ -199,7 +204,7 @@ def _copy_template(
     for owned_dest in owned_dests:
         if owned_dest.is_symlink() or (owned_dest.exists() and not owned_dest.is_dir()):
             blocked_owned_paths.append(
-                owned_dest.relative_to(project_root_resolved).as_posix()
+                owned_dest.relative_to(workspace_directory_resolved).as_posix()
             )
     if blocked_owned_paths:
         raise _format_blocked_owned_paths(blocked_owned_paths)
@@ -209,7 +214,7 @@ def _copy_template(
 
     for rel in file_rels:
         src = template_root / rel
-        dest = project_root_resolved / rel
+        dest = workspace_directory_resolved / rel
         dest.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(src, dest)
         written.append(rel.as_posix())
@@ -217,7 +222,7 @@ def _copy_template(
     top_level: list[Path] = list(owned_dests)
     seen: set[Path] = set(top_level)
     for rel in file_rels:
-        dest = project_root_resolved / rel
+        dest = workspace_directory_resolved / rel
         if any(_is_under(dest, owned_dest) for owned_dest in owned_dests):
             continue
         parent = dest.parent
@@ -229,12 +234,12 @@ def _copy_template(
 
 
 def apply_command(name: str, *, force: bool = False) -> CommandResult | None:
-    """Apply a template into the active project layout."""
-    project_root = _require_project_root()
-    destinations, written = _copy_template(name, project_root, force=force)
+    """Apply a template into the active workspace directory layout."""
+    workspace_directory = _require_workspace_directory()
+    destinations, written = _copy_template(name, workspace_directory, force=force)
 
     rel_destinations = [
-        dest.relative_to(project_root).as_posix() + "/" for dest in destinations
+        dest.relative_to(workspace_directory).as_posix() + "/" for dest in destinations
     ]
 
     output = get_output_context()

@@ -11,7 +11,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 
 
-def _make_project(root: Path) -> Path:
+def _make_workspace_directory(root: Path) -> Path:
     subprocess.run(
         ["git", "init", "-b", "main", str(root)],
         check=True,
@@ -36,7 +36,7 @@ def _make_project(root: Path) -> Path:
 def _run_json_command(
     args: list[str], tmp_path: Path
 ) -> subprocess.CompletedProcess[str]:
-    project = _make_project(tmp_path / "project")
+    project = _make_workspace_directory(tmp_path / "project")
     env = {**os.environ}
     env["PYTHONPATH"] = os.pathsep.join(
         [str(ROOT), *(path for path in [env.get("PYTHONPATH")] if path)]
@@ -71,7 +71,7 @@ def test_project_doctor_fix_in_git_repo_creates_runtime_free_scaffold(
             "-m",
             "osmosis_ai.cli.main",
             "--json",
-            "project",
+            "workspace",
             "doctor",
             "--fix",
         ],

@@ -29,19 +29,19 @@ osmosis auth whoami
 ```
 
 `whoami` verifies the active credentials and reports the authenticated account.
-Manage projects, repositories, secrets, and account settings in the Osmosis
+Manage workspaces, repositories, secrets, and account settings in the Osmosis
 Platform product.
 
-## Project Flow
+## Workspace Directory Flow
 
-Create the project in the Osmosis Platform, clone the repository created there,
+Create or open a workspace in the Osmosis Platform, clone the repository created there,
 then run CLI commands from that checkout.
 
 ```bash
 git clone <repo-url>
 cd <repo>
 osmosis auth login
-osmosis project doctor
+osmosis workspace doctor
 osmosis template apply multiply              # or add your rollout under rollouts/
 cp configs/training/default.toml configs/training/<run>.toml
 $EDITOR configs/training/<run>.toml          # set rollout, dataset, and model_path
@@ -62,25 +62,25 @@ export OSMOSIS_TOKEN=<token>
 osmosis train submit configs/training/<run>.toml --yes
 ```
 
-### osmosis project doctor
+### osmosis workspace doctor
 
 ```bash
-osmosis project doctor
-osmosis project doctor ./path/to/project
-osmosis project doctor --fix
+osmosis workspace doctor
+osmosis workspace doctor ./path/to/workspace-directory
+osmosis workspace doctor --fix
 ```
 
 Inspect and optionally repair the scaffold in the current Git checkout. Without
-`--fix`, the command reports the project root, Git identity, required scaffold
+`--fix`, the command reports the workspace directory, Git identity, required scaffold
 paths, and missing paths. Add `--fix` to create missing scaffold paths and
 check for official scaffold file updates; existing scaffold files are refreshed
-with `osmosis project refresh-agents --force` after reviewing local edits.
+with `osmosis workspace refresh-agents --force` after reviewing local edits.
 
 ## Rollout
 
 ### osmosis rollout list
 
-List rollouts for the current project repository.
+List rollouts for the current workspace directory.
 
 ```bash
 osmosis rollout list
@@ -99,7 +99,7 @@ controller's `/chat/completions` endpoint, and waits for rollout and grader
 callback URLs.
 
 `osmosis eval run` expects the config file to live under `configs/eval/` inside a
-structured Osmosis project. Eval configs use `[eval]`, `[llm]`, `[runs]`,
+structured Osmosis workspace directory. Eval configs use `[eval]`, `[llm]`, `[runs]`,
 `[timeouts]`, and `[output]`; `[grader]` and `[baseline]` are no longer
 supported.
 
@@ -162,7 +162,7 @@ osmosis train submit configs/training/my-run.toml --yes   # skip confirmation
 ```
 
 The config file must live under `configs/training/` inside a structured Osmosis
-project. The CLI reads the config locally and sends it to the platform, which
+workspace directory. The CLI reads the config locally and sends it to the platform, which
 clones the repository identified by the checkout's `origin` remote for the
 actual rollout code.
 `osmosis train submit` includes the training preflight checks before launch; run
@@ -256,7 +256,7 @@ osmosis --json train status <run-name>
 
 ### osmosis train list
 
-List training runs for the current project repository.
+List training runs for the current workspace directory.
 
 ```bash
 osmosis train list
@@ -289,7 +289,7 @@ UUID or checkpoint name anywhere `<checkpoint>` appears.
 
 ### osmosis deployment list
 
-List deployments for the current project repository.
+List deployments for the current workspace directory.
 
 ```bash
 osmosis deployment list

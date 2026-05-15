@@ -28,7 +28,7 @@ PROJECT_ROOT = Path("/repo")
 
 
 def assert_git_context(data: dict[str, object]) -> None:
-    assert data["project_root"] == "/repo"
+    assert data["workspace_directory"] == "/repo"
     assert data["git"] == {
         "identity": GIT_IDENTITY,
         "remote_url": REPO_URL,
@@ -39,14 +39,14 @@ def assert_git_context(data: dict[str, object]) -> None:
 def _stub_git_context(monkeypatch: pytest.MonkeyPatch) -> object:
     fake_credentials = object()
     context = SimpleNamespace(
-        project_root=PROJECT_ROOT,
+        workspace_directory=PROJECT_ROOT,
         git_identity=GIT_IDENTITY,
         repo_url=REPO_URL,
         credentials=fake_credentials,
     )
     monkeypatch.setattr(
         dataset_module,
-        "require_git_project_context",
+        "require_git_workspace_directory_context",
         lambda: context,
     )
     return fake_credentials

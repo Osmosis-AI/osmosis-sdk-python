@@ -1,8 +1,8 @@
-"""SDK-backed scaffold repair for existing Osmosis projects.
+"""SDK-backed scaffold repair for existing Osmosis workspace directories.
 
 This module owns the retained scaffold primitives used to repair an
-already-created Osmosis project checkout. It is not a bootstrap flow: it does
-not create projects, initialize git repositories, or make initial commits.
+already-created Osmosis workspace directory checkout. It is not a bootstrap flow: it does
+not create workspace directories, initialize git repositories, or make initial commits.
 """
 
 from __future__ import annotations
@@ -67,12 +67,12 @@ def _read_agent_scaffold_files(*, refresh_template: bool) -> dict[str, str]:
     return contents
 
 
-def _first_symlinked_path(project_root: Path, rel_path: str) -> str | None:
-    current = project_root
+def _first_symlinked_path(workspace_directory: Path, rel_path: str) -> str | None:
+    current = workspace_directory
     for part in Path(rel_path).parts:
         current = current / part
         if current.is_symlink():
-            return current.relative_to(project_root).as_posix()
+            return current.relative_to(workspace_directory).as_posix()
     return None
 
 
@@ -111,15 +111,15 @@ def load_scaffold_entries() -> tuple[list[ScaffoldEntry], set[str]]:
 
 
 def official_scaffold_updates(
-    project_root: Path, *, refresh_template: bool = True
+    workspace_directory: Path, *, refresh_template: bool = True
 ) -> list[str]:
     """Return official scaffold files whose local content differs from the template."""
     official_contents = _read_agent_scaffold_files(refresh_template=refresh_template)
     updates: list[str] = []
     blocked_paths: list[str] = []
     for rel_path, official in official_contents.items():
-        path = project_root / rel_path
-        symlink_path = _first_symlinked_path(project_root, rel_path)
+        path = workspace_directory / rel_path
+        symlink_path = _first_symlinked_path(workspace_directory, rel_path)
         if symlink_path is not None:
             _append_unique(blocked_paths, symlink_path)
             continue
@@ -170,7 +170,7 @@ def write_scaffold(target: Path, project_name: str, *, update: bool = False) -> 
 
 
 def refresh_agent_scaffold(
-    project_root: Path, *, force: bool = False
+    workspace_directory: Path, *, force: bool = False
 ) -> dict[str, list[str]]:
     """Refresh official agent scaffold files, protecting local edits by default."""
     official = _read_agent_scaffold_files(refresh_template=True)
@@ -182,8 +182,8 @@ def refresh_agent_scaffold(
     pending_refreshes: list[tuple[str, Path, str]] = []
 
     for rel_path, content in official.items():
-        path = project_root / rel_path
-        symlink_path = _first_symlinked_path(project_root, rel_path)
+        path = workspace_directory / rel_path
+        symlink_path = _first_symlinked_path(workspace_directory, rel_path)
         if symlink_path is not None:
             _append_unique(blocked_paths, symlink_path)
             continue
@@ -207,7 +207,7 @@ def refresh_agent_scaffold(
         raise CLIError(
             "Refusing to overwrite local edits in official scaffold files:\n"
             f"  {listing}\n"
-            "\nRe-run with `osmosis project refresh-agents --force` after reviewing "
+            "\nRe-run with `osmosis workspace refresh-agents --force` after reviewing "
             "your local changes.",
             code="CONFLICT",
         )

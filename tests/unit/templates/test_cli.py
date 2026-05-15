@@ -70,8 +70,8 @@ def workspace_template(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return root
 
 
-def _make_project(root: Path) -> Path:
-    """Create the minimum directory layout that resolve_project_root accepts."""
+def _make_workspace_directory(root: Path) -> Path:
+    """Create the minimum directory layout that resolve_workspace_directory accepts."""
     subprocess.run(
         ["git", "init", "-b", "main", str(root)],
         check=True,
@@ -142,24 +142,26 @@ def test_apply_command_writes_directly_into_project_canonical_layout(
     tmp_path, monkeypatch, workspace_template
 ) -> None:
     """`apply` lands files at rollouts/<name>/ and configs/{eval,training}/."""
-    project_root = _make_project(tmp_path)
-    monkeypatch.chdir(project_root)
+    workspace_directory = _make_workspace_directory(tmp_path)
+    monkeypatch.chdir(workspace_directory)
 
     with override_output_context(format=OutputFormat.json):
         result = apply_command("multiply-local-strands")
 
-    rollout_root = project_root / "rollouts" / "multiply-local-strands"
+    rollout_root = workspace_directory / "rollouts" / "multiply-local-strands"
     # A rollout in a project is self-describing: entrypoint + deps + README.
     assert (rollout_root / "main.py").is_file()
     assert (rollout_root / "pyproject.toml").is_file()
     assert (rollout_root / "README.md").is_file()
     assert (
-        project_root / "configs" / "training" / "multiply-local-strands.toml"
+        workspace_directory / "configs" / "training" / "multiply-local-strands.toml"
     ).is_file()
-    assert (project_root / "configs" / "eval" / "multiply-local-strands.toml").is_file()
-    assert (project_root / "data" / "multiply.jsonl").is_file()
+    assert (
+        workspace_directory / "configs" / "eval" / "multiply-local-strands.toml"
+    ).is_file()
+    assert (workspace_directory / "data" / "multiply.jsonl").is_file()
     # The legacy staging directory must NOT be created.
-    assert not (project_root / "templates").exists()
+    assert not (workspace_directory / "templates").exists()
 
     assert result is not None
     assert result.operation == "template.apply"
@@ -188,10 +190,10 @@ def test_apply_command_writes_directly_into_project_canonical_layout(
 def test_apply_command_refuses_overwrite_without_force(
     tmp_path, monkeypatch, workspace_template
 ) -> None:
-    project_root = _make_project(tmp_path)
-    monkeypatch.chdir(project_root)
+    workspace_directory = _make_workspace_directory(tmp_path)
+    monkeypatch.chdir(workspace_directory)
 
-    rollout_root = project_root / "rollouts" / "multiply-local-strands"
+    rollout_root = workspace_directory / "rollouts" / "multiply-local-strands"
     rollout_root.mkdir(parents=True)
     user_edit = rollout_root / "main.py"
     user_edit.write_text("# user-edited\n", encoding="utf-8")
@@ -212,10 +214,10 @@ def test_apply_command_refuses_overwrite_without_force(
 def test_apply_command_force_overwrites_existing_rollout(
     tmp_path, monkeypatch, workspace_template
 ) -> None:
-    project_root = _make_project(tmp_path)
-    monkeypatch.chdir(project_root)
+    workspace_directory = _make_workspace_directory(tmp_path)
+    monkeypatch.chdir(workspace_directory)
 
-    rollout_root = project_root / "rollouts" / "multiply-local-strands"
+    rollout_root = workspace_directory / "rollouts" / "multiply-local-strands"
     rollout_root.mkdir(parents=True)
     stale = rollout_root / "stale_user_file.txt"
     stale.write_text("user edits", encoding="utf-8")
@@ -231,10 +233,10 @@ def test_apply_command_force_overwrites_existing_rollout(
 def test_apply_command_force_rejects_file_at_owned_directory_path(
     tmp_path, monkeypatch, workspace_template
 ) -> None:
-    project_root = _make_project(tmp_path)
-    monkeypatch.chdir(project_root)
+    workspace_directory = _make_workspace_directory(tmp_path)
+    monkeypatch.chdir(workspace_directory)
 
-    rollout_root = project_root / "rollouts" / "multiply-local-strands"
+    rollout_root = workspace_directory / "rollouts" / "multiply-local-strands"
     rollout_root.parent.mkdir(parents=True)
     rollout_root.write_text("not a directory\n", encoding="utf-8")
 
@@ -253,10 +255,10 @@ def test_apply_command_force_rejects_file_at_owned_directory_path(
 def test_apply_command_force_overwrites_existing_config(
     tmp_path, monkeypatch, workspace_template
 ) -> None:
-    project_root = _make_project(tmp_path)
-    monkeypatch.chdir(project_root)
+    workspace_directory = _make_workspace_directory(tmp_path)
+    monkeypatch.chdir(workspace_directory)
 
-    config = project_root / "configs" / "eval" / "multiply-local-strands.toml"
+    config = workspace_directory / "configs" / "eval" / "multiply-local-strands.toml"
     config.parent.mkdir(parents=True)
     config.write_text("# stale\n", encoding="utf-8")
 
@@ -291,12 +293,12 @@ def test_apply_command_refreshes_workspace_template_before_copy(
     monkeypatch.setattr(
         source, "_download_workspace_template", fake_download_workspace_template
     )
-    project_root = _make_project(tmp_path / "project")
-    monkeypatch.chdir(project_root)
+    workspace_directory = _make_workspace_directory(tmp_path / "project")
+    monkeypatch.chdir(workspace_directory)
 
     with override_output_context(format=OutputFormat.json):
         apply_command("multiply-local-strands")
-    first = project_root / "rollouts" / "multiply-local-strands" / "main.py"
+    first = workspace_directory / "rollouts" / "multiply-local-strands" / "main.py"
     assert first.read_text(encoding="utf-8") == "# rollout 1\n"
 
     with override_output_context(format=OutputFormat.json):
@@ -310,10 +312,10 @@ def test_apply_command_refreshes_workspace_template_before_copy(
 def test_apply_command_refuses_existing_data_without_force(
     tmp_path, monkeypatch, workspace_template
 ) -> None:
-    project_root = _make_project(tmp_path)
-    monkeypatch.chdir(project_root)
+    workspace_directory = _make_workspace_directory(tmp_path)
+    monkeypatch.chdir(workspace_directory)
 
-    data = project_root / "data" / "multiply.jsonl"
+    data = workspace_directory / "data" / "multiply.jsonl"
     data.parent.mkdir(parents=True)
     data.write_text("user data\n", encoding="utf-8")
 
@@ -331,13 +333,13 @@ def test_apply_command_refuses_existing_data_without_force(
 def test_apply_command_reuses_shared_dataset_from_another_template(
     tmp_path, monkeypatch, workspace_template
 ) -> None:
-    project_root = _make_project(tmp_path)
-    monkeypatch.chdir(project_root)
+    workspace_directory = _make_workspace_directory(tmp_path)
+    monkeypatch.chdir(workspace_directory)
 
     with override_output_context(format=OutputFormat.json):
         apply_command("multiply-local-strands")
 
-    data = project_root / "data" / "multiply.jsonl"
+    data = workspace_directory / "data" / "multiply.jsonl"
     assert data.read_text(encoding="utf-8") == "{}\n"
 
     for name in ("multiply-local-openai", "multiply-harbor-strands"):
@@ -346,22 +348,22 @@ def test_apply_command_reuses_shared_dataset_from_another_template(
 
         assert result is not None
         assert result.status == "success"
-        assert (project_root / "rollouts" / name / "main.py").is_file()
+        assert (workspace_directory / "rollouts" / name / "main.py").is_file()
         assert data.read_text(encoding="utf-8") == "{}\n"
 
 
 def test_apply_command_preserves_unrelated_user_files(
     tmp_path, monkeypatch, workspace_template
 ) -> None:
-    project_root = _make_project(tmp_path)
-    (project_root / "rollouts").mkdir()
-    (project_root / "configs" / "training").mkdir(parents=True)
-    user_rollout = project_root / "rollouts" / "user.py"
+    workspace_directory = _make_workspace_directory(tmp_path)
+    (workspace_directory / "rollouts").mkdir()
+    (workspace_directory / "configs" / "training").mkdir(parents=True)
+    user_rollout = workspace_directory / "rollouts" / "user.py"
     user_rollout.write_text("# user code\n", encoding="utf-8")
-    user_training_config = project_root / "configs" / "training" / "user.toml"
+    user_training_config = workspace_directory / "configs" / "training" / "user.toml"
     user_training_config.write_text("# user training\n", encoding="utf-8")
 
-    monkeypatch.chdir(project_root)
+    monkeypatch.chdir(workspace_directory)
     with override_output_context(format=OutputFormat.json):
         apply_command("multiply-local-strands")
 
@@ -369,14 +371,16 @@ def test_apply_command_preserves_unrelated_user_files(
     # configs — unrelated rollouts and configs must be left alone.
     assert user_rollout.read_text(encoding="utf-8") == "# user code\n"
     assert user_training_config.read_text(encoding="utf-8") == "# user training\n"
-    assert (project_root / "rollouts" / "multiply-local-strands" / "main.py").is_file()
+    assert (
+        workspace_directory / "rollouts" / "multiply-local-strands" / "main.py"
+    ).is_file()
 
 
 def test_apply_command_unknown_template_raises_not_found(
     tmp_path, monkeypatch, workspace_template
 ) -> None:
-    project_root = _make_project(tmp_path)
-    monkeypatch.chdir(project_root)
+    workspace_directory = _make_workspace_directory(tmp_path)
+    monkeypatch.chdir(workspace_directory)
 
     with (
         override_output_context(format=OutputFormat.json),

@@ -21,11 +21,11 @@ from osmosis_ai.platform.auth import (
     AuthenticationExpiredError,
     load_credentials,
 )
-from osmosis_ai.platform.cli.project_context import (
-    GitProjectContext,
-    LocalProjectContext,
-    resolve_git_project_context,
-    resolve_local_project_context,
+from osmosis_ai.platform.cli.workspace_directory_context import (
+    GitWorkspaceDirectoryContext,
+    LocalWorkspaceDirectoryContext,
+    resolve_git_workspace_directory_context,
+    resolve_local_workspace_directory_context,
 )
 from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE
 
@@ -57,16 +57,16 @@ def require_credentials() -> Credentials:
     return credentials
 
 
-def require_git_project_context() -> GitProjectContext:
-    """Resolve the current Git-scoped Osmosis project for platform commands."""
-    return resolve_git_project_context()
+def require_git_workspace_directory_context() -> GitWorkspaceDirectoryContext:
+    """Resolve the current Git-scoped Osmosis workspace directory for platform commands."""
+    return resolve_git_workspace_directory_context()
 
 
-def require_local_project_context(
+def require_local_workspace_directory_context(
     *, require_scaffold: bool = True
-) -> LocalProjectContext:
-    """Resolve the current Git project for local-only commands."""
-    return resolve_local_project_context(require_scaffold=require_scaffold)
+) -> LocalWorkspaceDirectoryContext:
+    """Resolve the current Git workspace directory for local-only commands."""
+    return resolve_local_workspace_directory_context(require_scaffold=require_scaffold)
 
 
 def format_dataset_status(d: Any, *, for_prompt: bool = False) -> str:

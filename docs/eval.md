@@ -5,7 +5,7 @@ dataset using the same controller protocol used by training. Results are cached
 on disk so long runs can resume after interruption.
 
 Eval configs must live under `configs/eval/` inside a structured Osmosis
-project.
+workspace directory.
 
 ## TOML configuration
 
@@ -17,7 +17,7 @@ project.
 |-----|-------------|
 | `rollout` | Rollout pack name; eval runs the entrypoint from `rollouts/<rollout>/`. |
 | `entrypoint` | Python file started with `uv run python <entrypoint>` from the rollout directory. |
-| `dataset` | Dataset file path, relative to the project root. |
+| `dataset` | Dataset file path, relative to the workspace directory. |
 
 **`[llm]`**
 
@@ -161,7 +161,7 @@ includes estimated pass@k values derived from pass/fail counts vs
 1. A **task id** is derived from the effective configuration, dataset
    fingerprint, rollout filesystem fingerprint, entrypoint path, and controller
    protocol version.
-2. Cache files live under project-local `.osmosis/cache/eval/`.
+2. Cache files live under workspace-directory local `.osmosis/cache/eval/`.
 3. Re-running the **same** command resumes an in-progress cache; use `--fresh`
    to discard.
 

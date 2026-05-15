@@ -527,7 +527,7 @@ class TestPlatformRequest:
         message = str(exc_info.value)
         assert message == "Billing required for this workspace"
         assert exc_info.value.error_code == "BILLING_REQUIRED"
-        assert "osmosis project link" not in message
+        assert "osmosis workspace link" not in message
         assert "osmosis workspace" not in message
 
     @patch("osmosis_ai.platform.auth.platform_client.urlopen")

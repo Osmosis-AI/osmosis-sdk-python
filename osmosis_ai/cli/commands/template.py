@@ -11,7 +11,7 @@ from typing import Any
 import typer
 
 app: typer.Typer = typer.Typer(
-    help="Add starter templates into your Osmosis project.",
+    help="Add starter templates into your Osmosis workspace directory.",
     no_args_is_help=True,
 )
 
@@ -48,7 +48,7 @@ def apply(
         ),
     ),
 ) -> Any:
-    """Copy a starter template into the project's canonical layout.
+    """Copy a starter template into the workspace directory's canonical layout.
 
     Files land at ``rollouts/<name>/`` and ``configs/{training,eval}/<name>.toml``
     so the rollout is immediately runnable.

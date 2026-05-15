@@ -41,7 +41,7 @@ def workspace_template(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     return root
 
 
-def _make_project(root: Path) -> Path:
+def _make_workspace_directory(root: Path) -> Path:
     subprocess.run(
         ["git", "init", "-b", "main", str(root)],
         check=True,
@@ -158,8 +158,8 @@ def test_completion_registration_uses_public_typer_api() -> None:
 def test_template_apply_json_writes_into_project_canonical_layout(
     monkeypatch, tmp_path, capsys, workspace_template
 ) -> None:
-    project_root = _make_project(tmp_path)
-    monkeypatch.chdir(project_root)
+    workspace_directory = _make_workspace_directory(tmp_path)
+    monkeypatch.chdir(workspace_directory)
 
     rc = cli.main(["--json", "template", "apply", "multiply-local-strands"])
     captured = capsys.readouterr()
@@ -177,18 +177,22 @@ def test_template_apply_json_writes_into_project_canonical_layout(
     assert "configs/training/multiply-local-strands.toml" in files
     assert "data/multiply.jsonl" in files
 
-    assert (project_root / "rollouts" / "multiply-local-strands" / "main.py").is_file()
-    assert (project_root / "configs" / "eval" / "multiply-local-strands.toml").is_file()
-    assert (project_root / "data" / "multiply.jsonl").is_file()
+    assert (
+        workspace_directory / "rollouts" / "multiply-local-strands" / "main.py"
+    ).is_file()
+    assert (
+        workspace_directory / "configs" / "eval" / "multiply-local-strands.toml"
+    ).is_file()
+    assert (workspace_directory / "data" / "multiply.jsonl").is_file()
     # The legacy staging directory must NOT be created.
-    assert not (project_root / "templates").exists()
+    assert not (workspace_directory / "templates").exists()
 
 
 def test_template_apply_json_in_incomplete_git_checkout(
     monkeypatch, tmp_path, capsys, workspace_template
 ) -> None:
-    project_root = _make_project(tmp_path)
-    monkeypatch.chdir(project_root)
+    workspace_directory = _make_workspace_directory(tmp_path)
+    monkeypatch.chdir(workspace_directory)
 
     rc = cli.main(["--json", "template", "apply", "multiply-local-strands"])
     captured = capsys.readouterr()
@@ -196,16 +200,18 @@ def test_template_apply_json_in_incomplete_git_checkout(
     assert rc == 0
     payload = json.loads(captured.out)
     assert "rollouts/multiply-local-strands/main.py" in payload["resource"]["files"]
-    assert (project_root / "rollouts" / "multiply-local-strands" / "main.py").is_file()
+    assert (
+        workspace_directory / "rollouts" / "multiply-local-strands" / "main.py"
+    ).is_file()
 
 
 def test_template_apply_refuses_overwrite_without_force(
     monkeypatch, tmp_path, capsys, workspace_template
 ) -> None:
-    project_root = _make_project(tmp_path)
-    monkeypatch.chdir(project_root)
+    workspace_directory = _make_workspace_directory(tmp_path)
+    monkeypatch.chdir(workspace_directory)
 
-    rollout_root = project_root / "rollouts" / "multiply-local-strands"
+    rollout_root = workspace_directory / "rollouts" / "multiply-local-strands"
     rollout_root.mkdir(parents=True)
     (rollout_root / "main.py").write_text("# user\n", encoding="utf-8")
 
@@ -224,10 +230,10 @@ def test_template_apply_refuses_overwrite_without_force(
 def test_template_apply_force_overwrites_existing_rollout(
     monkeypatch, tmp_path, workspace_template
 ) -> None:
-    project_root = _make_project(tmp_path)
-    monkeypatch.chdir(project_root)
+    workspace_directory = _make_workspace_directory(tmp_path)
+    monkeypatch.chdir(workspace_directory)
 
-    rollout_root = project_root / "rollouts" / "multiply-local-strands"
+    rollout_root = workspace_directory / "rollouts" / "multiply-local-strands"
     rollout_root.mkdir(parents=True)
     stale = rollout_root / "STALE.txt"
     stale.write_text("stale", encoding="utf-8")
@@ -242,8 +248,8 @@ def test_template_apply_force_overwrites_existing_rollout(
 def test_template_apply_unknown_template_returns_not_found_in_json(
     monkeypatch, tmp_path, capsys, workspace_template
 ) -> None:
-    project_root = _make_project(tmp_path)
-    monkeypatch.chdir(project_root)
+    workspace_directory = _make_workspace_directory(tmp_path)
+    monkeypatch.chdir(workspace_directory)
 
     rc = cli.main(["--json", "template", "apply", "nope"])
     captured = capsys.readouterr()

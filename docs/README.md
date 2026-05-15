@@ -1,15 +1,15 @@
 # Osmosis SDK documentation
 
-## Project Flow
+## Workspace Directory Flow
 
-Create the project in the Osmosis Platform, clone the repository created there,
+Create or open a workspace in the Osmosis Platform, clone the repository created there,
 then run CLI commands from that checkout.
 
 ```bash
 git clone <repo-url>
 cd <repo>
 osmosis auth login
-osmosis project doctor
+osmosis workspace doctor
 osmosis template apply multiply              # or add your rollout under rollouts/
 cp configs/training/default.toml configs/training/<run>.toml
 $EDITOR configs/training/<run>.toml          # set rollout, dataset, and model_path

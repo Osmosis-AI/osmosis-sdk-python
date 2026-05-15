@@ -25,7 +25,7 @@ class TemplateRecipe:
 
 @dataclass(frozen=True, slots=True)
 class ScaffoldEntry:
-    """A file or directory marker needed for project repair."""
+    """A file or directory marker needed for workspace directory repair."""
 
     dest: str
     content: str = ""

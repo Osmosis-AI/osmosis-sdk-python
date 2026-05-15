@@ -13,7 +13,7 @@ from osmosis_ai.cli.output import OutputFormat, override_output_context
 from osmosis_ai.eval.evaluation.cli import EvalCommand
 
 
-def _make_project(root: Path) -> Path:
+def _make_workspace_directory(root: Path) -> Path:
     subprocess.run(
         ["git", "init", "-b", "main", str(root)],
         check=True,
@@ -79,24 +79,24 @@ def _make_config(**overrides):
     return _FakeEvalConfig(**values)
 
 
-def test_load_project_dotenv_sets_missing_env(
+def test_load_workspace_directory_dotenv_sets_missing_env(
     monkeypatch: pytest.MonkeyPatch, tmp_path
 ) -> None:
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
     (tmp_path / ".env").write_text("OPENAI_API_KEY=from-dotenv\n", encoding="utf-8")
 
-    EvalCommand._load_project_dotenv(tmp_path)
+    EvalCommand._load_workspace_directory_dotenv(tmp_path)
 
     assert os.environ["OPENAI_API_KEY"] == "from-dotenv"
 
 
-def test_load_project_dotenv_does_not_override_shell_env(
+def test_load_workspace_directory_dotenv_does_not_override_shell_env(
     monkeypatch: pytest.MonkeyPatch, tmp_path
 ) -> None:
     monkeypatch.setenv("OPENAI_API_KEY", "from-shell")
     (tmp_path / ".env").write_text("OPENAI_API_KEY=from-dotenv\n", encoding="utf-8")
 
-    EvalCommand._load_project_dotenv(tmp_path)
+    EvalCommand._load_workspace_directory_dotenv(tmp_path)
 
     assert os.environ["OPENAI_API_KEY"] == "from-shell"
 
@@ -115,7 +115,7 @@ def _patch_eval_run_common(
     )
     monkeypatch.setattr(
         "osmosis_ai.eval.config.resolve_eval_context_paths",
-        lambda cfg, project_root: cfg,
+        lambda cfg, workspace_directory: cfg,
     )
     monkeypatch.setattr(
         "osmosis_ai.eval.common.cli.load_dataset_rows",
@@ -142,15 +142,15 @@ def _patch_eval_run_common(
         _fail_if_old_eval_flow_called,
     )
     monkeypatch.setattr(
-        "osmosis_ai.platform.cli.project_contract.resolve_project_root_from_cwd",
+        "osmosis_ai.platform.cli.workspace_directory_contract.resolve_workspace_directory_from_cwd",
         lambda: project,
     )
     monkeypatch.setattr(
-        "osmosis_ai.platform.cli.project_contract.validate_project_contract",
-        lambda project_root: None,
+        "osmosis_ai.platform.cli.workspace_directory_contract.validate_workspace_directory_contract",
+        lambda workspace_directory: None,
     )
     monkeypatch.setattr(
-        "osmosis_ai.platform.cli.project_contract.ensure_project_config_path",
+        "osmosis_ai.platform.cli.workspace_directory_contract.ensure_workspace_directory_config_path",
         lambda *args, **kwargs: None,
     )
 
@@ -205,7 +205,7 @@ def test_cached_only_eval_skips_api_key_port_and_startup(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    project = _make_project(tmp_path / "project")
+    project = _make_workspace_directory(tmp_path / "project")
     monkeypatch.chdir(project)
     config = _make_config()
     events: list[str] = []
@@ -266,7 +266,7 @@ def test_eval_run_hash_payload_preserves_legacy_none_keys(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    project = _make_project(tmp_path / "project")
+    project = _make_workspace_directory(tmp_path / "project")
     monkeypatch.chdir(project)
     config = _make_config()
     captured_config: dict[str, Any] = {}
@@ -340,7 +340,7 @@ def test_pending_eval_allows_missing_api_key_for_no_auth_providers(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    project = _make_project(tmp_path / "project")
+    project = _make_workspace_directory(tmp_path / "project")
     monkeypatch.chdir(project)
     config = _make_config()
     events: list[str] = []
@@ -464,7 +464,7 @@ def test_pending_eval_cli_error_from_run_prepared_returns_clean_rich_error(
     tmp_path: Path,
     capsys,
 ) -> None:
-    project = _make_project(tmp_path / "project")
+    project = _make_workspace_directory(tmp_path / "project")
     monkeypatch.chdir(project)
     config = _make_config()
 
@@ -544,7 +544,7 @@ def test_pending_eval_configured_empty_api_key_env_json_is_validation_error(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
-    project = _make_project(tmp_path / "project")
+    project = _make_workspace_directory(tmp_path / "project")
     monkeypatch.chdir(project)
     config = _make_config(llm_api_key_env="MISSING_KEY")
     events: list[str] = []
@@ -602,7 +602,7 @@ def test_pending_eval_progress_prints_reward_in_rich_output(
     tmp_path: Path,
     capsys,
 ) -> None:
-    project = _make_project(tmp_path / "project")
+    project = _make_workspace_directory(tmp_path / "project")
     monkeypatch.chdir(project)
     config = _make_config(output_quiet=False)
 
@@ -706,7 +706,7 @@ def test_eval_run_config_path_must_be_under_current_project(
 ) -> None:
     from osmosis_ai.cli.main import main
 
-    project = _make_project(tmp_path / "project")
+    project = _make_workspace_directory(tmp_path / "project")
     outside = tmp_path / "other.toml"
     outside.write_text(
         "[eval]\n"

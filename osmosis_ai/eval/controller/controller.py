@@ -22,7 +22,7 @@ from osmosis_ai.rollout.types import GraderStatus, RolloutInitResponse, RolloutS
 
 @dataclass
 class EvalControllerConfig:
-    project_root: Path
+    workspace_directory: Path
     rollout_name: str
     rollout_dir: Path
     entrypoint: str

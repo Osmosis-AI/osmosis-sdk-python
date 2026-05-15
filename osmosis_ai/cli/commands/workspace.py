@@ -1,4 +1,4 @@
-"""Local project management commands."""
+"""Local workspace directory management commands."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from typing import Any
 import typer
 
 app: typer.Typer = typer.Typer(
-    help="Manage the local Osmosis project.",
+    help="Manage the local Osmosis workspace directory.",
     no_args_is_help=True,
 )
 
@@ -21,7 +21,7 @@ def doctor(
         file_okay=True,
         dir_okay=True,
         resolve_path=True,
-        help="Path inside the project (defaults to current directory).",
+        help="Path inside the workspace directory (defaults to current directory).",
     ),
     fix: bool = typer.Option(
         False,
@@ -29,10 +29,10 @@ def doctor(
         help="Create missing scaffold paths. Existing files are never overwritten.",
     ),
 ) -> Any:
-    """Inspect and optionally repair the canonical project scaffold."""
-    from osmosis_ai.platform.cli.project import doctor_project
+    """Inspect and optionally repair the canonical workspace directory scaffold."""
+    from osmosis_ai.platform.cli.workspace_directory import doctor_workspace_directory
 
-    return doctor_project(path=path, fix=fix)
+    return doctor_workspace_directory(path=path, fix=fix)
 
 
 @app.command("refresh-agents")
@@ -45,6 +45,8 @@ def refresh_agents(
     ),
 ) -> Any:
     """Refresh official agent scaffold files after reviewing local edits."""
-    from osmosis_ai.platform.cli.project import refresh_agent_files
+    from osmosis_ai.platform.cli.workspace_directory import (
+        refresh_workspace_agent_files,
+    )
 
-    return refresh_agent_files(force=force)
+    return refresh_workspace_agent_files(force=force)

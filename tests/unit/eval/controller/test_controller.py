@@ -47,7 +47,7 @@ class FakeBridge:
 @pytest.fixture
 def config(tmp_path: Path) -> EvalControllerConfig:
     return EvalControllerConfig(
-        project_root=tmp_path,
+        workspace_directory=tmp_path,
         rollout_name="demo",
         rollout_dir=tmp_path / "rollouts" / "demo",
         entrypoint="rollout.py",

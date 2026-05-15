@@ -36,7 +36,7 @@ from osmosis_ai.eval.evaluation.cache import (
 )
 
 
-def _make_project(root: Path) -> Path:
+def _make_workspace_directory(root: Path) -> Path:
     subprocess.run(
         ["git", "init", "-b", "main", str(root)],
         check=True,
@@ -459,14 +459,14 @@ class TestComputeEvalFnsFingerprint:
 
 class TestGetCacheRoot:
     def test_default_path(self, monkeypatch, tmp_path):
-        project = _make_project(tmp_path / "project")
+        project = _make_workspace_directory(tmp_path / "project")
         monkeypatch.chdir(project)
         monkeypatch.delenv("XDG_CACHE_HOME", raising=False)
         root = _get_cache_root()
         assert root == (project / ".osmosis" / "cache" / "eval").resolve()
 
     def test_xdg_cache_home_is_ignored(self, monkeypatch, tmp_path):
-        project = _make_project(tmp_path / "project")
+        project = _make_workspace_directory(tmp_path / "project")
         monkeypatch.chdir(project)
         monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
         root = _get_cache_root()
@@ -477,7 +477,7 @@ def test_eval_cache_default_root_is_project_local(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    project = _make_project(tmp_path / "project")
+    project = _make_workspace_directory(tmp_path / "project")
     monkeypatch.chdir(project)
 
     assert _get_cache_root() == (project / ".osmosis" / "cache" / "eval").resolve()
@@ -516,7 +516,7 @@ def test_eval_cache_ls_allows_scaffold_without_credentials_or_origin(
     tmp_path: Path,
     capsys,
 ) -> None:
-    project = _make_project(tmp_path / "project")
+    project = _make_workspace_directory(tmp_path / "project")
     cache_root = project / ".osmosis" / "cache" / "eval"
     _make_cache_entry(cache_root, "abc123", "openai/gpt-4", "data.jsonl")
     monkeypatch.chdir(project)
@@ -539,7 +539,7 @@ def test_eval_cache_rm_allows_scaffold_without_credentials_or_origin(
     tmp_path: Path,
     capsys,
 ) -> None:
-    project = _make_project(tmp_path / "project")
+    project = _make_workspace_directory(tmp_path / "project")
     cache_root = project / ".osmosis" / "cache" / "eval"
     cache_path = _make_cache_entry(cache_root, "abc123", "openai/gpt-4", "data.jsonl")
     monkeypatch.chdir(project)

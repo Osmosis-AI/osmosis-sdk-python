@@ -1,7 +1,7 @@
 """Business logic for ``osmosis rollout init``.
 
-Reads SDK-bundled scaffold templates and stamps them into the active project's
-canonical layout. The templates ship as package data alongside this module, so
+Reads SDK-bundled scaffold templates and stamps them into the active workspace
+directory's canonical layout. The templates ship as package data alongside this module, so
 ``rollout init`` works offline and is unaffected by user edits to the
 workspace-template repo.
 """
@@ -28,7 +28,7 @@ _RESERVED_NAMES = frozenset({"default"})
 _ROLLOUT_NAME_TOKEN = "<your-rollout>"
 _SCAFFOLD_PACKAGE = "osmosis_ai.templates._scaffolds.rollout"
 
-# Source ``.tpl`` filename → project-relative destination template. ``{name}``
+# Source ``.tpl`` filename -> workspace-directory-relative destination template. ``{name}``
 # is replaced with the rollout name at render time.
 _SCAFFOLD_LAYOUT: tuple[tuple[str, str], ...] = (
     ("main.py.tpl", "rollouts/{name}/main.py"),
@@ -56,16 +56,19 @@ def _validate_rollout_name(name: str) -> None:
         )
 
 
-def _planned_destinations(project_root: Path, name: str) -> dict[str, Path]:
-    """Top-level project paths owned by this scaffold.
+def _planned_destinations(workspace_directory: Path, name: str) -> dict[str, Path]:
+    """Top-level workspace directory paths owned by this scaffold.
 
     Used for conflict detection and cleanup. Individual files inside
     ``rollouts/<name>/`` live in ``_SCAFFOLD_LAYOUT``.
     """
     return {
-        "rollout_dir": project_root / "rollouts" / name,
-        "eval_config": project_root / "configs" / "eval" / f"{name}.toml",
-        "training_config": project_root / "configs" / "training" / f"{name}.toml",
+        "rollout_dir": workspace_directory / "rollouts" / name,
+        "eval_config": workspace_directory / "configs" / "eval" / f"{name}.toml",
+        "training_config": workspace_directory
+        / "configs"
+        / "training"
+        / f"{name}.toml",
     }
 
 
@@ -79,12 +82,12 @@ def _format_conflicts(name: str, conflicts: list[str]) -> CLIError:
     )
 
 
-def _check_conflicts(project_root: Path, name: str) -> None:
+def _check_conflicts(workspace_directory: Path, name: str) -> None:
     conflicts: list[str] = []
-    for dest in _planned_destinations(project_root, name).values():
+    for dest in _planned_destinations(workspace_directory, name).values():
         if dest.exists() or dest.is_symlink():
             suffix = "/" if dest.is_dir() and not dest.is_symlink() else ""
-            conflicts.append(dest.relative_to(project_root).as_posix() + suffix)
+            conflicts.append(dest.relative_to(workspace_directory).as_posix() + suffix)
     if conflicts:
         raise _format_conflicts(name, conflicts)
 
@@ -131,13 +134,13 @@ def _reset_rollout_dir(rollout_dir: Path, name: str) -> None:
 
 
 def _check_force_config_targets(
-    project_root: Path, destinations: dict[str, Path]
+    workspace_directory: Path, destinations: dict[str, Path]
 ) -> None:
     blocked: list[str] = []
     for key in ("eval_config", "training_config"):
         dest = destinations[key]
         if dest.is_symlink() or dest.is_dir() or (dest.exists() and not dest.is_file()):
-            blocked.append(dest.relative_to(project_root).as_posix())
+            blocked.append(dest.relative_to(workspace_directory).as_posix())
 
     if not blocked:
         return
@@ -153,44 +156,44 @@ def _check_force_config_targets(
 
 def init_command(name: str, *, force: bool = False) -> CommandResult | None:
     """Scaffold ``rollouts/<name>/`` and matching eval/training configs."""
-    from osmosis_ai.platform.cli.project_contract import (
-        resolve_project_root_from_cwd,
-        validate_project_contract,
+    from osmosis_ai.platform.cli.workspace_directory_contract import (
+        resolve_workspace_directory_from_cwd,
+        validate_workspace_directory_contract,
     )
 
     _validate_rollout_name(name)
-    project_root = resolve_project_root_from_cwd()
-    validate_project_contract(project_root)
+    workspace_directory = resolve_workspace_directory_from_cwd()
+    validate_workspace_directory_contract(workspace_directory)
 
-    destinations = _planned_destinations(project_root, name)
+    destinations = _planned_destinations(workspace_directory, name)
     rollout_dir = destinations["rollout_dir"]
     eval_config = destinations["eval_config"]
     training_config = destinations["training_config"]
 
     if not force:
-        _check_conflicts(project_root, name)
+        _check_conflicts(workspace_directory, name)
 
     scaffold_root = _scaffold_root()
     _check_scaffold_files_present(scaffold_root)
 
     if force:
-        _check_force_config_targets(project_root, destinations)
+        _check_force_config_targets(workspace_directory, destinations)
         _reset_rollout_dir(rollout_dir, name)
 
     written: list[str] = []
     for tpl_name, dest_template in _SCAFFOLD_LAYOUT:
-        dest = project_root / dest_template.format(name=name)
+        dest = workspace_directory / dest_template.format(name=name)
         _render_to(scaffold_root.joinpath(tpl_name), dest, name)
-        written.append(dest.relative_to(project_root).as_posix())
+        written.append(dest.relative_to(workspace_directory).as_posix())
 
     next_steps = [
         f"pip install -e rollouts/{name}",
         f"osmosis eval run configs/eval/{name}.toml --limit 1",
         f"osmosis train submit configs/training/{name}.toml",
     ]
-    rollout_dir_rel = rollout_dir.relative_to(project_root).as_posix()
-    eval_config_rel = eval_config.relative_to(project_root).as_posix()
-    training_config_rel = training_config.relative_to(project_root).as_posix()
+    rollout_dir_rel = rollout_dir.relative_to(workspace_directory).as_posix()
+    eval_config_rel = eval_config.relative_to(workspace_directory).as_posix()
+    training_config_rel = training_config.relative_to(workspace_directory).as_posix()
 
     output = get_output_context()
     if output.format is OutputFormat.rich:
@@ -209,7 +212,7 @@ def init_command(name: str, *, force: bool = False) -> CommandResult | None:
         status="success",
         resource={
             "name": name,
-            "project_root": str(project_root),
+            "workspace_directory": str(workspace_directory),
             "rollout_dir": rollout_dir_rel,
             "configs": {
                 "eval": eval_config_rel,

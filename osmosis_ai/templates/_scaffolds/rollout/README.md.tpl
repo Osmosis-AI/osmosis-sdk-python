@@ -3,7 +3,7 @@
 Placeholder rollout created by `osmosis rollout init`. Edit `main.py` to fill in
 `MyAgentWorkflow.run()` and `MyGrader.grade()`.
 
-Local dev loop from the project root:
+Local dev loop from the workspace directory:
 
 ```bash
 pip install -e rollouts/<your-rollout>

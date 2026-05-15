@@ -44,13 +44,13 @@ def test_build_user_server_command_uses_uv_python_entrypoint() -> None:
 def test_build_user_server_env_sets_contract_and_pythonpath(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
-    project_root = tmp_path / "project"
+    workspace_directory = tmp_path / "project"
     rollout_dir = tmp_path / "project" / "rollouts" / "demo"
     monkeypatch.setenv("PYTHONPATH", "/existing")
     monkeypatch.setenv("KEEP_ME", "yes")
 
     env = build_user_server_env(
-        project_root=project_root,
+        workspace_directory=workspace_directory,
         rollout_dir=rollout_dir,
         rollout_name="demo",
         entrypoint="rollout.py",
@@ -65,7 +65,7 @@ def test_build_user_server_env_sets_contract_and_pythonpath(
     assert env["KEEP_ME"] == "yes"
     assert env["PYTHONPATH"].split(os.pathsep) == [
         str(rollout_dir),
-        str(project_root),
+        str(workspace_directory),
         "/existing",
     ]
 

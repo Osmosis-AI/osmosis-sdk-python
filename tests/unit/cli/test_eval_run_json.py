@@ -59,7 +59,7 @@ class _FakeOrchestrator:
         raise AssertionError("cached eval result should not execute pending work")
 
 
-def _make_project(root: Path) -> Path:
+def _make_workspace_directory(root: Path) -> Path:
     subprocess.run(
         ["git", "init", "-b", "main", str(root)],
         check=True,
@@ -95,7 +95,7 @@ def test_eval_run_json_returns_final_summary(
     tmp_path,
     capsys,
 ) -> None:
-    project = _make_project(tmp_path / "project")
+    project = _make_workspace_directory(tmp_path / "project")
     config_path = project / "configs" / "eval" / "eval.toml"
     dataset_path = project / "data" / "data.jsonl"
     config_path.write_text("[eval]\n", encoding="utf-8")
