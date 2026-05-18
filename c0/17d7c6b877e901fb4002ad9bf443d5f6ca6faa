@@ -1,0 +1,19 @@
+osmosis_ai/platform/cli/training_config.py
+  s_bff8d599f25a70::t_622e82c86fa751 8,32,44,83,90,325
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.9",
+  "base_commit_sha": "c017d7c6b877e901fb4002ad9bf443d5f6ca6faa",
+  "prompts": {},
+  "sessions": {
+    "s_bff8d599f25a70": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "3f24d686-23d3-4443-8e21-cfa94654096d",
+        "model": "gpt-5.5-extra-high"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}
