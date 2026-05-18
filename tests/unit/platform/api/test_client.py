@@ -329,7 +329,7 @@ class TestSubmitTrainingRun:
         assert payload == {
             "model_path": "m1",
             "dataset": "ds1",
-            "rollout_name": "rollout1",
+            "rollout": "rollout1",
             "entrypoint": "rollouts/main.py",
         }
         assert "rollout_env" not in payload

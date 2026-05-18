@@ -190,7 +190,7 @@ class OsmosisClient:
         data: dict[str, Any] = {
             "model_path": model_path,
             "dataset": dataset,
-            "rollout_name": rollout_name,
+            "rollout": rollout_name,
             "entrypoint": entrypoint,
         }
         if commit_sha is not None:
