@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 import tomllib
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from pydantic_core import ErrorDetails
@@ -29,7 +29,7 @@ _ENV_VAR_NAME_RE = re.compile(r"^[A-Z_][A-Z0-9_]*$")
 
 
 class _ExperimentSection(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra="forbid")
 
     rollout: str
     entrypoint: str
@@ -41,7 +41,7 @@ class _ExperimentSection(BaseModel):
 class _BackendValidatedParamSection(BaseModel):
     """Preserve training params for server-side schema validation."""
 
-    model_config = ConfigDict(extra="allow")
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra="allow")
 
 
 class _TrainingSection(_BackendValidatedParamSection):
@@ -80,14 +80,14 @@ _MAX_KEY_CORRECTION_DISTANCE = 3
 
 
 class _RolloutSection(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra="forbid")
 
     env: dict[str, str] = Field(default_factory=dict)
     secrets: dict[str, str] = Field(default_factory=dict)
 
 
 class _TrainingRunParams(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra="forbid")
 
     training: _TrainingSection = Field(default_factory=_TrainingSection)
     sampling: _SamplingSection = Field(default_factory=_SamplingSection)
@@ -322,7 +322,7 @@ def _collect_param_section_key_issues(
 class TrainingConfig(BaseModel):
     """Parsed training TOML configuration."""
 
-    model_config = ConfigDict(extra="forbid")
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra="forbid")
 
     experiment: _ExperimentSection
     params: _TrainingRunParams
