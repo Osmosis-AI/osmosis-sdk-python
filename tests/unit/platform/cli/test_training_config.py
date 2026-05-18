@@ -411,7 +411,7 @@ total_epochs = "not-a-number"
     assert cfg.to_api_config()["total_epochs"] == "not-a-number"
 
 
-def test_unknown_training_field_is_delegated_to_backend(tmp_path: Path) -> None:
+def test_unknown_training_fields_are_rejected_by_sdk(tmp_path: Path) -> None:
     path = tmp_path / "unknown_field.toml"
     path.write_text(
         """
@@ -422,13 +422,76 @@ model_path = "m"
 dataset = "d"
 
 [training]
-unexpected = 1
+dummy = 1
+rollout_bach_size = 32
 """.strip(),
         encoding="utf-8",
     )
 
-    cfg = load_training_config(path)
-    assert cfg.to_api_config()["unexpected"] == 1
+    with pytest.raises(CLIError) as exc_info:
+        load_training_config(path)
+
+    message = str(exc_info.value)
+    assert message.startswith("Invalid training config:")
+    assert "dummy: Unrecognized key" in message
+    assert (
+        "rollout_bach_size: Unrecognized key (did you mean 'rollout_batch_size'?)"
+        in message
+    )
+    assert exc_info.value.details == {
+        "error": "Invalid training config",
+        "issues": [
+            {"key": "dummy", "message": "Unrecognized key"},
+            {
+                "key": "rollout_bach_size",
+                "message": "Unrecognized key",
+                "key_correction": "rollout_batch_size",
+            },
+        ],
+    }
+
+
+def test_sdk_detected_errors_are_reported_together(tmp_path: Path) -> None:
+    path = tmp_path / "multiple_sdk_errors.toml"
+    path.write_text(
+        """
+[experiment]
+rollout = "r"
+entrypoint = "e.py"
+model_path = "m"
+dataset = "d"
+extra = 1
+
+[training]
+dummy = 1
+rollout_bach_size = 32
+""".strip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(CLIError) as exc_info:
+        load_training_config(path)
+
+    message = str(exc_info.value)
+    assert message.startswith("Invalid training config:")
+    assert "experiment.extra: Unrecognized key" in message
+    assert "dummy: Unrecognized key" in message
+    assert (
+        "rollout_bach_size: Unrecognized key (did you mean 'rollout_batch_size'?)"
+        in message
+    )
+    assert exc_info.value.details == {
+        "error": "Invalid training config",
+        "issues": [
+            {"key": "experiment.extra", "message": "Unrecognized key"},
+            {"key": "dummy", "message": "Unrecognized key"},
+            {
+                "key": "rollout_bach_size",
+                "message": "Unrecognized key",
+                "key_correction": "rollout_batch_size",
+            },
+        ],
+    }
 
 
 def test_known_training_field_in_wrong_section_is_rejected(tmp_path: Path) -> None:

@@ -76,6 +76,7 @@ _KNOWN_PARAM_SECTION_BY_KEY = {
     for section_name, model_type in _PARAM_SECTION_MODELS
     for key in model_type.model_fields
 }
+_MAX_KEY_CORRECTION_DISTANCE = 3
 
 
 class _RolloutSection(BaseModel):
@@ -99,12 +100,6 @@ class _TrainingRunParams(BaseModel):
         return fields
 
 
-def _format_bound(value: int | float) -> str:
-    if isinstance(value, float) and value.is_integer():
-        return str(int(value))
-    return str(value)
-
-
 def _format_input(value: Any) -> str:
     return repr(value)
 
@@ -113,63 +108,20 @@ def _format_field_path(loc: tuple[Any, ...]) -> str:
     return ".".join(str(part) for part in loc)
 
 
-def _format_field_bounds(model_type: type[BaseModel], field_name: str) -> str | None:
-    field = model_type.model_fields.get(field_name)
-    if field is None:
-        return None
-
-    lower: list[str] = []
-    upper: list[str] = []
-    for metadata in field.metadata:
-        gt = getattr(metadata, "gt", None)
-        ge = getattr(metadata, "ge", None)
-        lt = getattr(metadata, "lt", None)
-        le = getattr(metadata, "le", None)
-        if gt is not None:
-            lower.append(f"> {_format_bound(gt)}")
-        if ge is not None:
-            lower.append(f">= {_format_bound(ge)}")
-        if lt is not None:
-            upper.append(f"< {_format_bound(lt)}")
-        if le is not None:
-            upper.append(f"<= {_format_bound(le)}")
-
-    bounds = [*lower, *upper]
-    if not bounds:
-        return None
-    return " and ".join(bounds)
-
-
-def _format_validation_issue(
+def _validation_issue_to_training_config_issue(
     *,
     error: ErrorDetails,
     section_name: str,
-    model_type: type[BaseModel],
-    path: Path,
-) -> str:
+) -> dict[str, str]:
     loc = tuple(error.get("loc") or ())
     field_path = _format_field_path(loc)
-    field_name = str(loc[0]) if loc else section_name
     error_type = str(error.get("type"))
+    issue_key = f"{section_name}.{field_path}" if field_path else section_name
 
     if error_type == "extra_forbidden":
-        return f"Unknown key '{field_name}' in [{section_name}] of {path}"
+        return {"key": issue_key, "message": "Unrecognized key"}
 
-    subject = f"{field_path} in [{section_name}] of {path}"
     value = _format_input(error.get("input"))
-
-    bounds = _format_field_bounds(model_type, field_name)
-    if (
-        error_type
-        in {
-            "greater_than",
-            "greater_than_equal",
-            "less_than",
-            "less_than_equal",
-        }
-        and bounds is not None
-    ):
-        return f"{subject} must be {bounds}, got {value}"
 
     expected_types = {
         "bool_parsing": "a boolean",
@@ -183,9 +135,15 @@ def _format_validation_issue(
     }
     expected_type = expected_types.get(error_type)
     if expected_type is not None:
-        return f"{subject} must be {expected_type}, got {value}"
+        return {
+            "key": issue_key,
+            "message": f"must be {expected_type}, got {value}",
+        }
 
-    return f"{subject} is invalid: {error.get('msg', 'invalid value')}"
+    return {
+        "key": issue_key,
+        "message": f"is invalid: {error.get('msg', 'invalid value')}",
+    }
 
 
 def _config_validation_error(
@@ -196,21 +154,13 @@ def _config_validation_error(
     path: Path,
 ) -> CLIError:
     issues = [
-        _format_validation_issue(
+        _validation_issue_to_training_config_issue(
             error=validation_issue,
             section_name=section_name,
-            model_type=model_type,
-            path=path,
         )
         for validation_issue in error.errors()
     ]
-    if len(issues) == 1:
-        return CLIError(issues[0])
-    lines = [
-        f"Invalid [{section_name}] section in {path}:",
-        *[f"- {i}" for i in issues],
-    ]
-    return CLIError("\n".join(lines))
+    return _training_config_issues_error(issues=issues)
 
 
 def _training_config_issues_error(
@@ -219,7 +169,10 @@ def _training_config_issues_error(
 ) -> CLIError:
     lines = [
         "Invalid training config:",
-        *[f"  - {issue['key']}: {issue['message']}" for issue in issues],
+        *[
+            f"  - {issue['key']}: {_format_training_config_issue(issue)}"
+            for issue in issues
+        ],
     ]
     return CLIError(
         "\n".join(lines),
@@ -228,6 +181,42 @@ def _training_config_issues_error(
             "issues": issues,
         },
     )
+
+
+def _format_training_config_issue(issue: dict[str, str]) -> str:
+    message = issue["message"]
+    correction = issue.get("key_correction")
+    if correction:
+        return f"{message} (did you mean '{correction}'?)"
+    return message
+
+
+def _levenshtein_distance(a: str, b: str) -> int:
+    previous = list(range(len(b) + 1))
+    for i, char_a in enumerate(a, start=1):
+        current = [i]
+        for j, char_b in enumerate(b, start=1):
+            cost = 0 if char_a == char_b else 1
+            current.append(
+                min(
+                    current[j - 1] + 1,
+                    previous[j] + 1,
+                    previous[j - 1] + cost,
+                )
+            )
+        previous = current
+    return previous[-1]
+
+
+def _find_key_correction(key: str) -> str | None:
+    best_key: str | None = None
+    best_distance = _MAX_KEY_CORRECTION_DISTANCE + 1
+    for valid_key in _KNOWN_PARAM_SECTION_BY_KEY:
+        distance = _levenshtein_distance(key, valid_key)
+        if distance < best_distance:
+            best_distance = distance
+            best_key = valid_key
+    return best_key if best_distance <= _MAX_KEY_CORRECTION_DISTANCE else None
 
 
 def _read_table(
@@ -266,11 +255,29 @@ def _parse_section(
         ) from e
 
 
-def _validate_param_section_keys(
+def _collect_section_validation_issues(
+    *,
+    section_name: str,
+    model_type: type[BaseModel],
+    data: dict[str, Any],
+) -> list[dict[str, str]]:
+    try:
+        model_type(**data)
+    except ValidationError as e:
+        return [
+            _validation_issue_to_training_config_issue(
+                error=validation_issue,
+                section_name=section_name,
+            )
+            for validation_issue in e.errors()
+        ]
+    return []
+
+
+def _collect_param_section_key_issues(
     *,
     sections: dict[str, dict[str, Any]],
-    path: Path,
-) -> None:
+) -> list[dict[str, str]]:
     seen: dict[str, str] = {}
     issues: list[dict[str, str]] = []
     for section_name, section in sections.items():
@@ -299,9 +306,17 @@ def _validate_param_section_keys(
                         ),
                     }
                 )
+            elif expected_section is None:
+                issue = {
+                    "key": key,
+                    "message": "Unrecognized key",
+                }
+                correction = _find_key_correction(key)
+                if correction is not None:
+                    issue["key_correction"] = correction
+                issues.append(issue)
 
-    if issues:
-        raise _training_config_issues_error(issues=issues)
+    return issues
 
 
 class TrainingConfig(BaseModel):
@@ -374,7 +389,7 @@ class TrainingConfig(BaseModel):
         return self.params.sampling.rollout_top_p
 
     @property
-    def checkpoints_eval_interval(self) -> int | None:
+    def checkpoints_eval_interval(self) -> Any:
         return self.params.checkpoints.eval_interval
 
     @property
@@ -446,21 +461,37 @@ def load_training_config(path: Path) -> TrainingConfig:
                 f"Missing '{required_key}' in [experiment] section of {path}"
             )
 
+    training_section = _read_table(raw, "training", path)
+    sampling_section = _read_table(raw, "sampling", path)
+    checkpoints_section = _read_table(raw, "checkpoints", path)
+    rollout_section = _read_table(raw, "rollout", path)
+    param_sections = {
+        "training": training_section,
+        "sampling": sampling_section,
+        "checkpoints": checkpoints_section,
+    }
+    issues = [
+        *_collect_section_validation_issues(
+            section_name="experiment",
+            model_type=_ExperimentSection,
+            data=experiment_section,
+        ),
+        *_collect_param_section_key_issues(
+            sections=param_sections,
+        ),
+        *_collect_section_validation_issues(
+            section_name="rollout",
+            model_type=_RolloutSection,
+            data=rollout_section,
+        ),
+    ]
+    if issues:
+        raise _training_config_issues_error(issues=issues)
+
     experiment = _parse_section(
         section_name="experiment",
         model_type=_ExperimentSection,
         data=experiment_section,
-        path=path,
-    )
-    training_section = _read_table(raw, "training", path)
-    sampling_section = _read_table(raw, "sampling", path)
-    checkpoints_section = _read_table(raw, "checkpoints", path)
-    _validate_param_section_keys(
-        sections={
-            "training": training_section,
-            "sampling": sampling_section,
-            "checkpoints": checkpoints_section,
-        },
         path=path,
     )
     training = _parse_section(
@@ -484,7 +515,7 @@ def load_training_config(path: Path) -> TrainingConfig:
     rollout = _parse_section(
         section_name="rollout",
         model_type=_RolloutSection,
-        data=_read_table(raw, "rollout", path),
+        data=rollout_section,
         path=path,
     )
     assert isinstance(experiment, _ExperimentSection)
