@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic_core import ErrorDetails
 
 from osmosis_ai.cli.errors import CLIError
 
@@ -141,7 +142,7 @@ def _format_field_bounds(model_type: type[BaseModel], field_name: str) -> str | 
 
 def _format_validation_issue(
     *,
-    error: dict[str, Any],
+    error: ErrorDetails,
     section_name: str,
     model_type: type[BaseModel],
     path: Path,
