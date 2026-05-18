@@ -429,3 +429,87 @@ unexpected = 1
 
     cfg = load_training_config(path)
     assert cfg.to_api_config()["unexpected"] == 1
+
+
+def test_known_training_field_in_wrong_section_is_rejected(tmp_path: Path) -> None:
+    path = tmp_path / "misplaced_field.toml"
+    path.write_text(
+        """
+[experiment]
+rollout = "r"
+entrypoint = "e.py"
+model_path = "m"
+dataset = "d"
+
+[sampling]
+lr = 1e-6
+""".strip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(CLIError) as exc_info:
+        load_training_config(path)
+
+    message = str(exc_info.value)
+    assert message.startswith("Invalid training config:")
+    assert str(path) not in message
+    assert "lr: belongs in [training], not [sampling]" in message
+
+
+def test_duplicate_param_key_across_sections_is_rejected(tmp_path: Path) -> None:
+    path = tmp_path / "duplicate_field.toml"
+    path.write_text(
+        """
+[experiment]
+rollout = "r"
+entrypoint = "e.py"
+model_path = "m"
+dataset = "d"
+
+[training]
+custom_backend_arg = 1
+
+[checkpoints]
+custom_backend_arg = 2
+""".strip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(CLIError) as exc_info:
+        load_training_config(path)
+
+    message = str(exc_info.value)
+    assert message.startswith("Invalid training config:")
+    assert str(path) not in message
+    assert "custom_backend_arg: appears in both [training] and [checkpoints]" in message
+
+
+def test_param_section_errors_are_reported_together(tmp_path: Path) -> None:
+    path = tmp_path / "multiple_section_errors.toml"
+    path.write_text(
+        """
+[experiment]
+rollout = "r"
+entrypoint = "e.py"
+model_path = "m"
+dataset = "d"
+
+[training]
+lr = 1e-6
+
+[sampling]
+lr = 2e-6
+checkpoint_save_freq = 10
+""".strip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(CLIError) as exc_info:
+        load_training_config(path)
+
+    message = str(exc_info.value)
+    assert message.startswith("Invalid training config:")
+    assert str(path) not in message
+    assert "lr: appears in both [training] and [sampling]" in message
+    assert "lr: belongs in [training], not [sampling]" in message
+    assert "checkpoint_save_freq: belongs in [checkpoints], not [sampling]" in message

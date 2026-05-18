@@ -64,6 +64,19 @@ class _CheckpointsSection(_BackendValidatedParamSection):
     checkpoint_save_freq: Any = None
 
 
+_PARAM_SECTION_MODELS = (
+    ("training", _TrainingSection),
+    ("sampling", _SamplingSection),
+    ("checkpoints", _CheckpointsSection),
+)
+
+_KNOWN_PARAM_SECTION_BY_KEY = {
+    key: section_name
+    for section_name, model_type in _PARAM_SECTION_MODELS
+    for key in model_type.model_fields
+}
+
+
 class _RolloutSection(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -199,6 +212,23 @@ def _config_validation_error(
     return CLIError("\n".join(lines))
 
 
+def _training_config_issues_error(
+    *,
+    issues: list[dict[str, str]],
+) -> CLIError:
+    lines = [
+        "Invalid training config:",
+        *[f"  - {issue['key']}: {issue['message']}" for issue in issues],
+    ]
+    return CLIError(
+        "\n".join(lines),
+        details={
+            "error": "Invalid training config",
+            "issues": issues,
+        },
+    )
+
+
 def _read_table(
     raw: dict[str, Any],
     section_name: str,
@@ -233,6 +263,44 @@ def _parse_section(
             model_type=model_type,
             path=path,
         ) from e
+
+
+def _validate_param_section_keys(
+    *,
+    sections: dict[str, dict[str, Any]],
+    path: Path,
+) -> None:
+    seen: dict[str, str] = {}
+    issues: list[dict[str, str]] = []
+    for section_name, section in sections.items():
+        for key in section:
+            previous_section = seen.get(key)
+            if previous_section is not None:
+                issues.append(
+                    {
+                        "key": key,
+                        "message": (
+                            f"appears in both [{previous_section}] and [{section_name}]"
+                        ),
+                    }
+                )
+            seen[key] = section_name
+
+    for section_name, section in sections.items():
+        for key in section:
+            expected_section = _KNOWN_PARAM_SECTION_BY_KEY.get(key)
+            if expected_section is not None and expected_section != section_name:
+                issues.append(
+                    {
+                        "key": key,
+                        "message": (
+                            f"belongs in [{expected_section}], not [{section_name}]"
+                        ),
+                    }
+                )
+
+    if issues:
+        raise _training_config_issues_error(issues=issues)
 
 
 class TrainingConfig(BaseModel):
@@ -383,22 +451,33 @@ def load_training_config(path: Path) -> TrainingConfig:
         data=experiment_section,
         path=path,
     )
+    training_section = _read_table(raw, "training", path)
+    sampling_section = _read_table(raw, "sampling", path)
+    checkpoints_section = _read_table(raw, "checkpoints", path)
+    _validate_param_section_keys(
+        sections={
+            "training": training_section,
+            "sampling": sampling_section,
+            "checkpoints": checkpoints_section,
+        },
+        path=path,
+    )
     training = _parse_section(
         section_name="training",
         model_type=_TrainingSection,
-        data=_read_table(raw, "training", path),
+        data=training_section,
         path=path,
     )
     sampling = _parse_section(
         section_name="sampling",
         model_type=_SamplingSection,
-        data=_read_table(raw, "sampling", path),
+        data=sampling_section,
         path=path,
     )
     checkpoints = _parse_section(
         section_name="checkpoints",
         model_type=_CheckpointsSection,
-        data=_read_table(raw, "checkpoints", path),
+        data=checkpoints_section,
         path=path,
     )
     rollout = _parse_section(
