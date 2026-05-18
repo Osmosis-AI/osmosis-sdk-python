@@ -13,20 +13,6 @@ from osmosis_ai.platform.cli.training_config import (
     validate_training_context_paths,
 )
 
-DEFAULT_API_CONFIG = {
-    "lr": 1e-6,
-    "total_epochs": 1,
-    "n_samples_per_prompt": 8,
-    "rollout_batch_size": 64,
-    "max_prompt_length": 8192,
-    "max_response_length": 8192,
-    "agent_workflow_timeout_s": 450,
-    "grader_timeout_s": 150,
-    "rollout_temperature": 1.0,
-    "rollout_top_p": 1.0,
-    "checkpoint_save_freq": 20,
-}
-
 # ---------------------------------------------------------------------------
 # Valid configs
 # ---------------------------------------------------------------------------
@@ -97,12 +83,12 @@ dataset = "id-1"
     cfg = load_training_config(path)
     assert cfg.experiment_rollout == "r"
     assert cfg.experiment_commit_sha is None
-    assert cfg.training_lr == 1e-6
-    assert cfg.training_total_epochs == 1
-    assert cfg.training_n_samples_per_prompt == 8
-    assert cfg.training_rollout_batch_size == 64
-    assert cfg.sampling_rollout_temperature == 1.0
-    assert cfg.checkpoints_checkpoint_save_freq == 20
+    assert cfg.training_lr is None
+    assert cfg.training_total_epochs is None
+    assert cfg.training_n_samples_per_prompt is None
+    assert cfg.training_rollout_batch_size is None
+    assert cfg.sampling_rollout_temperature is None
+    assert cfg.checkpoints_checkpoint_save_freq is None
     assert cfg.checkpoints_eval_interval is None
 
 
@@ -143,12 +129,7 @@ checkpoint_save_freq = 10
         "total_epochs": 1,
         "n_samples_per_prompt": 8,
         "rollout_batch_size": 64,
-        "max_prompt_length": 8192,
-        "max_response_length": 8192,
-        "agent_workflow_timeout_s": 450,
-        "grader_timeout_s": 150,
         "rollout_temperature": 0.9,
-        "rollout_top_p": 1.0,
         "checkpoint_save_freq": 10,
     }
 
@@ -167,7 +148,7 @@ dataset = "d"
     )
 
     cfg = load_training_config(path)
-    assert cfg.to_api_config() == DEFAULT_API_CONFIG
+    assert cfg.to_api_config() == {}
 
 
 # ---------------------------------------------------------------------------
@@ -309,15 +290,12 @@ def test_directory_path_raises(tmp_path: Path) -> None:
 @pytest.mark.parametrize(
     ("training_body", "expected_config"),
     [
-        ("rollout_batch_size = 32", {**DEFAULT_API_CONFIG, "rollout_batch_size": 32}),
-        (
-            "n_samples_per_prompt = 4",
-            {**DEFAULT_API_CONFIG, "n_samples_per_prompt": 4},
-        ),
-        ("", DEFAULT_API_CONFIG),
+        ("rollout_batch_size = 32", {"rollout_batch_size": 32}),
+        ("n_samples_per_prompt = 4", {"n_samples_per_prompt": 4}),
+        ("", {}),
     ],
 )
-def test_optional_training_fields_use_defaults_and_can_be_set_independently(
+def test_optional_training_fields_only_emit_explicit_values(
     tmp_path: Path, training_body: str, expected_config: dict[str, int | float]
 ) -> None:
     path = tmp_path / "optional_training_fields.toml"
@@ -368,7 +346,7 @@ dataset = "d"
         ("checkpoints", "checkpoint_save_freq", "1000001"),
     ],
 )
-def test_training_param_bounds_are_validated(
+def test_training_param_bounds_are_delegated_to_backend(
     tmp_path: Path, section: str, field: str, value: str
 ) -> None:
     path = tmp_path / "bad_bounds.toml"
@@ -386,11 +364,9 @@ dataset = "d"
         encoding="utf-8",
     )
 
-    with pytest.raises(CLIError) as exc_info:
-        load_training_config(path)
-    message = str(exc_info.value)
-    assert field in message
-    assert "must be" in message
+    cfg = load_training_config(path)
+    expected = float(value) if "." in value else int(value)
+    assert cfg.to_api_config()[field] == expected
 
 
 def test_rollout_batch_size_not_required_to_be_divisible(tmp_path: Path) -> None:
@@ -415,7 +391,7 @@ rollout_batch_size = 65
     assert cfg.training_n_samples_per_prompt == 8
 
 
-def test_invalid_training_field_type(tmp_path: Path) -> None:
+def test_invalid_training_field_type_is_delegated_to_backend(tmp_path: Path) -> None:
     path = tmp_path / "bad_type.toml"
     path.write_text(
         """
@@ -431,16 +407,11 @@ total_epochs = "not-a-number"
         encoding="utf-8",
     )
 
-    with pytest.raises(CLIError) as exc_info:
-        load_training_config(path)
-    message = str(exc_info.value)
-    assert f"total_epochs in [training] of {path}" in message
-    assert "must be an integer" in message
-    assert "got 'not-a-number'" in message
-    assert "pydantic" not in message.lower()
+    cfg = load_training_config(path)
+    assert cfg.to_api_config()["total_epochs"] == "not-a-number"
 
 
-def test_unknown_training_field_has_friendly_error(tmp_path: Path) -> None:
+def test_unknown_training_field_is_delegated_to_backend(tmp_path: Path) -> None:
     path = tmp_path / "unknown_field.toml"
     path.write_text(
         """
@@ -456,7 +427,5 @@ unexpected = 1
         encoding="utf-8",
     )
 
-    with pytest.raises(CLIError) as exc_info:
-        load_training_config(path)
-    message = str(exc_info.value)
-    assert message == f"Unknown key 'unexpected' in [training] of {path}"
+    cfg = load_training_config(path)
+    assert cfg.to_api_config()["unexpected"] == 1

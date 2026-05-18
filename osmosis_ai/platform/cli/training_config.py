@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 import tomllib
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
@@ -37,31 +37,31 @@ class _ExperimentSection(BaseModel):
     commit_sha: str | None = None
 
 
-class _TrainingSection(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+class _BackendValidatedParamSection(BaseModel):
+    """Preserve training params for server-side schema validation."""
 
-    lr: Annotated[float, Field(gt=0.0, le=1.0)] = 1e-6
-    total_epochs: Annotated[int, Field(ge=1, le=10_000)] = 1
-    n_samples_per_prompt: Annotated[int, Field(ge=1, le=1_024)] = 8
-    rollout_batch_size: Annotated[int, Field(ge=1, le=1_000_000)] = 64
-    max_prompt_length: Annotated[int, Field(ge=1, le=262_144)] = 8_192
-    max_response_length: Annotated[int, Field(ge=1, le=262_144)] = 8_192
-    agent_workflow_timeout_s: Annotated[float, Field(ge=1, le=86_400)] = 450.0
-    grader_timeout_s: Annotated[float, Field(ge=1, le=86_400)] = 150.0
+    model_config = ConfigDict(extra="allow")
 
 
-class _SamplingSection(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+class _TrainingSection(_BackendValidatedParamSection):
+    lr: Any = None
+    total_epochs: Any = None
+    n_samples_per_prompt: Any = None
+    rollout_batch_size: Any = None
+    max_prompt_length: Any = None
+    max_response_length: Any = None
+    agent_workflow_timeout_s: Any = None
+    grader_timeout_s: Any = None
 
-    rollout_temperature: Annotated[float, Field(ge=0.0, le=2.0)] = 1.0
-    rollout_top_p: Annotated[float, Field(ge=0.0, le=1.0)] = 1.0
+
+class _SamplingSection(_BackendValidatedParamSection):
+    rollout_temperature: Any = None
+    rollout_top_p: Any = None
 
 
-class _CheckpointsSection(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    eval_interval: Annotated[int | None, Field(ge=1, le=1_000_000)] = None
-    checkpoint_save_freq: Annotated[int, Field(ge=1, le=1_000_000)] = 20
+class _CheckpointsSection(_BackendValidatedParamSection):
+    eval_interval: Any = None
+    checkpoint_save_freq: Any = None
 
 
 class _RolloutSection(BaseModel):
@@ -265,43 +265,43 @@ class TrainingConfig(BaseModel):
         return self.experiment.commit_sha
 
     @property
-    def training_lr(self) -> float:
+    def training_lr(self) -> Any:
         return self.params.training.lr
 
     @property
-    def training_total_epochs(self) -> int:
+    def training_total_epochs(self) -> Any:
         return self.params.training.total_epochs
 
     @property
-    def training_n_samples_per_prompt(self) -> int:
+    def training_n_samples_per_prompt(self) -> Any:
         return self.params.training.n_samples_per_prompt
 
     @property
-    def training_rollout_batch_size(self) -> int:
+    def training_rollout_batch_size(self) -> Any:
         return self.params.training.rollout_batch_size
 
     @property
-    def training_max_prompt_length(self) -> int:
+    def training_max_prompt_length(self) -> Any:
         return self.params.training.max_prompt_length
 
     @property
-    def training_max_response_length(self) -> int:
+    def training_max_response_length(self) -> Any:
         return self.params.training.max_response_length
 
     @property
-    def training_agent_workflow_timeout_s(self) -> float:
+    def training_agent_workflow_timeout_s(self) -> Any:
         return self.params.training.agent_workflow_timeout_s
 
     @property
-    def training_grader_timeout_s(self) -> float:
+    def training_grader_timeout_s(self) -> Any:
         return self.params.training.grader_timeout_s
 
     @property
-    def sampling_rollout_temperature(self) -> float:
+    def sampling_rollout_temperature(self) -> Any:
         return self.params.sampling.rollout_temperature
 
     @property
-    def sampling_rollout_top_p(self) -> float:
+    def sampling_rollout_top_p(self) -> Any:
         return self.params.sampling.rollout_top_p
 
     @property
@@ -309,7 +309,7 @@ class TrainingConfig(BaseModel):
         return self.params.checkpoints.eval_interval
 
     @property
-    def checkpoints_checkpoint_save_freq(self) -> int:
+    def checkpoints_checkpoint_save_freq(self) -> Any:
         return self.params.checkpoints.checkpoint_save_freq
 
     @property

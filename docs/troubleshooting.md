@@ -132,14 +132,14 @@ Upgrade the package or delete the specific cache file after `osmosis eval cache 
 
 If a training run completes with `rollout/raw_reward = 0` and `rollout/response_len/mean = 0`, every rollout timed out before producing output. This usually means the LLM inference engine was overwhelmed with too many concurrent requests.
 
-**Cause:** `rollout_batch_size` defaults to 64. With `n_samples_per_prompt = 8` that's 512 concurrent LLM calls hitting the rollout server simultaneously, which saturates the SGLang engine and causes every rollout to exceed `agent_workflow_timeout_s`.
+**Cause:** A high configured `rollout_batch_size` can create too many concurrent LLM calls. For example, `rollout_batch_size = 64` with `n_samples_per_prompt = 8` sends 512 concurrent calls to the rollout server, which can saturate the SGLang engine and cause every rollout to exceed `agent_workflow_timeout_s`.
 
 **Fix:** Reduce `rollout_batch_size` in your training config:
 
 ```toml
 [training]
 n_samples_per_prompt = 8
-rollout_batch_size = 8    # 8 × 8 = 64 concurrent calls instead of 512
+rollout_batch_size = 8    # 8 x 8 = 64 concurrent calls instead of 512
 ```
 
 If rollouts are still timing out with a smaller batch size (e.g. because your agent takes many turns), increase the timeout:
