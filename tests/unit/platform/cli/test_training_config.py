@@ -411,7 +411,7 @@ total_epochs = "not-a-number"
     assert cfg.to_api_config()["total_epochs"] == "not-a-number"
 
 
-def test_unknown_training_fields_are_rejected_by_sdk(tmp_path: Path) -> None:
+def test_unknown_training_fields_are_preserved_for_backend(tmp_path: Path) -> None:
     path = tmp_path / "unknown_field.toml"
     path.write_text(
         """
@@ -428,30 +428,12 @@ rollout_bach_size = 32
         encoding="utf-8",
     )
 
-    with pytest.raises(CLIError) as exc_info:
-        load_training_config(path)
-
-    message = str(exc_info.value)
-    assert message.startswith("Invalid training config:")
-    assert "dummy: Unrecognized key" in message
-    assert (
-        "rollout_bach_size: Unrecognized key (did you mean 'rollout_batch_size'?)"
-        in message
-    )
-    assert exc_info.value.details == {
-        "error": "Invalid training config",
-        "issues": [
-            {"key": "dummy", "message": "Unrecognized key"},
-            {
-                "key": "rollout_bach_size",
-                "message": "Unrecognized key",
-                "key_correction": "rollout_batch_size",
-            },
-        ],
-    }
+    cfg = load_training_config(path)
+    assert cfg.to_api_config()["dummy"] == 1
+    assert cfg.to_api_config()["rollout_bach_size"] == 32
 
 
-def test_sdk_detected_errors_are_reported_together(tmp_path: Path) -> None:
+def test_sdk_detected_errors_ignore_unknown_backend_params(tmp_path: Path) -> None:
     path = tmp_path / "multiple_sdk_errors.toml"
     path.write_text(
         """
@@ -475,21 +457,12 @@ rollout_bach_size = 32
     message = str(exc_info.value)
     assert message.startswith("Invalid training config:")
     assert "experiment.extra: Unrecognized key" in message
-    assert "dummy: Unrecognized key" in message
-    assert (
-        "rollout_bach_size: Unrecognized key (did you mean 'rollout_batch_size'?)"
-        in message
-    )
+    assert "dummy" not in message
+    assert "rollout_bach_size" not in message
     assert exc_info.value.details == {
         "error": "Invalid training config",
         "issues": [
             {"key": "experiment.extra", "message": "Unrecognized key"},
-            {"key": "dummy", "message": "Unrecognized key"},
-            {
-                "key": "rollout_bach_size",
-                "message": "Unrecognized key",
-                "key_correction": "rollout_batch_size",
-            },
         ],
     }
 

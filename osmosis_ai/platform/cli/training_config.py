@@ -76,7 +76,6 @@ _KNOWN_PARAM_SECTION_BY_KEY = {
     for section_name, model_type in _PARAM_SECTION_MODELS
     for key in model_type.model_fields
 }
-_MAX_KEY_CORRECTION_DISTANCE = 3
 
 
 class _RolloutSection(BaseModel):
@@ -191,34 +190,6 @@ def _format_training_config_issue(issue: dict[str, str]) -> str:
     return message
 
 
-def _levenshtein_distance(a: str, b: str) -> int:
-    previous = list(range(len(b) + 1))
-    for i, char_a in enumerate(a, start=1):
-        current = [i]
-        for j, char_b in enumerate(b, start=1):
-            cost = 0 if char_a == char_b else 1
-            current.append(
-                min(
-                    current[j - 1] + 1,
-                    previous[j] + 1,
-                    previous[j - 1] + cost,
-                )
-            )
-        previous = current
-    return previous[-1]
-
-
-def _find_key_correction(key: str) -> str | None:
-    best_key: str | None = None
-    best_distance = _MAX_KEY_CORRECTION_DISTANCE + 1
-    for valid_key in _KNOWN_PARAM_SECTION_BY_KEY:
-        distance = _levenshtein_distance(key, valid_key)
-        if distance < best_distance:
-            best_distance = distance
-            best_key = valid_key
-    return best_key if best_distance <= _MAX_KEY_CORRECTION_DISTANCE else None
-
-
 def _read_table(
     raw: dict[str, Any],
     section_name: str,
@@ -306,15 +277,6 @@ def _collect_param_section_key_issues(
                         ),
                     }
                 )
-            elif expected_section is None:
-                issue = {
-                    "key": key,
-                    "message": "Unrecognized key",
-                }
-                correction = _find_key_correction(key)
-                if correction is not None:
-                    issue["key_correction"] = correction
-                issues.append(issue)
 
     return issues
 
