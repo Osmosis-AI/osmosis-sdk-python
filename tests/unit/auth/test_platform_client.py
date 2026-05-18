@@ -585,7 +585,52 @@ class TestPlatformRequest:
             "code": "CONFLICT",
             "field": "loraName",
         }
-        assert "A deployment with this LoRA name already exists" in str(exc_info.value)
+        message = str(exc_info.value)
+        assert message.startswith("A deployment with this LoRA name already exists")
+        assert "API error: HTTP" not in message
+
+    @patch("osmosis_ai.platform.auth.platform_client.urlopen")
+    def test_http_error_includes_training_config_issues_in_message(
+        self, mock_urlopen: MagicMock
+    ) -> None:
+        """Verify backend training config issues are visible in human CLI output."""
+        error_body = json.dumps(
+            {
+                "error": "Invalid training config",
+                "issues": [
+                    {"key": "rollout_batch_size", "message": "Expected integer"},
+                    {
+                        "key": "rollout_bach_size",
+                        "message": "Unrecognized key",
+                        "key_correction": "rollout_batch_size",
+                    },
+                ],
+            }
+        )
+        mock_urlopen.side_effect = _make_http_error(400, error_body)
+        creds = _make_credentials()
+
+        with pytest.raises(PlatformAPIError) as exc_info:
+            platform_request("/api/test", credentials=creds, git_identity="git_test")
+
+        message = str(exc_info.value)
+        assert message.startswith("Invalid training config")
+        assert "API error: HTTP" not in message
+        assert "rollout_batch_size: Expected integer" in message
+        assert (
+            "rollout_bach_size: Unrecognized key (did you mean 'rollout_batch_size'?)"
+        ) in message
+        assert exc_info.value.details == {
+            "error": "Invalid training config",
+            "issues": [
+                {"key": "rollout_batch_size", "message": "Expected integer"},
+                {
+                    "key": "rollout_bach_size",
+                    "message": "Unrecognized key",
+                    "key_correction": "rollout_batch_size",
+                },
+            ],
+        }
 
     @patch("osmosis_ai.platform.auth.platform_client.urlopen")
     def test_subscription_error_preserves_structured_metadata(
