@@ -1,0 +1,23 @@
+osmosis_ai/platform/auth/platform_client.py
+  s_bff8d599f25a70::t_ca2af2348e3374 375,393,434
+  s_bff8d599f25a70::t_a6b2e8b0c1cf18 113-151,392
+tests/unit/auth/test_platform_client.py
+  s_bff8d599f25a70::t_a4a9d72173613b 593-616,619-633
+  s_bff8d599f25a70::t_65507a0f31be04 588-590,617-618
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.9",
+  "base_commit_sha": "8f2fb95f9aef494c4219f20529404c79a28b20e3",
+  "prompts": {},
+  "sessions": {
+    "s_bff8d599f25a70": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "3f24d686-23d3-4443-8e21-cfa94654096d",
+        "model": "gpt-5.5-extra-high"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}
