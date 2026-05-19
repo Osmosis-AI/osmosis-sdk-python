@@ -179,16 +179,19 @@ class TrainingRun:
     creator_name: str | None = None
     creator_email: str | None = None
     platform_url: str | None = None
+    dataset_id: str | None = None
+    dataset_name: str | None = None
     reward: float | None = field(default=None, kw_only=True)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> TrainingRun:
         model = data.get("model") or {}
+        dataset = data.get("dataset") or {}
         return cls(
             id=data["id"],
             name=data.get("name"),
             status=data.get("status", ""),
-            model_id=data.get("model_id"),
+            model_id=model.get("id"),
             model_name=model.get("model_name"),
             created_at=data.get("created_at", ""),
             started_at=data.get("started_at"),
@@ -202,6 +205,8 @@ class TrainingRun:
             creator_name=data.get("creator_name"),
             creator_email=data.get("creator_email"),
             platform_url=data.get("platform_url"),
+            dataset_id=dataset.get("id"),
+            dataset_name=dataset.get("file_name"),
         )
 
     @property
@@ -223,11 +228,12 @@ class TrainingRunDetail(TrainingRun):
         # Detail API returns { training_run: {..., enhanced_status}, model: {...} }
         run = data["training_run"]
         model = data.get("model") or {}
+        dataset = data.get("dataset") or {}
         return cls(
             id=run["id"],
             name=run.get("name"),
             status=run.get("enhanced_status") or run.get("status", ""),
-            model_id=run.get("model_id"),
+            model_id=model.get("id"),
             model_name=model.get("model_name"),
             created_at=run.get("created_at", ""),
             started_at=run.get("started_at"),
@@ -241,6 +247,8 @@ class TrainingRunDetail(TrainingRun):
             creator_name=run.get("creator_name"),
             creator_email=run.get("creator_email"),
             platform_url=run.get("platform_url"),
+            dataset_id=dataset.get("id"),
+            dataset_name=dataset.get("file_name"),
             examples_processed_count=run.get("examples_processed_count"),
             notes=run.get("notes"),
             hf_status=run.get("hf_status"),
@@ -275,15 +283,25 @@ class SubmitTrainingRunResult:
     id: str
     name: str
     status: str
+    model_id: str | None
+    model_name: str
+    dataset_id: str | None
+    dataset_name: str
     created_at: str
     platform_url: str | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> SubmitTrainingRunResult:
+        model = data["model"]
+        dataset = data["dataset"]
         return cls(
             id=data["id"],
             name=data["name"],
             status=data["status"],
+            model_id=model["id"],
+            model_name=model["model_name"],
+            dataset_id=dataset["id"],
+            dataset_name=dataset["file_name"],
             created_at=data["created_at"],
             platform_url=data.get("platform_url"),
         )

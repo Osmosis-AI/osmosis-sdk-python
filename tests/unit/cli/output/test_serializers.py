@@ -72,8 +72,11 @@ def test_serialize_training_run_keys() -> None:
             "id": "run_1",
             "name": "qwen3-run1",
             "status": "running",
-            "model_id": "model_1",
-            "model": {"model_name": "Qwen/Qwen3-30B-A3B-Instruct-2507-FP8"},
+            "model": {
+                "id": "model_1",
+                "model_name": "Qwen/Qwen3-30B-A3B-Instruct-2507-FP8",
+            },
+            "dataset": {"id": None, "file_name": "train.jsonl"},
             "eval_accuracy": 0.4,
             "reward": 0.875,
             "reward_increase_delta": 0.02,
@@ -89,7 +92,10 @@ def test_serialize_training_run_keys() -> None:
     )
     payload = serialize_training_run(run)
     _assert_keys_match_golden(payload, "training_run_serializer.json")
+    assert payload["model_id"] == "model_1"
     assert payload["model_name"] == "Qwen/Qwen3-30B-A3B-Instruct-2507-FP8"
+    assert payload["dataset_id"] is None
+    assert payload["dataset_name"] == "train.jsonl"
     assert payload["reward"] == 0.875
 
 

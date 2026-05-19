@@ -157,6 +157,8 @@ class TestGitIdentityPassthrough:
                     "id": "run-1",
                     "name": "Run 1",
                     "status": "pending",
+                    "model": {"id": "model-1", "model_name": "Qwen/Qwen3"},
+                    "dataset": {"id": "dataset-1", "file_name": "train.jsonl"},
                     "created_at": "2026-05-03T00:00:00Z",
                 },
             ),
@@ -309,6 +311,8 @@ class TestSubmitTrainingRun:
             "id": "run-1",
             "name": "run-1",
             "status": "pending",
+            "model": {"id": "model-1", "model_name": "Qwen/Qwen3"},
+            "dataset": {"id": "dataset-1", "file_name": "train.jsonl"},
             "created_at": "2026-05-04T00:00:00Z",
         }
 

@@ -222,6 +222,10 @@ rollout_batch_size = 64
                 id="run_1",
                 name="reward-run",
                 status="pending",
+                model_id="model_1",
+                model_name="Qwen/Qwen3",
+                dataset_id="dataset_1",
+                dataset_name="train.jsonl",
                 created_at="2026-04-26T00:00:00Z",
             )
 
@@ -234,6 +238,8 @@ rollout_batch_size = 64
     payload = json.loads(captured.out)
     assert payload["operation"] == "train.submit"
     assert payload["resource"]["name"] == "reward-run"
+    assert payload["resource"]["model_name"] == "Qwen/Qwen3"
+    assert payload["resource"]["dataset_name"] == "train.jsonl"
     _assert_git_context(payload["resource"], project)
 
 

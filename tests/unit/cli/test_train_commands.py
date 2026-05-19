@@ -521,6 +521,10 @@ class TestSubmit:
         id="550e8400-e29b-41d4-a716-446655440000",
         name="my-training-run",
         status="pending",
+        model_id="model_1",
+        model_name="Qwen/Qwen3",
+        dataset_id="dataset_1",
+        dataset_name="train.jsonl",
         created_at="2026-04-10T12:00:00Z",
         platform_url="https://platform.osmosis.ai/ws/training/550e8400-e29b-41d4-a716-446655440000",
     )
@@ -577,6 +581,10 @@ rollout_batch_size = 64
         assert command_result.resource["name"] == "my-training-run"
         assert command_result.resource["id"] == "550e8400-e29b-41d4-a716-446655440000"
         assert command_result.resource["status"] == "pending"
+        assert command_result.resource["model_id"] == "model_1"
+        assert command_result.resource["model_name"] == "Qwen/Qwen3"
+        assert command_result.resource["dataset_id"] == "dataset_1"
+        assert command_result.resource["dataset_name"] == "train.jsonl"
         assert "/training/" in command_result.resource["url"]
         assert command_result.resource["git"] == {
             "identity": GIT_IDENTITY,
@@ -609,6 +617,8 @@ rollout_batch_size = 64
         assert isinstance(command_result, OperationResult)
         assert command_result.resource is not None
         assert command_result.resource["url"] == expected_url
+        assert "Model: Qwen/Qwen3" in command_result.display_next_steps
+        assert "Dataset: train.jsonl" in command_result.display_next_steps
         assert f"View: {expected_url}" in command_result.display_next_steps
 
     def test_submit_shows_summary_table(
