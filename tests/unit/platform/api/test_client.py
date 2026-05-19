@@ -145,10 +145,12 @@ class TestGitIdentityPassthrough:
             ),
             (
                 lambda client: client.submit_training_run(
-                    model_path="openai/gpt-oss",
-                    dataset="dataset-1",
-                    rollout_name="rollout",
-                    entrypoint="rollout.py",
+                    experiment_config={
+                        "model_path": "openai/gpt-oss",
+                        "dataset": "dataset-1",
+                        "rollout": "rollout",
+                        "entrypoint": "rollout.py",
+                    },
                     git_identity="git_123",
                 ),
                 {
@@ -310,6 +312,18 @@ class TestSubmitTrainingRun:
             "created_at": "2026-05-04T00:00:00Z",
         }
 
+    def test_legacy_flattened_kwargs_are_not_supported(self) -> None:
+        """Training submissions use the platform's nested config contract only."""
+        client = OsmosisClient()
+        with pytest.raises(TypeError):
+            client.submit_training_run(
+                model_path="m1",
+                dataset="ds1",
+                rollout_name="rollout1",
+                entrypoint="rollouts/main.py",
+                git_identity="git_test",
+            )
+
     @patch("osmosis_ai.platform.api.client.platform_request")
     def test_minimal_payload_omits_optional_fields(
         self, mock_request: MagicMock
@@ -318,10 +332,12 @@ class TestSubmitTrainingRun:
         mock_request.return_value = self._response()
         client = OsmosisClient()
         result = client.submit_training_run(
-            model_path="m1",
-            dataset="ds1",
-            rollout_name="rollout1",
-            entrypoint="rollouts/main.py",
+            experiment_config={
+                "model_path": "m1",
+                "dataset": "ds1",
+                "rollout": "rollout1",
+                "entrypoint": "rollouts/main.py",
+            },
             git_identity="git_test",
         )
         assert result.id == "run-1"
@@ -344,10 +360,12 @@ class TestSubmitTrainingRun:
         client = OsmosisClient()
         rollout_env = {"FOO": "bar", "BAZ": "qux"}
         client.submit_training_run(
-            model_path="m1",
-            dataset="ds1",
-            rollout_name="rollout1",
-            entrypoint="rollouts/main.py",
+            experiment_config={
+                "model_path": "m1",
+                "dataset": "ds1",
+                "rollout": "rollout1",
+                "entrypoint": "rollouts/main.py",
+            },
             rollout_env=rollout_env,
             git_identity="git_test",
         )
@@ -364,10 +382,12 @@ class TestSubmitTrainingRun:
         client = OsmosisClient()
         secret_refs = {"OPENAI_API_KEY": "openai-prod"}
         client.submit_training_run(
-            model_path="m1",
-            dataset="ds1",
-            rollout_name="rollout1",
-            entrypoint="rollouts/main.py",
+            experiment_config={
+                "model_path": "m1",
+                "dataset": "ds1",
+                "rollout": "rollout1",
+                "entrypoint": "rollouts/main.py",
+            },
             rollout_secret_refs=secret_refs,
             git_identity="git_test",
         )
@@ -383,10 +403,12 @@ class TestSubmitTrainingRun:
         mock_request.return_value = self._response()
         client = OsmosisClient()
         client.submit_training_run(
-            model_path="m1",
-            dataset="ds1",
-            rollout_name="rollout1",
-            entrypoint="rollouts/main.py",
+            experiment_config={
+                "model_path": "m1",
+                "dataset": "ds1",
+                "rollout": "rollout1",
+                "entrypoint": "rollouts/main.py",
+            },
             rollout_env={},
             rollout_secret_refs={},
             git_identity="git_test",
@@ -403,11 +425,13 @@ class TestSubmitTrainingRun:
         mock_request.return_value = self._response()
         client = OsmosisClient()
         client.submit_training_run(
-            model_path="m1",
-            dataset="ds1",
-            rollout_name="rollout1",
-            entrypoint="rollouts/main.py",
-            commit_sha="abc123",
+            experiment_config={
+                "model_path": "m1",
+                "dataset": "ds1",
+                "rollout": "rollout1",
+                "entrypoint": "rollouts/main.py",
+                "commit_sha": "abc123",
+            },
             training_config={"lr": 0.001},
             sampling_config={"rollout_temperature": 0.8},
             checkpoints_config={"checkpoint_save_freq": 10},

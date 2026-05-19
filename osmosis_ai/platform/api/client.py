@@ -169,12 +169,7 @@ class OsmosisClient:
     def submit_training_run(
         self,
         *,
-        experiment_config: dict[str, Any] | None = None,
-        model_path: str | None = None,
-        dataset: str | None = None,
-        rollout_name: str | None = None,
-        entrypoint: str | None = None,
-        commit_sha: str | None = None,
+        experiment_config: dict[str, Any],
         training_config: dict[str, Any] | None = None,
         sampling_config: dict[str, Any] | None = None,
         checkpoints_config: dict[str, Any] | None = None,
@@ -191,21 +186,6 @@ class OsmosisClient:
         names of workspace ``environment_secret`` records; values are resolved
         server-side and never travel through the CLI.
         """
-        if experiment_config is None:
-            if model_path is None or dataset is None or rollout_name is None:
-                raise ValueError(
-                    "submit_training_run requires experiment_config or model_path, dataset, and rollout_name"
-                )
-            experiment_config = {
-                "model_path": model_path,
-                "dataset": dataset,
-                "rollout": rollout_name,
-            }
-            if entrypoint is not None:
-                experiment_config["entrypoint"] = entrypoint
-            if commit_sha is not None:
-                experiment_config["commit_sha"] = commit_sha
-
         data: dict[str, Any] = {
             "experiment_config": experiment_config,
         }

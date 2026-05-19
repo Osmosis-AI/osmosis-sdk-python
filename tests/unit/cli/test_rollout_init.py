@@ -177,7 +177,10 @@ def test_rollout_init_training_config_omits_platform_defaults(
 
     assert config.training_n_samples_per_prompt is None
     assert config.training_rollout_batch_size is None
-    assert config.to_api_config() == {}
+    assert config.training_config == {}
+    assert config.sampling_config == {}
+    assert config.checkpoints_config == {}
+    assert config.advanced_config == {}
 
 
 # ── conflict handling ───────────────────────────────────────────

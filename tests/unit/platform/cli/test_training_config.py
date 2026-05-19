@@ -44,6 +44,10 @@ rollout_top_p = 0.95
 [checkpoints]
 eval_interval = 10
 checkpoint_save_freq = 20
+
+[advanced]
+optimizer = "adam"
+custom_flag = true
 """.strip(),
         encoding="utf-8",
     )
@@ -65,6 +69,7 @@ checkpoint_save_freq = 20
     assert cfg.sampling_rollout_top_p == 0.95
     assert cfg.checkpoints_eval_interval == 10
     assert cfg.checkpoints_checkpoint_save_freq == 20
+    assert cfg.advanced_config == {"optimizer": "adam", "custom_flag": True}
 
 
 def test_load_minimal_config(tmp_path: Path) -> None:
@@ -118,6 +123,9 @@ rollout_temperature = 0.9
 
 [checkpoints]
 checkpoint_save_freq = 10
+
+[advanced]
+optimizer = "adam"
 """.strip(),
         encoding="utf-8",
     )
@@ -135,7 +143,7 @@ checkpoint_save_freq = 10
     assert cfg.checkpoints_config == {
         "checkpoint_save_freq": 10,
     }
-    assert cfg.advanced_config == {}
+    assert cfg.advanced_config == {"optimizer": "adam"}
 
 
 def test_api_config_sections_empty_optional_sections(tmp_path: Path) -> None:
@@ -156,6 +164,7 @@ dataset = "d"
     assert cfg.sampling_config == {}
     assert cfg.checkpoints_config == {}
     assert cfg.advanced_config == {}
+    assert not hasattr(cfg, "to_api_config")
 
 
 # ---------------------------------------------------------------------------
@@ -423,7 +432,30 @@ total_epochs = "not-a-number"
     assert cfg.training_config["total_epochs"] == "not-a-number"
 
 
-def test_unknown_training_fields_are_preserved_for_backend(tmp_path: Path) -> None:
+def test_advanced_section_preserves_backend_params(tmp_path: Path) -> None:
+    path = tmp_path / "unknown_field.toml"
+    path.write_text(
+        """
+[experiment]
+rollout = "r"
+entrypoint = "e.py"
+model_path = "m"
+dataset = "d"
+
+[advanced]
+dummy = 1
+rollout_bach_size = 32
+""".strip(),
+        encoding="utf-8",
+    )
+
+    cfg = load_training_config(path)
+    assert cfg.training_config == {}
+    assert cfg.advanced_config["dummy"] == 1
+    assert cfg.advanced_config["rollout_bach_size"] == 32
+
+
+def test_extra_param_fields_outside_advanced_are_rejected(tmp_path: Path) -> None:
     path = tmp_path / "unknown_field.toml"
     path.write_text(
         """
@@ -440,13 +472,16 @@ rollout_bach_size = 32
         encoding="utf-8",
     )
 
-    cfg = load_training_config(path)
-    assert cfg.training_config == {}
-    assert cfg.advanced_config["dummy"] == 1
-    assert cfg.advanced_config["rollout_bach_size"] == 32
+    with pytest.raises(CLIError) as exc_info:
+        load_training_config(path)
+
+    message = str(exc_info.value)
+    assert message.startswith("Invalid training config:")
+    assert "training.dummy: Unrecognized key" in message
+    assert "training.rollout_bach_size: Unrecognized key" in message
 
 
-def test_sdk_detected_errors_ignore_unknown_backend_params(tmp_path: Path) -> None:
+def test_sdk_detected_errors_ignore_advanced_backend_params(tmp_path: Path) -> None:
     path = tmp_path / "multiple_sdk_errors.toml"
     path.write_text(
         """
@@ -457,7 +492,7 @@ model_path = "m"
 dataset = "d"
 extra = 1
 
-[training]
+[advanced]
 dummy = 1
 rollout_bach_size = 32
 """.strip(),
@@ -502,35 +537,7 @@ lr = 1e-6
     message = str(exc_info.value)
     assert message.startswith("Invalid training config:")
     assert str(path) not in message
-    assert "lr: belongs in [training], not [sampling]" in message
-
-
-def test_duplicate_param_key_across_sections_is_rejected(tmp_path: Path) -> None:
-    path = tmp_path / "duplicate_field.toml"
-    path.write_text(
-        """
-[experiment]
-rollout = "r"
-entrypoint = "e.py"
-model_path = "m"
-dataset = "d"
-
-[training]
-custom_backend_arg = 1
-
-[checkpoints]
-custom_backend_arg = 2
-""".strip(),
-        encoding="utf-8",
-    )
-
-    with pytest.raises(CLIError) as exc_info:
-        load_training_config(path)
-
-    message = str(exc_info.value)
-    assert message.startswith("Invalid training config:")
-    assert str(path) not in message
-    assert "custom_backend_arg: appears in both [training] and [checkpoints]" in message
+    assert "sampling.lr: Unrecognized key" in message
 
 
 def test_param_section_errors_are_reported_together(tmp_path: Path) -> None:
@@ -559,6 +566,5 @@ checkpoint_save_freq = 10
     message = str(exc_info.value)
     assert message.startswith("Invalid training config:")
     assert str(path) not in message
-    assert "lr: appears in both [training] and [sampling]" in message
-    assert "lr: belongs in [training], not [sampling]" in message
-    assert "checkpoint_save_freq: belongs in [checkpoints], not [sampling]" in message
+    assert "sampling.lr: Unrecognized key" in message
+    assert "sampling.checkpoint_save_freq: Unrecognized key" in message

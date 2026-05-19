@@ -39,9 +39,9 @@ class _ExperimentSection(BaseModel):
 
 
 class _BackendValidatedParamSection(BaseModel):
-    """Preserve training params for server-side schema validation."""
+    """Validate the public TOML param sections without coercing values."""
 
-    model_config: ClassVar[ConfigDict] = ConfigDict(extra="allow")
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra="forbid")
 
 
 class _TrainingSection(_BackendValidatedParamSection):
@@ -65,17 +65,10 @@ class _CheckpointsSection(_BackendValidatedParamSection):
     checkpoint_save_freq: Any = None
 
 
-_PARAM_SECTION_MODELS = (
-    ("training", _TrainingSection),
-    ("sampling", _SamplingSection),
-    ("checkpoints", _CheckpointsSection),
-)
+class _AdvancedSection(BaseModel):
+    """Preserve advanced backend params for server-side schema validation."""
 
-_KNOWN_PARAM_SECTION_BY_KEY = {
-    key: section_name
-    for section_name, model_type in _PARAM_SECTION_MODELS
-    for key in model_type.model_fields
-}
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra="allow")
 
 
 class _RolloutSection(BaseModel):
@@ -91,18 +84,11 @@ class _TrainingRunParams(BaseModel):
     training: _TrainingSection = Field(default_factory=_TrainingSection)
     sampling: _SamplingSection = Field(default_factory=_SamplingSection)
     checkpoints: _CheckpointsSection = Field(default_factory=_CheckpointsSection)
+    advanced: _AdvancedSection = Field(default_factory=_AdvancedSection)
 
     @staticmethod
     def _known_config(section: _BackendValidatedParamSection) -> dict[str, Any]:
-        data = section.model_dump(exclude_none=True)
-        known_keys = type(section).model_fields
-        return {key: value for key, value in data.items() if key in known_keys}
-
-    @staticmethod
-    def _advanced_config(section: _BackendValidatedParamSection) -> dict[str, Any]:
-        data = section.model_dump(exclude_none=True)
-        known_keys = type(section).model_fields
-        return {key: value for key, value in data.items() if key not in known_keys}
+        return section.model_dump(exclude_none=True)
 
     @property
     def training_config(self) -> dict[str, Any]:
@@ -118,10 +104,7 @@ class _TrainingRunParams(BaseModel):
 
     @property
     def advanced_config(self) -> dict[str, Any]:
-        fields: dict[str, Any] = {}
-        for section in (self.training, self.sampling, self.checkpoints):
-            fields.update(self._advanced_config(section))
-        return fields
+        return self.advanced.model_dump(exclude_none=True)
 
 
 def _format_input(value: Any) -> str:
@@ -270,42 +253,6 @@ def _collect_section_validation_issues(
     return []
 
 
-def _collect_param_section_key_issues(
-    *,
-    sections: dict[str, dict[str, Any]],
-) -> list[dict[str, str]]:
-    seen: dict[str, str] = {}
-    issues: list[dict[str, str]] = []
-    for section_name, section in sections.items():
-        for key in section:
-            previous_section = seen.get(key)
-            if previous_section is not None:
-                issues.append(
-                    {
-                        "key": key,
-                        "message": (
-                            f"appears in both [{previous_section}] and [{section_name}]"
-                        ),
-                    }
-                )
-            seen[key] = section_name
-
-    for section_name, section in sections.items():
-        for key in section:
-            expected_section = _KNOWN_PARAM_SECTION_BY_KEY.get(key)
-            if expected_section is not None and expected_section != section_name:
-                issues.append(
-                    {
-                        "key": key,
-                        "message": (
-                            f"belongs in [{expected_section}], not [{section_name}]"
-                        ),
-                    }
-                )
-
-    return issues
-
-
 class TrainingConfig(BaseModel):
     """Parsed training TOML configuration."""
 
@@ -411,19 +358,6 @@ class TrainingConfig(BaseModel):
     def advanced_config(self) -> dict[str, Any]:
         return self.params.advanced_config
 
-    def to_api_config(self) -> dict[str, Any]:
-        """Build the legacy flat ``config`` dict for compatibility.
-
-        New CLI submissions use ``*_config`` payload sections. This method is
-        retained for callers that still consume the previous flattened shape.
-        """
-        return {
-            **self.training_config,
-            **self.sampling_config,
-            **self.checkpoints_config,
-            **self.advanced_config,
-        }
-
 
 def _validate_rollout_env_keys(
     *,
@@ -476,20 +410,27 @@ def load_training_config(path: Path) -> TrainingConfig:
     training_section = _read_table(raw, "training", path)
     sampling_section = _read_table(raw, "sampling", path)
     checkpoints_section = _read_table(raw, "checkpoints", path)
+    advanced_section = _read_table(raw, "advanced", path)
     rollout_section = _read_table(raw, "rollout", path)
-    param_sections = {
-        "training": training_section,
-        "sampling": sampling_section,
-        "checkpoints": checkpoints_section,
-    }
     issues = [
         *_collect_section_validation_issues(
             section_name="experiment",
             model_type=_ExperimentSection,
             data=experiment_section,
         ),
-        *_collect_param_section_key_issues(
-            sections=param_sections,
+        *(
+            issue
+            for section_name, model_type, data in (
+                ("training", _TrainingSection, training_section),
+                ("sampling", _SamplingSection, sampling_section),
+                ("checkpoints", _CheckpointsSection, checkpoints_section),
+                ("advanced", _AdvancedSection, advanced_section),
+            )
+            for issue in _collect_section_validation_issues(
+                section_name=section_name,
+                model_type=model_type,
+                data=data,
+            )
         ),
         *_collect_section_validation_issues(
             section_name="rollout",
@@ -524,6 +465,12 @@ def load_training_config(path: Path) -> TrainingConfig:
         data=checkpoints_section,
         path=path,
     )
+    advanced = _parse_section(
+        section_name="advanced",
+        model_type=_AdvancedSection,
+        data=advanced_section,
+        path=path,
+    )
     rollout = _parse_section(
         section_name="rollout",
         model_type=_RolloutSection,
@@ -534,6 +481,7 @@ def load_training_config(path: Path) -> TrainingConfig:
     assert isinstance(training, _TrainingSection)
     assert isinstance(sampling, _SamplingSection)
     assert isinstance(checkpoints, _CheckpointsSection)
+    assert isinstance(advanced, _AdvancedSection)
     assert isinstance(rollout, _RolloutSection)
 
     _validate_rollout_env_keys(env=rollout.env, secrets=rollout.secrets, path=path)
@@ -544,6 +492,7 @@ def load_training_config(path: Path) -> TrainingConfig:
             training=training,
             sampling=sampling,
             checkpoints=checkpoints,
+            advanced=advanced,
         ),
         rollout=rollout,
     )
