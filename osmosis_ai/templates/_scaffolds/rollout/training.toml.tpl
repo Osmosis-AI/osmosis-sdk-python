@@ -16,27 +16,25 @@ dataset = "<your-dataset-name>"  # Platform dataset name from `osmosis dataset l
 # commit_sha =                        # Pin to a specific commit (default: latest on default branch)
 
 [training]
-# Starter values required by `osmosis train submit`.
-n_samples_per_prompt = 8  # Rollout samples per prompt
-rollout_batch_size = 64  # Rollout batch size
-#
-# Optional. Commented values below are the SDK defaults used by `osmosis train submit`.
-# Uncomment a field only when you want to override the default.
+# Optional. Omit values to use platform defaults.
+# Uncomment a field only when you want to override platform behavior.
 # lr = 1e-6                           # Learning rate
 # total_epochs = 1                    # Number of training epochs
+# n_samples_per_prompt = 8            # Rollout samples per prompt
+# rollout_batch_size = 32             # Rollout batch size
 # max_prompt_length = 8192            # Max prompt tokens
 # max_response_length = 8192          # Max response tokens
 # agent_workflow_timeout_s = 450      # Agent rollout timeout per row
 # grader_timeout_s = 150              # Grader timeout per row
 
 [sampling]
-# Optional. Commented values below are the SDK defaults.
+# Optional. Omit values to use platform defaults.
 # rollout_temperature = 1.0           # Sampling temperature during rollouts
 # rollout_top_p = 1.0                 # Top-p (nucleus) sampling
 
 [checkpoints]
-# Optional. Commented values below are the SDK defaults where a default exists.
-# eval_interval =                     # Evaluate every N rollouts (optional)
+# Optional. Omit values to use platform defaults.
+# eval_interval = 10                  # Evaluate every N rollouts
 # checkpoint_save_freq = 20           # Save checkpoint every N rollouts
 
 # Environment variables & secrets

@@ -48,17 +48,22 @@ class OsmosisClient:
         file_size: int,
         extension: str,
         *,
+        overwrite_dataset_id: str | None = None,
         credentials: Credentials | None = None,
         git_identity: str,
     ) -> DatasetFile:
+        payload: dict[str, Any] = {
+            "file_name": file_name,
+            "file_size": file_size,
+            "extension": extension,
+        }
+        if overwrite_dataset_id is not None:
+            payload["overwrite_dataset_id"] = overwrite_dataset_id
+
         data = platform_request(
             "/api/cli/datasets",
             method="POST",
-            data={
-                "file_name": file_name,
-                "file_size": file_size,
-                "extension": extension,
-            },
+            data=payload,
             credentials=credentials,
             git_identity=git_identity,
         )
@@ -169,12 +174,11 @@ class OsmosisClient:
     def submit_training_run(
         self,
         *,
-        model_path: str,
-        dataset: str,
-        rollout_name: str,
-        entrypoint: str,
-        commit_sha: str | None = None,
-        config: dict[str, Any] | None = None,
+        experiment_config: dict[str, Any],
+        training_config: dict[str, Any] | None = None,
+        sampling_config: dict[str, Any] | None = None,
+        checkpoints_config: dict[str, Any] | None = None,
+        advanced_config: dict[str, Any] | None = None,
         rollout_env: dict[str, str] | None = None,
         rollout_secret_refs: dict[str, str] | None = None,
         credentials: Credentials | None = None,
@@ -188,15 +192,16 @@ class OsmosisClient:
         server-side and never travel through the CLI.
         """
         data: dict[str, Any] = {
-            "model_path": model_path,
-            "dataset": dataset,
-            "rollout_name": rollout_name,
-            "entrypoint": entrypoint,
+            "experiment_config": experiment_config,
         }
-        if commit_sha is not None:
-            data["commit_sha"] = commit_sha
-        if config is not None:
-            data["config"] = config
+        if training_config:
+            data["training_config"] = training_config
+        if sampling_config:
+            data["sampling_config"] = sampling_config
+        if checkpoints_config:
+            data["checkpoints_config"] = checkpoints_config
+        if advanced_config:
+            data["advanced_config"] = advanced_config
         if rollout_env:
             data["rollout_env"] = rollout_env
         if rollout_secret_refs:
@@ -382,7 +387,7 @@ class OsmosisClient:
         return DeploymentSummary.from_dict(data)
 
     # ── Training-run checkpoints ──────────────────────────────────
-    # Still used by `osmosis train status` to list deployable checkpoints.
+    # Still used by `osmosis train info` to list deployable checkpoints.
 
     def list_training_run_checkpoints(
         self,

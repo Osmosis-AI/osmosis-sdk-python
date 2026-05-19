@@ -161,7 +161,7 @@ def test_rollout_init_substitutes_rollout_name_in_configs(
     assert "Qwen/Qwen3.5-122B-A10B" in training_toml
 
 
-def test_rollout_init_training_config_loads_with_template_defaults(
+def test_rollout_init_training_config_omits_platform_defaults(
     monkeypatch, tmp_path
 ) -> None:
     from osmosis_ai.platform.cli.training_config import load_training_config
@@ -175,8 +175,12 @@ def test_rollout_init_training_config_loads_with_template_defaults(
     training_toml = workspace_directory / "configs" / "training" / "my-agent.toml"
     config = load_training_config(training_toml)
 
-    assert config.training_n_samples_per_prompt == 8
-    assert config.training_rollout_batch_size == 64
+    assert config.training_n_samples_per_prompt is None
+    assert config.training_rollout_batch_size is None
+    assert config.training_config == {}
+    assert config.sampling_config == {}
+    assert config.checkpoints_config == {}
+    assert config.advanced_config == {}
 
 
 # ── conflict handling ───────────────────────────────────────────

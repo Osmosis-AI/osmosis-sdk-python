@@ -149,6 +149,29 @@ osmosis eval rubric -d data.jsonl \
 | `--timeout` | Seconds |
 | `--score-min` / `--score-max` | Score range |
 
+## Dataset
+
+### osmosis dataset upload
+
+Upload a local dataset file to the current workspace directory's platform
+project. The dataset name is derived from the file name without its extension.
+
+```bash
+osmosis dataset upload data.jsonl
+osmosis dataset upload data.jsonl --yes
+osmosis dataset upload data.jsonl --overwrite
+```
+
+| Flag | Description |
+|------|-------------|
+| `--yes` / `-y` | Skip the interactive confirmation prompt |
+| `--overwrite` | Replace an existing dataset with the same derived name |
+
+When `--overwrite` is used, the CLI first confirms the duplicate-name conflict
+with the platform, then creates a replacement dataset record and soft-deletes
+the old one. The platform may reject overwrites while the existing dataset is
+still uploading, still processing, or used by an active training run.
+
 ## Training
 
 ### osmosis train submit
@@ -244,13 +267,14 @@ OPENAI_API_KEY = "openai-api-key"   # "openai-api-key" is the record name
   `TRAINING_RUN_ID`, `ROLLOUT_NAME`, `ROLLOUT_PORT`.
 - Both sections are optional.
 
-### osmosis train status
+### osmosis train info
 
-Show details for a training run.
+Show details, checkpoints, and metrics for a training run.
 
 ```bash
-osmosis train status <run-name>
-osmosis --json train status <run-name>
+osmosis train info <run-name>
+osmosis --json train info <run-name>
+osmosis train info <run-name> -o ./my-metrics.json
 ```
 
 ### osmosis train list
@@ -270,15 +294,6 @@ Stop a pending or running training run.
 ```bash
 osmosis train stop <run-name>
 osmosis train stop <run-name> --yes
-```
-
-### osmosis train metrics
-
-Export training run metrics to a JSON file.
-
-```bash
-osmosis train metrics <run-name>
-osmosis train metrics <run-name> -o ./my-metrics.json
 ```
 
 ## Deployment

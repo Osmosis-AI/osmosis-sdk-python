@@ -175,6 +175,9 @@ def test_upload_passes_git_context_to_api_calls_without_subscription_preflight(
         "https://platform.osmosis.ai/ws/datasets/dataset-1"
         in result.display_next_steps[0]
     )
+    rendered = output.getvalue()
+    assert "Upload Target" not in rendered
+    assert "Repository" not in rendered
     assert result.next_steps_structured == [
         {
             "label": "View dataset",

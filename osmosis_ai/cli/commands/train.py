@@ -282,27 +282,43 @@ def list_runs(
             }
             for run in training_runs
         ],
-        display_hints=[
-            "Use osmosis train status <name> or osmosis train metrics <name> for details."
-        ],
+        display_hints=["Use osmosis train info <name> for details."],
     )
 
 
-@app.command("status")
-def status(
+@app.command("info")
+def info(
     name: str = typer.Argument(..., help="Training run name."),
+    output: str | None = typer.Option(
+        None,
+        "--output",
+        "-o",
+        help=(
+            "Output path for metrics JSON. Non-.json extensions are replaced with"
+            " .json; a trailing '/' or existing directory generates a default"
+            " filename inside it. (default in rich mode: .osmosis/metrics/)"
+        ),
+    ),
 ) -> Any:
-    """Show training run details."""
+    """Show training run details, checkpoints, and metrics."""
+    import json
+
+    from osmosis_ai.cli.metrics_export import build_export_dict
     from osmosis_ai.cli.output import (
+        DetailField,
         DetailResult,
         DetailSection,
+        OutputFormat,
         get_output_context,
         serialize_checkpoint,
         serialize_training_run,
     )
     from osmosis_ai.cli.output.display import format_local_datetime
     from osmosis_ai.platform.api.client import OsmosisClient
-    from osmosis_ai.platform.api.models import RUN_STATUSES_TERMINAL
+    from osmosis_ai.platform.api.models import (
+        RUN_STATUSES_IN_PROGRESS,
+        RUN_STATUSES_TERMINAL,
+    )
     from osmosis_ai.platform.auth.platform_client import PlatformAPIError
     from osmosis_ai.platform.cli.utils import (
         build_run_detail_rows,
@@ -314,8 +330,8 @@ def status(
     credentials = context.credentials
 
     client = OsmosisClient()
-    output = get_output_context()
-    with output.status("Fetching training run..."):
+    output_ctx = get_output_context()
+    with output_ctx.status("Fetching training run..."):
         run = client.get_training_run(
             name,
             credentials=credentials,
@@ -340,7 +356,7 @@ def status(
 
     if run.status in RUN_STATUSES_TERMINAL:
         try:
-            with output.status("Fetching checkpoints..."):
+            with output_ctx.status("Fetching checkpoints..."):
                 ckpts = client.list_training_run_checkpoints(
                     name,
                     credentials=credentials,
@@ -349,8 +365,49 @@ def status(
         except PlatformAPIError:
             ckpts = None
 
-        if ckpts is not None and ckpts.checkpoints:
-            checkpoints = ckpts.checkpoints
+        if ckpts is not None:
+            fetched_checkpoints = getattr(ckpts, "checkpoints", None)
+            if isinstance(fetched_checkpoints, list) and fetched_checkpoints:
+                checkpoints = fetched_checkpoints
+
+    metrics_data = None
+    metrics_error: str | None = None
+    is_in_progress = run.status in RUN_STATUSES_IN_PROGRESS
+    if run.status == "pending":
+        metrics_error = "Metrics are not yet available for pending training runs."
+    else:
+        try:
+            with output_ctx.status("Fetching metrics..."):
+                metrics_data = client.get_training_run_metrics(
+                    run.id,
+                    credentials=credentials,
+                    git_identity=context.git_identity,
+                )
+        except (PlatformAPIError, KeyError) as exc:
+            metrics_error = str(exc) or "Could not fetch metrics data."
+
+    export: dict[str, Any] | None = None
+    output_path: str | None = None
+    save_warning: str | None = None
+    if metrics_data is not None:
+        export = build_export_dict(run, metrics_data)
+        if metrics_data.overview.duration_formatted:
+            rows.append(("Duration", metrics_data.overview.duration_formatted))
+        if metrics_data.overview.reward is not None:
+            rows.append(("Final Reward", f"{metrics_data.overview.reward:.4f}"))
+        if metrics_data.overview.reward_delta is not None:
+            rows.append(
+                (
+                    "Metric Reward Delta",
+                    f"{metrics_data.overview.reward_delta:+.4f}",
+                )
+            )
+        total_steps = max(
+            (dp.step for m in metrics_data.metrics for dp in m.data_points),
+            default=0,
+        )
+        if total_steps:
+            rows.append(("Steps", f"{total_steps:,}"))
 
     fields = _detail_fields(rows)
     if run.platform_url:
@@ -383,21 +440,77 @@ def status(
         sections.append(DetailSection(rich=table, plain_lines=plain_lines))
         display_hints.append("Deploy with: osmosis deploy <checkpoint-name>")
 
-    data = serialize_training_run(run)
-    data.update(
-        {
-            "examples_processed_count": run.examples_processed_count,
-            "notes": run.notes,
-            "hf_status": run.hf_status,
-            **({"platform_url": run.platform_url} if run.platform_url else {}),
-            "checkpoints": [serialize_checkpoint(cp) for cp in checkpoints],
-            **git_result_context(context),
-        }
-    )
+    if metrics_data is not None and metrics_data.metrics:
+        from osmosis_ai.cli.metrics_graph import (
+            render_metric_trends,
+            should_render_metric_trends,
+        )
+
+        if output_ctx.format is OutputFormat.rich and should_render_metric_trends(
+            is_tty=console.is_tty,
+            terminal_width=console.width,
+            metrics=metrics_data.metrics,
+        ):
+            trends = render_metric_trends(
+                metrics_data.metrics, terminal_width=console.width
+            )
+            if trends:
+                sections.append(DetailSection(rich=trends))
+    elif metrics_data is not None:
+        fields.append(DetailField(label="Metrics", value="No metric data found."))
+
+    if metrics_error is not None:
+        fields.append(DetailField(label="Metrics", value=metrics_error))
+
+    if is_in_progress and metrics_data is not None:
+        fields.append(
+            DetailField(
+                label="Note",
+                value="Training is in progress. Metrics shown are a snapshot.",
+            )
+        )
+
+    if metrics_data is not None:
+        should_write_file = output is not None or output_ctx.format is OutputFormat.rich
+        if should_write_file:
+            try:
+                out_path = (
+                    _resolve_output_path(output, run.name, run.id)
+                    if output
+                    else _resolve_default_output(
+                        run.name,
+                        run.id,
+                        workspace_directory=context.workspace_directory,
+                    )
+                )
+                out_path.write_text(
+                    json.dumps(export, indent=2, ensure_ascii=False) + "\n"
+                )
+                output_path = str(out_path)
+                display_hints.append(f"Saved metrics to {output_path}")
+            except (CLIError, OSError) as exc:
+                save_warning = f"Could not save metrics: {exc}"
+                display_hints.append(save_warning)
 
     return DetailResult(
-        title="Training Run",
-        data=data,
+        title="Training Run Info",
+        data={
+            "training_run": {
+                **serialize_training_run(run),
+                "examples_processed_count": run.examples_processed_count,
+                "notes": run.notes,
+                "hf_status": run.hf_status,
+            },
+            **({"platform_url": run.platform_url} if run.platform_url else {}),
+            "checkpoints": [serialize_checkpoint(cp) for cp in checkpoints],
+            "in_progress": is_in_progress,
+            "metrics_available": metrics_data is not None,
+            "metrics_error": metrics_error,
+            "metrics": export,
+            "output_path": output_path,
+            "save_warning": save_warning,
+            **git_result_context(context),
+        },
         fields=fields,
         sections=sections,
         display_hints=display_hints,
@@ -503,12 +616,11 @@ def submit(
     output = get_output_context()
     with output.status("Submitting training run..."):
         result = client.submit_training_run(
-            model_path=config.experiment_model_path,
-            dataset=config.experiment_dataset,
-            rollout_name=config.experiment_rollout,
-            entrypoint=config.experiment_entrypoint,
-            commit_sha=config.experiment_commit_sha,
-            config=config.to_api_config(),
+            experiment_config=config.experiment_config,
+            training_config=config.training_config or None,
+            sampling_config=config.sampling_config or None,
+            checkpoints_config=config.checkpoints_config or None,
+            advanced_config=config.advanced_config or None,
             rollout_env=config.rollout_env or None,
             rollout_secret_refs=config.rollout_secret_refs or None,
             credentials=credentials,
@@ -522,6 +634,8 @@ def submit(
             "id": result.id,
             "name": result.name,
             "status": result.status,
+            "model_name": config.experiment_model_path,
+            "dataset_name": config.experiment_dataset,
             "created_at": result.created_at,
             **({"url": result.platform_url} if result.platform_url else {}),
             **git_result_context(context),
@@ -536,14 +650,16 @@ def submit(
         message=f"Training run submitted: {result.name}",
         display_next_steps=[
             f"Status: {result.status}",
+            f"Model: {config.experiment_model_path}",
+            f"Dataset: {config.experiment_dataset}",
             (
                 f"View: {result.platform_url}"
                 if result.platform_url
-                else f"Check status with: osmosis train status {result.name}"
+                else f"Check status with: osmosis train info {result.name}"
             ),
         ],
         next_steps_structured=[
-            {"action": "train_status", "name": result.name},
+            {"action": "train_info", "name": result.name},
             *(
                 [{"action": "open_url", "url": result.platform_url}]
                 if result.platform_url
@@ -605,179 +721,6 @@ def _resolve_default_output(
     metrics_dir = workspace_directory / ".osmosis" / "metrics"
     metrics_dir.mkdir(parents=True, exist_ok=True)
     return metrics_dir / _default_filename(run_name, run_id)
-
-
-@app.command("metrics")
-def metrics(
-    name: str = typer.Argument(..., help="Training run name."),
-    output: str | None = typer.Option(
-        None,
-        "--output",
-        "-o",
-        help=(
-            "Output path. Non-.json extensions are replaced with .json;"
-            " a trailing '/' or existing directory generates a default"
-            " filename inside it. (default: .osmosis/metrics/)"
-        ),
-    ),
-) -> Any:
-    """Export training run metrics to a JSON file."""
-    import json
-
-    from osmosis_ai.cli.metrics_export import build_export_dict
-    from osmosis_ai.cli.output import (
-        DetailField,
-        DetailResult,
-        DetailSection,
-        OutputFormat,
-        get_output_context,
-        serialize_training_run,
-    )
-    from osmosis_ai.platform.api.client import OsmosisClient
-    from osmosis_ai.platform.api.models import RUN_STATUSES_IN_PROGRESS
-    from osmosis_ai.platform.auth.platform_client import PlatformAPIError
-    from osmosis_ai.platform.cli.utils import require_git_workspace_directory_context
-    from osmosis_ai.platform.cli.workspace_directory_context import git_result_context
-
-    context = require_git_workspace_directory_context()
-    credentials = context.credentials
-    client = OsmosisClient()
-    output_ctx = get_output_context()
-
-    with output_ctx.status("Fetching training run..."):
-        run = client.get_training_run(
-            name,
-            credentials=credentials,
-            git_identity=context.git_identity,
-        )
-
-    if run.status == "pending":
-        raise CLIError("Metrics are not yet available for pending training runs.")
-
-    is_in_progress = run.status in RUN_STATUSES_IN_PROGRESS
-
-    # ── Fetch metrics (best-effort) ──────────────────────────────
-    metrics_data = None
-    metrics_error: str | None = None
-    try:
-        with output_ctx.status("Fetching metrics..."):
-            metrics_data = client.get_training_run_metrics(
-                run.id,
-                credentials=credentials,
-                git_identity=context.git_identity,
-            )
-    except (PlatformAPIError, KeyError) as exc:
-        metrics_error = str(exc) or "Could not fetch metrics data."
-
-    # ── Summary table ─────────────────────────────────────────────
-    rows: list[tuple[str, str]] = []
-    if run.name:
-        rows.append(("Name", console.escape(run.name)))
-    rows.append(("Status", run.status))
-    if run.model_name:
-        rows.append(("Model", console.escape(run.model_name)))
-
-    if metrics_data is not None:
-        if metrics_data.overview.duration_formatted:
-            rows.append(("Duration", metrics_data.overview.duration_formatted))
-        if metrics_data.overview.reward is not None:
-            rows.append(("Final Reward", f"{metrics_data.overview.reward:.4f}"))
-        if metrics_data.overview.reward_delta is not None:
-            rows.append(("Reward Delta", f"{metrics_data.overview.reward_delta:+.4f}"))
-        if metrics_data.overview.examples_processed_count is not None:
-            rows.append(
-                ("Examples", f"{metrics_data.overview.examples_processed_count:,}")
-            )
-        total_steps = max(
-            (dp.step for m in metrics_data.metrics for dp in m.data_points),
-            default=0,
-        )
-        if total_steps:
-            rows.append(("Steps", f"{total_steps:,}"))
-
-    fields = _detail_fields(rows)
-    sections: list[DetailSection] = []
-    display_hints: list[str] = []
-    if run.platform_url:
-        display_hints.append(f"View: {run.platform_url}")
-
-    # ── Metric trends ─────────────────────────────────────────────
-    if metrics_data is not None and metrics_data.metrics:
-        from osmosis_ai.cli.metrics_graph import (
-            render_metric_trends,
-            should_render_metric_trends,
-        )
-
-        if output_ctx.format is OutputFormat.rich and should_render_metric_trends(
-            is_tty=console.is_tty,
-            terminal_width=console.width,
-            metrics=metrics_data.metrics,
-        ):
-            trends = render_metric_trends(
-                metrics_data.metrics, terminal_width=console.width
-            )
-            if trends:
-                sections.append(DetailSection(rich=trends))
-    elif metrics_data is not None:
-        fields.append(DetailField(label="Metrics", value="No metric data found."))
-
-    if metrics_error is not None:
-        fields.append(
-            DetailField(label="Metrics", value="Could not fetch metrics data.")
-        )
-
-    if is_in_progress:
-        fields.append(
-            DetailField(
-                label="Note",
-                value="Training is in progress. Metrics shown are a snapshot.",
-            )
-        )
-
-    # ── Save to file (best-effort) ────────────────────────────────
-    export: dict[str, Any] | None = None
-    output_path: str | None = None
-    save_warning: str | None = None
-    if metrics_data is not None:
-        export = build_export_dict(run, metrics_data)
-        should_write_file = output is not None or output_ctx.format is OutputFormat.rich
-        if should_write_file:
-            try:
-                out_path = (
-                    _resolve_output_path(output, run.name, run.id)
-                    if output
-                    else _resolve_default_output(
-                        run.name,
-                        run.id,
-                        workspace_directory=context.workspace_directory,
-                    )
-                )
-                out_path.write_text(
-                    json.dumps(export, indent=2, ensure_ascii=False) + "\n"
-                )
-                output_path = str(out_path)
-                display_hints.append(f"Saved metrics to {output_path}")
-            except (CLIError, OSError) as exc:
-                save_warning = f"Could not save metrics: {exc}"
-                display_hints.append(save_warning)
-
-    return DetailResult(
-        title="Training Run Metrics",
-        data={
-            "training_run": serialize_training_run(run),
-            **({"platform_url": run.platform_url} if run.platform_url else {}),
-            "in_progress": is_in_progress,
-            "metrics_available": metrics_data is not None,
-            "metrics_error": metrics_error,
-            "metrics": export,
-            "output_path": output_path,
-            "save_warning": save_warning,
-            **git_result_context(context),
-        },
-        fields=fields,
-        sections=sections,
-        display_hints=display_hints,
-    )
 
 
 @app.command("stop")

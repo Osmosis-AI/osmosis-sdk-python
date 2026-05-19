@@ -209,12 +209,14 @@ class TestSubmitTrainingRunResult:
             "name": "my-training-run",
             "status": "pending",
             "created_at": "2026-04-10T12:00:00Z",
+            "platform_url": "https://platform.osmosis.ai/ws/training/run",
         }
         result = SubmitTrainingRunResult.from_dict(data)
         assert result.id == "550e8400-e29b-41d4-a716-446655440000"
         assert result.name == "my-training-run"
         assert result.status == "pending"
         assert result.created_at == "2026-04-10T12:00:00Z"
+        assert result.platform_url == "https://platform.osmosis.ai/ws/training/run"
 
 
 class TestTrainingRun:
@@ -229,6 +231,42 @@ class TestTrainingRun:
         )
 
         assert run.reward == 0.875
+
+    def test_from_dict_parses_nested_model_and_dataset(self) -> None:
+        run = api_models.TrainingRun.from_dict(
+            {
+                "id": "run_1",
+                "name": "nested-run",
+                "status": "finished",
+                "model": {"id": None, "model_name": "Qwen/Qwen3"},
+                "dataset": {"id": "dataset_1", "file_name": "train.jsonl"},
+            }
+        )
+
+        assert run.model_id is None
+        assert run.model_name == "Qwen/Qwen3"
+        assert run.dataset_id == "dataset_1"
+        assert run.dataset_name == "train.jsonl"
+
+    def test_from_dict_uses_nested_training_run_contract_only(self) -> None:
+        run = api_models.TrainingRun.from_dict(
+            {
+                "id": "run_1",
+                "name": "nested-run",
+                "status": "finished",
+                "model_id": "legacy_model",
+                "model_name": "legacy-model-name",
+                "dataset_id": "legacy_dataset",
+                "dataset_name": "legacy-dataset-name",
+                "model": {"id": "model_1", "model_name": "Qwen/Qwen3"},
+                "dataset": {"id": "dataset_1", "file_name": "train.jsonl"},
+            }
+        )
+
+        assert run.model_id == "model_1"
+        assert run.model_name == "Qwen/Qwen3"
+        assert run.dataset_id == "dataset_1"
+        assert run.dataset_name == "train.jsonl"
 
     def test_from_dict_defaults_missing_reward_to_none(self) -> None:
         run = api_models.TrainingRun.from_dict(

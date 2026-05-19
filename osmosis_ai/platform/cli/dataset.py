@@ -183,6 +183,65 @@ def _dataset_name_from_path(file_path: Path) -> str:
     return file_path.stem
 
 
+def _existing_dataset_id_from_conflict(exc: PlatformAPIError) -> str | None:
+    """Extract the recoverable duplicate-name conflict marker from a platform error."""
+    if exc.status_code != 409 or not isinstance(exc.details, dict):
+        return None
+    existing_dataset_id = exc.details.get("existing_dataset_id")
+    return existing_dataset_id if isinstance(existing_dataset_id, str) else None
+
+
+def _create_dataset_for_upload(
+    *,
+    client: Any,
+    dataset_name: str,
+    file_size: int,
+    ext: str,
+    overwrite: bool,
+    git_identity: str,
+    credentials: Any | None = None,
+) -> Any:
+    """Create the dataset record, retrying with overwrite when explicitly requested."""
+    try:
+        return platform_call(
+            "Creating dataset...",
+            lambda: client.create_dataset(
+                dataset_name,
+                file_size,
+                ext,
+                credentials=credentials,
+                git_identity=git_identity,
+            ),
+            output_console=console,
+        )
+    except PlatformAPIError as exc:
+        existing_dataset_id = _existing_dataset_id_from_conflict(exc)
+        if existing_dataset_id is None:
+            raise
+        if not overwrite:
+            details = dict(exc.details or {})
+            details.setdefault("status_code", exc.status_code)
+            raise CLIError(
+                f"A dataset named '{dataset_name}' already exists. "
+                "Use --overwrite to replace it.",
+                code="CONFLICT",
+                details=details,
+            ) from exc
+
+        return platform_call(
+            "Replacing existing dataset...",
+            lambda: client.create_dataset(
+                dataset_name,
+                file_size,
+                ext,
+                overwrite_dataset_id=existing_dataset_id,
+                credentials=credentials,
+                git_identity=git_identity,
+            ),
+            output_console=console,
+        )
+
+
 def _detail_fields(rows: list[tuple[str, str]]) -> list[DetailField]:
     """Convert existing label/value rows into renderer detail fields."""
     return [DetailField(label=label, value=value) for label, value in rows]
@@ -195,6 +254,7 @@ def _perform_upload(
     file_size: int,
     git_identity: str,
     credentials: Any | None = None,
+    overwrite: bool = False,
 ) -> Any:
     """Core upload: create dataset record → S3 upload → complete.
 
@@ -211,16 +271,14 @@ def _perform_upload(
     client = OsmosisClient()
     dataset_name = _dataset_name_from_path(file_path)
 
-    dataset = platform_call(
-        "Creating dataset...",
-        lambda: client.create_dataset(
-            dataset_name,
-            file_size,
-            ext,
-            credentials=credentials,
-            git_identity=git_identity,
-        ),
-        output_console=console,
+    dataset = _create_dataset_for_upload(
+        client=client,
+        dataset_name=dataset_name,
+        file_size=file_size,
+        ext=ext,
+        overwrite=overwrite,
+        credentials=credentials,
+        git_identity=git_identity,
     )
 
     upload_info = dataset.upload
@@ -307,6 +365,8 @@ def _perform_upload(
 
 def upload(
     file: str,
+    overwrite: bool = False,
+    yes: bool = False,
 ) -> CommandResult:
     """Upload a dataset file."""
     context = require_git_workspace_directory_context()
@@ -323,17 +383,7 @@ def upload(
             "File validation failed:\n" + "\n".join(f"  - {e}" for e in errors)
         )
 
-    # Confirm upload target
-    console.print()
-    console.table(
-        [
-            ("Repository", console.escape(git_identity)),
-            ("File", f"{console.escape(file_path.name)} ({format_size(file_size)})"),
-        ],
-        title="Upload Target",
-    )
-    console.print()
-    if output.interactive:
+    if output.interactive and not yes:
         proceed = confirm("Proceed with upload?", default=True)
         if proceed is None or not proceed:
             return OperationResult(
@@ -346,6 +396,7 @@ def upload(
         file_path=file_path,
         ext=ext,
         file_size=file_size,
+        overwrite=overwrite,
         credentials=credentials,
         git_identity=git_identity,
     )

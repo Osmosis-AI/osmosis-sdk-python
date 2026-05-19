@@ -7,7 +7,7 @@ from contextlib import redirect_stderr, redirect_stdout
 from typing import Any
 
 from osmosis_ai.cli.output.context import OutputFormat, override_output_context
-from osmosis_ai.cli.output.renderer import render
+from osmosis_ai.cli.output.renderer import _can_protect_primary_column, render
 from osmosis_ai.cli.output.result import (
     DetailField,
     DetailResult,
@@ -25,6 +25,16 @@ def _render(result: Any) -> tuple[str, str]:
         with redirect_stdout(out), redirect_stderr(err):
             render(result, ctx)
     return out.getvalue(), err.getvalue()
+
+
+def _render_at_width(result: Any, monkeypatch: Any, width: int) -> tuple[str, str]:
+    from osmosis_ai.cli.console import Console as CliConsole
+
+    monkeypatch.setattr(
+        "osmosis_ai.cli.console.Console",
+        lambda: CliConsole(force_terminal=True, no_color=True, width=width),
+    )
+    return _render(result)
 
 
 def test_rich_detail_uses_label_value_table() -> None:
@@ -66,13 +76,13 @@ def test_rich_list_prints_display_hints() -> None:
         has_more=False,
         next_offset=None,
         columns=[ListColumn(key="name", label="Name", ratio=4, overflow="fold")],
-        display_hints=["Use osmosis train status <name> for details."],
+        display_hints=["Use osmosis train info <name> for details."],
     )
     stdout, _ = _render(result)
-    assert "Use osmosis train status <name> for details." in stdout
+    assert "Use osmosis train info <name> for details." in stdout
 
 
-def test_rich_list_expands_table_so_column_ratios_apply(monkeypatch) -> None:
+def test_rich_list_does_not_expand_table_to_terminal_width(monkeypatch) -> None:
     from rich.table import Table as RichTable
 
     created_tables = []
@@ -98,7 +108,87 @@ def test_rich_list_expands_table_so_column_ratios_apply(monkeypatch) -> None:
     _render(result)
 
     assert created_tables
-    assert created_tables[0].expand is True
+    assert created_tables[0].expand is False
+
+
+def test_rich_list_prioritizes_name_column_when_width_is_tight(monkeypatch) -> None:
+    name = "run-name-that-should-fit-before-other-columns"
+    result = ListResult(
+        title="Training Runs",
+        items=[
+            {
+                "name": name,
+                "status": "running",
+                "reward": "0.123",
+                "created_at": "2026-05-18",
+                "id": "abcdef12",
+            }
+        ],
+        total_count=1,
+        has_more=False,
+        next_offset=None,
+        columns=[
+            ListColumn(key="name", label="Name", ratio=4, overflow="fold"),
+            ListColumn(key="status", label="Status", no_wrap=True, ratio=1),
+            ListColumn(key="reward", label="Reward", no_wrap=True, ratio=1),
+            ListColumn(key="created_at", label="Created", no_wrap=True, ratio=1),
+            ListColumn(key="id", label="ID", no_wrap=True, ratio=1),
+        ],
+    )
+
+    stdout, _ = _render_at_width(result, monkeypatch, 90)
+
+    assert name in stdout
+    assert "…" in stdout
+
+
+def test_primary_column_protection_accounts_for_min_width() -> None:
+    assert (
+        _can_protect_primary_column(
+            [
+                ListColumn(key="name", label="Name", min_width=20),
+                ListColumn(key="status", label="Status", min_width=10),
+            ],
+            [{"name": "run-a", "status": "running"}],
+            console_width=25,
+        )
+        is False
+    )
+
+
+def test_rich_list_preserves_explicit_non_primary_wrapping(monkeypatch) -> None:
+    from rich.table import Table as RichTable
+
+    added_columns = []
+
+    class RecordingTable(RichTable):
+        def add_column(self, *args, **kwargs):
+            added_columns.append((args, kwargs))
+            return super().add_column(*args, **kwargs)
+
+    monkeypatch.setattr("rich.table.Table", RecordingTable)
+    result = ListResult(
+        title="Training Runs",
+        items=[{"name": "short-name", "status": "running status"}],
+        total_count=1,
+        has_more=False,
+        next_offset=None,
+        columns=[
+            ListColumn(key="name", label="Name", ratio=4, overflow="fold"),
+            ListColumn(
+                key="status",
+                label="Status",
+                no_wrap=True,
+                overflow="fold",
+                ratio=1,
+            ),
+        ],
+    )
+
+    _render_at_width(result, monkeypatch, 80)
+
+    assert added_columns[1][1]["no_wrap"] is True
+    assert added_columns[1][1]["overflow"] == "fold"
 
 
 def test_rich_list_prints_display_hints_with_literal_brackets() -> None:

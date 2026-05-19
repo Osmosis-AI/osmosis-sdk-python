@@ -154,7 +154,7 @@ def test_train_list_json_returns_single_list_envelope(
     assert captured.out.count("\n") == 1
 
 
-def test_train_status_json_returns_detail_envelope(
+def test_train_info_json_returns_combined_detail_envelope(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     _stub_git_context(monkeypatch)
@@ -166,19 +166,22 @@ def test_train_status_json_returns_detail_envelope(
             return TrainingRunDetail(
                 id="run_1",
                 name=name,
-                status="running",
+                status="pending",
                 model_name="Qwen/Qwen3",
             )
 
     monkeypatch.setattr("osmosis_ai.platform.api.client.OsmosisClient", FakeClient)
 
-    exit_code = cli.main(["--json", "train", "status", "reward-run"])
+    exit_code = cli.main(["--json", "train", "info", "reward-run"])
     captured = capsys.readouterr()
 
     assert exit_code == 0
     payload = json.loads(captured.out)
-    assert payload["data"]["name"] == "reward-run"
-    assert payload["data"]["status"] == "running"
+    assert payload["data"]["training_run"]["name"] == "reward-run"
+    assert payload["data"]["training_run"]["status"] == "pending"
+    assert payload["data"]["checkpoints"] == []
+    assert payload["data"]["metrics_available"] is False
+    assert payload["data"]["output_path"] is None
     _assert_git_context(payload["data"])
 
 
@@ -217,7 +220,7 @@ rollout_batch_size = 64
             assert kwargs["credentials"] is FAKE_CREDENTIALS
             assert kwargs["git_identity"] == GIT_IDENTITY
             assert "workspace_id" not in kwargs
-            assert kwargs["rollout_name"] == "demo"
+            assert kwargs["experiment_config"]["rollout"] == "demo"
             return SubmitTrainingRunResult(
                 id="run_1",
                 name="reward-run",
@@ -234,10 +237,12 @@ rollout_batch_size = 64
     payload = json.loads(captured.out)
     assert payload["operation"] == "train.submit"
     assert payload["resource"]["name"] == "reward-run"
+    assert payload["resource"]["model_name"] == "Qwen/Qwen3"
+    assert payload["resource"]["dataset_name"] == "demo-dataset"
     _assert_git_context(payload["resource"], project)
 
 
-def test_train_metrics_json_does_not_write_default_file(
+def test_train_info_json_does_not_write_default_file(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     tmp_path: Path,
@@ -294,9 +299,16 @@ def test_train_metrics_json_does_not_write_default_file(
                 ],
             )
 
+        def list_training_run_checkpoints(
+            self, run_id, *, git_identity, credentials=None
+        ):
+            assert credentials is FAKE_CREDENTIALS
+            assert git_identity == GIT_IDENTITY
+            return type("CheckpointPage", (), {"checkpoints": []})()
+
     monkeypatch.setattr("osmosis_ai.platform.api.client.OsmosisClient", FakeClient)
 
-    exit_code = cli.main(["--json", "train", "metrics", "reward-run"])
+    exit_code = cli.main(["--json", "train", "info", "reward-run"])
     captured = capsys.readouterr()
 
     assert exit_code == 0
@@ -587,7 +599,6 @@ def test_rollout_list_columns_prioritize_name_over_id(
     assert [column.key for column in result.columns] == [
         "name",
         "is_active",
-        "repo_full_name",
         "last_synced_commit_sha",
         "created_at",
     ]
@@ -598,11 +609,8 @@ def test_rollout_list_columns_prioritize_name_over_id(
     assert result.columns[1].no_wrap is True
     assert result.columns[1].min_width == 6
     assert result.columns[1].max_width == 6
-    assert result.columns[2].label == "Repo"
-    assert result.columns[2].no_wrap is True
-    assert result.columns[2].overflow == "ellipsis"
-    assert result.columns[3].max_width == 8
-    assert result.columns[4].max_width == 10
+    assert result.columns[2].max_width == 8
+    assert result.columns[3].max_width == 10
     assert result.items[0]["last_synced_commit_sha"] == "abcdef123456"
     assert result.display_items is not None
     assert result.display_items[0]["is_active"] == "yes"

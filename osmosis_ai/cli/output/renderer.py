@@ -11,6 +11,7 @@ from .context import OutputContext, OutputFormat
 from .result import (
     CommandResult,
     DetailResult,
+    ListColumn,
     ListResult,
     MessageResult,
     OperationResult,
@@ -140,6 +141,65 @@ def _rich_text(value: Any, *, style: str | None = None) -> Any:
     return Text(text, style=style)
 
 
+def _display_width(value: Any) -> int:
+    from rich.cells import cell_len
+
+    text = "" if value is None else str(value)
+    return max((cell_len(line) for line in text.splitlines()), default=0)
+
+
+def _is_primary_column(column: ListColumn) -> bool:
+    return column.label.lower() == "name" or column.key in {
+        "name",
+        "file_name",
+        "model_name",
+        "checkpoint_name",
+    }
+
+
+def _primary_column_index(columns: list[ListColumn]) -> int | None:
+    for index, column in enumerate(columns):
+        if _is_primary_column(column):
+            return index
+    return None
+
+
+def _max_column_display_width(
+    column: ListColumn,
+    display_items: list[dict[str, Any]],
+) -> int:
+    width = _display_width(column.label)
+    for item in display_items:
+        width = max(width, _display_width(item.get(column.key)))
+    return max(width, 1)
+
+
+def _can_protect_primary_column(
+    columns: list[ListColumn],
+    display_items: list[dict[str, Any]],
+    *,
+    console_width: int,
+) -> bool:
+    primary_index = _primary_column_index(columns)
+    if primary_index is None:
+        return False
+
+    # Rich collapses wrapable columns first. Protect the primary column only
+    # when it can fit on one line after other columns shrink to one cell.
+    content_budget = console_width - (3 * len(columns)) - 1
+    other_column_budget = sum(
+        max(column.min_width or 1, 1)
+        for index, column in enumerate(columns)
+        if index != primary_index
+    )
+    primary_column = columns[primary_index]
+    primary_width = max(
+        _max_column_display_width(primary_column, display_items),
+        primary_column.min_width or 1,
+    )
+    return primary_width + other_column_budget <= content_budget
+
+
 def _render_plain(result: CommandResult, output: OutputContext) -> None:
     if isinstance(result, DetailResult):
         for field in result.fields:
@@ -205,18 +265,34 @@ def _render_rich(result: CommandResult, output: OutputContext) -> None:
     if isinstance(result, ListResult):
         from rich.table import Table
 
-        table = Table(show_header=True, header_style="bold", expand=True)
+        display_items = _display_items(result)
+        protect_primary_column = _can_protect_primary_column(
+            result.columns,
+            display_items,
+            console_width=console.width,
+        )
+        table = Table(show_header=True, header_style="bold", expand=False)
         for column in result.columns:
             overflow = column.overflow if column.overflow is not None else "ellipsis"
+            no_wrap = column.no_wrap
+            if protect_primary_column:
+                if _is_primary_column(column):
+                    no_wrap = True
+                else:
+                    no_wrap = column.no_wrap
+                    overflow = (
+                        column.overflow if column.overflow is not None else "ellipsis"
+                    )
+
             table.add_column(
                 column.label,
-                no_wrap=column.no_wrap,
+                no_wrap=no_wrap,
                 overflow=overflow,
                 ratio=column.ratio,
                 min_width=column.min_width,
                 max_width=column.max_width,
             )
-        for idx, item in enumerate(_display_items(result)):
+        for idx, item in enumerate(display_items):
             raw_item = result.items[idx] if idx < len(result.items) else {}
             table.add_row(
                 *[
