@@ -1,0 +1,39 @@
+osmosis_ai/cli/output/serializers.py
+  s_bff8d599f25a70::t_024c301a013adb 43-44
+tests/unit/cli/test_command_result_migration_train_model_deployment_rollout.py
+  s_bff8d599f25a70::t_2fdc3dfaadf11f 225-228,241-242
+osmosis_ai/cli/commands/train.py
+  s_bff8d599f25a70::t_4e2ff1adbaca6d 524-527,542-543
+tests/unit/platform/api/test_models.py
+  s_bff8d599f25a70::t_d6adc5385fae4d 211-212,219-222
+  s_bff8d599f25a70::t_7848f4b6e0031d 239-254
+  s_bff8d599f25a70::t_92f92db678c8b9 255-274
+osmosis_ai/platform/api/models.py
+  s_bff8d599f25a70::t_aaaedd12ac67ac 286-289,295-296,301-304
+  s_bff8d599f25a70::t_506cd4a0d9caf1 194,208-209,236,250-251
+  s_bff8d599f25a70::t_8b685d333ef565 182-183,189,231
+tests/unit/cli/output/test_serializers.py
+  s_bff8d599f25a70::t_4b0ce9a14197ed 75-79,95,97-98
+tests/unit/cli/test_train_commands.py
+  s_bff8d599f25a70::t_018b384d5a4e06 524-527,584-587,620-621
+tests/unit/platform/api/test_client.py
+  s_bff8d599f25a70::t_5dd4ccc8d95830 160-161,314-315
+tests/golden/cli_output/training_run_serializer.json
+  s_bff8d599f25a70::t_65b982fd0b5f3b 9-10
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.9",
+  "base_commit_sha": "cdd417d5c0b1b2a4fa2865b9532ba45f626413ee",
+  "prompts": {},
+  "sessions": {
+    "s_bff8d599f25a70": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "3f24d686-23d3-4443-8e21-cfa94654096d",
+        "model": "gpt-5.5-extra-high"
+      },
+      "human_author": "JoyboyBrian <gzybrian@gmail.com>"
+    }
+  }
+}
