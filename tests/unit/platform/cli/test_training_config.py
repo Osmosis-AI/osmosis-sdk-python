@@ -59,6 +59,13 @@ custom_flag = true
     assert cfg.experiment_model_path == "Qwen/Qwen3.6-35B-A3B"
     assert cfg.experiment_dataset == "abc-123"
     assert cfg.experiment_commit_sha == "deadbeef"
+    assert cfg.experiment_config == {
+        "rollout": "calculator",
+        "entrypoint": "main.py",
+        "model_path": "Qwen/Qwen3.6-35B-A3B",
+        "dataset": "abc-123",
+        "commit_sha": "deadbeef",
+    }
     assert cfg.training_lr == 1e-6
     assert cfg.training_total_epochs == 2
     assert cfg.training_n_samples_per_prompt == 8

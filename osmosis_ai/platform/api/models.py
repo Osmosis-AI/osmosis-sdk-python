@@ -283,25 +283,15 @@ class SubmitTrainingRunResult:
     id: str
     name: str
     status: str
-    model_id: str | None
-    model_name: str
-    dataset_id: str | None
-    dataset_name: str
     created_at: str
     platform_url: str | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> SubmitTrainingRunResult:
-        model = data["model"]
-        dataset = data["dataset"]
         return cls(
             id=data["id"],
             name=data["name"],
             status=data["status"],
-            model_id=model["id"],
-            model_name=model["model_name"],
-            dataset_id=dataset["id"],
-            dataset_name=dataset["file_name"],
             created_at=data["created_at"],
             platform_url=data.get("platform_url"),
         )

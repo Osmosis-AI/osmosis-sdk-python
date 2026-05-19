@@ -15,6 +15,7 @@ import osmosis_ai.platform.api.client as api_client_module
 import osmosis_ai.platform.api.download as download_module
 import osmosis_ai.platform.api.upload as upload_module
 import osmosis_ai.platform.cli.dataset as dataset_module
+from osmosis_ai.cli.output import OperationResult
 from osmosis_ai.platform.api.models import (
     DatasetDownloadInfo,
     DatasetFile,
@@ -328,6 +329,158 @@ def test_dataset_upload_json_stdout_is_one_envelope(
     payload = json.loads(captured.out)
     assert payload["operation"] == "dataset.upload"
     assert payload["resource"]["id"] == "ds_1"
+    assert_git_context(payload["resource"])
+    assert "Uploading" not in captured.out
+
+
+@pytest.mark.parametrize("yes_flag", ["--yes", "-y"])
+def test_dataset_upload_yes_option_is_forwarded(
+    yes_flag: str, monkeypatch, tmp_path: Path
+) -> None:
+    file_path = tmp_path / "train.jsonl"
+    file_path.write_text(
+        json.dumps({"system_prompt": "s", "user_prompt": "u", "ground_truth": "g"})
+        + "\n",
+        encoding="utf-8",
+    )
+    seen: dict[str, object] = {}
+
+    def fake_upload(*, file: str, overwrite: bool, yes: bool) -> OperationResult:
+        seen.update({"file": file, "overwrite": overwrite, "yes": yes})
+        return OperationResult(
+            operation="dataset.upload",
+            status="success",
+            message="Dataset uploaded.",
+        )
+
+    monkeypatch.setattr(dataset_module, "upload", fake_upload)
+
+    exit_code = cli.main(["dataset", "upload", str(file_path), yes_flag])
+
+    assert exit_code == 0
+    assert seen == {"file": str(file_path), "overwrite": False, "yes": True}
+
+
+def test_dataset_upload_json_conflict_preserves_existing_dataset_id(
+    monkeypatch,
+    tmp_path: Path,
+    capsys,
+) -> None:
+    _stub_git_context(monkeypatch)
+    file_path = tmp_path / "train.jsonl"
+    file_path.write_text(
+        json.dumps({"system_prompt": "s", "user_prompt": "u", "ground_truth": "g"})
+        + "\n",
+        encoding="utf-8",
+    )
+
+    from osmosis_ai.platform.auth import PlatformAPIError
+
+    class FakeClient:
+        def create_dataset(
+            self, file_name, file_size, extension, *, git_identity, credentials=None
+        ):
+            assert git_identity == GIT_IDENTITY
+            raise PlatformAPIError(
+                "A dataset with this name already exists",
+                status_code=409,
+                details={
+                    "error": "A dataset with this name already exists",
+                    "existing_dataset_id": "ds_existing",
+                },
+            )
+
+    monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+
+    exit_code = cli.main(["--json", "dataset", "upload", str(file_path)])
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    payload = json.loads(captured.err)
+    assert payload["error"]["code"] == "CONFLICT"
+    assert payload["error"]["details"]["existing_dataset_id"] == "ds_existing"
+    assert "--overwrite" in payload["error"]["message"]
+    assert "osmosis dataset upload" not in payload["error"]["message"]
+    assert str(file_path) not in payload["error"]["message"]
+
+
+def test_dataset_upload_json_overwrite_stdout_is_one_envelope(
+    monkeypatch,
+    tmp_path: Path,
+    capsys,
+) -> None:
+    fake_credentials = _stub_git_context(monkeypatch)
+    file_path = tmp_path / "train.jsonl"
+    file_path.write_text(
+        json.dumps({"system_prompt": "s", "user_prompt": "u", "ground_truth": "g"})
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        upload_module,
+        "make_progress_bar",
+        lambda _size, **_kwargs: (nullcontext(), lambda _done, _total: None),
+    )
+    monkeypatch.setattr(
+        upload_module,
+        "upload_file_simple",
+        lambda _file_path, _upload_info, progress_callback=None: None,
+    )
+
+    from osmosis_ai.platform.auth import PlatformAPIError
+
+    class FakeClient:
+        def create_dataset(
+            self,
+            file_name,
+            file_size,
+            extension,
+            *,
+            git_identity,
+            credentials=None,
+            overwrite_dataset_id=None,
+        ):
+            assert credentials is fake_credentials
+            assert git_identity == GIT_IDENTITY
+            if overwrite_dataset_id is None:
+                raise PlatformAPIError(
+                    "A dataset with this name already exists",
+                    status_code=409,
+                    details={
+                        "error": "A dataset with this name already exists",
+                        "existing_dataset_id": "ds_existing",
+                    },
+                )
+            assert overwrite_dataset_id == "ds_existing"
+            return DatasetFile(
+                id="ds_new",
+                file_name=file_name,
+                file_size=file_size,
+                status="created",
+                upload=UploadInfo(
+                    method="simple",
+                    s3_key="uploads/train",
+                    presigned_url="https://example.com/upload",
+                ),
+            )
+
+        def complete_upload(
+            self, file_id, parts=None, *, git_identity, credentials=None
+        ):
+            assert file_id == "ds_new"
+            assert credentials is fake_credentials
+            assert git_identity == GIT_IDENTITY
+            return _dataset(id=file_id)
+
+    monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+
+    exit_code = cli.main(["--json", "dataset", "upload", str(file_path), "--overwrite"])
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    payload = json.loads(captured.out)
+    assert payload["operation"] == "dataset.upload"
+    assert payload["resource"]["id"] == "ds_new"
     assert_git_context(payload["resource"])
     assert "Uploading" not in captured.out
 

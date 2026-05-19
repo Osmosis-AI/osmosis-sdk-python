@@ -149,6 +149,29 @@ osmosis eval rubric -d data.jsonl \
 | `--timeout` | Seconds |
 | `--score-min` / `--score-max` | Score range |
 
+## Dataset
+
+### osmosis dataset upload
+
+Upload a local dataset file to the current workspace directory's platform
+project. The dataset name is derived from the file name without its extension.
+
+```bash
+osmosis dataset upload data.jsonl
+osmosis dataset upload data.jsonl --yes
+osmosis dataset upload data.jsonl --overwrite
+```
+
+| Flag | Description |
+|------|-------------|
+| `--yes` / `-y` | Skip the interactive confirmation prompt |
+| `--overwrite` | Replace an existing dataset with the same derived name |
+
+When `--overwrite` is used, the CLI first confirms the duplicate-name conflict
+with the platform, then creates a replacement dataset record and soft-deletes
+the old one. The platform may reject overwrites while the existing dataset is
+still uploading, still processing, or used by an active training run.
+
 ## Training
 
 ### osmosis train submit

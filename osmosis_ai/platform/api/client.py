@@ -48,17 +48,22 @@ class OsmosisClient:
         file_size: int,
         extension: str,
         *,
+        overwrite_dataset_id: str | None = None,
         credentials: Credentials | None = None,
         git_identity: str,
     ) -> DatasetFile:
+        payload: dict[str, Any] = {
+            "file_name": file_name,
+            "file_size": file_size,
+            "extension": extension,
+        }
+        if overwrite_dataset_id is not None:
+            payload["overwrite_dataset_id"] = overwrite_dataset_id
+
         data = platform_request(
             "/api/cli/datasets",
             method="POST",
-            data={
-                "file_name": file_name,
-                "file_size": file_size,
-                "extension": extension,
-            },
+            data=payload,
             credentials=credentials,
             git_identity=git_identity,
         )
