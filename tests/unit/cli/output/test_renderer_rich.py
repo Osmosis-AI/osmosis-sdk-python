@@ -27,6 +27,16 @@ def _render(result: Any) -> tuple[str, str]:
     return out.getvalue(), err.getvalue()
 
 
+def _render_at_width(result: Any, monkeypatch: Any, width: int) -> tuple[str, str]:
+    from osmosis_ai.cli.console import Console as CliConsole
+
+    monkeypatch.setattr(
+        "osmosis_ai.cli.console.Console",
+        lambda: CliConsole(force_terminal=True, no_color=True, width=width),
+    )
+    return _render(result)
+
+
 def test_rich_detail_uses_label_value_table() -> None:
     result = DetailResult(
         title="Dataset",
@@ -72,7 +82,7 @@ def test_rich_list_prints_display_hints() -> None:
     assert "Use osmosis train status <name> for details." in stdout
 
 
-def test_rich_list_expands_table_so_column_ratios_apply(monkeypatch) -> None:
+def test_rich_list_does_not_expand_table_to_terminal_width(monkeypatch) -> None:
     from rich.table import Table as RichTable
 
     created_tables = []
@@ -98,7 +108,38 @@ def test_rich_list_expands_table_so_column_ratios_apply(monkeypatch) -> None:
     _render(result)
 
     assert created_tables
-    assert created_tables[0].expand is True
+    assert created_tables[0].expand is False
+
+
+def test_rich_list_prioritizes_name_column_when_width_is_tight(monkeypatch) -> None:
+    name = "run-name-that-should-fit-before-other-columns"
+    result = ListResult(
+        title="Training Runs",
+        items=[
+            {
+                "name": name,
+                "status": "running",
+                "reward": "0.123",
+                "created_at": "2026-05-18",
+                "id": "abcdef12",
+            }
+        ],
+        total_count=1,
+        has_more=False,
+        next_offset=None,
+        columns=[
+            ListColumn(key="name", label="Name", ratio=4, overflow="fold"),
+            ListColumn(key="status", label="Status", no_wrap=True, ratio=1),
+            ListColumn(key="reward", label="Reward", no_wrap=True, ratio=1),
+            ListColumn(key="created_at", label="Created", no_wrap=True, ratio=1),
+            ListColumn(key="id", label="ID", no_wrap=True, ratio=1),
+        ],
+    )
+
+    stdout, _ = _render_at_width(result, monkeypatch, 90)
+
+    assert name in stdout
+    assert "…" in stdout
 
 
 def test_rich_list_prints_display_hints_with_literal_brackets() -> None:
