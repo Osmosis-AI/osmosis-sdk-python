@@ -57,11 +57,11 @@ def test_build_user_server_env_sets_contract_and_pythonpath(
         invocation_id="inv-1",
     )
 
-    assert env["ENTRYPOINT_SCRIPT"] == "rollout.py"
-    assert env["REPOSITORY_PATH"] == str(rollout_dir)
-    assert env["TRAINING_RUN_ID"] == "inv-1"
-    assert env["ROLLOUT_NAME"] == "demo"
-    assert env["ROLLOUT_PORT"] == "8000"
+    assert env["_OSMOSIS_ENTRYPOINT_SCRIPT"] == "rollout.py"
+    assert env["_OSMOSIS_REPOSITORY_PATH"] == str(rollout_dir)
+    assert env["_OSMOSIS_TRAINING_RUN_ID"] == "inv-1"
+    assert env["_OSMOSIS_ROLLOUT_NAME"] == "demo"
+    assert env["_OSMOSIS_ROLLOUT_PORT"] == "8000"
     assert env["KEEP_ME"] == "yes"
     assert env["PYTHONPATH"].split(os.pathsep) == [
         str(rollout_dir),

@@ -12,20 +12,6 @@ from pydantic_core import ErrorDetails
 
 from osmosis_ai.cli.errors import CLIError
 
-# Names the platform-app reserves for built-in env vars on the rollout container.
-# All reserved names use the _OSMOSIS_ prefix; any key with that prefix is blocked.
-_RESERVED_ROLLOUT_ENV_NAMES: frozenset[str] = frozenset(
-    {
-        "_OSMOSIS_GITHUB_CLONE_URL",
-        "_OSMOSIS_GITHUB_TOKEN",
-        "_OSMOSIS_ENTRYPOINT_SCRIPT",
-        "_OSMOSIS_REPOSITORY_PATH",
-        "_OSMOSIS_TRAINING_RUN_ID",
-        "_OSMOSIS_ROLLOUT_NAME",
-        "_OSMOSIS_ROLLOUT_PORT",
-    }
-)
-
 _ENV_VAR_NAME_RE = re.compile(r"^[A-Z_][A-Z0-9_]*$")
 _TRAINING_CONFIG_SECTIONS: frozenset[str] = frozenset(
     {

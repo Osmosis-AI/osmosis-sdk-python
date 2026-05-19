@@ -262,9 +262,7 @@ OPENAI_API_KEY = "openai-api-key"   # "openai-api-key" is the record name
 
 - Keys must match `^[A-Z_][A-Z0-9_]*$`.
 - A key cannot appear in both `[rollout.env]` and `[rollout.secrets]`.
-- Reserved names that cannot be used (managed by the platform):
-  `GITHUB_CLONE_URL`, `GITHUB_TOKEN`, `ENTRYPOINT_SCRIPT`, `REPOSITORY_PATH`,
-  `TRAINING_RUN_ID`, `ROLLOUT_NAME`, `ROLLOUT_PORT`.
+- Any env var name starting with `_OSMOSIS_` is reserved by the platform and cannot be used.
 - Both sections are optional.
 
 ### osmosis train info
