@@ -593,7 +593,6 @@ def test_rollout_list_columns_prioritize_name_over_id(
     assert [column.key for column in result.columns] == [
         "name",
         "is_active",
-        "repo_full_name",
         "last_synced_commit_sha",
         "created_at",
     ]
@@ -604,11 +603,8 @@ def test_rollout_list_columns_prioritize_name_over_id(
     assert result.columns[1].no_wrap is True
     assert result.columns[1].min_width == 6
     assert result.columns[1].max_width == 6
-    assert result.columns[2].label == "Repo"
-    assert result.columns[2].no_wrap is True
-    assert result.columns[2].overflow == "ellipsis"
-    assert result.columns[3].max_width == 8
-    assert result.columns[4].max_width == 10
+    assert result.columns[2].max_width == 8
+    assert result.columns[3].max_width == 10
     assert result.items[0]["last_synced_commit_sha"] == "abcdef123456"
     assert result.display_items is not None
     assert result.display_items[0]["is_active"] == "yes"
