@@ -92,10 +92,35 @@ class _TrainingRunParams(BaseModel):
     sampling: _SamplingSection = Field(default_factory=_SamplingSection)
     checkpoints: _CheckpointsSection = Field(default_factory=_CheckpointsSection)
 
-    def to_api_config(self) -> dict[str, Any]:
+    @staticmethod
+    def _known_config(section: _BackendValidatedParamSection) -> dict[str, Any]:
+        data = section.model_dump(exclude_none=True)
+        known_keys = type(section).model_fields
+        return {key: value for key, value in data.items() if key in known_keys}
+
+    @staticmethod
+    def _advanced_config(section: _BackendValidatedParamSection) -> dict[str, Any]:
+        data = section.model_dump(exclude_none=True)
+        known_keys = type(section).model_fields
+        return {key: value for key, value in data.items() if key not in known_keys}
+
+    @property
+    def training_config(self) -> dict[str, Any]:
+        return self._known_config(self.training)
+
+    @property
+    def sampling_config(self) -> dict[str, Any]:
+        return self._known_config(self.sampling)
+
+    @property
+    def checkpoints_config(self) -> dict[str, Any]:
+        return self._known_config(self.checkpoints)
+
+    @property
+    def advanced_config(self) -> dict[str, Any]:
         fields: dict[str, Any] = {}
         for section in (self.training, self.sampling, self.checkpoints):
-            fields.update(section.model_dump(exclude_none=True))
+            fields.update(self._advanced_config(section))
         return fields
 
 
@@ -366,13 +391,38 @@ class TrainingConfig(BaseModel):
     def rollout_secret_refs(self) -> dict[str, str]:
         return dict(self.rollout.secrets)
 
-    def to_api_config(self) -> dict[str, Any]:
-        """Build the ``config`` dict for the training-runs API payload.
+    @property
+    def experiment_config(self) -> dict[str, Any]:
+        return self.experiment.model_dump(exclude_none=True)
 
-        Merges training, sampling, and checkpoints fields, omitting None values.
-        Rollout env/secrets are submitted as separate top-level fields, not here.
+    @property
+    def training_config(self) -> dict[str, Any]:
+        return self.params.training_config
+
+    @property
+    def sampling_config(self) -> dict[str, Any]:
+        return self.params.sampling_config
+
+    @property
+    def checkpoints_config(self) -> dict[str, Any]:
+        return self.params.checkpoints_config
+
+    @property
+    def advanced_config(self) -> dict[str, Any]:
+        return self.params.advanced_config
+
+    def to_api_config(self) -> dict[str, Any]:
+        """Build the legacy flat ``config`` dict for compatibility.
+
+        New CLI submissions use ``*_config`` payload sections. This method is
+        retained for callers that still consume the previous flattened shape.
         """
-        return self.params.to_api_config()
+        return {
+            **self.training_config,
+            **self.sampling_config,
+            **self.checkpoints_config,
+            **self.advanced_config,
+        }
 
 
 def _validate_rollout_env_keys(

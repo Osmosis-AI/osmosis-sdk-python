@@ -169,12 +169,16 @@ class OsmosisClient:
     def submit_training_run(
         self,
         *,
-        model_path: str,
-        dataset: str,
-        rollout_name: str,
-        entrypoint: str,
+        experiment_config: dict[str, Any] | None = None,
+        model_path: str | None = None,
+        dataset: str | None = None,
+        rollout_name: str | None = None,
+        entrypoint: str | None = None,
         commit_sha: str | None = None,
-        config: dict[str, Any] | None = None,
+        training_config: dict[str, Any] | None = None,
+        sampling_config: dict[str, Any] | None = None,
+        checkpoints_config: dict[str, Any] | None = None,
+        advanced_config: dict[str, Any] | None = None,
         rollout_env: dict[str, str] | None = None,
         rollout_secret_refs: dict[str, str] | None = None,
         credentials: Credentials | None = None,
@@ -187,16 +191,32 @@ class OsmosisClient:
         names of workspace ``environment_secret`` records; values are resolved
         server-side and never travel through the CLI.
         """
+        if experiment_config is None:
+            if model_path is None or dataset is None or rollout_name is None:
+                raise ValueError(
+                    "submit_training_run requires experiment_config or model_path, dataset, and rollout_name"
+                )
+            experiment_config = {
+                "model_path": model_path,
+                "dataset": dataset,
+                "rollout": rollout_name,
+            }
+            if entrypoint is not None:
+                experiment_config["entrypoint"] = entrypoint
+            if commit_sha is not None:
+                experiment_config["commit_sha"] = commit_sha
+
         data: dict[str, Any] = {
-            "model_path": model_path,
-            "dataset": dataset,
-            "rollout": rollout_name,
-            "entrypoint": entrypoint,
+            "experiment_config": experiment_config,
         }
-        if commit_sha is not None:
-            data["commit_sha"] = commit_sha
-        if config is not None:
-            data["config"] = config
+        if training_config:
+            data["training_config"] = training_config
+        if sampling_config:
+            data["sampling_config"] = sampling_config
+        if checkpoints_config:
+            data["checkpoints_config"] = checkpoints_config
+        if advanced_config:
+            data["advanced_config"] = advanced_config
         if rollout_env:
             data["rollout_env"] = rollout_env
         if rollout_secret_refs:

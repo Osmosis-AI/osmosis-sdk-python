@@ -217,7 +217,7 @@ rollout_batch_size = 64
             assert kwargs["credentials"] is FAKE_CREDENTIALS
             assert kwargs["git_identity"] == GIT_IDENTITY
             assert "workspace_id" not in kwargs
-            assert kwargs["rollout_name"] == "demo"
+            assert kwargs["experiment_config"]["rollout"] == "demo"
             return SubmitTrainingRunResult(
                 id="run_1",
                 name="reward-run",

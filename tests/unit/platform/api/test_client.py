@@ -327,10 +327,12 @@ class TestSubmitTrainingRun:
         assert result.id == "run-1"
         payload = mock_request.call_args.kwargs["data"]
         assert payload == {
-            "model_path": "m1",
-            "dataset": "ds1",
-            "rollout": "rollout1",
-            "entrypoint": "rollouts/main.py",
+            "experiment_config": {
+                "model_path": "m1",
+                "dataset": "ds1",
+                "rollout": "rollout1",
+                "entrypoint": "rollouts/main.py",
+            },
         }
         assert "rollout_env" not in payload
         assert "rollout_secret_refs" not in payload
@@ -394,10 +396,10 @@ class TestSubmitTrainingRun:
         assert "rollout_secret_refs" not in payload
 
     @patch("osmosis_ai.platform.api.client.platform_request")
-    def test_commit_sha_and_config_included_when_provided(
+    def test_commit_sha_and_config_sections_included_when_provided(
         self, mock_request: MagicMock
     ) -> None:
-        """commit_sha and config are forwarded when provided."""
+        """commit_sha and config sections are forwarded using the CLI API shape."""
         mock_request.return_value = self._response()
         client = OsmosisClient()
         client.submit_training_run(
@@ -406,14 +408,26 @@ class TestSubmitTrainingRun:
             rollout_name="rollout1",
             entrypoint="rollouts/main.py",
             commit_sha="abc123",
-            config={"lr": 0.001},
+            training_config={"lr": 0.001},
+            sampling_config={"rollout_temperature": 0.8},
+            checkpoints_config={"checkpoint_save_freq": 10},
+            advanced_config={"optimizer": "adam"},
             rollout_env={"FOO": "bar"},
             rollout_secret_refs={"OPENAI_API_KEY": "openai-prod"},
             git_identity="git_test",
         )
         payload = mock_request.call_args.kwargs["data"]
-        assert payload["commit_sha"] == "abc123"
-        assert payload["config"] == {"lr": 0.001}
+        assert payload["experiment_config"] == {
+            "model_path": "m1",
+            "dataset": "ds1",
+            "rollout": "rollout1",
+            "entrypoint": "rollouts/main.py",
+            "commit_sha": "abc123",
+        }
+        assert payload["training_config"] == {"lr": 0.001}
+        assert payload["sampling_config"] == {"rollout_temperature": 0.8}
+        assert payload["checkpoints_config"] == {"checkpoint_save_freq": 10}
+        assert payload["advanced_config"] == {"optimizer": "adam"}
         assert payload["rollout_env"] == {"FOO": "bar"}
         assert payload["rollout_secret_refs"] == {"OPENAI_API_KEY": "openai-prod"}
 

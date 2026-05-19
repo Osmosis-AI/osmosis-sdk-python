@@ -503,12 +503,11 @@ def submit(
     output = get_output_context()
     with output.status("Submitting training run..."):
         result = client.submit_training_run(
-            model_path=config.experiment_model_path,
-            dataset=config.experiment_dataset,
-            rollout_name=config.experiment_rollout,
-            entrypoint=config.experiment_entrypoint,
-            commit_sha=config.experiment_commit_sha,
-            config=config.to_api_config(),
+            experiment_config=config.experiment_config,
+            training_config=config.training_config or None,
+            sampling_config=config.sampling_config or None,
+            checkpoints_config=config.checkpoints_config or None,
+            advanced_config=config.advanced_config or None,
             rollout_env=config.rollout_env or None,
             rollout_secret_refs=config.rollout_secret_refs or None,
             credentials=credentials,

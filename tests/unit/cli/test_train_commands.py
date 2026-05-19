@@ -678,7 +678,7 @@ rollout_batch_size = 64
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
         result = train_module.submit(config_path=path, yes=True)
-        assert captured_kwargs["commit_sha"] == "deadbeef"
+        assert captured_kwargs["experiment_config"]["commit_sha"] == "deadbeef"
         assert captured_kwargs["git_identity"] == GIT_IDENTITY
         assert "workspace_id" not in captured_kwargs
         assert "deadbeef" in console_capture.getvalue()
@@ -703,18 +703,23 @@ rollout_batch_size = 64
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
         train_module.submit(config_path=config_path, yes=True)
-        assert captured_kwargs["model_path"] == "Qwen/Qwen3.6-35B-A3B"
-        assert captured_kwargs["dataset"] == "abc-123"
-        assert captured_kwargs["rollout_name"] == "calculator"
-        assert captured_kwargs["entrypoint"] == "main.py"
+        assert captured_kwargs["experiment_config"] == {
+            "model_path": "Qwen/Qwen3.6-35B-A3B",
+            "dataset": "abc-123",
+            "rollout": "calculator",
+            "entrypoint": "main.py",
+        }
         assert captured_kwargs["git_identity"] == GIT_IDENTITY
         assert "workspace_id" not in captured_kwargs
-        assert captured_kwargs["config"] == {
+        assert captured_kwargs["training_config"] == {
             "lr": 1e-6,
             "total_epochs": 1,
             "n_samples_per_prompt": 8,
             "rollout_batch_size": 64,
         }
+        assert captured_kwargs["sampling_config"] is None
+        assert captured_kwargs["checkpoints_config"] is None
+        assert captured_kwargs["advanced_config"] is None
 
     def test_submit_rejects_non_canonical_training_config_path(
         self,

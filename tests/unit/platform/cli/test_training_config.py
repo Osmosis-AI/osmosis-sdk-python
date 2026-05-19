@@ -93,11 +93,11 @@ dataset = "id-1"
 
 
 # ---------------------------------------------------------------------------
-# to_api_config
+# API config sections
 # ---------------------------------------------------------------------------
 
 
-def test_to_api_config_all_fields(tmp_path: Path) -> None:
+def test_api_config_sections_all_fields(tmp_path: Path) -> None:
     path = tmp_path / "full.toml"
     path.write_text(
         """
@@ -123,18 +123,22 @@ checkpoint_save_freq = 10
     )
 
     cfg = load_training_config(path)
-    api = cfg.to_api_config()
-    assert api == {
+    assert cfg.training_config == {
         "lr": 1e-6,
         "total_epochs": 1,
         "n_samples_per_prompt": 8,
         "rollout_batch_size": 64,
+    }
+    assert cfg.sampling_config == {
         "rollout_temperature": 0.9,
+    }
+    assert cfg.checkpoints_config == {
         "checkpoint_save_freq": 10,
     }
+    assert cfg.advanced_config == {}
 
 
-def test_to_api_config_empty_optional_sections(tmp_path: Path) -> None:
+def test_api_config_sections_empty_optional_sections(tmp_path: Path) -> None:
     path = tmp_path / "minimal.toml"
     path.write_text(
         """
@@ -148,7 +152,10 @@ dataset = "d"
     )
 
     cfg = load_training_config(path)
-    assert cfg.to_api_config() == {}
+    assert cfg.training_config == {}
+    assert cfg.sampling_config == {}
+    assert cfg.checkpoints_config == {}
+    assert cfg.advanced_config == {}
 
 
 # ---------------------------------------------------------------------------
@@ -314,7 +321,7 @@ dataset = "d"
     )
 
     cfg = load_training_config(path)
-    assert cfg.to_api_config() == expected_config
+    assert cfg.training_config == expected_config
 
 
 @pytest.mark.parametrize(
@@ -366,7 +373,12 @@ dataset = "d"
 
     cfg = load_training_config(path)
     expected = float(value) if "." in value else int(value)
-    assert cfg.to_api_config()[field] == expected
+    section_configs = {
+        "training": cfg.training_config,
+        "sampling": cfg.sampling_config,
+        "checkpoints": cfg.checkpoints_config,
+    }
+    assert section_configs[section][field] == expected
 
 
 def test_rollout_batch_size_not_required_to_be_divisible(tmp_path: Path) -> None:
@@ -408,7 +420,7 @@ total_epochs = "not-a-number"
     )
 
     cfg = load_training_config(path)
-    assert cfg.to_api_config()["total_epochs"] == "not-a-number"
+    assert cfg.training_config["total_epochs"] == "not-a-number"
 
 
 def test_unknown_training_fields_are_preserved_for_backend(tmp_path: Path) -> None:
@@ -429,8 +441,9 @@ rollout_bach_size = 32
     )
 
     cfg = load_training_config(path)
-    assert cfg.to_api_config()["dummy"] == 1
-    assert cfg.to_api_config()["rollout_bach_size"] == 32
+    assert cfg.training_config == {}
+    assert cfg.advanced_config["dummy"] == 1
+    assert cfg.advanced_config["rollout_bach_size"] == 32
 
 
 def test_sdk_detected_errors_ignore_unknown_backend_params(tmp_path: Path) -> None:
