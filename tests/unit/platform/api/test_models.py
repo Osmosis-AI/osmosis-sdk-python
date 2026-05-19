@@ -208,19 +208,15 @@ class TestSubmitTrainingRunResult:
             "id": "550e8400-e29b-41d4-a716-446655440000",
             "name": "my-training-run",
             "status": "pending",
-            "model": {"id": "model_1", "model_name": "Qwen/Qwen3"},
-            "dataset": {"id": "dataset_1", "file_name": "train.jsonl"},
             "created_at": "2026-04-10T12:00:00Z",
+            "platform_url": "https://platform.osmosis.ai/ws/training/run",
         }
         result = SubmitTrainingRunResult.from_dict(data)
         assert result.id == "550e8400-e29b-41d4-a716-446655440000"
         assert result.name == "my-training-run"
         assert result.status == "pending"
-        assert result.model_id == "model_1"
-        assert result.model_name == "Qwen/Qwen3"
-        assert result.dataset_id == "dataset_1"
-        assert result.dataset_name == "train.jsonl"
         assert result.created_at == "2026-04-10T12:00:00Z"
+        assert result.platform_url == "https://platform.osmosis.ai/ws/training/run"
 
 
 class TestTrainingRun:

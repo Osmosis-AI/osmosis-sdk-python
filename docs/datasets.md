@@ -53,6 +53,29 @@ You are a helpful calculator.,What is 10 * 5?,50
 
 Any other columns are kept on the normalized row dict. Downstream code (workflows, graders, or platform metadata) can read them from that structure.
 
+## Uploading datasets
+
+Upload a local dataset file with:
+
+```bash
+osmosis dataset upload data.jsonl
+```
+
+Add `--yes` (or `-y`) to skip the interactive confirmation prompt, which is
+useful in JSON/plain output modes and CI jobs.
+
+Dataset names are derived from the file name without its extension. If a dataset
+with the same name already exists, the upload fails instead of auto-renaming the
+new dataset. To replace the existing dataset, pass `--overwrite`:
+
+```bash
+osmosis dataset upload data.jsonl --overwrite
+```
+
+Overwrite creates a new dataset record and soft-deletes the old one. The platform
+may reject overwrites while the existing dataset is still uploading, still
+processing, or used by an active training run.
+
 ## See also
 
 - [Eval](./eval.md)

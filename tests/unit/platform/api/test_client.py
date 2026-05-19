@@ -33,6 +33,52 @@ class TestRemovedClientMethods:
         assert not hasattr(OsmosisClient, method_name)
 
 
+class TestCreateDataset:
+    """Tests for OsmosisClient.create_dataset request payloads."""
+
+    @patch("osmosis_ai.platform.api.client.platform_request")
+    def test_create_dataset_omits_overwrite_dataset_id_by_default(
+        self, mock_request: MagicMock
+    ) -> None:
+        mock_request.return_value = {
+            "id": "file-1",
+            "file_name": "data",
+            "file_size": 100,
+            "status": "uploading",
+        }
+
+        OsmosisClient().create_dataset("data", 100, "jsonl", git_identity="git_test")
+
+        payload = mock_request.call_args.kwargs["data"]
+        assert payload == {
+            "file_name": "data",
+            "file_size": 100,
+            "extension": "jsonl",
+        }
+
+    @patch("osmosis_ai.platform.api.client.platform_request")
+    def test_create_dataset_sends_overwrite_dataset_id_when_provided(
+        self, mock_request: MagicMock
+    ) -> None:
+        mock_request.return_value = {
+            "id": "file-2",
+            "file_name": "data",
+            "file_size": 100,
+            "status": "uploading",
+        }
+
+        OsmosisClient().create_dataset(
+            "data",
+            100,
+            "jsonl",
+            overwrite_dataset_id="file-1",
+            git_identity="git_test",
+        )
+
+        payload = mock_request.call_args.kwargs["data"]
+        assert payload["overwrite_dataset_id"] == "file-1"
+
+
 class TestCompleteUploadValidation:
     """Tests for parameter validation in OsmosisClient.complete_upload."""
 
@@ -157,8 +203,6 @@ class TestGitIdentityPassthrough:
                     "id": "run-1",
                     "name": "Run 1",
                     "status": "pending",
-                    "model": {"id": "model-1", "model_name": "Qwen/Qwen3"},
-                    "dataset": {"id": "dataset-1", "file_name": "train.jsonl"},
                     "created_at": "2026-05-03T00:00:00Z",
                 },
             ),
@@ -311,8 +355,6 @@ class TestSubmitTrainingRun:
             "id": "run-1",
             "name": "run-1",
             "status": "pending",
-            "model": {"id": "model-1", "model_name": "Qwen/Qwen3"},
-            "dataset": {"id": "dataset-1", "file_name": "train.jsonl"},
             "created_at": "2026-05-04T00:00:00Z",
         }
 
@@ -321,7 +363,7 @@ class TestSubmitTrainingRun:
         client = OsmosisClient()
         with pytest.raises(TypeError):
             client.submit_training_run(
-                model_path="m1",
+                model="m1",
                 dataset="ds1",
                 rollout_name="rollout1",
                 entrypoint="rollouts/main.py",
