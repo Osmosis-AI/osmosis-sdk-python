@@ -1,0 +1,30 @@
+osmosis_ai/templates/_scaffolds/rollout/main.py.tpl
+  s_90b7aefb161df6::t_128da8018057c6 4
+  s_90b7aefb161df6::t_3dc3d1bad4bece 60
+tests/unit/eval/controller/test_process.py
+  s_90b7aefb161df6::t_29a657f7bcc49e 60-64
+osmosis_ai/templates/_scaffolds/rollout/training.toml.tpl
+  s_90b7aefb161df6::t_85a7630a92c885 63-66
+docs/eval.md
+  s_90b7aefb161df6::t_2800e3a9e3c72b 116
+docs/cli.md
+  s_90b7aefb161df6::t_f492f6937a4675 265
+osmosis_ai/eval/controller/process.py
+  s_90b7aefb161df6::t_91b1e8ba18b441 36-40
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.4.10",
+  "base_commit_sha": "c754888fc8a9bc1b3cb81cd5fa559f683c32893d",
+  "prompts": {},
+  "sessions": {
+    "s_90b7aefb161df6": {
+      "agent_id": {
+        "tool": "cursor",
+        "id": "b67d6690-da8b-44f5-9f37-d96febe51cb9",
+        "model": "claude-sonnet-4-6"
+      },
+      "human_author": "Jacob Trock <jgh@geocrypt.me>"
+    }
+  }
+}
