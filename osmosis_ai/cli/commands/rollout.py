@@ -128,15 +128,6 @@ def list_rollouts(
                 max_width=6,
             ),
             ListColumn(
-                key="repo_full_name",
-                label="Repo",
-                no_wrap=True,
-                overflow="ellipsis",
-                ratio=2,
-                min_width=10,
-                max_width=10,
-            ),
-            ListColumn(
                 key="last_synced_commit_sha",
                 label="Commit",
                 no_wrap=True,

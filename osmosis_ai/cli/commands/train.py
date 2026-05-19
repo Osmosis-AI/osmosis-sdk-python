@@ -503,12 +503,11 @@ def submit(
     output = get_output_context()
     with output.status("Submitting training run..."):
         result = client.submit_training_run(
-            model_path=config.experiment_model_path,
-            dataset=config.experiment_dataset,
-            rollout_name=config.experiment_rollout,
-            entrypoint=config.experiment_entrypoint,
-            commit_sha=config.experiment_commit_sha,
-            config=config.to_api_config(),
+            experiment_config=config.experiment_config,
+            training_config=config.training_config or None,
+            sampling_config=config.sampling_config or None,
+            checkpoints_config=config.checkpoints_config or None,
+            advanced_config=config.advanced_config or None,
             rollout_env=config.rollout_env or None,
             rollout_secret_refs=config.rollout_secret_refs or None,
             credentials=credentials,
@@ -522,6 +521,10 @@ def submit(
             "id": result.id,
             "name": result.name,
             "status": result.status,
+            "model_id": result.model_id,
+            "model_name": result.model_name,
+            "dataset_id": result.dataset_id,
+            "dataset_name": result.dataset_name,
             "created_at": result.created_at,
             **({"url": result.platform_url} if result.platform_url else {}),
             **git_result_context(context),
@@ -536,6 +539,8 @@ def submit(
         message=f"Training run submitted: {result.name}",
         display_next_steps=[
             f"Status: {result.status}",
+            f"Model: {result.model_name}",
+            f"Dataset: {result.dataset_name}",
             (
                 f"View: {result.platform_url}"
                 if result.platform_url

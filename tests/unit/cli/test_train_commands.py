@@ -521,6 +521,10 @@ class TestSubmit:
         id="550e8400-e29b-41d4-a716-446655440000",
         name="my-training-run",
         status="pending",
+        model_id="model_1",
+        model_name="Qwen/Qwen3",
+        dataset_id="dataset_1",
+        dataset_name="train.jsonl",
         created_at="2026-04-10T12:00:00Z",
         platform_url="https://platform.osmosis.ai/ws/training/550e8400-e29b-41d4-a716-446655440000",
     )
@@ -577,6 +581,10 @@ rollout_batch_size = 64
         assert command_result.resource["name"] == "my-training-run"
         assert command_result.resource["id"] == "550e8400-e29b-41d4-a716-446655440000"
         assert command_result.resource["status"] == "pending"
+        assert command_result.resource["model_id"] == "model_1"
+        assert command_result.resource["model_name"] == "Qwen/Qwen3"
+        assert command_result.resource["dataset_id"] == "dataset_1"
+        assert command_result.resource["dataset_name"] == "train.jsonl"
         assert "/training/" in command_result.resource["url"]
         assert command_result.resource["git"] == {
             "identity": GIT_IDENTITY,
@@ -609,6 +617,8 @@ rollout_batch_size = 64
         assert isinstance(command_result, OperationResult)
         assert command_result.resource is not None
         assert command_result.resource["url"] == expected_url
+        assert "Model: Qwen/Qwen3" in command_result.display_next_steps
+        assert "Dataset: train.jsonl" in command_result.display_next_steps
         assert f"View: {expected_url}" in command_result.display_next_steps
 
     def test_submit_shows_summary_table(
@@ -678,7 +688,7 @@ rollout_batch_size = 64
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
         result = train_module.submit(config_path=path, yes=True)
-        assert captured_kwargs["commit_sha"] == "deadbeef"
+        assert captured_kwargs["experiment_config"]["commit_sha"] == "deadbeef"
         assert captured_kwargs["git_identity"] == GIT_IDENTITY
         assert "workspace_id" not in captured_kwargs
         assert "deadbeef" in console_capture.getvalue()
@@ -703,18 +713,23 @@ rollout_batch_size = 64
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
         train_module.submit(config_path=config_path, yes=True)
-        assert captured_kwargs["model_path"] == "Qwen/Qwen3.6-35B-A3B"
-        assert captured_kwargs["dataset"] == "abc-123"
-        assert captured_kwargs["rollout_name"] == "calculator"
-        assert captured_kwargs["entrypoint"] == "main.py"
+        assert captured_kwargs["experiment_config"] == {
+            "model_path": "Qwen/Qwen3.6-35B-A3B",
+            "dataset": "abc-123",
+            "rollout": "calculator",
+            "entrypoint": "main.py",
+        }
         assert captured_kwargs["git_identity"] == GIT_IDENTITY
         assert "workspace_id" not in captured_kwargs
-        assert captured_kwargs["config"] == {
+        assert captured_kwargs["training_config"] == {
             "lr": 1e-6,
             "total_epochs": 1,
             "n_samples_per_prompt": 8,
             "rollout_batch_size": 64,
         }
+        assert captured_kwargs["sampling_config"] is None
+        assert captured_kwargs["checkpoints_config"] is None
+        assert captured_kwargs["advanced_config"] is None
 
     def test_submit_rejects_non_canonical_training_config_path(
         self,

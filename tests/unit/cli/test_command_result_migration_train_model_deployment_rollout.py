@@ -217,11 +217,15 @@ rollout_batch_size = 64
             assert kwargs["credentials"] is FAKE_CREDENTIALS
             assert kwargs["git_identity"] == GIT_IDENTITY
             assert "workspace_id" not in kwargs
-            assert kwargs["rollout_name"] == "demo"
+            assert kwargs["experiment_config"]["rollout"] == "demo"
             return SubmitTrainingRunResult(
                 id="run_1",
                 name="reward-run",
                 status="pending",
+                model_id="model_1",
+                model_name="Qwen/Qwen3",
+                dataset_id="dataset_1",
+                dataset_name="train.jsonl",
                 created_at="2026-04-26T00:00:00Z",
             )
 
@@ -234,6 +238,8 @@ rollout_batch_size = 64
     payload = json.loads(captured.out)
     assert payload["operation"] == "train.submit"
     assert payload["resource"]["name"] == "reward-run"
+    assert payload["resource"]["model_name"] == "Qwen/Qwen3"
+    assert payload["resource"]["dataset_name"] == "train.jsonl"
     _assert_git_context(payload["resource"], project)
 
 
@@ -587,7 +593,6 @@ def test_rollout_list_columns_prioritize_name_over_id(
     assert [column.key for column in result.columns] == [
         "name",
         "is_active",
-        "repo_full_name",
         "last_synced_commit_sha",
         "created_at",
     ]
@@ -598,11 +603,8 @@ def test_rollout_list_columns_prioritize_name_over_id(
     assert result.columns[1].no_wrap is True
     assert result.columns[1].min_width == 6
     assert result.columns[1].max_width == 6
-    assert result.columns[2].label == "Repo"
-    assert result.columns[2].no_wrap is True
-    assert result.columns[2].overflow == "ellipsis"
-    assert result.columns[3].max_width == 8
-    assert result.columns[4].max_width == 10
+    assert result.columns[2].max_width == 8
+    assert result.columns[3].max_width == 10
     assert result.items[0]["last_synced_commit_sha"] == "abcdef123456"
     assert result.display_items is not None
     assert result.display_items[0]["is_active"] == "yes"

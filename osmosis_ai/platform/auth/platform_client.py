@@ -110,6 +110,45 @@ def _auth_error_message(error_code: str | None, *, using_env_token: bool) -> str
     return MSG_SESSION_EXPIRED
 
 
+def _format_response_issue(issue: Any) -> str | None:
+    if isinstance(issue, str):
+        return issue
+    if not isinstance(issue, dict):
+        return None
+
+    key = issue.get("key")
+    message = issue.get("message")
+    correction = issue.get("key_correction")
+
+    if isinstance(key, str) and key:
+        text = key
+        if isinstance(message, str) and message:
+            text = f"{text}: {message}"
+    elif isinstance(message, str) and message:
+        text = message
+    else:
+        return None
+
+    if isinstance(correction, str) and correction:
+        text = f"{text} (did you mean '{correction}'?)"
+    return text
+
+
+def _format_response_issues(error_body: dict[str, Any]) -> str | None:
+    issues = error_body.get("issues")
+    if not isinstance(issues, list):
+        return None
+
+    lines = [
+        f"  - {formatted}"
+        for issue in issues
+        if (formatted := _format_response_issue(issue))
+    ]
+    if not lines:
+        return None
+    return "\n" + "\n".join(lines)
+
+
 _REPO_SCOPE_ERROR_MESSAGES: dict[str, str] = {
     "GIT_SCOPE_REQUIRED": "This command requires an Osmosis workspace directory.",
     "GIT_SCOPE_HEADER_REQUIRED": (
@@ -333,6 +372,7 @@ def platform_request(
         error_body: dict[str, Any] = {}
         error_code: str | None = None
         field: str | None = None
+        platform_message: str | None = None
         try:
             raw = e.read()
             text = raw.decode("utf-8", errors="replace").strip() if raw else ""
@@ -349,7 +389,8 @@ def platform_request(
                 # Prefer structured error/message field over raw body
                 error_msg = error_body.get("error") or error_body.get("message")
                 if error_msg and isinstance(error_msg, str):
-                    detail = f" {error_msg}"
+                    issues_detail = _format_response_issues(error_body)
+                    platform_message = f"{error_msg}{issues_detail or ''}"
                 elif text:
                     if len(text) > 200:
                         text = text[:200] + "...(truncated)"
@@ -390,7 +431,7 @@ def platform_request(
                 ) from e
 
         raise PlatformAPIError(
-            f"API error: HTTP {e.code}.{detail}",
+            platform_message or f"API error: HTTP {e.code}.{detail}",
             e.code,
             error_code=error_code,
             field=field,

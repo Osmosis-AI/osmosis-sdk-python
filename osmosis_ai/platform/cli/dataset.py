@@ -323,16 +323,6 @@ def upload(
             "File validation failed:\n" + "\n".join(f"  - {e}" for e in errors)
         )
 
-    # Confirm upload target
-    console.print()
-    console.table(
-        [
-            ("Repository", console.escape(git_identity)),
-            ("File", f"{console.escape(file_path.name)} ({format_size(file_size)})"),
-        ],
-        title="Upload Target",
-    )
-    console.print()
     if output.interactive:
         proceed = confirm("Proceed with upload?", default=True)
         if proceed is None or not proceed:
