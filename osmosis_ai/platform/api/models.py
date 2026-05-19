@@ -561,7 +561,7 @@ class PaginatedRollouts:
         )
 
 
-# ── LoRA checkpoints (for `osmosis train status` + `osmosis deploy`) ─────
+# ── LoRA checkpoints (for `osmosis train info` + `osmosis deploy`) ───────
 
 
 @dataclass

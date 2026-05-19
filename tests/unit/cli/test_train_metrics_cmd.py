@@ -1,4 +1,4 @@
-"""Tests for the osmosis train metrics CLI command."""
+"""Tests for train info metrics rendering."""
 
 from __future__ import annotations
 
@@ -138,7 +138,7 @@ class TestMetricsCommandPlatformUrl:
         output = tmp_path / "m.json"
         buf = io.StringIO()
         with _patch_train_console(buf, force_terminal=False, width=120):
-            from osmosis_ai.cli.commands.train import metrics
+            from osmosis_ai.cli.commands.train import info as metrics
 
             result = metrics(
                 name="reward-tuning-v3",
@@ -180,7 +180,7 @@ class TestMetricsCommandTrendGraphs:
         with _patch_train_console(
             buf, force_terminal=True, width=MIN_TREND_TERMINAL_WIDTH
         ):
-            from osmosis_ai.cli.commands.train import metrics
+            from osmosis_ai.cli.commands.train import info as metrics
 
             result = metrics(
                 name="reward-tuning-v3",
@@ -188,7 +188,7 @@ class TestMetricsCommandTrendGraphs:
             )
 
         assert isinstance(result, DetailResult)
-        assert result.title == "Training Run Metrics"
+        assert result.title == "Training Run Info"
         assert all(field.label != "Metric Trends" for field in result.fields)
         assert result.sections
         trends = _render_section_text(result)
@@ -223,7 +223,7 @@ class TestMetricsCommandTrendGraphs:
         with _patch_train_console(
             buf, force_terminal=True, width=MIN_TREND_TERMINAL_WIDTH
         ):
-            from osmosis_ai.cli.commands.train import metrics
+            from osmosis_ai.cli.commands.train import info as metrics
 
             result = metrics(
                 name="reward-tuning-v3",
@@ -250,7 +250,7 @@ class TestMetricsCommandTrendGraphs:
         with _patch_train_console(
             buf, force_terminal=False, width=MIN_TREND_TERMINAL_WIDTH
         ):
-            from osmosis_ai.cli.commands.train import metrics
+            from osmosis_ai.cli.commands.train import info as metrics
 
             metrics(
                 name="reward-tuning-v3",
@@ -274,7 +274,7 @@ class TestMetricsCommandTrendGraphs:
         with _patch_train_console(
             buf, force_terminal=True, width=MIN_TREND_TERMINAL_WIDTH - 1
         ):
-            from osmosis_ai.cli.commands.train import metrics
+            from osmosis_ai.cli.commands.train import info as metrics
 
             metrics(
                 name="reward-tuning-v3",
@@ -298,7 +298,7 @@ class TestMetricsCommandTrendGraphs:
         with _patch_train_console(
             buf, force_terminal=True, width=MIN_TREND_TERMINAL_WIDTH
         ):
-            from osmosis_ai.cli.commands.train import metrics
+            from osmosis_ai.cli.commands.train import info as metrics
 
             result = metrics(
                 name="reward-tuning-v3",
@@ -309,7 +309,7 @@ class TestMetricsCommandTrendGraphs:
         assert _field_value(result, "Metrics") == "No metric data found."
         assert all(field.label != "Metric Trends" for field in result.fields)
         # Summary table is always shown (run metadata is valuable even without metrics)
-        assert result.title == "Training Run Metrics"
+        assert result.title == "Training Run Info"
 
 
 class TestMetricsCommandWritesFile:
@@ -327,7 +327,7 @@ class TestMetricsCommandWritesFile:
 
         output = tmp_path / "metrics.json"
 
-        from osmosis_ai.cli.commands.train import metrics
+        from osmosis_ai.cli.commands.train import info as metrics
 
         metrics(
             name="reward-tuning-v3",
@@ -357,7 +357,7 @@ class TestMetricsCommandWritesFile:
         osmosis_dir = tmp_path / ".osmosis"
         monkeypatch.chdir(tmp_path)
 
-        from osmosis_ai.cli.commands.train import metrics
+        from osmosis_ai.cli.commands.train import info as metrics
 
         metrics(
             name="reward-tuning-v3",
@@ -387,7 +387,7 @@ class TestMetricsCommandWritesFile:
         nested.mkdir(parents=True)
         monkeypatch.chdir(nested)
 
-        from osmosis_ai.cli.commands.train import metrics
+        from osmosis_ai.cli.commands.train import info as metrics
 
         result = metrics(
             name="reward-tuning-v3",
@@ -471,21 +471,22 @@ class TestMetricsCommandErrors:
 
     @patch(_PATCH_CLIENT)
     @patch(_PATCH_AUTH)
-    def test_pending_run_raises(
+    def test_pending_run_reports_metrics_unavailable(
         self, mock_auth: MagicMock, mock_client_cls: MagicMock
     ) -> None:
         mock_auth.return_value = _make_git_context()
         client = mock_client_cls.return_value
         client.get_training_run.return_value = _make_run_detail(status="pending")
 
-        from osmosis_ai.cli.commands.train import metrics
-        from osmosis_ai.cli.errors import CLIError
+        from osmosis_ai.cli.commands.train import info as metrics
 
-        with pytest.raises(CLIError, match="not yet available for pending"):
-            metrics(
-                name="reward-tuning-v3",
-                output="/tmp/out.json",
-            )
+        result = metrics(
+            name="reward-tuning-v3",
+            output="/tmp/out.json",
+        )
+
+        assert result.data["metrics_available"] is False
+        assert "not yet available for pending" in result.data["metrics_error"]
 
     @patch(_PATCH_CLIENT)
     @patch(_PATCH_AUTH)
@@ -500,7 +501,7 @@ class TestMetricsCommandErrors:
         output = tmp_path / "m.json"
         buf = io.StringIO()
         with _patch_train_console(buf, force_terminal=False, width=120):
-            from osmosis_ai.cli.commands.train import metrics
+            from osmosis_ai.cli.commands.train import info as metrics
 
             result = metrics(
                 name="reward-tuning-v3",
@@ -536,7 +537,7 @@ class TestMetricsCommandErrors:
 
         buf = io.StringIO()
         with _patch_train_console(buf, force_terminal=False, width=80):
-            from osmosis_ai.cli.commands.train import metrics
+            from osmosis_ai.cli.commands.train import info as metrics
 
             result = metrics(
                 name="reward-tuning-v3",
@@ -569,7 +570,7 @@ class TestMetricsCommandErrors:
 
         buf = io.StringIO()
         with _patch_train_console(buf, force_terminal=False, width=80):
-            from osmosis_ai.cli.commands.train import metrics
+            from osmosis_ai.cli.commands.train import info as metrics
 
             result = metrics(
                 name="reward-tuning-v3",
@@ -578,7 +579,7 @@ class TestMetricsCommandErrors:
 
         expected = tmp_path / ".osmosis" / "metrics" / "reward-tuning-v3_550e8400.json"
         assert isinstance(result, DetailResult)
-        assert result.title == "Training Run Metrics"
+        assert result.title == "Training Run Info"
         assert expected.exists()
         assert result.data["output_path"] == str(expected)
         assert f"Saved metrics to {expected}" in result.display_hints

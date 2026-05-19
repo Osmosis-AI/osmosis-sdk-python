@@ -17,6 +17,8 @@ from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.cli.output import DetailResult, ListResult, OperationResult
 from osmosis_ai.cli.output.context import OutputFormat, override_output_context
 from osmosis_ai.platform.api.models import (
+    MetricDataPoint,
+    MetricHistory,
     PaginatedTrainingRuns,
     SubmitTrainingRunResult,
     TrainingRun,
@@ -40,6 +42,11 @@ def _git_extra() -> dict[str, object]:
 
 def assert_git_context(data: dict[str, object]) -> None:
     assert data == _git_extra()
+
+
+def _raise_metrics_unavailable(self, run_id, *, git_identity, credentials=None):
+    assert git_identity == GIT_IDENTITY
+    raise PlatformAPIError("not available")
 
 
 def _find_temp_workspace_directory(start: Path) -> Path | None:
@@ -251,9 +258,7 @@ class TestListRuns:
         assert result.columns[3].label.startswith("Created (")
         assert result.display_items is not None
         assert result.display_items[0]["reward"] == "0.88"
-        assert result.display_hints == [
-            "Use osmosis train status <name> or osmosis train metrics <name> for details."
-        ]
+        assert result.display_hints == ["Use osmosis train info <name> for details."]
 
     def test_list_unnamed_run(
         self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
@@ -308,6 +313,118 @@ class TestListRuns:
 
 
 # ---------------------------------------------------------------------------
+# info
+# ---------------------------------------------------------------------------
+
+
+class TestInfo:
+    def test_info_combines_status_checkpoints_and_metrics(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        console_capture: StringIO,
+        tmp_path: Path,
+    ) -> None:
+        from osmosis_ai.platform.api.models import LoraCheckpointInfo
+
+        detail = TrainingRunDetail(
+            id="abcdef1234567890abcdef1234567890",
+            name="run-1",
+            status="finished",
+            model_name="gpt-2",
+            platform_url="https://platform.osmosis.ai/ws/training/abcdef1234567890abcdef1234567890",
+        )
+        checkpoint = LoraCheckpointInfo(
+            id="ckpt_abcdef123456",
+            checkpoint_name="run-1-step-100",
+            checkpoint_step=100,
+            status="uploaded",
+            created_at="2026-01-01T01:00:00Z",
+        )
+        metric_data = TrainingRunMetrics(
+            training_run_id=detail.id,
+            status="finished",
+            overview=TrainingRunMetricsOverview(
+                mlflow_run_id="mlflow-1",
+                mlflow_status="FINISHED",
+                duration_ms=1000,
+                duration_formatted="1s",
+                reward=0.75,
+                reward_delta=0.25,
+                examples_processed_count=10,
+            ),
+            metrics=[
+                MetricHistory(
+                    metric_key="rollout/raw_reward",
+                    title="Reward",
+                    data_points=[MetricDataPoint(step=1, value=0.75, timestamp=0)],
+                )
+            ],
+        )
+
+        class FakeClient:
+            def get_training_run(self, run_id, *, git_identity, credentials=None):
+                assert git_identity == GIT_IDENTITY
+                return detail
+
+            def list_training_run_checkpoints(
+                self, run_id, *, git_identity, credentials=None
+            ):
+                assert git_identity == GIT_IDENTITY
+                return type("CheckpointPage", (), {"checkpoints": [checkpoint]})()
+
+            def get_training_run_metrics(
+                self, run_id, *, git_identity, credentials=None
+            ):
+                assert run_id == detail.id
+                assert git_identity == GIT_IDENTITY
+                return metric_data
+
+        monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        result = train_module.info(name="run-1", output=str(tmp_path / "metrics.json"))
+
+        assert isinstance(result, DetailResult)
+        assert result.title == "Training Run Info"
+        assert result.data["training_run"]["name"] == "run-1"
+        assert result.data["checkpoints"][0]["checkpoint_name"] == "run-1-step-100"
+        assert result.data["metrics_available"] is True
+        assert result.data["metrics"]["summary"]["final_reward"] == 0.75
+        assert result.data["output_path"] == str(tmp_path / "metrics.json")
+        assert any("Saved metrics" in hint for hint in result.display_hints)
+        assert {
+            key: result.data[key] for key in ("git", "workspace_directory")
+        } == _git_extra()
+
+    def test_info_pending_run_does_not_fail_when_metrics_are_unavailable(
+        self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
+    ) -> None:
+        detail = TrainingRunDetail(
+            id="abcdef1234567890abcdef1234567890",
+            name="pending-run",
+            status="pending",
+            model_name="gpt-2",
+        )
+
+        class FakeClient:
+            def get_training_run(self, run_id, *, git_identity, credentials=None):
+                assert git_identity == GIT_IDENTITY
+                return detail
+
+            def get_training_run_metrics(
+                self, run_id, *, git_identity, credentials=None
+            ):  # pragma: no cover
+                raise AssertionError("pending info should not fetch metrics")
+
+        monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        result = train_module.info(name="pending-run")
+
+        assert isinstance(result, DetailResult)
+        assert result.data["training_run"]["status"] == "pending"
+        assert result.data["metrics_available"] is False
+        assert "not yet available" in (result.data["metrics_error"] or "")
+        assert all(field.label != "Note" for field in result.fields)
+
+
+# ---------------------------------------------------------------------------
 # status
 # ---------------------------------------------------------------------------
 
@@ -334,13 +451,19 @@ class TestStatus:
                 assert git_identity == GIT_IDENTITY
                 raise PlatformAPIError("not available")
 
+            def get_training_run_metrics(
+                self, run_id, *, git_identity, credentials=None
+            ):
+                assert git_identity == GIT_IDENTITY
+                raise PlatformAPIError("not available")
+
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-        result = train_module.status(name="run-1")
+        result = train_module.info(name="run-1")
 
         assert isinstance(result, DetailResult)
-        assert result.title == "Training Run"
-        assert result.data["name"] == "run-1"
-        assert result.data["status"] == "completed"
+        assert result.title == "Training Run Info"
+        assert result.data["training_run"]["name"] == "run-1"
+        assert result.data["training_run"]["status"] == "completed"
         assert {
             key: result.data[key] for key in ("git", "workspace_directory")
         } == _git_extra()
@@ -378,8 +501,10 @@ class TestStatus:
                 assert git_identity == GIT_IDENTITY
                 return type("CheckpointPage", (), {"checkpoints": [checkpoint]})()
 
+            get_training_run_metrics = _raise_metrics_unavailable
+
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-        result = train_module.status(name="run-1")
+        result = train_module.info(name="run-1")
 
         assert all(field.label != "Checkpoint" for field in result.fields)
         assert all(field.label != "Deploy" for field in result.fields)
@@ -423,8 +548,10 @@ class TestStatus:
                 assert git_identity == GIT_IDENTITY
                 return type("CheckpointPage", (), {"checkpoints": [checkpoint]})()
 
+            get_training_run_metrics = _raise_metrics_unavailable
+
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-        result = train_module.status(name="run-1")
+        result = train_module.info(name="run-1")
 
         assert result.sections
         section = result.sections[0]
@@ -457,8 +584,10 @@ class TestStatus:
                 assert git_identity == GIT_IDENTITY
                 return detail
 
+            get_training_run_metrics = _raise_metrics_unavailable
+
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-        result = train_module.status(name="timed-run")
+        result = train_module.info(name="timed-run")
         fields = {field.label: field.value for field in result.fields}
 
         assert len(fields["Created"]) >= len("2026-01-01 00:00:00")
@@ -496,8 +625,10 @@ class TestStatus:
                 assert git_identity == GIT_IDENTITY
                 raise PlatformAPIError("not available")
 
+            get_training_run_metrics = _raise_metrics_unavailable
+
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-        result = train_module.status(name="full-run")
+        result = train_module.info(name="full-run")
 
         assert isinstance(result, DetailResult)
         fields = {field.label: field.value for field in result.fields}
@@ -506,9 +637,9 @@ class TestStatus:
         assert fields["HF Status"] == "uploaded"
         assert len(fields["Started"]) >= len("2026-01-01 00:00:00")
         assert len(fields["Completed"]) >= len("2026-01-02 00:00:00")
-        assert result.data["examples_processed_count"] == 100
-        assert result.data["notes"] == "experiment notes"
-        assert result.data["hf_status"] == "uploaded"
+        assert result.data["training_run"]["examples_processed_count"] == 100
+        assert result.data["training_run"]["notes"] == "experiment notes"
+        assert result.data["training_run"]["hf_status"] == "uploaded"
 
 
 # ---------------------------------------------------------------------------
@@ -1255,13 +1386,13 @@ class TestMetrics:
                 return metrics
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-        result = train_module.metrics(
+        result = train_module.info(
             name="run-1",
             output=str(tmp_path / "metrics.json"),
         )
 
         assert isinstance(result, DetailResult)
-        assert result.title == "Training Run Metrics"
+        assert result.title == "Training Run Info"
         assert result.data["platform_url"] == detail.platform_url
         assert {
             key: result.data[key] for key in ("git", "workspace_directory")

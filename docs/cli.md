@@ -244,13 +244,14 @@ OPENAI_API_KEY = "openai-api-key"   # "openai-api-key" is the record name
   `TRAINING_RUN_ID`, `ROLLOUT_NAME`, `ROLLOUT_PORT`.
 - Both sections are optional.
 
-### osmosis train status
+### osmosis train info
 
-Show details for a training run.
+Show details, checkpoints, and metrics for a training run.
 
 ```bash
-osmosis train status <run-name>
-osmosis --json train status <run-name>
+osmosis train info <run-name>
+osmosis --json train info <run-name>
+osmosis train info <run-name> -o ./my-metrics.json
 ```
 
 ### osmosis train list
@@ -270,15 +271,6 @@ Stop a pending or running training run.
 ```bash
 osmosis train stop <run-name>
 osmosis train stop <run-name> --yes
-```
-
-### osmosis train metrics
-
-Export training run metrics to a JSON file.
-
-```bash
-osmosis train metrics <run-name>
-osmosis train metrics <run-name> -o ./my-metrics.json
 ```
 
 ## Deployment

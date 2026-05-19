@@ -382,7 +382,7 @@ class OsmosisClient:
         return DeploymentSummary.from_dict(data)
 
     # ── Training-run checkpoints ──────────────────────────────────
-    # Still used by `osmosis train status` to list deployable checkpoints.
+    # Still used by `osmosis train info` to list deployable checkpoints.
 
     def list_training_run_checkpoints(
         self,

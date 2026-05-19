@@ -1,4 +1,4 @@
-"""Tests for 'osmosis train status' checkpoints section."""
+"""Tests for 'osmosis train info' checkpoints section."""
 
 from __future__ import annotations
 
@@ -19,10 +19,17 @@ from osmosis_ai.platform.api.models import (
     TrainingRunCheckpoints,
     TrainingRunDetail,
 )
+from osmosis_ai.platform.auth import PlatformAPIError
 
 GIT_IDENTITY = "acme/rollouts"
 REPO_URL = "https://github.com/acme/rollouts.git"
 FAKE_CREDENTIALS = object()
+
+
+def _raise_metrics_unavailable(self, name, *, git_identity, credentials=None):
+    assert credentials is FAKE_CREDENTIALS
+    assert git_identity == GIT_IDENTITY
+    raise PlatformAPIError("not available")
 
 
 @pytest.fixture()
@@ -109,8 +116,10 @@ class TestStatusCheckpoints:
                     ],
                 )
 
+            get_training_run_metrics = _raise_metrics_unavailable
+
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-        result = train_module.status(name="qwen3-run1")
+        result = train_module.info(name="qwen3-run1")
 
         assert isinstance(result, DetailResult)
         checkpoint = result.data["checkpoints"][0]
@@ -152,8 +161,10 @@ class TestStatusCheckpoints:
                 called["ckpts"] = True
                 raise AssertionError("should not call for running run")
 
+            get_training_run_metrics = _raise_metrics_unavailable
+
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-        result = train_module.status(name="qwen3-run1")
+        result = train_module.info(name="qwen3-run1")
 
         assert isinstance(result, DetailResult)
         assert result.data["checkpoints"] == []
@@ -188,11 +199,13 @@ class TestStatusCheckpoints:
                     ],
                 )
 
+            get_training_run_metrics = _raise_metrics_unavailable
+
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-        result = train_module.status(name="qwen3-run1")
+        result = train_module.info(name="qwen3-run1")
 
         assert isinstance(result, DetailResult)
-        assert result.data["status"] == "stopped"
+        assert result.data["training_run"]["status"] == "stopped"
         assert result.data["checkpoints"][0]["checkpoint_name"] == (
             "qwen3-run1-step-100"
         )
@@ -219,11 +232,13 @@ class TestStatusCheckpoints:
                 assert git_identity == GIT_IDENTITY
                 raise PlatformAPIError("Internal server error", 500)
 
+            get_training_run_metrics = _raise_metrics_unavailable
+
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-        result = train_module.status(name="qwen3-run1")
+        result = train_module.info(name="qwen3-run1")
 
         assert isinstance(result, DetailResult)
-        assert result.title == "Training Run"
+        assert result.title == "Training Run Info"
         assert result.data["checkpoints"] == []
         assert all(field.label != "Checkpoint" for field in result.fields)
 
@@ -247,8 +262,10 @@ class TestStatusCheckpoints:
                     checkpoints=[],
                 )
 
+            get_training_run_metrics = _raise_metrics_unavailable
+
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-        result = train_module.status(name="qwen3-run1")
+        result = train_module.info(name="qwen3-run1")
 
         assert isinstance(result, DetailResult)
         assert result.data["checkpoints"] == []
