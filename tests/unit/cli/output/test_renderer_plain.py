@@ -75,7 +75,7 @@ def test_plain_detail_section_lines_preserve_literal_bracket_text() -> None:
 
 def test_plain_detail_display_hints_preserve_literal_bracket_text() -> None:
     result = DetailResult(
-        title="Training Run Metrics",
+        title="Training Run Info",
         data={"id": "run_1"},
         display_hints=["Saved metrics to /tmp/[red]metrics[/red].json"],
     )

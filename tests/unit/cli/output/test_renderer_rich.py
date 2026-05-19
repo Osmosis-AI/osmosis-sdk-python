@@ -76,10 +76,10 @@ def test_rich_list_prints_display_hints() -> None:
         has_more=False,
         next_offset=None,
         columns=[ListColumn(key="name", label="Name", ratio=4, overflow="fold")],
-        display_hints=["Use osmosis train status <name> for details."],
+        display_hints=["Use osmosis train info <name> for details."],
     )
     stdout, _ = _render(result)
-    assert "Use osmosis train status <name> for details." in stdout
+    assert "Use osmosis train info <name> for details." in stdout
 
 
 def test_rich_list_does_not_expand_table_to_terminal_width(monkeypatch) -> None:
