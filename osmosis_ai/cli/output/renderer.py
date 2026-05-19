@@ -187,8 +187,16 @@ def _can_protect_primary_column(
     # Rich collapses wrapable columns first. Protect the primary column only
     # when it can fit on one line after other columns shrink to one cell.
     content_budget = console_width - (3 * len(columns)) - 1
-    other_column_budget = len(columns) - 1
-    primary_width = _max_column_display_width(columns[primary_index], display_items)
+    other_column_budget = sum(
+        max(column.min_width or 1, 1)
+        for index, column in enumerate(columns)
+        if index != primary_index
+    )
+    primary_column = columns[primary_index]
+    primary_width = max(
+        _max_column_display_width(primary_column, display_items),
+        primary_column.min_width or 1,
+    )
     return primary_width + other_column_budget <= content_budget
 
 
@@ -271,8 +279,10 @@ def _render_rich(result: CommandResult, output: OutputContext) -> None:
                 if _is_primary_column(column):
                     no_wrap = True
                 else:
-                    no_wrap = False
-                    overflow = "ellipsis"
+                    no_wrap = column.no_wrap
+                    overflow = (
+                        column.overflow if column.overflow is not None else "ellipsis"
+                    )
 
             table.add_column(
                 column.label,

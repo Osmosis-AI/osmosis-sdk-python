@@ -7,7 +7,7 @@ from contextlib import redirect_stderr, redirect_stdout
 from typing import Any
 
 from osmosis_ai.cli.output.context import OutputFormat, override_output_context
-from osmosis_ai.cli.output.renderer import render
+from osmosis_ai.cli.output.renderer import _can_protect_primary_column, render
 from osmosis_ai.cli.output.result import (
     DetailField,
     DetailResult,
@@ -140,6 +140,55 @@ def test_rich_list_prioritizes_name_column_when_width_is_tight(monkeypatch) -> N
 
     assert name in stdout
     assert "…" in stdout
+
+
+def test_primary_column_protection_accounts_for_min_width() -> None:
+    assert (
+        _can_protect_primary_column(
+            [
+                ListColumn(key="name", label="Name", min_width=20),
+                ListColumn(key="status", label="Status", min_width=10),
+            ],
+            [{"name": "run-a", "status": "running"}],
+            console_width=25,
+        )
+        is False
+    )
+
+
+def test_rich_list_preserves_explicit_non_primary_wrapping(monkeypatch) -> None:
+    from rich.table import Table as RichTable
+
+    added_columns = []
+
+    class RecordingTable(RichTable):
+        def add_column(self, *args, **kwargs):
+            added_columns.append((args, kwargs))
+            return super().add_column(*args, **kwargs)
+
+    monkeypatch.setattr("rich.table.Table", RecordingTable)
+    result = ListResult(
+        title="Training Runs",
+        items=[{"name": "short-name", "status": "running status"}],
+        total_count=1,
+        has_more=False,
+        next_offset=None,
+        columns=[
+            ListColumn(key="name", label="Name", ratio=4, overflow="fold"),
+            ListColumn(
+                key="status",
+                label="Status",
+                no_wrap=True,
+                overflow="fold",
+                ratio=1,
+            ),
+        ],
+    )
+
+    _render_at_width(result, monkeypatch, 80)
+
+    assert added_columns[1][1]["no_wrap"] is True
+    assert added_columns[1][1]["overflow"] == "fold"
 
 
 def test_rich_list_prints_display_hints_with_literal_brackets() -> None:
