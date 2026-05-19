@@ -26,6 +26,16 @@ _RESERVED_ROLLOUT_ENV_NAMES: frozenset[str] = frozenset(
 )
 
 _ENV_VAR_NAME_RE = re.compile(r"^[A-Z_][A-Z0-9_]*$")
+_TRAINING_CONFIG_SECTIONS: frozenset[str] = frozenset(
+    {
+        "experiment",
+        "training",
+        "sampling",
+        "checkpoints",
+        "advanced",
+        "rollout",
+    }
+)
 
 
 class _ExperimentSection(BaseModel):
@@ -253,6 +263,14 @@ def _collect_section_validation_issues(
     return []
 
 
+def _collect_top_level_validation_issues(raw: dict[str, Any]) -> list[dict[str, str]]:
+    return [
+        {"key": section_name, "message": "Unrecognized section"}
+        for section_name in raw
+        if section_name not in _TRAINING_CONFIG_SECTIONS
+    ]
+
+
 class TrainingConfig(BaseModel):
     """Parsed training TOML configuration."""
 
@@ -413,6 +431,7 @@ def load_training_config(path: Path) -> TrainingConfig:
     advanced_section = _read_table(raw, "advanced", path)
     rollout_section = _read_table(raw, "rollout", path)
     issues = [
+        *_collect_top_level_validation_issues(raw),
         *_collect_section_validation_issues(
             section_name="experiment",
             model_type=_ExperimentSection,

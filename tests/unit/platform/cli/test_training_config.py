@@ -515,6 +515,49 @@ rollout_bach_size = 32
     }
 
 
+def test_unknown_top_level_sections_are_reported_together(tmp_path: Path) -> None:
+    path = tmp_path / "unknown_sections.toml"
+    path.write_text(
+        """
+[experiment]
+rollout = "r"
+entrypoint = "e.py"
+model_path = "m"
+dataset = "d"
+extra = 1
+
+[section]
+foo = "bar"
+
+[another_section]
+enabled = true
+
+[training]
+dummy = 1
+""".strip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(CLIError) as exc_info:
+        load_training_config(path)
+
+    message = str(exc_info.value)
+    assert message.startswith("Invalid training config:")
+    assert "experiment.extra: Unrecognized key" in message
+    assert "section: Unrecognized section" in message
+    assert "another_section: Unrecognized section" in message
+    assert "training.dummy: Unrecognized key" in message
+    assert exc_info.value.details == {
+        "error": "Invalid training config",
+        "issues": [
+            {"key": "section", "message": "Unrecognized section"},
+            {"key": "another_section", "message": "Unrecognized section"},
+            {"key": "experiment.extra", "message": "Unrecognized key"},
+            {"key": "training.dummy", "message": "Unrecognized key"},
+        ],
+    }
+
+
 def test_known_training_field_in_wrong_section_is_rejected(tmp_path: Path) -> None:
     path = tmp_path / "misplaced_field.toml"
     path.write_text(
