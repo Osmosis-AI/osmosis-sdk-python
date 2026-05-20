@@ -181,12 +181,15 @@ class TrainingRun:
     platform_url: str | None = None
     dataset_id: str | None = None
     dataset_name: str | None = None
+    rollout_id: str | None = None
+    rollout_name: str | None = None
     reward: float | None = field(default=None, kw_only=True)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> TrainingRun:
         model = data.get("model") or {}
         dataset = data.get("dataset") or {}
+        rollout = data.get("rollout") or {}
         return cls(
             id=data["id"],
             name=data.get("name"),
@@ -207,6 +210,8 @@ class TrainingRun:
             platform_url=data.get("platform_url"),
             dataset_id=dataset.get("id"),
             dataset_name=dataset.get("file_name"),
+            rollout_id=rollout.get("id"),
+            rollout_name=rollout.get("name"),
         )
 
     @property
@@ -225,16 +230,17 @@ class TrainingRunDetail(TrainingRun):
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> TrainingRunDetail:
-        # Detail API returns { training_run: {..., enhanced_status}, model: {...} }
+        # Detail API returns unified entity refs for model, dataset, and rollout.
         run = data["training_run"]
         model = data.get("model") or {}
         dataset = data.get("dataset") or {}
+        rollout = data.get("rollout") or {}
         return cls(
             id=run["id"],
             name=run.get("name"),
-            status=run.get("enhanced_status") or run.get("status", ""),
+            status=run.get("status", ""),
             model_id=model.get("id"),
-            model_name=model.get("model_name"),
+            model_name=model.get("name"),
             created_at=run.get("created_at", ""),
             started_at=run.get("started_at"),
             completed_at=run.get("completed_at"),
@@ -248,7 +254,9 @@ class TrainingRunDetail(TrainingRun):
             creator_email=run.get("creator_email"),
             platform_url=run.get("platform_url"),
             dataset_id=dataset.get("id"),
-            dataset_name=dataset.get("file_name"),
+            dataset_name=dataset.get("name"),
+            rollout_id=rollout.get("id"),
+            rollout_name=rollout.get("name"),
             examples_processed_count=run.get("examples_processed_count"),
             notes=run.get("notes"),
             hf_status=run.get("hf_status"),

@@ -263,6 +263,7 @@ def list_runs(
         extra=git_result_context(context),
         columns=[
             ListColumn(key="name", label="Name", ratio=4, overflow="fold"),
+            ListColumn(key="rollout_name", label="Rollout", ratio=2, overflow="fold"),
             ListColumn(key="status", label="Status", no_wrap=True, ratio=1),
             ListColumn(key="reward", label="Reward", no_wrap=True, ratio=1),
             ListColumn(
@@ -276,6 +277,7 @@ def list_runs(
             {
                 **serialize_training_run(run),
                 "name": run.name or "(unnamed)",
+                "rollout_name": run.rollout_name or "—",
                 "status": format_run_status(run),
                 "reward": format_reward(run.reward),
                 "created_at": format_local_date(run.created_at),

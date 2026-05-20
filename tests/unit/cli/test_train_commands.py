@@ -68,7 +68,7 @@ def _make_workspace_directory(root: Path, *, rollout: str = "demo") -> Path:
         capture_output=True,
     )
     for rel_path in (
-        ".osmosis/research",
+        ".osmosis",
         f"rollouts/{rollout}",
         "configs/training",
         "configs/eval",
@@ -76,10 +76,6 @@ def _make_workspace_directory(root: Path, *, rollout: str = "demo") -> Path:
     ):
         (root / rel_path).mkdir(parents=True, exist_ok=True)
 
-    (root / ".osmosis" / "research" / "program.md").write_text(
-        "# Test Program\n",
-        encoding="utf-8",
-    )
     (root / "rollouts" / rollout / "main.py").write_text(
         """
 from osmosis_ai.rollout import AgentWorkflow, Grader
@@ -231,6 +227,7 @@ class TestListRuns:
             name="long-human-readable-run-name",
             status="running",
             reward=0.875,
+            rollout_name="math-rollout",
             created_at="2026-01-01T00:00:00Z",
         )
 
@@ -248,15 +245,19 @@ class TestListRuns:
 
         assert [column.label for column in result.columns] == [
             "Name",
+            "Rollout",
             "Status",
             "Reward",
-            result.columns[3].label,
+            result.columns[4].label,
         ]
         assert result.columns[0].key == "name"
         assert result.columns[0].ratio == 4
         assert result.columns[0].overflow == "fold"
-        assert result.columns[3].label.startswith("Created (")
+        assert result.columns[1].key == "rollout_name"
+        assert result.columns[1].overflow == "fold"
+        assert result.columns[4].label.startswith("Created (")
         assert result.display_items is not None
+        assert result.display_items[0]["rollout_name"] == "math-rollout"
         assert result.display_items[0]["reward"] == "0.88"
         assert result.display_hints == ["Use osmosis train info <name> for details."]
 
@@ -331,6 +332,8 @@ class TestInfo:
             name="run-1",
             status="finished",
             model_name="gpt-2",
+            dataset_name="train.jsonl",
+            rollout_name="math-rollout",
             platform_url="https://platform.osmosis.ai/ws/training/abcdef1234567890abcdef1234567890",
         )
         checkpoint = LoraCheckpointInfo(
@@ -385,6 +388,9 @@ class TestInfo:
         assert isinstance(result, DetailResult)
         assert result.title == "Training Run Info"
         assert result.data["training_run"]["name"] == "run-1"
+        field_rows = [(field.label, field.value) for field in result.fields]
+        assert ("Dataset", "train.jsonl") in field_rows
+        assert ("Rollout", "math-rollout") in field_rows
         assert result.data["checkpoints"][0]["checkpoint_name"] == "run-1-step-100"
         assert result.data["metrics_available"] is True
         assert result.data["metrics"]["summary"]["final_reward"] == 0.75

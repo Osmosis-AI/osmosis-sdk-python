@@ -82,5 +82,4 @@ def test_project_doctor_json_reports_missing_paths_without_error(
         "AGENTS.md",
         "CLAUDE.md",
         "configs/AGENTS.md",
-        ".claude/settings.json",
     ]

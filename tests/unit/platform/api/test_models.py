@@ -16,6 +16,7 @@ from osmosis_ai.platform.api.models import (
     MetricDataPoint,
     MetricHistory,
     SubmitTrainingRunResult,
+    TrainingRunDetail,
     TrainingRunMetrics,
     TrainingRunMetricsOverview,
     UploadInfo,
@@ -240,6 +241,7 @@ class TestTrainingRun:
                 "status": "finished",
                 "model": {"id": None, "model_name": "Qwen/Qwen3"},
                 "dataset": {"id": "dataset_1", "file_name": "train.jsonl"},
+                "rollout": {"id": "rollout_1", "name": "math-rollout"},
             }
         )
 
@@ -247,6 +249,8 @@ class TestTrainingRun:
         assert run.model_name == "Qwen/Qwen3"
         assert run.dataset_id == "dataset_1"
         assert run.dataset_name == "train.jsonl"
+        assert run.rollout_id == "rollout_1"
+        assert run.rollout_name == "math-rollout"
 
     def test_from_dict_uses_nested_training_run_contract_only(self) -> None:
         run = api_models.TrainingRun.from_dict(
@@ -286,6 +290,32 @@ class TestTrainingRun:
 
         assert run.reward_increase_delta == 0.2
         assert run.reward is None
+
+
+class TestTrainingRunDetail:
+    def test_from_dict_parses_platform_entity_refs(self) -> None:
+        run = TrainingRunDetail.from_dict(
+            {
+                "training_run": {
+                    "id": "run_1",
+                    "name": "entity-ref-run",
+                    "status": "finished",
+                    "examples_processed_count": 42,
+                },
+                "model": {"id": "model_1", "name": "Qwen/Qwen3"},
+                "dataset": {"id": "dataset_1", "name": "train.jsonl"},
+                "rollout": {"id": "rollout_1", "name": "math-rollout"},
+            }
+        )
+
+        assert run.id == "run_1"
+        assert run.model_id == "model_1"
+        assert run.model_name == "Qwen/Qwen3"
+        assert run.dataset_id == "dataset_1"
+        assert run.dataset_name == "train.jsonl"
+        assert run.rollout_id == "rollout_1"
+        assert run.rollout_name == "math-rollout"
+        assert run.examples_processed_count == 42
 
 
 class TestMetricDataPoint:

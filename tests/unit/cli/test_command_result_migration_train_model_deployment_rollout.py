@@ -85,16 +85,12 @@ def _make_rollout_project(root: Path) -> Path:
     )
     for rel_path in (
         ".osmosis",
-        ".osmosis/research",
         "rollouts/demo",
         "configs/training",
         "configs/eval",
         "data",
     ):
         (root / rel_path).mkdir(parents=True, exist_ok=True)
-    (root / ".osmosis" / "research" / "program.md").write_text(
-        "# Test Program\n", encoding="utf-8"
-    )
     (root / "rollouts" / "demo" / "main.py").write_text(
         """
 from osmosis_ai.rollout.agent_workflow import AgentWorkflow
@@ -133,6 +129,8 @@ def test_train_list_json_returns_single_list_envelope(
                         name="reward-run",
                         status="running",
                         model_name="Qwen/Qwen3",
+                        rollout_id="rollout_1",
+                        rollout_name="math-rollout",
                         created_at="2026-04-26T00:00:00Z",
                     )
                 ],
@@ -149,6 +147,7 @@ def test_train_list_json_returns_single_list_envelope(
     payload = json.loads(captured.out)
     assert payload["schema_version"] == 1
     assert payload["items"][0]["name"] == "reward-run"
+    assert payload["items"][0]["rollout_name"] == "math-rollout"
     assert payload["total_count"] == 1
     _assert_git_context(payload)
     assert captured.out.count("\n") == 1
@@ -168,6 +167,8 @@ def test_train_info_json_returns_combined_detail_envelope(
                 name=name,
                 status="pending",
                 model_name="Qwen/Qwen3",
+                rollout_id="rollout_1",
+                rollout_name="math-rollout",
             )
 
     monkeypatch.setattr("osmosis_ai.platform.api.client.OsmosisClient", FakeClient)
@@ -179,6 +180,7 @@ def test_train_info_json_returns_combined_detail_envelope(
     payload = json.loads(captured.out)
     assert payload["data"]["training_run"]["name"] == "reward-run"
     assert payload["data"]["training_run"]["status"] == "pending"
+    assert payload["data"]["training_run"]["rollout_name"] == "math-rollout"
     assert payload["data"]["checkpoints"] == []
     assert payload["data"]["metrics_available"] is False
     assert payload["data"]["output_path"] is None
@@ -254,7 +256,7 @@ def test_train_info_json_does_not_write_default_file(
         capture_output=True,
     )
     for rel_path in (
-        ".osmosis/research",
+        ".osmosis",
         "rollouts",
         "configs/eval",
         "configs/training",

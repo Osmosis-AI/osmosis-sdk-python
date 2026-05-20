@@ -44,7 +44,6 @@ def _make_workspace_directory(root: Path) -> Path:
     )
     for rel_path in (
         ".osmosis",
-        ".osmosis/research",
         "rollouts",
         "configs",
         "configs/eval",
@@ -52,9 +51,6 @@ def _make_workspace_directory(root: Path) -> Path:
         "data",
     ):
         (root / rel_path).mkdir(parents=True, exist_ok=True)
-    (root / ".osmosis" / "research" / "program.md").write_text(
-        "# Test\n", encoding="utf-8"
-    )
     return root
 
 

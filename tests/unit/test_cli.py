@@ -25,16 +25,13 @@ def _make_git_project(root: Path) -> Path:
         capture_output=True,
     )
     for rel_path in (
-        ".osmosis/research",
+        ".osmosis",
         "rollouts",
         "configs/eval",
         "configs/training",
         "data",
     ):
         (root / rel_path).mkdir(parents=True, exist_ok=True)
-    (root / ".osmosis" / "research" / "program.md").write_text(
-        "# Test\n", encoding="utf-8"
-    )
     return root
 
 

@@ -98,7 +98,6 @@ OFFICIAL_AGENT_SCAFFOLD_PATHS: tuple[Path, ...] = (
     _path("AGENTS.md"),
     _path("CLAUDE.md"),
     _path("configs/AGENTS.md"),
-    _path(".claude/settings.json"),
 )
 
 REQUIRED_WORKSPACE_DIRS: tuple[Path, ...] = (
