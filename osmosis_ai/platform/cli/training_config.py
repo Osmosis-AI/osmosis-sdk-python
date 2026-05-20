@@ -12,19 +12,6 @@ from pydantic_core import ErrorDetails
 
 from osmosis_ai.cli.errors import CLIError
 
-# Names the platform-app reserves for built-in env vars on the rollout container.
-_RESERVED_ROLLOUT_ENV_NAMES: frozenset[str] = frozenset(
-    {
-        "GITHUB_CLONE_URL",
-        "GITHUB_TOKEN",
-        "ENTRYPOINT_SCRIPT",
-        "REPOSITORY_PATH",
-        "TRAINING_RUN_ID",
-        "ROLLOUT_NAME",
-        "ROLLOUT_PORT",
-    }
-)
-
 _ENV_VAR_NAME_RE = re.compile(r"^[A-Z_][A-Z0-9_]*$")
 _TRAINING_CONFIG_SECTIONS: frozenset[str] = frozenset(
     {
@@ -391,10 +378,10 @@ def _validate_rollout_env_keys(
                     f"Invalid env var name '{key}' in [{section_name}] of {path}: "
                     "must match ^[A-Z_][A-Z0-9_]*$"
                 )
-            if key in _RESERVED_ROLLOUT_ENV_NAMES:
+            if key.startswith("_OSMOSIS_"):
                 raise CLIError(
-                    f"'{key}' in [{section_name}] of {path} is reserved by "
-                    "the rollout container runtime; choose a different name."
+                    f"'{key}' in [{section_name}] of {path}: env var names starting "
+                    "with _OSMOSIS_ are reserved by the platform; choose a different name."
                 )
 
     overlap = sorted(set(env) & set(secrets))

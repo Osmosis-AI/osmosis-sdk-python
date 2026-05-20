@@ -113,7 +113,7 @@ Use `osmosis eval run configs/eval/<name>.toml --limit 1` for the end-to-end smo
 ## Rollout server contract
 
 The rollout entrypoint must start a server built with `create_rollout_server(...)`.
-For local eval, the CLI provides `ROLLOUT_PORT=8000` and runs the entrypoint from
+For local eval, the CLI provides `_OSMOSIS_ROLLOUT_PORT=8000` and runs the entrypoint from
 the rollout directory.
 
 The rollout server must expose:

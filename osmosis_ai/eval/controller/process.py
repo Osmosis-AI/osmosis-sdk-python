@@ -33,11 +33,11 @@ def build_user_server_env(
         path_parts.append(existing_pythonpath)
     env.update(
         {
-            "ENTRYPOINT_SCRIPT": entrypoint,
-            "REPOSITORY_PATH": str(rollout_dir),
-            "TRAINING_RUN_ID": invocation_id,
-            "ROLLOUT_NAME": rollout_name,
-            "ROLLOUT_PORT": str(USER_SERVER_PORT),
+            "_OSMOSIS_ENTRYPOINT_SCRIPT": entrypoint,
+            "_OSMOSIS_REPOSITORY_PATH": str(rollout_dir),
+            "_OSMOSIS_TRAINING_RUN_ID": invocation_id,
+            "_OSMOSIS_ROLLOUT_NAME": rollout_name,
+            "_OSMOSIS_ROLLOUT_PORT": str(USER_SERVER_PORT),
             "PYTHONPATH": os.pathsep.join(path_parts),
         }
     )
