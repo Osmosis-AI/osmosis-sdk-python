@@ -613,7 +613,7 @@ class TestStatus:
         fields = {field.label: field.value for field in result.fields}
 
         assert len(fields["Started"]) >= len("2026-01-01 00:00:00")
-        assert len(fields["Training Started"]) >= len("2026-01-01 00:01:02")
+        assert len(fields["Started At"]) >= len("2026-01-01 00:01:02")
         assert len(fields["Completed"]) >= len("2026-01-01 00:02:03")
 
     def test_status_with_all_optional_fields(
@@ -659,7 +659,7 @@ class TestStatus:
         assert fields["HF Status"] == "uploaded"
         assert fields["Started By"] == "alice"
         assert len(fields["Started"]) >= len("2025-12-31 00:00:00")
-        assert len(fields["Training Started"]) >= len("2026-01-01 00:00:00")
+        assert len(fields["Started At"]) >= len("2026-01-01 00:00:00")
         assert len(fields["Completed"]) >= len("2026-01-02 00:00:00")
         assert result.data["training_run"]["examples_processed_count"] == 100
         assert result.data["training_run"]["notes"] == "experiment notes"

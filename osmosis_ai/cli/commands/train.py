@@ -352,7 +352,7 @@ def info(
     if run.hf_status:
         rows.append(("HF Status", run.hf_status))
     if run.started_at:
-        rows.append(("Training Started", format_local_datetime(run.started_at)))
+        rows.append(("Started At", format_local_datetime(run.started_at)))
     if run.completed_at:
         rows.append(("Completed", format_local_datetime(run.completed_at)))
 
