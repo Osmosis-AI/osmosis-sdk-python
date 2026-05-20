@@ -7,7 +7,6 @@ not create workspace directories, initialize git repositories, or make initial c
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 from osmosis_ai.cli.errors import CLIError
@@ -17,35 +16,6 @@ from osmosis_ai.templates.catalog import (
     ScaffoldEntry,
 )
 from osmosis_ai.templates.source import workspace_template_root
-
-_PLUGIN_REPO_DEFAULT = "Osmosis-AI/osmosis-plugins"
-_PLUGIN_MARKETPLACE_DEFAULT = "osmosis"
-
-
-def _plugin_repo() -> str:
-    """GitHub repo (`owner/name`) hosting the Osmosis plugin marketplace."""
-    return os.environ.get("OSMOSIS_PLUGIN_REPO") or _PLUGIN_REPO_DEFAULT
-
-
-def _plugin_marketplace() -> str:
-    """Marketplace name as declared in the plugin repo's `marketplace.json`."""
-    return os.environ.get("OSMOSIS_PLUGIN_MARKETPLACE") or _PLUGIN_MARKETPLACE_DEFAULT
-
-
-def _render_official_scaffold(text: str) -> str:
-    """Apply environment-driven plugin substitutions to official scaffold files."""
-    plugin_repo = _plugin_repo()
-    plugin_marketplace = _plugin_marketplace()
-    return (
-        text.replace(_PLUGIN_REPO_DEFAULT, plugin_repo)
-        .replace(
-            f"osmosis@{_PLUGIN_MARKETPLACE_DEFAULT}", f"osmosis@{plugin_marketplace}"
-        )
-        .replace(f'"{_PLUGIN_MARKETPLACE_DEFAULT}"', f'"{plugin_marketplace}"')
-        .replace(
-            f"install {_PLUGIN_MARKETPLACE_DEFAULT}", f"install {plugin_marketplace}"
-        )
-    )
 
 
 def _read_agent_scaffold_files(*, refresh_template: bool) -> dict[str, str]:
@@ -61,9 +31,7 @@ def _read_agent_scaffold_files(*, refresh_template: bool) -> dict[str, str]:
                 f"{rel_path_text}",
                 code="NOT_FOUND",
             )
-        contents[rel_path_text] = _render_official_scaffold(
-            source_path.read_text(encoding="utf-8")
-        )
+        contents[rel_path_text] = source_path.read_text(encoding="utf-8")
     return contents
 
 
