@@ -41,7 +41,7 @@ def local_timezone_label(
 def created_column_label(
     *, now: datetime | None = None, tz: tzinfo | None = None
 ) -> str:
-    return "Created (local)"
+    return "Created At"
 
 
 def format_local_date(

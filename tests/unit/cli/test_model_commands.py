@@ -145,7 +145,7 @@ class TestListModels:
         assert result.columns[0].key == "model_name"
         assert result.columns[0].ratio == 4
         assert result.columns[0].overflow == "fold"
-        assert result.columns[2].label.startswith("Created (")
+        assert result.columns[2].label == "Created At"
         assert all(column.key != "id" for column in result.columns)
         assert all(column.key != "status" for column in result.columns)
 

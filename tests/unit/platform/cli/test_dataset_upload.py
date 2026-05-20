@@ -39,6 +39,41 @@ def _make_fake_dataset(
 
 
 class TestPerformUpload:
+    def test_create_dataset_loading_message_says_uploading_dataset(self, monkeypatch):
+        """Dataset creation uses the upload-oriented loading message."""
+        import osmosis_ai.platform.cli.dataset as dataset_module
+
+        messages: list[str] = []
+
+        class FakeClient:
+            def create_dataset(
+                self, file_name, file_size, ext, *, git_identity, credentials=None
+            ):
+                assert file_name == "data"
+                assert file_size == 2
+                assert ext == "jsonl"
+                assert git_identity == GIT_IDENTITY
+                return _make_fake_dataset()
+
+        def fake_platform_call(message, call, *, output_console=None):
+            messages.append(message)
+            return call()
+
+        monkeypatch.setattr(dataset_module, "platform_call", fake_platform_call)
+
+        result = dataset_module._create_dataset_for_upload(
+            client=FakeClient(),
+            dataset_name="data",
+            file_size=2,
+            ext="jsonl",
+            overwrite=False,
+            git_identity=GIT_IDENTITY,
+            credentials=None,
+        )
+
+        assert result.id == "dataset-1"
+        assert messages == ["Uploading dataset..."]
+
     def test_simple_upload_flow(self, monkeypatch, tmp_path):
         """_perform_upload creates dataset, uploads to S3, and completes."""
         import osmosis_ai.platform.api.client as api_client_module

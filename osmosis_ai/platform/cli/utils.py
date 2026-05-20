@@ -180,9 +180,9 @@ def build_run_detail_rows(r: Any) -> list[tuple[str, str]]:
     if r.error_message:
         rows.append(("Error", console.escape(r.error_message)))
     if r.creator_name:
-        rows.append(("Creator", console.escape(r.creator_name)))
+        rows.append(("Started By", console.escape(r.creator_name)))
     if r.created_at:
-        rows.append(("Created", format_local_datetime(r.created_at)))
+        rows.append(("Started", format_local_datetime(r.created_at)))
     return rows
 
 

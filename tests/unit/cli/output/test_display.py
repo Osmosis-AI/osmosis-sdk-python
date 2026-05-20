@@ -29,8 +29,8 @@ def test_format_local_date_uses_explicit_timezone() -> None:
     assert formatted == "2026-05-13 12:34 UTC"
 
 
-def test_created_column_label_uses_stable_local_label() -> None:
-    assert created_column_label() == "Created (local)"
+def test_created_column_label_uses_created_at_label() -> None:
+    assert created_column_label() == "Created At"
 
 
 def test_format_local_date_includes_per_timestamp_timezone_rules() -> None:

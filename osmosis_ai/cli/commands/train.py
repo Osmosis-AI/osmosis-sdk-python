@@ -263,8 +263,10 @@ def list_runs(
         extra=git_result_context(context),
         columns=[
             ListColumn(key="name", label="Name", ratio=4, overflow="fold"),
-            ListColumn(key="rollout_name", label="Rollout", ratio=2, overflow="fold"),
             ListColumn(key="status", label="Status", no_wrap=True, ratio=1),
+            ListColumn(key="dataset_name", label="Dataset", ratio=2, overflow="fold"),
+            ListColumn(key="model_name", label="Model", ratio=2, overflow="fold"),
+            ListColumn(key="rollout_name", label="Rollout", ratio=2, overflow="fold"),
             ListColumn(key="reward", label="Reward", no_wrap=True, ratio=1),
             ListColumn(
                 key="created_at",
@@ -277,8 +279,10 @@ def list_runs(
             {
                 **serialize_training_run(run),
                 "name": run.name or "(unnamed)",
-                "rollout_name": run.rollout_name or "—",
                 "status": format_run_status(run),
+                "dataset_name": run.dataset_name or "—",
+                "model_name": run.model_name or "—",
+                "rollout_name": run.rollout_name or "—",
                 "reward": format_reward(run.reward),
                 "created_at": format_local_date(run.created_at),
             }
@@ -348,7 +352,7 @@ def info(
     if run.hf_status:
         rows.append(("HF Status", run.hf_status))
     if run.started_at:
-        rows.append(("Started", format_local_datetime(run.started_at)))
+        rows.append(("Training Started", format_local_datetime(run.started_at)))
     if run.completed_at:
         rows.append(("Completed", format_local_datetime(run.completed_at)))
 
@@ -423,21 +427,18 @@ def info(
         table.add_column("Step", no_wrap=True)
         table.add_column("Status", no_wrap=True)
         table.add_column("ID", no_wrap=True)
-        table.add_column("Created", no_wrap=True)
         plain_lines = []
         for cp in checkpoints:
             cp_name = cp.checkpoint_name or "(unnamed)"
-            created = format_local_datetime(cp.created_at)
             table.add_row(
                 Text(cp_name),
                 str(cp.checkpoint_step),
                 cp.status,
                 cp.id[:8],
-                created,
             )
             plain_lines.append(
                 f"Checkpoint: {cp_name} step {cp.checkpoint_step} "
-                f"[{cp.status}] {cp.id[:8]} {created}"
+                f"[{cp.status}] {cp.id[:8]}"
             )
         sections.append(DetailSection(rich=table, plain_lines=plain_lines))
         display_hints.append("Deploy with: osmosis deploy <checkpoint-name>")

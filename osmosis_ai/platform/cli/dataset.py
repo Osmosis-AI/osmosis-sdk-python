@@ -204,7 +204,7 @@ def _create_dataset_for_upload(
     """Create the dataset record, retrying with overwrite when explicitly requested."""
     try:
         return platform_call(
-            "Creating dataset...",
+            "Uploading dataset...",
             lambda: client.create_dataset(
                 dataset_name,
                 file_size,

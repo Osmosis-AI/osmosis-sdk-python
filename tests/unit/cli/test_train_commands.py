@@ -219,13 +219,15 @@ class TestListRuns:
         assert result.items[0]["model_name"] == "gpt-2"
         assert result.items[0]["eval_accuracy"] == 0.95
 
-    def test_list_display_columns_prioritize_name_status_reward_created(
+    def test_list_display_columns_show_training_summary_fields(
         self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
     ) -> None:
         run = TrainingRun(
             id="abcdef1234567890abcdef1234567890",
             name="long-human-readable-run-name",
             status="running",
+            dataset_name="train.jsonl",
+            model_name="gpt-2",
             reward=0.875,
             rollout_name="math-rollout",
             created_at="2026-01-01T00:00:00Z",
@@ -245,18 +247,25 @@ class TestListRuns:
 
         assert [column.label for column in result.columns] == [
             "Name",
-            "Rollout",
             "Status",
+            "Dataset",
+            "Model",
+            "Rollout",
             "Reward",
-            result.columns[4].label,
+            "Created At",
         ]
         assert result.columns[0].key == "name"
         assert result.columns[0].ratio == 4
         assert result.columns[0].overflow == "fold"
-        assert result.columns[1].key == "rollout_name"
-        assert result.columns[1].overflow == "fold"
-        assert result.columns[4].label.startswith("Created (")
+        assert result.columns[1].key == "status"
+        assert result.columns[2].key == "dataset_name"
+        assert result.columns[3].key == "model_name"
+        assert result.columns[4].key == "rollout_name"
+        assert result.columns[4].overflow == "fold"
+        assert result.columns[6].key == "created_at"
         assert result.display_items is not None
+        assert result.display_items[0]["dataset_name"] == "train.jsonl"
+        assert result.display_items[0]["model_name"] == "gpt-2"
         assert result.display_items[0]["rollout_name"] == "math-rollout"
         assert result.display_items[0]["reward"] == "0.88"
         assert result.display_hints == ["Use osmosis train info <name> for details."]
@@ -521,7 +530,7 @@ class TestStatus:
         ]
         assert result.data["checkpoints"][0]["checkpoint_name"] == "run-1-step-100"
 
-    def test_status_checkpoint_section_escapes_names_and_uses_detailed_timestamps(
+    def test_status_checkpoint_section_omits_created_column_and_escapes_names(
         self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
     ) -> None:
         from rich.console import Console as RichConsole
@@ -561,16 +570,23 @@ class TestStatus:
 
         assert result.sections
         section = result.sections[0]
+        assert [column.header for column in section.rich.columns] == [
+            "Checkpoint",
+            "Step",
+            "Status",
+            "ID",
+        ]
         output = StringIO()
         rich = RichConsole(file=output, force_terminal=False, no_color=True, width=200)
         rich.print(section.rich)
         rendered = output.getvalue()
 
         assert "[red]danger[/red]" in rendered
+        assert "Created" not in rendered
         assert section.plain_lines
         plain_line = section.plain_lines[0]
-        assert "2026-01-01" in plain_line
-        assert ":00 " in plain_line
+        assert "2026-01-01" not in plain_line
+        assert ":00 " not in plain_line
 
     def test_status_uses_detailed_local_timestamps(
         self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
@@ -596,8 +612,8 @@ class TestStatus:
         result = train_module.info(name="timed-run")
         fields = {field.label: field.value for field in result.fields}
 
-        assert len(fields["Created"]) >= len("2026-01-01 00:00:00")
-        assert len(fields["Started"]) >= len("2026-01-01 00:01:02")
+        assert len(fields["Started"]) >= len("2026-01-01 00:00:00")
+        assert len(fields["Training Started"]) >= len("2026-01-01 00:01:02")
         assert len(fields["Completed"]) >= len("2026-01-01 00:02:03")
 
     def test_status_with_all_optional_fields(
@@ -641,7 +657,9 @@ class TestStatus:
         assert fields["Examples"] == "100"
         assert fields["Notes"] == "experiment notes"
         assert fields["HF Status"] == "uploaded"
-        assert len(fields["Started"]) >= len("2026-01-01 00:00:00")
+        assert fields["Started By"] == "alice"
+        assert len(fields["Started"]) >= len("2025-12-31 00:00:00")
+        assert len(fields["Training Started"]) >= len("2026-01-01 00:00:00")
         assert len(fields["Completed"]) >= len("2026-01-02 00:00:00")
         assert result.data["training_run"]["examples_processed_count"] == 100
         assert result.data["training_run"]["notes"] == "experiment notes"
