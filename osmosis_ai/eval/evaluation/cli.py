@@ -53,20 +53,6 @@ class EvalCommand:
         sys.stderr.write(message + "\n")
         sys.stderr.flush()
 
-    def _run_cache_dir(self) -> int | DetailResult:
-        from osmosis_ai.eval.evaluation.cache import JsonFileCacheBackend
-
-        backend = JsonFileCacheBackend()
-        if self._structured_output():
-            path = str(backend.cache_root)
-            return DetailResult(
-                title="Eval Cache",
-                data={"cache_root": path},
-                fields=[DetailField(label="Cache root", value=path)],
-            )
-        self.console.print(str(backend.cache_root))
-        return 0
-
     @staticmethod
     def _filter_caches(
         entries: list[dict],
@@ -302,9 +288,9 @@ class EvalCommand:
         return asyncio.run(self._run_async(args))
 
     @staticmethod
-    def _load_project_dotenv(project_root: Path) -> None:
-        """Load project-local .env for eval runs without overriding shell env."""
-        dotenv_path = project_root / ".env"
+    def _load_workspace_directory_dotenv(workspace_directory: Path) -> None:
+        """Load workspace-directory .env for eval runs without overriding shell env."""
+        dotenv_path = workspace_directory / ".env"
         if not dotenv_path.is_file():
             return
 
@@ -490,30 +476,30 @@ class EvalCommand:
             )
 
         from osmosis_ai.eval.common.cli import (
-            _resolve_grader,
             format_duration,
             load_dataset_rows,
-            load_workflow,
             truncate_error,
         )
         from osmosis_ai.eval.config import load_eval_config, resolve_eval_context_paths
-        from osmosis_ai.platform.cli.project_contract import (
-            ensure_project_config_path,
-            resolve_project_root_from_cwd,
-            validate_project_contract,
+        from osmosis_ai.platform.cli.workspace_directory_contract import (
+            ensure_workspace_directory_config_path,
+            resolve_workspace_directory_from_cwd,
+            validate_workspace_directory_contract,
         )
 
-        # 1. Validate project-local config path
+        # 1. Validate workspace-directory config path
         config_path = Path(args.config_path)
         try:
-            project_root = resolve_project_root_from_cwd()
+            workspace_directory = resolve_workspace_directory_from_cwd()
             config_path = (
-                config_path if config_path.is_absolute() else project_root / config_path
+                config_path
+                if config_path.is_absolute()
+                else workspace_directory / config_path
             )
-            validate_project_contract(project_root)
-            ensure_project_config_path(
+            validate_workspace_directory_contract(workspace_directory)
+            ensure_workspace_directory_config_path(
                 config_path,
-                project_root,
+                workspace_directory,
                 config_dir="configs/eval",
                 command_label="`osmosis eval run`",
             )
@@ -522,11 +508,11 @@ class EvalCommand:
 
         try:
             config = load_eval_config(config_path)
-            config = resolve_eval_context_paths(config, project_root)
+            config = resolve_eval_context_paths(config, workspace_directory)
         except CLIError as e:
             return self._fail(f"Error: {e}")
 
-        self._load_project_dotenv(project_root)
+        self._load_workspace_directory_dotenv(workspace_directory)
 
         # Apply CLI overrides (CLI flags take precedence over TOML).
         # Optional values: CLI wins when not None.
@@ -567,17 +553,9 @@ class EvalCommand:
             self.console.print(f"osmosis-eval v{PACKAGE_VERSION}", style="bold")
             self.console.print(f"Config: {config_path}")
             self.console.print(f"Model: {config.llm_model}")
-            if config.baseline_model:
-                self.console.print(f"Baseline: {config.baseline_model}")
             self.console.print()
 
-        # 2. Resolve API key
-        try:
-            api_key = self._resolve_api_key(config)
-        except CLIError as e:
-            return self._fail(f"Error: {e}")
-
-        # 3. Load dataset
+        # 5. Load dataset
         rows, error = load_dataset_rows(
             dataset_path=config.eval_dataset,
             limit=limit,
@@ -591,163 +569,66 @@ class EvalCommand:
             return self._fail(f"Error: {error}")
         assert rows is not None
 
-        # 4. Load workflow
-        workflow_cls, workflow_config, entrypoint_module, error = load_workflow(
-            rollout=config.eval_rollout,
-            entrypoint=config.eval_entrypoint,
-            quiet=quiet,
-            console=self.console,
-            project_root=project_root,
-        )
-        if error:
-            return self._fail(f"Error: {error}")
-        assert workflow_cls is not None
-        assert entrypoint_module is not None
-
-        # 5. Resolve grader from [grader] override or auto-discover from entrypoint
-        try:
-            grader_cls, grader_config = _resolve_grader(
-                entrypoint_module,
-                explicit_grader=config.grader_module,
-                explicit_config=config.grader_config,
-            )
-        except (CLIError, ImportError, TypeError, ValueError) as e:
-            return self._fail(f"Error: {e}")
-
-        if grader_cls is None:
-            return self._fail(
-                "No Grader was found in the entrypoint module. "
-                "`osmosis eval run` requires a concrete Grader (and typically a "
-                "GraderConfig) alongside the workflow. Configure `[grader].module` "
-                "if the grader lives outside the entrypoint."
-            )
-
-        if not quiet:
-            self.console.print(f"  Grader: {grader_cls.__name__}")
-
-        # 6. Create proxy and start
-        from osmosis_ai.eval.llm_proxy import LiteLLMProxy
-
-        trace_dir = None
-        if debug:
-            trace_dir = str(Path("./eval_traces") / "debug")
-
-        proxy = LiteLLMProxy(
-            model=config.llm_model,
-            api_key=api_key,
-            base_url=config.llm_base_url,
-            trace_dir=trace_dir,
-        )
-
-        # 7. Preflight check
-        try:
-            await proxy.preflight_check()
-        except CLIError as e:
-            return self._fail(f"Error: {e}")
-
-        # 8. Start proxy
-        await proxy.start()
-
-        # 9. Construct backend + driver
-        from osmosis_ai.rollout.backend.local.backend import LocalBackend
-        from osmosis_ai.rollout.driver import InProcessDriver, RolloutDriver
-
-        backend = LocalBackend(
-            workflow=workflow_cls,
-            workflow_config=workflow_config,
-            grader=grader_cls,
-            grader_config=grader_config,
-        )
-        driver = InProcessDriver(backend=backend, proxy=proxy)
-
-        # 10. Build drivers list
-        drivers: list[tuple[str | None, RolloutDriver]] = []
-        baseline_proxy = None
-        if config.baseline_model:
-            drivers.append(("primary", driver))
-
-            # Resolve baseline API key
-            baseline_api_key = None
-            if config.baseline_api_key_env:
-                import os
-
-                baseline_api_key = os.environ.get(config.baseline_api_key_env)
-                if not baseline_api_key:
-                    await proxy.stop()
-                    return self._fail(
-                        f"Error: Environment variable '{config.baseline_api_key_env}' is not set."
-                    )
-
-            baseline_proxy = LiteLLMProxy(
-                model=config.baseline_model,
-                api_key=baseline_api_key,
-                base_url=config.baseline_base_url,
-                trace_dir=trace_dir,
-            )
-            try:
-                await baseline_proxy.preflight_check()
-            except CLIError as e:
-                await proxy.stop()
-                return self._fail(f"Error (baseline): {e}")
-
-            await baseline_proxy.start()
-            baseline_driver = InProcessDriver(backend=backend, proxy=baseline_proxy)
-            drivers.append(("baseline", baseline_driver))
-        else:
-            drivers.append((None, driver))
-
-        # 11. Compute cache config
+        # 6. Compute cache config
         from osmosis_ai.eval.evaluation.cache import (
             CacheConfig,
             JsonFileCacheBackend,
             _get_cache_root,
             compute_dataset_fingerprint,
-            compute_module_fingerprint,
-            compute_rollout_package_fingerprint,
+            compute_rollout_filesystem_fingerprint,
             compute_task_id,
         )
 
+        rollout_dir = workspace_directory / "rollouts" / config.eval_rollout
         dataset_fingerprint = compute_dataset_fingerprint(config.eval_dataset)
-
-        module_fingerprint = (
-            compute_rollout_package_fingerprint(entrypoint_module) or ""
+        rollout_fingerprint = compute_rollout_filesystem_fingerprint(
+            rollout_dir,
+            entrypoint=config.eval_entrypoint,
         )
-
-        grader_fingerprint = compute_module_fingerprint(grader_cls.__module__)
 
         # Merge CLI overrides into config for cache identity.
         # Exclude non-semantic fields (presentation/runtime flags) so that
         # changing --quiet, --debug, --batch-size, etc. doesn't invalidate
         # the cache and break resume.
-        _non_semantic = {
-            "eval_fresh",
-            "eval_retry_failed",
-            "llm_api_key_env",
-            "runs_batch_size",
-            "output_log_samples",
-            "output_path",
-            "output_quiet",
-            "output_debug",
-            "baseline_api_key_env",
-        }
         config_for_hash = {
-            k: v for k, v in config.model_dump().items() if k not in _non_semantic
+            k: v
+            for k, v in config.model_dump().items()
+            if k
+            not in {
+                "eval_fresh",
+                "eval_retry_failed",
+                "llm_api_key_env",
+                "runs_batch_size",
+                "output_log_samples",
+                "output_path",
+                "output_quiet",
+                "output_debug",
+            }
         }
+        # Preserve pre-removal cache identity without restoring legacy EvalConfig fields.
+        config_for_hash.update(
+            {
+                "grader_module": None,
+                "grader_config": None,
+                "baseline_model": None,
+                "baseline_base_url": None,
+                "baseline_api_key_env": None,
+            }
+        )
         config_for_hash["offset"] = offset
         config_for_hash["limit"] = limit
 
         task_id, config_hash = compute_task_id(
             config=config_for_hash,
-            workflow_fingerprint=module_fingerprint,
-            grader_fingerprint=grader_fingerprint,
+            rollout_fingerprint=rollout_fingerprint,
             dataset_fingerprint=dataset_fingerprint,
+            entrypoint=config.eval_entrypoint,
         )
 
         config_dict = {
             **config_for_hash,
             "dataset_fingerprint": dataset_fingerprint,
-            "module_fingerprint": module_fingerprint,
-            "grader_fingerprint": grader_fingerprint,
+            "rollout_fingerprint": rollout_fingerprint,
         }
 
         cache_config = CacheConfig(
@@ -766,12 +647,30 @@ class EvalCommand:
             output_path_resolved = Path(output_path).resolve()
             cache_root_resolved = _get_cache_root().resolve()
             if output_path_resolved == cache_root_resolved:
-                await proxy.stop()
-                if baseline_proxy:
-                    await baseline_proxy.stop()
                 return self._fail(
                     "Error: --output-path cannot be the same as the cache root directory."
                 )
+
+        from osmosis_ai.eval.controller.controller import (
+            EvalController,
+            EvalControllerConfig,
+        )
+        from osmosis_ai.rollout.driver import RolloutDriver
+
+        controller = EvalController(
+            config=EvalControllerConfig(
+                workspace_directory=workspace_directory,
+                rollout_name=config.eval_rollout,
+                rollout_dir=rollout_dir,
+                entrypoint=config.eval_entrypoint,
+                llm_model=config.llm_model,
+                api_key=None,
+                base_url=config.llm_base_url,
+                agent_timeout_sec=config.timeout_agent_sec,
+                grader_timeout_sec=config.timeout_grader_sec,
+            )
+        )
+        drivers: list[tuple[str | None, RolloutDriver]] = [(None, controller)]
 
         def on_progress(current: int, total: int, result: dict) -> None:
             if quiet:
@@ -788,8 +687,11 @@ class EvalCommand:
                 tag_prefix = f"[{result['model_tag']}] "
 
             reward_str = ""
+            rich_reward_str = ""
             if result["success"] and result.get("reward") is not None:
-                reward_str = f" [reward={result['reward']:.3f}]"
+                reward_label = f"[reward={result['reward']:.3f}]"
+                reward_str = f" {reward_label}"
+                rich_reward_str = f" {self.console.escape(reward_label)}"
 
             error_suffix = ""
             if not result["success"] and result.get("error"):
@@ -804,24 +706,29 @@ class EvalCommand:
                 self._stderr_line(line)
                 return
             status_styled = self.console.format_styled(status, status_style)
+            rich_prefix = self.console.escape(f"[{current}/{total}] {tag_prefix}")
+            rich_body = self.console.escape(f"({duration}, {tokens:,} tokens)")
+            rich_error_suffix = self.console.escape(error_suffix)
             self.console.print(
-                f"[{current}/{total}] {tag_prefix}{status_styled} "
-                f"({duration}, {tokens:,} tokens){reward_str}{error_suffix}"
+                f"{rich_prefix}{status_styled} "
+                f"{rich_body}{rich_reward_str}{rich_error_suffix}"
             )
 
         if not quiet and output.format is not OutputFormat.json:
             self.console.print()
             n_info = f" x{config.runs_n} runs" if config.runs_n > 1 else ""
             batch_info = f", batch_size={batch_size}" if batch_size > 1 else ""
-            model_info = " x2 models" if config.baseline_model else ""
-            message = f"Running evaluation ({len(rows)} rows{n_info}{model_info}{batch_info})..."
+            message = f"Running evaluation ({len(rows)} rows{n_info}{batch_info})..."
             if output.format is OutputFormat.plain:
                 self._stderr_line(message)
             else:
                 self.console.print(message)
 
-        # 12. Run orchestrator
-        from osmosis_ai.eval.evaluation.orchestrator import EvalOrchestrator
+        # 7. Plan cache work before touching credentials, fixed ports, or servers.
+        from osmosis_ai.eval.evaluation.orchestrator import (
+            EvalOrchestrator,
+            OrchestratorResult,
+        )
 
         orchestrator = EvalOrchestrator(
             drivers=drivers,
@@ -840,18 +747,85 @@ class EvalCommand:
             on_progress=on_progress,
         )
 
-        try:
-            orch_result = await orchestrator.run()
-        except Exception as e:
-            if debug:
-                import traceback
+        plan = orchestrator.plan()
+        if plan.already_completed or not plan.has_pending_work:
+            try:
+                orch_result = OrchestratorResult(
+                    status=(
+                        "already_completed" if plan.already_completed else "completed"
+                    ),
+                    cache_path=plan.cache_path,
+                    samples_path=plan.samples_path,
+                    summary=plan.cache_data.get("summary"),
+                    total_completed=len(plan.completed_runs),
+                    total_expected=plan.total_expected,
+                    cache_data=plan.cache_data,
+                    dataset_fingerprint_warning=plan.dataset_fingerprint_warning,
+                )
+            finally:
+                plan.release()
+        else:
+            from osmosis_ai.eval.controller.locks import (
+                FixedPortLock,
+                assert_user_server_port_free,
+            )
+            from osmosis_ai.eval.controller.process import (
+                start_user_server_process,
+                wait_for_user_server_health,
+            )
 
-                traceback.print_exc()
-            return self._fail(f"Error during evaluation: {e}", code="INTERNAL")
-        finally:
-            await proxy.stop()
-            if baseline_proxy:
-                await baseline_proxy.stop()
+            fixed_port_lock: Any | None = None
+            fixed_port_lock_acquired = False
+            user_server_process: Any | None = None
+            try:
+                fixed_port_lock = FixedPortLock()
+                fixed_port_lock.acquire()
+                fixed_port_lock_acquired = True
+                assert_user_server_port_free()
+
+                try:
+                    api_key = self._resolve_api_key(config)
+                except CLIError as e:
+                    return self._fail(f"Error: {e}")
+                controller.config.api_key = api_key
+                controller.bridge.api_key = api_key
+
+                try:
+                    await controller.bridge.preflight_check()
+                except CLIError as e:
+                    return self._fail(f"Error: {e}")
+
+                await controller.start()
+                user_server_process = await start_user_server_process(
+                    workspace_directory=workspace_directory,
+                    rollout_dir=rollout_dir,
+                    rollout_name=config.eval_rollout,
+                    entrypoint=config.eval_entrypoint,
+                    invocation_id=task_id,
+                    log_dir=plan.cache_path.parent,
+                )
+                await wait_for_user_server_health(process=user_server_process)
+
+                orch_result = await orchestrator.run_prepared(plan)
+            except CLIError as e:
+                return self._fail(f"Error: {e}", code=e.code)
+            except Exception as e:
+                if debug:
+                    import traceback
+
+                    traceback.print_exc()
+                return self._fail(f"Error during evaluation: {e}", code="INTERNAL")
+            finally:
+                try:
+                    try:
+                        if user_server_process is not None:
+                            await user_server_process.terminate()
+                    finally:
+                        await controller.stop()
+                finally:
+                    if fixed_port_lock is not None and fixed_port_lock_acquired:
+                        fixed_port_lock.release()
+                    plan.release()
 
         # 13. Handle result status
         if orch_result.status == "already_completed":

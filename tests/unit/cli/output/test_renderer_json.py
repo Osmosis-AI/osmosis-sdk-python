@@ -117,14 +117,16 @@ def test_operation_envelope_required_keys() -> None:
 
 def test_operation_envelope_includes_structured_next_steps_only() -> None:
     result = OperationResult(
-        operation="init",
+        operation="deploy",
         status="success",
-        next_steps_structured=[{"action": "open", "target": "https://x.io"}],
-        display_next_steps=["Open the dashboard."],
+        next_steps_structured=[
+            {"action": "deployment_info", "checkpoint_name": "run-step-40"}
+        ],
+        display_next_steps=["Inspect with: osmosis deployment info run-step-40"],
     )
     payload, _ = _render_to_json(result)
     assert payload["next_steps_structured"] == [
-        {"action": "open", "target": "https://x.io"}
+        {"action": "deployment_info", "checkpoint_name": "run-step-40"}
     ]
     assert "display_next_steps" not in payload
 

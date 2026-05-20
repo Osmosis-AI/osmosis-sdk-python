@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -19,55 +21,76 @@ from osmosis_ai.platform.api.models import (
     PaginatedRollouts,
     PaginatedTrainingRuns,
     RolloutInfo,
+    SubmitTrainingRunResult,
     TrainingRun,
     TrainingRunDetail,
     TrainingRunMetrics,
     TrainingRunMetricsOverview,
 )
-from osmosis_ai.platform.cli.workspace_context import WorkspaceContext
 
-WORKSPACE_ID = "ws-test"
-WORKSPACE_NAME = "ws-test"
+GIT_IDENTITY = "acme/rollouts"
+REPO_URL = "https://github.com/acme/rollouts.git"
+GIT_PROJECT_ROOT = Path("/repo")
 FAKE_CREDENTIALS = object()
 
 
-def _assert_workspace_context(payload: dict, project_root: Path) -> None:
-    assert payload["workspace"] == {"id": WORKSPACE_ID, "name": WORKSPACE_NAME}
-    assert payload["project_root"] == str(project_root.resolve())
+def _assert_git_context(
+    payload: dict[str, object],
+    workspace_directory: Path = GIT_PROJECT_ROOT,
+) -> None:
+    assert payload["workspace_directory"] == str(workspace_directory.resolve())
+    assert payload["git"] == {
+        "identity": GIT_IDENTITY,
+        "remote_url": REPO_URL,
+    }
+    assert "workspace" not in payload
 
 
-def _stub_workspace_context(monkeypatch: pytest.MonkeyPatch) -> None:
-    def _context() -> WorkspaceContext:
-        return WorkspaceContext(
-            project_root=Path.cwd().resolve(),
-            workspace_id=WORKSPACE_ID,
-            workspace_name=WORKSPACE_NAME,
-            repo_url=None,
+def _stub_git_context(monkeypatch: pytest.MonkeyPatch) -> None:
+    def _git_top_level(start: Path) -> Path | None:
+        current = start.resolve()
+        for candidate in (current, *current.parents):
+            if (candidate / ".osmosis").is_dir():
+                return candidate
+        return None
+
+    def _git_context() -> SimpleNamespace:
+        workspace_directory = (
+            Path.cwd().resolve()
+            if (Path.cwd() / ".osmosis").is_dir()
+            else GIT_PROJECT_ROOT
+        )
+        return SimpleNamespace(
+            workspace_directory=workspace_directory,
+            git_identity=GIT_IDENTITY,
+            repo_url=REPO_URL,
             credentials=FAKE_CREDENTIALS,
         )
 
     monkeypatch.setattr(
-        "osmosis_ai.platform.cli.utils.require_workspace_context",
-        _context,
+        "osmosis_ai.platform.cli.utils.require_git_workspace_directory_context",
+        _git_context,
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.cli.workspace_repo.git_worktree_top_level",
+        _git_top_level,
     )
 
 
 def _make_rollout_project(root: Path) -> Path:
+    subprocess.run(
+        ["git", "init", "-b", "main", str(root)],
+        check=True,
+        capture_output=True,
+    )
     for rel_path in (
         ".osmosis",
-        ".osmosis/research",
         "rollouts/demo",
         "configs/training",
         "configs/eval",
         "data",
     ):
         (root / rel_path).mkdir(parents=True, exist_ok=True)
-    (root / ".osmosis" / "project.toml").write_text(
-        "[project]\nsetup_source = 'test'\n", encoding="utf-8"
-    )
-    (root / ".osmosis" / "research" / "program.md").write_text(
-        "# Test Program\n", encoding="utf-8"
-    )
     (root / "rollouts" / "demo" / "main.py").write_text(
         """
 from osmosis_ai.rollout.agent_workflow import AgentWorkflow
@@ -91,13 +114,14 @@ class DemoGrader(Grader):
 def test_train_list_json_returns_single_list_envelope(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    _stub_workspace_context(monkeypatch)
+    _stub_git_context(monkeypatch)
 
     class FakeClient:
         def list_training_runs(
-            self, limit=30, offset=0, *, workspace_id, credentials=None
+            self, limit=30, offset=0, *, git_identity, credentials=None
         ):
-            assert workspace_id == WORKSPACE_ID
+            assert credentials is FAKE_CREDENTIALS
+            assert git_identity == GIT_IDENTITY
             return PaginatedTrainingRuns(
                 training_runs=[
                     TrainingRun(
@@ -105,6 +129,8 @@ def test_train_list_json_returns_single_list_envelope(
                         name="reward-run",
                         status="running",
                         model_name="Qwen/Qwen3",
+                        rollout_id="rollout_1",
+                        rollout_name="math-rollout",
                         created_at="2026-04-26T00:00:00Z",
                     )
                 ],
@@ -121,25 +147,129 @@ def test_train_list_json_returns_single_list_envelope(
     payload = json.loads(captured.out)
     assert payload["schema_version"] == 1
     assert payload["items"][0]["name"] == "reward-run"
+    assert payload["items"][0]["rollout_name"] == "math-rollout"
     assert payload["total_count"] == 1
-    _assert_workspace_context(payload, Path.cwd())
+    _assert_git_context(payload)
     assert captured.out.count("\n") == 1
 
 
-def test_train_metrics_json_does_not_write_default_file(
+def test_train_info_json_returns_combined_detail_envelope(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _stub_git_context(monkeypatch)
+
+    class FakeClient:
+        def get_training_run(self, name, *, git_identity, credentials=None):
+            assert credentials is FAKE_CREDENTIALS
+            assert git_identity == GIT_IDENTITY
+            return TrainingRunDetail(
+                id="run_1",
+                name=name,
+                status="pending",
+                model_name="Qwen/Qwen3",
+                rollout_id="rollout_1",
+                rollout_name="math-rollout",
+            )
+
+    monkeypatch.setattr("osmosis_ai.platform.api.client.OsmosisClient", FakeClient)
+
+    exit_code = cli.main(["--json", "train", "info", "reward-run"])
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    payload = json.loads(captured.out)
+    assert payload["data"]["training_run"]["name"] == "reward-run"
+    assert payload["data"]["training_run"]["status"] == "pending"
+    assert payload["data"]["training_run"]["rollout_name"] == "math-rollout"
+    assert payload["data"]["checkpoints"] == []
+    assert payload["data"]["metrics_available"] is False
+    assert payload["data"]["output_path"] is None
+    _assert_git_context(payload["data"])
+
+
+def test_train_submit_json_returns_operation_envelope(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    project = _make_rollout_project(tmp_path)
+    config_path = project / "configs" / "training" / "demo.toml"
+    config_path.write_text(
+        """
+[experiment]
+rollout = "demo"
+entrypoint = "main.py"
+model_path = "Qwen/Qwen3"
+dataset = "demo-dataset"
+
+[training]
+n_samples_per_prompt = 8
+rollout_batch_size = 64
+""".strip(),
+        encoding="utf-8",
+    )
+    monkeypatch.chdir(project)
+    _stub_git_context(monkeypatch)
+    monkeypatch.setattr(
+        "osmosis_ai.platform.cli.workspace_repo.require_git_top_level",
+        lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.cli.workspace_repo.summarize_local_git_state",
+        lambda _root: None,
+    )
+
+    class FakeClient:
+        def submit_training_run(self, **kwargs):
+            assert kwargs["credentials"] is FAKE_CREDENTIALS
+            assert kwargs["git_identity"] == GIT_IDENTITY
+            assert "workspace_id" not in kwargs
+            assert kwargs["experiment_config"]["rollout"] == "demo"
+            return SubmitTrainingRunResult(
+                id="run_1",
+                name="reward-run",
+                status="pending",
+                created_at="2026-04-26T00:00:00Z",
+            )
+
+    monkeypatch.setattr("osmosis_ai.platform.api.client.OsmosisClient", FakeClient)
+
+    exit_code = cli.main(["--json", "train", "submit", str(config_path), "--yes"])
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    payload = json.loads(captured.out)
+    assert payload["operation"] == "train.submit"
+    assert payload["resource"]["name"] == "reward-run"
+    assert payload["resource"]["model_name"] == "Qwen/Qwen3"
+    assert payload["resource"]["dataset_name"] == "demo-dataset"
+    _assert_git_context(payload["resource"], project)
+
+
+def test_train_info_json_does_not_write_default_file(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     tmp_path: Path,
 ) -> None:
-    _stub_workspace_context(monkeypatch)
+    _stub_git_context(monkeypatch)
+    subprocess.run(
+        ["git", "init", "-b", "main", str(tmp_path)],
+        check=True,
+        capture_output=True,
+    )
+    for rel_path in (
+        ".osmosis",
+        "rollouts",
+        "configs/eval",
+        "configs/training",
+        "data",
+    ):
+        (tmp_path / rel_path).mkdir(parents=True, exist_ok=True)
     osmosis_dir = tmp_path / ".osmosis"
-    osmosis_dir.mkdir()
-    (osmosis_dir / "project.toml").write_text("[project]\n", encoding="utf-8")
     monkeypatch.chdir(tmp_path)
 
     class FakeClient:
-        def get_training_run(self, name, *, workspace_id, credentials=None):
-            assert workspace_id == WORKSPACE_ID
+        def get_training_run(self, name, *, git_identity, credentials=None):
+            assert credentials is FAKE_CREDENTIALS
+            assert git_identity == GIT_IDENTITY
             return TrainingRunDetail(
                 id="run_1",
                 name=name,
@@ -147,8 +277,9 @@ def test_train_metrics_json_does_not_write_default_file(
                 model_name="Qwen/Qwen3",
             )
 
-        def get_training_run_metrics(self, run_id, *, workspace_id, credentials=None):
-            assert workspace_id == WORKSPACE_ID
+        def get_training_run_metrics(self, run_id, *, git_identity, credentials=None):
+            assert credentials is FAKE_CREDENTIALS
+            assert git_identity == GIT_IDENTITY
             return TrainingRunMetrics(
                 training_run_id=run_id,
                 status="finished",
@@ -170,47 +301,67 @@ def test_train_metrics_json_does_not_write_default_file(
                 ],
             )
 
+        def list_training_run_checkpoints(
+            self, run_id, *, git_identity, credentials=None
+        ):
+            assert credentials is FAKE_CREDENTIALS
+            assert git_identity == GIT_IDENTITY
+            return type("CheckpointPage", (), {"checkpoints": []})()
+
     monkeypatch.setattr("osmosis_ai.platform.api.client.OsmosisClient", FakeClient)
 
-    exit_code = cli.main(["--json", "train", "metrics", "reward-run"])
+    exit_code = cli.main(["--json", "train", "info", "reward-run"])
     captured = capsys.readouterr()
 
     assert exit_code == 0
     payload = json.loads(captured.out)
     assert payload["data"]["metrics_available"] is True
     assert payload["data"]["output_path"] is None
-    _assert_workspace_context(payload["data"], tmp_path)
+    _assert_git_context(payload["data"], tmp_path)
     assert not (osmosis_dir / "metrics").exists()
 
 
-def test_train_traces_json_returns_structured_not_implemented_error(capsys) -> None:
-    exit_code = cli.main(["--json", "train", "traces"])
+def test_train_stop_json_returns_operation_envelope(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _stub_git_context(monkeypatch)
+
+    class FakeClient:
+        def stop_training_run(self, name, *, git_identity, credentials=None):
+            assert name == "reward-run"
+            assert credentials is FAKE_CREDENTIALS
+            assert git_identity == GIT_IDENTITY
+            return {"stopped": True}
+
+    monkeypatch.setattr("osmosis_ai.platform.api.client.OsmosisClient", FakeClient)
+
+    exit_code = cli.main(["--json", "train", "stop", "reward-run", "--yes"])
     captured = capsys.readouterr()
 
-    assert exit_code == 1
-    assert captured.out == ""
-    payload = json.loads(captured.err)
-    assert payload["error"]["code"] == "NOT_IMPLEMENTED"
-    assert "train traces" in payload["error"]["message"]
+    assert exit_code == 0
+    payload = json.loads(captured.out)
+    assert payload["operation"] == "train.stop"
+    assert payload["resource"]["name"] == "reward-run"
+    _assert_git_context(payload["resource"])
 
 
 def test_model_list_plain_is_tab_separated_rows(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    _stub_workspace_context(monkeypatch)
+    _stub_git_context(monkeypatch)
 
     class FakeClient:
         def list_base_models(
-            self, limit=30, offset=0, *, workspace_id, credentials=None
+            self, limit=30, offset=0, *, git_identity, credentials=None
         ):
-            assert workspace_id == WORKSPACE_ID
+            assert credentials is FAKE_CREDENTIALS
+            assert git_identity == GIT_IDENTITY
             return PaginatedBaseModels(
                 models=[
                     BaseModelInfo(
                         id="model_1",
                         model_name="Qwen/Qwen3",
                         base_model="Qwen/Qwen3",
-                        status="ready",
                         creator_name="brian",
                         created_at="2026-04-26T00:00:00Z",
                     )
@@ -225,28 +376,34 @@ def test_model_list_plain_is_tab_separated_rows(
     captured = capsys.readouterr()
 
     assert exit_code == 0
-    assert captured.out.splitlines() == [
-        "Qwen/Qwen3\tQwen/Qwen3\tready\tbrian\t2026-04-26T00:00:00Z\tmodel_1"
-    ]
+    lines = captured.out.splitlines()
+    assert len(lines) == 1
+    fields = lines[0].split("\t")
+    assert len(fields) == 3
+    assert fields[0] == "Qwen/Qwen3"
+    assert fields[1] == "Qwen/Qwen3"
+    assert fields[2].startswith("2026-04-")
+    assert "model_1" not in fields
+    assert "brian" not in fields
 
 
-def test_model_list_json_includes_linked_workspace_context(
+def test_model_list_json_includes_git_context(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    _stub_workspace_context(monkeypatch)
+    _stub_git_context(monkeypatch)
 
     class FakeClient:
         def list_base_models(
-            self, limit=30, offset=0, *, workspace_id, credentials=None
+            self, limit=30, offset=0, *, git_identity, credentials=None
         ):
-            assert workspace_id == WORKSPACE_ID
+            assert credentials is FAKE_CREDENTIALS
+            assert git_identity == GIT_IDENTITY
             return PaginatedBaseModels(
                 models=[
                     BaseModelInfo(
                         id="model_1",
                         model_name="Qwen/Qwen3",
                         base_model="Qwen/Qwen3",
-                        status="ready",
                         creator_name="brian",
                         created_at="2026-04-26T00:00:00Z",
                     )
@@ -263,19 +420,21 @@ def test_model_list_json_includes_linked_workspace_context(
     assert exit_code == 0
     payload = json.loads(captured.out)
     assert payload["items"][0]["model_name"] == "Qwen/Qwen3"
-    _assert_workspace_context(payload, Path.cwd())
+    assert "status" not in payload["items"][0]
+    _assert_git_context(payload)
 
 
 def test_deployment_commands_json_return_results(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    _stub_workspace_context(monkeypatch)
+    _stub_git_context(monkeypatch)
 
     class FakeClient:
         def list_deployments(
-            self, limit=30, offset=0, *, workspace_id, credentials=None
+            self, limit=30, offset=0, *, git_identity, credentials=None
         ):
-            assert workspace_id == WORKSPACE_ID
+            assert credentials is FAKE_CREDENTIALS
+            assert git_identity == GIT_IDENTITY
             return PaginatedDeployments(
                 deployments=[
                     DeploymentInfo(
@@ -290,10 +449,30 @@ def test_deployment_commands_json_return_results(
                 has_more=False,
             )
 
-        def deploy_checkpoint(self, checkpoint, *, workspace_id, credentials=None):
-            assert workspace_id == WORKSPACE_ID
+        def get_deployment(self, checkpoint, *, git_identity, credentials=None):
+            assert credentials is FAKE_CREDENTIALS
+            assert git_identity == GIT_IDENTITY
+            return DeploymentInfo(
+                id="dep_1",
+                checkpoint_name=checkpoint,
+                status="active",
+                checkpoint_step=1,
+                base_model="Qwen/Qwen3",
+                training_run_name="reward-run",
+            )
+
+        def deploy_checkpoint(self, checkpoint, *, git_identity, credentials=None):
+            assert credentials is FAKE_CREDENTIALS
+            assert git_identity == GIT_IDENTITY
             return DeploymentSummary(
                 id="dep_1", checkpoint_name=checkpoint, status="active"
+            )
+
+        def undeploy_checkpoint(self, checkpoint, *, git_identity, credentials=None):
+            assert credentials is FAKE_CREDENTIALS
+            assert git_identity == GIT_IDENTITY
+            return DeploymentSummary(
+                id="dep_1", checkpoint_name=checkpoint, status="inactive"
             )
 
     monkeypatch.setattr("osmosis_ai.platform.api.client.OsmosisClient", FakeClient)
@@ -302,24 +481,39 @@ def test_deployment_commands_json_return_results(
     payload = json.loads(capsys.readouterr().out)
     assert exit_code == 0
     assert payload["items"][0]["checkpoint_name"] == "run-step-1"
-    _assert_workspace_context(payload, Path.cwd())
+    _assert_git_context(payload)
+
+    exit_code = cli.main(["--json", "deployment", "info", "run-step-1"])
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert payload["data"]["checkpoint_name"] == "run-step-1"
+    _assert_git_context(payload["data"])
 
     exit_code = cli.main(["--json", "deploy", "run-step-1"])
     payload = json.loads(capsys.readouterr().out)
     assert exit_code == 0
     assert payload["operation"] == "deploy"
     assert payload["resource"]["checkpoint_name"] == "run-step-1"
-    _assert_workspace_context(payload["resource"], Path.cwd())
+    _assert_git_context(payload["resource"])
+
+    exit_code = cli.main(["--json", "undeploy", "run-step-1"])
+    payload = json.loads(capsys.readouterr().out)
+    assert exit_code == 0
+    assert payload["operation"] == "undeploy"
+    assert payload["resource"]["checkpoint_name"] == "run-step-1"
+    assert payload["resource"]["status"] == "inactive"
+    _assert_git_context(payload["resource"])
 
 
 def test_failed_deploy_json_exits_nonzero(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    _stub_workspace_context(monkeypatch)
+    _stub_git_context(monkeypatch)
 
     class FakeClient:
-        def deploy_checkpoint(self, checkpoint, *, workspace_id, credentials=None):
-            assert workspace_id == WORKSPACE_ID
+        def deploy_checkpoint(self, checkpoint, *, git_identity, credentials=None):
+            assert credentials is FAKE_CREDENTIALS
+            assert git_identity == GIT_IDENTITY
             return DeploymentSummary(
                 id="dep_1",
                 checkpoint_name=checkpoint,
@@ -334,31 +528,18 @@ def test_failed_deploy_json_exits_nonzero(
     assert exit_code == 1
     assert payload["operation"] == "deploy"
     assert payload["status"] == "failed"
-    _assert_workspace_context(payload["resource"], Path.cwd())
-
-
-def test_destructive_command_requires_yes_in_json(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    _stub_workspace_context(monkeypatch)
-
-    exit_code = cli.main(["--json", "deployment", "delete", "run-step-1"])
-    captured = capsys.readouterr()
-
-    assert exit_code != 0
-    assert captured.out == ""
-    payload = json.loads(captured.err)
-    assert payload["error"]["code"] == "INTERACTIVE_REQUIRED"
+    _assert_git_context(payload["resource"])
 
 
 def test_rollout_list_json_returns_envelope(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    _stub_workspace_context(monkeypatch)
+    _stub_git_context(monkeypatch)
 
     class FakeClient:
-        def list_rollouts(self, limit=30, offset=0, *, workspace_id, credentials=None):
-            assert workspace_id == WORKSPACE_ID
+        def list_rollouts(self, limit=30, offset=0, *, git_identity, credentials=None):
+            assert credentials is FAKE_CREDENTIALS
+            assert git_identity == GIT_IDENTITY
             return PaginatedRollouts(
                 rollouts=[
                     RolloutInfo(
@@ -383,34 +564,60 @@ def test_rollout_list_json_returns_envelope(
     payload = json.loads(captured.out)
     assert payload["items"][0]["name"] == "demo"
     assert payload["next_offset"] is None
-    _assert_workspace_context(payload, Path.cwd())
+    _assert_git_context(payload)
 
 
-def test_rollout_validate_json_returns_detail_result(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+def test_rollout_list_columns_prioritize_name_over_id(
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    project = _make_rollout_project(tmp_path)
-    monkeypatch.chdir(project)
-    config_path = project / "configs" / "training" / "demo.toml"
-    config_path.write_text(
-        """
-[experiment]
-rollout = "demo"
-entrypoint = "main.py"
-model_path = "Qwen/Qwen3"
-dataset = "demo-dataset"
+    created_at = "2026-04-26T00:00:00Z"
+    _stub_git_context(monkeypatch)
 
-[training]
-n_samples_per_prompt = 8
-rollout_batch_size = 64
-""".strip(),
-        encoding="utf-8",
+    class FakeClient:
+        def list_rollouts(self, limit=30, offset=0, *, git_identity, credentials=None):
+            assert git_identity == GIT_IDENTITY
+            return PaginatedRollouts(
+                rollouts=[
+                    RolloutInfo(
+                        id="rollout_1",
+                        name="demo",
+                        is_active=True,
+                        repo_full_name="osmosis/demo",
+                        last_synced_commit_sha="abcdef123456",
+                        created_at=created_at,
+                    )
+                ],
+                total_count=1,
+                has_more=False,
+            )
+
+    monkeypatch.setattr("osmosis_ai.platform.api.client.OsmosisClient", FakeClient)
+
+    from osmosis_ai.cli.commands.rollout import list_rollouts
+    from osmosis_ai.cli.output.display import format_local_date
+
+    result = list_rollouts(limit=30, all_=False)
+
+    assert [column.key for column in result.columns] == [
+        "name",
+        "is_active",
+        "last_synced_commit_sha",
+        "created_at",
+    ]
+    name_column = result.columns[0]
+    assert name_column.ratio == 6
+    assert name_column.overflow == "fold"
+    assert name_column.min_width == 20
+    assert result.columns[1].no_wrap is True
+    assert result.columns[1].min_width == 6
+    assert result.columns[1].max_width == 6
+    assert result.columns[2].max_width == 8
+    assert result.columns[3].max_width == 10
+    assert result.items[0]["last_synced_commit_sha"] == "abcdef123456"
+    assert result.display_items is not None
+    assert result.display_items[0]["is_active"] == "yes"
+    assert result.display_items[0]["last_synced_commit_sha"] == "abcdef12"
+    assert (
+        result.display_items[0]["created_at"]
+        == format_local_date(created_at).split(" ", 1)[0]
     )
-
-    exit_code = cli.main(["--json", "rollout", "validate", str(config_path)])
-    captured = capsys.readouterr()
-
-    assert exit_code == 0
-    payload = json.loads(captured.out)
-    assert payload["data"]["valid"] is True
-    assert payload["data"]["kind"] == "training"

@@ -1,17 +1,17 @@
-"""Discovery helpers for bundled project templates."""
+"""Discovery helpers for workspace template recipes."""
 
 from __future__ import annotations
 
 from osmosis_ai.templates.registry import (
     TemplateNotFoundError,
-    cookbook_root,
     list_templates,
     template_path,
+    template_recipe,
 )
 
 __all__ = [
     "TemplateNotFoundError",
-    "cookbook_root",
     "list_templates",
     "template_path",
+    "template_recipe",
 ]

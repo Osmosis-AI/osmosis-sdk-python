@@ -46,14 +46,10 @@ jobs:
           # Known --verifytypes baselines we intentionally skip:
           #   * agent_adapter: inherits from harbor's BaseInstalledAgent which
           #     has no type stubs ("base class unknown").
-          #   * templates.cookbook.*: starter recipes shipped as data, not part
-          #     of the SDK's public API surface (mirrors the ruff/pyright
-          #     excludes in pyproject.toml).
           unexpected=$(echo "$output" | awk '
             /^osmosis_ai\./ { sym = $0 }
             /error:/ {
               if (sym ~ /agent_adapter/) next
-              if (sym ~ /^osmosis_ai\.templates\.cookbook\./) next
               print $0
             }
           ')

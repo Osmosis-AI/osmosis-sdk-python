@@ -15,6 +15,9 @@ from osmosis_ai.cli.console import Console
 from osmosis_ai.platform.api.models import DatasetFile, PaginatedDatasets
 from tests.unit.platform.cli.conftest import strip_ansi
 
+GIT_IDENTITY = "acme/rollouts"
+REPO_URL = "https://github.com/acme/rollouts.git"
+
 
 def _make_rich_console() -> tuple[Console, StringIO]:
     output = StringIO()
@@ -36,12 +39,12 @@ def test_list_datasets_preserves_uncategorized_status_brackets(
     monkeypatch.setattr(utils_module, "console", console)
     monkeypatch.setattr(
         dataset_module,
-        "require_workspace_context",
+        "require_git_workspace_directory_context",
         lambda: SimpleNamespace(
             credentials=fake_credentials,
-            workspace_id="ws-b",
-            workspace_name="workspace-b",
-            project_root=tmp_path,
+            git_identity=GIT_IDENTITY,
+            repo_url=REPO_URL,
+            workspace_directory=tmp_path,
         ),
     )
 
@@ -52,10 +55,10 @@ def test_list_datasets_preserves_uncategorized_status_brackets(
             offset: int = 0,
             *,
             credentials=None,
-            workspace_id: str,
+            git_identity: str,
         ) -> PaginatedDatasets:
             assert credentials is fake_credentials
-            assert workspace_id == "ws-b"
+            assert git_identity == GIT_IDENTITY
             return PaginatedDatasets(
                 datasets=[
                     DatasetFile(
@@ -78,7 +81,7 @@ def test_list_datasets_preserves_uncategorized_status_brackets(
 
 
 @pytest.mark.parametrize("status", ["cancelled", "deleted"])
-def test_workspace_status_format_preserves_uncategorized_status_brackets(
+def test_dataset_status_format_preserves_uncategorized_status_brackets(
     monkeypatch: pytest.MonkeyPatch,
     status: str,
 ) -> None:
@@ -96,7 +99,7 @@ def test_workspace_status_format_preserves_uncategorized_status_brackets(
     assert f"[{status}]" in strip_ansi(output.getvalue())
 
 
-def test_workspace_status_format_preserves_plain_text_brackets() -> None:
+def test_dataset_status_format_preserves_plain_text_brackets() -> None:
     console = Console(file=StringIO(), force_terminal=False)
     dataset = SimpleNamespace(
         status="deleted",

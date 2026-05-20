@@ -17,10 +17,10 @@ from osmosis_ai.cli.output import (
     ListColumn,
     ListResult,
     OperationResult,
-    OutputFormat,
     get_output_context,
     serialize_dataset,
 )
+from osmosis_ai.cli.output.display import created_column_label, format_local_date
 from osmosis_ai.cli.paths import parse_cli_path
 from osmosis_ai.cli.prompts import confirm
 from osmosis_ai.platform.api.models import STATUSES_IN_PROGRESS
@@ -28,6 +28,7 @@ from osmosis_ai.platform.auth import (
     AuthenticationExpiredError,
     PlatformAPIError,
 )
+from osmosis_ai.platform.cli.workspace_directory_context import git_result_context
 from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE
 
 from .constants import (
@@ -36,14 +37,11 @@ from .constants import (
     VALID_EXTENSIONS,
 )
 from .utils import (
-    _require_subscription,
     build_dataset_detail_rows,
     format_dataset_status,
-    format_dim_date,
     format_size,
     platform_call,
-    platform_entity_url,
-    require_workspace_context,
+    require_git_workspace_directory_context,
 )
 
 
@@ -51,7 +49,7 @@ def _abort_upload(
     client: Any,
     dataset_id: str,
     *,
-    workspace_id: str,
+    git_identity: str,
     credentials: Any | None = None,
 ) -> None:
     """Best-effort abort of an in-progress upload."""
@@ -59,7 +57,7 @@ def _abort_upload(
         client.abort_upload(
             dataset_id,
             credentials=credentials,
-            workspace_id=workspace_id,
+            git_identity=git_identity,
         )
     except Exception as exc:
         console.print(
@@ -86,19 +84,12 @@ PARQUET_VALIDATION_SKIPPED_WARNING = (
 )
 
 
-def _workspace_result_context(workspace: Any) -> dict[str, Any]:
-    return {
-        "workspace": {"id": workspace.workspace_id, "name": workspace.workspace_name},
-        "project_root": str(workspace.project_root),
-    }
-
-
 def _complete_with_retry(
     client: Any,
     dataset_id: str,
     parts: list[dict] | None = None,
     *,
-    workspace_id: str,
+    git_identity: str,
     credentials: Any | None = None,
 ) -> Any:
     """Call ``client.complete_upload`` with automatic retry on transient errors.
@@ -122,7 +113,7 @@ def _complete_with_retry(
                     dataset_id,
                     parts=parts,
                     credentials=credentials,
-                    workspace_id=workspace_id,
+                    git_identity=git_identity,
                 ),
                 output_console=console,
             )
@@ -192,6 +183,65 @@ def _dataset_name_from_path(file_path: Path) -> str:
     return file_path.stem
 
 
+def _existing_dataset_id_from_conflict(exc: PlatformAPIError) -> str | None:
+    """Extract the recoverable duplicate-name conflict marker from a platform error."""
+    if exc.status_code != 409 or not isinstance(exc.details, dict):
+        return None
+    existing_dataset_id = exc.details.get("existing_dataset_id")
+    return existing_dataset_id if isinstance(existing_dataset_id, str) else None
+
+
+def _create_dataset_for_upload(
+    *,
+    client: Any,
+    dataset_name: str,
+    file_size: int,
+    ext: str,
+    overwrite: bool,
+    git_identity: str,
+    credentials: Any | None = None,
+) -> Any:
+    """Create the dataset record, retrying with overwrite when explicitly requested."""
+    try:
+        return platform_call(
+            "Creating dataset...",
+            lambda: client.create_dataset(
+                dataset_name,
+                file_size,
+                ext,
+                credentials=credentials,
+                git_identity=git_identity,
+            ),
+            output_console=console,
+        )
+    except PlatformAPIError as exc:
+        existing_dataset_id = _existing_dataset_id_from_conflict(exc)
+        if existing_dataset_id is None:
+            raise
+        if not overwrite:
+            details = dict(exc.details or {})
+            details.setdefault("status_code", exc.status_code)
+            raise CLIError(
+                f"A dataset named '{dataset_name}' already exists. "
+                "Use --overwrite to replace it.",
+                code="CONFLICT",
+                details=details,
+            ) from exc
+
+        return platform_call(
+            "Replacing existing dataset...",
+            lambda: client.create_dataset(
+                dataset_name,
+                file_size,
+                ext,
+                overwrite_dataset_id=existing_dataset_id,
+                credentials=credentials,
+                git_identity=git_identity,
+            ),
+            output_console=console,
+        )
+
+
 def _detail_fields(rows: list[tuple[str, str]]) -> list[DetailField]:
     """Convert existing label/value rows into renderer detail fields."""
     return [DetailField(label=label, value=value) for label, value in rows]
@@ -202,8 +252,9 @@ def _perform_upload(
     file_path: Path,
     ext: str,
     file_size: int,
-    workspace_id: str,
+    git_identity: str,
     credentials: Any | None = None,
+    overwrite: bool = False,
 ) -> Any:
     """Core upload: create dataset record → S3 upload → complete.
 
@@ -220,16 +271,14 @@ def _perform_upload(
     client = OsmosisClient()
     dataset_name = _dataset_name_from_path(file_path)
 
-    dataset = platform_call(
-        "Creating dataset...",
-        lambda: client.create_dataset(
-            dataset_name,
-            file_size,
-            ext,
-            credentials=credentials,
-            workspace_id=workspace_id,
-        ),
-        output_console=console,
+    dataset = _create_dataset_for_upload(
+        client=client,
+        dataset_name=dataset_name,
+        file_size=file_size,
+        ext=ext,
+        overwrite=overwrite,
+        credentials=credentials,
+        git_identity=git_identity,
     )
 
     upload_info = dataset.upload
@@ -263,7 +312,7 @@ def _perform_upload(
                 client,
                 dataset.id,
                 credentials=credentials,
-                workspace_id=workspace_id,
+                git_identity=git_identity,
             )
             raise CLIError("Upload cancelled by user.") from None
         except Exception as e:
@@ -271,7 +320,7 @@ def _perform_upload(
                 client,
                 dataset.id,
                 credentials=credentials,
-                workspace_id=workspace_id,
+                git_identity=git_identity,
             )
             raise CLIError(f"Upload failed: {e}") from e
         completed = _complete_with_retry(
@@ -279,7 +328,7 @@ def _perform_upload(
             dataset.id,
             parts=parts,
             credentials=credentials,
-            workspace_id=workspace_id,
+            git_identity=git_identity,
         )
     else:
         try:
@@ -293,7 +342,7 @@ def _perform_upload(
                 client,
                 dataset.id,
                 credentials=credentials,
-                workspace_id=workspace_id,
+                git_identity=git_identity,
             )
             raise CLIError("Upload cancelled by user.") from None
         except Exception as e:
@@ -301,14 +350,14 @@ def _perform_upload(
                 client,
                 dataset.id,
                 credentials=credentials,
-                workspace_id=workspace_id,
+                git_identity=git_identity,
             )
             raise CLIError(f"Upload failed: {e}") from e
         completed = _complete_with_retry(
             client,
             dataset.id,
             credentials=credentials,
-            workspace_id=workspace_id,
+            git_identity=git_identity,
         )
 
     return completed or dataset
@@ -316,13 +365,13 @@ def _perform_upload(
 
 def upload(
     file: str,
+    overwrite: bool = False,
+    yes: bool = False,
 ) -> CommandResult:
     """Upload a dataset file."""
-    workspace = require_workspace_context()
-    ws_name = workspace.workspace_name
-    credentials = workspace.credentials
-    workspace_id = workspace.workspace_id
-    _require_subscription(workspace_id=workspace_id, workspace_name=ws_name)
+    context = require_git_workspace_directory_context()
+    credentials = context.credentials
+    git_identity = context.git_identity
     output = get_output_context()
 
     file_path, ext, file_size = _check_file_basics(file)
@@ -334,17 +383,7 @@ def upload(
             "File validation failed:\n" + "\n".join(f"  - {e}" for e in errors)
         )
 
-    # Confirm upload target
-    console.print()
-    console.table(
-        [
-            ("Workspace", console.escape(ws_name) if ws_name else "unknown"),
-            ("File", f"{console.escape(file_path.name)} ({format_size(file_size)})"),
-        ],
-        title="Upload Target",
-    )
-    console.print()
-    if output.interactive:
+    if output.interactive and not yes:
         proceed = confirm("Proceed with upload?", default=True)
         if proceed is None or not proceed:
             return OperationResult(
@@ -357,27 +396,32 @@ def upload(
         file_path=file_path,
         ext=ext,
         file_size=file_size,
+        overwrite=overwrite,
         credentials=credentials,
-        workspace_id=workspace_id,
+        git_identity=git_identity,
     )
 
-    url = platform_entity_url(ws_name, "datasets", dataset.id)
     resource = serialize_dataset(dataset)
-    resource.update(_workspace_result_context(workspace))
+    resource.update(git_result_context(context))
+    display_next_steps = [
+        (
+            f"Processing will continue on the platform. Check status at: {dataset.platform_url}"
+            if dataset.platform_url
+            else f"Processing will continue on the platform. Check status with: osmosis dataset info {dataset.id}"
+        )
+    ]
+    next_steps_structured = (
+        [{"label": "View dataset", "url": dataset.platform_url}]
+        if dataset.platform_url
+        else [{"action": "dataset_info", "id": dataset.id}]
+    )
     return OperationResult(
         operation="dataset.upload",
         status="success",
         resource=resource,
         message=f"Dataset uploaded: {dataset.file_name}",
-        display_next_steps=[
-            f"Processing will continue on the platform. Check status at: {url}"
-        ],
-        next_steps_structured=[
-            {
-                "label": "View dataset",
-                "url": url,
-            }
-        ],
+        display_next_steps=display_next_steps,
+        next_steps_structured=next_steps_structured,
     )
 
 
@@ -390,9 +434,9 @@ def list_datasets(limit: int = DEFAULT_PAGE_SIZE, all_: bool = False) -> Command
 
     effective_limit, fetch_all = validate_list_options(limit=limit, all_=all_)
 
-    workspace = require_workspace_context()
-    credentials = workspace.credentials
-    workspace_id = workspace.workspace_id
+    context = require_git_workspace_directory_context()
+    credentials = context.credentials
+    git_identity = context.git_identity
     from osmosis_ai.platform.api.client import OsmosisClient
 
     client = OsmosisClient()
@@ -404,7 +448,7 @@ def list_datasets(limit: int = DEFAULT_PAGE_SIZE, all_: bool = False) -> Command
                     limit=lim,
                     offset=off,
                     credentials=credentials,
-                    workspace_id=workspace_id,
+                    git_identity=git_identity,
                 ),
                 items_attr="datasets",
             )
@@ -415,7 +459,7 @@ def list_datasets(limit: int = DEFAULT_PAGE_SIZE, all_: bool = False) -> Command
                 limit=effective_limit,
                 offset=0,
                 credentials=credentials,
-                workspace_id=workspace_id,
+                git_identity=git_identity,
             )
             datasets = page.datasets
             total_count = page.total_count
@@ -428,20 +472,24 @@ def list_datasets(limit: int = DEFAULT_PAGE_SIZE, all_: bool = False) -> Command
         total_count=total_count,
         has_more=has_more,
         next_offset=next_offset,
-        extra=_workspace_result_context(workspace),
+        extra=git_result_context(context),
         columns=[
-            ListColumn(key="file_name", label="File"),
-            ListColumn(key="status", label="Status"),
-            ListColumn(key="file_size", label="Size"),
-            ListColumn(key="created_at", label="Created"),
-            ListColumn(key="id", label="ID", no_wrap=True),
+            ListColumn(key="file_name", label="Name", ratio=4, overflow="fold"),
+            ListColumn(key="status", label="Status", no_wrap=True, ratio=1),
+            ListColumn(key="file_size", label="Size", no_wrap=True, ratio=1),
+            ListColumn(
+                key="created_at",
+                label=created_column_label(),
+                no_wrap=True,
+                ratio=1,
+            ),
         ],
         display_items=[
             {
                 **serialize_dataset(d),
                 "status": format_dataset_status(d),
                 "file_size": format_size(d.file_size),
-                "created_at": format_dim_date(d.created_at),
+                "created_at": format_local_date(d.created_at),
             }
             for d in datasets
         ],
@@ -452,9 +500,9 @@ def info(
     name: str,
 ) -> CommandResult:
     """Show dataset details and processing status."""
-    workspace = require_workspace_context()
-    credentials = workspace.credentials
-    workspace_id = workspace.workspace_id
+    context = require_git_workspace_directory_context()
+    credentials = context.credentials
+    git_identity = context.git_identity
     from osmosis_ai.platform.api.client import OsmosisClient
 
     client = OsmosisClient()
@@ -463,18 +511,19 @@ def info(
         lambda: client.get_dataset(
             name,
             credentials=credentials,
-            workspace_id=workspace_id,
+            git_identity=git_identity,
         ),
         output_console=console,
     )
 
     rows = build_dataset_detail_rows(ds)
     data = serialize_dataset(ds)
-    data.update(_workspace_result_context(workspace))
+    data.update(git_result_context(context))
     return DetailResult(
         title="Dataset",
         data=data,
         fields=_detail_fields(rows),
+        display_hints=[f"View: {ds.platform_url}"] if ds.platform_url else [],
     )
 
 
@@ -483,9 +532,9 @@ def preview(
     rows: int = 5,
 ) -> CommandResult:
     """Preview dataset rows."""
-    workspace = require_workspace_context()
-    credentials = workspace.credentials
-    workspace_id = workspace.workspace_id
+    context = require_git_workspace_directory_context()
+    credentials = context.credentials
+    git_identity = context.git_identity
     from osmosis_ai.platform.api.client import OsmosisClient
 
     client = OsmosisClient()
@@ -494,7 +543,7 @@ def preview(
         lambda: client.get_dataset(
             name,
             credentials=credentials,
-            workspace_id=workspace_id,
+            git_identity=git_identity,
         ),
         output_console=console,
     )
@@ -513,7 +562,7 @@ def preview(
                 "returned_rows": 0,
                 "available": False,
                 "message": message,
-                **_workspace_result_context(workspace),
+                **git_result_context(context),
             },
             fields=[
                 DetailField(label="Dataset", value=ds.file_name),
@@ -549,7 +598,7 @@ def preview(
             "requested_rows": rows,
             "returned_rows": len(preview_rows) if isinstance(preview_rows, list) else 1,
             "available": True,
-            **_workspace_result_context(workspace),
+            **git_result_context(context),
         },
         fields=fields,
     )
@@ -572,9 +621,9 @@ def download(
     overwrite: bool = False,
 ) -> CommandResult:
     """Download a dataset file."""
-    workspace = require_workspace_context()
-    credentials = workspace.credentials
-    workspace_id = workspace.workspace_id
+    context = require_git_workspace_directory_context()
+    credentials = context.credentials
+    git_identity = context.git_identity
     from osmosis_ai.platform.api.client import OsmosisClient
     from osmosis_ai.platform.api.download import download_file
 
@@ -584,7 +633,7 @@ def download(
         lambda: client.get_dataset(
             name,
             credentials=credentials,
-            workspace_id=workspace_id,
+            git_identity=git_identity,
         ),
         output_console=console,
     )
@@ -601,7 +650,7 @@ def download(
         lambda: client.get_dataset_download_url(
             name,
             credentials=credentials,
-            workspace_id=workspace_id,
+            git_identity=git_identity,
         ),
         output_console=console,
     )
@@ -630,105 +679,12 @@ def download(
 
     resource = serialize_dataset(ds)
     resource["output_path"] = str(destination)
-    resource.update(_workspace_result_context(workspace))
+    resource.update(git_result_context(context))
     return OperationResult(
         operation="dataset.download",
         status="success",
         resource=resource,
         message=f"Dataset downloaded: {destination}",
-    )
-
-
-def delete(
-    name: str,
-    yes: bool = False,
-) -> CommandResult:
-    """Delete a dataset."""
-    output = get_output_context()
-    if not yes and (output.format is not OutputFormat.rich or not output.interactive):
-        raise CLIError(
-            "Use --yes to confirm in non-interactive mode.",
-            code="INTERACTIVE_REQUIRED",
-        )
-
-    workspace = require_workspace_context()
-    credentials = workspace.credentials
-    workspace_id = workspace.workspace_id
-    from osmosis_ai.platform.api.client import OsmosisClient
-
-    client = OsmosisClient()
-
-    # Blocking preflight: abort if active training runs use this dataset
-    try:
-        affected = platform_call(
-            "Checking dataset dependencies...",
-            lambda: client.get_dataset_affected_resources(
-                name,
-                credentials=credentials,
-                workspace_id=workspace_id,
-            ),
-            output_console=console,
-        )
-    except Exception as e:
-        raise CLIError(f"Unable to verify dataset dependencies: {e}") from e
-
-    if affected.has_blocking_runs:
-        blocking_runs = [
-            {
-                "id": run.id,
-                "training_run_name": run.training_run_name,
-            }
-            for run in affected.affected_training_runs
-        ]
-        if output.format is not OutputFormat.rich:
-            raise CLIError(
-                "Cannot delete this dataset because training runs depend on it.",
-                code="CONFLICT",
-                details={"training_runs": blocking_runs},
-            )
-        lines = ["Cannot delete — active training runs depend on this dataset:"]
-        for run in affected.affected_training_runs:
-            run_name = (
-                console.escape(run.training_run_name)
-                if run.training_run_name
-                else "(unnamed)"
-            )
-            lines.append(f"  {run_name}")
-        lines.append("\nStop these training runs first, then retry.")
-        raise CLIError("\n".join(lines))
-
-    if not yes:
-        ds = platform_call(
-            "Fetching dataset...",
-            lambda: client.get_dataset(
-                name,
-                credentials=credentials,
-                workspace_id=workspace_id,
-            ),
-            output_console=console,
-        )
-        console.print(
-            f"  Dataset: {console.escape(ds.file_name)} ({format_size(ds.file_size)})"
-        )
-
-    from osmosis_ai.cli.prompts import require_confirmation
-
-    require_confirmation(f'Delete dataset "{name}"? This cannot be undone.', yes=yes)
-
-    platform_call(
-        "Deleting dataset...",
-        lambda: client.delete_dataset(
-            name,
-            credentials=credentials,
-            workspace_id=workspace_id,
-        ),
-        output_console=console,
-    )
-    return OperationResult(
-        operation="dataset.delete",
-        status="success",
-        resource={"id": name, **_workspace_result_context(workspace)},
-        message=f'Dataset "{name}" deleted.',
     )
 
 

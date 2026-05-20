@@ -1,157 +1,49 @@
-"""Rollout commands: validate, list."""
+"""Rollout commands: list."""
 
 from __future__ import annotations
 
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import typer
 
-from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE
 
+if TYPE_CHECKING:
+    from osmosis_ai.cli.output import CommandResult
+else:
+    CommandResult = Any
+
 app: typer.Typer = typer.Typer(
-    help="Manage rollouts (validate, list).",
+    help="Manage rollouts (init, list).",
     no_args_is_help=True,
 )
 
 
-def _workspace_result_context(workspace: Any) -> dict[str, Any]:
-    return {
-        "workspace": {"id": workspace.workspace_id, "name": workspace.workspace_name},
-        "project_root": str(workspace.project_root),
-    }
-
-
-def _resolve_validation_target(
-    config_path: Path,
-) -> tuple[str, Path, str, str, str | None, str | None]:
-    from osmosis_ai.eval.config import load_eval_config
-    from osmosis_ai.platform.cli.project_contract import (
-        ensure_project_config_path,
-        resolve_project_root_from_cwd,
-        validate_project_contract,
-    )
-    from osmosis_ai.platform.cli.training_config import load_training_config
-
-    project_root = resolve_project_root_from_cwd()
-    validate_project_contract(project_root)
-
-    resolved_path = config_path.resolve()
-    training_dir = (project_root / "configs" / "training").resolve()
-    eval_dir = (project_root / "configs" / "eval").resolve()
-
-    try:
-        resolved_path.relative_to(training_dir)
-    except ValueError:
-        pass
-    else:
-        ensure_project_config_path(
-            config_path,
-            project_root,
-            config_dir="configs/training",
-            command_label="`osmosis rollout validate`",
-        )
-        config = load_training_config(config_path)
-        return (
-            "training",
-            project_root,
-            config.experiment_rollout,
-            config.experiment_entrypoint,
-            None,
-            None,
-        )
-
-    try:
-        resolved_path.relative_to(eval_dir)
-    except ValueError:
-        pass
-    else:
-        ensure_project_config_path(
-            config_path,
-            project_root,
-            config_dir="configs/eval",
-            command_label="`osmosis rollout validate`",
-        )
-        config = load_eval_config(config_path)
-        return (
-            "eval",
-            project_root,
-            config.eval_rollout,
-            config.eval_entrypoint,
-            config.grader_module,
-            config.grader_config,
-        )
-
-    raise CLIError(
-        "`osmosis rollout validate` only accepts configs under "
-        "`configs/training/` or `configs/eval/`."
-    )
-
-
-def _validate_rollout_config(*, config_path: Path) -> Any:
-    from osmosis_ai.cli.output import DetailField, DetailResult
-    from osmosis_ai.platform.cli.project_contract import validate_rollout_backend
-
-    (
-        config_kind,
-        project_root,
-        rollout,
-        entrypoint,
-        grader_module,
-        grader_config_ref,
-    ) = _resolve_validation_target(config_path)
-
-    validate_rollout_backend(
-        project_root=project_root,
-        rollout=rollout,
-        entrypoint=entrypoint,
-        command_label="`osmosis rollout validate`",
-        grader_module=grader_module,
-        grader_config_ref=grader_config_ref,
-    )
-
-    rows: list[tuple[str, Any]] = [
-        ("Config", str(config_path.resolve())),
-        ("Kind", config_kind),
-        ("Rollout", rollout),
-        ("Entrypoint", entrypoint),
-    ]
-    if grader_module:
-        rows.append(("Grader override", grader_module))
-    rows.append(("Status", "Validation passed."))
-
-    return DetailResult(
-        title="Rollout Validation",
-        data={
-            "config": str(config_path.resolve()),
-            "kind": config_kind,
-            "rollout": rollout,
-            "entrypoint": entrypoint,
-            "grader_module": grader_module,
-            "grader_config": grader_config_ref,
-            "valid": True,
-        },
-        fields=[
-            DetailField(label=str(label), value=str(value)) for label, value in rows
-        ],
-    )
-
-
-@app.command("validate")
-def validate(
-    config_path: Path = typer.Argument(
+@app.command("init")
+def init(
+    name: str = typer.Argument(
         ...,
-        exists=True,
-        file_okay=True,
-        dir_okay=False,
-        readable=True,
-        resolve_path=True,
-        help="Path to training or eval TOML config file.",
+        help="Rollout name (lowercase letters, digits, and hyphens).",
     ),
-) -> Any:
-    """Validate a rollout entrypoint referenced by a config file."""
-    return _validate_rollout_config(config_path=config_path)
+    force: bool = typer.Option(
+        False,
+        "--force",
+        "-f",
+        help=(
+            "Overwrite existing rollouts/<name>/ directory and configs/{eval,training}/"
+            "<name>.toml. Without --force, the command refuses to clobber existing paths."
+        ),
+    ),
+) -> CommandResult | None:
+    """Scaffold a new rollout from the workspace template placeholders.
+
+    Creates ``rollouts/<name>/{main.py,pyproject.toml,README.md}`` and
+    ``configs/{eval,training}/<name>.toml`` so you can start editing right away.
+    Must run inside an Osmosis workspace directory.
+    """
+    from osmosis_ai.templates.init import init_command
+
+    return init_command(name=name, force=force)
 
 
 @app.command("list")
@@ -161,24 +53,26 @@ def list_rollouts(
     ),
     all_: bool = typer.Option(False, "--all", help="Show all rollouts."),
 ) -> Any:
-    """List rollouts in the linked project workspace."""
+    """List rollouts for the current workspace directory."""
     from osmosis_ai.cli.output import (
         ListColumn,
         ListResult,
         get_output_context,
         serialize_rollout,
     )
+    from osmosis_ai.cli.output.display import format_local_date
     from osmosis_ai.platform.cli.utils import (
         fetch_all_pages,
-        require_workspace_context,
+        require_git_workspace_directory_context,
         validate_list_options,
     )
+    from osmosis_ai.platform.cli.workspace_directory_context import git_result_context
 
     effective_limit, fetch_all = validate_list_options(limit=limit, all_=all_)
 
-    workspace = require_workspace_context()
-    credentials = workspace.credentials
-    workspace_id = workspace.workspace_id
+    context = require_git_workspace_directory_context()
+    credentials = context.credentials
+    git_identity = context.git_identity
 
     from osmosis_ai.platform.api.client import OsmosisClient
 
@@ -191,7 +85,7 @@ def list_rollouts(
                     limit=lim,
                     offset=off,
                     credentials=credentials,
-                    workspace_id=workspace_id,
+                    git_identity=git_identity,
                 ),
                 items_attr="rollouts",
             )
@@ -202,26 +96,59 @@ def list_rollouts(
                 limit=effective_limit,
                 offset=0,
                 credentials=credentials,
-                workspace_id=workspace_id,
+                git_identity=git_identity,
             )
             rollouts = page.rollouts
             total_count = page.total_count
             has_more = page.has_more
             next_offset = page.next_offset
 
+    items = [serialize_rollout(rollout) for rollout in rollouts]
+
     return ListResult(
         title="Rollouts",
-        items=[serialize_rollout(rollout) for rollout in rollouts],
+        items=items,
         total_count=total_count,
         has_more=has_more,
         next_offset=next_offset,
-        extra=_workspace_result_context(workspace),
+        extra=git_result_context(context),
         columns=[
-            ListColumn(key="name", label="Name"),
-            ListColumn(key="is_active", label="Active"),
-            ListColumn(key="repo_full_name", label="Repository"),
-            ListColumn(key="last_synced_commit_sha", label="Commit"),
-            ListColumn(key="created_at", label="Created"),
-            ListColumn(key="id", label="ID", no_wrap=True),
+            ListColumn(
+                key="name",
+                label="Name",
+                ratio=6,
+                overflow="fold",
+                min_width=20,
+            ),
+            ListColumn(
+                key="is_active",
+                label="Active",
+                no_wrap=True,
+                min_width=6,
+                max_width=6,
+            ),
+            ListColumn(
+                key="last_synced_commit_sha",
+                label="Commit",
+                no_wrap=True,
+                min_width=8,
+                max_width=8,
+            ),
+            ListColumn(
+                key="created_at",
+                label="Created",
+                no_wrap=True,
+                min_width=10,
+                max_width=10,
+            ),
+        ],
+        display_items=[
+            {
+                **item,
+                "is_active": "yes" if item["is_active"] else "no",
+                "last_synced_commit_sha": (item["last_synced_commit_sha"] or "")[:8],
+                "created_at": format_local_date(item["created_at"]).split(" ", 1)[0],
+            }
+            for item in items
         ],
     )

@@ -9,7 +9,7 @@ import typer
 from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE
 
 app: typer.Typer = typer.Typer(
-    help="Manage datasets (upload, download, list, info, preview, validate, delete).",
+    help="Manage datasets (upload, download, list, info, preview, validate).",
     no_args_is_help=True,
 )
 
@@ -17,11 +17,17 @@ app: typer.Typer = typer.Typer(
 @app.command("upload")
 def upload(
     file: str = typer.Argument(..., help="Path to the file to upload."),
+    overwrite: bool = typer.Option(
+        False,
+        "--overwrite",
+        help="Replace an existing dataset with the same name.",
+    ),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
 ) -> Any:
     """Upload a dataset file."""
     from osmosis_ai.platform.cli.dataset import upload as _upload
 
-    return _upload(file=file)
+    return _upload(file=file, overwrite=overwrite, yes=yes)
 
 
 @app.command("download")
@@ -87,14 +93,3 @@ def validate(
     from osmosis_ai.platform.cli.dataset import validate as _validate
 
     return _validate(file=file)
-
-
-@app.command("delete")
-def delete(
-    name: str = typer.Argument(..., help="Dataset name."),
-    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
-) -> Any:
-    """Delete a dataset."""
-    from osmosis_ai.platform.cli.dataset import delete as _delete
-
-    return _delete(name=name, yes=yes)

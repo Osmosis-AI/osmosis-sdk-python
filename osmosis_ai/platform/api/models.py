@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Literal
 
 # ── Dataset status constants ─────────────────────────────────────
@@ -72,6 +72,7 @@ class DatasetFile:
     organization_id: str | None = None
     created_at: str = ""
     updated_at: str = ""
+    platform_url: str | None = None
     # Upload info — only present in create_dataset response
     upload: UploadInfo | None = None
 
@@ -92,6 +93,7 @@ class DatasetFile:
             organization_id=data.get("organization_id"),
             created_at=data.get("created_at", ""),
             updated_at=data.get("updated_at", ""),
+            platform_url=data.get("platform_url"),
             upload=upload,
         )
 
@@ -176,26 +178,40 @@ class TrainingRun:
     error_message: str | None = None
     creator_name: str | None = None
     creator_email: str | None = None
+    platform_url: str | None = None
+    dataset_id: str | None = None
+    dataset_name: str | None = None
+    rollout_id: str | None = None
+    rollout_name: str | None = None
+    reward: float | None = field(default=None, kw_only=True)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> TrainingRun:
         model = data.get("model") or {}
+        dataset = data.get("dataset") or {}
+        rollout = data.get("rollout") or {}
         return cls(
             id=data["id"],
             name=data.get("name"),
             status=data.get("status", ""),
-            model_id=data.get("model_id"),
+            model_id=model.get("id"),
             model_name=model.get("model_name"),
             created_at=data.get("created_at", ""),
             started_at=data.get("started_at"),
             completed_at=data.get("completed_at"),
             eval_accuracy=data.get("eval_accuracy"),
+            reward=data.get("reward"),
             reward_increase_delta=data.get("reward_increase_delta"),
             processing_step=data.get("processing_step"),
             processing_percent=data.get("processing_percent"),
             error_message=data.get("error_message"),
             creator_name=data.get("creator_name"),
             creator_email=data.get("creator_email"),
+            platform_url=data.get("platform_url"),
+            dataset_id=dataset.get("id"),
+            dataset_name=dataset.get("file_name"),
+            rollout_id=rollout.get("id"),
+            rollout_name=rollout.get("name"),
         )
 
     @property
@@ -214,25 +230,33 @@ class TrainingRunDetail(TrainingRun):
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> TrainingRunDetail:
-        # Detail API returns { training_run: {..., enhanced_status}, model: {...} }
+        # Detail API returns unified entity refs for model, dataset, and rollout.
         run = data["training_run"]
         model = data.get("model") or {}
+        dataset = data.get("dataset") or {}
+        rollout = data.get("rollout") or {}
         return cls(
             id=run["id"],
             name=run.get("name"),
-            status=run.get("enhanced_status") or run.get("status", ""),
-            model_id=run.get("model_id"),
-            model_name=model.get("model_name"),
+            status=run.get("status", ""),
+            model_id=model.get("id"),
+            model_name=model.get("name"),
             created_at=run.get("created_at", ""),
             started_at=run.get("started_at"),
             completed_at=run.get("completed_at"),
             eval_accuracy=run.get("eval_accuracy"),
+            reward=run.get("reward"),
             reward_increase_delta=run.get("reward_increase_delta"),
             processing_step=run.get("processing_step"),
             processing_percent=run.get("processing_percent"),
             error_message=run.get("error_message"),
             creator_name=run.get("creator_name"),
             creator_email=run.get("creator_email"),
+            platform_url=run.get("platform_url"),
+            dataset_id=dataset.get("id"),
+            dataset_name=dataset.get("name"),
+            rollout_id=rollout.get("id"),
+            rollout_name=rollout.get("name"),
             examples_processed_count=run.get("examples_processed_count"),
             notes=run.get("notes"),
             hf_status=run.get("hf_status"),
@@ -261,17 +285,6 @@ class PaginatedTrainingRuns:
 
 
 @dataclass
-class DeleteTrainingRunResult:
-    """Result of deleting a training run."""
-
-    deleted: bool
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> DeleteTrainingRunResult:
-        return cls(deleted=data["deleted"])
-
-
-@dataclass
 class SubmitTrainingRunResult:
     """Result of submitting a new training run."""
 
@@ -279,6 +292,7 @@ class SubmitTrainingRunResult:
     name: str
     status: str
     created_at: str
+    platform_url: str | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> SubmitTrainingRunResult:
@@ -287,63 +301,8 @@ class SubmitTrainingRunResult:
             name=data["name"],
             status=data["status"],
             created_at=data["created_at"],
+            platform_url=data.get("platform_url"),
         )
-
-
-@dataclass
-class AffectedTrainingRun:
-    """A training run affected by a resource deletion."""
-
-    id: str
-    training_run_name: str | None = None
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> AffectedTrainingRun:
-        return cls(
-            id=data["id"],
-            training_run_name=data.get("training_run_name"),
-        )
-
-
-@dataclass
-class DatasetAffectedResources:
-    """Affected resources for a dataset deletion."""
-
-    affected_training_runs: list[AffectedTrainingRun]
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> DatasetAffectedResources:
-        return cls(
-            affected_training_runs=[
-                AffectedTrainingRun.from_dict(r)
-                for r in data.get("affected_training_runs", [])
-            ],
-        )
-
-    @property
-    def has_blocking_runs(self) -> bool:
-        return len(self.affected_training_runs) > 0
-
-
-@dataclass
-class ModelAffectedResources:
-    """Affected resources for a model deletion."""
-
-    training_runs_using_model: list[AffectedTrainingRun]
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> ModelAffectedResources:
-        return cls(
-            training_runs_using_model=[
-                AffectedTrainingRun.from_dict(r)
-                for r in data.get("training_runs_using_model", [])
-            ],
-        )
-
-    @property
-    def has_blocking_runs(self) -> bool:
-        """Whether there are training runs that block deletion."""
-        return len(self.training_runs_using_model) > 0
 
 
 # ── Training run metrics ─────────────────────────────────────────
@@ -426,43 +385,6 @@ class TrainingRunMetrics:
             status=data["status"],
             overview=TrainingRunMetricsOverview.from_dict(data["overview"]),
             metrics=[MetricHistory.from_dict(m) for m in data.get("metrics", [])],
-        )
-
-
-@dataclass
-class ProcessCount:
-    """Running process counts for a workspace-scoped resource category."""
-
-    count: int
-    valid: bool
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> ProcessCount:
-        return cls(count=data.get("count", 0), valid=data.get("valid", True))
-
-
-@dataclass
-class WorkspaceDeletionStatus:
-    """Workspace deletion readiness status."""
-
-    can_delete: bool
-    is_owner: bool
-    is_last_workspace: bool
-    has_running_processes: bool
-    feature_pipelines: ProcessCount
-    training_runs: ProcessCount
-    models: ProcessCount
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> WorkspaceDeletionStatus:
-        return cls(
-            can_delete=data.get("can_delete", False),
-            is_owner=data.get("is_owner", False),
-            is_last_workspace=data.get("is_last_workspace", False),
-            has_running_processes=data.get("has_running_processes", False),
-            feature_pipelines=ProcessCount.from_dict(data.get("feature_pipelines", {})),
-            training_runs=ProcessCount.from_dict(data.get("training_runs", {})),
-            models=ProcessCount.from_dict(data.get("models", {})),
         )
 
 
@@ -588,25 +510,6 @@ class DeploymentSummary:
         )
 
 
-@dataclass
-class RenameDeploymentResult:
-    """Result of renaming a checkpoint via PATCH /api/cli/deployments/[checkpointId]."""
-
-    id: str
-    old_checkpoint_name: str
-    checkpoint_name: str
-    status: str
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> RenameDeploymentResult:
-        return cls(
-            id=data["id"],
-            old_checkpoint_name=data.get("old_checkpoint_name", ""),
-            checkpoint_name=data.get("checkpoint_name", ""),
-            status=data.get("status", ""),
-        )
-
-
 # ── Rollouts ─────────────────────────────────────────────────────
 
 
@@ -656,7 +559,7 @@ class PaginatedRollouts:
         )
 
 
-# ── LoRA checkpoints (for `osmosis train status` + `osmosis deploy`) ─────
+# ── LoRA checkpoints (for `osmosis train info` + `osmosis deploy`) ───────
 
 
 @dataclass

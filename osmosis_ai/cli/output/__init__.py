@@ -19,6 +19,7 @@ from .result import (
     CommandResult,
     DetailField,
     DetailResult,
+    DetailSection,
     ListColumn,
     ListResult,
     MessageResult,
@@ -32,13 +33,13 @@ from .serializers import (
     serialize_model,
     serialize_rollout,
     serialize_training_run,
-    serialize_workspace,
 )
 
 __all__ = [
     "CommandResult",
     "DetailField",
     "DetailResult",
+    "DetailSection",
     "ListColumn",
     "ListResult",
     "MessageResult",
@@ -62,6 +63,5 @@ __all__ = [
     "serialize_model",
     "serialize_rollout",
     "serialize_training_run",
-    "serialize_workspace",
     "verify_output_emitted",
 ]

@@ -13,7 +13,6 @@ from osmosis_ai.cli.output.serializers import (
     serialize_model,
     serialize_rollout,
     serialize_training_run,
-    serialize_workspace,
 )
 from osmosis_ai.platform.api.models import (
     BaseModelInfo,
@@ -73,9 +72,14 @@ def test_serialize_training_run_keys() -> None:
             "id": "run_1",
             "name": "qwen3-run1",
             "status": "running",
-            "model_id": "model_1",
-            "model": {"model_name": "Qwen/Qwen3-30B-A3B-Instruct-2507-FP8"},
+            "model": {
+                "id": "model_1",
+                "model_name": "Qwen/Qwen3-30B-A3B-Instruct-2507-FP8",
+            },
+            "dataset": {"id": None, "file_name": "train.jsonl"},
+            "rollout": {"id": "rollout_1", "name": "math-rollout"},
             "eval_accuracy": 0.4,
+            "reward": 0.875,
             "reward_increase_delta": 0.02,
             "processing_step": "training",
             "processing_percent": 50.0,
@@ -89,7 +93,13 @@ def test_serialize_training_run_keys() -> None:
     )
     payload = serialize_training_run(run)
     _assert_keys_match_golden(payload, "training_run_serializer.json")
+    assert payload["model_id"] == "model_1"
     assert payload["model_name"] == "Qwen/Qwen3-30B-A3B-Instruct-2507-FP8"
+    assert payload["dataset_id"] is None
+    assert payload["dataset_name"] == "train.jsonl"
+    assert payload["rollout_id"] == "rollout_1"
+    assert payload["rollout_name"] == "math-rollout"
+    assert payload["reward"] == 0.875
 
 
 def test_serialize_checkpoint_keys() -> None:
@@ -130,7 +140,6 @@ def test_serialize_model_keys() -> None:
             "id": "model_1",
             "model_name": "Qwen/Qwen3-30B-A3B-Instruct-2507-FP8",
             "base_model": "Qwen/Qwen3",
-            "status": "ready",
             "creator_name": "brian",
             "created_at": "2026-04-26T00:00:00Z",
             "updated_at": "2026-04-26T00:00:01Z",
@@ -140,10 +149,10 @@ def test_serialize_model_keys() -> None:
     _assert_keys_match_golden(payload, "model_serializer.json")
 
 
-def test_serialize_workspace_minimal() -> None:
-    payload = serialize_workspace({"id": "ws_1", "name": "default"})
-    _assert_keys_match_golden(payload, "workspace_serializer.json")
-    assert payload == {"id": "ws_1", "name": "default"}
+def test_workspace_serializer_is_not_exported() -> None:
+    import osmosis_ai.cli.output as output
+
+    assert not hasattr(output, "serialize_workspace")
 
 
 def test_serialize_rollout_keys() -> None:

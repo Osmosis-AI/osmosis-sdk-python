@@ -38,24 +38,51 @@ Credentials path: `~/.config/osmosis/credentials.json`.
 Not logged in. Run 'osmosis auth login' first.
 ```
 
-Run `osmosis auth login` again before using platform commands that use the linked project workspace.
+Run `osmosis auth login` again before using platform-scoped commands from a
+workspace directory.
 
-### Wrong linked workspace
+## Workspace Directory Flow
 
-From the project directory, link this project with the intended workspace:
+Create or open a workspace in the Osmosis Platform, clone the repository created there,
+then run CLI commands from that workspace directory.
 
 ```bash
-osmosis project link --workspace <workspace-id-or-name> --yes
+git clone <repo-url>
+cd <repo>
+osmosis auth login
+osmosis doctor
+osmosis template apply multiply              # or add your rollout under rollouts/
+cp configs/training/default.toml configs/training/<run>.toml
+$EDITOR configs/training/<run>.toml          # set rollout, dataset, and model_path
+git add rollouts configs data
+git commit -m "configure training run"
+git push
+osmosis train submit configs/training/<run>.toml
 ```
 
-Use `osmosis project info` to inspect the workspace linked to the current
-project, or `osmosis project list` to see every local project link stored for
-the current platform. Add `--refresh` to `project info` when you need to
-refresh cached workspace metadata from the platform.
+Platform-scoped commands derive scope from the workspace directory's `origin` remote and
+send `X-Osmosis-Git: namespace/repo_name`. The CLI does not store or send a
+workspace ID for commands scoped by the workspace directory.
 
-## Reward and grader issues
+### Wrong workspace directory
 
-For **`osmosis eval run`**, scoring comes from your **Grader** implementation discovered next to the workflow — see [Eval](./eval.md).
+Confirm that the workspace directory's `origin` remote matches the repository created for
+the intended Osmosis Platform workspace. If it does not, clone the correct
+repository and rerun the command from that workspace directory.
+
+## Eval server and grader issues
+
+### Eval Fails Because 127.0.0.1:8000 Is Occupied
+
+Controller-backed eval owns the rollout server process and uses fixed port `8000`. Stop the existing local server or wait for the other eval run to finish. Cached-only eval runs return cached results without touching port `8000`.
+
+### Eval Server Starts But `/health` Never Passes
+
+Check the user-server subprocess log. For `osmosis eval run`, it is stored next to the eval cache under `.osmosis/cache/eval/<sanitized-model>/<sanitized-dataset-stem>/user-server-<task_id>.log`; for example, `openai/gpt-5-mini` appears as `openai-gpt-5-mini`. Eval starts the server with `uv run python <entrypoint>` from `rollouts/<rollout>`, so imports that only worked when eval loaded code in-process must be changed to work from the rollout directory. The rollout folder must contain `pyproject.toml`.
+
+### Missing Grader Rewards
+
+The controller tracks sample IDs when `/chat/completions` reaches the sample-create point. The grader callback must include a sample entry for every controller-created sample ID. Normal samples need a non-null reward. Skipped or removed samples can set `remove_sample=true` with `reward=None`.
 
 ## Rubric (`osmosis eval rubric`)
 
@@ -105,14 +132,14 @@ Upgrade the package or delete the specific cache file after `osmosis eval cache 
 
 If a training run completes with `rollout/raw_reward = 0` and `rollout/response_len/mean = 0`, every rollout timed out before producing output. This usually means the LLM inference engine was overwhelmed with too many concurrent requests.
 
-**Cause:** `rollout_batch_size` defaults to 64. With `n_samples_per_prompt = 8` that's 512 concurrent LLM calls hitting the rollout server simultaneously, which saturates the SGLang engine and causes every rollout to exceed `agent_workflow_timeout_s`.
+**Cause:** A high configured `rollout_batch_size` can create too many concurrent LLM calls. For example, `rollout_batch_size = 64` with `n_samples_per_prompt = 8` sends 512 concurrent calls to the rollout server, which can saturate the SGLang engine and cause every rollout to exceed `agent_workflow_timeout_s`.
 
 **Fix:** Reduce `rollout_batch_size` in your training config:
 
 ```toml
 [training]
 n_samples_per_prompt = 8
-rollout_batch_size = 8    # 8 × 8 = 64 concurrent calls instead of 512
+rollout_batch_size = 8    # 8 x 8 = 64 concurrent calls instead of 512
 ```
 
 If rollouts are still timing out with a smaller batch size (e.g. because your agent takes many turns), increase the timeout:
@@ -130,21 +157,25 @@ Common causes:
 - **Event loop blocking**: synchronous calls inside an `async` rollout workflow (e.g. `mcp.list_tools_sync()`) freeze the uvicorn event loop. New HTTP requests from our trainer cannot get a 200 OK within the 30 s httpx connect timeout. Fix: wrap blocking calls in `asyncio.get_running_loop().run_in_executor(None, ...)`.
 - **Subprocess exhaustion**: too many concurrent MCP subprocesses saturating OS limits. Set `ConcurrencyConfig(max_concurrent=64)` in your `AgentWorkflowConfig`.
 
-## Rollout validation
+## Training submission preflight
 
-### Validation failures
+### Preflight failures
 
-Run a one-shot check:
+Run an eval smoke test before submitting:
 
 ```bash
-osmosis rollout validate configs/training/<run>.toml
+osmosis eval run configs/eval/<run>.toml --limit 1
 ```
 
-Fix reported workflow/grader issues before submitting training.
+Then submit the training config:
 
-`osmosis rollout validate` requires a concrete `Grader` discoverable from the
-resolved entrypoint module. If validation reports that no grader was found, add
-one there; in most projects you will also define a `GraderConfig`.
+```bash
+osmosis train submit configs/training/<run>.toml
+```
+
+Training submission performs its own preflight checks before launching the
+managed run. Fix reported rollout, config, dataset, or repository scope issues before
+submitting again.
 
 ## See also
 

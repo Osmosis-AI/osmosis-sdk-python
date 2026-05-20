@@ -1,65 +1,29 @@
-"""Platform workspace management commands."""
+"""Local workspace directory health commands."""
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
 import typer
 
-app: typer.Typer = typer.Typer(
-    help="Manage platform workspaces (list, create, delete).",
-    invoke_without_command=True,
-    no_args_is_help=False,
-)
 
-
-@app.callback(invoke_without_command=True)
-def workspace_default(ctx: typer.Context) -> None:
-    """Manage platform workspaces. Launches interactive mode when no subcommand is given."""
-    if ctx.invoked_subcommand is None:
-        from osmosis_ai.cli.errors import CLIError
-        from osmosis_ai.cli.output import OutputFormat, get_output_context
-        from osmosis_ai.platform.cli.workspace import workspace as workspace_ui
-
-        output = get_output_context()
-        if output.format is not OutputFormat.rich:
-            raise CLIError(
-                "Interactive workspace UI is unavailable in this mode. "
-                "Use 'osmosis workspace list' or 'osmosis workspace create <name>'.",
-                code="INTERACTIVE_REQUIRED",
-            )
-        workspace_ui()
-
-
-@app.command("list")
-def list_workspaces() -> Any:
-    """List available platform workspaces."""
-    from osmosis_ai.platform.cli.workspace import list_workspaces as _list_workspaces
-
-    return _list_workspaces()
-
-
-@app.command("create")
-def create(
-    name: str = typer.Argument(
-        ..., help="Workspace name (lowercase, hyphens allowed)."
+def doctor(
+    path: Path = typer.Argument(
+        Path("."),
+        exists=True,
+        file_okay=True,
+        dir_okay=True,
+        resolve_path=True,
+        help="Path inside the workspace directory (defaults to current directory).",
     ),
-    timezone: str = typer.Option(
-        "UTC", "--timezone", help="IANA timezone (e.g. America/New_York)."
+    fix: bool = typer.Option(
+        False,
+        "--fix",
+        help="Create missing scaffold paths. Existing files are never overwritten.",
     ),
 ) -> Any:
-    """Create a new platform workspace."""
-    from osmosis_ai.platform.cli.workspace import create_workspace
+    """Inspect and optionally repair the canonical workspace directory scaffold."""
+    from osmosis_ai.platform.cli.workspace_directory import doctor_workspace_directory
 
-    return create_workspace(name=name, timezone=timezone)
-
-
-@app.command("delete")
-def delete(
-    name: str = typer.Argument(..., help="Workspace name to delete."),
-    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
-) -> Any:
-    """Delete a platform workspace."""
-    from osmosis_ai.platform.cli.workspace import delete_workspace
-
-    return delete_workspace(name=name, yes=yes)
+    return doctor_workspace_directory(path=path, fix=fix)

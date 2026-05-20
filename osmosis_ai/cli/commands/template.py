@@ -11,14 +11,21 @@ from typing import Any
 import typer
 
 app: typer.Typer = typer.Typer(
-    help="Add starter templates into your Osmosis project.",
+    help="Add starter templates into your Osmosis workspace directory.",
     no_args_is_help=True,
 )
 
 
+def _complete_template_names(ctx: Any, args: list[str], incomplete: str) -> list[str]:
+    del ctx, args
+    from osmosis_ai.templates.registry import list_templates as registry_list_templates
+
+    return [name for name in registry_list_templates() if name.startswith(incomplete)]
+
+
 @app.command("list")
 def list_templates() -> Any:
-    """List bundled cookbook templates."""
+    """List starter templates."""
     from osmosis_ai.templates.cli import list_command
 
     return list_command()
@@ -27,7 +34,9 @@ def list_templates() -> Any:
 @app.command("apply")
 def apply(
     name: str = typer.Argument(
-        ..., help="Template name (see 'osmosis template list')."
+        ...,
+        help="Template name (see 'osmosis template list').",
+        autocompletion=_complete_template_names,
     ),
     force: bool = typer.Option(
         False,
@@ -39,7 +48,7 @@ def apply(
         ),
     ),
 ) -> Any:
-    """Copy a bundled template directly into the project's canonical layout.
+    """Copy a starter template into the workspace directory's canonical layout.
 
     Files land at ``rollouts/<name>/`` and ``configs/{training,eval}/<name>.toml``
     so the rollout is immediately runnable.

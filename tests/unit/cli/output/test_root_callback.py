@@ -1,4 +1,4 @@
-"""Root callback tests for --format/--json/--plain parsing."""
+"""Root callback tests for --json/--plain parsing."""
 
 from __future__ import annotations
 

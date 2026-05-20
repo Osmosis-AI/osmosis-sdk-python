@@ -10,44 +10,9 @@ from typing import Any
 
 import typer
 
-from osmosis_ai.cli.console import console
 from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE
 
-app: typer.Typer = typer.Typer(
-    help="Manage base models (list, delete).", no_args_is_help=True
-)
-
-
-def _workspace_result_context(workspace: Any) -> dict[str, Any]:
-    return {
-        "workspace": {"id": workspace.workspace_id, "name": workspace.workspace_name},
-        "project_root": str(workspace.project_root),
-    }
-
-
-def _require_confirmation(message: str, *, yes: bool) -> None:
-    if yes:
-        return
-
-    from osmosis_ai.cli.errors import CLIError
-    from osmosis_ai.cli.output import OutputFormat, get_output_context
-
-    output = get_output_context()
-    if output.format is not OutputFormat.rich or not output.interactive:
-        err = CLIError(
-            "Use --yes to confirm in non-interactive mode.",
-            code="INTERACTIVE_REQUIRED",
-        )
-        if output.format is OutputFormat.json:
-            from osmosis_ai.cli.output import emit_structured_error_to_stderr
-
-            emit_structured_error_to_stderr(err)
-            raise typer.Exit(1)
-        raise err
-
-    from osmosis_ai.cli.prompts import require_confirmation
-
-    require_confirmation(message, yes=yes)
+app: typer.Typer = typer.Typer(help="Manage base models (list).", no_args_is_help=True)
 
 
 @app.command("list")
@@ -59,24 +24,26 @@ def list_models(
     ),
     all_: bool = typer.Option(False, "--all", help="Show all base models."),
 ) -> Any:
-    """List base models in the linked project workspace."""
+    """List base models for the current workspace directory."""
     from osmosis_ai.cli.output import (
         ListColumn,
         ListResult,
         get_output_context,
         serialize_model,
     )
+    from osmosis_ai.cli.output.display import created_column_label, format_local_date
     from osmosis_ai.platform.cli.utils import (
         fetch_all_pages,
-        require_workspace_context,
+        require_git_workspace_directory_context,
         validate_list_options,
     )
+    from osmosis_ai.platform.cli.workspace_directory_context import git_result_context
 
     effective_limit, fetch_all = validate_list_options(limit=limit, all_=all_)
 
-    workspace = require_workspace_context()
-    credentials = workspace.credentials
-    workspace_id = workspace.workspace_id
+    context = require_git_workspace_directory_context()
+    credentials = context.credentials
+    git_identity = context.git_identity
 
     from osmosis_ai.platform.api.client import OsmosisClient
 
@@ -89,7 +56,7 @@ def list_models(
                     limit=lim,
                     offset=off,
                     credentials=credentials,
-                    workspace_id=workspace_id,
+                    git_identity=git_identity,
                 ),
                 items_attr="models",
             )
@@ -100,7 +67,7 @@ def list_models(
                 limit=effective_limit,
                 offset=0,
                 credentials=credentials,
-                workspace_id=workspace_id,
+                git_identity=git_identity,
             )
             models = result.models
             total = result.total_count
@@ -113,84 +80,22 @@ def list_models(
         total_count=total,
         has_more=has_more,
         next_offset=next_offset,
-        extra=_workspace_result_context(workspace),
+        extra=git_result_context(context),
         columns=[
-            ListColumn(key="model_name", label="Model"),
-            ListColumn(key="base_model", label="Base"),
-            ListColumn(key="status", label="Status"),
-            ListColumn(key="creator_name", label="Creator"),
-            ListColumn(key="created_at", label="Created"),
-            ListColumn(key="id", label="ID", no_wrap=True),
+            ListColumn(key="model_name", label="Name", ratio=4, overflow="fold"),
+            ListColumn(key="base_model", label="Base", ratio=2, overflow="fold"),
+            ListColumn(
+                key="created_at",
+                label=created_column_label(),
+                no_wrap=True,
+                ratio=1,
+            ),
         ],
-    )
-
-
-@app.command("delete")
-def delete(
-    name: str = typer.Argument(..., help="Model path (e.g. google/gemma-2-9b-it)."),
-    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
-) -> Any:
-    """Delete a base model."""
-    from osmosis_ai.cli.errors import CLIError
-    from osmosis_ai.cli.output import OperationResult, OutputFormat, get_output_context
-    from osmosis_ai.platform.api.client import OsmosisClient
-    from osmosis_ai.platform.auth.platform_client import PlatformAPIError
-    from osmosis_ai.platform.cli.utils import require_workspace_context
-
-    workspace = require_workspace_context()
-    credentials = workspace.credentials
-    workspace_id = workspace.workspace_id
-    client = OsmosisClient()
-    output = get_output_context()
-
-    try:
-        with output.status("Checking model dependencies..."):
-            affected = client.get_model_affected_resources(
-                name,
-                credentials=credentials,
-                workspace_id=workspace_id,
-            )
-    except PlatformAPIError as e:
-        raise CLIError(f"Unable to verify model dependencies: {e}") from e
-
-    if affected.has_blocking_runs:
-        blocking_runs = [
+        display_items=[
             {
-                "id": run.id,
-                "training_run_name": run.training_run_name,
+                **serialize_model(model),
+                "created_at": format_local_date(model.created_at),
             }
-            for run in affected.training_runs_using_model
-        ]
-        if output.format is not OutputFormat.rich:
-            raise CLIError(
-                "Cannot delete this model because training runs depend on it.",
-                details={"training_runs": blocking_runs},
-            )
-        console.print(
-            "Cannot delete this model — the following training runs depend on it:",
-            style="red",
-        )
-        for run in affected.training_runs_using_model:
-            short_id = run.id[:8]
-            label = (
-                console.escape(run.training_run_name)
-                if run.training_run_name
-                else f"(unnamed: {short_id})"
-            )
-            console.print(f"  {label}  {console.format_styled(short_id, 'dim')}")
-        console.print("\nDelete these training runs first, then retry.", style="dim")
-        raise typer.Exit(1)
-
-    _require_confirmation(f'Delete model "{name}"? This cannot be undone.', yes=yes)
-    with output.status("Deleting model..."):
-        client.delete_model(
-            name,
-            credentials=credentials,
-            workspace_id=workspace_id,
-        )
-    return OperationResult(
-        operation="model.delete",
-        status="success",
-        resource={"name": name, **_workspace_result_context(workspace)},
-        message=f'Model "{name}" deleted.',
+            for model in models
+        ],
     )

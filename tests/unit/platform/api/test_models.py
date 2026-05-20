@@ -4,25 +4,42 @@ from __future__ import annotations
 
 import pytest
 
+from osmosis_ai.platform.api import models as api_models
 from osmosis_ai.platform.api.models import (
     STATUSES_ERROR,
     STATUSES_IN_PROGRESS,
     STATUSES_INACTIVE,
     STATUSES_SUCCESS,
     STATUSES_TERMINAL,
-    AffectedTrainingRun,
     DatasetDownloadInfo,
     DatasetFile,
     MetricDataPoint,
     MetricHistory,
-    ModelAffectedResources,
-    ProcessCount,
     SubmitTrainingRunResult,
+    TrainingRunDetail,
     TrainingRunMetrics,
     TrainingRunMetricsOverview,
     UploadInfo,
-    WorkspaceDeletionStatus,
 )
+
+REMOVED_RESPONSE_MODELS = (
+    "DeleteTrainingRunResult",
+    "AffectedTrainingRun",
+    "DatasetAffectedResources",
+    "ModelAffectedResources",
+    "WorkspaceDeletionStatus",
+    "ProcessCount",
+    "RenameDeploymentResult",
+)
+
+
+class TestRemovedResponseModels:
+    """Deleted response models must not be exposed by the models module."""
+
+    @pytest.mark.parametrize("model_name", REMOVED_RESPONSE_MODELS)
+    def test_removed_response_model_is_not_exposed(self, model_name: str) -> None:
+        assert not hasattr(api_models, model_name)
+
 
 # =============================================================================
 # UploadInfo Tests
@@ -179,99 +196,6 @@ class TestStatusConstants:
                 )
 
 
-class TestAffectedTrainingRun:
-    """Tests for AffectedTrainingRun.from_dict."""
-
-    def test_from_dict(self) -> None:
-        data = {"id": "run-1", "training_run_name": "My Run"}
-        run = AffectedTrainingRun.from_dict(data)
-        assert run.id == "run-1"
-        assert run.training_run_name == "My Run"
-
-    def test_from_dict_null_training_run_name(self) -> None:
-        data = {"id": "run-2"}
-        run = AffectedTrainingRun.from_dict(data)
-        assert run.training_run_name is None
-
-
-class TestModelAffectedResources:
-    """Tests for ModelAffectedResources.from_dict."""
-
-    def test_empty(self) -> None:
-        data = {"training_runs_using_model": []}
-        res = ModelAffectedResources.from_dict(data)
-        assert res.training_runs_using_model == []
-        assert res.has_blocking_runs is False
-
-    def test_with_blocking_runs(self) -> None:
-        data = {
-            "training_runs_using_model": [
-                {"id": "r1", "training_run_name": "Run 1"},
-                {"id": "r2", "training_run_name": None},
-            ],
-        }
-        res = ModelAffectedResources.from_dict(data)
-        assert len(res.training_runs_using_model) == 2
-        assert res.has_blocking_runs is True
-
-
-class TestWorkspaceDeletionStatus:
-    """Tests for WorkspaceDeletionStatus.from_dict."""
-
-    def test_can_delete(self) -> None:
-        data = {
-            "can_delete": True,
-            "is_owner": True,
-            "is_last_workspace": False,
-            "has_running_processes": False,
-            "feature_pipelines": {"count": 0, "valid": True},
-            "training_runs": {"count": 0, "valid": True},
-            "models": {"count": 0, "valid": True},
-        }
-        status = WorkspaceDeletionStatus.from_dict(data)
-        assert status.can_delete is True
-        assert status.is_owner is True
-        assert status.is_last_workspace is False
-        assert status.has_running_processes is False
-        assert status.feature_pipelines == ProcessCount(count=0, valid=True)
-        assert status.training_runs == ProcessCount(count=0, valid=True)
-        assert status.models == ProcessCount(count=0, valid=True)
-
-    def test_with_running_processes(self) -> None:
-        data = {
-            "can_delete": False,
-            "is_owner": True,
-            "is_last_workspace": False,
-            "has_running_processes": True,
-            "feature_pipelines": {"count": 2, "valid": False},
-            "training_runs": {"count": 0, "valid": True},
-            "models": {"count": 1, "valid": False},
-        }
-        status = WorkspaceDeletionStatus.from_dict(data)
-        assert status.can_delete is False
-        assert status.has_running_processes is True
-        assert status.feature_pipelines.count == 2
-        assert status.feature_pipelines.valid is False
-        assert status.training_runs.count == 0
-        assert status.training_runs.valid is True
-        assert status.models.count == 1
-        assert status.models.valid is False
-
-    def test_not_owner(self) -> None:
-        data = {
-            "can_delete": False,
-            "is_owner": False,
-            "is_last_workspace": False,
-            "has_running_processes": False,
-            "feature_pipelines": {"count": 0, "valid": True},
-            "training_runs": {"count": 0, "valid": True},
-            "models": {"count": 0, "valid": True},
-        }
-        status = WorkspaceDeletionStatus.from_dict(data)
-        assert status.can_delete is False
-        assert status.is_owner is False
-
-
 # =============================================================================
 # Metric Data Model Tests
 # =============================================================================
@@ -286,12 +210,112 @@ class TestSubmitTrainingRunResult:
             "name": "my-training-run",
             "status": "pending",
             "created_at": "2026-04-10T12:00:00Z",
+            "platform_url": "https://platform.osmosis.ai/ws/training/run",
         }
         result = SubmitTrainingRunResult.from_dict(data)
         assert result.id == "550e8400-e29b-41d4-a716-446655440000"
         assert result.name == "my-training-run"
         assert result.status == "pending"
         assert result.created_at == "2026-04-10T12:00:00Z"
+        assert result.platform_url == "https://platform.osmosis.ai/ws/training/run"
+
+
+class TestTrainingRun:
+    def test_from_dict_parses_reward(self) -> None:
+        run = api_models.TrainingRun.from_dict(
+            {
+                "id": "run_1",
+                "name": "reward-run",
+                "status": "finished",
+                "reward": 0.875,
+            }
+        )
+
+        assert run.reward == 0.875
+
+    def test_from_dict_parses_nested_model_and_dataset(self) -> None:
+        run = api_models.TrainingRun.from_dict(
+            {
+                "id": "run_1",
+                "name": "nested-run",
+                "status": "finished",
+                "model": {"id": None, "model_name": "Qwen/Qwen3"},
+                "dataset": {"id": "dataset_1", "file_name": "train.jsonl"},
+                "rollout": {"id": "rollout_1", "name": "math-rollout"},
+            }
+        )
+
+        assert run.model_id is None
+        assert run.model_name == "Qwen/Qwen3"
+        assert run.dataset_id == "dataset_1"
+        assert run.dataset_name == "train.jsonl"
+        assert run.rollout_id == "rollout_1"
+        assert run.rollout_name == "math-rollout"
+
+    def test_from_dict_uses_nested_training_run_contract_only(self) -> None:
+        run = api_models.TrainingRun.from_dict(
+            {
+                "id": "run_1",
+                "name": "nested-run",
+                "status": "finished",
+                "model_id": "legacy_model",
+                "model_name": "legacy-model-name",
+                "dataset_id": "legacy_dataset",
+                "dataset_name": "legacy-dataset-name",
+                "model": {"id": "model_1", "model_name": "Qwen/Qwen3"},
+                "dataset": {"id": "dataset_1", "file_name": "train.jsonl"},
+            }
+        )
+
+        assert run.model_id == "model_1"
+        assert run.model_name == "Qwen/Qwen3"
+        assert run.dataset_id == "dataset_1"
+        assert run.dataset_name == "train.jsonl"
+
+    def test_from_dict_defaults_missing_reward_to_none(self) -> None:
+        run = api_models.TrainingRun.from_dict(
+            {
+                "id": "run_1",
+                "name": "legacy-run",
+                "status": "finished",
+            }
+        )
+
+        assert run.reward is None
+
+    def test_positional_constructor_preserves_reward_increase_delta(self) -> None:
+        run = api_models.TrainingRun(
+            "run_1", "run", "finished", None, None, "", None, None, 0.1, 0.2
+        )
+
+        assert run.reward_increase_delta == 0.2
+        assert run.reward is None
+
+
+class TestTrainingRunDetail:
+    def test_from_dict_parses_platform_entity_refs(self) -> None:
+        run = TrainingRunDetail.from_dict(
+            {
+                "training_run": {
+                    "id": "run_1",
+                    "name": "entity-ref-run",
+                    "status": "finished",
+                    "examples_processed_count": 42,
+                },
+                "model": {"id": "model_1", "name": "Qwen/Qwen3"},
+                "dataset": {"id": "dataset_1", "name": "train.jsonl"},
+                "rollout": {"id": "rollout_1", "name": "math-rollout"},
+            }
+        )
+
+        assert run.id == "run_1"
+        assert run.model_id == "model_1"
+        assert run.model_name == "Qwen/Qwen3"
+        assert run.dataset_id == "dataset_1"
+        assert run.dataset_name == "train.jsonl"
+        assert run.rollout_id == "rollout_1"
+        assert run.rollout_name == "math-rollout"
+        assert run.examples_processed_count == 42
 
 
 class TestMetricDataPoint:
@@ -489,22 +513,6 @@ class TestDeploymentModels:
         assert s.id == "dep_1"
         assert s.checkpoint_name == "x"
         assert s.status == "active"
-
-    def test_rename_deployment_result(self) -> None:
-        from osmosis_ai.platform.api.models import RenameDeploymentResult
-
-        r = RenameDeploymentResult.from_dict(
-            {
-                "id": "dep_1",
-                "old_checkpoint_name": "old",
-                "checkpoint_name": "new",
-                "status": "active",
-            }
-        )
-        assert r.id == "dep_1"
-        assert r.old_checkpoint_name == "old"
-        assert r.checkpoint_name == "new"
-        assert r.status == "active"
 
     def test_deployment_status_frozensets(self) -> None:
         from osmosis_ai.platform.api.models import (

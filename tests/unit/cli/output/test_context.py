@@ -76,17 +76,9 @@ def test_install_output_context_sets_obj_and_contextvar() -> None:
     assert _output_context_var.get() is None
 
 
-def test_argv_prescan_recognises_format_flags() -> None:
+def test_argv_prescan_recognises_output_flags() -> None:
     assert _argv_format_prescan(["--json", "dataset", "list"]) is OutputFormat.json
     assert _argv_format_prescan(["--plain", "dataset", "list"]) is OutputFormat.plain
-    assert (
-        _argv_format_prescan(["--format", "json", "dataset", "list"])
-        is OutputFormat.json
-    )
-    assert (
-        _argv_format_prescan(["--format=plain", "dataset", "list"])
-        is OutputFormat.plain
-    )
 
 
 def test_argv_prescan_ignores_command_local_output() -> None:
@@ -112,48 +104,28 @@ def test_get_output_context_layer_2_uses_usage_error_ctx() -> None:
 
 def test_resolve_format_selectors_default_is_rich() -> None:
     assert (
-        resolve_format_selectors(None, json_alias=False, plain_alias=False)
+        resolve_format_selectors(json_alias=False, plain_alias=False)
         is OutputFormat.rich
     )
 
 
 def test_resolve_format_selectors_json_alias() -> None:
     assert (
-        resolve_format_selectors(None, json_alias=True, plain_alias=False)
+        resolve_format_selectors(json_alias=True, plain_alias=False)
         is OutputFormat.json
     )
 
 
 def test_resolve_format_selectors_plain_alias() -> None:
     assert (
-        resolve_format_selectors(None, json_alias=False, plain_alias=True)
+        resolve_format_selectors(json_alias=False, plain_alias=True)
         is OutputFormat.plain
-    )
-
-
-def test_resolve_format_selectors_explicit_value_wins_over_unset_aliases() -> None:
-    assert (
-        resolve_format_selectors(OutputFormat.json, json_alias=False, plain_alias=False)
-        is OutputFormat.json
-    )
-
-
-def test_resolve_format_selectors_consistent_alias_and_value_is_ok() -> None:
-    assert (
-        resolve_format_selectors(OutputFormat.json, json_alias=True, plain_alias=False)
-        is OutputFormat.json
     )
 
 
 def test_resolve_format_selectors_json_and_plain_conflict() -> None:
     with pytest.raises(CLIError) as exc:
-        resolve_format_selectors(None, json_alias=True, plain_alias=True)
-    assert exc.value.code == "VALIDATION"
-
-
-def test_resolve_format_selectors_format_and_alias_conflict() -> None:
-    with pytest.raises(CLIError) as exc:
-        resolve_format_selectors(OutputFormat.plain, json_alias=True, plain_alias=False)
+        resolve_format_selectors(json_alias=True, plain_alias=True)
     assert exc.value.code == "VALIDATION"
 
 

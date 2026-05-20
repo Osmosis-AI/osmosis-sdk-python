@@ -15,37 +15,40 @@ import osmosis_ai.platform.api.client as api_client_module
 import osmosis_ai.platform.api.download as download_module
 import osmosis_ai.platform.api.upload as upload_module
 import osmosis_ai.platform.cli.dataset as dataset_module
+from osmosis_ai.cli.output import OperationResult
 from osmosis_ai.platform.api.models import (
-    AffectedTrainingRun,
-    DatasetAffectedResources,
     DatasetDownloadInfo,
     DatasetFile,
     PaginatedDatasets,
     UploadInfo,
 )
 
-WORKSPACE_ID = "ws_1"
-WORKSPACE_NAME = "ws-a"
-PROJECT_ROOT = Path("/tmp/osmosis-project")
+GIT_IDENTITY = "acme/rollouts"
+REPO_URL = "https://github.com/acme/rollouts.git"
+PROJECT_ROOT = Path("/repo")
 
 
-def _stub_workspace_context(monkeypatch: pytest.MonkeyPatch) -> object:
+def assert_git_context(data: dict[str, object]) -> None:
+    assert data["workspace_directory"] == "/repo"
+    assert data["git"] == {
+        "identity": GIT_IDENTITY,
+        "remote_url": REPO_URL,
+    }
+    assert "workspace" not in data
+
+
+def _stub_git_context(monkeypatch: pytest.MonkeyPatch) -> object:
     fake_credentials = object()
-    workspace = SimpleNamespace(
-        project_root=PROJECT_ROOT,
-        workspace_id=WORKSPACE_ID,
-        workspace_name=WORKSPACE_NAME,
+    context = SimpleNamespace(
+        workspace_directory=PROJECT_ROOT,
+        git_identity=GIT_IDENTITY,
+        repo_url=REPO_URL,
         credentials=fake_credentials,
     )
     monkeypatch.setattr(
         dataset_module,
-        "require_workspace_context",
-        lambda: workspace,
-    )
-    monkeypatch.setattr(
-        dataset_module,
-        "_require_subscription",
-        lambda *, workspace_id, workspace_name: None,
+        "require_git_workspace_directory_context",
+        lambda: context,
     )
     return fake_credentials
 
@@ -60,7 +63,7 @@ def test_dataset_list_requires_linked_project(
     rc = main(["--json", "dataset", "list"])
 
     assert rc == 1
-    assert "Not in an Osmosis project" in capsys.readouterr().err
+    assert "Osmosis workspace directory" in capsys.readouterr().err
 
 
 def test_dataset_validate_is_project_independent(
@@ -81,22 +84,6 @@ def test_dataset_validate_is_project_independent(
     assert rc == 0
 
 
-def test_require_auth_no_workspace_reports_linked_project_before_credentials(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    import osmosis_ai.platform.cli.utils as utils_module
-    from osmosis_ai.cli.errors import CLIError
-
-    monkeypatch.setattr(
-        utils_module,
-        "require_credentials",
-        lambda: pytest.fail("credentials should not be loaded"),
-    )
-
-    with pytest.raises(CLIError, match="linked Osmosis project"):
-        utils_module._require_auth()
-
-
 def _dataset(
     *,
     id: str = "ds_1",
@@ -104,6 +91,7 @@ def _dataset(
     file_size: int = 100,
     status: str = "uploaded",
     data_preview=None,
+    platform_url: str | None = None,
 ) -> DatasetFile:
     return DatasetFile(
         id=id,
@@ -113,16 +101,17 @@ def _dataset(
         data_preview=data_preview,
         created_at="2026-04-26T00:00:00Z",
         updated_at="2026-04-26T00:00:01Z",
+        platform_url=platform_url,
     )
 
 
 def test_dataset_list_json_envelope(monkeypatch, capsys) -> None:
-    fake_credentials = _stub_workspace_context(monkeypatch)
+    fake_credentials = _stub_git_context(monkeypatch)
 
     class FakeClient:
-        def list_datasets(self, *, limit, offset, workspace_id, credentials=None):
+        def list_datasets(self, *, limit, offset, git_identity, credentials=None):
             assert credentials is fake_credentials
-            assert workspace_id == WORKSPACE_ID
+            assert git_identity == GIT_IDENTITY
             assert limit == 10
             assert offset == 0
             return PaginatedDatasets(
@@ -144,16 +133,15 @@ def test_dataset_list_json_envelope(monkeypatch, capsys) -> None:
     assert payload["total_count"] == 20
     assert payload["has_more"] is True
     assert payload["next_offset"] == 10
-    assert payload["workspace"] == {"id": WORKSPACE_ID, "name": WORKSPACE_NAME}
-    assert payload["project_root"] == str(PROJECT_ROOT)
+    assert_git_context(payload)
 
 
 def test_dataset_list_plain_emits_tab_separated_rows(monkeypatch, capsys) -> None:
-    _stub_workspace_context(monkeypatch)
+    _stub_git_context(monkeypatch)
 
     class FakeClient:
-        def list_datasets(self, *, limit, offset, workspace_id, credentials=None):
-            assert workspace_id == WORKSPACE_ID
+        def list_datasets(self, *, limit, offset, git_identity, credentials=None):
+            assert git_identity == GIT_IDENTITY
             return PaginatedDatasets(
                 datasets=[
                     _dataset(id="ds_1", file_name="a.jsonl", status="uploaded"),
@@ -169,19 +157,22 @@ def test_dataset_list_plain_emits_tab_separated_rows(monkeypatch, capsys) -> Non
     captured = capsys.readouterr()
 
     assert exit_code == 0
-    assert captured.out.splitlines() == [
-        "a.jsonl\t[uploaded]\t100 B\t2026-04-26\tds_1",
-        "b.jsonl\t[pending]\t100 B\t2026-04-26\tds_2",
-    ]
+    lines = captured.out.splitlines()
+    assert len(lines[0].split("\t")) == 4
+    assert lines[0].startswith("a.jsonl\t[uploaded]\t100 B\t")
+    assert len(lines[1].split("\t")) == 4
+    assert lines[1].startswith("b.jsonl\t[pending]\t100 B\t")
+    assert "\tds_1" not in lines[0]
+    assert "\tds_2" not in lines[1]
 
 
 def test_dataset_info_json_envelope(monkeypatch, capsys) -> None:
-    _stub_workspace_context(monkeypatch)
+    _stub_git_context(monkeypatch)
 
     class FakeClient:
-        def get_dataset(self, name, *, workspace_id, credentials=None):
+        def get_dataset(self, name, *, git_identity, credentials=None):
             assert name == "ds_1"
-            assert workspace_id == WORKSPACE_ID
+            assert git_identity == GIT_IDENTITY
             return _dataset(file_size=12345)
 
     monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
@@ -194,17 +185,35 @@ def test_dataset_info_json_envelope(monkeypatch, capsys) -> None:
     assert payload["schema_version"] == 1
     assert payload["data"]["id"] == "ds_1"
     assert payload["data"]["file_size"] == 12345
-    assert payload["data"]["workspace"] == {"id": WORKSPACE_ID, "name": WORKSPACE_NAME}
-    assert payload["data"]["project_root"] == str(PROJECT_ROOT)
+    assert_git_context(payload["data"])
+
+
+def test_dataset_info_places_platform_url_after_table(monkeypatch) -> None:
+    _stub_git_context(monkeypatch)
+    expected_url = "https://platform.osmosis.ai/ws/datasets/ds_1"
+
+    class FakeClient:
+        def get_dataset(self, name, *, git_identity, credentials=None):
+            assert name == "ds_1"
+            assert git_identity == GIT_IDENTITY
+            return _dataset(file_size=12345, platform_url=expected_url)
+
+    monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+
+    result = dataset_module.info("ds_1")
+
+    assert result.data["platform_url"] == expected_url
+    assert all(field.value != expected_url for field in result.fields)
+    assert result.display_hints == [f"View: {expected_url}"]
 
 
 def test_dataset_preview_json_includes_rows(monkeypatch, capsys) -> None:
-    _stub_workspace_context(monkeypatch)
+    _stub_git_context(monkeypatch)
     rows = [{"system_prompt": "s", "user_prompt": "u", "ground_truth": "g"}]
 
     class FakeClient:
-        def get_dataset(self, name, *, workspace_id, credentials=None):
-            assert workspace_id == WORKSPACE_ID
+        def get_dataset(self, name, *, git_identity, credentials=None):
+            assert git_identity == GIT_IDENTITY
             return _dataset(data_preview=rows)
 
     monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
@@ -216,8 +225,7 @@ def test_dataset_preview_json_includes_rows(monkeypatch, capsys) -> None:
     payload = json.loads(captured.out)
     assert payload["data"]["available"] is True
     assert payload["data"]["rows"] == rows
-    assert payload["data"]["workspace"] == {"id": WORKSPACE_ID, "name": WORKSPACE_NAME}
-    assert payload["data"]["project_root"] == str(PROJECT_ROOT)
+    assert_git_context(payload["data"])
 
 
 def test_dataset_validate_json_envelope(tmp_path: Path, capsys) -> None:
@@ -268,7 +276,7 @@ def test_dataset_upload_json_stdout_is_one_envelope(
     tmp_path: Path,
     capsys,
 ) -> None:
-    fake_credentials = _stub_workspace_context(monkeypatch)
+    fake_credentials = _stub_git_context(monkeypatch)
     file_path = tmp_path / "train.jsonl"
     file_path.write_text(
         json.dumps({"system_prompt": "s", "user_prompt": "u", "ground_truth": "g"})
@@ -288,10 +296,10 @@ def test_dataset_upload_json_stdout_is_one_envelope(
 
     class FakeClient:
         def create_dataset(
-            self, file_name, file_size, extension, *, workspace_id, credentials=None
+            self, file_name, file_size, extension, *, git_identity, credentials=None
         ):
             assert credentials is fake_credentials
-            assert workspace_id == WORKSPACE_ID
+            assert git_identity == GIT_IDENTITY
             return DatasetFile(
                 id="ds_1",
                 file_name=file_name,
@@ -305,11 +313,11 @@ def test_dataset_upload_json_stdout_is_one_envelope(
             )
 
         def complete_upload(
-            self, file_id, parts=None, *, workspace_id, credentials=None
+            self, file_id, parts=None, *, git_identity, credentials=None
         ):
             assert file_id == "ds_1"
             assert credentials is fake_credentials
-            assert workspace_id == WORKSPACE_ID
+            assert git_identity == GIT_IDENTITY
             return _dataset(id=file_id)
 
     monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
@@ -321,11 +329,159 @@ def test_dataset_upload_json_stdout_is_one_envelope(
     payload = json.loads(captured.out)
     assert payload["operation"] == "dataset.upload"
     assert payload["resource"]["id"] == "ds_1"
-    assert payload["resource"]["workspace"] == {
-        "id": WORKSPACE_ID,
-        "name": WORKSPACE_NAME,
-    }
-    assert payload["resource"]["project_root"] == str(PROJECT_ROOT)
+    assert_git_context(payload["resource"])
+    assert "Uploading" not in captured.out
+
+
+@pytest.mark.parametrize("yes_flag", ["--yes", "-y"])
+def test_dataset_upload_yes_option_is_forwarded(
+    yes_flag: str, monkeypatch, tmp_path: Path
+) -> None:
+    file_path = tmp_path / "train.jsonl"
+    file_path.write_text(
+        json.dumps({"system_prompt": "s", "user_prompt": "u", "ground_truth": "g"})
+        + "\n",
+        encoding="utf-8",
+    )
+    seen: dict[str, object] = {}
+
+    def fake_upload(*, file: str, overwrite: bool, yes: bool) -> OperationResult:
+        seen.update({"file": file, "overwrite": overwrite, "yes": yes})
+        return OperationResult(
+            operation="dataset.upload",
+            status="success",
+            message="Dataset uploaded.",
+        )
+
+    monkeypatch.setattr(dataset_module, "upload", fake_upload)
+
+    exit_code = cli.main(["dataset", "upload", str(file_path), yes_flag])
+
+    assert exit_code == 0
+    assert seen == {"file": str(file_path), "overwrite": False, "yes": True}
+
+
+def test_dataset_upload_json_conflict_preserves_existing_dataset_id(
+    monkeypatch,
+    tmp_path: Path,
+    capsys,
+) -> None:
+    _stub_git_context(monkeypatch)
+    file_path = tmp_path / "train.jsonl"
+    file_path.write_text(
+        json.dumps({"system_prompt": "s", "user_prompt": "u", "ground_truth": "g"})
+        + "\n",
+        encoding="utf-8",
+    )
+
+    from osmosis_ai.platform.auth import PlatformAPIError
+
+    class FakeClient:
+        def create_dataset(
+            self, file_name, file_size, extension, *, git_identity, credentials=None
+        ):
+            assert git_identity == GIT_IDENTITY
+            raise PlatformAPIError(
+                "A dataset with this name already exists",
+                status_code=409,
+                details={
+                    "error": "A dataset with this name already exists",
+                    "existing_dataset_id": "ds_existing",
+                },
+            )
+
+    monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+
+    exit_code = cli.main(["--json", "dataset", "upload", str(file_path)])
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    payload = json.loads(captured.err)
+    assert payload["error"]["code"] == "CONFLICT"
+    assert payload["error"]["details"]["existing_dataset_id"] == "ds_existing"
+    assert "--overwrite" in payload["error"]["message"]
+    assert "osmosis dataset upload" not in payload["error"]["message"]
+    assert str(file_path) not in payload["error"]["message"]
+
+
+def test_dataset_upload_json_overwrite_stdout_is_one_envelope(
+    monkeypatch,
+    tmp_path: Path,
+    capsys,
+) -> None:
+    fake_credentials = _stub_git_context(monkeypatch)
+    file_path = tmp_path / "train.jsonl"
+    file_path.write_text(
+        json.dumps({"system_prompt": "s", "user_prompt": "u", "ground_truth": "g"})
+        + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        upload_module,
+        "make_progress_bar",
+        lambda _size, **_kwargs: (nullcontext(), lambda _done, _total: None),
+    )
+    monkeypatch.setattr(
+        upload_module,
+        "upload_file_simple",
+        lambda _file_path, _upload_info, progress_callback=None: None,
+    )
+
+    from osmosis_ai.platform.auth import PlatformAPIError
+
+    class FakeClient:
+        def create_dataset(
+            self,
+            file_name,
+            file_size,
+            extension,
+            *,
+            git_identity,
+            credentials=None,
+            overwrite_dataset_id=None,
+        ):
+            assert credentials is fake_credentials
+            assert git_identity == GIT_IDENTITY
+            if overwrite_dataset_id is None:
+                raise PlatformAPIError(
+                    "A dataset with this name already exists",
+                    status_code=409,
+                    details={
+                        "error": "A dataset with this name already exists",
+                        "existing_dataset_id": "ds_existing",
+                    },
+                )
+            assert overwrite_dataset_id == "ds_existing"
+            return DatasetFile(
+                id="ds_new",
+                file_name=file_name,
+                file_size=file_size,
+                status="created",
+                upload=UploadInfo(
+                    method="simple",
+                    s3_key="uploads/train",
+                    presigned_url="https://example.com/upload",
+                ),
+            )
+
+        def complete_upload(
+            self, file_id, parts=None, *, git_identity, credentials=None
+        ):
+            assert file_id == "ds_new"
+            assert credentials is fake_credentials
+            assert git_identity == GIT_IDENTITY
+            return _dataset(id=file_id)
+
+    monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+
+    exit_code = cli.main(["--json", "dataset", "upload", str(file_path), "--overwrite"])
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    payload = json.loads(captured.out)
+    assert payload["operation"] == "dataset.upload"
+    assert payload["resource"]["id"] == "ds_new"
+    assert_git_context(payload["resource"])
     assert "Uploading" not in captured.out
 
 
@@ -334,16 +490,16 @@ def test_dataset_download_json_includes_output_path(
     tmp_path: Path,
     capsys,
 ) -> None:
-    _stub_workspace_context(monkeypatch)
+    _stub_git_context(monkeypatch)
     output_path = tmp_path / "out.jsonl"
 
     class FakeClient:
-        def get_dataset(self, name, *, workspace_id, credentials=None):
-            assert workspace_id == WORKSPACE_ID
+        def get_dataset(self, name, *, git_identity, credentials=None):
+            assert git_identity == GIT_IDENTITY
             return _dataset()
 
-        def get_dataset_download_url(self, name, *, workspace_id, credentials=None):
-            assert workspace_id == WORKSPACE_ID
+        def get_dataset_download_url(self, name, *, git_identity, credentials=None):
+            assert git_identity == GIT_IDENTITY
             return DatasetDownloadInfo(
                 presigned_url="https://example.com/train.jsonl",
                 expires_in=3600,
@@ -379,75 +535,4 @@ def test_dataset_download_json_includes_output_path(
     payload = json.loads(captured.out)
     assert payload["operation"] == "dataset.download"
     assert payload["resource"]["output_path"] == str(output_path)
-    assert payload["resource"]["workspace"] == {
-        "id": WORKSPACE_ID,
-        "name": WORKSPACE_NAME,
-    }
-    assert payload["resource"]["project_root"] == str(PROJECT_ROOT)
-
-
-def test_dataset_delete_json_with_yes_returns_operation(
-    monkeypatch,
-    capsys,
-) -> None:
-    _stub_workspace_context(monkeypatch)
-
-    class FakeClient:
-        def get_dataset_affected_resources(
-            self, name, *, workspace_id, credentials=None
-        ):
-            assert workspace_id == WORKSPACE_ID
-            return DatasetAffectedResources(affected_training_runs=[])
-
-        def delete_dataset(self, name, *, workspace_id, credentials=None):
-            assert workspace_id == WORKSPACE_ID
-            return True
-
-    monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-
-    exit_code = cli.main(["--json", "dataset", "delete", "ds_1", "--yes"])
-    captured = capsys.readouterr()
-
-    assert exit_code == 0
-    payload = json.loads(captured.out)
-    assert payload["operation"] == "dataset.delete"
-    assert payload["status"] == "success"
-    assert payload["resource"]["id"] == "ds_1"
-    assert payload["resource"]["workspace"] == {
-        "id": WORKSPACE_ID,
-        "name": WORKSPACE_NAME,
-    }
-    assert payload["resource"]["project_root"] == str(PROJECT_ROOT)
-
-
-def test_dataset_delete_json_conflict_includes_blocking_runs(
-    monkeypatch,
-    capsys,
-) -> None:
-    _stub_workspace_context(monkeypatch)
-
-    class FakeClient:
-        def get_dataset_affected_resources(
-            self, name, *, workspace_id, credentials=None
-        ):
-            assert workspace_id == WORKSPACE_ID
-            return DatasetAffectedResources(
-                affected_training_runs=[
-                    AffectedTrainingRun(
-                        id="run_1",
-                        training_run_name="active-run",
-                    )
-                ]
-            )
-
-    monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-
-    exit_code = cli.main(["--json", "dataset", "delete", "ds_1", "--yes"])
-    captured = capsys.readouterr()
-
-    assert exit_code == 1
-    payload = json.loads(captured.err)
-    assert payload["error"]["code"] == "CONFLICT"
-    assert payload["error"]["details"]["training_runs"] == [
-        {"id": "run_1", "training_run_name": "active-run"}
-    ]
+    assert_git_context(payload["resource"])

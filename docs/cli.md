@@ -29,109 +29,57 @@ osmosis auth whoami
 ```
 
 `whoami` verifies the active credentials and reports the authenticated account.
-It does not inspect local project links. Use `osmosis project info` for the
-current project link or `osmosis project list` for the local link table.
+Manage workspaces, repositories, secrets, and account settings in the Osmosis
+Platform product.
 
-> Top-level `osmosis login`, `osmosis logout`, and `osmosis whoami` still work as hidden aliases during the transition.
+## Workspace Directory Flow
 
-### osmosis workspace
-
-Open the interactive workspace browser. The TUI lets you choose an accessible workspace, then browse training runs, datasets, and models.
-
-```bash
-osmosis workspace
-```
-
-In non-interactive environments, use a specific subcommand such as `osmosis workspace list`, `osmosis workspace create <name>`, or `osmosis workspace delete <name> --yes`. To link this project with a workspace for platform commands, use `osmosis project link --workspace <workspace-id-or-name>`.
-
-## Project
-
-### osmosis project link
-
-Link this project with an Osmosis workspace. The workspace must have a Git
-Sync connected repository, and the command must be run from a checkout whose
-`origin` remote matches that repository. Platform commands resolve their
-workspace from the current project.
+Create or open a workspace in the Osmosis Platform, clone the repository created there,
+then run CLI commands from that workspace directory.
 
 ```bash
-osmosis project link --workspace <workspace-id-or-name>
-osmosis project link --workspace <workspace-id-or-name> --yes
+git clone <repo-url>
+cd <repo>
+osmosis auth login
+osmosis doctor
+osmosis template apply multiply              # or add your rollout under rollouts/
+cp configs/training/default.toml configs/training/<run>.toml
+$EDITOR configs/training/<run>.toml          # set rollout, dataset, and model_path
+git add rollouts configs data
+git commit -m "configure training run"
+git push
+osmosis train submit configs/training/<run>.toml
 ```
 
-The project mapping is stored in `~/.osmosis/config.json`.
-
-### osmosis project info
-
-Show the local workspace link for the current project. This reads local metadata
-by default and only contacts the platform when `--refresh` is passed.
-
-```bash
-osmosis project info
-osmosis project info --refresh
-```
-
-### osmosis project list
-
-List project-to-workspace links stored on this machine. This command reads the
-local mapping table and does not require authentication.
-
-```bash
-osmosis project list
-osmosis project list --all-platforms
-```
+Platform-scoped commands derive scope from the workspace directory's `origin` remote and
+send `X-Osmosis-Git: namespace/repo_name`. The CLI does not store or send a
+workspace ID for commands scoped by the workspace directory.
 
 For CI:
 
 ```bash
 export OSMOSIS_TOKEN=<token>
-osmosis project link --workspace <workspace-id-or-name> --yes
-osmosis train submit configs/training/default.toml --yes
+osmosis train submit configs/training/<run>.toml --yes
 ```
 
-To create a project in the current directory, run `init --here` from a
-completely empty directory:
+### osmosis doctor
 
 ```bash
-osmosis init --here <name>
-osmosis project link --workspace <workspace-id-or-name>
+osmosis doctor
+osmosis doctor ./path/to/workspace-directory
+osmosis doctor --fix
 ```
 
-### osmosis project validate
-
-Validate the canonical layout of a local Osmosis project (the directory created
-by `osmosis init`).
-
-```bash
-osmosis project validate
-osmosis project validate ./path/to/project
-```
-
-The command checks for `.osmosis/project.toml` and the required `rollouts/`,
-`configs/training/`, `configs/eval/`, and `data/` directories.
+Inspect and optionally repair the scaffold in the current workspace directory. Without
+`--fix`, the command reports the workspace directory, Git identity, required scaffold
+paths, and missing paths. Add `--fix` to create missing scaffold paths and
+check for official scaffold file updates without overwriting local edits.
 
 ## Rollout
 
-### osmosis rollout validate
-
-Validate the rollout entrypoint referenced by a training or eval config.
-
-`osmosis rollout validate` requires the resolved entrypoint module to expose a
-concrete `AgentWorkflow` and a concrete `Grader` (unless an eval config
-provides an explicit grader override).
-
-```bash
-osmosis rollout validate configs/eval/my-rollout.toml
-osmosis rollout validate configs/training/my-run.toml
-```
-
-The command only accepts configs under these canonical project paths:
-
-- `configs/eval/<name>.toml`
-- `configs/training/<name>.toml`
-
 ### osmosis rollout list
 
-List rollouts in the linked project workspace.
+List rollouts for the current workspace directory.
 
 ```bash
 osmosis rollout list
@@ -143,12 +91,19 @@ osmosis rollout list --all
 
 ### osmosis eval run
 
-Evaluate using a TOML config. The workflow is loaded from the entrypoint module, and the grader is usually auto-discovered from that same module, so most configs do not need a separate `[grader]` table. If the grader lives elsewhere, set `[grader].module` and optional `[grader].config`.
+Evaluate using a TOML config. Controller-backed eval starts the configured
+rollout entrypoint as a local HTTP server with `uv run python <entrypoint>` from
+`rollouts/<rollout>/`, sends `POST /rollout`, provides model calls through the
+controller's `/chat/completions` endpoint, and waits for rollout and grader
+callback URLs.
 
 `osmosis eval run` expects the config file to live under `configs/eval/` inside a
-structured Osmosis project.
+structured Osmosis workspace directory. Eval configs use `[eval]`, `[llm]`, `[runs]`,
+`[timeouts]`, and `[output]`; `[grader]` and `[baseline]` are no longer
+supported.
 
 ```bash
+osmosis eval run configs/eval/my-rollout.toml --limit 1
 osmosis eval run configs/eval/my-rollout.toml
 osmosis eval run configs/eval/my-rollout.toml --fresh
 osmosis eval run configs/eval/my-rollout.toml --retry-failed
@@ -156,12 +111,12 @@ osmosis eval run configs/eval/my-rollout.toml --limit 20 --batch-size 4
 osmosis eval run configs/eval/my-rollout.toml -o ./results --log-samples
 ```
 
-See [Eval](./eval.md) for the full `[eval]`, `[llm]`, `[runs]`, `[baseline]`, and `[output]` sections.
+See [Eval](./eval.md) for the full `[eval]`, `[llm]`, `[runs]`, `[timeouts]`,
+and `[output]` sections.
 
 ### osmosis eval cache
 
 ```bash
-osmosis eval cache dir
 osmosis eval cache ls
 osmosis eval cache ls --model gpt-4 --status completed
 osmosis eval cache rm <task_id>
@@ -170,7 +125,6 @@ osmosis eval cache rm --all --yes
 
 | Subcommand / option | Description |
 |---------------------|-------------|
-| `dir` | Print cache root |
 | `ls` | List caches (`--model`, `--dataset`, `--status`) |
 | `rm` | Delete by `task_id`, `--all`, or filters (`-y` skips prompt) |
 
@@ -195,6 +149,29 @@ osmosis eval rubric -d data.jsonl \
 | `--timeout` | Seconds |
 | `--score-min` / `--score-max` | Score range |
 
+## Dataset
+
+### osmosis dataset upload
+
+Upload a local dataset file to the current workspace directory's platform
+project. The dataset name is derived from the file name without its extension.
+
+```bash
+osmosis dataset upload data.jsonl
+osmosis dataset upload data.jsonl --yes
+osmosis dataset upload data.jsonl --overwrite
+```
+
+| Flag | Description |
+|------|-------------|
+| `--yes` / `-y` | Skip the interactive confirmation prompt |
+| `--overwrite` | Replace an existing dataset with the same derived name |
+
+When `--overwrite` is used, the CLI first confirms the duplicate-name conflict
+with the platform, then creates a replacement dataset record and soft-deletes
+the old one. The platform may reject overwrites while the existing dataset is
+still uploading, still processing, or used by an active training run.
+
 ## Training
 
 ### osmosis train submit
@@ -207,8 +184,12 @@ osmosis train submit configs/training/my-run.toml --yes   # skip confirmation
 ```
 
 The config file must live under `configs/training/` inside a structured Osmosis
-project. The CLI reads the config locally and sends it to the platform, which
-clones the workspace's connected Git repository for the actual rollout code.
+workspace directory. The CLI reads the config locally and sends it to the platform, which
+clones the repository identified by the workspace directory's `origin` remote for the
+actual rollout code.
+`osmosis train submit` includes the training preflight checks before launch; run
+`osmosis eval run configs/eval/<name>.toml --limit 1` first when you want an
+end-to-end local smoke test of the rollout server and grader.
 
 #### Required `[experiment]` fields
 
@@ -264,9 +245,9 @@ DEFAULT_REGION = "us-west-2"
 
 #### Secrets — `[rollout.secrets]`
 
-Maps env-var names to workspace `environment_secret` **record names**. The
-platform resolves the actual secret value server-side from the workspace's
-encrypted secret store and injects it into the container. Secret values never
+Maps env-var names to Platform `environment_secret` **record names**. The
+platform resolves the actual secret value server-side from encrypted secret
+storage and injects it into the container. Secret values never
 appear in the config file, in the API payload, or in CLI output.
 
 Pre-register secrets at `/:orgName/secrets` in the platform UI before
@@ -281,23 +262,22 @@ OPENAI_API_KEY = "openai-api-key"   # "openai-api-key" is the record name
 
 - Keys must match `^[A-Z_][A-Z0-9_]*$`.
 - A key cannot appear in both `[rollout.env]` and `[rollout.secrets]`.
-- Reserved names that cannot be used (managed by the platform):
-  `GITHUB_CLONE_URL`, `GITHUB_TOKEN`, `ENTRYPOINT_SCRIPT`, `REPOSITORY_PATH`,
-  `TRAINING_RUN_ID`, `ROLLOUT_NAME`, `ROLLOUT_PORT`.
+- Any env var name starting with `_OSMOSIS_` is reserved by the platform and cannot be used.
 - Both sections are optional.
 
-### osmosis train status
+### osmosis train info
 
-Show details for a training run.
+Show details, checkpoints, and metrics for a training run.
 
 ```bash
-osmosis train status <run-name>
-osmosis --json train status <run-name>
+osmosis train info <run-name>
+osmosis --json train info <run-name>
+osmosis train info <run-name> -o ./my-metrics.json
 ```
 
 ### osmosis train list
 
-List training runs in the current workspace.
+List training runs for the current workspace directory.
 
 ```bash
 osmosis train list
@@ -314,22 +294,44 @@ osmosis train stop <run-name>
 osmosis train stop <run-name> --yes
 ```
 
-### osmosis train delete
+## Deployment
 
-Delete a training run.
+Deployments expose trained checkpoint adapters for inference. Use the checkpoint
+UUID or checkpoint name anywhere `<checkpoint>` appears.
+
+### osmosis deployment list
+
+List deployments for the current workspace directory.
 
 ```bash
-osmosis train delete <run-name>
-osmosis train delete <run-name> --yes
+osmosis deployment list
+osmosis deployment list --limit 50
+osmosis deployment list --all
 ```
 
-### osmosis train metrics
+### osmosis deployment info
 
-Export training run metrics to a JSON file.
+Show deployment details for a checkpoint.
 
 ```bash
-osmosis train metrics <run-name>
-osmosis train metrics <run-name> -o ./my-metrics.json
+osmosis deployment info <checkpoint>
+osmosis --json deployment info <checkpoint>
+```
+
+### osmosis deploy
+
+Deploy or reactivate a checkpoint.
+
+```bash
+osmosis deploy <checkpoint>
+```
+
+### osmosis undeploy
+
+Transition a checkpoint deployment to inactive.
+
+```bash
+osmosis undeploy <checkpoint>
 ```
 
 ## See also

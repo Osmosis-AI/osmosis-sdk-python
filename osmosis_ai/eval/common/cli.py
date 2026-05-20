@@ -48,11 +48,11 @@ def _resolve_rollout_entrypoint(
     rollout: str,
     entrypoint: str,
     *,
-    project_root: Path | None = None,
+    workspace_directory: Path | None = None,
 ) -> tuple[Path, Path]:
     """Resolve and validate the rollout root and entrypoint file path."""
-    project_root = (project_root or Path.cwd()).resolve()
-    rollouts_root = (project_root / "rollouts").resolve()
+    workspace_directory = (workspace_directory or Path.cwd()).resolve()
+    rollouts_root = (workspace_directory / "rollouts").resolve()
     rollout_path = Path(rollout)
     rollout_dir = (
         rollout_path if rollout_path.is_absolute() else rollouts_root / rollout_path
@@ -165,13 +165,13 @@ def _load_rollout_module(
     rollout: str,
     entrypoint: str,
     *,
-    project_root: Path | None = None,
+    workspace_directory: Path | None = None,
 ) -> types.ModuleType:
     """Load an entrypoint as an isolated synthetic package subtree."""
     rollout_dir, entrypoint_path = _resolve_rollout_entrypoint(
         rollout,
         entrypoint,
-        project_root=project_root,
+        workspace_directory=workspace_directory,
     )
     _ensure_rollout_dir_on_path(rollout_dir)
     package_name = _synthetic_rollout_package_name(rollout_dir)
@@ -215,7 +215,7 @@ def _resolve_workflow(
     rollout: str,
     entrypoint: str,
     *,
-    project_root: Path | None = None,
+    workspace_directory: Path | None = None,
 ) -> tuple[type, Any, str]:
     """Resolve an AgentWorkflow subclass and its config.
 
@@ -235,7 +235,7 @@ def _resolve_workflow(
     mod = _load_rollout_module(
         rollout,
         entrypoint,
-        project_root=project_root,
+        workspace_directory=workspace_directory,
     )
 
     workflow_pairs = [
@@ -282,7 +282,7 @@ def load_workflow(
     entrypoint: str,
     quiet: bool = False,
     console: Console | None = None,
-    project_root: Path | None = None,
+    workspace_directory: Path | None = None,
 ) -> tuple[type | None, Any, str | None, str | None]:
     """Load an AgentWorkflow class and its config.
 
@@ -295,7 +295,7 @@ def load_workflow(
         workflow_cls, workflow_config, entrypoint_module = _resolve_workflow(
             rollout=rollout,
             entrypoint=entrypoint,
-            project_root=project_root,
+            workspace_directory=workspace_directory,
         )
     except Exception as e:
         detail = str(e)

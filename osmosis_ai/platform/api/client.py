@@ -9,24 +9,19 @@ from osmosis_ai.platform.auth.platform_client import platform_request
 from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE
 
 from .models import (
-    DatasetAffectedResources,
     DatasetDownloadInfo,
     DatasetFile,
-    DeleteTrainingRunResult,
     DeploymentInfo,
     DeploymentSummary,
-    ModelAffectedResources,
     PaginatedBaseModels,
     PaginatedDatasets,
     PaginatedDeployments,
     PaginatedRollouts,
     PaginatedTrainingRuns,
-    RenameDeploymentResult,
     SubmitTrainingRunResult,
     TrainingRunCheckpoints,
     TrainingRunDetail,
     TrainingRunMetrics,
-    WorkspaceDeletionStatus,
 )
 
 if TYPE_CHECKING:
@@ -41,116 +36,9 @@ def _safe_path(segment: str) -> str:
 class OsmosisClient:
     """Client for /api/cli/* endpoints.
 
-    Workspace-scoped methods require an explicit ``workspace_id`` so calls can
-    be tied to the linked project context.
+    Repo-scoped methods require an explicit ``git_identity`` so calls can
+    be tied to the trusted workspace directory context.
     """
-
-    # ── Workspace ────────────────────────────────────────────────────
-
-    def refresh_workspace_info(
-        self,
-        *,
-        credentials: Credentials | None = None,
-        workspace_id: str | None = None,
-        workspace_name: str | None = None,
-        cleanup_on_401: bool = True,
-    ) -> dict[str, Any]:
-        """Fetch workspace metadata via /api/cli/workspaces.
-
-        Returns a dict with ``has_subscription`` plus optional Git integration
-        fields for the matched workspace, or an empty dict if the workspace is
-        not found. When both ``workspace_id`` and ``workspace_name`` are passed,
-        ``workspace_id`` takes precedence.
-        """
-        data = platform_request(
-            "/api/cli/workspaces",
-            credentials=credentials,
-            require_workspace=False,
-            cleanup_on_401=cleanup_on_401,
-        )
-        for ws in data.get("workspaces", []):
-            if workspace_id is not None and ws.get("id") == workspace_id:
-                return {
-                    "found": True,
-                    "id": ws.get("id"),
-                    "name": ws.get("name"),
-                    "has_subscription": ws.get("has_subscription"),
-                    "has_github_app_installation": ws.get(
-                        "has_github_app_installation", False
-                    ),
-                    "connected_repo": ws.get("connected_repo"),
-                }
-        if workspace_id is None and workspace_name is not None:
-            for ws in data.get("workspaces", []):
-                if ws.get("name") == workspace_name:
-                    return {
-                        "found": True,
-                        "id": ws.get("id"),
-                        "name": ws.get("name"),
-                        "has_subscription": ws.get("has_subscription"),
-                        "has_github_app_installation": ws.get(
-                            "has_github_app_installation", False
-                        ),
-                        "connected_repo": ws.get("connected_repo"),
-                    }
-        return {"found": False}
-
-    def list_workspaces(
-        self,
-        *,
-        credentials: Credentials | None = None,
-    ) -> dict[str, Any]:
-        """List all workspaces the user belongs to."""
-        return platform_request(
-            "/api/cli/workspaces",
-            credentials=credentials,
-            require_workspace=False,
-        )
-
-    def create_workspace(
-        self,
-        name: str,
-        timezone: str = "UTC",
-        *,
-        credentials: Credentials | None = None,
-    ) -> dict[str, Any]:
-        """Create a new workspace (organization)."""
-        return platform_request(
-            "/api/cli/workspaces",
-            method="POST",
-            data={"name": name, "timezone": timezone},
-            credentials=credentials,
-            require_workspace=False,
-        )
-
-    def delete_workspace(
-        self,
-        workspace_id: str,
-        *,
-        credentials: Credentials | None = None,
-    ) -> bool:
-        """Delete a workspace (organization)."""
-        platform_request(
-            f"/api/cli/workspaces/{_safe_path(workspace_id)}",
-            method="DELETE",
-            credentials=credentials,
-            require_workspace=False,
-        )
-        return True
-
-    def get_workspace_deletion_status(
-        self,
-        workspace_id: str,
-        *,
-        credentials: Credentials | None = None,
-    ) -> WorkspaceDeletionStatus:
-        """Get workspace deletion readiness status."""
-        data = platform_request(
-            f"/api/cli/workspaces/{_safe_path(workspace_id)}/deletion-status",
-            credentials=credentials,
-            require_workspace=False,
-        )
-        return WorkspaceDeletionStatus.from_dict(data)
 
     # ── Datasets ─────────────────────────────────────────────────────
 
@@ -160,19 +48,24 @@ class OsmosisClient:
         file_size: int,
         extension: str,
         *,
+        overwrite_dataset_id: str | None = None,
         credentials: Credentials | None = None,
-        workspace_id: str,
+        git_identity: str,
     ) -> DatasetFile:
+        payload: dict[str, Any] = {
+            "file_name": file_name,
+            "file_size": file_size,
+            "extension": extension,
+        }
+        if overwrite_dataset_id is not None:
+            payload["overwrite_dataset_id"] = overwrite_dataset_id
+
         data = platform_request(
             "/api/cli/datasets",
             method="POST",
-            data={
-                "file_name": file_name,
-                "file_size": file_size,
-                "extension": extension,
-            },
+            data=payload,
             credentials=credentials,
-            workspace_id=workspace_id,
+            git_identity=git_identity,
         )
         return DatasetFile.from_dict(data)
 
@@ -182,7 +75,7 @@ class OsmosisClient:
         parts: list[dict[str, Any]] | None = None,
         *,
         credentials: Credentials | None = None,
-        workspace_id: str,
+        git_identity: str,
     ) -> DatasetFile:
         """Complete an upload.
 
@@ -208,7 +101,7 @@ class OsmosisClient:
             data=payload,
             timeout=timeout,
             credentials=credentials,
-            workspace_id=workspace_id,
+            git_identity=git_identity,
         )
         return DatasetFile.from_dict(data)
 
@@ -217,7 +110,7 @@ class OsmosisClient:
         file_id: str,
         *,
         credentials: Credentials | None = None,
-        workspace_id: str,
+        git_identity: str,
     ) -> None:
         """Abort an in-progress upload.
 
@@ -229,7 +122,7 @@ class OsmosisClient:
             method="POST",
             data={},
             credentials=credentials,
-            workspace_id=workspace_id,
+            git_identity=git_identity,
         )
 
     def list_datasets(
@@ -238,13 +131,13 @@ class OsmosisClient:
         offset: int = 0,
         *,
         credentials: Credentials | None = None,
-        workspace_id: str,
+        git_identity: str,
     ) -> PaginatedDatasets:
         qs = urlencode({"limit": limit, "offset": offset})
         data = platform_request(
             f"/api/cli/datasets?{qs}",
             credentials=credentials,
-            workspace_id=workspace_id,
+            git_identity=git_identity,
         )
         return PaginatedDatasets.from_dict(data)
 
@@ -253,12 +146,12 @@ class OsmosisClient:
         file_id: str,
         *,
         credentials: Credentials | None = None,
-        workspace_id: str,
+        git_identity: str,
     ) -> DatasetFile:
         data = platform_request(
             f"/api/cli/datasets/{_safe_path(file_id)}",
             credentials=credentials,
-            workspace_id=workspace_id,
+            git_identity=git_identity,
         )
         return DatasetFile.from_dict(data)
 
@@ -267,60 +160,29 @@ class OsmosisClient:
         file_id: str,
         *,
         credentials: Credentials | None = None,
-        workspace_id: str,
+        git_identity: str,
     ) -> DatasetDownloadInfo:
         data = platform_request(
             f"/api/cli/datasets/{_safe_path(file_id)}/download",
             credentials=credentials,
-            workspace_id=workspace_id,
+            git_identity=git_identity,
         )
         return DatasetDownloadInfo.from_dict(data)
-
-    def delete_dataset(
-        self,
-        file_id: str,
-        *,
-        credentials: Credentials | None = None,
-        workspace_id: str,
-    ) -> bool:
-        platform_request(
-            f"/api/cli/datasets/{_safe_path(file_id)}",
-            method="DELETE",
-            credentials=credentials,
-            workspace_id=workspace_id,
-        )
-        return True
-
-    def get_dataset_affected_resources(
-        self,
-        file_id: str,
-        *,
-        credentials: Credentials | None = None,
-        workspace_id: str,
-    ) -> DatasetAffectedResources:
-        """Get affected resources for a dataset deletion confirmation."""
-        data = platform_request(
-            f"/api/cli/datasets/{_safe_path(file_id)}/affected-resources",
-            credentials=credentials,
-            workspace_id=workspace_id,
-        )
-        return DatasetAffectedResources.from_dict(data)
 
     # ── Training Runs ─────────────────────────────────────────────
 
     def submit_training_run(
         self,
         *,
-        model_path: str,
-        dataset: str,
-        rollout_name: str,
-        entrypoint: str,
-        commit_sha: str | None = None,
-        config: dict[str, Any] | None = None,
+        experiment_config: dict[str, Any],
+        training_config: dict[str, Any] | None = None,
+        sampling_config: dict[str, Any] | None = None,
+        checkpoints_config: dict[str, Any] | None = None,
+        advanced_config: dict[str, Any] | None = None,
         rollout_env: dict[str, str] | None = None,
         rollout_secret_refs: dict[str, str] | None = None,
         credentials: Credentials | None = None,
-        workspace_id: str,
+        git_identity: str,
     ) -> SubmitTrainingRunResult:
         """Submit a new training run.
 
@@ -330,15 +192,16 @@ class OsmosisClient:
         server-side and never travel through the CLI.
         """
         data: dict[str, Any] = {
-            "model_path": model_path,
-            "dataset": dataset,
-            "rollout_name": rollout_name,
-            "entrypoint": entrypoint,
+            "experiment_config": experiment_config,
         }
-        if commit_sha is not None:
-            data["commit_sha"] = commit_sha
-        if config is not None:
-            data["config"] = config
+        if training_config:
+            data["training_config"] = training_config
+        if sampling_config:
+            data["sampling_config"] = sampling_config
+        if checkpoints_config:
+            data["checkpoints_config"] = checkpoints_config
+        if advanced_config:
+            data["advanced_config"] = advanced_config
         if rollout_env:
             data["rollout_env"] = rollout_env
         if rollout_secret_refs:
@@ -348,7 +211,7 @@ class OsmosisClient:
             method="POST",
             data=data,
             credentials=credentials,
-            workspace_id=workspace_id,
+            git_identity=git_identity,
         )
         return SubmitTrainingRunResult.from_dict(result)
 
@@ -358,13 +221,13 @@ class OsmosisClient:
         offset: int = 0,
         *,
         credentials: Credentials | None = None,
-        workspace_id: str,
+        git_identity: str,
     ) -> PaginatedTrainingRuns:
         qs = urlencode({"limit": limit, "offset": offset})
         data = platform_request(
             f"/api/cli/training-runs?{qs}",
             credentials=credentials,
-            workspace_id=workspace_id,
+            git_identity=git_identity,
         )
         return PaginatedTrainingRuns.from_dict(data)
 
@@ -373,12 +236,12 @@ class OsmosisClient:
         run_id: str,
         *,
         credentials: Credentials | None = None,
-        workspace_id: str,
+        git_identity: str,
     ) -> TrainingRunDetail:
         data = platform_request(
             f"/api/cli/training-runs/{_safe_path(run_id)}",
             credentials=credentials,
-            workspace_id=workspace_id,
+            git_identity=git_identity,
         )
         return TrainingRunDetail.from_dict(data)
 
@@ -387,7 +250,7 @@ class OsmosisClient:
         run_id: str,
         *,
         credentials: Credentials | None = None,
-        workspace_id: str,
+        git_identity: str,
     ) -> dict[str, Any]:
         """Stop a pending or running training run."""
         return platform_request(
@@ -395,37 +258,21 @@ class OsmosisClient:
             method="POST",
             data={},
             credentials=credentials,
-            workspace_id=workspace_id,
+            git_identity=git_identity,
         )
-
-    def delete_training_run(
-        self,
-        run_id: str,
-        *,
-        credentials: Credentials | None = None,
-        workspace_id: str,
-    ) -> DeleteTrainingRunResult:
-        """Delete a training run (stops it first if active)."""
-        data = platform_request(
-            f"/api/cli/training-runs/{_safe_path(run_id)}",
-            method="DELETE",
-            credentials=credentials,
-            workspace_id=workspace_id,
-        )
-        return DeleteTrainingRunResult.from_dict(data)
 
     def get_training_run_metrics(
         self,
         run_id: str,
         *,
         credentials: Credentials | None = None,
-        workspace_id: str,
+        git_identity: str,
     ) -> TrainingRunMetrics:
         """Fetch training run metrics (only available for terminal runs)."""
         data = platform_request(
             f"/api/cli/training-runs/{_safe_path(run_id)}/metrics",
             credentials=credentials,
-            workspace_id=workspace_id,
+            git_identity=git_identity,
         )
         return TrainingRunMetrics.from_dict(data)
 
@@ -437,13 +284,13 @@ class OsmosisClient:
         offset: int = 0,
         *,
         credentials: Credentials | None = None,
-        workspace_id: str,
+        git_identity: str,
     ) -> PaginatedRollouts:
         qs = urlencode({"limit": limit, "offset": offset})
         data = platform_request(
             f"/api/cli/rollouts?{qs}",
             credentials=credentials,
-            workspace_id=workspace_id,
+            git_identity=git_identity,
         )
         return PaginatedRollouts.from_dict(data)
 
@@ -455,46 +302,15 @@ class OsmosisClient:
         offset: int = 0,
         *,
         credentials: Credentials | None = None,
-        workspace_id: str,
+        git_identity: str,
     ) -> PaginatedBaseModels:
         qs = urlencode({"limit": limit, "offset": offset})
         data = platform_request(
             f"/api/cli/models/base?{qs}",
             credentials=credentials,
-            workspace_id=workspace_id,
+            git_identity=git_identity,
         )
         return PaginatedBaseModels.from_dict(data)
-
-    def delete_model(
-        self,
-        model_id: str,
-        *,
-        credentials: Credentials | None = None,
-        workspace_id: str,
-    ) -> bool:
-        """Delete a model with full cascade cleanup."""
-        platform_request(
-            f"/api/cli/models/{_safe_path(model_id)}",
-            method="DELETE",
-            credentials=credentials,
-            workspace_id=workspace_id,
-        )
-        return True
-
-    def get_model_affected_resources(
-        self,
-        model_id: str,
-        *,
-        credentials: Credentials | None = None,
-        workspace_id: str,
-    ) -> ModelAffectedResources:
-        """Get affected resources for a model deletion."""
-        data = platform_request(
-            f"/api/cli/models/{_safe_path(model_id)}/affected-resources",
-            credentials=credentials,
-            workspace_id=workspace_id,
-        )
-        return ModelAffectedResources.from_dict(data)
 
     # ── Deployments ───────────────────────────────────────────────
     # All mutating endpoints key off `checkpoint` (UUID or checkpoint_name).
@@ -506,14 +322,14 @@ class OsmosisClient:
         offset: int = 0,
         *,
         credentials: Credentials | None = None,
-        workspace_id: str,
+        git_identity: str,
     ) -> PaginatedDeployments:
-        """List LoRA deployments in the specified workspace."""
+        """List LoRA deployments in the connected repository scope."""
         qs = urlencode({"limit": limit, "offset": offset})
         data = platform_request(
             f"/api/cli/deployments?{qs}",
             credentials=credentials,
-            workspace_id=workspace_id,
+            git_identity=git_identity,
         )
         return PaginatedDeployments.from_dict(data)
 
@@ -522,13 +338,13 @@ class OsmosisClient:
         checkpoint: str,
         *,
         credentials: Credentials | None = None,
-        workspace_id: str,
+        git_identity: str,
     ) -> DeploymentInfo:
         """Fetch a deployment by checkpoint UUID or checkpoint name."""
         data = platform_request(
             f"/api/cli/deployments/{_safe_path(checkpoint)}",
             credentials=credentials,
-            workspace_id=workspace_id,
+            git_identity=git_identity,
         )
         return DeploymentInfo.from_dict(data["deployment"])
 
@@ -537,7 +353,7 @@ class OsmosisClient:
         checkpoint: str,
         *,
         credentials: Credentials | None = None,
-        workspace_id: str,
+        git_identity: str,
     ) -> DeploymentSummary:
         """Deploy (or reactivate) a LoRA checkpoint.
 
@@ -549,7 +365,7 @@ class OsmosisClient:
             method="POST",
             data={},
             credentials=credentials,
-            workspace_id=workspace_id,
+            git_identity=git_identity,
         )
         return DeploymentSummary.from_dict(data["deployment"])
 
@@ -558,7 +374,7 @@ class OsmosisClient:
         checkpoint: str,
         *,
         credentials: Credentials | None = None,
-        workspace_id: str,
+        git_identity: str,
     ) -> DeploymentSummary:
         """Undeploy a LoRA checkpoint (transitions to ``inactive``)."""
         data = platform_request(
@@ -566,61 +382,23 @@ class OsmosisClient:
             method="POST",
             data={},
             credentials=credentials,
-            workspace_id=workspace_id,
+            git_identity=git_identity,
         )
         return DeploymentSummary.from_dict(data)
 
-    def rename_checkpoint(
-        self,
-        checkpoint: str,
-        new_name: str,
-        *,
-        credentials: Credentials | None = None,
-        workspace_id: str,
-    ) -> RenameDeploymentResult:
-        """Rename a LoRA checkpoint.
-
-        Renaming an ``active`` deployment also re-registers the LoRA with
-        inference under the new name.
-        """
-        data = platform_request(
-            f"/api/cli/deployments/{_safe_path(checkpoint)}",
-            method="PATCH",
-            data={"checkpoint_name": new_name},
-            credentials=credentials,
-            workspace_id=workspace_id,
-        )
-        return RenameDeploymentResult.from_dict(data)
-
-    def delete_deployment(
-        self,
-        checkpoint: str,
-        *,
-        credentials: Credentials | None = None,
-        workspace_id: str,
-    ) -> bool:
-        """Delete a deployment record (idempotent)."""
-        platform_request(
-            f"/api/cli/deployments/{_safe_path(checkpoint)}",
-            method="DELETE",
-            credentials=credentials,
-            workspace_id=workspace_id,
-        )
-        return True
-
     # ── Training-run checkpoints ──────────────────────────────────
-    # Still used by `osmosis train status` to list deployable checkpoints.
+    # Still used by `osmosis train info` to list deployable checkpoints.
 
     def list_training_run_checkpoints(
         self,
         name_or_id: str,
         *,
         credentials: Credentials | None = None,
-        workspace_id: str,
+        git_identity: str,
     ) -> TrainingRunCheckpoints:
         data = platform_request(
             f"/api/cli/training-runs/{_safe_path(name_or_id)}/checkpoints",
             credentials=credentials,
-            workspace_id=workspace_id,
+            git_identity=git_identity,
         )
         return TrainingRunCheckpoints.from_dict(data)

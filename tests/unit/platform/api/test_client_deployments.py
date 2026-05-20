@@ -2,8 +2,7 @@
 
 Covers the checkpoint-centric API:
     list_deployments / get_deployment / deploy_checkpoint /
-    undeploy_checkpoint / rename_checkpoint / delete_deployment /
-    list_training_run_checkpoints
+    undeploy_checkpoint / list_training_run_checkpoints
 """
 
 from __future__ import annotations
@@ -12,7 +11,7 @@ from unittest.mock import MagicMock, patch
 
 from osmosis_ai.platform.api.client import OsmosisClient
 
-WORKSPACE_ID = "ws_test"
+GIT_IDENTITY = "git_test"
 
 
 class TestListDeployments:
@@ -25,13 +24,14 @@ class TestListDeployments:
             "next_offset": None,
         }
         client = OsmosisClient()
-        result = client.list_deployments(limit=10, offset=5, workspace_id=WORKSPACE_ID)
+        result = client.list_deployments(limit=10, offset=5, git_identity=GIT_IDENTITY)
         assert result.total_count == 0
         args, kwargs = mock_req.call_args
         assert "/api/cli/deployments?" in args[0]
         assert "limit=10" in args[0]
         assert "offset=5" in args[0]
-        assert kwargs["workspace_id"] == WORKSPACE_ID
+        assert kwargs["git_identity"] == GIT_IDENTITY
+        assert "workspace_id" not in kwargs
 
     @patch("osmosis_ai.platform.api.client.platform_request")
     def test_defaults(self, mock_req: MagicMock) -> None:
@@ -42,12 +42,13 @@ class TestListDeployments:
             "next_offset": None,
         }
         client = OsmosisClient()
-        client.list_deployments(workspace_id=WORKSPACE_ID)
+        client.list_deployments(git_identity=GIT_IDENTITY)
         args, kwargs = mock_req.call_args
         assert "/api/cli/deployments?" in args[0]
         assert "limit=" in args[0]
         assert "offset=0" in args[0]
-        assert kwargs["workspace_id"] == WORKSPACE_ID
+        assert kwargs["git_identity"] == GIT_IDENTITY
+        assert "workspace_id" not in kwargs
 
 
 class TestGetDeployment:
@@ -63,11 +64,12 @@ class TestGetDeployment:
             }
         }
         client = OsmosisClient()
-        result = client.get_deployment("qwen3-step-100", workspace_id=WORKSPACE_ID)
+        result = client.get_deployment("qwen3-step-100", git_identity=GIT_IDENTITY)
         assert result.checkpoint_name == "qwen3-step-100"
         args, kwargs = mock_req.call_args
         assert args[0] == "/api/cli/deployments/qwen3-step-100"
-        assert kwargs["workspace_id"] == WORKSPACE_ID
+        assert kwargs["git_identity"] == GIT_IDENTITY
+        assert "workspace_id" not in kwargs
 
     @patch("osmosis_ai.platform.api.client.platform_request")
     def test_urlencodes_path(self, mock_req: MagicMock) -> None:
@@ -81,10 +83,11 @@ class TestGetDeployment:
             }
         }
         client = OsmosisClient()
-        client.get_deployment("../bad", workspace_id=WORKSPACE_ID)
+        client.get_deployment("../bad", git_identity=GIT_IDENTITY)
         args, kwargs = mock_req.call_args
         assert "../" not in args[0]
-        assert kwargs["workspace_id"] == WORKSPACE_ID
+        assert kwargs["git_identity"] == GIT_IDENTITY
+        assert "workspace_id" not in kwargs
 
 
 class TestDeployCheckpoint:
@@ -98,14 +101,15 @@ class TestDeployCheckpoint:
             }
         }
         client = OsmosisClient()
-        result = client.deploy_checkpoint("qwen3-step-100", workspace_id=WORKSPACE_ID)
+        result = client.deploy_checkpoint("qwen3-step-100", git_identity=GIT_IDENTITY)
         assert result.id == "dep_1"
         assert result.status == "active"
         args, kwargs = mock_req.call_args
         assert args[0] == "/api/cli/deployments/qwen3-step-100/deploy"
         assert kwargs["method"] == "POST"
         assert kwargs["data"] == {}
-        assert kwargs["workspace_id"] == WORKSPACE_ID
+        assert kwargs["git_identity"] == GIT_IDENTITY
+        assert "workspace_id" not in kwargs
 
     @patch("osmosis_ai.platform.api.client.platform_request")
     def test_deploy_urlencodes_path(self, mock_req: MagicMock) -> None:
@@ -113,10 +117,11 @@ class TestDeployCheckpoint:
             "deployment": {"id": "d", "checkpoint_name": "x", "status": "active"}
         }
         client = OsmosisClient()
-        client.deploy_checkpoint("../bad", workspace_id=WORKSPACE_ID)
+        client.deploy_checkpoint("../bad", git_identity=GIT_IDENTITY)
         args, kwargs = mock_req.call_args
         assert "../" not in args[0]
-        assert kwargs["workspace_id"] == WORKSPACE_ID
+        assert kwargs["git_identity"] == GIT_IDENTITY
+        assert "workspace_id" not in kwargs
 
 
 class TestUndeployCheckpoint:
@@ -128,50 +133,14 @@ class TestUndeployCheckpoint:
             "status": "inactive",
         }
         client = OsmosisClient()
-        result = client.undeploy_checkpoint("qwen3-step-100", workspace_id=WORKSPACE_ID)
+        result = client.undeploy_checkpoint("qwen3-step-100", git_identity=GIT_IDENTITY)
         assert result.status == "inactive"
         args, kwargs = mock_req.call_args
         assert args[0] == "/api/cli/deployments/qwen3-step-100/undeploy"
         assert kwargs["method"] == "POST"
         assert kwargs["data"] == {}
-        assert kwargs["workspace_id"] == WORKSPACE_ID
-
-
-class TestRenameCheckpoint:
-    @patch("osmosis_ai.platform.api.client.platform_request")
-    def test_rename(self, mock_req: MagicMock) -> None:
-        mock_req.return_value = {
-            "id": "dep_1",
-            "old_checkpoint_name": "old-name",
-            "checkpoint_name": "new-name",
-            "status": "active",
-        }
-        client = OsmosisClient()
-        result = client.rename_checkpoint(
-            "old-name", "new-name", workspace_id=WORKSPACE_ID
-        )
-        assert result.checkpoint_name == "new-name"
-        assert result.old_checkpoint_name == "old-name"
-        args, kwargs = mock_req.call_args
-        assert args[0] == "/api/cli/deployments/old-name"
-        assert kwargs["method"] == "PATCH"
-        assert kwargs["data"] == {"checkpoint_name": "new-name"}
-        assert kwargs["workspace_id"] == WORKSPACE_ID
-
-
-class TestDeleteDeployment:
-    @patch("osmosis_ai.platform.api.client.platform_request")
-    def test_delete(self, mock_req: MagicMock) -> None:
-        mock_req.return_value = {"deleted": True}
-        client = OsmosisClient()
-        assert (
-            client.delete_deployment("qwen3-step-100", workspace_id=WORKSPACE_ID)
-            is True
-        )
-        args, kwargs = mock_req.call_args
-        assert args[0] == "/api/cli/deployments/qwen3-step-100"
-        assert kwargs["method"] == "DELETE"
-        assert kwargs["workspace_id"] == WORKSPACE_ID
+        assert kwargs["git_identity"] == GIT_IDENTITY
+        assert "workspace_id" not in kwargs
 
 
 class TestListTrainingRunCheckpoints:
@@ -191,9 +160,10 @@ class TestListTrainingRunCheckpoints:
         }
         client = OsmosisClient()
         result = client.list_training_run_checkpoints(
-            "qwen3-run1", workspace_id=WORKSPACE_ID
+            "qwen3-run1", git_identity=GIT_IDENTITY
         )
         assert len(result.checkpoints) == 1
         args, kwargs = mock_req.call_args
         assert args[0] == "/api/cli/training-runs/qwen3-run1/checkpoints"
-        assert kwargs["workspace_id"] == WORKSPACE_ID
+        assert kwargs["git_identity"] == GIT_IDENTITY
+        assert "workspace_id" not in kwargs
