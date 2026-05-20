@@ -77,6 +77,7 @@ def test_serialize_training_run_keys() -> None:
                 "model_name": "Qwen/Qwen3-30B-A3B-Instruct-2507-FP8",
             },
             "dataset": {"id": None, "file_name": "train.jsonl"},
+            "rollout": {"id": "rollout_1", "name": "math-rollout"},
             "eval_accuracy": 0.4,
             "reward": 0.875,
             "reward_increase_delta": 0.02,
@@ -96,6 +97,8 @@ def test_serialize_training_run_keys() -> None:
     assert payload["model_name"] == "Qwen/Qwen3-30B-A3B-Instruct-2507-FP8"
     assert payload["dataset_id"] is None
     assert payload["dataset_name"] == "train.jsonl"
+    assert payload["rollout_id"] == "rollout_1"
+    assert payload["rollout_name"] == "math-rollout"
     assert payload["reward"] == 0.875
 
 

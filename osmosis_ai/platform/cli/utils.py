@@ -171,6 +171,8 @@ def build_run_detail_rows(r: Any) -> list[tuple[str, str]]:
     if step:
         rows.append(("Step", step))
     rows.append(("Model", console.escape(r.model_name) if r.model_name else "—"))
+    rows.append(("Dataset", console.escape(r.dataset_name) if r.dataset_name else "—"))
+    rows.append(("Rollout", console.escape(r.rollout_name) if r.rollout_name else "—"))
     if r.eval_accuracy is not None:
         rows.append(("Accuracy", f"{r.eval_accuracy:.4f}"))
     if r.reward_increase_delta is not None:
