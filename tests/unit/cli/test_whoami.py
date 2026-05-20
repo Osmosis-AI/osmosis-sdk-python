@@ -64,7 +64,6 @@ def _create_canonical_project(workspace_directory: Path) -> None:
     )
     for relative in (
         ".osmosis",
-        ".osmosis/research",
         "rollouts",
         "configs",
         "configs/eval",
@@ -72,10 +71,6 @@ def _create_canonical_project(workspace_directory: Path) -> None:
         "data",
     ):
         (workspace_directory / relative).mkdir(parents=True, exist_ok=True)
-    (workspace_directory / ".osmosis" / "research" / "program.md").write_text(
-        "# Program\n",
-        encoding="utf-8",
-    )
 
 
 def _assert_deprecated_workspace_directory_context_is_empty(data: dict) -> None:

@@ -67,7 +67,6 @@ def _make_workspace_directory(root: Path) -> Path:
     )
     for rel_path in (
         ".osmosis",
-        ".osmosis/research",
         "rollouts",
         "rollouts/demo_rollout",
         "configs",
@@ -76,9 +75,6 @@ def _make_workspace_directory(root: Path) -> Path:
         "data",
     ):
         (root / rel_path).mkdir(parents=True, exist_ok=True)
-    (root / ".osmosis" / "research" / "program.md").write_text(
-        "# Test\n", encoding="utf-8"
-    )
     (root / "rollouts" / "demo_rollout" / "pyproject.toml").write_text(
         "[project]\nname='demo-rollout'\n",
         encoding="utf-8",

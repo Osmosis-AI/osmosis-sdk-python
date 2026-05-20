@@ -68,7 +68,7 @@ def _make_workspace_directory(root: Path, *, rollout: str = "demo") -> Path:
         capture_output=True,
     )
     for rel_path in (
-        ".osmosis/research",
+        ".osmosis",
         f"rollouts/{rollout}",
         "configs/training",
         "configs/eval",
@@ -76,10 +76,6 @@ def _make_workspace_directory(root: Path, *, rollout: str = "demo") -> Path:
     ):
         (root / rel_path).mkdir(parents=True, exist_ok=True)
 
-    (root / ".osmosis" / "research" / "program.md").write_text(
-        "# Test Program\n",
-        encoding="utf-8",
-    )
     (root / "rollouts" / rollout / "main.py").write_text(
         """
 from osmosis_ai.rollout import AgentWorkflow, Grader

@@ -85,16 +85,12 @@ def _make_rollout_project(root: Path) -> Path:
     )
     for rel_path in (
         ".osmosis",
-        ".osmosis/research",
         "rollouts/demo",
         "configs/training",
         "configs/eval",
         "data",
     ):
         (root / rel_path).mkdir(parents=True, exist_ok=True)
-    (root / ".osmosis" / "research" / "program.md").write_text(
-        "# Test Program\n", encoding="utf-8"
-    )
     (root / "rollouts" / "demo" / "main.py").write_text(
         """
 from osmosis_ai.rollout.agent_workflow import AgentWorkflow
@@ -260,7 +256,7 @@ def test_train_info_json_does_not_write_default_file(
         capture_output=True,
     )
     for rel_path in (
-        ".osmosis/research",
+        ".osmosis",
         "rollouts",
         "configs/eval",
         "configs/training",

@@ -61,7 +61,6 @@ def test_project_doctor_dry_run_reports_missing_paths(
         "configs/eval/",
         "data/",
     ]
-    assert not (project / "research" / "program.md").exists()
 
 
 def test_project_doctor_reports_git_context(
@@ -215,7 +214,6 @@ def test_project_doctor_fix_creates_missing_paths(
 
     payload = json.loads(capsys.readouterr().out)
     assert rc == 0
-    assert not (project / ".osmosis" / "research" / "program.md").exists()
     assert (project / "configs" / "training").is_dir()
     assert (project / "AGENTS.md").is_file()
     assert (project / "AGENTS.md").read_text(encoding="utf-8") == "template agents\n"
@@ -238,25 +236,6 @@ def test_project_doctor_fix_outside_project_does_not_create_project(
     message = json.loads(captured.err)["error"]["message"]
     assert "Osmosis workspace directory" in message
     assert "osmosis init" not in message
-
-
-def test_project_doctor_fix_preserves_existing_research_program(
-    tmp_path: Path, monkeypatch, capsys, workspace_template: Path
-) -> None:
-    project = _make_workspace_directory(tmp_path / "project")
-    program = project / "research" / "program.md"
-    program.parent.mkdir(parents=True)
-    program.write_text("# Research Brief\n\nKeep this content.\n", encoding="utf-8")
-    monkeypatch.chdir(project)
-
-    rc = main(["--json", "doctor", "--fix"])
-
-    capsys.readouterr()
-    assert rc == 0
-    assert (
-        program.read_text(encoding="utf-8")
-        == "# Research Brief\n\nKeep this content.\n"
-    )
 
 
 def test_project_doctor_reports_agent_updates_without_overwriting(

@@ -89,7 +89,7 @@ def test_fixed_port_lock_path_is_shared_across_projects(
             capture_output=True,
         )
         for rel_path in (
-            ".osmosis/research",
+            ".osmosis",
             "rollouts",
             "configs/eval",
             "configs/training",

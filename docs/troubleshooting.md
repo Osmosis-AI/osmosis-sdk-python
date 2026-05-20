@@ -54,7 +54,7 @@ osmosis doctor
 osmosis template apply multiply              # or add your rollout under rollouts/
 cp configs/training/default.toml configs/training/<run>.toml
 $EDITOR configs/training/<run>.toml          # set rollout, dataset, and model_path
-git add rollouts configs data research
+git add rollouts configs data
 git commit -m "configure training run"
 git push
 osmosis train submit configs/training/<run>.toml
