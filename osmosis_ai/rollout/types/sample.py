@@ -9,7 +9,15 @@ SampleMessage = Mapping[str, Any]
 
 
 class RolloutSample(BaseModel):
-    id: str
+    """The conversation + grading artefacts produced by one rollout.
+
+    A rollout produces exactly one sample (one agent run, one reward). There
+    used to be a per-sample id so the wire protocol could carry a
+    ``dict[str, RolloutSample]``; with the URL-routed single-sample wire
+    protocol the id is gone and callers identify rollouts via the URL paths
+    they hand the SDK.
+    """
+
     messages: Sequence[SampleMessage] = Field(default_factory=list)
     label: str | None = None
     reward: float | None = None
@@ -33,11 +41,6 @@ class RolloutErrorCategory(StrEnum):
     AGENT_ERROR = "agent_error"
 
 
-class MultiTurnMode(StrEnum):
-    MULTI_SAMPLE = "multi_sample"
-    SINGLE_SAMPLE = "single_sample"
-
-
 class ExecutionRequest(BaseModel):
     id: str
     prompt: list[MessageDict]
@@ -48,6 +51,6 @@ class ExecutionRequest(BaseModel):
 
 class ExecutionResult(BaseModel):
     status: RolloutStatus
-    samples: dict[str, RolloutSample] = Field(default_factory=dict)
+    sample: RolloutSample | None = None
     err_message: str | None = None
     err_category: RolloutErrorCategory | None = None

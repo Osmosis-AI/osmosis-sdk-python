@@ -17,22 +17,19 @@ from osmosis_ai.rollout.types import RolloutSample, RolloutStatus
 class RolloutOutcome:
     """Result of a single rollout execution.
 
-    This is the eval-facing contract. Eval doesn't need to know
-    whether this came from in-process execution or an HTTP call.
+    Single-sample by design: one rollout = one agent run = one reward.
+    ``sample`` carries the conversation and reward (when grading succeeded),
+    ``rollout_id`` identifies the rollout in logs/cache rows, and the rest
+    are run-level metrics + diagnostics.
     """
 
     status: RolloutStatus
-    samples: dict[str, RolloutSample] = field(default_factory=dict)
+    sample: RolloutSample | None = None
     error: str | None = None
     duration_ms: float = 0.0
     tokens: int = 0
     systemic_error: str | None = None
     rollout_id: str | None = None
-    controller_created_sample_ids: list[str] = field(default_factory=list)
-    completion_counts: dict[str, int] = field(default_factory=dict)
-    full_callback_sample_ids: list[str] = field(default_factory=list)
-    scored_sample_ids: list[str] = field(default_factory=list)
-    skipped_sample_ids: list[str] = field(default_factory=list)
     callback_diagnostics: dict[str, Any] = field(default_factory=dict)
     skipped: bool = False
 
