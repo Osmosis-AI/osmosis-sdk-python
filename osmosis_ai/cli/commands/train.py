@@ -338,12 +338,14 @@ def info(
         )
 
     rows = build_run_detail_rows(run)
-    if run.examples_processed_count is not None:
-        rows.append(("Rows Processed", f"{run.examples_processed_count:,}"))
+    if run.status == "pending":
+        rows.insert(3, ("Progress", "Waiting to start..."))
     if run.started_at:
         rows.append(("Started", format_local_datetime(run.started_at)))
     if run.completed_at:
         rows.append(("Completed", format_local_datetime(run.completed_at)))
+    if run.examples_processed_count is not None:
+        rows.append(("Rows Processed", f"{run.examples_processed_count:,}"))
     if run.notes:
         rows.append(("Notes", console.escape(run.notes)))
 
@@ -388,6 +390,10 @@ def info(
     save_warning: str | None = None
     if metrics_data is not None:
         export = build_export_dict(run, metrics_data)
+        if metrics_data.overview.total_steps is not None:
+            latest = metrics_data.overview.latest_step or 0
+            total = metrics_data.overview.total_steps
+            rows.insert(3, ("Progress", f"{latest} / {total} rollout steps"))
         if metrics_data.overview.duration_formatted:
             rows.append(("Duration", metrics_data.overview.duration_formatted))
 

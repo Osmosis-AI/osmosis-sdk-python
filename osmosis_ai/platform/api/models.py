@@ -360,6 +360,8 @@ class TrainingRunMetricsOverview:
     duration_formatted: str | None
     metric_summaries: list[MetricSummary]
     examples_processed_count: int | None
+    latest_step: int | None = None
+    total_steps: int | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> TrainingRunMetricsOverview:
@@ -370,6 +372,8 @@ class TrainingRunMetricsOverview:
                 MetricSummary.from_dict(s) for s in data.get("metric_summaries", [])
             ],
             examples_processed_count=data.get("examples_processed_count"),
+            latest_step=data.get("latest_step"),
+            total_steps=data.get("total_steps"),
         )
 
 

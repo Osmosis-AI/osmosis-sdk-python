@@ -168,19 +168,18 @@ def build_dataset_detail_rows(ds: Any) -> list[tuple[str, str]]:
 
 
 def build_run_detail_rows(r: Any) -> list[tuple[str, str]]:
-    """Build common detail rows for a training run."""
     rows: list[tuple[str, str]] = [
         ("Name", console.escape(r.name) if r.name else "(unnamed)"),
         ("ID", r.id),
         ("Status", r.status.replace("_", " ").title()),
     ]
-    rows.append(("Base Model", console.escape(r.model_name) if r.model_name else "—"))
-    rows.append(("Dataset", console.escape(r.dataset_name) if r.dataset_name else "—"))
-    rows.append(("Rollout", console.escape(r.rollout_name) if r.rollout_name else "—"))
-    if r.creator_name:
-        rows.append(("Submitted By", console.escape(r.creator_name)))
     if r.created_at:
         rows.append(("Submitted", format_local_datetime(r.created_at)))
+    if r.creator_name:
+        rows.append(("Submitted By", console.escape(r.creator_name)))
+    rows.append(("Dataset", console.escape(r.dataset_name) if r.dataset_name else "—"))
+    rows.append(("Base Model", console.escape(r.model_name) if r.model_name else "—"))
+    rows.append(("Rollout", console.escape(r.rollout_name) if r.rollout_name else "—"))
     return rows
 
 

@@ -49,6 +49,10 @@ def build_export_dict(
         training_run["completed_at"] = run.completed_at
     if run.examples_processed_count is not None:
         training_run["rows_processed"] = run.examples_processed_count
+    if metrics.overview.latest_step is not None:
+        training_run["latest_step"] = metrics.overview.latest_step
+    if metrics.overview.total_steps is not None:
+        training_run["total_steps"] = metrics.overview.total_steps
 
     # summary section
     summary: dict[str, Any] = {}
