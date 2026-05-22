@@ -511,12 +511,11 @@ class TestGetTrainingRunMetrics:
             "training_run_id": "run-1",
             "status": "finished",
             "overview": {
-                "mlflow_run_id": "mlflow-1",
-                "mlflow_status": "FINISHED",
                 "duration_ms": 3600000,
                 "duration_formatted": "1h",
-                "reward": 0.85,
-                "reward_increase_delta": 0.15,
+                "metric_summaries": [
+                    {"key": "rollout/raw_reward", "title": "Training Reward", "initial": 0.70, "latest": 0.85, "delta": 0.15, "min": 0.65, "max": 0.87},
+                ],
                 "examples_processed_count": 5000,
             },
             "metrics": [
@@ -532,7 +531,7 @@ class TestGetTrainingRunMetrics:
         client = OsmosisClient()
         result = client.get_training_run_metrics("run-1", git_identity="git_test")
         assert result.training_run_id == "run-1"
-        assert result.overview.reward == 0.85
+        assert result.overview.metric_summaries[0].latest == 0.85
         assert len(result.metrics) == 1
         path = mock_request.call_args[0][0]
         assert path == "/api/cli/training-runs/run-1/metrics"
@@ -543,12 +542,9 @@ class TestGetTrainingRunMetrics:
             "training_run_id": "a/b",
             "status": "finished",
             "overview": {
-                "mlflow_run_id": "m",
-                "mlflow_status": "FINISHED",
                 "duration_ms": None,
                 "duration_formatted": None,
-                "reward": None,
-                "reward_increase_delta": None,
+                "metric_summaries": [],
                 "examples_processed_count": None,
             },
             "metrics": [],

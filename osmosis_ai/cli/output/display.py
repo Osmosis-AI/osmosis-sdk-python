@@ -62,10 +62,3 @@ def format_local_datetime(
     return _localize(parsed, tz=tz).strftime("%Y-%m-%d %H:%M:%S %Z")
 
 
-def format_reward(value: Any) -> str:
-    if value is None:
-        return ""
-    try:
-        return f"{float(value):.2f}"
-    except (TypeError, ValueError):
-        return str(value)

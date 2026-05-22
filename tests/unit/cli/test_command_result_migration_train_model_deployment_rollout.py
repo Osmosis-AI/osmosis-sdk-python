@@ -284,12 +284,9 @@ def test_train_info_json_does_not_write_default_file(
                 training_run_id=run_id,
                 status="finished",
                 overview=TrainingRunMetricsOverview(
-                    mlflow_run_id="mlflow_1",
-                    mlflow_status="FINISHED",
                     duration_ms=1000,
                     duration_formatted="1s",
-                    reward=1.0,
-                    reward_delta=0.5,
+                    metric_summaries=[],
                     examples_processed_count=10,
                 ),
                 metrics=[

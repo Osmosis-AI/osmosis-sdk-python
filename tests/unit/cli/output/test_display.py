@@ -9,14 +9,8 @@ from osmosis_ai.cli.output.display import (
     created_column_label,
     format_local_date,
     format_local_datetime,
-    format_reward,
     local_timezone_label,
 )
-
-
-def test_format_reward_uses_two_decimal_places() -> None:
-    assert format_reward(0.875) == "0.88"
-    assert format_reward(None) == ""
 
 
 def test_local_timezone_label_returns_non_empty_text() -> None:

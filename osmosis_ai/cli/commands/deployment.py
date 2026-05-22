@@ -196,10 +196,8 @@ def list_deployments(
         columns=[
             ListColumn(key="checkpoint_name", label="Checkpoint"),
             ListColumn(key="status", label="Status"),
-            ListColumn(key="base_model", label="Base Model"),
-            ListColumn(key="checkpoint_step", label="Step"),
-            ListColumn(key="created_at", label="Created"),
-            ListColumn(key="id", label="ID", no_wrap=True),
+            ListColumn(key="created_at", label="Deployed"),
+            ListColumn(key="creator_name", label="Deployed By"),
         ],
     )
 

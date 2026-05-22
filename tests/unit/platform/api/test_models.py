@@ -221,18 +221,6 @@ class TestSubmitTrainingRunResult:
 
 
 class TestTrainingRun:
-    def test_from_dict_parses_reward(self) -> None:
-        run = api_models.TrainingRun.from_dict(
-            {
-                "id": "run_1",
-                "name": "reward-run",
-                "status": "finished",
-                "reward": 0.875,
-            }
-        )
-
-        assert run.reward == 0.875
-
     def test_from_dict_parses_nested_model_and_dataset(self) -> None:
         run = api_models.TrainingRun.from_dict(
             {
@@ -271,25 +259,6 @@ class TestTrainingRun:
         assert run.model_name == "Qwen/Qwen3"
         assert run.dataset_id == "dataset_1"
         assert run.dataset_name == "train.jsonl"
-
-    def test_from_dict_defaults_missing_reward_to_none(self) -> None:
-        run = api_models.TrainingRun.from_dict(
-            {
-                "id": "run_1",
-                "name": "legacy-run",
-                "status": "finished",
-            }
-        )
-
-        assert run.reward is None
-
-    def test_positional_constructor_preserves_reward_increase_delta(self) -> None:
-        run = api_models.TrainingRun(
-            "run_1", "run", "finished", None, None, "", None, None, 0.1, 0.2
-        )
-
-        assert run.reward_increase_delta == 0.2
-        assert run.reward is None
 
 
 class TestTrainingRunDetail:
@@ -357,36 +326,31 @@ class TestMetricHistory:
 class TestTrainingRunMetricsOverview:
     def test_from_dict_full(self) -> None:
         data = {
-            "mlflow_run_id": "mlflow-abc",
-            "mlflow_status": "FINISHED",
             "duration_ms": 3600000,
             "duration_formatted": "1h",
-            "reward": 0.85,
-            "reward_increase_delta": 0.15,
+            "metric_summaries": [
+                {"key": "rollout/raw_reward", "title": "Training Reward", "initial": 0.70, "latest": 0.85, "delta": 0.15, "min": 0.65, "max": 0.87},
+            ],
             "examples_processed_count": 5000,
         }
         overview = TrainingRunMetricsOverview.from_dict(data)
-        assert overview.mlflow_run_id == "mlflow-abc"
         assert overview.duration_ms == 3600000
         assert overview.duration_formatted == "1h"
-        assert overview.reward == 0.85
-        assert overview.reward_delta == 0.15
+        assert len(overview.metric_summaries) == 1
+        assert overview.metric_summaries[0].latest == 0.85
+        assert overview.metric_summaries[0].delta == 0.15
         assert overview.examples_processed_count == 5000
 
     def test_from_dict_nulls(self) -> None:
         data = {
-            "mlflow_run_id": "mlflow-xyz",
-            "mlflow_status": "FAILED",
             "duration_ms": None,
             "duration_formatted": None,
-            "reward": None,
-            "reward_increase_delta": None,
+            "metric_summaries": [],
             "examples_processed_count": None,
         }
         overview = TrainingRunMetricsOverview.from_dict(data)
         assert overview.duration_ms is None
-        assert overview.reward is None
-        assert overview.reward_delta is None
+        assert overview.metric_summaries == []
 
 
 class TestTrainingRunMetrics:
@@ -395,12 +359,11 @@ class TestTrainingRunMetrics:
             "training_run_id": "550e8400-e29b-41d4-a716-446655440000",
             "status": "finished",
             "overview": {
-                "mlflow_run_id": "mlflow-abc",
-                "mlflow_status": "FINISHED",
                 "duration_ms": 3600000,
                 "duration_formatted": "1h",
-                "reward": 0.85,
-                "reward_increase_delta": 0.15,
+                "metric_summaries": [
+                    {"key": "rollout/raw_reward", "title": "Training Reward", "initial": 0.70, "latest": 0.85, "delta": 0.15, "min": 0.65, "max": 0.87},
+                ],
                 "examples_processed_count": 5000,
             },
             "metrics": [
@@ -416,7 +379,7 @@ class TestTrainingRunMetrics:
         result = TrainingRunMetrics.from_dict(data)
         assert result.training_run_id == "550e8400-e29b-41d4-a716-446655440000"
         assert result.status == "finished"
-        assert result.overview.reward == 0.85
+        assert result.overview.metric_summaries[0].latest == 0.85
         assert len(result.metrics) == 1
         assert result.metrics[0].metric_key == "rollout/raw_reward"
 
@@ -425,12 +388,9 @@ class TestTrainingRunMetrics:
             "training_run_id": "run-empty",
             "status": "finished",
             "overview": {
-                "mlflow_run_id": "mlflow-empty",
-                "mlflow_status": "FINISHED",
                 "duration_ms": None,
                 "duration_formatted": None,
-                "reward": None,
-                "reward_increase_delta": None,
+                "metric_summaries": [],
                 "examples_processed_count": None,
             },
             "metrics": [],

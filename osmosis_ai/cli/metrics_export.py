@@ -13,6 +13,8 @@ _METRIC_KEY_MAP: dict[str, str] = {
     "eval/validation/reward": "validation_reward",
     "train/entropy_loss": "entropy",
     "rollout/response_lengths": "response_length",
+    "rollout/total_lengths": "total_length",
+    "rollout/truncated_ratio": "truncation_ratio",
 }
 
 
@@ -46,18 +48,25 @@ def build_export_dict(
     if run.completed_at is not None:
         training_run["completed_at"] = run.completed_at
     if run.examples_processed_count is not None:
-        training_run["examples_processed"] = run.examples_processed_count
+        training_run["rows_processed"] = run.examples_processed_count
 
     # summary section
-    summary: dict[str, Any] = {
-        "total_steps": max(
-            (dp.step for m in metrics.metrics for dp in m.data_points), default=0
-        ),
-    }
-    if metrics.overview.reward is not None:
-        summary["final_reward"] = metrics.overview.reward
-    if metrics.overview.reward_delta is not None:
-        summary["reward_delta"] = metrics.overview.reward_delta
+    summary: dict[str, Any] = {}
+    for s in metrics.overview.metric_summaries:
+        key = _METRIC_KEY_MAP.get(s.key, s.key)
+        entry: dict[str, float] = {}
+        if s.initial is not None:
+            entry["initial"] = s.initial
+        if s.latest is not None:
+            entry["latest"] = s.latest
+        if s.delta is not None:
+            entry["delta"] = s.delta
+        if s.min is not None:
+            entry["min"] = s.min
+        if s.max is not None:
+            entry["max"] = s.max
+        if entry:
+            summary[key] = entry
 
     # metrics section
     export_metrics = []
