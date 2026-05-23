@@ -77,7 +77,7 @@ class TestBuildExportDict:
         assert tr["id"] == "550e8400-e29b-41d4-a716-446655440000"
         assert tr["name"] == "reward-tuning-v3"
         assert tr["status"] == "finished"
-        assert tr["model_name"] == "Qwen/Qwen3-8B"
+        assert tr["base_model_name"] == "Qwen/Qwen3-8B"
         assert tr["started_at"] == "2026-03-28T10:00:00Z"
         assert tr["completed_at"] == "2026-03-28T11:05:30Z"
         assert tr["rows_processed"] == 5000
@@ -135,7 +135,7 @@ class TestBuildExportDict:
         result = build_export_dict(run, metrics)
         tr = result["training_run"]
         assert "name" not in tr
-        assert "model_name" not in tr
+        assert "base_model_name" not in tr
         assert "started_at" not in tr
         assert "completed_at" not in tr
         assert "dataset_name" not in tr

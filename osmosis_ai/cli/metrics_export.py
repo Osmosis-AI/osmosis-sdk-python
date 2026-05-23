@@ -40,7 +40,7 @@ def build_export_dict(
     if run.name is not None:
         training_run["name"] = run.name
     if run.model_name is not None:
-        training_run["model_name"] = run.model_name
+        training_run["base_model_name"] = run.model_name
     if run.dataset_name is not None:
         training_run["dataset_name"] = run.dataset_name
     if run.rollout_name is not None:
