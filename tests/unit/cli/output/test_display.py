@@ -24,7 +24,7 @@ def test_format_local_date_uses_explicit_timezone() -> None:
 
 
 def test_created_column_label_uses_created_at_label() -> None:
-    assert created_column_label() == "Created At"
+    assert created_column_label() == "Created"
 
 
 def test_format_local_date_includes_per_timestamp_timezone_rules() -> None:

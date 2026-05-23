@@ -41,6 +41,10 @@ def build_export_dict(
         training_run["name"] = run.name
     if run.model_name is not None:
         training_run["model_name"] = run.model_name
+    if run.dataset_name is not None:
+        training_run["dataset_name"] = run.dataset_name
+    if run.rollout_name is not None:
+        training_run["rollout_name"] = run.rollout_name
     if metrics.overview.duration_formatted is not None:
         training_run["duration"] = metrics.overview.duration_formatted
     if run.started_at is not None:

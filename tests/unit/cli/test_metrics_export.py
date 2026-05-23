@@ -54,6 +54,8 @@ class TestBuildExportDict:
             name="reward-tuning-v3",
             status="finished",
             model_name="Qwen/Qwen3-8B",
+            dataset_name="my-dataset.jsonl",
+            rollout_name="my-rollout",
             started_at="2026-03-28T10:00:00Z",
             completed_at="2026-03-28T11:05:30Z",
             examples_processed_count=5000,
@@ -71,6 +73,8 @@ class TestBuildExportDict:
         assert tr["started_at"] == "2026-03-28T10:00:00Z"
         assert tr["completed_at"] == "2026-03-28T11:05:30Z"
         assert tr["rows_processed"] == 5000
+        assert tr["dataset_name"] == "my-dataset.jsonl"
+        assert tr["rollout_name"] == "my-rollout"
 
     def test_summary_section(self) -> None:
         metrics = self._make_metrics()
@@ -126,6 +130,8 @@ class TestBuildExportDict:
         assert "model_name" not in tr
         assert "started_at" not in tr
         assert "completed_at" not in tr
+        assert "dataset_name" not in tr
+        assert "rollout_name" not in tr
 
     def test_duration_from_overview(self) -> None:
         metrics = self._make_metrics()
