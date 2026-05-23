@@ -43,12 +43,9 @@ def _make_metrics(**overrides) -> TrainingRunMetrics:
         training_run_id="550e8400-e29b-41d4-a716-446655440000",
         status="finished",
         overview=TrainingRunMetricsOverview(
-            mlflow_run_id="mlflow-abc",
-            mlflow_status="FINISHED",
             duration_ms=3600000,
             duration_formatted="1h",
-            reward=0.85,
-            reward_delta=0.15,
+            metric_summaries=[],
             examples_processed_count=5000,
         ),
         metrics=[
@@ -337,7 +334,7 @@ class TestMetricsCommandWritesFile:
         assert output.exists()
         data = json.loads(output.read_text())
         assert data["training_run"]["name"] == "reward-tuning-v3"
-        assert data["summary"]["final_reward"] == 0.85
+        assert isinstance(data["summary"], dict)
         assert data["metrics"][0]["key"] == "training_reward"
 
     @patch(_PATCH_CLIENT)

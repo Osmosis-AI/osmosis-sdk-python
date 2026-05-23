@@ -13,6 +13,8 @@ _METRIC_KEY_MAP: dict[str, str] = {
     "eval/validation/reward": "validation_reward",
     "train/entropy_loss": "entropy",
     "rollout/response_lengths": "response_length",
+    "rollout/total_lengths": "total_length",
+    "rollout/truncated_ratio": "truncation_ratio",
 }
 
 
@@ -38,7 +40,11 @@ def build_export_dict(
     if run.name is not None:
         training_run["name"] = run.name
     if run.model_name is not None:
-        training_run["model_name"] = run.model_name
+        training_run["base_model_name"] = run.model_name
+    if run.dataset_name is not None:
+        training_run["dataset_name"] = run.dataset_name
+    if run.rollout_name is not None:
+        training_run["rollout_name"] = run.rollout_name
     if metrics.overview.duration_formatted is not None:
         training_run["duration"] = metrics.overview.duration_formatted
     if run.started_at is not None:
@@ -46,18 +52,29 @@ def build_export_dict(
     if run.completed_at is not None:
         training_run["completed_at"] = run.completed_at
     if run.examples_processed_count is not None:
-        training_run["examples_processed"] = run.examples_processed_count
+        training_run["rows_processed"] = run.examples_processed_count
+    if metrics.overview.latest_step is not None:
+        training_run["latest_step"] = metrics.overview.latest_step
+    if metrics.overview.total_steps is not None:
+        training_run["total_steps"] = metrics.overview.total_steps
 
     # summary section
-    summary: dict[str, Any] = {
-        "total_steps": max(
-            (dp.step for m in metrics.metrics for dp in m.data_points), default=0
-        ),
-    }
-    if metrics.overview.reward is not None:
-        summary["final_reward"] = metrics.overview.reward
-    if metrics.overview.reward_delta is not None:
-        summary["reward_delta"] = metrics.overview.reward_delta
+    summary: dict[str, Any] = {}
+    for s in metrics.overview.metric_summaries:
+        key = _METRIC_KEY_MAP.get(s.key, s.key)
+        entry: dict[str, float] = {}
+        if s.initial is not None:
+            entry["initial"] = s.initial
+        if s.latest is not None:
+            entry["latest"] = s.latest
+        if s.delta is not None:
+            entry["delta"] = s.delta
+        if s.min is not None:
+            entry["min"] = s.min
+        if s.max is not None:
+            entry["max"] = s.max
+        if entry:
+            summary[key] = entry
 
     # metrics section
     export_metrics = []

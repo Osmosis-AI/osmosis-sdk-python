@@ -208,9 +208,7 @@ def list_runs(
         serialize_training_run,
     )
     from osmosis_ai.cli.output.display import (
-        created_column_label,
         format_local_date,
-        format_reward,
     )
     from osmosis_ai.platform.cli.utils import (
         fetch_all_pages,
@@ -263,24 +261,23 @@ def list_runs(
         extra=git_result_context(context),
         columns=[
             ListColumn(key="name", label="Name", ratio=4, overflow="fold"),
-            ListColumn(key="rollout_name", label="Rollout", ratio=2, overflow="fold"),
             ListColumn(key="status", label="Status", no_wrap=True, ratio=1),
-            ListColumn(key="reward", label="Reward", no_wrap=True, ratio=1),
-            ListColumn(
-                key="created_at",
-                label=created_column_label(),
-                no_wrap=True,
-                ratio=1,
-            ),
+            ListColumn(key="dataset_name", label="Dataset", ratio=2, overflow="fold"),
+            ListColumn(key="model_name", label="Base Model", ratio=2, overflow="fold"),
+            ListColumn(key="rollout_name", label="Rollout", ratio=2, overflow="fold"),
+            ListColumn(key="created_at", label="Submitted", no_wrap=True, ratio=1),
+            ListColumn(key="creator_name", label="Submitted By", no_wrap=True, ratio=1),
         ],
         display_items=[
             {
                 **serialize_training_run(run),
                 "name": run.name or "(unnamed)",
-                "rollout_name": run.rollout_name or "—",
                 "status": format_run_status(run),
-                "reward": format_reward(run.reward),
+                "dataset_name": run.dataset_name or "—",
+                "model_name": run.model_name or "—",
+                "rollout_name": run.rollout_name or "—",
                 "created_at": format_local_date(run.created_at),
+                "creator_name": run.creator_name or "—",
             }
             for run in training_runs
         ],
@@ -341,16 +338,16 @@ def info(
         )
 
     rows = build_run_detail_rows(run)
-    if run.examples_processed_count is not None:
-        rows.append(("Examples", str(run.examples_processed_count)))
-    if run.notes:
-        rows.append(("Notes", console.escape(run.notes)))
-    if run.hf_status:
-        rows.append(("HF Status", run.hf_status))
+    if run.status == "pending":
+        rows.insert(3, ("Progress", "Waiting to start..."))
     if run.started_at:
         rows.append(("Started", format_local_datetime(run.started_at)))
     if run.completed_at:
         rows.append(("Completed", format_local_datetime(run.completed_at)))
+    if run.examples_processed_count is not None:
+        rows.append(("Rows Processed", f"{run.examples_processed_count:,}"))
+    if run.notes:
+        rows.append(("Notes", console.escape(run.notes)))
 
     checkpoints = []
     sections: list[DetailSection] = []
@@ -393,23 +390,12 @@ def info(
     save_warning: str | None = None
     if metrics_data is not None:
         export = build_export_dict(run, metrics_data)
+        if metrics_data.overview.total_steps is not None:
+            latest = metrics_data.overview.latest_step or 0
+            total = metrics_data.overview.total_steps
+            rows.insert(3, ("Progress", f"{latest} / {total} rollout steps"))
         if metrics_data.overview.duration_formatted:
             rows.append(("Duration", metrics_data.overview.duration_formatted))
-        if metrics_data.overview.reward is not None:
-            rows.append(("Final Reward", f"{metrics_data.overview.reward:.4f}"))
-        if metrics_data.overview.reward_delta is not None:
-            rows.append(
-                (
-                    "Metric Reward Delta",
-                    f"{metrics_data.overview.reward_delta:+.4f}",
-                )
-            )
-        total_steps = max(
-            (dp.step for m in metrics_data.metrics for dp in m.data_points),
-            default=0,
-        )
-        if total_steps:
-            rows.append(("Steps", f"{total_steps:,}"))
 
     fields = _detail_fields(rows)
     if run.platform_url:
@@ -423,21 +409,18 @@ def info(
         table.add_column("Step", no_wrap=True)
         table.add_column("Status", no_wrap=True)
         table.add_column("ID", no_wrap=True)
-        table.add_column("Created", no_wrap=True)
         plain_lines = []
         for cp in checkpoints:
             cp_name = cp.checkpoint_name or "(unnamed)"
-            created = format_local_datetime(cp.created_at)
             table.add_row(
                 Text(cp_name),
                 str(cp.checkpoint_step),
                 cp.status,
                 cp.id[:8],
-                created,
             )
             plain_lines.append(
                 f"Checkpoint: {cp_name} step {cp.checkpoint_step} "
-                f"[{cp.status}] {cp.id[:8]} {created}"
+                f"[{cp.status}] {cp.id[:8]}"
             )
         sections.append(DetailSection(rich=table, plain_lines=plain_lines))
         display_hints.append("Deploy with: osmosis deploy <checkpoint-name>")
@@ -501,7 +484,6 @@ def info(
                 **serialize_training_run(run),
                 "examples_processed_count": run.examples_processed_count,
                 "notes": run.notes,
-                "hf_status": run.hf_status,
             },
             **({"platform_url": run.platform_url} if run.platform_url else {}),
             "checkpoints": [serialize_checkpoint(cp) for cp in checkpoints],

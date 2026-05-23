@@ -284,12 +284,9 @@ def test_train_info_json_does_not_write_default_file(
                 training_run_id=run_id,
                 status="finished",
                 overview=TrainingRunMetricsOverview(
-                    mlflow_run_id="mlflow_1",
-                    mlflow_status="FINISHED",
                     duration_ms=1000,
                     duration_formatted="1s",
-                    reward=1.0,
-                    reward_delta=0.5,
+                    metric_summaries=[],
                     examples_processed_count=10,
                 ),
                 metrics=[
@@ -381,10 +378,9 @@ def test_model_list_plain_is_tab_separated_rows(
     fields = lines[0].split("\t")
     assert len(fields) == 3
     assert fields[0] == "Qwen/Qwen3"
-    assert fields[1] == "Qwen/Qwen3"
-    assert fields[2].startswith("2026-04-")
+    assert fields[1].startswith("2026-04-")
+    assert fields[2] == "brian"
     assert "model_1" not in fields
-    assert "brian" not in fields
 
 
 def test_model_list_json_includes_git_context(

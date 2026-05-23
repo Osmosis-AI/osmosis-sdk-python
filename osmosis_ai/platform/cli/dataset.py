@@ -20,7 +20,7 @@ from osmosis_ai.cli.output import (
     get_output_context,
     serialize_dataset,
 )
-from osmosis_ai.cli.output.display import created_column_label, format_local_date
+from osmosis_ai.cli.output.display import format_local_date
 from osmosis_ai.cli.paths import parse_cli_path
 from osmosis_ai.cli.prompts import confirm
 from osmosis_ai.platform.api.models import STATUSES_IN_PROGRESS
@@ -204,7 +204,7 @@ def _create_dataset_for_upload(
     """Create the dataset record, retrying with overwrite when explicitly requested."""
     try:
         return platform_call(
-            "Creating dataset...",
+            "Uploading dataset...",
             lambda: client.create_dataset(
                 dataset_name,
                 file_size,
@@ -477,12 +477,8 @@ def list_datasets(limit: int = DEFAULT_PAGE_SIZE, all_: bool = False) -> Command
             ListColumn(key="file_name", label="Name", ratio=4, overflow="fold"),
             ListColumn(key="status", label="Status", no_wrap=True, ratio=1),
             ListColumn(key="file_size", label="Size", no_wrap=True, ratio=1),
-            ListColumn(
-                key="created_at",
-                label=created_column_label(),
-                no_wrap=True,
-                ratio=1,
-            ),
+            ListColumn(key="created_at", label="Uploaded", no_wrap=True, ratio=1),
+            ListColumn(key="creator_name", label="Uploaded By", no_wrap=True, ratio=1),
         ],
         display_items=[
             {
@@ -490,6 +486,7 @@ def list_datasets(limit: int = DEFAULT_PAGE_SIZE, all_: bool = False) -> Command
                 "status": format_dataset_status(d),
                 "file_size": format_size(d.file_size),
                 "created_at": format_local_date(d.created_at),
+                "creator_name": d.creator_name or "—",
             }
             for d in datasets
         ],

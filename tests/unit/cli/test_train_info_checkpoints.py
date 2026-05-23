@@ -13,7 +13,6 @@ import osmosis_ai.platform.api.client as api_client_module
 import osmosis_ai.platform.cli.utils as utils_module
 from osmosis_ai.cli.console import Console
 from osmosis_ai.cli.output import DetailResult
-from osmosis_ai.cli.output.display import format_local_datetime
 from osmosis_ai.platform.api.models import (
     LoraCheckpointInfo,
     TrainingRunCheckpoints,
@@ -140,7 +139,6 @@ class TestStatusCheckpoints:
         assert "step 100" in checkpoint_line
         assert "[uploaded]" in checkpoint_line
         assert "cp_1" in checkpoint_line
-        assert format_local_datetime("2026-04-20T00:00:00Z") in checkpoint_line
 
     def test_running_run_skips_checkpoints(
         self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO

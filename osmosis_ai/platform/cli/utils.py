@@ -115,11 +115,6 @@ def format_run_status(r: Any, *, for_prompt: bool = False) -> str:
     interactive prompt choices.
     """
     status_info = f"[{r.status}]"
-    if r.processing_step:
-        pct = (
-            f" {r.processing_percent:.0f}%" if r.processing_percent is not None else ""
-        )
-        status_info = f"[{r.status}: {r.processing_step}{pct}]"
 
     if for_prompt:
         return status_info
@@ -149,53 +144,43 @@ def build_dataset_detail_rows(ds: Any) -> list[tuple[str, str]]:
     rows: list[tuple[str, str]] = [
         ("File", console.escape(ds.file_name)),
         ("ID", ds.id),
-        ("Size", format_size(ds.file_size)),
-        ("Status", ds.status),
+        ("Status", ds.status.replace("_", " ").title()),
     ]
-    step = format_processing_step(ds)
-    if step:
-        rows.append(("Step", step))
-    if ds.error:
-        rows.append(("Error", console.escape(ds.error)))
+    file_format = getattr(ds, "file_format", None)
+    original_format = getattr(ds, "original_file_format", None)
+    if file_format:
+        fmt = file_format.upper()
+        if original_format and original_format != file_format:
+            fmt += f" (uploaded as {original_format.upper()})"
+        rows.append(("File Format", fmt))
+    if getattr(ds, "row_count", None) is not None:
+        rows.append(("Total Rows", f"{ds.row_count:,}"))
+    size_str = format_size(ds.file_size)
+    original_size = getattr(ds, "original_file_size", None)
+    if original_size:
+        size_str += f" (uncompressed: {format_size(original_size)})"
+    rows.append(("Size", size_str))
+    if ds.created_at:
+        rows.append(("Uploaded", format_local_datetime(ds.created_at)))
+    if getattr(ds, "creator_name", None):
+        rows.append(("Uploaded By", console.escape(ds.creator_name)))
     return rows
 
 
 def build_run_detail_rows(r: Any) -> list[tuple[str, str]]:
-    """Build common detail rows for a training run."""
     rows: list[tuple[str, str]] = [
         ("Name", console.escape(r.name) if r.name else "(unnamed)"),
         ("ID", r.id),
-        ("Status", r.status),
+        ("Status", r.status.replace("_", " ").title()),
     ]
-    step = format_processing_step(r)
-    if step:
-        rows.append(("Step", step))
-    rows.append(("Model", console.escape(r.model_name) if r.model_name else "—"))
-    rows.append(("Dataset", console.escape(r.dataset_name) if r.dataset_name else "—"))
-    rows.append(("Rollout", console.escape(r.rollout_name) if r.rollout_name else "—"))
-    if r.eval_accuracy is not None:
-        rows.append(("Accuracy", f"{r.eval_accuracy:.4f}"))
-    if r.reward_increase_delta is not None:
-        rows.append(("Reward Delta", f"{r.reward_increase_delta:+.4f}"))
-    if r.error_message:
-        rows.append(("Error", console.escape(r.error_message)))
-    if r.creator_name:
-        rows.append(("Creator", console.escape(r.creator_name)))
     if r.created_at:
-        rows.append(("Created", format_local_datetime(r.created_at)))
+        rows.append(("Submitted", format_local_datetime(r.created_at)))
+    if r.creator_name:
+        rows.append(("Submitted By", console.escape(r.creator_name)))
+    rows.append(("Dataset", console.escape(r.dataset_name) if r.dataset_name else "—"))
+    rows.append(("Base Model", console.escape(r.model_name) if r.model_name else "—"))
+    rows.append(("Rollout", console.escape(r.rollout_name) if r.rollout_name else "—"))
     return rows
-
-
-def format_processing_step(obj: Any) -> str | None:
-    """Format processing step with optional percentage, or None if no step."""
-    if not obj.processing_step:
-        return None
-    pct = (
-        f" ({obj.processing_percent:.0f}%)"
-        if obj.processing_percent is not None
-        else ""
-    )
-    return f"{obj.processing_step}{pct}"
 
 
 def format_size(size_bytes: int | float) -> str:

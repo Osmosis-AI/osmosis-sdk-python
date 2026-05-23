@@ -13,7 +13,6 @@ from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.platform.cli.utils import (
     fetch_all_pages,
     format_dataset_status,
-    format_processing_step,
     format_run_status,
     format_size,
     platform_call,
@@ -50,40 +49,20 @@ def test_format_size(size_bytes: int, expected: str) -> None:
     assert format_size(size_bytes) == expected
 
 
-# ── format_processing_step ───────────────────────────────────────────
-
-
-def test_format_processing_step_none_when_no_step() -> None:
-    obj = SimpleNamespace(processing_step=None, processing_percent=None)
-    assert format_processing_step(obj) is None
-
-
-def test_format_processing_step_with_step_only() -> None:
-    obj = SimpleNamespace(processing_step="training", processing_percent=None)
-    assert format_processing_step(obj) == "training"
-
-
-def test_format_processing_step_with_percent() -> None:
-    obj = SimpleNamespace(processing_step="training", processing_percent=42.7)
-    assert format_processing_step(obj) == "training (43%)"
-
-
 # ── format_dataset_status ────────────────────────────────────────────
 
 
-def _dataset(status: str, step: str | None = None) -> SimpleNamespace:
-    return SimpleNamespace(status=status, processing_step=step, processing_percent=None)
+def _dataset(status: str) -> SimpleNamespace:
+    return SimpleNamespace(status=status)
 
 
 def test_format_dataset_status_for_prompt() -> None:
     assert format_dataset_status(_dataset("uploaded"), for_prompt=True) == "[uploaded]"
 
 
-def test_format_dataset_status_for_prompt_with_step() -> None:
-    """processing_step is not shown in list display — only [status]."""
+def test_format_dataset_status_for_prompt_processing() -> None:
     assert (
-        format_dataset_status(_dataset("processing", "validating"), for_prompt=True)
-        == "[processing]"
+        format_dataset_status(_dataset("processing"), for_prompt=True) == "[processing]"
     )
 
 
@@ -132,10 +111,8 @@ def test_format_dataset_status_unknown_uses_escape(
 # ── format_run_status ────────────────────────────────────────────────
 
 
-def _run(
-    status: str, step: str | None = None, pct: float | None = None
-) -> SimpleNamespace:
-    return SimpleNamespace(status=status, processing_step=step, processing_percent=pct)
+def _run(status: str) -> SimpleNamespace:
+    return SimpleNamespace(status=status)
 
 
 def test_format_run_status_for_prompt() -> None:
@@ -143,8 +120,8 @@ def test_format_run_status_for_prompt() -> None:
 
 
 def test_format_run_status_for_prompt_with_step_and_percent() -> None:
-    result = format_run_status(_run("running", "training", 55.3), for_prompt=True)
-    assert result == "[running: training 55%]"
+    result = format_run_status(_run("running"), for_prompt=True)
+    assert result == "[running]"
 
 
 def test_format_run_status_success(monkeypatch: pytest.MonkeyPatch) -> None:
