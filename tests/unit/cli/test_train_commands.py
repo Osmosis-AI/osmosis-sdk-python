@@ -357,7 +357,15 @@ class TestInfo:
                 duration_ms=1000,
                 duration_formatted="1s",
                 metric_summaries=[
-                    MetricSummary(key="rollout/raw_reward", title="Training Reward", initial=0.50, latest=0.75, delta=0.25, min=0.45, max=0.78),
+                    MetricSummary(
+                        key="rollout/raw_reward",
+                        title="Training Reward",
+                        initial=0.50,
+                        latest=0.75,
+                        delta=0.25,
+                        min=0.45,
+                        max=0.78,
+                    ),
                 ],
                 examples_processed_count=10,
             ),

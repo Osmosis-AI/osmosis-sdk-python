@@ -514,7 +514,15 @@ class TestGetTrainingRunMetrics:
                 "duration_ms": 3600000,
                 "duration_formatted": "1h",
                 "metric_summaries": [
-                    {"key": "rollout/raw_reward", "title": "Training Reward", "initial": 0.70, "latest": 0.85, "delta": 0.15, "min": 0.65, "max": 0.87},
+                    {
+                        "key": "rollout/raw_reward",
+                        "title": "Training Reward",
+                        "initial": 0.70,
+                        "latest": 0.85,
+                        "delta": 0.15,
+                        "min": 0.65,
+                        "max": 0.87,
+                    },
                 ],
                 "examples_processed_count": 5000,
             },

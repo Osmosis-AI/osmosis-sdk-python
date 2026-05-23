@@ -62,8 +62,7 @@ def test_format_dataset_status_for_prompt() -> None:
 
 def test_format_dataset_status_for_prompt_processing() -> None:
     assert (
-        format_dataset_status(_dataset("processing"), for_prompt=True)
-        == "[processing]"
+        format_dataset_status(_dataset("processing"), for_prompt=True) == "[processing]"
     )
 
 
