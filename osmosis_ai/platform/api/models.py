@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Literal
 
 # ── Dataset status constants ─────────────────────────────────────
@@ -64,11 +64,13 @@ class DatasetFile:
     file_name: str
     file_size: int
     status: str
-    processing_step: str | None = None
-    processing_percent: float | None = None
-    error: str | None = None
     data_preview: Any = None
     df_stats: Any = None
+    file_format: str | None = None
+    original_file_format: str | None = None
+    row_count: int | None = None
+    original_file_size: int | None = None
+    creator_name: str | None = None
     organization_id: str | None = None
     created_at: str = ""
     updated_at: str = ""
@@ -85,11 +87,13 @@ class DatasetFile:
             file_name=data.get("file_name", ""),
             file_size=data.get("file_size", 0),
             status=data.get("status", ""),
-            processing_step=data.get("processing_step"),
-            processing_percent=data.get("processing_percent"),
-            error=data.get("error"),
             data_preview=data.get("data_preview"),
             df_stats=data.get("df_stats"),
+            file_format=data.get("file_format"),
+            original_file_format=data.get("original_file_format"),
+            row_count=data.get("row_count"),
+            original_file_size=data.get("original_file_size"),
+            creator_name=data.get("creator_name"),
             organization_id=data.get("organization_id"),
             created_at=data.get("created_at", ""),
             updated_at=data.get("updated_at", ""),
@@ -171,11 +175,6 @@ class TrainingRun:
     created_at: str = ""
     started_at: str | None = None
     completed_at: str | None = None
-    eval_accuracy: float | None = None
-    reward_increase_delta: float | None = None
-    processing_step: str | None = None
-    processing_percent: float | None = None
-    error_message: str | None = None
     creator_name: str | None = None
     creator_email: str | None = None
     platform_url: str | None = None
@@ -183,7 +182,6 @@ class TrainingRun:
     dataset_name: str | None = None
     rollout_id: str | None = None
     rollout_name: str | None = None
-    reward: float | None = field(default=None, kw_only=True)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> TrainingRun:
@@ -199,12 +197,6 @@ class TrainingRun:
             created_at=data.get("created_at", ""),
             started_at=data.get("started_at"),
             completed_at=data.get("completed_at"),
-            eval_accuracy=data.get("eval_accuracy"),
-            reward=data.get("reward"),
-            reward_increase_delta=data.get("reward_increase_delta"),
-            processing_step=data.get("processing_step"),
-            processing_percent=data.get("processing_percent"),
-            error_message=data.get("error_message"),
             creator_name=data.get("creator_name"),
             creator_email=data.get("creator_email"),
             platform_url=data.get("platform_url"),
@@ -226,7 +218,6 @@ class TrainingRunDetail(TrainingRun):
 
     examples_processed_count: int | None = None
     notes: str | None = None
-    hf_status: str | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> TrainingRunDetail:
@@ -244,12 +235,6 @@ class TrainingRunDetail(TrainingRun):
             created_at=run.get("created_at", ""),
             started_at=run.get("started_at"),
             completed_at=run.get("completed_at"),
-            eval_accuracy=run.get("eval_accuracy"),
-            reward=run.get("reward"),
-            reward_increase_delta=run.get("reward_increase_delta"),
-            processing_step=run.get("processing_step"),
-            processing_percent=run.get("processing_percent"),
-            error_message=run.get("error_message"),
             creator_name=run.get("creator_name"),
             creator_email=run.get("creator_email"),
             platform_url=run.get("platform_url"),
@@ -259,7 +244,6 @@ class TrainingRunDetail(TrainingRun):
             rollout_name=rollout.get("name"),
             examples_processed_count=run.get("examples_processed_count"),
             notes=run.get("notes"),
-            hf_status=run.get("hf_status"),
         )
 
 
@@ -309,6 +293,31 @@ class SubmitTrainingRunResult:
 
 
 @dataclass
+class MetricSummary:
+    """Initial, latest, and delta for a single metric."""
+
+    key: str
+    title: str
+    initial: float | None
+    latest: float | None
+    delta: float | None
+    min: float | None
+    max: float | None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> MetricSummary:
+        return cls(
+            key=data["key"],
+            title=data["title"],
+            initial=data.get("initial"),
+            latest=data.get("latest"),
+            delta=data.get("delta"),
+            min=data.get("min"),
+            max=data.get("max"),
+        )
+
+
+@dataclass
 class MetricDataPoint:
     """A single data point in a metric time series."""
 
@@ -348,24 +357,24 @@ class MetricHistory:
 class TrainingRunMetricsOverview:
     """Summary metrics for a training run."""
 
-    mlflow_run_id: str
-    mlflow_status: str
     duration_ms: int | None
     duration_formatted: str | None
-    reward: float | None
-    reward_delta: float | None
+    metric_summaries: list[MetricSummary]
     examples_processed_count: int | None
+    latest_step: int | None = None
+    total_steps: int | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> TrainingRunMetricsOverview:
         return cls(
-            mlflow_run_id=data["mlflow_run_id"],
-            mlflow_status=data["mlflow_status"],
             duration_ms=data.get("duration_ms"),
             duration_formatted=data.get("duration_formatted"),
-            reward=data.get("reward"),
-            reward_delta=data.get("reward_increase_delta"),
+            metric_summaries=[
+                MetricSummary.from_dict(s) for s in data.get("metric_summaries", [])
+            ],
             examples_processed_count=data.get("examples_processed_count"),
+            latest_step=data.get("latest_step"),
+            total_steps=data.get("total_steps"),
         )
 
 

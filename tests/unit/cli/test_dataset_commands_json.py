@@ -158,9 +158,9 @@ def test_dataset_list_plain_emits_tab_separated_rows(monkeypatch, capsys) -> Non
 
     assert exit_code == 0
     lines = captured.out.splitlines()
-    assert len(lines[0].split("\t")) == 4
+    assert len(lines[0].split("\t")) == 5
     assert lines[0].startswith("a.jsonl\t[uploaded]\t100 B\t")
-    assert len(lines[1].split("\t")) == 4
+    assert len(lines[1].split("\t")) == 5
     assert lines[1].startswith("b.jsonl\t[pending]\t100 B\t")
     assert "\tds_1" not in lines[0]
     assert "\tds_2" not in lines[1]

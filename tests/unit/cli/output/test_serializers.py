@@ -38,9 +38,6 @@ def test_serialize_dataset_keys() -> None:
             "file_name": "train.jsonl",
             "file_size": 12345,
             "status": "uploaded",
-            "processing_step": None,
-            "processing_percent": None,
-            "error": None,
             "created_at": "2026-04-26T00:00:00Z",
             "updated_at": "2026-04-26T00:00:01Z",
         }
@@ -62,8 +59,8 @@ def test_serialize_dataset_keeps_none_optional_contract_fields() -> None:
         }
     )
     payload = serialize_dataset(dataset)
-    assert payload["error"] is None
-    assert payload["processing_step"] is None
+    assert payload["file_format"] is None
+    assert payload["row_count"] is None
 
 
 def test_serialize_training_run_keys() -> None:
@@ -78,12 +75,6 @@ def test_serialize_training_run_keys() -> None:
             },
             "dataset": {"id": None, "file_name": "train.jsonl"},
             "rollout": {"id": "rollout_1", "name": "math-rollout"},
-            "eval_accuracy": 0.4,
-            "reward": 0.875,
-            "reward_increase_delta": 0.02,
-            "processing_step": "training",
-            "processing_percent": 50.0,
-            "error_message": None,
             "creator_name": "brian",
             "creator_email": "b@example.com",
             "created_at": "2026-04-26T00:00:00Z",
@@ -99,7 +90,6 @@ def test_serialize_training_run_keys() -> None:
     assert payload["dataset_name"] == "train.jsonl"
     assert payload["rollout_id"] == "rollout_1"
     assert payload["rollout_name"] == "math-rollout"
-    assert payload["reward"] == 0.875
 
 
 def test_serialize_checkpoint_keys() -> None:

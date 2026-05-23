@@ -44,7 +44,7 @@ dataset = "<your-dataset-name>"  # Platform dataset name from `osmosis dataset l
 # [rollout.env]
 # Literal key = "value" pairs injected verbatim into the rollout container.
 # Values are visible in this file and in CLI output - do NOT put secrets here.
-# Keys must match ^[A-Z_][A-Z0-9_]*$ and must not be reserved names (see below).
+# Keys must match ^[A-Z_][A-Z0-9_]*$ and must not start with _OSMOSIS_.
 #
 # Example:
 #   LOG_LEVEL = "INFO"
@@ -58,9 +58,3 @@ dataset = "<your-dataset-name>"  # Platform dataset name from `osmosis dataset l
 #
 # Example:
 #   OPENAI_API_KEY = "openai-api-key"   # value is the *name* of the secret record
-#
-# Reserved names (cannot appear in either section - managed by the platform):
-#   _OSMOSIS_GITHUB_CLONE_URL  _OSMOSIS_GITHUB_TOKEN  _OSMOSIS_ENTRYPOINT_SCRIPT
-#   _OSMOSIS_REPOSITORY_PATH   _OSMOSIS_TRAINING_RUN_ID  _OSMOSIS_ROLLOUT_NAME
-#   _OSMOSIS_ROLLOUT_PORT
-# More broadly: any name starting with _OSMOSIS_ is reserved.

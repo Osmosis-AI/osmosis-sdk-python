@@ -31,7 +31,7 @@ def list_models(
         get_output_context,
         serialize_model,
     )
-    from osmosis_ai.cli.output.display import created_column_label, format_local_date
+    from osmosis_ai.cli.output.display import format_local_date
     from osmosis_ai.platform.cli.utils import (
         fetch_all_pages,
         require_git_workspace_directory_context,
@@ -83,18 +83,14 @@ def list_models(
         extra=git_result_context(context),
         columns=[
             ListColumn(key="model_name", label="Name", ratio=4, overflow="fold"),
-            ListColumn(key="base_model", label="Base", ratio=2, overflow="fold"),
-            ListColumn(
-                key="created_at",
-                label=created_column_label(),
-                no_wrap=True,
-                ratio=1,
-            ),
+            ListColumn(key="created_at", label="Added", no_wrap=True, ratio=1),
+            ListColumn(key="creator_name", label="Added By", no_wrap=True, ratio=1),
         ],
         display_items=[
             {
                 **serialize_model(model),
                 "created_at": format_local_date(model.created_at),
+                "creator_name": model.creator_name or "—",
             }
             for model in models
         ],
