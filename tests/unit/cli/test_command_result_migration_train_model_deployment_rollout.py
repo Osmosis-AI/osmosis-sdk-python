@@ -378,10 +378,9 @@ def test_model_list_plain_is_tab_separated_rows(
     fields = lines[0].split("\t")
     assert len(fields) == 3
     assert fields[0] == "Qwen/Qwen3"
-    assert fields[1] == "Qwen/Qwen3"
-    assert fields[2].startswith("2026-04-")
+    assert fields[1].startswith("2026-04-")
+    assert fields[2] == "brian"
     assert "model_1" not in fields
-    assert "brian" not in fields
 
 
 def test_model_list_json_includes_git_context(

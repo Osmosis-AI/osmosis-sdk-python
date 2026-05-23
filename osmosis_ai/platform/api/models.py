@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Literal
 
 # ── Dataset status constants ─────────────────────────────────────
@@ -182,6 +182,7 @@ class TrainingRun:
     dataset_name: str | None = None
     rollout_id: str | None = None
     rollout_name: str | None = None
+
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> TrainingRun:
         model = data.get("model") or {}

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from datetime import datetime, tzinfo
-from typing import Any
 
 
 def _parse_iso_datetime(value: str | None) -> datetime | None:
@@ -60,5 +59,3 @@ def format_local_datetime(
     if parsed is None:
         return "" if value is None else str(value)
     return _localize(parsed, tz=tz).strftime("%Y-%m-%d %H:%M:%S %Z")
-
-

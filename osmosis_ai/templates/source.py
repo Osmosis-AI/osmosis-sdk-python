@@ -45,11 +45,6 @@ def _safe_extract(archive: tarfile.TarFile, target: Path) -> None:
     """Extract a tar archive while rejecting path traversal."""
     target_resolved = target.resolve()
     for member in archive.getmembers():
-        if member.issym() or member.islnk():
-            raise CLIError(
-                f"Template archive contains an unsafe link: {member.name}",
-                code="VALIDATION",
-            )
         member_path = target / member.name
         try:
             member_path.resolve().relative_to(target_resolved)
@@ -58,6 +53,8 @@ def _safe_extract(archive: tarfile.TarFile, target: Path) -> None:
                 f"Template archive contains an unsafe path: {member.name}",
                 code="VALIDATION",
             ) from exc
+    # The data filter rejects unsafe links and special files while allowing
+    # safe in-archive symlinks used by the workspace template.
     archive.extractall(target, filter="data")
 
 
