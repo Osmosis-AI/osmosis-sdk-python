@@ -9,15 +9,18 @@ from osmosis_ai.platform.auth.platform_client import platform_request
 from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE
 
 from .models import (
+    CloudEvalRunDetail,
     DatasetDownloadInfo,
     DatasetFile,
     DeploymentInfo,
     DeploymentSummary,
     PaginatedBaseModels,
+    PaginatedCloudEvalRuns,
     PaginatedDatasets,
     PaginatedDeployments,
     PaginatedRollouts,
     PaginatedTrainingRuns,
+    SubmitCloudEvalResult,
     SubmitTrainingRunResult,
     TrainingRunCheckpoints,
     TrainingRunDetail,
@@ -402,3 +405,78 @@ class OsmosisClient:
             git_identity=git_identity,
         )
         return TrainingRunCheckpoints.from_dict(data)
+
+    # ── Cloud Eval Runs ──────────────────────────────────────────
+
+    def submit_cloud_eval(
+        self,
+        *,
+        eval_config: dict[str, Any],
+        commit_sha: str | None = None,
+        rollout_env: dict[str, str] | None = None,
+        rollout_secret_refs: dict[str, str] | None = None,
+        credentials: Credentials | None = None,
+        git_identity: str,
+    ) -> SubmitCloudEvalResult:
+        """Submit a new cloud eval run."""
+        data: dict[str, Any] = {"eval_config": eval_config}
+        if commit_sha:
+            data["commit_sha"] = commit_sha
+        if rollout_env:
+            data["rollout_env"] = rollout_env
+        if rollout_secret_refs:
+            data["rollout_secret_refs"] = rollout_secret_refs
+        result = platform_request(
+            "/api/cli/eval-runs",
+            method="POST",
+            data=data,
+            credentials=credentials,
+            git_identity=git_identity,
+        )
+        return SubmitCloudEvalResult.from_dict(result)
+
+    def list_eval_runs(
+        self,
+        limit: int = DEFAULT_PAGE_SIZE,
+        offset: int = 0,
+        *,
+        credentials: Credentials | None = None,
+        git_identity: str,
+    ) -> PaginatedCloudEvalRuns:
+        qs = urlencode({"limit": limit, "offset": offset})
+        data = platform_request(
+            f"/api/cli/eval-runs?{qs}",
+            credentials=credentials,
+            git_identity=git_identity,
+        )
+        return PaginatedCloudEvalRuns.from_dict(data)
+
+    def get_eval_run(
+        self,
+        eval_run_id: str,
+        *,
+        credentials: Credentials | None = None,
+        git_identity: str,
+    ) -> CloudEvalRunDetail:
+        data = platform_request(
+            f"/api/cli/eval-runs/{_safe_path(eval_run_id)}",
+            credentials=credentials,
+            git_identity=git_identity,
+        )
+        return CloudEvalRunDetail.from_dict(data)
+
+    def stop_eval_run(
+        self,
+        eval_run_id: str,
+        *,
+        credentials: Credentials | None = None,
+        git_identity: str,
+    ) -> dict[str, Any]:
+        """Stop a pending or running cloud eval run."""
+        return platform_request(
+            f"/api/cli/eval-runs/{_safe_path(eval_run_id)}/stop",
+            method="POST",
+            data={},
+            credentials=credentials,
+            git_identity=git_identity,
+        )

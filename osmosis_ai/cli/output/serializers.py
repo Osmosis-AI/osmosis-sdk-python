@@ -6,6 +6,7 @@ from typing import Any
 
 from osmosis_ai.platform.api.models import (
     BaseModelInfo,
+    CloudEvalRun,
     DatasetFile,
     DeploymentInfo,
     LoraCheckpointInfo,
@@ -104,6 +105,21 @@ def serialize_rollout(rollout: RolloutInfo) -> dict[str, Any]:
         "repo_full_name": rollout.repo_full_name,
         "last_synced_commit_sha": rollout.last_synced_commit_sha,
         "created_at": rollout.created_at,
+    }
+
+
+def serialize_eval_run(run: CloudEvalRun) -> dict[str, Any]:
+    """Serialize a cloud eval run for the public JSON contract."""
+    return {
+        "id": run.id,
+        "name": run.name,
+        "status": run.status,
+        "created_at": run.created_at,
+        "started_at": run.started_at,
+        "completed_at": run.completed_at,
+        "model": run.model.get("name") if run.model else None,
+        "dataset": run.dataset.get("name") if run.dataset else None,
+        "rollout": run.rollout.get("name") if run.rollout else None,
     }
 
 

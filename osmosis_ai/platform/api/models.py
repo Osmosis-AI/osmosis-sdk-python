@@ -162,6 +162,13 @@ RUN_STATUSES_TERMINAL: frozenset[str] = (
     RUN_STATUSES_SUCCESS | RUN_STATUSES_ERROR | RUN_STATUSES_STOPPED
 )
 
+# ── Eval run status constants ────────────────────────────────────
+
+EVAL_RUN_STATUSES_IN_PROGRESS: frozenset[str] = frozenset({"pending", "running"})
+EVAL_RUN_STATUSES_TERMINAL: frozenset[str] = frozenset(
+    {"finished", "failed", "stopped"}
+)
+
 
 @dataclass
 class TrainingRun:
@@ -608,4 +615,101 @@ class TrainingRunCheckpoints:
             checkpoints=[
                 LoraCheckpointInfo.from_dict(c) for c in data.get("checkpoints", [])
             ],
+        )
+
+
+# ── Cloud Eval Runs ──────────────────────────────────────────────
+
+
+@dataclass
+class CloudEvalRun:
+    """A cloud eval run record."""
+
+    id: str
+    name: str
+    status: str
+    created_at: str
+    started_at: str | None = None
+    completed_at: str | None = None
+    model: dict | None = None
+    dataset: dict | None = None
+    rollout: dict | None = None
+    creator_name: str | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> CloudEvalRun:
+        return cls(
+            id=data["id"],
+            name=data["name"],
+            status=data["status"],
+            created_at=data["created_at"],
+            started_at=data.get("started_at"),
+            completed_at=data.get("completed_at"),
+            model=data.get("model"),
+            dataset=data.get("dataset"),
+            rollout=data.get("rollout"),
+            creator_name=data.get("creator_name"),
+        )
+
+
+@dataclass
+class CloudEvalRunDetail:
+    """Detailed cloud eval run info."""
+
+    eval_run: dict
+    config: dict | None = None
+    results: dict | None = None
+    model: dict | None = None
+    dataset: dict | None = None
+    rollout: dict | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> CloudEvalRunDetail:
+        return cls(
+            eval_run=data["eval_run"],
+            config=data.get("config"),
+            results=data.get("results"),
+            model=data.get("model"),
+            dataset=data.get("dataset"),
+            rollout=data.get("rollout"),
+        )
+
+
+@dataclass
+class PaginatedCloudEvalRuns:
+    """Paginated list of cloud eval runs."""
+
+    data: list[CloudEvalRun]
+    total_count: int
+    has_more: bool
+    next_offset: int | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> PaginatedCloudEvalRuns:
+        return cls(
+            data=[CloudEvalRun.from_dict(r) for r in data["data"]],
+            total_count=data["total_count"],
+            has_more=data["has_more"],
+            next_offset=data.get("next_offset"),
+        )
+
+
+@dataclass
+class SubmitCloudEvalResult:
+    """Result of submitting a new cloud eval run."""
+
+    id: str
+    name: str
+    status: str
+    created_at: str
+    platform_url: str | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> SubmitCloudEvalResult:
+        return cls(
+            id=data["id"],
+            name=data["name"],
+            status=data["status"],
+            created_at=data["created_at"],
+            platform_url=data.get("platform_url"),
         )
