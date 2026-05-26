@@ -304,7 +304,13 @@ def test_dataset_upload_json_stdout_is_one_envelope(
             )
 
         def complete_upload(
-            self, file_id, parts=None, *, file_extension=None, git_identity, credentials=None
+            self,
+            file_id,
+            parts=None,
+            *,
+            file_extension=None,
+            git_identity,
+            credentials=None,
         ):
             assert file_id == "ds_1"
             assert credentials is fake_credentials
@@ -450,7 +456,13 @@ def test_dataset_upload_json_overwrite_stdout_is_one_envelope(
             )
 
         def complete_upload(
-            self, file_id, parts=None, *, file_extension=None, git_identity, credentials=None
+            self,
+            file_id,
+            parts=None,
+            *,
+            file_extension=None,
+            git_identity,
+            credentials=None,
         ):
             assert file_id == "ds_new"
             assert credentials is fake_credentials

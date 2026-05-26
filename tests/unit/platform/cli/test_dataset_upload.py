@@ -99,7 +99,13 @@ class TestPerformUpload:
                 return fake_dataset
 
             def complete_upload(
-                self, file_id, parts=None, *, file_extension=None, git_identity, credentials=None
+                self,
+                file_id,
+                parts=None,
+                *,
+                file_extension=None,
+                git_identity,
+                credentials=None,
             ):
                 calls["complete"] = True
                 assert file_id == "dataset-1"
@@ -162,7 +168,13 @@ class TestPerformUpload:
                 return _make_fake_dataset(file_name=file_name, file_size=file_size)
 
             def complete_upload(
-                self, file_id, parts=None, *, file_extension=None, git_identity, credentials=None
+                self,
+                file_id,
+                parts=None,
+                *,
+                file_extension=None,
+                git_identity,
+                credentials=None,
             ):
                 assert git_identity == GIT_IDENTITY
                 return DatasetFile(
@@ -366,7 +378,13 @@ class TestPerformUpload:
                 return _make_fake_dataset(file_name=file_name, file_size=file_size)
 
             def complete_upload(
-                self, file_id, parts=None, *, file_extension=None, git_identity, credentials=None
+                self,
+                file_id,
+                parts=None,
+                *,
+                file_extension=None,
+                git_identity,
+                credentials=None,
             ):
                 assert file_id == "dataset-1"
                 return DatasetFile(
