@@ -631,9 +631,9 @@ class CloudEvalRun:
     created_at: str
     started_at: str | None = None
     completed_at: str | None = None
-    model: dict | None = None
-    dataset: dict | None = None
-    rollout: dict | None = None
+    model: dict[str, Any] | None = None
+    dataset: dict[str, Any] | None = None
+    rollout: dict[str, Any] | None = None
     creator_name: str | None = None
 
     @classmethod
@@ -656,12 +656,12 @@ class CloudEvalRun:
 class CloudEvalRunDetail:
     """Detailed cloud eval run info."""
 
-    eval_run: dict
-    config: dict | None = None
-    results: dict | None = None
-    model: dict | None = None
-    dataset: dict | None = None
-    rollout: dict | None = None
+    eval_run: dict[str, Any]
+    config: dict[str, Any] | None = None
+    results: dict[str, Any] | None = None
+    model: dict[str, Any] | None = None
+    dataset: dict[str, Any] | None = None
+    rollout: dict[str, Any] | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> CloudEvalRunDetail:
