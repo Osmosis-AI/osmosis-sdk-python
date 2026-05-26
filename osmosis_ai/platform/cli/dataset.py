@@ -89,6 +89,7 @@ def _complete_with_retry(
     dataset_id: str,
     parts: list[dict] | None = None,
     *,
+    file_extension: str | None = None,
     git_identity: str,
     credentials: Any | None = None,
 ) -> Any:
@@ -112,6 +113,7 @@ def _complete_with_retry(
                 lambda: client.complete_upload(
                     dataset_id,
                     parts=parts,
+                    file_extension=file_extension,
                     credentials=credentials,
                     git_identity=git_identity,
                 ),
@@ -327,6 +329,7 @@ def _perform_upload(
             client,
             dataset.id,
             parts=parts,
+            file_extension=ext,
             credentials=credentials,
             git_identity=git_identity,
         )
@@ -356,6 +359,7 @@ def _perform_upload(
         completed = _complete_with_retry(
             client,
             dataset.id,
+            file_extension=ext,
             credentials=credentials,
             git_identity=git_identity,
         )

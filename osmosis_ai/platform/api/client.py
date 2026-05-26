@@ -74,6 +74,7 @@ class OsmosisClient:
         file_id: str,
         parts: list[dict[str, Any]] | None = None,
         *,
+        file_extension: str | None = None,
         credentials: Credentials | None = None,
         git_identity: str,
     ) -> DatasetFile:
@@ -84,6 +85,8 @@ class OsmosisClient:
         For simple uploads, no parts needed.
         """
         payload: dict = {}
+        if file_extension is not None:
+            payload["file_extension"] = file_extension
         if parts is not None:
             # Validate no duplicate part numbers before sending
             part_numbers = [p["PartNumber"] for p in parts]
