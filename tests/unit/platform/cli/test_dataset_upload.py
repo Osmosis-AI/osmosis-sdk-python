@@ -99,7 +99,7 @@ class TestPerformUpload:
                 return fake_dataset
 
             def complete_upload(
-                self, file_id, parts=None, *, git_identity, credentials=None
+                self, file_id, parts=None, *, file_extension=None, git_identity, credentials=None
             ):
                 calls["complete"] = True
                 assert file_id == "dataset-1"
@@ -162,7 +162,7 @@ class TestPerformUpload:
                 return _make_fake_dataset(file_name=file_name, file_size=file_size)
 
             def complete_upload(
-                self, file_id, parts=None, *, git_identity, credentials=None
+                self, file_id, parts=None, *, file_extension=None, git_identity, credentials=None
             ):
                 assert git_identity == GIT_IDENTITY
                 return DatasetFile(
@@ -366,7 +366,7 @@ class TestPerformUpload:
                 return _make_fake_dataset(file_name=file_name, file_size=file_size)
 
             def complete_upload(
-                self, file_id, parts=None, *, git_identity, credentials=None
+                self, file_id, parts=None, *, file_extension=None, git_identity, credentials=None
             ):
                 assert file_id == "dataset-1"
                 return DatasetFile(
@@ -447,9 +447,8 @@ class TestUploadCommand:
         import osmosis_ai.platform.cli.dataset as dataset_module
 
         file_path = tmp_path / "data.jsonl"
-        file_path.write_text(
-            '{"system_prompt": "s", "user_prompt": "u", "ground_truth": "g"}\n'
-        )
+        row = '{"system_prompt": "s", "user_prompt": "u", "ground_truth": "g"}\n'
+        file_path.write_text(row * 4)
         fake_context = type(
             "Context",
             (),
