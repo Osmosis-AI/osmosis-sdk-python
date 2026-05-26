@@ -891,6 +891,20 @@ def _validate_jsonl(file_path: Path) -> list[str]:
                 errors.append("... (showing first 5 errors)")
                 break
 
+    if row_count < MIN_ROW_COUNT:
+        total = 0
+        with open(file_path, encoding="utf-8") as fh:
+            for line in fh:
+                if line.strip():
+                    total += 1
+                    if total >= MIN_ROW_COUNT:
+                        break
+        if total < MIN_ROW_COUNT:
+            errors.append(
+                f"Dataset too small: {total} rows. "
+                f"A minimum of {MIN_ROW_COUNT} rows is required."
+            )
+
     return errors
 
 
