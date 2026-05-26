@@ -679,17 +679,20 @@ class CloudEvalRunDetail:
 class PaginatedCloudEvalRuns:
     """Paginated list of cloud eval runs."""
 
-    data: list[CloudEvalRun]
+    eval_runs: list[CloudEvalRun]
     total_count: int
     has_more: bool
     next_offset: int | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> PaginatedCloudEvalRuns:
+        # Platform returns the list under the wire key "data"; expose it as
+        # ``eval_runs`` internally for consistency with the other paginated
+        # wrappers (training_runs, datasets, deployments, ...).
         return cls(
-            data=[CloudEvalRun.from_dict(r) for r in data["data"]],
-            total_count=data["total_count"],
-            has_more=data["has_more"],
+            eval_runs=[CloudEvalRun.from_dict(r) for r in data.get("data", [])],
+            total_count=data.get("total_count", 0),
+            has_more=data.get("has_more", False),
             next_offset=data.get("next_offset"),
         )
 

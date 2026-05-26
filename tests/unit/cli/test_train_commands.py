@@ -1339,9 +1339,11 @@ class TestSubmitNonInteractiveContext:
     def test_require_confirmation_includes_details_in_cli_error(
         self,
     ) -> None:
+        from osmosis_ai.cli.prompts import require_confirmation
+
         with override_output_context(format=OutputFormat.plain, interactive=False):
             with pytest.raises(CLIError) as exc_info:
-                train_module._require_confirmation(
+                require_confirmation(
                     "Submit this training run?",
                     yes=False,
                     summary=[("Model", "Qwen")],
