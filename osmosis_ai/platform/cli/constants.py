@@ -48,3 +48,4 @@ def validate_name(name: str, *, label: str = "Name") -> str | None:
 VALID_EXTENSIONS = {"csv", "jsonl", "parquet"}
 MAX_FILE_SIZE = 5 * 1024 * 1024 * 1024  # 5 GB
 REQUIRED_COLUMNS = {"system_prompt", "user_prompt"}
+MIN_ROW_COUNT = 4
