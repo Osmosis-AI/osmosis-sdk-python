@@ -190,3 +190,64 @@ model_path = "openai/gpt-5-mini"
 
     with pytest.raises(CLIError, match="entrypoint must resolve under"):
         validate_eval_submit_context_paths(config, tmp_path)
+
+
+def _write_eval_config_with_rollout(path: Path, rollout: str) -> Path:
+    return _write_config(
+        path,
+        f"""
+[experiment]
+rollout = "{rollout}"
+entrypoint = "main.py"
+dataset = "multiply"
+
+[llm]
+model_path = "openai/gpt-5-mini"
+""",
+    )
+
+
+def test_validate_eval_submit_context_paths_rejects_rollout_with_separator(
+    tmp_path: Path,
+) -> None:
+    config_path = _write_eval_config_with_rollout(tmp_path / "eval.toml", "../outside")
+    config = load_eval_submit_config(config_path)
+
+    with pytest.raises(CLIError, match="single-segment name"):
+        validate_eval_submit_context_paths(config, tmp_path)
+
+
+def test_validate_eval_submit_context_paths_rejects_rollout_with_forward_slash(
+    tmp_path: Path,
+) -> None:
+    config_path = _write_eval_config_with_rollout(tmp_path / "eval.toml", "foo/bar")
+    config = load_eval_submit_config(config_path)
+
+    with pytest.raises(CLIError, match="single-segment name"):
+        validate_eval_submit_context_paths(config, tmp_path)
+
+
+@pytest.mark.parametrize("rollout", ["", ".", ".."])
+def test_validate_eval_submit_context_paths_rejects_non_logical_rollout_name(
+    tmp_path: Path,
+    rollout: str,
+) -> None:
+    config_path = _write_eval_config_with_rollout(tmp_path / "eval.toml", rollout)
+    config = load_eval_submit_config(config_path)
+
+    with pytest.raises(CLIError, match="not a valid rollout name"):
+        validate_eval_submit_context_paths(config, tmp_path)
+
+
+def test_validate_eval_submit_context_paths_rejects_absolute_rollout(
+    tmp_path: Path,
+) -> None:
+    absolute_rollout = str(tmp_path / "outside")
+    config_path = _write_eval_config_with_rollout(
+        tmp_path / "eval.toml",
+        absolute_rollout,
+    )
+    config = load_eval_submit_config(config_path)
+
+    with pytest.raises(CLIError, match="logical rollout name"):
+        validate_eval_submit_context_paths(config, tmp_path)

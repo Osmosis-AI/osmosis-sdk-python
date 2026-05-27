@@ -11,6 +11,10 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from pydantic_core import ErrorDetails
 
 from osmosis_ai.cli.errors import CLIError
+from osmosis_ai.platform.cli.shared_config import (
+    BackendValidatedParamSection,
+    validate_workspace_rollout_paths,
+)
 
 _ENV_VAR_NAME_RE = re.compile(r"^[A-Z_][A-Z0-9_]*$")
 _EVAL_CONFIG_SECTIONS: frozenset[str] = frozenset(
@@ -34,9 +38,7 @@ class _LLMSection(BaseModel):
     base_url: str | None = None
 
 
-class _EvaluationSection(BaseModel):
-    model_config: ClassVar[ConfigDict] = ConfigDict(extra="forbid")
-
+class _EvaluationSection(BackendValidatedParamSection):
     limit: Any = None
     n: Any = None
     batch_size: Any = None
@@ -348,27 +350,12 @@ def validate_eval_submit_context_paths(
     workspace_directory: Path,
 ) -> None:
     """Validate rollout and entrypoint paths against the workspace directory."""
-    if Path(config.experiment_rollout).is_absolute():
-        raise CLIError("Eval rollout must be a logical rollout name.")
-
-    rollouts_root = (workspace_directory / "rollouts").resolve()
-    rollout_root = (
-        workspace_directory / "rollouts" / config.experiment_rollout
-    ).resolve()
-    try:
-        rollout_root.relative_to(rollouts_root)
-    except ValueError as exc:
-        raise CLIError(
-            "Eval rollout must resolve under the current workspace directory's rollouts directory."
-        ) from exc
-
-    entrypoint_path = (rollout_root / config.experiment_entrypoint).resolve()
-    try:
-        entrypoint_path.relative_to(rollout_root)
-    except ValueError as exc:
-        raise CLIError(
-            "Eval entrypoint must resolve under rollouts/<rollout>/ within the current workspace directory."
-        ) from exc
+    validate_workspace_rollout_paths(
+        rollout=config.experiment_rollout,
+        entrypoint=config.experiment_entrypoint,
+        workspace_directory=workspace_directory,
+        command_label="Eval",
+    )
 
 
 __all__ = [

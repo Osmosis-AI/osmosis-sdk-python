@@ -237,12 +237,32 @@ def test_validate_training_context_paths_rejects_entrypoint_escape(
         validate_training_context_paths(cfg, tmp_path)
 
 
-def test_validate_training_context_paths_rejects_rollout_escape(
+def test_validate_training_context_paths_rejects_rollout_with_separator(
     tmp_path: Path,
 ) -> None:
     cfg = _training_config(rollout="../outside", entrypoint="main.py")
 
-    with pytest.raises(CLIError, match="current workspace directory's rollouts"):
+    with pytest.raises(CLIError, match="single-segment name"):
+        validate_training_context_paths(cfg, tmp_path)
+
+
+def test_validate_training_context_paths_rejects_rollout_with_forward_slash(
+    tmp_path: Path,
+) -> None:
+    cfg = _training_config(rollout="foo/bar", entrypoint="main.py")
+
+    with pytest.raises(CLIError, match="single-segment name"):
+        validate_training_context_paths(cfg, tmp_path)
+
+
+@pytest.mark.parametrize("rollout", ["", ".", ".."])
+def test_validate_training_context_paths_rejects_non_logical_rollout_name(
+    tmp_path: Path,
+    rollout: str,
+) -> None:
+    cfg = _training_config(rollout=rollout, entrypoint="main.py")
+
+    with pytest.raises(CLIError, match="not a valid rollout name"):
         validate_training_context_paths(cfg, tmp_path)
 
 

@@ -11,6 +11,10 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from pydantic_core import ErrorDetails
 
 from osmosis_ai.cli.errors import CLIError
+from osmosis_ai.platform.cli.shared_config import (
+    BackendValidatedParamSection,
+    validate_workspace_rollout_paths,
+)
 
 _ENV_VAR_NAME_RE = re.compile(r"^[A-Z_][A-Z0-9_]*$")
 _TRAINING_CONFIG_SECTIONS: frozenset[str] = frozenset(
@@ -36,13 +40,7 @@ class _ExperimentSection(BaseModel):
     commit_sha: str | None = None
 
 
-class _BackendValidatedParamSection(BaseModel):
-    """Validate the public TOML param sections without coercing values."""
-
-    model_config: ClassVar[ConfigDict] = ConfigDict(extra="forbid")
-
-
-class _TrainingSection(_BackendValidatedParamSection):
+class _TrainingSection(BackendValidatedParamSection):
     lr: Any = None
     total_epochs: Any = None
     n_samples_per_prompt: Any = None
@@ -53,12 +51,12 @@ class _TrainingSection(_BackendValidatedParamSection):
     grader_timeout_s: Any = None
 
 
-class _SamplingSection(_BackendValidatedParamSection):
+class _SamplingSection(BackendValidatedParamSection):
     rollout_temperature: Any = None
     rollout_top_p: Any = None
 
 
-class _CheckpointsSection(_BackendValidatedParamSection):
+class _CheckpointsSection(BackendValidatedParamSection):
     eval_interval: Any = None
     checkpoint_save_freq: Any = None
 
@@ -78,7 +76,7 @@ class _TrainingRunParams(BaseModel):
     advanced: _AdvancedSection = Field(default_factory=_AdvancedSection)
 
     @staticmethod
-    def _known_config(section: _BackendValidatedParamSection) -> dict[str, Any]:
+    def _known_config(section: BackendValidatedParamSection) -> dict[str, Any]:
         return section.model_dump(exclude_none=True)
 
     @property
@@ -507,27 +505,12 @@ def load_training_config(path: Path) -> TrainingConfig:
 def validate_training_context_paths(
     config: TrainingConfig, workspace_directory: Path
 ) -> None:
-    if Path(config.experiment_rollout).is_absolute():
-        raise CLIError("Training rollout must be a logical rollout name.")
-
-    rollouts_root = (workspace_directory / "rollouts").resolve()
-    rollout_root = (
-        workspace_directory / "rollouts" / config.experiment_rollout
-    ).resolve()
-    try:
-        rollout_root.relative_to(rollouts_root)
-    except ValueError as exc:
-        raise CLIError(
-            "Training rollout must resolve under the current workspace directory's rollouts directory."
-        ) from exc
-
-    rollout_path = (rollout_root / config.experiment_entrypoint).resolve()
-    try:
-        rollout_path.relative_to(rollout_root)
-    except ValueError as exc:
-        raise CLIError(
-            "Training entrypoint must resolve under rollouts/<rollout>/ within the current workspace directory."
-        ) from exc
+    validate_workspace_rollout_paths(
+        rollout=config.experiment_rollout,
+        entrypoint=config.experiment_entrypoint,
+        workspace_directory=workspace_directory,
+        command_label="Training",
+    )
 
 
 __all__ = [
