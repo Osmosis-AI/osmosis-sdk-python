@@ -104,6 +104,31 @@ dataset = "id-1"
     assert cfg.checkpoints_eval_interval is None
 
 
+def test_load_config_accepts_top_level_env_and_secrets(tmp_path: Path) -> None:
+    path = tmp_path / "env_secrets.toml"
+    path.write_text(
+        """
+[experiment]
+rollout = "r"
+entrypoint = "e.py"
+model_path = "m"
+dataset = "d"
+
+[env]
+LOG_LEVEL = "INFO"
+
+[secrets]
+OPENAI_API_KEY = "openai-api-key"
+""".strip(),
+        encoding="utf-8",
+    )
+
+    cfg = load_training_config(path)
+
+    assert cfg.rollout_env == {"LOG_LEVEL": "INFO"}
+    assert cfg.rollout_secret_refs == {"OPENAI_API_KEY": "openai-api-key"}
+
+
 # ---------------------------------------------------------------------------
 # API config sections
 # ---------------------------------------------------------------------------
@@ -192,7 +217,6 @@ def _training_config(
             "dataset": "d",
         },
         params={},
-        rollout={},
     )
 
 

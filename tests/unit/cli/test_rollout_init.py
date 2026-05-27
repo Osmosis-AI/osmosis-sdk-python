@@ -170,6 +170,8 @@ def test_rollout_init_substitutes_rollout_name_in_configs(
     assert "<your-dataset-name>" in training_toml
     assert "Qwen/Qwen3.6-35B-A3B" in training_toml
     assert "Qwen/Qwen3.5-122B-A10B" in training_toml
+    assert "# [env]" in training_toml
+    assert "# [secrets]" in training_toml
 
 
 def test_rollout_init_training_config_omits_platform_defaults(

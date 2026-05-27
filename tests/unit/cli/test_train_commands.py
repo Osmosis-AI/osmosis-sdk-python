@@ -879,6 +879,46 @@ rollout_batch_size = 64
         assert captured_kwargs["checkpoints_config"] is None
         assert captured_kwargs["advanced_config"] is None
 
+    def test_submit_passes_top_level_env_and_secrets_to_api(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        console_capture: StringIO,
+        tmp_path: Path,
+    ) -> None:
+        workspace_directory = self._write_project(tmp_path, rollout="r")
+        monkeypatch.chdir(workspace_directory)
+        path = workspace_directory / "configs" / "training" / "train.toml"
+        path.write_text(
+            """
+[experiment]
+rollout = "r"
+entrypoint = "main.py"
+model_path = "m"
+dataset = "d"
+
+[env]
+LOG_LEVEL = "INFO"
+
+[secrets]
+OPENAI_API_KEY = "openai-api-key"
+""".strip(),
+            encoding="utf-8",
+        )
+        captured_kwargs: dict = {}
+
+        class FakeClient:
+            def submit_training_run(self, **kwargs):
+                captured_kwargs.update(kwargs)
+                return TestSubmit.SUBMIT_RESULT
+
+        monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        train_module.submit(config_path=path, yes=True)
+
+        assert captured_kwargs["rollout_env"] == {"LOG_LEVEL": "INFO"}
+        assert captured_kwargs["rollout_secret_refs"] == {
+            "OPENAI_API_KEY": "openai-api-key"
+        }
+
     def test_submit_rejects_non_canonical_training_config_path(
         self,
         monkeypatch: pytest.MonkeyPatch,

@@ -270,19 +270,19 @@ All fields are optional. Omitted fields use platform defaults.
 | `checkpoint_save_freq` | int | Save a checkpoint every N rollout steps |
 | `eval_interval` | int | Run evaluation every N rollout steps |
 
-#### Environment variables — `[rollout.env]`
+#### Environment variables — `[env]`
 
 Literal key/value pairs injected verbatim into the rollout container. Values
 are visible in the config file and in CLI output — do **not** use this section
 for secrets.
 
 ```toml
-[rollout.env]
+[env]
 LOG_LEVEL = "INFO"
 DEFAULT_REGION = "us-west-2"
 ```
 
-#### Secrets — `[rollout.secrets]`
+#### Secrets — `[secrets]`
 
 Maps env-var names to Platform `environment_secret` **record names**. The
 platform resolves the actual secret value server-side from encrypted secret
@@ -293,14 +293,14 @@ Pre-register secrets at `/:orgName/secrets` in the platform UI before
 submitting a run that references them.
 
 ```toml
-[rollout.secrets]
+[secrets]
 OPENAI_API_KEY = "openai-api-key"   # "openai-api-key" is the record name
 ```
 
 #### Rules for both sections
 
 - Keys must match `^[A-Z_][A-Z0-9_]*$`.
-- A key cannot appear in both `[rollout.env]` and `[rollout.secrets]`.
+- A key cannot appear in both `[env]` and `[secrets]`.
 - Any env var name starting with `_OSMOSIS_` is reserved by the platform and cannot be used.
 - Both sections are optional.
 

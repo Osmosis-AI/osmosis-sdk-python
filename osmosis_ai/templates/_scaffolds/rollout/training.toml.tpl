@@ -41,7 +41,7 @@ dataset = "<your-dataset-name>"  # Platform dataset name from `osmosis dataset l
 # Both sections are optional. Omit them entirely if your rollout needs no
 # additional environment configuration.
 #
-# [rollout.env]
+# [env]
 # Literal key = "value" pairs injected verbatim into the rollout container.
 # Values are visible in this file and in CLI output - do NOT put secrets here.
 # Keys must match ^[A-Z_][A-Z0-9_]*$ and must not start with _OSMOSIS_.
@@ -50,7 +50,7 @@ dataset = "<your-dataset-name>"  # Platform dataset name from `osmosis dataset l
 #   LOG_LEVEL = "INFO"
 #   DEFAULT_REGION = "us-west-2"
 #
-# [rollout.secrets]
+# [secrets]
 # Maps env-var names to workspace environment_secret record *names*.
 # Values are resolved server-side from the workspace's encrypted secret store
 # and injected into the container - they never appear in this file or in transit.

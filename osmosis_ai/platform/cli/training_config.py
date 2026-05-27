@@ -20,7 +20,8 @@ _TRAINING_CONFIG_SECTIONS: frozenset[str] = frozenset(
         "sampling",
         "checkpoints",
         "advanced",
-        "rollout",
+        "env",
+        "secrets",
     }
 )
 
@@ -66,13 +67,6 @@ class _AdvancedSection(BaseModel):
     """Preserve advanced backend params for server-side schema validation."""
 
     model_config: ClassVar[ConfigDict] = ConfigDict(extra="allow")
-
-
-class _RolloutSection(BaseModel):
-    model_config: ClassVar[ConfigDict] = ConfigDict(extra="forbid")
-
-    env: dict[str, str] = Field(default_factory=dict)
-    secrets: dict[str, str] = Field(default_factory=dict)
 
 
 class _TrainingRunParams(BaseModel):
@@ -265,7 +259,8 @@ class TrainingConfig(BaseModel):
 
     experiment: _ExperimentSection
     params: _TrainingRunParams
-    rollout: _RolloutSection
+    env: dict[str, str] = Field(default_factory=dict)
+    secrets: dict[str, str] = Field(default_factory=dict)
 
     @property
     def experiment_rollout(self) -> str:
@@ -337,11 +332,11 @@ class TrainingConfig(BaseModel):
 
     @property
     def rollout_env(self) -> dict[str, str]:
-        return dict(self.rollout.env)
+        return dict(self.env)
 
     @property
     def rollout_secret_refs(self) -> dict[str, str]:
-        return dict(self.rollout.secrets)
+        return dict(self.secrets)
 
     @property
     def experiment_config(self) -> dict[str, Any]:
@@ -371,7 +366,7 @@ def _validate_rollout_env_keys(
     path: Path,
 ) -> None:
     """Reject invalid env-var names, reserved names, and overlap between sections."""
-    for section_name, section in (("rollout.env", env), ("rollout.secrets", secrets)):
+    for section_name, section in (("env", env), ("secrets", secrets)):
         for key in section:
             if not _ENV_VAR_NAME_RE.match(key):
                 raise CLIError(
@@ -388,9 +383,27 @@ def _validate_rollout_env_keys(
     if overlap:
         names = ", ".join(overlap)
         raise CLIError(
-            f"Key(s) appear in both [rollout.env] and [rollout.secrets] of {path}: "
+            f"Key(s) appear in both [env] and [secrets] of {path}: "
             f"{names}. Each env var name must come from exactly one section."
         )
+
+
+def _validate_env_values(
+    *,
+    env: dict[str, Any],
+    secrets: dict[str, Any],
+) -> list[dict[str, str]]:
+    issues: list[dict[str, str]] = []
+    for section_name, section in (("env", env), ("secrets", secrets)):
+        for key, value in section.items():
+            if not isinstance(value, str):
+                issues.append(
+                    {
+                        "key": f"{section_name}.{key}",
+                        "message": f"must be a string, got {_format_input(value)}",
+                    }
+                )
+    return issues
 
 
 def load_training_config(path: Path) -> TrainingConfig:
@@ -416,7 +429,8 @@ def load_training_config(path: Path) -> TrainingConfig:
     sampling_section = _read_table(raw, "sampling", path)
     checkpoints_section = _read_table(raw, "checkpoints", path)
     advanced_section = _read_table(raw, "advanced", path)
-    rollout_section = _read_table(raw, "rollout", path)
+    env_section = _read_table(raw, "env", path)
+    secrets_section = _read_table(raw, "secrets", path)
     issues = [
         *_collect_top_level_validation_issues(raw),
         *_collect_section_validation_issues(
@@ -438,11 +452,7 @@ def load_training_config(path: Path) -> TrainingConfig:
                 data=data,
             )
         ),
-        *_collect_section_validation_issues(
-            section_name="rollout",
-            model_type=_RolloutSection,
-            data=rollout_section,
-        ),
+        *_validate_env_values(env=env_section, secrets=secrets_section),
     ]
     if issues:
         raise _training_config_issues_error(issues=issues)
@@ -477,20 +487,17 @@ def load_training_config(path: Path) -> TrainingConfig:
         data=advanced_section,
         path=path,
     )
-    rollout = _parse_section(
-        section_name="rollout",
-        model_type=_RolloutSection,
-        data=rollout_section,
-        path=path,
-    )
     assert isinstance(experiment, _ExperimentSection)
     assert isinstance(training, _TrainingSection)
     assert isinstance(sampling, _SamplingSection)
     assert isinstance(checkpoints, _CheckpointsSection)
     assert isinstance(advanced, _AdvancedSection)
-    assert isinstance(rollout, _RolloutSection)
 
-    _validate_rollout_env_keys(env=rollout.env, secrets=rollout.secrets, path=path)
+    env = {key: value for key, value in env_section.items() if isinstance(value, str)}
+    secrets = {
+        key: value for key, value in secrets_section.items() if isinstance(value, str)
+    }
+    _validate_rollout_env_keys(env=env, secrets=secrets, path=path)
 
     return TrainingConfig(
         experiment=experiment,
@@ -500,7 +507,8 @@ def load_training_config(path: Path) -> TrainingConfig:
             checkpoints=checkpoints,
             advanced=advanced,
         ),
-        rollout=rollout,
+        env=env,
+        secrets=secrets,
     )
 
 
