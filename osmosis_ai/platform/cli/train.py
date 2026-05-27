@@ -29,27 +29,23 @@ from osmosis_ai.platform.api.client import OsmosisClient
 from osmosis_ai.platform.api.models import (
     RUN_STATUSES_IN_PROGRESS,
     RUN_STATUSES_TERMINAL,
+    SubmitRunResult,
 )
 from osmosis_ai.platform.auth.platform_client import PlatformAPIError
-from osmosis_ai.platform.cli.shared_config import build_submit_summary_rows
+from osmosis_ai.platform.cli.shared_submit import CloudSubmitSpec, run_cloud_submit
 from osmosis_ai.platform.cli.training_config import (
-    load_training_config,
-    validate_training_context_paths,
+    TrainSubmitConfig,
+    load_train_submit_config,
+    validate_train_submit_context_paths,
 )
 from osmosis_ai.platform.cli.utils import (
     build_run_detail_rows,
     fetch_all_pages,
     format_run_status,
-    print_remote_fetch_notice,
     require_git_workspace_directory_context,
     validate_list_options,
 )
 from osmosis_ai.platform.cli.workspace_directory_context import git_result_context
-from osmosis_ai.platform.cli.workspace_directory_contract import (
-    ensure_workspace_directory_config_path,
-    validate_rollout_backend,
-    validate_workspace_directory_contract,
-)
 
 
 def _detail_fields(rows: list[tuple[str, str]]) -> list[DetailField]:
@@ -106,116 +102,65 @@ def _resolve_default_output(
     return metrics_dir / _default_filename(run_name, run_id)
 
 
+def _submit_training(
+    client: OsmosisClient,
+    config: TrainSubmitConfig,
+    credentials: Any,
+    git_identity: str,
+) -> SubmitRunResult:
+    return client.submit_training_run(
+        experiment_config=config.experiment_config,
+        training_config=config.training_config or None,
+        sampling_config=config.sampling_config or None,
+        checkpoints_config=config.checkpoints_config or None,
+        advanced_config=config.advanced_config or None,
+        env_config=config.env or None,
+        secret_refs_config=config.secrets or None,
+        credentials=credentials,
+        git_identity=git_identity,
+    )
+
+
+def _train_next_steps(
+    result: SubmitRunResult, config: TrainSubmitConfig
+) -> tuple[list[str], list[dict[str, Any]]]:
+    display = [
+        f"Status: {result.status}",
+        f"Model: {config.experiment_model_path}",
+        f"Dataset: {config.experiment_dataset}",
+        (
+            f"View: {result.platform_url}"
+            if result.platform_url
+            else f"Check status with: osmosis train info {result.name}"
+        ),
+    ]
+    structured: list[dict[str, Any]] = [
+        {"action": "train_info", "name": result.name},
+        {"action": "train_list"},
+    ]
+    if result.platform_url:
+        structured.append({"action": "open_url", "url": result.platform_url})
+    return display, structured
+
+
+_TRAIN_SUBMIT_SPEC: CloudSubmitSpec[TrainSubmitConfig] = CloudSubmitSpec(
+    config_dir="configs/training",
+    command_label="`osmosis train submit`",
+    table_title="Training Run",
+    confirm_prompt="Submit this training run?",
+    status_message="Submitting training run...",
+    operation="train.submit",
+    success_message_format="Training run submitted: {name}",
+    load_config=load_train_submit_config,
+    validate_context=validate_train_submit_context_paths,
+    submit=_submit_training,
+    build_next_steps=_train_next_steps,
+)
+
+
 def submit(config_path: Path, *, yes: bool) -> OperationResult:
     """Submit a new training run."""
-    command_label = "`osmosis train submit`"
-
-    context = require_git_workspace_directory_context()
-    workspace_directory = context.workspace_directory
-    validate_workspace_directory_contract(workspace_directory)
-    config_path = Path(config_path)
-    resolved_config_path = (
-        config_path if config_path.is_absolute() else workspace_directory / config_path
-    )
-    ensure_workspace_directory_config_path(
-        resolved_config_path,
-        workspace_directory,
-        config_dir="configs/training",
-        command_label=command_label,
-    )
-    config = load_training_config(resolved_config_path)
-    validate_training_context_paths(config, workspace_directory)
-    validate_rollout_backend(
-        workspace_directory=workspace_directory,
-        rollout=config.experiment_rollout,
-        entrypoint=config.experiment_entrypoint,
-        command_label=command_label,
-    )
-    credentials = context.credentials
-
-    summary_rows = build_submit_summary_rows(
-        rollout=config.experiment_rollout,
-        entrypoint=config.experiment_entrypoint,
-        model=config.experiment_model_path,
-        dataset=config.experiment_dataset,
-        commit_sha=config.experiment_commit_sha,
-        env=config.env,
-        secrets=config.secrets,
-    )
-    console.table(
-        [(label, console.escape(value)) for label, value in summary_rows],
-        title="Training Run",
-    )
-
-    notes, warnings = print_remote_fetch_notice(
-        workspace_directory,
-        pinned_commit_sha=config.experiment_commit_sha,
-    )
-
-    require_confirmation(
-        "Submit this training run?",
-        yes=yes,
-        summary=summary_rows,
-        notes=notes,
-        warnings=warnings,
-    )
-
-    client = OsmosisClient()
-    output = get_output_context()
-    with output.status("Submitting training run..."):
-        result = client.submit_training_run(
-            experiment_config=config.experiment_config,
-            training_config=config.training_config or None,
-            sampling_config=config.sampling_config or None,
-            checkpoints_config=config.checkpoints_config or None,
-            advanced_config=config.advanced_config or None,
-            env_config=config.env or None,
-            secret_refs_config=config.secrets or None,
-            credentials=credentials,
-            git_identity=context.git_identity,
-        )
-
-    return OperationResult(
-        operation="train.submit",
-        status="success",
-        resource={
-            "id": result.id,
-            "name": result.name,
-            "status": result.status,
-            "model_name": config.experiment_model_path,
-            "dataset_name": config.experiment_dataset,
-            "created_at": result.created_at,
-            **({"url": result.platform_url} if result.platform_url else {}),
-            **git_result_context(context),
-            "config": {
-                "rollout": config.experiment_rollout,
-                "entrypoint": config.experiment_entrypoint,
-                "model": config.experiment_model_path,
-                "dataset": config.experiment_dataset,
-                "commit_sha": config.experiment_commit_sha,
-            },
-        },
-        message=f"Training run submitted: {result.name}",
-        display_next_steps=[
-            f"Status: {result.status}",
-            f"Model: {config.experiment_model_path}",
-            f"Dataset: {config.experiment_dataset}",
-            (
-                f"View: {result.platform_url}"
-                if result.platform_url
-                else f"Check status with: osmosis train info {result.name}"
-            ),
-        ],
-        next_steps_structured=[
-            {"action": "train_info", "name": result.name},
-            {"action": "train_list"},
-            *(
-                [{"action": "open_url", "url": result.platform_url}]
-                if result.platform_url
-                else []
-            ),
-        ],
-    )
+    return run_cloud_submit(config_path, yes=yes, spec=_TRAIN_SUBMIT_SPEC)
 
 
 def list_training_runs(*, limit: int, all_: bool) -> ListResult:

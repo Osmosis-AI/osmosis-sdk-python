@@ -276,8 +276,12 @@ class PaginatedTrainingRuns:
 
 
 @dataclass
-class SubmitTrainingRunResult:
-    """Result of submitting a new training run."""
+class SubmitRunResult:
+    """Result of submitting a training run or cloud eval run.
+
+    Both `POST /api/cli/training-runs` and `POST /api/cli/eval-runs` return the
+    same shape; this is the single response model for either submit path.
+    """
 
     id: str
     name: str
@@ -286,7 +290,7 @@ class SubmitTrainingRunResult:
     platform_url: str | None = None
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> SubmitTrainingRunResult:
+    def from_dict(cls, data: dict[str, Any]) -> SubmitRunResult:
         return cls(
             id=data["id"],
             name=data["name"],
@@ -694,25 +698,4 @@ class PaginatedCloudEvalRuns:
             total_count=data.get("total_count", 0),
             has_more=data.get("has_more", False),
             next_offset=data.get("next_offset"),
-        )
-
-
-@dataclass
-class SubmitCloudEvalResult:
-    """Result of submitting a new cloud eval run."""
-
-    id: str
-    name: str
-    status: str
-    created_at: str
-    platform_url: str | None = None
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> SubmitCloudEvalResult:
-        return cls(
-            id=data["id"],
-            name=data["name"],
-            status=data["status"],
-            created_at=data["created_at"],
-            platform_url=data.get("platform_url"),
         )

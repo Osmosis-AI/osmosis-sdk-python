@@ -177,7 +177,7 @@ def test_rollout_init_substitutes_rollout_name_in_configs(
 def test_rollout_init_training_config_omits_platform_defaults(
     monkeypatch, tmp_path
 ) -> None:
-    from osmosis_ai.platform.cli.training_config import load_training_config
+    from osmosis_ai.platform.cli.training_config import load_train_submit_config
 
     workspace_directory = _make_workspace_directory(tmp_path / "proj")
     monkeypatch.chdir(workspace_directory)
@@ -186,10 +186,10 @@ def test_rollout_init_training_config_omits_platform_defaults(
     assert rc == 0
 
     training_toml = workspace_directory / "configs" / "training" / "my-agent.toml"
-    config = load_training_config(training_toml)
+    config = load_train_submit_config(training_toml)
 
-    assert config.training_n_samples_per_prompt is None
-    assert config.training_rollout_batch_size is None
+    assert config.training.n_samples_per_prompt is None
+    assert config.training.rollout_batch_size is None
     assert config.training_config == {}
     assert config.sampling_config == {}
     assert config.checkpoints_config == {}

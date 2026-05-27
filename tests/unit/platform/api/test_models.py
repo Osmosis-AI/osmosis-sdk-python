@@ -15,7 +15,7 @@ from osmosis_ai.platform.api.models import (
     DatasetFile,
     MetricDataPoint,
     MetricHistory,
-    SubmitTrainingRunResult,
+    SubmitRunResult,
     TrainingRunDetail,
     TrainingRunMetrics,
     TrainingRunMetricsOverview,
@@ -201,8 +201,8 @@ class TestStatusConstants:
 # =============================================================================
 
 
-class TestSubmitTrainingRunResult:
-    """Tests for SubmitTrainingRunResult.from_dict."""
+class TestSubmitRunResult:
+    """Tests for SubmitRunResult.from_dict."""
 
     def test_from_dict(self) -> None:
         data = {
@@ -212,7 +212,7 @@ class TestSubmitTrainingRunResult:
             "created_at": "2026-04-10T12:00:00Z",
             "platform_url": "https://platform.osmosis.ai/ws/training/run",
         }
-        result = SubmitTrainingRunResult.from_dict(data)
+        result = SubmitRunResult.from_dict(data)
         assert result.id == "550e8400-e29b-41d4-a716-446655440000"
         assert result.name == "my-training-run"
         assert result.status == "pending"

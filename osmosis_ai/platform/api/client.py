@@ -20,8 +20,7 @@ from .models import (
     PaginatedDeployments,
     PaginatedRollouts,
     PaginatedTrainingRuns,
-    SubmitCloudEvalResult,
-    SubmitTrainingRunResult,
+    SubmitRunResult,
     TrainingRunCheckpoints,
     TrainingRunDetail,
     TrainingRunMetrics,
@@ -186,7 +185,7 @@ class OsmosisClient:
         secret_refs_config: dict[str, str] | None = None,
         credentials: Credentials | None = None,
         git_identity: str,
-    ) -> SubmitTrainingRunResult:
+    ) -> SubmitRunResult:
         """Submit a new training run.
 
         ``env_config`` is a literal env-var-name → value map applied to the
@@ -216,7 +215,7 @@ class OsmosisClient:
             credentials=credentials,
             git_identity=git_identity,
         )
-        return SubmitTrainingRunResult.from_dict(result)
+        return SubmitRunResult.from_dict(result)
 
     def list_training_runs(
         self,
@@ -418,7 +417,7 @@ class OsmosisClient:
         secret_refs_config: dict[str, str] | None = None,
         credentials: Credentials | None = None,
         git_identity: str,
-    ) -> SubmitCloudEvalResult:
+    ) -> SubmitRunResult:
         """Submit a new cloud eval run."""
         data: dict[str, Any] = {
             "experiment_config": experiment_config,
@@ -438,7 +437,7 @@ class OsmosisClient:
             credentials=credentials,
             git_identity=git_identity,
         )
-        return SubmitCloudEvalResult.from_dict(result)
+        return SubmitRunResult.from_dict(result)
 
     def list_eval_runs(
         self,

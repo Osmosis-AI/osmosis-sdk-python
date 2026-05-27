@@ -21,7 +21,7 @@ from osmosis_ai.platform.api.models import (
     PaginatedRollouts,
     PaginatedTrainingRuns,
     RolloutInfo,
-    SubmitTrainingRunResult,
+    SubmitRunResult,
     TrainingRun,
     TrainingRunDetail,
     TrainingRunMetrics,
@@ -74,6 +74,11 @@ def _stub_git_context(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(
         "osmosis_ai.platform.cli.train.require_git_workspace_directory_context",
         _git_context,
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.cli.shared_submit.require_git_workspace_directory_context",
+        _git_context,
+        raising=False,
     )
     monkeypatch.setattr(
         "osmosis_ai.platform.cli.workspace_repo.git_worktree_top_level",
@@ -233,7 +238,7 @@ rollout_batch_size = 64
             assert kwargs["git_identity"] == GIT_IDENTITY
             assert "workspace_id" not in kwargs
             assert kwargs["experiment_config"]["rollout"] == "demo"
-            return SubmitTrainingRunResult(
+            return SubmitRunResult(
                 id="run_1",
                 name="reward-run",
                 status="pending",
@@ -243,6 +248,11 @@ rollout_batch_size = 64
     monkeypatch.setattr("osmosis_ai.platform.api.client.OsmosisClient", FakeClient)
     monkeypatch.setattr(
         "osmosis_ai.platform.cli.train.OsmosisClient", FakeClient, raising=False
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.cli.shared_submit.OsmosisClient",
+        FakeClient,
+        raising=False,
     )
 
     exit_code = cli.main(["--json", "train", "submit", str(config_path), "--yes"])

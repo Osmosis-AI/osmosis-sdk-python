@@ -10,7 +10,7 @@ import typer
 from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE
 
 app: typer.Typer = typer.Typer(
-    help="Evaluate agent against dataset (run, rubric, cache, submit, list, status, stop).",
+    help="Evaluate agent against dataset (run, rubric, cache, submit, list, info, stop).",
     no_args_is_help=True,
 )
 
@@ -158,14 +158,14 @@ def eval_list(
     return _list_eval_runs(limit=limit, all_=all_)
 
 
-@app.command("status")
-def eval_status(
+@app.command("info")
+def eval_info(
     name_or_id: str = typer.Argument(..., help="Eval run name or ID."),
 ) -> Any:
     """Show cloud eval run details and results."""
-    from osmosis_ai.platform.cli.eval import status as _status
+    from osmosis_ai.platform.cli.eval import info as _info
 
-    return _status(name_or_id)
+    return _info(name_or_id)
 
 
 @app.command("stop")

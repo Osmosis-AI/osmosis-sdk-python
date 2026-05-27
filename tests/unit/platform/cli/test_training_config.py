@@ -8,9 +8,9 @@ import pytest
 
 from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.platform.cli.training_config import (
-    TrainingConfig,
-    load_training_config,
-    validate_training_context_paths,
+    TrainSubmitConfig,
+    load_train_submit_config,
+    validate_train_submit_context_paths,
 )
 
 # ---------------------------------------------------------------------------
@@ -52,8 +52,8 @@ custom_flag = true
         encoding="utf-8",
     )
 
-    cfg = load_training_config(path)
-    assert isinstance(cfg, TrainingConfig)
+    cfg = load_train_submit_config(path)
+    assert isinstance(cfg, TrainSubmitConfig)
     assert cfg.experiment_rollout == "calculator"
     assert cfg.experiment_entrypoint == "main.py"
     assert cfg.experiment_model_path == "Qwen/Qwen3.6-35B-A3B"
@@ -66,16 +66,16 @@ custom_flag = true
         "dataset": "abc-123",
         "commit_sha": "deadbeef",
     }
-    assert cfg.training_lr == 1e-6
-    assert cfg.training_total_epochs == 2
-    assert cfg.training_n_samples_per_prompt == 8
-    assert cfg.training_rollout_batch_size == 64
-    assert cfg.training_max_prompt_length == 4096
-    assert cfg.training_max_response_length == 8192
-    assert cfg.sampling_rollout_temperature == 0.8
-    assert cfg.sampling_rollout_top_p == 0.95
-    assert cfg.checkpoints_eval_interval == 10
-    assert cfg.checkpoints_checkpoint_save_freq == 20
+    assert cfg.training.lr == 1e-6
+    assert cfg.training.total_epochs == 2
+    assert cfg.training.n_samples_per_prompt == 8
+    assert cfg.training.rollout_batch_size == 64
+    assert cfg.training.max_prompt_length == 4096
+    assert cfg.training.max_response_length == 8192
+    assert cfg.sampling.rollout_temperature == 0.8
+    assert cfg.sampling.rollout_top_p == 0.95
+    assert cfg.checkpoints.eval_interval == 10
+    assert cfg.checkpoints.checkpoint_save_freq == 20
     assert cfg.advanced_config == {"optimizer": "adam", "custom_flag": True}
 
 
@@ -92,16 +92,16 @@ dataset = "id-1"
         encoding="utf-8",
     )
 
-    cfg = load_training_config(path)
+    cfg = load_train_submit_config(path)
     assert cfg.experiment_rollout == "r"
     assert cfg.experiment_commit_sha is None
-    assert cfg.training_lr is None
-    assert cfg.training_total_epochs is None
-    assert cfg.training_n_samples_per_prompt is None
-    assert cfg.training_rollout_batch_size is None
-    assert cfg.sampling_rollout_temperature is None
-    assert cfg.checkpoints_checkpoint_save_freq is None
-    assert cfg.checkpoints_eval_interval is None
+    assert cfg.training.lr is None
+    assert cfg.training.total_epochs is None
+    assert cfg.training.n_samples_per_prompt is None
+    assert cfg.training.rollout_batch_size is None
+    assert cfg.sampling.rollout_temperature is None
+    assert cfg.checkpoints.checkpoint_save_freq is None
+    assert cfg.checkpoints.eval_interval is None
 
 
 def test_load_config_accepts_top_level_env_and_secrets(tmp_path: Path) -> None:
@@ -123,7 +123,7 @@ OPENAI_API_KEY = "openai-api-key"
         encoding="utf-8",
     )
 
-    cfg = load_training_config(path)
+    cfg = load_train_submit_config(path)
 
     assert cfg.env == {"LOG_LEVEL": "INFO"}
     assert cfg.secrets == {"OPENAI_API_KEY": "openai-api-key"}
@@ -162,7 +162,7 @@ optimizer = "adam"
         encoding="utf-8",
     )
 
-    cfg = load_training_config(path)
+    cfg = load_train_submit_config(path)
     assert cfg.training_config == {
         "lr": 1e-6,
         "total_epochs": 1,
@@ -191,7 +191,7 @@ dataset = "d"
         encoding="utf-8",
     )
 
-    cfg = load_training_config(path)
+    cfg = load_train_submit_config(path)
     assert cfg.training_config == {}
     assert cfg.sampling_config == {}
     assert cfg.checkpoints_config == {}
@@ -208,73 +208,75 @@ def _training_config(
     *,
     rollout: str = "calculator",
     entrypoint: str = "workers/main.py",
-) -> TrainingConfig:
-    return TrainingConfig(
-        experiment={
-            "rollout": rollout,
-            "entrypoint": entrypoint,
-            "model_path": "m",
-            "dataset": "d",
-        },
+) -> TrainSubmitConfig:
+    return TrainSubmitConfig.model_validate(
+        {
+            "experiment": {
+                "rollout": rollout,
+                "entrypoint": entrypoint,
+                "model_path": "m",
+                "dataset": "d",
+            },
+        }
     )
 
 
-def test_validate_training_context_paths_allows_entrypoint_under_rollout(
+def test_validate_train_submit_context_paths_allows_entrypoint_under_rollout(
     tmp_path: Path,
 ) -> None:
     cfg = _training_config()
 
-    validate_training_context_paths(cfg, tmp_path)
+    validate_train_submit_context_paths(cfg, tmp_path)
 
 
-def test_validate_training_context_paths_rejects_entrypoint_escape(
+def test_validate_train_submit_context_paths_rejects_entrypoint_escape(
     tmp_path: Path,
 ) -> None:
     cfg = _training_config(entrypoint="../outside.py")
 
     with pytest.raises(CLIError, match="under rollouts/<rollout>"):
-        validate_training_context_paths(cfg, tmp_path)
+        validate_train_submit_context_paths(cfg, tmp_path)
 
 
-def test_validate_training_context_paths_rejects_rollout_with_separator(
+def test_validate_train_submit_context_paths_rejects_rollout_with_separator(
     tmp_path: Path,
 ) -> None:
     cfg = _training_config(rollout="../outside", entrypoint="main.py")
 
     with pytest.raises(CLIError, match="single-segment name"):
-        validate_training_context_paths(cfg, tmp_path)
+        validate_train_submit_context_paths(cfg, tmp_path)
 
 
-def test_validate_training_context_paths_rejects_rollout_with_forward_slash(
+def test_validate_train_submit_context_paths_rejects_rollout_with_forward_slash(
     tmp_path: Path,
 ) -> None:
     cfg = _training_config(rollout="foo/bar", entrypoint="main.py")
 
     with pytest.raises(CLIError, match="single-segment name"):
-        validate_training_context_paths(cfg, tmp_path)
+        validate_train_submit_context_paths(cfg, tmp_path)
 
 
 @pytest.mark.parametrize("rollout", ["", ".", ".."])
-def test_validate_training_context_paths_rejects_non_logical_rollout_name(
+def test_validate_train_submit_context_paths_rejects_non_logical_rollout_name(
     tmp_path: Path,
     rollout: str,
 ) -> None:
     cfg = _training_config(rollout=rollout, entrypoint="main.py")
 
     with pytest.raises(CLIError, match="not a valid rollout name"):
-        validate_training_context_paths(cfg, tmp_path)
+        validate_train_submit_context_paths(cfg, tmp_path)
 
 
-def test_validate_training_context_paths_rejects_absolute_rollout(
+def test_validate_train_submit_context_paths_rejects_absolute_rollout(
     tmp_path: Path,
 ) -> None:
     cfg = _training_config(rollout=str(tmp_path / "outside"), entrypoint="main.py")
 
     with pytest.raises(CLIError, match="logical rollout name"):
-        validate_training_context_paths(cfg, tmp_path)
+        validate_train_submit_context_paths(cfg, tmp_path)
 
 
-def test_validate_training_context_paths_rejects_absolute_rollout_under_project(
+def test_validate_train_submit_context_paths_rejects_absolute_rollout_under_project(
     tmp_path: Path,
 ) -> None:
     cfg = _training_config(
@@ -283,7 +285,7 @@ def test_validate_training_context_paths_rejects_absolute_rollout_under_project(
     )
 
     with pytest.raises(CLIError, match="logical rollout name"):
-        validate_training_context_paths(cfg, tmp_path)
+        validate_train_submit_context_paths(cfg, tmp_path)
 
 
 # ---------------------------------------------------------------------------
@@ -296,7 +298,7 @@ def test_missing_experiment_section(tmp_path: Path) -> None:
     path.write_text("[training]\nlr = 1e-6\n", encoding="utf-8")
 
     with pytest.raises(CLIError) as exc_info:
-        load_training_config(path)
+        load_train_submit_config(path)
     assert "[experiment]" in str(exc_info.value)
 
 
@@ -305,7 +307,7 @@ def test_experiment_must_be_table(tmp_path: Path) -> None:
     path.write_text("experiment = 123\n", encoding="utf-8")
 
     with pytest.raises(CLIError) as exc_info:
-        load_training_config(path)
+        load_train_submit_config(path)
     assert "[experiment]" in str(exc_info.value)
 
 
@@ -325,7 +327,7 @@ def test_missing_required_experiment_field(tmp_path: Path, missing_key: str) -> 
     path.write_text(f"[experiment]\n{body}\n", encoding="utf-8")
 
     with pytest.raises(CLIError) as exc_info:
-        load_training_config(path)
+        load_train_submit_config(path)
     assert missing_key in str(exc_info.value)
 
 
@@ -334,13 +336,13 @@ def test_invalid_toml(tmp_path: Path) -> None:
     path.write_text("[[[not valid", encoding="utf-8")
 
     with pytest.raises(CLIError) as exc_info:
-        load_training_config(path)
+        load_train_submit_config(path)
     assert "Invalid TOML" in str(exc_info.value)
 
 
 def test_file_not_found(tmp_path: Path) -> None:
     with pytest.raises(CLIError) as exc_info:
-        load_training_config(tmp_path / "missing.toml")
+        load_train_submit_config(tmp_path / "missing.toml")
     assert "not found" in str(exc_info.value)
 
 
@@ -349,7 +351,7 @@ def test_directory_path_raises(tmp_path: Path) -> None:
     dir_path.mkdir()
 
     with pytest.raises(CLIError) as exc_info:
-        load_training_config(dir_path)
+        load_train_submit_config(dir_path)
     assert "Cannot read config file" in str(exc_info.value)
 
 
@@ -379,7 +381,7 @@ dataset = "d"
         encoding="utf-8",
     )
 
-    cfg = load_training_config(path)
+    cfg = load_train_submit_config(path)
     assert cfg.training_config == expected_config
 
 
@@ -430,7 +432,7 @@ dataset = "d"
         encoding="utf-8",
     )
 
-    cfg = load_training_config(path)
+    cfg = load_train_submit_config(path)
     expected = float(value) if "." in value else int(value)
     section_configs = {
         "training": cfg.training_config,
@@ -457,9 +459,9 @@ rollout_batch_size = 65
         encoding="utf-8",
     )
 
-    cfg = load_training_config(path)
-    assert cfg.training_rollout_batch_size == 65
-    assert cfg.training_n_samples_per_prompt == 8
+    cfg = load_train_submit_config(path)
+    assert cfg.training.rollout_batch_size == 65
+    assert cfg.training.n_samples_per_prompt == 8
 
 
 def test_invalid_training_field_type_is_delegated_to_backend(tmp_path: Path) -> None:
@@ -478,7 +480,7 @@ total_epochs = "not-a-number"
         encoding="utf-8",
     )
 
-    cfg = load_training_config(path)
+    cfg = load_train_submit_config(path)
     assert cfg.training_config["total_epochs"] == "not-a-number"
 
 
@@ -499,7 +501,7 @@ rollout_bach_size = 32
         encoding="utf-8",
     )
 
-    cfg = load_training_config(path)
+    cfg = load_train_submit_config(path)
     assert cfg.training_config == {}
     assert cfg.advanced_config["dummy"] == 1
     assert cfg.advanced_config["rollout_bach_size"] == 32
@@ -523,7 +525,7 @@ rollout_bach_size = 32
     )
 
     with pytest.raises(CLIError) as exc_info:
-        load_training_config(path)
+        load_train_submit_config(path)
 
     message = str(exc_info.value)
     assert message.startswith("Invalid training config:")
@@ -550,7 +552,7 @@ rollout_bach_size = 32
     )
 
     with pytest.raises(CLIError) as exc_info:
-        load_training_config(path)
+        load_train_submit_config(path)
 
     message = str(exc_info.value)
     assert message.startswith("Invalid training config:")
@@ -589,7 +591,7 @@ dummy = 1
     )
 
     with pytest.raises(CLIError) as exc_info:
-        load_training_config(path)
+        load_train_submit_config(path)
 
     message = str(exc_info.value)
     assert message.startswith("Invalid training config:")
@@ -625,7 +627,7 @@ lr = 1e-6
     )
 
     with pytest.raises(CLIError) as exc_info:
-        load_training_config(path)
+        load_train_submit_config(path)
 
     message = str(exc_info.value)
     assert message.startswith("Invalid training config:")
@@ -654,7 +656,7 @@ checkpoint_save_freq = 10
     )
 
     with pytest.raises(CLIError) as exc_info:
-        load_training_config(path)
+        load_train_submit_config(path)
 
     message = str(exc_info.value)
     assert message.startswith("Invalid training config:")

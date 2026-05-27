@@ -1,4 +1,4 @@
-"""Handler for `osmosis eval` remote subcommands (submit/list/status/stop)."""
+"""Handler for `osmosis eval` remote subcommands (submit/list/info/stop)."""
 
 from __future__ import annotations
 
@@ -25,24 +25,20 @@ from osmosis_ai.platform.api.client import OsmosisClient
 from osmosis_ai.platform.api.models import (
     EVAL_RUN_STATUSES_IN_PROGRESS,
     EVAL_RUN_STATUSES_TERMINAL,
+    SubmitRunResult,
 )
 from osmosis_ai.platform.cli.eval_config import (
+    EvalSubmitConfig,
     load_eval_submit_config,
     validate_eval_submit_context_paths,
 )
-from osmosis_ai.platform.cli.shared_config import build_submit_summary_rows
+from osmosis_ai.platform.cli.shared_submit import CloudSubmitSpec, run_cloud_submit
 from osmosis_ai.platform.cli.utils import (
     fetch_all_pages,
-    print_remote_fetch_notice,
     require_git_workspace_directory_context,
     validate_list_options,
 )
 from osmosis_ai.platform.cli.workspace_directory_context import git_result_context
-from osmosis_ai.platform.cli.workspace_directory_contract import (
-    ensure_workspace_directory_config_path,
-    validate_rollout_backend,
-    validate_workspace_directory_contract,
-)
 
 
 def _format_eval_status(run: Any) -> str:
@@ -57,112 +53,58 @@ def _format_eval_status(run: Any) -> str:
     return console.escape(status_info)
 
 
+def _submit_eval(
+    client: OsmosisClient,
+    config: EvalSubmitConfig,
+    credentials: Any,
+    git_identity: str,
+) -> SubmitRunResult:
+    return client.submit_cloud_eval(
+        experiment_config=config.experiment_config,
+        evaluation_config=config.evaluation_config or None,
+        advanced_config=config.advanced_config or None,
+        env_config=config.env or None,
+        secret_refs_config=config.secrets or None,
+        credentials=credentials,
+        git_identity=git_identity,
+    )
+
+
+def _eval_next_steps(
+    result: SubmitRunResult, _config: EvalSubmitConfig
+) -> tuple[list[str], list[dict[str, Any]]]:
+    display = [
+        f"Status: {result.status}",
+        f"Check status with: osmosis eval info {result.name}",
+        "List all eval runs with: osmosis eval list",
+    ]
+    structured: list[dict[str, Any]] = [
+        {"action": "eval_info", "name": result.name},
+        {"action": "eval_list"},
+    ]
+    if result.platform_url:
+        structured.append({"action": "open_url", "url": result.platform_url})
+    return display, structured
+
+
+_EVAL_SUBMIT_SPEC: CloudSubmitSpec[EvalSubmitConfig] = CloudSubmitSpec(
+    config_dir="configs/eval",
+    command_label="`osmosis eval submit`",
+    table_title="Cloud Eval Run",
+    confirm_prompt="Submit this cloud eval run?",
+    status_message="Submitting cloud eval run...",
+    operation="eval.submit",
+    success_message_format="Cloud eval run submitted: {name}",
+    load_config=load_eval_submit_config,
+    validate_context=validate_eval_submit_context_paths,
+    submit=_submit_eval,
+    build_next_steps=_eval_next_steps,
+)
+
+
 def submit(config_path: Path, *, yes: bool) -> OperationResult:
     """Submit a cloud eval run."""
-    command_label = "`osmosis eval submit`"
-
-    context = require_git_workspace_directory_context()
-    workspace_directory = context.workspace_directory
-    validate_workspace_directory_contract(workspace_directory)
-
-    config_path = Path(config_path)
-    resolved_config_path = (
-        config_path if config_path.is_absolute() else workspace_directory / config_path
-    )
-    ensure_workspace_directory_config_path(
-        resolved_config_path,
-        workspace_directory,
-        config_dir="configs/eval",
-        command_label=command_label,
-    )
-
-    config = load_eval_submit_config(resolved_config_path)
-    validate_eval_submit_context_paths(config, workspace_directory)
-    validate_rollout_backend(
-        workspace_directory=workspace_directory,
-        rollout=config.experiment_rollout,
-        entrypoint=config.experiment_entrypoint,
-        command_label=command_label,
-    )
-    env = config.env
-    secret_refs = config.secrets
-
-    summary_rows = build_submit_summary_rows(
-        rollout=config.experiment_rollout,
-        entrypoint=config.experiment_entrypoint,
-        model=config.experiment_model_path,
-        dataset=config.experiment_dataset,
-        commit_sha=config.experiment_commit_sha,
-        env=env,
-        secrets=secret_refs,
-    )
-    console.table(
-        [(label, console.escape(value)) for label, value in summary_rows],
-        title="Cloud Eval Run",
-    )
-
-    notes, warnings = print_remote_fetch_notice(
-        workspace_directory,
-        pinned_commit_sha=config.experiment_commit_sha,
-    )
-
-    require_confirmation(
-        "Submit this cloud eval run?",
-        yes=yes,
-        summary=summary_rows,
-        notes=notes,
-        warnings=warnings,
-    )
-
-    client = OsmosisClient()
-    output = get_output_context()
-    with output.status("Submitting cloud eval run..."):
-        result = client.submit_cloud_eval(
-            experiment_config=config.experiment_config,
-            evaluation_config=config.evaluation_config or None,
-            advanced_config=config.advanced_config or None,
-            env_config=env or None,
-            secret_refs_config=secret_refs or None,
-            credentials=context.credentials,
-            git_identity=context.git_identity,
-        )
-
-    return OperationResult(
-        operation="eval.submit",
-        status="success",
-        resource={
-            "id": result.id,
-            "name": result.name,
-            "status": result.status,
-            "model_name": config.experiment_model_path,
-            "dataset_name": config.experiment_dataset,
-            "created_at": result.created_at,
-            **({"url": result.platform_url} if result.platform_url else {}),
-            **git_result_context(context),
-            "config": {
-                "rollout": config.experiment_rollout,
-                "entrypoint": config.experiment_entrypoint,
-                "model": config.experiment_model_path,
-                "dataset": config.experiment_dataset,
-                "commit_sha": config.experiment_commit_sha,
-            },
-        },
-        message=f"Cloud eval run submitted: {result.name}",
-        display_next_steps=[
-            f"Status: {result.status}",
-            f"Check status with: osmosis eval status {result.name}",
-            "List all eval runs with: osmosis eval list",
-        ],
-        next_steps_structured=[
-            {"action": "eval_status", "name": result.name},
-            {"action": "eval_list"},
-            *(
-                [{"action": "open_url", "url": result.platform_url}]
-                if result.platform_url
-                else []
-            ),
-        ],
-    )
+    return run_cloud_submit(config_path, yes=yes, spec=_EVAL_SUBMIT_SPEC)
 
 
 def list_eval_runs(*, limit: int, all_: bool) -> ListResult:
@@ -229,11 +171,11 @@ def list_eval_runs(*, limit: int, all_: bool) -> ListResult:
             }
             for run in eval_runs
         ],
-        display_hints=["Use osmosis eval status <name> for details."],
+        display_hints=["Use osmosis eval info <name> for details."],
     )
 
 
-def status(name_or_id: str) -> DetailResult:
+def info(name_or_id: str) -> DetailResult:
     """Show cloud eval run details and results."""
     context = require_git_workspace_directory_context()
     credentials = context.credentials

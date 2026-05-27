@@ -9,10 +9,11 @@ import pytest
 
 import osmosis_ai.platform.api.client as api_client_module
 import osmosis_ai.platform.cli.eval as eval_module
+import osmosis_ai.platform.cli.shared_submit as shared_submit_module
 import osmosis_ai.platform.cli.utils as utils_module
 from osmosis_ai.cli.console import Console
 from osmosis_ai.cli.output import OperationResult
-from osmosis_ai.platform.api.models import SubmitCloudEvalResult
+from osmosis_ai.platform.api.models import SubmitRunResult
 
 GIT_IDENTITY = "acme/rollouts"
 REPO_URL = "https://github.com/acme/rollouts.git"
@@ -96,6 +97,7 @@ def console_capture(monkeypatch: pytest.MonkeyPatch) -> StringIO:
     output = StringIO()
     console = Console(file=output, force_terminal=False, width=200)
     monkeypatch.setattr(eval_module, "console", console)
+    monkeypatch.setattr(shared_submit_module, "console", console)
     monkeypatch.setattr(utils_module, "console", console)
     return output
 
@@ -118,7 +120,7 @@ def _mock_git_context(monkeypatch: pytest.MonkeyPatch) -> None:
         )()
 
     monkeypatch.setattr(
-        eval_module,
+        shared_submit_module,
         "require_git_workspace_directory_context",
         _git_context,
     )
@@ -156,9 +158,9 @@ def test_eval_submit_passes_new_schema_to_cloud_eval_api(
     captured_kwargs: dict[str, Any] = {}
 
     class FakeClient:
-        def submit_cloud_eval(self, **kwargs: Any) -> SubmitCloudEvalResult:
+        def submit_cloud_eval(self, **kwargs: Any) -> SubmitRunResult:
             captured_kwargs.update(kwargs)
-            return SubmitCloudEvalResult(
+            return SubmitRunResult(
                 id="eval-1",
                 name="eval-run",
                 status="pending",
@@ -167,7 +169,7 @@ def test_eval_submit_passes_new_schema_to_cloud_eval_api(
             )
 
     monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-    monkeypatch.setattr(eval_module, "OsmosisClient", FakeClient)
+    monkeypatch.setattr(shared_submit_module, "OsmosisClient", FakeClient)
 
     result = eval_module.submit(config_path=config_path, yes=True)
 
@@ -215,9 +217,9 @@ def test_eval_submit_does_not_pin_local_head_without_config_commit_sha(
     captured_kwargs: dict[str, Any] = {}
 
     class FakeClient:
-        def submit_cloud_eval(self, **kwargs: Any) -> SubmitCloudEvalResult:
+        def submit_cloud_eval(self, **kwargs: Any) -> SubmitRunResult:
             captured_kwargs.update(kwargs)
-            return SubmitCloudEvalResult(
+            return SubmitRunResult(
                 id="eval-1",
                 name="eval-run",
                 status="pending",
@@ -226,7 +228,7 @@ def test_eval_submit_does_not_pin_local_head_without_config_commit_sha(
             )
 
     monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-    monkeypatch.setattr(eval_module, "OsmosisClient", FakeClient)
+    monkeypatch.setattr(shared_submit_module, "OsmosisClient", FakeClient)
 
     eval_module.submit(config_path=config_path, yes=True)
 

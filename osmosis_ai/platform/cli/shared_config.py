@@ -7,7 +7,7 @@ import tomllib
 from pathlib import Path
 from typing import Any, ClassVar
 
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from pydantic_core import ErrorDetails
 
 from osmosis_ai.cli.errors import CLIError
@@ -270,6 +270,156 @@ def validate_env_var_keys(
         )
 
 
+class ExperimentSection(BaseModel):
+    """``[experiment]`` table — shared between train and eval submit configs."""
+
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra="forbid")
+
+    rollout: str
+    entrypoint: str
+    model_path: str
+    dataset: str
+    commit_sha: str | None = None
+
+
+_EXPERIMENT_REQUIRED_KEYS: tuple[str, ...] = (
+    "rollout",
+    "entrypoint",
+    "model_path",
+    "dataset",
+)
+
+
+class BaseSubmitConfig(BaseModel):
+    """Common skeleton for ``train submit`` / ``eval submit`` TOML configs.
+
+    Subclasses add their own optional sections (e.g. ``training``, ``sampling``,
+    ``checkpoints`` or ``evaluation``) but inherit ``[experiment]``, ``[advanced]``,
+    ``[env]`` and ``[secrets]`` plus the matching properties used by the
+    submit flow.
+    """
+
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra="forbid")
+
+    experiment: ExperimentSection
+    advanced: AdvancedPassthroughSection = Field(
+        default_factory=AdvancedPassthroughSection
+    )
+    env: dict[str, str] = Field(default_factory=dict)
+    secrets: dict[str, str] = Field(default_factory=dict)
+
+    @property
+    def experiment_rollout(self) -> str:
+        return self.experiment.rollout
+
+    @property
+    def experiment_entrypoint(self) -> str:
+        return self.experiment.entrypoint
+
+    @property
+    def experiment_model_path(self) -> str:
+        return self.experiment.model_path
+
+    @property
+    def experiment_dataset(self) -> str:
+        return self.experiment.dataset
+
+    @property
+    def experiment_commit_sha(self) -> str | None:
+        return self.experiment.commit_sha
+
+    @property
+    def experiment_config(self) -> dict[str, Any]:
+        return self.experiment.model_dump(exclude_none=True)
+
+    @property
+    def advanced_config(self) -> dict[str, Any]:
+        return self.advanced.model_dump(exclude_none=True)
+
+
+def load_submit_config[SubmitConfigT: BaseSubmitConfig](
+    path: Path,
+    *,
+    config_class: type[SubmitConfigT],
+    extra_sections: list[tuple[str, type[BaseModel]]],
+    config_label: str,
+) -> SubmitConfigT:
+    """Load and validate a submit TOML file into ``config_class``.
+
+    ``extra_sections`` is a list of ``(section_name, pydantic_model)`` tuples
+    describing the optional sections specific to this config (e.g. for training:
+    ``[("training", _TrainingSection), ("sampling", _SamplingSection), ...]``).
+    Each section name must match the corresponding field name on ``config_class``.
+
+    ``[experiment]``, ``[advanced]``, ``[env]`` and ``[secrets]`` are handled
+    here; subclasses only declare their own sections.
+    """
+    raw = read_toml_file(path)
+
+    experiment_section = read_toml_table(raw, "experiment", path, required=True)
+    for required_key in _EXPERIMENT_REQUIRED_KEYS:
+        if required_key not in experiment_section:
+            raise CLIError(
+                f"Missing '{required_key}' in [experiment] section of {path}"
+            )
+
+    extra_data: dict[str, dict[str, Any]] = {
+        name: read_toml_table(raw, name, path) for name, _ in extra_sections
+    }
+    advanced_section = read_toml_table(raw, "advanced", path)
+    env_section = read_toml_table(raw, "env", path)
+    secrets_section = read_toml_table(raw, "secrets", path)
+
+    allowed_sections = frozenset(
+        {
+            "experiment",
+            "advanced",
+            "env",
+            "secrets",
+            *(name for name, _ in extra_sections),
+        }
+    )
+
+    section_specs: list[tuple[str, type[BaseModel], dict[str, Any]]] = [
+        ("experiment", ExperimentSection, experiment_section),
+        *((name, model, extra_data[name]) for name, model in extra_sections),
+        ("advanced", AdvancedPassthroughSection, advanced_section),
+    ]
+
+    issues = [
+        *collect_top_level_validation_issues(raw, allowed_sections=allowed_sections),
+        *(
+            issue
+            for section_name, model_type, data in section_specs
+            for issue in collect_section_validation_issues(
+                section_name=section_name,
+                model_type=model_type,
+                data=data,
+            )
+        ),
+        *validate_env_values(env=env_section, secrets=secrets_section),
+    ]
+    if issues:
+        raise config_issues_error(issues=issues, config_label=config_label)
+
+    parsed: dict[str, Any] = {}
+    for section_name, model_type, data in section_specs:
+        parsed[section_name] = parse_section(
+            section_name=section_name,
+            model_type=model_type,
+            data=data,
+            config_label=config_label,
+        )
+
+    env = {key: value for key, value in env_section.items() if isinstance(value, str)}
+    secrets = {
+        key: value for key, value in secrets_section.items() if isinstance(value, str)
+    }
+    validate_env_var_keys(env=env, secrets=secrets, path=path)
+
+    return config_class(**parsed, env=env, secrets=secrets)
+
+
 def build_submit_summary_rows(
     *,
     rollout: str,
@@ -325,6 +475,8 @@ __all__ = [
     "RESERVED_ENV_PREFIX",
     "AdvancedPassthroughSection",
     "BackendValidatedParamSection",
+    "BaseSubmitConfig",
+    "ExperimentSection",
     "build_submit_summary_rows",
     "collect_section_validation_issues",
     "collect_top_level_validation_issues",
@@ -332,6 +484,7 @@ __all__ = [
     "format_config_issue",
     "format_field_path",
     "format_input",
+    "load_submit_config",
     "parse_section",
     "read_toml_file",
     "read_toml_table",

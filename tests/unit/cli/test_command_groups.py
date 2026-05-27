@@ -189,6 +189,15 @@ def test_root_help_surface_does_not_list_removed_groups_or_aliases(capfd):
         assert command in root_help_commands
 
 
+def test_eval_help_lists_info_not_status(capfd):
+    rc = main(["--plain", "eval", "--help"])
+    captured = capfd.readouterr()
+
+    assert rc == 0
+    assert "info" in captured.out
+    assert "status" not in captured.out
+
+
 @pytest.mark.parametrize(
     ("args", "not_expected"),
     [
