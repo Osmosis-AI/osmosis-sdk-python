@@ -27,10 +27,10 @@ from osmosis_ai.platform.api.models import (
     EVAL_RUN_STATUSES_TERMINAL,
 )
 from osmosis_ai.platform.cli.eval_config import (
-    EvalSubmitConfig,
     load_eval_submit_config,
     validate_eval_submit_context_paths,
 )
+from osmosis_ai.platform.cli.shared_config import build_submit_summary_rows
 from osmosis_ai.platform.cli.utils import (
     fetch_all_pages,
     print_remote_fetch_notice,
@@ -43,33 +43,6 @@ from osmosis_ai.platform.cli.workspace_directory_contract import (
     validate_rollout_backend,
     validate_workspace_directory_contract,
 )
-
-
-def _build_submit_summary(
-    config: EvalSubmitConfig,
-    *,
-    env: dict[str, str],
-    secret_refs: dict[str, str],
-) -> list[tuple[str, str]]:
-    """Build the confirmation-table rows shown before submitting."""
-    rows: list[tuple[str, str]] = [
-        ("Rollout", config.experiment_rollout),
-        ("Entrypoint", config.experiment_entrypoint),
-        ("Model", config.llm_model_path),
-        ("Dataset", config.experiment_dataset),
-    ]
-    if config.experiment_commit_sha:
-        rows.append(("Commit", config.experiment_commit_sha))
-    if env:
-        env_keys = ", ".join(sorted(env))
-        rows.append((f"Rollout env ({len(env)})", env_keys))
-    if secret_refs:
-        secret_summary = ", ".join(
-            f"{env_name}={secret_name}"
-            for env_name, secret_name in sorted(secret_refs.items())
-        )
-        rows.append((f"Rollout secrets ({len(secret_refs)})", secret_summary))
-    return rows
 
 
 def _format_eval_status(run: Any) -> str:
@@ -114,10 +87,14 @@ def submit(config_path: Path, *, yes: bool) -> OperationResult:
     env = config.env
     secret_refs = config.secrets
 
-    summary_rows = _build_submit_summary(
-        config,
+    summary_rows = build_submit_summary_rows(
+        rollout=config.experiment_rollout,
+        entrypoint=config.experiment_entrypoint,
+        model=config.llm_model_path,
+        dataset=config.experiment_dataset,
+        commit_sha=config.experiment_commit_sha,
         env=env,
-        secret_refs=secret_refs,
+        secrets=secret_refs,
     )
     console.table(
         [(label, console.escape(value)) for label, value in summary_rows],
@@ -158,6 +135,8 @@ def submit(config_path: Path, *, yes: bool) -> OperationResult:
             "id": result.id,
             "name": result.name,
             "status": result.status,
+            "model_name": config.llm_model_path,
+            "dataset_name": config.experiment_dataset,
             "created_at": result.created_at,
             **({"url": result.platform_url} if result.platform_url else {}),
             **git_result_context(context),

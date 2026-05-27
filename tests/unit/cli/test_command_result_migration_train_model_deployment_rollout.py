@@ -72,6 +72,10 @@ def _stub_git_context(monkeypatch: pytest.MonkeyPatch) -> None:
         _git_context,
     )
     monkeypatch.setattr(
+        "osmosis_ai.platform.cli.train.require_git_workspace_directory_context",
+        _git_context,
+    )
+    monkeypatch.setattr(
         "osmosis_ai.platform.cli.workspace_repo.git_worktree_top_level",
         _git_top_level,
     )
@@ -139,6 +143,9 @@ def test_train_list_json_returns_single_list_envelope(
             )
 
     monkeypatch.setattr("osmosis_ai.platform.api.client.OsmosisClient", FakeClient)
+    monkeypatch.setattr(
+        "osmosis_ai.platform.cli.train.OsmosisClient", FakeClient, raising=False
+    )
 
     exit_code = cli.main(["--json", "train", "list"])
     captured = capsys.readouterr()
@@ -172,6 +179,9 @@ def test_train_info_json_returns_combined_detail_envelope(
             )
 
     monkeypatch.setattr("osmosis_ai.platform.api.client.OsmosisClient", FakeClient)
+    monkeypatch.setattr(
+        "osmosis_ai.platform.cli.train.OsmosisClient", FakeClient, raising=False
+    )
 
     exit_code = cli.main(["--json", "train", "info", "reward-run"])
     captured = capsys.readouterr()
@@ -231,6 +241,9 @@ rollout_batch_size = 64
             )
 
     monkeypatch.setattr("osmosis_ai.platform.api.client.OsmosisClient", FakeClient)
+    monkeypatch.setattr(
+        "osmosis_ai.platform.cli.train.OsmosisClient", FakeClient, raising=False
+    )
 
     exit_code = cli.main(["--json", "train", "submit", str(config_path), "--yes"])
     captured = capsys.readouterr()
@@ -306,6 +319,9 @@ def test_train_info_json_does_not_write_default_file(
             return type("CheckpointPage", (), {"checkpoints": []})()
 
     monkeypatch.setattr("osmosis_ai.platform.api.client.OsmosisClient", FakeClient)
+    monkeypatch.setattr(
+        "osmosis_ai.platform.cli.train.OsmosisClient", FakeClient, raising=False
+    )
 
     exit_code = cli.main(["--json", "train", "info", "reward-run"])
     captured = capsys.readouterr()
@@ -331,6 +347,9 @@ def test_train_stop_json_returns_operation_envelope(
             return {"stopped": True}
 
     monkeypatch.setattr("osmosis_ai.platform.api.client.OsmosisClient", FakeClient)
+    monkeypatch.setattr(
+        "osmosis_ai.platform.cli.train.OsmosisClient", FakeClient, raising=False
+    )
 
     exit_code = cli.main(["--json", "train", "stop", "reward-run", "--yes"])
     captured = capsys.readouterr()
@@ -368,6 +387,9 @@ def test_model_list_plain_is_tab_separated_rows(
             )
 
     monkeypatch.setattr("osmosis_ai.platform.api.client.OsmosisClient", FakeClient)
+    monkeypatch.setattr(
+        "osmosis_ai.platform.cli.train.OsmosisClient", FakeClient, raising=False
+    )
 
     exit_code = cli.main(["--plain", "model", "list"])
     captured = capsys.readouterr()
@@ -409,6 +431,9 @@ def test_model_list_json_includes_git_context(
             )
 
     monkeypatch.setattr("osmosis_ai.platform.api.client.OsmosisClient", FakeClient)
+    monkeypatch.setattr(
+        "osmosis_ai.platform.cli.train.OsmosisClient", FakeClient, raising=False
+    )
 
     exit_code = cli.main(["--json", "model", "list"])
     captured = capsys.readouterr()
@@ -472,6 +497,9 @@ def test_deployment_commands_json_return_results(
             )
 
     monkeypatch.setattr("osmosis_ai.platform.api.client.OsmosisClient", FakeClient)
+    monkeypatch.setattr(
+        "osmosis_ai.platform.cli.train.OsmosisClient", FakeClient, raising=False
+    )
 
     exit_code = cli.main(["--json", "deployment", "list"])
     payload = json.loads(capsys.readouterr().out)
@@ -517,6 +545,9 @@ def test_failed_deploy_json_exits_nonzero(
             )
 
     monkeypatch.setattr("osmosis_ai.platform.api.client.OsmosisClient", FakeClient)
+    monkeypatch.setattr(
+        "osmosis_ai.platform.cli.train.OsmosisClient", FakeClient, raising=False
+    )
 
     exit_code = cli.main(["--json", "deploy", "run-step-1"])
     payload = json.loads(capsys.readouterr().out)
@@ -552,6 +583,9 @@ def test_rollout_list_json_returns_envelope(
             )
 
     monkeypatch.setattr("osmosis_ai.platform.api.client.OsmosisClient", FakeClient)
+    monkeypatch.setattr(
+        "osmosis_ai.platform.cli.train.OsmosisClient", FakeClient, raising=False
+    )
 
     exit_code = cli.main(["--json", "rollout", "list"])
     captured = capsys.readouterr()
@@ -588,6 +622,9 @@ def test_rollout_list_columns_prioritize_name_over_id(
             )
 
     monkeypatch.setattr("osmosis_ai.platform.api.client.OsmosisClient", FakeClient)
+    monkeypatch.setattr(
+        "osmosis_ai.platform.cli.train.OsmosisClient", FakeClient, raising=False
+    )
 
     from osmosis_ai.cli.commands.rollout import list_rollouts
     from osmosis_ai.cli.output.display import format_local_date

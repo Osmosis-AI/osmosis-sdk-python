@@ -63,9 +63,9 @@ def _make_metrics(**overrides) -> TrainingRunMetrics:
     return TrainingRunMetrics(**defaults)
 
 
-# Patch at source modules since train.py uses function-level lazy imports.
-_PATCH_AUTH = "osmosis_ai.platform.cli.utils.require_git_workspace_directory_context"
-_PATCH_CLIENT = "osmosis_ai.platform.api.client.OsmosisClient"
+# Patch at the platform train module where these symbols are bound at import.
+_PATCH_AUTH = "osmosis_ai.platform.cli.train.require_git_workspace_directory_context"
+_PATCH_CLIENT = "osmosis_ai.platform.cli.train.OsmosisClient"
 
 
 def _make_git_context(
@@ -85,11 +85,11 @@ def _patch_train_console(
     force_terminal: bool = True,
     width: int = 120,
 ):
-    """Patch ``train`` module ``console`` for deterministic metrics output tests."""
-    import osmosis_ai.cli.commands.train as train_module
+    """Patch the platform train ``console`` for deterministic metrics output tests."""
+    import osmosis_ai.platform.cli.train as platform_train_module
 
     return patch.object(
-        train_module,
+        platform_train_module,
         "console",
         Console(
             file=buf,
@@ -404,7 +404,7 @@ class TestResolveOutputPath:
     """Test _resolve_output_path smart path resolution."""
 
     def test_explicit_json_extension_used_as_is(self, tmp_path: Path) -> None:
-        from osmosis_ai.cli.commands.train import _resolve_output_path
+        from osmosis_ai.platform.cli.train import _resolve_output_path
 
         result = _resolve_output_path(
             str(tmp_path / "my_metrics.json"), "run-name", "abcd1234"
@@ -412,7 +412,7 @@ class TestResolveOutputPath:
         assert result == tmp_path / "my_metrics.json"
 
     def test_no_extension_appends_json(self, tmp_path: Path) -> None:
-        from osmosis_ai.cli.commands.train import _resolve_output_path
+        from osmosis_ai.platform.cli.train import _resolve_output_path
 
         result = _resolve_output_path(
             str(tmp_path / "my_metrics"), "run-name", "abcd1234"
@@ -420,7 +420,7 @@ class TestResolveOutputPath:
         assert result == tmp_path / "my_metrics.json"
 
     def test_non_json_extension_replaced_with_json(self, tmp_path: Path) -> None:
-        from osmosis_ai.cli.commands.train import _resolve_output_path
+        from osmosis_ai.platform.cli.train import _resolve_output_path
 
         result = _resolve_output_path(
             str(tmp_path / "my_metrics.csv"), "run-name", "abcd1234"
@@ -428,7 +428,7 @@ class TestResolveOutputPath:
         assert result == tmp_path / "my_metrics.json"
 
     def test_trailing_slash_uses_directory_mode(self, tmp_path: Path) -> None:
-        from osmosis_ai.cli.commands.train import _resolve_output_path
+        from osmosis_ai.platform.cli.train import _resolve_output_path
 
         dir_path = tmp_path / "output"
         result = _resolve_output_path(
@@ -438,7 +438,7 @@ class TestResolveOutputPath:
         assert dir_path.is_dir()
 
     def test_existing_directory_uses_directory_mode(self, tmp_path: Path) -> None:
-        from osmosis_ai.cli.commands.train import _resolve_output_path
+        from osmosis_ai.platform.cli.train import _resolve_output_path
 
         dir_path = tmp_path / "output"
         dir_path.mkdir()
@@ -446,7 +446,7 @@ class TestResolveOutputPath:
         assert result == dir_path / "abcd1234.json"
 
     def test_auto_creates_parent_directories(self, tmp_path: Path) -> None:
-        from osmosis_ai.cli.commands.train import _resolve_output_path
+        from osmosis_ai.platform.cli.train import _resolve_output_path
 
         result = _resolve_output_path(
             str(tmp_path / "nested" / "deep" / "metrics"), "run", "abcd1234"
@@ -455,7 +455,7 @@ class TestResolveOutputPath:
         assert result.parent.is_dir()
 
     def test_trailing_slash_auto_creates_directory(self, tmp_path: Path) -> None:
-        from osmosis_ai.cli.commands.train import _resolve_output_path
+        from osmosis_ai.platform.cli.train import _resolve_output_path
 
         dir_path = tmp_path / "new_dir"
         result = _resolve_output_path(str(dir_path) + "/", "my-run", "abcd1234efgh5678")
@@ -512,7 +512,7 @@ class TestMetricsCommandErrors:
     def test_default_output_does_not_require_project_marker(
         self, tmp_path: Path
     ) -> None:
-        from osmosis_ai.cli.commands.train import _resolve_default_output
+        from osmosis_ai.platform.cli.train import _resolve_default_output
 
         result = _resolve_default_output(
             "my-run", "abc12345", workspace_directory=tmp_path

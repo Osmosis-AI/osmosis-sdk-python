@@ -216,7 +216,6 @@ def _training_config(
             "model_path": "m",
             "dataset": "d",
         },
-        params={},
     )
 
 
