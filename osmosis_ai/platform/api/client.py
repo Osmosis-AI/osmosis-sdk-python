@@ -414,6 +414,7 @@ class OsmosisClient:
         experiment_config: dict[str, Any],
         llm_config: dict[str, Any],
         evaluation_config: dict[str, Any] | None = None,
+        advanced_config: dict[str, Any] | None = None,
         env_config: dict[str, str] | None = None,
         secret_refs_config: dict[str, str] | None = None,
         credentials: Credentials | None = None,
@@ -426,6 +427,8 @@ class OsmosisClient:
         }
         if evaluation_config:
             data["evaluation_config"] = evaluation_config
+        if advanced_config:
+            data["advanced_config"] = advanced_config
         if env_config:
             data["env_config"] = env_config
         if secret_refs_config:

@@ -18,7 +18,7 @@ from osmosis_ai.platform.cli.shared_config import (
 
 _ENV_VAR_NAME_RE = re.compile(r"^[A-Z_][A-Z0-9_]*$")
 _EVAL_CONFIG_SECTIONS: frozenset[str] = frozenset(
-    {"experiment", "llm", "evaluation", "env", "secrets"}
+    {"experiment", "llm", "evaluation", "advanced", "env", "secrets"}
 )
 
 
@@ -45,6 +45,12 @@ class _EvaluationSection(BackendValidatedParamSection):
     pass_threshold: Any = None
     agent_workflow_timeout_s: Any = None
     grader_timeout_s: Any = None
+
+
+class _AdvancedSection(BaseModel):
+    """Preserve advanced backend params for server-side schema validation."""
+
+    model_config: ClassVar[ConfigDict] = ConfigDict(extra="allow")
 
 
 def _format_input(value: Any) -> str:
@@ -226,6 +232,7 @@ class EvalSubmitConfig(BaseModel):
     experiment: _ExperimentSection
     llm: _LLMSection
     evaluation: _EvaluationSection
+    advanced: _AdvancedSection = Field(default_factory=_AdvancedSection)
     env: dict[str, str] = Field(default_factory=dict)
     secrets: dict[str, str] = Field(default_factory=dict)
 
@@ -265,6 +272,10 @@ class EvalSubmitConfig(BaseModel):
     def evaluation_config(self) -> dict[str, Any]:
         return self.evaluation.model_dump(exclude_none=True)
 
+    @property
+    def advanced_config(self) -> dict[str, Any]:
+        return self.advanced.model_dump(exclude_none=True)
+
 
 def load_eval_submit_config(path: Path) -> EvalSubmitConfig:
     """Load and validate TOML config for cloud eval submit."""
@@ -290,6 +301,7 @@ def load_eval_submit_config(path: Path) -> EvalSubmitConfig:
         raise CLIError(f"Missing 'model_path' in [llm] section of {path}")
 
     evaluation_section = _read_table(raw, "evaluation", path)
+    advanced_section = _read_table(raw, "advanced", path)
     env_section = _read_table(raw, "env", path)
     secrets_section = _read_table(raw, "secrets", path)
 
@@ -310,6 +322,11 @@ def load_eval_submit_config(path: Path) -> EvalSubmitConfig:
             model_type=_EvaluationSection,
             data=evaluation_section,
         ),
+        *_collect_section_validation_issues(
+            section_name="advanced",
+            model_type=_AdvancedSection,
+            data=advanced_section,
+        ),
         *_validate_env_values(env=env_section, secrets=secrets_section),
     ]
     if issues:
@@ -326,9 +343,15 @@ def load_eval_submit_config(path: Path) -> EvalSubmitConfig:
         model_type=_EvaluationSection,
         data=evaluation_section,
     )
+    advanced = _parse_section(
+        section_name="advanced",
+        model_type=_AdvancedSection,
+        data=advanced_section,
+    )
     assert isinstance(experiment, _ExperimentSection)
     assert isinstance(llm, _LLMSection)
     assert isinstance(evaluation, _EvaluationSection)
+    assert isinstance(advanced, _AdvancedSection)
 
     env = {key: value for key, value in env_section.items() if isinstance(value, str)}
     secrets = {
@@ -340,6 +363,7 @@ def load_eval_submit_config(path: Path) -> EvalSubmitConfig:
         experiment=experiment,
         llm=llm,
         evaluation=evaluation,
+        advanced=advanced,
         env=env,
         secrets=secrets,
     )

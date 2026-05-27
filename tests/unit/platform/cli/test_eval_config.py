@@ -97,9 +97,63 @@ model_path = "openai/gpt-5-mini"
     assert config.experiment_commit_sha is None
     assert config.llm_base_url is None
     assert config.evaluation_config == {}
+    assert config.advanced_config == {}
     assert config.llm_config == {"model_path": "openai/gpt-5-mini"}
     assert config.env == {}
     assert config.secrets == {}
+
+
+def test_load_eval_submit_config_advanced_section_preserves_backend_params(
+    tmp_path: Path,
+) -> None:
+    path = _write_config(
+        tmp_path / "eval.toml",
+        """
+[experiment]
+rollout = "calculator"
+entrypoint = "main.py"
+dataset = "multiply"
+
+[llm]
+model_path = "openai/gpt-5-mini"
+
+[advanced]
+custom_eval_flag = true
+future_knob = "experimental"
+""",
+    )
+
+    config = load_eval_submit_config(path)
+
+    assert config.advanced_config == {
+        "custom_eval_flag": True,
+        "future_knob": "experimental",
+    }
+
+
+def test_load_eval_submit_config_rejects_extra_param_fields_outside_advanced(
+    tmp_path: Path,
+) -> None:
+    path = _write_config(
+        tmp_path / "eval.toml",
+        """
+[experiment]
+rollout = "calculator"
+entrypoint = "main.py"
+dataset = "multiply"
+
+[llm]
+model_path = "openai/gpt-5-mini"
+
+[evaluation]
+unknown_eval_knob = 42
+""",
+    )
+
+    with pytest.raises(
+        CLIError, match=r"evaluation\.unknown_eval_knob: Unrecognized key"
+    ):
+        load_eval_submit_config(path)
 
 
 def test_load_eval_submit_config_rejects_old_local_eval_schema(

@@ -46,7 +46,20 @@ def _make_workspace_directory(root: Path, *, rollout: str = "calculator") -> Pat
     ):
         (root / rel_path).mkdir(parents=True, exist_ok=True)
     (root / "rollouts" / rollout / "main.py").write_text(
-        "# rollout server\n", encoding="utf-8"
+        """
+from osmosis_ai.rollout import AgentWorkflow, Grader
+
+
+class TestWorkflow(AgentWorkflow):
+    async def run(self, ctx):
+        return None
+
+
+class TestGrader(Grader):
+    async def grade(self, ctx):
+        return 1.0
+""".strip(),
+        encoding="utf-8",
     )
     return root
 

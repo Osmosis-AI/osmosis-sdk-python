@@ -11,6 +11,7 @@ import pytest
 
 import osmosis_ai.cli.commands.train as train_module
 import osmosis_ai.platform.api.client as api_client_module
+import osmosis_ai.platform.cli.train as platform_train_module
 import osmosis_ai.platform.cli.utils as utils_module
 from osmosis_ai.cli.console import Console
 from osmosis_ai.cli.errors import CLIError
@@ -107,6 +108,7 @@ def console_capture(monkeypatch: pytest.MonkeyPatch) -> StringIO:
     output = StringIO()
     console = Console(file=output, force_terminal=False, width=200)
     monkeypatch.setattr(train_module, "console", console)
+    monkeypatch.setattr(platform_train_module, "console", console)
     monkeypatch.setattr(utils_module, "console", console)
     return output
 

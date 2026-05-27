@@ -40,6 +40,7 @@ from osmosis_ai.platform.cli.utils import (
 from osmosis_ai.platform.cli.workspace_directory_context import git_result_context
 from osmosis_ai.platform.cli.workspace_directory_contract import (
     ensure_workspace_directory_config_path,
+    validate_rollout_backend,
     validate_workspace_directory_contract,
 )
 
@@ -104,6 +105,12 @@ def submit(config_path: Path, *, yes: bool) -> OperationResult:
 
     config = load_eval_submit_config(resolved_config_path)
     validate_eval_submit_context_paths(config, workspace_directory)
+    validate_rollout_backend(
+        workspace_directory=workspace_directory,
+        rollout=config.experiment_rollout,
+        entrypoint=config.experiment_entrypoint,
+        command_label=command_label,
+    )
     env = config.env
     secret_refs = config.secrets
 
@@ -137,6 +144,7 @@ def submit(config_path: Path, *, yes: bool) -> OperationResult:
             experiment_config=config.experiment_config,
             llm_config=config.llm_config,
             evaluation_config=config.evaluation_config or None,
+            advanced_config=config.advanced_config or None,
             env_config=env or None,
             secret_refs_config=secret_refs or None,
             credentials=context.credentials,
