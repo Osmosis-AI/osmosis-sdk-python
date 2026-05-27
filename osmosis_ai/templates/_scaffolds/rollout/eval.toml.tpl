@@ -4,13 +4,9 @@
 [experiment]
 rollout = "<your-rollout>"            # Rollout name
 entrypoint = "main.py"                # Entrypoint file name
+model_path = "openai/gpt-5-mini"      # LiteLLM-style model name
 dataset = "<your-dataset-name>"       # Platform dataset name
 # commit_sha =                        # Pin to a specific commit
-
-[llm]
-model_path = "openai/gpt-5-mini"      # LiteLLM-style model name
-# Optional LiteLLM/OpenAI-compatible base URL; no default is applied when omitted.
-# base_url = "https://api.openai.com/v1"
 
 [evaluation]
 # Optional. Omit values to use platform defaults.

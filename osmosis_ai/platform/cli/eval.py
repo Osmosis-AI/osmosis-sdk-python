@@ -90,7 +90,7 @@ def submit(config_path: Path, *, yes: bool) -> OperationResult:
     summary_rows = build_submit_summary_rows(
         rollout=config.experiment_rollout,
         entrypoint=config.experiment_entrypoint,
-        model=config.llm_model_path,
+        model=config.experiment_model_path,
         dataset=config.experiment_dataset,
         commit_sha=config.experiment_commit_sha,
         env=env,
@@ -119,7 +119,6 @@ def submit(config_path: Path, *, yes: bool) -> OperationResult:
     with output.status("Submitting cloud eval run..."):
         result = client.submit_cloud_eval(
             experiment_config=config.experiment_config,
-            llm_config=config.llm_config,
             evaluation_config=config.evaluation_config or None,
             advanced_config=config.advanced_config or None,
             env_config=env or None,
@@ -135,7 +134,7 @@ def submit(config_path: Path, *, yes: bool) -> OperationResult:
             "id": result.id,
             "name": result.name,
             "status": result.status,
-            "model_name": config.llm_model_path,
+            "model_name": config.experiment_model_path,
             "dataset_name": config.experiment_dataset,
             "created_at": result.created_at,
             **({"url": result.platform_url} if result.platform_url else {}),
@@ -143,7 +142,7 @@ def submit(config_path: Path, *, yes: bool) -> OperationResult:
             "config": {
                 "rollout": config.experiment_rollout,
                 "entrypoint": config.experiment_entrypoint,
-                "model": config.llm_model_path,
+                "model": config.experiment_model_path,
                 "dataset": config.experiment_dataset,
                 "commit_sha": config.experiment_commit_sha,
             },

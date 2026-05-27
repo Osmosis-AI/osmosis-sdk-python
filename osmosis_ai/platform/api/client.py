@@ -412,7 +412,6 @@ class OsmosisClient:
         self,
         *,
         experiment_config: dict[str, Any],
-        llm_config: dict[str, Any],
         evaluation_config: dict[str, Any] | None = None,
         advanced_config: dict[str, Any] | None = None,
         env_config: dict[str, str] | None = None,
@@ -423,7 +422,6 @@ class OsmosisClient:
         """Submit a new cloud eval run."""
         data: dict[str, Any] = {
             "experiment_config": experiment_config,
-            "llm_config": llm_config,
         }
         if evaluation_config:
             data["evaluation_config"] = evaluation_config

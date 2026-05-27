@@ -23,12 +23,9 @@ def test_load_eval_submit_config_accepts_new_cloud_schema(tmp_path: Path) -> Non
 [experiment]
 rollout = "calculator"
 entrypoint = "main.py"
+model_path = "openai/gpt-5-mini"
 dataset = "multiply"
 commit_sha = "deadbeef"
-
-[llm]
-model_path = "openai/gpt-5-mini"
-base_url = "https://api.openai.com/v1"
 
 [evaluation]
 limit = 200
@@ -52,8 +49,7 @@ OPENAI_API_KEY = "openai-api-key"
     assert config.experiment_entrypoint == "main.py"
     assert config.experiment_dataset == "multiply"
     assert config.experiment_commit_sha == "deadbeef"
-    assert config.llm_model_path == "openai/gpt-5-mini"
-    assert config.llm_base_url == "https://api.openai.com/v1"
+    assert config.experiment_model_path == "openai/gpt-5-mini"
     assert config.evaluation_config == {
         "limit": 200,
         "n": 2,
@@ -67,12 +63,9 @@ OPENAI_API_KEY = "openai-api-key"
     assert config.experiment_config == {
         "rollout": "calculator",
         "entrypoint": "main.py",
+        "model_path": "openai/gpt-5-mini",
         "dataset": "multiply",
         "commit_sha": "deadbeef",
-    }
-    assert config.llm_config == {
-        "model_path": "openai/gpt-5-mini",
-        "base_url": "https://api.openai.com/v1",
     }
 
 
@@ -85,20 +78,17 @@ def test_load_eval_submit_config_defaults_optional_evaluation_fields(
 [experiment]
 rollout = "calculator"
 entrypoint = "main.py"
-dataset = "multiply"
-
-[llm]
 model_path = "openai/gpt-5-mini"
+dataset = "multiply"
 """,
     )
 
     config = load_eval_submit_config(path)
 
     assert config.experiment_commit_sha is None
-    assert config.llm_base_url is None
+    assert config.experiment_model_path == "openai/gpt-5-mini"
     assert config.evaluation_config == {}
     assert config.advanced_config == {}
-    assert config.llm_config == {"model_path": "openai/gpt-5-mini"}
     assert config.env == {}
     assert config.secrets == {}
 
@@ -112,10 +102,8 @@ def test_load_eval_submit_config_advanced_section_preserves_backend_params(
 [experiment]
 rollout = "calculator"
 entrypoint = "main.py"
-dataset = "multiply"
-
-[llm]
 model_path = "openai/gpt-5-mini"
+dataset = "multiply"
 
 [advanced]
 custom_eval_flag = true
@@ -140,10 +128,8 @@ def test_load_eval_submit_config_rejects_extra_param_fields_outside_advanced(
 [experiment]
 rollout = "calculator"
 entrypoint = "main.py"
-dataset = "multiply"
-
-[llm]
 model_path = "openai/gpt-5-mini"
+dataset = "multiply"
 
 [evaluation]
 unknown_eval_knob = 42
@@ -176,6 +162,27 @@ model = "openai/gpt-5-mini"
         load_eval_submit_config(path)
 
 
+def test_load_eval_submit_config_rejects_legacy_llm_section(
+    tmp_path: Path,
+) -> None:
+    path = _write_config(
+        tmp_path / "eval.toml",
+        """
+[experiment]
+rollout = "calculator"
+entrypoint = "main.py"
+model_path = "openai/gpt-5-mini"
+dataset = "multiply"
+
+[llm]
+model_path = "openai/gpt-5-mini"
+""",
+    )
+
+    with pytest.raises(CLIError, match=r"llm: Unrecognized section"):
+        load_eval_submit_config(path)
+
+
 def test_load_eval_submit_config_rejects_invalid_env_keys(tmp_path: Path) -> None:
     path = _write_config(
         tmp_path / "eval.toml",
@@ -183,10 +190,8 @@ def test_load_eval_submit_config_rejects_invalid_env_keys(tmp_path: Path) -> Non
 [experiment]
 rollout = "calculator"
 entrypoint = "main.py"
-dataset = "multiply"
-
-[llm]
 model_path = "openai/gpt-5-mini"
+dataset = "multiply"
 
 [env]
 _OSMOSIS_INTERNAL = "bad"
@@ -206,10 +211,8 @@ def test_load_eval_submit_config_defers_evaluation_value_validation_to_backend(
 [experiment]
 rollout = "calculator"
 entrypoint = "main.py"
-dataset = "multiply"
-
-[llm]
 model_path = "openai/gpt-5-mini"
+dataset = "multiply"
 
 [evaluation]
 limit = "many"
@@ -234,10 +237,8 @@ def test_validate_eval_submit_context_paths_rejects_entrypoint_escape(
 [experiment]
 rollout = "calculator"
 entrypoint = "../main.py"
-dataset = "multiply"
-
-[llm]
 model_path = "openai/gpt-5-mini"
+dataset = "multiply"
 """,
     )
     config = load_eval_submit_config(config_path)
@@ -253,10 +254,8 @@ def _write_eval_config_with_rollout(path: Path, rollout: str) -> Path:
 [experiment]
 rollout = "{rollout}"
 entrypoint = "main.py"
-dataset = "multiply"
-
-[llm]
 model_path = "openai/gpt-5-mini"
+dataset = "multiply"
 """,
     )
 

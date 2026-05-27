@@ -71,11 +71,9 @@ def _write_eval_config(path: Path, *, commit_sha: str | None = None) -> Path:
             "[experiment]\n"
             'rollout = "calculator"\n'
             'entrypoint = "main.py"\n'
+            'model_path = "openai/gpt-5-mini"\n'
             'dataset = "multiply"\n'
             f"{commit_line}\n"
-            "[llm]\n"
-            'model_path = "openai/gpt-5-mini"\n'
-            'base_url = "https://api.openai.com/v1"\n\n'
             "[evaluation]\n"
             "limit = 200\n"
             "n = 2\n"
@@ -180,13 +178,11 @@ def test_eval_submit_passes_new_schema_to_cloud_eval_api(
     assert captured_kwargs["experiment_config"] == {
         "rollout": "calculator",
         "entrypoint": "main.py",
+        "model_path": "openai/gpt-5-mini",
         "dataset": "multiply",
         "commit_sha": "deadbeef",
     }
-    assert captured_kwargs["llm_config"] == {
-        "model_path": "openai/gpt-5-mini",
-        "base_url": "https://api.openai.com/v1",
-    }
+    assert "llm_config" not in captured_kwargs
     assert captured_kwargs["evaluation_config"] == {
         "limit": 200,
         "n": 2,
@@ -238,5 +234,6 @@ def test_eval_submit_does_not_pin_local_head_without_config_commit_sha(
     assert captured_kwargs["experiment_config"] == {
         "rollout": "calculator",
         "entrypoint": "main.py",
+        "model_path": "openai/gpt-5-mini",
         "dataset": "multiply",
     }

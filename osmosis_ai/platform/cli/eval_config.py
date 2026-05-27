@@ -24,7 +24,7 @@ from osmosis_ai.platform.cli.shared_config import (
 
 _EVAL_CONFIG_LABEL = "eval"
 _EVAL_CONFIG_SECTIONS: frozenset[str] = frozenset(
-    {"experiment", "llm", "evaluation", "advanced", "env", "secrets"}
+    {"experiment", "evaluation", "advanced", "env", "secrets"}
 )
 
 
@@ -33,15 +33,9 @@ class _ExperimentSection(BaseModel):
 
     rollout: str
     entrypoint: str
+    model_path: str
     dataset: str
     commit_sha: str | None = None
-
-
-class _LLMSection(BaseModel):
-    model_config: ClassVar[ConfigDict] = ConfigDict(extra="forbid")
-
-    model_path: str
-    base_url: str | None = None
 
 
 class _EvaluationSection(BackendValidatedParamSection):
@@ -59,7 +53,6 @@ class EvalSubmitConfig(BaseModel):
     model_config: ClassVar[ConfigDict] = ConfigDict(extra="forbid")
 
     experiment: _ExperimentSection
-    llm: _LLMSection
     evaluation: _EvaluationSection
     advanced: AdvancedPassthroughSection = Field(
         default_factory=AdvancedPassthroughSection
@@ -84,20 +77,12 @@ class EvalSubmitConfig(BaseModel):
         return self.experiment.commit_sha
 
     @property
-    def llm_model_path(self) -> str:
-        return self.llm.model_path
-
-    @property
-    def llm_base_url(self) -> str | None:
-        return self.llm.base_url
+    def experiment_model_path(self) -> str:
+        return self.experiment.model_path
 
     @property
     def experiment_config(self) -> dict[str, Any]:
         return self.experiment.model_dump(exclude_none=True)
-
-    @property
-    def llm_config(self) -> dict[str, Any]:
-        return self.llm.model_dump(exclude_none=True)
 
     @property
     def evaluation_config(self) -> dict[str, Any]:
@@ -113,15 +98,11 @@ def load_eval_submit_config(path: Path) -> EvalSubmitConfig:
     raw = read_toml_file(path)
 
     experiment_section = read_toml_table(raw, "experiment", path, required=True)
-    for required_key in ("rollout", "entrypoint", "dataset"):
+    for required_key in ("rollout", "entrypoint", "model_path", "dataset"):
         if required_key not in experiment_section:
             raise CLIError(
                 f"Missing '{required_key}' in [experiment] section of {path}"
             )
-
-    llm_section = read_toml_table(raw, "llm", path, required=True)
-    if "model_path" not in llm_section:
-        raise CLIError(f"Missing 'model_path' in [llm] section of {path}")
 
     evaluation_section = read_toml_table(raw, "evaluation", path)
     advanced_section = read_toml_table(raw, "advanced", path)
@@ -136,7 +117,6 @@ def load_eval_submit_config(path: Path) -> EvalSubmitConfig:
             issue
             for section_name, model_type, data in (
                 ("experiment", _ExperimentSection, experiment_section),
-                ("llm", _LLMSection, llm_section),
                 ("evaluation", _EvaluationSection, evaluation_section),
                 ("advanced", AdvancedPassthroughSection, advanced_section),
             )
@@ -157,12 +137,6 @@ def load_eval_submit_config(path: Path) -> EvalSubmitConfig:
         data=experiment_section,
         config_label=_EVAL_CONFIG_LABEL,
     )
-    llm = parse_section(
-        section_name="llm",
-        model_type=_LLMSection,
-        data=llm_section,
-        config_label=_EVAL_CONFIG_LABEL,
-    )
     evaluation = parse_section(
         section_name="evaluation",
         model_type=_EvaluationSection,
@@ -176,7 +150,6 @@ def load_eval_submit_config(path: Path) -> EvalSubmitConfig:
         config_label=_EVAL_CONFIG_LABEL,
     )
     assert isinstance(experiment, _ExperimentSection)
-    assert isinstance(llm, _LLMSection)
     assert isinstance(evaluation, _EvaluationSection)
     assert isinstance(advanced, AdvancedPassthroughSection)
 
@@ -188,7 +161,6 @@ def load_eval_submit_config(path: Path) -> EvalSubmitConfig:
 
     return EvalSubmitConfig(
         experiment=experiment,
-        llm=llm,
         evaluation=evaluation,
         advanced=advanced,
         env=env,
