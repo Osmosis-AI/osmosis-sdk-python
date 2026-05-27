@@ -104,22 +104,24 @@ dataset = "my-platform-dataset"
 # commit_sha =
 
 [llm]
-model_path = "openai/gpt-5-mini"
-base_url = "https://api.openai.com/v1"
+model_path = "openai/gpt-5-mini"      # LiteLLM-style model name
+# Optional LiteLLM/OpenAI-compatible base URL; no default is applied when omitted.
+# base_url = "https://api.openai.com/v1"
 
 [evaluation]
-limit = 200
-n = 1
-batch_size = 1
-pass_threshold = 1.0
-agent_workflow_timeout_s = 450
-grader_timeout_s = 150
+# Optional. Omit values to use platform defaults.
+# limit = 200
+# n = 1
+# batch_size = 1
+# pass_threshold = 1.0
+# agent_workflow_timeout_s = 450
+# grader_timeout_s = 150
 
-[env]
-LOG_LEVEL = "INFO"
+# [env]
+# LOG_LEVEL = "INFO"
 
-[secrets]
-OPENAI_API_KEY = "openai-api-key"
+# [secrets]
+# OPENAI_API_KEY = "openai-api-key"
 ```
 
 ```bash

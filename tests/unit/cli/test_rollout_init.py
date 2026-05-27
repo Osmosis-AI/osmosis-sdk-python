@@ -147,6 +147,16 @@ def test_rollout_init_substitutes_rollout_name_in_configs(
     # Dataset placeholder must remain (user must pick a dataset themselves).
     assert "<your-dataset-name>" in eval_toml
     assert 'model_path = "openai/gpt-5-mini"' in eval_toml
+    assert "# base_url = " in eval_toml
+    assert "\nbase_url = " not in eval_toml
+    # Evaluation tuning and env/secrets are optional; templates should not
+    # submit SDK-side defaults.
+    assert "# limit = 200" in eval_toml
+    assert "# n = 1" in eval_toml
+    assert "# [env]" in eval_toml
+    assert "# [secrets]" in eval_toml
+    assert "\nlimit = 200" not in eval_toml
+    assert "\nLOG_LEVEL =" not in eval_toml
 
     training_toml = (
         workspace_directory / "configs" / "training" / "my-agent.toml"

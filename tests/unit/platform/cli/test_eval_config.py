@@ -105,7 +105,9 @@ model_path = "openai/gpt-5-mini"
     config = load_eval_submit_config(path)
 
     assert config.experiment_commit_sha is None
+    assert config.llm_base_url is None
     assert config.evaluation_config == {}
+    assert config.eval_config["llm"] == {"model_path": "openai/gpt-5-mini"}
     assert "evaluation" not in config.eval_config
     assert config.rollout_env == {}
     assert config.rollout_secret_refs == {}
