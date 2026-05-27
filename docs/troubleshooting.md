@@ -161,10 +161,10 @@ Common causes:
 
 ### Preflight failures
 
-Run an eval smoke test before submitting:
+Submit a cloud eval before training:
 
 ```bash
-osmosis eval run configs/eval/<run>.toml --limit 1
+osmosis eval submit configs/eval/<run>.toml
 ```
 
 Then submit the training config:

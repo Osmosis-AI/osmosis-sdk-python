@@ -1,7 +1,7 @@
 """Business logic for ``osmosis template`` commands.
 
 Templates are read from the SDK-owned catalog and copied into the canonical
-workspace directory layout for ``eval run`` and ``train submit``.
+workspace directory layout for ``eval submit`` and ``train submit``.
 """
 
 from __future__ import annotations
@@ -143,7 +143,7 @@ def _next_steps(name: str) -> list[str]:
         return list(recipe.next_steps)
     return [
         f"pip install -e rollouts/{name}",
-        f"osmosis eval run configs/eval/{name}.toml --limit 1",
+        f"osmosis eval submit configs/eval/{name}.toml",
         f"osmosis dataset upload data/{name}.jsonl",
         f"Edit configs/training/{name}.toml with the uploaded dataset ID and target model",
         'git add . && git commit -m "add rollout template"',

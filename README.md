@@ -19,7 +19,7 @@
 
 > ⚠️ **Warning**: osmosis-ai is still in active development. APIs may change between versions.
 
-Python SDK for [Osmosis AI](https://platform.osmosis.ai), a platform for training LLMs with reinforcement learning. Implement an **AgentWorkflow** in Python, add a concrete **Grader** for local eval and managed training flows, run an eval smoke test locally with the CLI, then submit training from an Osmosis workspace directory.
+Python SDK for [Osmosis AI](https://platform.osmosis.ai), a platform for training LLMs with reinforcement learning. Implement an **AgentWorkflow** in Python, add a concrete **Grader** for eval and managed training flows, submit cloud evals with the CLI, then submit training from an Osmosis workspace directory.
 
 ## Quick start
 
@@ -29,8 +29,7 @@ Python SDK for [Osmosis AI](https://platform.osmosis.ai), a platform for trainin
 | **Layout** | Use a rollout pack directory under `rollouts/<name>/` when loading by rollout name; the CLI adds that directory to `sys.path`. |
 | **Workspace directory** | Create or open a workspace in the Osmosis Platform, then clone the repository created there. |
 | **Check workspace** | `osmosis doctor` — run from the workspace directory so platform commands resolve the repository from the `origin` remote. Add `--fix` to restore missing scaffold paths. |
-| **Smoke test** | `osmosis eval run configs/eval/<name>.toml --limit 1` — exercises the same rollout server protocol used by training. |
-| **Evaluate** | `osmosis eval run configs/eval/<name>.toml` — run the full eval with optional pass@k and caching. |
+| **Evaluate** | `osmosis eval submit configs/eval/<name>.toml` — submit a cloud eval using the same platform dataset naming as training. |
 
 **Example repository:** [osmosis-remote-rollout-example](https://github.com/Osmosis-AI/osmosis-remote-rollout-example) (reference server usage - align with current SDK exports when upgrading).
 
@@ -108,7 +107,7 @@ uv add osmosis-ai[full]           # Same as [server] (all packaged optional feat
 
 ## Testing and evaluation
 
-- [Eval](docs/eval.md) — graded runs, pass@k, cache/resume with `osmosis eval run`
+- [Eval](docs/eval.md) — cloud eval configs and `osmosis eval submit`
 - [CLI reference](docs/cli.md)
 
 ## Contributing

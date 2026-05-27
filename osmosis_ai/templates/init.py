@@ -188,7 +188,7 @@ def init_command(name: str, *, force: bool = False) -> CommandResult | None:
 
     next_steps = [
         f"pip install -e rollouts/{name}",
-        f"osmosis eval run configs/eval/{name}.toml --limit 1",
+        f"osmosis eval submit configs/eval/{name}.toml",
         f"osmosis train submit configs/training/{name}.toml",
     ]
     rollout_dir_rel = rollout_dir.relative_to(workspace_directory).as_posix()

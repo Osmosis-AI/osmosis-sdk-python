@@ -89,6 +89,43 @@ osmosis rollout list --all
 
 ## Evaluation
 
+### osmosis eval submit
+
+Submit a cloud eval run using a TOML config under `configs/eval/`. Cloud eval
+configs align with training configs for rollout identity and platform dataset
+selection: `[experiment].dataset` is a platform dataset name from
+`osmosis dataset list`, not a local `data/*.jsonl` path.
+
+```toml
+[experiment]
+rollout = "my-rollout"
+entrypoint = "main.py"
+dataset = "my-platform-dataset"
+# commit_sha =
+
+[llm]
+model_path = "openai/gpt-5-mini"
+base_url = "https://api.openai.com/v1"
+
+[evaluation]
+limit = 200
+n = 1
+batch_size = 1
+pass_threshold = 1.0
+agent_workflow_timeout_s = 450
+grader_timeout_s = 150
+
+[env]
+LOG_LEVEL = "INFO"
+
+[secrets]
+OPENAI_API_KEY = "openai-api-key"
+```
+
+```bash
+osmosis eval submit configs/eval/my-rollout.toml
+```
+
 ### osmosis eval run
 
 Evaluate using a TOML config. Controller-backed eval starts the configured
@@ -188,8 +225,8 @@ workspace directory. The CLI reads the config locally and sends it to the platfo
 clones the repository identified by the workspace directory's `origin` remote for the
 actual rollout code.
 `osmosis train submit` includes the training preflight checks before launch; run
-`osmosis eval run configs/eval/<name>.toml --limit 1` first when you want an
-end-to-end local smoke test of the rollout server and grader.
+`osmosis eval submit configs/eval/<name>.toml` first when you want a platform
+eval before training.
 
 #### Required `[experiment]` fields
 

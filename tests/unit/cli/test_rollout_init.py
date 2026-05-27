@@ -103,7 +103,7 @@ def test_rollout_init_plain_next_steps_use_existing_commands(
     captured = capsys.readouterr()
 
     assert rc == 0
-    assert "osmosis eval run configs/eval/my-agent.toml --limit 1" in captured.out
+    assert "osmosis eval submit configs/eval/my-agent.toml" in captured.out
     assert "osmosis train submit configs/training/my-agent.toml" in captured.out
     assert "osmosis rollout validate" not in captured.out
 
@@ -145,7 +145,8 @@ def test_rollout_init_substitutes_rollout_name_in_configs(
     )
     assert 'rollout = "my-agent"' in eval_toml
     # Dataset placeholder must remain (user must pick a dataset themselves).
-    assert "<your-dataset>" in eval_toml
+    assert "<your-dataset-name>" in eval_toml
+    assert 'model_path = "openai/gpt-5-mini"' in eval_toml
 
     training_toml = (
         workspace_directory / "configs" / "training" / "my-agent.toml"

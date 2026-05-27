@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-import tomllib
 from pathlib import Path
 from typing import Any
 
 from osmosis_ai.cli.console import console
-from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.cli.output import (
     DetailField,
     DetailResult,
@@ -28,6 +26,11 @@ from osmosis_ai.platform.api.models import (
     EVAL_RUN_STATUSES_IN_PROGRESS,
     EVAL_RUN_STATUSES_TERMINAL,
 )
+from osmosis_ai.platform.cli.eval_config import (
+    EvalSubmitConfig,
+    load_eval_submit_config,
+    validate_eval_submit_context_paths,
+)
 from osmosis_ai.platform.cli.utils import (
     fetch_all_pages,
     print_remote_fetch_notice,
@@ -39,40 +42,23 @@ from osmosis_ai.platform.cli.workspace_directory_contract import (
     ensure_workspace_directory_config_path,
     validate_workspace_directory_contract,
 )
-from osmosis_ai.platform.cli.workspace_repo import summarize_local_git_state
-
-
-def _load_eval_config(resolved_config_path: Path) -> dict[str, Any]:
-    """Read and parse a TOML eval config, raising CLIError on failure."""
-    if not resolved_config_path.exists():
-        raise CLIError(f"Config file not found: {resolved_config_path}")
-    try:
-        with open(resolved_config_path, "rb") as f:
-            return tomllib.load(f)
-    except tomllib.TOMLDecodeError as e:
-        raise CLIError(f"Invalid TOML in {resolved_config_path}: {e}") from e
 
 
 def _build_submit_summary(
-    raw_config: dict[str, Any],
+    config: EvalSubmitConfig,
     *,
-    commit_sha: str | None,
-    rollout_env: dict[str, str] | None,
-    rollout_secret_refs: dict[str, str] | None,
+    rollout_env: dict[str, str],
+    rollout_secret_refs: dict[str, str],
 ) -> list[tuple[str, str]]:
     """Build the confirmation-table rows shown before submitting."""
-    eval_section = raw_config.get("eval", {})
-    llm_section = raw_config.get("llm", {})
-
-    rows: list[tuple[str, str]] = []
-    if eval_section.get("rollout"):
-        rows.append(("Rollout", eval_section["rollout"]))
-    if eval_section.get("dataset"):
-        rows.append(("Dataset", eval_section["dataset"]))
-    if llm_section.get("model"):
-        rows.append(("Model", llm_section["model"]))
-    if commit_sha:
-        rows.append(("Commit", commit_sha[:8]))
+    rows: list[tuple[str, str]] = [
+        ("Rollout", config.experiment_rollout),
+        ("Entrypoint", config.experiment_entrypoint),
+        ("Model", config.llm_model_path),
+        ("Dataset", config.experiment_dataset),
+    ]
+    if config.experiment_commit_sha:
+        rows.append(("Commit", config.experiment_commit_sha))
     if rollout_env:
         env_keys = ", ".join(sorted(rollout_env))
         rows.append((f"Rollout env ({len(rollout_env)})", env_keys))
@@ -116,25 +102,13 @@ def submit(config_path: Path, *, yes: bool) -> OperationResult:
         command_label=command_label,
     )
 
-    raw_config = _load_eval_config(resolved_config_path)
-    eval_section = raw_config.get("eval", {})
-    if not isinstance(eval_section, dict) or not eval_section:
-        raise CLIError(f"Missing or empty [eval] section in {resolved_config_path}.")
-
-    rollout_section = raw_config.get("rollout", {})
-    rollout_env = (
-        rollout_section.get("env") if isinstance(rollout_section, dict) else None
-    )
-    rollout_secret_refs = (
-        rollout_section.get("secrets") if isinstance(rollout_section, dict) else None
-    )
-
-    state = summarize_local_git_state(workspace_directory)
-    commit_sha: str | None = state.head_sha if state is not None else None
+    config = load_eval_submit_config(resolved_config_path)
+    validate_eval_submit_context_paths(config, workspace_directory)
+    rollout_env = config.rollout_env
+    rollout_secret_refs = config.rollout_secret_refs
 
     summary_rows = _build_submit_summary(
-        raw_config,
-        commit_sha=commit_sha,
+        config,
         rollout_env=rollout_env,
         rollout_secret_refs=rollout_secret_refs,
     )
@@ -145,7 +119,7 @@ def submit(config_path: Path, *, yes: bool) -> OperationResult:
 
     notes, warnings = print_remote_fetch_notice(
         workspace_directory,
-        pinned_commit_sha=commit_sha,
+        pinned_commit_sha=config.experiment_commit_sha,
     )
 
     require_confirmation(
@@ -160,8 +134,8 @@ def submit(config_path: Path, *, yes: bool) -> OperationResult:
     output = get_output_context()
     with output.status("Submitting cloud eval run..."):
         result = client.submit_cloud_eval(
-            eval_config=raw_config,
-            commit_sha=commit_sha,
+            eval_config=config.eval_config,
+            commit_sha=config.experiment_commit_sha,
             rollout_env=rollout_env or None,
             rollout_secret_refs=rollout_secret_refs or None,
             credentials=context.credentials,
@@ -178,6 +152,13 @@ def submit(config_path: Path, *, yes: bool) -> OperationResult:
             "created_at": result.created_at,
             **({"url": result.platform_url} if result.platform_url else {}),
             **git_result_context(context),
+            "config": {
+                "rollout": config.experiment_rollout,
+                "entrypoint": config.experiment_entrypoint,
+                "model": config.llm_model_path,
+                "dataset": config.experiment_dataset,
+                "commit_sha": config.experiment_commit_sha,
+            },
         },
         message=f"Cloud eval run submitted: {result.name}",
         display_next_steps=[

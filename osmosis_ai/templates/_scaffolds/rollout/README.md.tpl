@@ -3,14 +3,14 @@
 Placeholder rollout created by `osmosis rollout init`. Edit `main.py` to fill in
 `MyAgentWorkflow.run()` and `MyGrader.grade()`.
 
-Local dev loop from the workspace directory:
+Submit a cloud eval from the workspace directory:
 
 ```bash
 pip install -e rollouts/<your-rollout>
-osmosis eval run configs/eval/<your-rollout>.toml --limit 1
+osmosis eval submit configs/eval/<your-rollout>.toml
 ```
 
-Once your rollout produces non-zero rewards locally, submit a training run:
+Once your rollout is ready, submit a training run:
 
 ```bash
 git push   # Git Sync must be connected in the Osmosis Platform

@@ -1,8 +1,8 @@
 # Eval
 
-Run **`osmosis eval run`** with a TOML file to evaluate a rollout against a
-dataset using the same controller protocol used by training. Results are cached
-on disk so long runs can resume after interruption.
+Submit **`osmosis eval submit`** with a TOML file to run a cloud eval against a
+platform dataset. Eval submission uses the same workspace, rollout, entrypoint,
+dataset, and optional `commit_sha` semantics as `osmosis train submit`.
 
 Eval configs must live under `configs/eval/` inside a structured Osmosis
 workspace directory.
@@ -11,96 +11,87 @@ workspace directory.
 
 ### Required
 
-**`[eval]`**
+**`[experiment]`**
 
 | Key | Description |
 |-----|-------------|
-| `rollout` | Rollout pack name; eval runs the entrypoint from `rollouts/<rollout>/`. |
-| `entrypoint` | Python file started with `uv run python <entrypoint>` from the rollout directory. |
-| `dataset` | Dataset file path, relative to the workspace directory. |
+| `rollout` | Rollout name. |
+| `entrypoint` | Python file relative to the rollout directory. |
+| `dataset` | Platform dataset name from `osmosis dataset list`. |
+| `commit_sha` | Optional pinned commit. When omitted, the platform chooses source from the connected repository. |
 
 **`[llm]`**
 
 | Key | Description |
 |-----|-------------|
-| `model` | Model id in LiteLLM provider/model form, such as `openai/gpt-5-mini` or `hosted_vllm/Qwen/Qwen2.5-7B-Instruct`. |
-| `base_url` | Optional OpenAI-compatible API base for the selected LiteLLM provider. |
-| `api_key_env` | Optional environment variable name holding the API key; omit only for LiteLLM providers/endpoints that do not require credentials. |
+| `model_path` | Model id for the eval policy model, such as `openai/gpt-5-mini`. |
+| `base_url` | Optional OpenAI-compatible API base, such as `https://api.openai.com/v1`. |
 
 ### Optional sections
 
-Eval configs use `[eval]`, `[llm]`, and optional `[runs]`, `[timeouts]`, and
-`[output]` settings. Legacy `[grader]` and `[baseline]` sections are rejected:
-grading is reported by the rollout server callback, and model comparisons should
-use separate eval configs.
+Eval submit configs use `[experiment]`, `[llm]`, and optional `[evaluation]`,
+`[env]`, and `[secrets]` sections. The SDK validates only shallow TOML shape,
+required fields, recognized keys, and env-var names; backend validation owns
+provider, dataset, model, and evaluation parameter errors.
 
-**`[runs]`**
+**`[evaluation]`**
 
-| Key | Default | Description |
-|-----|---------|-------------|
-| `n` | `1` | Runs per row (pass@k). |
-| `batch_size` | `1` | Concurrent runs. |
-| `pass_threshold` | `1.0` | Score >= threshold counts as pass. |
+| Key | Description |
+|-----|-------------|
+| `limit` | Optional row cap. |
+| `n` | Number of eval runs. |
+| `batch_size` | Rows evaluated per batch. |
+| `pass_threshold` | Minimum passing score. |
+| `agent_workflow_timeout_s` | Agent workflow timeout per row. |
+| `grader_timeout_s` | Grader timeout per row. |
 
-**`[timeouts]`**
+**`[env]` / `[secrets]`**
 
-| Key | Default | Description |
-|-----|---------|-------------|
-| `agent_workflow_timeout_s` | `450` | Max seconds to wait for the rollout completion callback. |
-| `grader_timeout_s` | `150` | Max seconds to wait for the grader completion callback. |
-
-**`[output]`**
-
-| Key | Default | Description |
-|-----|---------|-------------|
-| `log_samples` | `false` | Persist full message logs to JSONL alongside the cache. |
-| `output_path` | - | Structured results directory (CLI `-o` overrides). |
-| `quiet` | `false` | Less console output. |
-| `debug` | `false` | Debug logging / traces. |
-
-**`[eval]` extras**
-
-| Key | Default | Description |
-|-----|---------|-------------|
-| `limit` | - | Max rows (CLI `--limit` overrides when set). |
-| `offset` | `0` | Skip first N rows. |
-| `fresh` | `false` | Start fresh (same as CLI `--fresh`). |
-| `retry_failed` | `false` | Only failed runs (same as CLI `--retry-failed`). |
+`[env]` contains literal env-var values. `[secrets]` maps env-var names to
+workspace secret record names resolved server-side. Keys must match
+`^[A-Z_][A-Z0-9_]*$`, must not start with `_OSMOSIS_`, and cannot appear in both
+sections.
 
 ### Example `configs/eval/my-rollout.toml`
 
 ```toml
-[eval]
+[experiment]
 rollout = "my_rollout"
 entrypoint = "main.py"
-dataset = "data/my-eval.jsonl"
+dataset = "my-platform-dataset"
+# commit_sha =
 
 [llm]
-model = "openai/gpt-5-mini"
-api_key_env = "OPENAI_API_KEY"
+model_path = "openai/gpt-5-mini"
+base_url = "https://api.openai.com/v1"
 
-[runs]
+[evaluation]
+limit = 200
 n = 1
 batch_size = 1
 pass_threshold = 1.0
-
-[timeouts]
 agent_workflow_timeout_s = 450
 grader_timeout_s = 150
 
-[output]
-log_samples = false
+[env]
+LOG_LEVEL = "INFO"
+
+[secrets]
+OPENAI_API_KEY = "openai-api-key"
 ```
 
 ## Quick start
 
 ```bash
-osmosis eval run configs/eval/my-rollout.toml
-osmosis eval run configs/eval/my-rollout.toml --fresh
-osmosis eval run configs/eval/my-rollout.toml --limit 50 --batch-size 4 -o ./results
+osmosis dataset list
+osmosis eval submit configs/eval/my-rollout.toml
 ```
 
 ## Local eval setup
+
+`osmosis eval run` remains available during the local eval deprecation window and
+still uses the legacy local eval config shape. Future work will remove local eval
+from the public CLI surface.
 
 ### Controller-Backed Local Eval
 
