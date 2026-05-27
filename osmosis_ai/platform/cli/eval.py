@@ -47,8 +47,8 @@ from osmosis_ai.platform.cli.workspace_directory_contract import (
 def _build_submit_summary(
     config: EvalSubmitConfig,
     *,
-    rollout_env: dict[str, str],
-    rollout_secret_refs: dict[str, str],
+    env: dict[str, str],
+    secret_refs: dict[str, str],
 ) -> list[tuple[str, str]]:
     """Build the confirmation-table rows shown before submitting."""
     rows: list[tuple[str, str]] = [
@@ -59,15 +59,15 @@ def _build_submit_summary(
     ]
     if config.experiment_commit_sha:
         rows.append(("Commit", config.experiment_commit_sha))
-    if rollout_env:
-        env_keys = ", ".join(sorted(rollout_env))
-        rows.append((f"Rollout env ({len(rollout_env)})", env_keys))
-    if rollout_secret_refs:
+    if env:
+        env_keys = ", ".join(sorted(env))
+        rows.append((f"Rollout env ({len(env)})", env_keys))
+    if secret_refs:
         secret_summary = ", ".join(
             f"{env_name}={secret_name}"
-            for env_name, secret_name in sorted(rollout_secret_refs.items())
+            for env_name, secret_name in sorted(secret_refs.items())
         )
-        rows.append((f"Rollout secrets ({len(rollout_secret_refs)})", secret_summary))
+        rows.append((f"Rollout secrets ({len(secret_refs)})", secret_summary))
     return rows
 
 
@@ -104,13 +104,13 @@ def submit(config_path: Path, *, yes: bool) -> OperationResult:
 
     config = load_eval_submit_config(resolved_config_path)
     validate_eval_submit_context_paths(config, workspace_directory)
-    rollout_env = config.rollout_env
-    rollout_secret_refs = config.rollout_secret_refs
+    env = config.env
+    secret_refs = config.secrets
 
     summary_rows = _build_submit_summary(
         config,
-        rollout_env=rollout_env,
-        rollout_secret_refs=rollout_secret_refs,
+        env=env,
+        secret_refs=secret_refs,
     )
     console.table(
         [(label, console.escape(value)) for label, value in summary_rows],
@@ -134,10 +134,11 @@ def submit(config_path: Path, *, yes: bool) -> OperationResult:
     output = get_output_context()
     with output.status("Submitting cloud eval run..."):
         result = client.submit_cloud_eval(
-            eval_config=config.eval_config,
-            commit_sha=config.experiment_commit_sha,
-            rollout_env=rollout_env or None,
-            rollout_secret_refs=rollout_secret_refs or None,
+            experiment_config=config.experiment_config,
+            llm_config=config.llm_config,
+            evaluation_config=config.evaluation_config or None,
+            env_config=env or None,
+            secret_refs_config=secret_refs or None,
             credentials=context.credentials,
             git_identity=context.git_identity,
         )

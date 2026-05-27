@@ -396,15 +396,15 @@ class TestSubmitTrainingRun:
                 "entrypoint": "rollouts/main.py",
             },
         }
-        assert "rollout_env" not in payload
-        assert "rollout_secret_refs" not in payload
+        assert "env_config" not in payload
+        assert "secret_refs_config" not in payload
 
     @patch("osmosis_ai.platform.api.client.platform_request")
-    def test_rollout_env_included_when_non_empty(self, mock_request: MagicMock) -> None:
-        """Non-empty rollout_env map is forwarded to the platform."""
+    def test_env_config_included_when_non_empty(self, mock_request: MagicMock) -> None:
+        """Non-empty env_config map is forwarded to the platform."""
         mock_request.return_value = self._response()
         client = OsmosisClient()
-        rollout_env = {"FOO": "bar", "BAZ": "qux"}
+        env_config = {"FOO": "bar", "BAZ": "qux"}
         client.submit_training_run(
             experiment_config={
                 "model_path": "m1",
@@ -412,21 +412,21 @@ class TestSubmitTrainingRun:
                 "rollout": "rollout1",
                 "entrypoint": "rollouts/main.py",
             },
-            rollout_env=rollout_env,
+            env_config=env_config,
             git_identity="git_test",
         )
         payload = mock_request.call_args.kwargs["data"]
-        assert payload["rollout_env"] == rollout_env
-        assert "rollout_secret_refs" not in payload
+        assert payload["env_config"] == env_config
+        assert "secret_refs_config" not in payload
 
     @patch("osmosis_ai.platform.api.client.platform_request")
-    def test_rollout_secret_refs_included_when_non_empty(
+    def test_secret_refs_config_included_when_non_empty(
         self, mock_request: MagicMock
     ) -> None:
-        """Non-empty rollout_secret_refs map is forwarded to the platform."""
+        """Non-empty secret_refs_config map is forwarded to the platform."""
         mock_request.return_value = self._response()
         client = OsmosisClient()
-        secret_refs = {"OPENAI_API_KEY": "openai-prod"}
+        secret_refs_config = {"OPENAI_API_KEY": "openai-prod"}
         client.submit_training_run(
             experiment_config={
                 "model_path": "m1",
@@ -434,15 +434,15 @@ class TestSubmitTrainingRun:
                 "rollout": "rollout1",
                 "entrypoint": "rollouts/main.py",
             },
-            rollout_secret_refs=secret_refs,
+            secret_refs_config=secret_refs_config,
             git_identity="git_test",
         )
         payload = mock_request.call_args.kwargs["data"]
-        assert payload["rollout_secret_refs"] == secret_refs
-        assert "rollout_env" not in payload
+        assert payload["secret_refs_config"] == secret_refs_config
+        assert "env_config" not in payload
 
     @patch("osmosis_ai.platform.api.client.platform_request")
-    def test_empty_rollout_env_and_secret_refs_are_omitted(
+    def test_empty_env_and_secret_refs_configs_are_omitted(
         self, mock_request: MagicMock
     ) -> None:
         """Empty dicts are treated as 'not provided' and stripped from payload."""
@@ -455,13 +455,13 @@ class TestSubmitTrainingRun:
                 "rollout": "rollout1",
                 "entrypoint": "rollouts/main.py",
             },
-            rollout_env={},
-            rollout_secret_refs={},
+            env_config={},
+            secret_refs_config={},
             git_identity="git_test",
         )
         payload = mock_request.call_args.kwargs["data"]
-        assert "rollout_env" not in payload
-        assert "rollout_secret_refs" not in payload
+        assert "env_config" not in payload
+        assert "secret_refs_config" not in payload
 
     @patch("osmosis_ai.platform.api.client.platform_request")
     def test_commit_sha_and_config_sections_included_when_provided(
@@ -482,8 +482,8 @@ class TestSubmitTrainingRun:
             sampling_config={"rollout_temperature": 0.8},
             checkpoints_config={"checkpoint_save_freq": 10},
             advanced_config={"optimizer": "adam"},
-            rollout_env={"FOO": "bar"},
-            rollout_secret_refs={"OPENAI_API_KEY": "openai-prod"},
+            env_config={"FOO": "bar"},
+            secret_refs_config={"OPENAI_API_KEY": "openai-prod"},
             git_identity="git_test",
         )
         payload = mock_request.call_args.kwargs["data"]
@@ -498,8 +498,8 @@ class TestSubmitTrainingRun:
         assert payload["sampling_config"] == {"rollout_temperature": 0.8}
         assert payload["checkpoints_config"] == {"checkpoint_save_freq": 10}
         assert payload["advanced_config"] == {"optimizer": "adam"}
-        assert payload["rollout_env"] == {"FOO": "bar"}
-        assert payload["rollout_secret_refs"] == {"OPENAI_API_KEY": "openai-prod"}
+        assert payload["env_config"] == {"FOO": "bar"}
+        assert payload["secret_refs_config"] == {"OPENAI_API_KEY": "openai-prod"}
 
 
 class TestGetTrainingRunMetrics:

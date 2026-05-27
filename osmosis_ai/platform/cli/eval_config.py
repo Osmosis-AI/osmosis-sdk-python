@@ -252,27 +252,16 @@ class EvalSubmitConfig(BaseModel):
         return self.llm.base_url
 
     @property
+    def experiment_config(self) -> dict[str, Any]:
+        return self.experiment.model_dump(exclude_none=True)
+
+    @property
+    def llm_config(self) -> dict[str, Any]:
+        return self.llm.model_dump(exclude_none=True)
+
+    @property
     def evaluation_config(self) -> dict[str, Any]:
         return self.evaluation.model_dump(exclude_none=True)
-
-    @property
-    def rollout_env(self) -> dict[str, str]:
-        return dict(self.env)
-
-    @property
-    def rollout_secret_refs(self) -> dict[str, str]:
-        return dict(self.secrets)
-
-    @property
-    def eval_config(self) -> dict[str, Any]:
-        config = {
-            "experiment": self.experiment.model_dump(exclude_none=True),
-            "llm": self.llm.model_dump(exclude_none=True),
-        }
-        evaluation = self.evaluation_config
-        if evaluation:
-            config["evaluation"] = evaluation
-        return config
 
 
 def load_eval_submit_config(path: Path) -> EvalSubmitConfig:

@@ -331,14 +331,6 @@ class TrainingConfig(BaseModel):
         return self.params.checkpoints.checkpoint_save_freq
 
     @property
-    def rollout_env(self) -> dict[str, str]:
-        return dict(self.env)
-
-    @property
-    def rollout_secret_refs(self) -> dict[str, str]:
-        return dict(self.secrets)
-
-    @property
     def experiment_config(self) -> dict[str, Any]:
         return self.experiment.model_dump(exclude_none=True)
 
@@ -359,7 +351,7 @@ class TrainingConfig(BaseModel):
         return self.params.advanced_config
 
 
-def _validate_rollout_env_keys(
+def _validate_env_keys(
     *,
     env: dict[str, str],
     secrets: dict[str, str],
@@ -497,7 +489,7 @@ def load_training_config(path: Path) -> TrainingConfig:
     secrets = {
         key: value for key, value in secrets_section.items() if isinstance(value, str)
     }
-    _validate_rollout_env_keys(env=env, secrets=secrets, path=path)
+    _validate_env_keys(env=env, secrets=secrets, path=path)
 
     return TrainingConfig(
         experiment=experiment,

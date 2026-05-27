@@ -125,8 +125,8 @@ OPENAI_API_KEY = "openai-api-key"
 
     cfg = load_training_config(path)
 
-    assert cfg.rollout_env == {"LOG_LEVEL": "INFO"}
-    assert cfg.rollout_secret_refs == {"OPENAI_API_KEY": "openai-api-key"}
+    assert cfg.env == {"LOG_LEVEL": "INFO"}
+    assert cfg.secrets == {"OPENAI_API_KEY": "openai-api-key"}
 
 
 # ---------------------------------------------------------------------------

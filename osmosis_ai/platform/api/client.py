@@ -182,15 +182,15 @@ class OsmosisClient:
         sampling_config: dict[str, Any] | None = None,
         checkpoints_config: dict[str, Any] | None = None,
         advanced_config: dict[str, Any] | None = None,
-        rollout_env: dict[str, str] | None = None,
-        rollout_secret_refs: dict[str, str] | None = None,
+        env_config: dict[str, str] | None = None,
+        secret_refs_config: dict[str, str] | None = None,
         credentials: Credentials | None = None,
         git_identity: str,
     ) -> SubmitTrainingRunResult:
         """Submit a new training run.
 
-        ``rollout_env`` is a literal env-var-name → value map applied to the
-        rollout container. ``rollout_secret_refs`` maps env-var names to the
+        ``env_config`` is a literal env-var-name → value map applied to the
+        rollout container. ``secret_refs_config`` maps env-var names to the
         names of workspace ``environment_secret`` records; values are resolved
         server-side and never travel through the CLI.
         """
@@ -205,10 +205,10 @@ class OsmosisClient:
             data["checkpoints_config"] = checkpoints_config
         if advanced_config:
             data["advanced_config"] = advanced_config
-        if rollout_env:
-            data["rollout_env"] = rollout_env
-        if rollout_secret_refs:
-            data["rollout_secret_refs"] = rollout_secret_refs
+        if env_config:
+            data["env_config"] = env_config
+        if secret_refs_config:
+            data["secret_refs_config"] = secret_refs_config
         result = platform_request(
             "/api/cli/training-runs",
             method="POST",
@@ -411,21 +411,25 @@ class OsmosisClient:
     def submit_cloud_eval(
         self,
         *,
-        eval_config: dict[str, Any],
-        commit_sha: str | None = None,
-        rollout_env: dict[str, str] | None = None,
-        rollout_secret_refs: dict[str, str] | None = None,
+        experiment_config: dict[str, Any],
+        llm_config: dict[str, Any],
+        evaluation_config: dict[str, Any] | None = None,
+        env_config: dict[str, str] | None = None,
+        secret_refs_config: dict[str, str] | None = None,
         credentials: Credentials | None = None,
         git_identity: str,
     ) -> SubmitCloudEvalResult:
         """Submit a new cloud eval run."""
-        data: dict[str, Any] = {"eval_config": eval_config}
-        if commit_sha:
-            data["commit_sha"] = commit_sha
-        if rollout_env:
-            data["rollout_env"] = rollout_env
-        if rollout_secret_refs:
-            data["rollout_secret_refs"] = rollout_secret_refs
+        data: dict[str, Any] = {
+            "experiment_config": experiment_config,
+            "llm_config": llm_config,
+        }
+        if evaluation_config:
+            data["evaluation_config"] = evaluation_config
+        if env_config:
+            data["env_config"] = env_config
+        if secret_refs_config:
+            data["secret_refs_config"] = secret_refs_config
         result = platform_request(
             "/api/cli/eval-runs",
             method="POST",

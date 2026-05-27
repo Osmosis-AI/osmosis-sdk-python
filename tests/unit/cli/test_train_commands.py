@@ -914,8 +914,8 @@ OPENAI_API_KEY = "openai-api-key"
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
         train_module.submit(config_path=path, yes=True)
 
-        assert captured_kwargs["rollout_env"] == {"LOG_LEVEL": "INFO"}
-        assert captured_kwargs["rollout_secret_refs"] == {
+        assert captured_kwargs["env_config"] == {"LOG_LEVEL": "INFO"}
+        assert captured_kwargs["secret_refs_config"] == {
             "OPENAI_API_KEY": "openai-api-key"
         }
 

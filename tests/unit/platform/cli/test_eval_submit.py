@@ -162,30 +162,25 @@ def test_eval_submit_passes_new_schema_to_cloud_eval_api(
 
     assert captured_kwargs["git_identity"] == GIT_IDENTITY
     assert captured_kwargs["credentials"] is FAKE_CREDENTIALS
-    assert captured_kwargs["commit_sha"] == "deadbeef"
-    assert captured_kwargs["rollout_env"] == {"LOG_LEVEL": "INFO"}
-    assert captured_kwargs["rollout_secret_refs"] == {
-        "OPENAI_API_KEY": "openai-api-key"
+    assert captured_kwargs["env_config"] == {"LOG_LEVEL": "INFO"}
+    assert captured_kwargs["secret_refs_config"] == {"OPENAI_API_KEY": "openai-api-key"}
+    assert captured_kwargs["experiment_config"] == {
+        "rollout": "calculator",
+        "entrypoint": "main.py",
+        "dataset": "multiply",
+        "commit_sha": "deadbeef",
     }
-    assert captured_kwargs["eval_config"] == {
-        "experiment": {
-            "rollout": "calculator",
-            "entrypoint": "main.py",
-            "dataset": "multiply",
-            "commit_sha": "deadbeef",
-        },
-        "llm": {
-            "model_path": "openai/gpt-5-mini",
-            "base_url": "https://api.openai.com/v1",
-        },
-        "evaluation": {
-            "limit": 200,
-            "n": 2,
-            "batch_size": 1,
-            "pass_threshold": 1.0,
-            "agent_workflow_timeout_s": 450.0,
-            "grader_timeout_s": 150.0,
-        },
+    assert captured_kwargs["llm_config"] == {
+        "model_path": "openai/gpt-5-mini",
+        "base_url": "https://api.openai.com/v1",
+    }
+    assert captured_kwargs["evaluation_config"] == {
+        "limit": 200,
+        "n": 2,
+        "batch_size": 1,
+        "pass_threshold": 1.0,
+        "agent_workflow_timeout_s": 450.0,
+        "grader_timeout_s": 150.0,
     }
     assert "openai/gpt-5-mini" in console_capture.getvalue()
     assert isinstance(result, OperationResult)
@@ -226,8 +221,8 @@ def test_eval_submit_does_not_pin_local_head_without_config_commit_sha(
 
     eval_module.submit(config_path=config_path, yes=True)
 
-    assert captured_kwargs["commit_sha"] is None
-    assert captured_kwargs["eval_config"]["experiment"] == {
+    assert "commit_sha" not in captured_kwargs["experiment_config"]
+    assert captured_kwargs["experiment_config"] == {
         "rollout": "calculator",
         "entrypoint": "main.py",
         "dataset": "multiply",

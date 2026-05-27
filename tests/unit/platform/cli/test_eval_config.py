@@ -62,27 +62,17 @@ OPENAI_API_KEY = "openai-api-key"
         "agent_workflow_timeout_s": 450.0,
         "grader_timeout_s": 150.0,
     }
-    assert config.rollout_env == {"LOG_LEVEL": "INFO"}
-    assert config.rollout_secret_refs == {"OPENAI_API_KEY": "openai-api-key"}
-    assert config.eval_config == {
-        "experiment": {
-            "rollout": "calculator",
-            "entrypoint": "main.py",
-            "dataset": "multiply",
-            "commit_sha": "deadbeef",
-        },
-        "llm": {
-            "model_path": "openai/gpt-5-mini",
-            "base_url": "https://api.openai.com/v1",
-        },
-        "evaluation": {
-            "limit": 200,
-            "n": 2,
-            "batch_size": 3,
-            "pass_threshold": 0.75,
-            "agent_workflow_timeout_s": 450.0,
-            "grader_timeout_s": 150.0,
-        },
+    assert config.env == {"LOG_LEVEL": "INFO"}
+    assert config.secrets == {"OPENAI_API_KEY": "openai-api-key"}
+    assert config.experiment_config == {
+        "rollout": "calculator",
+        "entrypoint": "main.py",
+        "dataset": "multiply",
+        "commit_sha": "deadbeef",
+    }
+    assert config.llm_config == {
+        "model_path": "openai/gpt-5-mini",
+        "base_url": "https://api.openai.com/v1",
     }
 
 
@@ -107,10 +97,9 @@ model_path = "openai/gpt-5-mini"
     assert config.experiment_commit_sha is None
     assert config.llm_base_url is None
     assert config.evaluation_config == {}
-    assert config.eval_config["llm"] == {"model_path": "openai/gpt-5-mini"}
-    assert "evaluation" not in config.eval_config
-    assert config.rollout_env == {}
-    assert config.rollout_secret_refs == {}
+    assert config.llm_config == {"model_path": "openai/gpt-5-mini"}
+    assert config.env == {}
+    assert config.secrets == {}
 
 
 def test_load_eval_submit_config_rejects_old_local_eval_schema(
