@@ -2057,7 +2057,6 @@ wheels = [
 name = "osmosis-ai"
 source = { editable = "." }
 dependencies = [
-    { name = "filelock" },
     { name = "harbor", extra = ["daytona"] },
     { name = "httpx" },
     { name = "keyring" },
@@ -2072,7 +2071,6 @@ dependencies = [
     { name = "strands-agents", extra = ["litellm"] },
     { name = "tqdm" },
     { name = "typer" },
-    { name = "xxhash" },
 ]
 
 [package.optional-dependencies]
@@ -2112,7 +2110,6 @@ server = [
 requires-dist = [
     { name = "anyio", marker = "extra == 'dev'", specifier = ">=4.0.0" },
     { name = "fastapi", marker = "extra == 'server'", specifier = ">=0.100.0,<1.0.0" },
-    { name = "filelock", specifier = ">=3.0.0,<4.0.0" },
     { name = "harbor", extras = ["daytona"], specifier = "==0.6.1" },
     { name = "httpx", specifier = ">=0.25.0,<1.0.0" },
     { name = "keyring", specifier = ">=25.0.0" },
@@ -2143,7 +2140,6 @@ requires-dist = [
     { name = "types-pyyaml", marker = "extra == 'dev'", specifier = ">=6.0" },
     { name = "types-requests", marker = "extra == 'dev'", specifier = ">=2.0" },
     { name = "uvicorn", marker = "extra == 'server'", specifier = ">=0.23.0,<1.0.0" },
-    { name = "xxhash", specifier = ">=3.0.0" },
 ]
 provides-extras = ["platform", "server", "dev", "full"]
 

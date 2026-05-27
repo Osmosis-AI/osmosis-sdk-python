@@ -128,45 +128,6 @@ model_path = "openai/gpt-5-mini"      # LiteLLM-style model name
 osmosis eval submit configs/eval/my-rollout.toml
 ```
 
-### osmosis eval run
-
-Evaluate using a TOML config. Controller-backed eval starts the configured
-rollout entrypoint as a local HTTP server with `uv run python <entrypoint>` from
-`rollouts/<rollout>/`, sends `POST /rollout`, provides model calls through the
-controller's `/chat/completions` endpoint, and waits for rollout and grader
-callback URLs.
-
-`osmosis eval run` expects the config file to live under `configs/eval/` inside a
-structured Osmosis workspace directory. Eval configs use `[eval]`, `[llm]`, `[runs]`,
-`[timeouts]`, and `[output]`; `[grader]` and `[baseline]` are no longer
-supported.
-
-```bash
-osmosis eval run configs/eval/my-rollout.toml --limit 1
-osmosis eval run configs/eval/my-rollout.toml
-osmosis eval run configs/eval/my-rollout.toml --fresh
-osmosis eval run configs/eval/my-rollout.toml --retry-failed
-osmosis eval run configs/eval/my-rollout.toml --limit 20 --batch-size 4
-osmosis eval run configs/eval/my-rollout.toml -o ./results --log-samples
-```
-
-See [Eval](./eval.md) for the full `[eval]`, `[llm]`, `[runs]`, `[timeouts]`,
-and `[output]` sections.
-
-### osmosis eval cache
-
-```bash
-osmosis eval cache ls
-osmosis eval cache ls --model gpt-4 --status completed
-osmosis eval cache rm <task_id>
-osmosis eval cache rm --all --yes
-```
-
-| Subcommand / option | Description |
-|---------------------|-------------|
-| `ls` | List caches (`--model`, `--dataset`, `--status`) |
-| `rm` | Delete by `task_id`, `--all`, or filters (`-y` skips prompt) |
-
 ### osmosis eval rubric
 
 LLM-as-judge on a JSONL conversation file:

@@ -86,7 +86,7 @@ osmosis train submit configs/training/<run>.toml --yes
 
 Requires **Python 3.12+**. For development setup, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
-- **An LLM API key** (e.g., OpenAI, Anthropic, Groq) — required for `osmosis eval run` when using hosted models. See [supported providers](https://docs.litellm.ai/docs/providers).
+- **An LLM API key** (e.g., OpenAI, Anthropic, Groq) — required for `osmosis eval rubric` (LLM-as-judge) when using hosted models. See [supported providers](https://docs.litellm.ai/docs/providers).
 - **Osmosis account** (optional) — needed for `osmosis auth login` and platform-backed commands such as datasets, models, and training runs. Sign up at [platform.osmosis.ai](https://platform.osmosis.ai).
 
 **pip**

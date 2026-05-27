@@ -1,78 +1,18 @@
-"""Eval commands (thin shell delegating to eval/* and platform/cli/eval.py)."""
+"""Eval commands (thin shell delegating to eval/rubric/ and platform/cli/eval.py)."""
 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 import typer
 
 from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE
 
 app: typer.Typer = typer.Typer(
-    help="Evaluate agent against dataset (run, rubric, cache, submit, list, info, stop).",
+    help="Manage cloud eval runs (submit, list, info, stop) and LLM-as-judge rubric scoring.",
     no_args_is_help=True,
 )
-
-cache_app: typer.Typer = typer.Typer(help="Manage eval cache.")
-app.add_typer(cache_app, name="cache")
-
-
-def _require_eval_local_project() -> None:
-    from osmosis_ai.platform.cli.workspace_directory_context import (
-        resolve_local_workspace_directory_context,
-    )
-
-    resolve_local_workspace_directory_context(require_scaffold=True)
-
-
-@app.command("run")
-def eval_run(
-    config_path: str = typer.Argument(..., help="Path to TOML config file."),
-    fresh: bool = typer.Option(False, "--fresh", help="Discard cached results."),
-    retry_failed: bool = typer.Option(
-        False, "--retry-failed", help="Re-run only failed."
-    ),
-    limit: int | None = typer.Option(None, "--limit", help="Max rows to evaluate."),
-    offset: int | None = typer.Option(None, "--offset", help="Skip first N rows."),
-    quiet: bool = typer.Option(
-        False, "-q", "--quiet", help="Suppress progress output."
-    ),
-    debug: bool = typer.Option(False, "--debug", help="Enable debug logging + trace."),
-    output_path: str | None = typer.Option(
-        None, "-o", "--output-path", help="Override output directory."
-    ),
-    log_samples: bool = typer.Option(
-        False, "--log-samples", help="Save full conversation logs to JSONL."
-    ),
-    batch_size: int | None = typer.Option(
-        None, "--batch-size", help="Override concurrent batch size."
-    ),
-) -> Any:
-    """Evaluate agent against dataset using TOML config."""
-    _require_eval_local_project()
-
-    from osmosis_ai.cli.output import CommandResult
-    from osmosis_ai.eval.evaluation.cli import EvalCommand
-
-    cmd = EvalCommand()
-    result = cmd.run(
-        config_path=config_path,
-        fresh=fresh,
-        retry_failed=retry_failed,
-        limit=limit,
-        offset=offset,
-        quiet=quiet,
-        debug=debug,
-        output_path=output_path,
-        log_samples=log_samples,
-        batch_size_override=batch_size,
-    )
-    if isinstance(result, CommandResult):
-        return result
-    if result:
-        raise typer.Exit(result)
-    return None
 
 
 @app.command("rubric")
@@ -177,71 +117,3 @@ def eval_stop(
     from osmosis_ai.platform.cli.eval import stop as _stop
 
     return _stop(name_or_id, yes=yes)
-
-
-@cache_app.command("ls")
-def eval_cache_ls(
-    cache_model: str | None = typer.Option(
-        None, "--model", help="Filter by model name."
-    ),
-    cache_dataset: str | None = typer.Option(
-        None, "--dataset", help="Filter by dataset path."
-    ),
-    cache_status: Literal["in_progress", "completed"] | None = typer.Option(
-        None, "--status", help="Filter by status (in_progress, completed)."
-    ),
-) -> Any:
-    """List cached evaluations."""
-    _require_eval_local_project()
-
-    from osmosis_ai.cli.output import CommandResult
-    from osmosis_ai.eval.evaluation.cli import EvalCommand
-
-    result = EvalCommand()._run_cache_ls(
-        cache_model=cache_model,
-        cache_dataset=cache_dataset,
-        cache_status=cache_status,
-    )
-    if isinstance(result, CommandResult):
-        return result
-    if result:
-        raise typer.Exit(result)
-    return None
-
-
-@cache_app.command("rm")
-def eval_cache_rm(
-    task_id: str | None = typer.Argument(
-        None, help="Task ID of the cache entry to delete."
-    ),
-    rm_all: bool = typer.Option(False, "--all", help="Delete all cached evaluations."),
-    cache_model: str | None = typer.Option(
-        None, "--model", help="Filter by model name."
-    ),
-    cache_dataset: str | None = typer.Option(
-        None, "--dataset", help="Filter by dataset path."
-    ),
-    cache_status: Literal["in_progress", "completed"] | None = typer.Option(
-        None, "--status", help="Filter by status (in_progress, completed)."
-    ),
-    yes: bool = typer.Option(False, "-y", "--yes", help="Skip confirmation prompt."),
-) -> Any:
-    """Remove cached evaluations."""
-    _require_eval_local_project()
-
-    from osmosis_ai.cli.output import CommandResult
-    from osmosis_ai.eval.evaluation.cli import EvalCommand
-
-    result = EvalCommand()._run_cache_rm(
-        task_id=task_id,
-        rm_all=rm_all,
-        cache_model=cache_model,
-        cache_dataset=cache_dataset,
-        cache_status=cache_status,
-        yes=yes,
-    )
-    if isinstance(result, CommandResult):
-        return result
-    if result:
-        raise typer.Exit(result)
-    return None

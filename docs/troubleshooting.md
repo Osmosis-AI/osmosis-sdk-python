@@ -1,6 +1,6 @@
 # Troubleshooting
 
-Common errors when using the Osmosis SDK CLI and local evaluation.
+Common errors when using the Osmosis SDK CLI.
 
 ## Installation
 
@@ -70,20 +70,6 @@ Confirm that the workspace directory's `origin` remote matches the repository cr
 the intended Osmosis Platform workspace. If it does not, clone the correct
 repository and rerun the command from that workspace directory.
 
-## Eval server and grader issues
-
-### Eval Fails Because 127.0.0.1:8000 Is Occupied
-
-Controller-backed eval owns the rollout server process and uses fixed port `8000`. Stop the existing local server or wait for the other eval run to finish. Cached-only eval runs return cached results without touching port `8000`.
-
-### Eval Server Starts But `/health` Never Passes
-
-Check the user-server subprocess log. For `osmosis eval run`, it is stored next to the eval cache under `.osmosis/cache/eval/<sanitized-model>/<sanitized-dataset-stem>/user-server-<task_id>.log`; for example, `openai/gpt-5-mini` appears as `openai-gpt-5-mini`. Eval starts the server with `uv run python <entrypoint>` from `rollouts/<rollout>`, so imports that only worked when eval loaded code in-process must be changed to work from the rollout directory. The rollout folder must contain `pyproject.toml`.
-
-### Missing Grader Rewards
-
-The controller tracks sample IDs when `/chat/completions` reaches the sample-create point. The grader callback must include a sample entry for every controller-created sample ID. Normal samples need a non-null reward. Skipped or removed samples can set `remove_sample=true` with `reward=None`.
-
 ## Rubric (`osmosis eval rubric`)
 
 ### Missing API key
@@ -96,35 +82,11 @@ Check quota, model name, and network. Increase `--timeout` if calls are slow.
 
 ## Dataset errors
 
-### `DatasetParseError`
+### Dataset validation fails
 
 Unsupported extension or malformed file. Supported: `.parquet`, `.jsonl`, `.csv`.
 
-### `DatasetValidationError`
-
 Every row needs non-empty string `ground_truth`, `user_prompt`, and `system_prompt`. See [Dataset format](./datasets.md).
-
-## Eval cache
-
-### Lock contention
-
-```
-TimeoutError: Another eval with the same config is already running.
-```
-
-Wait for the other process, or:
-
-```bash
-export OSMOSIS_EVAL_LOCK_TIMEOUT=120
-```
-
-### Dataset changed mid-run
-
-Use `--fresh` after mutating the dataset file.
-
-### Stale cache format
-
-Upgrade the package or delete the specific cache file after `osmosis eval cache ls`.
 
 ## Training run rollout failures
 

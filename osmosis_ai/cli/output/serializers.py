@@ -121,16 +121,3 @@ def serialize_eval_run(run: CloudEvalRun) -> dict[str, Any]:
         "dataset": run.dataset.get("name") if run.dataset else None,
         "rollout": run.rollout.get("name") if run.rollout else None,
     }
-
-
-def serialize_eval_cache_entry(entry: dict[str, Any]) -> dict[str, Any]:
-    """Serialize an eval cache entry dict."""
-    config = entry.get("config", {}) or {}
-    return {
-        "task_id": entry.get("task_id", ""),
-        "model": config.get("llm_model") or config.get("model", ""),
-        "dataset": config.get("eval_dataset") or config.get("dataset", ""),
-        "status": entry.get("status", ""),
-        "runs_count": entry.get("runs_count", 0),
-        "created_at": entry.get("created_at", ""),
-    }
