@@ -14,22 +14,16 @@ Eval configs must live under `configs/eval/` inside a structured Osmosis workspa
 |-----|-------------|
 | `rollout` | Directory name under `rollouts/`. |
 | `entrypoint` | Python file relative to the rollout directory. |
-| `dataset` | Platform dataset name from `osmosis dataset list`. |
-
-**`[llm]`**
-
-| Key | Description |
-|-----|-------------|
 | `model_path` | LiteLLM-style model name for the eval policy model, such as `openai/gpt-5-mini`. |
+| `dataset` | Platform dataset name from `osmosis dataset list`. |
 
 ### Optional fields and sections
 
-Eval submit configs also support optional `[experiment].commit_sha`, `[llm].base_url`, `[evaluation]`, `[env]`, and `[secrets]`. The SDK validates only shallow TOML shape, required fields, recognized keys, and env-var names; backend validation owns provider, dataset, model, and evaluation parameter errors.
+Eval submit configs also support optional `[experiment].commit_sha`, `[evaluation]`, `[env]`, and `[secrets]`. The SDK validates only shallow TOML shape, required fields, recognized keys, and env-var names; backend validation owns provider, dataset, model, and evaluation parameter errors.
 
 | Key | Description |
 |-----|-------------|
 | `commit_sha` | Optional pinned commit. When omitted, the platform chooses source from the connected repository. |
-| `base_url` | Optional LiteLLM/OpenAI-compatible API base URL, such as `https://api.openai.com/v1`. No default is applied when this is omitted. |
 
 **`[evaluation]`**
 
@@ -52,13 +46,9 @@ Eval submit configs also support optional `[experiment].commit_sha`, `[llm].base
 [experiment]
 rollout = "my-rollout"
 entrypoint = "main.py"
+model_path = "openai/gpt-5-mini"      # LiteLLM-style model name
 dataset = "my-platform-dataset"
 # commit_sha =
-
-[llm]
-model_path = "openai/gpt-5-mini"      # LiteLLM-style model name
-# Optional LiteLLM/OpenAI-compatible base URL; no default is applied when omitted.
-# base_url = "https://api.openai.com/v1"
 
 [evaluation]
 # Optional. Omit values to use platform defaults.

@@ -100,13 +100,9 @@ selection: `[experiment].dataset` is a platform dataset name from
 [experiment]
 rollout = "my-rollout"
 entrypoint = "main.py"
+model_path = "openai/gpt-5-mini"      # LiteLLM-style model name
 dataset = "my-platform-dataset"
 # commit_sha =
-
-[llm]
-model_path = "openai/gpt-5-mini"      # LiteLLM-style model name
-# Optional LiteLLM/OpenAI-compatible base URL; no default is applied when omitted.
-# base_url = "https://api.openai.com/v1"
 
 [evaluation]
 # Optional. Omit values to use platform defaults.
