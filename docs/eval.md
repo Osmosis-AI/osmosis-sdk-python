@@ -1,8 +1,8 @@
 # Eval
 
-Cloud eval submits a run against a platform dataset using the same workspace, rollout, entrypoint, dataset, and optional `commit_sha` semantics as `osmosis train submit`. The platform clones the repository identified by the workspace directory's `origin` remote and executes the rollout server-side, so push your changes and confirm Git Sync before submitting.
+An evaluation run submits against a platform dataset using the same workspace, rollout, entrypoint, dataset, and optional `commit_sha` semantics as `osmosis train submit`. The platform clones the repository identified by the workspace directory's `origin` remote and executes the rollout server-side, so push your changes and confirm Git Sync before submitting.
 
-Eval configs must live under `configs/eval/` inside a structured Osmosis workspace directory.
+Evaluation configs must live under `configs/eval/` inside a structured Osmosis workspace directory.
 
 ## TOML configuration
 
@@ -14,12 +14,12 @@ Eval configs must live under `configs/eval/` inside a structured Osmosis workspa
 |-----|-------------|
 | `rollout` | Directory name under `rollouts/`. |
 | `entrypoint` | Python file relative to the rollout directory. |
-| `model_path` | LiteLLM-style model name for the eval policy model, such as `openai/gpt-5-mini`. |
+| `model_path` | LiteLLM-style model name for the evaluation policy model, such as `openai/gpt-5-mini`. |
 | `dataset` | Platform dataset name from `osmosis dataset list`. |
 
 ### Optional fields and sections
 
-Eval submit configs also support optional `[experiment].commit_sha`, `[evaluation]`, `[env]`, and `[secrets]`. The SDK validates only shallow TOML shape, required fields, recognized keys, and env-var names; backend validation owns provider, dataset, model, and evaluation parameter errors.
+Evaluation submit configs also support optional `[experiment].commit_sha`, `[evaluation]`, `[env]`, and `[secrets]`. The SDK validates only shallow TOML shape, required fields, recognized keys, and env-var names; backend validation owns provider, dataset, model, and evaluation parameter errors.
 
 | Key | Description |
 |-----|-------------|

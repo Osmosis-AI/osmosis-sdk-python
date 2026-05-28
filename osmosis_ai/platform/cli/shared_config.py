@@ -55,7 +55,7 @@ def validate_workspace_rollout_paths(
     ``<rollouts>/<rollout>/<entrypoint>`` resolves under ``rollouts/<rollout>/``.
 
     ``command_label`` is the human-facing prefix in error messages
-    (e.g. ``"Training"`` or ``"Eval"``).
+    (e.g. ``"Training"`` or ``"Evaluation"``).
     """
     if Path(rollout).is_absolute():
         raise CLIError(f"{command_label} rollout must be a logical rollout name.")

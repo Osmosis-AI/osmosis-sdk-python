@@ -502,8 +502,8 @@ class TestSubmitTrainingRun:
         assert payload["secret_refs_config"] == {"OPENAI_API_KEY": "openai-prod"}
 
 
-class TestCloudEvalRuns:
-    """Tests for OsmosisClient cloud eval run request contracts."""
+class TestEvaluationRuns:
+    """Tests for OsmosisClient evaluation run request contracts."""
 
     @staticmethod
     def _submit_response() -> dict[str, Any]:
@@ -515,11 +515,11 @@ class TestCloudEvalRuns:
         }
 
     @patch("osmosis_ai.platform.api.client.platform_request")
-    def test_submit_cloud_eval_minimal_payload_omits_optional_fields(
+    def test_submit_evaluation_run_minimal_payload_omits_optional_fields(
         self, mock_request: MagicMock
     ) -> None:
         mock_request.return_value = self._submit_response()
-        result = OsmosisClient().submit_cloud_eval(
+        result = OsmosisClient().submit_evaluation_run(
             experiment_config={
                 "model_path": "openai/gpt-oss",
                 "dataset": "dataset-1",
@@ -543,12 +543,12 @@ class TestCloudEvalRuns:
         assert mock_request.call_args.kwargs["git_identity"] == "git_test"
 
     @patch("osmosis_ai.platform.api.client.platform_request")
-    def test_submit_cloud_eval_includes_non_empty_config_sections(
+    def test_submit_evaluation_run_includes_non_empty_config_sections(
         self, mock_request: MagicMock
     ) -> None:
         mock_request.return_value = self._submit_response()
 
-        OsmosisClient().submit_cloud_eval(
+        OsmosisClient().submit_evaluation_run(
             experiment_config={"model_path": "openai/gpt-oss"},
             evaluation_config={"rubric": "grade correctness"},
             advanced_config={"max_concurrent_rollouts": 8},

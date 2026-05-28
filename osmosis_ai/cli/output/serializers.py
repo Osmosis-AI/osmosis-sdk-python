@@ -6,9 +6,9 @@ from typing import Any
 
 from osmosis_ai.platform.api.models import (
     BaseModelInfo,
-    CloudEvalRun,
     DatasetFile,
     DeploymentInfo,
+    EvaluationRun,
     LoraCheckpointInfo,
     RolloutInfo,
     TrainingRun,
@@ -108,8 +108,8 @@ def serialize_rollout(rollout: RolloutInfo) -> dict[str, Any]:
     }
 
 
-def serialize_eval_run(run: CloudEvalRun) -> dict[str, Any]:
-    """Serialize a cloud eval run for the public JSON contract."""
+def serialize_eval_run(run: EvaluationRun) -> dict[str, Any]:
+    """Serialize an evaluation run for the public JSON contract."""
     return {
         "id": run.id,
         "name": run.name,

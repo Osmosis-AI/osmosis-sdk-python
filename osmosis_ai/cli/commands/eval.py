@@ -10,7 +10,7 @@ import typer
 from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE
 
 app: typer.Typer = typer.Typer(
-    help="Manage cloud eval runs (submit, list, info, stop) and LLM-as-judge rubric scoring.",
+    help="Manage evaluation runs (submit, list, info, stop) and LLM-as-judge rubric scoring.",
     no_args_is_help=True,
 )
 
@@ -75,11 +75,11 @@ def eval_submit(
         dir_okay=False,
         readable=False,
         resolve_path=False,
-        help="Path to eval config TOML file.",
+        help="Path to evaluation config TOML file.",
     ),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
 ) -> Any:
-    """Submit a cloud eval run."""
+    """Submit an evaluation run."""
     from osmosis_ai.platform.cli.eval import submit as _submit
 
     return _submit(config_path, yes=yes)
@@ -88,11 +88,13 @@ def eval_submit(
 @app.command("list")
 def eval_list(
     limit: int = typer.Option(
-        DEFAULT_PAGE_SIZE, "--limit", help="Maximum number of eval runs to show."
+        DEFAULT_PAGE_SIZE,
+        "--limit",
+        help="Maximum number of evaluation runs to show.",
     ),
-    all_: bool = typer.Option(False, "--all", help="Show all eval runs."),
+    all_: bool = typer.Option(False, "--all", help="Show all evaluation runs."),
 ) -> Any:
-    """List cloud eval runs for the current workspace directory."""
+    """List evaluation runs for the current workspace directory."""
     from osmosis_ai.platform.cli.eval import list_eval_runs as _list_eval_runs
 
     return _list_eval_runs(limit=limit, all_=all_)
@@ -100,9 +102,9 @@ def eval_list(
 
 @app.command("info")
 def eval_info(
-    name_or_id: str = typer.Argument(..., help="Eval run name or ID."),
+    name_or_id: str = typer.Argument(..., help="Evaluation run name or ID."),
 ) -> Any:
-    """Show cloud eval run details and results."""
+    """Show evaluation run details and results."""
     from osmosis_ai.platform.cli.eval import info as _info
 
     return _info(name_or_id)
@@ -110,10 +112,10 @@ def eval_info(
 
 @app.command("stop")
 def eval_stop(
-    name_or_id: str = typer.Argument(..., help="Eval run name or ID."),
+    name_or_id: str = typer.Argument(..., help="Evaluation run name or ID."),
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
 ) -> Any:
-    """Stop a cloud eval run."""
+    """Stop an evaluation run."""
     from osmosis_ai.platform.cli.eval import stop as _stop
 
     return _stop(name_or_id, yes=yes)

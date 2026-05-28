@@ -1,4 +1,4 @@
-# Osmosis eval config reference.
+# Osmosis evaluation config reference.
 # Command: osmosis eval submit configs/eval/<your-rollout>.toml
 
 [experiment]

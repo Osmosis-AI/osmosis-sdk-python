@@ -19,17 +19,17 @@
 
 > ⚠️ **Warning**: osmosis-ai is still in active development. APIs may change between versions.
 
-Python SDK for [Osmosis AI](https://platform.osmosis.ai), a platform for training LLMs with reinforcement learning. Implement an **AgentWorkflow** in Python, add a concrete **Grader** for eval and managed training flows, submit cloud evals with the CLI, then submit training from an Osmosis workspace directory.
+Python SDK for [Osmosis AI](https://platform.osmosis.ai), a platform for training LLMs with reinforcement learning. Implement an **AgentWorkflow** in Python, add a concrete **Grader** for evaluation runs and managed training runs, submit evaluation runs with the CLI, then submit training runs from an Osmosis workspace directory.
 
 ## Quick start
 
 | Step | What you do |
 |------|-------------|
-| **Define agents** | One `AgentWorkflow` subclass (+ optional `AgentWorkflowConfig`) in your repo. The training/eval entrypoint must also expose a concrete `Grader` (typically with a `GraderConfig`). |
+| **Define agents** | One `AgentWorkflow` subclass (+ optional `AgentWorkflowConfig`) in your repo. The training/evaluation entrypoint must also expose a concrete `Grader` (typically with a `GraderConfig`). |
 | **Layout** | Use a rollout pack directory under `rollouts/<name>/` when loading by rollout name; the CLI adds that directory to `sys.path`. |
 | **Workspace directory** | Create or open a workspace in the Osmosis Platform, then clone the repository created there. |
 | **Check workspace** | `osmosis doctor` — run from the workspace directory so platform commands resolve the repository from the `origin` remote. Add `--fix` to restore missing scaffold paths. |
-| **Evaluate** | `osmosis eval submit configs/eval/<name>.toml` — submit a cloud eval using the same platform dataset naming as training. |
+| **Evaluate** | `osmosis eval submit configs/eval/<name>.toml` — submit an evaluation run using the same platform dataset naming as training runs. |
 
 **Example repository:** [osmosis-remote-rollout-example](https://github.com/Osmosis-AI/osmosis-remote-rollout-example) (reference server usage - align with current SDK exports when upgrading).
 
@@ -74,7 +74,7 @@ Platform-scoped commands derive scope from the workspace directory's `origin` re
 send `X-Osmosis-Git: namespace/repo_name`. The CLI does not store or send a
 workspace ID for commands scoped by the workspace directory.
 
-Before submitting training from CI, push the repository and authenticate with a
+Before submitting training runs from CI, push the repository and authenticate with a
 token:
 
 ```bash
@@ -107,7 +107,7 @@ uv add osmosis-ai[full]           # Same as [server] (all packaged optional feat
 
 ## Testing and evaluation
 
-- [Eval](docs/eval.md) — cloud eval configs and `osmosis eval submit`
+- [Eval](docs/eval.md) — evaluation run configs and `osmosis eval submit`
 - [CLI reference](docs/cli.md)
 
 ## Contributing

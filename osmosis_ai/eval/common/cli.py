@@ -1,10 +1,10 @@
-"""Workflow + grader resolution helpers shared by cloud submit preflight.
+"""Workflow + grader resolution helpers shared by remote submit preflight.
 
 Historically these utilities also powered the local `osmosis eval run` and
-`osmosis test` flows; with eval moving to cloud-only execution the only
+`osmosis test` flows; with eval moving to remote execution the only
 remaining caller is `platform.cli.workspace_directory_contract.validate_rollout_backend`,
 which uses them to load and inspect a workspace rollout before submitting a
-cloud training or eval run.
+remote training run or evaluation run.
 """
 
 from __future__ import annotations

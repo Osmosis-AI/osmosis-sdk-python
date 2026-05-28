@@ -42,7 +42,7 @@ from osmosis_ai.platform.cli.workspace_directory_context import git_result_conte
 
 
 def _format_eval_status(run: Any) -> str:
-    """Format an eval run status string with Rich color styling."""
+    """Format an evaluation run status string with Rich color styling."""
     status_info = f"[{run.status}]"
     if run.status in EVAL_RUN_STATUSES_IN_PROGRESS:
         return console.format_styled(status_info, "yellow")
@@ -59,7 +59,7 @@ def _submit_eval(
     credentials: Any,
     git_identity: str,
 ) -> SubmitRunResult:
-    return client.submit_cloud_eval(
+    return client.submit_evaluation_run(
         experiment_config=config.experiment_config,
         evaluation_config=config.evaluation_config or None,
         advanced_config=config.advanced_config or None,
@@ -76,7 +76,7 @@ def _eval_next_steps(
     display = [
         f"Status: {result.status}",
         f"Check status with: osmosis eval info {result.name}",
-        "List all eval runs with: osmosis eval list",
+        "List all evaluation runs with: osmosis eval list",
     ]
     structured: list[dict[str, Any]] = [
         {"action": "eval_info", "name": result.name},
@@ -90,11 +90,11 @@ def _eval_next_steps(
 _EVAL_SUBMIT_SPEC: CloudSubmitSpec[EvalSubmitConfig] = CloudSubmitSpec(
     config_dir="configs/eval",
     command_label="`osmosis eval submit`",
-    table_title="Cloud Eval Run",
-    confirm_prompt="Submit this cloud eval run?",
-    status_message="Submitting cloud eval run...",
+    table_title="Evaluation Run",
+    confirm_prompt="Submit this evaluation run?",
+    status_message="Submitting evaluation run...",
     operation="eval.submit",
-    success_message_format="Cloud eval run submitted: {name}",
+    success_message_format="Evaluation run submitted: {name}",
     load_config=load_eval_submit_config,
     validate_context=validate_eval_submit_context_paths,
     submit=_submit_eval,
@@ -103,12 +103,12 @@ _EVAL_SUBMIT_SPEC: CloudSubmitSpec[EvalSubmitConfig] = CloudSubmitSpec(
 
 
 def submit(config_path: Path, *, yes: bool) -> OperationResult:
-    """Submit a cloud eval run."""
+    """Submit an evaluation run."""
     return run_cloud_submit(config_path, yes=yes, spec=_EVAL_SUBMIT_SPEC)
 
 
 def list_eval_runs(*, limit: int, all_: bool) -> ListResult:
-    """List cloud eval runs for the current workspace directory."""
+    """List evaluation runs for the current workspace directory."""
     effective_limit, fetch_all = validate_list_options(limit=limit, all_=all_)
 
     context = require_git_workspace_directory_context()
@@ -116,7 +116,7 @@ def list_eval_runs(*, limit: int, all_: bool) -> ListResult:
 
     client = OsmosisClient()
     output = get_output_context()
-    with output.status("Fetching eval runs..."):
+    with output.status("Fetching evaluation runs..."):
         if fetch_all:
             eval_runs, total_count = fetch_all_pages(
                 lambda lim, off: client.list_eval_runs(
@@ -142,7 +142,7 @@ def list_eval_runs(*, limit: int, all_: bool) -> ListResult:
             next_offset = page.next_offset
 
     return ListResult(
-        title="Cloud Eval Runs",
+        title="Evaluation Runs",
         items=[serialize_eval_run(r) for r in eval_runs],
         total_count=total_count,
         has_more=has_more,
@@ -176,13 +176,13 @@ def list_eval_runs(*, limit: int, all_: bool) -> ListResult:
 
 
 def info(name_or_id: str) -> DetailResult:
-    """Show cloud eval run details and results."""
+    """Show evaluation run details and results."""
     context = require_git_workspace_directory_context()
     credentials = context.credentials
 
     client = OsmosisClient()
     output = get_output_context()
-    with output.status("Fetching eval run..."):
+    with output.status("Fetching evaluation run..."):
         detail = client.get_eval_run(
             name_or_id,
             credentials=credentials,
@@ -225,7 +225,7 @@ def info(name_or_id: str) -> DetailResult:
         fields.append(
             DetailField(
                 label="Note",
-                value="Eval is in progress. Results shown are a snapshot.",
+                value="Evaluation run is in progress. Results shown are a snapshot.",
             )
         )
         display_hints.append(
@@ -233,7 +233,7 @@ def info(name_or_id: str) -> DetailResult:
         )
 
     return DetailResult(
-        title="Cloud Eval Run",
+        title="Evaluation Run",
         data={
             "eval_run": eval_run,
             "config": detail.config,
@@ -249,19 +249,19 @@ def info(name_or_id: str) -> DetailResult:
 
 
 def stop(name_or_id: str, *, yes: bool) -> OperationResult:
-    """Stop a cloud eval run."""
+    """Stop an evaluation run."""
     context = require_git_workspace_directory_context()
     credentials = context.credentials
 
     require_confirmation(
-        f'Stop eval run "{name_or_id}"?',
+        f'Stop evaluation run "{name_or_id}"?',
         yes=yes,
         summary=[("Name", name_or_id)],
     )
 
     client = OsmosisClient()
     output = get_output_context()
-    with output.status("Stopping eval run..."):
+    with output.status("Stopping evaluation run..."):
         client.stop_eval_run(
             name_or_id,
             credentials=credentials,
@@ -272,5 +272,5 @@ def stop(name_or_id: str, *, yes: bool) -> OperationResult:
         operation="eval.stop",
         status="success",
         resource={"name": name_or_id, **git_result_context(context)},
-        message=f'Eval run "{name_or_id}" stopped.',
+        message=f'Evaluation run "{name_or_id}" stopped.',
     )

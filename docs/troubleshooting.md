@@ -123,19 +123,19 @@ Common causes:
 
 ### Preflight failures
 
-Submit a cloud eval before training:
+Submit an evaluation run before a training run:
 
 ```bash
 osmosis eval submit configs/eval/<run>.toml
 ```
 
-Then submit the training config:
+Then submit the training run config:
 
 ```bash
 osmosis train submit configs/training/<run>.toml
 ```
 
-Training submission performs its own preflight checks before launching the
+Training run submission performs its own preflight checks before launching the
 managed run. Fix reported rollout, config, dataset, or repository scope issues before
 submitting again.
 

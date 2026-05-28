@@ -9,15 +9,15 @@ from osmosis_ai.platform.auth.platform_client import platform_request
 from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE
 
 from .models import (
-    CloudEvalRunDetail,
     DatasetDownloadInfo,
     DatasetFile,
     DeploymentInfo,
     DeploymentSummary,
+    EvaluationRunDetail,
     PaginatedBaseModels,
-    PaginatedCloudEvalRuns,
     PaginatedDatasets,
     PaginatedDeployments,
+    PaginatedEvaluationRuns,
     PaginatedRollouts,
     PaginatedTrainingRuns,
     SubmitRunResult,
@@ -405,9 +405,9 @@ class OsmosisClient:
         )
         return TrainingRunCheckpoints.from_dict(data)
 
-    # ── Cloud Eval Runs ──────────────────────────────────────────
+    # ── Evaluation Runs ──────────────────────────────────────────
 
-    def submit_cloud_eval(
+    def submit_evaluation_run(
         self,
         *,
         experiment_config: dict[str, Any],
@@ -418,7 +418,7 @@ class OsmosisClient:
         credentials: Credentials | None = None,
         git_identity: str,
     ) -> SubmitRunResult:
-        """Submit a new cloud eval run."""
+        """Submit a new evaluation run."""
         data: dict[str, Any] = {
             "experiment_config": experiment_config,
         }
@@ -446,14 +446,14 @@ class OsmosisClient:
         *,
         credentials: Credentials | None = None,
         git_identity: str,
-    ) -> PaginatedCloudEvalRuns:
+    ) -> PaginatedEvaluationRuns:
         qs = urlencode({"limit": limit, "offset": offset})
         data = platform_request(
             f"/api/cli/eval-runs?{qs}",
             credentials=credentials,
             git_identity=git_identity,
         )
-        return PaginatedCloudEvalRuns.from_dict(data)
+        return PaginatedEvaluationRuns.from_dict(data)
 
     def get_eval_run(
         self,
@@ -461,13 +461,13 @@ class OsmosisClient:
         *,
         credentials: Credentials | None = None,
         git_identity: str,
-    ) -> CloudEvalRunDetail:
+    ) -> EvaluationRunDetail:
         data = platform_request(
             f"/api/cli/eval-runs/{_safe_path(eval_run_id)}",
             credentials=credentials,
             git_identity=git_identity,
         )
-        return CloudEvalRunDetail.from_dict(data)
+        return EvaluationRunDetail.from_dict(data)
 
     def stop_eval_run(
         self,
@@ -476,7 +476,7 @@ class OsmosisClient:
         credentials: Credentials | None = None,
         git_identity: str,
     ) -> dict[str, Any]:
-        """Stop a pending or running cloud eval run."""
+        """Stop a pending or running evaluation run."""
         return platform_request(
             f"/api/cli/eval-runs/{_safe_path(eval_run_id)}/stop",
             method="POST",

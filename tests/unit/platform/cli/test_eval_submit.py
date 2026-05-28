@@ -144,7 +144,7 @@ def _mock_workspace_repo(monkeypatch: pytest.MonkeyPatch) -> None:
     )
 
 
-def test_eval_submit_passes_new_schema_to_cloud_eval_api(
+def test_eval_submit_passes_new_schema_to_evaluation_run_api(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     console_capture: StringIO,
@@ -158,7 +158,7 @@ def test_eval_submit_passes_new_schema_to_cloud_eval_api(
     captured_kwargs: dict[str, Any] = {}
 
     class FakeClient:
-        def submit_cloud_eval(self, **kwargs: Any) -> SubmitRunResult:
+        def submit_evaluation_run(self, **kwargs: Any) -> SubmitRunResult:
             captured_kwargs.update(kwargs)
             return SubmitRunResult(
                 id="eval-1",
@@ -217,7 +217,7 @@ def test_eval_submit_does_not_pin_local_head_without_config_commit_sha(
     captured_kwargs: dict[str, Any] = {}
 
     class FakeClient:
-        def submit_cloud_eval(self, **kwargs: Any) -> SubmitRunResult:
+        def submit_evaluation_run(self, **kwargs: Any) -> SubmitRunResult:
             captured_kwargs.update(kwargs)
             return SubmitRunResult(
                 id="eval-1",

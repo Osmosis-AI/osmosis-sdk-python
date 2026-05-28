@@ -162,7 +162,7 @@ RUN_STATUSES_TERMINAL: frozenset[str] = (
     RUN_STATUSES_SUCCESS | RUN_STATUSES_ERROR | RUN_STATUSES_STOPPED
 )
 
-# ── Eval run status constants ────────────────────────────────────
+# ── Evaluation run status constants ──────────────────────────────
 
 EVAL_RUN_STATUSES_IN_PROGRESS: frozenset[str] = frozenset({"pending", "running"})
 EVAL_RUN_STATUSES_TERMINAL: frozenset[str] = frozenset(
@@ -277,7 +277,7 @@ class PaginatedTrainingRuns:
 
 @dataclass
 class SubmitRunResult:
-    """Result of submitting a training run or cloud eval run.
+    """Result of submitting a training run or evaluation run.
 
     Both `POST /api/cli/training-runs` and `POST /api/cli/eval-runs` return the
     same shape; this is the single response model for either submit path.
@@ -622,12 +622,12 @@ class TrainingRunCheckpoints:
         )
 
 
-# ── Cloud Eval Runs ──────────────────────────────────────────────
+# ── Evaluation Runs ──────────────────────────────────────────────
 
 
 @dataclass
-class CloudEvalRun:
-    """A cloud eval run record."""
+class EvaluationRun:
+    """An evaluation run record."""
 
     id: str
     name: str
@@ -641,7 +641,7 @@ class CloudEvalRun:
     creator_name: str | None = None
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> CloudEvalRun:
+    def from_dict(cls, data: dict[str, Any]) -> EvaluationRun:
         return cls(
             id=data["id"],
             name=data["name"],
@@ -657,8 +657,8 @@ class CloudEvalRun:
 
 
 @dataclass
-class CloudEvalRunDetail:
-    """Detailed cloud eval run info."""
+class EvaluationRunDetail:
+    """Detailed evaluation run info."""
 
     eval_run: dict[str, Any]
     config: dict[str, Any] | None = None
@@ -668,7 +668,7 @@ class CloudEvalRunDetail:
     rollout: dict[str, Any] | None = None
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> CloudEvalRunDetail:
+    def from_dict(cls, data: dict[str, Any]) -> EvaluationRunDetail:
         return cls(
             eval_run=data["eval_run"],
             config=data.get("config"),
@@ -680,21 +680,21 @@ class CloudEvalRunDetail:
 
 
 @dataclass
-class PaginatedCloudEvalRuns:
-    """Paginated list of cloud eval runs."""
+class PaginatedEvaluationRuns:
+    """Paginated list of evaluation runs."""
 
-    eval_runs: list[CloudEvalRun]
+    eval_runs: list[EvaluationRun]
     total_count: int
     has_more: bool
     next_offset: int | None = None
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> PaginatedCloudEvalRuns:
+    def from_dict(cls, data: dict[str, Any]) -> PaginatedEvaluationRuns:
         # Platform returns the list under the wire key "data"; expose it as
         # ``eval_runs`` internally for consistency with the other paginated
         # wrappers (training_runs, datasets, deployments, ...).
         return cls(
-            eval_runs=[CloudEvalRun.from_dict(r) for r in data.get("data", [])],
+            eval_runs=[EvaluationRun.from_dict(r) for r in data.get("data", [])],
             total_count=data.get("total_count", 0),
             has_more=data.get("has_more", False),
             next_offset=data.get("next_offset"),

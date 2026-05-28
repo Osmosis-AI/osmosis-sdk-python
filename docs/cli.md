@@ -91,8 +91,8 @@ osmosis rollout list --all
 
 ### osmosis eval submit
 
-Submit a cloud eval run using a TOML config under `configs/eval/`. Cloud eval
-configs align with training configs for rollout identity and platform dataset
+Submit an evaluation run using a TOML config under `configs/eval/`. Evaluation
+run configs align with training run configs for rollout identity and platform dataset
 selection: `[experiment].dataset` is a platform dataset name from
 `osmosis dataset list`, not a local `data/*.jsonl` path.
 
@@ -183,9 +183,9 @@ The config file must live under `configs/training/` inside a structured Osmosis
 workspace directory. The CLI reads the config locally and sends it to the platform, which
 clones the repository identified by the workspace directory's `origin` remote for the
 actual rollout code.
-`osmosis train submit` includes the training preflight checks before launch; run
-`osmosis eval submit configs/eval/<name>.toml` first when you want a platform
-eval before training.
+`osmosis train submit` includes the training run preflight checks before launch;
+run `osmosis eval submit configs/eval/<name>.toml` first when you want an
+evaluation run before a training run.
 
 #### Required `[experiment]` fields
 

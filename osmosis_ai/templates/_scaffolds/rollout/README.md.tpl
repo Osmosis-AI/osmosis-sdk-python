@@ -3,7 +3,7 @@
 Placeholder rollout created by `osmosis rollout init`. Edit `main.py` to fill in
 `MyAgentWorkflow.run()` and `MyGrader.grade()`.
 
-Submit a cloud eval from the workspace directory:
+Submit an evaluation run from the workspace directory:
 
 ```bash
 pip install -e rollouts/<your-rollout>

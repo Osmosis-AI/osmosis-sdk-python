@@ -11,13 +11,13 @@ from osmosis_ai.platform.api.models import (
     STATUSES_INACTIVE,
     STATUSES_SUCCESS,
     STATUSES_TERMINAL,
-    CloudEvalRun,
-    CloudEvalRunDetail,
     DatasetDownloadInfo,
     DatasetFile,
+    EvaluationRun,
+    EvaluationRunDetail,
     MetricDataPoint,
     MetricHistory,
-    PaginatedCloudEvalRuns,
+    PaginatedEvaluationRuns,
     SubmitRunResult,
     TrainingRunDetail,
     TrainingRunMetrics,
@@ -566,9 +566,9 @@ class TestDeploymentModels:
         assert r.checkpoints[1].checkpoint_name == "qwen3-run1-step-200"
 
 
-class TestCloudEvalRunModels:
-    def test_cloud_eval_run_from_dict_parses_nested_refs(self) -> None:
-        run = CloudEvalRun.from_dict(
+class TestEvaluationRunModels:
+    def test_evaluation_run_from_dict_parses_nested_refs(self) -> None:
+        run = EvaluationRun.from_dict(
             {
                 "id": "eval_1",
                 "name": "math-eval",
@@ -590,8 +590,8 @@ class TestCloudEvalRunModels:
         assert run.rollout == {"id": "rollout_1", "name": "math-rollout"}
         assert run.creator_name == "brian"
 
-    def test_cloud_eval_run_detail_from_dict(self) -> None:
-        detail = CloudEvalRunDetail.from_dict(
+    def test_evaluation_run_detail_from_dict(self) -> None:
+        detail = EvaluationRunDetail.from_dict(
             {
                 "eval_run": {"id": "eval_1", "status": "succeeded"},
                 "config": {"evaluation": {"rubric": "grade correctness"}},
@@ -609,8 +609,8 @@ class TestCloudEvalRunModels:
         assert detail.dataset == {"id": "dataset_1"}
         assert detail.rollout == {"id": "rollout_1"}
 
-    def test_paginated_cloud_eval_runs_uses_platform_data_key(self) -> None:
-        page = PaginatedCloudEvalRuns.from_dict(
+    def test_paginated_evaluation_runs_uses_platform_data_key(self) -> None:
+        page = PaginatedEvaluationRuns.from_dict(
             {
                 "data": [
                     {

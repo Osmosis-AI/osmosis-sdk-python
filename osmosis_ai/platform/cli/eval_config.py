@@ -1,4 +1,4 @@
-"""TOML config loading and validation for `osmosis eval submit` runs."""
+"""TOML config loading and validation for evaluation runs."""
 
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ class _EvaluationSection(BackendValidatedParamSection):
 
 
 class EvalSubmitConfig(BaseSubmitConfig):
-    """Parsed cloud eval TOML configuration."""
+    """Parsed evaluation run TOML configuration."""
 
     model_config: ClassVar[ConfigDict] = ConfigDict(extra="forbid")
 
@@ -39,7 +39,7 @@ class EvalSubmitConfig(BaseSubmitConfig):
 
 
 def load_eval_submit_config(path: Path) -> EvalSubmitConfig:
-    """Load and validate TOML config for cloud eval submit."""
+    """Load and validate TOML config for evaluation run submit."""
     return load_submit_config(
         path,
         config_class=EvalSubmitConfig,
@@ -57,7 +57,7 @@ def validate_eval_submit_context_paths(
         rollout=config.experiment_rollout,
         entrypoint=config.experiment_entrypoint,
         workspace_directory=workspace_directory,
-        command_label="Eval",
+        command_label="Evaluation",
     )
 
 
