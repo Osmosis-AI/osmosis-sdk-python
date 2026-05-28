@@ -55,6 +55,29 @@ _output_context_var: ContextVar[OutputContext | None] = ContextVar(
     default=None,
 )
 
+# The argv that ``main()`` actually dispatched. Set for the duration of a CLI
+# invocation so error helpers that fire mid-flight (interactive-required
+# prompts, ``verify_output_emitted``) can reconstruct the command path from the
+# same argv the top-level handler uses — instead of the process-global
+# ``sys.argv``, which diverges when the CLI is driven with an explicit argv.
+_invocation_argv_var: ContextVar[list[str] | None] = ContextVar(
+    "osmosis_invocation_argv",
+    default=None,
+)
+
+
+def get_invocation_argv() -> list[str]:
+    """Best-effort argv (without the program name) for the current invocation.
+
+    Returns the argv ``main()`` dispatched when available, falling back to the
+    process-global ``sys.argv[1:]`` for callers outside ``main()`` (e.g. tests
+    that exercise helpers directly).
+    """
+    stored = _invocation_argv_var.get()
+    if stored is not None:
+        return stored
+    return sys.argv[1:]
+
 
 def default_output_context() -> OutputContext:
     """Default rich + stdin-derived interactivity."""

@@ -10,6 +10,7 @@ from osmosis_ai.cli.output.context import (
     OutputContext,
     OutputFormat,
     _argv_format_prescan,
+    _invocation_argv_var,
     _output_context_var,
     get_output_context,
     install_output_context,
@@ -173,6 +174,11 @@ def _register_commands() -> None:
 def main(argv: list[str] | None = None) -> int:
     """Entry point for the osmosis CLI."""
     _register_commands()
+    # Record the argv actually dispatched so mid-flight error helpers
+    # (interactive-required prompts, verify_output_emitted) reconstruct the same
+    # command path as the top-level handler — even when the caller passes an
+    # explicit argv that differs from the process-global sys.argv.
+    argv_token = _invocation_argv_var.set(argv if argv is not None else sys.argv[1:])
     try:
         result = app(argv, standalone_mode=False)
         # standalone_mode=False returns None on normal completion and re-raises
@@ -199,6 +205,8 @@ def main(argv: list[str] | None = None) -> int:
         return _handle_cli_error(exc, argv=argv, exit_code=exit_code)
     except Exception as exc:
         return _handle_cli_error(exc, argv=argv)
+    finally:
+        _invocation_argv_var.reset(argv_token)
 
 
 if __name__ == "__main__":

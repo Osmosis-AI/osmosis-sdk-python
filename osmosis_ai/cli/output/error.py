@@ -178,7 +178,9 @@ def command_path_for_error(
         if len(parts) == 2:
             return parts[1]
         return path or "<root>"
-    return _argv_command_path(sys.argv[1:] if sys.argv[1:] else [])
+    from osmosis_ai.cli.output.context import get_invocation_argv
+
+    return _argv_command_path(get_invocation_argv())
 
 
 def emit_structured_error_to_stderr(
