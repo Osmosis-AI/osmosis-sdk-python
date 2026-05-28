@@ -75,7 +75,11 @@ def _eval_next_steps(
 ) -> tuple[list[str], list[dict[str, Any]]]:
     display = [
         f"Status: {result.status}",
-        f"Check status with: osmosis eval info {result.name}",
+        (
+            f"View: {result.platform_url}"
+            if result.platform_url
+            else f"Check status with: osmosis eval info {result.name}"
+        ),
         "List all evaluation runs with: osmosis eval list",
     ]
     structured: list[dict[str, Any]] = [
@@ -153,6 +157,7 @@ def list_eval_runs(*, limit: int, all_: bool) -> ListResult:
             ListColumn(key="rollout", label="Rollout", ratio=2, overflow="fold"),
             ListColumn(key="status", label="Status", no_wrap=True, ratio=1),
             ListColumn(key="model", label="Model", no_wrap=True, ratio=2),
+            ListColumn(key="creator_name", label="Submitted By", no_wrap=True, ratio=1),
             ListColumn(
                 key="created_at",
                 label=created_column_label(),
@@ -167,6 +172,7 @@ def list_eval_runs(*, limit: int, all_: bool) -> ListResult:
                 "rollout": run.rollout.get("name") if run.rollout else "—",
                 "status": _format_eval_status(run),
                 "model": run.model.get("name") if run.model else "—",
+                "creator_name": run.creator_name or "—",
                 "created_at": format_local_date(run.created_at),
             }
             for run in eval_runs
@@ -220,6 +226,9 @@ def info(name_or_id: str) -> DetailResult:
 
     fields = [DetailField(label=label, value=value) for label, value in rows]
     display_hints: list[str] = []
+
+    if eval_run.get("platform_url"):
+        display_hints.append(f"View: {eval_run['platform_url']}")
 
     if eval_run.get("status") in EVAL_RUN_STATUSES_IN_PROGRESS:
         fields.append(

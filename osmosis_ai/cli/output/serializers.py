@@ -110,7 +110,7 @@ def serialize_rollout(rollout: RolloutInfo) -> dict[str, Any]:
 
 def serialize_eval_run(run: EvaluationRun) -> dict[str, Any]:
     """Serialize an evaluation run for the public JSON contract."""
-    return {
+    data: dict[str, Any] = {
         "id": run.id,
         "name": run.name,
         "status": run.status,
@@ -120,4 +120,9 @@ def serialize_eval_run(run: EvaluationRun) -> dict[str, Any]:
         "model": run.model.get("name") if run.model else None,
         "dataset": run.dataset.get("name") if run.dataset else None,
         "rollout": run.rollout.get("name") if run.rollout else None,
+        "creator_name": run.creator_name,
+        "creator_email": run.creator_email,
     }
+    if run.platform_url:
+        data["platform_url"] = run.platform_url
+    return data

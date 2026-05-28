@@ -639,6 +639,8 @@ class EvaluationRun:
     dataset: dict[str, Any] | None = None
     rollout: dict[str, Any] | None = None
     creator_name: str | None = None
+    creator_email: str | None = None
+    platform_url: str | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> EvaluationRun:
@@ -653,6 +655,8 @@ class EvaluationRun:
             dataset=data.get("dataset"),
             rollout=data.get("rollout"),
             creator_name=data.get("creator_name"),
+            creator_email=data.get("creator_email"),
+            platform_url=data.get("platform_url"),
         )
 
 
