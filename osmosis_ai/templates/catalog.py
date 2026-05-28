@@ -49,9 +49,9 @@ TEMPLATE_RECIPES: tuple[TemplateRecipe, ...] = (
         owned_dirs=(_path("rollouts/multiply-local-strands"),),
         next_steps=(
             "pip install -e rollouts/multiply-local-strands",
-            "osmosis eval run configs/eval/multiply-local-strands.toml --limit 1",
             "git push",
             "Confirm Git Sync is connected in the Osmosis Platform",
+            "osmosis eval submit configs/eval/multiply-local-strands.toml",
             "osmosis train submit configs/training/multiply-local-strands.toml",
         ),
     ),
@@ -67,9 +67,9 @@ TEMPLATE_RECIPES: tuple[TemplateRecipe, ...] = (
         owned_dirs=(_path("rollouts/multiply-local-openai"),),
         next_steps=(
             "pip install -e rollouts/multiply-local-openai",
-            "osmosis eval run configs/eval/multiply-local-openai.toml --limit 1",
             "git push",
             "Confirm Git Sync is connected in the Osmosis Platform",
+            "osmosis eval submit configs/eval/multiply-local-openai.toml",
             "osmosis train submit configs/training/multiply-local-openai.toml",
         ),
     ),
@@ -85,9 +85,9 @@ TEMPLATE_RECIPES: tuple[TemplateRecipe, ...] = (
         owned_dirs=(_path("rollouts/multiply-harbor-strands"),),
         next_steps=(
             "pip install -e rollouts/multiply-harbor-strands",
-            "osmosis eval run configs/eval/multiply-harbor-strands.toml --limit 1",
             "git push",
             "Confirm Git Sync is connected in the Osmosis Platform",
+            "osmosis eval submit configs/eval/multiply-harbor-strands.toml",
             "osmosis train submit configs/training/multiply-harbor-strands.toml",
         ),
     ),

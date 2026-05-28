@@ -10,6 +10,7 @@ import pytest
 
 import osmosis_ai.cli.commands.train as train_module
 import osmosis_ai.platform.api.client as api_client_module
+import osmosis_ai.platform.cli.train as platform_train_module
 import osmosis_ai.platform.cli.utils as utils_module
 from osmosis_ai.cli.console import Console
 from osmosis_ai.cli.output import DetailResult
@@ -35,21 +36,27 @@ def _raise_metrics_unavailable(self, name, *, git_identity, credentials=None):
 def console_capture(monkeypatch: pytest.MonkeyPatch) -> StringIO:
     output = StringIO()
     console = Console(file=output, force_terminal=False)
-    monkeypatch.setattr(train_module, "console", console)
+    monkeypatch.setattr(platform_train_module, "console", console)
     monkeypatch.setattr(utils_module, "console", console)
     return output
 
 
 @pytest.fixture(autouse=True)
 def _mock_git_context(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        "osmosis_ai.platform.cli.utils.require_git_workspace_directory_context",
-        lambda: SimpleNamespace(
+    def _git_context() -> SimpleNamespace:
+        return SimpleNamespace(
             workspace_directory=Path("/repo"),
             git_identity=GIT_IDENTITY,
             repo_url=REPO_URL,
             credentials=FAKE_CREDENTIALS,
-        ),
+        )
+
+    monkeypatch.setattr(
+        "osmosis_ai.platform.cli.utils.require_git_workspace_directory_context",
+        _git_context,
+    )
+    monkeypatch.setattr(
+        platform_train_module, "require_git_workspace_directory_context", _git_context
     )
 
 
@@ -118,6 +125,7 @@ class TestStatusCheckpoints:
             get_training_run_metrics = _raise_metrics_unavailable
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(platform_train_module, "OsmosisClient", FakeClient)
         result = train_module.info(name="qwen3-run1")
 
         assert isinstance(result, DetailResult)
@@ -162,6 +170,7 @@ class TestStatusCheckpoints:
             get_training_run_metrics = _raise_metrics_unavailable
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(platform_train_module, "OsmosisClient", FakeClient)
         result = train_module.info(name="qwen3-run1")
 
         assert isinstance(result, DetailResult)
@@ -200,6 +209,7 @@ class TestStatusCheckpoints:
             get_training_run_metrics = _raise_metrics_unavailable
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(platform_train_module, "OsmosisClient", FakeClient)
         result = train_module.info(name="qwen3-run1")
 
         assert isinstance(result, DetailResult)
@@ -233,6 +243,7 @@ class TestStatusCheckpoints:
             get_training_run_metrics = _raise_metrics_unavailable
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(platform_train_module, "OsmosisClient", FakeClient)
         result = train_module.info(name="qwen3-run1")
 
         assert isinstance(result, DetailResult)
@@ -263,6 +274,7 @@ class TestStatusCheckpoints:
             get_training_run_metrics = _raise_metrics_unavailable
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(platform_train_module, "OsmosisClient", FakeClient)
         result = train_module.info(name="qwen3-run1")
 
         assert isinstance(result, DetailResult)

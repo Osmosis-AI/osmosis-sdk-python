@@ -1,5 +1,4 @@
 import json
-import subprocess
 import sys
 from pathlib import Path
 from unittest.mock import AsyncMock
@@ -16,23 +15,6 @@ from osmosis_ai.eval.rubric.types import RubricResult
 # =============================================================================
 # eval rubric — happy-path
 # =============================================================================
-
-
-def _make_git_project(root: Path) -> Path:
-    subprocess.run(
-        ["git", "init", "-b", "main", str(root)],
-        check=True,
-        capture_output=True,
-    )
-    for rel_path in (
-        ".osmosis",
-        "rollouts",
-        "configs/eval",
-        "configs/training",
-        "data",
-    ):
-        (root / rel_path).mkdir(parents=True, exist_ok=True)
-    return root
 
 
 def test_eval_rubric_basic(tmp_path, monkeypatch, capsys):
@@ -197,60 +179,6 @@ def test_main_without_subcommand_shows_help(capsys):
 
     assert exit_code == 0
     assert "osmosis" in captured.out.lower()
-
-
-def test_eval_run_requires_workspace_directory_context_before_config_lookup(
-    tmp_path, monkeypatch, capsys
-):
-    """eval run first requires a current Osmosis workspace directory."""
-    monkeypatch.chdir(tmp_path)
-    exit_code = cli.main(
-        [
-            "eval",
-            "run",
-            "nonexistent.toml",
-        ]
-    )
-    captured = capsys.readouterr()
-
-    assert exit_code == 1
-    assert "Osmosis workspace directory" in captured.err
-
-
-def test_eval_run_rejects_missing_config_inside_project(tmp_path, monkeypatch, capsys):
-    """eval run fails when a workspace-directory config file does not exist."""
-    _make_git_project(tmp_path)
-    monkeypatch.chdir(tmp_path)
-
-    exit_code = cli.main(["eval", "run", "configs/eval/nonexistent.toml"])
-    captured = capsys.readouterr()
-
-    assert exit_code == 1
-    assert "Config file not found" in captured.err
-
-
-def test_eval_run_rejects_fresh_and_retry_failed(tmp_path, monkeypatch, capsys):
-    """eval run rejects --fresh and --retry-failed together."""
-    project = _make_git_project(tmp_path / "project")
-    monkeypatch.chdir(project)
-    config_path = tmp_path / "eval.toml"
-    config_path.write_text(
-        '[eval]\nmodule = "mod:Agent"\ndataset = "data.jsonl"\n\n[llm]\nmodel = "openai/gpt-5.4"\n',
-        encoding="utf-8",
-    )
-    exit_code = cli.main(
-        [
-            "eval",
-            "run",
-            str(config_path),
-            "--fresh",
-            "--retry-failed",
-        ]
-    )
-    captured = capsys.readouterr()
-
-    assert exit_code == 1
-    assert "--fresh and --retry-failed are mutually exclusive" in captured.err
 
 
 def test_fuzzy_suggestion(capsys):

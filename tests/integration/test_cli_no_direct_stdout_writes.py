@@ -11,7 +11,6 @@ ROOT = Path(__file__).resolve().parents[2]
 SCAN_PATHS = [
     ROOT / "osmosis_ai" / "cli" / "commands" / "eval.py",
     ROOT / "osmosis_ai" / "eval" / "rubric" / "cli.py",
-    ROOT / "osmosis_ai" / "eval" / "evaluation" / "cli.py",
     ROOT / "osmosis_ai" / "cli" / "upgrade.py",
 ]
 
