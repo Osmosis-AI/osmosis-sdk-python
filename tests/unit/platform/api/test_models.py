@@ -590,29 +590,34 @@ class TestEvaluationRunModels:
         assert run.rollout == {"id": "rollout_1", "name": "math-rollout"}
         assert run.creator_name == "brian"
 
-    def test_evaluation_run_detail_from_dict(self) -> None:
+    def test_evaluation_run_detail_from_dict_uses_config_model_path(self) -> None:
         detail = EvaluationRunDetail.from_dict(
             {
                 "eval_run": {"id": "eval_1", "status": "succeeded"},
-                "config": {"evaluation": {"rubric": "grade correctness"}},
+                "config": {
+                    "model_path": "openai/gpt-5-mini",
+                    "evaluation": {"rubric": "grade correctness"},
+                },
                 "results": {"score": 0.92},
-                "model": {"id": "model_1"},
                 "dataset": {"id": "dataset_1"},
                 "rollout": {"id": "rollout_1"},
             }
         )
 
         assert detail.eval_run == {"id": "eval_1", "status": "succeeded"}
-        assert detail.config == {"evaluation": {"rubric": "grade correctness"}}
+        assert detail.config == {
+            "model_path": "openai/gpt-5-mini",
+            "evaluation": {"rubric": "grade correctness"},
+        }
         assert detail.results == {"score": 0.92}
-        assert detail.model == {"id": "model_1"}
+        assert detail.model == {"name": "openai/gpt-5-mini"}
         assert detail.dataset == {"id": "dataset_1"}
         assert detail.rollout == {"id": "rollout_1"}
 
-    def test_paginated_evaluation_runs_uses_platform_data_key(self) -> None:
+    def test_paginated_evaluation_runs_uses_eval_runs_key(self) -> None:
         page = PaginatedEvaluationRuns.from_dict(
             {
-                "data": [
+                "eval_runs": [
                     {
                         "id": "eval_1",
                         "name": "math-eval",

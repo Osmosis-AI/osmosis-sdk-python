@@ -571,8 +571,15 @@ class TestEvaluationRuns:
         self, mock_request: MagicMock
     ) -> None:
         mock_request.return_value = {
-            "data": [],
-            "total_count": 0,
+            "eval_runs": [
+                {
+                    "id": "eval-1",
+                    "name": "math-eval",
+                    "status": "pending",
+                    "created_at": "2026-05-04T00:00:00Z",
+                }
+            ],
+            "total_count": 1,
             "has_more": False,
             "next_offset": None,
         }
@@ -583,7 +590,8 @@ class TestEvaluationRuns:
             git_identity="git_test",
         )
 
-        assert result.eval_runs == []
+        assert len(result.eval_runs) == 1
+        assert result.eval_runs[0].name == "math-eval"
         assert mock_request.call_args[0][0] == "/api/cli/eval-runs?limit=25&offset=50"
         assert mock_request.call_args.kwargs["git_identity"] == "git_test"
 

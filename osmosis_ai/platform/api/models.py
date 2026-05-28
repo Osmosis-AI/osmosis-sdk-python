@@ -669,11 +669,13 @@ class EvaluationRunDetail:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> EvaluationRunDetail:
+        config = data.get("config")
+        model_path = config.get("model_path") if isinstance(config, dict) else None
         return cls(
             eval_run=data["eval_run"],
-            config=data.get("config"),
+            config=config,
             results=data.get("results"),
-            model=data.get("model"),
+            model={"name": model_path} if isinstance(model_path, str) else None,
             dataset=data.get("dataset"),
             rollout=data.get("rollout"),
         )
@@ -690,11 +692,8 @@ class PaginatedEvaluationRuns:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> PaginatedEvaluationRuns:
-        # Platform returns the list under the wire key "data"; expose it as
-        # ``eval_runs`` internally for consistency with the other paginated
-        # wrappers (training_runs, datasets, deployments, ...).
         return cls(
-            eval_runs=[EvaluationRun.from_dict(r) for r in data.get("data", [])],
+            eval_runs=[EvaluationRun.from_dict(r) for r in data.get("eval_runs", [])],
             total_count=data.get("total_count", 0),
             has_more=data.get("has_more", False),
             next_offset=data.get("next_offset"),
