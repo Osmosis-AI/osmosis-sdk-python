@@ -8,8 +8,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar, Token
 from dataclasses import dataclass
 from enum import StrEnum
-
-import click
+from typing import Any
 
 
 class OutputFormat(StrEnum):
@@ -82,16 +81,6 @@ def _argv_format_prescan(argv: list[str]) -> OutputFormat | None:
 
 def get_output_context() -> OutputContext:
     """Resolve the active OutputContext through the fallback stack."""
-    try:
-        ctx = click.get_current_context(silent=True)
-    except RuntimeError:
-        ctx = None
-
-    if ctx is not None:
-        root_obj = ctx.find_root().obj
-        if isinstance(root_obj, OutputContext):
-            return root_obj
-
     stored = _output_context_var.get()
     if stored is not None:
         return stored
@@ -103,8 +92,8 @@ def get_output_context() -> OutputContext:
     return default_output_context()
 
 
-def install_output_context(ctx: click.Context, output: OutputContext) -> None:
-    """Mirror `output` to Click.Context.obj and the ContextVar."""
+def install_output_context(ctx: Any, output: OutputContext) -> None:
+    """Mirror `output` to the Typer context obj and the ContextVar."""
     ctx.obj = output
     token: Token[OutputContext | None] = _output_context_var.set(output)
     ctx.call_on_close(lambda: _output_context_var.reset(token))

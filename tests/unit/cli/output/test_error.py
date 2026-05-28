@@ -8,12 +8,12 @@ from contextlib import redirect_stderr
 from pathlib import Path
 from typing import Any
 
-import click
 import pytest
 
 from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.cli.main import _handle_cli_error, main
 from osmosis_ai.cli.output.error import (
+    ClickUsageError,
     classify_error,
     command_path_for_error,
     emit_structured_error_to_stderr,
@@ -24,6 +24,15 @@ from osmosis_ai.platform.auth.platform_client import (
 )
 
 GOLDEN = Path(__file__).resolve().parents[3] / "golden" / "cli_output"
+
+
+class UsageError(ClickUsageError):
+    """Stand-in for a real Typer/Click parser usage error."""
+
+
+class _FakeContext:
+    def __init__(self, command_path: str) -> None:
+        self.command_path = command_path
 
 
 def _capture_envelope(err: CLIError) -> dict[str, Any]:
@@ -38,7 +47,7 @@ def _capture_json_usage_error_for_argv(
     capsys: pytest.CaptureFixture[str],
 ) -> dict[str, Any]:
     rc = _handle_cli_error(
-        click.UsageError("No such command."),
+        UsageError("No such command."),
         argv=argv,
         exit_code=2,
     )
@@ -120,16 +129,10 @@ def test_command_path_fallback_excludes_top_level_argument(monkeypatch) -> None:
     assert command_path_for_error(None) == "deploy"
 
 
-def test_command_path_uses_click_context_when_available() -> None:
-    import click
-
-    parent = click.Context(click.Command("osmosis"))
-    parent.info_name = "osmosis"
-    middle = click.Context(click.Command("dataset"), parent=parent)
-    middle.info_name = "dataset"
-    nested = click.Context(click.Command("list"), parent=middle)
-    nested.info_name = "list"
-    assert command_path_for_error(nested) == "dataset list"
+def test_command_path_uses_parser_context_when_available() -> None:
+    assert (
+        command_path_for_error(_FakeContext("osmosis dataset list")) == "dataset list"
+    )
 
 
 def test_command_path_root_when_argv_empty(monkeypatch) -> None:

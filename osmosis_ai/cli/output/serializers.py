@@ -8,6 +8,7 @@ from osmosis_ai.platform.api.models import (
     BaseModelInfo,
     DatasetFile,
     DeploymentInfo,
+    EnvironmentSecretInfo,
     EvaluationRun,
     LoraCheckpointInfo,
     RolloutInfo,
@@ -105,6 +106,21 @@ def serialize_rollout(rollout: RolloutInfo) -> dict[str, Any]:
         "repo_full_name": rollout.repo_full_name,
         "last_synced_commit_sha": rollout.last_synced_commit_sha,
         "created_at": rollout.created_at,
+    }
+
+
+def serialize_environment_secret(secret: EnvironmentSecretInfo) -> dict[str, Any]:
+    """Serialize an environment secret for the public JSON contract.
+
+    Intentionally never includes the secret value — the platform does not
+    return it, and there must be no path by which a value reaches output.
+    """
+    return {
+        "id": secret.id,
+        "name": secret.name,
+        "created_at": secret.created_at,
+        "updated_at": secret.updated_at,
+        "creator_name": secret.creator_name,
     }
 
 

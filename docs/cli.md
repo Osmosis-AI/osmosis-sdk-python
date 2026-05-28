@@ -246,8 +246,7 @@ platform resolves the actual secret value server-side from encrypted secret
 storage and injects it into the container. Secret values never
 appear in the config file, in the API payload, or in CLI output.
 
-Pre-register secrets at `/:orgName/secrets` in the platform UI before
-submitting a run that references them.
+Pre-register secrets before submitting a run that references them — either with [`osmosis secret add`](#osmosis-secret-add) or at `/:orgName/secrets` in the platform UI.
 
 ```toml
 [secrets]
@@ -328,6 +327,35 @@ Transition a checkpoint deployment to inactive.
 
 ```bash
 osmosis undeploy <checkpoint>
+```
+
+## Secrets
+
+Manage workspace `environment_secret` records — the values referenced by the `[secrets]` table in train/eval configs. The platform never returns a secret value: `list` shows names and metadata only, and `add` echoes back only metadata. Secret values are accepted from a hidden interactive prompt or a named environment variable — never as a plaintext command-line argument (which would leak into shell history and the process list).
+
+### osmosis secret list
+
+List secrets for the current workspace directory (names and metadata only).
+
+```bash
+osmosis secret list
+osmosis secret list --limit 50
+osmosis secret list --all
+```
+
+### osmosis secret add
+
+Add a workspace secret. The value is read from a named environment variable (`--env VARNAME`) or, with no flag, typed at a hidden interactive prompt. The secret name may contain letters, digits, `_`, and `-` (1–255 chars). Adding a secret whose name already exists fails with a `CONFLICT` error rather than overwriting it.
+
+```bash
+# Type the value at a hidden prompt (input is not echoed):
+osmosis secret add OPENAI_API_KEY
+
+# Read the value from an environment variable (recommended for CI):
+osmosis secret add OPENAI_API_KEY --env OPENAI_API_KEY
+
+# In --json / --plain (non-interactive) modes, --env is required:
+osmosis --json secret add OPENAI_API_KEY --env SOURCE_VAR
 ```
 
 ## See also
