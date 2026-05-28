@@ -502,6 +502,116 @@ class TestSubmitTrainingRun:
         assert payload["secret_refs_config"] == {"OPENAI_API_KEY": "openai-prod"}
 
 
+class TestCloudEvalRuns:
+    """Tests for OsmosisClient cloud eval run request contracts."""
+
+    @staticmethod
+    def _submit_response() -> dict[str, Any]:
+        return {
+            "id": "eval-1",
+            "name": "eval-1",
+            "status": "pending",
+            "created_at": "2026-05-04T00:00:00Z",
+        }
+
+    @patch("osmosis_ai.platform.api.client.platform_request")
+    def test_submit_cloud_eval_minimal_payload_omits_optional_fields(
+        self, mock_request: MagicMock
+    ) -> None:
+        mock_request.return_value = self._submit_response()
+        result = OsmosisClient().submit_cloud_eval(
+            experiment_config={
+                "model_path": "openai/gpt-oss",
+                "dataset": "dataset-1",
+                "rollout": "rollout",
+                "entrypoint": "rollout.py",
+            },
+            git_identity="git_test",
+        )
+
+        assert result.id == "eval-1"
+        assert mock_request.call_args[0][0] == "/api/cli/eval-runs"
+        assert mock_request.call_args.kwargs["method"] == "POST"
+        assert mock_request.call_args.kwargs["data"] == {
+            "experiment_config": {
+                "model_path": "openai/gpt-oss",
+                "dataset": "dataset-1",
+                "rollout": "rollout",
+                "entrypoint": "rollout.py",
+            }
+        }
+        assert mock_request.call_args.kwargs["git_identity"] == "git_test"
+
+    @patch("osmosis_ai.platform.api.client.platform_request")
+    def test_submit_cloud_eval_includes_non_empty_config_sections(
+        self, mock_request: MagicMock
+    ) -> None:
+        mock_request.return_value = self._submit_response()
+
+        OsmosisClient().submit_cloud_eval(
+            experiment_config={"model_path": "openai/gpt-oss"},
+            evaluation_config={"rubric": "grade correctness"},
+            advanced_config={"max_concurrent_rollouts": 8},
+            env_config={"FOO": "bar"},
+            secret_refs_config={"OPENAI_API_KEY": "openai-prod"},
+            git_identity="git_test",
+        )
+
+        payload = mock_request.call_args.kwargs["data"]
+        assert payload == {
+            "experiment_config": {"model_path": "openai/gpt-oss"},
+            "evaluation_config": {"rubric": "grade correctness"},
+            "advanced_config": {"max_concurrent_rollouts": 8},
+            "env_config": {"FOO": "bar"},
+            "secret_refs_config": {"OPENAI_API_KEY": "openai-prod"},
+        }
+
+    @patch("osmosis_ai.platform.api.client.platform_request")
+    def test_list_eval_runs_uses_pagination_query(
+        self, mock_request: MagicMock
+    ) -> None:
+        mock_request.return_value = {
+            "data": [],
+            "total_count": 0,
+            "has_more": False,
+            "next_offset": None,
+        }
+
+        result = OsmosisClient().list_eval_runs(
+            limit=25,
+            offset=50,
+            git_identity="git_test",
+        )
+
+        assert result.eval_runs == []
+        assert mock_request.call_args[0][0] == "/api/cli/eval-runs?limit=25&offset=50"
+        assert mock_request.call_args.kwargs["git_identity"] == "git_test"
+
+    @patch("osmosis_ai.platform.api.client.platform_request")
+    def test_get_eval_run_encodes_id(self, mock_request: MagicMock) -> None:
+        mock_request.return_value = {
+            "eval_run": {"id": "a/b", "status": "running"},
+        }
+
+        result = OsmosisClient().get_eval_run("a/b", git_identity="git_test")
+
+        assert result.eval_run["id"] == "a/b"
+        assert mock_request.call_args[0][0] == "/api/cli/eval-runs/a%2Fb"
+
+    @patch("osmosis_ai.platform.api.client.platform_request")
+    def test_stop_eval_run_posts_empty_body_and_encodes_id(
+        self, mock_request: MagicMock
+    ) -> None:
+        mock_request.return_value = {"id": "a/b", "status": "stopping"}
+
+        result = OsmosisClient().stop_eval_run("a/b", git_identity="git_test")
+
+        assert result == {"id": "a/b", "status": "stopping"}
+        assert mock_request.call_args[0][0] == "/api/cli/eval-runs/a%2Fb/stop"
+        assert mock_request.call_args.kwargs["method"] == "POST"
+        assert mock_request.call_args.kwargs["data"] == {}
+
+
 class TestGetTrainingRunMetrics:
     """Tests for OsmosisClient.get_training_run_metrics."""
 

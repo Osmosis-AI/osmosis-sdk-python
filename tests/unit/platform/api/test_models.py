@@ -11,10 +11,13 @@ from osmosis_ai.platform.api.models import (
     STATUSES_INACTIVE,
     STATUSES_SUCCESS,
     STATUSES_TERMINAL,
+    CloudEvalRun,
+    CloudEvalRunDetail,
     DatasetDownloadInfo,
     DatasetFile,
     MetricDataPoint,
     MetricHistory,
+    PaginatedCloudEvalRuns,
     SubmitRunResult,
     TrainingRunDetail,
     TrainingRunMetrics,
@@ -561,3 +564,70 @@ class TestDeploymentModels:
         assert r.checkpoints[0].checkpoint_name == "qwen3-run1-step-100"
         assert r.checkpoints[1].checkpoint_step == 200
         assert r.checkpoints[1].checkpoint_name == "qwen3-run1-step-200"
+
+
+class TestCloudEvalRunModels:
+    def test_cloud_eval_run_from_dict_parses_nested_refs(self) -> None:
+        run = CloudEvalRun.from_dict(
+            {
+                "id": "eval_1",
+                "name": "math-eval",
+                "status": "running",
+                "created_at": "2026-05-04T00:00:00Z",
+                "started_at": "2026-05-04T00:01:00Z",
+                "completed_at": None,
+                "model": {"id": "model_1", "name": "Qwen/Qwen3"},
+                "dataset": {"id": "dataset_1", "file_name": "eval.jsonl"},
+                "rollout": {"id": "rollout_1", "name": "math-rollout"},
+                "creator_name": "brian",
+            }
+        )
+
+        assert run.id == "eval_1"
+        assert run.status == "running"
+        assert run.model == {"id": "model_1", "name": "Qwen/Qwen3"}
+        assert run.dataset == {"id": "dataset_1", "file_name": "eval.jsonl"}
+        assert run.rollout == {"id": "rollout_1", "name": "math-rollout"}
+        assert run.creator_name == "brian"
+
+    def test_cloud_eval_run_detail_from_dict(self) -> None:
+        detail = CloudEvalRunDetail.from_dict(
+            {
+                "eval_run": {"id": "eval_1", "status": "succeeded"},
+                "config": {"evaluation": {"rubric": "grade correctness"}},
+                "results": {"score": 0.92},
+                "model": {"id": "model_1"},
+                "dataset": {"id": "dataset_1"},
+                "rollout": {"id": "rollout_1"},
+            }
+        )
+
+        assert detail.eval_run == {"id": "eval_1", "status": "succeeded"}
+        assert detail.config == {"evaluation": {"rubric": "grade correctness"}}
+        assert detail.results == {"score": 0.92}
+        assert detail.model == {"id": "model_1"}
+        assert detail.dataset == {"id": "dataset_1"}
+        assert detail.rollout == {"id": "rollout_1"}
+
+    def test_paginated_cloud_eval_runs_uses_platform_data_key(self) -> None:
+        page = PaginatedCloudEvalRuns.from_dict(
+            {
+                "data": [
+                    {
+                        "id": "eval_1",
+                        "name": "math-eval",
+                        "status": "pending",
+                        "created_at": "2026-05-04T00:00:00Z",
+                    }
+                ],
+                "total_count": 2,
+                "has_more": True,
+                "next_offset": 1,
+            }
+        )
+
+        assert len(page.eval_runs) == 1
+        assert page.eval_runs[0].name == "math-eval"
+        assert page.total_count == 2
+        assert page.has_more is True
+        assert page.next_offset == 1
