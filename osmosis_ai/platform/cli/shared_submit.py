@@ -30,6 +30,7 @@ from osmosis_ai.platform.cli.shared_config import (
     build_submit_summary_rows,
 )
 from osmosis_ai.platform.cli.utils import (
+    fetch_all_pages,
     print_remote_fetch_notice,
     require_git_workspace_directory_context,
 )
@@ -85,6 +86,58 @@ class CloudSubmitSpec[ConfigT: BaseSubmitConfig]:
     ]
 
 
+def _fetch_user_secret_names(
+    client: OsmosisClient, *, credentials: Any, git_identity: str
+) -> set[str]:
+    """Return the names of the caller's personal (user-scope) secrets.
+
+    Best-effort: any failure (network, auth) returns an empty set so the
+    confirmation reminder never blocks a submit.
+    """
+    try:
+
+        def _fetch(limit: int, offset: int) -> Any:
+            return client.list_environment_secrets(
+                limit=limit,
+                offset=offset,
+                scope="user",
+                credentials=credentials,
+                git_identity=git_identity,
+            )
+
+        secrets, _ = fetch_all_pages(_fetch, items_attr="environment_secrets")
+        return {s.name for s in secrets}
+    except Exception:
+        return set()
+
+
+def _annotate_secret_override_row(
+    rows: list[tuple[str, str]],
+    *,
+    referenced: list[str],
+    user_secret_names: set[str],
+) -> list[tuple[str, str]]:
+    """Rewrite the ``Rollout secrets (N)`` row to spell out, per referenced
+    name, whether it resolves to the caller's personal value or the shared
+    workspace value (e.g. ``OPENAI_API_KEY (personal), DATABASE_URL
+    (workspace)``). Returns a new list; non-secret rows are untouched.
+    """
+    if not referenced:
+        return rows
+
+    annotated_value = ", ".join(
+        f"{name} (personal)" if name in user_secret_names else f"{name} (workspace)"
+        for name in referenced
+    )
+    result: list[tuple[str, str]] = []
+    for label, value in rows:
+        if label.startswith("Rollout secrets"):
+            result.append((label, annotated_value))
+        else:
+            result.append((label, value))
+    return result
+
+
 def run_cloud_submit[ConfigT: BaseSubmitConfig](
     config_path: Path,
     *,
@@ -125,6 +178,19 @@ def run_cloud_submit[ConfigT: BaseSubmitConfig](
         env=config.env,
         secrets=config.secrets,
     )
+
+    if config.secrets:
+        user_secret_names = _fetch_user_secret_names(
+            OsmosisClient(),
+            credentials=context.credentials,
+            git_identity=context.git_identity,
+        )
+        summary_rows = _annotate_secret_override_row(
+            summary_rows,
+            referenced=list(config.secrets),
+            user_secret_names=user_secret_names,
+        )
+
     console.table(
         [(label, console.escape(value)) for label, value in summary_rows],
         title=spec.table_title,
