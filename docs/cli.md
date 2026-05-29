@@ -97,6 +97,10 @@ selection: `[experiment].dataset` is a platform dataset name from
 `osmosis dataset list`, not a local `data/*.jsonl` path.
 
 ```toml
+# `secrets` must be at the TOP of the file, before any [table] header —
+# otherwise TOML folds it into the preceding table and it is silently ignored.
+# secrets = ["OPENAI_API_KEY"]
+
 [experiment]
 rollout = "my-rollout"
 entrypoint = "main.py"
@@ -115,9 +119,6 @@ dataset = "my-platform-dataset"
 
 # [env]
 # LOG_LEVEL = "INFO"
-
-# [secrets]
-# OPENAI_API_KEY = "openai-api-key"
 ```
 
 ```bash
@@ -239,26 +240,32 @@ LOG_LEVEL = "INFO"
 DEFAULT_REGION = "us-west-2"
 ```
 
-#### Secrets — `[secrets]`
+#### Secrets — `secrets`
 
-Maps env-var names to Platform `environment_secret` **record names**. The
-platform resolves the actual secret value server-side from encrypted secret
-storage and injects it into the container. Secret values never
+A list of Platform `environment_secret` **record names** to inject into the
+rollout container. The platform resolves each name to an encrypted value
+server-side and sets it as an env var of the same name. Secret values never
 appear in the config file, in the API payload, or in CLI output.
 
-Pre-register secrets before submitting a run that references them — either with [`osmosis secret add`](#osmosis-secret-add) or at `/:orgName/secrets` in the platform UI.
+Each name must match `^[A-Z][A-Z0-9_]*$`.
 
 ```toml
-[secrets]
-OPENAI_API_KEY = "openai-api-key"   # "openai-api-key" is the record name
+# Must be at the top of the file, before any [table] header.
+secrets = ["OPENAI_API_KEY", "DATABASE_URL"]
 ```
 
-#### Rules for both sections
+Secrets are scoped. A **workspace** secret is shared across the workspace; a
+**user** secret is private to you. When a workspace and a personal secret
+share a name, your personal value wins at run time. Register secrets with
+`osmosis secret set` (below) or at `/:orgName/secrets` in the platform UI
+before submitting a run that references them.
 
-- Keys must match `^[A-Z_][A-Z0-9_]*$`.
-- A key cannot appear in both `[env]` and `[secrets]`.
-- Any env var name starting with `_OSMOSIS_` is reserved by the platform and cannot be used.
-- Both sections are optional.
+#### Rules
+
+- `[env]` keys and `secrets` names must match `^[A-Z][A-Z0-9_]*$`.
+- A name cannot appear in both `[env]` and `secrets`.
+- Any name starting with `_OSMOSIS_` is reserved by the platform.
+- Both are optional.
 
 ### osmosis train info
 
@@ -331,31 +338,29 @@ osmosis undeploy <checkpoint>
 
 ## Secrets
 
-Manage workspace `environment_secret` records — the values referenced by the `[secrets]` table in train/eval configs. The platform never returns a secret value: `list` shows names and metadata only, and `add` echoes back only metadata. Secret values are accepted from a hidden interactive prompt or a named environment variable — never as a plaintext command-line argument (which would leak into shell history and the process list).
+### `osmosis secret`
 
-### osmosis secret list
+Manage environment secrets. The platform never returns secret values; these
+commands show or accept names + metadata only.
 
-List secrets for the current workspace directory (names and metadata only).
+| Command | Description |
+| --- | --- |
+| `osmosis secret list [--scope all\|workspace\|user] [--limit N] [--all]` | List secret names + scope (no values). |
+| `osmosis secret set NAME [--scope workspace\|user] [--env VARNAME]` | Create or update (upsert) a secret. Value read from `--env VARNAME` or a hidden prompt — never a plaintext argument. |
+| `osmosis secret delete NAME [--scope workspace\|user] [--yes]` | Delete a secret within the given scope. |
 
-```bash
-osmosis secret list
-osmosis secret list --limit 50
-osmosis secret list --all
-```
-
-### osmosis secret add
-
-Add a workspace secret. The value is read from a named environment variable (`--env VARNAME`) or, with no flag, typed at a hidden interactive prompt. The secret name may contain letters, digits, `_`, and `-` (1–255 chars). Adding a secret whose name already exists fails with a `CONFLICT` error rather than overwriting it.
+`--scope` defaults to `workspace` for `set`/`delete` and `all` for `list`.
+Workspace secrets require an admin/owner role; user secrets are private to you.
 
 ```bash
-# Type the value at a hidden prompt (input is not echoed):
-osmosis secret add OPENAI_API_KEY
+# Read the value from an env var (recommended for scripts):
+OPENAI_API_KEY=sk-... osmosis secret set OPENAI_API_KEY --env OPENAI_API_KEY
 
-# Read the value from an environment variable (recommended for CI):
-osmosis secret add OPENAI_API_KEY --env OPENAI_API_KEY
+# Personal override (only affects your own runs):
+osmosis secret set OPENAI_API_KEY --scope user --env OPENAI_API_KEY
 
-# In --json / --plain (non-interactive) modes, --env is required:
-osmosis --json secret add OPENAI_API_KEY --env SOURCE_VAR
+osmosis secret list --scope user
+osmosis secret delete OPENAI_API_KEY --scope user --yes
 ```
 
 ## See also
