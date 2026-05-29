@@ -28,8 +28,8 @@ def _typer_click_base(name: str) -> type[BaseException]:
     raise RuntimeError(f"typer.BadParameter MRO has no {name!r}; Typer layout changed")
 
 
-ClickUsageError = _typer_click_base("UsageError")  # exit_code 2
-ClickException = _typer_click_base("ClickException")  # exit_code 1
+ClickUsageError: type[BaseException] = _typer_click_base("UsageError")  # exit_code 2
+ClickException: type[BaseException] = _typer_click_base("ClickException")  # exit_code 1
 
 _SUPPORTED_TOP_LEVEL_COMMANDS = {
     "doctor",
