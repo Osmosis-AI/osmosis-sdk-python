@@ -92,6 +92,28 @@ dataset = "multiply"
     assert config.secrets == []
 
 
+def test_secrets_map_form_is_rejected_with_conversion_hint(tmp_path: Path) -> None:
+    path = _write_config(
+        tmp_path / "eval.toml",
+        """
+[experiment]
+rollout = "calculator"
+entrypoint = "main.py"
+model_path = "openai/gpt-5-mini"
+dataset = "multiply"
+
+[secrets]
+OPENAI_API_KEY = "OPENAI_API_KEY"
+""",
+    )
+
+    with pytest.raises(CLIError) as exc_info:
+        load_eval_submit_config(path)
+    message = str(exc_info.value)
+    assert "[secrets] map form is no longer supported" in message
+    assert 'secrets = ["NAME", ...]' in message
+
+
 def test_load_eval_submit_config_advanced_section_preserves_backend_params(
     tmp_path: Path,
 ) -> None:

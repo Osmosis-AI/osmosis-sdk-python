@@ -145,6 +145,49 @@ dataset = "d"
     assert cfg.secrets == []
 
 
+def test_secrets_map_form_is_rejected_with_conversion_hint(tmp_path: Path) -> None:
+    path = tmp_path / "map_secrets.toml"
+    path.write_text(
+        """
+[experiment]
+rollout = "r"
+entrypoint = "e.py"
+model_path = "m"
+dataset = "d"
+
+[secrets]
+OPENAI_API_KEY = "OPENAI_API_KEY"
+""".strip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(CLIError) as exc_info:
+        load_train_submit_config(path)
+    message = str(exc_info.value)
+    assert "[secrets] map form is no longer supported" in message
+    assert 'secrets = ["NAME", ...]' in message
+
+
+def test_secrets_must_be_a_list_of_strings(tmp_path: Path) -> None:
+    path = tmp_path / "scalar_secrets.toml"
+    path.write_text(
+        """
+secrets = "OPENAI_API_KEY"
+
+[experiment]
+rollout = "r"
+entrypoint = "e.py"
+model_path = "m"
+dataset = "d"
+""".strip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(CLIError) as exc_info:
+        load_train_submit_config(path)
+    assert "must be a list of strings" in str(exc_info.value)
+
+
 # ---------------------------------------------------------------------------
 # API config sections
 # ---------------------------------------------------------------------------
