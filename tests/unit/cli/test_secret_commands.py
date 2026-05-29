@@ -716,3 +716,74 @@ def test_secret_delete_subcommand_wires_through(monkeypatch, capsys) -> None:
     monkeypatch.setattr(secret_module, "OsmosisClient", FakeClient)
     assert cli.main(["--json", "secret", "delete", "X", "--scope", "user", "--yes"]) == 0
     assert seen == {"name": "X", "scope": "user"}
+
+
+# ── lenient name validation on delete (legacy-named secrets) ──────
+
+
+@pytest.mark.parametrize(
+    "legacy_name",
+    ["my-old-key", "lowercase_name", "dash-and-lower", "oldkey"],
+)
+def test_secret_delete_accepts_legacy_names(
+    monkeypatch, capsys, legacy_name: str
+) -> None:
+    """delete should NOT block legacy-named secrets at the client side.
+
+    The platform DELETE endpoint uses a lenient lookup schema (non-empty,
+    max 255 chars, no character-set restriction) so pre-existing secrets
+    with lowercase/dash names can still be deleted via the CLI.
+    """
+    fake_credentials = _stub_git_context(monkeypatch)
+    seen: dict[str, object] = {}
+
+    class FakeClient:
+        def delete_environment_secret(
+            self, name, *, scope, git_identity, credentials=None
+        ):
+            assert credentials is fake_credentials
+            seen.update(name=name, scope=scope)
+
+    monkeypatch.setattr(secret_module, "OsmosisClient", FakeClient)
+    exit_code = cli.main(
+        ["--json", "secret", "delete", legacy_name, "--scope", "workspace", "--yes"]
+    )
+    captured = capsys.readouterr()
+    assert exit_code == 0, captured.err
+    assert seen == {"name": legacy_name, "scope": "workspace"}
+
+
+def test_secret_set_still_rejects_legacy_names(monkeypatch, capsys) -> None:
+    """set must STILL enforce SCREAMING_SNAKE_CASE — only delete is lenient."""
+    _stub_git_context(monkeypatch)
+    monkeypatch.setenv("SOURCE_VAR", SENTINEL_VALUE)
+
+    exit_code = cli.main(
+        ["--json", "secret", "set", "my-old-key",
+         "--scope", "workspace", "--env", "SOURCE_VAR"]
+    )
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    payload = json.loads(captured.err)
+    assert payload["error"]["code"] == "VALIDATION"
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["my-old-key", "lowercase_name", "dash-and-lower"],
+)
+def test_validate_secret_name_for_lookup_accepts_legacy(name: str) -> None:
+    """The lenient lookup validator passes names that strict validation rejects."""
+    secret_module._validate_secret_name_for_lookup(name)  # no raise
+
+
+def test_validate_secret_name_for_lookup_rejects_empty() -> None:
+    with pytest.raises(CLIError) as exc:
+        secret_module._validate_secret_name_for_lookup("")
+    assert exc.value.code == "VALIDATION"
+
+
+def test_validate_secret_name_for_lookup_rejects_too_long() -> None:
+    with pytest.raises(CLIError) as exc:
+        secret_module._validate_secret_name_for_lookup("A" * 256)
+    assert exc.value.code == "VALIDATION"

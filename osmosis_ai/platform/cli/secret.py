@@ -60,6 +60,20 @@ def _validate_secret_name(name: str) -> None:
         )
 
 
+def _validate_secret_name_for_lookup(name: str) -> None:
+    """Lenient name check for delete — mirrors the platform's ``environmentSecretNameLookupSchema``.
+
+    Only enforces non-empty and max 255 chars; no character-set restriction.
+    This allows legacy-named secrets (lowercase/dashes, created before the
+    SCREAMING_SNAKE rule) to still be deleted via the CLI.
+    """
+    if not name or len(name) > _SECRET_NAME_MAX:
+        raise CLIError(
+            "Secret name must be between 1 and 255 characters.",
+            code="VALIDATION",
+        )
+
+
 def _validate_scope(scope: str) -> None:
     if scope not in _VALID_SCOPES:
         raise CLIError(
@@ -313,8 +327,12 @@ def delete_secret(*, name: str, scope: str, yes: bool) -> OperationResult:
     ``scope`` is ``"workspace"`` or ``"user"``. Requires confirmation
     (``--yes`` to skip). Workspace deletion is additionally role-gated
     server-side (admin/owner).
+
+    Name validation uses the lenient lookup schema (non-empty, max 255 chars)
+    rather than the strict SCREAMING_SNAKE rule so that legacy-named secrets
+    (created before the naming convention was enforced) can still be deleted.
     """
-    _validate_secret_name(name)
+    _validate_secret_name_for_lookup(name)
     _validate_scope(scope)
 
     context = require_git_workspace_directory_context()
