@@ -13,12 +13,14 @@ from .models import (
     DatasetFile,
     DeploymentInfo,
     DeploymentSummary,
+    EvaluationRunDetail,
     PaginatedBaseModels,
     PaginatedDatasets,
     PaginatedDeployments,
+    PaginatedEvaluationRuns,
     PaginatedRollouts,
     PaginatedTrainingRuns,
-    SubmitTrainingRunResult,
+    SubmitRunResult,
     TrainingRunCheckpoints,
     TrainingRunDetail,
     TrainingRunMetrics,
@@ -182,15 +184,15 @@ class OsmosisClient:
         sampling_config: dict[str, Any] | None = None,
         checkpoints_config: dict[str, Any] | None = None,
         advanced_config: dict[str, Any] | None = None,
-        rollout_env: dict[str, str] | None = None,
-        rollout_secret_refs: dict[str, str] | None = None,
+        env_config: dict[str, str] | None = None,
+        secret_refs_config: dict[str, str] | None = None,
         credentials: Credentials | None = None,
         git_identity: str,
-    ) -> SubmitTrainingRunResult:
+    ) -> SubmitRunResult:
         """Submit a new training run.
 
-        ``rollout_env`` is a literal env-var-name → value map applied to the
-        rollout container. ``rollout_secret_refs`` maps env-var names to the
+        ``env_config`` is a literal env-var-name → value map applied to the
+        rollout container. ``secret_refs_config`` maps env-var names to the
         names of workspace ``environment_secret`` records; values are resolved
         server-side and never travel through the CLI.
         """
@@ -205,10 +207,10 @@ class OsmosisClient:
             data["checkpoints_config"] = checkpoints_config
         if advanced_config:
             data["advanced_config"] = advanced_config
-        if rollout_env:
-            data["rollout_env"] = rollout_env
-        if rollout_secret_refs:
-            data["rollout_secret_refs"] = rollout_secret_refs
+        if env_config:
+            data["env_config"] = env_config
+        if secret_refs_config:
+            data["secret_refs_config"] = secret_refs_config
         result = platform_request(
             "/api/cli/training-runs",
             method="POST",
@@ -216,7 +218,7 @@ class OsmosisClient:
             credentials=credentials,
             git_identity=git_identity,
         )
-        return SubmitTrainingRunResult.from_dict(result)
+        return SubmitRunResult.from_dict(result)
 
     def list_training_runs(
         self,
@@ -405,3 +407,83 @@ class OsmosisClient:
             git_identity=git_identity,
         )
         return TrainingRunCheckpoints.from_dict(data)
+
+    # ── Evaluation Runs ──────────────────────────────────────────
+
+    def submit_evaluation_run(
+        self,
+        *,
+        experiment_config: dict[str, Any],
+        evaluation_config: dict[str, Any] | None = None,
+        advanced_config: dict[str, Any] | None = None,
+        env_config: dict[str, str] | None = None,
+        secret_refs_config: dict[str, str] | None = None,
+        credentials: Credentials | None = None,
+        git_identity: str,
+    ) -> SubmitRunResult:
+        """Submit a new evaluation run."""
+        data: dict[str, Any] = {
+            "experiment_config": experiment_config,
+        }
+        if evaluation_config:
+            data["evaluation_config"] = evaluation_config
+        if advanced_config:
+            data["advanced_config"] = advanced_config
+        if env_config:
+            data["env_config"] = env_config
+        if secret_refs_config:
+            data["secret_refs_config"] = secret_refs_config
+        result = platform_request(
+            "/api/cli/eval-runs",
+            method="POST",
+            data=data,
+            credentials=credentials,
+            git_identity=git_identity,
+        )
+        return SubmitRunResult.from_dict(result)
+
+    def list_eval_runs(
+        self,
+        limit: int = DEFAULT_PAGE_SIZE,
+        offset: int = 0,
+        *,
+        credentials: Credentials | None = None,
+        git_identity: str,
+    ) -> PaginatedEvaluationRuns:
+        qs = urlencode({"limit": limit, "offset": offset})
+        data = platform_request(
+            f"/api/cli/eval-runs?{qs}",
+            credentials=credentials,
+            git_identity=git_identity,
+        )
+        return PaginatedEvaluationRuns.from_dict(data)
+
+    def get_eval_run(
+        self,
+        eval_run_id: str,
+        *,
+        credentials: Credentials | None = None,
+        git_identity: str,
+    ) -> EvaluationRunDetail:
+        data = platform_request(
+            f"/api/cli/eval-runs/{_safe_path(eval_run_id)}",
+            credentials=credentials,
+            git_identity=git_identity,
+        )
+        return EvaluationRunDetail.from_dict(data)
+
+    def stop_eval_run(
+        self,
+        eval_run_id: str,
+        *,
+        credentials: Credentials | None = None,
+        git_identity: str,
+    ) -> dict[str, Any]:
+        """Stop a pending or running evaluation run."""
+        return platform_request(
+            f"/api/cli/eval-runs/{_safe_path(eval_run_id)}/stop",
+            method="POST",
+            data={},
+            credentials=credentials,
+            git_identity=git_identity,
+        )

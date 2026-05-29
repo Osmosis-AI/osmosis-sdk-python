@@ -435,15 +435,15 @@ class TestSubmitTrainingRun:
                 "entrypoint": "rollouts/main.py",
             },
         }
-        assert "rollout_env" not in payload
-        assert "rollout_secret_refs" not in payload
+        assert "env_config" not in payload
+        assert "secret_refs_config" not in payload
 
     @patch("osmosis_ai.platform.api.client.platform_request")
-    def test_rollout_env_included_when_non_empty(self, mock_request: MagicMock) -> None:
-        """Non-empty rollout_env map is forwarded to the platform."""
+    def test_env_config_included_when_non_empty(self, mock_request: MagicMock) -> None:
+        """Non-empty env_config map is forwarded to the platform."""
         mock_request.return_value = self._response()
         client = OsmosisClient()
-        rollout_env = {"FOO": "bar", "BAZ": "qux"}
+        env_config = {"FOO": "bar", "BAZ": "qux"}
         client.submit_training_run(
             experiment_config={
                 "model_path": "m1",
@@ -451,21 +451,21 @@ class TestSubmitTrainingRun:
                 "rollout": "rollout1",
                 "entrypoint": "rollouts/main.py",
             },
-            rollout_env=rollout_env,
+            env_config=env_config,
             git_identity="git_test",
         )
         payload = mock_request.call_args.kwargs["data"]
-        assert payload["rollout_env"] == rollout_env
-        assert "rollout_secret_refs" not in payload
+        assert payload["env_config"] == env_config
+        assert "secret_refs_config" not in payload
 
     @patch("osmosis_ai.platform.api.client.platform_request")
-    def test_rollout_secret_refs_included_when_non_empty(
+    def test_secret_refs_config_included_when_non_empty(
         self, mock_request: MagicMock
     ) -> None:
-        """Non-empty rollout_secret_refs map is forwarded to the platform."""
+        """Non-empty secret_refs_config map is forwarded to the platform."""
         mock_request.return_value = self._response()
         client = OsmosisClient()
-        secret_refs = {"OPENAI_API_KEY": "openai-prod"}
+        secret_refs_config = {"OPENAI_API_KEY": "openai-prod"}
         client.submit_training_run(
             experiment_config={
                 "model_path": "m1",
@@ -473,15 +473,15 @@ class TestSubmitTrainingRun:
                 "rollout": "rollout1",
                 "entrypoint": "rollouts/main.py",
             },
-            rollout_secret_refs=secret_refs,
+            secret_refs_config=secret_refs_config,
             git_identity="git_test",
         )
         payload = mock_request.call_args.kwargs["data"]
-        assert payload["rollout_secret_refs"] == secret_refs
-        assert "rollout_env" not in payload
+        assert payload["secret_refs_config"] == secret_refs_config
+        assert "env_config" not in payload
 
     @patch("osmosis_ai.platform.api.client.platform_request")
-    def test_empty_rollout_env_and_secret_refs_are_omitted(
+    def test_empty_env_and_secret_refs_configs_are_omitted(
         self, mock_request: MagicMock
     ) -> None:
         """Empty dicts are treated as 'not provided' and stripped from payload."""
@@ -494,13 +494,13 @@ class TestSubmitTrainingRun:
                 "rollout": "rollout1",
                 "entrypoint": "rollouts/main.py",
             },
-            rollout_env={},
-            rollout_secret_refs={},
+            env_config={},
+            secret_refs_config={},
             git_identity="git_test",
         )
         payload = mock_request.call_args.kwargs["data"]
-        assert "rollout_env" not in payload
-        assert "rollout_secret_refs" not in payload
+        assert "env_config" not in payload
+        assert "secret_refs_config" not in payload
 
     @patch("osmosis_ai.platform.api.client.platform_request")
     def test_commit_sha_and_config_sections_included_when_provided(
@@ -521,8 +521,8 @@ class TestSubmitTrainingRun:
             sampling_config={"rollout_temperature": 0.8},
             checkpoints_config={"checkpoint_save_freq": 10},
             advanced_config={"optimizer": "adam"},
-            rollout_env={"FOO": "bar"},
-            rollout_secret_refs={"OPENAI_API_KEY": "openai-prod"},
+            env_config={"FOO": "bar"},
+            secret_refs_config={"OPENAI_API_KEY": "openai-prod"},
             git_identity="git_test",
         )
         payload = mock_request.call_args.kwargs["data"]
@@ -537,8 +537,126 @@ class TestSubmitTrainingRun:
         assert payload["sampling_config"] == {"rollout_temperature": 0.8}
         assert payload["checkpoints_config"] == {"checkpoint_save_freq": 10}
         assert payload["advanced_config"] == {"optimizer": "adam"}
-        assert payload["rollout_env"] == {"FOO": "bar"}
-        assert payload["rollout_secret_refs"] == {"OPENAI_API_KEY": "openai-prod"}
+        assert payload["env_config"] == {"FOO": "bar"}
+        assert payload["secret_refs_config"] == {"OPENAI_API_KEY": "openai-prod"}
+
+
+class TestEvaluationRuns:
+    """Tests for OsmosisClient evaluation run request contracts."""
+
+    @staticmethod
+    def _submit_response() -> dict[str, Any]:
+        return {
+            "id": "eval-1",
+            "name": "eval-1",
+            "status": "pending",
+            "created_at": "2026-05-04T00:00:00Z",
+        }
+
+    @patch("osmosis_ai.platform.api.client.platform_request")
+    def test_submit_evaluation_run_minimal_payload_omits_optional_fields(
+        self, mock_request: MagicMock
+    ) -> None:
+        mock_request.return_value = self._submit_response()
+        result = OsmosisClient().submit_evaluation_run(
+            experiment_config={
+                "model_path": "openai/gpt-oss",
+                "dataset": "dataset-1",
+                "rollout": "rollout",
+                "entrypoint": "rollout.py",
+            },
+            git_identity="git_test",
+        )
+
+        assert result.id == "eval-1"
+        assert mock_request.call_args[0][0] == "/api/cli/eval-runs"
+        assert mock_request.call_args.kwargs["method"] == "POST"
+        assert mock_request.call_args.kwargs["data"] == {
+            "experiment_config": {
+                "model_path": "openai/gpt-oss",
+                "dataset": "dataset-1",
+                "rollout": "rollout",
+                "entrypoint": "rollout.py",
+            }
+        }
+        assert mock_request.call_args.kwargs["git_identity"] == "git_test"
+
+    @patch("osmosis_ai.platform.api.client.platform_request")
+    def test_submit_evaluation_run_includes_non_empty_config_sections(
+        self, mock_request: MagicMock
+    ) -> None:
+        mock_request.return_value = self._submit_response()
+
+        OsmosisClient().submit_evaluation_run(
+            experiment_config={"model_path": "openai/gpt-oss"},
+            evaluation_config={"rubric": "grade correctness"},
+            advanced_config={"max_concurrent_rollouts": 8},
+            env_config={"FOO": "bar"},
+            secret_refs_config={"OPENAI_API_KEY": "openai-prod"},
+            git_identity="git_test",
+        )
+
+        payload = mock_request.call_args.kwargs["data"]
+        assert payload == {
+            "experiment_config": {"model_path": "openai/gpt-oss"},
+            "evaluation_config": {"rubric": "grade correctness"},
+            "advanced_config": {"max_concurrent_rollouts": 8},
+            "env_config": {"FOO": "bar"},
+            "secret_refs_config": {"OPENAI_API_KEY": "openai-prod"},
+        }
+
+    @patch("osmosis_ai.platform.api.client.platform_request")
+    def test_list_eval_runs_uses_pagination_query(
+        self, mock_request: MagicMock
+    ) -> None:
+        mock_request.return_value = {
+            "eval_runs": [
+                {
+                    "id": "eval-1",
+                    "name": "math-eval",
+                    "status": "pending",
+                    "created_at": "2026-05-04T00:00:00Z",
+                }
+            ],
+            "total_count": 1,
+            "has_more": False,
+            "next_offset": None,
+        }
+
+        result = OsmosisClient().list_eval_runs(
+            limit=25,
+            offset=50,
+            git_identity="git_test",
+        )
+
+        assert len(result.eval_runs) == 1
+        assert result.eval_runs[0].name == "math-eval"
+        assert mock_request.call_args[0][0] == "/api/cli/eval-runs?limit=25&offset=50"
+        assert mock_request.call_args.kwargs["git_identity"] == "git_test"
+
+    @patch("osmosis_ai.platform.api.client.platform_request")
+    def test_get_eval_run_encodes_id(self, mock_request: MagicMock) -> None:
+        mock_request.return_value = {
+            "eval_run": {"id": "a/b", "status": "running"},
+        }
+
+        result = OsmosisClient().get_eval_run("a/b", git_identity="git_test")
+
+        assert result.eval_run["id"] == "a/b"
+        assert mock_request.call_args[0][0] == "/api/cli/eval-runs/a%2Fb"
+
+    @patch("osmosis_ai.platform.api.client.platform_request")
+    def test_stop_eval_run_posts_empty_body_and_encodes_id(
+        self, mock_request: MagicMock
+    ) -> None:
+        mock_request.return_value = {"id": "a/b", "status": "stopping"}
+
+        result = OsmosisClient().stop_eval_run("a/b", git_identity="git_test")
+
+        assert result == {"id": "a/b", "status": "stopping"}
+        assert mock_request.call_args[0][0] == "/api/cli/eval-runs/a%2Fb/stop"
+        assert mock_request.call_args.kwargs["method"] == "POST"
+        assert mock_request.call_args.kwargs["data"] == {}
 
 
 class TestGetTrainingRunMetrics:

@@ -120,13 +120,6 @@ def test_command_path_fallback_excludes_top_level_argument(monkeypatch) -> None:
     assert command_path_for_error(None) == "deploy"
 
 
-def test_command_path_fallback_keeps_eval_cache_subcommand(monkeypatch) -> None:
-    monkeypatch.setattr(
-        "sys.argv", ["osmosis", "--json", "eval", "cache", "rm", "task-1"]
-    )
-    assert command_path_for_error(None) == "eval cache rm"
-
-
 def test_command_path_uses_click_context_when_available() -> None:
     import click
 

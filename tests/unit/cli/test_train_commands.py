@@ -11,6 +11,8 @@ import pytest
 
 import osmosis_ai.cli.commands.train as train_module
 import osmosis_ai.platform.api.client as api_client_module
+import osmosis_ai.platform.cli.shared_submit as shared_submit_module
+import osmosis_ai.platform.cli.train as platform_train_module
 import osmosis_ai.platform.cli.utils as utils_module
 from osmosis_ai.cli.console import Console
 from osmosis_ai.cli.errors import CLIError
@@ -21,7 +23,7 @@ from osmosis_ai.platform.api.models import (
     MetricHistory,
     MetricSummary,
     PaginatedTrainingRuns,
-    SubmitTrainingRunResult,
+    SubmitRunResult,
     TrainingRun,
     TrainingRunDetail,
     TrainingRunMetrics,
@@ -106,7 +108,8 @@ def console_capture(monkeypatch: pytest.MonkeyPatch) -> StringIO:
     """
     output = StringIO()
     console = Console(file=output, force_terminal=False, width=200)
-    monkeypatch.setattr(train_module, "console", console)
+    monkeypatch.setattr(platform_train_module, "console", console)
+    monkeypatch.setattr(shared_submit_module, "console", console)
     monkeypatch.setattr(utils_module, "console", console)
     return output
 
@@ -135,6 +138,16 @@ def _mock_git_context(
 
     monkeypatch.setattr(
         "osmosis_ai.platform.cli.utils.require_git_workspace_directory_context",
+        _git_context,
+    )
+    monkeypatch.setattr(
+        platform_train_module,
+        "require_git_workspace_directory_context",
+        _git_context,
+    )
+    monkeypatch.setattr(
+        shared_submit_module,
+        "require_git_workspace_directory_context",
         _git_context,
     )
 
@@ -182,6 +195,8 @@ class TestListRuns:
                 )
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(platform_train_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(shared_submit_module, "OsmosisClient", FakeClient)
         result = train_module.list_runs(limit=30, all_=False)
 
         assert isinstance(result, ListResult)
@@ -212,6 +227,8 @@ class TestListRuns:
                 )
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(platform_train_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(shared_submit_module, "OsmosisClient", FakeClient)
         result = train_module.list_runs(limit=30, all_=False)
 
         assert isinstance(result, ListResult)
@@ -241,6 +258,8 @@ class TestListRuns:
                 )
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(platform_train_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(shared_submit_module, "OsmosisClient", FakeClient)
         result = train_module.list_runs(limit=30, all_=False)
 
         assert [column.label for column in result.columns] == [
@@ -287,6 +306,8 @@ class TestListRuns:
                 )
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(platform_train_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(shared_submit_module, "OsmosisClient", FakeClient)
         result = train_module.list_runs(limit=30, all_=False)
 
         assert isinstance(result, ListResult)
@@ -312,6 +333,8 @@ class TestListRuns:
                 )
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(platform_train_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(shared_submit_module, "OsmosisClient", FakeClient)
         result = train_module.list_runs(limit=30, all_=False)
 
         assert isinstance(result, ListResult)
@@ -397,6 +420,8 @@ class TestInfo:
                 return metric_data
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(platform_train_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(shared_submit_module, "OsmosisClient", FakeClient)
         result = train_module.info(name="run-1", output=str(tmp_path / "metrics.json"))
 
         assert isinstance(result, DetailResult)
@@ -435,6 +460,8 @@ class TestInfo:
                 raise AssertionError("pending info should not fetch metrics")
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(platform_train_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(shared_submit_module, "OsmosisClient", FakeClient)
         result = train_module.info(name="pending-run")
 
         assert isinstance(result, DetailResult)
@@ -478,6 +505,8 @@ class TestStatus:
                 raise PlatformAPIError("not available")
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(platform_train_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(shared_submit_module, "OsmosisClient", FakeClient)
         result = train_module.info(name="run-1")
 
         assert isinstance(result, DetailResult)
@@ -524,6 +553,8 @@ class TestStatus:
             get_training_run_metrics = _raise_metrics_unavailable
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(platform_train_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(shared_submit_module, "OsmosisClient", FakeClient)
         result = train_module.info(name="run-1")
 
         assert all(field.label != "Checkpoint" for field in result.fields)
@@ -571,6 +602,8 @@ class TestStatus:
             get_training_run_metrics = _raise_metrics_unavailable
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(platform_train_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(shared_submit_module, "OsmosisClient", FakeClient)
         result = train_module.info(name="run-1")
 
         assert result.sections
@@ -614,6 +647,8 @@ class TestStatus:
             get_training_run_metrics = _raise_metrics_unavailable
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(platform_train_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(shared_submit_module, "OsmosisClient", FakeClient)
         result = train_module.info(name="timed-run")
         fields = {field.label: field.value for field in result.fields}
 
@@ -651,6 +686,8 @@ class TestStatus:
             get_training_run_metrics = _raise_metrics_unavailable
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(platform_train_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(shared_submit_module, "OsmosisClient", FakeClient)
         result = train_module.info(name="full-run")
 
         assert isinstance(result, DetailResult)
@@ -671,7 +708,7 @@ class TestStatus:
 
 
 class TestSubmit:
-    SUBMIT_RESULT = SubmitTrainingRunResult(
+    SUBMIT_RESULT = SubmitRunResult(
         id="550e8400-e29b-41d4-a716-446655440000",
         name="my-training-run",
         status="pending",
@@ -722,6 +759,8 @@ rollout_batch_size = 64
                 return result
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(platform_train_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(shared_submit_module, "OsmosisClient", FakeClient)
         command_result = train_module.submit(config_path=config_path, yes=True)
 
         assert isinstance(command_result, OperationResult)
@@ -759,6 +798,8 @@ rollout_batch_size = 64
                 return result
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(platform_train_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(shared_submit_module, "OsmosisClient", FakeClient)
         command_result = train_module.submit(config_path=config_path, yes=True)
 
         expected_url = result.platform_url
@@ -786,6 +827,8 @@ rollout_batch_size = 64
 
         FakeClient.SUBMIT_RESULT = self.SUBMIT_RESULT
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(platform_train_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(shared_submit_module, "OsmosisClient", FakeClient)
         result = train_module.submit(config_path=config_path, yes=True)
         out = console_capture.getvalue()
         assert "calculator" in out
@@ -835,6 +878,8 @@ rollout_batch_size = 64
                 return TestSubmit.SUBMIT_RESULT
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(platform_train_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(shared_submit_module, "OsmosisClient", FakeClient)
         result = train_module.submit(config_path=path, yes=True)
         assert captured_kwargs["experiment_config"]["commit_sha"] == "deadbeef"
         assert captured_kwargs["git_identity"] == GIT_IDENTITY
@@ -860,6 +905,8 @@ rollout_batch_size = 64
                 return TestSubmit.SUBMIT_RESULT
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(platform_train_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(shared_submit_module, "OsmosisClient", FakeClient)
         train_module.submit(config_path=config_path, yes=True)
         assert captured_kwargs["experiment_config"] == {
             "model_path": "Qwen/Qwen3.6-35B-A3B",
@@ -878,6 +925,48 @@ rollout_batch_size = 64
         assert captured_kwargs["sampling_config"] is None
         assert captured_kwargs["checkpoints_config"] is None
         assert captured_kwargs["advanced_config"] is None
+
+    def test_submit_passes_top_level_env_and_secrets_to_api(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        console_capture: StringIO,
+        tmp_path: Path,
+    ) -> None:
+        workspace_directory = self._write_project(tmp_path, rollout="r")
+        monkeypatch.chdir(workspace_directory)
+        path = workspace_directory / "configs" / "training" / "train.toml"
+        path.write_text(
+            """
+[experiment]
+rollout = "r"
+entrypoint = "main.py"
+model_path = "m"
+dataset = "d"
+
+[env]
+LOG_LEVEL = "INFO"
+
+[secrets]
+OPENAI_API_KEY = "openai-api-key"
+""".strip(),
+            encoding="utf-8",
+        )
+        captured_kwargs: dict = {}
+
+        class FakeClient:
+            def submit_training_run(self, **kwargs):
+                captured_kwargs.update(kwargs)
+                return TestSubmit.SUBMIT_RESULT
+
+        monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(platform_train_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(shared_submit_module, "OsmosisClient", FakeClient)
+        train_module.submit(config_path=path, yes=True)
+
+        assert captured_kwargs["env_config"] == {"LOG_LEVEL": "INFO"}
+        assert captured_kwargs["secret_refs_config"] == {
+            "OPENAI_API_KEY": "openai-api-key"
+        }
 
     def test_submit_rejects_non_canonical_training_config_path(
         self,
@@ -954,6 +1043,8 @@ rollout_batch_size = 64
                 return TestSubmit.SUBMIT_RESULT
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(platform_train_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(shared_submit_module, "OsmosisClient", FakeClient)
         train_module.submit(config_path=config_path, yes=True)
 
         out = console_capture.getvalue()
@@ -991,6 +1082,8 @@ rollout_batch_size = 64
                 return TestSubmit.SUBMIT_RESULT
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(platform_train_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(shared_submit_module, "OsmosisClient", FakeClient)
         train_module.submit(config_path=config_path, yes=True)
 
         out = console_capture.getvalue()
@@ -1027,6 +1120,8 @@ rollout_batch_size = 64
                 return TestSubmit.SUBMIT_RESULT
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(platform_train_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(shared_submit_module, "OsmosisClient", FakeClient)
         train_module.submit(config_path=config_path, yes=True)
 
         out = console_capture.getvalue()
@@ -1063,6 +1158,8 @@ rollout_batch_size = 64
                 return TestSubmit.SUBMIT_RESULT
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(platform_train_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(shared_submit_module, "OsmosisClient", FakeClient)
         train_module.submit(config_path=config_path, yes=True)
 
         out = console_capture.getvalue()
@@ -1102,6 +1199,8 @@ rollout_batch_size = 64
                 return TestSubmit.SUBMIT_RESULT
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(platform_train_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(shared_submit_module, "OsmosisClient", FakeClient)
         train_module.submit(config_path=path, yes=True)
 
         out = console_capture.getvalue()
@@ -1124,6 +1223,8 @@ rollout_batch_size = 64
                 return TestSubmit.SUBMIT_RESULT
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(platform_train_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(shared_submit_module, "OsmosisClient", FakeClient)
         result = train_module.submit(config_path=config_path, yes=True)
 
         assert isinstance(result, OperationResult)
@@ -1219,6 +1320,8 @@ def test_train_submit_accepts_project_subdirectory(
             return TestSubmit.SUBMIT_RESULT
 
     monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+    monkeypatch.setattr(platform_train_module, "OsmosisClient", FakeClient)
+    monkeypatch.setattr(shared_submit_module, "OsmosisClient", FakeClient)
     rc = main(["--json", "train", "submit", "configs/training/default.toml", "--yes"])
     captured = capsys.readouterr()
 
@@ -1249,6 +1352,8 @@ class TestSubmitNonInteractiveContext:
                 raise AssertionError("API must not be reached without confirmation")
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(platform_train_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(shared_submit_module, "OsmosisClient", FakeClient)
 
         from osmosis_ai.cli import main as cli
 
@@ -1321,6 +1426,8 @@ class TestSubmitNonInteractiveContext:
                 raise AssertionError("API must not be reached without confirmation")
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(platform_train_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(shared_submit_module, "OsmosisClient", FakeClient)
 
         from osmosis_ai.cli import main as cli
 
@@ -1339,9 +1446,11 @@ class TestSubmitNonInteractiveContext:
     def test_require_confirmation_includes_details_in_cli_error(
         self,
     ) -> None:
+        from osmosis_ai.cli.prompts import require_confirmation
+
         with override_output_context(format=OutputFormat.plain, interactive=False):
             with pytest.raises(CLIError) as exc_info:
-                train_module._require_confirmation(
+                require_confirmation(
                     "Submit this training run?",
                     yes=False,
                     summary=[("Model", "Qwen")],
@@ -1400,6 +1509,8 @@ class TestMetrics:
                 return metrics
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(platform_train_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(shared_submit_module, "OsmosisClient", FakeClient)
         result = train_module.info(
             name="run-1",
             output=str(tmp_path / "metrics.json"),
@@ -1428,6 +1539,8 @@ class TestStop:
                 return {"stopped": True}
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(platform_train_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(shared_submit_module, "OsmosisClient", FakeClient)
         result = train_module.stop(name="my-run", yes=True)
 
         assert isinstance(result, OperationResult)

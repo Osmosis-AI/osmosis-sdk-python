@@ -8,6 +8,7 @@ from osmosis_ai.platform.api.models import (
     BaseModelInfo,
     DatasetFile,
     DeploymentInfo,
+    EvaluationRun,
     LoraCheckpointInfo,
     RolloutInfo,
     TrainingRun,
@@ -107,14 +108,21 @@ def serialize_rollout(rollout: RolloutInfo) -> dict[str, Any]:
     }
 
 
-def serialize_eval_cache_entry(entry: dict[str, Any]) -> dict[str, Any]:
-    """Serialize an eval cache entry dict."""
-    config = entry.get("config", {}) or {}
-    return {
-        "task_id": entry.get("task_id", ""),
-        "model": config.get("llm_model") or config.get("model", ""),
-        "dataset": config.get("eval_dataset") or config.get("dataset", ""),
-        "status": entry.get("status", ""),
-        "runs_count": entry.get("runs_count", 0),
-        "created_at": entry.get("created_at", ""),
+def serialize_eval_run(run: EvaluationRun) -> dict[str, Any]:
+    """Serialize an evaluation run for the public JSON contract."""
+    data: dict[str, Any] = {
+        "id": run.id,
+        "name": run.name,
+        "status": run.status,
+        "created_at": run.created_at,
+        "started_at": run.started_at,
+        "completed_at": run.completed_at,
+        "model": run.model.get("name") if run.model else None,
+        "dataset": run.dataset.get("name") if run.dataset else None,
+        "rollout": run.rollout.get("name") if run.rollout else None,
+        "creator_name": run.creator_name,
+        "creator_email": run.creator_email,
     }
+    if run.platform_url:
+        data["platform_url"] = run.platform_url
+    return data
