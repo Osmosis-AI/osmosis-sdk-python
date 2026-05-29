@@ -1,4 +1,4 @@
-"""Business logic for ``osmosis secret`` (list + add).
+"""Business logic for ``osmosis secret`` (set, list, delete).
 
 Security invariants for this module:
   * The secret *value* travels through this process only to be POSTed once.
@@ -156,8 +156,17 @@ def _redact_secret_platform_error(exc: Any, secret_value: str) -> Any:
     )
 
 
-def list_secrets(*, limit: int, all_: bool) -> ListResult:
-    """List workspace secrets (names + metadata only; values are never returned)."""
+def list_secrets(*, limit: int, all_: bool, scope: str = "all") -> ListResult:
+    """List environment secrets (names + metadata only; values never shown).
+
+    ``scope`` is ``"all"`` (workspace + the caller's personal secrets),
+    ``"workspace"``, or ``"user"`` (personal only).
+    """
+    if scope not in _VALID_LIST_SCOPES:
+        raise CLIError(
+            "Scope must be 'all', 'workspace', or 'user'.",
+            code="VALIDATION",
+        )
     effective_limit, fetch_all = validate_list_options(limit=limit, all_=all_)
 
     context = require_git_workspace_directory_context()
@@ -174,6 +183,7 @@ def list_secrets(*, limit: int, all_: bool) -> ListResult:
         page = client.list_environment_secrets(
             limit=lim,
             offset=off,
+            scope=scope,
             credentials=credentials,
             git_identity=context.git_identity,
         )
@@ -211,12 +221,14 @@ def list_secrets(*, limit: int, all_: bool) -> ListResult:
         extra=extra,
         columns=[
             ListColumn(key="name", label="Name", ratio=3, overflow="fold"),
+            ListColumn(key="scope", label="Scope", no_wrap=True, ratio=1),
             ListColumn(key="created_at", label="Added", no_wrap=True, ratio=1),
             ListColumn(key="creator_name", label="Added by", no_wrap=True, ratio=1),
         ],
         display_items=[
             {
                 **serialize_environment_secret(s),
+                "scope": s.scope or "—",
                 "created_at": format_local_date(s.created_at),
                 "creator_name": s.creator_name or "—",
             }
@@ -226,13 +238,14 @@ def list_secrets(*, limit: int, all_: bool) -> ListResult:
     )
 
 
-def add_secret(*, name: str, env: str | None) -> OperationResult:
-    """Add a workspace secret.
+def set_secret(*, name: str, scope: str, env: str | None) -> OperationResult:
+    """Create or update (upsert) an environment secret.
 
     The value is read from ``--env VARNAME`` or a hidden interactive prompt,
     POSTed once, and immediately discarded. It never appears in the result.
     """
     _validate_secret_name(name)
+    _validate_scope(scope)
 
     output = get_output_context()
     if env is None and (
@@ -245,7 +258,7 @@ def add_secret(*, name: str, env: str | None) -> OperationResult:
     value = _resolve_secret_value(env=env, output=output)
     if value is None:
         return OperationResult(
-            operation="secret.add",
+            operation="secret.set",
             status="cancelled",
             resource=git_result_context(context),
             message="Cancelled.",
@@ -255,10 +268,11 @@ def add_secret(*, name: str, env: str | None) -> OperationResult:
     from osmosis_ai.platform.auth.platform_client import PlatformAPIError
 
     try:
-        with output.status(f'Adding secret "{name}"...'):
-            secret = client.create_environment_secret(
+        with output.status(f'Saving secret "{name}"...'):
+            secret = client.set_environment_secret(
                 name,
                 value,
+                scope=scope,
                 credentials=context.credentials,
                 git_identity=context.git_identity,
             )
@@ -283,11 +297,48 @@ def add_secret(*, name: str, env: str | None) -> OperationResult:
         )
 
     return OperationResult(
-        operation="secret.add",
+        operation="secret.set",
         status="success",
         resource=resource,
-        message=f'Secret "{name}" added.',
+        message=f'Secret "{name}" saved.',
         display_next_steps=display_next_steps,
         next_steps_structured=next_steps_structured,
         extra=extra,
+    )
+
+
+def delete_secret(*, name: str, scope: str, yes: bool) -> OperationResult:
+    """Delete an environment secret by name within ``scope``.
+
+    ``scope`` is ``"workspace"`` or ``"user"``. Requires confirmation
+    (``--yes`` to skip). Workspace deletion is additionally role-gated
+    server-side (admin/owner).
+    """
+    _validate_secret_name(name)
+    _validate_scope(scope)
+
+    context = require_git_workspace_directory_context()
+
+    require_confirmation(
+        f'Delete {scope} secret "{name}"? This cannot be undone.',
+        yes=yes,
+        summary=[("Name", name), ("Scope", scope)],
+    )
+
+    client = OsmosisClient()
+    with get_output_context().status(f'Deleting secret "{name}"...'):
+        client.delete_environment_secret(
+            name,
+            scope=scope,
+            credentials=context.credentials,
+            git_identity=context.git_identity,
+        )
+
+    resource: dict[str, Any] = {"name": name, "scope": scope}
+    resource.update(git_result_context(context))
+    return OperationResult(
+        operation="secret.delete",
+        status="success",
+        resource=resource,
+        message=f'Secret "{name}" deleted.',
     )
