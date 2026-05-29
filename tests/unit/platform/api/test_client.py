@@ -332,7 +332,7 @@ class TestEnvironmentSecrets:
         )
 
         assert mock_request.call_args[0][0] == (
-            "/api/cli/environment-secrets?limit=25&offset=50"
+            "/api/cli/environment-secrets?limit=25&offset=50&scope=all"
         )
         assert mock_request.call_args.kwargs["credentials"] is credentials
         assert mock_request.call_args.kwargs["git_identity"] == "git_123"
@@ -342,7 +342,7 @@ class TestEnvironmentSecrets:
         assert result.platform_url == "https://platform.osmosis.ai/acme/secrets"
 
     @patch("osmosis_ai.platform.api.client.platform_request")
-    def test_create_environment_secret_posts_value_once_and_returns_metadata(
+    def test_set_environment_secret_posts_value_once_and_returns_metadata(
         self, mock_request: MagicMock
     ) -> None:
         credentials = object()
@@ -353,12 +353,14 @@ class TestEnvironmentSecrets:
             "created_at": "2026-05-01T00:00:00Z",
             "updated_at": "2026-05-01T00:00:01Z",
             "creator_name": "Ada",
+            "scope": "workspace",
             "platform_url": "https://platform.osmosis.ai/acme/secrets",
         }
 
-        result = OsmosisClient().create_environment_secret(
+        result = OsmosisClient().set_environment_secret(
             "OPENAI_API_KEY",
             secret_value,
+            scope="workspace",
             credentials=credentials,
             git_identity="git_123",
         )
@@ -368,6 +370,7 @@ class TestEnvironmentSecrets:
         assert mock_request.call_args.kwargs["data"] == {
             "name": "OPENAI_API_KEY",
             "value": secret_value,
+            "scope": "workspace",
         }
         assert mock_request.call_args.kwargs["credentials"] is credentials
         assert mock_request.call_args.kwargs["git_identity"] == "git_123"

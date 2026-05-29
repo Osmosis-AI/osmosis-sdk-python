@@ -320,19 +320,25 @@ class OsmosisClient:
         return PaginatedBaseModels.from_dict(data)
 
     # ── Environment Secrets ───────────────────────────────────────
-    # Workspace-scoped secrets. The platform never echoes secret values:
-    # list returns names + metadata only; create returns metadata only.
+    # Scoped secrets. The platform never echoes secret values:
+    # list returns names + metadata only; set returns metadata only.
 
     def list_environment_secrets(
         self,
         limit: int = DEFAULT_PAGE_SIZE,
         offset: int = 0,
         *,
+        scope: str = "all",
         credentials: Credentials | None = None,
         git_identity: str,
     ) -> PaginatedEnvironmentSecrets:
-        """List workspace environment secrets (names + metadata only)."""
-        qs = urlencode({"limit": limit, "offset": offset})
+        """List environment secrets (names + metadata only).
+
+        ``scope`` is one of ``"all"`` (workspace + the caller's personal
+        secrets), ``"workspace"``, or ``"user"`` (the caller's personal
+        secrets only). The platform never returns secret values.
+        """
+        qs = urlencode({"limit": limit, "offset": offset, "scope": scope})
         data = platform_request(
             f"/api/cli/environment-secrets?{qs}",
             credentials=credentials,
@@ -340,28 +346,50 @@ class OsmosisClient:
         )
         return PaginatedEnvironmentSecrets.from_dict(data)
 
-    def create_environment_secret(
+    def set_environment_secret(
         self,
         name: str,
         value: str,
         *,
+        scope: str,
         credentials: Credentials | None = None,
         git_identity: str,
     ) -> EnvironmentSecretInfo:
-        """Create a workspace environment secret.
+        """Create or update (upsert) an environment secret.
 
-        The secret ``value`` is sent once in the request body and is never
-        returned by the platform — the response carries only metadata
-        (id, name, timestamps). Callers must not log or echo ``value``.
+        ``scope`` is ``"workspace"`` or ``"user"``. The secret ``value`` is
+        sent once in the request body and is never returned by the platform —
+        the response carries only metadata. Callers must not log or echo
+        ``value``.
         """
         data = platform_request(
             "/api/cli/environment-secrets",
             method="POST",
-            data={"name": name, "value": value},
+            data={"name": name, "value": value, "scope": scope},
             credentials=credentials,
             git_identity=git_identity,
         )
         return EnvironmentSecretInfo.from_dict(data)
+
+    def delete_environment_secret(
+        self,
+        name: str,
+        *,
+        scope: str,
+        credentials: Credentials | None = None,
+        git_identity: str,
+    ) -> None:
+        """Delete an environment secret by name within ``scope``.
+
+        ``scope`` is ``"workspace"`` or ``"user"``.
+        """
+        platform_request(
+            "/api/cli/environment-secrets",
+            method="DELETE",
+            data={"name": name, "scope": scope},
+            credentials=credentials,
+            git_identity=git_identity,
+        )
 
     # ── Deployments ───────────────────────────────────────────────
     # All mutating endpoints key off `checkpoint` (UUID or checkpoint_name).
