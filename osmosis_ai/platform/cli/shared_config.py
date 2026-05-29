@@ -473,7 +473,7 @@ def build_submit_summary_rows(
     dataset: str,
     commit_sha: str | None,
     env: dict[str, str],
-    secrets: dict[str, str],
+    secrets: list[str],
 ) -> list[tuple[str, str]]:
     """Build the confirmation-table rows shared by ``train`` and ``eval`` submit."""
     rows: list[tuple[str, str]] = [
@@ -488,11 +488,8 @@ def build_submit_summary_rows(
         env_keys = ", ".join(sorted(env))
         rows.append((f"Rollout env ({len(env)})", env_keys))
     if secrets:
-        secret_summary = ", ".join(
-            f"{env_name}={secret_name}"
-            for env_name, secret_name in sorted(secrets.items())
-        )
-        rows.append((f"Rollout secrets ({len(secrets)})", secret_summary))
+        secret_names = ", ".join(sorted(secrets))
+        rows.append((f"Rollout secrets ({len(secrets)})", secret_names))
     return rows
 
 
