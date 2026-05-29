@@ -132,6 +132,45 @@ class TestCompleteUploadValidation:
         timeout = call_kwargs.kwargs.get("timeout") or call_kwargs[1].get("timeout")
         assert timeout == 120.0
 
+    @patch("osmosis_ai.platform.api.client.platform_request")
+    def test_file_extension_included_in_payload(self, mock_request: MagicMock) -> None:
+        """Verify file_extension is forwarded in the request payload."""
+        mock_request.return_value = {
+            "id": "file-3",
+            "file_name": "file.jsonl",
+            "file_size": 1024,
+            "status": "uploaded",
+        }
+        client = OsmosisClient()
+        client.complete_upload(
+            file_id="file-3",
+            file_extension="jsonl",
+            git_identity="git_test",
+        )
+        payload = mock_request.call_args.kwargs.get("data") or mock_request.call_args[
+            1
+        ].get("data")
+        assert payload["file_extension"] == "jsonl"
+
+    @patch("osmosis_ai.platform.api.client.platform_request")
+    def test_file_extension_omitted_when_none(self, mock_request: MagicMock) -> None:
+        """Verify file_extension is not in the payload when not provided."""
+        mock_request.return_value = {
+            "id": "file-4",
+            "file_name": "file.jsonl",
+            "file_size": 1024,
+            "status": "uploaded",
+        }
+        client = OsmosisClient()
+        client.complete_upload(
+            file_id="file-4",
+            git_identity="git_test",
+        )
+        payload = mock_request.call_args.kwargs.get("data") or mock_request.call_args[
+            1
+        ].get("data")
+        assert "file_extension" not in payload
+
     def test_duplicate_part_numbers_raises(self) -> None:
         """Verify ValueError when duplicate part numbers are provided."""
         client = OsmosisClient()

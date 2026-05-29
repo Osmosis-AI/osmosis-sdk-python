@@ -37,14 +37,13 @@ class TestCheckRequiredColumns:
         assert _check_required_columns(cols) == []
 
     def test_missing_one(self):
-        errors = _check_required_columns(["system_prompt", "user_prompt"])
+        errors = _check_required_columns(["system_prompt"])
         assert len(errors) == 1
-        assert "ground_truth" in errors[0]
+        assert "user_prompt" in errors[0]
 
     def test_missing_all(self):
         errors = _check_required_columns(["foo", "bar"])
         assert len(errors) == 1
-        assert "ground_truth" in errors[0]
         assert "system_prompt" in errors[0]
         assert "user_prompt" in errors[0]
 
@@ -158,8 +157,18 @@ class TestValidateJsonl:
     def test_blank_lines_skipped(self, tmp_path: Path):
         f = tmp_path / "blanks.jsonl"
         good = '{"system_prompt":"s","user_prompt":"u","ground_truth":"g"}'
-        f.write_text(f"\n{good}\n\n{good}\n")
+        f.write_text(f"\n{good}\n\n{good}\n{good}\n\n{good}\n")
         assert _validate_jsonl(f) == []
+
+    def test_sparse_large_file_enforces_min_rows(self, tmp_path: Path):
+        """Large files with mostly blank lines must still meet MIN_ROW_COUNT."""
+        f = tmp_path / "sparse.jsonl"
+        good = '{"system_prompt":"s","user_prompt":"u","ground_truth":"g"}'
+        blank_lines = [""] * 101
+        data_lines = [good] * 2
+        f.write_text("\n".join(blank_lines + data_lines) + "\n")
+        errors = _validate_jsonl(f)
+        assert any("Dataset too small" in e for e in errors)
 
     def test_columns_checked_from_tail_when_head_blank(self, tmp_path: Path):
         """If head is all blank lines, columns are still checked via tail."""
@@ -179,12 +188,14 @@ class TestValidateJsonl:
 class TestValidateCsv:
     def test_valid_file(self, tmp_path: Path):
         f = tmp_path / "ok.csv"
-        f.write_text("system_prompt,user_prompt,ground_truth\ns,u,g\ns2,u2,g2\n")
+        rows = "s,u,g\n" * 5
+        f.write_text(f"system_prompt,user_prompt,ground_truth\n{rows}")
         assert _validate_csv(f) == []
 
     def test_extra_columns_ok(self, tmp_path: Path):
         f = tmp_path / "extra.csv"
-        f.write_text("system_prompt,user_prompt,ground_truth,extra\ns,u,g,e\n")
+        rows = "s,u,g,e\n" * 5
+        f.write_text(f"system_prompt,user_prompt,ground_truth,extra\n{rows}")
         assert _validate_csv(f) == []
 
     def test_missing_required_columns(self, tmp_path: Path):
@@ -323,9 +334,9 @@ class TestValidateParquet:
 
         table = pa.table(
             {
-                "system_prompt": ["s"],
-                "user_prompt": ["u"],
-                "ground_truth": ["g"],
+                "system_prompt": ["s"] * 5,
+                "user_prompt": ["u"] * 5,
+                "ground_truth": ["g"] * 5,
             }
         )
         f = tmp_path / "ok.parquet"
@@ -350,10 +361,10 @@ class TestValidateParquet:
 
         table = pa.table(
             {
-                "system_prompt": ["s"],
-                "user_prompt": ["u"],
-                "ground_truth": ["g"],
-                "extra": ["e"],
+                "system_prompt": ["s"] * 5,
+                "user_prompt": ["u"] * 5,
+                "ground_truth": ["g"] * 5,
+                "extra": ["e"] * 5,
             }
         )
         f = tmp_path / "extra.parquet"

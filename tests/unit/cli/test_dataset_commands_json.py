@@ -72,11 +72,8 @@ def test_dataset_validate_is_project_independent(
     from osmosis_ai.cli.main import main
 
     data = tmp_path / "data.jsonl"
-    data.write_text(
-        json.dumps({"system_prompt": "s", "user_prompt": "u", "ground_truth": "g"})
-        + "\n",
-        encoding="utf-8",
-    )
+    row = json.dumps({"system_prompt": "s", "user_prompt": "u", "ground_truth": "g"})
+    data.write_text((row + "\n") * 4, encoding="utf-8")
     monkeypatch.chdir(tmp_path)
 
     rc = main(["--json", "dataset", "validate", str(data)])
@@ -230,11 +227,8 @@ def test_dataset_preview_json_includes_rows(monkeypatch, capsys) -> None:
 
 def test_dataset_validate_json_envelope(tmp_path: Path, capsys) -> None:
     file_path = tmp_path / "train.jsonl"
-    file_path.write_text(
-        json.dumps({"system_prompt": "s", "user_prompt": "u", "ground_truth": "g"})
-        + "\n",
-        encoding="utf-8",
-    )
+    row = json.dumps({"system_prompt": "s", "user_prompt": "u", "ground_truth": "g"})
+    file_path.write_text((row + "\n") * 4, encoding="utf-8")
 
     exit_code = cli.main(["--json", "dataset", "validate", str(file_path)])
     captured = capsys.readouterr()
@@ -278,11 +272,8 @@ def test_dataset_upload_json_stdout_is_one_envelope(
 ) -> None:
     fake_credentials = _stub_git_context(monkeypatch)
     file_path = tmp_path / "train.jsonl"
-    file_path.write_text(
-        json.dumps({"system_prompt": "s", "user_prompt": "u", "ground_truth": "g"})
-        + "\n",
-        encoding="utf-8",
-    )
+    row = json.dumps({"system_prompt": "s", "user_prompt": "u", "ground_truth": "g"})
+    file_path.write_text((row + "\n") * 4, encoding="utf-8")
     monkeypatch.setattr(
         upload_module,
         "make_progress_bar",
@@ -313,7 +304,13 @@ def test_dataset_upload_json_stdout_is_one_envelope(
             )
 
         def complete_upload(
-            self, file_id, parts=None, *, git_identity, credentials=None
+            self,
+            file_id,
+            parts=None,
+            *,
+            file_extension=None,
+            git_identity,
+            credentials=None,
         ):
             assert file_id == "ds_1"
             assert credentials is fake_credentials
@@ -368,11 +365,8 @@ def test_dataset_upload_json_conflict_preserves_existing_dataset_id(
 ) -> None:
     _stub_git_context(monkeypatch)
     file_path = tmp_path / "train.jsonl"
-    file_path.write_text(
-        json.dumps({"system_prompt": "s", "user_prompt": "u", "ground_truth": "g"})
-        + "\n",
-        encoding="utf-8",
-    )
+    row = json.dumps({"system_prompt": "s", "user_prompt": "u", "ground_truth": "g"})
+    file_path.write_text((row + "\n") * 4, encoding="utf-8")
 
     from osmosis_ai.platform.auth import PlatformAPIError
 
@@ -411,11 +405,8 @@ def test_dataset_upload_json_overwrite_stdout_is_one_envelope(
 ) -> None:
     fake_credentials = _stub_git_context(monkeypatch)
     file_path = tmp_path / "train.jsonl"
-    file_path.write_text(
-        json.dumps({"system_prompt": "s", "user_prompt": "u", "ground_truth": "g"})
-        + "\n",
-        encoding="utf-8",
-    )
+    row = json.dumps({"system_prompt": "s", "user_prompt": "u", "ground_truth": "g"})
+    file_path.write_text((row + "\n") * 4, encoding="utf-8")
     monkeypatch.setattr(
         upload_module,
         "make_progress_bar",
@@ -465,7 +456,13 @@ def test_dataset_upload_json_overwrite_stdout_is_one_envelope(
             )
 
         def complete_upload(
-            self, file_id, parts=None, *, git_identity, credentials=None
+            self,
+            file_id,
+            parts=None,
+            *,
+            file_extension=None,
+            git_identity,
+            credentials=None,
         ):
             assert file_id == "ds_new"
             assert credentials is fake_credentials

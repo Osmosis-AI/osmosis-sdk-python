@@ -141,6 +141,7 @@ def test_upload_passes_git_context_to_api_calls_without_subscription_preflight(
             file_id: str,
             parts: list[dict] | None = None,
             *,
+            file_extension: str | None = None,
             credentials=None,
             git_identity: str,
         ) -> DatasetFile:
