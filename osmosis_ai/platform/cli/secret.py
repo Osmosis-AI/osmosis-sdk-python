@@ -13,7 +13,6 @@ Security invariants for this module:
 from __future__ import annotations
 
 import os
-import re
 from typing import Any
 
 from osmosis_ai.cli.errors import CLIError
@@ -26,7 +25,9 @@ from osmosis_ai.cli.output import (
     serialize_environment_secret,
 )
 from osmosis_ai.cli.output.display import format_local_date
+from osmosis_ai.cli.prompts import require_confirmation
 from osmosis_ai.platform.api.client import OsmosisClient
+from osmosis_ai.platform.cli.shared_config import SECRET_NAME_RE
 from osmosis_ai.platform.cli.utils import (
     fetch_all_pages,
     require_git_workspace_directory_context,
@@ -34,12 +35,15 @@ from osmosis_ai.platform.cli.utils import (
 )
 from osmosis_ai.platform.cli.workspace_directory_context import git_result_context
 
-# Mirror the platform's ``environmentSecretNameSchema`` so we fail fast with a
-# clear local message instead of round-tripping an obviously invalid name —
-# and so the name (never the value) is the only thing a validation error
-# can reference.
-_SECRET_NAME_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
+# Mirror the platform's ``environmentSecretNameSchema`` (^[A-Z][A-Z0-9_]*$):
+# uppercase env-var style so a referencing config's [env]-style name and the
+# secret record name are the same shape. Validating fails fast locally and,
+# because only the name (never the value) is referenced, can never leak a value.
+_SECRET_NAME_RE = SECRET_NAME_RE
 _SECRET_NAME_MAX = 255
+
+_VALID_SCOPES = ("workspace", "user")
+_VALID_LIST_SCOPES = ("all", "workspace", "user")
 
 
 def _validate_secret_name(name: str) -> None:
@@ -50,7 +54,16 @@ def _validate_secret_name(name: str) -> None:
         )
     if not _SECRET_NAME_RE.fullmatch(name):
         raise CLIError(
-            "Secret name may only contain letters, digits, '_' and '-'.",
+            "Secret name must match ^[A-Z][A-Z0-9_]*$ "
+            "(uppercase letters, digits and '_', starting with a letter).",
+            code="VALIDATION",
+        )
+
+
+def _validate_scope(scope: str) -> None:
+    if scope not in _VALID_SCOPES:
+        raise CLIError(
+            "Scope must be 'workspace' or 'user'.",
             code="VALIDATION",
         )
 

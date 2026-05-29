@@ -261,6 +261,24 @@ def test_secret_name_with_trailing_newline_is_invalid() -> None:
     assert exc.value.code == "VALIDATION"
 
 
+@pytest.mark.parametrize(
+    "name",
+    ["OPENAI_API_KEY", "A", "DATABASE_URL", "X1", "A_B_C"],
+)
+def test_validate_secret_name_accepts_screaming_snake_case(name: str) -> None:
+    secret_module._validate_secret_name(name)  # no raise
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["lowercase", "1LEADING_DIGIT", "_LEADING_UNDERSCORE", "HAS-DASH", "HAS SPACE", ""],
+)
+def test_validate_secret_name_rejects_non_env_style(name: str) -> None:
+    with pytest.raises(CLIError) as exc:
+        secret_module._validate_secret_name(name)
+    assert exc.value.code == "VALIDATION"
+
+
 def test_secret_add_conflict_maps_to_conflict_code(monkeypatch, capsys) -> None:
     _stub_git_context(monkeypatch)
     monkeypatch.setenv("SOURCE_VAR", SENTINEL_VALUE)
