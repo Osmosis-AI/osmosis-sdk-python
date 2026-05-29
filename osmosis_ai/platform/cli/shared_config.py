@@ -13,6 +13,7 @@ from pydantic_core import ErrorDetails
 from osmosis_ai.cli.errors import CLIError
 
 ENV_VAR_NAME_RE = re.compile(r"^[A-Z_][A-Z0-9_]*$")
+SECRET_NAME_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")
 RESERVED_ENV_PREFIX = "_OSMOSIS_"
 
 _EXPECTED_TYPE_BY_ERROR: dict[str, str] = {
@@ -268,31 +269,21 @@ def parse_section(
 def validate_env_var_keys(
     *,
     env: dict[str, str],
-    secrets: dict[str, str],
     path: Path,
 ) -> None:
-    """Reject invalid env-var names, reserved names, and overlap between sections."""
-    for section_name, section in (("env", env), ("secrets", secrets)):
-        for key in section:
-            if not ENV_VAR_NAME_RE.match(key):
-                raise CLIError(
-                    f"Invalid env var name '{key}' in [{section_name}] of {path}: "
-                    "must match ^[A-Z_][A-Z0-9_]*$"
-                )
-            if key.startswith(RESERVED_ENV_PREFIX):
-                raise CLIError(
-                    f"'{key}' in [{section_name}] of {path}: env var names starting "
-                    f"with {RESERVED_ENV_PREFIX} are reserved by the platform; "
-                    "choose a different name."
-                )
-
-    overlap = sorted(set(env) & set(secrets))
-    if overlap:
-        names = ", ".join(overlap)
-        raise CLIError(
-            f"Key(s) appear in both [env] and [secrets] of {path}: "
-            f"{names}. Each env var name must come from exactly one section."
-        )
+    """Reject invalid or reserved [env] var names."""
+    for key in env:
+        if not ENV_VAR_NAME_RE.match(key):
+            raise CLIError(
+                f"Invalid env var name '{key}' in [env] of {path}: "
+                "must match ^[A-Z_][A-Z0-9_]*$"
+            )
+        if key.startswith(RESERVED_ENV_PREFIX):
+            raise CLIError(
+                f"'{key}' in [env] of {path}: env var names starting "
+                f"with {RESERVED_ENV_PREFIX} are reserved by the platform; "
+                "choose a different name."
+            )
 
 
 def validate_secret_names(
@@ -302,7 +293,28 @@ def validate_secret_names(
     path: Path,
 ) -> None:
     """Validate each secret name and reject overlap with [env] keys."""
-    return None
+    for name in secrets:
+        if not SECRET_NAME_RE.match(name):
+            raise CLIError(
+                f"Invalid secret name '{name}' in {path}: "
+                "use SCREAMING_SNAKE_CASE (uppercase letters, digits, "
+                "underscores; must start with a letter). "
+                "Must match ^[A-Z][A-Z0-9_]*$."
+            )
+        if name.startswith(RESERVED_ENV_PREFIX):
+            raise CLIError(
+                f"'{name}' in secrets of {path}: names starting with "
+                f"{RESERVED_ENV_PREFIX} are reserved by the platform; "
+                "choose a different name."
+            )
+
+    overlap = sorted(set(env) & set(secrets))
+    if overlap:
+        names = ", ".join(overlap)
+        raise CLIError(
+            f"Name(s) appear in both [env] and secrets of {path}: "
+            f"{names}. Each env var name must come from exactly one place."
+        )
 
 
 class ExperimentSection(BaseModel):
@@ -432,7 +444,7 @@ def load_submit_config[SubmitConfigT: BaseSubmitConfig](
                 data=data,
             )
         ),
-        *validate_env_values(env=env_section, secrets={}),
+        *validate_env_values(env=env_section),
     ]
     if issues:
         raise config_issues_error(issues=issues, config_label=config_label)
@@ -447,7 +459,7 @@ def load_submit_config[SubmitConfigT: BaseSubmitConfig](
         )
 
     env = {key: value for key, value in env_section.items() if isinstance(value, str)}
-    validate_env_var_keys(env=env, secrets={}, path=path)
+    validate_env_var_keys(env=env, path=path)
     validate_secret_names(secrets=secrets_list, env=env, path=path)
 
     return config_class(**parsed, env=env, secrets=secrets_list)
@@ -487,25 +499,24 @@ def build_submit_summary_rows(
 def validate_env_values(
     *,
     env: dict[str, Any],
-    secrets: dict[str, Any],
 ) -> list[dict[str, str]]:
-    """Return issues for any env/secret value that is not a string."""
+    """Return issues for any [env] value that is not a string."""
     issues: list[dict[str, str]] = []
-    for section_name, section in (("env", env), ("secrets", secrets)):
-        for key, value in section.items():
-            if not isinstance(value, str):
-                issues.append(
-                    {
-                        "key": f"{section_name}.{key}",
-                        "message": f"must be a string, got {format_input(value)}",
-                    }
-                )
+    for key, value in env.items():
+        if not isinstance(value, str):
+            issues.append(
+                {
+                    "key": f"env.{key}",
+                    "message": f"must be a string, got {format_input(value)}",
+                }
+            )
     return issues
 
 
 __all__ = [
     "ENV_VAR_NAME_RE",
     "RESERVED_ENV_PREFIX",
+    "SECRET_NAME_RE",
     "AdvancedPassthroughSection",
     "BackendValidatedParamSection",
     "BaseSubmitConfig",
@@ -523,6 +534,7 @@ __all__ = [
     "read_toml_table",
     "validate_env_values",
     "validate_env_var_keys",
+    "validate_secret_names",
     "validate_workspace_rollout_paths",
     "validation_issue_to_config_issue",
 ]

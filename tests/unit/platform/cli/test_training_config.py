@@ -188,6 +188,70 @@ dataset = "d"
     assert "must be a list of strings" in str(exc_info.value)
 
 
+def _config_with_secrets(secrets_line: str, *, env_block: str = "") -> str:
+    return f"""
+{secrets_line}
+
+[experiment]
+rollout = "r"
+entrypoint = "e.py"
+model_path = "m"
+dataset = "d"
+{env_block}
+""".strip()
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["openai_api_key", "1OPENAI", "OPENAI-API-KEY", "_LEADING", "WITH SPACE"],
+)
+def test_secret_name_must_be_screaming_snake(tmp_path: Path, name: str) -> None:
+    path = tmp_path / "bad_name.toml"
+    path.write_text(
+        _config_with_secrets(f'secrets = ["{name}"]'), encoding="utf-8"
+    )
+    with pytest.raises(CLIError) as exc_info:
+        load_train_submit_config(path)
+    assert "^[A-Z][A-Z0-9_]*$" in str(exc_info.value)
+
+
+def test_secret_name_rejects_reserved_prefix(tmp_path: Path) -> None:
+    path = tmp_path / "reserved.toml"
+    path.write_text(
+        _config_with_secrets('secrets = ["_OSMOSIS_TOKEN"]'), encoding="utf-8"
+    )
+    with pytest.raises(CLIError) as exc_info:
+        load_train_submit_config(path)
+    assert "_OSMOSIS_" in str(exc_info.value)
+    assert "reserved" in str(exc_info.value)
+
+
+def test_secret_name_rejects_env_overlap(tmp_path: Path) -> None:
+    path = tmp_path / "overlap.toml"
+    path.write_text(
+        _config_with_secrets(
+            'secrets = ["OPENAI_API_KEY"]',
+            env_block='[env]\nOPENAI_API_KEY = "literal"',
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(CLIError) as exc_info:
+        load_train_submit_config(path)
+    message = str(exc_info.value)
+    assert "both [env] and secrets" in message
+    assert "OPENAI_API_KEY" in message
+
+
+def test_valid_secret_names_accepted(tmp_path: Path) -> None:
+    path = tmp_path / "ok.toml"
+    path.write_text(
+        _config_with_secrets('secrets = ["OPENAI_API_KEY", "DATABASE_URL", "X1"]'),
+        encoding="utf-8",
+    )
+    cfg = load_train_submit_config(path)
+    assert cfg.secrets == ["OPENAI_API_KEY", "DATABASE_URL", "X1"]
+
+
 # ---------------------------------------------------------------------------
 # API config sections
 # ---------------------------------------------------------------------------
