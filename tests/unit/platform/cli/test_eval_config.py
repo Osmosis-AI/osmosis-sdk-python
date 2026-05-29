@@ -20,6 +20,8 @@ def test_load_eval_submit_config_accepts_new_cloud_schema(tmp_path: Path) -> Non
     path = _write_config(
         tmp_path / "eval.toml",
         """
+secrets = ["OPENAI_API_KEY", "DATABASE_URL"]
+
 [experiment]
 rollout = "calculator"
 entrypoint = "main.py"
@@ -37,9 +39,6 @@ grader_timeout_s = 150
 
 [env]
 LOG_LEVEL = "INFO"
-
-[secrets]
-OPENAI_API_KEY = "openai-api-key"
 """,
     )
 
@@ -59,7 +58,7 @@ OPENAI_API_KEY = "openai-api-key"
         "grader_timeout_s": 150.0,
     }
     assert config.env == {"LOG_LEVEL": "INFO"}
-    assert config.secrets == {"OPENAI_API_KEY": "openai-api-key"}
+    assert config.secrets == ["OPENAI_API_KEY", "DATABASE_URL"]
     assert config.experiment_config == {
         "rollout": "calculator",
         "entrypoint": "main.py",
@@ -90,7 +89,7 @@ dataset = "multiply"
     assert config.evaluation_config == {}
     assert config.advanced_config == {}
     assert config.env == {}
-    assert config.secrets == {}
+    assert config.secrets == []
 
 
 def test_load_eval_submit_config_advanced_section_preserves_backend_params(

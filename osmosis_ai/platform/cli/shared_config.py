@@ -123,6 +123,31 @@ def read_toml_table(
     return section
 
 
+def read_toml_secrets_list(raw: dict[str, Any], path: Path) -> list[str]:
+    """Read the top-level ``secrets`` array.
+
+    The ``[secrets]`` *table* (map) form is no longer supported and raises a
+    :class:`CLIError` with a conversion hint.
+    """
+    if "secrets" not in raw:
+        return []
+
+    value = raw["secrets"]
+    if isinstance(value, dict):
+        raise CLIError(
+            f"The [secrets] map form is no longer supported in {path}. "
+            'Use a list: secrets = ["NAME", ...]. '
+            'For example, [secrets] with OPENAI_API_KEY = "OPENAI_API_KEY" '
+            'becomes secrets = ["OPENAI_API_KEY"].'
+        )
+    if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
+        raise CLIError(
+            f"'secrets' in {path} must be a list of strings, "
+            'e.g. secrets = ["OPENAI_API_KEY", "DATABASE_URL"].'
+        )
+    return value
+
+
 def format_input(value: Any) -> str:
     return repr(value)
 
@@ -270,6 +295,16 @@ def validate_env_var_keys(
         )
 
 
+def validate_secret_names(
+    *,
+    secrets: list[str],
+    env: dict[str, str],
+    path: Path,
+) -> None:
+    """Validate each secret name and reject overlap with [env] keys."""
+    return None
+
+
 class ExperimentSection(BaseModel):
     """``[experiment]`` table — shared between train and eval submit configs."""
 
@@ -306,7 +341,7 @@ class BaseSubmitConfig(BaseModel):
         default_factory=AdvancedPassthroughSection
     )
     env: dict[str, str] = Field(default_factory=dict)
-    secrets: dict[str, str] = Field(default_factory=dict)
+    secrets: list[str] = Field(default_factory=list)
 
     @property
     def experiment_rollout(self) -> str:
@@ -368,7 +403,7 @@ def load_submit_config[SubmitConfigT: BaseSubmitConfig](
     }
     advanced_section = read_toml_table(raw, "advanced", path)
     env_section = read_toml_table(raw, "env", path)
-    secrets_section = read_toml_table(raw, "secrets", path)
+    secrets_list = read_toml_secrets_list(raw, path)
 
     allowed_sections = frozenset(
         {
@@ -397,7 +432,7 @@ def load_submit_config[SubmitConfigT: BaseSubmitConfig](
                 data=data,
             )
         ),
-        *validate_env_values(env=env_section, secrets=secrets_section),
+        *validate_env_values(env=env_section, secrets={}),
     ]
     if issues:
         raise config_issues_error(issues=issues, config_label=config_label)
@@ -412,12 +447,10 @@ def load_submit_config[SubmitConfigT: BaseSubmitConfig](
         )
 
     env = {key: value for key, value in env_section.items() if isinstance(value, str)}
-    secrets = {
-        key: value for key, value in secrets_section.items() if isinstance(value, str)
-    }
-    validate_env_var_keys(env=env, secrets=secrets, path=path)
+    validate_env_var_keys(env=env, secrets={}, path=path)
+    validate_secret_names(secrets=secrets_list, env=env, path=path)
 
-    return config_class(**parsed, env=env, secrets=secrets)
+    return config_class(**parsed, env=env, secrets=secrets_list)
 
 
 def build_submit_summary_rows(

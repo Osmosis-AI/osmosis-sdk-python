@@ -108,6 +108,8 @@ def test_load_config_accepts_top_level_env_and_secrets(tmp_path: Path) -> None:
     path = tmp_path / "env_secrets.toml"
     path.write_text(
         """
+secrets = ["OPENAI_API_KEY", "DATABASE_URL"]
+
 [experiment]
 rollout = "r"
 entrypoint = "e.py"
@@ -116,9 +118,6 @@ dataset = "d"
 
 [env]
 LOG_LEVEL = "INFO"
-
-[secrets]
-OPENAI_API_KEY = "openai-api-key"
 """.strip(),
         encoding="utf-8",
     )
@@ -126,7 +125,24 @@ OPENAI_API_KEY = "openai-api-key"
     cfg = load_train_submit_config(path)
 
     assert cfg.env == {"LOG_LEVEL": "INFO"}
-    assert cfg.secrets == {"OPENAI_API_KEY": "openai-api-key"}
+    assert cfg.secrets == ["OPENAI_API_KEY", "DATABASE_URL"]
+
+
+def test_secrets_defaults_to_empty_list(tmp_path: Path) -> None:
+    path = tmp_path / "no_secrets.toml"
+    path.write_text(
+        """
+[experiment]
+rollout = "r"
+entrypoint = "e.py"
+model_path = "m"
+dataset = "d"
+""".strip(),
+        encoding="utf-8",
+    )
+
+    cfg = load_train_submit_config(path)
+    assert cfg.secrets == []
 
 
 # ---------------------------------------------------------------------------
