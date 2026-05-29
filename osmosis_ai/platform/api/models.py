@@ -470,6 +470,9 @@ class EnvironmentSecretInfo:
     created_at: str = ""
     updated_at: str = ""
     creator_name: str | None = None
+    # "workspace" or "user". None when the platform did not report it
+    # (older responses / endpoints that don't distinguish scope).
+    scope: str | None = None
     # Page/operation-level link to the secrets console page. Populated by the
     # platform on create (and exposed at the list level via
     # ``PaginatedEnvironmentSecrets.platform_url``); ``None`` for list items.
@@ -483,6 +486,7 @@ class EnvironmentSecretInfo:
             created_at=data.get("created_at", ""),
             updated_at=data.get("updated_at", ""),
             creator_name=data.get("creator_name"),
+            scope=data.get("scope"),
             platform_url=data.get("platform_url"),
         )
 
