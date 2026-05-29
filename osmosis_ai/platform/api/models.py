@@ -162,6 +162,13 @@ RUN_STATUSES_TERMINAL: frozenset[str] = (
     RUN_STATUSES_SUCCESS | RUN_STATUSES_ERROR | RUN_STATUSES_STOPPED
 )
 
+# ── Evaluation run status constants ──────────────────────────────
+
+EVAL_RUN_STATUSES_IN_PROGRESS: frozenset[str] = frozenset({"pending", "running"})
+EVAL_RUN_STATUSES_TERMINAL: frozenset[str] = frozenset(
+    {"finished", "failed", "stopped"}
+)
+
 
 @dataclass
 class TrainingRun:
@@ -269,8 +276,12 @@ class PaginatedTrainingRuns:
 
 
 @dataclass
-class SubmitTrainingRunResult:
-    """Result of submitting a new training run."""
+class SubmitRunResult:
+    """Result of submitting a training run or evaluation run.
+
+    Both `POST /api/cli/training-runs` and `POST /api/cli/eval-runs` return the
+    same shape; this is the single response model for either submit path.
+    """
 
     id: str
     name: str
@@ -279,7 +290,7 @@ class SubmitTrainingRunResult:
     platform_url: str | None = None
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> SubmitTrainingRunResult:
+    def from_dict(cls, data: dict[str, Any]) -> SubmitRunResult:
         return cls(
             id=data["id"],
             name=data["name"],
@@ -440,6 +451,63 @@ class PaginatedBaseModels:
             total_count=data.get("total_count", 0),
             has_more=data.get("has_more", False),
             next_offset=data.get("next_offset"),
+        )
+
+
+# ── Environment Secrets ──────────────────────────────────────────
+# Workspace-scoped secrets. The platform never returns the secret *value*:
+# list responses carry names + metadata only, and create responses carry
+# only metadata. These models therefore have no field for the value — there
+# is intentionally nowhere for a value to land if one were ever returned.
+
+
+@dataclass
+class EnvironmentSecretInfo:
+    """A workspace environment secret record (metadata only — never the value)."""
+
+    id: str
+    name: str
+    created_at: str = ""
+    updated_at: str = ""
+    creator_name: str | None = None
+    # Page/operation-level link to the secrets console page. Populated by the
+    # platform on create (and exposed at the list level via
+    # ``PaginatedEnvironmentSecrets.platform_url``); ``None`` for list items.
+    platform_url: str | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> EnvironmentSecretInfo:
+        return cls(
+            id=data["id"],
+            name=data.get("name", ""),
+            created_at=data.get("created_at", ""),
+            updated_at=data.get("updated_at", ""),
+            creator_name=data.get("creator_name"),
+            platform_url=data.get("platform_url"),
+        )
+
+
+@dataclass
+class PaginatedEnvironmentSecrets:
+    """Paginated list of environment secrets (names + metadata only)."""
+
+    environment_secrets: list[EnvironmentSecretInfo]
+    total_count: int
+    has_more: bool
+    next_offset: int | None = None
+    platform_url: str | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> PaginatedEnvironmentSecrets:
+        return cls(
+            environment_secrets=[
+                EnvironmentSecretInfo.from_dict(s)
+                for s in data.get("environment_secrets", [])
+            ],
+            total_count=data.get("total_count", 0),
+            has_more=data.get("has_more", False),
+            next_offset=data.get("next_offset"),
+            platform_url=data.get("platform_url"),
         )
 
 
@@ -608,4 +676,86 @@ class TrainingRunCheckpoints:
             checkpoints=[
                 LoraCheckpointInfo.from_dict(c) for c in data.get("checkpoints", [])
             ],
+        )
+
+
+# ── Evaluation Runs ──────────────────────────────────────────────
+
+
+@dataclass
+class EvaluationRun:
+    """An evaluation run record."""
+
+    id: str
+    name: str
+    status: str
+    created_at: str
+    started_at: str | None = None
+    completed_at: str | None = None
+    model: dict[str, Any] | None = None
+    dataset: dict[str, Any] | None = None
+    rollout: dict[str, Any] | None = None
+    creator_name: str | None = None
+    creator_email: str | None = None
+    platform_url: str | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> EvaluationRun:
+        return cls(
+            id=data["id"],
+            name=data["name"],
+            status=data["status"],
+            created_at=data["created_at"],
+            started_at=data.get("started_at"),
+            completed_at=data.get("completed_at"),
+            model=data.get("model"),
+            dataset=data.get("dataset"),
+            rollout=data.get("rollout"),
+            creator_name=data.get("creator_name"),
+            creator_email=data.get("creator_email"),
+            platform_url=data.get("platform_url"),
+        )
+
+
+@dataclass
+class EvaluationRunDetail:
+    """Detailed evaluation run info."""
+
+    eval_run: dict[str, Any]
+    config: dict[str, Any] | None = None
+    results: dict[str, Any] | None = None
+    model: dict[str, Any] | None = None
+    dataset: dict[str, Any] | None = None
+    rollout: dict[str, Any] | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> EvaluationRunDetail:
+        config = data.get("config")
+        model_path = config.get("model_path") if isinstance(config, dict) else None
+        return cls(
+            eval_run=data["eval_run"],
+            config=config,
+            results=data.get("results"),
+            model={"name": model_path} if isinstance(model_path, str) else None,
+            dataset=data.get("dataset"),
+            rollout=data.get("rollout"),
+        )
+
+
+@dataclass
+class PaginatedEvaluationRuns:
+    """Paginated list of evaluation runs."""
+
+    eval_runs: list[EvaluationRun]
+    total_count: int
+    has_more: bool
+    next_offset: int | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> PaginatedEvaluationRuns:
+        return cls(
+            eval_runs=[EvaluationRun.from_dict(r) for r in data.get("eval_runs", [])],
+            total_count=data.get("total_count", 0),
+            has_more=data.get("has_more", False),
+            next_offset=data.get("next_offset"),
         )

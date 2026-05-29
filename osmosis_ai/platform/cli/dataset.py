@@ -33,6 +33,7 @@ from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE
 
 from .constants import (
     MAX_FILE_SIZE,
+    MIN_ROW_COUNT,
     REQUIRED_COLUMNS,
     VALID_EXTENSIONS,
 )
@@ -89,6 +90,7 @@ def _complete_with_retry(
     dataset_id: str,
     parts: list[dict] | None = None,
     *,
+    file_extension: str | None = None,
     git_identity: str,
     credentials: Any | None = None,
 ) -> Any:
@@ -112,6 +114,7 @@ def _complete_with_retry(
                 lambda: client.complete_upload(
                     dataset_id,
                     parts=parts,
+                    file_extension=file_extension,
                     credentials=credentials,
                     git_identity=git_identity,
                 ),
@@ -327,6 +330,7 @@ def _perform_upload(
             client,
             dataset.id,
             parts=parts,
+            file_extension=ext,
             credentials=credentials,
             git_identity=git_identity,
         )
@@ -356,6 +360,7 @@ def _perform_upload(
         completed = _complete_with_retry(
             client,
             dataset.id,
+            file_extension=ext,
             credentials=credentials,
             git_identity=git_identity,
         )
@@ -813,6 +818,11 @@ def _validate_parquet(file_path: Path) -> list[str]:
                 errors.append("Parquet file has no rows")
             else:
                 errors.extend(_check_required_columns(pf.schema_arrow.names))
+                if pf.metadata.num_rows < MIN_ROW_COUNT:
+                    errors.append(
+                        f"Dataset too small: {pf.metadata.num_rows} rows. "
+                        f"A minimum of {MIN_ROW_COUNT} rows is required."
+                    )
     except Exception as e:
         errors.append(f"Invalid parquet file: {e}")
     return errors
@@ -826,6 +836,7 @@ def _validate_jsonl(file_path: Path) -> list[str]:
     columns_checked = False
     file_fully_read = False
 
+    row_count = 0
     with open(file_path, encoding="utf-8") as f:
         for i, line in enumerate(f, 1):
             if i > 100:
@@ -833,6 +844,7 @@ def _validate_jsonl(file_path: Path) -> list[str]:
             stripped = line.strip()
             if not stripped:
                 continue
+            row_count += 1
             try:
                 obj = json.loads(stripped)
                 if not columns_checked and isinstance(obj, dict):
@@ -847,7 +859,15 @@ def _validate_jsonl(file_path: Path) -> list[str]:
             # Loop completed without break — entire file was read
             file_fully_read = True
 
-    if file_fully_read or len(errors) >= 5:
+    if file_fully_read:
+        if row_count < MIN_ROW_COUNT:
+            errors.append(
+                f"Dataset too small: {row_count} rows. "
+                f"A minimum of {MIN_ROW_COUNT} rows is required."
+            )
+        return errors
+
+    if len(errors) >= 5:
         return errors
 
     # Validate last 100 lines
@@ -871,6 +891,20 @@ def _validate_jsonl(file_path: Path) -> list[str]:
                 errors.append("... (showing first 5 errors)")
                 break
 
+    if row_count < MIN_ROW_COUNT:
+        total = 0
+        with open(file_path, encoding="utf-8") as fh:
+            for line in fh:
+                if line.strip():
+                    total += 1
+                    if total >= MIN_ROW_COUNT:
+                        break
+        if total < MIN_ROW_COUNT:
+            errors.append(
+                f"Dataset too small: {total} rows. "
+                f"A minimum of {MIN_ROW_COUNT} rows is required."
+            )
+
     return errors
 
 
@@ -880,6 +914,7 @@ def _validate_csv(file_path: Path) -> list[str]:
 
     errors = []
     num_cols = 0
+    row_count = 0
     file_fully_read = False
 
     try:
@@ -895,6 +930,7 @@ def _validate_csv(file_path: Path) -> list[str]:
             for i, row in enumerate(reader, 2):
                 if i > 101:
                     break
+                row_count += 1
                 if len(row) != num_cols:
                     errors.append(
                         f"Row {i}: expected {num_cols} columns, got {len(row)}"
@@ -911,7 +947,15 @@ def _validate_csv(file_path: Path) -> list[str]:
         errors.append(f"CSV parse error: {e}")
         return errors
 
-    if file_fully_read or len(errors) >= 5:
+    if file_fully_read:
+        if row_count < MIN_ROW_COUNT:
+            errors.append(
+                f"Dataset too small: {row_count} rows. "
+                f"A minimum of {MIN_ROW_COUNT} rows is required."
+            )
+        return errors
+
+    if len(errors) >= 5:
         return errors
 
     # Validate last 100 rows

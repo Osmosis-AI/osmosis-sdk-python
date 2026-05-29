@@ -89,44 +89,40 @@ osmosis rollout list --all
 
 ## Evaluation
 
-### osmosis eval run
+### osmosis eval submit
 
-Evaluate using a TOML config. Controller-backed eval starts the configured
-rollout entrypoint as a local HTTP server with `uv run python <entrypoint>` from
-`rollouts/<rollout>/`, sends `POST /rollout`, provides model calls through the
-controller's `/chat/completions` endpoint, and waits for rollout and grader
-callback URLs.
+Submit an evaluation run using a TOML config under `configs/eval/`. Evaluation
+run configs align with training run configs for rollout identity and platform dataset
+selection: `[experiment].dataset` is a platform dataset name from
+`osmosis dataset list`, not a local `data/*.jsonl` path.
 
-`osmosis eval run` expects the config file to live under `configs/eval/` inside a
-structured Osmosis workspace directory. Eval configs use `[eval]`, `[llm]`, `[runs]`,
-`[timeouts]`, and `[output]`; `[grader]` and `[baseline]` are no longer
-supported.
+```toml
+[experiment]
+rollout = "my-rollout"
+entrypoint = "main.py"
+model_path = "openai/gpt-5-mini"      # LiteLLM-style model name
+dataset = "my-platform-dataset"
+# commit_sha =
 
-```bash
-osmosis eval run configs/eval/my-rollout.toml --limit 1
-osmosis eval run configs/eval/my-rollout.toml
-osmosis eval run configs/eval/my-rollout.toml --fresh
-osmosis eval run configs/eval/my-rollout.toml --retry-failed
-osmosis eval run configs/eval/my-rollout.toml --limit 20 --batch-size 4
-osmosis eval run configs/eval/my-rollout.toml -o ./results --log-samples
+[evaluation]
+# Optional. Omit values to use platform defaults.
+# limit = 200
+# n = 1
+# batch_size = 1
+# pass_threshold = 1.0
+# agent_workflow_timeout_s = 450
+# grader_timeout_s = 150
+
+# [env]
+# LOG_LEVEL = "INFO"
+
+# [secrets]
+# OPENAI_API_KEY = "openai-api-key"
 ```
 
-See [Eval](./eval.md) for the full `[eval]`, `[llm]`, `[runs]`, `[timeouts]`,
-and `[output]` sections.
-
-### osmosis eval cache
-
 ```bash
-osmosis eval cache ls
-osmosis eval cache ls --model gpt-4 --status completed
-osmosis eval cache rm <task_id>
-osmosis eval cache rm --all --yes
+osmosis eval submit configs/eval/my-rollout.toml
 ```
-
-| Subcommand / option | Description |
-|---------------------|-------------|
-| `ls` | List caches (`--model`, `--dataset`, `--status`) |
-| `rm` | Delete by `task_id`, `--all`, or filters (`-y` skips prompt) |
 
 ### osmosis eval rubric
 
@@ -187,9 +183,9 @@ The config file must live under `configs/training/` inside a structured Osmosis
 workspace directory. The CLI reads the config locally and sends it to the platform, which
 clones the repository identified by the workspace directory's `origin` remote for the
 actual rollout code.
-`osmosis train submit` includes the training preflight checks before launch; run
-`osmosis eval run configs/eval/<name>.toml --limit 1` first when you want an
-end-to-end local smoke test of the rollout server and grader.
+`osmosis train submit` includes the training run preflight checks before launch;
+run `osmosis eval submit configs/eval/<name>.toml` first when you want an
+evaluation run before a training run.
 
 #### Required `[experiment]` fields
 
@@ -231,37 +227,36 @@ All fields are optional. Omitted fields use platform defaults.
 | `checkpoint_save_freq` | int | Save a checkpoint every N rollout steps |
 | `eval_interval` | int | Run evaluation every N rollout steps |
 
-#### Environment variables — `[rollout.env]`
+#### Environment variables — `[env]`
 
 Literal key/value pairs injected verbatim into the rollout container. Values
 are visible in the config file and in CLI output — do **not** use this section
 for secrets.
 
 ```toml
-[rollout.env]
+[env]
 LOG_LEVEL = "INFO"
 DEFAULT_REGION = "us-west-2"
 ```
 
-#### Secrets — `[rollout.secrets]`
+#### Secrets — `[secrets]`
 
 Maps env-var names to Platform `environment_secret` **record names**. The
 platform resolves the actual secret value server-side from encrypted secret
 storage and injects it into the container. Secret values never
 appear in the config file, in the API payload, or in CLI output.
 
-Pre-register secrets at `/:orgName/secrets` in the platform UI before
-submitting a run that references them.
+Pre-register secrets before submitting a run that references them — either with [`osmosis secret add`](#osmosis-secret-add) or at `/:orgName/secrets` in the platform UI.
 
 ```toml
-[rollout.secrets]
+[secrets]
 OPENAI_API_KEY = "openai-api-key"   # "openai-api-key" is the record name
 ```
 
 #### Rules for both sections
 
 - Keys must match `^[A-Z_][A-Z0-9_]*$`.
-- A key cannot appear in both `[rollout.env]` and `[rollout.secrets]`.
+- A key cannot appear in both `[env]` and `[secrets]`.
 - Any env var name starting with `_OSMOSIS_` is reserved by the platform and cannot be used.
 - Both sections are optional.
 
@@ -332,6 +327,35 @@ Transition a checkpoint deployment to inactive.
 
 ```bash
 osmosis undeploy <checkpoint>
+```
+
+## Secrets
+
+Manage workspace `environment_secret` records — the values referenced by the `[secrets]` table in train/eval configs. The platform never returns a secret value: `list` shows names and metadata only, and `add` echoes back only metadata. Secret values are accepted from a hidden interactive prompt or a named environment variable — never as a plaintext command-line argument (which would leak into shell history and the process list).
+
+### osmosis secret list
+
+List secrets for the current workspace directory (names and metadata only).
+
+```bash
+osmosis secret list
+osmosis secret list --limit 50
+osmosis secret list --all
+```
+
+### osmosis secret add
+
+Add a workspace secret. The value is read from a named environment variable (`--env VARNAME`) or, with no flag, typed at a hidden interactive prompt. The secret name may contain letters, digits, `_`, and `-` (1–255 chars). Adding a secret whose name already exists fails with a `CONFLICT` error rather than overwriting it.
+
+```bash
+# Type the value at a hidden prompt (input is not echoed):
+osmosis secret add OPENAI_API_KEY
+
+# Read the value from an environment variable (recommended for CI):
+osmosis secret add OPENAI_API_KEY --env OPENAI_API_KEY
+
+# In --json / --plain (non-interactive) modes, --env is required:
+osmosis --json secret add OPENAI_API_KEY --env SOURCE_VAR
 ```
 
 ## See also

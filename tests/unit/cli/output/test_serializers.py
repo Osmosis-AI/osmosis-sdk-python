@@ -9,7 +9,6 @@ from osmosis_ai.cli.output.serializers import (
     serialize_checkpoint,
     serialize_dataset,
     serialize_deployment,
-    serialize_eval_cache_entry,
     serialize_model,
     serialize_rollout,
     serialize_training_run,
@@ -158,20 +157,3 @@ def test_serialize_rollout_keys() -> None:
     )
     payload = serialize_rollout(rollout)
     _assert_keys_match_golden(payload, "rollout_serializer.json")
-
-
-def test_serialize_eval_cache_entry_keys() -> None:
-    entry = {
-        "task_id": "task_1",
-        "config": {
-            "llm_model": "openai/gpt-5.4",
-            "eval_dataset": "data.jsonl",
-        },
-        "status": "completed",
-        "runs_count": 3,
-        "created_at": "2026-04-26T00:00:00Z",
-    }
-    payload = serialize_eval_cache_entry(entry)
-    _assert_keys_match_golden(payload, "eval_cache_entry_serializer.json")
-    assert payload["model"] == "openai/gpt-5.4"
-    assert payload["dataset"] == "data.jsonl"

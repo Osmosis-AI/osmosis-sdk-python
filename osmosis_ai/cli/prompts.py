@@ -368,19 +368,104 @@ def text(
     ).ask()
 
 
-def require_confirmation(message: str, *, yes: bool = False) -> None:
+def password(
+    message: str,
+    *,
+    validate: Any = None,
+    instruction: str | None = None,
+) -> str | None:
+    """Interactive masked input prompt (no echo) for secret values.
+
+    Built on ``questionary.password`` (prompt_toolkit ``is_password=True``),
+    so the typed value is read straight from the terminal: it is never
+    echoed, never written to shell history, and never placed on the process
+    command line. Use this — not :func:`text` or ``console.input`` — for any
+    sensitive value.
+
+    The validate callable receives the input string and should return True
+    if valid, or an error message string if invalid.
+
+    Returns the entered text, or None if the user cancels (Ctrl+C / ESC).
+    """
+    return _add_escape_binding(
+        questionary.password(
+            message,
+            validate=validate,
+            style=OSMOSIS_STYLE,
+            qmark="?",
+            instruction=instruction,
+        )
+    ).ask()
+
+
+def require_confirmation(
+    message: str,
+    *,
+    yes: bool = False,
+    summary: list[tuple[str, str]] | None = None,
+    notes: list[str] | None = None,
+    warnings: list[str] | None = None,
+) -> None:
     """Guard for destructive CLI commands that need user confirmation.
 
-    Does nothing when *yes* is True (``--yes`` flag).  In non-interactive
-    sessions raises :class:`CLIError`; otherwise prompts the user and
-    exits cleanly on decline.
+    Does nothing when *yes* is True (``--yes`` flag). In rich + interactive
+    sessions prompts the user with questionary and exits cleanly on decline.
+    In JSON mode emits a structured ``INTERACTIVE_REQUIRED`` error envelope
+    (so agents/CI can see exactly what they are being asked to confirm) and
+    exits 1. In plain mode writes the prompt + context to stderr and raises
+    :class:`CLIError`.
+
+    The optional *summary*, *notes*, and *warnings* carry the same context
+    the rich panel showed: the JSON envelope embeds them as structured
+    fields, and the plain-mode stderr output prints them inline.
     """
     if yes:
         return
-    if not is_interactive():
+
+    from osmosis_ai.cli.output import OutputFormat, get_output_context
+
+    output = get_output_context()
+    if output.format is not OutputFormat.rich or not output.interactive:
         from osmosis_ai.cli.errors import CLIError
 
-        raise CLIError("Use --yes to confirm in non-interactive mode.")
+        details: dict[str, Any] = {"prompt": message}
+        if summary:
+            details["summary"] = {label: value for label, value in summary}
+        if notes:
+            details["notes"] = list(notes)
+        if warnings:
+            details["warnings"] = list(warnings)
+
+        if output.format is OutputFormat.plain:
+            lines: list[str] = [f"Confirmation required: {message}"]
+            if summary:
+                for label, value in summary:
+                    lines.append(f"  {label}: {value}")
+            if notes:
+                lines.append("Notes:")
+                for note in notes:
+                    lines.append(f"  - {note}")
+            if warnings:
+                lines.append("Warnings:")
+                for warning in warnings:
+                    lines.append(f"  - {warning}")
+            sys.stderr.write("\n".join(lines) + "\n")
+            sys.stderr.flush()
+
+        err = CLIError(
+            "Use --yes to confirm in non-interactive mode.",
+            code="INTERACTIVE_REQUIRED",
+            details=details,
+        )
+        if output.format is OutputFormat.json:
+            import typer
+
+            from osmosis_ai.cli.output import emit_structured_error_to_stderr
+
+            emit_structured_error_to_stderr(err)
+            raise typer.Exit(1)
+        raise err
+
     if not confirm(message):
         import typer
 
@@ -396,6 +481,7 @@ __all__ = [
     "Separator",
     "confirm",
     "is_interactive",
+    "password",
     "require_confirmation",
     "select",
     "select_list",

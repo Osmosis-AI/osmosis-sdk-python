@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from osmosis_ai.cli.console import Console, console
@@ -268,3 +269,105 @@ def validate_list_options(
     if all_ and limit != DEFAULT_PAGE_SIZE:
         raise CLIError("--all and --limit are mutually exclusive.")
     return limit, all_
+
+
+def print_remote_fetch_notice(
+    workspace_directory: Path,
+    *,
+    pinned_commit_sha: str | None,
+) -> tuple[list[str], list[str]]:
+    """Remind the user that remote submissions pull *code* from the connected
+    Git remote while reading *config values* from the local TOML file.
+
+    The platform resolves code from the Platform-connected repository (or
+    fetches a pinned commit) before the run starts, so local *code* changes
+    that haven't been pushed will silently be ignored. The config TOML
+    passed to the submit command, by contrast, is read from disk and its
+    values are sent verbatim in the submit payload — local edits to the
+    config take effect immediately, even if they are uncommitted.
+
+    Returns ``(notes, warnings)`` as plain-text lists so callers can surface
+    the same context in non-rich modes (e.g. the JSON error envelope when
+    ``--yes`` is missing). The Rich panel is rendered only when the output
+    format is Rich.
+    """
+    from osmosis_ai.cli.output import OutputFormat, get_output_context
+    from osmosis_ai.platform.cli.workspace_repo import summarize_local_git_state
+
+    state = summarize_local_git_state(workspace_directory)
+
+    warnings: list[str] = []
+    if state is not None:
+        if state.is_dirty:
+            warnings.append(
+                "Uncommitted changes detected — code edits won't be picked up "
+                "(only the config file above is read locally)."
+            )
+        if state.has_upstream and state.ahead > 0:
+            commits_word = "commit" if state.ahead == 1 else "commits"
+            warnings.append(
+                f"{state.ahead} unpushed {commits_word} ahead of upstream — "
+                "push code before submitting."
+            )
+        elif state.branch is not None and not state.has_upstream:
+            warnings.append(
+                f"Branch '{state.branch}' has no upstream — "
+                "push code and set tracking before submitting."
+            )
+
+    notes: list[str] = []
+    if pinned_commit_sha:
+        notes.append(
+            f"Osmosis will fetch commit {pinned_commit_sha} from the "
+            "Platform-connected repository."
+        )
+        notes.append("Make sure that commit is pushed to origin.")
+    else:
+        notes.append("Osmosis will fetch code from the Platform-connected repository.")
+        if state is not None and state.branch and state.head_sha:
+            notes.append(f"Local branch: {state.branch} @ {state.head_sha[:8]}")
+        notes.append("Make sure your code changes are committed and pushed.")
+        warnings.append(
+            "Platform source selection may differ from your local branch when no "
+            "commit_sha is set."
+        )
+    notes.append(
+        "Config values come from your local TOML file and are submitted "
+        "as-is — uncommitted edits to the config still apply."
+    )
+
+    if get_output_context().format is OutputFormat.rich:
+        body_lines: list[str] = []
+        if pinned_commit_sha:
+            body_lines.append(
+                f"Osmosis will fetch commit [bold]{console.escape(pinned_commit_sha)}[/bold] "
+                "from the Platform-connected repository."
+            )
+            body_lines.append("Make sure that commit is pushed to origin.")
+        else:
+            body_lines.append(
+                "Osmosis will fetch code from the Platform-connected repository."
+            )
+            if state is not None and state.branch and state.head_sha:
+                body_lines.append(
+                    f"Local: [bold]{console.escape(state.branch)}[/bold] @ "
+                    f"[dim]{console.escape(state.head_sha[:8])}[/dim]"
+                )
+            body_lines.append("Make sure your code changes are committed and pushed.")
+
+        body_lines.append("")
+        body_lines.append(
+            "[dim]Config values above come from your local TOML file and are "
+            "submitted as-is — uncommitted edits to the config still apply.[/dim]"
+        )
+
+        if warnings:
+            body_lines.append("")
+            for warning in warnings:
+                body_lines.append(f"[yellow]• {console.escape(warning)}[/yellow]")
+
+        style = "yellow" if warnings else "blue"
+        title = "Push before submitting" if warnings else "Before you submit"
+        console.panel(title, "\n".join(body_lines), style=style)
+
+    return notes, warnings

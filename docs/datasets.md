@@ -1,6 +1,6 @@
 # Dataset format
 
-Datasets supply prompts and reference answers for **`osmosis eval run`**. Each row becomes a short message list (system + user) plus optional extra fields carried on the row dict.
+Datasets supply prompts and reference answers for cloud `osmosis eval submit` and `osmosis train submit` runs. Each row becomes a short message list (system + user) plus optional extra fields carried on the row dict.
 
 ## Supported formats
 

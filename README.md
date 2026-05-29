@@ -19,18 +19,17 @@
 
 > ⚠️ **Warning**: osmosis-ai is still in active development. APIs may change between versions.
 
-Python SDK for [Osmosis AI](https://platform.osmosis.ai), a platform for training LLMs with reinforcement learning. Implement an **AgentWorkflow** in Python, add a concrete **Grader** for local eval and managed training flows, run an eval smoke test locally with the CLI, then submit training from an Osmosis workspace directory.
+Python SDK for [Osmosis AI](https://platform.osmosis.ai), a platform for training LLMs with reinforcement learning. Implement an **AgentWorkflow** in Python, add a concrete **Grader** for evaluation runs and managed training runs, submit evaluation runs with the CLI, then submit training runs from an Osmosis workspace directory.
 
 ## Quick start
 
 | Step | What you do |
 |------|-------------|
-| **Define agents** | One `AgentWorkflow` subclass (+ optional `AgentWorkflowConfig`) in your repo. The training/eval entrypoint must also expose a concrete `Grader` (typically with a `GraderConfig`). |
+| **Define agents** | One `AgentWorkflow` subclass (+ optional `AgentWorkflowConfig`) in your repo. The training/evaluation entrypoint must also expose a concrete `Grader` (typically with a `GraderConfig`). |
 | **Layout** | Use a rollout pack directory under `rollouts/<name>/` when loading by rollout name; the CLI adds that directory to `sys.path`. |
 | **Workspace directory** | Create or open a workspace in the Osmosis Platform, then clone the repository created there. |
 | **Check workspace** | `osmosis doctor` — run from the workspace directory so platform commands resolve the repository from the `origin` remote. Add `--fix` to restore missing scaffold paths. |
-| **Smoke test** | `osmosis eval run configs/eval/<name>.toml --limit 1` — exercises the same rollout server protocol used by training. |
-| **Evaluate** | `osmosis eval run configs/eval/<name>.toml` — run the full eval with optional pass@k and caching. |
+| **Evaluate** | `osmosis eval submit configs/eval/<name>.toml` — submit an evaluation run using the same platform dataset naming as training runs. |
 
 **Example repository:** [osmosis-remote-rollout-example](https://github.com/Osmosis-AI/osmosis-remote-rollout-example) (reference server usage - align with current SDK exports when upgrading).
 
@@ -75,7 +74,7 @@ Platform-scoped commands derive scope from the workspace directory's `origin` re
 send `X-Osmosis-Git: namespace/repo_name`. The CLI does not store or send a
 workspace ID for commands scoped by the workspace directory.
 
-Before submitting training from CI, push the repository and authenticate with a
+Before submitting training runs from CI, push the repository and authenticate with a
 token:
 
 ```bash
@@ -87,7 +86,7 @@ osmosis train submit configs/training/<run>.toml --yes
 
 Requires **Python 3.12+**. For development setup, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
-- **An LLM API key** (e.g., OpenAI, Anthropic, Groq) — required for `osmosis eval run` when using hosted models. See [supported providers](https://docs.litellm.ai/docs/providers).
+- **An LLM API key** (e.g., OpenAI, Anthropic, Groq) — required for `osmosis eval rubric` (LLM-as-judge) when using hosted models. See [supported providers](https://docs.litellm.ai/docs/providers).
 - **Osmosis account** (optional) — needed for `osmosis auth login` and platform-backed commands such as datasets, models, and training runs. Sign up at [platform.osmosis.ai](https://platform.osmosis.ai).
 
 **pip**
@@ -108,7 +107,7 @@ uv add osmosis-ai[full]           # Same as [server] (all packaged optional feat
 
 ## Testing and evaluation
 
-- [Eval](docs/eval.md) — graded runs, pass@k, cache/resume with `osmosis eval run`
+- [Eval](docs/eval.md) — evaluation run configs and `osmosis eval submit`
 - [CLI reference](docs/cli.md)
 
 ## Contributing
