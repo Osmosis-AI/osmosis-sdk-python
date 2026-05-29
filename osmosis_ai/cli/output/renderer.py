@@ -7,8 +7,6 @@ import re
 import sys
 from typing import Any
 
-import typer
-
 from .context import OutputContext, OutputFormat
 from .result import (
     CommandResult,
@@ -350,7 +348,9 @@ def render_command_result(result: Any, **_: Any) -> None:
         render(result, get_output_context())
         exit_code = getattr(result, "exit_code", 0)
         if exit_code:
-            raise typer.Exit(exit_code)
+            import click
+
+            raise click.exceptions.Exit(exit_code)
         return
 
     output = get_output_context()
@@ -385,6 +385,8 @@ def verify_output_emitted() -> None:
     if sys.exc_info()[0] is not None:
         return
 
+    import click
+
     from osmosis_ai.cli.errors import CLIError
 
     emit_structured_error_to_stderr(
@@ -393,4 +395,4 @@ def verify_output_emitted() -> None:
             code="INTERNAL",
         )
     )
-    raise typer.Exit(1)
+    raise click.exceptions.Exit(1)

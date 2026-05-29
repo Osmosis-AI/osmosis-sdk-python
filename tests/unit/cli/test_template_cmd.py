@@ -7,7 +7,8 @@ import subprocess
 from pathlib import Path
 
 import pytest
-from typer.testing import CliRunner
+from click.testing import CliRunner
+from typer.main import get_command
 
 from osmosis_ai.cli import main as cli
 
@@ -126,7 +127,7 @@ def test_zsh_completion_for_template_commands_does_not_require_comp_words(
 ) -> None:
     cli._register_commands()
     result = CliRunner().invoke(
-        cli.app,
+        get_command(cli.app),
         [],
         prog_name="osmosis",
         env={
@@ -149,21 +150,6 @@ def test_completion_registration_uses_public_typer_api() -> None:
     assert (
         "from typer.completion import get_completion_inspect_parameters" in main_source
     )
-
-
-def test_cli_does_not_use_private_typer_click_modules() -> None:
-    package_root = Path(cli.__file__).resolve().parents[1]
-    assert not (package_root / "cli" / "_click_compat.py").exists()
-
-    cli_sources = [
-        package_root / "cli" / "main.py",
-        package_root / "cli" / "output" / "error.py",
-        package_root / "cli" / "output" / "renderer.py",
-    ]
-    for path in cli_sources:
-        source = path.read_text(encoding="utf-8")
-        assert "typer._click" not in source
-        assert "_click_compat" not in source
 
 
 # ── apply ────────────────────────────────────────────────────────
@@ -280,7 +266,7 @@ def test_template_apply_unknown_template_returns_not_found_in_json(
 def test_zsh_completion_for_template_apply_names(workspace_template) -> None:
     cli._register_commands()
     result = CliRunner().invoke(
-        cli.app,
+        get_command(cli.app),
         [],
         prog_name="osmosis",
         env={

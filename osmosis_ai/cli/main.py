@@ -1,33 +1,67 @@
 """Osmosis AI CLI — built with Typer."""
 
+import difflib
 import sys
 import warnings
 
+import click
 import typer
+import typer.core
 from dotenv import find_dotenv, load_dotenv
 
+from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.cli.output.context import (
     OutputContext,
     OutputFormat,
     _argv_format_prescan,
-    _invocation_argv_var,
     _output_context_var,
     get_output_context,
     install_output_context,
     resolve_format_selectors,
 )
 from osmosis_ai.cli.output.error import (
-    ClickException,
     classify_error,
     command_path_for_error,
     emit_structured_error_to_stderr,
-    is_cli_usage_error,
 )
 from osmosis_ai.cli.output.renderer import render_command_result, verify_output_emitted
 from osmosis_ai.consts import PACKAGE_VERSION, package_name
+from osmosis_ai.platform.auth.platform_client import (
+    AuthenticationExpiredError,
+    PlatformAPIError,
+)
+
+
+class OsmosisGroup(typer.core.TyperGroup):
+    """Typer group with fuzzy command suggestion."""
+
+    def resolve_command(
+        self, ctx: click.Context, args: list[str]
+    ) -> tuple[str | None, click.Command | None, list[str]]:
+        try:
+            return super().resolve_command(ctx, args)
+        except click.UsageError:
+            if args:
+                cmd_name = args[0]
+                candidates = []
+                for name in self.list_commands(ctx):
+                    command = self.get_command(ctx, name)
+                    if command is None or getattr(command, "hidden", False):
+                        continue
+                    candidates.append(name)
+                matches = difflib.get_close_matches(
+                    cmd_name, candidates, n=1, cutoff=0.5
+                )
+                if matches:
+                    raise click.UsageError(
+                        f"No such command '{cmd_name}'. Did you mean '{matches[0]}'?"
+                    ) from None
+            raise
+
 
 app: typer.Typer = typer.Typer(
     name="osmosis",
+    cls=OsmosisGroup,
     no_args_is_help=True,
     add_completion=False,
     context_settings={"help_option_names": ["-h", "--help"]},
@@ -87,10 +121,16 @@ def _print_error(message: str) -> None:
     Console(file=sys.stderr).print_error(f"Error: {message}", soft_wrap=True)
 
 
-def _output_context_for_error(argv: list[str] | None) -> OutputContext:
-    # The active context survives in the ContextVar; if it was already reset
-    # (parse error before the callback installed it), recover the format from
-    # the explicit argv. Mirrors get_output_context()'s fallback chain.
+def _output_context_for_error(
+    exc: BaseException,
+    argv: list[str] | None,
+) -> OutputContext:
+    ctx = getattr(exc, "ctx", None)
+    if isinstance(exc, click.ClickException) and isinstance(ctx, click.Context):
+        root_obj = ctx.find_root().obj
+        if isinstance(root_obj, OutputContext):
+            return root_obj
+
     stored = _output_context_var.get()
     if stored is not None:
         return stored
@@ -107,15 +147,20 @@ def _handle_cli_error(
     argv: list[str] | None,
     exit_code: int = 1,
 ) -> int:
-    output = _output_context_for_error(argv)
+    output = _output_context_for_error(exc, argv)
     if output.format is OutputFormat.json:
+        raw_ctx = getattr(exc, "ctx", None)
+        ctx = raw_ctx if isinstance(raw_ctx, click.Context) else None
         command_argv = argv if argv is not None else sys.argv[1:]
         emit_structured_error_to_stderr(
             classify_error(exc),
-            command=command_path_for_error(None, argv=command_argv),
+            command=command_path_for_error(ctx, argv=command_argv),
         )
     else:
-        _print_error(str(exc))
+        if isinstance(exc, AuthenticationExpiredError):
+            _print_error(str(exc))
+        else:
+            _print_error(str(exc))
     return exit_code
 
 
@@ -174,39 +219,33 @@ def _register_commands() -> None:
 def main(argv: list[str] | None = None) -> int:
     """Entry point for the osmosis CLI."""
     _register_commands()
-    # Record the argv actually dispatched so mid-flight error helpers
-    # (interactive-required prompts, verify_output_emitted) reconstruct the same
-    # command path as the top-level handler — even when the caller passes an
-    # explicit argv that differs from the process-global sys.argv.
-    argv_token = _invocation_argv_var.set(argv if argv is not None else sys.argv[1:])
     try:
         result = app(argv, standalone_mode=False)
-        # standalone_mode=False returns None on normal completion and re-raises
-        # ClickException / Abort for the except arms below to handle.
+        # standalone_mode=False returns None on normal completion;
+        # typer.Exit() still raises SystemExit, caught by the except block below.
         if isinstance(result, int) and result != 0:
             return result
         return 0
-    except typer.Exit as e:
+    except click.exceptions.Exit as e:
         return e.exit_code
-    except (KeyboardInterrupt, typer.Abort):
-        # typer.Abort is a RuntimeError (not a ClickException); under
-        # standalone_mode=False Click does not convert it to an exit, so handle
-        # it here instead of letting it fall through and read as INTERNAL.
-        return 130
     except SystemExit as e:
         return int(e.code) if e.code is not None else 0
-    except ClickException as exc:
-        # Bundled Click base — covers every parser/usage error. An empty message
-        # means no_args_is_help already printed help, so exit cleanly. Usage
-        # errors are exit 2 (POSIX), other Click errors exit 1.
+    except click.UsageError as exc:
+        # NoArgsIsHelpError (from no_args_is_help=True) has an empty message
+        # after help is already printed — just exit cleanly.
         if not str(exc):
             return 0
-        exit_code = 2 if is_cli_usage_error(exc) else 1
-        return _handle_cli_error(exc, argv=argv, exit_code=exit_code)
+        return _handle_cli_error(exc, argv=argv, exit_code=exc.exit_code)
+    except AuthenticationExpiredError as exc:
+        return _handle_cli_error(exc, argv=argv)
+    except PlatformAPIError as exc:
+        return _handle_cli_error(exc, argv=argv)
+    except CLIError as exc:
+        return _handle_cli_error(exc, argv=argv)
+    except KeyboardInterrupt:
+        return 130
     except Exception as exc:
         return _handle_cli_error(exc, argv=argv)
-    finally:
-        _invocation_argv_var.reset(argv_token)
 
 
 if __name__ == "__main__":

@@ -106,6 +106,37 @@ def _resolve_secret_value(*, env: str | None, output: Any) -> str | None:
     return value
 
 
+def _redact_secret_value(data: Any, secret_value: str) -> Any:
+    """Return a copy of *data* with the current plaintext secret removed."""
+    if isinstance(data, str):
+        return data.replace(secret_value, "[REDACTED]")
+    if isinstance(data, dict):
+        return {
+            key: (
+                "[REDACTED]"
+                if str(key).lower() in {"value", "secret", "secret_value"}
+                else _redact_secret_value(value, secret_value)
+            )
+            for key, value in data.items()
+        }
+    if isinstance(data, list):
+        return [_redact_secret_value(value, secret_value) for value in data]
+    return data
+
+
+def _redact_secret_platform_error(exc: Any, secret_value: str) -> Any:
+    """Clone a PlatformAPIError with any echoed secret value removed."""
+    from osmosis_ai.platform.auth.platform_client import PlatformAPIError
+
+    return PlatformAPIError(
+        _redact_secret_value(str(exc), secret_value),
+        status_code=exc.status_code,
+        error_code=exc.error_code,
+        field=exc.field,
+        details=_redact_secret_value(exc.details, secret_value),
+    )
+
+
 def list_secrets(*, limit: int, all_: bool) -> ListResult:
     """List workspace secrets (names + metadata only; values are never returned)."""
     effective_limit, fetch_all = validate_list_options(limit=limit, all_=all_)
@@ -197,15 +228,22 @@ def add_secret(*, name: str, env: str | None) -> OperationResult:
         )
 
     client = OsmosisClient()
-    with output.status(f'Adding secret "{name}"...'):
-        secret = client.create_environment_secret(
-            name,
-            value,
-            credentials=context.credentials,
-            git_identity=context.git_identity,
-        )
-    # Drop the only remaining reference to the plaintext value promptly.
-    del value
+    from osmosis_ai.platform.auth.platform_client import PlatformAPIError
+
+    try:
+        with output.status(f'Adding secret "{name}"...'):
+            secret = client.create_environment_secret(
+                name,
+                value,
+                credentials=context.credentials,
+                git_identity=context.git_identity,
+            )
+    except PlatformAPIError as exc:
+        raise _redact_secret_platform_error(exc, value) from exc
+    finally:
+        # Drop the only remaining reference to the plaintext value promptly,
+        # including the failure path.
+        del value
 
     resource = serialize_environment_secret(secret)
     resource.update(git_result_context(context))

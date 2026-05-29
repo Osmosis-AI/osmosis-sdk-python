@@ -8,13 +8,12 @@ from contextlib import redirect_stderr
 from pathlib import Path
 from typing import Any
 
+import click
 import pytest
 
 from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.cli.main import _handle_cli_error, main
-from osmosis_ai.cli.output.context import _invocation_argv_var, get_invocation_argv
 from osmosis_ai.cli.output.error import (
-    ClickUsageError,
     classify_error,
     command_path_for_error,
     emit_structured_error_to_stderr,
@@ -25,15 +24,6 @@ from osmosis_ai.platform.auth.platform_client import (
 )
 
 GOLDEN = Path(__file__).resolve().parents[3] / "golden" / "cli_output"
-
-
-class UsageError(ClickUsageError):
-    """Stand-in for a real Typer/Click parser usage error."""
-
-
-class _FakeContext:
-    def __init__(self, command_path: str) -> None:
-        self.command_path = command_path
 
 
 def _capture_envelope(err: CLIError) -> dict[str, Any]:
@@ -48,7 +38,7 @@ def _capture_json_usage_error_for_argv(
     capsys: pytest.CaptureFixture[str],
 ) -> dict[str, Any]:
     rc = _handle_cli_error(
-        UsageError("No such command."),
+        click.UsageError("No such command."),
         argv=argv,
         exit_code=2,
     )
@@ -130,10 +120,16 @@ def test_command_path_fallback_excludes_top_level_argument(monkeypatch) -> None:
     assert command_path_for_error(None) == "deploy"
 
 
-def test_command_path_uses_parser_context_when_available() -> None:
-    assert (
-        command_path_for_error(_FakeContext("osmosis dataset list")) == "dataset list"
-    )
+def test_command_path_uses_click_context_when_available() -> None:
+    import click
+
+    parent = click.Context(click.Command("osmosis"))
+    parent.info_name = "osmosis"
+    middle = click.Context(click.Command("dataset"), parent=parent)
+    middle.info_name = "dataset"
+    nested = click.Context(click.Command("list"), parent=middle)
+    nested.info_name = "list"
+    assert command_path_for_error(nested) == "dataset list"
 
 
 def test_command_path_root_when_argv_empty(monkeypatch) -> None:
@@ -159,6 +155,8 @@ def test_command_path_root_when_argv_empty(monkeypatch) -> None:
         (["--json", "project", "init"], "project"),
         (["--json", "project", "info"], "project"),
         (["--json", "project", "list"], "project"),
+        (["--json", "secret", "list"], "secret list"),
+        (["--json", "secret", "add", "NAME"], "secret add"),
         (["--json", "dataset", "delete", "name"], "dataset delete"),
         (["--json", "train", "delete", "run"], "train delete"),
         (["--json", "train", "status", "run"], "train status"),
@@ -214,60 +212,3 @@ def test_json_unknown_command_from_main_without_argv_uses_process_argv(
     envelope = json.loads(captured.err)
     assert envelope["command"] == "workspace"
     assert envelope["error"]["code"] == "VALIDATION"
-
-
-def test_get_invocation_argv_falls_back_to_sys_argv(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr("sys.argv", ["osmosis", "--json", "dataset", "list"])
-    assert _invocation_argv_var.get() is None
-    assert get_invocation_argv() == ["--json", "dataset", "list"]
-
-
-def test_command_path_prefers_invocation_argv_over_sys_argv(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    # Simulate an explicit main(argv=...) invocation whose argv differs from the
-    # process-global sys.argv (e.g. an embedding host or pytest's own argv).
-    monkeypatch.setattr("sys.argv", ["pytest", "-q"])
-    token = _invocation_argv_var.set(["--json", "secret", "list"])
-    try:
-        assert command_path_for_error(None) == "secret list"
-    finally:
-        _invocation_argv_var.reset(token)
-
-
-def test_emit_without_command_uses_invocation_argv(
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    # Mirrors the mid-flight emit paths (interactive-required prompts,
-    # verify_output_emitted): no command/argv is passed, so the envelope must
-    # fall back to the invocation argv rather than the divergent sys.argv.
-    monkeypatch.setattr("sys.argv", ["pytest", "-q"])
-    token = _invocation_argv_var.set(["--json", "secret", "add", "NAME"])
-    try:
-        emit_structured_error_to_stderr(
-            CLIError("Secret value required.", code="INTERACTIVE_REQUIRED")
-        )
-    finally:
-        _invocation_argv_var.reset(token)
-
-    envelope = json.loads(capsys.readouterr().err)
-    assert envelope["command"] == "secret add"
-    assert envelope["error"]["code"] == "INTERACTIVE_REQUIRED"
-
-
-def test_main_resets_invocation_argv_after_return(
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    monkeypatch.setattr("sys.argv", ["osmosis", "--json", "dataset", "list"])
-    assert _invocation_argv_var.get() is None
-
-    rc = main(["--json", "definitely-unknown"])
-
-    assert rc == 2
-    # The ContextVar must not leak past the invocation it was scoped to.
-    assert _invocation_argv_var.get() is None
-    capsys.readouterr()

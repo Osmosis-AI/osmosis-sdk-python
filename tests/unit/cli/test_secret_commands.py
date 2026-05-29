@@ -268,6 +268,46 @@ def test_secret_add_conflict_maps_to_conflict_code(monkeypatch, capsys) -> None:
     assert SENTINEL_VALUE not in captured.err
 
 
+def test_secret_add_redacts_value_from_platform_error(monkeypatch, capsys) -> None:
+    _stub_git_context(monkeypatch)
+    monkeypatch.setenv("SOURCE_VAR", SENTINEL_VALUE)
+
+    from osmosis_ai.platform.auth import PlatformAPIError
+
+    class FakeClient:
+        def create_environment_secret(
+            self, name, value, *, git_identity, credentials=None
+        ):
+            assert value == SENTINEL_VALUE
+            raise PlatformAPIError(
+                f"Rejected value {SENTINEL_VALUE}",
+                status_code=400,
+                error_code="bad_secret",
+                details={
+                    "value": SENTINEL_VALUE,
+                    "nested": {"message": f"contains {SENTINEL_VALUE}"},
+                    "items": [SENTINEL_VALUE],
+                },
+            )
+
+    monkeypatch.setattr(secret_module, "OsmosisClient", FakeClient)
+
+    exit_code = cli.main(
+        ["--json", "secret", "add", "OPENAI_API_KEY", "--env", "SOURCE_VAR"]
+    )
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    assert SENTINEL_VALUE not in captured.out
+    assert SENTINEL_VALUE not in captured.err
+    payload = json.loads(captured.err)
+    assert payload["error"]["code"] == "VALIDATION"
+    assert "[REDACTED]" in payload["error"]["message"]
+    assert payload["error"]["details"]["value"] == "[REDACTED]"
+    assert payload["error"]["details"]["nested"]["message"] == "contains [REDACTED]"
+    assert payload["error"]["details"]["items"] == ["[REDACTED]"]
+
+
 # ── value resolution unit tests (incl. hidden prompt path) ────────
 
 

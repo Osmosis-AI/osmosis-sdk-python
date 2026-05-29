@@ -6,30 +6,10 @@ import json
 import sys
 from typing import Any
 
-import typer
+import click
 
 from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.consts import PACKAGE_VERSION
-
-
-def _typer_click_base(name: str) -> type[BaseException]:
-    """Return a Click base class that Typer raises, e.g. ``"UsageError"``.
-
-    Typer 0.26 ships its own privately bundled copy of Click, so the exceptions
-    it raises are not ``isinstance`` of the top-level ``click`` package — and
-    Typer does not re-export the ``UsageError`` / ``ClickException`` bases. We
-    resolve them off the PUBLIC ``typer.BadParameter`` (MRO: BadParameter ->
-    UsageError -> ClickException -> Exception), so we never import Typer
-    internals, and fail loudly if Typer ever changes that hierarchy.
-    """
-    for cls in typer.BadParameter.__mro__:
-        if cls.__name__ == name:
-            return cls
-    raise RuntimeError(f"typer.BadParameter MRO has no {name!r}; Typer layout changed")
-
-
-ClickUsageError: type[BaseException] = _typer_click_base("UsageError")  # exit_code 2
-ClickException: type[BaseException] = _typer_click_base("ClickException")  # exit_code 1
 
 _SUPPORTED_TOP_LEVEL_COMMANDS = {
     "doctor",
@@ -86,11 +66,6 @@ def _classify_platform_status(status: int | None) -> str:
     return "PLATFORM_ERROR"
 
 
-def is_cli_usage_error(exc: BaseException) -> bool:
-    """Return True for Typer/Click parser usage errors (bad args, unknown command)."""
-    return isinstance(exc, ClickUsageError)
-
-
 def classify_error(exc: BaseException) -> CLIError:
     """Map any supported error type into a structured CLIError."""
     if isinstance(exc, CLIError):
@@ -121,7 +96,7 @@ def classify_error(exc: BaseException) -> CLIError:
             details=details,
         )
 
-    if is_cli_usage_error(exc):
+    if isinstance(exc, click.UsageError):
         return CLIError(str(exc) or "Invalid usage.", code="VALIDATION")
 
     return CLIError(
@@ -165,7 +140,7 @@ def _argv_command_path(argv: list[str]) -> str:
 
 
 def command_path_for_error(
-    ctx: object | None,
+    ctx: click.Context | None,
     *,
     argv: list[str] | None = None,
 ) -> str:
@@ -173,14 +148,12 @@ def command_path_for_error(
     if argv is not None:
         return _argv_command_path(argv)
     if ctx is not None:
-        path = str(getattr(ctx, "command_path", ""))
+        path = ctx.command_path
         parts = path.split(" ", 1)
         if len(parts) == 2:
             return parts[1]
         return path or "<root>"
-    from osmosis_ai.cli.output.context import get_invocation_argv
-
-    return _argv_command_path(get_invocation_argv())
+    return _argv_command_path(sys.argv[1:] if sys.argv[1:] else [])
 
 
 def emit_structured_error_to_stderr(
@@ -191,7 +164,11 @@ def emit_structured_error_to_stderr(
 ) -> None:
     """Write the JSON-mode error envelope to stderr."""
     if command is None:
-        command = command_path_for_error(None)
+        try:
+            ctx = click.get_current_context(silent=True)
+        except RuntimeError:
+            ctx = None
+        command = command_path_for_error(ctx)
 
     envelope: dict[str, Any] = {
         "schema_version": 1,

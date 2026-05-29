@@ -567,9 +567,9 @@ def whoami() -> Any:
     # result callback. Preserve that rich rendering path without duplicating
     # output during normal CLI invocations.
     if output.format is OutputFormat.rich:
-        from osmosis_ai.cli.output.context import _output_context_var
+        import click
 
-        if _output_context_var.get() is None:
+        if click.get_current_context(silent=True) is None:
             console.table([(field.label, field.value) for field in fields])
 
     return result

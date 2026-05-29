@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from io import StringIO
 
+import click
 import pytest
 
 from osmosis_ai.cli.errors import CLIError
@@ -18,26 +19,6 @@ from osmosis_ai.cli.output.context import (
     override_output_context,
     resolve_format_selectors,
 )
-
-
-class _FakeContext:
-    def __init__(self) -> None:
-        self.obj = None
-        self._close_callbacks = []
-
-    def call_on_close(self, callback):
-        self._close_callbacks.append(callback)
-
-    def close(self) -> None:
-        while self._close_callbacks:
-            self._close_callbacks.pop()()
-
-    def find_root(self):
-        return self
-
-
-class UsageError(Exception):
-    __module__ = "typer.testing"
 
 
 def test_output_format_values() -> None:
@@ -55,7 +36,15 @@ def test_default_output_context_is_rich_and_uses_stdin_isatty(monkeypatch) -> No
     assert output.output_emitted is False
 
 
-def test_get_output_context_layer_1_uses_contextvar() -> None:
+def test_get_output_context_layer_1_uses_active_click_context() -> None:
+    output = OutputContext(format=OutputFormat.plain, interactive=False)
+    cmd = click.Command("dummy", callback=lambda: None)
+    with click.Context(cmd) as ctx:
+        ctx.obj = output
+        assert get_output_context() is output
+
+
+def test_get_output_context_layer_3_falls_back_to_contextvar() -> None:
     forced = OutputContext(format=OutputFormat.json, interactive=False)
     token = _output_context_var.set(forced)
     try:
@@ -64,14 +53,14 @@ def test_get_output_context_layer_1_uses_contextvar() -> None:
         _output_context_var.reset(token)
 
 
-def test_get_output_context_layer_2_uses_argv_prescan(monkeypatch) -> None:
+def test_get_output_context_layer_4_uses_argv_prescan(monkeypatch) -> None:
     monkeypatch.setattr("sys.argv", ["osmosis", "--json", "dataset", "list"])
     output = get_output_context()
     assert output.format is OutputFormat.json
     assert output.interactive is False
 
 
-def test_get_output_context_layer_3_default_when_unset(monkeypatch) -> None:
+def test_get_output_context_layer_5_default_when_unset(monkeypatch) -> None:
     monkeypatch.setattr("sys.argv", ["osmosis"])
     output = get_output_context()
     assert output.format is OutputFormat.rich
@@ -79,13 +68,11 @@ def test_get_output_context_layer_3_default_when_unset(monkeypatch) -> None:
 
 def test_install_output_context_sets_obj_and_contextvar() -> None:
     output = OutputContext(format=OutputFormat.plain, interactive=False)
-    ctx = _FakeContext()
-    install_output_context(ctx, output)
-
-    assert ctx.obj is output
-    assert _output_context_var.get() is output
-
-    ctx.close()
+    cmd = click.Command("dummy", callback=lambda: None)
+    with click.Context(cmd) as ctx:
+        install_output_context(ctx, output)
+        assert ctx.obj is output
+        assert _output_context_var.get() is output
     assert _output_context_var.get() is None
 
 
@@ -105,16 +92,14 @@ def test_argv_prescan_ignores_unknown_flags() -> None:
     assert _argv_format_prescan(["--bogus", "dataset", "list"]) is None
 
 
-def test_parser_error_ctx_can_carry_installed_output_context() -> None:
+def test_get_output_context_layer_2_uses_usage_error_ctx() -> None:
     output = OutputContext(format=OutputFormat.json, interactive=False)
-    ctx = _FakeContext()
-    install_output_context(ctx, output)
-    exc = UsageError("Bad subcommand")
-    exc.ctx = ctx
-
-    assert exc.ctx.find_root().obj is output
-
-    ctx.close()
+    root_cmd = click.Command("root", callback=lambda: None)
+    with click.Context(root_cmd) as ctx:
+        ctx.obj = output
+        exc = click.UsageError("Bad subcommand", ctx=ctx)
+        assert exc.ctx is not None
+        assert exc.ctx.find_root().obj is output
 
 
 def test_resolve_format_selectors_default_is_rich() -> None:
