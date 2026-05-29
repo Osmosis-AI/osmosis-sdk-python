@@ -187,16 +187,16 @@ class OsmosisClient:
         checkpoints_config: dict[str, Any] | None = None,
         advanced_config: dict[str, Any] | None = None,
         env_config: dict[str, str] | None = None,
-        secret_refs_config: dict[str, str] | None = None,
+        secrets: list[str] | None = None,
         credentials: Credentials | None = None,
         git_identity: str,
     ) -> SubmitRunResult:
         """Submit a new training run.
 
         ``env_config`` is a literal env-var-name → value map applied to the
-        rollout container. ``secret_refs_config`` maps env-var names to the
-        names of workspace ``environment_secret`` records; values are resolved
-        server-side and never travel through the CLI.
+        rollout container. ``secrets`` is a list of workspace
+        ``environment_secret`` names; their values are resolved server-side and
+        never travel through the CLI.
         """
         data: dict[str, Any] = {
             "experiment_config": experiment_config,
@@ -211,8 +211,8 @@ class OsmosisClient:
             data["advanced_config"] = advanced_config
         if env_config:
             data["env_config"] = env_config
-        if secret_refs_config:
-            data["secret_refs_config"] = secret_refs_config
+        if secrets:
+            data["secrets"] = secrets
         result = platform_request(
             "/api/cli/training-runs",
             method="POST",
@@ -463,7 +463,7 @@ class OsmosisClient:
         evaluation_config: dict[str, Any] | None = None,
         advanced_config: dict[str, Any] | None = None,
         env_config: dict[str, str] | None = None,
-        secret_refs_config: dict[str, str] | None = None,
+        secrets: list[str] | None = None,
         credentials: Credentials | None = None,
         git_identity: str,
     ) -> SubmitRunResult:
@@ -477,8 +477,8 @@ class OsmosisClient:
             data["advanced_config"] = advanced_config
         if env_config:
             data["env_config"] = env_config
-        if secret_refs_config:
-            data["secret_refs_config"] = secret_refs_config
+        if secrets:
+            data["secrets"] = secrets
         result = platform_request(
             "/api/cli/eval-runs",
             method="POST",
