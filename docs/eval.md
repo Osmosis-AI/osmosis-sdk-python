@@ -19,7 +19,7 @@ Evaluation configs must live under `configs/eval/` inside a structured Osmosis w
 
 ### Optional fields and sections
 
-Evaluation submit configs also support optional `[experiment].commit_sha`, `[evaluation]`, `[env]`, and `[secrets]`. The SDK validates only shallow TOML shape, required fields, recognized keys, and env-var names; backend validation owns provider, dataset, model, and evaluation parameter errors.
+Evaluation submit configs also support optional `[experiment].commit_sha`, `[evaluation]`, `[env]`, and a top-level `secrets` list. The SDK validates only shallow TOML shape, required fields, recognized keys, and env-var names; backend validation owns provider, dataset, model, and evaluation parameter errors.
 
 | Key | Description |
 |-----|-------------|
@@ -36,13 +36,17 @@ Evaluation submit configs also support optional `[experiment].commit_sha`, `[eva
 | `agent_workflow_timeout_s` | Agent workflow timeout per row. |
 | `grader_timeout_s` | Grader timeout per row. |
 
-**`[env]` / `[secrets]`**
+**`[env]` / `secrets`**
 
-`[env]` contains literal env-var values. `[secrets]` maps env-var names to workspace secret record names resolved server-side. Keys must match `^[A-Z_][A-Z0-9_]*$`, must not start with `_OSMOSIS_`, and cannot appear in both sections.
+`[env]` contains literal env-var values. `secrets` is a list of workspace `environment_secret` record names; the platform resolves each to its encrypted value server-side and injects it as an env var of the same name. `[env]` keys and `secrets` names must match `^[A-Z][A-Z0-9_]*$`, must not start with `_OSMOSIS_`, and a name cannot appear in both. Register secrets with `osmosis secret set`; use `--scope user` for a personal override that only affects your own runs.
 
 ### Example `configs/eval/my-rollout.toml`
 
 ```toml
+# `secrets` must be at the TOP of the file, before any [table] header —
+# otherwise TOML folds it into the preceding table and it is silently ignored.
+# secrets = ["OPENAI_API_KEY"]
+
 [experiment]
 rollout = "my-rollout"
 entrypoint = "main.py"
@@ -61,9 +65,6 @@ dataset = "my-platform-dataset"
 
 # [env]
 # LOG_LEVEL = "INFO"
-
-# [secrets]
-# OPENAI_API_KEY = "openai-api-key"
 ```
 
 ## Quick start
