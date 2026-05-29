@@ -115,7 +115,7 @@ def _submit_training(
         checkpoints_config=config.checkpoints_config or None,
         advanced_config=config.advanced_config or None,
         env_config=config.env or None,
-        secret_refs_config=config.secrets or None,
+        secrets=config.secrets or None,
         credentials=credentials,
         git_identity=git_identity,
     )

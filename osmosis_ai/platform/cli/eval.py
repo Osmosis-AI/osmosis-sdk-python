@@ -64,7 +64,7 @@ def _submit_eval(
         evaluation_config=config.evaluation_config or None,
         advanced_config=config.advanced_config or None,
         env_config=config.env or None,
-        secret_refs_config=config.secrets or None,
+        secrets=config.secrets or None,
         credentials=credentials,
         git_identity=git_identity,
     )

@@ -937,6 +937,8 @@ rollout_batch_size = 64
         path = workspace_directory / "configs" / "training" / "train.toml"
         path.write_text(
             """
+secrets = ["OPENAI_API_KEY"]
+
 [experiment]
 rollout = "r"
 entrypoint = "main.py"
@@ -945,9 +947,6 @@ dataset = "d"
 
 [env]
 LOG_LEVEL = "INFO"
-
-[secrets]
-OPENAI_API_KEY = "openai-api-key"
 """.strip(),
             encoding="utf-8",
         )
@@ -964,9 +963,7 @@ OPENAI_API_KEY = "openai-api-key"
         train_module.submit(config_path=path, yes=True)
 
         assert captured_kwargs["env_config"] == {"LOG_LEVEL": "INFO"}
-        assert captured_kwargs["secret_refs_config"] == {
-            "OPENAI_API_KEY": "openai-api-key"
-        }
+        assert captured_kwargs["secrets"] == ["OPENAI_API_KEY"]
 
     def test_submit_rejects_non_canonical_training_config_path(
         self,
