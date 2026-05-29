@@ -11,6 +11,7 @@ from typing import Any
 import click
 import pytest
 
+import osmosis_ai.cli.main as cli_main
 from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.cli.main import _handle_cli_error, main
 from osmosis_ai.cli.output.error import (
@@ -212,3 +213,15 @@ def test_json_unknown_command_from_main_without_argv_uses_process_argv(
     envelope = json.loads(captured.err)
     assert envelope["command"] == "workspace"
     assert envelope["error"]["code"] == "VALIDATION"
+
+
+def test_main_maps_click_abort_to_interrupt_exit_code(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def raise_abort(*_: Any, **__: Any) -> None:
+        raise click.Abort()
+
+    monkeypatch.setattr(cli_main, "_register_commands", lambda: None)
+    monkeypatch.setattr(cli_main, "app", raise_abort)
+
+    assert main(["secret", "add", "OPENAI_API_KEY"]) == 130

@@ -124,15 +124,21 @@ def _redact_secret_value(data: Any, secret_value: str) -> Any:
     return data
 
 
+def _redact_secret_text(value: str | None, secret_value: str) -> str | None:
+    if value is None:
+        return None
+    return value.replace(secret_value, "[REDACTED]")
+
+
 def _redact_secret_platform_error(exc: Any, secret_value: str) -> Any:
     """Clone a PlatformAPIError with any echoed secret value removed."""
     from osmosis_ai.platform.auth.platform_client import PlatformAPIError
 
     return PlatformAPIError(
-        _redact_secret_value(str(exc), secret_value),
+        _redact_secret_text(str(exc), secret_value) or "",
         status_code=exc.status_code,
-        error_code=exc.error_code,
-        field=exc.field,
+        error_code=_redact_secret_text(exc.error_code, secret_value),
+        field=_redact_secret_text(exc.field, secret_value),
         details=_redact_secret_value(exc.details, secret_value),
     )
 
@@ -215,8 +221,13 @@ def add_secret(*, name: str, env: str | None) -> OperationResult:
     """
     _validate_secret_name(name)
 
-    context = require_git_workspace_directory_context()
     output = get_output_context()
+    if env is None and (
+        output.format is not OutputFormat.rich or not output.interactive
+    ):
+        _resolve_secret_value(env=None, output=output)
+
+    context = require_git_workspace_directory_context()
 
     value = _resolve_secret_value(env=env, output=output)
     if value is None:
@@ -239,7 +250,7 @@ def add_secret(*, name: str, env: str | None) -> OperationResult:
                 git_identity=context.git_identity,
             )
     except PlatformAPIError as exc:
-        raise _redact_secret_platform_error(exc, value) from exc
+        raise _redact_secret_platform_error(exc, value) from None
     finally:
         # Drop the only remaining reference to the plaintext value promptly,
         # including the failure path.

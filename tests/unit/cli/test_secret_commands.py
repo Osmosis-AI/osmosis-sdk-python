@@ -16,7 +16,7 @@ import pytest
 import osmosis_ai.cli.main as cli
 import osmosis_ai.platform.cli.secret as secret_module
 from osmosis_ai.cli.errors import CLIError
-from osmosis_ai.cli.output import OutputFormat
+from osmosis_ai.cli.output import OutputFormat, override_output_context
 from osmosis_ai.platform.api.models import (
     EnvironmentSecretInfo,
     PaginatedEnvironmentSecrets,
@@ -218,6 +218,27 @@ def test_secret_add_without_value_source_requires_interactive(
     assert "--env" in payload["error"]["message"]
 
 
+def test_secret_add_without_value_source_checks_before_workspace(
+    monkeypatch, capsys
+) -> None:
+    def fail_if_workspace_resolved():
+        raise AssertionError("workspace context should not be resolved")
+
+    monkeypatch.setattr(
+        secret_module,
+        "require_git_workspace_directory_context",
+        fail_if_workspace_resolved,
+    )
+
+    exit_code = cli.main(["--json", "secret", "add", "MY_SECRET"])
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    payload = json.loads(captured.err)
+    assert payload["error"]["code"] == "INTERACTIVE_REQUIRED"
+    assert "--env" in payload["error"]["message"]
+
+
 def test_secret_add_invalid_name_is_validation_error(monkeypatch, capsys) -> None:
     _stub_git_context(monkeypatch)
     monkeypatch.setenv("SOURCE_VAR", SENTINEL_VALUE)
@@ -282,7 +303,8 @@ def test_secret_add_redacts_value_from_platform_error(monkeypatch, capsys) -> No
             raise PlatformAPIError(
                 f"Rejected value {SENTINEL_VALUE}",
                 status_code=400,
-                error_code="bad_secret",
+                error_code=f"bad_{SENTINEL_VALUE}",
+                field=f"field_{SENTINEL_VALUE}",
                 details={
                     "value": SENTINEL_VALUE,
                     "nested": {"message": f"contains {SENTINEL_VALUE}"},
@@ -303,9 +325,38 @@ def test_secret_add_redacts_value_from_platform_error(monkeypatch, capsys) -> No
     payload = json.loads(captured.err)
     assert payload["error"]["code"] == "VALIDATION"
     assert "[REDACTED]" in payload["error"]["message"]
+    assert payload["error"]["details"]["platform_code"] == "bad_[REDACTED]"
+    assert payload["error"]["details"]["field"] == "field_[REDACTED]"
     assert payload["error"]["details"]["value"] == "[REDACTED]"
     assert payload["error"]["details"]["nested"]["message"] == "contains [REDACTED]"
     assert payload["error"]["details"]["items"] == ["[REDACTED]"]
+
+
+def test_secret_add_redacted_platform_error_suppresses_original_cause(
+    monkeypatch,
+) -> None:
+    _stub_git_context(monkeypatch)
+    monkeypatch.setenv("SOURCE_VAR", SENTINEL_VALUE)
+
+    from osmosis_ai.platform.auth import PlatformAPIError
+
+    class FakeClient:
+        def create_environment_secret(
+            self, name, value, *, git_identity, credentials=None
+        ):
+            raise PlatformAPIError(
+                f"Rejected value {SENTINEL_VALUE}",
+                status_code=400,
+            )
+
+    monkeypatch.setattr(secret_module, "OsmosisClient", FakeClient)
+
+    with override_output_context(format=OutputFormat.json, interactive=False):
+        with pytest.raises(PlatformAPIError) as exc:
+            secret_module.add_secret(name="OPENAI_API_KEY", env="SOURCE_VAR")
+
+    assert exc.value.__cause__ is None
+    assert SENTINEL_VALUE not in str(exc.value)
 
 
 # ── value resolution unit tests (incl. hidden prompt path) ────────

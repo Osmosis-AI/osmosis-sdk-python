@@ -242,7 +242,7 @@ def main(argv: list[str] | None = None) -> int:
         return _handle_cli_error(exc, argv=argv)
     except CLIError as exc:
         return _handle_cli_error(exc, argv=argv)
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, click.Abort):
         return 130
     except Exception as exc:
         return _handle_cli_error(exc, argv=argv)
