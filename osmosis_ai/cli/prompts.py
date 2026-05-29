@@ -368,6 +368,36 @@ def text(
     ).ask()
 
 
+def password(
+    message: str,
+    *,
+    validate: Any = None,
+    instruction: str | None = None,
+) -> str | None:
+    """Interactive masked input prompt (no echo) for secret values.
+
+    Built on ``questionary.password`` (prompt_toolkit ``is_password=True``),
+    so the typed value is read straight from the terminal: it is never
+    echoed, never written to shell history, and never placed on the process
+    command line. Use this — not :func:`text` or ``console.input`` — for any
+    sensitive value.
+
+    The validate callable receives the input string and should return True
+    if valid, or an error message string if invalid.
+
+    Returns the entered text, or None if the user cancels (Ctrl+C / ESC).
+    """
+    return _add_escape_binding(
+        questionary.password(
+            message,
+            validate=validate,
+            style=OSMOSIS_STYLE,
+            qmark="?",
+            instruction=instruction,
+        )
+    ).ask()
+
+
 def require_confirmation(
     message: str,
     *,
@@ -451,6 +481,7 @@ __all__ = [
     "Separator",
     "confirm",
     "is_interactive",
+    "password",
     "require_confirmation",
     "select",
     "select_list",

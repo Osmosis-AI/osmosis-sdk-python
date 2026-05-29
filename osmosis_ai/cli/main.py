@@ -184,6 +184,7 @@ def _register_commands() -> None:
     from osmosis_ai.cli.commands.eval import app as eval_app
     from osmosis_ai.cli.commands.model import app as model_app
     from osmosis_ai.cli.commands.rollout import app as rollout_app
+    from osmosis_ai.cli.commands.secret import app as secret_app
     from osmosis_ai.cli.commands.template import app as template_app
     from osmosis_ai.cli.commands.train import app as train_app
 
@@ -199,6 +200,7 @@ def _register_commands() -> None:
     app.add_typer(template_app, name="template", rich_help_panel=_WORKFLOW)
 
     app.add_typer(auth_app, name="auth", rich_help_panel=_PLATFORM)
+    app.add_typer(secret_app, name="secret", rich_help_panel=_PLATFORM)
 
     # `deploy` and `undeploy` are verbs, not CRUD on the deployment resource,
     # so they are promoted to top-level to avoid `osmosis deployment deploy`.
@@ -240,7 +242,7 @@ def main(argv: list[str] | None = None) -> int:
         return _handle_cli_error(exc, argv=argv)
     except CLIError as exc:
         return _handle_cli_error(exc, argv=argv)
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, click.Abort):
         return 130
     except Exception as exc:
         return _handle_cli_error(exc, argv=argv)
