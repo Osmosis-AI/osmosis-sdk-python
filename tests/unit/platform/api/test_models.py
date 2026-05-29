@@ -13,10 +13,12 @@ from osmosis_ai.platform.api.models import (
     STATUSES_TERMINAL,
     DatasetDownloadInfo,
     DatasetFile,
+    EnvironmentSecretInfo,
     EvaluationRun,
     EvaluationRunDetail,
     MetricDataPoint,
     MetricHistory,
+    PaginatedEnvironmentSecrets,
     PaginatedEvaluationRuns,
     SubmitRunResult,
     TrainingRunDetail,
@@ -221,6 +223,54 @@ class TestSubmitRunResult:
         assert result.status == "pending"
         assert result.created_at == "2026-04-10T12:00:00Z"
         assert result.platform_url == "https://platform.osmosis.ai/ws/training/run"
+
+
+class TestEnvironmentSecretInfo:
+    """Tests for environment secret metadata response models."""
+
+    def test_secret_info_from_dict_omits_value_even_if_response_contains_one(
+        self,
+    ) -> None:
+        info = EnvironmentSecretInfo.from_dict(
+            {
+                "id": "sec-1",
+                "name": "OPENAI_API_KEY",
+                "value": "sk-never-model-this",
+                "created_at": "2026-05-01T00:00:00Z",
+                "updated_at": "2026-05-01T00:00:01Z",
+                "creator_name": "Ada",
+                "platform_url": "https://platform.osmosis.ai/acme/secrets",
+            }
+        )
+
+        assert info.id == "sec-1"
+        assert info.name == "OPENAI_API_KEY"
+        assert info.creator_name == "Ada"
+        assert info.platform_url == "https://platform.osmosis.ai/acme/secrets"
+        assert not hasattr(info, "value")
+
+    def test_paginated_environment_secrets_from_dict(self) -> None:
+        page = PaginatedEnvironmentSecrets.from_dict(
+            {
+                "environment_secrets": [
+                    {"id": "sec-1", "name": "OPENAI_API_KEY"},
+                    {"id": "sec-2", "name": "ANTHROPIC_API_KEY"},
+                ],
+                "total_count": 3,
+                "has_more": True,
+                "next_offset": 2,
+                "platform_url": "https://platform.osmosis.ai/acme/secrets",
+            }
+        )
+
+        assert [secret.name for secret in page.environment_secrets] == [
+            "OPENAI_API_KEY",
+            "ANTHROPIC_API_KEY",
+        ]
+        assert page.total_count == 3
+        assert page.has_more is True
+        assert page.next_offset == 2
+        assert page.platform_url == "https://platform.osmosis.ai/acme/secrets"
 
 
 class TestTrainingRun:

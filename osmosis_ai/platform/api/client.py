@@ -13,10 +13,12 @@ from .models import (
     DatasetFile,
     DeploymentInfo,
     DeploymentSummary,
+    EnvironmentSecretInfo,
     EvaluationRunDetail,
     PaginatedBaseModels,
     PaginatedDatasets,
     PaginatedDeployments,
+    PaginatedEnvironmentSecrets,
     PaginatedEvaluationRuns,
     PaginatedRollouts,
     PaginatedTrainingRuns,
@@ -316,6 +318,50 @@ class OsmosisClient:
             git_identity=git_identity,
         )
         return PaginatedBaseModels.from_dict(data)
+
+    # ── Environment Secrets ───────────────────────────────────────
+    # Workspace-scoped secrets. The platform never echoes secret values:
+    # list returns names + metadata only; create returns metadata only.
+
+    def list_environment_secrets(
+        self,
+        limit: int = DEFAULT_PAGE_SIZE,
+        offset: int = 0,
+        *,
+        credentials: Credentials | None = None,
+        git_identity: str,
+    ) -> PaginatedEnvironmentSecrets:
+        """List workspace environment secrets (names + metadata only)."""
+        qs = urlencode({"limit": limit, "offset": offset})
+        data = platform_request(
+            f"/api/cli/environment-secrets?{qs}",
+            credentials=credentials,
+            git_identity=git_identity,
+        )
+        return PaginatedEnvironmentSecrets.from_dict(data)
+
+    def create_environment_secret(
+        self,
+        name: str,
+        value: str,
+        *,
+        credentials: Credentials | None = None,
+        git_identity: str,
+    ) -> EnvironmentSecretInfo:
+        """Create a workspace environment secret.
+
+        The secret ``value`` is sent once in the request body and is never
+        returned by the platform — the response carries only metadata
+        (id, name, timestamps). Callers must not log or echo ``value``.
+        """
+        data = platform_request(
+            "/api/cli/environment-secrets",
+            method="POST",
+            data={"name": name, "value": value},
+            credentials=credentials,
+            git_identity=git_identity,
+        )
+        return EnvironmentSecretInfo.from_dict(data)
 
     # ── Deployments ───────────────────────────────────────────────
     # All mutating endpoints key off `checkpoint` (UUID or checkpoint_name).

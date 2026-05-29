@@ -25,6 +25,7 @@ _SUPPORTED_COMMAND_GROUPS = {
     "eval",
     "model",
     "rollout",
+    "secret",
     "template",
     "train",
 }

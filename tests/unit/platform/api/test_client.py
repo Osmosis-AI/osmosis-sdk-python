@@ -300,6 +300,82 @@ class TestGitIdentityPassthrough:
         assert "workspace_id" not in mock_request.call_args.kwargs
 
 
+class TestEnvironmentSecrets:
+    """Tests for workspace environment secret request contracts."""
+
+    @patch("osmosis_ai.platform.api.client.platform_request")
+    def test_list_environment_secrets_uses_pagination_and_git_scope(
+        self, mock_request: MagicMock
+    ) -> None:
+        credentials = object()
+        mock_request.return_value = {
+            "environment_secrets": [
+                {
+                    "id": "sec-1",
+                    "name": "OPENAI_API_KEY",
+                    "created_at": "2026-05-01T00:00:00Z",
+                    "updated_at": "2026-05-01T00:00:01Z",
+                    "creator_name": "Ada",
+                }
+            ],
+            "total_count": 1,
+            "has_more": False,
+            "next_offset": None,
+            "platform_url": "https://platform.osmosis.ai/acme/secrets",
+        }
+
+        result = OsmosisClient().list_environment_secrets(
+            limit=25,
+            offset=50,
+            credentials=credentials,
+            git_identity="git_123",
+        )
+
+        assert mock_request.call_args[0][0] == (
+            "/api/cli/environment-secrets?limit=25&offset=50"
+        )
+        assert mock_request.call_args.kwargs["credentials"] is credentials
+        assert mock_request.call_args.kwargs["git_identity"] == "git_123"
+        assert len(result.environment_secrets) == 1
+        assert result.environment_secrets[0].name == "OPENAI_API_KEY"
+        assert not hasattr(result.environment_secrets[0], "value")
+        assert result.platform_url == "https://platform.osmosis.ai/acme/secrets"
+
+    @patch("osmosis_ai.platform.api.client.platform_request")
+    def test_create_environment_secret_posts_value_once_and_returns_metadata(
+        self, mock_request: MagicMock
+    ) -> None:
+        credentials = object()
+        secret_value = "sk-never-return-this"
+        mock_request.return_value = {
+            "id": "sec-1",
+            "name": "OPENAI_API_KEY",
+            "created_at": "2026-05-01T00:00:00Z",
+            "updated_at": "2026-05-01T00:00:01Z",
+            "creator_name": "Ada",
+            "platform_url": "https://platform.osmosis.ai/acme/secrets",
+        }
+
+        result = OsmosisClient().create_environment_secret(
+            "OPENAI_API_KEY",
+            secret_value,
+            credentials=credentials,
+            git_identity="git_123",
+        )
+
+        assert mock_request.call_args[0][0] == "/api/cli/environment-secrets"
+        assert mock_request.call_args.kwargs["method"] == "POST"
+        assert mock_request.call_args.kwargs["data"] == {
+            "name": "OPENAI_API_KEY",
+            "value": secret_value,
+        }
+        assert mock_request.call_args.kwargs["credentials"] is credentials
+        assert mock_request.call_args.kwargs["git_identity"] == "git_123"
+        assert result.name == "OPENAI_API_KEY"
+        assert result.platform_url == "https://platform.osmosis.ai/acme/secrets"
+        assert not hasattr(result, "value")
+
+
 class TestSafePath:
     """Tests for the _safe_path helper used to prevent path traversal."""
 
