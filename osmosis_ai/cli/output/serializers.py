@@ -118,6 +118,7 @@ def serialize_environment_secret(secret: EnvironmentSecretInfo) -> dict[str, Any
     return {
         "id": secret.id,
         "name": secret.name,
+        "scope": secret.scope,
         "created_at": secret.created_at,
         "updated_at": secret.updated_at,
         "creator_name": secret.creator_name,
