@@ -129,9 +129,15 @@ def _missing_secret_message(names: list[str]) -> str:
     lines = [
         f"Secret(s) not found: {', '.join(names)}.",
         "",
-        "Add them, then resubmit:",
+        "Add them as personal secrets, then resubmit (personal is the default):",
     ]
-    lines.extend(f"  osmosis secret set {name}" for name in names)
+    lines.extend(f"  osmosis secret set {name} --scope personal" for name in names)
+    lines.extend(
+        [
+            "",
+            "Use --scope workspace instead for secrets shared across the workspace.",
+        ]
+    )
     return "\n".join(lines)
 
 
@@ -151,9 +157,17 @@ def _enrich_missing_secret_error(
     names = [n.strip() for n in match.group(1).split(",")]
     platform_url = (exc.details or {}).get("platform_url")
 
-    lines = [str(exc), "", "To add the missing secret(s):"]
+    lines = [
+        str(exc),
+        "",
+        "To add the missing secret(s) as personal secrets (personal is the default):",
+    ]
     for name in names:
-        lines.append(f"  osmosis secret set {name}")
+        lines.append(f"  osmosis secret set {name} --scope personal")
+    lines.append("")
+    lines.append(
+        "Use --scope workspace instead for secrets shared across the workspace."
+    )
     if platform_url:
         lines.append(f"\nOr add them in the UI: {platform_url}")
 

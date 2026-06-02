@@ -146,8 +146,8 @@ dataset = "d"
     assert cfg.secrets == []
 
 
-def test_secrets_map_form_is_rejected_with_conversion_hint(tmp_path: Path) -> None:
-    path = tmp_path / "map_secrets.toml"
+def test_secrets_table_requires_required_field_for_training(tmp_path: Path) -> None:
+    path = tmp_path / "empty_secrets.toml"
     path.write_text(
         """
 [experiment]
@@ -157,7 +157,27 @@ model_path = "m"
 dataset = "d"
 
 [secrets]
+""".strip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(CLIError) as exc_info:
+        load_train_submit_config(path)
+    assert "Missing 'required' in [secrets]" in str(exc_info.value)
+
+
+def test_secrets_rejects_unknown_keys(tmp_path: Path) -> None:
+    path = tmp_path / "map_secrets.toml"
+    path.write_text(
+        """
+[secrets]
 OPENAI_API_KEY = "OPENAI_API_KEY"
+
+[experiment]
+rollout = "r"
+entrypoint = "e.py"
+model_path = "m"
+dataset = "d"
 """.strip(),
         encoding="utf-8",
     )
@@ -165,15 +185,15 @@ OPENAI_API_KEY = "OPENAI_API_KEY"
     with pytest.raises(CLIError) as exc_info:
         load_train_submit_config(path)
     message = str(exc_info.value)
-    assert "uses key=value pairs" in message
-    assert "required = [" in message
+    assert "only supports the 'required' field" in message
+    assert "OPENAI_API_KEY" in message
 
 
-def test_secrets_must_be_a_table(tmp_path: Path) -> None:
-    path = tmp_path / "scalar_secrets.toml"
+def test_top_level_secrets_key_is_rejected(tmp_path: Path) -> None:
+    path = tmp_path / "top_level_secrets.toml"
     path.write_text(
         """
-secrets = "OPENAI_API_KEY"
+secrets = ["OPENAI_API_KEY"]
 
 [experiment]
 rollout = "r"
@@ -186,11 +206,11 @@ dataset = "d"
 
     with pytest.raises(CLIError) as exc_info:
         load_train_submit_config(path)
-    assert "must be a table with a 'required' array" in str(exc_info.value)
+    assert "[secrets] must be a table" in str(exc_info.value)
 
 
-def test_secrets_required_must_be_a_list_of_strings(tmp_path: Path) -> None:
-    path = tmp_path / "scalar_required.toml"
+def test_secrets_must_be_a_list_of_strings(tmp_path: Path) -> None:
+    path = tmp_path / "non_string_secret.toml"
     path.write_text(
         """
 [experiment]
@@ -200,7 +220,7 @@ model_path = "m"
 dataset = "d"
 
 [secrets]
-required = "OPENAI_API_KEY"
+required = ["OPENAI_API_KEY", 123]
 """.strip(),
         encoding="utf-8",
     )

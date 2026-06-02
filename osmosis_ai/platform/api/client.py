@@ -193,10 +193,9 @@ class OsmosisClient:
     ) -> SubmitRunResult:
         """Submit a new training run.
 
-        ``env_config`` is a literal env-var-name → value map applied to the
-        rollout container. ``secrets`` is a list of workspace
-        ``environment_secret`` names; their values are resolved server-side and
-        never travel through the CLI.
+        ``env_config`` is a literal env-var-name to value map applied to the
+        rollout container. ``secrets`` is a list of ``environment_secret`` names;
+        their values are resolved server-side and never travel through the CLI.
         """
         data: dict[str, Any] = {
             "experiment_config": experiment_config,

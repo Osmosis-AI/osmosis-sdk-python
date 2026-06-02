@@ -244,7 +244,9 @@ def list_secrets(*, limit: int, all_: bool, scope: str = "all") -> ListResult:
     )
 
 
-def set_secret(*, name: str, scope: str, env: str | None) -> OperationResult:
+def set_secret(
+    *, name: str, scope: str = "personal", env: str | None = None
+) -> OperationResult:
     """Create or update (upsert) a secret.
 
     The value is read from ``--env VARNAME`` or a hidden interactive prompt,
@@ -306,7 +308,7 @@ def set_secret(*, name: str, scope: str, env: str | None) -> OperationResult:
         operation="secret.set",
         status="success",
         resource=resource,
-        message=f'Secret "{name}" saved.',
+        message=f'Secret "{name}" saved in {scope} scope.',
         display_next_steps=display_next_steps,
         next_steps_structured=next_steps_structured,
         extra=extra,
@@ -339,7 +341,9 @@ def _existing_secret_names(
         return None
 
 
-def delete_secret(*, name: str, scope: str, yes: bool) -> OperationResult:
+def delete_secret(
+    *, name: str, scope: str = "personal", yes: bool = False
+) -> OperationResult:
     """Delete a secret by name within ``scope``.
 
     ``scope`` is ``"workspace"`` or ``"personal"``. Requires confirmation
@@ -403,5 +407,5 @@ def delete_secret(*, name: str, scope: str, yes: bool) -> OperationResult:
         operation="secret.delete",
         status="success",
         resource=resource,
-        message=f'Secret "{name}" deleted.',
+        message=f'Secret "{name}" deleted from {scope} scope.',
     )

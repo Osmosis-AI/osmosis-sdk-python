@@ -80,6 +80,9 @@ rollout = "calculator"
 entrypoint = "main.py"
 model_path = "openai/gpt-5-mini"
 dataset = "multiply"
+
+[secrets]
+required = []
 """,
     )
 
@@ -93,7 +96,7 @@ dataset = "multiply"
     assert config.secrets == []
 
 
-def test_secrets_map_form_is_rejected_with_conversion_hint(tmp_path: Path) -> None:
+def test_secrets_required_field_is_required_for_eval(tmp_path: Path) -> None:
     path = _write_config(
         tmp_path / "eval.toml",
         """
@@ -104,15 +107,51 @@ model_path = "openai/gpt-5-mini"
 dataset = "multiply"
 
 [secrets]
+""",
+    )
+
+    with pytest.raises(CLIError) as exc_info:
+        load_eval_submit_config(path)
+    assert "Missing 'required' in [secrets]" in str(exc_info.value)
+
+
+def test_secrets_section_is_required_for_eval(tmp_path: Path) -> None:
+    path = _write_config(
+        tmp_path / "eval.toml",
+        """
+[experiment]
+rollout = "calculator"
+entrypoint = "main.py"
+model_path = "openai/gpt-5-mini"
+dataset = "multiply"
+""",
+    )
+
+    with pytest.raises(CLIError) as exc_info:
+        load_eval_submit_config(path)
+    assert "Missing [secrets] section" in str(exc_info.value)
+
+
+def test_secrets_rejects_unknown_keys(tmp_path: Path) -> None:
+    path = _write_config(
+        tmp_path / "eval.toml",
+        """
+[secrets]
 OPENAI_API_KEY = "OPENAI_API_KEY"
+
+[experiment]
+rollout = "calculator"
+entrypoint = "main.py"
+model_path = "openai/gpt-5-mini"
+dataset = "multiply"
 """,
     )
 
     with pytest.raises(CLIError) as exc_info:
         load_eval_submit_config(path)
     message = str(exc_info.value)
-    assert "uses key=value pairs" in message
-    assert "required = [" in message
+    assert "only supports the 'required' field" in message
+    assert "OPENAI_API_KEY" in message
 
 
 def test_load_eval_submit_config_advanced_section_preserves_backend_params(
@@ -130,6 +169,9 @@ dataset = "multiply"
 [advanced]
 custom_eval_flag = true
 future_knob = "experimental"
+
+[secrets]
+required = []
 """,
     )
 
@@ -155,6 +197,9 @@ dataset = "multiply"
 
 [evaluation]
 unknown_eval_knob = 42
+
+[secrets]
+required = []
 """,
     )
 
@@ -198,6 +243,9 @@ dataset = "multiply"
 
 [llm]
 model_path = "openai/gpt-5-mini"
+
+[secrets]
+required = []
 """,
     )
 
@@ -217,6 +265,9 @@ dataset = "multiply"
 
 [env]
 _OSMOSIS_INTERNAL = "bad"
+
+[secrets]
+required = []
 """,
     )
 
@@ -239,6 +290,9 @@ dataset = "multiply"
 [evaluation]
 limit = "many"
 pass_threshold = "strict"
+
+[secrets]
+required = []
 """,
     )
 
@@ -261,6 +315,9 @@ rollout = "calculator"
 entrypoint = "../main.py"
 model_path = "openai/gpt-5-mini"
 dataset = "multiply"
+
+[secrets]
+required = []
 """,
     )
     config = load_eval_submit_config(config_path)
@@ -278,6 +335,9 @@ rollout = "{rollout}"
 entrypoint = "main.py"
 model_path = "openai/gpt-5-mini"
 dataset = "multiply"
+
+[secrets]
+required = []
 """,
     )
 

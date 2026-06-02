@@ -323,15 +323,34 @@ def test_secret_set_from_env_forwards_name_value_scope(monkeypatch, capsys) -> N
     assert "value" not in payload["resource"]
 
 
-def test_secret_set_requires_scope(monkeypatch, capsys) -> None:
-    """--scope is required for set; omitting it is an error."""
-    _stub_git_context(monkeypatch)
+def test_secret_set_defaults_scope_to_personal(monkeypatch, capsys) -> None:
+    """Omitting --scope saves a personal secret by default."""
+    fake_credentials = _stub_git_context(monkeypatch)
     monkeypatch.setenv("SOURCE_VAR", SENTINEL_VALUE)
+    seen: dict[str, object] = {}
+
+    class FakeClient:
+        def set_environment_secret(
+            self, name, value, *, scope, git_identity, credentials=None
+        ):
+            assert credentials is fake_credentials
+            assert git_identity == GIT_IDENTITY
+            seen.update(name=name, value=value, scope=scope)
+            return _secret(name=name, scope=scope, platform_url=SECRETS_URL)
+
+    monkeypatch.setattr(secret_module, "OsmosisClient", FakeClient)
 
     exit_code = cli.main(
         ["--json", "secret", "set", "OPENAI_API_KEY", "--env", "SOURCE_VAR"]
     )
-    assert exit_code != 0
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert seen == {"name": "OPENAI_API_KEY", "value": SENTINEL_VALUE, "scope": "user"}
+    payload = json.loads(captured.out)
+    assert payload["resource"]["scope"] == "personal"
+    assert SENTINEL_VALUE not in captured.out
+    assert SENTINEL_VALUE not in captured.err
 
 
 def test_secret_set_invalid_scope_is_validation_error(monkeypatch, capsys) -> None:
@@ -806,11 +825,26 @@ def test_secret_add_subcommand_is_removed(monkeypatch, capsys) -> None:
     assert exit_code != 0
 
 
-def test_secret_delete_requires_scope(monkeypatch, capsys) -> None:
-    """--scope is required for delete; omitting it is an error."""
+def test_secret_delete_defaults_scope_to_personal(monkeypatch, capsys) -> None:
+    """Omitting --scope deletes from personal scope by default."""
     _stub_git_context(monkeypatch)
+    seen: dict[str, object] = {}
+
+    class FakeClient:
+        def delete_environment_secret(
+            self, name, *, scope, git_identity, credentials=None
+        ):
+            seen.update(name=name, scope=scope)
+
+    monkeypatch.setattr(secret_module, "OsmosisClient", FakeClient)
+
     exit_code = cli.main(["--json", "secret", "delete", "X", "--yes"])
-    assert exit_code != 0
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert seen == {"name": "X", "scope": "user"}
+    payload = json.loads(captured.out)
+    assert payload["resource"]["scope"] == "personal"
 
 
 def test_secret_delete_subcommand_wires_through(monkeypatch, capsys) -> None:

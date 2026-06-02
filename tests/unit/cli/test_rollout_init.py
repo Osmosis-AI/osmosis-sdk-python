@@ -149,12 +149,13 @@ def test_rollout_init_substitutes_rollout_name_in_configs(
     assert 'model_path = "openai/gpt-5-mini"' in eval_toml
     assert "[llm]" not in eval_toml
     assert "base_url" not in eval_toml
-    # Evaluation tuning and env/secrets are optional; templates should not
-    # submit SDK-side defaults.
+    # Evaluation tuning and env are optional; the default OpenAI eval model
+    # still needs an explicit secret ref.
     assert "# limit = 200" in eval_toml
     assert "# n = 1" in eval_toml
     assert "# [env]" in eval_toml
-    assert "# [secrets]" in eval_toml
+    assert "[secrets]" in eval_toml
+    assert 'required = ["OPENAI_API_KEY"]' in eval_toml
     assert "\nlimit = 200" not in eval_toml
     assert "\nLOG_LEVEL =" not in eval_toml
 
@@ -172,6 +173,7 @@ def test_rollout_init_substitutes_rollout_name_in_configs(
     assert "Qwen/Qwen3.5-122B-A10B" in training_toml
     assert "# [env]" in training_toml
     assert "# [secrets]" in training_toml
+    assert '#   required = ["OPENAI_API_KEY"]' in training_toml
 
 
 def test_rollout_init_training_config_omits_platform_defaults(

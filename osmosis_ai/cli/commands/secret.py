@@ -1,10 +1,14 @@
 """Secret management commands.
 
 ``osmosis secret`` manages secrets — the same records referenced by the
-``[secrets]`` table in train/eval configs. Secrets are scoped: a ``workspace``
-secret is shared across the workspace (admin/owner only), and a ``personal``
-secret is private to the calling user. When both exist with the same name, the
-personal secret takes precedence at run time.
+``[secrets].required`` list in submit configs. Evaluation configs must include
+that list; default OpenAI eval configs should include ``OPENAI_API_KEY`` and
+use ``required = []`` only when no secret refs are needed. Training configs may
+omit ``[secrets]`` entirely, but any ``[secrets]`` section must include
+``required``. Secrets are scoped: a ``workspace`` secret is shared across the
+workspace (admin/owner only), and a ``personal`` secret is private to the
+calling user. When both exist with the same name, the personal secret takes
+precedence at run time.
 
 The platform never returns secret values: ``list`` shows names + metadata
 only, and ``set`` echoes back only metadata.
@@ -30,7 +34,8 @@ app: typer.Typer = typer.Typer(
 _SCOPE_HELP = (
     "Secret scope: 'workspace' (shared across the workspace, applies to "
     "everyone's runs by default) or 'personal' (overrides "
-    "workspace secrets and applies only to runs you submit)."
+    "workspace secrets and applies only to runs you submit). Defaults to "
+    "'personal' for set/delete."
 )
 
 
@@ -57,7 +62,7 @@ def list_secrets(
 @app.command("set")
 def set_secret(
     name: str = typer.Argument(..., help="Secret name.", metavar="NAME"),
-    scope: str = typer.Option(..., "--scope", help=_SCOPE_HELP),
+    scope: str = typer.Option("personal", "--scope", help=_SCOPE_HELP),
     env: str | None = typer.Option(
         None,
         "--env",
@@ -82,7 +87,7 @@ def set_secret(
 @app.command("delete")
 def delete_secret(
     name: str = typer.Argument(..., help="Secret name.", metavar="NAME"),
-    scope: str = typer.Option(..., "--scope", help=_SCOPE_HELP),
+    scope: str = typer.Option("personal", "--scope", help=_SCOPE_HELP),
     yes: bool = typer.Option(
         False, "--yes", "-y", help="Skip the confirmation prompt."
     ),

@@ -28,5 +28,5 @@ workspace ID for commands scoped by the workspace directory.
 - [Dataset format](./datasets.md) — Parquet / JSONL / CSV columns
 - [Eval](./eval.md) — `osmosis eval submit` and evaluation run configs
 - [CLI reference](./cli.md) — all `osmosis` commands and options, including
-  `train submit` with `[env]` / `[secrets]`
+  `train submit` with `[env]` / `[secrets].required`
 - [Troubleshooting](./troubleshooting.md)

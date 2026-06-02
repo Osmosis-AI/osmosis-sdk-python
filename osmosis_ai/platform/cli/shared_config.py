@@ -124,34 +124,36 @@ def read_toml_table(
     return section
 
 
-def read_toml_secrets_required(raw: dict[str, Any], path: Path) -> list[str]:
-    """Read the ``required`` array from the ``[secrets]`` table.
+def read_toml_secrets(
+    raw: dict[str, Any],
+    path: Path,
+    *,
+    section_required: bool = False,
+) -> list[str]:
+    """Read secret refs from ``[secrets].required`` when present.
 
-    Legacy ``[secrets]`` key=value pairs (``NAME = "secret-id"``) raise a
-    :class:`CLIError` with a conversion hint.
+    Training configs may omit the whole ``[secrets]`` section. Evaluation
+    configs must include it. When the section exists, it must always include
+    the ``required`` field.
     """
     if "secrets" not in raw:
+        if section_required:
+            raise CLIError(f"Missing [secrets] section in {path}")
         return []
 
     value = raw["secrets"]
     if not isinstance(value, dict):
+        raise CLIError(f"[secrets] must be a table in {path}")
+
+    extra_keys = sorted(set(value) - {"required"})
+    if extra_keys:
         raise CLIError(
-            f"[secrets] in {path} must be a table with a 'required' array, "
-            'e.g.\n[secrets]\nrequired = ["OPENAI_API_KEY"].'
+            f"[secrets] in {path} only supports the 'required' field; "
+            f"unknown key(s): {', '.join(extra_keys)}."
         )
 
     if "required" not in value:
-        if value:
-            old_keys = ", ".join(value)
-            quoted = ", ".join(f'"{k}"' for k in value)
-            raise CLIError(
-                f"[secrets] in {path} uses key=value pairs (i.e. {old_keys}), "
-                "which is no longer supported. "
-                "Replace with a required array, e.g.:\n\n"
-                "[secrets]\n"
-                f"required = [{quoted}]"
-            )
-        return []
+        raise CLIError(f"Missing 'required' in [secrets] section of {path}")
 
     required = value["required"]
     if not isinstance(required, list) or not all(
@@ -159,7 +161,7 @@ def read_toml_secrets_required(raw: dict[str, Any], path: Path) -> list[str]:
     ):
         raise CLIError(
             f"'required' in [secrets] of {path} must be a list of strings, "
-            'e.g. required = ["OPENAI_API_KEY", "GITHUB_TOKEN"].'
+            'e.g. required = ["OPENAI_API_KEY"].'
         )
     return required
 
@@ -405,6 +407,7 @@ def load_submit_config[SubmitConfigT: BaseSubmitConfig](
     config_class: type[SubmitConfigT],
     extra_sections: list[tuple[str, type[BaseModel]]],
     config_label: str,
+    secrets_section_required: bool = False,
 ) -> SubmitConfigT:
     """Load and validate a submit TOML file into ``config_class``.
 
@@ -430,7 +433,9 @@ def load_submit_config[SubmitConfigT: BaseSubmitConfig](
     }
     advanced_section = read_toml_table(raw, "advanced", path)
     env_section = read_toml_table(raw, "env", path)
-    secrets_list = read_toml_secrets_required(raw, path)
+    secrets_list = read_toml_secrets(
+        raw, path, section_required=secrets_section_required
+    )
 
     allowed_sections = frozenset(
         {
@@ -569,6 +574,7 @@ __all__ = [
     "load_submit_config",
     "parse_section",
     "read_toml_file",
+    "read_toml_secrets",
     "read_toml_table",
     "validate_env_values",
     "validate_env_var_keys",
