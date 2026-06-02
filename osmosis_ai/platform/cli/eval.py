@@ -16,7 +16,6 @@ from osmosis_ai.cli.output import (
     serialize_eval_run,
 )
 from osmosis_ai.cli.output.display import (
-    created_column_label,
     format_local_date,
     format_local_datetime,
 )
@@ -157,13 +156,8 @@ def list_eval_runs(*, limit: int, all_: bool) -> ListResult:
             ListColumn(key="rollout", label="Rollout", ratio=2, overflow="fold"),
             ListColumn(key="status", label="Status", no_wrap=True, ratio=1),
             ListColumn(key="model", label="Model", no_wrap=True, ratio=2),
+            ListColumn(key="created_at", label="Submitted", no_wrap=True, ratio=1),
             ListColumn(key="creator_name", label="Submitted By", no_wrap=True, ratio=1),
-            ListColumn(
-                key="created_at",
-                label=created_column_label(),
-                no_wrap=True,
-                ratio=1,
-            ),
         ],
         display_items=[
             {
