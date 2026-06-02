@@ -7,6 +7,7 @@ import sys
 from typing import Any
 
 import click
+from typer._click import exceptions as _typer_exc
 
 from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.consts import PACKAGE_VERSION
@@ -96,7 +97,7 @@ def classify_error(exc: BaseException) -> CLIError:
             details=details,
         )
 
-    if isinstance(exc, click.UsageError):
+    if isinstance(exc, (click.UsageError, _typer_exc.UsageError)):
         return CLIError(str(exc) or "Invalid usage.", code="VALIDATION")
 
     return CLIError(

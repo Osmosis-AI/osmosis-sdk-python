@@ -10,6 +10,7 @@ from typing import Any
 import click
 import typer
 import typer.core
+from typer._click import exceptions as _typer_exc
 from dotenv import find_dotenv, load_dotenv
 
 from osmosis_ai.cli.errors import CLIError
@@ -229,13 +230,11 @@ def main(argv: list[str] | None = None) -> int:
         if isinstance(result, int) and result != 0:
             return result
         return 0
-    except click.exceptions.Exit as e:
+    except (click.exceptions.Exit, _typer_exc.Exit) as e:
         return e.exit_code
     except SystemExit as e:
         return int(e.code) if e.code is not None else 0
-    except click.UsageError as exc:
-        # NoArgsIsHelpError (from no_args_is_help=True) has an empty message
-        # after help is already printed — just exit cleanly.
+    except (click.UsageError, _typer_exc.UsageError) as exc:
         if not str(exc):
             return 0
         return _handle_cli_error(exc, argv=argv, exit_code=exc.exit_code)
