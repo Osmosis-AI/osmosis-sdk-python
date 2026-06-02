@@ -212,7 +212,7 @@ class OsmosisClient:
         if env_config:
             data["env_config"] = env_config
         if secrets:
-            data["secrets"] = secrets
+            data["secrets"] = {"required": secrets}
         result = platform_request(
             "/api/cli/training-runs",
             method="POST",
@@ -506,7 +506,7 @@ class OsmosisClient:
         if env_config:
             data["env_config"] = env_config
         if secrets:
-            data["secrets"] = secrets
+            data["secrets"] = {"required": secrets}
         result = platform_request(
             "/api/cli/eval-runs",
             method="POST",

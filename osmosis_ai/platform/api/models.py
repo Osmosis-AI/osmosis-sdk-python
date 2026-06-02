@@ -470,6 +470,7 @@ class EnvironmentSecretInfo:
     created_at: str = ""
     updated_at: str = ""
     creator_name: str | None = None
+    updater_name: str | None = None
     # "workspace" or "user". None when the platform did not report it
     # (older responses / endpoints that don't distinguish scope).
     scope: str | None = None
@@ -486,6 +487,7 @@ class EnvironmentSecretInfo:
             created_at=data.get("created_at", ""),
             updated_at=data.get("updated_at", ""),
             creator_name=data.get("creator_name"),
+            updater_name=data.get("updater_name"),
             scope=data.get("scope"),
             platform_url=data.get("platform_url"),
         )

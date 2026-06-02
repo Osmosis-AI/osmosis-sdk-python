@@ -168,8 +168,9 @@ def test_secret_list_forwards_scope_to_client(monkeypatch, capsys) -> None:
             )
 
     monkeypatch.setattr(secret_module, "OsmosisClient", FakeClient)
-    exit_code = cli.main(["--json", "secret", "list", "--scope", "user"])
+    exit_code = cli.main(["--json", "secret", "list", "--scope", "personal"])
     assert exit_code == 0
+    # User-facing "personal" is translated to the wire value "user".
     assert seen["scope"] == "user"
 
 
@@ -221,8 +222,8 @@ def test_secret_list_plain_shows_scope(monkeypatch, capsys) -> None:
     monkeypatch.setattr(secret_module, "OsmosisClient", FakeClient)
     assert cli.main(["--plain", "secret", "list"]) == 0
     out = capsys.readouterr().out
-    assert "workspace" in out
-    assert "user" in out
+    assert "Workspace" in out
+    assert "Personal" in out
 
 
 # ── set (upsert) ──────────────────────────────────────────────────
@@ -289,41 +290,32 @@ def test_secret_set_from_env_forwards_name_value_scope(monkeypatch, capsys) -> N
 
     exit_code = cli.main(
         ["--json", "secret", "set", "OPENAI_API_KEY",
-         "--scope", "user", "--env", "SOURCE_VAR"]
+         "--scope", "personal", "--env", "SOURCE_VAR"]
     )
     captured = capsys.readouterr()
 
     assert exit_code == 0
+    # "personal" is sent to the platform as the wire value "user".
     assert seen == {"name": "OPENAI_API_KEY", "value": SENTINEL_VALUE, "scope": "user"}
     payload = json.loads(captured.out)
     assert payload["operation"] == "secret.set"
     assert payload["status"] == "success"
     assert payload["resource"]["name"] == "OPENAI_API_KEY"
-    assert payload["resource"]["scope"] == "user"
+    assert payload["resource"]["scope"] == "personal"
     assert SENTINEL_VALUE not in captured.out
     assert SENTINEL_VALUE not in captured.err
     assert "value" not in payload["resource"]
 
 
-def test_secret_set_defaults_scope_to_workspace(monkeypatch, capsys) -> None:
+def test_secret_set_requires_scope(monkeypatch, capsys) -> None:
+    """--scope is required for set; omitting it is an error."""
     _stub_git_context(monkeypatch)
     monkeypatch.setenv("SOURCE_VAR", SENTINEL_VALUE)
-    seen: dict[str, object] = {}
-
-    class FakeClient:
-        def set_environment_secret(
-            self, name, value, *, scope, git_identity, credentials=None
-        ):
-            seen["scope"] = scope
-            return _secret(name=name, scope=scope)
-
-    monkeypatch.setattr(secret_module, "OsmosisClient", FakeClient)
 
     exit_code = cli.main(
         ["--json", "secret", "set", "OPENAI_API_KEY", "--env", "SOURCE_VAR"]
     )
-    assert exit_code == 0
-    assert seen["scope"] == "workspace"
+    assert exit_code != 0
 
 
 def test_secret_set_invalid_scope_is_validation_error(monkeypatch, capsys) -> None:
@@ -417,7 +409,7 @@ def test_secret_name_with_trailing_newline_is_invalid() -> None:
 
 @pytest.mark.parametrize(
     "name",
-    ["OPENAI_API_KEY", "A", "DATABASE_URL", "X1", "A_B_C"],
+    ["OPENAI_API_KEY", "A", "GITHUB_TOKEN", "X1", "A_B_C"],
 )
 def test_validate_secret_name_accepts_screaming_snake_case(name: str) -> None:
     secret_module._validate_secret_name(name)  # no raise
@@ -488,7 +480,7 @@ def test_secret_set_redacts_value_from_platform_error(monkeypatch, capsys) -> No
     monkeypatch.setattr(secret_module, "OsmosisClient", FakeClient)
 
     exit_code = cli.main(
-        ["--json", "secret", "set", "OPENAI_API_KEY", "--scope", "user",
+        ["--json", "secret", "set", "OPENAI_API_KEY", "--scope", "personal",
          "--env", "SOURCE_VAR"]
     )
     captured = capsys.readouterr()
@@ -606,16 +598,17 @@ def test_secret_delete_forwards_name_scope(monkeypatch, capsys) -> None:
     monkeypatch.setattr(secret_module, "OsmosisClient", FakeClient)
     exit_code = cli.main(
         ["--json", "secret", "delete", "OPENAI_API_KEY",
-         "--scope", "user", "--yes"]
+         "--scope", "personal", "--yes"]
     )
     captured = capsys.readouterr()
     assert exit_code == 0
+    # "personal" is sent to the platform as the wire value "user".
     assert seen == {"name": "OPENAI_API_KEY", "scope": "user"}
     payload = json.loads(captured.out)
     assert payload["operation"] == "secret.delete"
     assert payload["status"] == "success"
     assert payload["resource"]["name"] == "OPENAI_API_KEY"
-    assert payload["resource"]["scope"] == "user"
+    assert payload["resource"]["scope"] == "personal"
 
 
 def test_secret_delete_requires_scope_confirmation_without_yes(
@@ -665,12 +658,76 @@ def test_secret_delete_not_found_maps_to_not_found(monkeypatch, capsys) -> None:
 
     monkeypatch.setattr(secret_module, "OsmosisClient", FakeClient)
     exit_code = cli.main(
-        ["--json", "secret", "delete", "MISSING", "--scope", "user", "--yes"]
+        ["--json", "secret", "delete", "MISSING", "--scope", "personal", "--yes"]
     )
     captured = capsys.readouterr()
     assert exit_code == 1
     payload = json.loads(captured.err)
     assert payload["error"]["code"] == "NOT_FOUND"
+
+
+def test_secret_delete_missing_in_scope_fails_before_confirmation(
+    monkeypatch, capsys
+) -> None:
+    """A name absent from the requested scope errors without prompting or deleting."""
+    _stub_git_context(monkeypatch)
+    called: dict[str, bool] = {"deleted": False}
+
+    class FakeClient:
+        def list_environment_secrets(
+            self, *, limit, offset, scope, git_identity, credentials=None
+        ):
+            return PaginatedEnvironmentSecrets(
+                environment_secrets=[_secret(name="OTHER", scope="user")],
+                total_count=1,
+                has_more=False,
+            )
+
+        def delete_environment_secret(self, *args, **kwargs):
+            called["deleted"] = True
+
+    monkeypatch.setattr(secret_module, "OsmosisClient", FakeClient)
+    # No --yes: if the pre-check didn't fire this would block on confirmation.
+    exit_code = cli.main(
+        ["--json", "secret", "delete", "WANDB_API_KEY", "--scope", "personal"]
+    )
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    payload = json.loads(captured.err)
+    assert payload["error"]["code"] == "NOT_FOUND"
+    assert payload["error"]["message"] == 'Secret "WANDB_API_KEY" not found.'
+    assert called["deleted"] is False
+
+
+def test_secret_delete_missing_hints_other_scope_when_exists(
+    monkeypatch, capsys
+) -> None:
+    """When the secret exists in the OTHER scope, the error hints at it."""
+    _stub_git_context(monkeypatch)
+
+    class FakeClient:
+        def list_environment_secrets(
+            self, *, limit, offset, scope, git_identity, credentials=None
+        ):
+            if scope == "user":
+                return PaginatedEnvironmentSecrets(
+                    environment_secrets=[], total_count=0, has_more=False,
+                )
+            return PaginatedEnvironmentSecrets(
+                environment_secrets=[_secret(name="MY_KEY", scope="workspace")],
+                total_count=1,
+                has_more=False,
+            )
+
+    monkeypatch.setattr(secret_module, "OsmosisClient", FakeClient)
+    exit_code = cli.main(
+        ["--json", "secret", "delete", "MY_KEY", "--scope", "personal", "--yes"]
+    )
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    payload = json.loads(captured.err)
+    assert payload["error"]["code"] == "NOT_FOUND"
+    assert "osmosis secret delete MY_KEY --scope workspace" in payload["error"]["message"]
 
 
 # ── typer wiring ──────────────────────────────────────────────────
@@ -686,21 +743,11 @@ def test_secret_add_subcommand_is_removed(monkeypatch, capsys) -> None:
     assert exit_code != 0
 
 
-def test_secret_set_wires_scope_default_workspace(monkeypatch, capsys) -> None:
+def test_secret_delete_requires_scope(monkeypatch, capsys) -> None:
+    """--scope is required for delete; omitting it is an error."""
     _stub_git_context(monkeypatch)
-    monkeypatch.setenv("SOURCE_VAR", SENTINEL_VALUE)
-    seen: dict[str, object] = {}
-
-    class FakeClient:
-        def set_environment_secret(
-            self, name, value, *, scope, git_identity, credentials=None
-        ):
-            seen["scope"] = scope
-            return _secret(name=name, scope=scope)
-
-    monkeypatch.setattr(secret_module, "OsmosisClient", FakeClient)
-    assert cli.main(["--json", "secret", "set", "X", "--env", "SOURCE_VAR"]) == 0
-    assert seen["scope"] == "workspace"
+    exit_code = cli.main(["--json", "secret", "delete", "X", "--yes"])
+    assert exit_code != 0
 
 
 def test_secret_delete_subcommand_wires_through(monkeypatch, capsys) -> None:
@@ -714,47 +761,42 @@ def test_secret_delete_subcommand_wires_through(monkeypatch, capsys) -> None:
             seen.update(name=name, scope=scope)
 
     monkeypatch.setattr(secret_module, "OsmosisClient", FakeClient)
-    assert cli.main(["--json", "secret", "delete", "X", "--scope", "user", "--yes"]) == 0
+    assert (
+        cli.main(["--json", "secret", "delete", "X", "--scope", "personal", "--yes"])
+        == 0
+    )
+    # "personal" is sent to the platform as the wire value "user".
     assert seen == {"name": "X", "scope": "user"}
 
 
-# ── lenient name validation on delete (legacy-named secrets) ──────
+# ── strict name validation on set and delete ──────────────────────
 
 
 @pytest.mark.parametrize(
     "legacy_name",
-    ["my-old-key", "lowercase_name", "dash-and-lower", "oldkey"],
+    ["my-old-key", "lowercase_name", "dash-and-lower"],
 )
-def test_secret_delete_accepts_legacy_names(
+def test_secret_delete_rejects_legacy_names(
     monkeypatch, capsys, legacy_name: str
 ) -> None:
-    """delete should NOT block legacy-named secrets at the client side.
+    """delete enforces the strict name rule, like set.
 
-    The platform DELETE endpoint uses a lenient lookup schema (non-empty,
-    max 255 chars, no character-set restriction) so pre-existing secrets
-    with lowercase/dash names can still be deleted via the CLI.
+    Existing secrets are normalized to the strict rule by migration, so the
+    CLI validates names up front rather than relying on a lenient lookup.
     """
-    fake_credentials = _stub_git_context(monkeypatch)
-    seen: dict[str, object] = {}
+    _stub_git_context(monkeypatch)
 
-    class FakeClient:
-        def delete_environment_secret(
-            self, name, *, scope, git_identity, credentials=None
-        ):
-            assert credentials is fake_credentials
-            seen.update(name=name, scope=scope)
-
-    monkeypatch.setattr(secret_module, "OsmosisClient", FakeClient)
     exit_code = cli.main(
         ["--json", "secret", "delete", legacy_name, "--scope", "workspace", "--yes"]
     )
     captured = capsys.readouterr()
-    assert exit_code == 0, captured.err
-    assert seen == {"name": legacy_name, "scope": "workspace"}
+    assert exit_code == 1
+    payload = json.loads(captured.err)
+    assert payload["error"]["code"] == "VALIDATION"
 
 
-def test_secret_set_still_rejects_legacy_names(monkeypatch, capsys) -> None:
-    """set must STILL enforce SCREAMING_SNAKE_CASE — only delete is lenient."""
+def test_secret_set_rejects_legacy_names(monkeypatch, capsys) -> None:
+    """set enforces the strict name rule."""
     _stub_git_context(monkeypatch)
     monkeypatch.setenv("SOURCE_VAR", SENTINEL_VALUE)
 
@@ -766,24 +808,3 @@ def test_secret_set_still_rejects_legacy_names(monkeypatch, capsys) -> None:
     assert exit_code == 1
     payload = json.loads(captured.err)
     assert payload["error"]["code"] == "VALIDATION"
-
-
-@pytest.mark.parametrize(
-    "name",
-    ["my-old-key", "lowercase_name", "dash-and-lower"],
-)
-def test_validate_secret_name_for_lookup_accepts_legacy(name: str) -> None:
-    """The lenient lookup validator passes names that strict validation rejects."""
-    secret_module._validate_secret_name_for_lookup(name)  # no raise
-
-
-def test_validate_secret_name_for_lookup_rejects_empty() -> None:
-    with pytest.raises(CLIError) as exc:
-        secret_module._validate_secret_name_for_lookup("")
-    assert exc.value.code == "VALIDATION"
-
-
-def test_validate_secret_name_for_lookup_rejects_too_long() -> None:
-    with pytest.raises(CLIError) as exc:
-        secret_module._validate_secret_name_for_lookup("A" * 256)
-    assert exc.value.code == "VALIDATION"

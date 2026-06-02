@@ -937,8 +937,6 @@ rollout_batch_size = 64
         path = workspace_directory / "configs" / "training" / "train.toml"
         path.write_text(
             """
-secrets = ["OPENAI_API_KEY"]
-
 [experiment]
 rollout = "r"
 entrypoint = "main.py"
@@ -947,6 +945,9 @@ dataset = "d"
 
 [env]
 LOG_LEVEL = "INFO"
+
+[secrets]
+required = ["OPENAI_API_KEY"]
 """.strip(),
             encoding="utf-8",
         )

@@ -124,29 +124,44 @@ def read_toml_table(
     return section
 
 
-def read_toml_secrets_list(raw: dict[str, Any], path: Path) -> list[str]:
-    """Read the top-level ``secrets`` array.
+def read_toml_secrets_required(raw: dict[str, Any], path: Path) -> list[str]:
+    """Read the ``required`` array from the ``[secrets]`` table.
 
-    The ``[secrets]`` *table* (map) form is no longer supported and raises a
+    Legacy ``[secrets]`` key=value pairs (``NAME = "secret-id"``) raise a
     :class:`CLIError` with a conversion hint.
     """
     if "secrets" not in raw:
         return []
 
     value = raw["secrets"]
-    if isinstance(value, dict):
+    if not isinstance(value, dict):
         raise CLIError(
-            f"The [secrets] map form is no longer supported in {path}. "
-            'Use a list: secrets = ["NAME", ...]. '
-            'For example, [secrets] with OPENAI_API_KEY = "OPENAI_API_KEY" '
-            'becomes secrets = ["OPENAI_API_KEY"].'
+            f"[secrets] in {path} must be a table with a 'required' array, "
+            'e.g.\n[secrets]\nrequired = ["OPENAI_API_KEY"].'
         )
-    if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
+
+    if "required" not in value:
+        if value:
+            old_keys = ", ".join(value)
+            quoted = ", ".join(f'"{k}"' for k in value)
+            raise CLIError(
+                f"[secrets] in {path} uses key=value pairs (i.e. {old_keys}), "
+                "which is no longer supported. "
+                "Replace with a required array, e.g.:\n\n"
+                "[secrets]\n"
+                f"required = [{quoted}]"
+            )
+        return []
+
+    required = value["required"]
+    if not isinstance(required, list) or not all(
+        isinstance(item, str) for item in required
+    ):
         raise CLIError(
-            f"'secrets' in {path} must be a list of strings, "
-            'e.g. secrets = ["OPENAI_API_KEY", "DATABASE_URL"].'
+            f"'required' in [secrets] of {path} must be a list of strings, "
+            'e.g. required = ["OPENAI_API_KEY", "GITHUB_TOKEN"].'
         )
-    return value
+    return required
 
 
 def format_input(value: Any) -> str:
@@ -292,18 +307,24 @@ def validate_secret_names(
     env: dict[str, str],
     path: Path,
 ) -> None:
-    """Validate each secret name and reject overlap with [env] keys."""
+    """Validate each secret name, reject duplicates and overlap with [env] keys."""
+    duplicates = sorted({name for name in secrets if secrets.count(name) > 1})
+    if duplicates:
+        raise CLIError(
+            f"Duplicate secret name(s) in [secrets].required of {path}: "
+            f"{', '.join(duplicates)}. Each name must appear once."
+        )
+
     for name in secrets:
         if not SECRET_NAME_RE.match(name):
             raise CLIError(
-                f"Invalid secret name '{name}' in {path}: "
-                "use SCREAMING_SNAKE_CASE (uppercase letters, digits, "
-                "underscores; must start with a letter). "
-                "Must match ^[A-Z][A-Z0-9_]*$."
+                f"Invalid secret name '{name}' in {path}: use uppercase "
+                "letters, digits, and underscores, starting with a letter "
+                "(e.g. MY_SECRET). Must match ^[A-Z][A-Z0-9_]*$."
             )
         if name.startswith(RESERVED_ENV_PREFIX):
             raise CLIError(
-                f"'{name}' in secrets of {path}: names starting with "
+                f"'{name}' in [secrets] of {path}: names starting with "
                 f"{RESERVED_ENV_PREFIX} are reserved by the platform; "
                 "choose a different name."
             )
@@ -312,7 +333,7 @@ def validate_secret_names(
     if overlap:
         names = ", ".join(overlap)
         raise CLIError(
-            f"Name(s) appear in both [env] and secrets of {path}: "
+            f"Name(s) appear in both [env] and [secrets] of {path}: "
             f"{names}. Each env var name must come from exactly one place."
         )
 
@@ -415,7 +436,7 @@ def load_submit_config[SubmitConfigT: BaseSubmitConfig](
     }
     advanced_section = read_toml_table(raw, "advanced", path)
     env_section = read_toml_table(raw, "env", path)
-    secrets_list = read_toml_secrets_list(raw, path)
+    secrets_list = read_toml_secrets_required(raw, path)
 
     allowed_sections = frozenset(
         {
@@ -484,12 +505,36 @@ def build_submit_summary_rows(
     ]
     if commit_sha:
         rows.append(("Commit", commit_sha))
-    if env:
-        env_keys = ", ".join(sorted(env))
-        rows.append((f"Rollout env ({len(env)})", env_keys))
-    if secrets:
-        secret_names = ", ".join(sorted(secrets))
-        rows.append((f"Rollout secrets ({len(secrets)})", secret_names))
+    return rows
+
+
+def build_env_table_rows(env: dict[str, str]) -> list[tuple[str, str]]:
+    """Build (name, value) rows for the env vars table, sorted by name."""
+    return [(name, value) for name, value in sorted(env.items())]
+
+
+def build_secret_table_rows(
+    secrets: list[str],
+    *,
+    user_secret_names: set[str],
+    workspace_secret_names: set[str],
+) -> list[tuple[str, str]]:
+    """Build (name, scope) rows for the secrets table, sorted by name.
+
+    A personal secret is labeled an override only when a workspace secret of
+    the same name also exists; otherwise it is a personal-only secret.
+    """
+    rows: list[tuple[str, str]] = []
+    for name in sorted(secrets):
+        if name in user_secret_names:
+            label = (
+                "Personal (overrides workspace)"
+                if name in workspace_secret_names
+                else "Personal"
+            )
+        else:
+            label = "Workspace"
+        rows.append((name, label))
     return rows
 
 
@@ -518,6 +563,8 @@ __all__ = [
     "BackendValidatedParamSection",
     "BaseSubmitConfig",
     "ExperimentSection",
+    "build_env_table_rows",
+    "build_secret_table_rows",
     "build_submit_summary_rows",
     "collect_section_validation_issues",
     "collect_top_level_validation_issues",

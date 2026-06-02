@@ -104,12 +104,10 @@ dataset = "id-1"
     assert cfg.checkpoints.eval_interval is None
 
 
-def test_load_config_accepts_top_level_env_and_secrets(tmp_path: Path) -> None:
+def test_load_config_accepts_env_and_secrets(tmp_path: Path) -> None:
     path = tmp_path / "env_secrets.toml"
     path.write_text(
         """
-secrets = ["OPENAI_API_KEY", "DATABASE_URL"]
-
 [experiment]
 rollout = "r"
 entrypoint = "e.py"
@@ -118,6 +116,9 @@ dataset = "d"
 
 [env]
 LOG_LEVEL = "INFO"
+
+[secrets]
+required = ["OPENAI_API_KEY", "GITHUB_TOKEN"]
 """.strip(),
         encoding="utf-8",
     )
@@ -125,7 +126,7 @@ LOG_LEVEL = "INFO"
     cfg = load_train_submit_config(path)
 
     assert cfg.env == {"LOG_LEVEL": "INFO"}
-    assert cfg.secrets == ["OPENAI_API_KEY", "DATABASE_URL"]
+    assert cfg.secrets == ["OPENAI_API_KEY", "GITHUB_TOKEN"]
 
 
 def test_secrets_defaults_to_empty_list(tmp_path: Path) -> None:
@@ -164,11 +165,11 @@ OPENAI_API_KEY = "OPENAI_API_KEY"
     with pytest.raises(CLIError) as exc_info:
         load_train_submit_config(path)
     message = str(exc_info.value)
-    assert "[secrets] map form is no longer supported" in message
-    assert 'secrets = ["NAME", ...]' in message
+    assert "uses key=value pairs" in message
+    assert "required = [" in message
 
 
-def test_secrets_must_be_a_list_of_strings(tmp_path: Path) -> None:
+def test_secrets_must_be_a_table(tmp_path: Path) -> None:
     path = tmp_path / "scalar_secrets.toml"
     path.write_text(
         """
@@ -185,19 +186,40 @@ dataset = "d"
 
     with pytest.raises(CLIError) as exc_info:
         load_train_submit_config(path)
+    assert "must be a table with a 'required' array" in str(exc_info.value)
+
+
+def test_secrets_required_must_be_a_list_of_strings(tmp_path: Path) -> None:
+    path = tmp_path / "scalar_required.toml"
+    path.write_text(
+        """
+[experiment]
+rollout = "r"
+entrypoint = "e.py"
+model_path = "m"
+dataset = "d"
+
+[secrets]
+required = "OPENAI_API_KEY"
+""".strip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(CLIError) as exc_info:
+        load_train_submit_config(path)
     assert "must be a list of strings" in str(exc_info.value)
 
 
-def _config_with_secrets(secrets_line: str, *, env_block: str = "") -> str:
+def _config_with_secrets(secrets_block: str, *, env_block: str = "") -> str:
     return f"""
-{secrets_line}
-
 [experiment]
 rollout = "r"
 entrypoint = "e.py"
 model_path = "m"
 dataset = "d"
 {env_block}
+
+{secrets_block}
 """.strip()
 
 
@@ -208,7 +230,8 @@ dataset = "d"
 def test_secret_name_must_be_screaming_snake(tmp_path: Path, name: str) -> None:
     path = tmp_path / "bad_name.toml"
     path.write_text(
-        _config_with_secrets(f'secrets = ["{name}"]'), encoding="utf-8"
+        _config_with_secrets(f'[secrets]\nrequired = ["{name}"]'),
+        encoding="utf-8",
     )
     with pytest.raises(CLIError) as exc_info:
         load_train_submit_config(path)
@@ -218,7 +241,8 @@ def test_secret_name_must_be_screaming_snake(tmp_path: Path, name: str) -> None:
 def test_secret_name_rejects_reserved_prefix(tmp_path: Path) -> None:
     path = tmp_path / "reserved.toml"
     path.write_text(
-        _config_with_secrets('secrets = ["_OSMOSIS_TOKEN"]'), encoding="utf-8"
+        _config_with_secrets('[secrets]\nrequired = ["_OSMOSIS_TOKEN"]'),
+        encoding="utf-8",
     )
     with pytest.raises(CLIError) as exc_info:
         load_train_submit_config(path)
@@ -230,7 +254,7 @@ def test_secret_name_rejects_env_overlap(tmp_path: Path) -> None:
     path = tmp_path / "overlap.toml"
     path.write_text(
         _config_with_secrets(
-            'secrets = ["OPENAI_API_KEY"]',
+            '[secrets]\nrequired = ["OPENAI_API_KEY"]',
             env_block='[env]\nOPENAI_API_KEY = "literal"',
         ),
         encoding="utf-8",
@@ -238,18 +262,35 @@ def test_secret_name_rejects_env_overlap(tmp_path: Path) -> None:
     with pytest.raises(CLIError) as exc_info:
         load_train_submit_config(path)
     message = str(exc_info.value)
-    assert "both [env] and secrets" in message
+    assert "both [env] and [secrets]" in message
     assert "OPENAI_API_KEY" in message
 
 
 def test_valid_secret_names_accepted(tmp_path: Path) -> None:
     path = tmp_path / "ok.toml"
     path.write_text(
-        _config_with_secrets('secrets = ["OPENAI_API_KEY", "DATABASE_URL", "X1"]'),
+        _config_with_secrets(
+            '[secrets]\nrequired = ["OPENAI_API_KEY", "GITHUB_TOKEN", "X1"]'
+        ),
         encoding="utf-8",
     )
     cfg = load_train_submit_config(path)
-    assert cfg.secrets == ["OPENAI_API_KEY", "DATABASE_URL", "X1"]
+    assert cfg.secrets == ["OPENAI_API_KEY", "GITHUB_TOKEN", "X1"]
+
+
+def test_secrets_rejects_duplicate_names(tmp_path: Path) -> None:
+    path = tmp_path / "dupe.toml"
+    path.write_text(
+        _config_with_secrets(
+            '[secrets]\nrequired = ["OPENAI_API_KEY", "OPENAI_API_KEY"]'
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(CLIError) as exc_info:
+        load_train_submit_config(path)
+    message = str(exc_info.value)
+    assert "Duplicate" in message
+    assert "OPENAI_API_KEY" in message
 
 
 # ---------------------------------------------------------------------------

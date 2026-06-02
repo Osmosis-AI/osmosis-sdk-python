@@ -402,6 +402,7 @@ def require_confirmation(
     message: str,
     *,
     yes: bool = False,
+    default: bool = True,
     summary: list[tuple[str, str]] | None = None,
     notes: list[str] | None = None,
     warnings: list[str] | None = None,
@@ -466,7 +467,7 @@ def require_confirmation(
             raise typer.Exit(1)
         raise err
 
-    if not confirm(message):
+    if not confirm(message, default=default):
         import typer
 
         from osmosis_ai.cli.console import console

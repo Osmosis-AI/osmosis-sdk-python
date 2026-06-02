@@ -20,8 +20,6 @@ def test_load_eval_submit_config_accepts_new_cloud_schema(tmp_path: Path) -> Non
     path = _write_config(
         tmp_path / "eval.toml",
         """
-secrets = ["OPENAI_API_KEY", "DATABASE_URL"]
-
 [experiment]
 rollout = "calculator"
 entrypoint = "main.py"
@@ -39,6 +37,9 @@ grader_timeout_s = 150
 
 [env]
 LOG_LEVEL = "INFO"
+
+[secrets]
+required = ["OPENAI_API_KEY", "GITHUB_TOKEN"]
 """,
     )
 
@@ -58,7 +59,7 @@ LOG_LEVEL = "INFO"
         "grader_timeout_s": 150.0,
     }
     assert config.env == {"LOG_LEVEL": "INFO"}
-    assert config.secrets == ["OPENAI_API_KEY", "DATABASE_URL"]
+    assert config.secrets == ["OPENAI_API_KEY", "GITHUB_TOKEN"]
     assert config.experiment_config == {
         "rollout": "calculator",
         "entrypoint": "main.py",
@@ -110,8 +111,8 @@ OPENAI_API_KEY = "OPENAI_API_KEY"
     with pytest.raises(CLIError) as exc_info:
         load_eval_submit_config(path)
     message = str(exc_info.value)
-    assert "[secrets] map form is no longer supported" in message
-    assert 'secrets = ["NAME", ...]' in message
+    assert "uses key=value pairs" in message
+    assert "required = [" in message
 
 
 def test_load_eval_submit_config_advanced_section_preserves_backend_params(

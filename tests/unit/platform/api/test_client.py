@@ -549,11 +549,11 @@ class TestSubmitTrainingRun:
                 "rollout": "rollout1",
                 "entrypoint": "rollouts/main.py",
             },
-            secrets=["OPENAI_API_KEY", "DATABASE_URL"],
+            secrets=["OPENAI_API_KEY", "GITHUB_TOKEN"],
             git_identity="git_test",
         )
         payload = mock_request.call_args.kwargs["data"]
-        assert payload["secrets"] == ["OPENAI_API_KEY", "DATABASE_URL"]
+        assert payload["secrets"] == {"required": ["OPENAI_API_KEY", "GITHUB_TOKEN"]}
         assert "env_config" not in payload
         assert "secret_refs_config" not in payload
 
@@ -616,7 +616,7 @@ class TestSubmitTrainingRun:
         assert payload["checkpoints_config"] == {"checkpoint_save_freq": 10}
         assert payload["advanced_config"] == {"optimizer": "adam"}
         assert payload["env_config"] == {"FOO": "bar"}
-        assert payload["secrets"] == ["OPENAI_API_KEY"]
+        assert payload["secrets"] == {"required": ["OPENAI_API_KEY"]}
 
 
 class TestEvaluationRuns:
@@ -680,7 +680,7 @@ class TestEvaluationRuns:
             "evaluation_config": {"rubric": "grade correctness"},
             "advanced_config": {"max_concurrent_rollouts": 8},
             "env_config": {"FOO": "bar"},
-            "secrets": ["OPENAI_API_KEY"],
+            "secrets": {"required": ["OPENAI_API_KEY"]},
         }
 
     @patch("osmosis_ai.platform.api.client.platform_request")

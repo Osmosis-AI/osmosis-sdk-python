@@ -69,7 +69,6 @@ def _write_eval_config(path: Path, *, commit_sha: str | None = None) -> Path:
     commit_line = f'commit_sha = "{commit_sha}"\n' if commit_sha is not None else ""
     path.write_text(
         (
-            'secrets = ["OPENAI_API_KEY"]\n\n'
             "[experiment]\n"
             'rollout = "calculator"\n'
             'entrypoint = "main.py"\n'
@@ -84,7 +83,9 @@ def _write_eval_config(path: Path, *, commit_sha: str | None = None) -> Path:
             "agent_workflow_timeout_s = 450\n"
             "grader_timeout_s = 150\n\n"
             "[env]\n"
-            'LOG_LEVEL = "INFO"\n'
+            'LOG_LEVEL = "INFO"\n\n'
+            "[secrets]\n"
+            'required = ["OPENAI_API_KEY"]\n'
         ),
         encoding="utf-8",
     )

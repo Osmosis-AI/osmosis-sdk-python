@@ -59,10 +59,10 @@ def test_submit_training_passes_none_when_empty() -> None:
 def test_submit_eval_forwards_secrets_list() -> None:
     client = MagicMock()
     eval_mod._submit_eval(
-        client, _eval_config(["DATABASE_URL"]), credentials=None, git_identity="g"
+        client, _eval_config(["GITHUB_TOKEN"]), credentials=None, git_identity="g"
     )
     kwargs = client.submit_evaluation_run.call_args.kwargs
-    assert kwargs["secrets"] == ["DATABASE_URL"]
+    assert kwargs["secrets"] == ["GITHUB_TOKEN"]
     assert "secret_refs_config" not in kwargs
 
 

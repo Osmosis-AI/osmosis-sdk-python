@@ -17,7 +17,8 @@ def test_serialize_includes_scope_and_no_value() -> None:
             scope="user",
         )
     )
-    assert out["scope"] == "user"
+    # Wire "user" is presented to users as "personal".
+    assert out["scope"] == "personal"
     assert out["name"] == "OPENAI_API_KEY"
     assert "value" not in out
     assert "secret_value" not in out

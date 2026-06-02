@@ -42,8 +42,14 @@ from osmosis_ai.platform.cli.workspace_directory_context import git_result_conte
 _SECRET_NAME_RE = SECRET_NAME_RE
 _SECRET_NAME_MAX = 255
 
-_VALID_SCOPES = ("workspace", "user")
-_VALID_LIST_SCOPES = ("all", "workspace", "user")
+# User-facing scope vocabulary is "personal"/"workspace"; the platform wire
+# value for a personal secret is "user", so translate at the API boundary.
+_VALID_SCOPES = ("workspace", "personal")
+_VALID_LIST_SCOPES = ("all", "workspace", "personal")
+_SCOPE_TO_WIRE = {"all": "all", "workspace": "workspace", "personal": "user"}
+
+# Human-facing labels for the scope column (the raw wire values stay in JSON output).
+_SCOPE_DISPLAY = {"workspace": "Workspace", "user": "Personal"}
 
 
 def _validate_secret_name(name: str) -> None:
@@ -60,24 +66,10 @@ def _validate_secret_name(name: str) -> None:
         )
 
 
-def _validate_secret_name_for_lookup(name: str) -> None:
-    """Lenient name check for delete — mirrors the platform's ``environmentSecretNameLookupSchema``.
-
-    Only enforces non-empty and max 255 chars; no character-set restriction.
-    This allows legacy-named secrets (lowercase/dashes, created before the
-    SCREAMING_SNAKE rule) to still be deleted via the CLI.
-    """
-    if not name or len(name) > _SECRET_NAME_MAX:
-        raise CLIError(
-            "Secret name must be between 1 and 255 characters.",
-            code="VALIDATION",
-        )
-
-
 def _validate_scope(scope: str) -> None:
     if scope not in _VALID_SCOPES:
         raise CLIError(
-            "Scope must be 'workspace' or 'user'.",
+            "Scope must be 'workspace' or 'personal'.",
             code="VALIDATION",
         )
 
@@ -171,14 +163,14 @@ def _redact_secret_platform_error(exc: Any, secret_value: str) -> Any:
 
 
 def list_secrets(*, limit: int, all_: bool, scope: str = "all") -> ListResult:
-    """List environment secrets (names + metadata only; values never shown).
+    """List secrets (names + metadata only; values never shown).
 
     ``scope`` is ``"all"`` (workspace + the caller's personal secrets),
-    ``"workspace"``, or ``"user"`` (personal only).
+    ``"workspace"``, or ``"personal"`` (personal only).
     """
     if scope not in _VALID_LIST_SCOPES:
         raise CLIError(
-            "Scope must be 'all', 'workspace', or 'user'.",
+            "Scope must be 'all', 'workspace', or 'personal'.",
             code="VALIDATION",
         )
     effective_limit, fetch_all = validate_list_options(limit=limit, all_=all_)
@@ -197,7 +189,7 @@ def list_secrets(*, limit: int, all_: bool, scope: str = "all") -> ListResult:
         page = client.list_environment_secrets(
             limit=lim,
             offset=off,
-            scope=scope,
+            scope=_SCOPE_TO_WIRE[scope],
             credentials=credentials,
             git_identity=context.git_identity,
         )
@@ -236,15 +228,17 @@ def list_secrets(*, limit: int, all_: bool, scope: str = "all") -> ListResult:
         columns=[
             ListColumn(key="name", label="Name", ratio=3, overflow="fold"),
             ListColumn(key="scope", label="Scope", no_wrap=True, ratio=1),
-            ListColumn(key="created_at", label="Added", no_wrap=True, ratio=1),
-            ListColumn(key="creator_name", label="Added by", no_wrap=True, ratio=1),
+            ListColumn(key="updated_at", label="Updated", no_wrap=True, ratio=1),
+            ListColumn(
+                key="updater_name", label="Updated By", no_wrap=True, ratio=1
+            ),
         ],
         display_items=[
             {
                 **serialize_environment_secret(s),
-                "scope": s.scope or "—",
-                "created_at": format_local_date(s.created_at),
-                "creator_name": s.creator_name or "—",
+                "scope": _SCOPE_DISPLAY.get(s.scope, "—"),
+                "updated_at": format_local_date(s.updated_at),
+                "updater_name": s.updater_name or "—",
             }
             for s in secrets
         ],
@@ -253,7 +247,7 @@ def list_secrets(*, limit: int, all_: bool, scope: str = "all") -> ListResult:
 
 
 def set_secret(*, name: str, scope: str, env: str | None) -> OperationResult:
-    """Create or update (upsert) an environment secret.
+    """Create or update (upsert) a secret.
 
     The value is read from ``--env VARNAME`` or a hidden interactive prompt,
     POSTed once, and immediately discarded. It never appears in the result.
@@ -286,7 +280,7 @@ def set_secret(*, name: str, scope: str, env: str | None) -> OperationResult:
             secret = client.set_environment_secret(
                 name,
                 value,
-                scope=scope,
+                scope=_SCOPE_TO_WIRE[scope],
                 credentials=context.credentials,
                 git_identity=context.git_identity,
             )
@@ -321,33 +315,86 @@ def set_secret(*, name: str, scope: str, env: str | None) -> OperationResult:
     )
 
 
-def delete_secret(*, name: str, scope: str, yes: bool) -> OperationResult:
-    """Delete an environment secret by name within ``scope``.
+def _existing_secret_names(
+    client: OsmosisClient,
+    *,
+    scope: str,
+    credentials: Any,
+    git_identity: str,
+) -> set[str] | None:
+    """Names that exist in ``scope`` (a wire value). ``None`` if the lookup fails,
+    so a transient error falls back to letting the platform validate."""
+    try:
 
-    ``scope`` is ``"workspace"`` or ``"user"``. Requires confirmation
+        def _fetch(limit: int, offset: int) -> Any:
+            return client.list_environment_secrets(
+                limit=limit,
+                offset=offset,
+                scope=scope,
+                credentials=credentials,
+                git_identity=git_identity,
+            )
+
+        secrets, _ = fetch_all_pages(_fetch, items_attr="environment_secrets")
+        return {s.name for s in secrets}
+    except Exception:
+        return None
+
+
+def delete_secret(*, name: str, scope: str, yes: bool) -> OperationResult:
+    """Delete a secret by name within ``scope``.
+
+    ``scope`` is ``"workspace"`` or ``"personal"``. Requires confirmation
     (``--yes`` to skip). Workspace deletion is additionally role-gated
     server-side (admin/owner).
-
-    Name validation uses the lenient lookup schema (non-empty, max 255 chars)
-    rather than the strict SCREAMING_SNAKE rule so that legacy-named secrets
-    (created before the naming convention was enforced) can still be deleted.
     """
-    _validate_secret_name_for_lookup(name)
+    _validate_secret_name(name)
     _validate_scope(scope)
 
     context = require_git_workspace_directory_context()
+    client = OsmosisClient()
+    wire_scope = _SCOPE_TO_WIRE[scope]
+
+    # Fail before prompting if the secret doesn't exist in the requested scope,
+    # so a typo or wrong --scope is reported immediately instead of after a Y/n.
+    existing = _existing_secret_names(
+        client,
+        scope=wire_scope,
+        credentials=context.credentials,
+        git_identity=context.git_identity,
+    )
+    if existing is not None and name not in existing:
+        other_scope = "personal" if scope == "workspace" else "workspace"
+        other_wire = _SCOPE_TO_WIRE[other_scope]
+        other_names = _existing_secret_names(
+            client,
+            scope=other_wire,
+            credentials=context.credentials,
+            git_identity=context.git_identity,
+        )
+        if other_names is not None and name in other_names:
+            raise CLIError(
+                f'Secret "{name}" not found in {scope} scope.'
+                f"\nDid you mean: osmosis secret delete {name}"
+                f" --scope {other_scope}",
+                code="NOT_FOUND",
+            )
+        raise CLIError(
+            f'Secret "{name}" not found.',
+            code="NOT_FOUND",
+        )
 
     require_confirmation(
         f'Delete {scope} secret "{name}"? This cannot be undone.',
         yes=yes,
+        default=False,
         summary=[("Name", name), ("Scope", scope)],
     )
 
-    client = OsmosisClient()
     with get_output_context().status(f'Deleting secret "{name}"...'):
         client.delete_environment_secret(
             name,
-            scope=scope,
+            scope=wire_scope,
             credentials=context.credentials,
             git_identity=context.git_identity,
         )
