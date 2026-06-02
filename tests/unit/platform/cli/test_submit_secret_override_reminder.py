@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
+import osmosis_ai.platform.cli.shared_submit as shared_submit
 from osmosis_ai.platform.api.models import (
     EnvironmentSecretInfo,
     PaginatedEnvironmentSecrets,
 )
 from osmosis_ai.platform.cli.shared_config import build_secret_table_rows
-import osmosis_ai.platform.cli.shared_submit as shared_submit
 
 
 def test_build_secret_table_rows_annotates_scope() -> None:

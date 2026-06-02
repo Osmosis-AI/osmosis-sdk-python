@@ -229,9 +229,7 @@ def list_secrets(*, limit: int, all_: bool, scope: str = "all") -> ListResult:
             ListColumn(key="name", label="Name", ratio=3, overflow="fold"),
             ListColumn(key="scope", label="Scope", no_wrap=True, ratio=1),
             ListColumn(key="updated_at", label="Updated", no_wrap=True, ratio=1),
-            ListColumn(
-                key="updater_name", label="Updated By", no_wrap=True, ratio=1
-            ),
+            ListColumn(key="updater_name", label="Updated By", no_wrap=True, ratio=1),
         ],
         display_items=[
             {

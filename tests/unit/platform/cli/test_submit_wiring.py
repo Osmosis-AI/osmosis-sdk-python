@@ -68,7 +68,5 @@ def test_submit_eval_forwards_secrets_list() -> None:
 
 def test_submit_eval_passes_none_when_empty() -> None:
     client = MagicMock()
-    eval_mod._submit_eval(
-        client, _eval_config([]), credentials=None, git_identity="g"
-    )
+    eval_mod._submit_eval(client, _eval_config([]), credentials=None, git_identity="g")
     assert client.submit_evaluation_run.call_args.kwargs["secrets"] is None

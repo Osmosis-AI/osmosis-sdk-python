@@ -558,9 +558,7 @@ class TestSubmitTrainingRun:
         assert "secret_refs_config" not in payload
 
     @patch("osmosis_ai.platform.api.client.platform_request")
-    def test_empty_env_and_secrets_are_omitted(
-        self, mock_request: MagicMock
-    ) -> None:
+    def test_empty_env_and_secrets_are_omitted(self, mock_request: MagicMock) -> None:
         """Empty containers are treated as 'not provided' and stripped."""
         mock_request.return_value = self._response()
         client = OsmosisClient()

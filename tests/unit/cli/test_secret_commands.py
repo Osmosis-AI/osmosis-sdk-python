@@ -248,8 +248,16 @@ def test_secret_set_from_env_success_omits_value(monkeypatch, capsys) -> None:
     monkeypatch.setattr(secret_module, "OsmosisClient", FakeClient)
 
     exit_code = cli.main(
-        ["--json", "secret", "set", "OPENAI_API_KEY", "--scope", "workspace",
-         "--env", "SOURCE_VAR"]
+        [
+            "--json",
+            "secret",
+            "set",
+            "OPENAI_API_KEY",
+            "--scope",
+            "workspace",
+            "--env",
+            "SOURCE_VAR",
+        ]
     )
     captured = capsys.readouterr()
 
@@ -289,8 +297,16 @@ def test_secret_set_from_env_forwards_name_value_scope(monkeypatch, capsys) -> N
     monkeypatch.setattr(secret_module, "OsmosisClient", FakeClient)
 
     exit_code = cli.main(
-        ["--json", "secret", "set", "OPENAI_API_KEY",
-         "--scope", "personal", "--env", "SOURCE_VAR"]
+        [
+            "--json",
+            "secret",
+            "set",
+            "OPENAI_API_KEY",
+            "--scope",
+            "personal",
+            "--env",
+            "SOURCE_VAR",
+        ]
     )
     captured = capsys.readouterr()
 
@@ -323,8 +339,16 @@ def test_secret_set_invalid_scope_is_validation_error(monkeypatch, capsys) -> No
     monkeypatch.setenv("SOURCE_VAR", SENTINEL_VALUE)
 
     exit_code = cli.main(
-        ["--json", "secret", "set", "OPENAI_API_KEY",
-         "--scope", "team", "--env", "SOURCE_VAR"]
+        [
+            "--json",
+            "secret",
+            "set",
+            "OPENAI_API_KEY",
+            "--scope",
+            "team",
+            "--env",
+            "SOURCE_VAR",
+        ]
     )
     captured = capsys.readouterr()
     assert exit_code == 1
@@ -338,8 +362,16 @@ def test_secret_set_env_unset_is_validation_error(monkeypatch, capsys) -> None:
     monkeypatch.delenv("MISSING_VAR", raising=False)
 
     exit_code = cli.main(
-        ["--json", "secret", "set", "MY_SECRET", "--scope", "workspace",
-         "--env", "MISSING_VAR"]
+        [
+            "--json",
+            "secret",
+            "set",
+            "MY_SECRET",
+            "--scope",
+            "workspace",
+            "--env",
+            "MISSING_VAR",
+        ]
     )
     captured = capsys.readouterr()
 
@@ -354,7 +386,9 @@ def test_secret_set_without_value_source_requires_interactive(
 ) -> None:
     _stub_git_context(monkeypatch)
 
-    exit_code = cli.main(["--json", "secret", "set", "MY_SECRET", "--scope", "workspace"])
+    exit_code = cli.main(
+        ["--json", "secret", "set", "MY_SECRET", "--scope", "workspace"]
+    )
     captured = capsys.readouterr()
 
     assert exit_code == 1
@@ -375,7 +409,9 @@ def test_secret_set_without_value_source_checks_before_workspace(
         fail_if_workspace_resolved,
     )
 
-    exit_code = cli.main(["--json", "secret", "set", "MY_SECRET", "--scope", "workspace"])
+    exit_code = cli.main(
+        ["--json", "secret", "set", "MY_SECRET", "--scope", "workspace"]
+    )
     captured = capsys.readouterr()
 
     assert exit_code == 1
@@ -389,8 +425,16 @@ def test_secret_set_invalid_name_is_validation_error(monkeypatch, capsys) -> Non
     monkeypatch.setenv("SOURCE_VAR", SENTINEL_VALUE)
 
     exit_code = cli.main(
-        ["--json", "secret", "set", "bad name!", "--scope", "workspace",
-         "--env", "SOURCE_VAR"]
+        [
+            "--json",
+            "secret",
+            "set",
+            "bad name!",
+            "--scope",
+            "workspace",
+            "--env",
+            "SOURCE_VAR",
+        ]
     )
     captured = capsys.readouterr()
 
@@ -443,8 +487,16 @@ def test_secret_set_conflict_maps_to_conflict_code(monkeypatch, capsys) -> None:
     monkeypatch.setattr(secret_module, "OsmosisClient", FakeClient)
 
     exit_code = cli.main(
-        ["--json", "secret", "set", "OPENAI_API_KEY", "--scope", "workspace",
-         "--env", "SOURCE_VAR"]
+        [
+            "--json",
+            "secret",
+            "set",
+            "OPENAI_API_KEY",
+            "--scope",
+            "workspace",
+            "--env",
+            "SOURCE_VAR",
+        ]
     )
     captured = capsys.readouterr()
 
@@ -480,8 +532,16 @@ def test_secret_set_redacts_value_from_platform_error(monkeypatch, capsys) -> No
     monkeypatch.setattr(secret_module, "OsmosisClient", FakeClient)
 
     exit_code = cli.main(
-        ["--json", "secret", "set", "OPENAI_API_KEY", "--scope", "personal",
-         "--env", "SOURCE_VAR"]
+        [
+            "--json",
+            "secret",
+            "set",
+            "OPENAI_API_KEY",
+            "--scope",
+            "personal",
+            "--env",
+            "SOURCE_VAR",
+        ]
     )
     captured = capsys.readouterr()
 
@@ -597,8 +657,7 @@ def test_secret_delete_forwards_name_scope(monkeypatch, capsys) -> None:
 
     monkeypatch.setattr(secret_module, "OsmosisClient", FakeClient)
     exit_code = cli.main(
-        ["--json", "secret", "delete", "OPENAI_API_KEY",
-         "--scope", "personal", "--yes"]
+        ["--json", "secret", "delete", "OPENAI_API_KEY", "--scope", "personal", "--yes"]
     )
     captured = capsys.readouterr()
     assert exit_code == 0
@@ -711,7 +770,9 @@ def test_secret_delete_missing_hints_other_scope_when_exists(
         ):
             if scope == "user":
                 return PaginatedEnvironmentSecrets(
-                    environment_secrets=[], total_count=0, has_more=False,
+                    environment_secrets=[],
+                    total_count=0,
+                    has_more=False,
                 )
             return PaginatedEnvironmentSecrets(
                 environment_secrets=[_secret(name="MY_KEY", scope="workspace")],
@@ -727,7 +788,9 @@ def test_secret_delete_missing_hints_other_scope_when_exists(
     assert exit_code == 1
     payload = json.loads(captured.err)
     assert payload["error"]["code"] == "NOT_FOUND"
-    assert "osmosis secret delete MY_KEY --scope workspace" in payload["error"]["message"]
+    assert (
+        "osmosis secret delete MY_KEY --scope workspace" in payload["error"]["message"]
+    )
 
 
 # ── typer wiring ──────────────────────────────────────────────────
@@ -801,8 +864,16 @@ def test_secret_set_rejects_legacy_names(monkeypatch, capsys) -> None:
     monkeypatch.setenv("SOURCE_VAR", SENTINEL_VALUE)
 
     exit_code = cli.main(
-        ["--json", "secret", "set", "my-old-key",
-         "--scope", "workspace", "--env", "SOURCE_VAR"]
+        [
+            "--json",
+            "secret",
+            "set",
+            "my-old-key",
+            "--scope",
+            "workspace",
+            "--env",
+            "SOURCE_VAR",
+        ]
     )
     captured = capsys.readouterr()
     assert exit_code == 1

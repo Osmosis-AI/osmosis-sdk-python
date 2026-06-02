@@ -46,9 +46,7 @@ from osmosis_ai.platform.cli.workspace_directory_contract import (
     validate_workspace_directory_contract,
 )
 
-_MISSING_SECRET_RE = re.compile(
-    r"Secret\(s\) not found: (.+)"
-)
+_MISSING_SECRET_RE = re.compile(r"Secret\(s\) not found: (.+)")
 
 
 @dataclass(frozen=True)
@@ -223,9 +221,7 @@ def run_cloud_submit[ConfigT: BaseSubmitConfig](
             title=f"Env Vars ({len(env_rows)})",
             headers=("Name", "Value"),
         )
-        full_summary.extend(
-            (f"env.{name}", value) for name, value in env_rows
-        )
+        full_summary.extend((f"env.{name}", value) for name, value in env_rows)
 
     if config.secrets:
         scopes = _fetch_secret_scopes(
@@ -258,9 +254,7 @@ def run_cloud_submit[ConfigT: BaseSubmitConfig](
             title=f"Secrets ({len(secret_rows)})",
             headers=("Name", "Scope"),
         )
-        full_summary.extend(
-            (f"secret.{name}", scope) for name, scope in secret_rows
-        )
+        full_summary.extend((f"secret.{name}", scope) for name, scope in secret_rows)
 
     notes, warnings = print_remote_fetch_notice(
         workspace_directory,
@@ -279,10 +273,14 @@ def run_cloud_submit[ConfigT: BaseSubmitConfig](
     output = get_output_context()
     with output.status(spec.status_message):
         try:
-            result = spec.submit(client, config, context.credentials, context.git_identity)
+            result = spec.submit(
+                client, config, context.credentials, context.git_identity
+            )
         except PlatformAPIError as exc:
             enriched = _enrich_missing_secret_error(exc)
-            raise enriched if enriched is not None else exc
+            if enriched is not None:
+                raise enriched from exc
+            raise
 
     display_next_steps, next_steps_structured = spec.build_next_steps(result, config)
 

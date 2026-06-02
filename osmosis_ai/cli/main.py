@@ -1,8 +1,11 @@
 """Osmosis AI CLI — built with Typer."""
 
+from __future__ import annotations
+
 import difflib
 import sys
 import warnings
+from typing import Any
 
 import click
 import typer
@@ -35,9 +38,9 @@ from osmosis_ai.platform.auth.platform_client import (
 class OsmosisGroup(typer.core.TyperGroup):
     """Typer group with fuzzy command suggestion."""
 
-    def resolve_command(
-        self, ctx: click.Context, args: list[str]
-    ) -> tuple[str | None, click.Command | None, list[str]]:
+    def resolve_command(  # type: ignore[override]
+        self, ctx: Any, args: list[str]
+    ) -> tuple[str | None, Any, list[str]]:
         try:
             return super().resolve_command(ctx, args)
         except click.UsageError:
@@ -107,7 +110,7 @@ def _callback(
         format=selected_format,
         interactive=selected_format is OutputFormat.rich and sys.stdin.isatty(),
     )
-    install_output_context(ctx, output)
+    install_output_context(ctx, output)  # type: ignore[arg-type]
     ctx.call_on_close(verify_output_emitted)
     load_dotenv(find_dotenv(usecwd=True))
 
