@@ -35,13 +35,15 @@ def normalize_platform_url(url: str | None) -> str:
     try:
         port = parsed.port
     except ValueError:
-        port = None
+        raise ValueError(f"Invalid OSMOSIS_PLATFORM_URL port in '{raw}'") from None
+    # IPv6 literals contain colons and must stay bracketed inside the netloc.
+    host_for_netloc = f"[{hostname}]" if ":" in hostname else hostname
     if port is not None and not (
         (scheme == "https" and port == 443) or (scheme == "http" and port == 80)
     ):
-        netloc = f"{hostname}:{port}"
+        netloc = f"{host_for_netloc}:{port}"
     else:
-        netloc = hostname
+        netloc = host_for_netloc
 
     path = parsed.path.rstrip("/")
     return urlunparse((scheme, netloc, path, "", "", ""))
