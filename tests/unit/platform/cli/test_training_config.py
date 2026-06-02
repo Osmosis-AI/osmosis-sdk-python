@@ -238,7 +238,7 @@ def test_secret_name_must_be_screaming_snake(tmp_path: Path, name: str) -> None:
     assert "^[A-Z][A-Z0-9_]*$" in str(exc_info.value)
 
 
-def test_secret_name_rejects_reserved_prefix(tmp_path: Path) -> None:
+def test_secret_name_rejects_underscore_prefix(tmp_path: Path) -> None:
     path = tmp_path / "reserved.toml"
     path.write_text(
         _config_with_secrets('[secrets]\nrequired = ["_OSMOSIS_TOKEN"]'),
@@ -246,8 +246,7 @@ def test_secret_name_rejects_reserved_prefix(tmp_path: Path) -> None:
     )
     with pytest.raises(CLIError) as exc_info:
         load_train_submit_config(path)
-    assert "_OSMOSIS_" in str(exc_info.value)
-    assert "reserved" in str(exc_info.value)
+    assert "^[A-Z][A-Z0-9_]*$" in str(exc_info.value)
 
 
 def test_secret_name_rejects_env_overlap(tmp_path: Path) -> None:

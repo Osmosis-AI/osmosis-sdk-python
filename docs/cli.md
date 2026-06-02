@@ -262,9 +262,9 @@ before submitting a run that references them.
 
 #### Rules
 
-- `[env]` keys and `secrets` names must match `^[A-Z][A-Z0-9_]*$`.
+- `[env]` keys must match `^[A-Z_][A-Z0-9_]*$`; `secrets` names must match `^[A-Z][A-Z0-9_]*$`.
 - A name cannot appear in both `[env]` and `secrets`.
-- Any name starting with `_OSMOSIS_` is reserved by the platform.
+- `[env]` names starting with `_OSMOSIS_` are reserved by the platform.
 - Both are optional.
 
 ### osmosis train info

@@ -322,12 +322,6 @@ def validate_secret_names(
                 "letters, digits, and underscores, starting with a letter "
                 "(e.g. MY_SECRET). Must match ^[A-Z][A-Z0-9_]*$."
             )
-        if name.startswith(RESERVED_ENV_PREFIX):
-            raise CLIError(
-                f"'{name}' in [secrets] of {path}: names starting with "
-                f"{RESERVED_ENV_PREFIX} are reserved by the platform; "
-                "choose a different name."
-            )
 
     overlap = sorted(set(env) & set(secrets))
     if overlap:

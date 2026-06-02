@@ -10,8 +10,22 @@ from typing import Any
 import click
 import typer
 import typer.core
-from typer._click import exceptions as _typer_exc
 from dotenv import find_dotenv, load_dotenv
+
+try:
+    from typer._click import exceptions as _typer_exc
+
+    _EXIT_EXCEPTIONS: tuple[type[BaseException], ...] = (
+        click.exceptions.Exit,
+        _typer_exc.Exit,
+    )
+    _USAGE_EXCEPTIONS: tuple[type[BaseException], ...] = (
+        click.UsageError,
+        _typer_exc.UsageError,
+    )
+except ImportError:
+    _EXIT_EXCEPTIONS = (click.exceptions.Exit,)
+    _USAGE_EXCEPTIONS = (click.UsageError,)
 
 from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.cli.output.context import (
@@ -230,11 +244,11 @@ def main(argv: list[str] | None = None) -> int:
         if isinstance(result, int) and result != 0:
             return result
         return 0
-    except (click.exceptions.Exit, _typer_exc.Exit) as e:
+    except _EXIT_EXCEPTIONS as e:
         return e.exit_code
     except SystemExit as e:
         return int(e.code) if e.code is not None else 0
-    except (click.UsageError, _typer_exc.UsageError) as exc:
+    except _USAGE_EXCEPTIONS as exc:
         if not str(exc):
             return 0
         return _handle_cli_error(exc, argv=argv, exit_code=exc.exit_code)
