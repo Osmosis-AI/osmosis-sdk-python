@@ -265,6 +265,7 @@ def stop(name_or_id: str, *, yes: bool) -> OperationResult:
     require_confirmation(
         f'Stop evaluation run "{name_or_id}"?',
         yes=yes,
+        default=False,
         summary=[("Name", name_or_id)],
     )
 

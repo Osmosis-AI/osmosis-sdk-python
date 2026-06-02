@@ -416,6 +416,7 @@ def stop(name: str, *, yes: bool) -> OperationResult:
     require_confirmation(
         f'Stop training run "{name}"?',
         yes=yes,
+        default=False,
         summary=[("Name", name)],
     )
 
