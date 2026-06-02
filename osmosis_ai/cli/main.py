@@ -1,31 +1,13 @@
 """Osmosis AI CLI — built with Typer."""
 
-from __future__ import annotations
-
 import difflib
 import sys
 import warnings
-from typing import Any
 
 import click
 import typer
 import typer.core
 from dotenv import find_dotenv, load_dotenv
-
-try:
-    from typer._click import exceptions as _typer_exc
-
-    _EXIT_EXCEPTIONS: tuple[type[BaseException], ...] = (
-        click.exceptions.Exit,
-        _typer_exc.Exit,
-    )
-    _USAGE_EXCEPTIONS: tuple[type[BaseException], ...] = (
-        click.UsageError,
-        _typer_exc.UsageError,
-    )
-except ImportError:
-    _EXIT_EXCEPTIONS = (click.exceptions.Exit,)
-    _USAGE_EXCEPTIONS = (click.UsageError,)
 
 from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.cli.output.context import (
@@ -53,9 +35,9 @@ from osmosis_ai.platform.auth.platform_client import (
 class OsmosisGroup(typer.core.TyperGroup):
     """Typer group with fuzzy command suggestion."""
 
-    def resolve_command(  # type: ignore[override]
-        self, ctx: Any, args: list[str]
-    ) -> tuple[str | None, Any, list[str]]:
+    def resolve_command(
+        self, ctx: click.Context, args: list[str]
+    ) -> tuple[str | None, click.Command | None, list[str]]:
         try:
             return super().resolve_command(ctx, args)
         except click.UsageError:
@@ -125,7 +107,7 @@ def _callback(
         format=selected_format,
         interactive=selected_format is OutputFormat.rich and sys.stdin.isatty(),
     )
-    install_output_context(ctx, output)  # type: ignore[arg-type]
+    install_output_context(ctx, output)
     ctx.call_on_close(verify_output_emitted)
     load_dotenv(find_dotenv(usecwd=True))
 
@@ -244,11 +226,13 @@ def main(argv: list[str] | None = None) -> int:
         if isinstance(result, int) and result != 0:
             return result
         return 0
-    except _EXIT_EXCEPTIONS as e:
+    except click.exceptions.Exit as e:
         return e.exit_code
     except SystemExit as e:
         return int(e.code) if e.code is not None else 0
-    except _USAGE_EXCEPTIONS as exc:
+    except click.UsageError as exc:
+        # NoArgsIsHelpError (from no_args_is_help=True) has an empty message
+        # after help is already printed — just exit cleanly.
         if not str(exc):
             return 0
         return _handle_cli_error(exc, argv=argv, exit_code=exc.exit_code)
