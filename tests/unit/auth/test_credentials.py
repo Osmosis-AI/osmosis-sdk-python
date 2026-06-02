@@ -6,6 +6,9 @@ import json
 from datetime import UTC, datetime, timedelta
 from unittest.mock import patch
 
+import pytest
+
+from osmosis_ai.platform.auth.config import DEFAULT_PLATFORM_URL, normalize_platform_url
 from osmosis_ai.platform.auth.credentials import (
     KEYRING_ACCOUNT,
     TOKEN_STORE_ENV,
@@ -14,7 +17,16 @@ from osmosis_ai.platform.auth.credentials import (
     Credentials,
     UserInfo,
     get_credential_store,
+    keyring_account_for_platform,
 )
+
+DEFAULT_PLATFORM = normalize_platform_url(DEFAULT_PLATFORM_URL)
+STAGING_PLATFORM = "https://staging.osmosis.ai"
+
+
+@pytest.fixture(autouse=True)
+def _default_platform(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("OSMOSIS_PLATFORM_URL", raising=False)
 
 
 def _make_credentials(
@@ -32,6 +44,13 @@ def _make_credentials(
         user=UserInfo(id="user_1", email="user@example.com", name="User"),
         token_id=token_id,
     )
+
+
+def _platform_entry(
+    data: dict,
+    platform_url: str = DEFAULT_PLATFORM,
+) -> dict:
+    return data["platforms"][normalize_platform_url(platform_url)]
 
 
 def test_credentials_roundtrip_preserves_tz_aware_expires_at() -> None:
@@ -88,11 +107,15 @@ def test_save_uses_keyring_when_available(tmp_path, monkeypatch) -> None:
         store = save_credentials(_make_credentials())
 
     assert store == TOKEN_STORE_KEYRING
-    # Token should be stored under the fixed KEYRING_ACCOUNT, not the email
-    assert stored.get(KEYRING_ACCOUNT) == "test-token"
+    platform_account = keyring_account_for_platform(DEFAULT_PLATFORM)
+    assert stored.get(platform_account) == "test-token"
+    assert stored.get(KEYRING_ACCOUNT) is None
     data = json.loads(creds_file.read_text())
-    assert "access_token" not in data
-    assert data["token_store"] == TOKEN_STORE_KEYRING
+    assert "active_platform_url" not in data
+    entry = _platform_entry(data)
+    assert "access_token" not in entry
+    assert entry["token_store"] == TOKEN_STORE_KEYRING
+    assert entry["keyring_account"] == platform_account
 
 
 def test_save_cleans_up_old_keyring_on_account_change(tmp_path, monkeypatch) -> None:
@@ -205,8 +228,10 @@ def test_save_falls_back_to_file(tmp_path, monkeypatch, capsys) -> None:
 
     assert store == TOKEN_STORE_FILE
     data = json.loads(creds_file.read_text())
-    assert data["access_token"] == "test-token"
-    assert data["token_store"] == TOKEN_STORE_FILE
+    assert "active_platform_url" not in data
+    entry = _platform_entry(data)
+    assert entry["access_token"] == "test-token"
+    assert entry["token_store"] == TOKEN_STORE_FILE
     captured = capsys.readouterr()
     assert "keyring unavailable" in captured.err
 
@@ -266,7 +291,7 @@ def test_load_returns_none_when_keyring_entry_missing(
 
     assert loaded is None
     captured = capsys.readouterr()
-    assert "not found in keyring" in captured.err
+    assert "Token not found for the current Osmosis platform" in captured.err
 
 
 def test_load_from_file_fallback(tmp_path, monkeypatch) -> None:
@@ -287,6 +312,63 @@ def test_load_from_file_fallback(tmp_path, monkeypatch) -> None:
     assert loaded is not None
     assert loaded.access_token == "test-token"
     assert loaded.token_id == "tok_abc"
+
+
+def test_load_legacy_default_file_ignores_non_default_platform(
+    tmp_path, monkeypatch
+) -> None:
+    creds_file = tmp_path / "creds.json"
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.credentials.CREDENTIALS_FILE", creds_file
+    )
+    monkeypatch.setenv("OSMOSIS_PLATFORM_URL", STAGING_PLATFORM)
+    monkeypatch.delenv("OSMOSIS_TOKEN", raising=False)
+
+    stored = _make_credentials()
+    data = stored.to_dict()
+    data["token_store"] = TOKEN_STORE_FILE
+    creds_file.write_text(json.dumps(data))
+
+    from osmosis_ai.platform.auth.credentials import load_credentials
+
+    assert load_credentials() is None
+
+
+def test_platform_registry_loads_current_platform_entry(tmp_path, monkeypatch) -> None:
+    creds_file = tmp_path / "creds.json"
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.credentials.CREDENTIALS_FILE", creds_file
+    )
+    monkeypatch.setenv("OSMOSIS_PLATFORM_URL", STAGING_PLATFORM)
+    monkeypatch.delenv("OSMOSIS_TOKEN", raising=False)
+
+    prod = _make_credentials()
+    prod_data = prod.to_dict()
+    prod_data["platform_url"] = DEFAULT_PLATFORM
+    prod_data["token_store"] = TOKEN_STORE_FILE
+    staging = _make_credentials(token_id="tok_staging")
+    staging_data = staging.to_dict()
+    staging_data["access_token"] = "staging-token"
+    staging_data["platform_url"] = STAGING_PLATFORM
+    staging_data["token_store"] = TOKEN_STORE_FILE
+    creds_file.write_text(
+        json.dumps(
+            {
+                "version": 2,
+                "platforms": {
+                    DEFAULT_PLATFORM: prod_data,
+                    STAGING_PLATFORM: staging_data,
+                },
+            }
+        )
+    )
+
+    from osmosis_ai.platform.auth.credentials import load_credentials
+
+    loaded = load_credentials()
+    assert loaded is not None
+    assert loaded.access_token == "staging-token"
+    assert loaded.token_id == "tok_staging"
 
 
 # ---------------------------------------------------------------------------
@@ -526,6 +608,60 @@ def test_save_fallback_to_file_cleans_up_old_keyring(tmp_path, monkeypatch) -> N
     assert KEYRING_ACCOUNT in deleted_accounts
 
 
+def test_save_non_default_platform_preserves_legacy_default_keyring(
+    tmp_path, monkeypatch
+) -> None:
+    creds_file = tmp_path / "creds.json"
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.credentials.CREDENTIALS_FILE", creds_file
+    )
+    monkeypatch.setenv("OSMOSIS_PLATFORM_URL", STAGING_PLATFORM)
+
+    old_data = _make_credentials().to_dict()
+    old_data.pop("access_token")
+    old_data["token_store"] = TOKEN_STORE_KEYRING
+    creds_file.write_text(json.dumps(old_data))
+
+    deleted_accounts: list[str] = []
+    stored: dict[str, str] = {}
+
+    def fake_delete(account: str) -> bool:
+        deleted_accounts.append(account)
+        return True
+
+    def fake_set(account: str, token: str) -> bool:
+        stored[account] = token
+        return True
+
+    with (
+        patch(
+            "osmosis_ai.platform.auth.credentials._keyring_delete",
+            side_effect=fake_delete,
+        ),
+        patch(
+            "osmosis_ai.platform.auth.credentials._keyring_set",
+            side_effect=fake_set,
+        ),
+    ):
+        from osmosis_ai.platform.auth.credentials import save_credentials
+
+        store = save_credentials(_make_credentials())
+
+    assert store == TOKEN_STORE_KEYRING
+    assert KEYRING_ACCOUNT not in deleted_accounts
+    assert keyring_account_for_platform(STAGING_PLATFORM) in deleted_accounts
+    assert stored[keyring_account_for_platform(STAGING_PLATFORM)] == "test-token"
+
+    data = json.loads(creds_file.read_text())
+    assert "active_platform_url" not in data
+    assert DEFAULT_PLATFORM in data["platforms"]
+    assert STAGING_PLATFORM in data["platforms"]
+    assert data["platforms"][DEFAULT_PLATFORM]["keyring_account"] == KEYRING_ACCOUNT
+    assert data["platforms"][STAGING_PLATFORM]["keyring_account"] == (
+        keyring_account_for_platform(STAGING_PLATFORM)
+    )
+
+
 # ---------------------------------------------------------------------------
 # Backward compat: load credentials from legacy email-based keyring
 # ---------------------------------------------------------------------------
@@ -561,6 +697,54 @@ def test_load_falls_back_to_legacy_email_keyring(tmp_path, monkeypatch) -> None:
 
     assert loaded is not None
     assert loaded.access_token == "legacy-keyring-secret"
+
+
+def test_delete_credentials_removes_only_current_platform(
+    tmp_path, monkeypatch
+) -> None:
+    creds_file = tmp_path / "creds.json"
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.credentials.CREDENTIALS_FILE", creds_file
+    )
+    monkeypatch.setenv("OSMOSIS_PLATFORM_URL", STAGING_PLATFORM)
+
+    prod = _make_credentials(token_id="tok_prod").to_dict()
+    prod["platform_url"] = DEFAULT_PLATFORM
+    prod["token_store"] = TOKEN_STORE_FILE
+    staging = _make_credentials(token_id="tok_staging").to_dict()
+    staging["access_token"] = "staging-token"
+    staging["platform_url"] = STAGING_PLATFORM
+    staging["token_store"] = TOKEN_STORE_FILE
+    creds_file.write_text(
+        json.dumps(
+            {
+                "version": 2,
+                "platforms": {
+                    DEFAULT_PLATFORM: prod,
+                    STAGING_PLATFORM: staging,
+                },
+            }
+        )
+    )
+
+    deleted_accounts: list[str] = []
+
+    def fake_delete(account: str) -> bool:
+        deleted_accounts.append(account)
+        return True
+
+    with patch(
+        "osmosis_ai.platform.auth.credentials._keyring_delete",
+        side_effect=fake_delete,
+    ):
+        from osmosis_ai.platform.auth.credentials import delete_credentials
+
+        assert delete_credentials() is True
+
+    data = json.loads(creds_file.read_text())
+    assert DEFAULT_PLATFORM in data["platforms"]
+    assert STAGING_PLATFORM not in data["platforms"]
+    assert KEYRING_ACCOUNT not in deleted_accounts
 
 
 # ---------------------------------------------------------------------------
@@ -643,7 +827,10 @@ def test_get_credential_store_keyring(tmp_path, monkeypatch) -> None:
         "osmosis_ai.platform.auth.credentials.CREDENTIALS_FILE", creds_file
     )
     monkeypatch.delenv("OSMOSIS_TOKEN", raising=False)
-    creds_file.write_text(json.dumps({"token_store": TOKEN_STORE_KEYRING}))
+    data = _make_credentials().to_dict()
+    data.pop("access_token")
+    data["token_store"] = TOKEN_STORE_KEYRING
+    creds_file.write_text(json.dumps(data))
     assert get_credential_store() == TOKEN_STORE_KEYRING
 
 
@@ -653,8 +840,41 @@ def test_get_credential_store_file(tmp_path, monkeypatch) -> None:
         "osmosis_ai.platform.auth.credentials.CREDENTIALS_FILE", creds_file
     )
     monkeypatch.delenv("OSMOSIS_TOKEN", raising=False)
-    creds_file.write_text(json.dumps({"token_store": TOKEN_STORE_FILE}))
+    data = _make_credentials().to_dict()
+    data["token_store"] = TOKEN_STORE_FILE
+    creds_file.write_text(json.dumps(data))
     assert get_credential_store() == TOKEN_STORE_FILE
+
+
+def test_get_credential_store_uses_current_platform(tmp_path, monkeypatch) -> None:
+    creds_file = tmp_path / "creds.json"
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.credentials.CREDENTIALS_FILE", creds_file
+    )
+    monkeypatch.setenv("OSMOSIS_PLATFORM_URL", STAGING_PLATFORM)
+    monkeypatch.delenv("OSMOSIS_TOKEN", raising=False)
+
+    prod = _make_credentials().to_dict()
+    prod["platform_url"] = DEFAULT_PLATFORM
+    prod["token_store"] = TOKEN_STORE_FILE
+    staging = _make_credentials().to_dict()
+    staging.pop("access_token")
+    staging["platform_url"] = STAGING_PLATFORM
+    staging["token_store"] = TOKEN_STORE_KEYRING
+    staging["keyring_account"] = keyring_account_for_platform(STAGING_PLATFORM)
+    creds_file.write_text(
+        json.dumps(
+            {
+                "version": 2,
+                "platforms": {
+                    DEFAULT_PLATFORM: prod,
+                    STAGING_PLATFORM: staging,
+                },
+            }
+        )
+    )
+
+    assert get_credential_store() == TOKEN_STORE_KEYRING
 
 
 def test_get_credential_store_none(tmp_path, monkeypatch) -> None:

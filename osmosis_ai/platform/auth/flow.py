@@ -23,8 +23,11 @@ from urllib.request import Request, urlopen
 from osmosis_ai.cli.console import console
 from osmosis_ai.consts import PACKAGE_VERSION
 
-from .config import PLATFORM_URL
+from .config import PLATFORM_URL as _IMPORTED_PLATFORM_URL
+from .config import get_platform_url, normalize_platform_url
 from .credentials import Credentials, UserInfo
+
+PLATFORM_URL = _IMPORTED_PLATFORM_URL
 
 
 class LoginError(Exception):
@@ -79,6 +82,12 @@ class DeviceCodeResponse:
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _platform_url() -> str:
+    if PLATFORM_URL != _IMPORTED_PLATFORM_URL:
+        return normalize_platform_url(PLATFORM_URL)
+    return get_platform_url()
 
 
 def _parse_expires_at(raw: str | None) -> datetime:
@@ -208,7 +217,7 @@ def verify_token(token: str) -> VerifyResult:
     Raises:
         LoginError: If verification fails.
     """
-    verify_url = f"{PLATFORM_URL}/api/cli/verify"
+    verify_url = f"{_platform_url()}/api/cli/verify"
 
     request = Request(
         verify_url,
@@ -268,7 +277,7 @@ def verify_token(token: str) -> VerifyResult:
 
 def request_device_code(device_name: str | None = None) -> DeviceCodeResponse:
     """Request a device code from the platform."""
-    url = f"{PLATFORM_URL}/api/cli/device/authorize"
+    url = f"{_platform_url()}/api/cli/device/authorize"
     body = json.dumps(
         {
             "deviceName": device_name or _get_device_name(),
@@ -310,7 +319,7 @@ def poll_device_token(
     on_poll: Callable[[], None] | None = None,
 ) -> dict[str, Any]:
     """Poll for device authorization completion. Returns token response dict."""
-    url = f"{PLATFORM_URL}/api/cli/device/token"
+    url = f"{_platform_url()}/api/cli/device/token"
     body = json.dumps({"device_code": device_code}).encode()
     req_headers = {
         "Content-Type": "application/json",

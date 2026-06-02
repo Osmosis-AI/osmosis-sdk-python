@@ -58,11 +58,13 @@ def _login_operation_result(
 ) -> Any:
     """Build the structured login result for JSON/plain output."""
     from osmosis_ai.cli.output import OperationResult
+    from osmosis_ai.platform.auth.config import get_platform_url
 
     resource: dict[str, Any] = {
         "email": email,
         "name": name,
         "expires_at": expires_at.isoformat(),
+        "platform_url": get_platform_url(),
         "workspace": None,
         "source": source,
         "verified": True,
@@ -226,6 +228,7 @@ def _machine_login_with_token(*, token: str, force: bool) -> Any:
 def _machine_login_with_env_token(*, env_token: str) -> Any:
     """Verify OSMOSIS_TOKEN without mutating local credential/session state."""
     from osmosis_ai.cli.output import OperationResult, get_output_context
+    from osmosis_ai.platform.auth.config import get_platform_url
 
     output = get_output_context()
     with output.status("Verifying environment token..."):
@@ -238,6 +241,7 @@ def _machine_login_with_env_token(*, env_token: str) -> Any:
             "email": verified.user.email,
             "name": verified.user.name,
             "expires_at": verified.expires_at.isoformat(),
+            "platform_url": get_platform_url(),
             "workspace": None,
             "source": "environment",
             "verified": True,
@@ -262,6 +266,7 @@ def _rich_login(force: bool, token: str | None) -> Any:
         load_credentials,
         verify_token,
     )
+    from osmosis_ai.platform.auth.config import get_platform_url
     from osmosis_ai.platform.auth.credentials import (
         Credentials,
         save_credentials,
@@ -325,6 +330,7 @@ def _rich_login(force: bool, token: str | None) -> Any:
         info_lines = [f"Email: {esc(result.user.email)}"]
         if result.user.name:
             info_lines.append(f"Name: {esc(result.user.name)}")
+        info_lines.append(f"Platform: {esc(get_platform_url())}")
         info_lines.append(f"Expires: {result.expires_at.strftime('%Y-%m-%d')}")
 
         console.panel("Login Successful", "\n".join(info_lines), style="green")
@@ -384,6 +390,7 @@ def logout(
     from osmosis_ai.cli.output import OperationResult, OutputFormat, get_output_context
     from osmosis_ai.cli.prompts import confirm
     from osmosis_ai.platform.auth import load_credentials
+    from osmosis_ai.platform.auth.config import get_platform_url
     from osmosis_ai.platform.auth.local_config import reset_session
     from osmosis_ai.platform.auth.platform_client import revoke_cli_token
 
@@ -400,7 +407,11 @@ def logout(
             return OperationResult(
                 operation="auth.logout",
                 status="noop",
-                resource={"logged_in": True, "env_token_set": True},
+                resource={
+                    "logged_in": True,
+                    "env_token_set": True,
+                    "platform_url": get_platform_url(),
+                },
                 message=message,
                 display_next_steps=["Run 'unset OSMOSIS_TOKEN' to logout."],
                 next_steps_structured=[
@@ -413,7 +424,7 @@ def logout(
         return OperationResult(
             operation="auth.logout",
             status="noop",
-            resource={"logged_in": False},
+            resource={"logged_in": False, "platform_url": get_platform_url()},
             message="Not logged in.",
         )
 
@@ -447,6 +458,7 @@ def logout(
                 "logged_in": False,
                 "revoked": revoked,
                 "env_token_set": env_token_set,
+                "platform_url": get_platform_url(),
             },
             message="Logged out successfully.",
             display_next_steps=(
@@ -486,6 +498,7 @@ def whoami() -> Any:
         load_credentials,
         verify_token,
     )
+    from osmosis_ai.platform.auth.config import get_platform_url
     from osmosis_ai.platform.constants import MSG_NOT_LOGGED_IN
 
     output = get_output_context()
@@ -532,6 +545,7 @@ def whoami() -> Any:
         "email": credentials.user.email,
         "name": credentials.user.name,
         "expires_at": credentials.expires_at.isoformat(),
+        "platform_url": get_platform_url(),
         "source": source,
     }
     if credentials.token_id:
@@ -541,6 +555,7 @@ def whoami() -> Any:
         "email": credentials.user.email,
         "name": credentials.user.name,
         "expires_at": credentials.expires_at.isoformat(),
+        "platform_url": get_platform_url(),
         "source": source,
         "workspace": None,
         "linked_project": None,
@@ -556,6 +571,7 @@ def whoami() -> Any:
         fields.append(
             DetailField(label="Name", value=console.format_text(credentials.user.name))
         )
+    fields.append(DetailField(label="Platform", value=get_platform_url()))
     fields.append(DetailField(label="Auth Source", value=source))
     fields.append(
         DetailField(label="Expires", value=credentials.expires_at.strftime("%Y-%m-%d"))
