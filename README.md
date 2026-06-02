@@ -19,7 +19,7 @@
 
 > ⚠️ **Warning**: osmosis-ai is still in active development. APIs may change between versions.
 
-Python SDK for [Osmosis AI](https://platform.osmosis.ai), a platform for training LLMs with reinforcement learning. Implement an **AgentWorkflow** in Python, add a concrete **Grader** for evaluation runs and managed training runs, submit evaluation runs with the CLI, then submit training runs from an Osmosis workspace directory.
+Python SDK and CLI for [Osmosis AI](https://platform.osmosis.ai), a platform for training LLMs with reinforcement learning. Implement an **AgentWorkflow** in Python, add a concrete **Grader** for evaluation runs and managed training runs, submit evaluation runs with the CLI, then submit training runs from an Osmosis workspace directory.
 
 ## Quick start
 
