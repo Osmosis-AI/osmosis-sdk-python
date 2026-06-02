@@ -45,6 +45,7 @@ def load_eval_submit_config(path: Path) -> EvalSubmitConfig:
         config_class=EvalSubmitConfig,
         extra_sections=[("evaluation", _EvaluationSection)],
         config_label=_EVAL_CONFIG_LABEL,
+        secrets_section_required=True,
     )
 
 

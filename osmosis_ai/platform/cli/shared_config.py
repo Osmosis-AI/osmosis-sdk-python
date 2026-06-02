@@ -13,6 +13,7 @@ from pydantic_core import ErrorDetails
 from osmosis_ai.cli.errors import CLIError
 
 ENV_VAR_NAME_RE = re.compile(r"^[A-Z_][A-Z0-9_]*$")
+SECRET_NAME_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")
 RESERVED_ENV_PREFIX = "_OSMOSIS_"
 
 _EXPECTED_TYPE_BY_ERROR: dict[str, str] = {
@@ -121,6 +122,48 @@ def read_toml_table(
     if not isinstance(section, dict):
         raise CLIError(f"[{section_name}] must be a table in {path}")
     return section
+
+
+def read_toml_secrets(
+    raw: dict[str, Any],
+    path: Path,
+    *,
+    section_required: bool = False,
+) -> list[str]:
+    """Read secret refs from ``[secrets].required`` when present.
+
+    Training configs may omit the whole ``[secrets]`` section. Evaluation
+    configs must include it. When the section exists, it must always include
+    the ``required`` field.
+    """
+    if "secrets" not in raw:
+        if section_required:
+            raise CLIError(f"Missing [secrets] section in {path}")
+        return []
+
+    value = raw["secrets"]
+    if not isinstance(value, dict):
+        raise CLIError(f"[secrets] must be a table in {path}")
+
+    extra_keys = sorted(set(value) - {"required"})
+    if extra_keys:
+        raise CLIError(
+            f"[secrets] in {path} only supports the 'required' field; "
+            f"unknown key(s): {', '.join(extra_keys)}."
+        )
+
+    if "required" not in value:
+        raise CLIError(f"Missing 'required' in [secrets] section of {path}")
+
+    required = value["required"]
+    if not isinstance(required, list) or not all(
+        isinstance(item, str) for item in required
+    ):
+        raise CLIError(
+            f"'required' in [secrets] of {path} must be a list of strings, "
+            'e.g. required = ["OPENAI_API_KEY"].'
+        )
+    return required
 
 
 def format_input(value: Any) -> str:
@@ -243,30 +286,51 @@ def parse_section(
 def validate_env_var_keys(
     *,
     env: dict[str, str],
-    secrets: dict[str, str],
     path: Path,
 ) -> None:
-    """Reject invalid env-var names, reserved names, and overlap between sections."""
-    for section_name, section in (("env", env), ("secrets", secrets)):
-        for key in section:
-            if not ENV_VAR_NAME_RE.match(key):
-                raise CLIError(
-                    f"Invalid env var name '{key}' in [{section_name}] of {path}: "
-                    "must match ^[A-Z_][A-Z0-9_]*$"
-                )
-            if key.startswith(RESERVED_ENV_PREFIX):
-                raise CLIError(
-                    f"'{key}' in [{section_name}] of {path}: env var names starting "
-                    f"with {RESERVED_ENV_PREFIX} are reserved by the platform; "
-                    "choose a different name."
-                )
+    """Reject invalid or reserved [env] var names."""
+    for key in env:
+        if not ENV_VAR_NAME_RE.match(key):
+            raise CLIError(
+                f"Invalid env var name '{key}' in [env] of {path}: "
+                "must match ^[A-Z_][A-Z0-9_]*$"
+            )
+        if key.startswith(RESERVED_ENV_PREFIX):
+            raise CLIError(
+                f"'{key}' in [env] of {path}: env var names starting "
+                f"with {RESERVED_ENV_PREFIX} are reserved by the platform; "
+                "choose a different name."
+            )
+
+
+def validate_secret_names(
+    *,
+    secrets: list[str],
+    env: dict[str, str],
+    path: Path,
+) -> None:
+    """Validate each secret name, reject duplicates and overlap with [env] keys."""
+    duplicates = sorted({name for name in secrets if secrets.count(name) > 1})
+    if duplicates:
+        raise CLIError(
+            f"Duplicate secret name(s) in [secrets].required of {path}: "
+            f"{', '.join(duplicates)}. Each name must appear once."
+        )
+
+    for name in secrets:
+        if not SECRET_NAME_RE.match(name):
+            raise CLIError(
+                f"Invalid secret name '{name}' in {path}: use uppercase "
+                "letters, digits, and underscores, starting with a letter "
+                "(e.g. MY_SECRET). Must match ^[A-Z][A-Z0-9_]*$."
+            )
 
     overlap = sorted(set(env) & set(secrets))
     if overlap:
         names = ", ".join(overlap)
         raise CLIError(
-            f"Key(s) appear in both [env] and [secrets] of {path}: "
-            f"{names}. Each env var name must come from exactly one section."
+            f"Name(s) appear in both [env] and [secrets] of {path}: "
+            f"{names}. Each env var name must come from exactly one place."
         )
 
 
@@ -306,7 +370,7 @@ class BaseSubmitConfig(BaseModel):
         default_factory=AdvancedPassthroughSection
     )
     env: dict[str, str] = Field(default_factory=dict)
-    secrets: dict[str, str] = Field(default_factory=dict)
+    secrets: list[str] = Field(default_factory=list)
 
     @property
     def experiment_rollout(self) -> str:
@@ -343,6 +407,7 @@ def load_submit_config[SubmitConfigT: BaseSubmitConfig](
     config_class: type[SubmitConfigT],
     extra_sections: list[tuple[str, type[BaseModel]]],
     config_label: str,
+    secrets_section_required: bool = False,
 ) -> SubmitConfigT:
     """Load and validate a submit TOML file into ``config_class``.
 
@@ -368,7 +433,9 @@ def load_submit_config[SubmitConfigT: BaseSubmitConfig](
     }
     advanced_section = read_toml_table(raw, "advanced", path)
     env_section = read_toml_table(raw, "env", path)
-    secrets_section = read_toml_table(raw, "secrets", path)
+    secrets_list = read_toml_secrets(
+        raw, path, section_required=secrets_section_required
+    )
 
     allowed_sections = frozenset(
         {
@@ -397,7 +464,7 @@ def load_submit_config[SubmitConfigT: BaseSubmitConfig](
                 data=data,
             )
         ),
-        *validate_env_values(env=env_section, secrets=secrets_section),
+        *validate_env_values(env=env_section),
     ]
     if issues:
         raise config_issues_error(issues=issues, config_label=config_label)
@@ -412,12 +479,10 @@ def load_submit_config[SubmitConfigT: BaseSubmitConfig](
         )
 
     env = {key: value for key, value in env_section.items() if isinstance(value, str)}
-    secrets = {
-        key: value for key, value in secrets_section.items() if isinstance(value, str)
-    }
-    validate_env_var_keys(env=env, secrets=secrets, path=path)
+    validate_env_var_keys(env=env, path=path)
+    validate_secret_names(secrets=secrets_list, env=env, path=path)
 
-    return config_class(**parsed, env=env, secrets=secrets)
+    return config_class(**parsed, env=env, secrets=secrets_list)
 
 
 def build_submit_summary_rows(
@@ -428,7 +493,7 @@ def build_submit_summary_rows(
     dataset: str,
     commit_sha: str | None,
     env: dict[str, str],
-    secrets: dict[str, str],
+    secrets: list[str],
 ) -> list[tuple[str, str]]:
     """Build the confirmation-table rows shared by ``train`` and ``eval`` submit."""
     rows: list[tuple[str, str]] = [
@@ -439,44 +504,66 @@ def build_submit_summary_rows(
     ]
     if commit_sha:
         rows.append(("Commit", commit_sha))
-    if env:
-        env_keys = ", ".join(sorted(env))
-        rows.append((f"Rollout env ({len(env)})", env_keys))
-    if secrets:
-        secret_summary = ", ".join(
-            f"{env_name}={secret_name}"
-            for env_name, secret_name in sorted(secrets.items())
-        )
-        rows.append((f"Rollout secrets ({len(secrets)})", secret_summary))
+    return rows
+
+
+def build_env_table_rows(env: dict[str, str]) -> list[tuple[str, str]]:
+    """Build (name, value) rows for the env vars table, sorted by name."""
+    return [(name, value) for name, value in sorted(env.items())]
+
+
+def build_secret_table_rows(
+    secrets: list[str],
+    *,
+    user_secret_names: set[str],
+    workspace_secret_names: set[str],
+) -> list[tuple[str, str]]:
+    """Build (name, scope) rows for the secrets table, sorted by name.
+
+    A personal secret is labeled an override only when a workspace secret of
+    the same name also exists; otherwise it is a personal-only secret.
+    """
+    rows: list[tuple[str, str]] = []
+    for name in sorted(secrets):
+        if name in user_secret_names:
+            label = (
+                "Personal (overrides workspace)"
+                if name in workspace_secret_names
+                else "Personal"
+            )
+        else:
+            label = "Workspace"
+        rows.append((name, label))
     return rows
 
 
 def validate_env_values(
     *,
     env: dict[str, Any],
-    secrets: dict[str, Any],
 ) -> list[dict[str, str]]:
-    """Return issues for any env/secret value that is not a string."""
+    """Return issues for any [env] value that is not a string."""
     issues: list[dict[str, str]] = []
-    for section_name, section in (("env", env), ("secrets", secrets)):
-        for key, value in section.items():
-            if not isinstance(value, str):
-                issues.append(
-                    {
-                        "key": f"{section_name}.{key}",
-                        "message": f"must be a string, got {format_input(value)}",
-                    }
-                )
+    for key, value in env.items():
+        if not isinstance(value, str):
+            issues.append(
+                {
+                    "key": f"env.{key}",
+                    "message": f"must be a string, got {format_input(value)}",
+                }
+            )
     return issues
 
 
 __all__ = [
     "ENV_VAR_NAME_RE",
     "RESERVED_ENV_PREFIX",
+    "SECRET_NAME_RE",
     "AdvancedPassthroughSection",
     "BackendValidatedParamSection",
     "BaseSubmitConfig",
     "ExperimentSection",
+    "build_env_table_rows",
+    "build_secret_table_rows",
     "build_submit_summary_rows",
     "collect_section_validation_issues",
     "collect_top_level_validation_issues",
@@ -487,9 +574,11 @@ __all__ = [
     "load_submit_config",
     "parse_section",
     "read_toml_file",
+    "read_toml_secrets",
     "read_toml_table",
     "validate_env_values",
     "validate_env_var_keys",
+    "validate_secret_names",
     "validate_workspace_rollout_paths",
     "validation_issue_to_config_issue",
 ]

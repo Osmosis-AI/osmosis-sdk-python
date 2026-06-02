@@ -556,7 +556,7 @@ def whoami() -> Any:
         fields.append(
             DetailField(label="Name", value=console.format_text(credentials.user.name))
         )
-    fields.append(DetailField(label="Auth source", value=source))
+    fields.append(DetailField(label="Auth Source", value=source))
     fields.append(
         DetailField(label="Expires", value=credentials.expires_at.strftime("%Y-%m-%d"))
     )

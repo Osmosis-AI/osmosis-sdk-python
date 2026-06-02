@@ -332,7 +332,7 @@ class TestEnvironmentSecrets:
         )
 
         assert mock_request.call_args[0][0] == (
-            "/api/cli/environment-secrets?limit=25&offset=50"
+            "/api/cli/environment-secrets?limit=25&offset=50&scope=all"
         )
         assert mock_request.call_args.kwargs["credentials"] is credentials
         assert mock_request.call_args.kwargs["git_identity"] == "git_123"
@@ -342,7 +342,7 @@ class TestEnvironmentSecrets:
         assert result.platform_url == "https://platform.osmosis.ai/acme/secrets"
 
     @patch("osmosis_ai.platform.api.client.platform_request")
-    def test_create_environment_secret_posts_value_once_and_returns_metadata(
+    def test_set_environment_secret_posts_value_once_and_returns_metadata(
         self, mock_request: MagicMock
     ) -> None:
         credentials = object()
@@ -353,12 +353,14 @@ class TestEnvironmentSecrets:
             "created_at": "2026-05-01T00:00:00Z",
             "updated_at": "2026-05-01T00:00:01Z",
             "creator_name": "Ada",
+            "scope": "workspace",
             "platform_url": "https://platform.osmosis.ai/acme/secrets",
         }
 
-        result = OsmosisClient().create_environment_secret(
+        result = OsmosisClient().set_environment_secret(
             "OPENAI_API_KEY",
             secret_value,
+            scope="workspace",
             credentials=credentials,
             git_identity="git_123",
         )
@@ -368,6 +370,7 @@ class TestEnvironmentSecrets:
         assert mock_request.call_args.kwargs["data"] == {
             "name": "OPENAI_API_KEY",
             "value": secret_value,
+            "scope": "workspace",
         }
         assert mock_request.call_args.kwargs["credentials"] is credentials
         assert mock_request.call_args.kwargs["git_identity"] == "git_123"
@@ -512,7 +515,7 @@ class TestSubmitTrainingRun:
             },
         }
         assert "env_config" not in payload
-        assert "secret_refs_config" not in payload
+        assert "secrets" not in payload
 
     @patch("osmosis_ai.platform.api.client.platform_request")
     def test_env_config_included_when_non_empty(self, mock_request: MagicMock) -> None:
@@ -532,16 +535,13 @@ class TestSubmitTrainingRun:
         )
         payload = mock_request.call_args.kwargs["data"]
         assert payload["env_config"] == env_config
-        assert "secret_refs_config" not in payload
+        assert "secrets" not in payload
 
     @patch("osmosis_ai.platform.api.client.platform_request")
-    def test_secret_refs_config_included_when_non_empty(
-        self, mock_request: MagicMock
-    ) -> None:
-        """Non-empty secret_refs_config map is forwarded to the platform."""
+    def test_secrets_included_when_non_empty(self, mock_request: MagicMock) -> None:
+        """Non-empty secrets list is forwarded to the platform."""
         mock_request.return_value = self._response()
         client = OsmosisClient()
-        secret_refs_config = {"OPENAI_API_KEY": "openai-prod"}
         client.submit_training_run(
             experiment_config={
                 "model_path": "m1",
@@ -549,18 +549,17 @@ class TestSubmitTrainingRun:
                 "rollout": "rollout1",
                 "entrypoint": "rollouts/main.py",
             },
-            secret_refs_config=secret_refs_config,
+            secrets=["OPENAI_API_KEY", "GITHUB_TOKEN"],
             git_identity="git_test",
         )
         payload = mock_request.call_args.kwargs["data"]
-        assert payload["secret_refs_config"] == secret_refs_config
+        assert payload["secrets"] == {"required": ["OPENAI_API_KEY", "GITHUB_TOKEN"]}
         assert "env_config" not in payload
+        assert "secret_refs_config" not in payload
 
     @patch("osmosis_ai.platform.api.client.platform_request")
-    def test_empty_env_and_secret_refs_configs_are_omitted(
-        self, mock_request: MagicMock
-    ) -> None:
-        """Empty dicts are treated as 'not provided' and stripped from payload."""
+    def test_empty_env_and_secrets_are_omitted(self, mock_request: MagicMock) -> None:
+        """Empty containers are treated as 'not provided' and stripped."""
         mock_request.return_value = self._response()
         client = OsmosisClient()
         client.submit_training_run(
@@ -571,11 +570,12 @@ class TestSubmitTrainingRun:
                 "entrypoint": "rollouts/main.py",
             },
             env_config={},
-            secret_refs_config={},
+            secrets=[],
             git_identity="git_test",
         )
         payload = mock_request.call_args.kwargs["data"]
         assert "env_config" not in payload
+        assert "secrets" not in payload
         assert "secret_refs_config" not in payload
 
     @patch("osmosis_ai.platform.api.client.platform_request")
@@ -598,7 +598,7 @@ class TestSubmitTrainingRun:
             checkpoints_config={"checkpoint_save_freq": 10},
             advanced_config={"optimizer": "adam"},
             env_config={"FOO": "bar"},
-            secret_refs_config={"OPENAI_API_KEY": "openai-prod"},
+            secrets=["OPENAI_API_KEY"],
             git_identity="git_test",
         )
         payload = mock_request.call_args.kwargs["data"]
@@ -614,7 +614,7 @@ class TestSubmitTrainingRun:
         assert payload["checkpoints_config"] == {"checkpoint_save_freq": 10}
         assert payload["advanced_config"] == {"optimizer": "adam"}
         assert payload["env_config"] == {"FOO": "bar"}
-        assert payload["secret_refs_config"] == {"OPENAI_API_KEY": "openai-prod"}
+        assert payload["secrets"] == {"required": ["OPENAI_API_KEY"]}
 
 
 class TestEvaluationRuns:
@@ -668,7 +668,7 @@ class TestEvaluationRuns:
             evaluation_config={"rubric": "grade correctness"},
             advanced_config={"max_concurrent_rollouts": 8},
             env_config={"FOO": "bar"},
-            secret_refs_config={"OPENAI_API_KEY": "openai-prod"},
+            secrets=["OPENAI_API_KEY"],
             git_identity="git_test",
         )
 
@@ -678,7 +678,7 @@ class TestEvaluationRuns:
             "evaluation_config": {"rubric": "grade correctness"},
             "advanced_config": {"max_concurrent_rollouts": 8},
             "env_config": {"FOO": "bar"},
-            "secret_refs_config": {"OPENAI_API_KEY": "openai-prod"},
+            "secrets": {"required": ["OPENAI_API_KEY"]},
         }
 
     @patch("osmosis_ai.platform.api.client.platform_request")

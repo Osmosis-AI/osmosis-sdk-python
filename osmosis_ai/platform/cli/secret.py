@@ -1,4 +1,4 @@
-"""Business logic for ``osmosis secret`` (list + add).
+"""Business logic for ``osmosis secret`` (set, list, delete).
 
 Security invariants for this module:
   * The secret *value* travels through this process only to be POSTed once.
@@ -13,7 +13,6 @@ Security invariants for this module:
 from __future__ import annotations
 
 import os
-import re
 from typing import Any
 
 from osmosis_ai.cli.errors import CLIError
@@ -26,7 +25,9 @@ from osmosis_ai.cli.output import (
     serialize_environment_secret,
 )
 from osmosis_ai.cli.output.display import format_local_date
+from osmosis_ai.cli.prompts import require_confirmation
 from osmosis_ai.platform.api.client import OsmosisClient
+from osmosis_ai.platform.cli.shared_config import SECRET_NAME_RE
 from osmosis_ai.platform.cli.utils import (
     fetch_all_pages,
     require_git_workspace_directory_context,
@@ -34,12 +35,21 @@ from osmosis_ai.platform.cli.utils import (
 )
 from osmosis_ai.platform.cli.workspace_directory_context import git_result_context
 
-# Mirror the platform's ``environmentSecretNameSchema`` so we fail fast with a
-# clear local message instead of round-tripping an obviously invalid name —
-# and so the name (never the value) is the only thing a validation error
-# can reference.
-_SECRET_NAME_RE = re.compile(r"^[a-zA-Z0-9_-]+$")
+# Mirror the platform's ``environmentSecretNameSchema`` (^[A-Z][A-Z0-9_]*$):
+# uppercase env-var style so a referencing config's [env]-style name and the
+# secret record name are the same shape. Validating fails fast locally and,
+# because only the name (never the value) is referenced, can never leak a value.
+_SECRET_NAME_RE = SECRET_NAME_RE
 _SECRET_NAME_MAX = 255
+
+# User-facing scope vocabulary is "personal"/"workspace"; the platform wire
+# value for a personal secret is "user", so translate at the API boundary.
+_VALID_SCOPES = ("workspace", "personal")
+_VALID_LIST_SCOPES = ("all", "workspace", "personal")
+_SCOPE_TO_WIRE = {"all": "all", "workspace": "workspace", "personal": "user"}
+
+# Human-facing labels for the scope column (the raw wire values stay in JSON output).
+_SCOPE_DISPLAY = {"workspace": "Workspace", "user": "Personal"}
 
 
 def _validate_secret_name(name: str) -> None:
@@ -50,7 +60,16 @@ def _validate_secret_name(name: str) -> None:
         )
     if not _SECRET_NAME_RE.fullmatch(name):
         raise CLIError(
-            "Secret name may only contain letters, digits, '_' and '-'.",
+            "Secret name must match ^[A-Z][A-Z0-9_]*$ "
+            "(uppercase letters, digits and '_', starting with a letter).",
+            code="VALIDATION",
+        )
+
+
+def _validate_scope(scope: str) -> None:
+    if scope not in _VALID_SCOPES:
+        raise CLIError(
+            "Scope must be 'workspace' or 'personal'.",
             code="VALIDATION",
         )
 
@@ -143,8 +162,17 @@ def _redact_secret_platform_error(exc: Any, secret_value: str) -> Any:
     )
 
 
-def list_secrets(*, limit: int, all_: bool) -> ListResult:
-    """List workspace secrets (names + metadata only; values are never returned)."""
+def list_secrets(*, limit: int, all_: bool, scope: str = "all") -> ListResult:
+    """List secrets (names + metadata only; values never shown).
+
+    ``scope`` is ``"all"`` (workspace + the caller's personal secrets),
+    ``"workspace"``, or ``"personal"`` (personal only).
+    """
+    if scope not in _VALID_LIST_SCOPES:
+        raise CLIError(
+            "Scope must be 'all', 'workspace', or 'personal'.",
+            code="VALIDATION",
+        )
     effective_limit, fetch_all = validate_list_options(limit=limit, all_=all_)
 
     context = require_git_workspace_directory_context()
@@ -161,6 +189,7 @@ def list_secrets(*, limit: int, all_: bool) -> ListResult:
         page = client.list_environment_secrets(
             limit=lim,
             offset=off,
+            scope=_SCOPE_TO_WIRE[scope],
             credentials=credentials,
             git_identity=context.git_identity,
         )
@@ -198,14 +227,16 @@ def list_secrets(*, limit: int, all_: bool) -> ListResult:
         extra=extra,
         columns=[
             ListColumn(key="name", label="Name", ratio=3, overflow="fold"),
-            ListColumn(key="created_at", label="Added", no_wrap=True, ratio=1),
-            ListColumn(key="creator_name", label="Added by", no_wrap=True, ratio=1),
+            ListColumn(key="scope", label="Scope", no_wrap=True, ratio=1),
+            ListColumn(key="updated_at", label="Updated", no_wrap=True, ratio=1),
+            ListColumn(key="updater_name", label="Updated By", no_wrap=True, ratio=1),
         ],
         display_items=[
             {
                 **serialize_environment_secret(s),
-                "created_at": format_local_date(s.created_at),
-                "creator_name": s.creator_name or "—",
+                "scope": _SCOPE_DISPLAY.get(s.scope, "—"),
+                "updated_at": format_local_date(s.updated_at),
+                "updater_name": s.updater_name or "—",
             }
             for s in secrets
         ],
@@ -213,13 +244,16 @@ def list_secrets(*, limit: int, all_: bool) -> ListResult:
     )
 
 
-def add_secret(*, name: str, env: str | None) -> OperationResult:
-    """Add a workspace secret.
+def set_secret(
+    *, name: str, scope: str = "personal", env: str | None = None
+) -> OperationResult:
+    """Create or update (upsert) a secret.
 
     The value is read from ``--env VARNAME`` or a hidden interactive prompt,
     POSTed once, and immediately discarded. It never appears in the result.
     """
     _validate_secret_name(name)
+    _validate_scope(scope)
 
     output = get_output_context()
     if env is None and (
@@ -232,7 +266,7 @@ def add_secret(*, name: str, env: str | None) -> OperationResult:
     value = _resolve_secret_value(env=env, output=output)
     if value is None:
         return OperationResult(
-            operation="secret.add",
+            operation="secret.set",
             status="cancelled",
             resource=git_result_context(context),
             message="Cancelled.",
@@ -242,10 +276,11 @@ def add_secret(*, name: str, env: str | None) -> OperationResult:
     from osmosis_ai.platform.auth.platform_client import PlatformAPIError
 
     try:
-        with output.status(f'Adding secret "{name}"...'):
-            secret = client.create_environment_secret(
+        with output.status(f'Saving secret "{name}"...'):
+            secret = client.set_environment_secret(
                 name,
                 value,
+                scope=_SCOPE_TO_WIRE[scope],
                 credentials=context.credentials,
                 git_identity=context.git_identity,
             )
@@ -270,11 +305,107 @@ def add_secret(*, name: str, env: str | None) -> OperationResult:
         )
 
     return OperationResult(
-        operation="secret.add",
+        operation="secret.set",
         status="success",
         resource=resource,
-        message=f'Secret "{name}" added.',
+        message=f'Secret "{name}" saved in {scope} scope.',
         display_next_steps=display_next_steps,
         next_steps_structured=next_steps_structured,
         extra=extra,
+    )
+
+
+def _existing_secret_names(
+    client: OsmosisClient,
+    *,
+    scope: str,
+    credentials: Any,
+    git_identity: str,
+) -> set[str] | None:
+    """Names that exist in ``scope`` (a wire value). ``None`` if the lookup fails,
+    so a transient error falls back to letting the platform validate."""
+    try:
+
+        def _fetch(limit: int, offset: int) -> Any:
+            return client.list_environment_secrets(
+                limit=limit,
+                offset=offset,
+                scope=scope,
+                credentials=credentials,
+                git_identity=git_identity,
+            )
+
+        secrets, _ = fetch_all_pages(_fetch, items_attr="environment_secrets")
+        return {s.name for s in secrets}
+    except Exception:
+        return None
+
+
+def delete_secret(
+    *, name: str, scope: str = "personal", yes: bool = False
+) -> OperationResult:
+    """Delete a secret by name within ``scope``.
+
+    ``scope`` is ``"workspace"`` or ``"personal"``. Requires confirmation
+    (``--yes`` to skip). Workspace deletion is additionally role-gated
+    server-side (admin/owner).
+    """
+    _validate_secret_name(name)
+    _validate_scope(scope)
+
+    context = require_git_workspace_directory_context()
+    client = OsmosisClient()
+    wire_scope = _SCOPE_TO_WIRE[scope]
+
+    # Fail before prompting if the secret doesn't exist in the requested scope,
+    # so a typo or wrong --scope is reported immediately instead of after a Y/n.
+    existing = _existing_secret_names(
+        client,
+        scope=wire_scope,
+        credentials=context.credentials,
+        git_identity=context.git_identity,
+    )
+    if existing is not None and name not in existing:
+        other_scope = "personal" if scope == "workspace" else "workspace"
+        other_wire = _SCOPE_TO_WIRE[other_scope]
+        other_names = _existing_secret_names(
+            client,
+            scope=other_wire,
+            credentials=context.credentials,
+            git_identity=context.git_identity,
+        )
+        if other_names is not None and name in other_names:
+            raise CLIError(
+                f'Secret "{name}" not found in {scope} scope.'
+                f"\nDid you mean: osmosis secret delete {name}"
+                f" --scope {other_scope}",
+                code="NOT_FOUND",
+            )
+        raise CLIError(
+            f'Secret "{name}" not found.',
+            code="NOT_FOUND",
+        )
+
+    require_confirmation(
+        f'Delete {scope} secret "{name}"? This cannot be undone.',
+        yes=yes,
+        default=False,
+        summary=[("Name", name), ("Scope", scope)],
+    )
+
+    with get_output_context().status(f'Deleting secret "{name}"...'):
+        client.delete_environment_secret(
+            name,
+            scope=wire_scope,
+            credentials=context.credentials,
+            git_identity=context.git_identity,
+        )
+
+    resource: dict[str, Any] = {"name": name, "scope": scope}
+    resource.update(git_result_context(context))
+    return OperationResult(
+        operation="secret.delete",
+        status="success",
+        resource=resource,
+        message=f'Secret "{name}" deleted from {scope} scope.',
     )

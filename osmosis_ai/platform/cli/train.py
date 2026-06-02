@@ -115,7 +115,7 @@ def _submit_training(
         checkpoints_config=config.checkpoints_config or None,
         advanced_config=config.advanced_config or None,
         env_config=config.env or None,
-        secret_refs_config=config.secrets or None,
+        secrets=config.secrets or None,
         credentials=credentials,
         git_identity=git_identity,
     )
@@ -126,6 +126,7 @@ def _train_next_steps(
 ) -> tuple[list[str], list[dict[str, Any]]]:
     display = [
         f"Status: {result.status}",
+        f"Rollout: {config.experiment_rollout}",
         f"Model: {config.experiment_model_path}",
         f"Dataset: {config.experiment_dataset}",
         (
@@ -416,6 +417,7 @@ def stop(name: str, *, yes: bool) -> OperationResult:
     require_confirmation(
         f'Stop training run "{name}"?',
         yes=yes,
+        default=False,
         summary=[("Name", name)],
     )
 

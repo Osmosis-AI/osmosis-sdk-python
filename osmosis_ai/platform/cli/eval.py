@@ -16,7 +16,6 @@ from osmosis_ai.cli.output import (
     serialize_eval_run,
 )
 from osmosis_ai.cli.output.display import (
-    created_column_label,
     format_local_date,
     format_local_datetime,
 )
@@ -64,7 +63,7 @@ def _submit_eval(
         evaluation_config=config.evaluation_config or None,
         advanced_config=config.advanced_config or None,
         env_config=config.env or None,
-        secret_refs_config=config.secrets or None,
+        secrets=config.secrets or None,
         credentials=credentials,
         git_identity=git_identity,
     )
@@ -75,12 +74,14 @@ def _eval_next_steps(
 ) -> tuple[list[str], list[dict[str, Any]]]:
     display = [
         f"Status: {result.status}",
+        f"Rollout: {_config.experiment_rollout}",
+        f"Model: {_config.experiment_model_path}",
+        f"Dataset: {_config.experiment_dataset}",
         (
             f"View: {result.platform_url}"
             if result.platform_url
             else f"Check status with: osmosis eval info {result.name}"
         ),
-        "List all evaluation runs with: osmosis eval list",
     ]
     structured: list[dict[str, Any]] = [
         {"action": "eval_info", "name": result.name},
@@ -157,13 +158,8 @@ def list_eval_runs(*, limit: int, all_: bool) -> ListResult:
             ListColumn(key="rollout", label="Rollout", ratio=2, overflow="fold"),
             ListColumn(key="status", label="Status", no_wrap=True, ratio=1),
             ListColumn(key="model", label="Model", no_wrap=True, ratio=2),
+            ListColumn(key="created_at", label="Submitted", no_wrap=True, ratio=1),
             ListColumn(key="creator_name", label="Submitted By", no_wrap=True, ratio=1),
-            ListColumn(
-                key="created_at",
-                label=created_column_label(),
-                no_wrap=True,
-                ratio=1,
-            ),
         ],
         display_items=[
             {
@@ -265,6 +261,7 @@ def stop(name_or_id: str, *, yes: bool) -> OperationResult:
     require_confirmation(
         f'Stop evaluation run "{name_or_id}"?',
         yes=yes,
+        default=False,
         summary=[("Name", name_or_id)],
     )
 

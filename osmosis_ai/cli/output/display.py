@@ -43,13 +43,22 @@ def created_column_label(
     return "Created"
 
 
+def _twelve_hour_time(dt: datetime, *, with_seconds: bool = False) -> str:
+    """12-hour clock time with AM/PM and no leading-zero hour (e.g. ``6:16 PM``)."""
+    hour = dt.hour % 12 or 12
+    meridiem = "AM" if dt.hour < 12 else "PM"
+    seconds = f":{dt.second:02d}" if with_seconds else ""
+    return f"{hour}:{dt.minute:02d}{seconds} {meridiem}"
+
+
 def format_local_date(
     value: str | None, *, now: datetime | None = None, tz: tzinfo | None = None
 ) -> str:
     parsed = _parse_iso_datetime(value)
     if parsed is None:
         return "" if value is None else str(value)[:10]
-    return _localize(parsed, tz=tz).strftime("%Y-%m-%d %H:%M %Z")
+    local = _localize(parsed, tz=tz)
+    return f"{local.strftime('%Y-%m-%d')} {_twelve_hour_time(local)} {local.strftime('%Z')}"
 
 
 def format_local_datetime(
@@ -58,4 +67,8 @@ def format_local_datetime(
     parsed = _parse_iso_datetime(value)
     if parsed is None:
         return "" if value is None else str(value)
-    return _localize(parsed, tz=tz).strftime("%Y-%m-%d %H:%M:%S %Z")
+    local = _localize(parsed, tz=tz)
+    return (
+        f"{local.strftime('%Y-%m-%d')} "
+        f"{_twelve_hour_time(local, with_seconds=True)} {local.strftime('%Z')}"
+    )
