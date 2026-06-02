@@ -21,6 +21,7 @@ from osmosis_ai.platform.auth.platform_client import (
     AuthenticationExpiredError,
     PlatformAPIError,
     SubscriptionRequiredError,
+    UpgradeRequiredError,
     platform_request,
     revoke_cli_token,
 )
@@ -49,6 +50,8 @@ def _make_http_response(data: dict[str, Any]) -> MagicMock:
     body = json.dumps(data).encode()
     mock_resp = MagicMock()
     mock_resp.read.return_value = body
+    mock_resp.status = 200
+    mock_resp.headers = {}  # real dict: .get() returns None, no spurious warning
     mock_resp.__enter__ = MagicMock(return_value=mock_resp)
     mock_resp.__exit__ = MagicMock(return_value=False)
     return mock_resp
@@ -251,10 +254,17 @@ class TestPlatformRequest:
 
     @pytest.mark.parametrize(
         "header_name",
-        ["X-Osmosis-Org", "x-osmosis-org", "X-Osmosis-Git", "x-osmosis-git"],
+        [
+            "X-Osmosis-Org",
+            "x-osmosis-org",
+            "X-Osmosis-Git",
+            "x-osmosis-git",
+            "X-Osmosis-CLI-Version",
+            "x-osmosis-cli-version",
+        ],
     )
     @patch("osmosis_ai.platform.auth.platform_client.urlopen")
-    def test_rejects_caller_supplied_scope_headers_case_insensitively(
+    def test_rejects_caller_supplied_reserved_headers_case_insensitively(
         self, mock_urlopen: MagicMock, header_name: str
     ) -> None:
         creds = _make_credentials()
@@ -267,8 +277,8 @@ class TestPlatformRequest:
                 require_git_repo=False,
             )
 
-        assert exc_info.value.error_code == "SCOPE_HEADER_FORBIDDEN"
-        assert "managed by the SDK" in str(exc_info.value)
+        assert exc_info.value.error_code == "RESERVED_HEADER_FORBIDDEN"
+        assert "set automatically by the Osmosis CLI" in str(exc_info.value)
         mock_urlopen.assert_not_called()
 
     @patch("osmosis_ai.platform.auth.platform_client.urlopen")
@@ -451,7 +461,7 @@ class TestPlatformRequest:
         ],
     )
     @patch("osmosis_ai.platform.auth.platform_client.urlopen")
-    def test_repo_scope_codes_use_sdk_guidance(
+    def test_repo_scope_codes_use_cli_guidance(
         self,
         mock_urlopen: MagicMock,
         status_code: int,
@@ -773,6 +783,98 @@ class TestPlatformRequest:
         with pytest.raises(CLIError, match="Not logged in"):
             platform_request("/api/test", credentials=None)
 
+    # -------------------------------------------------------------------------
+    # CLI Version Header
+    # -------------------------------------------------------------------------
+
+    @patch("osmosis_ai.platform.auth.platform_client.urlopen")
+    def test_platform_request_emits_cli_version_header(
+        self, mock_urlopen: MagicMock
+    ) -> None:
+        """platform_request sends X-Osmosis-CLI-Version equal to PACKAGE_VERSION."""
+        from osmosis_ai.consts import PACKAGE_VERSION
+
+        mock_urlopen.return_value = _make_http_response({"ok": True})
+        creds = _make_credentials()
+
+        platform_request("/api/cli/verify", credentials=creds, require_git_repo=False)
+
+        request_obj = mock_urlopen.call_args[0][0]
+        # urllib stores header names via str.capitalize() (first char upper,
+        # rest lower), so we must query the normalized form.
+        assert request_obj.get_header("X-osmosis-cli-version") == PACKAGE_VERSION
+
+    # -------------------------------------------------------------------------
+    # Deprecation Warning
+    # -------------------------------------------------------------------------
+
+    @patch("osmosis_ai.platform.auth.platform_client.urlopen")
+    @patch("osmosis_ai.platform.auth.platform_client.console")
+    def test_platform_request_warns_on_deprecation_header(
+        self,
+        mock_console: MagicMock,
+        mock_urlopen: MagicMock,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A X-Osmosis-Deprecation response header triggers a single warning."""
+        from osmosis_ai.platform.auth import platform_client
+
+        # Reset the module-level dedup flag so this test is isolated.
+        monkeypatch.setattr(platform_client, "_deprecation_warned", False)
+
+        deprecation_msg = (
+            "This version of the Osmosis CLI is deprecated. Run: osmosis upgrade"
+        )
+
+        def _make_response_with_deprecation_header() -> MagicMock:
+            mock_resp = MagicMock()
+            mock_resp.read.return_value = b"{}"
+            mock_resp.status = 200
+            mock_resp.headers = {"X-Osmosis-Deprecation": deprecation_msg}
+            mock_resp.__enter__ = MagicMock(return_value=mock_resp)
+            mock_resp.__exit__ = MagicMock(return_value=False)
+            return mock_resp
+
+        mock_urlopen.return_value = _make_response_with_deprecation_header()
+        creds = _make_credentials()
+
+        platform_request("/api/cli/verify", credentials=creds, require_git_repo=False)
+        # Second call should NOT emit another warning (dedup flag is now True).
+        mock_urlopen.return_value = _make_response_with_deprecation_header()
+        platform_request("/api/cli/verify", credentials=creds, require_git_repo=False)
+
+        # print_warning should have been called exactly once (dedup flag prevents a second call).
+        mock_console.print_warning.assert_called_once_with(deprecation_msg)
+
+    # -------------------------------------------------------------------------
+    # 426 Upgrade Required
+    # -------------------------------------------------------------------------
+
+    @patch("osmosis_ai.platform.auth.platform_client.urlopen")
+    def test_platform_request_maps_426_to_upgrade_required(
+        self, mock_urlopen: MagicMock
+    ) -> None:
+        """A 426 response raises UpgradeRequiredError with the platform message."""
+        import io
+
+        body = b'{"error":"upgrade_required","message":"osmosis >= 1.0.0 required. Run: pip install -U osmosis-ai","minimum":"1.0.0"}'
+        mock_urlopen.side_effect = HTTPError(
+            "https://platform.osmosis.ai/api/cli/verify",
+            426,
+            "Upgrade Required",
+            {},
+            io.BytesIO(body),
+        )
+        creds = _make_credentials()
+
+        with pytest.raises(UpgradeRequiredError) as exc_info:
+            platform_request(
+                "/api/cli/verify", credentials=creds, require_git_repo=False
+            )
+
+        assert "osmosis >= 1.0.0 required" in str(exc_info.value)
+        assert exc_info.value.status_code == 426
+
 
 # =============================================================================
 # revoke_cli_token Tests
@@ -802,6 +904,13 @@ class TestRevokeCLIToken:
 
         assert revoke_cli_token(creds) is True
         mock_urlopen.assert_called_once()
+
+        from osmosis_ai.consts import PACKAGE_VERSION
+
+        request_obj = mock_urlopen.call_args[0][0]
+        # urllib stores header names via str.capitalize() (first char upper,
+        # rest lower), so we must query the normalized form.
+        assert request_obj.get_header("X-osmosis-cli-version") == PACKAGE_VERSION
 
     @patch("osmosis_ai.platform.auth.platform_client.urlopen")
     def test_returns_true_on_401(self, mock_urlopen: MagicMock) -> None:

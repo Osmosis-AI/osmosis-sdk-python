@@ -155,6 +155,25 @@ class Console:
             kwargs["soft_wrap"] = soft_wrap
         self._rich_stderr.print(message, style="bold red", **kwargs)
 
+    def print_warning(
+        self,
+        message: str,
+        *,
+        soft_wrap: bool | None = None,
+        markup: bool = False,
+    ) -> None:
+        """Print a non-fatal warning message to stderr.
+
+        Args:
+            message: Warning message to print.
+            soft_wrap: Whether Rich should avoid inserting hard line breaks.
+            markup: Whether to interpret Rich markup in the message.
+        """
+        kwargs: dict[str, Any] = {"markup": markup}
+        if soft_wrap is not None:
+            kwargs["soft_wrap"] = soft_wrap
+        self._rich_stderr.print(f"⚠ {message}", style="yellow", **kwargs)
+
     def separator(self, title: str = "") -> None:
         """Print a separator line with optional title.
 

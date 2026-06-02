@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from osmosis_ai.cli.console import console
 from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.consts import PACKAGE_VERSION
 from osmosis_ai.platform.constants import (
@@ -73,6 +74,23 @@ class SubscriptionRequiredError(PlatformAPIError):
             field=field,
             details=details,
         )
+
+
+class UpgradeRequiredError(PlatformAPIError):
+    """Raised when the installed CLI is below the platform's minimum supported version (HTTP 426)."""
+
+
+# Warn at most once per process about a deprecated CLI version.
+_deprecation_warned = False
+
+
+def _maybe_warn_deprecation(message: str | None) -> None:
+    """Emit a deprecation warning at most once per process."""
+    global _deprecation_warned
+    if not message or _deprecation_warned:
+        return
+    _deprecation_warned = True
+    console.print_warning(message)
 
 
 def _credentials_match_env_token(credentials: Credentials | None) -> bool:
@@ -185,15 +203,18 @@ _REPO_SCOPE_RENAME_DIAGNOSTIC_CODES = {
 }
 
 
-def _reject_scope_headers(headers: dict[str, str] | None) -> None:
+def _reject_reserved_headers(headers: dict[str, str] | None) -> None:
     if not headers:
         return
-    forbidden = {"x-osmosis-org", "x-osmosis-git"}
+    # Workspace scope and CLI version are derived from local state; callers must
+    # not override them. Compared case-insensitively since HTTP header names are.
+    reserved = {"x-osmosis-org", "x-osmosis-git", "x-osmosis-cli-version"}
     supplied = {name.casefold() for name in headers}
-    if supplied & forbidden:
+    if supplied & reserved:
         raise PlatformAPIError(
-            "Osmosis scope headers are managed by the SDK and cannot be supplied by callers.",
-            error_code="SCOPE_HEADER_FORBIDDEN",
+            "These headers are set automatically by the Osmosis CLI "
+            "and cannot be supplied by callers.",
+            error_code="RESERVED_HEADER_FORBIDDEN",
         )
 
 
@@ -255,6 +276,7 @@ def revoke_cli_token(credentials: Credentials) -> bool:
             "Authorization": f"Bearer {credentials.access_token}",
             "Content-Type": "application/json",
             "User-Agent": f"osmosis-cli/{PACKAGE_VERSION}",
+            "X-Osmosis-CLI-Version": PACKAGE_VERSION,
         },
         method="DELETE",
     )
@@ -315,7 +337,7 @@ def platform_request(
             when cleanup_on_401 is True)
         PlatformAPIError: For other API errors
     """
-    _reject_scope_headers(headers)
+    _reject_reserved_headers(headers)
 
     if credentials is None:
         credentials = load_credentials()
@@ -329,6 +351,7 @@ def platform_request(
         "Authorization": f"Bearer {credentials.access_token}",
         "Content-Type": "application/json",
         "User-Agent": f"osmosis-cli/{PACKAGE_VERSION}",
+        "X-Osmosis-CLI-Version": PACKAGE_VERSION,
     }
 
     if require_git_repo:
@@ -347,6 +370,7 @@ def platform_request(
 
     try:
         with urlopen(request, timeout=timeout) as response:
+            _maybe_warn_deprecation(response.headers.get("X-Osmosis-Deprecation"))
             if response.status == 204:
                 return {}
             raw = response.read()
@@ -365,6 +389,21 @@ def platform_request(
             raise AuthenticationExpiredError(
                 _auth_error_message(error_code, using_env_token=using_env_token),
                 code=error_code,
+            ) from e
+
+        if e.code == 426:
+            error_body = _read_error_body(e)
+            platform_message = error_body.get("message")
+            message = (
+                platform_message
+                if isinstance(platform_message, str) and platform_message
+                else "This version of the Osmosis CLI is no longer supported. Run: osmosis upgrade"
+            )
+            raise UpgradeRequiredError(
+                message,
+                e.code,
+                error_code="upgrade_required",
+                details=error_body or None,
             ) from e
 
         # Best-effort capture of structured error message from response body
