@@ -97,10 +97,6 @@ selection: `[experiment].dataset` is a platform dataset name from
 `osmosis dataset list`, not a local `data/*.jsonl` path.
 
 ```toml
-# `secrets` must be at the TOP of the file, before any [table] header —
-# otherwise TOML folds it into the preceding table and it is silently ignored.
-# secrets = ["OPENAI_API_KEY"]
-
 [experiment]
 rollout = "my-rollout"
 entrypoint = "main.py"
@@ -119,6 +115,9 @@ dataset = "my-platform-dataset"
 
 # [env]
 # LOG_LEVEL = "INFO"
+
+# [secrets]
+# required = ["OPENAI_API_KEY"]
 ```
 
 ```bash
@@ -240,7 +239,7 @@ LOG_LEVEL = "INFO"
 DEFAULT_REGION = "us-west-2"
 ```
 
-#### Secrets — `secrets`
+#### Secrets — `[secrets]`
 
 A list of Platform `environment_secret` **record names** to inject into the
 rollout container. The platform resolves each name to an encrypted value
@@ -250,12 +249,12 @@ appear in the config file, in the API payload, or in CLI output.
 Each name must match `^[A-Z][A-Z0-9_]*$`.
 
 ```toml
-# Must be at the top of the file, before any [table] header.
-secrets = ["OPENAI_API_KEY", "DATABASE_URL"]
+[secrets]
+required = ["OPENAI_API_KEY", "DATABASE_URL"]
 ```
 
 Secrets are scoped. A **workspace** secret is shared across the workspace; a
-**user** secret is private to you. When a workspace and a personal secret
+**personal** secret is private to you. When a workspace and a personal secret
 share a name, your personal value wins at run time. Register secrets with
 `osmosis secret set` (below) or at `/:orgName/secrets` in the platform UI
 before submitting a run that references them.
@@ -345,22 +344,22 @@ commands show or accept names + metadata only.
 
 | Command | Description |
 | --- | --- |
-| `osmosis secret list [--scope all\|workspace\|user] [--limit N] [--all]` | List secret names + scope (no values). |
-| `osmosis secret set NAME [--scope workspace\|user] [--env VARNAME]` | Create or update (upsert) a secret. Value read from `--env VARNAME` or a hidden prompt — never a plaintext argument. |
-| `osmosis secret delete NAME [--scope workspace\|user] [--yes]` | Delete a secret within the given scope. |
+| `osmosis secret list [--scope all\|workspace\|personal] [--limit N] [--all]` | List secret names + scope (no values). |
+| `osmosis secret set NAME [--scope workspace\|personal] [--env VARNAME]` | Create or update (upsert) a secret. Value read from `--env VARNAME` or a hidden prompt — never a plaintext argument. |
+| `osmosis secret delete NAME [--scope workspace\|personal] [--yes]` | Delete a secret within the given scope. |
 
 `--scope` defaults to `workspace` for `set`/`delete` and `all` for `list`.
-Workspace secrets require an admin/owner role; user secrets are private to you.
+Workspace secrets require an admin/owner role; personal secrets are private to you.
 
 ```bash
 # Read the value from an env var (recommended for scripts):
 OPENAI_API_KEY=sk-... osmosis secret set OPENAI_API_KEY --env OPENAI_API_KEY
 
 # Personal override (only affects your own runs):
-osmosis secret set OPENAI_API_KEY --scope user --env OPENAI_API_KEY
+osmosis secret set OPENAI_API_KEY --scope personal --env OPENAI_API_KEY
 
-osmosis secret list --scope user
-osmosis secret delete OPENAI_API_KEY --scope user --yes
+osmosis secret list --scope personal
+osmosis secret delete OPENAI_API_KEY --scope personal --yes
 ```
 
 ## See also

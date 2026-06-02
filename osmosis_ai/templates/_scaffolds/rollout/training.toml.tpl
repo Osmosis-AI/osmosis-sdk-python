@@ -51,11 +51,11 @@ dataset = "<your-dataset-name>"  # Platform dataset name from `osmosis dataset l
 #   DEFAULT_REGION = "us-west-2"
 #
 # [secrets]
-# Maps env-var names to workspace environment_secret record *names*.
-# Values are resolved server-side from the workspace's encrypted secret store
+# Lists platform environment_secret record names.
+# Values are resolved server-side from the encrypted secret store
 # and injected into the container - they never appear in this file or in transit.
-# Pre-register secrets with `osmosis secret add` or at /:orgName/secrets in
+# Pre-register secrets with `osmosis secret set` or at /:orgName/secrets in
 # the platform UI before submitting.
 #
 # Example:
-#   OPENAI_API_KEY = "openai-api-key"   # value is the *name* of the secret record
+#   required = ["OPENAI_API_KEY"]

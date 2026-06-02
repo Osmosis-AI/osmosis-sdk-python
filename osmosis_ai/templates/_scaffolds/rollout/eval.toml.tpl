@@ -29,8 +29,8 @@ dataset = "<your-dataset-name>"       # Platform dataset name
 # LOG_LEVEL = "INFO"
 #
 # [secrets]
-# Maps env-var names to workspace environment_secret record names.
-# Values are resolved server-side from the workspace's encrypted secret store.
-# Pre-register secrets with `osmosis secret add` or at /:orgName/secrets in
+# Lists platform environment_secret record names.
+# Values are resolved server-side from the encrypted secret store.
+# Pre-register secrets with `osmosis secret set` or at /:orgName/secrets in
 # the platform UI before submitting.
-# OPENAI_API_KEY = "openai-api-key"
+# required = ["OPENAI_API_KEY"]

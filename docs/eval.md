@@ -38,15 +38,11 @@ Evaluation submit configs also support optional `[experiment].commit_sha`, `[eva
 
 **`[env]` / `secrets`**
 
-`[env]` contains literal env-var values. `secrets` is a list of workspace `environment_secret` record names; the platform resolves each to its encrypted value server-side and injects it as an env var of the same name. `[env]` keys and `secrets` names must match `^[A-Z][A-Z0-9_]*$`, must not start with `_OSMOSIS_`, and a name cannot appear in both. Register secrets with `osmosis secret set`; use `--scope user` for a personal override that only affects your own runs.
+`[env]` contains literal env-var values. `[secrets].required` is a list of platform `environment_secret` record names; the platform resolves each to its encrypted value server-side and injects it as an env var of the same name. `[env]` keys must match `^[A-Z_][A-Z0-9_]*$`; secret names must match `^[A-Z][A-Z0-9_]*$`; `[env]` names must not start with `_OSMOSIS_`; and a name cannot appear in both sections. Register secrets with `osmosis secret set`; use `--scope personal` for a personal override that only affects your own runs.
 
 ### Example `configs/eval/my-rollout.toml`
 
 ```toml
-# `secrets` must be at the TOP of the file, before any [table] header —
-# otherwise TOML folds it into the preceding table and it is silently ignored.
-# secrets = ["OPENAI_API_KEY"]
-
 [experiment]
 rollout = "my-rollout"
 entrypoint = "main.py"
@@ -65,6 +61,9 @@ dataset = "my-platform-dataset"
 
 # [env]
 # LOG_LEVEL = "INFO"
+
+# [secrets]
+# required = ["OPENAI_API_KEY"]
 ```
 
 ## Quick start
