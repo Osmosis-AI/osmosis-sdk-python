@@ -126,6 +126,7 @@ def _train_next_steps(
 ) -> tuple[list[str], list[dict[str, Any]]]:
     display = [
         f"Status: {result.status}",
+        f"Rollout: {config.experiment_rollout}",
         f"Model: {config.experiment_model_path}",
         f"Dataset: {config.experiment_dataset}",
         (

@@ -67,10 +67,10 @@ def test_fetch_secret_scopes_returns_none_on_error(monkeypatch) -> None:
 
 def test_missing_secret_message_lists_set_commands() -> None:
     msg = shared_submit._missing_secret_message(["OPENAI_API_KEY", "WANDB_API_KEY"])
-    assert "not found: OPENAI_API_KEY, WANDB_API_KEY" in msg
-    assert "personal is the default" in msg
-    assert "osmosis secret set OPENAI_API_KEY --scope personal" in msg
-    assert "osmosis secret set WANDB_API_KEY --scope personal" in msg
+    assert "Could not find secret(s): OPENAI_API_KEY, WANDB_API_KEY" in msg
+    assert "osmosis secret set OPENAI_API_KEY" in msg
+    assert "osmosis secret set WANDB_API_KEY" in msg
+    assert "Secrets default to personal scope" in msg
     assert "--scope workspace" in msg
 
 
@@ -88,9 +88,9 @@ def test_enrich_missing_secret_error_adds_hint() -> None:
     enriched = shared_submit._enrich_missing_secret_error(exc)
     assert enriched is not None
     msg = str(enriched)
-    assert "personal is the default" in msg
-    assert "osmosis secret set OPENAI_API_KEY --scope personal" in msg
-    assert "osmosis secret set WANDB_API_KEY --scope personal" in msg
+    assert "osmosis secret set OPENAI_API_KEY" in msg
+    assert "osmosis secret set WANDB_API_KEY" in msg
+    assert "Secrets default to personal scope" in msg
     assert "--scope workspace" in msg
     assert "https://platform.osmosis.ai/my-workspace/secrets" in msg
 

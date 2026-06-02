@@ -241,12 +241,12 @@ LOG_LEVEL = "INFO"
 DEFAULT_REGION = "us-west-2"
 ```
 
-#### Secrets — `[secrets].required`
+#### Secrets — `[secrets]`
 
-A list of Platform `environment_secret` **record names** to inject into the
-rollout container. The platform resolves each name to an encrypted value
-server-side and sets it as an env var of the same name. Secret values never
-appear in the config file, in the API payload, or in CLI output.
+The `[secrets]` section must contain a `required` list of secret names to inject
+into the rollout container. The platform resolves each name to its encrypted
+value server-side and sets it as an env var of the same name. Secret values
+never appear in the config file, in the API payload, or in CLI output.
 
 Each name must match `^[A-Z][A-Z0-9_]*$`.
 
@@ -255,7 +255,7 @@ Each name must match `^[A-Z][A-Z0-9_]*$`.
 required = ["OPENAI_API_KEY", "DATABASE_URL"]
 ```
 
-Evaluation configs must include `[secrets].required`; use `required = []` when
+Evaluation configs must include `[secrets]`; use `required = []` when
 the evaluation needs no secret refs. The default OpenAI eval examples use
 `required = ["OPENAI_API_KEY"]`. Training configs may omit the `[secrets]` table
 when the training run does not need secret refs. If a config includes
@@ -271,8 +271,8 @@ secrets.
 
 #### Rules
 
-- `[env]` keys must match `^[A-Z_][A-Z0-9_]*$`; `[secrets].required` names must match `^[A-Z][A-Z0-9_]*$`.
-- A name cannot appear in both `[env]` and `[secrets].required`.
+- `[env]` keys must match `^[A-Z_][A-Z0-9_]*$`; `[secrets]` names must match `^[A-Z][A-Z0-9_]*$`.
+- A name cannot appear in both `[env]` and `[secrets]`.
 - `[env]` names starting with `_OSMOSIS_` are reserved by the platform.
 - Both are optional.
 
@@ -349,7 +349,7 @@ osmosis undeploy <checkpoint>
 
 ### `osmosis secret`
 
-Manage environment secrets. The platform never returns secret values; these
+Manage secrets. The platform never returns secret values; these
 commands show or accept names + metadata only.
 
 | Command | Description |

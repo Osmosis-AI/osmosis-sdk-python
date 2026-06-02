@@ -1,8 +1,8 @@
 """Secret management commands.
 
 ``osmosis secret`` manages secrets — the same records referenced by the
-``[secrets].required`` list in submit configs. Evaluation configs must include
-that list; default OpenAI eval configs should include ``OPENAI_API_KEY`` and
+``[secrets]`` section in submit configs. Evaluation configs must include
+this section; default OpenAI eval configs should include ``OPENAI_API_KEY`` and
 use ``required = []`` only when no secret refs are needed. Training configs may
 omit ``[secrets]`` entirely, but any ``[secrets]`` section must include
 ``required``. Secrets are scoped: a ``workspace`` secret is shared across the
@@ -32,10 +32,9 @@ app: typer.Typer = typer.Typer(
 )
 
 _SCOPE_HELP = (
-    "Secret scope: 'workspace' (shared across the workspace, applies to "
-    "everyone's runs by default) or 'personal' (overrides "
-    "workspace secrets and applies only to runs you submit). Defaults to "
-    "'personal' for set/delete."
+    "'personal' (default) or 'workspace'. Personal secrets apply only to "
+    "your runs and override workspace secrets with the same name. "
+    "Workspace secrets are shared across the workspace."
 )
 
 

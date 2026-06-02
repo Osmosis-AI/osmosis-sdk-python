@@ -74,12 +74,14 @@ def _eval_next_steps(
 ) -> tuple[list[str], list[dict[str, Any]]]:
     display = [
         f"Status: {result.status}",
+        f"Rollout: {_config.experiment_rollout}",
+        f"Model: {_config.experiment_model_path}",
+        f"Dataset: {_config.experiment_dataset}",
         (
             f"View: {result.platform_url}"
             if result.platform_url
             else f"Check status with: osmosis eval info {result.name}"
         ),
-        "List all evaluation runs with: osmosis eval list",
     ]
     structured: list[dict[str, Any]] = [
         {"action": "eval_info", "name": result.name},

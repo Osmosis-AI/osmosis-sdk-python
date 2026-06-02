@@ -19,7 +19,7 @@ Evaluation configs must live under `configs/eval/` inside a structured Osmosis w
 
 ### Optional fields and sections
 
-Evaluation submit configs also support optional `[experiment].commit_sha`, `[evaluation]`, and `[env]`. They must include `[secrets].required`; default OpenAI eval configs should include `OPENAI_API_KEY`, and `required = []` is only for evaluations that need no secret refs. The SDK validates only shallow TOML shape, required fields, recognized keys, and env-var names; backend validation owns provider, dataset, model, and evaluation parameter errors.
+Evaluation submit configs also support optional `[experiment].commit_sha`, `[evaluation]`, and `[env]`. They must include `[secrets]`; default OpenAI eval configs should include `OPENAI_API_KEY`, and `required = []` is only for evaluations that need no secret refs. The SDK validates only shallow TOML shape, required fields, recognized keys, and env-var names; backend validation owns provider, dataset, model, and evaluation parameter errors.
 
 | Key | Description |
 |-----|-------------|
@@ -38,7 +38,7 @@ Evaluation submit configs also support optional `[experiment].commit_sha`, `[eva
 
 **`[env]` / `[secrets]`**
 
-`[env]` contains literal env-var values. `[secrets].required` lists platform `environment_secret` record names; the platform resolves each to its encrypted value server-side and injects it as an env var of the same name. `[env]` keys must match `^[A-Z_][A-Z0-9_]*$`; secret names must match `^[A-Z][A-Z0-9_]*$`; `[env]` names must not start with `_OSMOSIS_`; and a name cannot appear in both `[env]` and `[secrets].required`. Register secrets with `osmosis secret set`; personal scope is the default, and `--scope workspace` creates workspace-shared secrets.
+`[env]` contains literal env-var values. `[secrets]` must contain a `required` list of secret names (e.g. `required = ["OPENAI_API_KEY"]`); the platform resolves each to its encrypted value server-side and injects it as an env var of the same name. `[env]` keys must match `^[A-Z_][A-Z0-9_]*$`; secret names must match `^[A-Z][A-Z0-9_]*$`; `[env]` names must not start with `_OSMOSIS_`; and a name cannot appear in both `[env]` and `[secrets]`. Register secrets with `osmosis secret set`; personal scope is the default, and `--scope workspace` creates workspace-shared secrets.
 
 ### Example `configs/eval/my-rollout.toml`
 

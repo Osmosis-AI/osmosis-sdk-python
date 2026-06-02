@@ -127,15 +127,15 @@ def _fetch_secret_scopes(
 def _missing_secret_message(names: list[str]) -> str:
     """Build a fail-fast message for run-submit secrets that don't exist."""
     lines = [
-        f"Secret(s) not found: {', '.join(names)}.",
+        f"Could not find secret(s): {', '.join(names)}.",
         "",
-        "Add them as personal secrets, then resubmit (personal is the default):",
+        "Run the following to add them:",
     ]
-    lines.extend(f"  osmosis secret set {name} --scope personal" for name in names)
+    lines.extend(f"  osmosis secret set {name}" for name in names)
     lines.extend(
         [
             "",
-            "Use --scope workspace instead for secrets shared across the workspace.",
+            "Secrets default to personal scope. Use --scope workspace for secrets shared across the workspace.",
         ]
     )
     return "\n".join(lines)
@@ -160,13 +160,13 @@ def _enrich_missing_secret_error(
     lines = [
         str(exc),
         "",
-        "To add the missing secret(s) as personal secrets (personal is the default):",
+        "Run the following to add them:",
     ]
     for name in names:
-        lines.append(f"  osmosis secret set {name} --scope personal")
+        lines.append(f"  osmosis secret set {name}")
     lines.append("")
     lines.append(
-        "Use --scope workspace instead for secrets shared across the workspace."
+        "Secrets default to personal scope. Use --scope workspace for secrets shared across the workspace."
     )
     if platform_url:
         lines.append(f"\nOr add them in the UI: {platform_url}")
