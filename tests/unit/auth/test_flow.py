@@ -84,6 +84,41 @@ class TestVerifyAndGetUserInfo:
         assert result.expires_at.tzinfo is not None
         assert result.token_id == "tok_abc"
 
+    @pytest.mark.parametrize(
+        ("platform_url", "expected_url"),
+        [
+            (
+                "https://platform.osmosis.ai/",
+                "https://platform.osmosis.ai/api/cli/verify",
+            ),
+            (
+                "https://staging.osmosis.ai/",
+                "https://staging.osmosis.ai/api/cli/verify",
+            ),
+        ],
+    )
+    def test_verification_uses_runtime_platform_env(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        platform_url: str,
+        expected_url: str,
+    ) -> None:
+        expires_str = (datetime.now(UTC) + timedelta(days=90)).isoformat()
+        body = _make_verify_response(expires_at=expires_str)
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = body
+        mock_resp.__enter__ = MagicMock(return_value=mock_resp)
+        mock_resp.__exit__ = MagicMock(return_value=False)
+        monkeypatch.setenv("OSMOSIS_PLATFORM_URL", platform_url)
+
+        with patch(
+            "osmosis_ai.platform.auth.flow.urlopen", return_value=mock_resp
+        ) as open_mock:
+            verify_token("test-token")
+
+        request_obj = open_mock.call_args[0][0]
+        assert request_obj.full_url == expected_url
+
     def test_verification_with_no_expires_at_defaults_to_90_days(self) -> None:
         body = _make_verify_response(expires_at=None)
         mock_resp = MagicMock()

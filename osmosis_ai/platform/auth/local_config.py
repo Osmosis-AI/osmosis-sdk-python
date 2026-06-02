@@ -20,11 +20,11 @@ def clear_all_local_data() -> None:
 
 
 def reset_session() -> None:
-    """Complete session teardown: credentials and legacy session config.
+    """Complete current-platform session teardown: credentials and legacy config.
 
     Single entry point for all "end session" paths (logout, login --force,
-    401 expiry, user identity change) to ensure no stale auth-local session
-    state remains.
+    401 expiry, user identity change) to ensure no stale auth-local state
+    remains for the active platform.
     """
     from .credentials import delete_credentials
 

@@ -21,12 +21,15 @@ from osmosis_ai.platform.constants import (
     MSG_SESSION_EXPIRED,
 )
 
-from .config import PLATFORM_URL
+from .config import PLATFORM_URL as _IMPORTED_PLATFORM_URL
+from .config import get_platform_url, normalize_platform_url
 from .credentials import load_credentials
 from .local_config import reset_session
 
 if TYPE_CHECKING:
     from .credentials import Credentials
+
+PLATFORM_URL = _IMPORTED_PLATFORM_URL
 
 
 class AuthenticationExpiredError(Exception):
@@ -98,6 +101,12 @@ def _credentials_match_env_token(credentials: Credentials | None) -> bool:
     return bool(
         env_token and credentials is not None and credentials.access_token == env_token
     )
+
+
+def _platform_url() -> str:
+    if PLATFORM_URL != _IMPORTED_PLATFORM_URL:
+        return normalize_platform_url(PLATFORM_URL)
+    return get_platform_url()
 
 
 def _read_error_body(e: HTTPError) -> dict[str, Any]:
@@ -269,7 +278,7 @@ def revoke_cli_token(credentials: Credentials) -> bool:
     if not credentials.token_id:
         return False
 
-    url = f"{PLATFORM_URL}/api/cli/tokens/{credentials.token_id}"
+    url = f"{_platform_url()}/api/cli/tokens/{credentials.token_id}"
     request = Request(
         url,
         headers={
@@ -345,7 +354,7 @@ def platform_request(
         raise CLIError(MSG_NOT_LOGGED_IN)
     using_env_token = _credentials_match_env_token(credentials)
 
-    url = f"{PLATFORM_URL}{endpoint}"
+    url = f"{_platform_url()}{endpoint}"
 
     req_headers = {
         "Authorization": f"Bearer {credentials.access_token}",

@@ -186,6 +186,31 @@ class TestPlatformRequest:
         request_obj = mock_urlopen.call_args[0][0]
         assert request_obj.full_url == "https://test.osmosis.ai/api/v1/verify"
 
+    @pytest.mark.parametrize(
+        ("platform_url", "expected_url"),
+        [
+            ("https://platform.osmosis.ai/", "https://platform.osmosis.ai/api/test"),
+            ("https://staging.osmosis.ai/", "https://staging.osmosis.ai/api/test"),
+        ],
+    )
+    @patch("osmosis_ai.platform.auth.platform_client.urlopen")
+    def test_constructs_url_from_runtime_platform_env(
+        self,
+        mock_urlopen: MagicMock,
+        monkeypatch: pytest.MonkeyPatch,
+        platform_url: str,
+        expected_url: str,
+    ) -> None:
+        """Changing OSMOSIS_PLATFORM_URL after import should affect requests."""
+        mock_urlopen.return_value = _make_http_response({"ok": True})
+        creds = _make_credentials()
+        monkeypatch.setenv("OSMOSIS_PLATFORM_URL", platform_url)
+
+        platform_request("/api/test", credentials=creds, git_identity="git_test")
+
+        request_obj = mock_urlopen.call_args[0][0]
+        assert request_obj.full_url == expected_url
+
     @patch("osmosis_ai.platform.auth.platform_client.urlopen")
     def test_sets_required_headers(self, mock_urlopen: MagicMock) -> None:
         """Verify Authorization, Content-Type, and User-Agent headers are set."""
