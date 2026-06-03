@@ -24,7 +24,6 @@ from osmosis_ai.cli.prompts import require_confirmation
 from osmosis_ai.platform.api.client import OsmosisClient
 from osmosis_ai.platform.api.models import (
     EVAL_RUN_STATUSES_IN_PROGRESS,
-    EVAL_RUN_STATUSES_TERMINAL,
     SubmitRunResult,
 )
 from osmosis_ai.platform.cli.eval_config import (
@@ -34,23 +33,12 @@ from osmosis_ai.platform.cli.eval_config import (
 )
 from osmosis_ai.platform.cli.shared_submit import CloudSubmitSpec, run_cloud_submit
 from osmosis_ai.platform.cli.utils import (
+    format_eval_status,
     paginated_fetch,
     require_git_workspace_directory_context,
     validate_list_options,
 )
 from osmosis_ai.platform.cli.workspace_directory_context import git_result_context
-
-
-def _format_eval_status(run: Any) -> str:
-    """Format an evaluation run status string with Rich color styling."""
-    status_info = f"[{run.status}]"
-    if run.status in EVAL_RUN_STATUSES_IN_PROGRESS:
-        return console.format_styled(status_info, "yellow")
-    if run.status == "finished":
-        return console.format_styled(status_info, "green")
-    if run.status in EVAL_RUN_STATUSES_TERMINAL:
-        return console.format_styled(status_info, "red")
-    return console.escape(status_info)
 
 
 def _submit_eval(
@@ -155,7 +143,7 @@ def list_eval_runs(*, limit: int, all_: bool) -> ListResult:
                 **serialize_eval_run(run),
                 "name": run.name,
                 "rollout": run.rollout.get("name") if run.rollout else "—",
-                "status": _format_eval_status(run),
+                "status": format_eval_status(run),
                 "model": run.model.get("name") if run.model else "—",
                 "creator_name": run.creator_name or "—",
                 "created_at": format_local_date(run.created_at),

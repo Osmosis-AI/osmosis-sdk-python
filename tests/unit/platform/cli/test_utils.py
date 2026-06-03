@@ -13,6 +13,8 @@ from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.platform.cli.utils import (
     fetch_all_pages,
     format_dataset_status,
+    format_deployment_status,
+    format_eval_status,
     format_run_status,
     format_size,
     platform_call,
@@ -167,6 +169,55 @@ def test_format_run_status_unknown(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(mod, "console", c)
     result = format_run_status(_run("weird"))
     assert "[weird]" in result
+
+
+# ── format_deployment_status ─────────────────────────────────────────
+#
+# ``format_styled`` returns Rich *markup* (``[green]\\[active][/green]``), so we
+# can assert the exact style bucket each status lands in. These guard formatters
+# that previously had zero coverage.
+
+
+@pytest.mark.parametrize(
+    "status, style",
+    [
+        ("active", "green"),
+        ("inactive", "dim"),
+        ("failed", "red"),
+    ],
+)
+def test_format_deployment_status_styles(status: str, style: str) -> None:
+    assert format_deployment_status(_run(status)) == f"[{style}]\\[{status}][/{style}]"
+
+
+def test_format_deployment_status_unknown_uses_escape() -> None:
+    assert format_deployment_status(_run("weird")) == "\\[weird]"
+
+
+# ── format_eval_status ───────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "status, style",
+    [
+        ("pending", "yellow"),
+        ("running", "yellow"),
+        ("failed", "red"),
+        ("stopped", "red"),
+    ],
+)
+def test_format_eval_status_styles(status: str, style: str) -> None:
+    assert format_eval_status(_run(status)) == f"[{style}]\\[{status}][/{style}]"
+
+
+def test_format_eval_status_finished_is_green_not_terminal_red() -> None:
+    # ``finished`` is a member of EVAL_RUN_STATUSES_TERMINAL too; the ordered
+    # matcher must hit the success (green) bucket before the terminal (red) one.
+    assert format_eval_status(_run("finished")) == "[green]\\[finished][/green]"
+
+
+def test_format_eval_status_unknown_uses_escape() -> None:
+    assert format_eval_status(_run("weird")) == "\\[weird]"
 
 
 # ── fetch_all_pages ─────────────────────────────────────────────────

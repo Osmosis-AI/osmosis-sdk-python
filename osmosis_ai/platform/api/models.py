@@ -159,6 +159,7 @@ RUN_STATUSES_TERMINAL: frozenset[str] = (
 
 # ── Evaluation run status constants ──────────────────────────────
 
+EVAL_RUN_STATUSES_SUCCESS: frozenset[str] = frozenset({"finished"})
 EVAL_RUN_STATUSES_IN_PROGRESS: frozenset[str] = frozenset({"pending", "running"})
 EVAL_RUN_STATUSES_TERMINAL: frozenset[str] = frozenset(
     {"finished", "failed", "stopped"}

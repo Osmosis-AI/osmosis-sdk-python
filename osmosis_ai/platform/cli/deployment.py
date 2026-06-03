@@ -32,11 +32,6 @@ from osmosis_ai.cli.output import (
     serialize_deployment,
 )
 from osmosis_ai.platform.api.client import OsmosisClient
-from osmosis_ai.platform.api.models import (
-    DEPLOYMENT_STATUSES_ERROR,
-    DEPLOYMENT_STATUSES_INACTIVE,
-    DEPLOYMENT_STATUSES_SUCCESS,
-)
 from osmosis_ai.platform.cli.utils import (
     format_date,
     paginated_fetch,
@@ -54,26 +49,6 @@ def _deployment_summary_resource(result: Any) -> dict[str, Any]:
         "checkpoint_name": result.checkpoint_name,
         "status": result.status,
     }
-
-
-def _deployment_status_style(status: str) -> str | None:
-    """Return the Rich style for a deployment status, or None if unstyled."""
-    if status in DEPLOYMENT_STATUSES_SUCCESS:
-        return "green"
-    if status in DEPLOYMENT_STATUSES_INACTIVE:
-        return "dim"
-    if status in DEPLOYMENT_STATUSES_ERROR:
-        return "red"
-    return None
-
-
-def _format_deployment_status(status: str) -> str:
-    """Render a deployment status token with Rich styling."""
-    style = _deployment_status_style(status)
-    label = f"[{status}]"
-    if style:
-        return console.format_styled(label, style)
-    return console.escape(label)
 
 
 def _select_checkpoint_for_deploy(context: Any) -> str | None:
