@@ -34,8 +34,9 @@ dependencies = [
     "keyring>=25.0.0",
     # Interactive CLI prompts
     "questionary>=2.1.0,<3.0.0",
-    # CLI framework
-    "typer>=0.16.0",
+    # CLI framework. <0.26: Typer 0.26+ vendors its own Click, so the
+    # exceptions it raises bypass our top-level `click` error handling.
+    "typer>=0.16.0,<0.26",
     "rich>=14.2.0",
     "harbor[daytona]==0.6.1",
 ]
