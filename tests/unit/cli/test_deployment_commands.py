@@ -168,7 +168,7 @@ class TestDeployWizardHelper:
             raise AssertionError(f"unexpected prompt: {message}")
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-        monkeypatch.setattr(deployment_module, "select_list", fake_select_list)
+        monkeypatch.setattr("osmosis_ai.cli.prompts.select_list", fake_select_list)
 
         selected = deployment_module._select_checkpoint_for_deploy(mock_git_context)
 
@@ -200,7 +200,7 @@ class TestDeployWizardHelper:
             return actions[0].value
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-        monkeypatch.setattr(deployment_module, "select_list", fake_select_list)
+        monkeypatch.setattr("osmosis_ai.cli.prompts.select_list", fake_select_list)
 
         assert deployment_module._select_checkpoint_for_deploy(mock_git_context) is None
 
@@ -245,7 +245,7 @@ class TestDeployWizardHelper:
             raise AssertionError(f"unexpected prompt: {message}")
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-        monkeypatch.setattr(deployment_module, "select_list", fake_select_list)
+        monkeypatch.setattr("osmosis_ai.cli.prompts.select_list", fake_select_list)
 
         assert deployment_module._select_checkpoint_for_deploy(mock_git_context) is None
 
@@ -295,7 +295,7 @@ class TestDeployWizardHelper:
             raise AssertionError(f"unexpected prompt: {message}")
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-        monkeypatch.setattr(deployment_module, "select_list", fake_select_list)
+        monkeypatch.setattr("osmosis_ai.cli.prompts.select_list", fake_select_list)
 
         selected = deployment_module._select_checkpoint_for_deploy(mock_git_context)
 
@@ -317,7 +317,7 @@ class TestDeployWizardHelper:
             raise AssertionError("select_list should not be called")
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-        monkeypatch.setattr(deployment_module, "select_list", fake_select_list)
+        monkeypatch.setattr("osmosis_ai.cli.prompts.select_list", fake_select_list)
 
         with pytest.raises(CLIError, match="No training runs"):
             deployment_module._select_checkpoint_for_deploy(mock_git_context)
@@ -377,8 +377,8 @@ class TestDeployWizardHelper:
             return True
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-        monkeypatch.setattr(deployment_module, "select_list", fake_select_list)
-        monkeypatch.setattr(deployment_module, "confirm", fake_confirm)
+        monkeypatch.setattr("osmosis_ai.cli.prompts.select_list", fake_select_list)
+        monkeypatch.setattr("osmosis_ai.cli.prompts.confirm", fake_confirm)
 
         selected = deployment_module._select_checkpoint_for_deploy(mock_git_context)
 
@@ -422,8 +422,8 @@ class TestDeployWizardHelper:
             return run
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-        monkeypatch.setattr(deployment_module, "select_list", fake_select_list)
-        monkeypatch.setattr(deployment_module, "confirm", lambda _message: False)
+        monkeypatch.setattr("osmosis_ai.cli.prompts.select_list", fake_select_list)
+        monkeypatch.setattr("osmosis_ai.cli.prompts.confirm", lambda _message: False)
 
         assert deployment_module._select_checkpoint_for_deploy(mock_git_context) is None
 

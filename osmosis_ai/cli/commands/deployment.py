@@ -25,8 +25,6 @@ import typer
 
 from osmosis_ai.cli.console import console
 from osmosis_ai.cli.errors import CLIError
-from osmosis_ai.cli.output import OutputFormat
-from osmosis_ai.cli.prompts import Choice, Separator, confirm, select_list
 from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE
 
 app: typer.Typer = typer.Typer(
@@ -78,6 +76,7 @@ def _format_deployment_status(status: str) -> str:
 
 
 def _select_checkpoint_for_deploy(context: Any) -> str | None:
+    from osmosis_ai.cli.prompts import Choice, Separator, confirm, select_list
     from osmosis_ai.platform.api.client import OsmosisClient
 
     client = OsmosisClient()
@@ -265,7 +264,7 @@ def deploy(
     ),
 ) -> Any:
     """Deploy (or reactivate) a LoRA checkpoint."""
-    from osmosis_ai.cli.output import OperationResult, get_output_context
+    from osmosis_ai.cli.output import OperationResult, OutputFormat, get_output_context
     from osmosis_ai.platform.api.client import OsmosisClient
     from osmosis_ai.platform.cli.utils import require_git_workspace_directory_context
     from osmosis_ai.platform.cli.workspace_directory_context import git_result_context
