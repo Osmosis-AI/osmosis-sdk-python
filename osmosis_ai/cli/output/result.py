@@ -90,7 +90,13 @@ class OperationResult(CommandResult):
 
 @dataclass
 class MessageResult(CommandResult):
-    """Free-form message that does not map cleanly to a resource."""
+    """Free-form message that does not map cleanly to a resource.
+
+    Reserved member of the result family: the renderer fully supports it across
+    rich/plain/JSON, but no command currently produces one (commands prefer
+    ``OperationResult`` so a structured ``resource`` rides along). Kept as the
+    sanctioned shape for any future command that emits only a human message.
+    """
 
     message: str
     extra: dict[str, Any] = field(default_factory=dict)

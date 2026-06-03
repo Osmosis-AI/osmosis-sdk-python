@@ -441,7 +441,7 @@ class TestRubricCommandRun:
         }
         data_file.write_text(json.dumps(record) + "\n", encoding="utf-8")
 
-        mock_result = RubricResult(score=0.9, explanation="Correct", raw={})
+        mock_result = RubricResult(score=0.9, explanation="Correct")
 
         with patch(
             _EVALUATE_RUBRIC_PATCH, new_callable=AsyncMock, return_value=mock_result
@@ -464,7 +464,7 @@ class TestRubricCommandRun:
         data_file.write_text(json.dumps(record) + "\n", encoding="utf-8")
         output_json = tmp_path / "result.json"
 
-        mock_result = RubricResult(score=0.8, explanation="Good", raw={})
+        mock_result = RubricResult(score=0.8, explanation="Good")
 
         with patch(
             _EVALUATE_RUBRIC_PATCH, new_callable=AsyncMock, return_value=mock_result
@@ -490,7 +490,7 @@ class TestRubricCommandRun:
         ]
         data_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
-        mock_result = RubricResult(score=0.7, explanation="OK", raw={})
+        mock_result = RubricResult(score=0.7, explanation="OK")
 
         with patch(
             _EVALUATE_RUBRIC_PATCH, new_callable=AsyncMock, return_value=mock_result
@@ -515,7 +515,7 @@ class TestRubricCommandRun:
         rubric_file = tmp_path / "rubric.txt"
         rubric_file.write_text("Score the response quality.", encoding="utf-8")
 
-        mock_result = RubricResult(score=0.5, explanation="Average", raw={})
+        mock_result = RubricResult(score=0.5, explanation="Average")
 
         with patch(
             _EVALUATE_RUBRIC_PATCH, new_callable=AsyncMock, return_value=mock_result
@@ -558,7 +558,7 @@ class TestRubricCommandRun:
         output_dir = tmp_path / "output_dir"
         output_dir.mkdir()
 
-        mock_result = RubricResult(score=0.6, explanation="Fair", raw={})
+        mock_result = RubricResult(score=0.6, explanation="Fair")
 
         with patch(
             _EVALUATE_RUBRIC_PATCH, new_callable=AsyncMock, return_value=mock_result
@@ -582,7 +582,7 @@ class TestRubricCommandRun:
 
         output_dir = tmp_path / "new_output_dir"
 
-        mock_result = RubricResult(score=0.6, explanation="Fair", raw={})
+        mock_result = RubricResult(score=0.6, explanation="Fair")
 
         with patch(
             _EVALUATE_RUBRIC_PATCH, new_callable=AsyncMock, return_value=mock_result
@@ -603,7 +603,7 @@ class TestRubricCommandRun:
         record = {"solution_str": "The answer is 42."}
         data_file.write_text(json.dumps(record) + "\n", encoding="utf-8")
 
-        mock_result = RubricResult(score=0.95, explanation="Excellent", raw={})
+        mock_result = RubricResult(score=0.95, explanation="Excellent")
 
         with patch(
             _EVALUATE_RUBRIC_PATCH, new_callable=AsyncMock, return_value=mock_result
