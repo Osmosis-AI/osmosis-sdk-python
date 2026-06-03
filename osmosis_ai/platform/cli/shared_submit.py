@@ -217,8 +217,6 @@ def run_cloud_submit[ConfigT: BaseSubmitConfig](
         model=config.experiment_model_path,
         dataset=config.experiment_dataset,
         commit_sha=config.experiment_commit_sha,
-        env=config.env,
-        secrets=config.secrets,
     )
 
     console.table(

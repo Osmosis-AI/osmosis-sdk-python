@@ -101,11 +101,6 @@ class DatasetFile:
             upload=upload,
         )
 
-    @property
-    def is_terminal(self) -> bool:
-        """Whether the file is in a terminal processing state."""
-        return self.status in STATUSES_TERMINAL
-
 
 @dataclass
 class DatasetDownloadInfo:
@@ -212,11 +207,6 @@ class TrainingRun:
             rollout_id=rollout.get("id"),
             rollout_name=rollout.get("name"),
         )
-
-    @property
-    def is_terminal(self) -> bool:
-        """Whether the run is in a terminal state."""
-        return self.status in RUN_STATUSES_TERMINAL
 
 
 @dataclass

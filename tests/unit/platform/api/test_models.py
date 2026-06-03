@@ -12,7 +12,6 @@ from osmosis_ai.platform.api.models import (
     STATUSES_SUCCESS,
     STATUSES_TERMINAL,
     DatasetDownloadInfo,
-    DatasetFile,
     EnvironmentSecretInfo,
     EvaluationRun,
     EvaluationRunDetail,
@@ -110,37 +109,6 @@ class TestUploadInfo:
         info = UploadInfo.from_dict(data)
         assert info.method == "simple"
         assert info.s3_key == "uploads/file.jsonl"
-
-
-# =============================================================================
-# DatasetFile.is_terminal Tests
-# =============================================================================
-
-
-class TestDatasetFileIsTerminal:
-    """Tests for DatasetFile.is_terminal property."""
-
-    @pytest.mark.parametrize(
-        "status",
-        ["uploaded", "error", "cancelled", "deleted"],
-    )
-    def test_terminal_statuses(self, status: str) -> None:
-        """Verify terminal statuses return True."""
-        ds = DatasetFile.from_dict(
-            {"id": "ds-t", "file_name": "f.jsonl", "file_size": 100, "status": status}
-        )
-        assert ds.is_terminal is True
-
-    @pytest.mark.parametrize(
-        "status",
-        ["processing", "pending", "uploading", ""],
-    )
-    def test_non_terminal_statuses(self, status: str) -> None:
-        """Verify non-terminal statuses return False."""
-        ds = DatasetFile.from_dict(
-            {"id": "ds-nt", "file_name": "f.jsonl", "file_size": 100, "status": status}
-        )
-        assert ds.is_terminal is False
 
 
 class TestDatasetDownloadInfo:

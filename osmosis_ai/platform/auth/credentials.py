@@ -92,32 +92,6 @@ def _dedupe(values: list[str]) -> list[str]:
     return result
 
 
-def _cleanup_legacy_keyring_entries(metadata: dict | None = None) -> None:
-    """Delete any legacy email-based keyring entry from a previous version.
-
-    Args:
-        metadata: Pre-parsed metadata dict. If ``None``, reads the credentials
-            file from disk to discover the old account name.
-
-    Silently does nothing if the file is missing, corrupt, or
-    no legacy entry exists.
-    """
-    if metadata is None:
-        try:
-            with open(CREDENTIALS_FILE, encoding="utf-8") as f:
-                metadata = json.load(f)
-        except (OSError, json.JSONDecodeError, ValueError):
-            return
-
-    if not isinstance(metadata, dict):
-        return
-
-    if metadata.get("token_store") == TOKEN_STORE_KEYRING:
-        old_account = metadata.get("user", {}).get("email", "")
-        if old_account and old_account != KEYRING_ACCOUNT:
-            _keyring_delete(old_account)
-
-
 def _is_platform_registry(data: dict[str, Any]) -> bool:
     return isinstance(data.get("platforms"), dict)
 
