@@ -718,7 +718,7 @@ class TestEvaluationRuns:
 
         result = OsmosisClient().get_eval_run("a/b", git_identity="git_test")
 
-        assert result.eval_run["id"] == "a/b"
+        assert result.id == "a/b"
         assert mock_request.call_args[0][0] == "/api/cli/eval-runs/a%2Fb"
 
     @patch("osmosis_ai.platform.api.client.platform_request")

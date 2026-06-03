@@ -730,27 +730,38 @@ class EvaluationRun:
 
 
 @dataclass
-class EvaluationRunDetail:
-    """Detailed evaluation run info."""
+class EvaluationRunDetail(EvaluationRun):
+    """Detailed evaluation run info.
 
-    eval_run: dict[str, Any]
+    Mirrors :class:`TrainingRunDetail`: a typed subclass of the list row so
+    callers read ``detail.status`` / ``detail.name`` with static safety instead
+    of stringly-typed ``eval_run.get(...)`` lookups. ``config`` / ``results``
+    are the detail-only payloads.
+    """
+
     config: dict[str, Any] | None = None
     results: dict[str, Any] | None = None
-    model: dict[str, Any] | None = None
-    dataset: dict[str, Any] | None = None
-    rollout: dict[str, Any] | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> EvaluationRunDetail:
+        run = data["eval_run"]
         config = data.get("config")
         model_path = config.get("model_path") if isinstance(config, dict) else None
         return cls(
-            eval_run=data["eval_run"],
-            config=config,
-            results=data.get("results"),
+            id=run["id"],
+            name=run.get("name", ""),
+            status=run.get("status", ""),
+            created_at=run.get("created_at", ""),
+            started_at=run.get("started_at"),
+            completed_at=run.get("completed_at"),
+            creator_name=run.get("creator_name"),
+            creator_email=run.get("creator_email"),
+            platform_url=run.get("platform_url"),
             model={"name": model_path} if isinstance(model_path, str) else None,
             dataset=data.get("dataset"),
             rollout=data.get("rollout"),
+            config=config,
+            results=data.get("results"),
         )
 
 

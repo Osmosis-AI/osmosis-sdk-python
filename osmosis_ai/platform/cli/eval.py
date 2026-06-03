@@ -168,11 +168,10 @@ def info(name_or_id: str) -> DetailResult:
             git_identity=context.git_identity,
         )
 
-    eval_run = detail.eval_run
     rows: list[tuple[str, str]] = [
-        ("Name", console.escape(eval_run.get("name", "(unnamed)"))),
-        ("ID", eval_run.get("id", "")),
-        ("Status", eval_run.get("status", "")),
+        ("Name", console.escape(detail.name or "(unnamed)")),
+        ("ID", detail.id),
+        ("Status", detail.status),
     ]
     if detail.model and detail.model.get("name"):
         rows.append(("Model", console.escape(detail.model["name"])))
@@ -180,14 +179,14 @@ def info(name_or_id: str) -> DetailResult:
         rows.append(("Dataset", console.escape(detail.dataset["name"])))
     if detail.rollout and detail.rollout.get("name"):
         rows.append(("Rollout", console.escape(detail.rollout["name"])))
-    if eval_run.get("creator_name"):
-        rows.append(("Creator", console.escape(eval_run["creator_name"])))
-    if eval_run.get("created_at"):
-        rows.append(("Created", format_local_datetime(eval_run["created_at"])))
-    if eval_run.get("started_at"):
-        rows.append(("Started", format_local_datetime(eval_run["started_at"])))
-    if eval_run.get("completed_at"):
-        rows.append(("Completed", format_local_datetime(eval_run["completed_at"])))
+    if detail.creator_name:
+        rows.append(("Creator", console.escape(detail.creator_name)))
+    if detail.created_at:
+        rows.append(("Created", format_local_datetime(detail.created_at)))
+    if detail.started_at:
+        rows.append(("Started", format_local_datetime(detail.started_at)))
+    if detail.completed_at:
+        rows.append(("Completed", format_local_datetime(detail.completed_at)))
 
     if detail.results:
         if detail.results.get("score") is not None:
@@ -200,10 +199,10 @@ def info(name_or_id: str) -> DetailResult:
     fields = detail_fields(rows)
     display_hints: list[str] = []
 
-    if eval_run.get("platform_url"):
-        display_hints.append(f"View: {eval_run['platform_url']}")
+    if detail.platform_url:
+        display_hints.append(f"View: {detail.platform_url}")
 
-    if eval_run.get("status") in EVAL_RUN_STATUSES_IN_PROGRESS:
+    if detail.status in EVAL_RUN_STATUSES_IN_PROGRESS:
         fields.append(
             DetailField(
                 label="Note",
@@ -211,13 +210,13 @@ def info(name_or_id: str) -> DetailResult:
             )
         )
         display_hints.append(
-            f"Stop with: osmosis eval stop {eval_run.get('name') or name_or_id}"
+            f"Stop with: osmosis eval stop {detail.name or name_or_id}"
         )
 
     return DetailResult(
         title="Evaluation Run",
         data={
-            "eval_run": eval_run,
+            "eval_run": serialize_eval_run(detail),
             "config": detail.config,
             "results": detail.results,
             "model": detail.model,
