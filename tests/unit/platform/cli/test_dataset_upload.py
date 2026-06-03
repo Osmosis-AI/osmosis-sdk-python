@@ -491,8 +491,10 @@ class TestUploadCommand:
             "_perform_upload",
             lambda **_kwargs: uploaded,
         )
+        import osmosis_ai.cli.prompts as prompts_module
+
         monkeypatch.setattr(
-            dataset_module,
+            prompts_module,
             "confirm",
             lambda *_args, **_kwargs: (_ for _ in ()).throw(
                 AssertionError("confirmation prompt should be skipped")
@@ -504,3 +506,54 @@ class TestUploadCommand:
 
         assert result.operation == "dataset.upload"
         assert result.status == "success"
+
+    def test_overwrite_warning_visible_in_interactive_prompt(
+        self, monkeypatch, tmp_path
+    ):
+        """The destructive --overwrite warning must reach the rich interactive
+        prompt itself (not only the JSON/plain details), and the prompt must
+        default to "no" so a bare Enter never overwrites."""
+        import osmosis_ai.cli.prompts as prompts_module
+        import osmosis_ai.platform.cli.dataset as dataset_module
+
+        file_path = tmp_path / "data.jsonl"
+        row = '{"system_prompt": "s", "user_prompt": "u", "ground_truth": "g"}\n'
+        file_path.write_text(row * 4)
+        fake_context = type(
+            "Context",
+            (),
+            {
+                "credentials": object(),
+                "git_identity": GIT_IDENTITY,
+                "workspace_directory": tmp_path,
+                "repo_url": "https://github.com/acme/rollouts.git",
+            },
+        )()
+        uploaded = _make_fake_dataset(
+            file_name="data", file_size=file_path.stat().st_size
+        )
+
+        monkeypatch.setattr(
+            dataset_module,
+            "require_git_workspace_directory_context",
+            lambda: fake_context,
+        )
+        monkeypatch.setattr(
+            dataset_module, "_perform_upload", lambda **_kwargs: uploaded
+        )
+
+        seen: dict[str, object] = {}
+
+        def fake_confirm(message, default=True):
+            seen["message"] = message
+            seen["default"] = default
+            return True
+
+        monkeypatch.setattr(prompts_module, "confirm", fake_confirm)
+
+        with override_output_context(format=OutputFormat.rich, interactive=True):
+            result = dataset_module.upload(str(file_path), overwrite=True)
+
+        assert result.status == "success"
+        assert "overwrite" in str(seen["message"]).lower()
+        assert seen["default"] is False

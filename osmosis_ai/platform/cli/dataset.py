@@ -17,12 +17,11 @@ from osmosis_ai.cli.output import (
     ListColumn,
     ListResult,
     OperationResult,
-    get_output_context,
     serialize_dataset,
 )
 from osmosis_ai.cli.output.display import format_local_date
 from osmosis_ai.cli.paths import parse_cli_path
-from osmosis_ai.cli.prompts import confirm
+from osmosis_ai.cli.prompts import require_confirmation
 from osmosis_ai.platform.api.models import STATUSES_IN_PROGRESS
 from osmosis_ai.platform.auth import (
     AuthenticationExpiredError,
@@ -377,7 +376,6 @@ def upload(
     context = require_git_workspace_directory_context()
     credentials = context.credentials
     git_identity = context.git_identity
-    output = get_output_context()
 
     file_path, ext, file_size = _check_file_basics(file)
 
@@ -388,14 +386,23 @@ def upload(
             "File validation failed:\n" + "\n".join(f"  - {e}" for e in errors)
         )
 
-    if output.interactive and not yes:
-        proceed = confirm("Proceed with upload?", default=True)
-        if proceed is None or not proceed:
-            return OperationResult(
-                operation="dataset.upload",
-                status="cancelled",
-                message="Upload cancelled.",
-            )
+    overwrite_warning = (
+        "--overwrite will replace the existing dataset with the same name."
+    )
+    require_confirmation(
+        (
+            "This will overwrite the existing dataset with the same name. "
+            "Proceed with upload?"
+            if overwrite
+            else "Proceed with upload?"
+        ),
+        yes=yes,
+        # Default to "no" for the destructive overwrite path so a bare Enter
+        # does not replace data; non-destructive uploads keep the "yes" default.
+        default=not overwrite,
+        summary=[("File", file_path.name), ("Size", format_size(file_size))],
+        warnings=[overwrite_warning] if overwrite else None,
+    )
 
     dataset = _perform_upload(
         file_path=file_path,
