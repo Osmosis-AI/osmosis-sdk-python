@@ -234,6 +234,37 @@ def test_print_warning_does_not_parse_rich_markup(monkeypatch) -> None:
     assert warning_output.getvalue() == "⚠ Missing [experiment] section\n"
 
 
+def test_print_warning_pauses_live_spinner(monkeypatch) -> None:
+    """A warning emitted while a spinner is live pauses and resumes it.
+
+    Writing to the separate stderr console mid-spin corrupts Rich's Live cursor
+    bookkeeping, stranding the spinner line on screen. print_warning must stop
+    the active Status before printing and start it again afterwards so the
+    spinner redraws cleanly and still vanishes when the spinner context exits.
+    """
+
+    class _FakeStatus:
+        def __init__(self) -> None:
+            self.events: list[str] = []
+
+        def stop(self) -> None:
+            self.events.append("stop")
+
+        def start(self) -> None:
+            self.events.append("start")
+
+    warning_output = StringIO()
+    monkeypatch.setattr(sys, "stderr", warning_output)
+    console = Console(file=StringIO(), force_terminal=True, no_color=True, width=120)
+    status = _FakeStatus()
+    console._active_status = status
+
+    console.print_warning("A newer version is available")
+
+    assert status.events == ["stop", "start"]
+    assert warning_output.getvalue() == "⚠ A newer version is available\n"
+
+
 def test_table_url_emits_terminal_hyperlink(monkeypatch) -> None:
     monkeypatch.delenv("NO_COLOR", raising=False)
     monkeypatch.setenv("TERM", "xterm-256color")

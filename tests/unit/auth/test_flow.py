@@ -372,3 +372,64 @@ class TestUpgradeRequiredAtLogin:
 
         assert exc_info.value.code == "UPGRADE_REQUIRED"
         assert exc_info.value.status_code == 426
+
+
+# ---------------------------------------------------------------------------
+# Soft version signals on the auth handshake (X-Osmosis-Deprecation / -Latest)
+# Warning is emitted via platform_client's console, so that is the patch target.
+# ---------------------------------------------------------------------------
+
+
+class TestVerifyTokenVersionSignals:
+    def _make_resp(self, headers: dict[str, str]) -> MagicMock:
+        expires_str = (datetime.now(UTC) + timedelta(days=90)).isoformat()
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = _make_verify_response(expires_at=expires_str)
+        mock_resp.headers = headers
+        mock_resp.__enter__ = MagicMock(return_value=mock_resp)
+        mock_resp.__exit__ = MagicMock(return_value=False)
+        return mock_resp
+
+    def test_verify_token_surfaces_deprecation_warning(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """A deprecation header on /api/cli/verify surfaces a warning."""
+        from osmosis_ai.platform.auth import platform_client
+
+        monkeypatch.setattr(platform_client, "_deprecation_warned", False)
+        monkeypatch.setattr(platform_client, "_upgrade_nudged", False)
+        deprecation_msg = (
+            "This version is deprecated. Latest is 9.9.9. Run: osmosis upgrade"
+        )
+        mock_resp = self._make_resp({"X-Osmosis-Deprecation": deprecation_msg})
+
+        with patch.object(platform_client, "console") as mock_console:
+            with patch("osmosis_ai.platform.auth.flow.urlopen", return_value=mock_resp):
+                verify_token("test-token")
+
+        mock_console.print_warning.assert_called_once_with(
+            deprecation_msg, code="DEPRECATION"
+        )
+
+    def test_verify_token_deprecation_supersedes_nudge(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Both headers present on the handshake still yields a single warning."""
+        from osmosis_ai.platform.auth import platform_client
+
+        monkeypatch.setattr(platform_client, "_deprecation_warned", False)
+        monkeypatch.setattr(platform_client, "_upgrade_nudged", False)
+        deprecation_msg = (
+            "This version is deprecated. Latest is 9.9.9. Run: osmosis upgrade"
+        )
+        mock_resp = self._make_resp(
+            {"X-Osmosis-Deprecation": deprecation_msg, "X-Osmosis-Latest": "9.9.9"}
+        )
+
+        with patch.object(platform_client, "console") as mock_console:
+            with patch("osmosis_ai.platform.auth.flow.urlopen", return_value=mock_resp):
+                verify_token("test-token")
+
+        mock_console.print_warning.assert_called_once_with(
+            deprecation_msg, code="DEPRECATION"
+        )

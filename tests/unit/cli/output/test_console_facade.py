@@ -60,6 +60,25 @@ def test_console_spinner_writes_to_stderr_in_plain_mode() -> None:
     assert "Loading..." in err.getvalue()
 
 
+def test_console_spinner_does_not_leak_into_stdout_under_redirection() -> None:
+    """Regression: spinner progress must never land in stdout.
+
+    `osmosis dataset list > out.txt` used to write "Fetching datasets..." into
+    out.txt because spinner() rendered to stdout. Now it delegates to status(),
+    so progress goes to stderr and stdout stays clean for redirection/piping —
+    matching train/model/eval, which always used the stderr path.
+    """
+    out, err = io.StringIO(), io.StringIO()
+    # rich format with a non-interactive (redirected) stdin is exactly the
+    # `> out.txt` case; the old stdout path would have failed this.
+    with override_output_context(format=OutputFormat.rich, interactive=False):
+        with redirect_stdout(out), redirect_stderr(err):
+            with Console(file=out).spinner("Fetching datasets..."):
+                out.write("REAL_RESULT_ROW\n")
+    assert out.getvalue() == "REAL_RESULT_ROW\n"
+    assert "Fetching datasets..." in err.getvalue()
+
+
 def test_output_context_status_no_op_in_json() -> None:
     out, err = io.StringIO(), io.StringIO()
     output = OutputContext(format=OutputFormat.json, interactive=False)

@@ -5,7 +5,6 @@ from __future__ import annotations
 import contextlib
 import json
 import os
-import sys
 from typing import TYPE_CHECKING, Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -117,6 +116,21 @@ def _maybe_nudge_upgrade(latest: str | None) -> None:
         "Run: osmosis upgrade",
         code="UPGRADE_AVAILABLE",
     )
+
+
+def surface_version_status(deprecation: str | None, latest: str | None) -> None:
+    """Surface at most one version warning, highest severity first.
+
+    Deprecation supersedes the upgrade nudge: a deprecated client is also out of
+    date, and its warning already says to upgrade. Shared by ``platform_request``
+    and the ``flow.py`` handshake; non-str header values coerce to absent.
+    """
+    deprecation = deprecation if isinstance(deprecation, str) else None
+    latest = latest if isinstance(latest, str) else None
+    if deprecation:
+        _maybe_warn_deprecation(deprecation)
+        return
+    _maybe_nudge_upgrade(latest)
 
 
 def _credentials_match_env_token(credentials: Credentials | None) -> bool:
@@ -320,8 +334,12 @@ def revoke_cli_token(credentials: Credentials) -> bool:
         if e.code == 401:
             # Token already expired/revoked — goal achieved.
             return True
-        sys.stderr.write(
-            f"Warning: failed to revoke CLI token server-side: HTTP {e.code}\n"
+        # Route through print_warning (not a raw stderr write) so this best-effort
+        # warning pauses any active "Revoking session..." spinner instead of
+        # gluing onto it, and stays output-mode aware (structured in JSON mode).
+        console.print_warning(
+            f"Failed to revoke CLI token server-side: HTTP {e.code}",
+            code="TOKEN_REVOKE_FAILED",
         )
         return False
     except (URLError, OSError):
@@ -402,8 +420,10 @@ def platform_request(
 
     try:
         with urlopen(request, timeout=timeout) as response:
-            _maybe_warn_deprecation(response.headers.get("X-Osmosis-Deprecation"))
-            _maybe_nudge_upgrade(response.headers.get("X-Osmosis-Latest"))
+            surface_version_status(
+                response.headers.get("X-Osmosis-Deprecation"),
+                response.headers.get("X-Osmosis-Latest"),
+            )
             if response.status == 204:
                 return {}
             raw = response.read()

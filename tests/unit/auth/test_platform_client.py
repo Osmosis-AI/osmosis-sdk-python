@@ -1011,6 +1011,47 @@ class TestPlatformRequest:
 
         mock_console.print_warning.assert_not_called()
 
+    @patch("osmosis_ai.platform.auth.platform_client.urlopen")
+    @patch("osmosis_ai.platform.auth.platform_client.console")
+    def test_deprecation_supersedes_nudge_when_both_headers_present(
+        self,
+        mock_console: MagicMock,
+        mock_urlopen: MagicMock,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Both headers present -> only the deprecation warning, never the nudge.
+
+        Pins the precedence assumption, not just the message text.
+        """
+        from osmosis_ai.platform.auth import platform_client
+
+        monkeypatch.setattr(platform_client, "_deprecation_warned", False)
+        monkeypatch.setattr(platform_client, "_upgrade_nudged", False)
+
+        deprecation_msg = (
+            "This version of the Osmosis CLI is deprecated. "
+            "Latest is 99.0.0. Run: osmosis upgrade"
+        )
+
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = b"{}"
+        mock_resp.status = 200
+        mock_resp.headers = {
+            "X-Osmosis-Deprecation": deprecation_msg,
+            "X-Osmosis-Latest": "99.0.0",
+        }
+        mock_resp.__enter__ = MagicMock(return_value=mock_resp)
+        mock_resp.__exit__ = MagicMock(return_value=False)
+        mock_urlopen.return_value = mock_resp
+        creds = _make_credentials()
+
+        platform_request("/api/cli/verify", credentials=creds, require_git_repo=False)
+
+        # Exactly one warning, and it is the deprecation — never the nudge.
+        mock_console.print_warning.assert_called_once_with(
+            deprecation_msg, code="DEPRECATION"
+        )
+
     # -------------------------------------------------------------------------
     # 426 Upgrade Required
     # -------------------------------------------------------------------------
@@ -1087,27 +1128,28 @@ class TestRevokeCLIToken:
         )
         assert revoke_cli_token(creds) is True
 
+    @patch("osmosis_ai.platform.auth.platform_client.console.print_warning")
     @patch("osmosis_ai.platform.auth.platform_client.urlopen")
-    def test_logs_warning_to_stderr_on_failure(self, mock_urlopen: MagicMock) -> None:
-        """Verify revoke_cli_token writes a warning to stderr when revocation fails."""
+    def test_logs_warning_on_failure(
+        self, mock_urlopen: MagicMock, mock_warn: MagicMock
+    ) -> None:
+        """A failed revoke routes through print_warning (not a raw stderr write).
+
+        Going through print_warning is what lets the warning pause an active
+        "Revoking session..." spinner and stay output-mode aware (structured in
+        JSON mode) instead of gluing raw text onto the spinner line.
+        """
         creds = _make_credentials()
         creds.token_id = "tok_456"
         mock_urlopen.side_effect = HTTPError(
             url="http://test", code=500, msg="Server Error", hdrs=None, fp=None
         )
 
-        import io
-        import sys
-
-        captured = io.StringIO()
-        old_stderr = sys.stderr
-        sys.stderr = captured
-        try:
-            result = revoke_cli_token(creds)
-        finally:
-            sys.stderr = old_stderr
+        result = revoke_cli_token(creds)
 
         assert result is False
-        warning = captured.getvalue()
-        assert "Warning: failed to revoke CLI token server-side" in warning
-        assert "HTTP 500" in warning
+        mock_warn.assert_called_once()
+        message = mock_warn.call_args.args[0]
+        assert "Failed to revoke CLI token server-side" in message
+        assert "HTTP 500" in message
+        assert mock_warn.call_args.kwargs.get("code") == "TOKEN_REVOKE_FAILED"

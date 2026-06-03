@@ -26,6 +26,7 @@ from osmosis_ai.consts import PACKAGE_VERSION
 from .config import PLATFORM_URL as _IMPORTED_PLATFORM_URL
 from .config import get_platform_url, normalize_platform_url
 from .credentials import Credentials, UserInfo
+from .platform_client import surface_version_status
 
 PLATFORM_URL = _IMPORTED_PLATFORM_URL
 
@@ -241,6 +242,10 @@ def verify_token(token: str) -> VerifyResult:
 
     try:
         with urlopen(request, timeout=30) as response:
+            surface_version_status(
+                response.headers.get("X-Osmosis-Deprecation"),
+                response.headers.get("X-Osmosis-Latest"),
+            )
             data = json.loads(response.read().decode())
 
             token_id = data.get("token_id")
@@ -308,6 +313,10 @@ def request_device_code(device_name: str | None = None) -> DeviceCodeResponse:
 
     try:
         with urlopen(request, timeout=30) as response:
+            surface_version_status(
+                response.headers.get("X-Osmosis-Deprecation"),
+                response.headers.get("X-Osmosis-Latest"),
+            )
             data = json.loads(response.read().decode())
             return DeviceCodeResponse(
                 device_code=data["device_code"],
@@ -346,6 +355,10 @@ def poll_device_token(
 
         try:
             with urlopen(request, timeout=30) as response:
+                surface_version_status(
+                    response.headers.get("X-Osmosis-Deprecation"),
+                    response.headers.get("X-Osmosis-Latest"),
+                )
                 data = json.loads(response.read().decode())
                 return data
         except HTTPError as e:

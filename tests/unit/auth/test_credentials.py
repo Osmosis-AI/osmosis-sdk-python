@@ -210,7 +210,7 @@ def test_save_always_cleans_up_keyring_before_saving(tmp_path, monkeypatch) -> N
     assert "user@example.com" in deleted_accounts
 
 
-def test_save_falls_back_to_file(tmp_path, monkeypatch, capsys) -> None:
+def test_save_falls_back_to_file(tmp_path, monkeypatch) -> None:
     creds_file = tmp_path / "creds.json"
     monkeypatch.setattr(
         "osmosis_ai.platform.auth.credentials.CREDENTIALS_FILE", creds_file
@@ -221,6 +221,7 @@ def test_save_falls_back_to_file(tmp_path, monkeypatch, capsys) -> None:
         patch(
             "osmosis_ai.platform.auth.credentials._keyring_delete", return_value=True
         ),
+        patch("osmosis_ai.cli.console.console.print_warning") as mock_warn,
     ):
         from osmosis_ai.platform.auth.credentials import save_credentials
 
@@ -232,8 +233,11 @@ def test_save_falls_back_to_file(tmp_path, monkeypatch, capsys) -> None:
     entry = _platform_entry(data)
     assert entry["access_token"] == "test-token"
     assert entry["token_store"] == TOKEN_STORE_FILE
-    captured = capsys.readouterr()
-    assert "keyring unavailable" in captured.err
+    # Warning routes through print_warning (output-mode aware) with a code,
+    # not a raw stderr write that would corrupt the --json stderr contract.
+    mock_warn.assert_called_once()
+    assert "Keyring unavailable" in mock_warn.call_args.args[0]
+    assert mock_warn.call_args.kwargs.get("code") == "KEYRING_UNAVAILABLE"
 
 
 def test_load_from_keyring(tmp_path, monkeypatch) -> None:
@@ -268,9 +272,7 @@ def test_load_from_keyring(tmp_path, monkeypatch) -> None:
     assert loaded.user.email == "user@example.com"
 
 
-def test_load_returns_none_when_keyring_entry_missing(
-    tmp_path, monkeypatch, capsys
-) -> None:
+def test_load_returns_none_when_keyring_entry_missing(tmp_path, monkeypatch) -> None:
     creds_file = tmp_path / "creds.json"
     monkeypatch.setattr(
         "osmosis_ai.platform.auth.credentials.CREDENTIALS_FILE", creds_file
@@ -284,14 +286,21 @@ def test_load_returns_none_when_keyring_entry_missing(
     creds_file.write_text(json.dumps(data))
 
     # Both fixed account and legacy email return None
-    with patch("osmosis_ai.platform.auth.credentials._keyring_get", return_value=None):
+    with (
+        patch("osmosis_ai.platform.auth.credentials._keyring_get", return_value=None),
+        patch("osmosis_ai.cli.console.console.print_warning") as mock_warn,
+    ):
         from osmosis_ai.platform.auth.credentials import load_credentials
 
         loaded = load_credentials()
 
     assert loaded is None
-    captured = capsys.readouterr()
-    assert "Token not found for the current Osmosis platform" in captured.err
+    mock_warn.assert_called_once()
+    assert (
+        "Token not found for the current Osmosis platform"
+        in (mock_warn.call_args.args[0])
+    )
+    assert mock_warn.call_args.kwargs.get("code") == "TOKEN_NOT_FOUND"
 
 
 def test_load_from_file_fallback(tmp_path, monkeypatch) -> None:
@@ -438,7 +447,7 @@ def test_load_credentials_can_skip_env_token(tmp_path, monkeypatch) -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_load_returns_none_for_version_mismatch(tmp_path, monkeypatch, capsys) -> None:
+def test_load_returns_none_for_version_mismatch(tmp_path, monkeypatch) -> None:
     creds_file = tmp_path / "creds.json"
     monkeypatch.setattr(
         "osmosis_ai.platform.auth.credentials.CREDENTIALS_FILE", creds_file
@@ -448,9 +457,41 @@ def test_load_returns_none_for_version_mismatch(tmp_path, monkeypatch, capsys) -
 
     from osmosis_ai.platform.auth.credentials import load_credentials
 
-    assert load_credentials() is None
-    captured = capsys.readouterr()
-    assert "osmosis auth login" in captured.err
+    with patch("osmosis_ai.cli.console.console.print_warning") as mock_warn:
+        assert load_credentials() is None
+    mock_warn.assert_called_once()
+    assert "osmosis auth login" in mock_warn.call_args.args[0]
+    assert mock_warn.call_args.kwargs.get("code") == "CREDENTIALS_VERSION_CHANGED"
+
+
+def test_credentials_warning_is_structured_json_in_json_mode(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    """In --json mode a credentials warning is a JSON-lines envelope on stderr.
+
+    This is the contract that the old raw ``sys.stderr.write`` broke: a plain
+    "Warning: ..." line on stderr is not valid JSON Lines, so a machine reading
+    `osmosis ... --json 2>err` would fail to parse err. Routing through
+    print_warning emits a structured ``{"warning": {...}}`` envelope instead.
+    """
+    from osmosis_ai.cli.output.context import OutputFormat, override_output_context
+    from osmosis_ai.platform.auth.credentials import load_credentials
+
+    creds_file = tmp_path / "creds.json"
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.credentials.CREDENTIALS_FILE", creds_file
+    )
+    monkeypatch.delenv("OSMOSIS_TOKEN", raising=False)
+    creds_file.write_text(json.dumps({"version": 1, "workspaces": {}}))
+
+    with override_output_context(format=OutputFormat.json):
+        assert load_credentials() is None
+
+    # stderr must be parseable as JSON Lines, not raw text.
+    payload = json.loads(capsys.readouterr().err.strip())
+    assert payload["schema_version"] == 1
+    assert payload["warning"]["code"] == "CREDENTIALS_VERSION_CHANGED"
+    assert "osmosis auth login" in payload["warning"]["message"]
 
 
 # ---------------------------------------------------------------------------
@@ -491,7 +532,7 @@ def test_delete_clears_keyring_and_file(tmp_path, monkeypatch) -> None:
     assert not creds_file.exists()
 
 
-def test_delete_warns_when_keyring_delete_fails(tmp_path, monkeypatch, capsys) -> None:
+def test_delete_warns_when_keyring_delete_fails(tmp_path, monkeypatch) -> None:
     creds_file = tmp_path / "creds.json"
     monkeypatch.setattr(
         "osmosis_ai.platform.auth.credentials.CREDENTIALS_FILE", creds_file
@@ -503,18 +544,23 @@ def test_delete_warns_when_keyring_delete_fails(tmp_path, monkeypatch, capsys) -
     data["token_store"] = TOKEN_STORE_KEYRING
     creds_file.write_text(json.dumps(data))
 
-    with patch(
-        "osmosis_ai.platform.auth.credentials._keyring_delete", return_value=False
+    with (
+        patch(
+            "osmosis_ai.platform.auth.credentials._keyring_delete", return_value=False
+        ),
+        patch("osmosis_ai.cli.console.console.print_warning") as mock_warn,
     ):
         from osmosis_ai.platform.auth.credentials import delete_credentials
 
         result = delete_credentials()
 
-    # File is still deleted, but warning is emitted about keyring failure
+    # File is still deleted, but a keyring-failure warning is emitted via
+    # print_warning (output-mode aware) with a code.
     assert result is True  # file deletion counts
     assert not creds_file.exists()
-    captured = capsys.readouterr()
-    assert "could not remove token from system keyring" in captured.err
+    mock_warn.assert_called_once()
+    assert "Could not remove token from system keyring" in mock_warn.call_args.args[0]
+    assert mock_warn.call_args.kwargs.get("code") == "KEYRING_CLEANUP_FAILED"
 
 
 def test_delete_with_corrupt_json_still_cleans_keyring(tmp_path, monkeypatch) -> None:

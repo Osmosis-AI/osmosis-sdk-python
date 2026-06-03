@@ -61,10 +61,10 @@ def _abort_upload(
             git_identity=git_identity,
         )
     except Exception as exc:
-        console.print(
-            f"Warning: failed to abort upload: {exc}",
-            style="dim yellow",
-        )
+        # print_warning (stderr, output-mode aware) rather than console.print,
+        # which would write this warning to stdout — polluting piped/redirected
+        # output and risking a collision with the live upload progress bar.
+        console.print_warning(f"Failed to abort upload: {exc}", code="ABORT_FAILED")
 
 
 # ── Complete-upload retry (P0 reliability fix) ───────────────────────

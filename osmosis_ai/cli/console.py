@@ -90,6 +90,10 @@ class Console:
             highlight=False,
             **rich_size,
         )
+        # Rich Status of a currently-live spinner, if any. print_warning stops
+        # it before printing and restarts it after, so the transient spinner
+        # line is not left stranded on screen mid-spin.
+        self._active_status: Any = None
 
     @property
     def is_tty(self) -> bool:
@@ -196,7 +200,15 @@ class Console:
         kwargs: dict[str, Any] = {"markup": markup}
         if soft_wrap is not None:
             kwargs["soft_wrap"] = soft_wrap
+        # A live spinner owns the terminal via a Rich Live region; writing to the
+        # separate stderr console mid-spin would strand the spinner line. Pause
+        # it (a clean transient erase), print, then resume so it redraws below.
+        status = self._active_status
+        if status is not None:
+            status.stop()
         self._rich_stderr.print(f"⚠ {message}", style="yellow", **kwargs)
+        if status is not None:
+            status.start()
 
     def separator(self, title: str = "") -> None:
         """Print a separator line with optional title.
@@ -331,33 +343,44 @@ class Console:
 
     @contextmanager
     def spinner(self, message: str) -> Generator[None, None, None]:
-        """Show a spinner animation while work is in progress.
+        """Show a spinner while work is in progress (alias for :meth:`status`).
+
+        Historically this rendered the spinner to *stdout*, which leaked the
+        progress text into redirected output — ``osmosis dataset list > out.txt``
+        used to write ``Fetching datasets...`` into ``out.txt``. It now delegates
+        to :meth:`status` so progress goes to stderr and stays output-mode aware,
+        keeping stdout clean for piping/redirection. Kept as a named alias so the
+        existing call sites (dataset, auth) read naturally.
 
         Usage::
 
             with console.spinner("Loading workspaces..."):
                 result = api_call()
         """
-        from osmosis_ai.cli.output.context import OutputFormat
-
-        fmt = self._output_format()
-        if fmt is OutputFormat.json:
+        with self.status(message):
             yield
-            return
-        if fmt is OutputFormat.plain:
-            sys.stderr.write(message + "\n")
-            sys.stderr.flush()
-            yield
-            return
 
-        if self.is_tty:
-            from rich.status import Status
+    @contextmanager
+    def track_spinner(self, status: Any) -> Generator[None, None, None]:
+        """Register ``status`` as the process-wide active spinner while live.
 
-            with Status(message, console=self._rich, spinner="dots"):
-                yield
-        else:
-            self._rich.print(message)
+        A terminal can only show one spinner at a time, so the active Rich
+        ``Status`` is tracked on this (singleton) console regardless of which
+        spinner implementation created it — ``console.spinner`` here, or
+        ``OutputContext.status`` on its own stderr console. ``print_warning``
+        consults it to pause/resume the spinner around a stderr write, so a
+        warning fired mid-spin (e.g. the upgrade nudge from deep in the request
+        path) neither glues onto the spinner line nor strands it on screen.
+
+        Saves and restores any previously-active status so nested spinners
+        behave; the innermost live spinner is the one a warning pauses.
+        """
+        prev = self._active_status
+        self._active_status = status
+        try:
             yield
+        finally:
+            self._active_status = prev
 
     @contextmanager
     def status(self, message: str) -> Generator[None, None, None]:
