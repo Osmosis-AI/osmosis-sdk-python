@@ -89,6 +89,13 @@ class UpgradeRequiredError(PlatformAPIError):
 VERSION_STATUS_HEADER = "X-Osmosis-Version-Status"
 VERSION_MESSAGE_HEADER = "X-Osmosis-Version-Message"
 
+# Shown for a 426 (Upgrade Required) when the server sends no usable message.
+# The platform is the authority and normally supplies the wording; this is only
+# the floor so the CLI never surfaces a bare "HTTP 426".
+UPGRADE_REQUIRED_FALLBACK_MESSAGE = (
+    "This version of the Osmosis CLI is no longer supported. Run: osmosis upgrade"
+)
+
 _VERSION_STATUSES = {"current", "upgrade_available", "deprecated", "unsupported"}
 # Non-fatal statuses surfaced as a warning on a successful response. "current"
 # stays silent and "unsupported" only ever arrives as a 426, so neither appears
@@ -119,6 +126,20 @@ def surface_version_signal(status: Any, message: Any) -> None:
     console.print_warning(message, code=_VERSION_WARNING_CODES[status])
 
 
+def surface_response_version_signal(response: Any) -> None:
+    """Surface the version signal carried on a successful response's headers.
+
+    Thin wrapper over :func:`surface_version_signal` for the standard
+    ``urlopen`` response object, so the auth handshake and API call sites share
+    one way of reading the atomic version headers.
+    """
+    headers = response.headers
+    surface_version_signal(
+        headers.get(VERSION_STATUS_HEADER),
+        headers.get(VERSION_MESSAGE_HEADER),
+    )
+
+
 def parse_version_signal(body: Any) -> dict[str, Any] | None:
     """Parse the server-computed version signal from a 426 response body.
 
@@ -134,6 +155,45 @@ def parse_version_signal(body: Any) -> dict[str, Any] | None:
     if message is not None and not isinstance(message, str):
         return None
     return {"status": status, "message": message}
+
+
+def upgrade_required_message(body: Any) -> tuple[str, dict[str, Any] | None]:
+    """Resolve the user-facing message and parsed signal for a 426 body.
+
+    Prefers the platform-supplied message and falls back to
+    ``UPGRADE_REQUIRED_FALLBACK_MESSAGE`` when the body carries none. Returns the
+    parsed signal (or ``None``) alongside so callers can attach it as structured
+    error details. Shared by the API client and the login handshake so both map a
+    426 the same way.
+    """
+    version_signal = parse_version_signal(body)
+    platform_message = (
+        version_signal.get("message") if version_signal is not None else None
+    )
+    message = (
+        platform_message
+        if isinstance(platform_message, str) and platform_message
+        else UPGRADE_REQUIRED_FALLBACK_MESSAGE
+    )
+    return message, version_signal
+
+
+def cli_request_headers(*, token: str | None = None) -> dict[str, str]:
+    """Build the base headers every CLI -> Platform request shares.
+
+    Always advertises the installed CLI version via ``X-Osmosis-CLI-Version`` so
+    the platform can negotiate support on any endpoint; adds a bearer
+    ``Authorization`` header when a token is supplied. Centralizing this keeps the
+    version stamp in exactly one place across the handshake and API calls.
+    """
+    headers = {
+        "Content-Type": "application/json",
+        "User-Agent": f"osmosis-cli/{PACKAGE_VERSION}",
+        "X-Osmosis-CLI-Version": PACKAGE_VERSION,
+    }
+    if token is not None:
+        headers["Authorization"] = f"Bearer {token}"
+    return headers
 
 
 def _credentials_match_env_token(credentials: Credentials | None) -> bool:
@@ -321,12 +381,7 @@ def revoke_cli_token(credentials: Credentials) -> bool:
     url = f"{_platform_url()}/api/cli/tokens/{credentials.token_id}"
     request = Request(
         url,
-        headers={
-            "Authorization": f"Bearer {credentials.access_token}",
-            "Content-Type": "application/json",
-            "User-Agent": f"osmosis-cli/{PACKAGE_VERSION}",
-            "X-Osmosis-CLI-Version": PACKAGE_VERSION,
-        },
+        headers=cli_request_headers(token=credentials.access_token),
         method="DELETE",
     )
 
@@ -400,12 +455,7 @@ def platform_request(
 
     url = f"{_platform_url()}{endpoint}"
 
-    req_headers = {
-        "Authorization": f"Bearer {credentials.access_token}",
-        "Content-Type": "application/json",
-        "User-Agent": f"osmosis-cli/{PACKAGE_VERSION}",
-        "X-Osmosis-CLI-Version": PACKAGE_VERSION,
-    }
+    req_headers = cli_request_headers(token=credentials.access_token)
 
     if require_git_repo:
         if not git_identity:
@@ -423,10 +473,7 @@ def platform_request(
 
     try:
         with urlopen(request, timeout=timeout) as response:
-            surface_version_signal(
-                response.headers.get(VERSION_STATUS_HEADER),
-                response.headers.get(VERSION_MESSAGE_HEADER),
-            )
+            surface_response_version_signal(response)
             if response.status == 204:
                 return {}
             raw = response.read()
@@ -449,15 +496,7 @@ def platform_request(
 
         if e.code == 426:
             error_body = _read_error_body(e)
-            version_signal = parse_version_signal(error_body)
-            platform_message = (
-                version_signal.get("message") if version_signal is not None else None
-            )
-            message = (
-                platform_message
-                if isinstance(platform_message, str) and platform_message
-                else "This version of the Osmosis CLI is no longer supported. Run: osmosis upgrade"
-            )
+            message, version_signal = upgrade_required_message(error_body)
             raise UpgradeRequiredError(
                 message,
                 e.code,

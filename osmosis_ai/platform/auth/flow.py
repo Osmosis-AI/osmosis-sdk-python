@@ -21,16 +21,14 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from osmosis_ai.cli.console import console
-from osmosis_ai.consts import PACKAGE_VERSION
 
 from .config import PLATFORM_URL as _IMPORTED_PLATFORM_URL
 from .config import get_platform_url, normalize_platform_url
 from .credentials import Credentials, UserInfo
 from .platform_client import (
-    VERSION_MESSAGE_HEADER,
-    VERSION_STATUS_HEADER,
-    parse_version_signal,
-    surface_version_signal,
+    cli_request_headers,
+    surface_response_version_signal,
+    upgrade_required_message,
 )
 
 PLATFORM_URL = _IMPORTED_PLATFORM_URL
@@ -194,15 +192,7 @@ def _login_error_from_http(
     """
     if e.code == 426:
         body = _read_error_body(e)
-        version_signal = parse_version_signal(body)
-        platform_message = (
-            version_signal.get("message") if version_signal is not None else None
-        )
-        message = (
-            platform_message
-            if isinstance(platform_message, str) and platform_message
-            else "This version of the Osmosis CLI is no longer supported. Run: osmosis upgrade"
-        )
+        message, _ = upgrade_required_message(body)
         return LoginError(message, code="UPGRADE_REQUIRED", status_code=426)
 
     detail = _read_error_detail(e)
@@ -240,20 +230,12 @@ def verify_token(token: str) -> VerifyResult:
 
     request = Request(
         verify_url,
-        headers={
-            "Authorization": f"Bearer {token}",
-            "Content-Type": "application/json",
-            "User-Agent": f"osmosis-cli/{PACKAGE_VERSION}",
-            "X-Osmosis-CLI-Version": PACKAGE_VERSION,
-        },
+        headers=cli_request_headers(token=token),
     )
 
     try:
         with urlopen(request, timeout=30) as response:
-            surface_version_signal(
-                response.headers.get(VERSION_STATUS_HEADER),
-                response.headers.get(VERSION_MESSAGE_HEADER),
-            )
+            surface_response_version_signal(response)
             data = json.loads(response.read().decode())
 
             token_id = data.get("token_id")
@@ -311,20 +293,13 @@ def request_device_code(device_name: str | None = None) -> DeviceCodeResponse:
     request = Request(
         url,
         data=body,
-        headers={
-            "Content-Type": "application/json",
-            "User-Agent": f"osmosis-cli/{PACKAGE_VERSION}",
-            "X-Osmosis-CLI-Version": PACKAGE_VERSION,
-        },
+        headers=cli_request_headers(),
         method="POST",
     )
 
     try:
         with urlopen(request, timeout=30) as response:
-            surface_version_signal(
-                response.headers.get(VERSION_STATUS_HEADER),
-                response.headers.get(VERSION_MESSAGE_HEADER),
-            )
+            surface_response_version_signal(response)
             data = json.loads(response.read().decode())
             return DeviceCodeResponse(
                 device_code=data["device_code"],
@@ -350,11 +325,7 @@ def poll_device_token(
     """Poll for device authorization completion. Returns token response dict."""
     url = f"{_platform_url()}/api/cli/device/token"
     body = json.dumps({"device_code": device_code}).encode()
-    req_headers = {
-        "Content-Type": "application/json",
-        "User-Agent": f"osmosis-cli/{PACKAGE_VERSION}",
-        "X-Osmosis-CLI-Version": PACKAGE_VERSION,
-    }
+    req_headers = cli_request_headers()
     deadline = time.monotonic() + timeout
     current_interval = interval
 
@@ -363,10 +334,7 @@ def poll_device_token(
 
         try:
             with urlopen(request, timeout=30) as response:
-                surface_version_signal(
-                    response.headers.get(VERSION_STATUS_HEADER),
-                    response.headers.get(VERSION_MESSAGE_HEADER),
-                )
+                surface_response_version_signal(response)
                 data = json.loads(response.read().decode())
                 return data
         except HTTPError as e:
