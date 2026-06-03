@@ -30,7 +30,7 @@ from osmosis_ai.platform.api.client import OsmosisClient
 from osmosis_ai.platform.api.models import WIRE_SCOPE_PERSONAL
 from osmosis_ai.platform.cli.shared_config import SECRET_NAME_RE
 from osmosis_ai.platform.cli.utils import (
-    fetch_all_pages,
+    fetch_environment_secrets,
     paginated_fetch,
     require_git_workspace_directory_context,
     validate_list_options,
@@ -338,21 +338,12 @@ def _existing_secret_names(
 ) -> set[str] | None:
     """Names that exist in ``scope`` (a wire value). ``None`` if the lookup fails,
     so a transient error falls back to letting the platform validate."""
-    try:
-
-        def _fetch(limit: int, offset: int) -> Any:
-            return client.list_environment_secrets(
-                limit=limit,
-                offset=offset,
-                scope=scope,
-                credentials=credentials,
-                git_identity=git_identity,
-            )
-
-        secrets, _ = fetch_all_pages(_fetch, items_attr="environment_secrets")
-        return {s.name for s in secrets}
-    except Exception:
+    secrets = fetch_environment_secrets(
+        client, scope=scope, credentials=credentials, git_identity=git_identity
+    )
+    if secrets is None:
         return None
+    return {s.name for s in secrets}
 
 
 def delete_secret(

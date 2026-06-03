@@ -35,7 +35,7 @@ from osmosis_ai.platform.cli.shared_config import (
     build_submit_summary_rows,
 )
 from osmosis_ai.platform.cli.utils import (
-    fetch_all_pages,
+    fetch_environment_secrets,
     print_remote_fetch_notice,
     require_git_workspace_directory_context,
 )
@@ -105,23 +105,14 @@ def _fetch_secret_scopes(
     Returns ``None`` on failure (network, auth) so the caller can fall back to
     a best-effort display instead of blocking the submit.
     """
-    try:
-
-        def _fetch(limit: int, offset: int) -> Any:
-            return client.list_environment_secrets(
-                limit=limit,
-                offset=offset,
-                scope="all",
-                credentials=credentials,
-                git_identity=git_identity,
-            )
-
-        secrets, _ = fetch_all_pages(_fetch, items_attr="environment_secrets")
-        workspace = {s.name for s in secrets if s.scope == "workspace"}
-        personal = {s.name for s in secrets if s.scope == WIRE_SCOPE_PERSONAL}
-        return workspace, personal
-    except Exception:
+    secrets = fetch_environment_secrets(
+        client, scope="all", credentials=credentials, git_identity=git_identity
+    )
+    if secrets is None:
         return None
+    workspace = {s.name for s in secrets if s.scope == "workspace"}
+    personal = {s.name for s in secrets if s.scope == WIRE_SCOPE_PERSONAL}
+    return workspace, personal
 
 
 def _secret_add_hint_lines(

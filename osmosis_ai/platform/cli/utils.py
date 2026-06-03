@@ -232,6 +232,38 @@ def fetch_all_pages(
     return all_items, total_count
 
 
+def fetch_environment_secrets(
+    client: Any,
+    *,
+    scope: str,
+    credentials: Any,
+    git_identity: str,
+) -> list[Any] | None:
+    """Best-effort fetch of every environment secret in ``scope``.
+
+    *scope* is a wire value (``"workspace"`` / ``"user"``) or the literal
+    ``"all"``. Returns the raw secret objects, or ``None`` on any failure
+    (network, auth) so callers fall back to a best-effort path instead of
+    blocking. Shared by the submit summary's scope partition and the
+    ``secret delete`` existence pre-check.
+    """
+    try:
+
+        def _fetch(limit: int, offset: int) -> Any:
+            return client.list_environment_secrets(
+                limit=limit,
+                offset=offset,
+                scope=scope,
+                credentials=credentials,
+                git_identity=git_identity,
+            )
+
+        secrets, _ = fetch_all_pages(_fetch, items_attr="environment_secrets")
+        return secrets
+    except Exception:
+        return None
+
+
 def paginated_fetch(
     fetch_fn: Callable[[int, int], Any],
     *,
