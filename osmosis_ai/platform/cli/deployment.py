@@ -31,9 +31,11 @@ from osmosis_ai.cli.output import (
     get_output_context,
     serialize_deployment,
 )
+from osmosis_ai.cli.output.display import format_local_date
 from osmosis_ai.platform.api.client import OsmosisClient
 from osmosis_ai.platform.cli.utils import (
     format_date,
+    format_deployment_status,
     paginated_fetch,
     require_git_workspace_directory_context,
     validate_list_options,
@@ -140,6 +142,18 @@ def list_deployments(*, limit: int, all_: bool) -> ListResult:
             ListColumn(key="status", label="Status"),
             ListColumn(key="created_at", label="Deployed"),
             ListColumn(key="creator_name", label="Deployed By"),
+        ],
+        # Rich-only rendering: localized date + styled status. Markup must stay
+        # out of ``items`` / ``serialize_deployment`` so the raw status string
+        # is what reaches the JSON contract.
+        display_items=[
+            {
+                **serialize_deployment(dep),
+                "status": format_deployment_status(dep),
+                "created_at": format_local_date(dep.created_at),
+                "creator_name": dep.creator_name or "—",
+            }
+            for dep in deployments
         ],
     )
 
