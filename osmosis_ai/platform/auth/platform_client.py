@@ -82,55 +82,58 @@ class UpgradeRequiredError(PlatformAPIError):
     """Raised when the installed CLI is below the platform's minimum supported version (HTTP 426)."""
 
 
-# Warn at most once per process about a deprecated CLI version.
-_deprecation_warned = False
-# Nudge at most once per process about an available upgrade.
-_upgrade_nudged = False
+# Atomic response headers carrying the server-computed version status. The
+# server is the authority for version comparisons; the SDK never compares
+# locally. A 426 (handled at the call sites) carries the same fields in its JSON
+# body instead.
+VERSION_STATUS_HEADER = "X-Osmosis-Version-Status"
+VERSION_MESSAGE_HEADER = "X-Osmosis-Version-Message"
+
+_VERSION_STATUSES = {"current", "upgrade_available", "deprecated", "unsupported"}
+# Non-fatal statuses surfaced as a warning on a successful response. "current"
+# stays silent and "unsupported" only ever arrives as a 426, so neither appears
+# here — which is why this path has no fatal branch.
+_VERSION_WARNING_CODES = {
+    "upgrade_available": "UPGRADE_AVAILABLE",
+    "deprecated": "DEPRECATED",
+}
+
+# Surface each non-fatal server-computed version status at most once per process.
+_version_signal_warned: set[str] = set()
 
 
-def _maybe_warn_deprecation(message: str | None) -> None:
-    """Emit a deprecation warning at most once per process."""
-    global _deprecation_warned
-    if not message or _deprecation_warned:
-        return
-    _deprecation_warned = True
-    console.print_warning(message, code="DEPRECATION")
+def surface_version_signal(status: Any, message: Any) -> None:
+    """Display a server-computed CLI version status from response headers.
 
-
-def _maybe_nudge_upgrade(latest: str | None) -> None:
-    """Nudge once per process when the platform advertises a newer CLI version.
-
-    Reads the ``X-Osmosis-Latest`` header the platform sets on every response;
-    stays silent when we are already current or the version is unparseable.
+    Reads the atomic ``X-Osmosis-Version-Status`` / ``X-Osmosis-Version-Message``
+    headers. The platform owns the comparison; the SDK only presents the result,
+    once per process per status.
     """
-    global _upgrade_nudged
-    if not latest or _upgrade_nudged:
+    if status not in _VERSION_WARNING_CODES:
         return
-    from osmosis_ai.cli.upgrade import _is_up_to_date
-
-    if _is_up_to_date(PACKAGE_VERSION, latest):
+    if not isinstance(message, str) or not message:
         return
-    _upgrade_nudged = True
-    console.print_warning(
-        f"A newer version of the Osmosis CLI is available ({latest}). "
-        "Run: osmosis upgrade",
-        code="UPGRADE_AVAILABLE",
-    )
+    if status in _version_signal_warned:
+        return
+    _version_signal_warned.add(status)
+    console.print_warning(message, code=_VERSION_WARNING_CODES[status])
 
 
-def surface_version_status(deprecation: str | None, latest: str | None) -> None:
-    """Surface at most one version warning, highest severity first.
+def parse_version_signal(body: Any) -> dict[str, Any] | None:
+    """Parse the server-computed version signal from a 426 response body.
 
-    Deprecation supersedes the upgrade nudge: a deprecated client is also out of
-    date, and its warning already says to upgrade. Shared by ``platform_request``
-    and the ``flow.py`` handshake; non-str header values coerce to absent.
+    The platform is the authority; the SDK validates only enough to avoid
+    surfacing a malformed message.
     """
-    deprecation = deprecation if isinstance(deprecation, str) else None
-    latest = latest if isinstance(latest, str) else None
-    if deprecation:
-        _maybe_warn_deprecation(deprecation)
-        return
-    _maybe_nudge_upgrade(latest)
+    if not isinstance(body, dict):
+        return None
+    status = body.get("status")
+    if status not in _VERSION_STATUSES:
+        return None
+    message = body.get("message")
+    if message is not None and not isinstance(message, str):
+        return None
+    return {"status": status, "message": message}
 
 
 def _credentials_match_env_token(credentials: Credentials | None) -> bool:
@@ -420,9 +423,9 @@ def platform_request(
 
     try:
         with urlopen(request, timeout=timeout) as response:
-            surface_version_status(
-                response.headers.get("X-Osmosis-Deprecation"),
-                response.headers.get("X-Osmosis-Latest"),
+            surface_version_signal(
+                response.headers.get(VERSION_STATUS_HEADER),
+                response.headers.get(VERSION_MESSAGE_HEADER),
             )
             if response.status == 204:
                 return {}
@@ -446,7 +449,10 @@ def platform_request(
 
         if e.code == 426:
             error_body = _read_error_body(e)
-            platform_message = error_body.get("message")
+            version_signal = parse_version_signal(error_body)
+            platform_message = (
+                version_signal.get("message") if version_signal is not None else None
+            )
             message = (
                 platform_message
                 if isinstance(platform_message, str) and platform_message
@@ -456,7 +462,7 @@ def platform_request(
                 message,
                 e.code,
                 error_code="UPGRADE_REQUIRED",
-                details=error_body or None,
+                details=version_signal or error_body or None,
             ) from e
 
         # Best-effort capture of structured error message from response body

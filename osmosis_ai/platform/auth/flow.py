@@ -26,7 +26,12 @@ from osmosis_ai.consts import PACKAGE_VERSION
 from .config import PLATFORM_URL as _IMPORTED_PLATFORM_URL
 from .config import get_platform_url, normalize_platform_url
 from .credentials import Credentials, UserInfo
-from .platform_client import surface_version_status
+from .platform_client import (
+    VERSION_MESSAGE_HEADER,
+    VERSION_STATUS_HEADER,
+    parse_version_signal,
+    surface_version_signal,
+)
 
 PLATFORM_URL = _IMPORTED_PLATFORM_URL
 
@@ -189,7 +194,10 @@ def _login_error_from_http(
     """
     if e.code == 426:
         body = _read_error_body(e)
-        platform_message = body.get("message")
+        version_signal = parse_version_signal(body)
+        platform_message = (
+            version_signal.get("message") if version_signal is not None else None
+        )
         message = (
             platform_message
             if isinstance(platform_message, str) and platform_message
@@ -242,9 +250,9 @@ def verify_token(token: str) -> VerifyResult:
 
     try:
         with urlopen(request, timeout=30) as response:
-            surface_version_status(
-                response.headers.get("X-Osmosis-Deprecation"),
-                response.headers.get("X-Osmosis-Latest"),
+            surface_version_signal(
+                response.headers.get(VERSION_STATUS_HEADER),
+                response.headers.get(VERSION_MESSAGE_HEADER),
             )
             data = json.loads(response.read().decode())
 
@@ -313,9 +321,9 @@ def request_device_code(device_name: str | None = None) -> DeviceCodeResponse:
 
     try:
         with urlopen(request, timeout=30) as response:
-            surface_version_status(
-                response.headers.get("X-Osmosis-Deprecation"),
-                response.headers.get("X-Osmosis-Latest"),
+            surface_version_signal(
+                response.headers.get(VERSION_STATUS_HEADER),
+                response.headers.get(VERSION_MESSAGE_HEADER),
             )
             data = json.loads(response.read().decode())
             return DeviceCodeResponse(
@@ -355,9 +363,9 @@ def poll_device_token(
 
         try:
             with urlopen(request, timeout=30) as response:
-                surface_version_status(
-                    response.headers.get("X-Osmosis-Deprecation"),
-                    response.headers.get("X-Osmosis-Latest"),
+                surface_version_signal(
+                    response.headers.get(VERSION_STATUS_HEADER),
+                    response.headers.get(VERSION_MESSAGE_HEADER),
                 )
                 data = json.loads(response.read().decode())
                 return data

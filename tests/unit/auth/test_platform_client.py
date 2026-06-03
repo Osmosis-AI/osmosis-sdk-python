@@ -400,16 +400,24 @@ class TestPlatformRequest:
         mock_resp.read.assert_not_called()
 
     @patch("osmosis_ai.platform.auth.platform_client.console")
-    @patch("osmosis_ai.platform.auth.platform_client._deprecation_warned", False)
     @patch("osmosis_ai.platform.auth.platform_client.urlopen")
-    def test_deprecation_header_emits_warning_once(
-        self, mock_urlopen: MagicMock, mock_console: MagicMock
+    def test_version_signal_emits_warning_once(
+        self,
+        mock_urlopen: MagicMock,
+        mock_console: MagicMock,
+        monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """Verify the X-Osmosis-Deprecation header surfaces a single warning."""
+        """Verify the X-Osmosis-Version signal surfaces a single warning."""
+        from osmosis_ai.platform.auth import platform_client
+
+        monkeypatch.setattr(platform_client, "_version_signal_warned", set())
         mock_resp = MagicMock()
         mock_resp.status = 200
         mock_resp.read.return_value = json.dumps({"ok": True}).encode()
-        mock_resp.headers = {"X-Osmosis-Deprecation": "Upgrade soon"}
+        mock_resp.headers = {
+            "X-Osmosis-Version-Status": "deprecated",
+            "X-Osmosis-Version-Message": "Upgrade soon",
+        }
         mock_resp.__enter__ = MagicMock(return_value=mock_resp)
         mock_resp.__exit__ = MagicMock(return_value=False)
         mock_urlopen.return_value = mock_resp
@@ -419,7 +427,7 @@ class TestPlatformRequest:
         platform_request("/api/test", credentials=creds, git_identity="git_test")
 
         mock_console.print_warning.assert_called_once_with(
-            "Upgrade soon", code="DEPRECATION"
+            "Upgrade soon", code="DEPRECATED"
         )
 
     # -------------------------------------------------------------------------
@@ -491,7 +499,13 @@ class TestPlatformRequest:
         self, mock_urlopen: MagicMock
     ) -> None:
         """Verify 426 uses the platform-supplied message when present."""
-        body = json.dumps({"message": "Please upgrade to v2.0.0"})
+        body = json.dumps(
+            {
+                "status": "unsupported",
+                "message": "Please upgrade to v2.0.0",
+                "latest": "2.0.0",
+            }
+        )
         mock_urlopen.side_effect = _make_http_error(426, body)
         creds = _make_credentials()
 
@@ -501,7 +515,10 @@ class TestPlatformRequest:
         assert str(exc_info.value) == "Please upgrade to v2.0.0"
         assert exc_info.value.status_code == 426
         assert exc_info.value.error_code == "UPGRADE_REQUIRED"
-        assert exc_info.value.details == {"message": "Please upgrade to v2.0.0"}
+        assert exc_info.value.details == {
+            "status": "unsupported",
+            "message": "Please upgrade to v2.0.0",
+        }
 
     @patch("osmosis_ai.platform.auth.platform_client.urlopen")
     def test_426_falls_back_to_default_message(self, mock_urlopen: MagicMock) -> None:
@@ -901,22 +918,22 @@ class TestPlatformRequest:
         assert request_obj.get_header("X-osmosis-cli-version") == PACKAGE_VERSION
 
     # -------------------------------------------------------------------------
-    # Deprecation Warning
+    # CLI Version Signals
     # -------------------------------------------------------------------------
 
     @patch("osmosis_ai.platform.auth.platform_client.urlopen")
     @patch("osmosis_ai.platform.auth.platform_client.console")
-    def test_platform_request_warns_on_deprecation_header(
+    def test_platform_request_warns_on_deprecated_version_signal(
         self,
         mock_console: MagicMock,
         mock_urlopen: MagicMock,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """A X-Osmosis-Deprecation response header triggers a single warning."""
+        """A deprecated X-Osmosis-Version signal triggers a single warning."""
         from osmosis_ai.platform.auth import platform_client
 
         # Reset the module-level dedup flag so this test is isolated.
-        monkeypatch.setattr(platform_client, "_deprecation_warned", False)
+        monkeypatch.setattr(platform_client, "_version_signal_warned", set())
 
         deprecation_msg = (
             "This version of the Osmosis CLI is deprecated. Run: osmosis upgrade"
@@ -926,7 +943,10 @@ class TestPlatformRequest:
             mock_resp = MagicMock()
             mock_resp.read.return_value = b"{}"
             mock_resp.status = 200
-            mock_resp.headers = {"X-Osmosis-Deprecation": deprecation_msg}
+            mock_resp.headers = {
+                "X-Osmosis-Version-Status": "deprecated",
+                "X-Osmosis-Version-Message": deprecation_msg,
+            }
             mock_resp.__enter__ = MagicMock(return_value=mock_resp)
             mock_resp.__exit__ = MagicMock(return_value=False)
             return mock_resp
@@ -941,67 +961,64 @@ class TestPlatformRequest:
 
         # print_warning should have been called exactly once (dedup flag prevents a second call).
         mock_console.print_warning.assert_called_once_with(
-            deprecation_msg, code="DEPRECATION"
+            deprecation_msg, code="DEPRECATED"
         )
-
-    # -------------------------------------------------------------------------
-    # Upgrade Nudge (X-Osmosis-Latest)
-    # -------------------------------------------------------------------------
 
     @patch("osmosis_ai.platform.auth.platform_client.urlopen")
     @patch("osmosis_ai.platform.auth.platform_client.console")
-    def test_platform_request_nudges_on_newer_latest_header(
+    def test_platform_request_nudges_on_upgrade_available_signal_without_local_compare(
         self,
         mock_console: MagicMock,
         mock_urlopen: MagicMock,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """A higher X-Osmosis-Latest triggers a single upgrade nudge."""
+        """Server-computed upgrade_available is presented without client comparison."""
         from osmosis_ai.platform.auth import platform_client
 
-        monkeypatch.setattr(platform_client, "_upgrade_nudged", False)
+        monkeypatch.setattr(platform_client, "_version_signal_warned", set())
 
-        def _make_response_with_latest_header() -> MagicMock:
+        def _make_response_with_upgrade_signal() -> MagicMock:
             mock_resp = MagicMock()
             mock_resp.read.return_value = b"{}"
             mock_resp.status = 200
-            mock_resp.headers = {"X-Osmosis-Latest": "99.0.0"}
+            mock_resp.headers = {
+                "X-Osmosis-Version-Status": "upgrade_available",
+                "X-Osmosis-Version-Message": "Server says upgrade. Run: osmosis upgrade",
+            }
             mock_resp.__enter__ = MagicMock(return_value=mock_resp)
             mock_resp.__exit__ = MagicMock(return_value=False)
             return mock_resp
 
-        mock_urlopen.return_value = _make_response_with_latest_header()
+        mock_urlopen.return_value = _make_response_with_upgrade_signal()
         creds = _make_credentials()
 
         platform_request("/api/cli/verify", credentials=creds, require_git_repo=False)
         # Second call should NOT nudge again (dedup flag is now True).
-        mock_urlopen.return_value = _make_response_with_latest_header()
+        mock_urlopen.return_value = _make_response_with_upgrade_signal()
         platform_request("/api/cli/verify", credentials=creds, require_git_repo=False)
 
         mock_console.print_warning.assert_called_once_with(
-            "A newer version of the Osmosis CLI is available (99.0.0). "
-            "Run: osmosis upgrade",
+            "Server says upgrade. Run: osmosis upgrade",
             code="UPGRADE_AVAILABLE",
         )
 
     @patch("osmosis_ai.platform.auth.platform_client.urlopen")
     @patch("osmosis_ai.platform.auth.platform_client.console")
-    def test_platform_request_no_nudge_when_already_current(
+    def test_platform_request_stays_silent_on_current_version_signal(
         self,
         mock_console: MagicMock,
         mock_urlopen: MagicMock,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """A X-Osmosis-Latest equal to the installed version stays silent."""
-        from osmosis_ai.consts import PACKAGE_VERSION
+        """A current X-Osmosis-Version signal stays silent."""
         from osmosis_ai.platform.auth import platform_client
 
-        monkeypatch.setattr(platform_client, "_upgrade_nudged", False)
+        monkeypatch.setattr(platform_client, "_version_signal_warned", set())
 
         mock_resp = MagicMock()
         mock_resp.read.return_value = b"{}"
         mock_resp.status = 200
-        mock_resp.headers = {"X-Osmosis-Latest": PACKAGE_VERSION}
+        mock_resp.headers = {"X-Osmosis-Version-Status": "current"}
         mock_resp.__enter__ = MagicMock(return_value=mock_resp)
         mock_resp.__exit__ = MagicMock(return_value=False)
         mock_urlopen.return_value = mock_resp
@@ -1013,32 +1030,23 @@ class TestPlatformRequest:
 
     @patch("osmosis_ai.platform.auth.platform_client.urlopen")
     @patch("osmosis_ai.platform.auth.platform_client.console")
-    def test_deprecation_supersedes_nudge_when_both_headers_present(
+    def test_platform_request_ignores_malformed_version_signal(
         self,
         mock_console: MagicMock,
         mock_urlopen: MagicMock,
         monkeypatch: pytest.MonkeyPatch,
     ) -> None:
-        """Both headers present -> only the deprecation warning, never the nudge.
-
-        Pins the precedence assumption, not just the message text.
-        """
+        """An unrecognized X-Osmosis-Version-Status stays silent."""
         from osmosis_ai.platform.auth import platform_client
 
-        monkeypatch.setattr(platform_client, "_deprecation_warned", False)
-        monkeypatch.setattr(platform_client, "_upgrade_nudged", False)
-
-        deprecation_msg = (
-            "This version of the Osmosis CLI is deprecated. "
-            "Latest is 99.0.0. Run: osmosis upgrade"
-        )
+        monkeypatch.setattr(platform_client, "_version_signal_warned", set())
 
         mock_resp = MagicMock()
         mock_resp.read.return_value = b"{}"
         mock_resp.status = 200
         mock_resp.headers = {
-            "X-Osmosis-Deprecation": deprecation_msg,
-            "X-Osmosis-Latest": "99.0.0",
+            "X-Osmosis-Version-Status": "bogus-status",
+            "X-Osmosis-Version-Message": "should be ignored",
         }
         mock_resp.__enter__ = MagicMock(return_value=mock_resp)
         mock_resp.__exit__ = MagicMock(return_value=False)
@@ -1047,10 +1055,39 @@ class TestPlatformRequest:
 
         platform_request("/api/cli/verify", credentials=creds, require_git_repo=False)
 
-        # Exactly one warning, and it is the deprecation — never the nudge.
-        mock_console.print_warning.assert_called_once_with(
-            deprecation_msg, code="DEPRECATION"
-        )
+        mock_console.print_warning.assert_not_called()
+
+    @patch("osmosis_ai.platform.auth.platform_client.urlopen")
+    @patch("osmosis_ai.platform.auth.platform_client.console")
+    def test_platform_request_ignores_legacy_version_headers(
+        self,
+        mock_console: MagicMock,
+        mock_urlopen: MagicMock,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """Legacy headers (bare X-Osmosis-Latest, single-JSON X-Osmosis-Version)
+        are ignored; only the atomic status/message headers are read."""
+        from osmosis_ai.platform.auth import platform_client
+
+        monkeypatch.setattr(platform_client, "_version_signal_warned", set())
+
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = b"{}"
+        mock_resp.status = 200
+        mock_resp.headers = {
+            "X-Osmosis-Latest": "99.0.0",
+            "X-Osmosis-Version": json.dumps(
+                {"status": "deprecated", "message": "legacy json header"}
+            ),
+        }
+        mock_resp.__enter__ = MagicMock(return_value=mock_resp)
+        mock_resp.__exit__ = MagicMock(return_value=False)
+        mock_urlopen.return_value = mock_resp
+        creds = _make_credentials()
+
+        platform_request("/api/cli/verify", credentials=creds, require_git_repo=False)
+
+        mock_console.print_warning.assert_not_called()
 
     # -------------------------------------------------------------------------
     # 426 Upgrade Required
@@ -1063,7 +1100,7 @@ class TestPlatformRequest:
         """A 426 response raises UpgradeRequiredError with the platform message."""
         import io
 
-        body = b'{"error":"upgrade_required","message":"osmosis >= 1.0.0 required. Run: pip install -U osmosis-ai","minimum":"1.0.0"}'
+        body = b'{"status":"unsupported","message":"osmosis >= 1.0.0 required. Run: osmosis upgrade","latest":"1.0.0"}'
         mock_urlopen.side_effect = HTTPError(
             "https://platform.osmosis.ai/api/cli/verify",
             426,
