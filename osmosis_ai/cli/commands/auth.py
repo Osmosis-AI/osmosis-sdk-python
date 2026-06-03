@@ -141,7 +141,15 @@ def _cli_error_from_login_error(exc: Any) -> CLIError:
         return CLIError(str(exc), code="AUTH_REQUIRED")
 
     if status_code == 426:
-        return CLIError(str(exc), code="UPGRADE_REQUIRED", details={"status_code": 426})
+        details: dict[str, Any] = {"status_code": 426}
+        # Mirror the structured signal (status/message) a 426 carries on a
+        # regular API call so the UPGRADE_REQUIRED envelope looks the same
+        # whether it came from the login handshake or any other command.
+        signal = getattr(exc, "details", None)
+        if isinstance(signal, dict):
+            for key, value in signal.items():
+                details.setdefault(key, value)
+        return CLIError(str(exc), code="UPGRADE_REQUIRED", details=details)
 
     details: dict[str, Any] = {}
     if isinstance(status_code, int):

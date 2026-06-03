@@ -358,6 +358,12 @@ class TestUpgradeRequiredAtLogin:
 
         assert exc_info.value.code == "UPGRADE_REQUIRED"
         assert exc_info.value.status_code == 426
+        # The parsed version signal rides along so the command layer can attach
+        # the same structured details a 426 on a regular API call produces.
+        assert exc_info.value.details == {
+            "status": "unsupported",
+            "message": "A newer osmosis CLI is required, run osmosis upgrade",
+        }
 
     def test_verify_token_426_falls_back_to_default_message(self) -> None:
         error = HTTPError(
@@ -373,6 +379,9 @@ class TestUpgradeRequiredAtLogin:
 
         assert exc_info.value.code == "UPGRADE_REQUIRED"
         assert exc_info.value.status_code == 426
+        # No usable signal in the body — details stay empty rather than carrying
+        # a half-parsed envelope.
+        assert exc_info.value.details is None
 
 
 # ---------------------------------------------------------------------------

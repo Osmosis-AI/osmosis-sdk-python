@@ -43,10 +43,12 @@ class LoginError(Exception):
         *,
         code: str | None = None,
         status_code: int | None = None,
+        details: dict[str, Any] | None = None,
     ):
         super().__init__(message)
         self.code = code
         self.status_code = status_code
+        self.details = details
 
 
 @dataclass
@@ -192,8 +194,17 @@ def _login_error_from_http(
     """
     if e.code == 426:
         body = _read_error_body(e)
-        message, _ = upgrade_required_message(body)
-        return LoginError(message, code="UPGRADE_REQUIRED", status_code=426)
+        message, version_signal = upgrade_required_message(body)
+        # Carry the parsed version signal so the command layer can attach the
+        # same structured ``details`` (status/message) a 426 on a regular API
+        # call produces, keeping the UPGRADE_REQUIRED JSON contract consistent
+        # across the login handshake and the rest of the CLI.
+        return LoginError(
+            message,
+            code="UPGRADE_REQUIRED",
+            status_code=426,
+            details=version_signal,
+        )
 
     detail = _read_error_detail(e)
     friendly = _HTTP_ERROR_MESSAGES.get(e.code)
