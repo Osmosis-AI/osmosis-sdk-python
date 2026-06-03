@@ -217,7 +217,7 @@ def _register_commands() -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Entry point for the osmosis CLI."""
+    """Entry point for the Osmosis CLI."""
     _register_commands()
     try:
         result = app(argv, standalone_mode=False)

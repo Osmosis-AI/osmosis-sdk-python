@@ -59,6 +59,8 @@ def _classify_platform_status(status: int | None) -> str:
         return "NOT_FOUND"
     if status == 409:
         return "CONFLICT"
+    if status == 426:
+        return "UPGRADE_REQUIRED"
     if status == 429:
         return "RATE_LIMITED"
     if status == 400:
@@ -179,6 +181,33 @@ def emit_structured_error_to_stderr(
             "message": err.message,
             "details": err.details,
             "request_id": err.request_id,
+        },
+    }
+    sys.stderr.write(json.dumps(envelope, ensure_ascii=False))
+    sys.stderr.write("\n")
+    sys.stderr.flush()
+
+
+def emit_structured_warning_to_stderr(
+    message: str,
+    *,
+    code: str | None = None,
+    cli_version: str | None = None,
+) -> None:
+    """Write a JSON-mode warning envelope (one line) to stderr.
+
+    Non-fatal warnings share stderr with the error envelope but are
+    distinguished by the top-level ``warning`` key (vs ``error``), so the stream
+    stays parseable as JSON Lines. Unlike errors, warnings are not tied to a
+    specific command (they originate from transport-level signals such as a
+    deprecation response header), so no ``command`` field is emitted.
+    """
+    envelope: dict[str, Any] = {
+        "schema_version": 1,
+        "cli_version": cli_version or PACKAGE_VERSION,
+        "warning": {
+            "code": code,
+            "message": message,
         },
     }
     sys.stderr.write(json.dumps(envelope, ensure_ascii=False))
