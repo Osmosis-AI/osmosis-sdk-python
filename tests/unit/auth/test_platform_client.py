@@ -945,6 +945,73 @@ class TestPlatformRequest:
         )
 
     # -------------------------------------------------------------------------
+    # Upgrade Nudge (X-Osmosis-Latest)
+    # -------------------------------------------------------------------------
+
+    @patch("osmosis_ai.platform.auth.platform_client.urlopen")
+    @patch("osmosis_ai.platform.auth.platform_client.console")
+    def test_platform_request_nudges_on_newer_latest_header(
+        self,
+        mock_console: MagicMock,
+        mock_urlopen: MagicMock,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A higher X-Osmosis-Latest triggers a single upgrade nudge."""
+        from osmosis_ai.platform.auth import platform_client
+
+        monkeypatch.setattr(platform_client, "_upgrade_nudged", False)
+
+        def _make_response_with_latest_header() -> MagicMock:
+            mock_resp = MagicMock()
+            mock_resp.read.return_value = b"{}"
+            mock_resp.status = 200
+            mock_resp.headers = {"X-Osmosis-Latest": "99.0.0"}
+            mock_resp.__enter__ = MagicMock(return_value=mock_resp)
+            mock_resp.__exit__ = MagicMock(return_value=False)
+            return mock_resp
+
+        mock_urlopen.return_value = _make_response_with_latest_header()
+        creds = _make_credentials()
+
+        platform_request("/api/cli/verify", credentials=creds, require_git_repo=False)
+        # Second call should NOT nudge again (dedup flag is now True).
+        mock_urlopen.return_value = _make_response_with_latest_header()
+        platform_request("/api/cli/verify", credentials=creds, require_git_repo=False)
+
+        mock_console.print_warning.assert_called_once_with(
+            "A newer version of the Osmosis CLI is available (99.0.0). "
+            "Run: osmosis upgrade",
+            code="UPGRADE_AVAILABLE",
+        )
+
+    @patch("osmosis_ai.platform.auth.platform_client.urlopen")
+    @patch("osmosis_ai.platform.auth.platform_client.console")
+    def test_platform_request_no_nudge_when_already_current(
+        self,
+        mock_console: MagicMock,
+        mock_urlopen: MagicMock,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A X-Osmosis-Latest equal to the installed version stays silent."""
+        from osmosis_ai.consts import PACKAGE_VERSION
+        from osmosis_ai.platform.auth import platform_client
+
+        monkeypatch.setattr(platform_client, "_upgrade_nudged", False)
+
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = b"{}"
+        mock_resp.status = 200
+        mock_resp.headers = {"X-Osmosis-Latest": PACKAGE_VERSION}
+        mock_resp.__enter__ = MagicMock(return_value=mock_resp)
+        mock_resp.__exit__ = MagicMock(return_value=False)
+        mock_urlopen.return_value = mock_resp
+        creds = _make_credentials()
+
+        platform_request("/api/cli/verify", credentials=creds, require_git_repo=False)
+
+        mock_console.print_warning.assert_not_called()
+
+    # -------------------------------------------------------------------------
     # 426 Upgrade Required
     # -------------------------------------------------------------------------
 

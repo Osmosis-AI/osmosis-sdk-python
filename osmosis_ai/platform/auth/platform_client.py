@@ -85,6 +85,8 @@ class UpgradeRequiredError(PlatformAPIError):
 
 # Warn at most once per process about a deprecated CLI version.
 _deprecation_warned = False
+# Nudge at most once per process about an available upgrade.
+_upgrade_nudged = False
 
 
 def _maybe_warn_deprecation(message: str | None) -> None:
@@ -94,6 +96,27 @@ def _maybe_warn_deprecation(message: str | None) -> None:
         return
     _deprecation_warned = True
     console.print_warning(message, code="DEPRECATION")
+
+
+def _maybe_nudge_upgrade(latest: str | None) -> None:
+    """Nudge once per process when the platform advertises a newer CLI version.
+
+    Reads the ``X-Osmosis-Latest`` header the platform sets on every response;
+    stays silent when we are already current or the version is unparseable.
+    """
+    global _upgrade_nudged
+    if not latest or _upgrade_nudged:
+        return
+    from osmosis_ai.cli.upgrade import _is_up_to_date
+
+    if _is_up_to_date(PACKAGE_VERSION, latest):
+        return
+    _upgrade_nudged = True
+    console.print_warning(
+        f"A newer version of the Osmosis CLI is available ({latest}). "
+        "Run: osmosis upgrade",
+        code="UPGRADE_AVAILABLE",
+    )
 
 
 def _credentials_match_env_token(credentials: Credentials | None) -> bool:
@@ -380,6 +403,7 @@ def platform_request(
     try:
         with urlopen(request, timeout=timeout) as response:
             _maybe_warn_deprecation(response.headers.get("X-Osmosis-Deprecation"))
+            _maybe_nudge_upgrade(response.headers.get("X-Osmosis-Latest"))
             if response.status == 204:
                 return {}
             raw = response.read()
