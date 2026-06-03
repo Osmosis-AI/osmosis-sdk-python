@@ -186,6 +186,16 @@ def _login_error_from_http(
     Uses the platform's error detail when it adds meaningful context,
     otherwise falls back to a status-code-specific message or a generic one.
     """
+    if e.code == 426:
+        body = _read_error_body(e)
+        platform_message = body.get("message")
+        message = (
+            platform_message
+            if isinstance(platform_message, str) and platform_message
+            else "This version of the Osmosis CLI is no longer supported. Run: osmosis upgrade"
+        )
+        return LoginError(message, code="UPGRADE_REQUIRED", status_code=426)
+
     detail = _read_error_detail(e)
     friendly = _HTTP_ERROR_MESSAGES.get(e.code)
 
@@ -225,6 +235,7 @@ def verify_token(token: str) -> VerifyResult:
             "Authorization": f"Bearer {token}",
             "Content-Type": "application/json",
             "User-Agent": f"osmosis-cli/{PACKAGE_VERSION}",
+            "X-Osmosis-CLI-Version": PACKAGE_VERSION,
         },
     )
 
@@ -290,6 +301,7 @@ def request_device_code(device_name: str | None = None) -> DeviceCodeResponse:
         headers={
             "Content-Type": "application/json",
             "User-Agent": f"osmosis-cli/{PACKAGE_VERSION}",
+            "X-Osmosis-CLI-Version": PACKAGE_VERSION,
         },
         method="POST",
     )
@@ -324,6 +336,7 @@ def poll_device_token(
     req_headers = {
         "Content-Type": "application/json",
         "User-Agent": f"osmosis-cli/{PACKAGE_VERSION}",
+        "X-Osmosis-CLI-Version": PACKAGE_VERSION,
     }
     deadline = time.monotonic() + timeout
     current_interval = interval
@@ -336,7 +349,7 @@ def poll_device_token(
                 data = json.loads(response.read().decode())
                 return data
         except HTTPError as e:
-            if e.code in (429, 500, 502, 503, 504):
+            if e.code in (426, 429, 500, 502, 503, 504):
                 raise _login_error_from_http(e, "Polling failed") from e
             try:
                 error_data = json.loads(e.read().decode())

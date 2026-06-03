@@ -140,6 +140,9 @@ def _cli_error_from_login_error(exc: Any) -> CLIError:
     ):
         return CLIError(str(exc), code="AUTH_REQUIRED")
 
+    if status_code == 426:
+        return CLIError(str(exc), code="UPGRADE_REQUIRED", details={"status_code": 426})
+
     details: dict[str, Any] = {}
     if isinstance(status_code, int):
         details["status_code"] = status_code
