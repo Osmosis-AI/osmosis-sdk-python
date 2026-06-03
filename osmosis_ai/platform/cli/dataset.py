@@ -23,7 +23,7 @@ from osmosis_ai.cli.output import (
 from osmosis_ai.cli.output.display import format_local_date
 from osmosis_ai.cli.paths import parse_cli_path
 from osmosis_ai.cli.prompts import require_confirmation
-from osmosis_ai.platform.api.models import STATUSES_IN_PROGRESS
+from osmosis_ai.platform.api.models import STATUSES_IN_PROGRESS, STATUSES_SUCCESS
 from osmosis_ai.platform.auth import (
     AuthenticationExpiredError,
     PlatformAPIError,
@@ -630,7 +630,7 @@ def download(
         ),
         output_console=console,
     )
-    if ds.status != "uploaded":
+    if ds.status not in STATUSES_SUCCESS:
         if ds.status in STATUSES_IN_PROGRESS:
             raise CLIError(
                 f"Dataset is still processing (status: {ds.status}). "
