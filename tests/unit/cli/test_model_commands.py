@@ -9,7 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 import osmosis_ai.cli.commands.model as model_module
-import osmosis_ai.platform.api.client as api_client_module
+import osmosis_ai.platform.cli.model as platform_model_module
 import osmosis_ai.platform.cli.utils as utils_module
 from osmosis_ai.cli.console import Console
 from osmosis_ai.cli.output import ListResult
@@ -50,7 +50,7 @@ def mock_git_context(monkeypatch: pytest.MonkeyPatch) -> None:
         credentials=AUTH_CREDENTIALS,
     )
     monkeypatch.setattr(
-        "osmosis_ai.platform.cli.utils.require_git_workspace_directory_context",
+        "osmosis_ai.platform.cli.model.require_git_workspace_directory_context",
         lambda: context,
     )
 
@@ -81,7 +81,7 @@ class TestListModels:
                 assert git_identity == GIT_IDENTITY
                 return PaginatedBaseModels(models=[], total_count=0, has_more=False)
 
-        monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(platform_model_module, "OsmosisClient", FakeClient)
         result = model_module.list_models(limit=30, all_=False)
 
         assert isinstance(result, ListResult)
@@ -109,7 +109,7 @@ class TestListModels:
                 assert git_identity == GIT_IDENTITY
                 return PaginatedBaseModels(models=[base], total_count=1, has_more=False)
 
-        monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(platform_model_module, "OsmosisClient", FakeClient)
         result = model_module.list_models(limit=30, all_=False)
 
         assert isinstance(result, ListResult)
@@ -134,7 +134,7 @@ class TestListModels:
                 assert git_identity == GIT_IDENTITY
                 return PaginatedBaseModels(models=[base], total_count=1, has_more=False)
 
-        monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(platform_model_module, "OsmosisClient", FakeClient)
         result = model_module.list_models(limit=30, all_=False)
 
         assert [column.label for column in result.columns] == [
@@ -164,7 +164,7 @@ class TestListModels:
                 assert git_identity == GIT_IDENTITY
                 return PaginatedBaseModels(models=[base], total_count=5, has_more=True)
 
-        monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(platform_model_module, "OsmosisClient", FakeClient)
         result = model_module.list_models(limit=1, all_=False)
 
         assert isinstance(result, ListResult)
