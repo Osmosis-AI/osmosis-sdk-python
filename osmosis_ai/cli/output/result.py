@@ -22,7 +22,6 @@ class ListColumn:
     label: str
     plain: bool = True
     no_wrap: bool = False
-    align: str | None = None
     overflow: Literal["fold", "crop", "ellipsis", "ignore"] | None = None
     ratio: int | None = None
     min_width: int | None = None

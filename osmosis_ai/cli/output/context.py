@@ -26,7 +26,6 @@ class OutputContext:
 
     format: OutputFormat
     interactive: bool
-    quiet: bool = False
     schema_version: int = 1
     output_emitted: bool = False
 

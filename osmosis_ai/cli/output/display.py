@@ -26,23 +26,6 @@ def _localize(dt: datetime, *, tz: tzinfo | None = None) -> datetime:
     return dt.astimezone()
 
 
-def local_timezone_label(
-    *, now: datetime | None = None, tz: tzinfo | None = None
-) -> str:
-    if tz is not None:
-        base_now = now or datetime.now(tz)
-        local_now = base_now.astimezone(tz) if base_now.tzinfo else base_now
-    else:
-        local_now = now or datetime.now().astimezone()
-    return local_now.tzname() or "Local"
-
-
-def created_column_label(
-    *, now: datetime | None = None, tz: tzinfo | None = None
-) -> str:
-    return "Created"
-
-
 def _twelve_hour_time(dt: datetime, *, with_seconds: bool = False) -> str:
     """12-hour clock time with AM/PM and no leading-zero hour (e.g. ``6:16 PM``)."""
     hour = dt.hour % 12 or 12
