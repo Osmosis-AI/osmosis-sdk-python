@@ -40,8 +40,8 @@ from osmosis_ai.platform.cli.training_config import (
 )
 from osmosis_ai.platform.cli.utils import (
     build_run_detail_rows,
-    fetch_all_pages,
     format_run_status,
+    paginated_fetch,
     require_git_workspace_directory_context,
     validate_list_options,
 )
@@ -174,29 +174,17 @@ def list_training_runs(*, limit: int, all_: bool) -> ListResult:
     client = OsmosisClient()
     output = get_output_context()
     with output.status("Fetching training runs..."):
-        if fetch_all:
-            training_runs, total_count = fetch_all_pages(
-                lambda lim, off: client.list_training_runs(
-                    limit=lim,
-                    offset=off,
-                    credentials=credentials,
-                    git_identity=context.git_identity,
-                ),
-                items_attr="training_runs",
-            )
-            has_more = False
-            next_offset: int | None = None
-        else:
-            page = client.list_training_runs(
-                limit=effective_limit,
-                offset=0,
+        training_runs, total_count, has_more, next_offset = paginated_fetch(
+            lambda lim, off: client.list_training_runs(
+                limit=lim,
+                offset=off,
                 credentials=credentials,
                 git_identity=context.git_identity,
-            )
-            training_runs = page.training_runs
-            total_count = page.total_count
-            has_more = page.has_more
-            next_offset = page.next_offset
+            ),
+            items_attr="training_runs",
+            limit=effective_limit,
+            fetch_all=fetch_all,
+        )
 
     return ListResult(
         title="Training Runs",

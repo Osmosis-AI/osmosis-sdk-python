@@ -440,7 +440,7 @@ def upload(
 def list_datasets(limit: int = DEFAULT_PAGE_SIZE, all_: bool = False) -> CommandResult:
     """List datasets."""
     from osmosis_ai.platform.cli.utils import (
-        fetch_all_pages,
+        paginated_fetch,
         validate_list_options,
     )
 
@@ -454,29 +454,17 @@ def list_datasets(limit: int = DEFAULT_PAGE_SIZE, all_: bool = False) -> Command
     client = OsmosisClient()
 
     with console.spinner("Fetching datasets..."):
-        if fetch_all:
-            datasets, total_count = fetch_all_pages(
-                lambda lim, off: client.list_datasets(
-                    limit=lim,
-                    offset=off,
-                    credentials=credentials,
-                    git_identity=git_identity,
-                ),
-                items_attr="datasets",
-            )
-            has_more = False
-            next_offset = None
-        else:
-            page = client.list_datasets(
-                limit=effective_limit,
-                offset=0,
+        datasets, total_count, has_more, next_offset = paginated_fetch(
+            lambda lim, off: client.list_datasets(
+                limit=lim,
+                offset=off,
                 credentials=credentials,
                 git_identity=git_identity,
-            )
-            datasets = page.datasets
-            total_count = page.total_count
-            has_more = page.has_more
-            next_offset = page.next_offset
+            ),
+            items_attr="datasets",
+            limit=effective_limit,
+            fetch_all=fetch_all,
+        )
 
     return ListResult(
         title="Datasets",

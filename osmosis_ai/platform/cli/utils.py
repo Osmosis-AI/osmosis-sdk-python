@@ -209,6 +209,37 @@ def fetch_all_pages(
     return all_items, total_count
 
 
+def paginated_fetch(
+    fetch_fn: Callable[[int, int], Any],
+    *,
+    items_attr: str,
+    limit: int,
+    fetch_all: bool,
+) -> tuple[list[Any], int, bool, int | None]:
+    """Resolve a list endpoint's ``--all`` / ``--limit`` branch uniformly.
+
+    *fetch_fn(limit, offset)* returns a page object exposing ``total_count``,
+    ``has_more``, ``next_offset`` (int | None), and an attribute named
+    *items_attr* (a list). The callable may be a closure with side effects
+    (e.g. capturing a page-level ``platform_url``); it is invoked on every
+    branch, so those side effects still fire.
+
+    When *fetch_all* is True every page is walked via :func:`fetch_all_pages`
+    and the result reports ``has_more=False`` / ``next_offset=None`` — a fully
+    drained list has no continuation cursor. Otherwise a single page is fetched
+    and its server-provided cursor fields are passed through verbatim.
+
+    Returns ``(items, total_count, has_more, next_offset)``. ``next_offset``
+    feeds ``ListResult.next_offset``, a required field of the stable ``--json``
+    ``schema_version:1`` envelope, so it must never be dropped.
+    """
+    if fetch_all:
+        items, total_count = fetch_all_pages(fetch_fn, items_attr=items_attr)
+        return items, total_count, False, None
+    page = fetch_fn(limit, 0)
+    return getattr(page, items_attr), page.total_count, page.has_more, page.next_offset
+
+
 def validate_list_options(
     *,
     limit: int,

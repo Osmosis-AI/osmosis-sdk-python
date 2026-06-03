@@ -30,6 +30,7 @@ from osmosis_ai.platform.api.client import OsmosisClient
 from osmosis_ai.platform.cli.shared_config import SECRET_NAME_RE
 from osmosis_ai.platform.cli.utils import (
     fetch_all_pages,
+    paginated_fetch,
     require_git_workspace_directory_context,
     validate_list_options,
 )
@@ -181,8 +182,9 @@ def list_secrets(*, limit: int, all_: bool, scope: str = "all") -> ListResult:
     client = OsmosisClient()
     output = get_output_context()
 
-    # ``fetch_all_pages`` discards the page object, so capture the page-level
-    # ``platform_url`` from the first response via a closure.
+    # ``paginated_fetch`` returns only items + cursor fields, discarding the page
+    # object, so capture the page-level ``platform_url`` from the first response
+    # via a closure (``_fetch`` is invoked on every branch of ``paginated_fetch``).
     captured: dict[str, str | None] = {}
 
     def _fetch(lim: int, off: int) -> Any:
@@ -197,18 +199,12 @@ def list_secrets(*, limit: int, all_: bool, scope: str = "all") -> ListResult:
         return page
 
     with output.status("Fetching secrets..."):
-        if fetch_all:
-            secrets, total_count = fetch_all_pages(
-                _fetch, items_attr="environment_secrets"
-            )
-            has_more = False
-            next_offset: int | None = None
-        else:
-            page = _fetch(effective_limit, 0)
-            secrets = page.environment_secrets
-            total_count = page.total_count
-            has_more = page.has_more
-            next_offset = page.next_offset
+        secrets, total_count, has_more, next_offset = paginated_fetch(
+            _fetch,
+            items_attr="environment_secrets",
+            limit=effective_limit,
+            fetch_all=fetch_all,
+        )
 
     platform_url = captured.get("platform_url")
 

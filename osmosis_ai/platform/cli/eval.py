@@ -33,7 +33,7 @@ from osmosis_ai.platform.cli.eval_config import (
 )
 from osmosis_ai.platform.cli.shared_submit import CloudSubmitSpec, run_cloud_submit
 from osmosis_ai.platform.cli.utils import (
-    fetch_all_pages,
+    paginated_fetch,
     require_git_workspace_directory_context,
     validate_list_options,
 )
@@ -122,29 +122,17 @@ def list_eval_runs(*, limit: int, all_: bool) -> ListResult:
     client = OsmosisClient()
     output = get_output_context()
     with output.status("Fetching evaluation runs..."):
-        if fetch_all:
-            eval_runs, total_count = fetch_all_pages(
-                lambda lim, off: client.list_eval_runs(
-                    limit=lim,
-                    offset=off,
-                    credentials=credentials,
-                    git_identity=context.git_identity,
-                ),
-                items_attr="eval_runs",
-            )
-            has_more = False
-            next_offset: int | None = None
-        else:
-            page = client.list_eval_runs(
-                limit=effective_limit,
-                offset=0,
+        eval_runs, total_count, has_more, next_offset = paginated_fetch(
+            lambda lim, off: client.list_eval_runs(
+                limit=lim,
+                offset=off,
                 credentials=credentials,
                 git_identity=context.git_identity,
-            )
-            eval_runs = page.eval_runs
-            total_count = page.total_count
-            has_more = page.has_more
-            next_offset = page.next_offset
+            ),
+            items_attr="eval_runs",
+            limit=effective_limit,
+            fetch_all=fetch_all,
+        )
 
     return ListResult(
         title="Evaluation Runs",
