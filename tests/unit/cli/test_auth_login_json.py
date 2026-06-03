@@ -245,6 +245,45 @@ def test_login_json_with_platform_verify_error_is_platform_error(
     assert "internal error" in envelope["error"]["message"]
 
 
+def test_login_json_with_426_is_upgrade_required_with_structured_details(
+    monkeypatch, capsys
+) -> None:
+    monkeypatch.delenv("OSMOSIS_TOKEN", raising=False)
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.load_credentials",
+        lambda **kwargs: None,
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.verify_token",
+        lambda token: (_ for _ in ()).throw(
+            LoginError(
+                "A newer osmosis CLI is required, run osmosis upgrade",
+                code="UPGRADE_REQUIRED",
+                status_code=426,
+                details={
+                    "status": "unsupported",
+                    "message": "A newer osmosis CLI is required, run osmosis upgrade",
+                },
+            )
+        ),
+    )
+
+    exit_code = cli.main(["--json", "auth", "login", "--token", "secret"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert captured.out == ""
+    envelope = json.loads(captured.err)
+    assert envelope["error"]["code"] == "UPGRADE_REQUIRED"
+    # The handshake 426 carries the same structured signal a regular API 426
+    # produces, so machine consumers see one consistent UPGRADE_REQUIRED shape.
+    assert envelope["error"]["details"] == {
+        "status_code": 426,
+        "status": "unsupported",
+        "message": "A newer osmosis CLI is required, run osmosis upgrade",
+    }
+
+
 def test_login_json_with_malformed_verify_response_is_platform_error(
     monkeypatch, capsys
 ) -> None:

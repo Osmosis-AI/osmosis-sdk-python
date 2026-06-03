@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import json
 import os
-import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from hashlib import sha256
@@ -51,6 +50,21 @@ KEYRING_ACCOUNT_PREFIX = "platform:"
 TOKEN_STORE_KEYRING = "keyring"
 TOKEN_STORE_FILE = "file"
 TOKEN_STORE_ENV = "env"
+
+
+def _warn(message: str, *, code: str) -> None:
+    """Emit an output-mode-aware warning from this low-level auth module.
+
+    Routes through ``console.print_warning`` (not a raw ``sys.stderr.write``) so
+    these best-effort diagnostics stay structured in ``--json`` mode instead of
+    corrupting the stderr JSON-lines contract, and pause any active spinner in
+    rich mode. The console is imported lazily to keep this module — imported on
+    nearly every authenticated command via ``load_credentials`` — free of a CLI
+    import at module load time.
+    """
+    from osmosis_ai.cli.console import console
+
+    console.print_warning(message, code=code)
 
 
 def keyring_account_for_platform(platform_url: str | None = None) -> str:
@@ -242,8 +256,9 @@ def _keyring_delete(account: str) -> bool:
         # Entry does not exist — nothing to clean up.
         return True
     except Exception:
-        sys.stderr.write(
-            f"Warning: failed to remove token from keyring for {account}\n"
+        _warn(
+            f"Could not remove token from keyring for {account}.",
+            code="KEYRING_DELETE_FAILED",
         )
         return False
 
@@ -377,9 +392,9 @@ def save_credentials(credentials: Credentials) -> str:
     data.pop("keyring_account", None)
     registry["platforms"][platform_url] = data
     atomic_write_json(CREDENTIALS_FILE, registry, mode=0o600)
-    sys.stderr.write(
-        "Warning: keyring unavailable — token stored in plain text at "
-        f"{CREDENTIALS_FILE}\n"
+    _warn(
+        f"Keyring unavailable — token stored in plain text at {CREDENTIALS_FILE}",
+        code="KEYRING_UNAVAILABLE",
     )
     return TOKEN_STORE_FILE
 
@@ -415,16 +430,18 @@ def load_credentials(*, include_env: bool = True) -> Credentials | None:
     except FileNotFoundError:
         return None
     except (json.JSONDecodeError, KeyError, ValueError) as exc:
-        sys.stderr.write(
-            f"Warning: could not parse credentials file ({type(exc).__name__}); "
-            "run 'osmosis auth login' to re-authenticate.\n"
+        _warn(
+            f"Could not parse credentials file ({type(exc).__name__}); "
+            "run 'osmosis auth login' to re-authenticate.",
+            code="CREDENTIALS_PARSE_FAILED",
         )
         return None
 
     if data.get("version") != CREDENTIALS_VERSION:
-        sys.stderr.write(
+        _warn(
             "Credentials format has changed. "
-            "Please run 'osmosis auth login' to re-authenticate.\n"
+            "Please run 'osmosis auth login' to re-authenticate.",
+            code="CREDENTIALS_VERSION_CHANGED",
         )
         return None
 
@@ -436,9 +453,10 @@ def load_credentials(*, include_env: bool = True) -> Credentials | None:
     credential_data.setdefault("version", CREDENTIALS_VERSION)
     token = _resolve_entry_token(credential_data, platform_url)
     if token is None:
-        sys.stderr.write(
+        _warn(
             "Token not found for the current Osmosis platform. "
-            "Please run 'osmosis auth login' to re-authenticate.\n"
+            "Please run 'osmosis auth login' to re-authenticate.",
+            code="TOKEN_NOT_FOUND",
         )
         return None
     credential_data["access_token"] = token
@@ -447,9 +465,10 @@ def load_credentials(*, include_env: bool = True) -> Credentials | None:
     try:
         return Credentials.from_dict(credential_data)
     except (KeyError, ValueError) as exc:
-        sys.stderr.write(
-            f"Warning: could not parse credentials ({type(exc).__name__}); "
-            "run 'osmosis auth login' to re-authenticate.\n"
+        _warn(
+            f"Could not parse credentials ({type(exc).__name__}); "
+            "run 'osmosis auth login' to re-authenticate.",
+            code="CREDENTIALS_PARSE_FAILED",
         )
         return None
 
@@ -481,9 +500,10 @@ def delete_credentials() -> bool:
     keyring_cleaned = _cleanup_platform_keyring_entries(old_entry, platform_url)
 
     if not keyring_cleaned:
-        sys.stderr.write(
-            "Warning: could not remove token from system keyring. "
-            "You may want to remove it manually.\n"
+        _warn(
+            "Could not remove token from system keyring. "
+            "You may want to remove it manually.",
+            code="KEYRING_CLEANUP_FAILED",
         )
 
     if metadata_missing:

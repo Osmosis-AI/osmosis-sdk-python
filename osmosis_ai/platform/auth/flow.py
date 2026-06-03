@@ -21,11 +21,15 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from osmosis_ai.cli.console import console
-from osmosis_ai.consts import PACKAGE_VERSION
 
 from .config import PLATFORM_URL as _IMPORTED_PLATFORM_URL
 from .config import get_platform_url, normalize_platform_url
 from .credentials import Credentials, UserInfo
+from .platform_client import (
+    cli_request_headers,
+    surface_response_version_signal,
+    upgrade_required_message,
+)
 
 PLATFORM_URL = _IMPORTED_PLATFORM_URL
 
@@ -39,10 +43,12 @@ class LoginError(Exception):
         *,
         code: str | None = None,
         status_code: int | None = None,
+        details: dict[str, Any] | None = None,
     ):
         super().__init__(message)
         self.code = code
         self.status_code = status_code
+        self.details = details
 
 
 @dataclass
@@ -186,6 +192,20 @@ def _login_error_from_http(
     Uses the platform's error detail when it adds meaningful context,
     otherwise falls back to a status-code-specific message or a generic one.
     """
+    if e.code == 426:
+        body = _read_error_body(e)
+        message, version_signal = upgrade_required_message(body)
+        # Carry the parsed version signal so the command layer can attach the
+        # same structured ``details`` (status/message) a 426 on a regular API
+        # call produces, keeping the UPGRADE_REQUIRED JSON contract consistent
+        # across the login handshake and the rest of the CLI.
+        return LoginError(
+            message,
+            code="UPGRADE_REQUIRED",
+            status_code=426,
+            details=version_signal,
+        )
+
     detail = _read_error_detail(e)
     friendly = _HTTP_ERROR_MESSAGES.get(e.code)
 
@@ -221,15 +241,12 @@ def verify_token(token: str) -> VerifyResult:
 
     request = Request(
         verify_url,
-        headers={
-            "Authorization": f"Bearer {token}",
-            "Content-Type": "application/json",
-            "User-Agent": f"osmosis-cli/{PACKAGE_VERSION}",
-        },
+        headers=cli_request_headers(token=token),
     )
 
     try:
         with urlopen(request, timeout=30) as response:
+            surface_response_version_signal(response)
             data = json.loads(response.read().decode())
 
             token_id = data.get("token_id")
@@ -287,15 +304,13 @@ def request_device_code(device_name: str | None = None) -> DeviceCodeResponse:
     request = Request(
         url,
         data=body,
-        headers={
-            "Content-Type": "application/json",
-            "User-Agent": f"osmosis-cli/{PACKAGE_VERSION}",
-        },
+        headers=cli_request_headers(),
         method="POST",
     )
 
     try:
         with urlopen(request, timeout=30) as response:
+            surface_response_version_signal(response)
             data = json.loads(response.read().decode())
             return DeviceCodeResponse(
                 device_code=data["device_code"],
@@ -321,10 +336,7 @@ def poll_device_token(
     """Poll for device authorization completion. Returns token response dict."""
     url = f"{_platform_url()}/api/cli/device/token"
     body = json.dumps({"device_code": device_code}).encode()
-    req_headers = {
-        "Content-Type": "application/json",
-        "User-Agent": f"osmosis-cli/{PACKAGE_VERSION}",
-    }
+    req_headers = cli_request_headers()
     deadline = time.monotonic() + timeout
     current_interval = interval
 
@@ -333,10 +345,11 @@ def poll_device_token(
 
         try:
             with urlopen(request, timeout=30) as response:
+                surface_response_version_signal(response)
                 data = json.loads(response.read().decode())
                 return data
         except HTTPError as e:
-            if e.code in (429, 500, 502, 503, 504):
+            if e.code in (426, 429, 500, 502, 503, 504):
                 raise _login_error_from_http(e, "Polling failed") from e
             try:
                 error_data = json.loads(e.read().decode())

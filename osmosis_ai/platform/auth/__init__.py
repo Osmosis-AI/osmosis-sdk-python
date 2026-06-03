@@ -16,6 +16,7 @@ from .platform_client import (
     AuthenticationExpiredError,
     PlatformAPIError,
     SubscriptionRequiredError,
+    UpgradeRequiredError,
     platform_request,
 )
 
@@ -29,6 +30,7 @@ __all__ = [
     "LoginResult",
     "PlatformAPIError",
     "SubscriptionRequiredError",
+    "UpgradeRequiredError",
     "UserInfo",
     "delete_credentials",
     "device_login",
