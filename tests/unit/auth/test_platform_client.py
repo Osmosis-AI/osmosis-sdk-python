@@ -381,6 +381,45 @@ class TestPlatformRequest:
 
         assert result == expected
 
+    @patch("osmosis_ai.platform.auth.platform_client.urlopen")
+    def test_204_response_returns_empty_dict(self, mock_urlopen: MagicMock) -> None:
+        """Verify a 204 No Content response yields an empty dict without reading."""
+        mock_resp = MagicMock()
+        mock_resp.status = 204
+        mock_resp.headers = {}
+        mock_resp.__enter__ = MagicMock(return_value=mock_resp)
+        mock_resp.__exit__ = MagicMock(return_value=False)
+        mock_urlopen.return_value = mock_resp
+        creds = _make_credentials()
+
+        result = platform_request(
+            "/api/test", credentials=creds, git_identity="git_test"
+        )
+
+        assert result == {}
+        mock_resp.read.assert_not_called()
+
+    @patch("osmosis_ai.platform.auth.platform_client.console")
+    @patch("osmosis_ai.platform.auth.platform_client._deprecation_warned", False)
+    @patch("osmosis_ai.platform.auth.platform_client.urlopen")
+    def test_deprecation_header_emits_warning_once(
+        self, mock_urlopen: MagicMock, mock_console: MagicMock
+    ) -> None:
+        """Verify the X-Osmosis-Deprecation header surfaces a single warning."""
+        mock_resp = MagicMock()
+        mock_resp.status = 200
+        mock_resp.read.return_value = json.dumps({"ok": True}).encode()
+        mock_resp.headers = {"X-Osmosis-Deprecation": "Upgrade soon"}
+        mock_resp.__enter__ = MagicMock(return_value=mock_resp)
+        mock_resp.__exit__ = MagicMock(return_value=False)
+        mock_urlopen.return_value = mock_resp
+        creds = _make_credentials()
+
+        platform_request("/api/test", credentials=creds, git_identity="git_test")
+        platform_request("/api/test", credentials=creds, git_identity="git_test")
+
+        mock_console.print_warning.assert_called_once_with("Upgrade soon")
+
     # -------------------------------------------------------------------------
     # HTTP Error Handling
     # -------------------------------------------------------------------------
@@ -444,6 +483,36 @@ class TestPlatformRequest:
         assert "OSMOSIS_TOKEN environment variable has expired" in str(exc_info.value)
         assert "unset OSMOSIS_TOKEN" in str(exc_info.value)
         mock_reset.assert_not_called()
+
+    @patch("osmosis_ai.platform.auth.platform_client.urlopen")
+    def test_426_raises_upgrade_required_with_platform_message(
+        self, mock_urlopen: MagicMock
+    ) -> None:
+        """Verify 426 uses the platform-supplied message when present."""
+        body = json.dumps({"message": "Please upgrade to v2.0.0"})
+        mock_urlopen.side_effect = _make_http_error(426, body)
+        creds = _make_credentials()
+
+        with pytest.raises(UpgradeRequiredError) as exc_info:
+            platform_request("/api/test", credentials=creds, git_identity="git_test")
+
+        assert str(exc_info.value) == "Please upgrade to v2.0.0"
+        assert exc_info.value.status_code == 426
+        assert exc_info.value.error_code == "upgrade_required"
+        assert exc_info.value.details == {"message": "Please upgrade to v2.0.0"}
+
+    @patch("osmosis_ai.platform.auth.platform_client.urlopen")
+    def test_426_falls_back_to_default_message(self, mock_urlopen: MagicMock) -> None:
+        """Verify 426 uses a default message when the body lacks one."""
+        mock_urlopen.side_effect = _make_http_error(426, "")
+        creds = _make_credentials()
+
+        with pytest.raises(UpgradeRequiredError) as exc_info:
+            platform_request("/api/test", credentials=creds, git_identity="git_test")
+
+        assert "no longer supported" in str(exc_info.value)
+        assert "osmosis upgrade" in str(exc_info.value)
+        assert exc_info.value.details is None
 
     @pytest.mark.parametrize(
         ("status_code", "error_code", "expected_message"),

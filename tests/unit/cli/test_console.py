@@ -195,6 +195,45 @@ def test_print_error_does_not_parse_rich_markup(monkeypatch) -> None:
     assert error_output.getvalue() == "Missing [experiment] section\n"
 
 
+# ── print_warning ───────────────────────────────────────────────────
+
+
+def test_print_warning_writes_to_stderr(monkeypatch) -> None:
+    """print_warning writes a prefixed message to stderr."""
+    warning_output = StringIO()
+    monkeypatch.setattr(sys, "stderr", warning_output)
+    console = Console(file=StringIO(), force_terminal=True, no_color=True, width=120)
+
+    console.print_warning("Token expires soon")
+
+    assert warning_output.getvalue() == "⚠ Token expires soon\n"
+
+
+def test_print_warning_preserves_url_with_soft_wrap(monkeypatch) -> None:
+    """URL-bearing warnings should stay copyable when soft_wrap is set."""
+    warning_output = StringIO()
+    monkeypatch.setattr(sys, "stderr", warning_output)
+    console = Console(file=StringIO(), force_terminal=True, no_color=True, width=92)
+    url = (
+        "https://platform.osmosis.ai/osmosis-shared/settings/billing/"
+        "328be61c-ef39-45e1-9b33-1e3c7c482e97"
+    )
+
+    console.print_warning(f"Upgrade at: {url}", soft_wrap=True)
+
+    assert warning_output.getvalue() == f"⚠ Upgrade at: {url}\n"
+
+
+def test_print_warning_does_not_parse_rich_markup(monkeypatch) -> None:
+    warning_output = StringIO()
+    monkeypatch.setattr(sys, "stderr", warning_output)
+    console = Console(file=StringIO(), force_terminal=True, no_color=True, width=120)
+
+    console.print_warning("Missing [experiment] section", soft_wrap=True)
+
+    assert warning_output.getvalue() == "⚠ Missing [experiment] section\n"
+
+
 def test_table_url_emits_terminal_hyperlink(monkeypatch) -> None:
     monkeypatch.delenv("NO_COLOR", raising=False)
     monkeypatch.setenv("TERM", "xterm-256color")
