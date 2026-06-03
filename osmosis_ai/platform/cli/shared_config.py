@@ -492,8 +492,6 @@ def build_submit_summary_rows(
     model: str,
     dataset: str,
     commit_sha: str | None,
-    env: dict[str, str],
-    secrets: list[str],
 ) -> list[tuple[str, str]]:
     """Build the confirmation-table rows shared by ``train`` and ``eval`` submit."""
     rows: list[tuple[str, str]] = [
@@ -565,14 +563,7 @@ __all__ = [
     "build_env_table_rows",
     "build_secret_table_rows",
     "build_submit_summary_rows",
-    "collect_section_validation_issues",
-    "collect_top_level_validation_issues",
-    "config_issues_error",
-    "format_config_issue",
-    "format_field_path",
-    "format_input",
     "load_submit_config",
-    "parse_section",
     "read_toml_file",
     "read_toml_secrets",
     "read_toml_table",
@@ -580,5 +571,4 @@ __all__ = [
     "validate_env_var_keys",
     "validate_secret_names",
     "validate_workspace_rollout_paths",
-    "validation_issue_to_config_issue",
 ]

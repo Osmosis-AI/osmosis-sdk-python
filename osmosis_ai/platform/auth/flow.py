@@ -22,16 +22,13 @@ from urllib.request import Request, urlopen
 
 from osmosis_ai.cli.console import console
 
-from .config import PLATFORM_URL as _IMPORTED_PLATFORM_URL
-from .config import get_platform_url, normalize_platform_url
+from .config import get_platform_url
 from .credentials import Credentials, UserInfo
 from .platform_client import (
     cli_request_headers,
     surface_response_version_signal,
     upgrade_required_message,
 )
-
-PLATFORM_URL = _IMPORTED_PLATFORM_URL
 
 
 class LoginError(Exception):
@@ -91,8 +88,6 @@ class DeviceCodeResponse:
 
 
 def _platform_url() -> str:
-    if PLATFORM_URL != _IMPORTED_PLATFORM_URL:
-        return normalize_platform_url(PLATFORM_URL)
     return get_platform_url()
 
 

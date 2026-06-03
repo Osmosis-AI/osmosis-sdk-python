@@ -16,17 +16,9 @@ def _rows(**kwargs) -> dict[str, str]:
         "model": "m",
         "dataset": "d",
         "commit_sha": None,
-        "env": {},
-        "secrets": [],
     }
     defaults.update(kwargs)
     return dict(build_submit_summary_rows(**defaults))
-
-
-def test_summary_rows_no_env_or_secrets() -> None:
-    rows = _rows(env={"A": "1"}, secrets=["X"])
-    assert not any(label.startswith("Rollout env") for label in rows)
-    assert not any(label.startswith("Rollout secrets") for label in rows)
 
 
 def test_summary_rows_includes_core_fields() -> None:

@@ -47,7 +47,6 @@ _REMOVED_TWO_TOKEN_COMMANDS = {
     ("model", "delete"),
     ("rollout", "validate"),
     ("train", "delete"),
-    ("train", "info"),
     ("train", "traces"),
 }
 

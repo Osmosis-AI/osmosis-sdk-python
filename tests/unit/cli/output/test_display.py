@@ -6,25 +6,15 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import pytest
 
 from osmosis_ai.cli.output.display import (
-    created_column_label,
     format_local_date,
     format_local_datetime,
-    local_timezone_label,
 )
-
-
-def test_local_timezone_label_returns_non_empty_text() -> None:
-    assert local_timezone_label()
 
 
 def test_format_local_date_uses_explicit_timezone() -> None:
     formatted = format_local_date("2026-05-13T12:34:56Z", tz=ZoneInfo("UTC"))
 
     assert formatted == "2026-05-13 12:34 PM UTC"
-
-
-def test_created_column_label_uses_created_at_label() -> None:
-    assert created_column_label() == "Created"
 
 
 def test_format_local_date_includes_per_timestamp_timezone_rules() -> None:

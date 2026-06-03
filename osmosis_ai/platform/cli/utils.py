@@ -24,9 +24,7 @@ from osmosis_ai.platform.auth import (
 )
 from osmosis_ai.platform.cli.workspace_directory_context import (
     GitWorkspaceDirectoryContext,
-    LocalWorkspaceDirectoryContext,
     resolve_git_workspace_directory_context,
-    resolve_local_workspace_directory_context,
 )
 from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE
 
@@ -61,13 +59,6 @@ def require_credentials() -> Credentials:
 def require_git_workspace_directory_context() -> GitWorkspaceDirectoryContext:
     """Resolve the current Git-scoped Osmosis workspace directory for platform commands."""
     return resolve_git_workspace_directory_context()
-
-
-def require_local_workspace_directory_context(
-    *, require_scaffold: bool = True
-) -> LocalWorkspaceDirectoryContext:
-    """Resolve the current Git workspace directory for local-only commands."""
-    return resolve_local_workspace_directory_context(require_scaffold=require_scaffold)
 
 
 def format_dataset_status(d: Any, *, for_prompt: bool = False) -> str:
@@ -131,13 +122,6 @@ def format_date(iso_str: str | None) -> str:
     if not iso_str:
         return ""
     return iso_str[:10]
-
-
-def format_dim_date(iso_str: str | None) -> str:
-    """Format a date as dim-styled text for list displays, or '' if empty."""
-    if not iso_str:
-        return ""
-    return console.format_styled(format_date(iso_str), "dim")
 
 
 def build_dataset_detail_rows(ds: Any) -> list[tuple[str, str]]:
@@ -223,38 +207,6 @@ def fetch_all_pages(
             break
         offset = result.next_offset
     return all_items, total_count
-
-
-def paginated_fetch(
-    fetch_fn: Callable[[int, int], Any],
-    *,
-    items_attr: str,
-    limit: int,
-    fetch_all: bool,
-) -> tuple[list[Any], int, bool]:
-    """Fetch items from a paginated API, respecting ``--all`` / ``--limit``.
-
-    When *fetch_all* is True, exhaustively paginates via :func:`fetch_all_pages`.
-    Otherwise, issues a single request with the given *limit*.
-
-    Returns ``(items, total_count, has_more)``.
-    """
-    if fetch_all:
-        items, total_count = fetch_all_pages(fetch_fn, items_attr=items_attr)
-        return items, total_count, False
-    result = fetch_fn(limit, 0)
-    return getattr(result, items_attr), result.total_count, result.has_more
-
-
-def print_pagination_footer(shown: int, total: int, entity_name: str) -> None:
-    """Print a dim hint when a list command truncated its output."""
-    if shown >= total:
-        return
-    console.print(
-        f"\nShowing {shown} of {total} {entity_name}."
-        " Use --all to show all, or --limit to adjust.",
-        style="dim",
-    )
 
 
 def validate_list_options(

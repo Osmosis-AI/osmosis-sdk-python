@@ -4,11 +4,11 @@ Provides a consistent visual style and helper functions for all
 platform CLI commands that need interactive user input.
 
 Usage:
-    from osmosis_ai.cli.prompts import select, confirm, text
+    from osmosis_ai.cli.prompts import select_list, confirm, password
 
-    choice = select("Pick a workspace:", choices=["ws-a", "ws-b"])
+    choice = select_list("Pick a workspace:", items=["ws-a", "ws-b"])
     ok = confirm("Proceed?")
-    name = text("Name:", validate=my_validator)
+    secret = password("API key:")
 """
 
 from __future__ import annotations
@@ -43,11 +43,6 @@ OSMOSIS_STYLE = Style(
         ("disabled", "fg:#6b7280 italic"),  # Gray italic disabled
     ]
 )
-
-
-def is_interactive() -> bool:
-    """Return True if stdin is a TTY (interactive terminal)."""
-    return sys.stdin.isatty()
 
 
 def _add_extra_keys(
@@ -96,15 +91,6 @@ def _get_choices_container(question: questionary.Question):
             "The internal structure may have changed — update prompts.py."
         )
     return children[1]
-
-
-def _apply_max_height(
-    question: questionary.Question,
-    max_height: int,
-) -> questionary.Question:
-    """Cap the visible choice list to *max_height* rows with scrolling."""
-    _get_choices_container(question).content.height = Dimension(max=max_height)
-    return question
 
 
 # ── Split-scroll layout ─────────────────────────────────────────
@@ -243,32 +229,6 @@ def _create_select_question(
     )
 
 
-def select(
-    message: str,
-    choices: list[str | Choice | Separator],
-    *,
-    default: Any = None,
-    instruction: str | None = None,
-    max_height: int | None = None,
-) -> Any | None:
-    """Interactive single-selection prompt with arrow-key navigation.
-
-    Args:
-        max_height: Maximum visible choices before scrolling. None = no limit.
-
-    Returns the selected value, or None if the user cancels (Ctrl+C / ESC).
-    """
-    question = _create_select_question(
-        message,
-        choices,
-        default=default,
-        instruction=instruction,
-    )
-    if max_height is not None:
-        _apply_max_height(question, max_height)
-    return question.ask()
-
-
 def select_list(
     message: str,
     items: list[str | Choice | Separator],
@@ -342,32 +302,6 @@ def confirm(
     ).ask()
 
 
-def text(
-    message: str,
-    *,
-    default: str = "",
-    validate: Any = None,
-    instruction: str | None = None,
-) -> str | None:
-    """Interactive text input prompt with optional validation.
-
-    The validate callable receives the input string and should return
-    True if valid, or an error message string if invalid.
-
-    Returns the entered text, or None if the user cancels (Ctrl+C / ESC).
-    """
-    return _add_escape_binding(
-        questionary.text(
-            message,
-            default=default,
-            validate=validate,
-            style=OSMOSIS_STYLE,
-            qmark="?",
-            instruction=instruction,
-        )
-    ).ask()
-
-
 def password(
     message: str,
     *,
@@ -379,8 +313,8 @@ def password(
     Built on ``questionary.password`` (prompt_toolkit ``is_password=True``),
     so the typed value is read straight from the terminal: it is never
     echoed, never written to shell history, and never placed on the process
-    command line. Use this — not :func:`text` or ``console.input`` — for any
-    sensitive value.
+    command line. Use this for any sensitive value so it is never echoed,
+    written to history, or placed on the command line.
 
     The validate callable receives the input string and should return True
     if valid, or an error message string if invalid.
@@ -481,10 +415,7 @@ __all__ = [
     "Choice",
     "Separator",
     "confirm",
-    "is_interactive",
     "password",
     "require_confirmation",
-    "select",
     "select_list",
-    "text",
 ]

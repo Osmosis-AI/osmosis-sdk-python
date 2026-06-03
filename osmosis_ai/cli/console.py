@@ -390,21 +390,6 @@ class Console:
         with get_output_context().status(message):
             yield
 
-    def input(self, prompt: str = "", style: str | None = None) -> str:
-        """Get user input with optional styled prompt.
-
-        Args:
-            prompt: Prompt text.
-            style: Optional style for the prompt.
-
-        Returns:
-            User input string.
-        """
-        if style:
-            self._rich.print(prompt, style=style, end="")
-            return input()
-        return input(prompt)
-
 
 # Default console instance for convenient access
 console: Console = Console()

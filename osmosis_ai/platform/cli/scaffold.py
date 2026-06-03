@@ -132,7 +132,7 @@ def write_scaffold(target: Path, project_name: str, *, update: bool = False) -> 
         dest = target / entry.dest
         if dest.exists():
             continue
-        content = official_contents[entry.dest] if entry.official else entry.content
+        content = official_contents[entry.dest] if entry.official else ""
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_text(content, encoding="utf-8")
 

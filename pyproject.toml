@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "osmosis-ai"
 dynamic = ["version"]
-description = "A Python SDK for Osmosis LLM training workflows: reward/rubric validation, rollout, platform CLI, and evaluation tools."
+description = "A Python SDK and CLI for building agent rollouts and managing LLM post-training workflows on Osmosis."
 readme = "README.md"
 authors = [
     {name = "Osmosis AI", email = "jake@osmosis.ai"}
@@ -30,14 +30,14 @@ dependencies = [
     "pydantic>=2.0.0,<3.0.0",
     "strands-agents[litellm]>=1.29.0",
     "openai-agents[litellm]>=0.14,<0.15",
-    "rich>=14.2.0",
     # Secure credential storage (system keychain)
     "keyring>=25.0.0",
     # Interactive CLI prompts
     "questionary>=2.1.0,<3.0.0",
-    # CLI framework
-    "typer>=0.16.0",
-    "rich>=13.0.0",
+    # CLI framework. <0.26: Typer 0.26+ vendors its own Click, so the
+    # exceptions it raises bypass our top-level `click` error handling.
+    "typer>=0.16.0,<0.26",
+    "rich>=14.2.0",
     "harbor[daytona]==0.6.1",
 ]
 
