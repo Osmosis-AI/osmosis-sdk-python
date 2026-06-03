@@ -22,12 +22,12 @@ from typing import Any
 from osmosis_ai.cli.console import console
 from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.cli.output import (
-    DetailField,
     DetailResult,
     ListColumn,
     ListResult,
     OperationResult,
     OutputFormat,
+    detail_fields,
     get_output_context,
     serialize_deployment,
 )
@@ -46,10 +46,6 @@ from osmosis_ai.platform.cli.utils import (
 from osmosis_ai.platform.cli.workspace_directory_context import git_result_context
 
 _CANCEL_ACTION = "__cancel__"
-
-
-def _detail_fields(rows: list[tuple[str, str]]) -> list[DetailField]:
-    return [DetailField(label=label, value=value) for label, value in rows]
 
 
 def _deployment_summary_resource(result: Any) -> dict[str, Any]:
@@ -209,7 +205,7 @@ def info(checkpoint: str) -> DetailResult:
     return DetailResult(
         title="Deployment",
         data=data,
-        fields=_detail_fields(rows),
+        fields=detail_fields(rows),
     )
 
 

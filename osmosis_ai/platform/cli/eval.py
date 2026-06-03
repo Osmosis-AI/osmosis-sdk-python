@@ -12,6 +12,7 @@ from osmosis_ai.cli.output import (
     ListColumn,
     ListResult,
     OperationResult,
+    detail_fields,
     get_output_context,
     serialize_eval_run,
 )
@@ -208,7 +209,7 @@ def info(name_or_id: str) -> DetailResult:
         if detail.results.get("total_samples") is not None:
             rows.append(("Samples", str(detail.results["total_samples"])))
 
-    fields = [DetailField(label=label, value=value) for label, value in rows]
+    fields = detail_fields(rows)
     display_hints: list[str] = []
 
     if eval_run.get("platform_url"):

@@ -14,6 +14,12 @@ class DetailField:
     value: Any
 
 
+def detail_fields(rows: list[tuple[str, str]]) -> list[DetailField]:
+    """Convert (label, value) rows into a mutable list of DetailField."""
+
+    return [DetailField(label=label, value=value) for label, value in rows]
+
+
 @dataclass(frozen=True)
 class ListColumn:
     """A column in a list result."""

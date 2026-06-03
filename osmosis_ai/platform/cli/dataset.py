@@ -17,6 +17,7 @@ from osmosis_ai.cli.output import (
     ListColumn,
     ListResult,
     OperationResult,
+    detail_fields,
     serialize_dataset,
 )
 from osmosis_ai.cli.output.display import format_local_date
@@ -242,11 +243,6 @@ def _create_dataset_for_upload(
             ),
             output_console=console,
         )
-
-
-def _detail_fields(rows: list[tuple[str, str]]) -> list[DetailField]:
-    """Convert existing label/value rows into renderer detail fields."""
-    return [DetailField(label=label, value=value) for label, value in rows]
 
 
 def _perform_upload(
@@ -519,7 +515,7 @@ def info(
     return DetailResult(
         title="Dataset",
         data=data,
-        fields=_detail_fields(rows),
+        fields=detail_fields(rows),
         display_hints=[f"View: {ds.platform_url}"] if ds.platform_url else [],
     )
 

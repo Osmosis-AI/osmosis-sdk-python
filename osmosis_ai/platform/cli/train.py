@@ -18,6 +18,7 @@ from osmosis_ai.cli.output import (
     ListResult,
     OperationResult,
     OutputFormat,
+    detail_fields,
     get_output_context,
     serialize_checkpoint,
     serialize_training_run,
@@ -46,10 +47,6 @@ from osmosis_ai.platform.cli.utils import (
     validate_list_options,
 )
 from osmosis_ai.platform.cli.workspace_directory_context import git_result_context
-
-
-def _detail_fields(rows: list[tuple[str, str]]) -> list[DetailField]:
-    return [DetailField(label=label, value=value) for label, value in rows]
 
 
 def _safe_name(name: str) -> str:
@@ -293,7 +290,7 @@ def info(name: str, *, output: str | None) -> DetailResult:
         if metrics_data.overview.duration_formatted:
             rows.append(("Duration", metrics_data.overview.duration_formatted))
 
-    fields = _detail_fields(rows)
+    fields = detail_fields(rows)
     if run.platform_url:
         display_hints.append(f"View: {run.platform_url}")
     if checkpoints:
