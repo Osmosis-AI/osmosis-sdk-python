@@ -18,6 +18,7 @@ from osmosis_ai.cli.output import (
     ListResult,
     OperationResult,
     detail_fields,
+    get_output_context,
     serialize_dataset,
 )
 from osmosis_ai.cli.output.display import format_local_date
@@ -118,7 +119,6 @@ def _complete_with_retry(
                     credentials=credentials,
                     git_identity=git_identity,
                 ),
-                output_console=console,
             )
         except AuthenticationExpiredError:
             raise  # Not transient — surface immediately
@@ -215,7 +215,6 @@ def _create_dataset_for_upload(
                 credentials=credentials,
                 git_identity=git_identity,
             ),
-            output_console=console,
         )
     except PlatformAPIError as exc:
         existing_dataset_id = _existing_dataset_id_from_conflict(exc)
@@ -241,7 +240,6 @@ def _create_dataset_for_upload(
                 credentials=credentials,
                 git_identity=git_identity,
             ),
-            output_console=console,
         )
 
 
@@ -449,7 +447,7 @@ def list_datasets(limit: int = DEFAULT_PAGE_SIZE, all_: bool = False) -> Command
 
     client = OsmosisClient()
 
-    with console.spinner("Fetching datasets..."):
+    with get_output_context().status("Fetching datasets..."):
         datasets, total_count, has_more, next_offset = paginated_fetch(
             lambda lim, off: client.list_datasets(
                 limit=lim,
@@ -506,7 +504,6 @@ def info(
             credentials=credentials,
             git_identity=git_identity,
         ),
-        output_console=console,
     )
 
     rows = build_dataset_detail_rows(ds)
@@ -538,7 +535,6 @@ def preview(
             credentials=credentials,
             git_identity=git_identity,
         ),
-        output_console=console,
     )
 
     if ds.data_preview is None:
@@ -628,7 +624,6 @@ def download(
             credentials=credentials,
             git_identity=git_identity,
         ),
-        output_console=console,
     )
     if ds.status not in STATUSES_SUCCESS:
         if ds.status in STATUSES_IN_PROGRESS:
@@ -645,7 +640,6 @@ def download(
             credentials=credentials,
             git_identity=git_identity,
         ),
-        output_console=console,
     )
     default_filename = _default_download_filename(
         info.file_name or ds.file_name,

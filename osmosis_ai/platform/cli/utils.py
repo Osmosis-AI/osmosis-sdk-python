@@ -6,7 +6,7 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from osmosis_ai.cli.console import Console, console
+from osmosis_ai.cli.console import console
 from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.cli.output.display import format_local_datetime
 from osmosis_ai.platform.api.models import (
@@ -38,15 +38,16 @@ if TYPE_CHECKING:
     from osmosis_ai.platform.auth.credentials import Credentials
 
 
-def platform_call[T](
-    message: str,
-    call: Callable[[], T],
-    *,
-    output_console: Console | None = None,
-) -> T:
-    """Run a platform request while showing a consistent CLI loading status."""
-    status_console = output_console or console
-    with status_console.spinner(message):
+def platform_call[T](message: str, call: Callable[[], T]) -> T:
+    """Run a platform request while showing a consistent CLI loading status.
+
+    Progress renders on stderr through the active output context, matching the
+    other command domains (train/eval/deployment/...), so stdout stays clean for
+    piping and JSON/plain modes stay silent.
+    """
+    from osmosis_ai.cli.output import get_output_context
+
+    with get_output_context().status(message):
         return call()
 
 

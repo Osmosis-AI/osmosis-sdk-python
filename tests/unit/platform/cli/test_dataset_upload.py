@@ -55,7 +55,7 @@ class TestPerformUpload:
                 assert git_identity == GIT_IDENTITY
                 return _make_fake_dataset()
 
-        def fake_platform_call(message, call, *, output_console=None):
+        def fake_platform_call(message, call):
             messages.append(message)
             return call()
 

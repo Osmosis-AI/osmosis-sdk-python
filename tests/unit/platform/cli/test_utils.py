@@ -318,23 +318,26 @@ def test_validate_list_options_mutual_exclusion() -> None:
 # ── platform_call ────────────────────────────────────────────────────
 
 
-def test_platform_call_uses_injected_console() -> None:
-    output = StringIO()
-    status_console = Console(file=output, force_terminal=False)
+def test_platform_call_shows_status_and_returns_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import osmosis_ai.cli.output as output_mod
+
     messages: list[str] = []
 
     @contextmanager
-    def record_spinner(message: str):
+    def record_status(message: str):
         messages.append(message)
         yield
 
-    status_console.spinner = record_spinner  # type: ignore[method-assign]
+    class _FakeContext:
+        def status(self, message: str):
+            return record_status(message)
 
-    result = platform_call(
-        "Fetching things...",
-        lambda: "ok",
-        output_console=status_console,
-    )
+    monkeypatch.setattr(output_mod, "get_output_context", lambda: _FakeContext())
+
+    result = platform_call("Fetching things...", lambda: "ok")
 
     assert result == "ok"
+    # Progress routes through the active output context (stderr), not a console.
     assert messages == ["Fetching things..."]
