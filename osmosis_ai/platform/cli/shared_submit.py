@@ -26,7 +26,7 @@ from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.cli.output import OperationResult, get_output_context
 from osmosis_ai.cli.prompts import require_confirmation
 from osmosis_ai.platform.api.client import OsmosisClient
-from osmosis_ai.platform.api.models import SubmitRunResult
+from osmosis_ai.platform.api.models import WIRE_SCOPE_PERSONAL, SubmitRunResult
 from osmosis_ai.platform.auth.platform_client import PlatformAPIError
 from osmosis_ai.platform.cli.shared_config import (
     BaseSubmitConfig,
@@ -118,19 +118,23 @@ def _fetch_secret_scopes(
 
         secrets, _ = fetch_all_pages(_fetch, items_attr="environment_secrets")
         workspace = {s.name for s in secrets if s.scope == "workspace"}
-        personal = {s.name for s in secrets if s.scope == "user"}
+        personal = {s.name for s in secrets if s.scope == WIRE_SCOPE_PERSONAL}
         return workspace, personal
     except Exception:
         return None
 
 
-def _missing_secret_message(names: list[str]) -> str:
-    """Build a fail-fast message for run-submit secrets that don't exist."""
-    lines = [
-        f"Could not find secret(s): {', '.join(names)}.",
-        "",
-        "Run the following to add them:",
-    ]
+def _secret_add_hint_lines(
+    names: list[str], *, platform_url: str | None = None
+) -> list[str]:
+    """Build the shared "add these secrets" hint tail shared by both error paths.
+
+    Emits the "Run the following to add them:" line, one
+    ``  osmosis secret set <name>`` per name, a blank-line separator, and the
+    personal-scope guidance sentence. When ``platform_url`` is provided, appends
+    a UI deep-link line (used only on the server-404 enrich path).
+    """
+    lines = ["Run the following to add them:"]
     lines.extend(f"  osmosis secret set {name}" for name in names)
     lines.extend(
         [
@@ -138,6 +142,18 @@ def _missing_secret_message(names: list[str]) -> str:
             "Secrets default to personal scope. Use --scope workspace for secrets shared across the workspace.",
         ]
     )
+    if platform_url:
+        lines.append(f"\nOr add them in the UI: {platform_url}")
+    return lines
+
+
+def _missing_secret_message(names: list[str]) -> str:
+    """Build a fail-fast message for run-submit secrets that don't exist."""
+    lines = [
+        f"Could not find secret(s): {', '.join(names)}.",
+        "",
+    ]
+    lines.extend(_secret_add_hint_lines(names))
     return "\n".join(lines)
 
 
@@ -160,16 +176,8 @@ def _enrich_missing_secret_error(
     lines = [
         str(exc),
         "",
-        "Run the following to add them:",
     ]
-    for name in names:
-        lines.append(f"  osmosis secret set {name}")
-    lines.append("")
-    lines.append(
-        "Secrets default to personal scope. Use --scope workspace for secrets shared across the workspace."
-    )
-    if platform_url:
-        lines.append(f"\nOr add them in the UI: {platform_url}")
+    lines.extend(_secret_add_hint_lines(names, platform_url=platform_url))
 
     return PlatformAPIError(
         "\n".join(lines),

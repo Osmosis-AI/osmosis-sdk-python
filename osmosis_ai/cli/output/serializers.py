@@ -13,6 +13,7 @@ from osmosis_ai.platform.api.models import (
     LoraCheckpointInfo,
     RolloutInfo,
     TrainingRun,
+    wire_to_display_scope,
 )
 
 
@@ -119,7 +120,7 @@ def serialize_environment_secret(secret: EnvironmentSecretInfo) -> dict[str, Any
         "id": secret.id,
         "name": secret.name,
         # User-facing scope vocabulary: the platform's wire "user" is "personal".
-        "scope": "personal" if secret.scope == "user" else secret.scope,
+        "scope": wire_to_display_scope(secret.scope),
         "created_at": secret.created_at,
         "updated_at": secret.updated_at,
         "creator_name": secret.creator_name,

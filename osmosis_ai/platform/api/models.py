@@ -450,6 +450,21 @@ class PaginatedBaseModels:
 # only metadata. These models therefore have no field for the value — there
 # is intentionally nowhere for a value to land if one were ever returned.
 
+# The platform wire value for a personal secret's scope is "user"; the
+# user-facing vocabulary calls it "personal". Both the wire value and the
+# display value are part of the stable JSON/API contract — keep them exact.
+WIRE_SCOPE_PERSONAL = "user"
+DISPLAY_SCOPE_PERSONAL = "personal"
+
+
+def wire_to_display_scope(scope: str | None) -> str | None:
+    """Map a wire scope value to its user-facing display value.
+
+    Only the personal scope differs ("user" → "personal"); every other value
+    (including ``"workspace"`` and ``None``) passes through unchanged.
+    """
+    return DISPLAY_SCOPE_PERSONAL if scope == WIRE_SCOPE_PERSONAL else scope
+
 
 @dataclass
 class EnvironmentSecretInfo:
