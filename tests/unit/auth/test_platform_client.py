@@ -418,7 +418,9 @@ class TestPlatformRequest:
         platform_request("/api/test", credentials=creds, git_identity="git_test")
         platform_request("/api/test", credentials=creds, git_identity="git_test")
 
-        mock_console.print_warning.assert_called_once_with("Upgrade soon")
+        mock_console.print_warning.assert_called_once_with(
+            "Upgrade soon", code="DEPRECATION"
+        )
 
     # -------------------------------------------------------------------------
     # HTTP Error Handling
@@ -498,7 +500,7 @@ class TestPlatformRequest:
 
         assert str(exc_info.value) == "Please upgrade to v2.0.0"
         assert exc_info.value.status_code == 426
-        assert exc_info.value.error_code == "upgrade_required"
+        assert exc_info.value.error_code == "UPGRADE_REQUIRED"
         assert exc_info.value.details == {"message": "Please upgrade to v2.0.0"}
 
     @patch("osmosis_ai.platform.auth.platform_client.urlopen")
@@ -938,7 +940,9 @@ class TestPlatformRequest:
         platform_request("/api/cli/verify", credentials=creds, require_git_repo=False)
 
         # print_warning should have been called exactly once (dedup flag prevents a second call).
-        mock_console.print_warning.assert_called_once_with(deprecation_msg)
+        mock_console.print_warning.assert_called_once_with(
+            deprecation_msg, code="DEPRECATION"
+        )
 
     # -------------------------------------------------------------------------
     # 426 Upgrade Required

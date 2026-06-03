@@ -159,16 +159,40 @@ class Console:
         self,
         message: str,
         *,
+        code: str | None = None,
         soft_wrap: bool | None = None,
         markup: bool = False,
     ) -> None:
-        """Print a non-fatal warning message to stderr.
+        """Print a non-fatal warning to stderr, honoring the output format.
+
+        Warnings are emitted automatically deep in the request path (e.g. from a
+        deprecation response header), so they are routed per output format to
+        avoid corrupting the machine contract:
+
+        - JSON: a one-line structured warning envelope on stderr, distinguished
+          from the error envelope by the ``warning`` key so the stream stays
+          parseable as JSON Lines.
+        - plain: unstyled ``warning: <message>`` text on stderr.
+        - rich: a yellow ``⚠`` line on stderr.
 
         Args:
             message: Warning message to print.
+            code: Optional machine-readable code (e.g. ``"DEPRECATION"``) carried
+                in the JSON envelope. Ignored in plain/rich modes.
             soft_wrap: Whether Rich should avoid inserting hard line breaks.
             markup: Whether to interpret Rich markup in the message.
         """
+        from osmosis_ai.cli.output.context import OutputFormat
+
+        fmt = self._output_format()
+        if fmt is OutputFormat.json:
+            from osmosis_ai.cli.output.error import emit_structured_warning_to_stderr
+
+            emit_structured_warning_to_stderr(message, code=code)
+            return
+        if fmt is OutputFormat.plain:
+            sys.stderr.write(f"warning: {message}\n")
+            return
         kwargs: dict[str, Any] = {"markup": markup}
         if soft_wrap is not None:
             kwargs["soft_wrap"] = soft_wrap

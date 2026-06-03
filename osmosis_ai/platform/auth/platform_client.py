@@ -93,7 +93,7 @@ def _maybe_warn_deprecation(message: str | None) -> None:
     if not message or _deprecation_warned:
         return
     _deprecation_warned = True
-    console.print_warning(message)
+    console.print_warning(message, code="DEPRECATION")
 
 
 def _credentials_match_env_token(credentials: Credentials | None) -> bool:
@@ -411,7 +411,7 @@ def platform_request(
             raise UpgradeRequiredError(
                 message,
                 e.code,
-                error_code="upgrade_required",
+                error_code="UPGRADE_REQUIRED",
                 details=error_body or None,
             ) from e
 
