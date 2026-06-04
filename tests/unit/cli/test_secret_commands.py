@@ -892,6 +892,44 @@ def test_secret_delete_rejects_legacy_names(
     assert payload["error"]["code"] == "VALIDATION"
 
 
+# ── _existing_secret_names (used by delete pre-check) ─────────────────
+
+
+def test_existing_secret_names_projects_names_in_scope() -> None:
+    class FakeClient:
+        def list_environment_secrets(
+            self, *, limit, offset, scope, credentials, git_identity
+        ):
+            assert scope == "user"  # wire value passed through verbatim
+            return PaginatedEnvironmentSecrets(
+                environment_secrets=[
+                    EnvironmentSecretInfo(id="A", name="OPENAI_API_KEY", scope="user"),
+                    EnvironmentSecretInfo(id="B", name="GH_TOKEN", scope="user"),
+                ],
+                total_count=2,
+                has_more=False,
+            )
+
+    names = secret_module._existing_secret_names(
+        FakeClient(), scope="user", credentials=object(), git_identity=GIT_IDENTITY
+    )
+    assert names == {"OPENAI_API_KEY", "GH_TOKEN"}
+
+
+def test_existing_secret_names_returns_none_on_error() -> None:
+    class FakeClient:
+        def list_environment_secrets(self, **kwargs):
+            raise RuntimeError("network down")
+
+    names = secret_module._existing_secret_names(
+        FakeClient(),
+        scope="workspace",
+        credentials=object(),
+        git_identity=GIT_IDENTITY,
+    )
+    assert names is None
+
+
 def test_secret_set_rejects_legacy_names(monkeypatch, capsys) -> None:
     """set enforces the strict name rule."""
     _stub_git_context(monkeypatch)

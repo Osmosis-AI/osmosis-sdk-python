@@ -27,9 +27,11 @@ from osmosis_ai.cli.output import (
 from osmosis_ai.cli.output.display import format_local_date
 from osmosis_ai.cli.prompts import require_confirmation
 from osmosis_ai.platform.api.client import OsmosisClient
+from osmosis_ai.platform.api.models import WIRE_SCOPE_PERSONAL
 from osmosis_ai.platform.cli.shared_config import SECRET_NAME_RE
 from osmosis_ai.platform.cli.utils import (
-    fetch_all_pages,
+    fetch_environment_secrets,
+    paginated_fetch,
     require_git_workspace_directory_context,
     validate_list_options,
 )
@@ -46,10 +48,14 @@ _SECRET_NAME_MAX = 255
 # value for a personal secret is "user", so translate at the API boundary.
 _VALID_SCOPES = ("workspace", "personal")
 _VALID_LIST_SCOPES = ("all", "workspace", "personal")
-_SCOPE_TO_WIRE = {"all": "all", "workspace": "workspace", "personal": "user"}
+_SCOPE_TO_WIRE = {
+    "all": "all",
+    "workspace": "workspace",
+    "personal": WIRE_SCOPE_PERSONAL,
+}
 
 # Human-facing labels for the scope column (the raw wire values stay in JSON output).
-_SCOPE_DISPLAY = {"workspace": "Workspace", "user": "Personal"}
+_SCOPE_DISPLAY = {"workspace": "Workspace", WIRE_SCOPE_PERSONAL: "Personal"}
 
 
 def _validate_secret_name(name: str) -> None:
@@ -71,6 +77,28 @@ def _validate_scope(scope: str) -> None:
         raise CLIError(
             "Scope must be 'workspace' or 'personal'.",
             code="VALIDATION",
+        )
+
+
+def _require_value_source_available(env: str | None, output: Any) -> None:
+    """Fail fast when no usable secret-value source exists.
+
+    Without ``--env``, a hidden interactive prompt is the only accepted source.
+    In non-interactive modes (``--json`` / ``--plain`` or a non-TTY stdin) there
+    is no safe way to obtain the value, so require an explicit flag. Raising here
+    lets ``set_secret`` reject before any network/workspace call (the message and
+    ``details`` stay in sync with the equivalent guard in
+    ``_resolve_secret_value``).
+    """
+    if env is None and (
+        output.format is not OutputFormat.rich or not output.interactive
+    ):
+        raise CLIError(
+            "Secret value required. Run interactively to type it at a hidden "
+            "prompt, or pass --env VARNAME to read it from an environment "
+            "variable.",
+            code="INTERACTIVE_REQUIRED",
+            details={"flags": ["--env"]},
         )
 
 
@@ -106,14 +134,7 @@ def _resolve_secret_value(*, env: str | None, output: Any) -> str | None:
     # No --env: a hidden interactive prompt is the only other accepted source.
     # In non-interactive modes (``--json`` / ``--plain`` or a non-TTY stdin)
     # there is no safe way to obtain the value, so require an explicit flag.
-    if output.format is not OutputFormat.rich or not output.interactive:
-        raise CLIError(
-            "Secret value required. Run interactively to type it at a hidden "
-            "prompt, or pass --env VARNAME to read it from an environment "
-            "variable.",
-            code="INTERACTIVE_REQUIRED",
-            details={"flags": ["--env"]},
-        )
+    _require_value_source_available(env, output)
 
     from osmosis_ai.cli.prompts import password
 
@@ -181,8 +202,9 @@ def list_secrets(*, limit: int, all_: bool, scope: str = "all") -> ListResult:
     client = OsmosisClient()
     output = get_output_context()
 
-    # ``fetch_all_pages`` discards the page object, so capture the page-level
-    # ``platform_url`` from the first response via a closure.
+    # ``paginated_fetch`` returns only items + cursor fields, discarding the page
+    # object, so capture the page-level ``platform_url`` from the first response
+    # via a closure (``_fetch`` is invoked on every branch of ``paginated_fetch``).
     captured: dict[str, str | None] = {}
 
     def _fetch(lim: int, off: int) -> Any:
@@ -197,18 +219,12 @@ def list_secrets(*, limit: int, all_: bool, scope: str = "all") -> ListResult:
         return page
 
     with output.status("Fetching secrets..."):
-        if fetch_all:
-            secrets, total_count = fetch_all_pages(
-                _fetch, items_attr="environment_secrets"
-            )
-            has_more = False
-            next_offset: int | None = None
-        else:
-            page = _fetch(effective_limit, 0)
-            secrets = page.environment_secrets
-            total_count = page.total_count
-            has_more = page.has_more
-            next_offset = page.next_offset
+        secrets, total_count, has_more, next_offset = paginated_fetch(
+            _fetch,
+            items_attr="environment_secrets",
+            limit=effective_limit,
+            fetch_all=fetch_all,
+        )
 
     platform_url = captured.get("platform_url")
 
@@ -256,10 +272,8 @@ def set_secret(
     _validate_scope(scope)
 
     output = get_output_context()
-    if env is None and (
-        output.format is not OutputFormat.rich or not output.interactive
-    ):
-        _resolve_secret_value(env=None, output=output)
+    # Reject before any network/workspace call when no value source is usable.
+    _require_value_source_available(env, output)
 
     context = require_git_workspace_directory_context()
 
@@ -324,21 +338,12 @@ def _existing_secret_names(
 ) -> set[str] | None:
     """Names that exist in ``scope`` (a wire value). ``None`` if the lookup fails,
     so a transient error falls back to letting the platform validate."""
-    try:
-
-        def _fetch(limit: int, offset: int) -> Any:
-            return client.list_environment_secrets(
-                limit=limit,
-                offset=offset,
-                scope=scope,
-                credentials=credentials,
-                git_identity=git_identity,
-            )
-
-        secrets, _ = fetch_all_pages(_fetch, items_attr="environment_secrets")
-        return {s.name for s in secrets}
-    except Exception:
+    secrets = fetch_environment_secrets(
+        client, scope=scope, credentials=credentials, git_identity=git_identity
+    )
+    if secrets is None:
         return None
+    return {s.name for s in secrets}
 
 
 def delete_secret(

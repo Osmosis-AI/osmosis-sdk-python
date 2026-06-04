@@ -159,6 +159,7 @@ RUN_STATUSES_TERMINAL: frozenset[str] = (
 
 # ── Evaluation run status constants ──────────────────────────────
 
+EVAL_RUN_STATUSES_SUCCESS: frozenset[str] = frozenset({"finished"})
 EVAL_RUN_STATUSES_IN_PROGRESS: frozenset[str] = frozenset({"pending", "running"})
 EVAL_RUN_STATUSES_TERMINAL: frozenset[str] = frozenset(
     {"finished", "failed", "stopped"}
@@ -450,6 +451,21 @@ class PaginatedBaseModels:
 # only metadata. These models therefore have no field for the value — there
 # is intentionally nowhere for a value to land if one were ever returned.
 
+# The platform wire value for a personal secret's scope is "user"; the
+# user-facing vocabulary calls it "personal". Both the wire value and the
+# display value are part of the stable JSON/API contract — keep them exact.
+WIRE_SCOPE_PERSONAL = "user"
+DISPLAY_SCOPE_PERSONAL = "personal"
+
+
+def wire_to_display_scope(scope: str | None) -> str | None:
+    """Map a wire scope value to its user-facing display value.
+
+    Only the personal scope differs ("user" → "personal"); every other value
+    (including ``"workspace"`` and ``None``) passes through unchanged.
+    """
+    return DISPLAY_SCOPE_PERSONAL if scope == WIRE_SCOPE_PERSONAL else scope
+
 
 @dataclass
 class EnvironmentSecretInfo:
@@ -714,27 +730,38 @@ class EvaluationRun:
 
 
 @dataclass
-class EvaluationRunDetail:
-    """Detailed evaluation run info."""
+class EvaluationRunDetail(EvaluationRun):
+    """Detailed evaluation run info.
 
-    eval_run: dict[str, Any]
+    Mirrors :class:`TrainingRunDetail`: a typed subclass of the list row so
+    callers read ``detail.status`` / ``detail.name`` with static safety instead
+    of stringly-typed ``eval_run.get(...)`` lookups. ``config`` / ``results``
+    are the detail-only payloads.
+    """
+
     config: dict[str, Any] | None = None
     results: dict[str, Any] | None = None
-    model: dict[str, Any] | None = None
-    dataset: dict[str, Any] | None = None
-    rollout: dict[str, Any] | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> EvaluationRunDetail:
+        run = data["eval_run"]
         config = data.get("config")
         model_path = config.get("model_path") if isinstance(config, dict) else None
         return cls(
-            eval_run=data["eval_run"],
-            config=config,
-            results=data.get("results"),
+            id=run["id"],
+            name=run.get("name", ""),
+            status=run.get("status", ""),
+            created_at=run.get("created_at", ""),
+            started_at=run.get("started_at"),
+            completed_at=run.get("completed_at"),
+            creator_name=run.get("creator_name"),
+            creator_email=run.get("creator_email"),
+            platform_url=run.get("platform_url"),
             model={"name": model_path} if isinstance(model_path, str) else None,
             dataset=data.get("dataset"),
             rollout=data.get("rollout"),
+            config=config,
+            results=data.get("results"),
         )
 
 

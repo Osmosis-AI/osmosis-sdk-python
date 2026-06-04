@@ -2,14 +2,20 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from osmosis_ai.cli.console import Console, console
+from osmosis_ai.cli.console import console
 from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.cli.output.display import format_local_datetime
 from osmosis_ai.platform.api.models import (
+    DEPLOYMENT_STATUSES_ERROR,
+    DEPLOYMENT_STATUSES_INACTIVE,
+    DEPLOYMENT_STATUSES_SUCCESS,
+    EVAL_RUN_STATUSES_IN_PROGRESS,
+    EVAL_RUN_STATUSES_SUCCESS,
+    EVAL_RUN_STATUSES_TERMINAL,
     RUN_STATUSES_ERROR,
     RUN_STATUSES_IN_PROGRESS,
     RUN_STATUSES_STOPPED,
@@ -32,15 +38,16 @@ if TYPE_CHECKING:
     from osmosis_ai.platform.auth.credentials import Credentials
 
 
-def platform_call[T](
-    message: str,
-    call: Callable[[], T],
-    *,
-    output_console: Console | None = None,
-) -> T:
-    """Run a platform request while showing a consistent CLI loading status."""
-    status_console = output_console or console
-    with status_console.spinner(message):
+def platform_call[T](message: str, call: Callable[[], T]) -> T:
+    """Run a platform request while showing a consistent CLI loading status.
+
+    Progress renders on stderr through the active output context, matching the
+    other command domains (train/eval/deployment/...), so stdout stays clean for
+    piping and JSON/plain modes stay silent.
+    """
+    from osmosis_ai.cli.output import get_output_context
+
+    with get_output_context().status(message):
         return call()
 
 
@@ -61,60 +68,77 @@ def require_git_workspace_directory_context() -> GitWorkspaceDirectoryContext:
     return resolve_git_workspace_directory_context()
 
 
-def format_dataset_status(d: Any, *, for_prompt: bool = False) -> str:
-    """Format a dataset status string with optional color styling.
+# Ordered ``(statuses, style)`` buckets per domain. The first bucket whose set
+# contains the status wins, so order matters when a status is a member of more
+# than one set — eval's ``finished`` lives in both the success and terminal
+# sets, so the success bucket must precede the terminal bucket below.
+_StatusStyleMap = Sequence[tuple[frozenset[str], str]]
 
-    When *for_prompt* is True, returns a plain text string suitable for
-    interactive prompt choices.
+_DATASET_STATUS_STYLES: _StatusStyleMap = (
+    (STATUSES_SUCCESS, "green"),
+    (STATUSES_IN_PROGRESS, "yellow"),
+    (STATUSES_ERROR, "red"),
+)
+_RUN_STATUS_STYLES: _StatusStyleMap = (
+    (RUN_STATUSES_SUCCESS, "green"),
+    (RUN_STATUSES_IN_PROGRESS, "yellow"),
+    (RUN_STATUSES_ERROR, "red"),
+    (RUN_STATUSES_STOPPED, "dim"),
+)
+_DEPLOYMENT_STATUS_STYLES: _StatusStyleMap = (
+    (DEPLOYMENT_STATUSES_SUCCESS, "green"),
+    (DEPLOYMENT_STATUSES_INACTIVE, "dim"),
+    (DEPLOYMENT_STATUSES_ERROR, "red"),
+)
+_EVAL_STATUS_STYLES: _StatusStyleMap = (
+    (EVAL_RUN_STATUSES_SUCCESS, "green"),  # {"finished"} — precede TERMINAL
+    (EVAL_RUN_STATUSES_IN_PROGRESS, "yellow"),
+    (EVAL_RUN_STATUSES_TERMINAL, "red"),  # contains "finished"; green matched first
+)
+
+
+def format_status_token(
+    status: str,
+    style_map: _StatusStyleMap,
+    *,
+    for_prompt: bool = False,
+) -> str:
+    """Render a ``[status]`` token, Rich-styled by the first matching bucket.
+
+    *style_map* is an ordered sequence of ``(statuses, style)`` pairs; the first
+    pair whose set contains *status* wins. List the more specific bucket first
+    when a status belongs to several sets (see :data:`_EVAL_STATUS_STYLES`).
+
+    When *for_prompt* is True, returns the plain ``[status]`` label with no Rich
+    markup, suitable for interactive prompt choices.
     """
-    status_info = f"[{d.status}]"
+    label = f"[{status}]"
     if for_prompt:
-        return status_info
-    color = entity_status_style(d.status)
-    if color:
-        return console.format_styled(status_info, color)
-    return console.escape(status_info)
+        return label
+    for statuses, style in style_map:
+        if status in statuses:
+            return console.format_styled(label, style)
+    return console.escape(label)
 
 
-def entity_status_style(status: str) -> str | None:
-    """Return the Rich style name for a dataset/model status, or None if unstyled."""
-    if status in STATUSES_SUCCESS:
-        return "green"
-    if status in STATUSES_IN_PROGRESS:
-        return "yellow"
-    if status in STATUSES_ERROR:
-        return "red"
-    return None
-
-
-def run_status_style(status: str) -> str | None:
-    """Return the Rich style name for a training run status, or None if unstyled."""
-    if status in RUN_STATUSES_SUCCESS:
-        return "green"
-    if status in RUN_STATUSES_IN_PROGRESS:
-        return "yellow"
-    if status in RUN_STATUSES_ERROR:
-        return "red"
-    if status in RUN_STATUSES_STOPPED:
-        return "dim"
-    return None
+def format_dataset_status(d: Any, *, for_prompt: bool = False) -> str:
+    """Format a dataset/model status token with optional Rich styling."""
+    return format_status_token(d.status, _DATASET_STATUS_STYLES, for_prompt=for_prompt)
 
 
 def format_run_status(r: Any, *, for_prompt: bool = False) -> str:
-    """Format a training run status string with optional color styling.
+    """Format a training run status token with optional Rich styling."""
+    return format_status_token(r.status, _RUN_STATUS_STYLES, for_prompt=for_prompt)
 
-    When *for_prompt* is True, returns a plain text string suitable for
-    interactive prompt choices.
-    """
-    status_info = f"[{r.status}]"
 
-    if for_prompt:
-        return status_info
+def format_deployment_status(d: Any) -> str:
+    """Format a deployment status token with Rich styling."""
+    return format_status_token(d.status, _DEPLOYMENT_STATUS_STYLES)
 
-    style = run_status_style(r.status)
-    if style:
-        return console.format_styled(status_info, style)
-    return console.escape(status_info)
+
+def format_eval_status(run: Any) -> str:
+    """Format an evaluation run status token with Rich styling."""
+    return format_status_token(run.status, _EVAL_STATUS_STYLES)
 
 
 def format_date(iso_str: str | None) -> str:
@@ -207,6 +231,69 @@ def fetch_all_pages(
             break
         offset = result.next_offset
     return all_items, total_count
+
+
+def fetch_environment_secrets(
+    client: Any,
+    *,
+    scope: str,
+    credentials: Any,
+    git_identity: str,
+) -> list[Any] | None:
+    """Best-effort fetch of every environment secret in ``scope``.
+
+    *scope* is a wire value (``"workspace"`` / ``"user"``) or the literal
+    ``"all"``. Returns the raw secret objects, or ``None`` on any failure
+    (network, auth) so callers fall back to a best-effort path instead of
+    blocking. Shared by the submit summary's scope partition and the
+    ``secret delete`` existence pre-check.
+    """
+    try:
+
+        def _fetch(limit: int, offset: int) -> Any:
+            return client.list_environment_secrets(
+                limit=limit,
+                offset=offset,
+                scope=scope,
+                credentials=credentials,
+                git_identity=git_identity,
+            )
+
+        secrets, _ = fetch_all_pages(_fetch, items_attr="environment_secrets")
+        return secrets
+    except Exception:
+        return None
+
+
+def paginated_fetch(
+    fetch_fn: Callable[[int, int], Any],
+    *,
+    items_attr: str,
+    limit: int,
+    fetch_all: bool,
+) -> tuple[list[Any], int, bool, int | None]:
+    """Resolve a list endpoint's ``--all`` / ``--limit`` branch uniformly.
+
+    *fetch_fn(limit, offset)* returns a page object exposing ``total_count``,
+    ``has_more``, ``next_offset`` (int | None), and an attribute named
+    *items_attr* (a list). The callable may be a closure with side effects
+    (e.g. capturing a page-level ``platform_url``); it is invoked on every
+    branch, so those side effects still fire.
+
+    When *fetch_all* is True every page is walked via :func:`fetch_all_pages`
+    and the result reports ``has_more=False`` / ``next_offset=None`` — a fully
+    drained list has no continuation cursor. Otherwise a single page is fetched
+    and its server-provided cursor fields are passed through verbatim.
+
+    Returns ``(items, total_count, has_more, next_offset)``. ``next_offset``
+    feeds ``ListResult.next_offset``, a required field of the stable ``--json``
+    ``schema_version:1`` envelope, so it must never be dropped.
+    """
+    if fetch_all:
+        items, total_count = fetch_all_pages(fetch_fn, items_attr=items_attr)
+        return items, total_count, False, None
+    page = fetch_fn(limit, 0)
+    return getattr(page, items_attr), page.total_count, page.has_more, page.next_offset
 
 
 def validate_list_options(

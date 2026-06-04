@@ -17,13 +17,14 @@ from osmosis_ai.cli.output import (
     ListColumn,
     ListResult,
     OperationResult,
+    detail_fields,
     get_output_context,
     serialize_dataset,
 )
 from osmosis_ai.cli.output.display import format_local_date
 from osmosis_ai.cli.paths import parse_cli_path
-from osmosis_ai.cli.prompts import confirm
-from osmosis_ai.platform.api.models import STATUSES_IN_PROGRESS
+from osmosis_ai.cli.prompts import require_confirmation
+from osmosis_ai.platform.api.models import STATUSES_IN_PROGRESS, STATUSES_SUCCESS
 from osmosis_ai.platform.auth import (
     AuthenticationExpiredError,
     PlatformAPIError,
@@ -118,7 +119,6 @@ def _complete_with_retry(
                     credentials=credentials,
                     git_identity=git_identity,
                 ),
-                output_console=console,
             )
         except AuthenticationExpiredError:
             raise  # Not transient — surface immediately
@@ -215,7 +215,6 @@ def _create_dataset_for_upload(
                 credentials=credentials,
                 git_identity=git_identity,
             ),
-            output_console=console,
         )
     except PlatformAPIError as exc:
         existing_dataset_id = _existing_dataset_id_from_conflict(exc)
@@ -241,13 +240,7 @@ def _create_dataset_for_upload(
                 credentials=credentials,
                 git_identity=git_identity,
             ),
-            output_console=console,
         )
-
-
-def _detail_fields(rows: list[tuple[str, str]]) -> list[DetailField]:
-    """Convert existing label/value rows into renderer detail fields."""
-    return [DetailField(label=label, value=value) for label, value in rows]
 
 
 def _perform_upload(
@@ -377,7 +370,6 @@ def upload(
     context = require_git_workspace_directory_context()
     credentials = context.credentials
     git_identity = context.git_identity
-    output = get_output_context()
 
     file_path, ext, file_size = _check_file_basics(file)
 
@@ -388,14 +380,23 @@ def upload(
             "File validation failed:\n" + "\n".join(f"  - {e}" for e in errors)
         )
 
-    if output.interactive and not yes:
-        proceed = confirm("Proceed with upload?", default=True)
-        if proceed is None or not proceed:
-            return OperationResult(
-                operation="dataset.upload",
-                status="cancelled",
-                message="Upload cancelled.",
-            )
+    overwrite_warning = (
+        "--overwrite will replace the existing dataset with the same name."
+    )
+    require_confirmation(
+        (
+            "This will overwrite the existing dataset with the same name. "
+            "Proceed with upload?"
+            if overwrite
+            else "Proceed with upload?"
+        ),
+        yes=yes,
+        # Default to "no" for the destructive overwrite path so a bare Enter
+        # does not replace data; non-destructive uploads keep the "yes" default.
+        default=not overwrite,
+        summary=[("File", file_path.name), ("Size", format_size(file_size))],
+        warnings=[overwrite_warning] if overwrite else None,
+    )
 
     dataset = _perform_upload(
         file_path=file_path,
@@ -433,7 +434,7 @@ def upload(
 def list_datasets(limit: int = DEFAULT_PAGE_SIZE, all_: bool = False) -> CommandResult:
     """List datasets."""
     from osmosis_ai.platform.cli.utils import (
-        fetch_all_pages,
+        paginated_fetch,
         validate_list_options,
     )
 
@@ -446,30 +447,18 @@ def list_datasets(limit: int = DEFAULT_PAGE_SIZE, all_: bool = False) -> Command
 
     client = OsmosisClient()
 
-    with console.spinner("Fetching datasets..."):
-        if fetch_all:
-            datasets, total_count = fetch_all_pages(
-                lambda lim, off: client.list_datasets(
-                    limit=lim,
-                    offset=off,
-                    credentials=credentials,
-                    git_identity=git_identity,
-                ),
-                items_attr="datasets",
-            )
-            has_more = False
-            next_offset = None
-        else:
-            page = client.list_datasets(
-                limit=effective_limit,
-                offset=0,
+    with get_output_context().status("Fetching datasets..."):
+        datasets, total_count, has_more, next_offset = paginated_fetch(
+            lambda lim, off: client.list_datasets(
+                limit=lim,
+                offset=off,
                 credentials=credentials,
                 git_identity=git_identity,
-            )
-            datasets = page.datasets
-            total_count = page.total_count
-            has_more = page.has_more
-            next_offset = page.next_offset
+            ),
+            items_attr="datasets",
+            limit=effective_limit,
+            fetch_all=fetch_all,
+        )
 
     return ListResult(
         title="Datasets",
@@ -515,7 +504,6 @@ def info(
             credentials=credentials,
             git_identity=git_identity,
         ),
-        output_console=console,
     )
 
     rows = build_dataset_detail_rows(ds)
@@ -524,7 +512,7 @@ def info(
     return DetailResult(
         title="Dataset",
         data=data,
-        fields=_detail_fields(rows),
+        fields=detail_fields(rows),
         display_hints=[f"View: {ds.platform_url}"] if ds.platform_url else [],
     )
 
@@ -547,7 +535,6 @@ def preview(
             credentials=credentials,
             git_identity=git_identity,
         ),
-        output_console=console,
     )
 
     if ds.data_preview is None:
@@ -637,9 +624,8 @@ def download(
             credentials=credentials,
             git_identity=git_identity,
         ),
-        output_console=console,
     )
-    if ds.status != "uploaded":
+    if ds.status not in STATUSES_SUCCESS:
         if ds.status in STATUSES_IN_PROGRESS:
             raise CLIError(
                 f"Dataset is still processing (status: {ds.status}). "
@@ -654,7 +640,6 @@ def download(
             credentials=credentials,
             git_identity=git_identity,
         ),
-        output_console=console,
     )
     default_filename = _default_download_filename(
         info.file_name or ds.file_name,

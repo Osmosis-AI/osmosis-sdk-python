@@ -622,7 +622,8 @@ class TestEvaluationRunModels:
             }
         )
 
-        assert detail.eval_run == {"id": "eval_1", "status": "succeeded"}
+        assert detail.id == "eval_1"
+        assert detail.status == "succeeded"
         assert detail.config == {
             "model_path": "openai/gpt-5-mini",
             "evaluation": {"rubric": "grade correctness"},

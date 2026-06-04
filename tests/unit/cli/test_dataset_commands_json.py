@@ -319,7 +319,7 @@ def test_dataset_upload_json_stdout_is_one_envelope(
 
     monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
 
-    exit_code = cli.main(["--json", "dataset", "upload", str(file_path)])
+    exit_code = cli.main(["--json", "dataset", "upload", str(file_path), "--yes"])
     captured = capsys.readouterr()
 
     assert exit_code == 0
@@ -358,6 +358,63 @@ def test_dataset_upload_yes_option_is_forwarded(
     assert seen == {"file": str(file_path), "overwrite": False, "yes": True}
 
 
+def test_dataset_upload_json_without_yes_requires_confirmation(
+    monkeypatch,
+    tmp_path: Path,
+    capsys,
+) -> None:
+    """Regression: a non-interactive upload without --yes must fail with
+    INTERACTIVE_REQUIRED instead of silently uploading (the inverted-guard bug)."""
+    _stub_git_context(monkeypatch)
+    file_path = tmp_path / "train.jsonl"
+    row = json.dumps({"system_prompt": "s", "user_prompt": "u", "ground_truth": "g"})
+    file_path.write_text((row + "\n") * 4, encoding="utf-8")
+
+    class FakeClient:
+        def create_dataset(self, *args, **kwargs):
+            raise AssertionError("upload must not proceed without confirmation")
+
+    monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+
+    exit_code = cli.main(["--json", "dataset", "upload", str(file_path)])
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    assert captured.out == ""
+    payload = json.loads(captured.err)
+    assert payload["error"]["code"] == "INTERACTIVE_REQUIRED"
+    assert payload["error"]["details"]["summary"]["File"] == "train.jsonl"
+
+
+def test_dataset_upload_json_overwrite_without_yes_warns_destructive(
+    monkeypatch,
+    tmp_path: Path,
+    capsys,
+) -> None:
+    """Regression: --overwrite without --yes must also be gated, and the
+    INTERACTIVE_REQUIRED envelope must surface the destructive-overwrite warning."""
+    _stub_git_context(monkeypatch)
+    file_path = tmp_path / "train.jsonl"
+    row = json.dumps({"system_prompt": "s", "user_prompt": "u", "ground_truth": "g"})
+    file_path.write_text((row + "\n") * 4, encoding="utf-8")
+
+    class FakeClient:
+        def create_dataset(self, *args, **kwargs):
+            raise AssertionError("overwrite must not proceed without confirmation")
+
+    monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+
+    exit_code = cli.main(["--json", "dataset", "upload", str(file_path), "--overwrite"])
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    payload = json.loads(captured.err)
+    assert payload["error"]["code"] == "INTERACTIVE_REQUIRED"
+    assert "overwrite" in payload["error"]["details"]["prompt"].lower()
+    warnings = payload["error"]["details"]["warnings"]
+    assert any("--overwrite" in warning for warning in warnings)
+
+
 def test_dataset_upload_json_conflict_preserves_existing_dataset_id(
     monkeypatch,
     tmp_path: Path,
@@ -386,7 +443,7 @@ def test_dataset_upload_json_conflict_preserves_existing_dataset_id(
 
     monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
 
-    exit_code = cli.main(["--json", "dataset", "upload", str(file_path)])
+    exit_code = cli.main(["--json", "dataset", "upload", str(file_path), "--yes"])
     captured = capsys.readouterr()
 
     assert exit_code == 1
@@ -471,7 +528,9 @@ def test_dataset_upload_json_overwrite_stdout_is_one_envelope(
 
     monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
 
-    exit_code = cli.main(["--json", "dataset", "upload", str(file_path), "--overwrite"])
+    exit_code = cli.main(
+        ["--json", "dataset", "upload", str(file_path), "--overwrite", "--yes"]
+    )
     captured = capsys.readouterr()
 
     assert exit_code == 0

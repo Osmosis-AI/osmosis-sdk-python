@@ -456,7 +456,7 @@ def _call_litellm(
         raise ProviderRequestError(provider, bare_model, str(err)) from err
 
     bounded = max(score_min, min(score_max, score))
-    return RubricResult(score=bounded, explanation=explanation, raw=raw)
+    return RubricResult(score=bounded, explanation=explanation)
 
 
 def _extract_error_message(err: Exception) -> str:
@@ -548,8 +548,8 @@ async def evaluate_rubric(
         system_prompt: Optional custom system prompt prepended to the default.
 
     Returns:
-        A :class:`RubricResult` dataclass with ``score``, ``explanation``, and
-        ``raw`` fields.
+        A :class:`RubricResult` dataclass with ``score`` and ``explanation``
+        fields.
     """
     if not isinstance(solution_str, str) or not solution_str.strip():
         raise TypeError("'solution_str' must be a non-empty string")

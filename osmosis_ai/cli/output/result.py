@@ -14,6 +14,12 @@ class DetailField:
     value: Any
 
 
+def detail_fields(rows: list[tuple[str, str]]) -> list[DetailField]:
+    """Convert (label, value) rows into a mutable list of DetailField."""
+
+    return [DetailField(label=label, value=value) for label, value in rows]
+
+
 @dataclass(frozen=True)
 class ListColumn:
     """A column in a list result."""
@@ -84,7 +90,13 @@ class OperationResult(CommandResult):
 
 @dataclass
 class MessageResult(CommandResult):
-    """Free-form message that does not map cleanly to a resource."""
+    """Free-form message that does not map cleanly to a resource.
+
+    Reserved member of the result family: the renderer fully supports it across
+    rich/plain/JSON, but no command currently produces one (commands prefer
+    ``OperationResult`` so a structured ``resource`` rides along). Kept as the
+    sanctioned shape for any future command that emits only a human message.
+    """
 
     message: str
     extra: dict[str, Any] = field(default_factory=dict)

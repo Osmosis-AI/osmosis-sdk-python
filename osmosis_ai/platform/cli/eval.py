@@ -12,6 +12,7 @@ from osmosis_ai.cli.output import (
     ListColumn,
     ListResult,
     OperationResult,
+    detail_fields,
     get_output_context,
     serialize_eval_run,
 )
@@ -23,7 +24,6 @@ from osmosis_ai.cli.prompts import require_confirmation
 from osmosis_ai.platform.api.client import OsmosisClient
 from osmosis_ai.platform.api.models import (
     EVAL_RUN_STATUSES_IN_PROGRESS,
-    EVAL_RUN_STATUSES_TERMINAL,
     SubmitRunResult,
 )
 from osmosis_ai.platform.cli.eval_config import (
@@ -33,23 +33,12 @@ from osmosis_ai.platform.cli.eval_config import (
 )
 from osmosis_ai.platform.cli.shared_submit import CloudSubmitSpec, run_cloud_submit
 from osmosis_ai.platform.cli.utils import (
-    fetch_all_pages,
+    format_eval_status,
+    paginated_fetch,
     require_git_workspace_directory_context,
     validate_list_options,
 )
 from osmosis_ai.platform.cli.workspace_directory_context import git_result_context
-
-
-def _format_eval_status(run: Any) -> str:
-    """Format an evaluation run status string with Rich color styling."""
-    status_info = f"[{run.status}]"
-    if run.status in EVAL_RUN_STATUSES_IN_PROGRESS:
-        return console.format_styled(status_info, "yellow")
-    if run.status == "finished":
-        return console.format_styled(status_info, "green")
-    if run.status in EVAL_RUN_STATUSES_TERMINAL:
-        return console.format_styled(status_info, "red")
-    return console.escape(status_info)
 
 
 def _submit_eval(
@@ -122,29 +111,17 @@ def list_eval_runs(*, limit: int, all_: bool) -> ListResult:
     client = OsmosisClient()
     output = get_output_context()
     with output.status("Fetching evaluation runs..."):
-        if fetch_all:
-            eval_runs, total_count = fetch_all_pages(
-                lambda lim, off: client.list_eval_runs(
-                    limit=lim,
-                    offset=off,
-                    credentials=credentials,
-                    git_identity=context.git_identity,
-                ),
-                items_attr="eval_runs",
-            )
-            has_more = False
-            next_offset: int | None = None
-        else:
-            page = client.list_eval_runs(
-                limit=effective_limit,
-                offset=0,
+        eval_runs, total_count, has_more, next_offset = paginated_fetch(
+            lambda lim, off: client.list_eval_runs(
+                limit=lim,
+                offset=off,
                 credentials=credentials,
                 git_identity=context.git_identity,
-            )
-            eval_runs = page.eval_runs
-            total_count = page.total_count
-            has_more = page.has_more
-            next_offset = page.next_offset
+            ),
+            items_attr="eval_runs",
+            limit=effective_limit,
+            fetch_all=fetch_all,
+        )
 
     return ListResult(
         title="Evaluation Runs",
@@ -166,7 +143,7 @@ def list_eval_runs(*, limit: int, all_: bool) -> ListResult:
                 **serialize_eval_run(run),
                 "name": run.name,
                 "rollout": run.rollout.get("name") if run.rollout else "—",
-                "status": _format_eval_status(run),
+                "status": format_eval_status(run),
                 "model": run.model.get("name") if run.model else "—",
                 "creator_name": run.creator_name or "—",
                 "created_at": format_local_date(run.created_at),
@@ -191,11 +168,10 @@ def info(name_or_id: str) -> DetailResult:
             git_identity=context.git_identity,
         )
 
-    eval_run = detail.eval_run
     rows: list[tuple[str, str]] = [
-        ("Name", console.escape(eval_run.get("name", "(unnamed)"))),
-        ("ID", eval_run.get("id", "")),
-        ("Status", eval_run.get("status", "")),
+        ("Name", console.escape(detail.name or "(unnamed)")),
+        ("ID", detail.id),
+        ("Status", detail.status),
     ]
     if detail.model and detail.model.get("name"):
         rows.append(("Model", console.escape(detail.model["name"])))
@@ -203,14 +179,14 @@ def info(name_or_id: str) -> DetailResult:
         rows.append(("Dataset", console.escape(detail.dataset["name"])))
     if detail.rollout and detail.rollout.get("name"):
         rows.append(("Rollout", console.escape(detail.rollout["name"])))
-    if eval_run.get("creator_name"):
-        rows.append(("Creator", console.escape(eval_run["creator_name"])))
-    if eval_run.get("created_at"):
-        rows.append(("Created", format_local_datetime(eval_run["created_at"])))
-    if eval_run.get("started_at"):
-        rows.append(("Started", format_local_datetime(eval_run["started_at"])))
-    if eval_run.get("completed_at"):
-        rows.append(("Completed", format_local_datetime(eval_run["completed_at"])))
+    if detail.creator_name:
+        rows.append(("Creator", console.escape(detail.creator_name)))
+    if detail.created_at:
+        rows.append(("Created", format_local_datetime(detail.created_at)))
+    if detail.started_at:
+        rows.append(("Started", format_local_datetime(detail.started_at)))
+    if detail.completed_at:
+        rows.append(("Completed", format_local_datetime(detail.completed_at)))
 
     if detail.results:
         if detail.results.get("score") is not None:
@@ -220,13 +196,13 @@ def info(name_or_id: str) -> DetailResult:
         if detail.results.get("total_samples") is not None:
             rows.append(("Samples", str(detail.results["total_samples"])))
 
-    fields = [DetailField(label=label, value=value) for label, value in rows]
+    fields = detail_fields(rows)
     display_hints: list[str] = []
 
-    if eval_run.get("platform_url"):
-        display_hints.append(f"View: {eval_run['platform_url']}")
+    if detail.platform_url:
+        display_hints.append(f"View: {detail.platform_url}")
 
-    if eval_run.get("status") in EVAL_RUN_STATUSES_IN_PROGRESS:
+    if detail.status in EVAL_RUN_STATUSES_IN_PROGRESS:
         fields.append(
             DetailField(
                 label="Note",
@@ -234,13 +210,13 @@ def info(name_or_id: str) -> DetailResult:
             )
         )
         display_hints.append(
-            f"Stop with: osmosis eval stop {eval_run.get('name') or name_or_id}"
+            f"Stop with: osmosis eval stop {detail.name or name_or_id}"
         )
 
     return DetailResult(
         title="Evaluation Run",
         data={
-            "eval_run": eval_run,
+            "eval_run": serialize_eval_run(detail),
             "config": detail.config,
             "results": detail.results,
             "model": detail.model,
