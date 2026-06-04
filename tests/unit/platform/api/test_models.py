@@ -251,6 +251,9 @@ class TestTrainingRun:
                 "model": {"id": None, "model_name": "Qwen/Qwen3"},
                 "dataset": {"id": "dataset_1", "file_name": "train.jsonl"},
                 "rollout": {"id": "rollout_1", "name": "math-rollout"},
+                "current_step": 90,
+                "total_steps": 100,
+                "reward": 0.75,
             }
         )
 
@@ -260,6 +263,9 @@ class TestTrainingRun:
         assert run.dataset_name == "train.jsonl"
         assert run.rollout_id == "rollout_1"
         assert run.rollout_name == "math-rollout"
+        assert run.current_step == 90
+        assert run.total_steps == 100
+        assert run.reward == 0.75
 
     def test_from_dict_uses_nested_training_run_contract_only(self) -> None:
         run = api_models.TrainingRun.from_dict(
@@ -611,7 +617,11 @@ class TestEvaluationRunModels:
     def test_evaluation_run_detail_from_dict_uses_config_model_path(self) -> None:
         detail = EvaluationRunDetail.from_dict(
             {
-                "eval_run": {"id": "eval_1", "status": "succeeded"},
+                "eval_run": {
+                    "id": "eval_1",
+                    "status": "succeeded",
+                    "row_index": 4,
+                },
                 "config": {
                     "model_path": "openai/gpt-5-mini",
                     "evaluation": {"rubric": "grade correctness"},
@@ -619,6 +629,19 @@ class TestEvaluationRunModels:
                 "results": {"score": 0.92},
                 "dataset": {"id": "dataset_1"},
                 "rollout": {"id": "rollout_1"},
+                "entrypoint": "main.py",
+                "commit_sha": "abcdef1234567890",
+                "env_config": {"PROMPT_MODE": "strict"},
+                "resolved_secret_scopes": {"OPENAI_API_KEY": "workspace"},
+                "recent_logs": [
+                    {
+                        "step": "eval",
+                        "level": "error",
+                        "message": "Missing API key",
+                        "timestamp": "2026-01-01T00:00:00Z",
+                    }
+                ],
+                "dataset_df_stats": {"row_count": 1000},
             }
         )
 
@@ -632,6 +655,20 @@ class TestEvaluationRunModels:
         assert detail.model == {"name": "openai/gpt-5-mini"}
         assert detail.dataset == {"id": "dataset_1"}
         assert detail.rollout == {"id": "rollout_1"}
+        assert detail.row_index == 4
+        assert detail.entrypoint == "main.py"
+        assert detail.commit_sha == "abcdef1234567890"
+        assert detail.env_config == {"PROMPT_MODE": "strict"}
+        assert detail.resolved_secret_scopes == {"OPENAI_API_KEY": "workspace"}
+        assert detail.recent_logs == [
+            {
+                "step": "eval",
+                "level": "error",
+                "message": "Missing API key",
+                "timestamp": "2026-01-01T00:00:00Z",
+            }
+        ]
+        assert detail.dataset_df_stats == {"row_count": 1000}
 
     def test_paginated_evaluation_runs_uses_eval_runs_key(self) -> None:
         page = PaginatedEvaluationRuns.from_dict(

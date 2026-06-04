@@ -57,6 +57,12 @@ def serialize_training_run(run: TrainingRun) -> dict[str, Any]:
     }
     if run.platform_url:
         data["platform_url"] = run.platform_url
+    if run.current_step is not None:
+        data["current_step"] = run.current_step
+    if run.total_steps is not None:
+        data["total_steps"] = run.total_steps
+    if run.reward is not None:
+        data["reward"] = run.reward
     return data
 
 
@@ -142,7 +148,12 @@ def serialize_eval_run(run: EvaluationRun) -> dict[str, Any]:
         "rollout": run.rollout.get("name") if run.rollout else None,
         "creator_name": run.creator_name,
         "creator_email": run.creator_email,
+        "row_index": run.row_index,
     }
+    if run.results is not None:
+        data["results"] = run.results
+    if run.config is not None:
+        data["config"] = run.config
     if run.platform_url:
         data["platform_url"] = run.platform_url
     return data

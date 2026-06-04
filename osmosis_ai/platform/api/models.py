@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -9,9 +10,12 @@ from typing import Any, Literal
 # Single source of truth for status classification.
 
 STATUSES_SUCCESS: frozenset[str] = frozenset({"uploaded"})
-STATUSES_IN_PROGRESS: frozenset[str] = frozenset({"pending", "uploading", "processing"})
+# "pending" waits (amber); "uploading"/"processing" are active work (blue).
+STATUSES_PENDING: frozenset[str] = frozenset({"pending"})
+STATUSES_ACTIVE: frozenset[str] = frozenset({"uploading", "processing"})
+STATUSES_IN_PROGRESS: frozenset[str] = STATUSES_PENDING | STATUSES_ACTIVE
 STATUSES_ERROR: frozenset[str] = frozenset({"error"})
-STATUSES_INACTIVE: frozenset[str] = frozenset({"cancelled", "deleted"})
+STATUSES_INACTIVE: frozenset[str] = frozenset({"cancelled"})
 STATUSES_TERMINAL: frozenset[str] = (
     STATUSES_SUCCESS | STATUSES_ERROR | STATUSES_INACTIVE
 )
@@ -150,9 +154,13 @@ class PaginatedDatasets:
 # ── Training run status constants ────────────────────────────────
 
 RUN_STATUSES_SUCCESS: frozenset[str] = frozenset({"finished"})
-RUN_STATUSES_IN_PROGRESS: frozenset[str] = frozenset({"pending", "running"})
+# "pending"/"queued" wait (amber); "running" is active work (blue).
+RUN_STATUSES_PENDING: frozenset[str] = frozenset({"pending", "queued"})
+RUN_STATUSES_ACTIVE: frozenset[str] = frozenset({"running"})
+RUN_STATUSES_IN_PROGRESS: frozenset[str] = RUN_STATUSES_PENDING | RUN_STATUSES_ACTIVE
 RUN_STATUSES_ERROR: frozenset[str] = frozenset({"failed", "crashed"})
-RUN_STATUSES_STOPPED: frozenset[str] = frozenset({"stopped", "killed"})
+# "unknown" is a terminal, greyed-out state alongside stopped/killed.
+RUN_STATUSES_STOPPED: frozenset[str] = frozenset({"stopped", "killed", "unknown"})
 RUN_STATUSES_TERMINAL: frozenset[str] = (
     RUN_STATUSES_SUCCESS | RUN_STATUSES_ERROR | RUN_STATUSES_STOPPED
 )
@@ -160,10 +168,25 @@ RUN_STATUSES_TERMINAL: frozenset[str] = (
 # ── Evaluation run status constants ──────────────────────────────
 
 EVAL_RUN_STATUSES_SUCCESS: frozenset[str] = frozenset({"finished"})
-EVAL_RUN_STATUSES_IN_PROGRESS: frozenset[str] = frozenset({"pending", "running"})
-EVAL_RUN_STATUSES_TERMINAL: frozenset[str] = frozenset(
-    {"finished", "failed", "stopped"}
+# "pending" waits (amber); "running" is active work (blue).
+EVAL_RUN_STATUSES_PENDING: frozenset[str] = frozenset({"pending"})
+EVAL_RUN_STATUSES_ACTIVE: frozenset[str] = frozenset({"running"})
+EVAL_RUN_STATUSES_IN_PROGRESS: frozenset[str] = (
+    EVAL_RUN_STATUSES_PENDING | EVAL_RUN_STATUSES_ACTIVE
 )
+EVAL_RUN_STATUSES_ERROR: frozenset[str] = frozenset({"failed"})
+EVAL_RUN_STATUSES_STOPPED: frozenset[str] = frozenset({"stopped"})
+EVAL_RUN_STATUSES_TERMINAL: frozenset[str] = (
+    EVAL_RUN_STATUSES_SUCCESS | EVAL_RUN_STATUSES_ERROR | EVAL_RUN_STATUSES_STOPPED
+)
+
+
+def _number_or_none(value: Any) -> int | float | None:
+    if isinstance(value, bool):
+        return None
+    if not isinstance(value, int | float) or not math.isfinite(value):
+        return None
+    return value
 
 
 @dataclass
@@ -185,12 +208,18 @@ class TrainingRun:
     dataset_name: str | None = None
     rollout_id: str | None = None
     rollout_name: str | None = None
+    current_step: int | None = None
+    total_steps: int | None = None
+    reward: float | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> TrainingRun:
         model = data.get("model") or {}
         dataset = data.get("dataset") or {}
         rollout = data.get("rollout") or {}
+        current_step = _number_or_none(data.get("current_step"))
+        total_steps = _number_or_none(data.get("total_steps"))
+        reward = _number_or_none(data.get("reward"))
         return cls(
             id=data["id"],
             name=data.get("name"),
@@ -207,6 +236,9 @@ class TrainingRun:
             dataset_name=dataset.get("file_name"),
             rollout_id=rollout.get("id"),
             rollout_name=rollout.get("name"),
+            current_step=int(current_step) if current_step is not None else None,
+            total_steps=int(total_steps) if total_steps is not None else None,
+            reward=float(reward) if reward is not None else None,
         )
 
 
@@ -224,6 +256,9 @@ class TrainingRunDetail(TrainingRun):
         model = data.get("model") or {}
         dataset = data.get("dataset") or {}
         rollout = data.get("rollout") or {}
+        current_step = _number_or_none(run.get("current_step"))
+        total_steps = _number_or_none(run.get("total_steps"))
+        reward = _number_or_none(run.get("reward"))
         return cls(
             id=run["id"],
             name=run.get("name"),
@@ -240,6 +275,9 @@ class TrainingRunDetail(TrainingRun):
             dataset_name=dataset.get("name"),
             rollout_id=rollout.get("id"),
             rollout_name=rollout.get("name"),
+            current_step=int(current_step) if current_step is not None else None,
+            total_steps=int(total_steps) if total_steps is not None else None,
+            reward=float(reward) if reward is not None else None,
             examples_processed_count=run.get("examples_processed_count"),
             notes=run.get("notes"),
         )
@@ -710,9 +748,14 @@ class EvaluationRun:
     creator_name: str | None = None
     creator_email: str | None = None
     platform_url: str | None = None
+    results: dict[str, Any] | None = None
+    row_index: int | None = None
+    config: dict[str, Any] | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> EvaluationRun:
+        row_index = _number_or_none(data.get("row_index"))
+        config = data.get("config")
         return cls(
             id=data["id"],
             name=data["name"],
@@ -726,6 +769,9 @@ class EvaluationRun:
             creator_name=data.get("creator_name"),
             creator_email=data.get("creator_email"),
             platform_url=data.get("platform_url"),
+            results=data.get("results"),
+            row_index=int(row_index) if row_index is not None else None,
+            config=config if isinstance(config, dict) else None,
         )
 
 
@@ -735,18 +781,28 @@ class EvaluationRunDetail(EvaluationRun):
 
     Mirrors :class:`TrainingRunDetail`: a typed subclass of the list row so
     callers read ``detail.status`` / ``detail.name`` with static safety instead
-    of stringly-typed ``eval_run.get(...)`` lookups. ``config`` / ``results``
-    are the detail-only payloads.
+    of stringly-typed ``eval_run.get(...)`` lookups.
     """
 
     config: dict[str, Any] | None = None
     results: dict[str, Any] | None = None
+    entrypoint: str | None = None
+    commit_sha: str | None = None
+    env_config: dict[str, Any] | None = None
+    resolved_secret_scopes: dict[str, Any] | None = None
+    dataset_df_stats: dict[str, Any] | None = None
+    recent_logs: list[dict[str, Any]] | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> EvaluationRunDetail:
         run = data["eval_run"]
         config = data.get("config")
         model_path = config.get("model_path") if isinstance(config, dict) else None
+        row_index = _number_or_none(run.get("row_index"))
+        env_config = data.get("env_config")
+        resolved_secret_scopes = data.get("resolved_secret_scopes")
+        dataset_df_stats = data.get("dataset_df_stats")
+        recent_logs = data.get("recent_logs")
         return cls(
             id=run["id"],
             name=run.get("name", ""),
@@ -760,8 +816,25 @@ class EvaluationRunDetail(EvaluationRun):
             model={"name": model_path} if isinstance(model_path, str) else None,
             dataset=data.get("dataset"),
             rollout=data.get("rollout"),
+            row_index=int(row_index) if row_index is not None else None,
             config=config,
             results=data.get("results"),
+            entrypoint=data.get("entrypoint")
+            if isinstance(data.get("entrypoint"), str)
+            else None,
+            commit_sha=data.get("commit_sha")
+            if isinstance(data.get("commit_sha"), str)
+            else None,
+            env_config=env_config if isinstance(env_config, dict) else None,
+            resolved_secret_scopes=(
+                resolved_secret_scopes
+                if isinstance(resolved_secret_scopes, dict)
+                else None
+            ),
+            dataset_df_stats=(
+                dataset_df_stats if isinstance(dataset_df_stats, dict) else None
+            ),
+            recent_logs=recent_logs if isinstance(recent_logs, list) else None,
         )
 
 

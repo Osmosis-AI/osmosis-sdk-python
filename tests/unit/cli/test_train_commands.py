@@ -246,6 +246,9 @@ class TestListRuns:
             model_name="gpt-2",
             rollout_name="math-rollout",
             created_at="2026-01-01T00:00:00Z",
+            current_step=31,
+            total_steps=25,
+            reward=0.75,
         )
 
         class FakeClient:
@@ -265,9 +268,9 @@ class TestListRuns:
         assert [column.label for column in result.columns] == [
             "Name",
             "Status",
-            "Dataset",
             "Base Model",
             "Rollout",
+            "Reward",
             "Submitted",
             "Submitted By",
         ]
@@ -275,16 +278,28 @@ class TestListRuns:
         assert result.columns[0].ratio == 4
         assert result.columns[0].overflow == "fold"
         assert result.columns[1].key == "status"
-        assert result.columns[2].key == "dataset_name"
-        assert result.columns[3].key == "model_name"
-        assert result.columns[4].key == "rollout_name"
-        assert result.columns[4].overflow == "fold"
+        assert result.columns[2].key == "model_name"
+        assert result.columns[3].key == "rollout_name"
+        assert result.columns[3].overflow == "fold"
+        assert result.columns[4].key == "reward"
         assert result.columns[5].key == "created_at"
         assert result.columns[6].key == "creator_name"
         assert result.display_items is not None
         assert result.display_items[0]["dataset_name"] == "train.jsonl"
         assert result.display_items[0]["model_name"] == "gpt-2"
         assert result.display_items[0]["rollout_name"] == "math-rollout"
+        assert result.display_items[0]["reward"] == "0.75"
+        assert result.items[0]["current_step"] == 31
+        assert result.items[0]["total_steps"] == 25
+        assert result.items[0]["reward"] == 0.75
+        assert result.items[0]["summary"] == {
+            "reward": 0.75,
+            "progress": {
+                "completed": 25,
+                "total": 25,
+                "unit": "steps",
+            },
+        }
         assert result.display_hints == ["Use osmosis train info <name> for details."]
 
     def test_list_unnamed_run(
@@ -365,6 +380,9 @@ class TestInfo:
             dataset_name="train.jsonl",
             rollout_name="math-rollout",
             platform_url="https://platform.osmosis.ai/ws/training/abcdef1234567890abcdef1234567890",
+            current_step=31,
+            total_steps=25,
+            reward=0.75,
         )
         checkpoint = LoraCheckpointInfo(
             id="ckpt_abcdef123456",
@@ -428,8 +446,21 @@ class TestInfo:
         assert result.title == "Training Run Info"
         assert result.data["training_run"]["name"] == "run-1"
         field_rows = [(field.label, field.value) for field in result.fields]
+        assert ("Progress", "25 / 25 steps") in field_rows
+        assert ("Reward", "0.7500") in field_rows
         assert ("Dataset", "train.jsonl") in field_rows
         assert ("Rollout", "math-rollout") in field_rows
+        assert result.data["training_run"]["current_step"] == 31
+        assert result.data["training_run"]["total_steps"] == 25
+        assert result.data["training_run"]["reward"] == 0.75
+        assert result.data["summary"] == {
+            "reward": 0.75,
+            "progress": {
+                "completed": 25,
+                "total": 25,
+                "unit": "steps",
+            },
+        }
         assert result.data["checkpoints"][0]["checkpoint_name"] == "run-1-step-100"
         assert result.data["metrics_available"] is True
         assert result.data["metrics"]["summary"]["training_reward"]["latest"] == 0.75

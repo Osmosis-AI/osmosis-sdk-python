@@ -99,6 +99,10 @@ def test_format_dataset_status_error_styled(monkeypatch: pytest.MonkeyPatch) -> 
     assert "error" in result
 
 
+def test_format_dataset_status_cancelled_is_dim() -> None:
+    assert format_dataset_status(_dataset("cancelled")) == "[dim]\\[cancelled][/dim]"
+
+
 def test_format_dataset_status_unknown_uses_escape(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -200,10 +204,10 @@ def test_format_deployment_status_unknown_uses_escape() -> None:
 @pytest.mark.parametrize(
     "status, style",
     [
-        ("pending", "yellow"),
-        ("running", "yellow"),
+        ("pending", "orange3"),
+        ("running", "blue"),
         ("failed", "red"),
-        ("stopped", "red"),
+        ("stopped", "dim"),
     ],
 )
 def test_format_eval_status_styles(status: str, style: str) -> None:

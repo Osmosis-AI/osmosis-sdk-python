@@ -136,7 +136,7 @@ class TestStatusCheckpoints:
         assert all(field.label != "Checkpoint" for field in result.fields)
         assert all(field.label != "Deploy" for field in result.fields)
         assert result.sections
-        assert result.sections[0].rich.expand is True
+        assert result.sections[0].rich.expand is False
         expected_url = "https://platform.osmosis.ai/ws/training/run_1"
         assert result.display_hints == [
             f"View: {expected_url}",
