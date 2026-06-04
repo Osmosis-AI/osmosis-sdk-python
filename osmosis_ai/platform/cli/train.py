@@ -41,7 +41,9 @@ from osmosis_ai.platform.cli.training_config import (
 )
 from osmosis_ai.platform.cli.utils import (
     build_run_detail_rows,
+    format_progress,
     format_run_status,
+    make_progress,
     paginated_fetch,
     require_git_workspace_directory_context,
     validate_list_options,
@@ -59,6 +61,22 @@ def _default_filename(run_name: str | None, run_id: str) -> str:
     short_id = run_id[:8]
     safe = _safe_name(run_name) if run_name else None
     return f"{safe}_{short_id}.json" if safe else f"{short_id}.json"
+
+
+def _format_train_reward(run: Any) -> str:
+    if run.reward is None:
+        return "—"
+    return f"{run.reward:.2f}"
+
+
+def _train_summary(run: Any) -> dict[str, Any]:
+    summary: dict[str, Any] = {}
+    if run.reward is not None:
+        summary["reward"] = run.reward
+    progress = make_progress(run.current_step, run.total_steps, "steps")
+    if progress is not None:
+        summary["progress"] = progress
+    return summary
 
 
 def _resolve_output_path(output: str, run_name: str | None, run_id: str) -> Path:
@@ -185,7 +203,10 @@ def list_training_runs(*, limit: int, all_: bool) -> ListResult:
 
     return ListResult(
         title="Training Runs",
-        items=[serialize_training_run(r) for r in training_runs],
+        items=[
+            {**serialize_training_run(r), "summary": _train_summary(r)}
+            for r in training_runs
+        ],
         total_count=total_count,
         has_more=has_more,
         next_offset=next_offset,
@@ -193,9 +214,9 @@ def list_training_runs(*, limit: int, all_: bool) -> ListResult:
         columns=[
             ListColumn(key="name", label="Name", ratio=4, overflow="fold"),
             ListColumn(key="status", label="Status", no_wrap=True, ratio=1),
-            ListColumn(key="dataset_name", label="Dataset", ratio=2, overflow="fold"),
             ListColumn(key="model_name", label="Base Model", ratio=2, overflow="fold"),
             ListColumn(key="rollout_name", label="Rollout", ratio=2, overflow="fold"),
+            ListColumn(key="reward", label="Reward", no_wrap=True, ratio=1),
             ListColumn(key="created_at", label="Submitted", no_wrap=True, ratio=1),
             ListColumn(key="creator_name", label="Submitted By", no_wrap=True, ratio=1),
         ],
@@ -204,9 +225,9 @@ def list_training_runs(*, limit: int, all_: bool) -> ListResult:
                 **serialize_training_run(run),
                 "name": run.name or "(unnamed)",
                 "status": format_run_status(run),
-                "dataset_name": run.dataset_name or "—",
                 "model_name": run.model_name or "—",
                 "rollout_name": run.rollout_name or "—",
+                "reward": _format_train_reward(run),
                 "created_at": format_local_date(run.created_at),
                 "creator_name": run.creator_name or "—",
             }
@@ -231,8 +252,15 @@ def info(name: str, *, output: str | None) -> DetailResult:
         )
 
     rows = build_run_detail_rows(run)
+    summary = _train_summary(run)
     if run.status == "pending":
         rows.insert(3, ("Progress", "Waiting to start..."))
+    else:
+        progress = format_progress(summary.get("progress"))
+        if progress:
+            rows.insert(3, ("Progress", progress))
+    if run.reward is not None:
+        rows.insert(4, ("Reward", f"{run.reward:.4f}"))
     if run.started_at:
         rows.append(("Started", format_local_datetime(run.started_at)))
     if run.completed_at:
@@ -283,7 +311,7 @@ def info(name: str, *, output: str | None) -> DetailResult:
     save_warning: str | None = None
     if metrics_data is not None:
         export = build_export_dict(run, metrics_data)
-        if metrics_data.overview.total_steps is not None:
+        if "progress" not in summary and metrics_data.overview.total_steps is not None:
             latest = metrics_data.overview.latest_step or 0
             total = metrics_data.overview.total_steps
             rows.insert(3, ("Progress", f"{latest} / {total} rollout steps"))
@@ -297,8 +325,8 @@ def info(name: str, *, output: str | None) -> DetailResult:
         from rich.table import Table
         from rich.text import Text
 
-        table = Table(show_header=True, header_style="bold", expand=True)
-        table.add_column("Checkpoint", ratio=4, overflow="fold")
+        table = Table(show_header=True, header_style="bold", expand=False)
+        table.add_column("Checkpoint", overflow="fold")
         table.add_column("Step", no_wrap=True)
         table.add_column("Status", no_wrap=True)
         table.add_column("ID", no_wrap=True)
@@ -378,6 +406,7 @@ def info(name: str, *, output: str | None) -> DetailResult:
                 "examples_processed_count": run.examples_processed_count,
                 "notes": run.notes,
             },
+            "summary": summary,
             **({"platform_url": run.platform_url} if run.platform_url else {}),
             "checkpoints": [serialize_checkpoint(cp) for cp in checkpoints],
             "in_progress": is_in_progress,

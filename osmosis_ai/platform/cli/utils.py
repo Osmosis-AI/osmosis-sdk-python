@@ -13,15 +13,20 @@ from osmosis_ai.platform.api.models import (
     DEPLOYMENT_STATUSES_ERROR,
     DEPLOYMENT_STATUSES_INACTIVE,
     DEPLOYMENT_STATUSES_SUCCESS,
-    EVAL_RUN_STATUSES_IN_PROGRESS,
+    EVAL_RUN_STATUSES_ACTIVE,
+    EVAL_RUN_STATUSES_ERROR,
+    EVAL_RUN_STATUSES_PENDING,
+    EVAL_RUN_STATUSES_STOPPED,
     EVAL_RUN_STATUSES_SUCCESS,
-    EVAL_RUN_STATUSES_TERMINAL,
+    RUN_STATUSES_ACTIVE,
     RUN_STATUSES_ERROR,
-    RUN_STATUSES_IN_PROGRESS,
+    RUN_STATUSES_PENDING,
     RUN_STATUSES_STOPPED,
     RUN_STATUSES_SUCCESS,
+    STATUSES_ACTIVE,
     STATUSES_ERROR,
-    STATUSES_IN_PROGRESS,
+    STATUSES_INACTIVE,
+    STATUSES_PENDING,
     STATUSES_SUCCESS,
 )
 from osmosis_ai.platform.auth import (
@@ -36,6 +41,48 @@ from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE
 
 if TYPE_CHECKING:
     from osmosis_ai.platform.auth.credentials import Credentials
+
+
+def make_progress(
+    completed: int | float | None,
+    total: int | float | None,
+    unit: str,
+) -> dict[str, Any] | None:
+    """Build a single source of truth for a run's progress.
+
+    Returns ``None`` unless ``total`` is a positive integer. ``completed`` is
+    clamped into ``[0, total]`` so the human-rendered string and the JSON
+    ``summary`` are derived from the same numbers and can never disagree or show
+    ``N / M`` with ``N > M``. Callers that cannot trust ``total`` as an upper
+    bound (e.g. when it is only a lower bound) should widen ``total`` before
+    calling.
+    """
+    if completed is None or total is None:
+        return None
+    total_int = int(total)
+    if total_int <= 0:
+        return None
+    return {
+        "completed": min(max(0, int(completed)), total_int),
+        "total": total_int,
+        "unit": unit,
+    }
+
+
+def format_progress(progress: dict[str, Any] | None) -> str | None:
+    """Render a progress dict produced by :func:`make_progress` as text."""
+    if not isinstance(progress, dict):
+        return None
+    completed = progress.get("completed")
+    total = progress.get("total")
+    unit = progress.get("unit")
+    if (
+        not isinstance(completed, int)
+        or not isinstance(total, int)
+        or not isinstance(unit, str)
+    ):
+        return None
+    return f"{completed:,} / {total:,} {unit}"
 
 
 def platform_call[T](message: str, call: Callable[[], T]) -> T:
@@ -70,18 +117,21 @@ def require_git_workspace_directory_context() -> GitWorkspaceDirectoryContext:
 
 # Ordered ``(statuses, style)`` buckets per domain. The first bucket whose set
 # contains the status wins, so order matters when a status is a member of more
-# than one set — eval's ``finished`` lives in both the success and terminal
-# sets, so the success bucket must precede the terminal bucket below.
+# than one set. Colors mirror the platform UI status dots: amber = waiting,
+# blue = active work, green = success, red = error, dim = stopped/inactive.
 _StatusStyleMap = Sequence[tuple[frozenset[str], str]]
 
 _DATASET_STATUS_STYLES: _StatusStyleMap = (
     (STATUSES_SUCCESS, "green"),
-    (STATUSES_IN_PROGRESS, "yellow"),
+    (STATUSES_PENDING, "orange3"),
+    (STATUSES_ACTIVE, "blue"),
     (STATUSES_ERROR, "red"),
+    (STATUSES_INACTIVE, "dim"),
 )
 _RUN_STATUS_STYLES: _StatusStyleMap = (
     (RUN_STATUSES_SUCCESS, "green"),
-    (RUN_STATUSES_IN_PROGRESS, "yellow"),
+    (RUN_STATUSES_PENDING, "orange3"),
+    (RUN_STATUSES_ACTIVE, "blue"),
     (RUN_STATUSES_ERROR, "red"),
     (RUN_STATUSES_STOPPED, "dim"),
 )
@@ -91,9 +141,11 @@ _DEPLOYMENT_STATUS_STYLES: _StatusStyleMap = (
     (DEPLOYMENT_STATUSES_ERROR, "red"),
 )
 _EVAL_STATUS_STYLES: _StatusStyleMap = (
-    (EVAL_RUN_STATUSES_SUCCESS, "green"),  # {"finished"} — precede TERMINAL
-    (EVAL_RUN_STATUSES_IN_PROGRESS, "yellow"),
-    (EVAL_RUN_STATUSES_TERMINAL, "red"),  # contains "finished"; green matched first
+    (EVAL_RUN_STATUSES_SUCCESS, "green"),
+    (EVAL_RUN_STATUSES_PENDING, "orange3"),
+    (EVAL_RUN_STATUSES_ACTIVE, "blue"),
+    (EVAL_RUN_STATUSES_ERROR, "red"),
+    (EVAL_RUN_STATUSES_STOPPED, "dim"),
 )
 
 

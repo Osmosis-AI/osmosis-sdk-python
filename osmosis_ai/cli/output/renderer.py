@@ -19,7 +19,7 @@ from .result import (
 
 _RICH_STYLE_TAG_RE = re.compile(
     r"\[/?(?:bold|dim|italic|underline|blink|reverse|strike|"
-    r"black|red|green|yellow|blue|magenta|cyan|white)"
+    r"black|red|green|yellow|blue|magenta|cyan|white|orange3)"
     r"(?: [a-zA-Z0-9_#./ -]+)?\]"
 )
 
