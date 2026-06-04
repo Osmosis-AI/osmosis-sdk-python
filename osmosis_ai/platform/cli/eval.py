@@ -214,7 +214,10 @@ def _format_pass_at_k(results: dict[str, Any] | None) -> str | None:
 
     formatted: list[str] = []
     for key in sorted(
-        pass_at_k, key=lambda value: int(value) if str(value).isdigit() else str(value)
+        pass_at_k,
+        key=lambda value: (
+            (0, int(value), "") if str(value).isdigit() else (1, 0, str(value))
+        ),
     ):
         value = pass_at_k.get(key)
         if isinstance(value, bool) or not isinstance(value, int | float):

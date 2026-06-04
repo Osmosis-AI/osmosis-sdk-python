@@ -30,7 +30,7 @@ Evaluation submit configs also support optional `[experiment].commit_sha`, `[eva
 | Key | Description |
 |-----|-------------|
 | `limit` | Optional row cap. |
-| `n` | Number of evaluation samples. |
+| `n` | Number of evaluation attempts per row. Total evaluations are `limit * n` (or `sampled_rows * n`). |
 | `batch_size` | Rows evaluated per batch. |
 | `pass_threshold` | Minimum passing score. |
 | `agent_workflow_timeout_s` | Agent workflow timeout per row. |
