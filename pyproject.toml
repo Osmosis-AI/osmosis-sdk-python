@@ -44,7 +44,7 @@ dependencies = [
 [project.optional-dependencies]
 # Platform CLI (dataset upload/validate)
 platform = [
-    "pyarrow>=14.0.0",      # Parquet file validation
+    "pyarrow>=24.0.0",      # Parquet file validation
 ]
 
 # Server dependencies for rollout serving
