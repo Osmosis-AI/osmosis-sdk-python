@@ -137,7 +137,9 @@ class TestDeployWizardHelper:
         calls: list[tuple[str, object]] = []
 
         class FakeClient:
-            def list_training_runs(self, *, git_identity, credentials=None):
+            def list_training_runs(
+                self, limit=50, offset=0, *, git_identity, credentials=None
+            ):
                 calls.append(("runs", git_identity))
                 assert credentials is AUTH_CREDENTIALS
                 assert git_identity == GIT_IDENTITY
@@ -174,13 +176,84 @@ class TestDeployWizardHelper:
         assert selected == "reward-run-step-100"
         assert calls == [("runs", GIT_IDENTITY), ("checkpoints", GIT_IDENTITY)]
 
+    def test_select_checkpoint_reaches_run_on_second_page(
+        self, monkeypatch: pytest.MonkeyPatch, mock_git_context: SimpleNamespace
+    ) -> None:
+        # Regression: the selector must drain every page, not just page 1.
+        # The run we want to deploy lives on page 2; if the selector stops
+        # after the first DEFAULT_PAGE_SIZE page it is unreachable.
+        page1_run = TrainingRun(id="run_decoy", name="page1-run", status="finished")
+        target_run = TrainingRun(id="run_target", name="page2-run", status="finished")
+        checkpoint = LoraCheckpointInfo(
+            id="cp_target",
+            checkpoint_name="page2-run-step-200",
+            checkpoint_step=200,
+            status="ready",
+        )
+        run_offsets: list[int] = []
+
+        class FakeClient:
+            def list_training_runs(
+                self, limit=50, offset=0, *, git_identity, credentials=None
+            ):
+                run_offsets.append(offset)
+                assert credentials is AUTH_CREDENTIALS
+                assert git_identity == GIT_IDENTITY
+                if offset == 0:
+                    return PaginatedTrainingRuns(
+                        training_runs=[page1_run],
+                        total_count=2,
+                        has_more=True,
+                        next_offset=50,
+                    )
+                assert offset == 50
+                return PaginatedTrainingRuns(
+                    training_runs=[target_run],
+                    total_count=2,
+                    has_more=False,
+                    next_offset=None,
+                )
+
+            def list_training_run_checkpoints(
+                self, run_id, *, git_identity, credentials=None
+            ):
+                assert run_id == "run_target"
+                return TrainingRunCheckpoints(
+                    training_run_id=run_id,
+                    training_run_name="page2-run",
+                    checkpoints=[checkpoint],
+                )
+
+        def fake_select_list(message, *, items, actions):
+            if message == "Choose a training run":
+                # Proves page 2's run reached the menu and is selectable.
+                # Production wraps each run in Choice(label, value=run).
+                menu_runs = [getattr(c, "value", c) for c in items]
+                assert target_run in menu_runs
+                return target_run
+            if message == "Choose a checkpoint":
+                return checkpoint
+            raise AssertionError(f"unexpected prompt: {message}")
+
+        monkeypatch.setattr(deployment_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr("osmosis_ai.cli.prompts.select_list", fake_select_list)
+
+        selected = deployment_module._select_checkpoint_for_deploy(mock_git_context)
+
+        # The page-2 checkpoint was selected — unreachable under single-page fetch.
+        assert selected == "page2-run-step-200"
+        # And the selector walked both pages rather than stopping at page 1.
+        assert run_offsets == [0, 50]
+
     def test_select_checkpoint_cancel_at_run(
         self, monkeypatch: pytest.MonkeyPatch, mock_git_context: SimpleNamespace
     ) -> None:
         run = TrainingRun(id="run_1", name="reward-run", status="finished")
 
         class FakeClient:
-            def list_training_runs(self, *, git_identity, credentials=None):
+            def list_training_runs(
+                self, limit=50, offset=0, *, git_identity, credentials=None
+            ):
                 assert credentials is AUTH_CREDENTIALS
                 assert git_identity == GIT_IDENTITY
                 return PaginatedTrainingRuns(
@@ -215,7 +288,9 @@ class TestDeployWizardHelper:
         )
 
         class FakeClient:
-            def list_training_runs(self, *, git_identity, credentials=None):
+            def list_training_runs(
+                self, limit=50, offset=0, *, git_identity, credentials=None
+            ):
                 assert credentials is AUTH_CREDENTIALS
                 assert git_identity == GIT_IDENTITY
                 return PaginatedTrainingRuns(
@@ -264,7 +339,9 @@ class TestDeployWizardHelper:
         checkpoint_calls: list[str] = []
 
         class FakeClient:
-            def list_training_runs(self, *, git_identity, credentials=None):
+            def list_training_runs(
+                self, limit=50, offset=0, *, git_identity, credentials=None
+            ):
                 assert credentials is AUTH_CREDENTIALS
                 assert git_identity == GIT_IDENTITY
                 return PaginatedTrainingRuns(
@@ -305,7 +382,9 @@ class TestDeployWizardHelper:
         self, monkeypatch: pytest.MonkeyPatch, mock_git_context: SimpleNamespace
     ) -> None:
         class FakeClient:
-            def list_training_runs(self, *, git_identity, credentials=None):
+            def list_training_runs(
+                self, limit=50, offset=0, *, git_identity, credentials=None
+            ):
                 assert credentials is AUTH_CREDENTIALS
                 assert git_identity == GIT_IDENTITY
                 return PaginatedTrainingRuns(
@@ -340,7 +419,9 @@ class TestDeployWizardHelper:
         confirm_messages: list[str] = []
 
         class FakeClient:
-            def list_training_runs(self, *, git_identity, credentials=None):
+            def list_training_runs(
+                self, limit=50, offset=0, *, git_identity, credentials=None
+            ):
                 assert credentials is AUTH_CREDENTIALS
                 assert git_identity == GIT_IDENTITY
                 return PaginatedTrainingRuns(
@@ -396,7 +477,9 @@ class TestDeployWizardHelper:
         run = TrainingRun(id="run_1", name="empty-run", status="finished")
 
         class FakeClient:
-            def list_training_runs(self, *, git_identity, credentials=None):
+            def list_training_runs(
+                self, limit=50, offset=0, *, git_identity, credentials=None
+            ):
                 assert credentials is AUTH_CREDENTIALS
                 assert git_identity == GIT_IDENTITY
                 return PaginatedTrainingRuns(

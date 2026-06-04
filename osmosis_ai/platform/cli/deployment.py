@@ -34,6 +34,7 @@ from osmosis_ai.cli.output import (
 from osmosis_ai.cli.output.display import format_local_date
 from osmosis_ai.platform.api.client import OsmosisClient
 from osmosis_ai.platform.cli.utils import (
+    fetch_all_pages,
     format_date,
     format_deployment_status,
     paginated_fetch,
@@ -57,10 +58,20 @@ def _select_checkpoint_for_deploy(context: Any) -> str | None:
     from osmosis_ai.cli.prompts import Choice, Separator, confirm, select_list
 
     client = OsmosisClient()
-    runs = client.list_training_runs(
-        credentials=context.credentials,
-        git_identity=context.git_identity,
-    ).training_runs
+    # Drain every page: the selector is the only path to a run, so a run on
+    # page 2+ would otherwise be unreachable. list_training_runs defaults to a
+    # single DEFAULT_PAGE_SIZE page, so walk next_offset to the end.
+    output = get_output_context()
+    with output.status("Fetching training runs..."):
+        runs, _ = fetch_all_pages(
+            lambda lim, off: client.list_training_runs(
+                limit=lim,
+                offset=off,
+                credentials=context.credentials,
+                git_identity=context.git_identity,
+            ),
+            items_attr="training_runs",
+        )
     if not runs:
         raise CLIError("No training runs with deployable checkpoints found.")
 
