@@ -18,3 +18,6 @@ changelog:
         - ci
         - dependencies
         - refactor
+    - title: "Other Changes"
+      labels:
+        - "*"
