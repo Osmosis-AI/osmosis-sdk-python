@@ -37,9 +37,9 @@ dataset = "<your-dataset-name>"  # Platform dataset name from `osmosis dataset l
 # eval_interval = 10                  # Evaluate every N rollouts
 # checkpoint_save_freq = 20           # Save checkpoint every N rollouts
 
-# Environment variables & secrets
-# Both sections are optional. Omit them entirely if your rollout needs no
-# additional environment configuration.
+# Environment variables
+# Optional. Omit entirely if your rollout needs no additional environment
+# configuration.
 #
 # [env]
 # Literal key = "value" pairs injected verbatim into the rollout container.
@@ -51,11 +51,10 @@ dataset = "<your-dataset-name>"  # Platform dataset name from `osmosis dataset l
 #   DEFAULT_REGION = "us-west-2"
 #
 # [secrets]
-# Maps env-var names to workspace environment_secret record *names*.
-# Values are resolved server-side from the workspace's encrypted secret store
-# and injected into the container - they never appear in this file or in transit.
-# Pre-register secrets with `osmosis secret add` or at /:orgName/secrets in
-# the platform UI before submitting.
+# Include this block only when this rollout needs platform secret refs.
+# When this block is present, it must include `required`.
+# Register them first with `osmosis secret set NAME` (personal is the default),
+# or pass `--scope workspace` for workspace-shared secrets.
 #
 # Example:
-#   OPENAI_API_KEY = "openai-api-key"   # value is the *name* of the secret record
+#   required = ["OPENAI_API_KEY"]

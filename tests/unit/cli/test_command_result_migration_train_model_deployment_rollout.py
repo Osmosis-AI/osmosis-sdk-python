@@ -75,6 +75,13 @@ def _stub_git_context(monkeypatch: pytest.MonkeyPatch) -> None:
         "osmosis_ai.platform.cli.train.require_git_workspace_directory_context",
         _git_context,
     )
+    for _delegated in ("model", "rollout", "deployment"):
+        monkeypatch.setattr(
+            f"osmosis_ai.platform.cli.{_delegated}."
+            "require_git_workspace_directory_context",
+            _git_context,
+            raising=False,
+        )
     monkeypatch.setattr(
         "osmosis_ai.platform.cli.shared_submit.require_git_workspace_directory_context",
         _git_context,
@@ -398,7 +405,7 @@ def test_model_list_plain_is_tab_separated_rows(
 
     monkeypatch.setattr("osmosis_ai.platform.api.client.OsmosisClient", FakeClient)
     monkeypatch.setattr(
-        "osmosis_ai.platform.cli.train.OsmosisClient", FakeClient, raising=False
+        "osmosis_ai.platform.cli.model.OsmosisClient", FakeClient, raising=False
     )
 
     exit_code = cli.main(["--plain", "model", "list"])
@@ -442,7 +449,7 @@ def test_model_list_json_includes_git_context(
 
     monkeypatch.setattr("osmosis_ai.platform.api.client.OsmosisClient", FakeClient)
     monkeypatch.setattr(
-        "osmosis_ai.platform.cli.train.OsmosisClient", FakeClient, raising=False
+        "osmosis_ai.platform.cli.model.OsmosisClient", FakeClient, raising=False
     )
 
     exit_code = cli.main(["--json", "model", "list"])
@@ -508,7 +515,7 @@ def test_deployment_commands_json_return_results(
 
     monkeypatch.setattr("osmosis_ai.platform.api.client.OsmosisClient", FakeClient)
     monkeypatch.setattr(
-        "osmosis_ai.platform.cli.train.OsmosisClient", FakeClient, raising=False
+        "osmosis_ai.platform.cli.deployment.OsmosisClient", FakeClient, raising=False
     )
 
     exit_code = cli.main(["--json", "deployment", "list"])
@@ -556,7 +563,7 @@ def test_failed_deploy_json_exits_nonzero(
 
     monkeypatch.setattr("osmosis_ai.platform.api.client.OsmosisClient", FakeClient)
     monkeypatch.setattr(
-        "osmosis_ai.platform.cli.train.OsmosisClient", FakeClient, raising=False
+        "osmosis_ai.platform.cli.deployment.OsmosisClient", FakeClient, raising=False
     )
 
     exit_code = cli.main(["--json", "deploy", "run-step-1"])
@@ -594,7 +601,7 @@ def test_rollout_list_json_returns_envelope(
 
     monkeypatch.setattr("osmosis_ai.platform.api.client.OsmosisClient", FakeClient)
     monkeypatch.setattr(
-        "osmosis_ai.platform.cli.train.OsmosisClient", FakeClient, raising=False
+        "osmosis_ai.platform.cli.rollout.OsmosisClient", FakeClient, raising=False
     )
 
     exit_code = cli.main(["--json", "rollout", "list"])
@@ -633,7 +640,7 @@ def test_rollout_list_columns_prioritize_name_over_id(
 
     monkeypatch.setattr("osmosis_ai.platform.api.client.OsmosisClient", FakeClient)
     monkeypatch.setattr(
-        "osmosis_ai.platform.cli.train.OsmosisClient", FakeClient, raising=False
+        "osmosis_ai.platform.cli.rollout.OsmosisClient", FakeClient, raising=False
     )
 
     from osmosis_ai.cli.commands.rollout import list_rollouts

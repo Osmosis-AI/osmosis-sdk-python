@@ -31,7 +31,7 @@ def test_eval_rubric_basic(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
 
     mock_eval = AsyncMock(
-        return_value=RubricResult(score=0.85, explanation="Good response", raw={})
+        return_value=RubricResult(score=0.85, explanation="Good response")
     )
     monkeypatch.setattr("osmosis_ai.eval.rubric.cli.evaluate_rubric", mock_eval)
 
@@ -67,7 +67,7 @@ def test_eval_rubric_with_output(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
 
     mock_eval = AsyncMock(
-        return_value=RubricResult(score=0.85, explanation="Good response", raw={})
+        return_value=RubricResult(score=0.85, explanation="Good response")
     )
     monkeypatch.setattr("osmosis_ai.eval.rubric.cli.evaluate_rubric", mock_eval)
 
@@ -116,9 +116,7 @@ def test_eval_rubric_multiple_runs(tmp_path, monkeypatch, capsys):
         nonlocal call_count
         call_count += 1
         score = 0.4 + 0.1 * call_count
-        return RubricResult(
-            score=score, explanation=f"run-{call_count}", raw={"call": call_count}
-        )
+        return RubricResult(score=score, explanation=f"run-{call_count}")
 
     monkeypatch.setattr("osmosis_ai.eval.rubric.cli.evaluate_rubric", mock_eval_fn)
 

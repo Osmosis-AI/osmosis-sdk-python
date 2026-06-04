@@ -1,5 +1,5 @@
 """
-osmosis-ai: A Python library for LLM training workflows.
+osmosis-ai: A Python SDK and CLI for building agent rollouts and managing LLM post-training workflows on Osmosis.
 
 Features:
 - Rubric evaluation via LLM-as-judge (evaluate_rubric)

@@ -6,25 +6,15 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import pytest
 
 from osmosis_ai.cli.output.display import (
-    created_column_label,
     format_local_date,
     format_local_datetime,
-    local_timezone_label,
 )
-
-
-def test_local_timezone_label_returns_non_empty_text() -> None:
-    assert local_timezone_label()
 
 
 def test_format_local_date_uses_explicit_timezone() -> None:
     formatted = format_local_date("2026-05-13T12:34:56Z", tz=ZoneInfo("UTC"))
 
-    assert formatted == "2026-05-13 12:34 UTC"
-
-
-def test_created_column_label_uses_created_at_label() -> None:
-    assert created_column_label() == "Created"
+    assert formatted == "2026-05-13 12:34 PM UTC"
 
 
 def test_format_local_date_includes_per_timestamp_timezone_rules() -> None:
@@ -34,10 +24,12 @@ def test_format_local_date_includes_per_timestamp_timezone_rules() -> None:
         pytest.skip("America/Los_Angeles timezone data is unavailable")
 
     assert (
-        format_local_date("2026-01-01T12:00:00Z", tz=pacific) == "2026-01-01 04:00 PST"
+        format_local_date("2026-01-01T12:00:00Z", tz=pacific)
+        == "2026-01-01 4:00 AM PST"
     )
     assert (
-        format_local_date("2026-07-01T12:00:00Z", tz=pacific) == "2026-07-01 05:00 PDT"
+        format_local_date("2026-07-01T12:00:00Z", tz=pacific)
+        == "2026-07-01 5:00 AM PDT"
     )
 
 
@@ -53,11 +45,11 @@ def test_format_local_datetime_uses_per_timestamp_timezone_rules() -> None:
 
     assert (
         format_local_datetime("2026-01-01T12:00:00Z", tz=pacific)
-        == "2026-01-01 04:00:00 PST"
+        == "2026-01-01 4:00:00 AM PST"
     )
     assert (
         format_local_datetime("2026-07-01T12:00:00Z", tz=pacific)
-        == "2026-07-01 05:00:00 PDT"
+        == "2026-07-01 5:00:00 AM PDT"
     )
 
 
@@ -82,11 +74,11 @@ def test_format_local_datetime_does_not_use_now_offset_for_conversion() -> None:
             now=july_fixed_offset_now,
             tz=pacific,
         )
-        == "2026-01-01 04:00:00 PST"
+        == "2026-01-01 4:00:00 AM PST"
     )
     assert (
         format_local_datetime("2026-01-01T12:00:00Z", now=july_fixed_offset_now)
-        != "2026-01-01 05:00:00 PDT"
+        != "2026-01-01 5:00:00 AM PDT"
     )
 
 

@@ -28,7 +28,6 @@ class ScaffoldEntry:
     """A file or directory marker needed for workspace directory repair."""
 
     dest: str
-    content: str = ""
     official: bool = False
 
 
@@ -129,16 +128,11 @@ def shared_template_files() -> frozenset[Path]:
     return frozenset(path for path, count in counts.items() if count > 1)
 
 
-def official_agent_scaffold_paths() -> tuple[Path, ...]:
-    return OFFICIAL_AGENT_SCAFFOLD_PATHS
-
-
 __all__ = [
     "OFFICIAL_AGENT_SCAFFOLD_PATHS",
     "REQUIRED_WORKSPACE_DIRS",
     "ScaffoldEntry",
     "TemplateRecipe",
-    "official_agent_scaffold_paths",
     "recipes_by_name",
     "required_workspace_paths",
     "shared_template_files",

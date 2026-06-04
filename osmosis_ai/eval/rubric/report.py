@@ -30,6 +30,21 @@ class RecordResult:
     errors: list[str]
     statistics: dict[str, float]
 
+    def to_payload(self) -> dict[str, Any]:
+        """Single source of truth for the per-record JSON shape.
+
+        Consumed by both the `--json`/`--plain` operation envelope and the
+        on-disk `--output` report so the two cannot drift.
+        """
+        return {
+            "index": self.record_index,
+            "label": self.label,
+            "scores": self.scores,
+            "explanations": self.explanations,
+            "errors": self.errors,
+            "statistics": self.statistics,
+        }
+
 
 @dataclass
 class RubricReport:
@@ -93,17 +108,7 @@ class JsonReportWriter:
             "data_path": str(report.data_path),
             "number": report.number,
             "overall_statistics": report.overall_statistics,
-            "records": [
-                {
-                    "index": r.record_index,
-                    "label": r.label,
-                    "scores": r.scores,
-                    "explanations": r.explanations,
-                    "errors": r.errors,
-                    "statistics": r.statistics,
-                }
-                for r in report.results
-            ],
+            "records": [r.to_payload() for r in report.results],
         }
         with output_path.open("w", encoding="utf-8") as fh:
             json.dump(payload, fh, indent=2, ensure_ascii=False)

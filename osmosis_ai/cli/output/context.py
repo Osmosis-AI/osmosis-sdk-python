@@ -26,7 +26,6 @@ class OutputContext:
 
     format: OutputFormat
     interactive: bool
-    quiet: bool = False
     schema_version: int = 1
     output_emitted: bool = False
 
@@ -46,8 +45,14 @@ class OutputContext:
         from rich.console import Console as RichConsole
         from rich.status import Status
 
+        from osmosis_ai.cli.console import console
+
         rich_stderr = RichConsole(stderr=True)
-        with Status(message, console=rich_stderr, spinner="dots"):
+        status = Status(message, console=rich_stderr, spinner="dots")
+        # Register on the shared console so a warning emitted mid-spin (e.g. the
+        # upgrade nudge) can pause/resume this spinner instead of gluing onto or
+        # stranding its line. This is the dominant spinner path for the CLI.
+        with console.track_spinner(status), status:
             yield
 
 

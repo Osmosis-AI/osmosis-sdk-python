@@ -53,7 +53,6 @@ def test_project_doctor_dry_run_reports_missing_paths(
     assert "rollouts/.gitkeep" not in payload["resource"]["missing"]
     assert "AGENTS.md" in payload["resource"]["missing"]
     assert payload["resource"]["fixed"] is False
-    assert payload["resource"]["updates_checked"] is False
     assert payload["resource"]["valid"] is False
     assert payload["resource"]["required_paths"] == [
         "rollouts/",
@@ -218,7 +217,6 @@ def test_project_doctor_fix_creates_missing_paths(
     assert (project / "AGENTS.md").is_file()
     assert (project / "AGENTS.md").read_text(encoding="utf-8") == "template agents\n"
     assert payload["resource"]["missing"] == []
-    assert payload["resource"]["updates_checked"] is True
     assert not (project / ".osmosis" / "project.toml").exists()
 
 
@@ -236,22 +234,3 @@ def test_project_doctor_fix_outside_project_does_not_create_project(
     message = json.loads(captured.err)["error"]["message"]
     assert "Osmosis workspace directory" in message
     assert "osmosis init" not in message
-
-
-def test_project_doctor_reports_agent_updates_without_overwriting(
-    tmp_path: Path, monkeypatch, workspace_template: Path
-) -> None:
-    from osmosis_ai.cli.output import OutputFormat, override_output_context
-    from osmosis_ai.platform.cli.workspace_directory import doctor_workspace_directory
-
-    project = _make_workspace_directory(tmp_path / "project")
-    (project / "AGENTS.md").write_text("custom agents", encoding="utf-8")
-    monkeypatch.chdir(project)
-
-    with override_output_context(format=OutputFormat.rich, interactive=True):
-        result = doctor_workspace_directory(fix=True)
-
-    assert (project / "AGENTS.md").read_text(encoding="utf-8") == "custom agents"
-    assert (project / "configs" / "training").is_dir()
-    assert result.resource["updates_available"] == ["AGENTS.md"]
-    assert result.display_next_steps

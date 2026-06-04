@@ -9,8 +9,7 @@ from types import SimpleNamespace
 
 import pytest
 
-import osmosis_ai.cli.commands.deployment as deployment_module
-import osmosis_ai.platform.api.client as api_client_module
+import osmosis_ai.platform.cli.deployment as deployment_module
 import osmosis_ai.platform.cli.utils as utils_module
 from osmosis_ai.cli.console import Console
 from osmosis_ai.cli.errors import CLIError
@@ -64,7 +63,7 @@ def mock_git_context(monkeypatch: pytest.MonkeyPatch) -> SimpleNamespace:
         credentials=AUTH_CREDENTIALS,
     )
     monkeypatch.setattr(
-        "osmosis_ai.platform.cli.utils.require_git_workspace_directory_context",
+        "osmosis_ai.platform.cli.deployment.require_git_workspace_directory_context",
         lambda: context,
     )
     return context
@@ -138,7 +137,9 @@ class TestDeployWizardHelper:
         calls: list[tuple[str, object]] = []
 
         class FakeClient:
-            def list_training_runs(self, *, git_identity, credentials=None):
+            def list_training_runs(
+                self, limit=50, offset=0, *, git_identity, credentials=None
+            ):
                 calls.append(("runs", git_identity))
                 assert credentials is AUTH_CREDENTIALS
                 assert git_identity == GIT_IDENTITY
@@ -167,13 +168,82 @@ class TestDeployWizardHelper:
                 return checkpoint
             raise AssertionError(f"unexpected prompt: {message}")
 
-        monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-        monkeypatch.setattr(deployment_module, "select_list", fake_select_list)
+        monkeypatch.setattr(deployment_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr("osmosis_ai.cli.prompts.select_list", fake_select_list)
 
         selected = deployment_module._select_checkpoint_for_deploy(mock_git_context)
 
         assert selected == "reward-run-step-100"
         assert calls == [("runs", GIT_IDENTITY), ("checkpoints", GIT_IDENTITY)]
+
+    def test_select_checkpoint_reaches_run_on_second_page(
+        self, monkeypatch: pytest.MonkeyPatch, mock_git_context: SimpleNamespace
+    ) -> None:
+        # Regression: the selector must drain every page, not just page 1.
+        # The run we want to deploy lives on page 2; if the selector stops
+        # after the first DEFAULT_PAGE_SIZE page it is unreachable.
+        page1_run = TrainingRun(id="run_decoy", name="page1-run", status="finished")
+        target_run = TrainingRun(id="run_target", name="page2-run", status="finished")
+        checkpoint = LoraCheckpointInfo(
+            id="cp_target",
+            checkpoint_name="page2-run-step-200",
+            checkpoint_step=200,
+            status="ready",
+        )
+        run_offsets: list[int] = []
+
+        class FakeClient:
+            def list_training_runs(
+                self, limit=50, offset=0, *, git_identity, credentials=None
+            ):
+                run_offsets.append(offset)
+                assert credentials is AUTH_CREDENTIALS
+                assert git_identity == GIT_IDENTITY
+                if offset == 0:
+                    return PaginatedTrainingRuns(
+                        training_runs=[page1_run],
+                        total_count=2,
+                        has_more=True,
+                        next_offset=50,
+                    )
+                assert offset == 50
+                return PaginatedTrainingRuns(
+                    training_runs=[target_run],
+                    total_count=2,
+                    has_more=False,
+                    next_offset=None,
+                )
+
+            def list_training_run_checkpoints(
+                self, run_id, *, git_identity, credentials=None
+            ):
+                assert run_id == "run_target"
+                return TrainingRunCheckpoints(
+                    training_run_id=run_id,
+                    training_run_name="page2-run",
+                    checkpoints=[checkpoint],
+                )
+
+        def fake_select_list(message, *, items, actions):
+            if message == "Choose a training run":
+                # Proves page 2's run reached the menu and is selectable.
+                # Production wraps each run in Choice(label, value=run).
+                menu_runs = [getattr(c, "value", c) for c in items]
+                assert target_run in menu_runs
+                return target_run
+            if message == "Choose a checkpoint":
+                return checkpoint
+            raise AssertionError(f"unexpected prompt: {message}")
+
+        monkeypatch.setattr(deployment_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr("osmosis_ai.cli.prompts.select_list", fake_select_list)
+
+        selected = deployment_module._select_checkpoint_for_deploy(mock_git_context)
+
+        # The page-2 checkpoint was selected — unreachable under single-page fetch.
+        assert selected == "page2-run-step-200"
+        # And the selector walked both pages rather than stopping at page 1.
+        assert run_offsets == [0, 50]
 
     def test_select_checkpoint_cancel_at_run(
         self, monkeypatch: pytest.MonkeyPatch, mock_git_context: SimpleNamespace
@@ -181,7 +251,9 @@ class TestDeployWizardHelper:
         run = TrainingRun(id="run_1", name="reward-run", status="finished")
 
         class FakeClient:
-            def list_training_runs(self, *, git_identity, credentials=None):
+            def list_training_runs(
+                self, limit=50, offset=0, *, git_identity, credentials=None
+            ):
                 assert credentials is AUTH_CREDENTIALS
                 assert git_identity == GIT_IDENTITY
                 return PaginatedTrainingRuns(
@@ -199,8 +271,8 @@ class TestDeployWizardHelper:
             assert actions[0].title == "Cancel"
             return actions[0].value
 
-        monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-        monkeypatch.setattr(deployment_module, "select_list", fake_select_list)
+        monkeypatch.setattr(deployment_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr("osmosis_ai.cli.prompts.select_list", fake_select_list)
 
         assert deployment_module._select_checkpoint_for_deploy(mock_git_context) is None
 
@@ -216,7 +288,9 @@ class TestDeployWizardHelper:
         )
 
         class FakeClient:
-            def list_training_runs(self, *, git_identity, credentials=None):
+            def list_training_runs(
+                self, limit=50, offset=0, *, git_identity, credentials=None
+            ):
                 assert credentials is AUTH_CREDENTIALS
                 assert git_identity == GIT_IDENTITY
                 return PaginatedTrainingRuns(
@@ -244,8 +318,8 @@ class TestDeployWizardHelper:
                 return actions[-1].value
             raise AssertionError(f"unexpected prompt: {message}")
 
-        monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-        monkeypatch.setattr(deployment_module, "select_list", fake_select_list)
+        monkeypatch.setattr(deployment_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr("osmosis_ai.cli.prompts.select_list", fake_select_list)
 
         assert deployment_module._select_checkpoint_for_deploy(mock_git_context) is None
 
@@ -265,7 +339,9 @@ class TestDeployWizardHelper:
         checkpoint_calls: list[str] = []
 
         class FakeClient:
-            def list_training_runs(self, *, git_identity, credentials=None):
+            def list_training_runs(
+                self, limit=50, offset=0, *, git_identity, credentials=None
+            ):
                 assert credentials is AUTH_CREDENTIALS
                 assert git_identity == GIT_IDENTITY
                 return PaginatedTrainingRuns(
@@ -294,8 +370,8 @@ class TestDeployWizardHelper:
                 return next(selected_checkpoints)
             raise AssertionError(f"unexpected prompt: {message}")
 
-        monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-        monkeypatch.setattr(deployment_module, "select_list", fake_select_list)
+        monkeypatch.setattr(deployment_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr("osmosis_ai.cli.prompts.select_list", fake_select_list)
 
         selected = deployment_module._select_checkpoint_for_deploy(mock_git_context)
 
@@ -306,7 +382,9 @@ class TestDeployWizardHelper:
         self, monkeypatch: pytest.MonkeyPatch, mock_git_context: SimpleNamespace
     ) -> None:
         class FakeClient:
-            def list_training_runs(self, *, git_identity, credentials=None):
+            def list_training_runs(
+                self, limit=50, offset=0, *, git_identity, credentials=None
+            ):
                 assert credentials is AUTH_CREDENTIALS
                 assert git_identity == GIT_IDENTITY
                 return PaginatedTrainingRuns(
@@ -316,8 +394,8 @@ class TestDeployWizardHelper:
         def fake_select_list(message, *, items, actions):
             raise AssertionError("select_list should not be called")
 
-        monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-        monkeypatch.setattr(deployment_module, "select_list", fake_select_list)
+        monkeypatch.setattr(deployment_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr("osmosis_ai.cli.prompts.select_list", fake_select_list)
 
         with pytest.raises(CLIError, match="No training runs"):
             deployment_module._select_checkpoint_for_deploy(mock_git_context)
@@ -341,7 +419,9 @@ class TestDeployWizardHelper:
         confirm_messages: list[str] = []
 
         class FakeClient:
-            def list_training_runs(self, *, git_identity, credentials=None):
+            def list_training_runs(
+                self, limit=50, offset=0, *, git_identity, credentials=None
+            ):
                 assert credentials is AUTH_CREDENTIALS
                 assert git_identity == GIT_IDENTITY
                 return PaginatedTrainingRuns(
@@ -376,9 +456,9 @@ class TestDeployWizardHelper:
             assert default is True
             return True
 
-        monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-        monkeypatch.setattr(deployment_module, "select_list", fake_select_list)
-        monkeypatch.setattr(deployment_module, "confirm", fake_confirm)
+        monkeypatch.setattr(deployment_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr("osmosis_ai.cli.prompts.select_list", fake_select_list)
+        monkeypatch.setattr("osmosis_ai.cli.prompts.confirm", fake_confirm)
 
         selected = deployment_module._select_checkpoint_for_deploy(mock_git_context)
 
@@ -397,7 +477,9 @@ class TestDeployWizardHelper:
         run = TrainingRun(id="run_1", name="empty-run", status="finished")
 
         class FakeClient:
-            def list_training_runs(self, *, git_identity, credentials=None):
+            def list_training_runs(
+                self, limit=50, offset=0, *, git_identity, credentials=None
+            ):
                 assert credentials is AUTH_CREDENTIALS
                 assert git_identity == GIT_IDENTITY
                 return PaginatedTrainingRuns(
@@ -421,9 +503,9 @@ class TestDeployWizardHelper:
             assert items
             return run
 
-        monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
-        monkeypatch.setattr(deployment_module, "select_list", fake_select_list)
-        monkeypatch.setattr(deployment_module, "confirm", lambda _message: False)
+        monkeypatch.setattr(deployment_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr("osmosis_ai.cli.prompts.select_list", fake_select_list)
+        monkeypatch.setattr("osmosis_ai.cli.prompts.confirm", lambda _message: False)
 
         assert deployment_module._select_checkpoint_for_deploy(mock_git_context) is None
 
@@ -447,7 +529,7 @@ class TestListDeployments:
                     deployments=[], total_count=0, has_more=False
                 )
 
-        monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(deployment_module, "OsmosisClient", FakeClient)
         result = deployment_module.list_deployments(limit=30, all_=False)
 
         assert isinstance(result, ListResult)
@@ -482,7 +564,7 @@ class TestListDeployments:
                     deployments=[dep], total_count=1, has_more=False
                 )
 
-        monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(deployment_module, "OsmosisClient", FakeClient)
         result = deployment_module.list_deployments(limit=10, all_=False)
         assert captured == {
             "limit": 10,
@@ -520,7 +602,7 @@ class TestInfo:
                     created_at="2026-04-20T00:00:00Z",
                 )
 
-        monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(deployment_module, "OsmosisClient", FakeClient)
         result = deployment_module.info(checkpoint=checkpoint_id)
         assert captured == {
             "checkpoint": checkpoint_id,
@@ -548,7 +630,7 @@ class TestInfo:
                     base_model="Qwen/Qwen3",
                 )
 
-        monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(deployment_module, "OsmosisClient", FakeClient)
 
         result = deployment_module.info(checkpoint="qwen3-run1-step-100")
 
@@ -576,7 +658,7 @@ class TestDeploy:
                     status="active",
                 )
 
-        monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(deployment_module, "OsmosisClient", FakeClient)
         result = deployment_module.deploy(checkpoint="qwen3-run1-step-100")
         assert captured == {
             "checkpoint": "qwen3-run1-step-100",
@@ -602,7 +684,7 @@ class TestDeploy:
             def deploy_checkpoint(self, checkpoint, *, git_identity, credentials=None):
                 raise AssertionError("checkpoint should not be deployed")
 
-        monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(deployment_module, "OsmosisClient", FakeClient)
         monkeypatch.setattr(
             deployment_module,
             "_select_checkpoint_for_deploy",
@@ -642,7 +724,7 @@ class TestDeploy:
                     status="active",
                 )
 
-        monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(deployment_module, "OsmosisClient", FakeClient)
 
         with override_output_context(
             format=OutputFormat.rich, interactive=True
@@ -667,7 +749,7 @@ class TestDeploy:
                     status="failed",
                 )
 
-        monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(deployment_module, "OsmosisClient", FakeClient)
         result = deployment_module.deploy(checkpoint="qwen3-run1-step-100")
 
         assert isinstance(result, OperationResult)
@@ -697,7 +779,7 @@ class TestUndeploy:
                     status="inactive",
                 )
 
-        monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(deployment_module, "OsmosisClient", FakeClient)
         result = deployment_module.undeploy(checkpoint=checkpoint_id)
         assert captured == {
             "checkpoint": checkpoint_id,
@@ -738,7 +820,7 @@ class TestUndeploy:
                     status="inactive",
                 )
 
-        monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(deployment_module, "OsmosisClient", FakeClient)
 
         with override_output_context(
             format=OutputFormat.rich, interactive=True
@@ -765,7 +847,7 @@ class TestUndeploy:
                     status="failed",
                 )
 
-        monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(deployment_module, "OsmosisClient", FakeClient)
         result = deployment_module.undeploy(checkpoint="qwen3-run1-step-100")
 
         assert isinstance(result, OperationResult)

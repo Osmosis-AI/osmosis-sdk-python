@@ -4,18 +4,16 @@ updates:
   - package-ecosystem: pip
     directory: "/"
     schedule:
-      interval: weekly
-      day: monday
+      interval: monthly
     groups:
       dev-dependencies:
         patterns:
           - "ruff"
           - "pytest*"
-          - "mypy"
           - "pyright*"
           - "pre-commit"
     commit-message:
-      prefix: "chore(deps):"
+      prefix: "[misc] chore:"
     labels:
       - "dependencies"
     open-pull-requests-limit: 10
@@ -24,10 +22,9 @@ updates:
   - package-ecosystem: github-actions
     directory: "/"
     schedule:
-      interval: weekly
-      day: monday
+      interval: monthly
     commit-message:
-      prefix: "chore(ci):"
+      prefix: "[ci] chore:"
     labels:
       - "dependencies"
       - "ci"

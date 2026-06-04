@@ -38,7 +38,6 @@ The table below lists all development commands. If you installed with **pip**, d
 | Format | `uv run ruff format .` |
 | Check formatting | `uv run ruff format --check .` |
 | Type check (pyright) | `uv run pyright osmosis_ai/` |
-| Type check (mypy) | `uv run mypy osmosis_ai/` |
 | Verify public API types | `uv run --no-editable pyright --verifytypes osmosis_ai --ignoreexternal` |
 
 ## Testing
@@ -53,13 +52,12 @@ Ruff is pinned to one version across `pyproject.toml`, `.pre-commit-config.yaml`
 
 ## Type Checking
 
-[Pyright](https://microsoft.github.io/pyright/) is the primary type checker and [mypy](https://mypy-lang.org/) is a secondary checker. Both are included in the `dev` extras.
+[Pyright](https://microsoft.github.io/pyright/) is the type checker, included in the `dev` extras.
 
 - **Pyright** — must pass. All errors must be resolved before merging.
 - **Pyright `--verifytypes`** — must pass. Ensures all public API symbols have complete type annotations.
-- **mypy** — advisory (`continue-on-error` in CI). Fix warnings when practical, but they won't block a PR.
 
-Configuration for both tools lives in `pyproject.toml` under `[tool.pyright]` and `[tool.mypy]`.
+Configuration lives in `pyproject.toml` under `[tool.pyright]`.
 
 > **Note:** `--verifytypes` requires a non-editable install. The `--no-editable` flag in `uv run` handles this automatically — it temporarily installs the package from a built wheel for the duration of the command.
 
@@ -126,4 +124,4 @@ Module-specific labels (`reward`, `rollout`, `server`, `cli`, `auth`, `eval`) ca
 3. Run `uv run pytest` and `uv run ruff check .`
 4. Submit a pull request with a properly formatted title and label
 
-CI will run linting, type checking (pyright + mypy), tests on supported Python versions (see `requires-python` in `pyproject.toml`), PR title validation, and a build validation on every PR.
+CI will run linting, type checking (pyright), tests on supported Python versions (see `requires-python` in `pyproject.toml`), PR title validation, and a build validation on every PR.
