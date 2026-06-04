@@ -9,7 +9,6 @@ Common errors when using the Osmosis SDK CLI.
 | Error | Install |
 |-------|---------|
 | `No module named 'fastapi'` / `uvicorn` | `pip install osmosis-ai[server]` |
-| `No module named 'pydantic_settings'` | `pip install osmosis-ai[server]` |
 | `No module named 'pyarrow'` | `pip install pyarrow` or `pip install osmosis-ai[server]` |
 | `No module named 'rich'` | `pip install osmosis-ai[server]` |
 | `No module named 'litellm'` | Should ship with core; reinstall `osmosis-ai` |

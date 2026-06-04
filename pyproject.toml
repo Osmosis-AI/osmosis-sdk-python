@@ -20,7 +20,6 @@ classifiers = [
 ]
 requires-python = ">=3.12"
 dependencies = [
-    "PyYAML>=6.0,<7.0",
     "python-dotenv>=0.1.0,<2.0.0",
     "requests>=2.0.0,<3.0.0",
     "litellm>=1.83.0,<2.0.0",
@@ -52,7 +51,6 @@ server = [
     "osmosis-ai[platform]",
     "fastapi>=0.100.0,<1.0.0",
     "uvicorn>=0.23.0,<1.0.0",
-    "pydantic-settings>=2.0.0,<3.0.0",
 ]
 
 # Development dependencies (testing, formatting, type checking, etc.)
@@ -62,11 +60,9 @@ dev = [
     "pytest>=9.0.3,<10.0.0",
     "pytest-asyncio>=1.4.0,<2.0.0",
     "pytest-cov>=7.1.0",
-    "anyio>=4.0.0",
     "ruff==0.15.15",  # Keep in sync with pre-commit and CI
     "pre-commit>=4.6.0,<5.0.0",
     "pyright[nodejs]==1.1.410",
-    "types-PyYAML>=6.0",
     "types-requests>=2.0",
 ]
 
