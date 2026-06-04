@@ -24,6 +24,7 @@ from .result import (
     ListResult,
     MessageResult,
     OperationResult,
+    detail_fields,
 )
 from .serializers import (
     serialize_checkpoint,
@@ -50,6 +51,7 @@ __all__ = [
     "classify_error",
     "command_path_for_error",
     "default_output_context",
+    "detail_fields",
     "emit_structured_error_to_stderr",
     "get_output_context",
     "install_output_context",

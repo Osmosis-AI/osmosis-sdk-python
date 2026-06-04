@@ -85,7 +85,7 @@ def _write_eval_config(path: Path, *, commit_sha: str | None = None) -> Path:
             "[env]\n"
             'LOG_LEVEL = "INFO"\n\n'
             "[secrets]\n"
-            'OPENAI_API_KEY = "openai-api-key"\n'
+            'required = ["OPENAI_API_KEY"]\n'
         ),
         encoding="utf-8",
     )
@@ -176,7 +176,7 @@ def test_eval_submit_passes_new_schema_to_evaluation_run_api(
     assert captured_kwargs["git_identity"] == GIT_IDENTITY
     assert captured_kwargs["credentials"] is FAKE_CREDENTIALS
     assert captured_kwargs["env_config"] == {"LOG_LEVEL": "INFO"}
-    assert captured_kwargs["secret_refs_config"] == {"OPENAI_API_KEY": "openai-api-key"}
+    assert captured_kwargs["secrets"] == ["OPENAI_API_KEY"]
     assert captured_kwargs["experiment_config"] == {
         "rollout": "calculator",
         "entrypoint": "main.py",

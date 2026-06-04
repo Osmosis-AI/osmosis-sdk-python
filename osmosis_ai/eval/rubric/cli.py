@@ -104,19 +104,7 @@ class RubricCommand:
         return 1 if has_errors else 0
 
     @staticmethod
-    def _record_payload(result: RecordResult) -> dict[str, Any]:
-        return {
-            "index": result.record_index,
-            "label": result.label,
-            "scores": result.scores,
-            "explanations": result.explanations,
-            "errors": result.errors,
-            "statistics": result.statistics,
-        }
-
-    @classmethod
     def _report_resource(
-        cls,
         report: RubricReport,
         output_path: Path | None,
     ) -> dict[str, Any]:
@@ -131,9 +119,7 @@ class RubricCommand:
         if output_path is not None:
             resource["output_path"] = str(output_path)
         else:
-            resource["records"] = [
-                cls._record_payload(result) for result in report.results
-            ]
+            resource["records"] = [result.to_payload() for result in report.results]
         return resource
 
     @staticmethod

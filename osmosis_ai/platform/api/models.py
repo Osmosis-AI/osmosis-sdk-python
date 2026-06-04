@@ -101,11 +101,6 @@ class DatasetFile:
             upload=upload,
         )
 
-    @property
-    def is_terminal(self) -> bool:
-        """Whether the file is in a terminal processing state."""
-        return self.status in STATUSES_TERMINAL
-
 
 @dataclass
 class DatasetDownloadInfo:
@@ -164,6 +159,7 @@ RUN_STATUSES_TERMINAL: frozenset[str] = (
 
 # ── Evaluation run status constants ──────────────────────────────
 
+EVAL_RUN_STATUSES_SUCCESS: frozenset[str] = frozenset({"finished"})
 EVAL_RUN_STATUSES_IN_PROGRESS: frozenset[str] = frozenset({"pending", "running"})
 EVAL_RUN_STATUSES_TERMINAL: frozenset[str] = frozenset(
     {"finished", "failed", "stopped"}
@@ -212,11 +208,6 @@ class TrainingRun:
             rollout_id=rollout.get("id"),
             rollout_name=rollout.get("name"),
         )
-
-    @property
-    def is_terminal(self) -> bool:
-        """Whether the run is in a terminal state."""
-        return self.status in RUN_STATUSES_TERMINAL
 
 
 @dataclass
@@ -460,6 +451,21 @@ class PaginatedBaseModels:
 # only metadata. These models therefore have no field for the value — there
 # is intentionally nowhere for a value to land if one were ever returned.
 
+# The platform wire value for a personal secret's scope is "user"; the
+# user-facing vocabulary calls it "personal". Both the wire value and the
+# display value are part of the stable JSON/API contract — keep them exact.
+WIRE_SCOPE_PERSONAL = "user"
+DISPLAY_SCOPE_PERSONAL = "personal"
+
+
+def wire_to_display_scope(scope: str | None) -> str | None:
+    """Map a wire scope value to its user-facing display value.
+
+    Only the personal scope differs ("user" → "personal"); every other value
+    (including ``"workspace"`` and ``None``) passes through unchanged.
+    """
+    return DISPLAY_SCOPE_PERSONAL if scope == WIRE_SCOPE_PERSONAL else scope
+
 
 @dataclass
 class EnvironmentSecretInfo:
@@ -470,6 +476,10 @@ class EnvironmentSecretInfo:
     created_at: str = ""
     updated_at: str = ""
     creator_name: str | None = None
+    updater_name: str | None = None
+    # "workspace" or "user". None when the platform did not report it
+    # (older responses / endpoints that don't distinguish scope).
+    scope: str | None = None
     # Page/operation-level link to the secrets console page. Populated by the
     # platform on create (and exposed at the list level via
     # ``PaginatedEnvironmentSecrets.platform_url``); ``None`` for list items.
@@ -483,6 +493,8 @@ class EnvironmentSecretInfo:
             created_at=data.get("created_at", ""),
             updated_at=data.get("updated_at", ""),
             creator_name=data.get("creator_name"),
+            updater_name=data.get("updater_name"),
+            scope=data.get("scope"),
             platform_url=data.get("platform_url"),
         )
 
@@ -718,27 +730,38 @@ class EvaluationRun:
 
 
 @dataclass
-class EvaluationRunDetail:
-    """Detailed evaluation run info."""
+class EvaluationRunDetail(EvaluationRun):
+    """Detailed evaluation run info.
 
-    eval_run: dict[str, Any]
+    Mirrors :class:`TrainingRunDetail`: a typed subclass of the list row so
+    callers read ``detail.status`` / ``detail.name`` with static safety instead
+    of stringly-typed ``eval_run.get(...)`` lookups. ``config`` / ``results``
+    are the detail-only payloads.
+    """
+
     config: dict[str, Any] | None = None
     results: dict[str, Any] | None = None
-    model: dict[str, Any] | None = None
-    dataset: dict[str, Any] | None = None
-    rollout: dict[str, Any] | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> EvaluationRunDetail:
+        run = data["eval_run"]
         config = data.get("config")
         model_path = config.get("model_path") if isinstance(config, dict) else None
         return cls(
-            eval_run=data["eval_run"],
-            config=config,
-            results=data.get("results"),
+            id=run["id"],
+            name=run.get("name", ""),
+            status=run.get("status", ""),
+            created_at=run.get("created_at", ""),
+            started_at=run.get("started_at"),
+            completed_at=run.get("completed_at"),
+            creator_name=run.get("creator_name"),
+            creator_email=run.get("creator_email"),
+            platform_url=run.get("platform_url"),
             model={"name": model_path} if isinstance(model_path, str) else None,
             dataset=data.get("dataset"),
             rollout=data.get("rollout"),
+            config=config,
+            results=data.get("results"),
         )
 
 

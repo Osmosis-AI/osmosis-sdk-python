@@ -27,14 +27,6 @@ def list_templates() -> list[str]:
     return sorted(recipes_by_name())
 
 
-def template_path(name: str, *, refresh: bool = False) -> Path:
-    """Resolve a recipe name to the workspace template root."""
-    _validate_template_name(name)
-    if name not in recipes_by_name():
-        raise TemplateNotFoundError(name)
-    return workspace_template_root(refresh=refresh)
-
-
 def template_recipe(name: str) -> TemplateRecipe:
     """Resolve a recipe name to its SDK catalog entry."""
     _validate_template_name(name)
@@ -90,6 +82,5 @@ __all__ = [
     "TemplateNotFoundError",
     "iter_template_files",
     "list_templates",
-    "template_path",
     "template_recipe",
 ]

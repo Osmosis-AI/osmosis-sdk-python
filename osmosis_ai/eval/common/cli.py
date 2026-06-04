@@ -285,11 +285,7 @@ def load_workflow(
     return workflow_cls, workflow_config, entrypoint_module, None
 
 
-def auto_discover_grader(
-    module_name: str,
-    *,
-    entrypoint_label: str | None = None,
-) -> tuple[type | None, Any]:
+def auto_discover_grader(module_name: str) -> tuple[type | None, Any]:
     """Discover a Grader subclass and its config from the entrypoint module.
 
     The entrypoint file (e.g., ``local_rollout_server_example.py``) typically
@@ -302,7 +298,7 @@ def auto_discover_grader(
     if mod is None:
         return None, None
 
-    return _discover_grader_from_module(mod, entrypoint_label or module_name)
+    return _discover_grader_from_module(mod, module_name)
 
 
 def _discover_grader_from_module(
@@ -356,8 +352,6 @@ def _resolve_grader(
     Only called when [grader] is present in TOML. Returns (None, None) when
     no grader is found.
     """
-    import sys
-
     from osmosis_ai.rollout.utils.imports import resolve_object
 
     if explicit_grader:
@@ -383,11 +377,7 @@ def _resolve_grader(
             )
         return grader_cls, grader_config
 
-    mod = sys.modules.get(module_name)
-    if mod is None:
-        return None, None
-
-    return _discover_grader_from_module(mod, module_name)
+    return auto_discover_grader(module_name)
 
 
 __all__ = [

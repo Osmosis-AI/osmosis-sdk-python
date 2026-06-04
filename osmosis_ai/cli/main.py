@@ -9,7 +9,6 @@ import typer
 import typer.core
 from dotenv import find_dotenv, load_dotenv
 
-from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.cli.output.context import (
     OutputContext,
     OutputFormat,
@@ -26,10 +25,6 @@ from osmosis_ai.cli.output.error import (
 )
 from osmosis_ai.cli.output.renderer import render_command_result, verify_output_emitted
 from osmosis_ai.consts import PACKAGE_VERSION, package_name
-from osmosis_ai.platform.auth.platform_client import (
-    AuthenticationExpiredError,
-    PlatformAPIError,
-)
 
 
 class OsmosisGroup(typer.core.TyperGroup):
@@ -157,10 +152,7 @@ def _handle_cli_error(
             command=command_path_for_error(ctx, argv=command_argv),
         )
     else:
-        if isinstance(exc, AuthenticationExpiredError):
-            _print_error(str(exc))
-        else:
-            _print_error(str(exc))
+        _print_error(str(exc))
     return exit_code
 
 
@@ -217,7 +209,7 @@ def _register_commands() -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Entry point for the osmosis CLI."""
+    """Entry point for the Osmosis CLI."""
     _register_commands()
     try:
         result = app(argv, standalone_mode=False)
@@ -236,15 +228,11 @@ def main(argv: list[str] | None = None) -> int:
         if not str(exc):
             return 0
         return _handle_cli_error(exc, argv=argv, exit_code=exc.exit_code)
-    except AuthenticationExpiredError as exc:
-        return _handle_cli_error(exc, argv=argv)
-    except PlatformAPIError as exc:
-        return _handle_cli_error(exc, argv=argv)
-    except CLIError as exc:
-        return _handle_cli_error(exc, argv=argv)
     except (KeyboardInterrupt, click.Abort):
         return 130
     except Exception as exc:
+        # CLIError, PlatformAPIError, AuthenticationExpiredError and anything
+        # else funnel through classify_error() into the structured envelope.
         return _handle_cli_error(exc, argv=argv)
 
 

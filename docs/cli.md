@@ -116,8 +116,10 @@ dataset = "my-platform-dataset"
 # [env]
 # LOG_LEVEL = "INFO"
 
-# [secrets]
-# OPENAI_API_KEY = "openai-api-key"
+[secrets]
+# Default OpenAI eval models need this platform secret.
+# Use [] only when this evaluation needs no secret refs.
+required = ["OPENAI_API_KEY"]
 ```
 
 ```bash
@@ -241,24 +243,38 @@ DEFAULT_REGION = "us-west-2"
 
 #### Secrets — `[secrets]`
 
-Maps env-var names to Platform `environment_secret` **record names**. The
-platform resolves the actual secret value server-side from encrypted secret
-storage and injects it into the container. Secret values never
-appear in the config file, in the API payload, or in CLI output.
+The `[secrets]` section must contain a `required` list of secret names to inject
+into the rollout container. The platform resolves each name to its encrypted
+value server-side and sets it as an env var of the same name. Secret values
+never appear in the config file, in the API payload, or in CLI output.
 
-Pre-register secrets before submitting a run that references them — either with [`osmosis secret add`](#osmosis-secret-add) or at `/:orgName/secrets` in the platform UI.
+Each name must match `^[A-Z][A-Z0-9_]*$`.
 
 ```toml
 [secrets]
-OPENAI_API_KEY = "openai-api-key"   # "openai-api-key" is the record name
+required = ["OPENAI_API_KEY", "DATABASE_URL"]
 ```
 
-#### Rules for both sections
+Evaluation configs must include `[secrets]`; use `required = []` when
+the evaluation needs no secret refs. The default OpenAI eval examples use
+`required = ["OPENAI_API_KEY"]`. Training configs may omit the `[secrets]` table
+when the training run does not need secret refs. If a config includes
+`[secrets]`, that table must include `required`.
 
-- Keys must match `^[A-Z_][A-Z0-9_]*$`.
-- A key cannot appear in both `[env]` and `[secrets]`.
-- Any env var name starting with `_OSMOSIS_` is reserved by the platform and cannot be used.
-- Both sections are optional.
+Secrets are scoped. A **workspace** secret is shared across the workspace; a
+**personal** secret is private to you. When a workspace and a personal secret
+share a name, your personal value wins at run time. Register secrets with
+`osmosis secret set` (below) or at `/:orgName/secrets` in the platform UI
+before submitting a run that references them. `osmosis secret set NAME` creates
+a personal secret by default; pass `--scope workspace` for workspace-shared
+secrets.
+
+#### Rules
+
+- `[env]` keys must match `^[A-Z_][A-Z0-9_]*$`; `[secrets]` names must match `^[A-Z][A-Z0-9_]*$`.
+- A name cannot appear in both `[env]` and `[secrets]`.
+- `[env]` names starting with `_OSMOSIS_` are reserved by the platform.
+- Both are optional.
 
 ### osmosis train info
 
@@ -331,31 +347,30 @@ osmosis undeploy <checkpoint>
 
 ## Secrets
 
-Manage workspace `environment_secret` records — the values referenced by the `[secrets]` table in train/eval configs. The platform never returns a secret value: `list` shows names and metadata only, and `add` echoes back only metadata. Secret values are accepted from a hidden interactive prompt or a named environment variable — never as a plaintext command-line argument (which would leak into shell history and the process list).
+### `osmosis secret`
 
-### osmosis secret list
+Manage secrets. The platform never returns secret values; these
+commands show or accept names + metadata only.
 
-List secrets for the current workspace directory (names and metadata only).
+| Command | Description |
+| --- | --- |
+| `osmosis secret list [--scope all\|workspace\|personal] [--limit N] [--all]` | List secret names + scope (no values). |
+| `osmosis secret set NAME [--scope workspace\|personal] [--env VARNAME]` | Create or update (upsert) a secret. Defaults to personal scope. Value read from `--env VARNAME` or a hidden prompt — never a plaintext argument. |
+| `osmosis secret delete NAME [--scope workspace\|personal] [--yes]` | Delete a secret within the given scope. Defaults to personal scope. |
 
-```bash
-osmosis secret list
-osmosis secret list --limit 50
-osmosis secret list --all
-```
-
-### osmosis secret add
-
-Add a workspace secret. The value is read from a named environment variable (`--env VARNAME`) or, with no flag, typed at a hidden interactive prompt. The secret name may contain letters, digits, `_`, and `-` (1–255 chars). Adding a secret whose name already exists fails with a `CONFLICT` error rather than overwriting it.
+`--scope` defaults to `personal` for `set`/`delete` and `all` for `list`.
+Workspace secrets require an admin/owner role; personal secrets are private to you.
 
 ```bash
-# Type the value at a hidden prompt (input is not echoed):
-osmosis secret add OPENAI_API_KEY
+# Read the value from an env var (recommended for scripts).
+# This creates or updates your personal secret by default:
+OPENAI_API_KEY=sk-... osmosis secret set OPENAI_API_KEY --env OPENAI_API_KEY
 
-# Read the value from an environment variable (recommended for CI):
-osmosis secret add OPENAI_API_KEY --env OPENAI_API_KEY
+# Workspace-shared secret:
+OPENAI_API_KEY=sk-... osmosis secret set OPENAI_API_KEY --scope workspace --env OPENAI_API_KEY
 
-# In --json / --plain (non-interactive) modes, --env is required:
-osmosis --json secret add OPENAI_API_KEY --env SOURCE_VAR
+osmosis secret list --scope personal
+osmosis secret delete OPENAI_API_KEY --scope personal --yes
 ```
 
 ## See also

@@ -159,7 +159,7 @@ def test_upload_passes_git_context_to_api_calls_without_subscription_preflight(
 
     monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
 
-    result = dataset_module.upload(str(file_path))
+    result = dataset_module.upload(str(file_path), yes=True)
 
     assert calls == {
         "create_credentials": fake_credentials,

@@ -187,16 +187,15 @@ class OsmosisClient:
         checkpoints_config: dict[str, Any] | None = None,
         advanced_config: dict[str, Any] | None = None,
         env_config: dict[str, str] | None = None,
-        secret_refs_config: dict[str, str] | None = None,
+        secrets: list[str] | None = None,
         credentials: Credentials | None = None,
         git_identity: str,
     ) -> SubmitRunResult:
         """Submit a new training run.
 
-        ``env_config`` is a literal env-var-name → value map applied to the
-        rollout container. ``secret_refs_config`` maps env-var names to the
-        names of workspace ``environment_secret`` records; values are resolved
-        server-side and never travel through the CLI.
+        ``env_config`` is a literal env-var-name to value map applied to the
+        rollout container. ``secrets`` is a list of ``environment_secret`` names;
+        their values are resolved server-side and never travel through the CLI.
         """
         data: dict[str, Any] = {
             "experiment_config": experiment_config,
@@ -211,8 +210,8 @@ class OsmosisClient:
             data["advanced_config"] = advanced_config
         if env_config:
             data["env_config"] = env_config
-        if secret_refs_config:
-            data["secret_refs_config"] = secret_refs_config
+        if secrets:
+            data["secrets"] = {"required": secrets}
         result = platform_request(
             "/api/cli/training-runs",
             method="POST",
@@ -320,19 +319,25 @@ class OsmosisClient:
         return PaginatedBaseModels.from_dict(data)
 
     # ── Environment Secrets ───────────────────────────────────────
-    # Workspace-scoped secrets. The platform never echoes secret values:
-    # list returns names + metadata only; create returns metadata only.
+    # Scoped secrets. The platform never echoes secret values:
+    # list returns names + metadata only; set returns metadata only.
 
     def list_environment_secrets(
         self,
         limit: int = DEFAULT_PAGE_SIZE,
         offset: int = 0,
         *,
+        scope: str = "all",
         credentials: Credentials | None = None,
         git_identity: str,
     ) -> PaginatedEnvironmentSecrets:
-        """List workspace environment secrets (names + metadata only)."""
-        qs = urlencode({"limit": limit, "offset": offset})
+        """List environment secrets (names + metadata only).
+
+        ``scope`` is one of ``"all"`` (workspace + the caller's personal
+        secrets), ``"workspace"``, or ``"user"`` (the caller's personal
+        secrets only). The platform never returns secret values.
+        """
+        qs = urlencode({"limit": limit, "offset": offset, "scope": scope})
         data = platform_request(
             f"/api/cli/environment-secrets?{qs}",
             credentials=credentials,
@@ -340,28 +345,50 @@ class OsmosisClient:
         )
         return PaginatedEnvironmentSecrets.from_dict(data)
 
-    def create_environment_secret(
+    def set_environment_secret(
         self,
         name: str,
         value: str,
         *,
+        scope: str,
         credentials: Credentials | None = None,
         git_identity: str,
     ) -> EnvironmentSecretInfo:
-        """Create a workspace environment secret.
+        """Create or update (upsert) an environment secret.
 
-        The secret ``value`` is sent once in the request body and is never
-        returned by the platform — the response carries only metadata
-        (id, name, timestamps). Callers must not log or echo ``value``.
+        ``scope`` is ``"workspace"`` or ``"user"``. The secret ``value`` is
+        sent once in the request body and is never returned by the platform —
+        the response carries only metadata. Callers must not log or echo
+        ``value``.
         """
         data = platform_request(
             "/api/cli/environment-secrets",
             method="POST",
-            data={"name": name, "value": value},
+            data={"name": name, "value": value, "scope": scope},
             credentials=credentials,
             git_identity=git_identity,
         )
         return EnvironmentSecretInfo.from_dict(data)
+
+    def delete_environment_secret(
+        self,
+        name: str,
+        *,
+        scope: str,
+        credentials: Credentials | None = None,
+        git_identity: str,
+    ) -> None:
+        """Delete an environment secret by name within ``scope``.
+
+        ``scope`` is ``"workspace"`` or ``"user"``.
+        """
+        platform_request(
+            "/api/cli/environment-secrets",
+            method="DELETE",
+            data={"name": name, "scope": scope},
+            credentials=credentials,
+            git_identity=git_identity,
+        )
 
     # ── Deployments ───────────────────────────────────────────────
     # All mutating endpoints key off `checkpoint` (UUID or checkpoint_name).
@@ -463,7 +490,7 @@ class OsmosisClient:
         evaluation_config: dict[str, Any] | None = None,
         advanced_config: dict[str, Any] | None = None,
         env_config: dict[str, str] | None = None,
-        secret_refs_config: dict[str, str] | None = None,
+        secrets: list[str] | None = None,
         credentials: Credentials | None = None,
         git_identity: str,
     ) -> SubmitRunResult:
@@ -477,8 +504,8 @@ class OsmosisClient:
             data["advanced_config"] = advanced_config
         if env_config:
             data["env_config"] = env_config
-        if secret_refs_config:
-            data["secret_refs_config"] = secret_refs_config
+        if secrets:
+            data["secrets"] = {"required": secrets}
         result = platform_request(
             "/api/cli/eval-runs",
             method="POST",

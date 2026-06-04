@@ -82,6 +82,7 @@ def test_envelope_includes_platform_details() -> None:
         (403, "PLATFORM_ERROR"),
         (404, "NOT_FOUND"),
         (409, "CONFLICT"),
+        (426, "UPGRADE_REQUIRED"),
         (429, "RATE_LIMITED"),
         (500, "PLATFORM_ERROR"),
         (502, "PLATFORM_ERROR"),
@@ -95,6 +96,15 @@ def test_platform_error_status_mapping(status: int, expected_code: str) -> None:
 def test_authentication_expired_error_maps_to_auth_required() -> None:
     cli_err = classify_error(AuthenticationExpiredError("expired"))
     assert cli_err.code == "AUTH_REQUIRED"
+
+
+def test_upgrade_required_error_maps_to_upgrade_required() -> None:
+    # UpgradeRequiredError is a PlatformAPIError subclass exported from the
+    # package's public surface (parity with SubscriptionRequiredError).
+    from osmosis_ai.platform.auth import UpgradeRequiredError
+
+    cli_err = classify_error(UpgradeRequiredError("upgrade", status_code=426))
+    assert cli_err.code == "UPGRADE_REQUIRED"
 
 
 def test_unknown_exception_maps_to_internal_with_safe_details() -> None:

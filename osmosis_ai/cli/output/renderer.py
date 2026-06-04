@@ -275,14 +275,8 @@ def _render_rich(result: CommandResult, output: OutputContext) -> None:
         for column in result.columns:
             overflow = column.overflow if column.overflow is not None else "ellipsis"
             no_wrap = column.no_wrap
-            if protect_primary_column:
-                if _is_primary_column(column):
-                    no_wrap = True
-                else:
-                    no_wrap = column.no_wrap
-                    overflow = (
-                        column.overflow if column.overflow is not None else "ellipsis"
-                    )
+            if protect_primary_column and _is_primary_column(column):
+                no_wrap = True
 
             table.add_column(
                 column.label,

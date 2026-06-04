@@ -18,6 +18,7 @@ from osmosis_ai.cli.output import (
     ListResult,
     OperationResult,
     OutputFormat,
+    detail_fields,
     get_output_context,
     serialize_checkpoint,
     serialize_training_run,
@@ -40,16 +41,12 @@ from osmosis_ai.platform.cli.training_config import (
 )
 from osmosis_ai.platform.cli.utils import (
     build_run_detail_rows,
-    fetch_all_pages,
     format_run_status,
+    paginated_fetch,
     require_git_workspace_directory_context,
     validate_list_options,
 )
 from osmosis_ai.platform.cli.workspace_directory_context import git_result_context
-
-
-def _detail_fields(rows: list[tuple[str, str]]) -> list[DetailField]:
-    return [DetailField(label=label, value=value) for label, value in rows]
 
 
 def _safe_name(name: str) -> str:
@@ -115,7 +112,7 @@ def _submit_training(
         checkpoints_config=config.checkpoints_config or None,
         advanced_config=config.advanced_config or None,
         env_config=config.env or None,
-        secret_refs_config=config.secrets or None,
+        secrets=config.secrets or None,
         credentials=credentials,
         git_identity=git_identity,
     )
@@ -126,6 +123,7 @@ def _train_next_steps(
 ) -> tuple[list[str], list[dict[str, Any]]]:
     display = [
         f"Status: {result.status}",
+        f"Rollout: {config.experiment_rollout}",
         f"Model: {config.experiment_model_path}",
         f"Dataset: {config.experiment_dataset}",
         (
@@ -173,29 +171,17 @@ def list_training_runs(*, limit: int, all_: bool) -> ListResult:
     client = OsmosisClient()
     output = get_output_context()
     with output.status("Fetching training runs..."):
-        if fetch_all:
-            training_runs, total_count = fetch_all_pages(
-                lambda lim, off: client.list_training_runs(
-                    limit=lim,
-                    offset=off,
-                    credentials=credentials,
-                    git_identity=context.git_identity,
-                ),
-                items_attr="training_runs",
-            )
-            has_more = False
-            next_offset: int | None = None
-        else:
-            page = client.list_training_runs(
-                limit=effective_limit,
-                offset=0,
+        training_runs, total_count, has_more, next_offset = paginated_fetch(
+            lambda lim, off: client.list_training_runs(
+                limit=lim,
+                offset=off,
                 credentials=credentials,
                 git_identity=context.git_identity,
-            )
-            training_runs = page.training_runs
-            total_count = page.total_count
-            has_more = page.has_more
-            next_offset = page.next_offset
+            ),
+            items_attr="training_runs",
+            limit=effective_limit,
+            fetch_all=fetch_all,
+        )
 
     return ListResult(
         title="Training Runs",
@@ -304,7 +290,7 @@ def info(name: str, *, output: str | None) -> DetailResult:
         if metrics_data.overview.duration_formatted:
             rows.append(("Duration", metrics_data.overview.duration_formatted))
 
-    fields = _detail_fields(rows)
+    fields = detail_fields(rows)
     if run.platform_url:
         display_hints.append(f"View: {run.platform_url}")
     if checkpoints:
@@ -416,6 +402,7 @@ def stop(name: str, *, yes: bool) -> OperationResult:
     require_confirmation(
         f'Stop training run "{name}"?',
         yes=yes,
+        default=False,
         summary=[("Name", name)],
     )
 
