@@ -463,7 +463,7 @@ def list_eval_runs(*, limit: int, all_: bool) -> ListResult:
             ListColumn(key="name", label="Name", ratio=4, overflow="fold"),
             ListColumn(key="status", label="Status", no_wrap=True, ratio=1),
             ListColumn(key="rollout", label="Rollout", ratio=2, overflow="fold"),
-            ListColumn(key="avg_reward", label="Reward", no_wrap=True, ratio=1),
+            ListColumn(key="avg_reward", label="Avg. Reward", no_wrap=True, ratio=1),
             ListColumn(key="created_at", label="Submitted", no_wrap=True, ratio=1),
             ListColumn(key="creator_name", label="Submitted By", no_wrap=True, ratio=1),
         ],
