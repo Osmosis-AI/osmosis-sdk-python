@@ -1,8 +1,8 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset=".github/osmosis-logo-dark.svg">
-    <source media="(prefers-color-scheme: light)" srcset=".github/osmosis-logo-light.svg">
-    <img alt="Osmosis" src=".github/osmosis-logo-light.svg" width="218">
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/Osmosis-AI/osmosis-sdk-python/main/.github/osmosis-logo-dark.svg">
+    <source media="(prefers-color-scheme: light)" srcset="https://raw.githubusercontent.com/Osmosis-AI/osmosis-sdk-python/main/.github/osmosis-logo-light.svg">
+    <img alt="Osmosis" src="https://raw.githubusercontent.com/Osmosis-AI/osmosis-sdk-python/main/.github/osmosis-logo-light.svg" width="218">
   </picture>
 </p>
 
