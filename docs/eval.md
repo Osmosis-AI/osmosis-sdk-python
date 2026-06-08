@@ -74,6 +74,8 @@ required = ["OPENAI_API_KEY"]
 osmosis dataset list
 git push                                       # ensure the platform sees your commit
 osmosis eval submit configs/eval/my-rollout.toml
+osmosis eval info <eval-run-name-or-id>
+osmosis eval info <eval-run-name-or-id> -o ./eval-metrics.json
 ```
 
 ## Rubric (LLM-as-judge)

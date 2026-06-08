@@ -126,6 +126,16 @@ required = ["OPENAI_API_KEY"]
 osmosis eval submit configs/eval/my-rollout.toml
 ```
 
+### osmosis eval info
+
+Show evaluation run details, results, and metrics. In Rich output mode, metrics JSON is saved under `.osmosis/metrics/` by default when metrics are available. In JSON or plain output mode, pass `-o` / `--output` to write the metrics file.
+
+```bash
+osmosis eval info <eval-run-name-or-id>
+osmosis --json eval info <eval-run-name-or-id>
+osmosis eval info <eval-run-name-or-id> -o ./eval-metrics.json
+```
+
 ### osmosis eval rubric
 
 LLM-as-judge on a JSONL conversation file:
