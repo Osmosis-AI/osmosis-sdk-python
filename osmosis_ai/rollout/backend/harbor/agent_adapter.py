@@ -15,6 +15,7 @@ from typing import Any
 
 from harbor.agents.installed.base import BaseInstalledAgent
 from harbor.models.agent.context import AgentContext
+from harbor.models.trial.paths import EnvironmentPaths
 
 
 class OsmosisInstalledAgent(BaseInstalledAgent):
@@ -39,8 +40,10 @@ class OsmosisInstalledAgent(BaseInstalledAgent):
     async def run(self, instruction: Any, environment: Any, context: Any) -> None:
         prompt_path = self.logs_dir / "prompt.json"
         config_path = self.logs_dir / "rollout_config.json"
-        prompt_env_path = environment.env_paths.agent_dir / "prompt.json"
-        config_env_path = environment.env_paths.agent_dir / "rollout_config.json"
+        # Harbor v0.13: BaseEnvironment.env_paths was removed; installed agents
+        # reference the class-level EnvironmentPaths (Linux container paths).
+        prompt_env_path = EnvironmentPaths.agent_dir / "prompt.json"
+        config_env_path = EnvironmentPaths.agent_dir / "rollout_config.json"
 
         prompt_path.write_text(instruction)
 
