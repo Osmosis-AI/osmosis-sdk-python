@@ -30,7 +30,6 @@ class TestBuildExportDict:
             status="finished",
             overview=TrainingRunMetricsOverview(
                 duration_ms=3600000,
-                duration_formatted="1h",
                 metric_summaries=[
                     MetricSummary(
                         key="rollout/raw_reward",
@@ -145,7 +144,7 @@ class TestBuildExportDict:
         metrics = self._make_metrics()
         run = self._make_run_detail()
         result = build_export_dict(run, metrics)
-        assert result["training_run"]["duration"] == "1h"
+        assert result["training_run"]["duration_ms"] == 3600000
 
     def test_empty_metrics_list(self) -> None:
         run = self._make_run_detail()
@@ -154,7 +153,6 @@ class TestBuildExportDict:
             status="finished",
             overview=TrainingRunMetricsOverview(
                 duration_ms=None,
-                duration_formatted=None,
                 metric_summaries=[],
                 examples_processed_count=None,
             ),
@@ -171,7 +169,6 @@ class TestBuildExportDict:
             status="finished",
             overview=TrainingRunMetricsOverview(
                 duration_ms=None,
-                duration_formatted=None,
                 metric_summaries=[
                     MetricSummary(
                         key="rollout/raw_reward",

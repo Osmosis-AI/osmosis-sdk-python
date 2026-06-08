@@ -315,7 +315,6 @@ def test_train_info_json_does_not_write_default_file(
                 status="finished",
                 overview=TrainingRunMetricsOverview(
                     duration_ms=1000,
-                    duration_formatted="1s",
                     metric_summaries=[],
                     examples_processed_count=10,
                 ),

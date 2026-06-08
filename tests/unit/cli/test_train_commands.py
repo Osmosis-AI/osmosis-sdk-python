@@ -396,7 +396,6 @@ class TestInfo:
             status="finished",
             overview=TrainingRunMetricsOverview(
                 duration_ms=1000,
-                duration_formatted="1s",
                 metric_summaries=[
                     MetricSummary(
                         key="rollout/raw_reward",
@@ -1519,7 +1518,6 @@ class TestMetrics:
             status="completed",
             overview=TrainingRunMetricsOverview(
                 duration_ms=None,
-                duration_formatted=None,
                 metric_summaries=[],
                 examples_processed_count=None,
             ),

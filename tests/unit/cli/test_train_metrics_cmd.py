@@ -44,7 +44,6 @@ def _make_metrics(**overrides) -> TrainingRunMetrics:
         status="finished",
         overview=TrainingRunMetricsOverview(
             duration_ms=3600000,
-            duration_formatted="1h",
             metric_summaries=[],
             examples_processed_count=5000,
         ),
@@ -404,7 +403,9 @@ class TestResolveOutputPath:
     """Test _resolve_output_path smart path resolution."""
 
     def test_explicit_json_extension_used_as_is(self, tmp_path: Path) -> None:
-        from osmosis_ai.platform.cli.train import _resolve_output_path
+        from osmosis_ai.cli.metrics_export import (
+            resolve_metrics_output_path as _resolve_output_path,
+        )
 
         result = _resolve_output_path(
             str(tmp_path / "my_metrics.json"), "run-name", "abcd1234"
@@ -412,7 +413,9 @@ class TestResolveOutputPath:
         assert result == tmp_path / "my_metrics.json"
 
     def test_no_extension_appends_json(self, tmp_path: Path) -> None:
-        from osmosis_ai.platform.cli.train import _resolve_output_path
+        from osmosis_ai.cli.metrics_export import (
+            resolve_metrics_output_path as _resolve_output_path,
+        )
 
         result = _resolve_output_path(
             str(tmp_path / "my_metrics"), "run-name", "abcd1234"
@@ -420,7 +423,9 @@ class TestResolveOutputPath:
         assert result == tmp_path / "my_metrics.json"
 
     def test_non_json_extension_replaced_with_json(self, tmp_path: Path) -> None:
-        from osmosis_ai.platform.cli.train import _resolve_output_path
+        from osmosis_ai.cli.metrics_export import (
+            resolve_metrics_output_path as _resolve_output_path,
+        )
 
         result = _resolve_output_path(
             str(tmp_path / "my_metrics.csv"), "run-name", "abcd1234"
@@ -428,7 +433,9 @@ class TestResolveOutputPath:
         assert result == tmp_path / "my_metrics.json"
 
     def test_trailing_slash_uses_directory_mode(self, tmp_path: Path) -> None:
-        from osmosis_ai.platform.cli.train import _resolve_output_path
+        from osmosis_ai.cli.metrics_export import (
+            resolve_metrics_output_path as _resolve_output_path,
+        )
 
         dir_path = tmp_path / "output"
         result = _resolve_output_path(
@@ -438,7 +445,9 @@ class TestResolveOutputPath:
         assert dir_path.is_dir()
 
     def test_existing_directory_uses_directory_mode(self, tmp_path: Path) -> None:
-        from osmosis_ai.platform.cli.train import _resolve_output_path
+        from osmosis_ai.cli.metrics_export import (
+            resolve_metrics_output_path as _resolve_output_path,
+        )
 
         dir_path = tmp_path / "output"
         dir_path.mkdir()
@@ -446,7 +455,9 @@ class TestResolveOutputPath:
         assert result == dir_path / "abcd1234.json"
 
     def test_auto_creates_parent_directories(self, tmp_path: Path) -> None:
-        from osmosis_ai.platform.cli.train import _resolve_output_path
+        from osmosis_ai.cli.metrics_export import (
+            resolve_metrics_output_path as _resolve_output_path,
+        )
 
         result = _resolve_output_path(
             str(tmp_path / "nested" / "deep" / "metrics"), "run", "abcd1234"
@@ -455,7 +466,9 @@ class TestResolveOutputPath:
         assert result.parent.is_dir()
 
     def test_trailing_slash_auto_creates_directory(self, tmp_path: Path) -> None:
-        from osmosis_ai.platform.cli.train import _resolve_output_path
+        from osmosis_ai.cli.metrics_export import (
+            resolve_metrics_output_path as _resolve_output_path,
+        )
 
         dir_path = tmp_path / "new_dir"
         result = _resolve_output_path(str(dir_path) + "/", "my-run", "abcd1234efgh5678")
@@ -512,7 +525,9 @@ class TestMetricsCommandErrors:
     def test_default_output_does_not_require_project_marker(
         self, tmp_path: Path
     ) -> None:
-        from osmosis_ai.platform.cli.train import _resolve_default_output
+        from osmosis_ai.cli.metrics_export import (
+            resolve_default_metrics_output as _resolve_default_output,
+        )
 
         result = _resolve_default_output(
             "my-run", "abc12345", workspace_directory=tmp_path

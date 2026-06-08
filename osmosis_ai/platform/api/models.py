@@ -154,10 +154,9 @@ class PaginatedDatasets:
 # ── Training run status constants ────────────────────────────────
 
 RUN_STATUSES_SUCCESS: frozenset[str] = frozenset({"finished"})
-# "pending"/"queued" wait (amber); "running" is active work (blue).
+# "pending"/"queued" wait (amber); "running" is in-progress work (blue).
 RUN_STATUSES_PENDING: frozenset[str] = frozenset({"pending", "queued"})
-RUN_STATUSES_ACTIVE: frozenset[str] = frozenset({"running"})
-RUN_STATUSES_IN_PROGRESS: frozenset[str] = RUN_STATUSES_PENDING | RUN_STATUSES_ACTIVE
+RUN_STATUSES_IN_PROGRESS: frozenset[str] = frozenset({"running"})
 RUN_STATUSES_ERROR: frozenset[str] = frozenset({"failed", "crashed"})
 # "unknown" is a terminal, greyed-out state alongside stopped/killed.
 RUN_STATUSES_STOPPED: frozenset[str] = frozenset({"stopped", "killed", "unknown"})
@@ -168,12 +167,9 @@ RUN_STATUSES_TERMINAL: frozenset[str] = (
 # ── Evaluation run status constants ──────────────────────────────
 
 EVAL_RUN_STATUSES_SUCCESS: frozenset[str] = frozenset({"finished"})
-# "pending" waits (amber); "running" is active work (blue).
+# "pending" waits (amber); "running" is in-progress work (blue).
 EVAL_RUN_STATUSES_PENDING: frozenset[str] = frozenset({"pending"})
-EVAL_RUN_STATUSES_ACTIVE: frozenset[str] = frozenset({"running"})
-EVAL_RUN_STATUSES_IN_PROGRESS: frozenset[str] = (
-    EVAL_RUN_STATUSES_PENDING | EVAL_RUN_STATUSES_ACTIVE
-)
+EVAL_RUN_STATUSES_IN_PROGRESS: frozenset[str] = frozenset({"running"})
 EVAL_RUN_STATUSES_ERROR: frozenset[str] = frozenset({"failed"})
 EVAL_RUN_STATUSES_STOPPED: frozenset[str] = frozenset({"stopped"})
 EVAL_RUN_STATUSES_TERMINAL: frozenset[str] = (
@@ -398,7 +394,6 @@ class TrainingRunMetricsOverview:
     """Summary metrics for a training run."""
 
     duration_ms: int | None
-    duration_formatted: str | None
     metric_summaries: list[MetricSummary]
     examples_processed_count: int | None
     latest_step: int | None = None
@@ -408,7 +403,6 @@ class TrainingRunMetricsOverview:
     def from_dict(cls, data: dict[str, Any]) -> TrainingRunMetricsOverview:
         return cls(
             duration_ms=data.get("duration_ms"),
-            duration_formatted=data.get("duration_formatted"),
             metric_summaries=[
                 MetricSummary.from_dict(s) for s in data.get("metric_summaries", [])
             ],
@@ -434,6 +428,98 @@ class TrainingRunMetrics:
             status=data["status"],
             overview=TrainingRunMetricsOverview.from_dict(data["overview"]),
             metrics=[MetricHistory.from_dict(m) for m in data.get("metrics", [])],
+        )
+
+
+@dataclass
+class EvalRewardStats:
+    """Distribution stats for per-sample rewards in an eval run."""
+
+    mean: float | None
+    median: float | None
+    std: float | None
+    min: float | None
+    max: float | None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> EvalRewardStats:
+        return cls(
+            mean=data.get("mean"),
+            median=data.get("median"),
+            std=data.get("std"),
+            min=data.get("min"),
+            max=data.get("max"),
+        )
+
+
+@dataclass
+class EvalPassAtKPoint:
+    """A single pass@k point (probability of a pass within k attempts)."""
+
+    k: int
+    value: float
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> EvalPassAtKPoint:
+        return cls(k=data["k"], value=data["value"])
+
+
+@dataclass
+class EvalRunMetricsOverview:
+    """Summary metrics for an evaluation run."""
+
+    duration_ms: int | None
+    total_samples: int | None
+    completed_samples: int | None
+    graded: int | None
+    passed: int | None
+    failed: int | None
+    skipped: int | None
+    pass_rate: float | None
+    pass_threshold: float | None
+    tokens_used: int | None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> EvalRunMetricsOverview:
+        return cls(
+            duration_ms=data.get("duration_ms"),
+            total_samples=data.get("total_samples"),
+            completed_samples=data.get("completed_samples"),
+            graded=data.get("graded"),
+            passed=data.get("passed"),
+            failed=data.get("failed"),
+            skipped=data.get("skipped"),
+            pass_rate=data.get("pass_rate"),
+            pass_threshold=data.get("pass_threshold"),
+            tokens_used=data.get("tokens_used"),
+        )
+
+
+@dataclass
+class EvalRunMetrics:
+    """Complete metrics response for an evaluation run."""
+
+    eval_run_id: str
+    status: str
+    overview: EvalRunMetricsOverview
+    reward_stats: EvalRewardStats | None
+    pass_at_k: list[EvalPassAtKPoint]
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> EvalRunMetrics:
+        reward_stats = data.get("reward_stats")
+        return cls(
+            eval_run_id=data["eval_run_id"],
+            status=data["status"],
+            overview=EvalRunMetricsOverview.from_dict(data["overview"]),
+            reward_stats=(
+                EvalRewardStats.from_dict(reward_stats)
+                if reward_stats is not None
+                else None
+            ),
+            pass_at_k=[
+                EvalPassAtKPoint.from_dict(p) for p in data.get("pass_at_k", [])
+            ],
         )
 
 

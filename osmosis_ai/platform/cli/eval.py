@@ -9,26 +9,36 @@ from pathlib import Path
 from typing import Any
 
 from osmosis_ai.cli.console import console
+from osmosis_ai.cli.errors import CLIError
+from osmosis_ai.cli.metrics_export import (
+    build_eval_export_dict,
+    resolve_default_metrics_output,
+    resolve_metrics_output_path,
+)
 from osmosis_ai.cli.output import (
     DetailResult,
     DetailSection,
     ListColumn,
     ListResult,
     OperationResult,
+    OutputFormat,
     detail_fields,
     get_output_context,
     serialize_eval_run,
 )
 from osmosis_ai.cli.output.display import (
+    format_duration_ms,
     format_local_date,
     format_local_datetime,
 )
 from osmosis_ai.cli.prompts import require_confirmation
 from osmosis_ai.platform.api.client import OsmosisClient
 from osmosis_ai.platform.api.models import (
-    EVAL_RUN_STATUSES_IN_PROGRESS,
+    EVAL_RUN_STATUSES_PENDING,
+    EVAL_RUN_STATUSES_TERMINAL,
     SubmitRunResult,
 )
+from osmosis_ai.platform.auth.platform_client import PlatformAPIError
 from osmosis_ai.platform.cli.eval_config import (
     EvalSubmitConfig,
     load_eval_submit_config,
@@ -100,7 +110,11 @@ def _format_eval_progress(detail: Any) -> str | None:
 
     completed = _results_number(detail.results, "total_runs")
     if completed is None:
-        return "Waiting to start..." if detail.status == "pending" else None
+        return (
+            "Waiting to start..."
+            if detail.status in EVAL_RUN_STATUSES_PENDING
+            else None
+        )
     return f"{int(completed):,} samples"
 
 
@@ -126,34 +140,13 @@ def _parse_iso_datetime(value: str | None) -> datetime | None:
     return parsed
 
 
-def _format_duration_ms(duration_ms: float) -> str:
-    duration_ms = max(0.0, duration_ms)
-    total_seconds = duration_ms / 1000
-    if total_seconds < 60:
-        return (
-            f"{total_seconds:.1f}s" if total_seconds % 1 else f"{int(total_seconds)}s"
-        )
-
-    total_seconds_int = int(total_seconds)
-    minutes, seconds = divmod(total_seconds_int, 60)
-    if minutes < 60:
-        return f"{minutes}m {seconds}s" if seconds else f"{minutes}m"
-
-    hours, minutes = divmod(minutes, 60)
-    if hours < 24:
-        return f"{hours}h {minutes}m" if minutes else f"{hours}h"
-
-    days, hours = divmod(hours, 24)
-    return f"{days}d {hours}h" if hours else f"{days}d"
-
-
 def _format_eval_duration(detail: Any) -> str | None:
     started_at = _parse_iso_datetime(detail.started_at)
     if started_at is None:
         return None
     completed_at = _parse_iso_datetime(detail.completed_at)
     end = completed_at or datetime.now(UTC)
-    return _format_duration_ms((end - started_at).total_seconds() * 1000)
+    return format_duration_ms((end - started_at).total_seconds() * 1000)
 
 
 def _format_decimal(value: int | float, *, precision: int = 4) -> str:
@@ -483,19 +476,34 @@ def list_eval_runs(*, limit: int, all_: bool) -> ListResult:
     )
 
 
-def info(name_or_id: str) -> DetailResult:
-    """Show evaluation run details and results."""
+def info(name_or_id: str, *, output: str | None) -> DetailResult:
+    """Show evaluation run details, results, and metrics."""
     context = require_git_workspace_directory_context()
     credentials = context.credentials
 
     client = OsmosisClient()
-    output = get_output_context()
-    with output.status("Fetching evaluation run..."):
+    output_ctx = get_output_context()
+    with output_ctx.status("Fetching evaluation run..."):
         detail = client.get_eval_run(
             name_or_id,
             credentials=credentials,
             git_identity=context.git_identity,
         )
+
+    metrics_data = None
+    metrics_error: str | None = None
+    if detail.status in EVAL_RUN_STATUSES_PENDING:
+        metrics_error = "Metrics are not yet available for pending evaluation runs."
+    else:
+        try:
+            with output_ctx.status("Fetching metrics..."):
+                metrics_data = client.get_eval_run_metrics(
+                    detail.id,
+                    credentials=credentials,
+                    git_identity=context.git_identity,
+                )
+        except (PlatformAPIError, KeyError) as exc:
+            metrics_error = str(exc) or "Could not fetch metrics data."
 
     # Main info — mirrors the Platform detail page sidebar (identity + timing +
     # what was run). Configuration and results live in their own sections below.
@@ -509,7 +517,12 @@ def info(name_or_id: str) -> DetailResult:
     if progress:
         rows.append(("Progress", progress))
 
-    duration = _format_eval_duration(detail)
+    metrics_duration_ms = metrics_data.overview.duration_ms if metrics_data else None
+    duration = (
+        format_duration_ms(metrics_duration_ms)
+        if metrics_duration_ms is not None
+        else _format_eval_duration(detail)
+    )
     if duration:
         rows.append(("Duration", duration))
 
@@ -595,10 +608,38 @@ def info(name_or_id: str) -> DetailResult:
     if detail.platform_url:
         display_hints.append(f"View: {detail.platform_url}")
 
-    if detail.status in EVAL_RUN_STATUSES_IN_PROGRESS:
+    if detail.status not in EVAL_RUN_STATUSES_TERMINAL:
         display_hints.append(
             f"Stop with: osmosis eval stop {detail.name or name_or_id}"
         )
+
+    export: dict[str, Any] | None = None
+    output_path: str | None = None
+    save_warning: str | None = None
+    if metrics_data is not None:
+        export = build_eval_export_dict(detail, metrics_data)
+        should_write_file = output is not None or output_ctx.format is OutputFormat.rich
+        if should_write_file:
+            try:
+                out_path = (
+                    resolve_metrics_output_path(output, detail.name, detail.id)
+                    if output
+                    else resolve_default_metrics_output(
+                        detail.name,
+                        detail.id,
+                        workspace_directory=context.workspace_directory,
+                    )
+                )
+                out_path.write_text(
+                    json.dumps(export, indent=2, ensure_ascii=False) + "\n"
+                )
+                output_path = str(out_path)
+                display_hints.append(f"Saved metrics to {output_path}")
+            except (CLIError, OSError) as exc:
+                save_warning = f"Could not save metrics: {exc}"
+                display_hints.append(save_warning)
+    elif metrics_error is not None and output is not None:
+        display_hints.append(metrics_error)
 
     return DetailResult(
         title="Evaluation Run",
@@ -616,6 +657,11 @@ def info(name_or_id: str) -> DetailResult:
             "resolved_secret_scopes": detail.resolved_secret_scopes,
             "dataset_df_stats": detail.dataset_df_stats,
             "recent_logs": detail.recent_logs or [],
+            "metrics": export,
+            "metrics_available": metrics_data is not None,
+            "metrics_error": metrics_error,
+            "output_path": output_path,
+            "save_warning": save_warning,
             **git_result_context(context),
         },
         fields=fields,

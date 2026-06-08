@@ -354,7 +354,6 @@ class TestTrainingRunMetricsOverview:
     def test_from_dict_full(self) -> None:
         data = {
             "duration_ms": 3600000,
-            "duration_formatted": "1h",
             "metric_summaries": [
                 {
                     "key": "rollout/raw_reward",
@@ -370,7 +369,6 @@ class TestTrainingRunMetricsOverview:
         }
         overview = TrainingRunMetricsOverview.from_dict(data)
         assert overview.duration_ms == 3600000
-        assert overview.duration_formatted == "1h"
         assert len(overview.metric_summaries) == 1
         assert overview.metric_summaries[0].latest == 0.85
         assert overview.metric_summaries[0].delta == 0.15
@@ -379,7 +377,6 @@ class TestTrainingRunMetricsOverview:
     def test_from_dict_nulls(self) -> None:
         data = {
             "duration_ms": None,
-            "duration_formatted": None,
             "metric_summaries": [],
             "examples_processed_count": None,
         }
@@ -395,7 +392,6 @@ class TestTrainingRunMetrics:
             "status": "finished",
             "overview": {
                 "duration_ms": 3600000,
-                "duration_formatted": "1h",
                 "metric_summaries": [
                     {
                         "key": "rollout/raw_reward",
@@ -432,7 +428,6 @@ class TestTrainingRunMetrics:
             "status": "finished",
             "overview": {
                 "duration_ms": None,
-                "duration_formatted": None,
                 "metric_summaries": [],
                 "examples_processed_count": None,
             },

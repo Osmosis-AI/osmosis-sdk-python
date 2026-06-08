@@ -18,10 +18,15 @@ from osmosis_ai.platform.api.models import (
     EvaluationRunDetail,
     PaginatedEvaluationRuns,
 )
+from osmosis_ai.platform.auth import PlatformAPIError
 
 GIT_IDENTITY = "acme/rollouts"
 REPO_URL = "https://github.com/acme/rollouts.git"
 FAKE_CREDENTIALS = object()
+
+
+def _fake_eval_metrics(self, eval_run_id, *, git_identity, credentials=None):
+    raise PlatformAPIError("not available")
 
 
 @pytest.fixture()
@@ -199,10 +204,12 @@ class TestEvalInfo:
                 assert git_identity == GIT_IDENTITY
                 return detail
 
+            get_eval_run_metrics = _fake_eval_metrics
+
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
         monkeypatch.setattr(platform_eval_module, "OsmosisClient", FakeClient)
 
-        result = eval_module.eval_info("math-eval")
+        result = eval_module.eval_info("math-eval", output=None)
 
         assert isinstance(result, DetailResult)
         field_rows = [(field.label, field.value) for field in result.fields]
@@ -310,10 +317,12 @@ class TestEvalInfo:
             def get_eval_run(self, name_or_id, *, git_identity, credentials=None):
                 return detail
 
+            get_eval_run_metrics = _fake_eval_metrics
+
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
         monkeypatch.setattr(platform_eval_module, "OsmosisClient", FakeClient)
 
-        result = eval_module.eval_info("overflow-eval")
+        result = eval_module.eval_info("overflow-eval", output=None)
 
         assert isinstance(result, DetailResult)
         fields = {field.label: field.value for field in result.fields}

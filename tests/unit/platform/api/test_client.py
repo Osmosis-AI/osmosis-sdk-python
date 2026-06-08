@@ -745,7 +745,6 @@ class TestGetTrainingRunMetrics:
             "status": "finished",
             "overview": {
                 "duration_ms": 3600000,
-                "duration_formatted": "1h",
                 "metric_summaries": [
                     {
                         "key": "rollout/raw_reward",
@@ -784,7 +783,6 @@ class TestGetTrainingRunMetrics:
             "status": "finished",
             "overview": {
                 "duration_ms": None,
-                "duration_formatted": None,
                 "metric_summaries": [],
                 "examples_processed_count": None,
             },

@@ -103,11 +103,21 @@ def eval_list(
 @app.command("info")
 def eval_info(
     name_or_id: str = typer.Argument(..., help="Evaluation run name or ID."),
+    output: str | None = typer.Option(
+        None,
+        "--output",
+        "-o",
+        help=(
+            "Output path for metrics JSON. Non-.json extensions are replaced with"
+            " .json; a trailing '/' or existing directory generates a default"
+            " filename inside it. (default in rich mode: .osmosis/metrics/)"
+        ),
+    ),
 ) -> Any:
-    """Show evaluation run details and results."""
+    """Show evaluation run details, results, and metrics."""
     from osmosis_ai.platform.cli.eval import info as _info
 
-    return _info(name_or_id)
+    return _info(name_or_id, output=output)
 
 
 @app.command("stop")
