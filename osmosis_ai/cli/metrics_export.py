@@ -35,7 +35,8 @@ def resolve_metrics_output_path(output: str, run_name: str | None, run_id: str) 
     Rules:
     * Trailing ``/`` or existing directory → directory mode (generate default
       filename inside the directory).
-    * Has a file extension → use as-is.
+    * Explicit ``.json`` extension → use as-is.
+    * Any non-``.json`` extension → replace with ``.json``.
     * No extension → auto-append ``.json``.
 
     Parent directories are created automatically.
@@ -71,7 +72,7 @@ def _ref_name(ref: dict[str, Any] | None) -> str | None:
     if not ref:
         return None
     value = ref.get("name") or ref.get("file_name") or ref.get("model_name")
-    return value if isinstance(value, str) else None
+    return value if isinstance(value, str) and value else None
 
 
 # MLflow internal key → human-readable export key

@@ -60,7 +60,7 @@ def _ref_name(ref: dict[str, Any] | None) -> str | None:
     if not ref:
         return None
     value = ref.get("name") or ref.get("file_name") or ref.get("model_name")
-    return value if isinstance(value, str) else None
+    return value if isinstance(value, str) and value else None
 
 
 def _results_number(results: dict[str, Any] | None, key: str) -> int | float | None:
@@ -638,7 +638,7 @@ def info(name_or_id: str, *, output: str | None) -> DetailResult:
             except (CLIError, OSError) as exc:
                 save_warning = f"Could not save metrics: {exc}"
                 display_hints.append(save_warning)
-    elif metrics_error is not None and output is not None:
+    elif metrics_error is not None:
         display_hints.append(metrics_error)
 
     return DetailResult(

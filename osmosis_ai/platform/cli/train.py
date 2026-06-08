@@ -248,7 +248,10 @@ def info(name: str, *, output: str | None) -> DetailResult:
 
     metrics_data = None
     metrics_error: str | None = None
-    is_in_progress = run.status not in RUN_STATUSES_TERMINAL
+    is_in_progress = (
+        run.status not in RUN_STATUSES_TERMINAL
+        and run.status not in RUN_STATUSES_PENDING
+    )
     if run.status in RUN_STATUSES_PENDING:
         metrics_error = (
             "Metrics are not yet available for pending or queued training runs."
