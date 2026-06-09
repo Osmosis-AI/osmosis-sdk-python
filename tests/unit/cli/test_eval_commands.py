@@ -333,3 +333,13 @@ class TestEvalInfo:
             "total": 12,
             "unit": "samples",
         }
+
+
+class TestFormatPassAtK:
+    def test_single_value_is_shown(self) -> None:
+        results = {"reward_stats": {"pass_at_k": {"1": 0.5}}}
+        assert platform_eval_module._format_pass_at_k(results) == "1: 50.0%"
+
+    def test_no_values_returns_none(self) -> None:
+        results = {"reward_stats": {"pass_at_k": {"1": "bad"}}}
+        assert platform_eval_module._format_pass_at_k(results) is None

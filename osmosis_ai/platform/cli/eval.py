@@ -230,7 +230,7 @@ def _format_pass_at_k(results: dict[str, Any] | None) -> str | None:
         if not math.isfinite(value):
             continue
         formatted.append(f"{key}: {value:.1%}")
-    return ", ".join(formatted) if len(formatted) >= 2 else None
+    return ", ".join(formatted) if formatted else None
 
 
 def _format_eval_config(config: dict[str, Any] | None) -> str | None:
