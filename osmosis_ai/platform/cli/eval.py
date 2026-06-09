@@ -9,26 +9,36 @@ from pathlib import Path
 from typing import Any
 
 from osmosis_ai.cli.console import console
+from osmosis_ai.cli.errors import CLIError
+from osmosis_ai.cli.metrics_export import (
+    build_eval_export_dict,
+    resolve_default_metrics_output,
+    resolve_metrics_output_path,
+)
 from osmosis_ai.cli.output import (
     DetailResult,
     DetailSection,
     ListColumn,
     ListResult,
     OperationResult,
+    OutputFormat,
     detail_fields,
     get_output_context,
     serialize_eval_run,
 )
 from osmosis_ai.cli.output.display import (
+    format_duration_ms,
     format_local_date,
     format_local_datetime,
 )
 from osmosis_ai.cli.prompts import require_confirmation
 from osmosis_ai.platform.api.client import OsmosisClient
 from osmosis_ai.platform.api.models import (
-    EVAL_RUN_STATUSES_IN_PROGRESS,
+    EVAL_RUN_STATUSES_PENDING,
+    EVAL_RUN_STATUSES_TERMINAL,
     SubmitRunResult,
 )
+from osmosis_ai.platform.auth.platform_client import PlatformAPIError
 from osmosis_ai.platform.cli.eval_config import (
     EvalSubmitConfig,
     load_eval_submit_config,
@@ -36,8 +46,12 @@ from osmosis_ai.platform.cli.eval_config import (
 )
 from osmosis_ai.platform.cli.shared_submit import CloudSubmitSpec, run_cloud_submit
 from osmosis_ai.platform.cli.utils import (
+    format_env_config,
     format_eval_status,
     format_progress,
+    format_secret_scopes,
+    jsonish,
+    kv_section,
     make_progress,
     paginated_fetch,
     require_git_workspace_directory_context,
@@ -50,7 +64,7 @@ def _ref_name(ref: dict[str, Any] | None) -> str | None:
     if not ref:
         return None
     value = ref.get("name") or ref.get("file_name") or ref.get("model_name")
-    return value if isinstance(value, str) else None
+    return value if isinstance(value, str) and value else None
 
 
 def _results_number(results: dict[str, Any] | None, key: str) -> int | float | None:
@@ -100,7 +114,11 @@ def _format_eval_progress(detail: Any) -> str | None:
 
     completed = _results_number(detail.results, "total_runs")
     if completed is None:
-        return "Waiting to start..." if detail.status == "pending" else None
+        return (
+            "Waiting to start..."
+            if detail.status in EVAL_RUN_STATUSES_PENDING
+            else None
+        )
     return f"{int(completed):,} samples"
 
 
@@ -126,34 +144,13 @@ def _parse_iso_datetime(value: str | None) -> datetime | None:
     return parsed
 
 
-def _format_duration_ms(duration_ms: float) -> str:
-    duration_ms = max(0.0, duration_ms)
-    total_seconds = duration_ms / 1000
-    if total_seconds < 60:
-        return (
-            f"{total_seconds:.1f}s" if total_seconds % 1 else f"{int(total_seconds)}s"
-        )
-
-    total_seconds_int = int(total_seconds)
-    minutes, seconds = divmod(total_seconds_int, 60)
-    if minutes < 60:
-        return f"{minutes}m {seconds}s" if seconds else f"{minutes}m"
-
-    hours, minutes = divmod(minutes, 60)
-    if hours < 24:
-        return f"{hours}h {minutes}m" if minutes else f"{hours}h"
-
-    days, hours = divmod(hours, 24)
-    return f"{days}d {hours}h" if hours else f"{days}d"
-
-
 def _format_eval_duration(detail: Any) -> str | None:
     started_at = _parse_iso_datetime(detail.started_at)
     if started_at is None:
         return None
     completed_at = _parse_iso_datetime(detail.completed_at)
     end = completed_at or datetime.now(UTC)
-    return _format_duration_ms((end - started_at).total_seconds() * 1000)
+    return format_duration_ms((end - started_at).total_seconds() * 1000)
 
 
 def _format_decimal(value: int | float, *, precision: int = 4) -> str:
@@ -193,9 +190,17 @@ def _format_reward_stats(results: dict[str, Any] | None) -> str | None:
     reward_stats = _reward_stats(results)
     if reward_stats is None:
         return None
+    mean = reward_stats.get("mean")
+    if isinstance(mean, bool) or not isinstance(mean, int | float):
+        mean = _results_number(results, "score")
     parts: list[str] = []
-    for key in ("min", "median", "max", "std"):
-        value = reward_stats.get(key)
+    for key, value in (
+        ("mean", mean),
+        ("std", reward_stats.get("std")),
+        ("min", reward_stats.get("min")),
+        ("median", reward_stats.get("median")),
+        ("max", reward_stats.get("max")),
+    ):
         if isinstance(value, bool) or not isinstance(value, int | float):
             continue
         if not math.isfinite(value):
@@ -228,43 +233,6 @@ def _format_pass_at_k(results: dict[str, Any] | None) -> str | None:
     return ", ".join(formatted) if formatted else None
 
 
-def _format_secret_scopes(scopes: dict[str, Any] | None) -> str | None:
-    if not scopes:
-        return None
-
-    parts: list[str] = []
-    for name, raw_scope in sorted(scopes.items()):
-        if not isinstance(name, str) or not isinstance(raw_scope, str):
-            continue
-        if raw_scope == "workspace":
-            scope = "workspace"
-        elif raw_scope == "user_override":
-            scope = "personal, overrides workspace"
-        elif raw_scope == "user":
-            scope = "personal"
-        else:
-            scope = raw_scope
-        parts.append(f"{name} ({scope})")
-    return ", ".join(parts) if parts else None
-
-
-def _jsonish(value: Any) -> str:
-    if isinstance(value, str):
-        return value
-    return json.dumps(value, ensure_ascii=False, sort_keys=True)
-
-
-def _format_env_config(env_config: dict[str, Any] | None) -> str | None:
-    if not env_config:
-        return None
-    parts = [
-        f"{key}={_jsonish(value)}"
-        for key, value in sorted(env_config.items())
-        if isinstance(key, str)
-    ]
-    return ", ".join(parts) if parts else None
-
-
 def _format_eval_config(config: dict[str, Any] | None) -> str | None:
     if not config:
         return None
@@ -291,32 +259,8 @@ def _format_eval_config(config: dict[str, Any] | None) -> str | None:
             and config[key] is not None
         )
     )
-    parts = [f"{key}={_jsonish(config[key])}" for key in keys]
+    parts = [f"{key}={jsonish(config[key])}" for key in keys]
     return ", ".join(parts) if parts else None
-
-
-def _kv_section(title: str, rows: list[tuple[str, str]]) -> DetailSection | None:
-    """Build a titled key/value section mirroring the main detail table.
-
-    Values are passed through as plain text (never markup) so brackets and other
-    Rich-significant characters render literally. Returns ``None`` when there is
-    nothing to show so callers can append unconditionally.
-    """
-    if not rows:
-        return None
-
-    from rich import box
-    from rich.table import Table
-    from rich.text import Text
-
-    table = Table(title=title, box=box.ROUNDED, show_header=False, title_justify="left")
-    table.add_column("", style="cyan")
-    table.add_column("")
-    plain_lines = [f"{title}:"]
-    for label, value in rows:
-        table.add_row(label, Text(value))
-        plain_lines.append(f"{label}: {value}")
-    return DetailSection(rich=table, plain_lines=plain_lines)
 
 
 def _eval_summary(detail: Any, *, include_details: bool) -> dict[str, Any]:
@@ -483,19 +427,34 @@ def list_eval_runs(*, limit: int, all_: bool) -> ListResult:
     )
 
 
-def info(name_or_id: str) -> DetailResult:
-    """Show evaluation run details and results."""
+def info(name_or_id: str, *, output: str | None) -> DetailResult:
+    """Show evaluation run details, results, and metrics."""
     context = require_git_workspace_directory_context()
     credentials = context.credentials
 
     client = OsmosisClient()
-    output = get_output_context()
-    with output.status("Fetching evaluation run..."):
+    output_ctx = get_output_context()
+    with output_ctx.status("Fetching evaluation run..."):
         detail = client.get_eval_run(
             name_or_id,
             credentials=credentials,
             git_identity=context.git_identity,
         )
+
+    metrics_data = None
+    metrics_error: str | None = None
+    if detail.status in EVAL_RUN_STATUSES_PENDING:
+        metrics_error = "Metrics are not yet available for pending evaluation runs."
+    else:
+        try:
+            with output_ctx.status("Fetching metrics..."):
+                metrics_data = client.get_eval_run_metrics(
+                    detail.id,
+                    credentials=credentials,
+                    git_identity=context.git_identity,
+                )
+        except (PlatformAPIError, KeyError) as exc:
+            metrics_error = str(exc) or "Could not fetch metrics data."
 
     # Main info — mirrors the Platform detail page sidebar (identity + timing +
     # what was run). Configuration and results live in their own sections below.
@@ -509,9 +468,21 @@ def info(name_or_id: str) -> DetailResult:
     if progress:
         rows.append(("Progress", progress))
 
-    duration = _format_eval_duration(detail)
+    metrics_duration_ms = metrics_data.overview.duration_ms if metrics_data else None
+    duration = (
+        format_duration_ms(metrics_duration_ms)
+        if metrics_duration_ms is not None
+        else _format_eval_duration(detail)
+    )
     if duration:
         rows.append(("Duration", duration))
+
+    pass_rate = _results_number(detail.results, "pass_rate")
+    if pass_rate is not None:
+        rows.append(("Pass Rate", f"{pass_rate:.1%}"))
+    tokens_used = _format_optional_int(_results_number(detail.results, "total_tokens"))
+    if tokens_used:
+        rows.append(("Tokens Used", tokens_used))
 
     if detail.created_at:
         rows.append(("Submitted", format_local_datetime(detail.created_at)))
@@ -541,12 +512,12 @@ def info(name_or_id: str) -> DetailResult:
         config_rows.append(("Config", config))
     if detail.commit_sha:
         config_rows.append(("Commit", detail.commit_sha[:7]))
-    secret_scopes = _format_secret_scopes(detail.resolved_secret_scopes)
+    secret_scopes = format_secret_scopes(detail.resolved_secret_scopes)
     if secret_scopes:
-        config_rows.append(("Required Secrets", secret_scopes))
-    env_config = _format_env_config(detail.env_config)
+        config_rows.append(("Secrets", secret_scopes))
+    env_config = format_env_config(detail.env_config)
     if env_config:
-        config_rows.append(("Environment", env_config))
+        config_rows.append(("Environment Variables", env_config))
 
     # Results section — scoring outcome.
     result_rows: list[tuple[str, str]] = []
@@ -555,12 +526,6 @@ def info(name_or_id: str) -> DetailResult:
         if results_counts:
             result_rows.append(("Results", results_counts))
 
-        avg_reward = _format_avg_reward(detail.results, precision=4)
-        if avg_reward != "—":
-            result_rows.append(("Avg. Reward", avg_reward))
-        pass_rate = _results_number(detail.results, "pass_rate")
-        if pass_rate is not None:
-            result_rows.append(("Pass Rate", f"{pass_rate:.1%}"))
         pass_threshold = _results_number(detail.results, "pass_threshold")
         if pass_threshold is not None:
             result_rows.append(("Pass Threshold", _format_decimal(pass_threshold)))
@@ -570,22 +535,12 @@ def info(name_or_id: str) -> DetailResult:
         pass_at_k = _format_pass_at_k(detail.results)
         if pass_at_k:
             result_rows.append(("Pass@k", pass_at_k))
-        total_tokens = _format_optional_int(
-            _results_number(detail.results, "total_tokens")
-        )
-        if total_tokens:
-            result_rows.append(("Total Tokens", total_tokens))
-        dataset_rows = _format_optional_int(
-            _results_number(detail.results, "total_dataset_rows")
-        )
-        if dataset_rows:
-            result_rows.append(("Dataset Rows", dataset_rows))
 
     fields = detail_fields(rows)
     sections: list[DetailSection] = []
     for section in (
-        _kv_section("Configuration", config_rows),
-        _kv_section("Results", result_rows),
+        kv_section("Configuration", config_rows),
+        kv_section("Results", result_rows),
     ):
         if section is not None:
             sections.append(section)
@@ -595,10 +550,38 @@ def info(name_or_id: str) -> DetailResult:
     if detail.platform_url:
         display_hints.append(f"View: {detail.platform_url}")
 
-    if detail.status in EVAL_RUN_STATUSES_IN_PROGRESS:
+    if detail.status not in EVAL_RUN_STATUSES_TERMINAL:
         display_hints.append(
             f"Stop with: osmosis eval stop {detail.name or name_or_id}"
         )
+
+    export: dict[str, Any] | None = None
+    output_path: str | None = None
+    save_warning: str | None = None
+    if metrics_data is not None:
+        export = build_eval_export_dict(detail, metrics_data)
+        should_write_file = output is not None or output_ctx.format is OutputFormat.rich
+        if should_write_file:
+            try:
+                out_path = (
+                    resolve_metrics_output_path(output, detail.name, detail.id)
+                    if output
+                    else resolve_default_metrics_output(
+                        detail.name,
+                        detail.id,
+                        workspace_directory=context.workspace_directory,
+                    )
+                )
+                out_path.write_text(
+                    json.dumps(export, indent=2, ensure_ascii=False) + "\n"
+                )
+                output_path = str(out_path)
+                display_hints.append(f"Saved metrics to {output_path}")
+            except (CLIError, OSError) as exc:
+                save_warning = f"Could not save metrics: {exc}"
+                display_hints.append(save_warning)
+    elif metrics_error is not None:
+        display_hints.append(metrics_error)
 
     return DetailResult(
         title="Evaluation Run",
@@ -616,6 +599,11 @@ def info(name_or_id: str) -> DetailResult:
             "resolved_secret_scopes": detail.resolved_secret_scopes,
             "dataset_df_stats": detail.dataset_df_stats,
             "recent_logs": detail.recent_logs or [],
+            "metrics": export,
+            "metrics_available": metrics_data is not None,
+            "metrics_error": metrics_error,
+            "output_path": output_path,
+            "save_warning": save_warning,
             **git_result_context(context),
         },
         fields=fields,

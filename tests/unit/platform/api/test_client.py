@@ -745,7 +745,6 @@ class TestGetTrainingRunMetrics:
             "status": "finished",
             "overview": {
                 "duration_ms": 3600000,
-                "duration_formatted": "1h",
                 "metric_summaries": [
                     {
                         "key": "rollout/raw_reward",
@@ -784,7 +783,6 @@ class TestGetTrainingRunMetrics:
             "status": "finished",
             "overview": {
                 "duration_ms": None,
-                "duration_formatted": None,
                 "metric_summaries": [],
                 "examples_processed_count": None,
             },
@@ -794,3 +792,60 @@ class TestGetTrainingRunMetrics:
         client.get_training_run_metrics("a/b", git_identity="git_test")
         path = mock_request.call_args[0][0]
         assert path == "/api/cli/training-runs/a%2Fb/metrics"
+
+
+class TestStopTrainingRun:
+    """Tests for OsmosisClient.stop_training_run."""
+
+    @patch("osmosis_ai.platform.api.client.platform_request")
+    def test_posts_empty_body_and_encodes_id(self, mock_request: MagicMock) -> None:
+        mock_request.return_value = {"id": "a/b", "status": "stopping"}
+
+        result = OsmosisClient().stop_training_run("a/b", git_identity="git_test")
+
+        assert result == {"id": "a/b", "status": "stopping"}
+        assert mock_request.call_args[0][0] == "/api/cli/training-runs/a%2Fb/stop"
+        assert mock_request.call_args.kwargs["method"] == "POST"
+        assert mock_request.call_args.kwargs["data"] == {}
+
+
+class TestGetEvalRunMetrics:
+    """Tests for OsmosisClient.get_eval_run_metrics."""
+
+    @patch("osmosis_ai.platform.api.client.platform_request")
+    def test_returns_parsed_metrics_and_encodes_id(
+        self, mock_request: MagicMock
+    ) -> None:
+        mock_request.return_value = {
+            "eval_run_id": "a/b",
+            "status": "succeeded",
+            "overview": {
+                "duration_ms": 1800000,
+                "total_samples": 100,
+                "completed_samples": 100,
+                "graded": 98,
+                "passed": 80,
+                "failed": 18,
+                "skipped": 2,
+                "pass_rate": 0.8163,
+                "pass_threshold": 0.5,
+                "tokens_used": 250000,
+            },
+            "reward_stats": {
+                "mean": 0.72,
+                "median": 0.75,
+                "std": 0.11,
+                "min": 0.2,
+                "max": 0.98,
+            },
+            "pass_at_k": [{"k": 1, "value": 0.6}],
+        }
+
+        result = OsmosisClient().get_eval_run_metrics("a/b", git_identity="git_test")
+
+        assert result.eval_run_id == "a/b"
+        assert result.overview.pass_rate == 0.8163
+        assert result.reward_stats is not None
+        assert result.reward_stats.mean == 0.72
+        assert result.pass_at_k[0].k == 1
+        assert mock_request.call_args[0][0] == "/api/cli/eval-runs/a%2Fb/metrics"

@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import json
-import re
 from pathlib import Path
 from typing import Any
 
 from osmosis_ai.cli.console import console
 from osmosis_ai.cli.errors import CLIError
-from osmosis_ai.cli.metrics_export import build_export_dict
+from osmosis_ai.cli.metrics_export import (
+    build_export_dict,
+    resolve_default_metrics_output,
+    resolve_metrics_output_path,
+)
 from osmosis_ai.cli.output import (
     DetailField,
     DetailResult,
@@ -23,12 +26,15 @@ from osmosis_ai.cli.output import (
     serialize_checkpoint,
     serialize_training_run,
 )
-from osmosis_ai.cli.output.display import format_local_date, format_local_datetime
-from osmosis_ai.cli.paths import parse_cli_path
+from osmosis_ai.cli.output.display import (
+    format_duration_ms,
+    format_local_date,
+    format_local_datetime,
+)
 from osmosis_ai.cli.prompts import require_confirmation
 from osmosis_ai.platform.api.client import OsmosisClient
 from osmosis_ai.platform.api.models import (
-    RUN_STATUSES_IN_PROGRESS,
+    RUN_STATUSES_PENDING,
     RUN_STATUSES_TERMINAL,
     SubmitRunResult,
 )
@@ -41,8 +47,12 @@ from osmosis_ai.platform.cli.training_config import (
 )
 from osmosis_ai.platform.cli.utils import (
     build_run_detail_rows,
+    format_env_config,
     format_progress,
     format_run_status,
+    format_secret_scopes,
+    jsonish,
+    kv_section,
     make_progress,
     paginated_fetch,
     require_git_workspace_directory_context,
@@ -51,22 +61,47 @@ from osmosis_ai.platform.cli.utils import (
 from osmosis_ai.platform.cli.workspace_directory_context import git_result_context
 
 
-def _safe_name(name: str) -> str:
-    """Sanitise a run name for use as a filename component."""
-    return re.sub(r"[^a-zA-Z0-9_-]", "_", name)
-
-
-def _default_filename(run_name: str | None, run_id: str) -> str:
-    """Build the default JSON filename from run metadata."""
-    short_id = run_id[:8]
-    safe = _safe_name(run_name) if run_name else None
-    return f"{safe}_{short_id}.json" if safe else f"{short_id}.json"
-
-
 def _format_train_reward(run: Any) -> str:
     if run.reward is None:
         return "—"
     return f"{run.reward:.2f}"
+
+
+def _format_train_config(config: dict[str, Any] | None) -> str | None:
+    if not config:
+        return None
+    parts: list[str] = []
+    for key in sorted(config):
+        if key == "model_path":
+            continue
+        value = config[key]
+        if value is None:
+            continue
+        if isinstance(value, dict):
+            for sub in sorted(value):
+                sub_value = value[sub]
+                if sub_value is not None:
+                    parts.append(f"{key}.{sub}={jsonish(sub_value)}")
+        else:
+            parts.append(f"{key}={jsonish(value)}")
+    return ", ".join(parts) if parts else None
+
+
+def _insert_after(
+    rows: list[tuple[str, str]],
+    anchors: tuple[str, ...],
+    item: tuple[str, str],
+) -> None:
+    """Insert ``item`` right after the first row matching any of ``anchors``.
+
+    Falls back to appending when none of the anchor labels are present.
+    """
+    for anchor in anchors:
+        for index, (label, _value) in enumerate(rows):
+            if label == anchor:
+                rows.insert(index + 1, item)
+                return
+    rows.append(item)
 
 
 def _train_summary(run: Any) -> dict[str, Any]:
@@ -77,44 +112,6 @@ def _train_summary(run: Any) -> dict[str, Any]:
     if progress is not None:
         summary["progress"] = progress
     return summary
-
-
-def _resolve_output_path(output: str, run_name: str | None, run_id: str) -> Path:
-    """Resolve a user-supplied ``-o`` value into a concrete file path.
-
-    Rules:
-    * Trailing ``/`` or existing directory → directory mode (generate default
-      filename inside the directory).
-    * Has a file extension → use as-is.
-    * No extension → auto-append ``.json``.
-
-    Parent directories are created automatically.
-    """
-    parsed_output = parse_cli_path(output)
-    path = parsed_output.path
-
-    try:
-        if parsed_output.has_trailing_separator or path.is_dir():
-            path.mkdir(parents=True, exist_ok=True)
-            return path / _default_filename(run_name, run_id)
-
-        if path.suffix != ".json":
-            path = path.with_suffix(".json")
-
-        path.parent.mkdir(parents=True, exist_ok=True)
-    except OSError as exc:
-        raise CLIError(f"Cannot create output path: {exc}") from exc
-
-    return path
-
-
-def _resolve_default_output(
-    run_name: str | None, run_id: str, *, workspace_directory: Path
-) -> Path:
-    """Resolve the default output path under .osmosis/metrics/."""
-    metrics_dir = workspace_directory / ".osmosis" / "metrics"
-    metrics_dir.mkdir(parents=True, exist_ok=True)
-    return metrics_dir / _default_filename(run_name, run_id)
 
 
 def _submit_training(
@@ -253,26 +250,40 @@ def info(name: str, *, output: str | None) -> DetailResult:
 
     rows = build_run_detail_rows(run)
     summary = _train_summary(run)
-    if run.status == "pending":
+    if run.status in RUN_STATUSES_PENDING:
         rows.insert(3, ("Progress", "Waiting to start..."))
     else:
         progress = format_progress(summary.get("progress"))
         if progress:
             rows.insert(3, ("Progress", progress))
-    if run.reward is not None:
-        rows.insert(4, ("Reward", f"{run.reward:.4f}"))
     if run.started_at:
         rows.append(("Started", format_local_datetime(run.started_at)))
     if run.completed_at:
         rows.append(("Completed", format_local_datetime(run.completed_at)))
-    if run.examples_processed_count is not None:
-        rows.append(("Rows Processed", f"{run.examples_processed_count:,}"))
     if run.notes:
         rows.append(("Notes", console.escape(run.notes)))
 
     checkpoints: list[Any] = []
     sections: list[DetailSection] = []
     display_hints: list[str] = []
+
+    config_rows: list[tuple[str, str]] = []
+    if run.entrypoint:
+        config_rows.append(("Entrypoint", run.entrypoint))
+    train_config = _format_train_config(run.config)
+    if train_config:
+        config_rows.append(("Config", train_config))
+    if run.commit_sha:
+        config_rows.append(("Commit", run.commit_sha[:7]))
+    secret_scopes = format_secret_scopes(run.resolved_secret_scopes)
+    if secret_scopes:
+        config_rows.append(("Secrets", secret_scopes))
+    env_config = format_env_config(run.env_config)
+    if env_config:
+        config_rows.append(("Environment Variables", env_config))
+    config_section = kv_section("Configuration", config_rows)
+    if config_section is not None:
+        sections.append(config_section)
 
     if run.status in RUN_STATUSES_TERMINAL:
         try:
@@ -292,9 +303,14 @@ def info(name: str, *, output: str | None) -> DetailResult:
 
     metrics_data = None
     metrics_error: str | None = None
-    is_in_progress = run.status in RUN_STATUSES_IN_PROGRESS
-    if run.status == "pending":
-        metrics_error = "Metrics are not yet available for pending training runs."
+    is_in_progress = (
+        run.status not in RUN_STATUSES_TERMINAL
+        and run.status not in RUN_STATUSES_PENDING
+    )
+    if run.status in RUN_STATUSES_PENDING:
+        metrics_error = (
+            "Metrics are not yet available for pending or queued training runs."
+        )
     else:
         try:
             with output_ctx.status("Fetching metrics..."):
@@ -315,8 +331,19 @@ def info(name: str, *, output: str | None) -> DetailResult:
             latest = metrics_data.overview.latest_step or 0
             total = metrics_data.overview.total_steps
             rows.insert(3, ("Progress", f"{latest} / {total} rollout steps"))
-        if metrics_data.overview.duration_formatted:
-            rows.append(("Duration", metrics_data.overview.duration_formatted))
+        if metrics_data.overview.duration_ms is not None:
+            _insert_after(
+                rows,
+                ("Progress", "Status"),
+                ("Duration", format_duration_ms(metrics_data.overview.duration_ms)),
+            )
+
+    if run.examples_processed_count is not None:
+        _insert_after(
+            rows,
+            ("Duration", "Progress", "Status"),
+            ("Examples Processed", f"{run.examples_processed_count:,}"),
+        )
 
     fields = detail_fields(rows)
     if run.platform_url:
@@ -381,9 +408,9 @@ def info(name: str, *, output: str | None) -> DetailResult:
         if should_write_file:
             try:
                 out_path = (
-                    _resolve_output_path(output, run.name, run.id)
+                    resolve_metrics_output_path(output, run.name, run.id)
                     if output
-                    else _resolve_default_output(
+                    else resolve_default_metrics_output(
                         run.name,
                         run.id,
                         workspace_directory=context.workspace_directory,

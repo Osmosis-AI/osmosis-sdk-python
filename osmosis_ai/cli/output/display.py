@@ -55,3 +55,25 @@ def format_local_datetime(
         f"{local.strftime('%Y-%m-%d')} "
         f"{_twelve_hour_time(local, with_seconds=True)} {local.strftime('%Z')}"
     )
+
+
+def format_duration_ms(duration_ms: float) -> str:
+    """Human-readable duration from milliseconds (e.g. ``2h 47m``)."""
+    duration_ms = max(0.0, duration_ms)
+    total_seconds = duration_ms / 1000
+    if total_seconds < 60:
+        return (
+            f"{total_seconds:.1f}s" if total_seconds % 1 else f"{int(total_seconds)}s"
+        )
+
+    total_seconds_int = int(total_seconds)
+    minutes, seconds = divmod(total_seconds_int, 60)
+    if minutes < 60:
+        return f"{minutes}m {seconds}s" if seconds else f"{minutes}m"
+
+    hours, minutes = divmod(minutes, 60)
+    if hours < 24:
+        return f"{hours}h {minutes}m" if minutes else f"{hours}h"
+
+    days, hours = divmod(hours, 24)
+    return f"{days}d {hours}h" if hours else f"{days}d"

@@ -14,6 +14,7 @@ from .models import (
     DeploymentInfo,
     DeploymentSummary,
     EnvironmentSecretInfo,
+    EvalRunMetrics,
     EvaluationRunDetail,
     PaginatedBaseModels,
     PaginatedDatasets,
@@ -544,6 +545,21 @@ class OsmosisClient:
             git_identity=git_identity,
         )
         return EvaluationRunDetail.from_dict(data)
+
+    def get_eval_run_metrics(
+        self,
+        eval_run_id: str,
+        *,
+        credentials: Credentials | None = None,
+        git_identity: str,
+    ) -> EvalRunMetrics:
+        """Fetch evaluation run metrics (unavailable for pending runs)."""
+        data = platform_request(
+            f"/api/cli/eval-runs/{_safe_path(eval_run_id)}/metrics",
+            credentials=credentials,
+            git_identity=git_identity,
+        )
+        return EvalRunMetrics.from_dict(data)
 
     def stop_eval_run(
         self,

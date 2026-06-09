@@ -2,24 +2,26 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from osmosis_ai.cli.console import console
 from osmosis_ai.cli.errors import CLIError
+from osmosis_ai.cli.output import DetailSection
 from osmosis_ai.cli.output.display import format_local_datetime
 from osmosis_ai.platform.api.models import (
     DEPLOYMENT_STATUSES_ERROR,
     DEPLOYMENT_STATUSES_INACTIVE,
     DEPLOYMENT_STATUSES_SUCCESS,
-    EVAL_RUN_STATUSES_ACTIVE,
     EVAL_RUN_STATUSES_ERROR,
+    EVAL_RUN_STATUSES_IN_PROGRESS,
     EVAL_RUN_STATUSES_PENDING,
     EVAL_RUN_STATUSES_STOPPED,
     EVAL_RUN_STATUSES_SUCCESS,
-    RUN_STATUSES_ACTIVE,
     RUN_STATUSES_ERROR,
+    RUN_STATUSES_IN_PROGRESS,
     RUN_STATUSES_PENDING,
     RUN_STATUSES_STOPPED,
     RUN_STATUSES_SUCCESS,
@@ -131,7 +133,7 @@ _DATASET_STATUS_STYLES: _StatusStyleMap = (
 _RUN_STATUS_STYLES: _StatusStyleMap = (
     (RUN_STATUSES_SUCCESS, "green"),
     (RUN_STATUSES_PENDING, "orange3"),
-    (RUN_STATUSES_ACTIVE, "blue"),
+    (RUN_STATUSES_IN_PROGRESS, "blue"),
     (RUN_STATUSES_ERROR, "red"),
     (RUN_STATUSES_STOPPED, "dim"),
 )
@@ -143,7 +145,7 @@ _DEPLOYMENT_STATUS_STYLES: _StatusStyleMap = (
 _EVAL_STATUS_STYLES: _StatusStyleMap = (
     (EVAL_RUN_STATUSES_SUCCESS, "green"),
     (EVAL_RUN_STATUSES_PENDING, "orange3"),
-    (EVAL_RUN_STATUSES_ACTIVE, "blue"),
+    (EVAL_RUN_STATUSES_IN_PROGRESS, "blue"),
     (EVAL_RUN_STATUSES_ERROR, "red"),
     (EVAL_RUN_STATUSES_STOPPED, "dim"),
 )
@@ -242,6 +244,67 @@ def build_run_detail_rows(r: Any) -> list[tuple[str, str]]:
     rows.append(("Base Model", console.escape(r.model_name) if r.model_name else "—"))
     rows.append(("Rollout", console.escape(r.rollout_name) if r.rollout_name else "—"))
     return rows
+
+
+def jsonish(value: Any) -> str:
+    if isinstance(value, str):
+        return value
+    return json.dumps(value, ensure_ascii=False, sort_keys=True)
+
+
+def format_secret_scopes(scopes: dict[str, Any] | None) -> str | None:
+    if not scopes:
+        return None
+
+    parts: list[str] = []
+    for name, raw_scope in sorted(scopes.items()):
+        if not isinstance(name, str) or not isinstance(raw_scope, str):
+            continue
+        if raw_scope == "workspace":
+            scope = "workspace"
+        elif raw_scope == "user_override":
+            scope = "personal, overrides workspace"
+        elif raw_scope == "user":
+            scope = "personal"
+        else:
+            scope = raw_scope
+        parts.append(f"{name} ({scope})")
+    return ", ".join(parts) if parts else None
+
+
+def format_env_config(env_config: dict[str, Any] | None) -> str | None:
+    if not env_config:
+        return None
+    parts = [
+        f"{key}={jsonish(value)}"
+        for key, value in sorted(env_config.items())
+        if isinstance(key, str)
+    ]
+    return ", ".join(parts) if parts else None
+
+
+def kv_section(title: str, rows: list[tuple[str, str]]) -> DetailSection | None:
+    """Build a titled key/value section mirroring the main detail table.
+
+    Values are passed through as plain text (never markup) so brackets and other
+    Rich-significant characters render literally. Returns ``None`` when there is
+    nothing to show so callers can append unconditionally.
+    """
+    if not rows:
+        return None
+
+    from rich import box
+    from rich.table import Table
+    from rich.text import Text
+
+    table = Table(title=title, box=box.ROUNDED, show_header=False, title_justify="left")
+    table.add_column("", style="cyan")
+    table.add_column("")
+    plain_lines = [f"{title}:"]
+    for label, value in rows:
+        table.add_row(label, Text(value))
+        plain_lines.append(f"{label}: {value}")
+    return DetailSection(rich=table, plain_lines=plain_lines)
 
 
 def format_size(size_bytes: int | float) -> str:
