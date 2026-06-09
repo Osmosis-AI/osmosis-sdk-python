@@ -186,9 +186,17 @@ def _format_reward_stats(results: dict[str, Any] | None) -> str | None:
     reward_stats = _reward_stats(results)
     if reward_stats is None:
         return None
+    mean = reward_stats.get("mean")
+    if isinstance(mean, bool) or not isinstance(mean, int | float):
+        mean = _results_number(results, "score")
     parts: list[str] = []
-    for key in ("min", "median", "max", "std"):
-        value = reward_stats.get(key)
+    for key, value in (
+        ("mean", mean),
+        ("std", reward_stats.get("std")),
+        ("min", reward_stats.get("min")),
+        ("median", reward_stats.get("median")),
+        ("max", reward_stats.get("max")),
+    ):
         if isinstance(value, bool) or not isinstance(value, int | float):
             continue
         if not math.isfinite(value):
@@ -218,7 +226,7 @@ def _format_pass_at_k(results: dict[str, Any] | None) -> str | None:
         if not math.isfinite(value):
             continue
         formatted.append(f"{key}: {value:.1%}")
-    return ", ".join(formatted) if formatted else None
+    return ", ".join(formatted) if len(formatted) >= 2 else None
 
 
 def _format_secret_scopes(scopes: dict[str, Any] | None) -> str | None:
@@ -526,6 +534,13 @@ def info(name_or_id: str, *, output: str | None) -> DetailResult:
     if duration:
         rows.append(("Duration", duration))
 
+    pass_rate = _results_number(detail.results, "pass_rate")
+    if pass_rate is not None:
+        rows.append(("Pass Rate", f"{pass_rate:.1%}"))
+    tokens_used = _format_optional_int(_results_number(detail.results, "total_tokens"))
+    if tokens_used:
+        rows.append(("Tokens Used", tokens_used))
+
     if detail.created_at:
         rows.append(("Submitted", format_local_datetime(detail.created_at)))
     if detail.creator_name:
@@ -568,12 +583,6 @@ def info(name_or_id: str, *, output: str | None) -> DetailResult:
         if results_counts:
             result_rows.append(("Results", results_counts))
 
-        avg_reward = _format_avg_reward(detail.results, precision=4)
-        if avg_reward != "—":
-            result_rows.append(("Avg. Reward", avg_reward))
-        pass_rate = _results_number(detail.results, "pass_rate")
-        if pass_rate is not None:
-            result_rows.append(("Pass Rate", f"{pass_rate:.1%}"))
         pass_threshold = _results_number(detail.results, "pass_threshold")
         if pass_threshold is not None:
             result_rows.append(("Pass Threshold", _format_decimal(pass_threshold)))
@@ -583,16 +592,6 @@ def info(name_or_id: str, *, output: str | None) -> DetailResult:
         pass_at_k = _format_pass_at_k(detail.results)
         if pass_at_k:
             result_rows.append(("Pass@k", pass_at_k))
-        total_tokens = _format_optional_int(
-            _results_number(detail.results, "total_tokens")
-        )
-        if total_tokens:
-            result_rows.append(("Total Tokens", total_tokens))
-        dataset_rows = _format_optional_int(
-            _results_number(detail.results, "total_dataset_rows")
-        )
-        if dataset_rows:
-            result_rows.append(("Dataset Rows", dataset_rows))
 
     fields = detail_fields(rows)
     sections: list[DetailSection] = []

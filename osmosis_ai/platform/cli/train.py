@@ -221,8 +221,6 @@ def info(name: str, *, output: str | None) -> DetailResult:
         rows.append(("Started", format_local_datetime(run.started_at)))
     if run.completed_at:
         rows.append(("Completed", format_local_datetime(run.completed_at)))
-    if run.examples_processed_count is not None:
-        rows.append(("Rows Processed", f"{run.examples_processed_count:,}"))
     if run.notes:
         rows.append(("Notes", console.escape(run.notes)))
 
@@ -280,6 +278,9 @@ def info(name: str, *, output: str | None) -> DetailResult:
             rows.append(
                 ("Duration", format_duration_ms(metrics_data.overview.duration_ms))
             )
+
+    if run.examples_processed_count is not None:
+        rows.append(("Examples Processed", f"{run.examples_processed_count:,}"))
 
     fields = detail_fields(rows)
     if run.platform_url:
