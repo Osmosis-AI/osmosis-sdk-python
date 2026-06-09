@@ -446,7 +446,6 @@ class TestInfo:
         assert result.data["training_run"]["name"] == "run-1"
         field_rows = [(field.label, field.value) for field in result.fields]
         assert ("Progress", "25 / 25 steps") in field_rows
-        assert ("Reward", "0.7500") in field_rows
         assert ("Dataset", "train.jsonl") in field_rows
         assert ("Rollout", "math-rollout") in field_rows
         assert result.data["training_run"]["current_step"] == 31
@@ -700,6 +699,18 @@ class TestStatus:
             completed_at="2026-01-02T00:00:00Z",
             creator_name="alice",
             created_at="2025-12-31T00:00:00Z",
+            config={
+                "model_path": "gpt-2",
+                "training": {"lr": 0.001, "total_epochs": 3},
+                "sampling": {"rollout_temperature": 0.7},
+            },
+            entrypoint="main.py",
+            commit_sha="abcdef1234567890",
+            env_config={"PROMPT_MODE": "strict"},
+            resolved_secret_scopes={
+                "OPENAI_API_KEY": "workspace",
+                "ANTHROPIC_API_KEY": "user_override",
+            },
         )
 
         class FakeClient:
@@ -722,7 +733,7 @@ class TestStatus:
 
         assert isinstance(result, DetailResult)
         fields = {field.label: field.value for field in result.fields}
-        assert fields["Rows Processed"] == "100"
+        assert fields["Examples Processed"] == "100"
         assert fields["Notes"] == "experiment notes"
         assert fields["Submitted By"] == "alice"
         assert len(fields["Submitted"]) >= len("2025-12-31 00:00:00")
@@ -730,6 +741,25 @@ class TestStatus:
         assert len(fields["Completed"]) >= len("2026-01-02 00:00:00")
         assert result.data["training_run"]["examples_processed_count"] == 100
         assert result.data["training_run"]["notes"] == "experiment notes"
+
+        # Configuration lives in its own section, mirroring eval info.
+        section_plain = {
+            line.split(": ", 1)[0]: line.split(": ", 1)[1]
+            for section in result.sections
+            for line in section.plain_lines
+            if ": " in line
+        }
+        assert section_plain["Entrypoint"] == "main.py"
+        assert section_plain["Config"] == (
+            "sampling.rollout_temperature=0.7, training.lr=0.001, "
+            "training.total_epochs=3"
+        )
+        assert section_plain["Commit"] == "abcdef1"
+        assert section_plain["Secrets"] == (
+            "ANTHROPIC_API_KEY (personal, overrides workspace), "
+            "OPENAI_API_KEY (workspace)"
+        )
+        assert section_plain["Environment Variables"] == "PROMPT_MODE=strict"
 
 
 # ---------------------------------------------------------------------------

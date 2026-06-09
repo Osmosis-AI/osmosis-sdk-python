@@ -220,6 +220,8 @@ class TestEvalInfo:
             "Status",
             "Progress",
             "Duration",
+            "Pass Rate",
+            "Tokens Used",
             "Submitted",
             "Submitted By",
             "Started",
@@ -231,6 +233,8 @@ class TestEvalInfo:
         fields = dict(field_rows)
         assert fields["Progress"] == "5 / 8 samples"
         assert fields["Duration"] == "12.5s"
+        assert fields["Pass Rate"] == "75.0%"
+        assert fields["Tokens Used"] == "12,345"
         assert fields["Submitted By"] == "alice"
 
         # Configuration + results live in their own sections, not the main info.
@@ -249,22 +253,18 @@ class TestEvalInfo:
         assert section_plain["Entrypoint"] == "main.py"
         assert section_plain["Config"] == "n=2, batch_size=5, pass_threshold=0.5"
         assert section_plain["Commit"] == "abcdef1"
-        assert section_plain["Required Secrets"] == (
+        assert section_plain["Secrets"] == (
             "ANTHROPIC_API_KEY (personal, overrides workspace), "
             "OPENAI_API_KEY (workspace)"
         )
-        assert section_plain["Environment"] == "PROMPT_MODE=strict"
+        assert section_plain["Environment Variables"] == "PROMPT_MODE=strict"
         assert section_plain["Results"] == "4 graded, 3 passed, 1 failed, 0 skipped"
-        assert section_plain["Avg. Reward"] == "0.8123"
-        assert section_plain["Pass Rate"] == "75.0%"
         assert section_plain["Pass Threshold"] == "0.5000"
         assert (
             section_plain["Reward Stats"]
-            == "min 0.1000, median 0.8000, max 1.0000, std 0.2000"
+            == "mean 0.8123, std 0.2000, min 0.1000, median 0.8000, max 1.0000"
         )
         assert section_plain["Pass@k"] == "1: 50.0%, 2: 75.0%"
-        assert section_plain["Total Tokens"] == "12,345"
-        assert section_plain["Dataset Rows"] == "1,000"
 
         # Errors are dropped from the rendered output but kept in JSON data.
         assert "Error" not in fields

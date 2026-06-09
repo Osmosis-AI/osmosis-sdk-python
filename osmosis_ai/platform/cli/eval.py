@@ -46,8 +46,12 @@ from osmosis_ai.platform.cli.eval_config import (
 )
 from osmosis_ai.platform.cli.shared_submit import CloudSubmitSpec, run_cloud_submit
 from osmosis_ai.platform.cli.utils import (
+    format_env_config,
     format_eval_status,
     format_progress,
+    format_secret_scopes,
+    jsonish,
+    kv_section,
     make_progress,
     paginated_fetch,
     require_git_workspace_directory_context,
@@ -229,43 +233,6 @@ def _format_pass_at_k(results: dict[str, Any] | None) -> str | None:
     return ", ".join(formatted) if len(formatted) >= 2 else None
 
 
-def _format_secret_scopes(scopes: dict[str, Any] | None) -> str | None:
-    if not scopes:
-        return None
-
-    parts: list[str] = []
-    for name, raw_scope in sorted(scopes.items()):
-        if not isinstance(name, str) or not isinstance(raw_scope, str):
-            continue
-        if raw_scope == "workspace":
-            scope = "workspace"
-        elif raw_scope == "user_override":
-            scope = "personal, overrides workspace"
-        elif raw_scope == "user":
-            scope = "personal"
-        else:
-            scope = raw_scope
-        parts.append(f"{name} ({scope})")
-    return ", ".join(parts) if parts else None
-
-
-def _jsonish(value: Any) -> str:
-    if isinstance(value, str):
-        return value
-    return json.dumps(value, ensure_ascii=False, sort_keys=True)
-
-
-def _format_env_config(env_config: dict[str, Any] | None) -> str | None:
-    if not env_config:
-        return None
-    parts = [
-        f"{key}={_jsonish(value)}"
-        for key, value in sorted(env_config.items())
-        if isinstance(key, str)
-    ]
-    return ", ".join(parts) if parts else None
-
-
 def _format_eval_config(config: dict[str, Any] | None) -> str | None:
     if not config:
         return None
@@ -292,32 +259,8 @@ def _format_eval_config(config: dict[str, Any] | None) -> str | None:
             and config[key] is not None
         )
     )
-    parts = [f"{key}={_jsonish(config[key])}" for key in keys]
+    parts = [f"{key}={jsonish(config[key])}" for key in keys]
     return ", ".join(parts) if parts else None
-
-
-def _kv_section(title: str, rows: list[tuple[str, str]]) -> DetailSection | None:
-    """Build a titled key/value section mirroring the main detail table.
-
-    Values are passed through as plain text (never markup) so brackets and other
-    Rich-significant characters render literally. Returns ``None`` when there is
-    nothing to show so callers can append unconditionally.
-    """
-    if not rows:
-        return None
-
-    from rich import box
-    from rich.table import Table
-    from rich.text import Text
-
-    table = Table(title=title, box=box.ROUNDED, show_header=False, title_justify="left")
-    table.add_column("", style="cyan")
-    table.add_column("")
-    plain_lines = [f"{title}:"]
-    for label, value in rows:
-        table.add_row(label, Text(value))
-        plain_lines.append(f"{label}: {value}")
-    return DetailSection(rich=table, plain_lines=plain_lines)
 
 
 def _eval_summary(detail: Any, *, include_details: bool) -> dict[str, Any]:
@@ -569,12 +512,12 @@ def info(name_or_id: str, *, output: str | None) -> DetailResult:
         config_rows.append(("Config", config))
     if detail.commit_sha:
         config_rows.append(("Commit", detail.commit_sha[:7]))
-    secret_scopes = _format_secret_scopes(detail.resolved_secret_scopes)
+    secret_scopes = format_secret_scopes(detail.resolved_secret_scopes)
     if secret_scopes:
-        config_rows.append(("Required Secrets", secret_scopes))
-    env_config = _format_env_config(detail.env_config)
+        config_rows.append(("Secrets", secret_scopes))
+    env_config = format_env_config(detail.env_config)
     if env_config:
-        config_rows.append(("Environment", env_config))
+        config_rows.append(("Environment Variables", env_config))
 
     # Results section — scoring outcome.
     result_rows: list[tuple[str, str]] = []
@@ -596,8 +539,8 @@ def info(name_or_id: str, *, output: str | None) -> DetailResult:
     fields = detail_fields(rows)
     sections: list[DetailSection] = []
     for section in (
-        _kv_section("Configuration", config_rows),
-        _kv_section("Results", result_rows),
+        kv_section("Configuration", config_rows),
+        kv_section("Results", result_rows),
     ):
         if section is not None:
             sections.append(section)

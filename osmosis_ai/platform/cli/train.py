@@ -47,8 +47,12 @@ from osmosis_ai.platform.cli.training_config import (
 )
 from osmosis_ai.platform.cli.utils import (
     build_run_detail_rows,
+    format_env_config,
     format_progress,
     format_run_status,
+    format_secret_scopes,
+    jsonish,
+    kv_section,
     make_progress,
     paginated_fetch,
     require_git_workspace_directory_context,
@@ -61,6 +65,43 @@ def _format_train_reward(run: Any) -> str:
     if run.reward is None:
         return "—"
     return f"{run.reward:.2f}"
+
+
+def _format_train_config(config: dict[str, Any] | None) -> str | None:
+    if not config:
+        return None
+    parts: list[str] = []
+    for key in sorted(config):
+        if key == "model_path":
+            continue
+        value = config[key]
+        if value is None:
+            continue
+        if isinstance(value, dict):
+            for sub in sorted(value):
+                sub_value = value[sub]
+                if sub_value is not None:
+                    parts.append(f"{key}.{sub}={jsonish(sub_value)}")
+        else:
+            parts.append(f"{key}={jsonish(value)}")
+    return ", ".join(parts) if parts else None
+
+
+def _insert_after(
+    rows: list[tuple[str, str]],
+    anchors: tuple[str, ...],
+    item: tuple[str, str],
+) -> None:
+    """Insert ``item`` right after the first row matching any of ``anchors``.
+
+    Falls back to appending when none of the anchor labels are present.
+    """
+    for anchor in anchors:
+        for index, (label, _value) in enumerate(rows):
+            if label == anchor:
+                rows.insert(index + 1, item)
+                return
+    rows.append(item)
 
 
 def _train_summary(run: Any) -> dict[str, Any]:
@@ -215,8 +256,6 @@ def info(name: str, *, output: str | None) -> DetailResult:
         progress = format_progress(summary.get("progress"))
         if progress:
             rows.insert(3, ("Progress", progress))
-    if run.reward is not None:
-        rows.insert(4, ("Reward", f"{run.reward:.4f}"))
     if run.started_at:
         rows.append(("Started", format_local_datetime(run.started_at)))
     if run.completed_at:
@@ -227,6 +266,24 @@ def info(name: str, *, output: str | None) -> DetailResult:
     checkpoints: list[Any] = []
     sections: list[DetailSection] = []
     display_hints: list[str] = []
+
+    config_rows: list[tuple[str, str]] = []
+    if run.entrypoint:
+        config_rows.append(("Entrypoint", run.entrypoint))
+    train_config = _format_train_config(run.config)
+    if train_config:
+        config_rows.append(("Config", train_config))
+    if run.commit_sha:
+        config_rows.append(("Commit", run.commit_sha[:7]))
+    secret_scopes = format_secret_scopes(run.resolved_secret_scopes)
+    if secret_scopes:
+        config_rows.append(("Secrets", secret_scopes))
+    env_config = format_env_config(run.env_config)
+    if env_config:
+        config_rows.append(("Environment Variables", env_config))
+    config_section = kv_section("Configuration", config_rows)
+    if config_section is not None:
+        sections.append(config_section)
 
     if run.status in RUN_STATUSES_TERMINAL:
         try:
@@ -275,12 +332,18 @@ def info(name: str, *, output: str | None) -> DetailResult:
             total = metrics_data.overview.total_steps
             rows.insert(3, ("Progress", f"{latest} / {total} rollout steps"))
         if metrics_data.overview.duration_ms is not None:
-            rows.append(
-                ("Duration", format_duration_ms(metrics_data.overview.duration_ms))
+            _insert_after(
+                rows,
+                ("Progress", "Status"),
+                ("Duration", format_duration_ms(metrics_data.overview.duration_ms)),
             )
 
     if run.examples_processed_count is not None:
-        rows.append(("Examples Processed", f"{run.examples_processed_count:,}"))
+        _insert_after(
+            rows,
+            ("Duration", "Progress", "Status"),
+            ("Examples Processed", f"{run.examples_processed_count:,}"),
+        )
 
     fields = detail_fields(rows)
     if run.platform_url:

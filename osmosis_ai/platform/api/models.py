@@ -244,6 +244,11 @@ class TrainingRunDetail(TrainingRun):
 
     examples_processed_count: int | None = None
     notes: str | None = None
+    config: dict[str, Any] | None = None
+    entrypoint: str | None = None
+    commit_sha: str | None = None
+    env_config: dict[str, Any] | None = None
+    resolved_secret_scopes: dict[str, Any] | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> TrainingRunDetail:
@@ -255,6 +260,9 @@ class TrainingRunDetail(TrainingRun):
         current_step = _number_or_none(run.get("current_step"))
         total_steps = _number_or_none(run.get("total_steps"))
         reward = _number_or_none(run.get("reward"))
+        config = data.get("config")
+        env_config = data.get("env_config")
+        resolved_secret_scopes = data.get("resolved_secret_scopes")
         return cls(
             id=run["id"],
             name=run.get("name"),
@@ -276,6 +284,19 @@ class TrainingRunDetail(TrainingRun):
             reward=float(reward) if reward is not None else None,
             examples_processed_count=run.get("examples_processed_count"),
             notes=run.get("notes"),
+            config=config if isinstance(config, dict) else None,
+            entrypoint=data.get("entrypoint")
+            if isinstance(data.get("entrypoint"), str)
+            else None,
+            commit_sha=data.get("commit_sha")
+            if isinstance(data.get("commit_sha"), str)
+            else None,
+            env_config=env_config if isinstance(env_config, dict) else None,
+            resolved_secret_scopes=(
+                resolved_secret_scopes
+                if isinstance(resolved_secret_scopes, dict)
+                else None
+            ),
         )
 
 
