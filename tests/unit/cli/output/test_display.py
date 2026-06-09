@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import pytest
 
 from osmosis_ai.cli.output.display import (
+    format_duration_ms,
     format_local_date,
     format_local_datetime,
 )
@@ -101,3 +102,21 @@ def test_format_local_date_uses_compact_fallback_for_offsetless_input() -> None:
         pytest.skip("America/Los_Angeles timezone data is unavailable")
 
     assert format_local_date("2026-01-01T12:00:00", tz=pacific) == "2026-01-01"
+
+
+@pytest.mark.parametrize(
+    ("duration_ms", "expected"),
+    [
+        (-500, "0s"),
+        (1500, "1.5s"),
+        (45000, "45s"),
+        (60000, "1m"),
+        (754000, "12m 34s"),
+        (3600000, "1h"),
+        (9900000, "2h 45m"),
+        (86400000, "1d"),
+        (90000000, "1d 1h"),
+    ],
+)
+def test_format_duration_ms(duration_ms: float, expected: str) -> None:
+    assert format_duration_ms(duration_ms) == expected

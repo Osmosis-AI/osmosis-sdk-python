@@ -13,6 +13,7 @@ from osmosis_ai.platform.api.models import (
     STATUSES_TERMINAL,
     DatasetDownloadInfo,
     EnvironmentSecretInfo,
+    EvalRunMetrics,
     EvaluationRun,
     EvaluationRunDetail,
     MetricDataPoint,
@@ -687,3 +688,80 @@ class TestEvaluationRunModels:
         assert page.total_count == 2
         assert page.has_more is True
         assert page.next_offset == 1
+
+    def test_evaluation_run_ignores_boolean_row_index(self) -> None:
+        run = EvaluationRun.from_dict(
+            {
+                "id": "eval_1",
+                "name": "math-eval",
+                "status": "pending",
+                "created_at": "2026-05-04T00:00:00Z",
+                "row_index": True,
+            }
+        )
+
+        assert run.row_index is None
+
+
+class TestEvalRunMetrics:
+    """Tests for EvalRunMetrics.from_dict and its nested models."""
+
+    def test_from_dict_full(self) -> None:
+        metrics = EvalRunMetrics.from_dict(
+            {
+                "eval_run_id": "eval_1",
+                "status": "succeeded",
+                "overview": {
+                    "duration_ms": 1800000,
+                    "total_samples": 100,
+                    "completed_samples": 100,
+                    "graded": 98,
+                    "passed": 80,
+                    "failed": 18,
+                    "skipped": 2,
+                    "pass_rate": 0.8163,
+                    "pass_threshold": 0.5,
+                    "tokens_used": 250000,
+                },
+                "reward_stats": {
+                    "mean": 0.72,
+                    "median": 0.75,
+                    "std": 0.11,
+                    "min": 0.2,
+                    "max": 0.98,
+                },
+                "pass_at_k": [
+                    {"k": 1, "value": 0.6},
+                    {"k": 4, "value": 0.85},
+                ],
+            }
+        )
+
+        assert metrics.eval_run_id == "eval_1"
+        assert metrics.status == "succeeded"
+        assert metrics.overview.duration_ms == 1800000
+        assert metrics.overview.total_samples == 100
+        assert metrics.overview.pass_rate == 0.8163
+        assert metrics.overview.pass_threshold == 0.5
+        assert metrics.overview.tokens_used == 250000
+        assert metrics.reward_stats is not None
+        assert metrics.reward_stats.mean == 0.72
+        assert metrics.reward_stats.median == 0.75
+        assert metrics.reward_stats.std == 0.11
+        assert metrics.reward_stats.min == 0.2
+        assert metrics.reward_stats.max == 0.98
+        assert [(p.k, p.value) for p in metrics.pass_at_k] == [(1, 0.6), (4, 0.85)]
+
+    def test_from_dict_without_reward_stats_or_pass_at_k(self) -> None:
+        metrics = EvalRunMetrics.from_dict(
+            {
+                "eval_run_id": "eval_1",
+                "status": "running",
+                "overview": {},
+            }
+        )
+
+        assert metrics.reward_stats is None
+        assert metrics.pass_at_k == []
+        assert metrics.overview.duration_ms is None
+        assert metrics.overview.total_samples is None
