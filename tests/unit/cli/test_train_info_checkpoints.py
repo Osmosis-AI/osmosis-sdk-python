@@ -140,7 +140,7 @@ class TestStatusCheckpoints:
         expected_url = "https://platform.osmosis.ai/ws/training/run_1"
         assert result.display_hints == [
             f"View: {expected_url}",
-            "Deploy with: osmosis deploy <checkpoint-name>",
+            "Deploy with: osmosis model deploy <lora-model-name>",
         ]
         checkpoint_line = result.sections[0].plain_lines[0]
         assert "qwen3-run1-step-100" in checkpoint_line
@@ -219,7 +219,7 @@ class TestStatusCheckpoints:
         )
         assert result.display_hints == [
             "View: https://platform.osmosis.ai/ws/training/run_1",
-            "Deploy with: osmosis deploy <checkpoint-name>",
+            "Deploy with: osmosis model deploy <lora-model-name>",
         ]
 
     def test_endpoint_error_is_non_fatal(

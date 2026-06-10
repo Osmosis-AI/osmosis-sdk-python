@@ -35,6 +35,10 @@ REMOVED_RESPONSE_MODELS = (
     "WorkspaceDeletionStatus",
     "ProcessCount",
     "RenameDeploymentResult",
+    "DeploymentInfo",
+    "PaginatedDeployments",
+    "DeploymentSummary",
+    "ModelList",
 )
 
 
@@ -438,58 +442,80 @@ class TestTrainingRunMetrics:
         assert result.metrics == []
 
 
-class TestDeploymentModels:
-    def test_deployment_info_from_dict(self) -> None:
-        from osmosis_ai.platform.api.models import DeploymentInfo
+class TestModelModels:
+    def test_lora_model_info_from_dict(self) -> None:
+        from osmosis_ai.platform.api.models import LoraModelInfo
 
-        d = DeploymentInfo.from_dict(
+        m = LoraModelInfo.from_dict(
             {
-                "id": "dep_1",
-                "checkpoint_name": "qwen3-run1-step-100",
-                "status": "active",
-                "training_run_id": "run_1",
+                "id": "lora_1",
+                "model_name": "qwen3-run1-step-100",
+                "base_model": "Qwen/Qwen3-30B-A3B-Instruct-2507-FP8",
                 "training_run_name": "qwen3-run1",
                 "checkpoint_step": 100,
-                "base_model": "Qwen/Qwen3-30B-A3B-Instruct-2507-FP8",
-                "creator_name": "brian",
+                "deployment_status": "active",
                 "created_at": "2026-04-20T00:00:00Z",
             }
         )
-        assert d.id == "dep_1"
-        assert d.checkpoint_name == "qwen3-run1-step-100"
-        assert d.status == "active"
-        assert d.checkpoint_step == 100
-        assert d.base_model == "Qwen/Qwen3-30B-A3B-Instruct-2507-FP8"
+        assert m.id == "lora_1"
+        assert m.model_name == "qwen3-run1-step-100"
+        assert m.deployment_status == "active"
+        assert m.checkpoint_step == 100
+        assert m.base_model == "Qwen/Qwen3-30B-A3B-Instruct-2507-FP8"
 
-    def test_deployment_info_minimal(self) -> None:
+    def test_lora_model_info_minimal(self) -> None:
         """Server may omit optional fields — from_dict must tolerate it."""
-        from osmosis_ai.platform.api.models import DeploymentInfo
+        from osmosis_ai.platform.api.models import LoraModelInfo
 
-        d = DeploymentInfo.from_dict(
+        m = LoraModelInfo.from_dict({"id": "lora_1", "model_name": "x"})
+        assert m.base_model is None
+        assert m.training_run_name is None
+        assert m.checkpoint_step is None
+        assert m.deployment_status is None
+        assert m.created_at == ""
+
+    def test_paginated_base_models_from_dict(self) -> None:
+        from osmosis_ai.platform.api.models import PaginatedBaseModels
+
+        page = PaginatedBaseModels.from_dict(
             {
-                "id": "dep_1",
-                "checkpoint_name": "x",
-                "status": "active",
-                "base_model": "Qwen/Qwen3",
-                "checkpoint_step": 0,
+                "models": [
+                    {
+                        "id": "model_1",
+                        "model_name": "Qwen/Qwen3",
+                        "base_model": "Qwen/Qwen3",
+                    }
+                ],
+                "total_count": 2,
+                "has_more": True,
+                "next_offset": 1,
             }
         )
-        assert d.training_run_id is None
-        assert d.training_run_name is None
-        assert d.creator_name is None
-        assert d.created_at == ""
+        assert len(page.models) == 1
+        assert page.models[0].model_name == "Qwen/Qwen3"
+        assert page.total_count == 2
+        assert page.has_more is True
+        assert page.next_offset == 1
 
-    def test_paginated_deployments_from_dict(self) -> None:
-        from osmosis_ai.platform.api.models import PaginatedDeployments
+    def test_paginated_base_models_from_dict_empty(self) -> None:
+        from osmosis_ai.platform.api.models import PaginatedBaseModels
 
-        p = PaginatedDeployments.from_dict(
+        page = PaginatedBaseModels.from_dict({})
+        assert page.models == []
+        assert page.total_count == 0
+        assert page.has_more is False
+        assert page.next_offset is None
+
+    def test_paginated_lora_models_from_dict(self) -> None:
+        from osmosis_ai.platform.api.models import PaginatedLoraModels
+
+        page = PaginatedLoraModels.from_dict(
             {
-                "deployments": [
+                "models": [
                     {
-                        "id": "dep_1",
-                        "checkpoint_name": "a",
-                        "status": "active",
-                        "base_model": "Qwen/Qwen3",
+                        "id": "lora_1",
+                        "model_name": "a",
+                        "deployment_status": None,
                         "checkpoint_step": 1,
                     }
                 ],
@@ -498,19 +524,29 @@ class TestDeploymentModels:
                 "next_offset": None,
             }
         )
-        assert len(p.deployments) == 1
-        assert p.total_count == 1
-        assert p.has_more is False
-        assert p.next_offset is None
+        assert len(page.models) == 1
+        assert page.models[0].deployment_status is None
+        assert page.total_count == 1
+        assert page.has_more is False
+        assert page.next_offset is None
 
-    def test_deployment_summary_from_dict(self) -> None:
-        from osmosis_ai.platform.api.models import DeploymentSummary
+    def test_paginated_lora_models_from_dict_empty(self) -> None:
+        from osmosis_ai.platform.api.models import PaginatedLoraModels
 
-        s = DeploymentSummary.from_dict(
-            {"id": "dep_1", "checkpoint_name": "x", "status": "active"}
+        page = PaginatedLoraModels.from_dict({})
+        assert page.models == []
+        assert page.total_count == 0
+        assert page.has_more is False
+        assert page.next_offset is None
+
+    def test_lora_model_summary_from_dict(self) -> None:
+        from osmosis_ai.platform.api.models import LoraModelSummary
+
+        s = LoraModelSummary.from_dict(
+            {"id": "lora_1", "model_name": "x", "status": "active"}
         )
-        assert s.id == "dep_1"
-        assert s.checkpoint_name == "x"
+        assert s.id == "lora_1"
+        assert s.model_name == "x"
         assert s.status == "active"
 
     def test_deployment_status_frozensets(self) -> None:

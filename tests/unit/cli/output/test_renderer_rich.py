@@ -221,12 +221,12 @@ def test_rich_detail_prints_sections_after_table() -> None:
                 plain_lines=["Checkpoint: ckpt-a"],
             )
         ],
-        display_hints=["Deploy: osmosis deploy ckpt-a"],
+        display_hints=["Deploy: osmosis model deploy ckpt-a"],
     )
     stdout, _ = _render(result)
     assert "Name" in stdout
     assert "ckpt-a" in stdout
-    assert "Deploy: osmosis deploy ckpt-a" in stdout
+    assert "Deploy: osmosis model deploy ckpt-a" in stdout
 
 
 def test_rich_list_renders_raw_cell_markup_as_text() -> None:

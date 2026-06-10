@@ -119,14 +119,12 @@ def test_operation_envelope_includes_structured_next_steps_only() -> None:
     result = OperationResult(
         operation="deploy",
         status="success",
-        next_steps_structured=[
-            {"action": "deployment_info", "checkpoint_name": "run-step-40"}
-        ],
-        display_next_steps=["Inspect with: osmosis deployment info run-step-40"],
+        next_steps_structured=[{"action": "model_deploy", "model_name": "run-step-40"}],
+        display_next_steps=["Deploy with: osmosis model deploy run-step-40"],
     )
     payload, _ = _render_to_json(result)
     assert payload["next_steps_structured"] == [
-        {"action": "deployment_info", "checkpoint_name": "run-step-40"}
+        {"action": "model_deploy", "model_name": "run-step-40"}
     ]
     assert "display_next_steps" not in payload
 

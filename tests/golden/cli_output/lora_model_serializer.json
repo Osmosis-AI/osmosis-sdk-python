@@ -2,13 +2,11 @@
   "schema_version": 1,
   "keys": [
     "id",
-    "checkpoint_name",
-    "status",
+    "model_name",
     "base_model",
-    "checkpoint_step",
-    "training_run_id",
     "training_run_name",
-    "creator_name",
+    "checkpoint_step",
+    "deployment_status",
     "created_at"
   ]
 }

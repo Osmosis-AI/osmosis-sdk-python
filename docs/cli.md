@@ -315,44 +315,40 @@ osmosis train stop <run-name>
 osmosis train stop <run-name> --yes
 ```
 
-## Deployment
+## Model
 
-Deployments expose trained checkpoint adapters for inference. Use the checkpoint
-UUID or checkpoint name anywhere `<checkpoint>` appears.
+Models cover base (foundation) models and LoRA models produced by training
+runs. Deploying a LoRA model exposes it for inference.
 
-### osmosis deployment list
+### osmosis model list
 
-List deployments for the current workspace directory.
+List base models and LoRA models for the current workspace directory in a
+single table (base models first). LoRA models include their deployment status.
+Filter with `--type base` or `--type lora`; when filtered, pagination cursors
+(`next_offset`) come straight from the matching endpoint.
 
 ```bash
-osmosis deployment list
-osmosis deployment list --limit 50
-osmosis deployment list --all
+osmosis model list
+osmosis model list --type lora
+osmosis model list --limit 50
+osmosis model list --all
+osmosis --json model list
 ```
 
-### osmosis deployment info
+### osmosis model deploy
 
-Show deployment details for a checkpoint.
+Deploy or reactivate a LoRA model by name.
 
 ```bash
-osmosis deployment info <checkpoint>
-osmosis --json deployment info <checkpoint>
+osmosis model deploy <lora-model-name>
 ```
 
-### osmosis deploy
+### osmosis model undeploy
 
-Deploy or reactivate a checkpoint.
-
-```bash
-osmosis deploy <checkpoint>
-```
-
-### osmosis undeploy
-
-Transition a checkpoint deployment to inactive.
+Transition a LoRA model's deployment to inactive (idempotent).
 
 ```bash
-osmosis undeploy <checkpoint>
+osmosis model undeploy <lora-model-name>
 ```
 
 ## Secrets

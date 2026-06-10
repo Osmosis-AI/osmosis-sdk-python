@@ -1,8 +1,8 @@
-"""Tests for OsmosisClient deployment + checkpoint methods.
+"""Tests for OsmosisClient model + checkpoint methods.
 
-Covers the checkpoint-centric API:
-    list_deployments / get_deployment / deploy_checkpoint /
-    undeploy_checkpoint / list_training_run_checkpoints
+Covers the model-centric API:
+    list_base_models / list_lora_models / deploy_lora_model /
+    undeploy_lora_model / list_training_run_checkpoints
 """
 
 from __future__ import annotations
@@ -14,20 +14,33 @@ from osmosis_ai.platform.api.client import OsmosisClient
 GIT_IDENTITY = "git_test"
 
 
-class TestListDeployments:
+class TestListBaseModels:
     @patch("osmosis_ai.platform.api.client.platform_request")
     def test_basic(self, mock_req: MagicMock) -> None:
         mock_req.return_value = {
-            "deployments": [],
-            "total_count": 0,
+            "models": [
+                {
+                    "id": "model_1",
+                    "model_name": "Qwen/Qwen3",
+                    "base_model": "Qwen/Qwen3",
+                    "creator_name": "brian",
+                    "created_at": "2026-04-20T00:00:00Z",
+                    "updated_at": "2026-04-20T00:00:00Z",
+                }
+            ],
+            "total_count": 1,
             "has_more": False,
             "next_offset": None,
         }
         client = OsmosisClient()
-        result = client.list_deployments(limit=10, offset=5, git_identity=GIT_IDENTITY)
-        assert result.total_count == 0
+        result = client.list_base_models(limit=10, offset=5, git_identity=GIT_IDENTITY)
+        assert len(result.models) == 1
+        assert result.models[0].model_name == "Qwen/Qwen3"
+        assert result.total_count == 1
+        assert result.has_more is False
+        assert result.next_offset is None
         args, kwargs = mock_req.call_args
-        assert "/api/cli/deployments?" in args[0]
+        assert "/api/cli/models/base?" in args[0]
         assert "limit=10" in args[0]
         assert "offset=5" in args[0]
         assert kwargs["git_identity"] == GIT_IDENTITY
@@ -36,76 +49,91 @@ class TestListDeployments:
     @patch("osmosis_ai.platform.api.client.platform_request")
     def test_defaults(self, mock_req: MagicMock) -> None:
         mock_req.return_value = {
-            "deployments": [],
+            "models": [],
             "total_count": 0,
             "has_more": False,
             "next_offset": None,
         }
         client = OsmosisClient()
-        client.list_deployments(git_identity=GIT_IDENTITY)
+        result = client.list_base_models(git_identity=GIT_IDENTITY)
+        assert result.models == []
         args, kwargs = mock_req.call_args
-        assert "/api/cli/deployments?" in args[0]
+        assert "/api/cli/models/base?" in args[0]
         assert "limit=" in args[0]
         assert "offset=0" in args[0]
         assert kwargs["git_identity"] == GIT_IDENTITY
         assert "workspace_id" not in kwargs
 
 
-class TestGetDeployment:
+class TestListLoraModels:
     @patch("osmosis_ai.platform.api.client.platform_request")
-    def test_by_checkpoint_name(self, mock_req: MagicMock) -> None:
+    def test_basic(self, mock_req: MagicMock) -> None:
         mock_req.return_value = {
-            "deployment": {
-                "id": "dep_1",
-                "checkpoint_name": "qwen3-step-100",
-                "status": "active",
-                "checkpoint_step": 100,
-                "base_model": "Qwen/Qwen3",
-            }
+            "models": [
+                {
+                    "id": "lora_1",
+                    "model_name": "qwen3-run1-step-100",
+                    "base_model": "Qwen/Qwen3",
+                    "training_run_name": "qwen3-run1",
+                    "checkpoint_step": 100,
+                    "deployment_status": "active",
+                    "created_at": "2026-04-21T00:00:00Z",
+                }
+            ],
+            "total_count": 3,
+            "has_more": True,
+            "next_offset": 1,
         }
         client = OsmosisClient()
-        result = client.get_deployment("qwen3-step-100", git_identity=GIT_IDENTITY)
-        assert result.checkpoint_name == "qwen3-step-100"
+        result = client.list_lora_models(limit=10, offset=5, git_identity=GIT_IDENTITY)
+        assert len(result.models) == 1
+        assert result.models[0].deployment_status == "active"
+        assert result.total_count == 3
+        assert result.has_more is True
+        assert result.next_offset == 1
         args, kwargs = mock_req.call_args
-        assert args[0] == "/api/cli/deployments/qwen3-step-100"
+        assert "/api/cli/models/lora?" in args[0]
+        assert "limit=10" in args[0]
+        assert "offset=5" in args[0]
         assert kwargs["git_identity"] == GIT_IDENTITY
         assert "workspace_id" not in kwargs
 
     @patch("osmosis_ai.platform.api.client.platform_request")
-    def test_urlencodes_path(self, mock_req: MagicMock) -> None:
+    def test_defaults(self, mock_req: MagicMock) -> None:
         mock_req.return_value = {
-            "deployment": {
-                "id": "d",
-                "checkpoint_name": "x",
-                "status": "active",
-                "checkpoint_step": 0,
-                "base_model": "q",
-            }
+            "models": [],
+            "total_count": 0,
+            "has_more": False,
+            "next_offset": None,
         }
         client = OsmosisClient()
-        client.get_deployment("../bad", git_identity=GIT_IDENTITY)
+        result = client.list_lora_models(git_identity=GIT_IDENTITY)
+        assert result.models == []
         args, kwargs = mock_req.call_args
-        assert "../" not in args[0]
+        assert "/api/cli/models/lora?" in args[0]
+        assert "limit=" in args[0]
+        assert "offset=0" in args[0]
         assert kwargs["git_identity"] == GIT_IDENTITY
         assert "workspace_id" not in kwargs
 
 
-class TestDeployCheckpoint:
+class TestDeployLoraModel:
     @patch("osmosis_ai.platform.api.client.platform_request")
     def test_deploy(self, mock_req: MagicMock) -> None:
         mock_req.return_value = {
-            "deployment": {
-                "id": "dep_1",
-                "checkpoint_name": "qwen3-step-100",
-                "status": "active",
-            }
+            "id": "lora_1",
+            "model_name": "qwen3-run1-step-100",
+            "status": "active",
         }
         client = OsmosisClient()
-        result = client.deploy_checkpoint("qwen3-step-100", git_identity=GIT_IDENTITY)
-        assert result.id == "dep_1"
+        result = client.deploy_lora_model(
+            "qwen3-run1-step-100", git_identity=GIT_IDENTITY
+        )
+        assert result.id == "lora_1"
+        assert result.model_name == "qwen3-run1-step-100"
         assert result.status == "active"
         args, kwargs = mock_req.call_args
-        assert args[0] == "/api/cli/deployments/qwen3-step-100/deploy"
+        assert args[0] == "/api/cli/models/qwen3-run1-step-100/deploy"
         assert kwargs["method"] == "POST"
         assert kwargs["data"] == {}
         assert kwargs["git_identity"] == GIT_IDENTITY
@@ -113,34 +141,42 @@ class TestDeployCheckpoint:
 
     @patch("osmosis_ai.platform.api.client.platform_request")
     def test_deploy_urlencodes_path(self, mock_req: MagicMock) -> None:
-        mock_req.return_value = {
-            "deployment": {"id": "d", "checkpoint_name": "x", "status": "active"}
-        }
+        mock_req.return_value = {"id": "l", "model_name": "x", "status": "active"}
         client = OsmosisClient()
-        client.deploy_checkpoint("../bad", git_identity=GIT_IDENTITY)
+        client.deploy_lora_model("../bad", git_identity=GIT_IDENTITY)
         args, kwargs = mock_req.call_args
         assert "../" not in args[0]
         assert kwargs["git_identity"] == GIT_IDENTITY
         assert "workspace_id" not in kwargs
 
 
-class TestUndeployCheckpoint:
+class TestUndeployLoraModel:
     @patch("osmosis_ai.platform.api.client.platform_request")
     def test_undeploy(self, mock_req: MagicMock) -> None:
         mock_req.return_value = {
-            "id": "dep_1",
-            "checkpoint_name": "qwen3-step-100",
+            "id": "lora_1",
+            "model_name": "qwen3-run1-step-100",
             "status": "inactive",
         }
         client = OsmosisClient()
-        result = client.undeploy_checkpoint("qwen3-step-100", git_identity=GIT_IDENTITY)
+        result = client.undeploy_lora_model(
+            "qwen3-run1-step-100", git_identity=GIT_IDENTITY
+        )
         assert result.status == "inactive"
         args, kwargs = mock_req.call_args
-        assert args[0] == "/api/cli/deployments/qwen3-step-100/undeploy"
+        assert args[0] == "/api/cli/models/qwen3-run1-step-100/undeploy"
         assert kwargs["method"] == "POST"
         assert kwargs["data"] == {}
         assert kwargs["git_identity"] == GIT_IDENTITY
         assert "workspace_id" not in kwargs
+
+    @patch("osmosis_ai.platform.api.client.platform_request")
+    def test_undeploy_urlencodes_path(self, mock_req: MagicMock) -> None:
+        mock_req.return_value = {"id": "l", "model_name": "x", "status": "inactive"}
+        client = OsmosisClient()
+        client.undeploy_lora_model("../bad", git_identity=GIT_IDENTITY)
+        args, _kwargs = mock_req.call_args
+        assert "../" not in args[0]
 
 
 class TestListTrainingRunCheckpoints:

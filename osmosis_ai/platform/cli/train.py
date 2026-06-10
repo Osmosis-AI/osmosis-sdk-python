@@ -371,7 +371,7 @@ def info(name: str, *, output: str | None) -> DetailResult:
                 f"[{cp.status}] {cp.id[:8]}"
             )
         sections.append(DetailSection(rich=table, plain_lines=plain_lines))
-        display_hints.append("Deploy with: osmosis deploy <checkpoint-name>")
+        display_hints.append("Deploy with: osmosis model deploy <lora-model-name>")
 
     if metrics_data is not None and metrics_data.metrics:
         from osmosis_ai.cli.metrics_graph import (

@@ -51,13 +51,13 @@ def test_plain_detail_prints_section_plain_lines_and_hints() -> None:
                 plain_lines=["Checkpoint: ckpt-a"],
             )
         ],
-        display_hints=["Deploy: osmosis deploy ckpt-a"],
+        display_hints=["Deploy: osmosis model deploy ckpt-a"],
     )
     stdout, _ = _render(result)
     assert stdout.splitlines() == [
         "Name: run-a",
         "Checkpoint: ckpt-a",
-        "Deploy: osmosis deploy ckpt-a",
+        "Deploy: osmosis model deploy ckpt-a",
     ]
 
 
@@ -186,7 +186,7 @@ def test_operation_renders_concise_success_line() -> None:
         status="success",
         resource={"id": "dep_1", "checkpoint_name": "run-step-40"},
         message="Checkpoint deployed.",
-        display_next_steps=["Test it: osmosis deployment info run-step-40"],
+        display_next_steps=["Test it: osmosis model deploy run-step-40"],
     )
     stdout, _ = _render(result)
     lines = stdout.splitlines()

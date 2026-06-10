@@ -258,19 +258,17 @@ class TestGitIdentityPassthrough:
                 {"models": [], "total_count": 0},
             ),
             (
-                lambda client: client.list_deployments(git_identity="git_123"),
-                {"deployments": [], "total_count": 0},
+                lambda client: client.list_lora_models(git_identity="git_123"),
+                {"models": [], "total_count": 0},
             ),
             (
-                lambda client: client.deploy_checkpoint(
-                    "checkpoint-1", git_identity="git_123"
+                lambda client: client.deploy_lora_model(
+                    "lora-model-1", git_identity="git_123"
                 ),
                 {
-                    "deployment": {
-                        "id": "dep-1",
-                        "checkpoint_name": "checkpoint-1",
-                        "status": "active",
-                    }
+                    "id": "lora-1",
+                    "model_name": "lora-model-1",
+                    "status": "active",
                 },
             ),
             (

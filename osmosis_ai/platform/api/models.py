@@ -590,6 +590,67 @@ class PaginatedBaseModels:
         )
 
 
+@dataclass
+class LoraModelInfo:
+    """A LoRA model produced by a training run."""
+
+    id: str
+    model_name: str
+    base_model: str | None = None
+    training_run_name: str | None = None
+    checkpoint_step: int | None = None
+    deployment_status: str | None = None
+    created_at: str = ""
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> LoraModelInfo:
+        return cls(
+            id=data["id"],
+            model_name=data.get("model_name", ""),
+            base_model=data.get("base_model"),
+            training_run_name=data.get("training_run_name"),
+            checkpoint_step=data.get("checkpoint_step"),
+            deployment_status=data.get("deployment_status"),
+            created_at=data.get("created_at", ""),
+        )
+
+
+@dataclass
+class PaginatedLoraModels:
+    """Paginated list of LoRA models."""
+
+    models: list[LoraModelInfo]
+    total_count: int
+    has_more: bool
+    next_offset: int | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> PaginatedLoraModels:
+        return cls(
+            models=[LoraModelInfo.from_dict(m) for m in data.get("models", [])],
+            total_count=data.get("total_count", 0),
+            has_more=data.get("has_more", False),
+            next_offset=data.get("next_offset"),
+        )
+
+
+@dataclass
+class LoraModelSummary:
+    """Minimal LoRA model identity returned from deploy/undeploy endpoints."""
+
+    id: str
+    model_name: str
+    status: str
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> LoraModelSummary:
+        return cls(
+            id=data["id"],
+            model_name=data.get("model_name", ""),
+            status=data.get("status", ""),
+        )
+
+
 # ── Environment Secrets ──────────────────────────────────────────
 # Workspace-scoped secrets. The platform never returns the secret *value*:
 # list responses carry names + metadata only, and create responses carry
@@ -668,80 +729,12 @@ class PaginatedEnvironmentSecrets:
         )
 
 
-# ── Deployments ──────────────────────────────────────────────────
-# Status lifecycle: "active" / "inactive" / "failed".
-# Naming lives on the LoRA checkpoint (`checkpoint_name`), not the deployment.
+# ── Deployment status ────────────────────────────────────────────
+# Lifecycle of a LoRA model's deployment: "active" / "inactive" / "failed".
 
 DEPLOYMENT_STATUSES_SUCCESS: frozenset[str] = frozenset({"active"})
 DEPLOYMENT_STATUSES_INACTIVE: frozenset[str] = frozenset({"inactive"})
 DEPLOYMENT_STATUSES_ERROR: frozenset[str] = frozenset({"failed"})
-
-
-@dataclass
-class DeploymentInfo:
-    """A LoRA deployment record (one deployment per checkpoint)."""
-
-    id: str
-    checkpoint_name: str
-    status: str
-    checkpoint_step: int
-    base_model: str
-    training_run_id: str | None = None
-    training_run_name: str | None = None
-    creator_name: str | None = None
-    created_at: str = ""
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> DeploymentInfo:
-        return cls(
-            id=data["id"],
-            checkpoint_name=data.get("checkpoint_name", ""),
-            status=data.get("status", ""),
-            checkpoint_step=data.get("checkpoint_step", 0),
-            base_model=data.get("base_model", ""),
-            training_run_id=data.get("training_run_id"),
-            training_run_name=data.get("training_run_name"),
-            creator_name=data.get("creator_name"),
-            created_at=data.get("created_at", ""),
-        )
-
-
-@dataclass
-class PaginatedDeployments:
-    """Paginated list of deployments."""
-
-    deployments: list[DeploymentInfo]
-    total_count: int
-    has_more: bool
-    next_offset: int | None = None
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> PaginatedDeployments:
-        return cls(
-            deployments=[
-                DeploymentInfo.from_dict(d) for d in data.get("deployments", [])
-            ],
-            total_count=data.get("total_count", 0),
-            has_more=data.get("has_more", False),
-            next_offset=data.get("next_offset"),
-        )
-
-
-@dataclass
-class DeploymentSummary:
-    """Minimal deployment identity returned from deploy/undeploy endpoints."""
-
-    id: str
-    checkpoint_name: str
-    status: str
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> DeploymentSummary:
-        return cls(
-            id=data["id"],
-            checkpoint_name=data.get("checkpoint_name", ""),
-            status=data.get("status", ""),
-        )
 
 
 # ── Rollouts ─────────────────────────────────────────────────────
@@ -793,7 +786,7 @@ class PaginatedRollouts:
         )
 
 
-# ── LoRA checkpoints (for `osmosis train info` + `osmosis deploy`) ───────
+# ── LoRA checkpoints (for `osmosis train info`) ──────────────────
 
 
 @dataclass

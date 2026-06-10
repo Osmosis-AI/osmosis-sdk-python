@@ -591,7 +591,7 @@ class TestStatus:
         assert result.sections
         assert result.display_hints == [
             f"View: {detail.platform_url}",
-            "Deploy with: osmosis deploy <checkpoint-name>",
+            "Deploy with: osmosis model deploy <lora-model-name>",
         ]
         assert result.data["checkpoints"][0]["checkpoint_name"] == "run-1-step-100"
 

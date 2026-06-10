@@ -7,10 +7,10 @@ from typing import Any
 from osmosis_ai.platform.api.models import (
     BaseModelInfo,
     DatasetFile,
-    DeploymentInfo,
     EnvironmentSecretInfo,
     EvaluationRun,
     LoraCheckpointInfo,
+    LoraModelInfo,
     RolloutInfo,
     TrainingRun,
     wire_to_display_scope,
@@ -77,18 +77,16 @@ def serialize_checkpoint(ckpt: LoraCheckpointInfo) -> dict[str, Any]:
     }
 
 
-def serialize_deployment(dep: DeploymentInfo) -> dict[str, Any]:
-    """Serialize a deployment for the public JSON contract."""
+def serialize_lora_model(model: LoraModelInfo) -> dict[str, Any]:
+    """Serialize a LoRA model for the public JSON contract."""
     return {
-        "id": dep.id,
-        "checkpoint_name": dep.checkpoint_name,
-        "status": dep.status,
-        "base_model": dep.base_model,
-        "checkpoint_step": dep.checkpoint_step,
-        "training_run_id": dep.training_run_id,
-        "training_run_name": dep.training_run_name,
-        "creator_name": dep.creator_name,
-        "created_at": dep.created_at,
+        "id": model.id,
+        "model_name": model.model_name,
+        "base_model": model.base_model,
+        "training_run_name": model.training_run_name,
+        "checkpoint_step": model.checkpoint_step,
+        "deployment_status": model.deployment_status,
+        "created_at": model.created_at,
     }
 
 

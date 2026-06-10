@@ -11,16 +11,15 @@ from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE
 from .models import (
     DatasetDownloadInfo,
     DatasetFile,
-    DeploymentInfo,
-    DeploymentSummary,
     EnvironmentSecretInfo,
     EvalRunMetrics,
     EvaluationRunDetail,
+    LoraModelSummary,
     PaginatedBaseModels,
     PaginatedDatasets,
-    PaginatedDeployments,
     PaginatedEnvironmentSecrets,
     PaginatedEvaluationRuns,
+    PaginatedLoraModels,
     PaginatedRollouts,
     PaginatedTrainingRuns,
     SubmitRunResult,
@@ -319,6 +318,60 @@ class OsmosisClient:
         )
         return PaginatedBaseModels.from_dict(data)
 
+    def list_lora_models(
+        self,
+        limit: int = DEFAULT_PAGE_SIZE,
+        offset: int = 0,
+        *,
+        credentials: Credentials | None = None,
+        git_identity: str,
+    ) -> PaginatedLoraModels:
+        qs = urlencode({"limit": limit, "offset": offset})
+        data = platform_request(
+            f"/api/cli/models/lora?{qs}",
+            credentials=credentials,
+            git_identity=git_identity,
+        )
+        return PaginatedLoraModels.from_dict(data)
+
+    def deploy_lora_model(
+        self,
+        lora_model_name: str,
+        *,
+        credentials: Credentials | None = None,
+        git_identity: str,
+    ) -> LoraModelSummary:
+        """Deploy (or reactivate) a LoRA model by name.
+
+        Idempotent: deploying a LoRA model that is already active returns
+        the existing deployment.
+        """
+        data = platform_request(
+            f"/api/cli/models/{_safe_path(lora_model_name)}/deploy",
+            method="POST",
+            data={},
+            credentials=credentials,
+            git_identity=git_identity,
+        )
+        return LoraModelSummary.from_dict(data)
+
+    def undeploy_lora_model(
+        self,
+        lora_model_name: str,
+        *,
+        credentials: Credentials | None = None,
+        git_identity: str,
+    ) -> LoraModelSummary:
+        """Undeploy a LoRA model (transitions to ``inactive``); idempotent."""
+        data = platform_request(
+            f"/api/cli/models/{_safe_path(lora_model_name)}/undeploy",
+            method="POST",
+            data={},
+            credentials=credentials,
+            git_identity=git_identity,
+        )
+        return LoraModelSummary.from_dict(data)
+
     # ── Environment Secrets ───────────────────────────────────────
     # Scoped secrets. The platform never echoes secret values:
     # list returns names + metadata only; set returns metadata only.
@@ -390,80 +443,6 @@ class OsmosisClient:
             credentials=credentials,
             git_identity=git_identity,
         )
-
-    # ── Deployments ───────────────────────────────────────────────
-    # All mutating endpoints key off `checkpoint` (UUID or checkpoint_name).
-    # Lifecycle: deploy → active, undeploy → inactive, failure → failed.
-
-    def list_deployments(
-        self,
-        limit: int = DEFAULT_PAGE_SIZE,
-        offset: int = 0,
-        *,
-        credentials: Credentials | None = None,
-        git_identity: str,
-    ) -> PaginatedDeployments:
-        """List LoRA deployments in the connected repository scope."""
-        qs = urlencode({"limit": limit, "offset": offset})
-        data = platform_request(
-            f"/api/cli/deployments?{qs}",
-            credentials=credentials,
-            git_identity=git_identity,
-        )
-        return PaginatedDeployments.from_dict(data)
-
-    def get_deployment(
-        self,
-        checkpoint: str,
-        *,
-        credentials: Credentials | None = None,
-        git_identity: str,
-    ) -> DeploymentInfo:
-        """Fetch a deployment by checkpoint UUID or checkpoint name."""
-        data = platform_request(
-            f"/api/cli/deployments/{_safe_path(checkpoint)}",
-            credentials=credentials,
-            git_identity=git_identity,
-        )
-        return DeploymentInfo.from_dict(data["deployment"])
-
-    def deploy_checkpoint(
-        self,
-        checkpoint: str,
-        *,
-        credentials: Credentials | None = None,
-        git_identity: str,
-    ) -> DeploymentSummary:
-        """Deploy (or reactivate) a LoRA checkpoint.
-
-        Idempotent: deploying a checkpoint that is already active returns
-        the existing deployment.
-        """
-        data = platform_request(
-            f"/api/cli/deployments/{_safe_path(checkpoint)}/deploy",
-            method="POST",
-            data={},
-            credentials=credentials,
-            git_identity=git_identity,
-        )
-        return DeploymentSummary.from_dict(data["deployment"])
-
-    def undeploy_checkpoint(
-        self,
-        checkpoint: str,
-        *,
-        credentials: Credentials | None = None,
-        git_identity: str,
-    ) -> DeploymentSummary:
-        """Undeploy a LoRA checkpoint (transitions to ``inactive``)."""
-        data = platform_request(
-            f"/api/cli/deployments/{_safe_path(checkpoint)}/undeploy",
-            method="POST",
-            data={},
-            credentials=credentials,
-            git_identity=git_identity,
-        )
-        return DeploymentSummary.from_dict(data)
 
     # ── Training-run checkpoints ──────────────────────────────────
     # Still used by `osmosis train info` to list deployable checkpoints.

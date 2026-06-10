@@ -91,7 +91,7 @@ def platform_call[T](message: str, call: Callable[[], T]) -> T:
     """Run a platform request while showing a consistent CLI loading status.
 
     Progress renders on stderr through the active output context, matching the
-    other command domains (train/eval/deployment/...), so stdout stays clean for
+    other command domains (train/eval/model/...), so stdout stays clean for
     piping and JSON/plain modes stay silent.
     """
     from osmosis_ai.cli.output import get_output_context
@@ -185,21 +185,19 @@ def format_run_status(r: Any, *, for_prompt: bool = False) -> str:
     return format_status_token(r.status, _RUN_STATUS_STYLES, for_prompt=for_prompt)
 
 
-def format_deployment_status(d: Any) -> str:
-    """Format a deployment status token with Rich styling."""
-    return format_status_token(d.status, _DEPLOYMENT_STATUS_STYLES)
+def format_deployment_status(status: str | None) -> str:
+    """Format a LoRA model deployment status token with Rich styling.
+
+    ``None`` (never deployed) renders as an em dash.
+    """
+    if status is None:
+        return "—"
+    return format_status_token(status, _DEPLOYMENT_STATUS_STYLES)
 
 
 def format_eval_status(run: Any) -> str:
     """Format an evaluation run status token with Rich styling."""
     return format_status_token(run.status, _EVAL_STATUS_STYLES)
-
-
-def format_date(iso_str: str | None) -> str:
-    """Extract YYYY-MM-DD from an ISO 8601 string, or return '' if empty."""
-    if not iso_str:
-        return ""
-    return iso_str[:10]
 
 
 def build_dataset_detail_rows(ds: Any) -> list[tuple[str, str]]:

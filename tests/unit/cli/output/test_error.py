@@ -174,8 +174,9 @@ def test_command_path_root_when_argv_empty(monkeypatch) -> None:
         (["--json", "train", "metrics", "run"], "train metrics"),
         (["--json", "train", "traces"], "train traces"),
         (["--json", "model", "delete", "name"], "model delete"),
-        (["--json", "deployment", "rename", "old", "new"], "deployment rename"),
-        (["--json", "deployment", "delete", "checkpoint"], "deployment delete"),
+        (["--json", "deployment", "list"], "deployment"),
+        (["--json", "deploy", "checkpoint"], "deploy"),
+        (["--json", "undeploy", "checkpoint"], "undeploy"),
         (["--json", "rollout", "validate", "config.toml"], "rollout validate"),
     ],
 )

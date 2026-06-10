@@ -1,4 +1,4 @@
-"""CommandResult smoke tests for train/model/deployment/rollout commands."""
+"""CommandResult smoke tests for train/model/rollout commands."""
 
 from __future__ import annotations
 
@@ -12,12 +12,12 @@ import pytest
 from osmosis_ai.cli import main as cli
 from osmosis_ai.platform.api.models import (
     BaseModelInfo,
-    DeploymentInfo,
-    DeploymentSummary,
+    LoraModelInfo,
+    LoraModelSummary,
     MetricDataPoint,
     MetricHistory,
     PaginatedBaseModels,
-    PaginatedDeployments,
+    PaginatedLoraModels,
     PaginatedRollouts,
     PaginatedTrainingRuns,
     RolloutInfo,
@@ -75,7 +75,7 @@ def _stub_git_context(monkeypatch: pytest.MonkeyPatch) -> None:
         "osmosis_ai.platform.cli.train.require_git_workspace_directory_context",
         _git_context,
     )
-    for _delegated in ("model", "rollout", "deployment"):
+    for _delegated in ("model", "rollout"):
         monkeypatch.setattr(
             f"osmosis_ai.platform.cli.{_delegated}."
             "require_git_workspace_directory_context",
@@ -377,11 +377,7 @@ def test_train_stop_json_returns_operation_envelope(
     _assert_git_context(payload["resource"])
 
 
-def test_model_list_plain_is_tab_separated_rows(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    _stub_git_context(monkeypatch)
-
+def _model_list_fake_client():
     class FakeClient:
         def list_base_models(
             self, limit=30, offset=0, *, git_identity, credentials=None
@@ -401,6 +397,36 @@ def test_model_list_plain_is_tab_separated_rows(
                 total_count=1,
                 has_more=False,
             )
+
+        def list_lora_models(
+            self, limit=30, offset=0, *, git_identity, credentials=None
+        ):
+            assert credentials is FAKE_CREDENTIALS
+            assert git_identity == GIT_IDENTITY
+            return PaginatedLoraModels(
+                models=[
+                    LoraModelInfo(
+                        id="lora_1",
+                        model_name="run-step-1",
+                        base_model="Qwen/Qwen3",
+                        training_run_name="reward-run",
+                        checkpoint_step=1,
+                        deployment_status="active",
+                        created_at="2026-04-27T00:00:00Z",
+                    )
+                ],
+                total_count=1,
+                has_more=False,
+            )
+
+    return FakeClient
+
+
+def test_model_list_plain_outputs_base_rows_before_lora_rows(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    _stub_git_context(monkeypatch)
+    FakeClient = _model_list_fake_client()
 
     monkeypatch.setattr("osmosis_ai.platform.api.client.OsmosisClient", FakeClient)
     monkeypatch.setattr(
@@ -412,39 +438,20 @@ def test_model_list_plain_is_tab_separated_rows(
 
     assert exit_code == 0
     lines = captured.out.splitlines()
-    assert len(lines) == 1
-    fields = lines[0].split("\t")
-    assert len(fields) == 3
-    assert fields[0] == "Qwen/Qwen3"
-    assert fields[1].startswith("2026-04-")
-    assert fields[2] == "brian"
-    assert "model_1" not in fields
+    assert len(lines) == 2
+    assert len(lines[0].split("\t")) == 7
+    assert lines[0].startswith("Qwen/Qwen3\tBase\t—\tQwen/Qwen3\t—\t—\t")
+    assert len(lines[1].split("\t")) == 7
+    assert lines[1].startswith(
+        "run-step-1\tLoRA\t[active]\tQwen/Qwen3\treward-run\t1\t"
+    )
 
 
-def test_model_list_json_includes_git_context(
+def test_model_list_json_returns_single_list_envelope(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     _stub_git_context(monkeypatch)
-
-    class FakeClient:
-        def list_base_models(
-            self, limit=30, offset=0, *, git_identity, credentials=None
-        ):
-            assert credentials is FAKE_CREDENTIALS
-            assert git_identity == GIT_IDENTITY
-            return PaginatedBaseModels(
-                models=[
-                    BaseModelInfo(
-                        id="model_1",
-                        model_name="Qwen/Qwen3",
-                        base_model="Qwen/Qwen3",
-                        creator_name="brian",
-                        created_at="2026-04-26T00:00:00Z",
-                    )
-                ],
-                total_count=1,
-                has_more=False,
-            )
+    FakeClient = _model_list_fake_client()
 
     monkeypatch.setattr("osmosis_ai.platform.api.client.OsmosisClient", FakeClient)
     monkeypatch.setattr(
@@ -456,120 +463,89 @@ def test_model_list_json_includes_git_context(
 
     assert exit_code == 0
     payload = json.loads(captured.out)
-    assert payload["items"][0]["model_name"] == "Qwen/Qwen3"
+    assert payload["schema_version"] == 1
+    assert payload["total_count"] == 2
+    assert payload["has_more"] is False
+    assert payload["next_offset"] is None
+    assert [(i["type"], i["model_name"]) for i in payload["items"]] == [
+        ("base", "Qwen/Qwen3"),
+        ("lora", "run-step-1"),
+    ]
     assert "status" not in payload["items"][0]
+    assert payload["items"][1]["deployment_status"] == "active"
+    assert payload["items"][1]["checkpoint_step"] == 1
     _assert_git_context(payload)
+    assert captured.out.count("\n") == 1
 
 
-def test_deployment_commands_json_return_results(
+def test_model_deploy_undeploy_json_return_results(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     _stub_git_context(monkeypatch)
 
     class FakeClient:
-        def list_deployments(
-            self, limit=30, offset=0, *, git_identity, credentials=None
+        def deploy_lora_model(self, lora_model_name, *, git_identity, credentials=None):
+            assert credentials is FAKE_CREDENTIALS
+            assert git_identity == GIT_IDENTITY
+            return LoraModelSummary(
+                id="lora_1", model_name=lora_model_name, status="active"
+            )
+
+        def undeploy_lora_model(
+            self, lora_model_name, *, git_identity, credentials=None
         ):
             assert credentials is FAKE_CREDENTIALS
             assert git_identity == GIT_IDENTITY
-            return PaginatedDeployments(
-                deployments=[
-                    DeploymentInfo(
-                        id="dep_1",
-                        checkpoint_name="run-step-1",
-                        status="active",
-                        checkpoint_step=1,
-                        base_model="Qwen/Qwen3",
-                    )
-                ],
-                total_count=1,
-                has_more=False,
-            )
-
-        def get_deployment(self, checkpoint, *, git_identity, credentials=None):
-            assert credentials is FAKE_CREDENTIALS
-            assert git_identity == GIT_IDENTITY
-            return DeploymentInfo(
-                id="dep_1",
-                checkpoint_name=checkpoint,
-                status="active",
-                checkpoint_step=1,
-                base_model="Qwen/Qwen3",
-                training_run_name="reward-run",
-            )
-
-        def deploy_checkpoint(self, checkpoint, *, git_identity, credentials=None):
-            assert credentials is FAKE_CREDENTIALS
-            assert git_identity == GIT_IDENTITY
-            return DeploymentSummary(
-                id="dep_1", checkpoint_name=checkpoint, status="active"
-            )
-
-        def undeploy_checkpoint(self, checkpoint, *, git_identity, credentials=None):
-            assert credentials is FAKE_CREDENTIALS
-            assert git_identity == GIT_IDENTITY
-            return DeploymentSummary(
-                id="dep_1", checkpoint_name=checkpoint, status="inactive"
+            return LoraModelSummary(
+                id="lora_1", model_name=lora_model_name, status="inactive"
             )
 
     monkeypatch.setattr("osmosis_ai.platform.api.client.OsmosisClient", FakeClient)
     monkeypatch.setattr(
-        "osmosis_ai.platform.cli.deployment.OsmosisClient", FakeClient, raising=False
+        "osmosis_ai.platform.cli.model.OsmosisClient", FakeClient, raising=False
     )
 
-    exit_code = cli.main(["--json", "deployment", "list"])
+    exit_code = cli.main(["--json", "model", "deploy", "run-step-1"])
     payload = json.loads(capsys.readouterr().out)
     assert exit_code == 0
-    assert payload["items"][0]["checkpoint_name"] == "run-step-1"
-    _assert_git_context(payload)
-
-    exit_code = cli.main(["--json", "deployment", "info", "run-step-1"])
-    payload = json.loads(capsys.readouterr().out)
-    assert exit_code == 0
-    assert payload["data"]["checkpoint_name"] == "run-step-1"
-    _assert_git_context(payload["data"])
-
-    exit_code = cli.main(["--json", "deploy", "run-step-1"])
-    payload = json.loads(capsys.readouterr().out)
-    assert exit_code == 0
-    assert payload["operation"] == "deploy"
-    assert payload["resource"]["checkpoint_name"] == "run-step-1"
+    assert payload["operation"] == "model.deploy"
+    assert payload["resource"]["model_name"] == "run-step-1"
     _assert_git_context(payload["resource"])
 
-    exit_code = cli.main(["--json", "undeploy", "run-step-1"])
+    exit_code = cli.main(["--json", "model", "undeploy", "run-step-1"])
     payload = json.loads(capsys.readouterr().out)
     assert exit_code == 0
-    assert payload["operation"] == "undeploy"
-    assert payload["resource"]["checkpoint_name"] == "run-step-1"
+    assert payload["operation"] == "model.undeploy"
+    assert payload["resource"]["model_name"] == "run-step-1"
     assert payload["resource"]["status"] == "inactive"
     _assert_git_context(payload["resource"])
 
 
-def test_failed_deploy_json_exits_nonzero(
+def test_failed_model_deploy_json_exits_nonzero(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     _stub_git_context(monkeypatch)
 
     class FakeClient:
-        def deploy_checkpoint(self, checkpoint, *, git_identity, credentials=None):
+        def deploy_lora_model(self, lora_model_name, *, git_identity, credentials=None):
             assert credentials is FAKE_CREDENTIALS
             assert git_identity == GIT_IDENTITY
-            return DeploymentSummary(
-                id="dep_1",
-                checkpoint_name=checkpoint,
+            return LoraModelSummary(
+                id="lora_1",
+                model_name=lora_model_name,
                 status="failed",
             )
 
     monkeypatch.setattr("osmosis_ai.platform.api.client.OsmosisClient", FakeClient)
     monkeypatch.setattr(
-        "osmosis_ai.platform.cli.deployment.OsmosisClient", FakeClient, raising=False
+        "osmosis_ai.platform.cli.model.OsmosisClient", FakeClient, raising=False
     )
 
-    exit_code = cli.main(["--json", "deploy", "run-step-1"])
+    exit_code = cli.main(["--json", "model", "deploy", "run-step-1"])
     payload = json.loads(capsys.readouterr().out)
 
     assert exit_code == 1
-    assert payload["operation"] == "deploy"
+    assert payload["operation"] == "model.deploy"
     assert payload["status"] == "failed"
     _assert_git_context(payload["resource"])
 

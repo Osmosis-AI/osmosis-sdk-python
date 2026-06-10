@@ -191,11 +191,15 @@ def test_format_run_status_unknown(monkeypatch: pytest.MonkeyPatch) -> None:
     ],
 )
 def test_format_deployment_status_styles(status: str, style: str) -> None:
-    assert format_deployment_status(_run(status)) == f"[{style}]\\[{status}][/{style}]"
+    assert format_deployment_status(status) == f"[{style}]\\[{status}][/{style}]"
 
 
 def test_format_deployment_status_unknown_uses_escape() -> None:
-    assert format_deployment_status(_run("weird")) == "\\[weird]"
+    assert format_deployment_status("weird") == "\\[weird]"
+
+
+def test_format_deployment_status_none_renders_em_dash() -> None:
+    assert format_deployment_status(None) == "—"
 
 
 # ── format_eval_status ───────────────────────────────────────────────

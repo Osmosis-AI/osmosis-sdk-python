@@ -95,13 +95,13 @@ def test_operation_result_with_structured_next_steps() -> None:
         status="success",
         message="Checkpoint deployed.",
         next_steps_structured=[
-            {"action": "deployment_info", "checkpoint_name": "run-step-40"},
+            {"action": "model_deploy", "model_name": "run-step-40"},
         ],
-        display_next_steps=["Inspect with: osmosis deployment info run-step-40"],
+        display_next_steps=["Deploy with: osmosis model deploy run-step-40"],
     )
-    assert result.next_steps_structured[0]["action"] == "deployment_info"
+    assert result.next_steps_structured[0]["action"] == "model_deploy"
     assert result.display_next_steps == [
-        "Inspect with: osmosis deployment info run-step-40"
+        "Deploy with: osmosis model deploy run-step-40"
     ]
 
 
