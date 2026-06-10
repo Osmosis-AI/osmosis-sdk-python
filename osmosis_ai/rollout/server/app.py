@@ -108,6 +108,7 @@ async def _handle_rollout(
                     id=request.rollout_id,
                     prompt=request.initial_messages,
                     label=request.label,
+                    metadata=request.metadata,
                     agent_timeout_sec=request.agent_timeout_sec,
                     grader_timeout_sec=request.grader_timeout_sec,
                 ),

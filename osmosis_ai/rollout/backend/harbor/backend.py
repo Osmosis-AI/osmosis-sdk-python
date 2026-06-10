@@ -342,6 +342,8 @@ class HarborBackend(ExecutionBackend):
             config["grader_config"] = self.grader_config_path
         if request.label is not None:
             config["label"] = request.label
+        if request.metadata is not None:
+            config["metadata"] = request.metadata
 
         ctx = get_rollout_context()
         if ctx:

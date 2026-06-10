@@ -42,6 +42,7 @@ class ExecutionRequest(BaseModel):
     id: str
     prompt: list[MessageDict]
     label: str | None = None
+    metadata: dict[str, Any] | None = None
     agent_timeout_sec: float | None = None
     grader_timeout_sec: float | None = None
 
