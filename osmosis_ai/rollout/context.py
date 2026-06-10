@@ -96,6 +96,7 @@ class GraderContext:
     label: str | None = None
     samples: dict[str, RolloutSample] = field(default_factory=dict)
     project_path: str | None = None
+    metadata: dict[str, Any] | None = None
 
     def get_samples(self) -> dict[str, RolloutSample]:
         return self.samples
@@ -110,14 +111,17 @@ class GraderContext:
 class AgentWorkflowContext[TConfig: AgentWorkflowConfig]:
     prompt: list[dict[str, Any]]
     config: TConfig | None = None
+    metadata: dict[str, Any] | None = None
 
     def __init__(
         self,
         prompt: list[dict[str, Any]],
         config: TConfig | None = None,
+        metadata: dict[str, Any] | None = None,
     ):
         self.prompt = prompt
         self.config = config
+        self.metadata = metadata
 
 
 @dataclass
@@ -138,6 +142,7 @@ class HarborAgentWorkflowContext[TConfig: AgentWorkflowConfig](
         prompt: list[dict[str, Any]],
         config: TConfig,
         environment: Any = None,
+        metadata: dict[str, Any] | None = None,
     ):
-        super().__init__(prompt=prompt, config=config)
+        super().__init__(prompt=prompt, config=config, metadata=metadata)
         self.environment = environment
