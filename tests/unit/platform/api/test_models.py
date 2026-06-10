@@ -453,6 +453,7 @@ class TestModelModels:
                 "base_model": "Qwen/Qwen3-30B-A3B-Instruct-2507-FP8",
                 "training_run_name": "qwen3-run1",
                 "checkpoint_step": 100,
+                "reward": 0.85,
                 "deployment_status": "active",
                 "created_at": "2026-04-20T00:00:00Z",
             }
@@ -461,6 +462,7 @@ class TestModelModels:
         assert m.model_name == "qwen3-run1-step-100"
         assert m.deployment_status == "active"
         assert m.checkpoint_step == 100
+        assert m.reward == 0.85
         assert m.base_model == "Qwen/Qwen3-30B-A3B-Instruct-2507-FP8"
 
     def test_lora_model_info_minimal(self) -> None:
@@ -471,6 +473,7 @@ class TestModelModels:
         assert m.base_model is None
         assert m.training_run_name is None
         assert m.checkpoint_step is None
+        assert m.reward is None
         assert m.deployment_status is None
         assert m.created_at == ""
 

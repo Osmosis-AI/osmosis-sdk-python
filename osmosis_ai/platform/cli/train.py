@@ -49,6 +49,7 @@ from osmosis_ai.platform.cli.utils import (
     build_run_detail_rows,
     format_env_config,
     format_progress,
+    format_reward,
     format_run_status,
     format_secret_scopes,
     jsonish,
@@ -59,12 +60,6 @@ from osmosis_ai.platform.cli.utils import (
     validate_list_options,
 )
 from osmosis_ai.platform.cli.workspace_directory_context import git_result_context
-
-
-def _format_train_reward(run: Any) -> str:
-    if run.reward is None:
-        return "—"
-    return f"{run.reward:.2f}"
 
 
 def _format_train_config(config: dict[str, Any] | None) -> str | None:
@@ -224,7 +219,7 @@ def list_training_runs(*, limit: int, all_: bool) -> ListResult:
                 "status": format_run_status(run),
                 "model_name": run.model_name or "—",
                 "rollout_name": run.rollout_name or "—",
-                "reward": _format_train_reward(run),
+                "reward": format_reward(run.reward),
                 "created_at": format_local_date(run.created_at),
                 "creator_name": run.creator_name or "—",
             }

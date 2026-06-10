@@ -124,6 +124,7 @@ def _lora_model(**overrides: object) -> LoraModelInfo:
         "base_model": "Qwen/Qwen3",
         "training_run_name": "qwen3-run1",
         "checkpoint_step": 100,
+        "reward": 0.85,
         "deployment_status": "active",
         "created_at": "2026-04-21T00:00:00Z",
     }
@@ -173,14 +174,25 @@ def _fake_list_client(
     return FakeClient
 
 
-_BASE_COLUMN_KEYS = ["model_name", "base_model", "created_at", "creator_name"]
+_BASE_COLUMN_KEYS = ["model_name", "created_at", "creator_name"]
+_BASE_COLUMN_LABELS = ["Name", "Created", "Created By"]
 _LORA_COLUMN_KEYS = [
     "model_name",
-    "deployment_status",
     "base_model",
     "training_run_name",
     "checkpoint_step",
+    "reward",
     "created_at",
+    "deployment_status",
+]
+_LORA_COLUMN_LABELS = [
+    "Name",
+    "Base Model",
+    "Training Run",
+    "Checkpoint Step",
+    "Training Reward",
+    "Created",
+    "Deployment Status",
 ]
 
 
@@ -231,7 +243,10 @@ class TestListModels:
         assert "status" not in base_section.items[0]
         assert lora_section.items[0]["deployment_status"] == "active"
         assert lora_section.items[0]["checkpoint_step"] == 100
+        assert lora_section.items[0]["reward"] == 0.85
         assert lora_section.items[0]["training_run_name"] == "qwen3-run1"
+        assert lora_section.display_items is not None
+        assert lora_section.display_items[0]["reward"] == "0.85"
         assert base_section.total_count == 1
         assert lora_section.total_count == 1
         assert result.display_hints == [
@@ -267,7 +282,9 @@ class TestListModels:
         assert isinstance(result, SectionedListResult)
         base_section, lora_section = result.sections
         assert [c.key for c in base_section.columns] == _BASE_COLUMN_KEYS
+        assert [c.label for c in base_section.columns] == _BASE_COLUMN_LABELS
         assert [c.key for c in lora_section.columns] == _LORA_COLUMN_KEYS
+        assert [c.label for c in lora_section.columns] == _LORA_COLUMN_LABELS
 
     def test_list_display_items_fill_missing_fields_with_dashes(
         self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
@@ -282,6 +299,7 @@ class TestListModels:
                         base_model=None,
                         training_run_name=None,
                         checkpoint_step=None,
+                        reward=None,
                         deployment_status=None,
                     )
                 ],
@@ -295,15 +313,16 @@ class TestListModels:
         assert lora_section.display_items is not None
         (base_display,) = base_section.display_items
         (lora_display,) = lora_section.display_items
-        assert base_display["base_model"] == "—"
         assert base_display["creator_name"] == "—"
         assert lora_display["deployment_status"] == "—"
         assert lora_display["base_model"] == "—"
         assert lora_display["training_run_name"] == "—"
         assert lora_display["checkpoint_step"] == "—"
+        assert lora_display["reward"] == "—"
         # Raw JSON items keep nulls — display dashes must not leak into them.
         assert lora_section.items[0]["deployment_status"] is None
         assert lora_section.items[0]["checkpoint_step"] is None
+        assert lora_section.items[0]["reward"] is None
 
     def test_list_sections_pass_cursors_through_verbatim(
         self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO

@@ -323,11 +323,12 @@ runs. Deploying a LoRA model exposes it for inference.
 ### osmosis model list
 
 List base models and LoRA models for the current workspace directory as two
-separate tables (base models first, then LoRA models). LoRA models include
-their deployment status. `--limit` and `--all` apply to each type
-independently, and each list carries its own pagination cursor
-(`next_offset`) straight from its endpoint. Filter with `--type base` or
-`--type lora` to show a single list.
+separate tables (base models first, then LoRA models). The base models table
+shows Name, Created, and Created By; the LoRA models table shows Name, Base
+Model, Training Run, Checkpoint Step, Training Reward, Created, and Deployment
+Status. `--limit` and `--all` apply to each type independently, and each list
+carries its own pagination cursor (`next_offset`) straight from its endpoint.
+Filter with `--type base` or `--type lora` to show a single list.
 
 ```bash
 osmosis model list
@@ -350,7 +351,7 @@ list is which:
     "next_offset": null
   },
   "lora_models": {
-    "items": [{"id": "...", "model_name": "run-step-1", "...": "..."}],
+    "items": [{"id": "...", "model_name": "run-step-1", "reward": 0.87, "...": "..."}],
     "total_count": 1,
     "has_more": false,
     "next_offset": null

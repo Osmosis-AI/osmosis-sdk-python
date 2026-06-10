@@ -411,6 +411,7 @@ def _model_list_fake_client():
                         base_model="Qwen/Qwen3",
                         training_run_name="reward-run",
                         checkpoint_step=1,
+                        reward=0.87,
                         deployment_status="active",
                         created_at="2026-04-27T00:00:00Z",
                     )
@@ -440,12 +441,13 @@ def test_model_list_plain_outputs_titled_base_and_lora_sections(
     lines = captured.out.splitlines()
     assert len(lines) == 4
     assert lines[0] == "Base Models:"
-    assert len(lines[1].split("\t")) == 4
-    assert lines[1].startswith("Qwen/Qwen3\tQwen/Qwen3\t")
+    assert len(lines[1].split("\t")) == 3
+    assert lines[1].startswith("Qwen/Qwen3\t")
     assert lines[1].endswith("\tbrian")
     assert lines[2] == "LoRA Models:"
-    assert len(lines[3].split("\t")) == 6
-    assert lines[3].startswith("run-step-1\t[active]\tQwen/Qwen3\treward-run\t1\t")
+    assert len(lines[3].split("\t")) == 7
+    assert lines[3].startswith("run-step-1\tQwen/Qwen3\treward-run\t1\t0.87\t")
+    assert lines[3].endswith("\t[active]")
 
 
 def test_model_list_json_returns_sectioned_list_envelope(
@@ -484,6 +486,7 @@ def test_model_list_json_returns_sectioned_list_envelope(
     assert "type" not in lora_models["items"][0]
     assert lora_models["items"][0]["deployment_status"] == "active"
     assert lora_models["items"][0]["checkpoint_step"] == 1
+    assert lora_models["items"][0]["reward"] == 0.87
     _assert_git_context(payload)
     assert captured.out.count("\n") == 1
 

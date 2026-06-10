@@ -595,6 +595,7 @@ class LoraModelInfo:
     base_model: str | None = None
     training_run_name: str | None = None
     checkpoint_step: int | None = None
+    reward: float | None = None
     deployment_status: str | None = None
     created_at: str = ""
 
@@ -606,6 +607,7 @@ class LoraModelInfo:
             base_model=data.get("base_model"),
             training_run_name=data.get("training_run_name"),
             checkpoint_step=data.get("checkpoint_step"),
+            reward=data.get("reward"),
             deployment_status=data.get("deployment_status"),
             created_at=data.get("created_at", ""),
         )

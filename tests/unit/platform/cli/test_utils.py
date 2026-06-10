@@ -15,6 +15,7 @@ from osmosis_ai.platform.cli.utils import (
     format_dataset_status,
     format_deployment_status,
     format_eval_status,
+    format_reward,
     format_run_status,
     format_size,
     platform_call,
@@ -225,6 +226,22 @@ def test_format_eval_status_finished_is_green_not_terminal_red() -> None:
 
 def test_format_eval_status_unknown_uses_escape() -> None:
     assert format_eval_status(_run("weird")) == "\\[weird]"
+
+
+# ── format_reward ────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "reward, expected",
+    [
+        (0.85, "0.85"),
+        (0.875, "0.88"),
+        (1, "1.00"),
+        (None, "—"),
+    ],
+)
+def test_format_reward(reward: float | None, expected: str) -> None:
+    assert format_reward(reward) == expected
 
 
 # ── fetch_all_pages ─────────────────────────────────────────────────

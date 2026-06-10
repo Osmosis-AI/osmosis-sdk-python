@@ -29,6 +29,7 @@ from osmosis_ai.platform.api.client import OsmosisClient
 from osmosis_ai.platform.api.models import BaseModelInfo, LoraModelInfo
 from osmosis_ai.platform.cli.utils import (
     format_deployment_status,
+    format_reward,
     paginated_fetch,
     require_git_workspace_directory_context,
     validate_list_options,
@@ -39,18 +40,20 @@ _VALID_LIST_TYPES = ("all", "base", "lora")
 
 _BASE_MODEL_COLUMNS = [
     ListColumn(key="model_name", label="Name", ratio=3, overflow="fold"),
-    ListColumn(key="base_model", label="Base Model", ratio=2, overflow="fold"),
     ListColumn(key="created_at", label="Created", no_wrap=True, ratio=1),
     ListColumn(key="creator_name", label="Created By", no_wrap=True, ratio=1),
 ]
 
 _LORA_MODEL_COLUMNS = [
     ListColumn(key="model_name", label="Name", ratio=3, overflow="fold"),
-    ListColumn(key="deployment_status", label="Status", no_wrap=True, ratio=1),
     ListColumn(key="base_model", label="Base Model", ratio=2, overflow="fold"),
     ListColumn(key="training_run_name", label="Training Run", ratio=2, overflow="fold"),
-    ListColumn(key="checkpoint_step", label="Step", no_wrap=True, ratio=1),
+    ListColumn(key="checkpoint_step", label="Checkpoint Step", no_wrap=True, ratio=1),
+    ListColumn(key="reward", label="Training Reward", no_wrap=True, ratio=1),
     ListColumn(key="created_at", label="Created", no_wrap=True, ratio=1),
+    ListColumn(
+        key="deployment_status", label="Deployment Status", no_wrap=True, ratio=1
+    ),
 ]
 
 
@@ -65,7 +68,6 @@ def _lora_model_summary_resource(result: Any) -> dict[str, Any]:
 def _base_model_display_item(model: BaseModelInfo) -> dict[str, Any]:
     return {
         **serialize_model(model),
-        "base_model": model.base_model or "—",
         "created_at": format_local_date(model.created_at),
         "creator_name": model.creator_name or "—",
     }
@@ -74,13 +76,14 @@ def _base_model_display_item(model: BaseModelInfo) -> dict[str, Any]:
 def _lora_model_display_item(model: LoraModelInfo) -> dict[str, Any]:
     return {
         **serialize_lora_model(model),
-        "deployment_status": format_deployment_status(model.deployment_status),
         "base_model": model.base_model or "—",
         "training_run_name": model.training_run_name or "—",
         "checkpoint_step": (
             str(model.checkpoint_step) if model.checkpoint_step is not None else "—"
         ),
+        "reward": format_reward(model.reward),
         "created_at": format_local_date(model.created_at),
+        "deployment_status": format_deployment_status(model.deployment_status),
     }
 
 

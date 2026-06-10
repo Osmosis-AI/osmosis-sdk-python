@@ -198,6 +198,13 @@ def format_eval_status(run: Any) -> str:
     return format_status_token(run.status, _EVAL_STATUS_STYLES)
 
 
+def format_reward(reward: float | None) -> str:
+    """Format a training reward to two decimals, em dash when unset."""
+    if reward is None:
+        return "—"
+    return f"{reward:.2f}"
+
+
 def build_dataset_detail_rows(ds: Any) -> list[tuple[str, str]]:
     """Build common detail rows for a dataset."""
     rows: list[tuple[str, str]] = [

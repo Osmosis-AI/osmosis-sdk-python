@@ -113,6 +113,7 @@ def test_serialize_lora_model_keys() -> None:
             "base_model": "Qwen/Qwen3-30B-A3B-Instruct-2507-FP8",
             "training_run_name": "qwen3-run1",
             "checkpoint_step": 100,
+            "reward": 0.85,
             "deployment_status": "active",
             "created_at": "2026-04-26T00:00:00Z",
         }
