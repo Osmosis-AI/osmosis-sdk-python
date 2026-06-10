@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from contextlib import contextmanager
 from io import StringIO
 from pathlib import Path
@@ -82,7 +83,9 @@ def test_model_list_requires_linked_project(
     rc = main(["--json", "model", "list"])
 
     assert rc == 1
-    assert "Osmosis workspace directory" in capsys.readouterr().err
+    error = json.loads(capsys.readouterr().err)["error"]
+    assert error["code"] == "WORKSPACE_REQUIRED"
+    assert "Osmosis workspace directory" in error["message"]
 
 
 @pytest.mark.parametrize("limit", ["0", "51"])
@@ -141,6 +144,8 @@ def _fake_list_client(
     lora_has_more: bool = False,
     base_next_offset: int | None = None,
     lora_next_offset: int | None = None,
+    active_deployments: int = 0,
+    max_active_deployments: int = 0,
 ):
     class FakeClient:
         def list_base_models(
@@ -169,6 +174,8 @@ def _fake_list_client(
                 total_count=len(lora_models),
                 has_more=lora_has_more,
                 next_offset=lora_next_offset,
+                active_deployments=active_deployments,
+                max_active_deployments=max_active_deployments,
             )
 
     return FakeClient
@@ -467,6 +474,185 @@ class TestListModels:
     def test_list_rejects_invalid_type(self) -> None:
         with pytest.raises(CLIError, match=r"Type must be 'all', 'base', or 'lora'\."):
             platform_model_module.list_models(limit=30, all_=False, type_="bogus")
+
+    def test_list_items_carry_deploy_metadata(
+        self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
+    ) -> None:
+        monkeypatch.setattr(
+            platform_model_module,
+            "OsmosisClient",
+            _fake_list_client(
+                [],
+                [
+                    _lora_model(
+                        deployed_at="2026-04-22T00:00:00Z", deployed_by="brian"
+                    ),
+                    _lora_model(id="lora_2", model_name="undeployed"),
+                ],
+            ),
+        )
+        result = platform_model_module.list_models(limit=30, all_=False, type_="lora")
+
+        assert isinstance(result, ListResult)
+        assert result.items[0]["deployed_at"] == "2026-04-22T00:00:00Z"
+        assert result.items[0]["deployed_by"] == "brian"
+        assert result.items[1]["deployed_at"] is None
+        assert result.items[1]["deployed_by"] is None
+        # No table column for deploy metadata — JSON contract only.
+        assert "deployed_at" not in [c.key for c in result.columns]
+        assert "deployed_by" not in [c.key for c in result.columns]
+
+    def test_list_shows_deployment_quota_hint_under_lora_table(
+        self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
+    ) -> None:
+        monkeypatch.setattr(
+            platform_model_module,
+            "OsmosisClient",
+            _fake_list_client(
+                [_base_model()],
+                [_lora_model()],
+                active_deployments=2,
+                max_active_deployments=5,
+            ),
+        )
+        result = platform_model_module.list_models(limit=30, all_=False)
+
+        assert isinstance(result, SectionedListResult)
+        assert result.display_hints == [
+            "2 of 5 deployment slots used",
+            "Deploy a LoRA model with: osmosis model deploy <name>",
+        ]
+
+    def test_list_type_lora_shows_deployment_quota_hint(
+        self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
+    ) -> None:
+        monkeypatch.setattr(
+            platform_model_module,
+            "OsmosisClient",
+            _fake_list_client(
+                [],
+                [],
+                active_deployments=0,
+                max_active_deployments=5,
+            ),
+        )
+        result = platform_model_module.list_models(limit=30, all_=False, type_="lora")
+
+        assert isinstance(result, ListResult)
+        assert result.display_hints == ["0 of 5 deployment slots used"]
+
+    def test_list_omits_quota_hint_when_server_reports_no_quota(
+        self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
+    ) -> None:
+        monkeypatch.setattr(
+            platform_model_module,
+            "OsmosisClient",
+            _fake_list_client([], [_lora_model()]),
+        )
+        result = platform_model_module.list_models(limit=30, all_=False)
+
+        assert isinstance(result, SectionedListResult)
+        assert result.display_hints == [
+            "Deploy a LoRA model with: osmosis model deploy <name>"
+        ]
+
+    def test_list_all_captures_quota_from_first_page(
+        self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
+    ) -> None:
+        monkeypatch.setattr(
+            platform_model_module,
+            "OsmosisClient",
+            _fake_list_client(
+                [],
+                [_lora_model()],
+                active_deployments=1,
+                max_active_deployments=5,
+            ),
+        )
+        result = platform_model_module.list_models(
+            limit=DEFAULT_PAGE_SIZE, all_=True, type_="lora"
+        )
+
+        assert isinstance(result, ListResult)
+        assert result.extra["active_deployments"] == 1
+        assert result.extra["max_active_deployments"] == 5
+
+
+def _render_to_json_envelope(result) -> dict[str, object]:
+    import io
+    from contextlib import redirect_stderr, redirect_stdout
+
+    from osmosis_ai.cli.output.renderer import render
+
+    out, err = io.StringIO(), io.StringIO()
+    with override_output_context(format=OutputFormat.json) as ctx:
+        with redirect_stdout(out), redirect_stderr(err):
+            render(result, ctx)
+    assert err.getvalue() == ""
+    return json.loads(out.getvalue())
+
+
+@pytest.mark.usefixtures("mock_git_context")
+class TestListModelsJsonEnvelope:
+    def test_type_all_envelope_carries_deployment_quota(
+        self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
+    ) -> None:
+        monkeypatch.setattr(
+            platform_model_module,
+            "OsmosisClient",
+            _fake_list_client(
+                [_base_model()],
+                [_lora_model()],
+                active_deployments=2,
+                max_active_deployments=5,
+            ),
+        )
+        result = platform_model_module.list_models(limit=30, all_=False)
+
+        envelope = _render_to_json_envelope(result)
+        assert envelope["active_deployments"] == 2
+        assert envelope["max_active_deployments"] == 5
+        assert envelope["base_models"]["total_count"] == 1
+        assert envelope["lora_models"]["items"][0]["deployed_at"] is None
+        assert envelope["lora_models"]["items"][0]["deployed_by"] is None
+
+    def test_type_lora_envelope_carries_deployment_quota(
+        self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
+    ) -> None:
+        monkeypatch.setattr(
+            platform_model_module,
+            "OsmosisClient",
+            _fake_list_client(
+                [],
+                [_lora_model()],
+                active_deployments=2,
+                max_active_deployments=5,
+            ),
+        )
+        result = platform_model_module.list_models(limit=30, all_=False, type_="lora")
+
+        envelope = _render_to_json_envelope(result)
+        assert envelope["active_deployments"] == 2
+        assert envelope["max_active_deployments"] == 5
+
+    def test_type_base_envelope_omits_deployment_quota(
+        self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
+    ) -> None:
+        monkeypatch.setattr(
+            platform_model_module,
+            "OsmosisClient",
+            _fake_list_client(
+                [_base_model()],
+                [_lora_model()],
+                active_deployments=2,
+                max_active_deployments=5,
+            ),
+        )
+        result = platform_model_module.list_models(limit=30, all_=False, type_="base")
+
+        envelope = _render_to_json_envelope(result)
+        assert "active_deployments" not in envelope
+        assert "max_active_deployments" not in envelope
 
 
 @pytest.mark.usefixtures("mock_git_context")

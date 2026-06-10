@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 from osmosis_ai.cli.console import console
 from osmosis_ai.cli.errors import CLIError
-from osmosis_ai.cli.output import DetailSection
+from osmosis_ai.cli.output import DetailSection, ListColumn, ListResult
 from osmosis_ai.cli.output.display import format_local_datetime
 from osmosis_ai.platform.api.models import (
     DEPLOYMENT_STATUSES_INACTIVE,
@@ -36,11 +36,13 @@ from osmosis_ai.platform.auth import (
 )
 from osmosis_ai.platform.cli.workspace_directory_context import (
     GitWorkspaceDirectoryContext,
+    git_result_context,
     resolve_git_workspace_directory_context,
 )
 from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE
 
 if TYPE_CHECKING:
+    from osmosis_ai.platform.api.models import LogsPage
     from osmosis_ai.platform.auth.credentials import Credentials
 
 
@@ -247,6 +249,49 @@ def build_run_detail_rows(r: Any) -> list[tuple[str, str]]:
     rows.append(("Base Model", console.escape(r.model_name) if r.model_name else "—"))
     rows.append(("Rollout", console.escape(r.rollout_name) if r.rollout_name else "—"))
     return rows
+
+
+def build_logs_result(
+    *,
+    title: str,
+    page: LogsPage,
+    context: GitWorkspaceDirectoryContext,
+    next_step_hint: str,
+) -> ListResult:
+    """Build the shared ``ListResult`` for a logs page (train/eval/dataset).
+
+    Cursor pagination: the server reports no total, so ``total_count`` is this
+    page's size and ``has_more`` means older entries exist beyond ``next_cursor``.
+    """
+    items = [
+        {
+            "timestamp": entry.timestamp,
+            "level": entry.level,
+            "step": entry.step,
+            "message": entry.message,
+            "details": entry.details,
+        }
+        for entry in page.logs
+    ]
+    return ListResult(
+        title=title,
+        items=items,
+        total_count=len(items),
+        has_more=page.next_cursor is not None,
+        next_offset=None,
+        extra={"next_cursor": page.next_cursor, **git_result_context(context)},
+        columns=[
+            ListColumn(key="timestamp", label="Time", no_wrap=True, ratio=2),
+            ListColumn(key="level", label="Level", no_wrap=True, ratio=1),
+            ListColumn(key="step", label="Step", no_wrap=True, ratio=1),
+            ListColumn(key="message", label="Message", ratio=6, overflow="fold"),
+        ],
+        display_items=[
+            {**item, "timestamp": format_local_datetime(entry.timestamp)}
+            for item, entry in zip(items, page.logs, strict=True)
+        ],
+        display_hints=[next_step_hint],
+    )
 
 
 def jsonish(value: Any) -> str:

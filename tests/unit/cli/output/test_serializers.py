@@ -115,11 +115,22 @@ def test_serialize_lora_model_keys() -> None:
             "checkpoint_step": 100,
             "reward": 0.85,
             "deployment_status": "active",
+            "deployed_at": "2026-04-27T00:00:00Z",
+            "deployed_by": "brian",
             "created_at": "2026-04-26T00:00:00Z",
         }
     )
     payload = serialize_lora_model(lora_model)
     _assert_keys_match_golden(payload, "lora_model_serializer.json")
+    assert payload["deployed_at"] == "2026-04-27T00:00:00Z"
+    assert payload["deployed_by"] == "brian"
+
+
+def test_serialize_lora_model_keeps_none_deploy_metadata() -> None:
+    lora_model = LoraModelInfo.from_dict({"id": "lora_1", "model_name": "x"})
+    payload = serialize_lora_model(lora_model)
+    assert payload["deployed_at"] is None
+    assert payload["deployed_by"] is None
 
 
 def test_serialize_model_keys() -> None:

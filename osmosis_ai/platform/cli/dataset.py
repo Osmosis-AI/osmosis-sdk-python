@@ -24,7 +24,11 @@ from osmosis_ai.cli.output import (
 from osmosis_ai.cli.output.display import format_local_date
 from osmosis_ai.cli.paths import parse_cli_path
 from osmosis_ai.cli.prompts import require_confirmation
-from osmosis_ai.platform.api.models import STATUSES_IN_PROGRESS, STATUSES_SUCCESS
+from osmosis_ai.platform.api.models import (
+    STATUSES_ERROR,
+    STATUSES_IN_PROGRESS,
+    STATUSES_SUCCESS,
+)
 from osmosis_ai.platform.auth import (
     AuthenticationExpiredError,
     PlatformAPIError,
@@ -40,6 +44,7 @@ from .constants import (
 )
 from .utils import (
     build_dataset_detail_rows,
+    build_logs_result,
     format_dataset_status,
     format_size,
     platform_call,
@@ -509,11 +514,43 @@ def info(
     rows = build_dataset_detail_rows(ds)
     data = serialize_dataset(ds)
     data.update(git_result_context(context))
+    display_hints = [f"View: {ds.platform_url}"] if ds.platform_url else []
+    if ds.status in STATUSES_ERROR:
+        display_hints.append(
+            f"See logs with: osmosis dataset logs {ds.file_name or name}"
+        )
     return DetailResult(
         title="Dataset",
         data=data,
         fields=detail_fields(rows),
-        display_hints=[f"View: {ds.platform_url}"] if ds.platform_url else [],
+        display_hints=display_hints,
+    )
+
+
+def logs(name: str, *, limit: int, cursor: str | None = None) -> ListResult:
+    """Show the most recent logs for a dataset, oldest-first."""
+    context = require_git_workspace_directory_context()
+    credentials = context.credentials
+    git_identity = context.git_identity
+    from osmosis_ai.platform.api.client import OsmosisClient
+
+    client = OsmosisClient()
+    page = platform_call(
+        "Fetching logs...",
+        lambda: client.get_dataset_logs(
+            name,
+            limit=limit,
+            cursor=cursor,
+            credentials=credentials,
+            git_identity=git_identity,
+        ),
+    )
+
+    return build_logs_result(
+        title=f"Dataset Logs: {name}",
+        page=page,
+        context=context,
+        next_step_hint=f"Use osmosis dataset info {name} for dataset details.",
     )
 
 

@@ -102,7 +102,7 @@ def _login_operation_result(
     )
 
 
-def _verify_env_token(env_token: str) -> Any:
+def _verify_env_token(env_token: str, *, git_identity: str | None = None) -> Any:
     """Verify OSMOSIS_TOKEN and replace generic 401s with actionable guidance."""
     from osmosis_ai.platform.auth import LoginError, verify_token
     from osmosis_ai.platform.constants import (
@@ -121,7 +121,7 @@ def _verify_env_token(env_token: str) -> Any:
     }
 
     try:
-        return verify_token(env_token)
+        return verify_token(env_token, git_identity=git_identity)
     except LoginError as exc:
         code = exc.code
         message = env_messages.get(code) if code is not None else None
@@ -510,30 +510,34 @@ def whoami() -> Any:
         verify_token,
     )
     from osmosis_ai.platform.auth.config import get_platform_url
+    from osmosis_ai.platform.cli.workspace_directory_context import (
+        resolve_optional_git_identity,
+    )
     from osmosis_ai.platform.constants import MSG_NOT_LOGGED_IN
 
     output = get_output_context()
     env_token = os.environ.get("OSMOSIS_TOKEN")
     source = "environment" if env_token else "credentials"
+    git_identity = resolve_optional_git_identity()
 
     if env_token:
         try:
             with output.status("Verifying token..."):
-                verified = _verify_env_token(env_token)
+                verified = _verify_env_token(env_token, git_identity=git_identity)
         except LoginError as exc:
             raise _cli_error_from_login_error(exc) from exc
         credentials = Credentials.from_verify_result(env_token, verified)
     else:
         credentials = load_credentials()
-
-    if credentials is None:
-        raise CLIError(MSG_NOT_LOGGED_IN, code="AUTH_REQUIRED")
-    if not env_token and credentials.is_expired():
-        raise AuthenticationExpiredError()
-    if not env_token:
+        if credentials is None:
+            raise CLIError(MSG_NOT_LOGGED_IN, code="AUTH_REQUIRED")
+        if credentials.is_expired():
+            raise AuthenticationExpiredError()
         try:
             with output.status("Verifying session..."):
-                verified = verify_token(credentials.access_token)
+                verified = verify_token(
+                    credentials.access_token, git_identity=git_identity
+                )
         except LoginError as exc:
             platform_code = getattr(exc, "code", None)
             if getattr(exc, "status_code", None) == 401 or (
@@ -552,6 +556,16 @@ def whoami() -> Any:
             raise _cli_error_from_login_error(exc) from exc
         credentials = Credentials.from_verify_result(credentials.access_token, verified)
 
+    workspace = (
+        {
+            "id": verified.workspace.id,
+            "name": verified.workspace.name,
+            "role": verified.workspace.role,
+        }
+        if verified.workspace is not None
+        else None
+    )
+
     account = {
         "email": credentials.user.email,
         "name": credentials.user.name,
@@ -568,9 +582,7 @@ def whoami() -> Any:
         "expires_at": credentials.expires_at.isoformat(),
         "platform_url": get_platform_url(),
         "source": source,
-        "workspace": None,
-        "linked_project": None,
-        "local_linked_project": None,
+        "workspace": workspace,
     }
 
     fields = [
@@ -582,6 +594,16 @@ def whoami() -> Any:
         fields.append(
             DetailField(label="Name", value=console.format_text(credentials.user.name))
         )
+    if workspace is not None:
+        fields.append(
+            DetailField(
+                label="Workspace", value=console.format_text(workspace["name"] or "")
+            )
+        )
+        if workspace["role"]:
+            fields.append(
+                DetailField(label="Role", value=console.format_text(workspace["role"]))
+            )
     fields.append(DetailField(label="Platform", value=get_platform_url()))
     fields.append(DetailField(label="Auth Source", value=source))
     fields.append(

@@ -34,6 +34,7 @@ from osmosis_ai.cli.output.display import (
 from osmosis_ai.cli.prompts import require_confirmation
 from osmosis_ai.platform.api.client import OsmosisClient
 from osmosis_ai.platform.api.models import (
+    EVAL_RUN_STATUSES_ERROR,
     EVAL_RUN_STATUSES_PENDING,
     EVAL_RUN_STATUSES_TERMINAL,
     SubmitRunResult,
@@ -46,6 +47,7 @@ from osmosis_ai.platform.cli.eval_config import (
 )
 from osmosis_ai.platform.cli.shared_submit import CloudSubmitSpec, run_cloud_submit
 from osmosis_ai.platform.cli.utils import (
+    build_logs_result,
     format_env_config,
     format_eval_status,
     format_progress,
@@ -297,10 +299,6 @@ def _eval_summary(detail: Any, *, include_details: bool) -> dict[str, Any]:
         if dataset_rows is not None:
             summary["dataset_rows"] = int(dataset_rows)
 
-        dominant_error_type = results.get("dominant_error_type") if results else None
-        if isinstance(dominant_error_type, str) and dominant_error_type:
-            summary["dominant_error_type"] = dominant_error_type
-
         resumed_count = _results_number(results, "resumed_count")
         if resumed_count is not None:
             summary["resumed_count"] = int(resumed_count)
@@ -427,6 +425,30 @@ def list_eval_runs(*, limit: int, all_: bool) -> ListResult:
     )
 
 
+def logs(name_or_id: str, *, limit: int, cursor: str | None = None) -> ListResult:
+    """Show the most recent logs for an evaluation run, oldest-first."""
+    context = require_git_workspace_directory_context()
+    credentials = context.credentials
+
+    client = OsmosisClient()
+    output = get_output_context()
+    with output.status("Fetching logs..."):
+        page = client.get_eval_run_logs(
+            name_or_id,
+            limit=limit,
+            cursor=cursor,
+            credentials=credentials,
+            git_identity=context.git_identity,
+        )
+
+    return build_logs_result(
+        title=f"Evaluation Run Logs: {name_or_id}",
+        page=page,
+        context=context,
+        next_step_hint=f"Use osmosis eval info {name_or_id} for run details.",
+    )
+
+
 def info(name_or_id: str, *, output: str | None) -> DetailResult:
     """Show evaluation run details, results, and metrics."""
     context = require_git_workspace_directory_context()
@@ -550,6 +572,11 @@ def info(name_or_id: str, *, output: str | None) -> DetailResult:
     if detail.platform_url:
         display_hints.append(f"View: {detail.platform_url}")
 
+    if detail.status in EVAL_RUN_STATUSES_ERROR:
+        display_hints.append(
+            f"See logs with: osmosis eval logs {detail.name or name_or_id}"
+        )
+
     if detail.status not in EVAL_RUN_STATUSES_TERMINAL:
         display_hints.append(
             f"Stop with: osmosis eval stop {detail.name or name_or_id}"
@@ -598,7 +625,6 @@ def info(name_or_id: str, *, output: str | None) -> DetailResult:
             "env_config": detail.env_config,
             "resolved_secret_scopes": detail.resolved_secret_scopes,
             "dataset_df_stats": detail.dataset_df_stats,
-            "recent_logs": detail.recent_logs or [],
             "metrics": export,
             "metrics_available": metrics_data is not None,
             "metrics_error": metrics_error,

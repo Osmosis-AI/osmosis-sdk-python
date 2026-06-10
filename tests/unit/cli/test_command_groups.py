@@ -46,6 +46,7 @@ PRESERVED_HELP_COMMANDS = [
     ["auth", "--help"],
     ["doctor", "--help"],
     ["dataset", "--help"],
+    ["dataset", "logs", "--help"],
     ["train", "--help"],
     ["train", "logs", "--help"],
     ["model", "--help"],
@@ -55,6 +56,7 @@ PRESERVED_HELP_COMMANDS = [
     ["rollout", "--help"],
     ["template", "--help"],
     ["eval", "--help"],
+    ["eval", "logs", "--help"],
     ["upgrade", "--help"],
 ]
 

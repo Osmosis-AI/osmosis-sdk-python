@@ -47,6 +47,7 @@ from osmosis_ai.platform.cli.training_config import (
     validate_train_submit_context_paths,
 )
 from osmosis_ai.platform.cli.utils import (
+    build_logs_result,
     build_run_detail_rows,
     format_env_config,
     format_progress,
@@ -246,36 +247,11 @@ def logs(name: str, *, limit: int, cursor: str | None = None) -> ListResult:
             git_identity=context.git_identity,
         )
 
-    items = [
-        {
-            "timestamp": entry.timestamp,
-            "level": entry.level,
-            "step": entry.step,
-            "message": entry.message,
-            "details": entry.details,
-        }
-        for entry in page.logs
-    ]
-    # Cursor pagination: the server reports no total, so total_count is this
-    # page's size and has_more means older entries exist beyond next_cursor.
-    return ListResult(
+    return build_logs_result(
         title=f"Training Run Logs: {name}",
-        items=items,
-        total_count=len(items),
-        has_more=page.next_cursor is not None,
-        next_offset=None,
-        extra={"next_cursor": page.next_cursor, **git_result_context(context)},
-        columns=[
-            ListColumn(key="timestamp", label="Time", no_wrap=True, ratio=2),
-            ListColumn(key="level", label="Level", no_wrap=True, ratio=1),
-            ListColumn(key="step", label="Step", no_wrap=True, ratio=1),
-            ListColumn(key="message", label="Message", ratio=6, overflow="fold"),
-        ],
-        display_items=[
-            {**item, "timestamp": format_local_datetime(entry.timestamp)}
-            for item, entry in zip(items, page.logs, strict=True)
-        ],
-        display_hints=[f"Use osmosis train info {name} for run details."],
+        page=page,
+        context=context,
+        next_step_hint=f"Use osmosis train info {name} for run details.",
     )
 
 

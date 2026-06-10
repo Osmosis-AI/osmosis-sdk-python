@@ -87,6 +87,8 @@ def serialize_lora_model(model: LoraModelInfo) -> dict[str, Any]:
         "checkpoint_step": model.checkpoint_step,
         "reward": model.reward,
         "deployment_status": model.deployment_status,
+        "deployed_at": model.deployed_at,
+        "deployed_by": model.deployed_by,
         "created_at": model.created_at,
     }
 

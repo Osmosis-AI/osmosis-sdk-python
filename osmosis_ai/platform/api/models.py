@@ -452,12 +452,13 @@ class TrainingRunMetrics:
         )
 
 
-# ── Training run logs ────────────────────────────────────────────
+# ── Logs (training runs, eval runs, datasets) ────────────────────
+# All three /logs endpoints share one wire shape.
 
 
 @dataclass
-class TrainingRunLogEntry:
-    """A single training run lifecycle log line."""
+class LogEntry:
+    """A single log line from a training run, evaluation run, or dataset."""
 
     timestamp: str
     level: str
@@ -466,7 +467,7 @@ class TrainingRunLogEntry:
     details: dict[str, Any] | None = None
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> TrainingRunLogEntry:
+    def from_dict(cls, data: dict[str, Any]) -> LogEntry:
         details = data.get("details")
         return cls(
             timestamp=data.get("timestamp", ""),
@@ -478,21 +479,21 @@ class TrainingRunLogEntry:
 
 
 @dataclass
-class TrainingRunLogs:
-    """One cursor page of training run logs.
+class LogsPage:
+    """One cursor page of logs.
 
     The server returns entries oldest-first within the page for both paging
     directions; ``next_cursor`` pages further back in time (``None`` when no
     more pages exist).
     """
 
-    logs: list[TrainingRunLogEntry]
+    logs: list[LogEntry]
     next_cursor: str | None = None
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> TrainingRunLogs:
+    def from_dict(cls, data: dict[str, Any]) -> LogsPage:
         return cls(
-            logs=[TrainingRunLogEntry.from_dict(log) for log in data.get("logs", [])],
+            logs=[LogEntry.from_dict(log) for log in data.get("logs", [])],
             next_cursor=data.get("next_cursor"),
         )
 
@@ -642,6 +643,8 @@ class LoraModelInfo:
     checkpoint_step: int | None = None
     reward: float | None = None
     deployment_status: str | None = None
+    deployed_at: str | None = None
+    deployed_by: str | None = None
     created_at: str = ""
 
     @classmethod
@@ -654,6 +657,8 @@ class LoraModelInfo:
             checkpoint_step=data.get("checkpoint_step"),
             reward=data.get("reward"),
             deployment_status=data.get("deployment_status"),
+            deployed_at=data.get("deployed_at"),
+            deployed_by=data.get("deployed_by"),
             created_at=data.get("created_at", ""),
         )
 
@@ -666,6 +671,8 @@ class PaginatedLoraModels:
     total_count: int
     has_more: bool
     next_offset: int | None = None
+    active_deployments: int = 0
+    max_active_deployments: int = 0
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> PaginatedLoraModels:
@@ -674,6 +681,8 @@ class PaginatedLoraModels:
             total_count=data.get("total_count", 0),
             has_more=data.get("has_more", False),
             next_offset=data.get("next_offset"),
+            active_deployments=data.get("active_deployments", 0),
+            max_active_deployments=data.get("max_active_deployments", 0),
         )
 
 
@@ -933,7 +942,6 @@ class EvaluationRunDetail(EvaluationRun):
     env_config: dict[str, Any] | None = None
     resolved_secret_scopes: dict[str, Any] | None = None
     dataset_df_stats: dict[str, Any] | None = None
-    recent_logs: list[dict[str, Any]] | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> EvaluationRunDetail:
@@ -944,7 +952,6 @@ class EvaluationRunDetail(EvaluationRun):
         env_config = data.get("env_config")
         resolved_secret_scopes = data.get("resolved_secret_scopes")
         dataset_df_stats = data.get("dataset_df_stats")
-        recent_logs = data.get("recent_logs")
         return cls(
             id=run["id"],
             name=run.get("name", ""),
@@ -976,7 +983,6 @@ class EvaluationRunDetail(EvaluationRun):
             dataset_df_stats=(
                 dataset_df_stats if isinstance(dataset_df_stats, dict) else None
             ),
-            recent_logs=recent_logs if isinstance(recent_logs, list) else None,
         )
 
 

@@ -31,8 +31,12 @@ osmosis auth whoami
 ```
 
 `whoami` verifies the active credentials and reports the authenticated account.
-Manage workspaces, repositories, secrets, and account settings in the Osmosis
-Platform product.
+When run inside a workspace directory with a Platform-connected `origin`
+remote, the platform also resolves the linked workspace, reported as a
+`workspace` object (`id`, `name`, `role`) in `--json` output and as
+`Workspace` / `Role` rows otherwise. Outside a workspace repository,
+`workspace` is `null`. Manage workspaces, repositories, secrets, and account
+settings in the Osmosis Platform product.
 
 ## Workspace Directory Flow
 
@@ -55,7 +59,9 @@ osmosis train submit configs/training/<run>.toml
 
 Platform-scoped commands derive scope from the workspace directory's `origin` remote and
 send `X-Osmosis-Git: namespace/repo_name`. The CLI does not store or send a
-workspace ID for commands scoped by the workspace directory.
+workspace ID for commands scoped by the workspace directory. Running a
+workspace-scoped command outside a workspace directory fails with the
+`WORKSPACE_REQUIRED` error code.
 
 For CI:
 
@@ -76,6 +82,14 @@ Inspect and optionally repair the scaffold in the current workspace directory. W
 `--fix`, the command reports the workspace directory, Git identity, required scaffold
 paths, and missing paths. Add `--fix` to create missing scaffold paths and
 check for official scaffold file updates without overwriting local edits.
+
+When you are logged in and the workspace directory has a Platform-connected
+`origin` remote, doctor also reports the linked workspace
+(`Linked workspace: <name>`; the `workspace` resource field in `--json`).
+The lookup is best-effort: offline or logged out, the field is `null` and
+doctor still works. Doctor exits non-zero with `status: "failed"` when
+required scaffold paths are missing (`valid: false`); run with `--fix` to
+restore them.
 
 ## Rollout
 
@@ -138,6 +152,21 @@ osmosis --json eval info <eval-run-name-or-id>
 osmosis eval info <eval-run-name-or-id> -o ./eval-metrics.json
 ```
 
+### osmosis eval logs
+
+Show the most recent lifecycle logs for an evaluation run, oldest first.
+Useful for diagnosing failed runs.
+
+```bash
+osmosis eval logs <eval-run-name-or-id>
+osmosis eval logs <eval-run-name-or-id> --limit 100
+osmosis eval logs <eval-run-name-or-id> --json
+```
+
+`--limit` accepts 1–200 entries (default: 50). When older entries exist, the
+JSON output includes a non-null `next_cursor`; pass it back with `--cursor` to
+page further back in time.
+
 ### osmosis eval rubric
 
 LLM-as-judge on a JSONL conversation file:
@@ -163,8 +192,8 @@ osmosis eval rubric -d data.jsonl \
 
 ### osmosis dataset upload
 
-Upload a local dataset file to the current workspace directory's platform
-project. The dataset name is derived from the file name without its extension.
+Upload a local dataset file to the linked platform workspace. The dataset
+name is derived from the file name without its extension.
 
 ```bash
 osmosis dataset upload data.jsonl
@@ -181,6 +210,21 @@ When `--overwrite` is used, the CLI first confirms the duplicate-name conflict
 with the platform, then creates a replacement dataset record and soft-deletes
 the old one. The platform may reject overwrites while the existing dataset is
 still uploading, still processing, or used by an active training run.
+
+### osmosis dataset logs
+
+Show the most recent lifecycle logs for a dataset, oldest first. Useful for
+diagnosing failed uploads.
+
+```bash
+osmosis dataset logs <dataset-name>
+osmosis dataset logs <dataset-name> --limit 100
+osmosis dataset logs <dataset-name> --json
+```
+
+`--limit` accepts 1–200 entries (default: 50). When older entries exist, the
+JSON output includes a non-null `next_cursor`; pass it back with `--cursor` to
+page further back in time.
 
 ## Training
 
@@ -325,7 +369,7 @@ page further back in time.
 
 ### osmosis train stop
 
-Stop a pending or running training run.
+Stop an in-progress training run.
 
 ```bash
 osmosis train stop <run-name>
@@ -346,6 +390,10 @@ Model, Training Run, Checkpoint Step, Training Reward, Created, and Deployment
 Status. `--limit` and `--all` apply to each type independently, and each list
 carries its own pagination cursor (`next_offset`) straight from its endpoint.
 Filter with `--type base` or `--type lora` to show a single list.
+
+When the LoRA models list is included, a deployment-quota summary is shown
+under the LoRA table (e.g. `2 of 5 deployment slots used`), matching the
+platform web UI.
 
 ```bash
 osmosis model list
@@ -368,15 +416,22 @@ list is which:
     "next_offset": null
   },
   "lora_models": {
-    "items": [{"id": "...", "model_name": "run-step-1", "reward": 0.87, "...": "..."}],
+    "items": [{"id": "...", "model_name": "run-step-1", "reward": 0.87, "deployed_at": null, "deployed_by": null, "...": "..."}],
     "total_count": 1,
     "has_more": false,
     "next_offset": null
   },
   "git": {"identity": "...", "remote_url": "..."},
-  "workspace_directory": "..."
+  "workspace_directory": "...",
+  "active_deployments": 2,
+  "max_active_deployments": 5
 }
 ```
+
+Each LoRA item carries `deployed_at` / `deployed_by` (null when the model has
+never been deployed). The top-level `active_deployments` /
+`max_active_deployments` quota keys appear for `--type all` and `--type lora`,
+but not for `--type base`.
 
 ### osmosis model deploy
 

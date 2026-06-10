@@ -862,6 +862,144 @@ class TestGetTrainingRunLogs:
         assert path.startswith("/api/cli/training-runs/a%2Fb/logs?")
 
 
+class TestGetEvalRunLogs:
+    """Tests for OsmosisClient.get_eval_run_logs."""
+
+    @patch("osmosis_ai.platform.api.client.platform_request")
+    def test_returns_parsed_logs_with_default_query(
+        self, mock_request: MagicMock
+    ) -> None:
+        mock_request.return_value = {
+            "logs": [
+                {
+                    "timestamp": "2026-06-01T00:00:00Z",
+                    "level": "info",
+                    "step": "init",
+                    "message": "Run created",
+                    "details": None,
+                },
+                {
+                    "timestamp": "2026-06-01T00:01:00Z",
+                    "level": "error",
+                    "step": "eval",
+                    "message": "Missing API key",
+                    "details": {"secret": "OPENAI_API_KEY"},
+                },
+            ],
+            "next_cursor": "2026-06-01T00:00:00Z|log-1",
+        }
+
+        result = OsmosisClient().get_eval_run_logs("eval-1", git_identity="git_test")
+
+        assert mock_request.call_args[0][0] == (
+            "/api/cli/eval-runs/eval-1/logs?limit=50&direction=older"
+        )
+        assert mock_request.call_args.kwargs["git_identity"] == "git_test"
+        assert len(result.logs) == 2
+        assert result.logs[0].message == "Run created"
+        assert result.logs[1].level == "error"
+        assert result.logs[1].details == {"secret": "OPENAI_API_KEY"}
+        assert result.next_cursor == "2026-06-01T00:00:00Z|log-1"
+
+    @patch("osmosis_ai.platform.api.client.platform_request")
+    def test_includes_cursor_and_direction_when_provided(
+        self, mock_request: MagicMock
+    ) -> None:
+        mock_request.return_value = {"logs": [], "next_cursor": None}
+
+        result = OsmosisClient().get_eval_run_logs(
+            "eval-1",
+            limit=10,
+            cursor="abc|def",
+            direction="newer",
+            git_identity="git_test",
+        )
+
+        assert mock_request.call_args[0][0] == (
+            "/api/cli/eval-runs/eval-1/logs?limit=10&direction=newer&cursor=abc%7Cdef"
+        )
+        assert result.logs == []
+        assert result.next_cursor is None
+
+    @patch("osmosis_ai.platform.api.client.platform_request")
+    def test_encodes_run_name(self, mock_request: MagicMock) -> None:
+        mock_request.return_value = {"logs": [], "next_cursor": None}
+
+        OsmosisClient().get_eval_run_logs("a/b", git_identity="git_test")
+
+        path = mock_request.call_args[0][0]
+        assert path.startswith("/api/cli/eval-runs/a%2Fb/logs?")
+
+
+class TestGetDatasetLogs:
+    """Tests for OsmosisClient.get_dataset_logs."""
+
+    @patch("osmosis_ai.platform.api.client.platform_request")
+    def test_returns_parsed_logs_with_default_query(
+        self, mock_request: MagicMock
+    ) -> None:
+        mock_request.return_value = {
+            "logs": [
+                {
+                    "timestamp": "2026-06-01T00:00:00Z",
+                    "level": "info",
+                    "step": "upload",
+                    "message": "Upload started",
+                    "details": None,
+                },
+                {
+                    "timestamp": "2026-06-01T00:01:00Z",
+                    "level": "error",
+                    "step": "processing",
+                    "message": "Invalid rows",
+                    "details": {"invalid_rows": 3},
+                },
+            ],
+            "next_cursor": "2026-06-01T00:00:00Z|log-1",
+        }
+
+        result = OsmosisClient().get_dataset_logs("ds-1", git_identity="git_test")
+
+        assert mock_request.call_args[0][0] == (
+            "/api/cli/datasets/ds-1/logs?limit=50&direction=older"
+        )
+        assert mock_request.call_args.kwargs["git_identity"] == "git_test"
+        assert len(result.logs) == 2
+        assert result.logs[0].message == "Upload started"
+        assert result.logs[1].level == "error"
+        assert result.logs[1].details == {"invalid_rows": 3}
+        assert result.next_cursor == "2026-06-01T00:00:00Z|log-1"
+
+    @patch("osmosis_ai.platform.api.client.platform_request")
+    def test_includes_cursor_and_direction_when_provided(
+        self, mock_request: MagicMock
+    ) -> None:
+        mock_request.return_value = {"logs": [], "next_cursor": None}
+
+        result = OsmosisClient().get_dataset_logs(
+            "ds-1",
+            limit=10,
+            cursor="abc|def",
+            direction="newer",
+            git_identity="git_test",
+        )
+
+        assert mock_request.call_args[0][0] == (
+            "/api/cli/datasets/ds-1/logs?limit=10&direction=newer&cursor=abc%7Cdef"
+        )
+        assert result.logs == []
+        assert result.next_cursor is None
+
+    @patch("osmosis_ai.platform.api.client.platform_request")
+    def test_encodes_dataset_name(self, mock_request: MagicMock) -> None:
+        mock_request.return_value = {"logs": [], "next_cursor": None}
+
+        OsmosisClient().get_dataset_logs("a/b", git_identity="git_test")
+
+        path = mock_request.call_args[0][0]
+        assert path.startswith("/api/cli/datasets/a%2Fb/logs?")
+
+
 class TestStopTrainingRun:
     """Tests for OsmosisClient.stop_training_run."""
 

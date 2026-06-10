@@ -54,6 +54,7 @@ def _make_verify_response(
     user: dict[str, Any] | None = None,
     expires_at: str | None = None,
     token_id: str | None = "tok_abc",
+    workspace: dict[str, Any] | None = None,
 ) -> bytes:
     """Build a JSON response body for the /api/cli/verify endpoint."""
     data: dict[str, Any] = {}
@@ -65,6 +66,8 @@ def _make_verify_response(
         data["expires_at"] = expires_at
     if token_id is not None:
         data["token_id"] = token_id
+    if workspace is not None:
+        data["workspace"] = workspace
     return json.dumps(data).encode()
 
 
@@ -85,6 +88,62 @@ class TestVerifyAndGetUserInfo:
         assert result.user.email == "u@test.com"
         assert result.expires_at.tzinfo is not None
         assert result.token_id == "tok_abc"
+        assert result.workspace is None
+
+    def test_verification_without_git_identity_omits_header(self) -> None:
+        expires_str = (datetime.now(UTC) + timedelta(days=90)).isoformat()
+        body = _make_verify_response(expires_at=expires_str)
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = body
+        mock_resp.__enter__ = MagicMock(return_value=mock_resp)
+        mock_resp.__exit__ = MagicMock(return_value=False)
+
+        with patch(
+            "osmosis_ai.platform.auth.flow.urlopen", return_value=mock_resp
+        ) as open_mock:
+            verify_token("test-token")
+
+        request_obj = open_mock.call_args[0][0]
+        assert not request_obj.has_header("X-osmosis-git")
+
+    def test_verification_with_git_identity_sends_header_and_parses_workspace(
+        self,
+    ) -> None:
+        expires_str = (datetime.now(UTC) + timedelta(days=90)).isoformat()
+        body = _make_verify_response(
+            expires_at=expires_str,
+            workspace={"id": "ws_1", "name": "Acme Workspace", "role": "admin"},
+        )
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = body
+        mock_resp.__enter__ = MagicMock(return_value=mock_resp)
+        mock_resp.__exit__ = MagicMock(return_value=False)
+
+        with patch(
+            "osmosis_ai.platform.auth.flow.urlopen", return_value=mock_resp
+        ) as open_mock:
+            result = verify_token("test-token", git_identity="acme/rollouts")
+
+        request_obj = open_mock.call_args[0][0]
+        assert request_obj.get_header("X-osmosis-git") == "acme/rollouts"
+        assert result.workspace is not None
+        assert result.workspace.id == "ws_1"
+        assert result.workspace.name == "Acme Workspace"
+        assert result.workspace.role == "admin"
+
+    def test_verification_tolerates_null_workspace(self) -> None:
+        expires_str = (datetime.now(UTC) + timedelta(days=90)).isoformat()
+        data = json.loads(_make_verify_response(expires_at=expires_str))
+        data["workspace"] = None
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = json.dumps(data).encode()
+        mock_resp.__enter__ = MagicMock(return_value=mock_resp)
+        mock_resp.__exit__ = MagicMock(return_value=False)
+
+        with patch("osmosis_ai.platform.auth.flow.urlopen", return_value=mock_resp):
+            result = verify_token("test-token", git_identity="acme/rollouts")
+
+        assert result.workspace is None
 
     @pytest.mark.parametrize(
         ("platform_url", "expected_url"),

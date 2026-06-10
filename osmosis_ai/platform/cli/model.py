@@ -114,6 +114,23 @@ def list_models(
     lora_models: list[LoraModelInfo] = []
     base_total, base_has_more, base_next_offset = 0, False, None
     lora_total, lora_has_more, lora_next_offset = 0, False, None
+
+    # ``paginated_fetch`` returns only items + cursor fields, discarding the
+    # page object, so capture the page-level deployment quota from the first
+    # response via a closure.
+    quota: dict[str, int] = {}
+
+    def _fetch_lora(lim: int, off: int) -> Any:
+        page = client.list_lora_models(
+            limit=lim,
+            offset=off,
+            credentials=credentials,
+            git_identity=git_identity,
+        )
+        quota.setdefault("active_deployments", page.active_deployments)
+        quota.setdefault("max_active_deployments", page.max_active_deployments)
+        return page
+
     with output.status("Fetching models..."):
         if type_ in ("all", "base"):
             base_models, base_total, base_has_more, base_next_offset = paginated_fetch(
@@ -129,12 +146,7 @@ def list_models(
             )
         if type_ in ("all", "lora"):
             lora_models, lora_total, lora_has_more, lora_next_offset = paginated_fetch(
-                lambda lim, off: client.list_lora_models(
-                    limit=lim,
-                    offset=off,
-                    credentials=credentials,
-                    git_identity=git_identity,
-                ),
+                _fetch_lora,
                 items_attr="models",
                 limit=effective_limit,
                 fetch_all=fetch_all,
@@ -160,9 +172,20 @@ def list_models(
         columns=_LORA_MODEL_COLUMNS,
         display_items=[_lora_model_display_item(m) for m in lora_models],
     )
-    display_hints = (
-        ["Deploy a LoRA model with: osmosis model deploy <name>"] if lora_models else []
-    )
+    active_deployments = quota.get("active_deployments", 0)
+    max_active_deployments = quota.get("max_active_deployments", 0)
+    display_hints: list[str] = []
+    if max_active_deployments > 0:
+        display_hints.append(
+            f"{active_deployments} of {max_active_deployments} deployment slots used"
+        )
+    if lora_models:
+        display_hints.append("Deploy a LoRA model with: osmosis model deploy <name>")
+    lora_extra = {
+        **git_result_context(context),
+        "active_deployments": active_deployments,
+        "max_active_deployments": max_active_deployments,
+    }
 
     if type_ == "base":
         return ListResult(
@@ -182,7 +205,7 @@ def list_models(
             total_count=lora_section.total_count,
             has_more=lora_section.has_more,
             next_offset=lora_section.next_offset,
-            extra=git_result_context(context),
+            extra=lora_extra,
             columns=lora_section.columns,
             display_items=lora_section.display_items,
             display_hints=display_hints,
@@ -190,7 +213,7 @@ def list_models(
 
     return SectionedListResult(
         sections=[base_section, lora_section],
-        extra=git_result_context(context),
+        extra=lora_extra,
         display_hints=display_hints,
     )
 

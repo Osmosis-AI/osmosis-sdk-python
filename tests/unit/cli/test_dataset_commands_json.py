@@ -19,9 +19,12 @@ from osmosis_ai.cli.output import OperationResult
 from osmosis_ai.platform.api.models import (
     DatasetDownloadInfo,
     DatasetFile,
+    LogEntry,
+    LogsPage,
     PaginatedDatasets,
     UploadInfo,
 )
+from osmosis_ai.platform.auth import PlatformAPIError
 
 GIT_IDENTITY = "acme/rollouts"
 REPO_URL = "https://github.com/acme/rollouts.git"
@@ -63,7 +66,9 @@ def test_dataset_list_requires_linked_project(
     rc = main(["--json", "dataset", "list"])
 
     assert rc == 1
-    assert "Osmosis workspace directory" in capsys.readouterr().err
+    error = json.loads(capsys.readouterr().err)["error"]
+    assert error["code"] == "WORKSPACE_REQUIRED"
+    assert "Osmosis workspace directory" in error["message"]
 
 
 def test_dataset_validate_is_project_independent(
@@ -202,6 +207,160 @@ def test_dataset_info_places_platform_url_after_table(monkeypatch) -> None:
     assert result.data["platform_url"] == expected_url
     assert all(field.value != expected_url for field in result.fields)
     assert result.display_hints == [f"View: {expected_url}"]
+
+
+def test_dataset_info_error_status_suggests_logs_command(monkeypatch) -> None:
+    _stub_git_context(monkeypatch)
+
+    class FakeClient:
+        def get_dataset(self, name, *, git_identity, credentials=None):
+            return _dataset(file_name="broken.jsonl", status="error")
+
+    monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+
+    result = dataset_module.info("broken.jsonl")
+
+    assert "See logs with: osmosis dataset logs broken.jsonl" in result.display_hints
+
+
+_LOG_ENTRIES = [
+    LogEntry(
+        timestamp="2026-06-01T00:00:00Z",
+        level="info",
+        step="upload",
+        message="Upload started",
+    ),
+    LogEntry(
+        timestamp="2026-06-01T00:05:00Z",
+        level="error",
+        step="processing",
+        message="Invalid rows",
+        details={"invalid_rows": 3},
+    ),
+]
+
+
+def _install_logs_client(
+    monkeypatch: pytest.MonkeyPatch, page: LogsPage
+) -> dict[str, object]:
+    fake_credentials = _stub_git_context(monkeypatch)
+    captured: dict[str, object] = {}
+
+    class FakeClient:
+        def get_dataset_logs(
+            self, name, *, limit, cursor=None, git_identity, credentials=None
+        ):
+            assert credentials is fake_credentials
+            assert git_identity == GIT_IDENTITY
+            captured["name"] = name
+            captured["limit"] = limit
+            captured["cursor"] = cursor
+            return page
+
+    monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+    return captured
+
+
+def test_dataset_logs_renders_chronological_list(monkeypatch) -> None:
+    captured = _install_logs_client(
+        monkeypatch, LogsPage(logs=_LOG_ENTRIES, next_cursor=None)
+    )
+
+    result = dataset_module.logs("train.jsonl", limit=50, cursor=None)
+
+    assert captured == {"name": "train.jsonl", "limit": 50, "cursor": None}
+    assert result.title == "Dataset Logs: train.jsonl"
+    assert [column.label for column in result.columns] == [
+        "Time",
+        "Level",
+        "Step",
+        "Message",
+    ]
+    # Oldest-first order is preserved from the server page.
+    assert [item["message"] for item in result.items] == [
+        "Upload started",
+        "Invalid rows",
+    ]
+    assert result.items[0]["timestamp"] == "2026-06-01T00:00:00Z"
+    assert result.items[1]["details"] == {"invalid_rows": 3}
+    assert result.total_count == 2
+    assert result.has_more is False
+    assert result.next_offset is None
+    assert result.extra["next_cursor"] is None
+    assert_git_context(dict(result.extra))
+    assert result.display_items is not None
+    # Display timestamps are localized, raw ISO stays in items for JSON.
+    assert result.display_items[0]["timestamp"] != "2026-06-01T00:00:00Z"
+    assert result.display_items[0]["timestamp"].startswith("2026-")
+    assert result.display_hints == [
+        "Use osmosis dataset info train.jsonl for dataset details."
+    ]
+
+
+def test_dataset_logs_has_more_when_next_cursor_present(monkeypatch) -> None:
+    _install_logs_client(
+        monkeypatch,
+        LogsPage(logs=_LOG_ENTRIES, next_cursor="2026-06-01T00:00:00Z|log-1"),
+    )
+
+    result = dataset_module.logs("train.jsonl", limit=2)
+
+    assert result.has_more is True
+    assert result.extra["next_cursor"] == "2026-06-01T00:00:00Z|log-1"
+
+
+def test_dataset_logs_passes_cursor_to_client(monkeypatch) -> None:
+    captured = _install_logs_client(
+        monkeypatch, LogsPage(logs=_LOG_ENTRIES, next_cursor=None)
+    )
+
+    dataset_module.logs("train.jsonl", limit=50, cursor="2026-06-01T00:00:00Z|log-1")
+
+    assert captured["cursor"] == "2026-06-01T00:00:00Z|log-1"
+
+
+def test_dataset_logs_empty_page(monkeypatch) -> None:
+    _install_logs_client(monkeypatch, LogsPage(logs=[], next_cursor=None))
+
+    result = dataset_module.logs("train.jsonl", limit=50)
+
+    assert result.items == []
+    assert result.total_count == 0
+    assert result.has_more is False
+
+
+@pytest.mark.parametrize("limit", ["0", "201"])
+def test_dataset_logs_rejects_out_of_range_limit(limit: str, capsys) -> None:
+    from osmosis_ai.cli.main import main
+
+    rc = main(["dataset", "logs", "train.jsonl", "--limit", limit])
+
+    assert rc == 2
+    assert "is not in the range 1<=x<=200" in capsys.readouterr().err
+
+
+def test_dataset_logs_unknown_dataset_emits_not_found_envelope(
+    monkeypatch, capsys
+) -> None:
+    _stub_git_context(monkeypatch)
+
+    class FakeClient:
+        def get_dataset_logs(
+            self, name, *, limit, cursor=None, git_identity, credentials=None
+        ):
+            raise PlatformAPIError("Dataset not found", 404)
+
+    monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+
+    exit_code = cli.main(["--json", "dataset", "logs", "missing.jsonl"])
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    assert captured.out == ""
+    envelope = json.loads(captured.err)
+    assert envelope["error"]["code"] == "NOT_FOUND"
+    assert envelope["error"]["message"] == "Dataset not found"
+    assert envelope["command"] == "dataset logs"
 
 
 def test_dataset_preview_json_includes_rows(monkeypatch, capsys) -> None:

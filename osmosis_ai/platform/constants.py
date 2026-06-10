@@ -7,7 +7,7 @@ import os
 DEFAULT_PAGE_SIZE = 50
 # Mirrors the server's per-page cap; the API rejects larger limits with a 400.
 MAX_PAGE_SIZE = 50
-# The training-run logs endpoint allows larger pages than resource lists.
+# The logs endpoints allow larger pages than resource lists.
 MAX_LOG_PAGE_SIZE = 200
 
 # ── Common error messages ────────────────────────────────────────

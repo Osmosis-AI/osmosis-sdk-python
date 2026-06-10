@@ -7,7 +7,11 @@ from typing import Any
 
 import typer
 
-from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
+from osmosis_ai.platform.constants import (
+    DEFAULT_PAGE_SIZE,
+    MAX_LOG_PAGE_SIZE,
+    MAX_PAGE_SIZE,
+)
 
 app: typer.Typer = typer.Typer(
     help="Manage evaluation runs (submit, list, info, stop) and LLM-as-judge rubric scoring.",
@@ -100,6 +104,28 @@ def eval_list(
     from osmosis_ai.platform.cli.eval import list_eval_runs as _list_eval_runs
 
     return _list_eval_runs(limit=limit, all_=all_)
+
+
+@app.command("logs")
+def eval_logs(
+    name_or_id: str = typer.Argument(..., help="Evaluation run name or ID."),
+    limit: int = typer.Option(
+        DEFAULT_PAGE_SIZE,
+        "--limit",
+        min=1,
+        max=MAX_LOG_PAGE_SIZE,
+        help="Maximum number of recent log entries to show.",
+    ),
+    cursor: str | None = typer.Option(
+        None,
+        "--cursor",
+        help="Page further back using the next_cursor value from a previous page.",
+    ),
+) -> Any:
+    """Show recent logs for an evaluation run, oldest first."""
+    from osmosis_ai.platform.cli.eval import logs as _logs
+
+    return _logs(name_or_id, limit=limit, cursor=cursor)
 
 
 @app.command("info")

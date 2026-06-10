@@ -19,6 +19,8 @@ from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.cli.output import DetailResult, ListResult, OperationResult
 from osmosis_ai.cli.output.context import OutputFormat, override_output_context
 from osmosis_ai.platform.api.models import (
+    LogEntry,
+    LogsPage,
     MetricDataPoint,
     MetricHistory,
     MetricSummary,
@@ -26,8 +28,6 @@ from osmosis_ai.platform.api.models import (
     SubmitRunResult,
     TrainingRun,
     TrainingRunDetail,
-    TrainingRunLogEntry,
-    TrainingRunLogs,
     TrainingRunMetrics,
     TrainingRunMetricsOverview,
 )
@@ -804,13 +804,13 @@ class TestStatus:
 
 class TestLogs:
     LOG_ENTRIES = [
-        TrainingRunLogEntry(
+        LogEntry(
             timestamp="2026-06-01T00:00:00Z",
             level="info",
             step="init",
             message="Run created",
         ),
-        TrainingRunLogEntry(
+        LogEntry(
             timestamp="2026-06-01T00:05:00Z",
             level="error",
             step="train",
@@ -821,7 +821,7 @@ class TestLogs:
 
     @staticmethod
     def _install_client(
-        monkeypatch: pytest.MonkeyPatch, page: TrainingRunLogs
+        monkeypatch: pytest.MonkeyPatch, page: LogsPage
     ) -> dict[str, object]:
         captured: dict[str, object] = {}
 
@@ -845,7 +845,7 @@ class TestLogs:
         self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
     ) -> None:
         captured = self._install_client(
-            monkeypatch, TrainingRunLogs(logs=self.LOG_ENTRIES, next_cursor=None)
+            monkeypatch, LogsPage(logs=self.LOG_ENTRIES, next_cursor=None)
         )
 
         result = train_module.logs(name="run-1", limit=50, cursor=None)
@@ -878,9 +878,7 @@ class TestLogs:
     ) -> None:
         self._install_client(
             monkeypatch,
-            TrainingRunLogs(
-                logs=self.LOG_ENTRIES, next_cursor="2026-06-01T00:00:00Z|log-1"
-            ),
+            LogsPage(logs=self.LOG_ENTRIES, next_cursor="2026-06-01T00:00:00Z|log-1"),
         )
 
         result = train_module.logs(name="run-1", limit=2)
@@ -893,7 +891,7 @@ class TestLogs:
         self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
     ) -> None:
         captured = self._install_client(
-            monkeypatch, TrainingRunLogs(logs=self.LOG_ENTRIES, next_cursor=None)
+            monkeypatch, LogsPage(logs=self.LOG_ENTRIES, next_cursor=None)
         )
 
         train_module.logs(name="run-1", limit=50, cursor="2026-06-01T00:00:00Z|log-1")
@@ -903,7 +901,7 @@ class TestLogs:
     def test_logs_empty_page(
         self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
     ) -> None:
-        self._install_client(monkeypatch, TrainingRunLogs(logs=[], next_cursor=None))
+        self._install_client(monkeypatch, LogsPage(logs=[], next_cursor=None))
 
         result = train_module.logs(name="run-1", limit=50)
 

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import dataclasses
+
 import pytest
 
 from osmosis_ai.platform.api import models as api_models
@@ -39,6 +41,9 @@ REMOVED_RESPONSE_MODELS = (
     "PaginatedDeployments",
     "DeploymentSummary",
     "ModelList",
+    # Renamed to the shared LogEntry / LogsPage models.
+    "TrainingRunLogEntry",
+    "TrainingRunLogs",
 )
 
 
@@ -442,9 +447,9 @@ class TestTrainingRunMetrics:
         assert result.metrics == []
 
 
-class TestTrainingRunLogs:
+class TestLogsPage:
     def test_from_dict(self) -> None:
-        from osmosis_ai.platform.api.models import TrainingRunLogs
+        from osmosis_ai.platform.api.models import LogsPage
 
         data = {
             "logs": [
@@ -465,7 +470,7 @@ class TestTrainingRunLogs:
             ],
             "next_cursor": "2026-06-01T00:00:00Z|log-1",
         }
-        result = TrainingRunLogs.from_dict(data)
+        result = LogsPage.from_dict(data)
         assert len(result.logs) == 2
         assert result.logs[0].timestamp == "2026-06-01T00:00:00Z"
         assert result.logs[0].details is None
@@ -473,9 +478,9 @@ class TestTrainingRunLogs:
         assert result.next_cursor == "2026-06-01T00:00:00Z|log-1"
 
     def test_from_dict_defaults_and_non_dict_details(self) -> None:
-        from osmosis_ai.platform.api.models import TrainingRunLogs
+        from osmosis_ai.platform.api.models import LogsPage
 
-        result = TrainingRunLogs.from_dict(
+        result = LogsPage.from_dict(
             {"logs": [{"details": "not-a-dict"}], "next_cursor": None}
         )
         entry = result.logs[0]
@@ -487,9 +492,9 @@ class TestTrainingRunLogs:
         assert result.next_cursor is None
 
     def test_from_dict_empty(self) -> None:
-        from osmosis_ai.platform.api.models import TrainingRunLogs
+        from osmosis_ai.platform.api.models import LogsPage
 
-        result = TrainingRunLogs.from_dict({})
+        result = LogsPage.from_dict({})
         assert result.logs == []
         assert result.next_cursor is None
 
@@ -507,12 +512,16 @@ class TestModelModels:
                 "checkpoint_step": 100,
                 "reward": 0.85,
                 "deployment_status": "active",
+                "deployed_at": "2026-04-22T00:00:00Z",
+                "deployed_by": "brian",
                 "created_at": "2026-04-20T00:00:00Z",
             }
         )
         assert m.id == "lora_1"
         assert m.model_name == "qwen3-run1-step-100"
         assert m.deployment_status == "active"
+        assert m.deployed_at == "2026-04-22T00:00:00Z"
+        assert m.deployed_by == "brian"
         assert m.checkpoint_step == 100
         assert m.reward == 0.85
         assert m.base_model == "Qwen/Qwen3-30B-A3B-Instruct-2507-FP8"
@@ -527,6 +536,8 @@ class TestModelModels:
         assert m.checkpoint_step is None
         assert m.reward is None
         assert m.deployment_status is None
+        assert m.deployed_at is None
+        assert m.deployed_by is None
         assert m.created_at == ""
 
     def test_paginated_base_models_from_dict(self) -> None:
@@ -577,6 +588,8 @@ class TestModelModels:
                 "total_count": 1,
                 "has_more": False,
                 "next_offset": None,
+                "active_deployments": 2,
+                "max_active_deployments": 5,
             }
         )
         assert len(page.models) == 1
@@ -584,6 +597,8 @@ class TestModelModels:
         assert page.total_count == 1
         assert page.has_more is False
         assert page.next_offset is None
+        assert page.active_deployments == 2
+        assert page.max_active_deployments == 5
 
     def test_paginated_lora_models_from_dict_empty(self) -> None:
         from osmosis_ai.platform.api.models import PaginatedLoraModels
@@ -593,6 +608,8 @@ class TestModelModels:
         assert page.total_count == 0
         assert page.has_more is False
         assert page.next_offset is None
+        assert page.active_deployments == 0
+        assert page.max_active_deployments == 0
 
     def test_lora_model_summary_from_dict(self) -> None:
         from osmosis_ai.platform.api.models import LoraModelSummary
@@ -718,14 +735,6 @@ class TestEvaluationRunModels:
                 "commit_sha": "abcdef1234567890",
                 "env_config": {"PROMPT_MODE": "strict"},
                 "resolved_secret_scopes": {"OPENAI_API_KEY": "workspace"},
-                "recent_logs": [
-                    {
-                        "step": "eval",
-                        "level": "error",
-                        "message": "Missing API key",
-                        "timestamp": "2026-01-01T00:00:00Z",
-                    }
-                ],
                 "dataset_df_stats": {"row_count": 1000},
             }
         )
@@ -745,15 +754,14 @@ class TestEvaluationRunModels:
         assert detail.commit_sha == "abcdef1234567890"
         assert detail.env_config == {"PROMPT_MODE": "strict"}
         assert detail.resolved_secret_scopes == {"OPENAI_API_KEY": "workspace"}
-        assert detail.recent_logs == [
-            {
-                "step": "eval",
-                "level": "error",
-                "message": "Missing API key",
-                "timestamp": "2026-01-01T00:00:00Z",
-            }
-        ]
         assert detail.dataset_df_stats == {"row_count": 1000}
+
+    def test_evaluation_run_detail_has_no_recent_logs_field(self) -> None:
+        # The detail endpoint stopped embedding logs; `osmosis eval logs` is
+        # the replacement.
+        assert "recent_logs" not in {
+            field.name for field in dataclasses.fields(EvaluationRunDetail)
+        }
 
     def test_paginated_evaluation_runs_uses_eval_runs_key(self) -> None:
         page = PaginatedEvaluationRuns.from_dict(

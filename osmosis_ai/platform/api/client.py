@@ -14,6 +14,7 @@ from .models import (
     EnvironmentSecretInfo,
     EvalRunMetrics,
     EvaluationRunDetail,
+    LogsPage,
     LoraModelSummary,
     PaginatedBaseModels,
     PaginatedDatasets,
@@ -25,7 +26,6 @@ from .models import (
     SubmitRunResult,
     TrainingRunCheckpoints,
     TrainingRunDetail,
-    TrainingRunLogs,
     TrainingRunMetrics,
 )
 
@@ -177,6 +177,32 @@ class OsmosisClient:
         )
         return DatasetDownloadInfo.from_dict(data)
 
+    def get_dataset_logs(
+        self,
+        name_or_id: str,
+        *,
+        limit: int = DEFAULT_PAGE_SIZE,
+        cursor: str | None = None,
+        direction: str = "older",
+        credentials: Credentials | None = None,
+        git_identity: str,
+    ) -> LogsPage:
+        """Fetch one page of dataset logs.
+
+        Without ``cursor``, ``direction="older"`` returns the most recent page;
+        the returned ``next_cursor`` pages further back in time.
+        """
+        params: dict[str, Any] = {"limit": limit, "direction": direction}
+        if cursor is not None:
+            params["cursor"] = cursor
+        qs = urlencode(params)
+        data = platform_request(
+            f"/api/cli/datasets/{_safe_path(name_or_id)}/logs?{qs}",
+            credentials=credentials,
+            git_identity=git_identity,
+        )
+        return LogsPage.from_dict(data)
+
     # ── Training Runs ─────────────────────────────────────────────
 
     def submit_training_run(
@@ -259,7 +285,7 @@ class OsmosisClient:
         credentials: Credentials | None = None,
         git_identity: str,
     ) -> dict[str, Any]:
-        """Stop a pending or running training run."""
+        """Stop an in-progress training run."""
         return platform_request(
             f"/api/cli/training-runs/{_safe_path(run_id)}/stop",
             method="POST",
@@ -292,8 +318,8 @@ class OsmosisClient:
         direction: str = "older",
         credentials: Credentials | None = None,
         git_identity: str,
-    ) -> TrainingRunLogs:
-        """Fetch one page of training run lifecycle logs.
+    ) -> LogsPage:
+        """Fetch one page of training run logs.
 
         Without ``cursor``, ``direction="older"`` returns the most recent page;
         the returned ``next_cursor`` pages further back in time.
@@ -307,7 +333,7 @@ class OsmosisClient:
             credentials=credentials,
             git_identity=git_identity,
         )
-        return TrainingRunLogs.from_dict(data)
+        return LogsPage.from_dict(data)
 
     # ── Rollouts ──────────────────────────────────────────────────
 
@@ -567,6 +593,32 @@ class OsmosisClient:
         )
         return EvalRunMetrics.from_dict(data)
 
+    def get_eval_run_logs(
+        self,
+        name_or_id: str,
+        *,
+        limit: int = DEFAULT_PAGE_SIZE,
+        cursor: str | None = None,
+        direction: str = "older",
+        credentials: Credentials | None = None,
+        git_identity: str,
+    ) -> LogsPage:
+        """Fetch one page of evaluation run logs.
+
+        Without ``cursor``, ``direction="older"`` returns the most recent page;
+        the returned ``next_cursor`` pages further back in time.
+        """
+        params: dict[str, Any] = {"limit": limit, "direction": direction}
+        if cursor is not None:
+            params["cursor"] = cursor
+        qs = urlencode(params)
+        data = platform_request(
+            f"/api/cli/eval-runs/{_safe_path(name_or_id)}/logs?{qs}",
+            credentials=credentials,
+            git_identity=git_identity,
+        )
+        return LogsPage.from_dict(data)
+
     def stop_eval_run(
         self,
         eval_run_id: str,
@@ -574,7 +626,7 @@ class OsmosisClient:
         credentials: Credentials | None = None,
         git_identity: str,
     ) -> dict[str, Any]:
-        """Stop a pending or running evaluation run."""
+        """Stop an in-progress evaluation run."""
         return platform_request(
             f"/api/cli/eval-runs/{_safe_path(eval_run_id)}/stop",
             method="POST",
