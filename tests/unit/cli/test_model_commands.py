@@ -17,6 +17,7 @@ from osmosis_ai.cli.output import (
     ListResult,
     OperationResult,
     OutputFormat,
+    SectionedListResult,
     override_output_context,
 )
 from osmosis_ai.platform.api.models import (
@@ -151,6 +152,17 @@ def _fake_list_client(
     return FakeClient
 
 
+_BASE_COLUMN_KEYS = ["model_name", "base_model", "created_at", "creator_name"]
+_LORA_COLUMN_KEYS = [
+    "model_name",
+    "deployment_status",
+    "base_model",
+    "training_run_name",
+    "checkpoint_step",
+    "created_at",
+]
+
+
 @pytest.mark.usefixtures("mock_git_context")
 class TestListModels:
     def test_empty_list(
@@ -161,16 +173,20 @@ class TestListModels:
         )
         result = platform_model_module.list_models(limit=30, all_=False)
 
-        assert isinstance(result, ListResult)
-        assert result.title == "Models"
-        assert result.items == []
-        assert result.total_count == 0
-        assert result.has_more is False
-        assert result.next_offset is None
+        assert isinstance(result, SectionedListResult)
+        assert [section.key for section in result.sections] == [
+            "base_models",
+            "lora_models",
+        ]
+        for section in result.sections:
+            assert section.items == []
+            assert section.total_count == 0
+            assert section.has_more is False
+            assert section.next_offset is None
         assert result.display_hints == []
         assert_git_context(result.extra)
 
-    def test_list_combines_base_models_before_lora_models(
+    def test_list_sections_base_models_before_lora_models(
         self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
     ) -> None:
         captured: dict[str, object] = {}
@@ -185,19 +201,52 @@ class TestListModels:
             "base": {"limit": 10, "offset": 0},
             "lora": {"limit": 10, "offset": 0},
         }
-        assert isinstance(result, ListResult)
-        assert [(i["type"], i["model_name"]) for i in result.items] == [
-            ("base", "Qwen/Qwen3"),
-            ("lora", "qwen3-run1-step-100"),
-        ]
-        assert "status" not in result.items[0]
-        assert result.items[1]["deployment_status"] == "active"
-        assert result.items[1]["checkpoint_step"] == 100
-        assert result.items[1]["training_run_name"] == "qwen3-run1"
-        assert result.total_count == 2
+        assert isinstance(result, SectionedListResult)
+        base_section, lora_section = result.sections
+        assert (base_section.key, base_section.title) == ("base_models", "Base Models")
+        assert (lora_section.key, lora_section.title) == ("lora_models", "LoRA Models")
+        assert [i["model_name"] for i in base_section.items] == ["Qwen/Qwen3"]
+        assert [i["model_name"] for i in lora_section.items] == ["qwen3-run1-step-100"]
+        assert "status" not in base_section.items[0]
+        assert lora_section.items[0]["deployment_status"] == "active"
+        assert lora_section.items[0]["checkpoint_step"] == 100
+        assert lora_section.items[0]["training_run_name"] == "qwen3-run1"
+        assert base_section.total_count == 1
+        assert lora_section.total_count == 1
         assert result.display_hints == [
             "Deploy a LoRA model with: osmosis model deploy <name>"
         ]
+
+    def test_list_items_carry_no_type_discriminator(
+        self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
+    ) -> None:
+        monkeypatch.setattr(
+            platform_model_module,
+            "OsmosisClient",
+            _fake_list_client([_base_model()], [_lora_model()]),
+        )
+        result = platform_model_module.list_models(limit=30, all_=False)
+
+        assert isinstance(result, SectionedListResult)
+        for section in result.sections:
+            assert all("type" not in item for item in section.items)
+            assert section.display_items is not None
+            assert all("type" not in item for item in section.display_items)
+
+    def test_list_sections_use_per_type_columns(
+        self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
+    ) -> None:
+        monkeypatch.setattr(
+            platform_model_module,
+            "OsmosisClient",
+            _fake_list_client([_base_model()], [_lora_model()]),
+        )
+        result = platform_model_module.list_models(limit=30, all_=False)
+
+        assert isinstance(result, SectionedListResult)
+        base_section, lora_section = result.sections
+        assert [c.key for c in base_section.columns] == _BASE_COLUMN_KEYS
+        assert [c.key for c in lora_section.columns] == _LORA_COLUMN_KEYS
 
     def test_list_display_items_fill_missing_fields_with_dashes(
         self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
@@ -206,7 +255,7 @@ class TestListModels:
             platform_model_module,
             "OsmosisClient",
             _fake_list_client(
-                [_base_model()],
+                [_base_model(base_model=None, creator_name=None)],
                 [
                     _lora_model(
                         base_model=None,
@@ -219,19 +268,45 @@ class TestListModels:
         )
         result = platform_model_module.list_models(limit=30, all_=False)
 
-        assert result.display_items is not None
-        base_display, lora_display = result.display_items
-        assert base_display["type"] == "Base"
-        assert base_display["deployment_status"] == "—"
-        assert base_display["training_run_name"] == "—"
-        assert base_display["checkpoint_step"] == "—"
-        assert lora_display["type"] == "LoRA"
+        assert isinstance(result, SectionedListResult)
+        base_section, lora_section = result.sections
+        assert base_section.display_items is not None
+        assert lora_section.display_items is not None
+        (base_display,) = base_section.display_items
+        (lora_display,) = lora_section.display_items
+        assert base_display["base_model"] == "—"
+        assert base_display["creator_name"] == "—"
         assert lora_display["deployment_status"] == "—"
         assert lora_display["base_model"] == "—"
+        assert lora_display["training_run_name"] == "—"
         assert lora_display["checkpoint_step"] == "—"
         # Raw JSON items keep nulls — display dashes must not leak into them.
-        assert result.items[1]["deployment_status"] is None
-        assert result.items[1]["checkpoint_step"] is None
+        assert lora_section.items[0]["deployment_status"] is None
+        assert lora_section.items[0]["checkpoint_step"] is None
+
+    def test_list_sections_pass_cursors_through_verbatim(
+        self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
+    ) -> None:
+        monkeypatch.setattr(
+            platform_model_module,
+            "OsmosisClient",
+            _fake_list_client(
+                [_base_model()],
+                [_lora_model()],
+                base_has_more=True,
+                base_next_offset=1,
+                lora_has_more=False,
+                lora_next_offset=2,
+            ),
+        )
+        result = platform_model_module.list_models(limit=30, all_=False)
+
+        assert isinstance(result, SectionedListResult)
+        base_section, lora_section = result.sections
+        assert base_section.has_more is True
+        assert base_section.next_offset == 1
+        assert lora_section.has_more is False
+        assert lora_section.next_offset == 2
 
     def test_list_type_base_only_calls_base_endpoint(
         self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
@@ -247,9 +322,15 @@ class TestListModels:
         result = platform_model_module.list_models(limit=30, all_=False, type_="base")
 
         assert list(captured) == ["base"]
-        assert [i["type"] for i in result.items] == ["base"]
+        assert isinstance(result, ListResult)
+        assert result.title == "Base Models"
+        assert [i["model_name"] for i in result.items] == ["Qwen/Qwen3"]
+        assert all("type" not in item for item in result.items)
+        assert [c.key for c in result.columns] == _BASE_COLUMN_KEYS
         assert result.total_count == 1
+        assert result.next_offset is None
         assert result.display_hints == []
+        assert_git_context(result.extra)
 
     def test_list_type_lora_only_calls_lora_endpoint(
         self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
@@ -265,27 +346,16 @@ class TestListModels:
         result = platform_model_module.list_models(limit=30, all_=False, type_="lora")
 
         assert list(captured) == ["lora"]
-        assert [i["type"] for i in result.items] == ["lora"]
+        assert isinstance(result, ListResult)
+        assert result.title == "LoRA Models"
+        assert [i["model_name"] for i in result.items] == ["qwen3-run1-step-100"]
+        assert all("type" not in item for item in result.items)
+        assert [c.key for c in result.columns] == _LORA_COLUMN_KEYS
         assert result.next_offset == 1
-
-    def test_list_type_all_has_no_continuation_cursor(
-        self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
-    ) -> None:
-        monkeypatch.setattr(
-            platform_model_module,
-            "OsmosisClient",
-            _fake_list_client(
-                [_base_model()],
-                [_lora_model()],
-                base_has_more=True,
-                base_next_offset=1,
-                lora_next_offset=1,
-            ),
-        )
-        result = platform_model_module.list_models(limit=30, all_=False)
-
-        assert result.has_more is True
-        assert result.next_offset is None
+        assert result.display_hints == [
+            "Deploy a LoRA model with: osmosis model deploy <name>"
+        ]
+        assert_git_context(result.extra)
 
     def test_list_rejects_invalid_type(self) -> None:
         with pytest.raises(CLIError, match=r"Type must be 'all', 'base', or 'lora'\."):

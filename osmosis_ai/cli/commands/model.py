@@ -27,16 +27,16 @@ def list_models(
     limit: int = typer.Option(
         DEFAULT_PAGE_SIZE,
         "--limit",
-        help="Maximum number of models of each type to show.",
+        help="Maximum number of models to show per type.",
     ),
-    all_: bool = typer.Option(False, "--all", help="Show all models."),
+    all_: bool = typer.Option(False, "--all", help="Show all models of each type."),
     type_: str = typer.Option(
         "all",
         "--type",
         help="Filter by model type: 'all', 'base', or 'lora'.",
     ),
 ) -> Any:
-    """List base models and LoRA models for the current workspace directory."""
+    """List base models and LoRA models as two separate lists."""
     from osmosis_ai.platform.cli.model import list_models as _list_models
 
     return _list_models(limit=limit, all_=all_, type_=type_)

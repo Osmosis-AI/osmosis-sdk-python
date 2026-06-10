@@ -14,8 +14,10 @@ from osmosis_ai.cli.output.result import (
     DetailSection,
     ListColumn,
     ListResult,
+    ListSection,
     MessageResult,
     OperationResult,
+    SectionedListResult,
 )
 
 
@@ -203,6 +205,74 @@ def test_rich_list_prints_display_hints_with_literal_brackets() -> None:
     )
     stdout, _ = _render(result)
     assert "[name]" in stdout
+
+
+def test_rich_sectioned_list_renders_heading_and_table_per_section() -> None:
+    result = SectionedListResult(
+        sections=[
+            ListSection(
+                key="base_models",
+                title="Base Models",
+                items=[{"name": "Qwen/Qwen3", "creator": "brian"}],
+                total_count=1,
+                has_more=False,
+                next_offset=None,
+                columns=[
+                    ListColumn(key="name", label="Name"),
+                    ListColumn(key="creator", label="Created By"),
+                ],
+            ),
+            ListSection(
+                key="lora_models",
+                title="LoRA Models",
+                items=[{"name": "run-step-1", "step": "1"}],
+                total_count=1,
+                has_more=False,
+                next_offset=None,
+                columns=[
+                    ListColumn(key="name", label="Name"),
+                    ListColumn(key="step", label="Step"),
+                ],
+            ),
+        ],
+        display_hints=["Deploy a LoRA model with: osmosis model deploy <name>"],
+    )
+    stdout, _ = _render(result)
+    assert "Base Models" in stdout
+    assert "LoRA Models" in stdout
+    assert "Created By" in stdout
+    assert "Step" in stdout
+    assert "Qwen/Qwen3" in stdout
+    assert "run-step-1" in stdout
+    assert "Deploy a LoRA model with: osmosis model deploy <name>" in stdout
+
+
+def test_rich_sectioned_list_prints_per_section_truncation_hint() -> None:
+    result = SectionedListResult(
+        sections=[
+            ListSection(
+                key="base_models",
+                title="Base Models",
+                items=[{"name": "m-1"}, {"name": "m-2"}],
+                total_count=10,
+                has_more=True,
+                next_offset=2,
+                columns=[ListColumn(key="name", label="Name")],
+            ),
+            ListSection(
+                key="lora_models",
+                title="LoRA Models",
+                items=[{"name": "l-1"}],
+                total_count=1,
+                has_more=False,
+                next_offset=None,
+                columns=[ListColumn(key="name", label="Name")],
+            ),
+        ],
+    )
+    stdout, _ = _render(result)
+    assert "Showing 2 of 10." in stdout
+    assert stdout.count("Showing") == 1
 
 
 def test_rich_detail_prints_sections_after_table() -> None:

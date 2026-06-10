@@ -322,10 +322,12 @@ runs. Deploying a LoRA model exposes it for inference.
 
 ### osmosis model list
 
-List base models and LoRA models for the current workspace directory in a
-single table (base models first). LoRA models include their deployment status.
-Filter with `--type base` or `--type lora`; when filtered, pagination cursors
-(`next_offset`) come straight from the matching endpoint.
+List base models and LoRA models for the current workspace directory as two
+separate tables (base models first, then LoRA models). LoRA models include
+their deployment status. `--limit` and `--all` apply to each type
+independently, and each list carries its own pagination cursor
+(`next_offset`) straight from its endpoint. Filter with `--type base` or
+`--type lora` to show a single list.
 
 ```bash
 osmosis model list
@@ -333,6 +335,29 @@ osmosis model list --type lora
 osmosis model list --limit 50
 osmosis model list --all
 osmosis --json model list
+```
+
+`--json` output keys each list separately, so the structure itself says which
+list is which:
+
+```json
+{
+  "schema_version": 1,
+  "base_models": {
+    "items": [{"id": "...", "model_name": "Qwen/Qwen3", "...": "..."}],
+    "total_count": 1,
+    "has_more": false,
+    "next_offset": null
+  },
+  "lora_models": {
+    "items": [{"id": "...", "model_name": "run-step-1", "...": "..."}],
+    "total_count": 1,
+    "has_more": false,
+    "next_offset": null
+  },
+  "workspace_directory": "...",
+  "git": {"identity": "...", "remote_url": "..."}
+}
 ```
 
 ### osmosis model deploy

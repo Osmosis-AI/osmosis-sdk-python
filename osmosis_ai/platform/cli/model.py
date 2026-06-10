@@ -17,7 +17,9 @@ from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.cli.output import (
     ListColumn,
     ListResult,
+    ListSection,
     OperationResult,
+    SectionedListResult,
     get_output_context,
     serialize_lora_model,
     serialize_model,
@@ -35,8 +37,21 @@ from osmosis_ai.platform.cli.workspace_directory_context import git_result_conte
 
 _VALID_LIST_TYPES = ("all", "base", "lora")
 
-# Human-facing labels for the type column (the raw type values stay in JSON output).
-_TYPE_DISPLAY = {"base": "Base", "lora": "LoRA"}
+_BASE_MODEL_COLUMNS = [
+    ListColumn(key="model_name", label="Name", ratio=3, overflow="fold"),
+    ListColumn(key="base_model", label="Base Model", ratio=2, overflow="fold"),
+    ListColumn(key="created_at", label="Created", no_wrap=True, ratio=1),
+    ListColumn(key="creator_name", label="Created By", no_wrap=True, ratio=1),
+]
+
+_LORA_MODEL_COLUMNS = [
+    ListColumn(key="model_name", label="Name", ratio=3, overflow="fold"),
+    ListColumn(key="deployment_status", label="Status", no_wrap=True, ratio=1),
+    ListColumn(key="base_model", label="Base Model", ratio=2, overflow="fold"),
+    ListColumn(key="training_run_name", label="Training Run", ratio=2, overflow="fold"),
+    ListColumn(key="checkpoint_step", label="Step", no_wrap=True, ratio=1),
+    ListColumn(key="created_at", label="Created", no_wrap=True, ratio=1),
+]
 
 
 def _lora_model_summary_resource(result: Any) -> dict[str, Any]:
@@ -50,19 +65,15 @@ def _lora_model_summary_resource(result: Any) -> dict[str, Any]:
 def _base_model_display_item(model: BaseModelInfo) -> dict[str, Any]:
     return {
         **serialize_model(model),
-        "type": _TYPE_DISPLAY["base"],
-        "deployment_status": "—",
         "base_model": model.base_model or "—",
-        "training_run_name": "—",
-        "checkpoint_step": "—",
         "created_at": format_local_date(model.created_at),
+        "creator_name": model.creator_name or "—",
     }
 
 
 def _lora_model_display_item(model: LoraModelInfo) -> dict[str, Any]:
     return {
         **serialize_lora_model(model),
-        "type": _TYPE_DISPLAY["lora"],
         "deployment_status": format_deployment_status(model.deployment_status),
         "base_model": model.base_model or "—",
         "training_run_name": model.training_run_name or "—",
@@ -73,11 +84,14 @@ def _lora_model_display_item(model: LoraModelInfo) -> dict[str, Any]:
     }
 
 
-def list_models(*, limit: int, all_: bool, type_: str = "all") -> ListResult:
+def list_models(
+    *, limit: int, all_: bool, type_: str = "all"
+) -> SectionedListResult | ListResult:
     """List base models and LoRA models for the current workspace directory.
 
-    ``type_`` is ``"all"`` (base models then LoRA models), ``"base"``, or
-    ``"lora"``.
+    ``type_`` ``"all"`` returns a :class:`SectionedListResult` with a base
+    models section followed by a LoRA models section, each independently
+    paginated. ``"base"`` / ``"lora"`` return a single :class:`ListResult`.
     """
     if type_ not in _VALID_LIST_TYPES:
         raise CLIError(
@@ -123,40 +137,58 @@ def list_models(*, limit: int, all_: bool, type_: str = "all") -> ListResult:
                 fetch_all=fetch_all,
             )
 
-    total_count = base_total + lora_total
-    has_more = base_has_more or lora_has_more
-    # A combined page spans two endpoints, so there is no single continuation
-    # cursor; --all (or --type base/lora) is the way to go past page one.
-    next_offset = (
-        None
-        if type_ == "all"
-        else (base_next_offset if type_ == "base" else lora_next_offset)
+    base_section = ListSection(
+        key="base_models",
+        title="Base Models",
+        items=[serialize_model(m) for m in base_models],
+        total_count=base_total,
+        has_more=base_has_more,
+        next_offset=base_next_offset,
+        columns=_BASE_MODEL_COLUMNS,
+        display_items=[_base_model_display_item(m) for m in base_models],
+    )
+    lora_section = ListSection(
+        key="lora_models",
+        title="LoRA Models",
+        items=[serialize_lora_model(m) for m in lora_models],
+        total_count=lora_total,
+        has_more=lora_has_more,
+        next_offset=lora_next_offset,
+        columns=_LORA_MODEL_COLUMNS,
+        display_items=[_lora_model_display_item(m) for m in lora_models],
+    )
+    display_hints = (
+        ["Deploy a LoRA model with: osmosis model deploy <name>"] if lora_models else []
     )
 
-    return ListResult(
-        title="Models",
-        items=[{"type": "base", **serialize_model(m)} for m in base_models]
-        + [{"type": "lora", **serialize_lora_model(m)} for m in lora_models],
-        total_count=total_count,
-        has_more=has_more,
-        next_offset=next_offset,
+    if type_ == "base":
+        return ListResult(
+            title=base_section.title,
+            items=base_section.items,
+            total_count=base_section.total_count,
+            has_more=base_section.has_more,
+            next_offset=base_section.next_offset,
+            extra=git_result_context(context),
+            columns=base_section.columns,
+            display_items=base_section.display_items,
+        )
+    if type_ == "lora":
+        return ListResult(
+            title=lora_section.title,
+            items=lora_section.items,
+            total_count=lora_section.total_count,
+            has_more=lora_section.has_more,
+            next_offset=lora_section.next_offset,
+            extra=git_result_context(context),
+            columns=lora_section.columns,
+            display_items=lora_section.display_items,
+            display_hints=display_hints,
+        )
+
+    return SectionedListResult(
+        sections=[base_section, lora_section],
         extra=git_result_context(context),
-        columns=[
-            ListColumn(key="model_name", label="Name", ratio=3, overflow="fold"),
-            ListColumn(key="type", label="Type", no_wrap=True, ratio=1),
-            ListColumn(key="deployment_status", label="Status", no_wrap=True, ratio=1),
-            ListColumn(key="base_model", label="Base Model", ratio=2, overflow="fold"),
-            ListColumn(
-                key="training_run_name", label="Training Run", ratio=2, overflow="fold"
-            ),
-            ListColumn(key="checkpoint_step", label="Step", no_wrap=True, ratio=1),
-            ListColumn(key="created_at", label="Created", no_wrap=True, ratio=1),
-        ],
-        display_items=[_base_model_display_item(m) for m in base_models]
-        + [_lora_model_display_item(m) for m in lora_models],
-        display_hints=["Deploy a LoRA model with: osmosis model deploy <name>"]
-        if lora_models
-        else [],
+        display_hints=display_hints,
     )
 
 

@@ -422,7 +422,7 @@ def _model_list_fake_client():
     return FakeClient
 
 
-def test_model_list_plain_outputs_base_rows_before_lora_rows(
+def test_model_list_plain_outputs_titled_base_and_lora_sections(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     _stub_git_context(monkeypatch)
@@ -438,16 +438,17 @@ def test_model_list_plain_outputs_base_rows_before_lora_rows(
 
     assert exit_code == 0
     lines = captured.out.splitlines()
-    assert len(lines) == 2
-    assert len(lines[0].split("\t")) == 7
-    assert lines[0].startswith("Qwen/Qwen3\tBase\t—\tQwen/Qwen3\t—\t—\t")
-    assert len(lines[1].split("\t")) == 7
-    assert lines[1].startswith(
-        "run-step-1\tLoRA\t[active]\tQwen/Qwen3\treward-run\t1\t"
-    )
+    assert len(lines) == 4
+    assert lines[0] == "Base Models:"
+    assert len(lines[1].split("\t")) == 4
+    assert lines[1].startswith("Qwen/Qwen3\tQwen/Qwen3\t")
+    assert lines[1].endswith("\tbrian")
+    assert lines[2] == "LoRA Models:"
+    assert len(lines[3].split("\t")) == 6
+    assert lines[3].startswith("run-step-1\t[active]\tQwen/Qwen3\treward-run\t1\t")
 
 
-def test_model_list_json_returns_single_list_envelope(
+def test_model_list_json_returns_sectioned_list_envelope(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
     _stub_git_context(monkeypatch)
@@ -464,16 +465,25 @@ def test_model_list_json_returns_single_list_envelope(
     assert exit_code == 0
     payload = json.loads(captured.out)
     assert payload["schema_version"] == 1
-    assert payload["total_count"] == 2
-    assert payload["has_more"] is False
-    assert payload["next_offset"] is None
-    assert [(i["type"], i["model_name"]) for i in payload["items"]] == [
-        ("base", "Qwen/Qwen3"),
-        ("lora", "run-step-1"),
-    ]
-    assert "status" not in payload["items"][0]
-    assert payload["items"][1]["deployment_status"] == "active"
-    assert payload["items"][1]["checkpoint_step"] == 1
+    assert "items" not in payload
+    assert "total_count" not in payload
+
+    base_models = payload["base_models"]
+    assert base_models["total_count"] == 1
+    assert base_models["has_more"] is False
+    assert base_models["next_offset"] is None
+    assert [i["model_name"] for i in base_models["items"]] == ["Qwen/Qwen3"]
+    assert "type" not in base_models["items"][0]
+    assert "status" not in base_models["items"][0]
+
+    lora_models = payload["lora_models"]
+    assert lora_models["total_count"] == 1
+    assert lora_models["has_more"] is False
+    assert lora_models["next_offset"] is None
+    assert [i["model_name"] for i in lora_models["items"]] == ["run-step-1"]
+    assert "type" not in lora_models["items"][0]
+    assert lora_models["items"][0]["deployment_status"] == "active"
+    assert lora_models["items"][0]["checkpoint_step"] == 1
     _assert_git_context(payload)
     assert captured.out.count("\n") == 1
 

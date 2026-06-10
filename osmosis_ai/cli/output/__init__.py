@@ -22,8 +22,10 @@ from .result import (
     DetailSection,
     ListColumn,
     ListResult,
+    ListSection,
     MessageResult,
     OperationResult,
+    SectionedListResult,
     detail_fields,
 )
 from .serializers import (
@@ -44,10 +46,12 @@ __all__ = [
     "DetailSection",
     "ListColumn",
     "ListResult",
+    "ListSection",
     "MessageResult",
     "OperationResult",
     "OutputContext",
     "OutputFormat",
+    "SectionedListResult",
     "classify_error",
     "command_path_for_error",
     "default_output_context",
