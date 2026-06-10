@@ -355,8 +355,8 @@ list is which:
     "has_more": false,
     "next_offset": null
   },
-  "workspace_directory": "...",
-  "git": {"identity": "...", "remote_url": "..."}
+  "git": {"identity": "...", "remote_url": "..."},
+  "workspace_directory": "..."
 }
 ```
 

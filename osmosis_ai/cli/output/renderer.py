@@ -259,7 +259,7 @@ def _render_plain(result: CommandResult, output: OutputContext) -> None:
 
     if isinstance(result, SectionedListResult):
         for section in result.sections:
-            sys.stdout.write(f"{section.title}:\n")
+            sys.stdout.write(f"{_normalise_plain_value(section.title)}:\n")
             _write_plain_list_rows(section)
         return
 

@@ -7,7 +7,7 @@ from typing import Any
 
 import typer
 
-from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE
+from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
 
 app: typer.Typer = typer.Typer(help="Manage training runs.", no_args_is_help=True)
 
@@ -15,7 +15,11 @@ app: typer.Typer = typer.Typer(help="Manage training runs.", no_args_is_help=Tru
 @app.command("list")
 def list_runs(
     limit: int = typer.Option(
-        DEFAULT_PAGE_SIZE, "--limit", help="Maximum number of runs to show."
+        DEFAULT_PAGE_SIZE,
+        "--limit",
+        min=1,
+        max=MAX_PAGE_SIZE,
+        help="Maximum number of runs to show.",
     ),
     all_: bool = typer.Option(False, "--all", help="Show all training runs."),
 ) -> Any:

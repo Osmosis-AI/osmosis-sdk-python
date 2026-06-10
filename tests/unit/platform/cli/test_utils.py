@@ -187,7 +187,6 @@ def test_format_run_status_unknown(monkeypatch: pytest.MonkeyPatch) -> None:
     [
         ("active", "green"),
         ("inactive", "dim"),
-        ("failed", "red"),
     ],
 )
 def test_format_deployment_status_styles(status: str, style: str) -> None:

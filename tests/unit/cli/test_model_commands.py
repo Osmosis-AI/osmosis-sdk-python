@@ -27,6 +27,7 @@ from osmosis_ai.platform.api.models import (
     PaginatedBaseModels,
     PaginatedLoraModels,
 )
+from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE
 
 AUTH_CREDENTIALS = object()
 GIT_IDENTITY = "acme/rollouts"
@@ -82,6 +83,26 @@ def test_model_list_requires_linked_project(
 
     assert rc == 1
     assert "Osmosis workspace directory" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("limit", ["0", "51"])
+def test_model_list_rejects_out_of_range_limit(limit: str, capsys) -> None:
+    from osmosis_ai.cli.main import main
+
+    rc = main(["model", "list", "--limit", limit])
+
+    assert rc == 2
+    assert "is not in the range 1<=x<=50" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("limit", ["0", "51"])
+def test_dataset_list_rejects_out_of_range_limit(limit: str, capsys) -> None:
+    from osmosis_ai.cli.main import main
+
+    rc = main(["dataset", "list", "--limit", limit])
+
+    assert rc == 2
+    assert "is not in the range 1<=x<=50" in capsys.readouterr().err
 
 
 def _base_model(**overrides: object) -> BaseModelInfo:
@@ -308,6 +329,73 @@ class TestListModels:
         assert lora_section.has_more is False
         assert lora_section.next_offset == 2
 
+    def test_list_all_drains_every_page_per_section(
+        self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
+    ) -> None:
+        base_pages = {
+            0: PaginatedBaseModels(
+                models=[_base_model(id="model_1", model_name="base-a")],
+                total_count=2,
+                has_more=True,
+                next_offset=1,
+            ),
+            1: PaginatedBaseModels(
+                models=[_base_model(id="model_2", model_name="base-b")],
+                total_count=2,
+                has_more=False,
+                next_offset=None,
+            ),
+        }
+        lora_pages = {
+            0: PaginatedLoraModels(
+                models=[_lora_model(id="lora_1", model_name="lora-a")],
+                total_count=2,
+                has_more=True,
+                next_offset=1,
+            ),
+            1: PaginatedLoraModels(
+                models=[_lora_model(id="lora_2", model_name="lora-b")],
+                total_count=2,
+                has_more=False,
+                next_offset=None,
+            ),
+        }
+        calls: dict[str, list[dict[str, int]]] = {"base": [], "lora": []}
+
+        class FakeClient:
+            def list_base_models(
+                self, limit=30, offset=0, *, git_identity, credentials=None
+            ):
+                assert credentials is AUTH_CREDENTIALS
+                assert git_identity == GIT_IDENTITY
+                calls["base"].append({"limit": limit, "offset": offset})
+                return base_pages[offset]
+
+            def list_lora_models(
+                self, limit=30, offset=0, *, git_identity, credentials=None
+            ):
+                assert credentials is AUTH_CREDENTIALS
+                assert git_identity == GIT_IDENTITY
+                calls["lora"].append({"limit": limit, "offset": offset})
+                return lora_pages[offset]
+
+        monkeypatch.setattr(platform_model_module, "OsmosisClient", FakeClient)
+        result = platform_model_module.list_models(limit=DEFAULT_PAGE_SIZE, all_=True)
+
+        expected_calls = [
+            {"limit": DEFAULT_PAGE_SIZE, "offset": 0},
+            {"limit": DEFAULT_PAGE_SIZE, "offset": 1},
+        ]
+        assert calls == {"base": expected_calls, "lora": expected_calls}
+        assert isinstance(result, SectionedListResult)
+        base_section, lora_section = result.sections
+        assert [i["model_name"] for i in base_section.items] == ["base-a", "base-b"]
+        assert [i["model_name"] for i in lora_section.items] == ["lora-a", "lora-b"]
+        for section in result.sections:
+            assert section.total_count == 2
+            assert section.has_more is False
+            assert section.next_offset is None
+
     def test_list_type_base_only_calls_base_endpoint(
         self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
     ) -> None:
@@ -427,24 +515,6 @@ class TestDeploy:
         assert captured["git_identity"] == GIT_IDENTITY
         assert captured["message"] == 'Deploying LoRA model "\\[red]bad\\[/red]"...'
         assert isinstance(result, OperationResult)
-
-    def test_deploy_failed_result_exits_nonzero(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        class FakeClient:
-            def deploy_lora_model(
-                self, lora_model_name, *, git_identity, credentials=None
-            ):
-                assert git_identity == GIT_IDENTITY
-                return _lora_model_summary("qwen3-run1-step-100", status="failed")
-
-        monkeypatch.setattr(platform_model_module, "OsmosisClient", FakeClient)
-        result = platform_model_module.deploy("qwen3-run1-step-100")
-
-        assert isinstance(result, OperationResult)
-        assert result.status == "failed"
-        assert result.message == "LoRA model qwen3-run1-step-100 failed"
-        assert result.exit_code == 1
 
 
 @pytest.mark.usefixtures("mock_git_context")

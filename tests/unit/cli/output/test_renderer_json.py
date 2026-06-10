@@ -114,6 +114,18 @@ def _sectioned_list_result(extra: dict[str, Any] | None = None) -> SectionedList
     )
 
 
+def test_sectioned_list_envelope_required_keys() -> None:
+    payload, stderr = _render_to_json(_sectioned_list_result())
+    golden = json.loads(
+        (GOLDEN / "sectioned_list_envelope.json").read_text(encoding="utf-8")
+    )
+    assert sorted(payload.keys()) == sorted(golden["keys"])
+    for section_key in ("base_models", "lora_models"):
+        assert sorted(payload[section_key].keys()) == sorted(golden["section_keys"])
+    assert payload["schema_version"] == 1
+    assert stderr == ""
+
+
 def test_sectioned_list_envelope_keys_each_section_with_own_pagination() -> None:
     payload, stderr = _render_to_json(_sectioned_list_result())
     assert sorted(payload.keys()) == sorted(

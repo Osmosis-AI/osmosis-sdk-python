@@ -551,8 +551,6 @@ class BaseModelInfo:
     id: str
     model_name: str
     base_model: str | None = None
-    status: str = ""
-    description: str | None = None
     creator_name: str | None = None
     created_at: str = ""
     updated_at: str = ""
@@ -563,8 +561,6 @@ class BaseModelInfo:
             id=data["id"],
             model_name=data.get("model_name", ""),
             base_model=data.get("base_model"),
-            status=data.get("status", ""),
-            description=data.get("description"),
             creator_name=data.get("creator_name"),
             created_at=data.get("created_at", ""),
             updated_at=data.get("updated_at", ""),
@@ -730,11 +726,10 @@ class PaginatedEnvironmentSecrets:
 
 
 # ── Deployment status ────────────────────────────────────────────
-# Lifecycle of a LoRA model's deployment: "active" / "inactive" / "failed".
+# Lifecycle of a LoRA model's deployment: "active" / "inactive".
 
 DEPLOYMENT_STATUSES_SUCCESS: frozenset[str] = frozenset({"active"})
 DEPLOYMENT_STATUSES_INACTIVE: frozenset[str] = frozenset({"inactive"})
-DEPLOYMENT_STATUSES_ERROR: frozenset[str] = frozenset({"failed"})
 
 
 # ── Rollouts ─────────────────────────────────────────────────────

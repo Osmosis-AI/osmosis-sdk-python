@@ -45,7 +45,7 @@ osmosis --json dataset list                  # recommended for AI agents and CI/
 osmosis --plain dataset list                 # low-noise text for shell pipelines
 ```
 
-JSON is the stable machine contract: every successful response includes `schema_version: 1`; list envelopes include `items`, `total_count`, `has_more`, and `next_offset`; detail envelopes include `data`; operation envelopes include `status`, `operation`, optional `resource`, and optional `next_steps_structured`. Errors are JSON-structured on stderr with `code`, `message`, `details`, optional `request_id`, plus the command path and SDK `cli_version`.
+JSON is the stable machine contract: every successful response includes `schema_version: 1`; list envelopes include `items`, `total_count`, `has_more`, and `next_offset`; detail envelopes include `data`; operation envelopes include `status`, `operation`, optional `resource`, and optional `next_steps_structured`. Sectioned list envelopes (e.g. `osmosis model list`) compose the list shape under named section keys such as `base_models` and `lora_models`, each section carrying its own `items`, `total_count`, `has_more`, and `next_offset`. Errors are JSON-structured on stderr with `code`, `message`, `details`, optional `request_id`, plus the command path and SDK `cli_version`.
 
 Plain mode is for humans and simple shell pipelines, not a strict schema. `--json` and `--plain` are global flags parsed before subcommands; prefer `osmosis --json <command>` or `osmosis --plain <command>` over the default Rich output in non-interactive environments. Command-local `--output` always means a file path, not a format selector, so `osmosis dataset download my-dataset --output ./data.jsonl` works in every mode.
 

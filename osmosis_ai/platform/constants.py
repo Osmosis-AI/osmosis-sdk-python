@@ -5,6 +5,8 @@ import os
 # ── Pagination ───────────────────────────────────────────────────
 
 DEFAULT_PAGE_SIZE = 50
+# Mirrors the server's per-page cap; the API rejects larger limits with a 400.
+MAX_PAGE_SIZE = 50
 
 # ── Common error messages ────────────────────────────────────────
 

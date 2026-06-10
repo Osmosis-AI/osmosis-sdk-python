@@ -12,7 +12,6 @@ from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.cli.output import DetailSection
 from osmosis_ai.cli.output.display import format_local_datetime
 from osmosis_ai.platform.api.models import (
-    DEPLOYMENT_STATUSES_ERROR,
     DEPLOYMENT_STATUSES_INACTIVE,
     DEPLOYMENT_STATUSES_SUCCESS,
     EVAL_RUN_STATUSES_ERROR,
@@ -140,7 +139,6 @@ _RUN_STATUS_STYLES: _StatusStyleMap = (
 _DEPLOYMENT_STATUS_STYLES: _StatusStyleMap = (
     (DEPLOYMENT_STATUSES_SUCCESS, "green"),
     (DEPLOYMENT_STATUSES_INACTIVE, "dim"),
-    (DEPLOYMENT_STATUSES_ERROR, "red"),
 )
 _EVAL_STATUS_STYLES: _StatusStyleMap = (
     (EVAL_RUN_STATUSES_SUCCESS, "green"),

@@ -205,17 +205,15 @@ def deploy(lora_model_name: str) -> OperationResult:
             git_identity=context.git_identity,
         )
 
-    op_status = "failed" if result.status == "failed" else "success"
     resource = _lora_model_summary_resource(result)
     resource.update(git_result_context(context))
     return OperationResult(
         operation="model.deploy",
-        status=op_status,
+        status="success",
         resource=resource,
         message=f"LoRA model {result.model_name or '-'} {result.status}",
         display_next_steps=["Check status with: osmosis model list"],
         next_steps_structured=[{"action": "model_list"}],
-        exit_code=1 if op_status == "failed" else 0,
     )
 
 
@@ -234,15 +232,13 @@ def undeploy(lora_model_name: str) -> OperationResult:
             git_identity=context.git_identity,
         )
 
-    op_status = "failed" if result.status == "failed" else "success"
     resource = _lora_model_summary_resource(result)
     resource.update(git_result_context(context))
     return OperationResult(
         operation="model.undeploy",
-        status=op_status,
+        status="success",
         resource=resource,
         message=f"LoRA model {result.model_name or '-'} {result.status}",
         display_next_steps=["Check status with: osmosis model list"],
         next_steps_structured=[{"action": "model_list"}],
-        exit_code=1 if op_status == "failed" else 0,
     )

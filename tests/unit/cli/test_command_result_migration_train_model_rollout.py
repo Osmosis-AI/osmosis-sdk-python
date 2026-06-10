@@ -531,35 +531,6 @@ def test_model_deploy_undeploy_json_return_results(
     _assert_git_context(payload["resource"])
 
 
-def test_failed_model_deploy_json_exits_nonzero(
-    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
-) -> None:
-    _stub_git_context(monkeypatch)
-
-    class FakeClient:
-        def deploy_lora_model(self, lora_model_name, *, git_identity, credentials=None):
-            assert credentials is FAKE_CREDENTIALS
-            assert git_identity == GIT_IDENTITY
-            return LoraModelSummary(
-                id="lora_1",
-                model_name=lora_model_name,
-                status="failed",
-            )
-
-    monkeypatch.setattr("osmosis_ai.platform.api.client.OsmosisClient", FakeClient)
-    monkeypatch.setattr(
-        "osmosis_ai.platform.cli.model.OsmosisClient", FakeClient, raising=False
-    )
-
-    exit_code = cli.main(["--json", "model", "deploy", "run-step-1"])
-    payload = json.loads(capsys.readouterr().out)
-
-    assert exit_code == 1
-    assert payload["operation"] == "model.deploy"
-    assert payload["status"] == "failed"
-    _assert_git_context(payload["resource"])
-
-
 def test_rollout_list_json_returns_envelope(
     monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:

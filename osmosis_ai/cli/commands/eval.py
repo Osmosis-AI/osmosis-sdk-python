@@ -7,7 +7,7 @@ from typing import Any
 
 import typer
 
-from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE
+from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
 
 app: typer.Typer = typer.Typer(
     help="Manage evaluation runs (submit, list, info, stop) and LLM-as-judge rubric scoring.",
@@ -90,6 +90,8 @@ def eval_list(
     limit: int = typer.Option(
         DEFAULT_PAGE_SIZE,
         "--limit",
+        min=1,
+        max=MAX_PAGE_SIZE,
         help="Maximum number of evaluation runs to show.",
     ),
     all_: bool = typer.Option(False, "--all", help="Show all evaluation runs."),

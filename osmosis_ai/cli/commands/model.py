@@ -14,7 +14,7 @@ from typing import Any
 
 import typer
 
-from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE
+from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
 
 app: typer.Typer = typer.Typer(
     help="Manage models (list, deploy, undeploy).",
@@ -27,6 +27,8 @@ def list_models(
     limit: int = typer.Option(
         DEFAULT_PAGE_SIZE,
         "--limit",
+        min=1,
+        max=MAX_PAGE_SIZE,
         help="Maximum number of models to show per type.",
     ),
     all_: bool = typer.Option(False, "--all", help="Show all models of each type."),

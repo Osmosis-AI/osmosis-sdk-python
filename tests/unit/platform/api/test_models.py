@@ -551,14 +551,12 @@ class TestModelModels:
 
     def test_deployment_status_frozensets(self) -> None:
         from osmosis_ai.platform.api.models import (
-            DEPLOYMENT_STATUSES_ERROR,
             DEPLOYMENT_STATUSES_INACTIVE,
             DEPLOYMENT_STATUSES_SUCCESS,
         )
 
         assert "active" in DEPLOYMENT_STATUSES_SUCCESS
         assert "inactive" in DEPLOYMENT_STATUSES_INACTIVE
-        assert "failed" in DEPLOYMENT_STATUSES_ERROR
 
     def test_lora_checkpoint_info(self) -> None:
         from osmosis_ai.platform.api.models import LoraCheckpointInfo
