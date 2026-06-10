@@ -2,6 +2,8 @@
 
 Installing the SDK provides a lightweight CLI as `osmosis` (aliases: `osmosis_ai`, `osmosis-ai`). The CLI loads `.env` from the current working directory via `python-dotenv`.
 
+The global output flags `--json` and `--plain` are accepted anywhere on the command line: `osmosis --json dataset list` and `osmosis dataset list --json` are equivalent.
+
 ## Authentication
 
 Credentials are stored at `~/.config/osmosis/credentials.json`.
@@ -42,7 +44,7 @@ git clone <repo-url>
 cd <repo>
 osmosis auth login
 osmosis doctor
-osmosis template apply multiply              # or add your rollout under rollouts/
+osmosis template apply multiply-local-openai # or add your rollout under rollouts/
 cp configs/training/default.toml configs/training/<run>.toml
 $EDITOR configs/training/<run>.toml          # set rollout, dataset, and model_path
 git add rollouts configs data
@@ -305,6 +307,21 @@ osmosis train list
 osmosis train list --limit 50
 osmosis train list --all
 ```
+
+### osmosis train logs
+
+Show the most recent lifecycle logs for a training run, oldest first. Useful
+for diagnosing failed or crashed runs.
+
+```bash
+osmosis train logs <run-name>
+osmosis train logs <run-name> --limit 100
+osmosis train logs <run-name> --json
+```
+
+`--limit` accepts 1–200 entries (default: 50). When older entries exist, the
+JSON output includes a non-null `next_cursor`; pass it back with `--cursor` to
+page further back in time.
 
 ### osmosis train stop
 

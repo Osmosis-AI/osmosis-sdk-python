@@ -7,7 +7,11 @@ from typing import Any
 
 import typer
 
-from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
+from osmosis_ai.platform.constants import (
+    DEFAULT_PAGE_SIZE,
+    MAX_LOG_PAGE_SIZE,
+    MAX_PAGE_SIZE,
+)
 
 app: typer.Typer = typer.Typer(help="Manage training runs.", no_args_is_help=True)
 
@@ -47,6 +51,28 @@ def info(
     from osmosis_ai.platform.cli.train import info as _info
 
     return _info(name, output=output)
+
+
+@app.command("logs")
+def logs(
+    name: str = typer.Argument(..., help="Training run name."),
+    limit: int = typer.Option(
+        DEFAULT_PAGE_SIZE,
+        "--limit",
+        min=1,
+        max=MAX_LOG_PAGE_SIZE,
+        help="Maximum number of recent log entries to show.",
+    ),
+    cursor: str | None = typer.Option(
+        None,
+        "--cursor",
+        help="Page further back using the next_cursor value from a previous page.",
+    ),
+) -> Any:
+    """Show recent logs for a training run, oldest first."""
+    from osmosis_ai.platform.cli.train import logs as _logs
+
+    return _logs(name, limit=limit, cursor=cursor)
 
 
 @app.command("submit")

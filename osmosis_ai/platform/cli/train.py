@@ -34,6 +34,7 @@ from osmosis_ai.cli.output.display import (
 from osmosis_ai.cli.prompts import require_confirmation
 from osmosis_ai.platform.api.client import OsmosisClient
 from osmosis_ai.platform.api.models import (
+    RUN_STATUSES_ERROR,
     RUN_STATUSES_PENDING,
     RUN_STATUSES_TERMINAL,
     SubmitRunResult,
@@ -229,6 +230,55 @@ def list_training_runs(*, limit: int, all_: bool) -> ListResult:
     )
 
 
+def logs(name: str, *, limit: int, cursor: str | None = None) -> ListResult:
+    """Show the most recent logs for a training run, oldest-first."""
+    context = require_git_workspace_directory_context()
+    credentials = context.credentials
+
+    client = OsmosisClient()
+    output = get_output_context()
+    with output.status("Fetching logs..."):
+        page = client.get_training_run_logs(
+            name,
+            limit=limit,
+            cursor=cursor,
+            credentials=credentials,
+            git_identity=context.git_identity,
+        )
+
+    items = [
+        {
+            "timestamp": entry.timestamp,
+            "level": entry.level,
+            "step": entry.step,
+            "message": entry.message,
+            "details": entry.details,
+        }
+        for entry in page.logs
+    ]
+    # Cursor pagination: the server reports no total, so total_count is this
+    # page's size and has_more means older entries exist beyond next_cursor.
+    return ListResult(
+        title=f"Training Run Logs: {name}",
+        items=items,
+        total_count=len(items),
+        has_more=page.next_cursor is not None,
+        next_offset=None,
+        extra={"next_cursor": page.next_cursor, **git_result_context(context)},
+        columns=[
+            ListColumn(key="timestamp", label="Time", no_wrap=True, ratio=2),
+            ListColumn(key="level", label="Level", no_wrap=True, ratio=1),
+            ListColumn(key="step", label="Step", no_wrap=True, ratio=1),
+            ListColumn(key="message", label="Message", ratio=6, overflow="fold"),
+        ],
+        display_items=[
+            {**item, "timestamp": format_local_datetime(entry.timestamp)}
+            for item, entry in zip(items, page.logs, strict=True)
+        ],
+        display_hints=[f"Use osmosis train info {name} for run details."],
+    )
+
+
 def info(name: str, *, output: str | None) -> DetailResult:
     """Show training run details, checkpoints, and metrics."""
     context = require_git_workspace_directory_context()
@@ -343,6 +393,8 @@ def info(name: str, *, output: str | None) -> DetailResult:
     fields = detail_fields(rows)
     if run.platform_url:
         display_hints.append(f"View: {run.platform_url}")
+    if run.status in RUN_STATUSES_ERROR:
+        display_hints.append(f"See logs with: osmosis train logs {run.name or name}")
     if checkpoints:
         from rich.table import Table
         from rich.text import Text
@@ -473,4 +525,4 @@ def stop(name: str, *, yes: bool) -> OperationResult:
     )
 
 
-__all__ = ["info", "list_training_runs", "stop", "submit"]
+__all__ = ["info", "list_training_runs", "logs", "stop", "submit"]

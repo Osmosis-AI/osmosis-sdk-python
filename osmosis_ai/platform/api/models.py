@@ -452,6 +452,51 @@ class TrainingRunMetrics:
         )
 
 
+# ── Training run logs ────────────────────────────────────────────
+
+
+@dataclass
+class TrainingRunLogEntry:
+    """A single training run lifecycle log line."""
+
+    timestamp: str
+    level: str
+    step: str
+    message: str
+    details: dict[str, Any] | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> TrainingRunLogEntry:
+        details = data.get("details")
+        return cls(
+            timestamp=data.get("timestamp", ""),
+            level=data.get("level", ""),
+            step=data.get("step", ""),
+            message=data.get("message", ""),
+            details=details if isinstance(details, dict) else None,
+        )
+
+
+@dataclass
+class TrainingRunLogs:
+    """One cursor page of training run logs.
+
+    The server returns entries oldest-first within the page for both paging
+    directions; ``next_cursor`` pages further back in time (``None`` when no
+    more pages exist).
+    """
+
+    logs: list[TrainingRunLogEntry]
+    next_cursor: str | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> TrainingRunLogs:
+        return cls(
+            logs=[TrainingRunLogEntry.from_dict(log) for log in data.get("logs", [])],
+            next_cursor=data.get("next_cursor"),
+        )
+
+
 @dataclass
 class EvalRewardStats:
     """Distribution stats for per-sample rewards in an eval run."""

@@ -442,6 +442,58 @@ class TestTrainingRunMetrics:
         assert result.metrics == []
 
 
+class TestTrainingRunLogs:
+    def test_from_dict(self) -> None:
+        from osmosis_ai.platform.api.models import TrainingRunLogs
+
+        data = {
+            "logs": [
+                {
+                    "timestamp": "2026-06-01T00:00:00Z",
+                    "level": "info",
+                    "step": "init",
+                    "message": "Run created",
+                    "details": None,
+                },
+                {
+                    "timestamp": "2026-06-01T00:01:00Z",
+                    "level": "error",
+                    "step": "train",
+                    "message": "OOM",
+                    "details": {"exit_code": 137},
+                },
+            ],
+            "next_cursor": "2026-06-01T00:00:00Z|log-1",
+        }
+        result = TrainingRunLogs.from_dict(data)
+        assert len(result.logs) == 2
+        assert result.logs[0].timestamp == "2026-06-01T00:00:00Z"
+        assert result.logs[0].details is None
+        assert result.logs[1].details == {"exit_code": 137}
+        assert result.next_cursor == "2026-06-01T00:00:00Z|log-1"
+
+    def test_from_dict_defaults_and_non_dict_details(self) -> None:
+        from osmosis_ai.platform.api.models import TrainingRunLogs
+
+        result = TrainingRunLogs.from_dict(
+            {"logs": [{"details": "not-a-dict"}], "next_cursor": None}
+        )
+        entry = result.logs[0]
+        assert entry.timestamp == ""
+        assert entry.level == ""
+        assert entry.step == ""
+        assert entry.message == ""
+        assert entry.details is None
+        assert result.next_cursor is None
+
+    def test_from_dict_empty(self) -> None:
+        from osmosis_ai.platform.api.models import TrainingRunLogs
+
+        result = TrainingRunLogs.from_dict({})
+        assert result.logs == []
+        assert result.next_cursor is None
+
+
 class TestModelModels:
     def test_lora_model_info_from_dict(self) -> None:
         from osmosis_ai.platform.api.models import LoraModelInfo

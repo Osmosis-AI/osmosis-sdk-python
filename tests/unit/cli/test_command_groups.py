@@ -47,6 +47,7 @@ PRESERVED_HELP_COMMANDS = [
     ["doctor", "--help"],
     ["dataset", "--help"],
     ["train", "--help"],
+    ["train", "logs", "--help"],
     ["model", "--help"],
     ["model", "list", "--help"],
     ["model", "deploy", "--help"],

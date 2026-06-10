@@ -15,6 +15,7 @@ from osmosis_ai.cli.output.context import (
     _argv_format_prescan,
     _output_context_var,
     get_output_context,
+    hoist_format_selectors,
     install_output_context,
     resolve_format_selectors,
 )
@@ -87,7 +88,7 @@ def _callback(
 ) -> None:
     """Osmosis AI CLI.
 
-    Rich output is the default for humans. For AI agents, CI/CD, and scripts, put a global output flag before the command, for example: `osmosis --json dataset list` or `osmosis --plain dataset list`.
+    Rich output is the default for humans. For AI agents, CI/CD, and scripts, pass `--json` or `--plain` anywhere on the command line, for example: `osmosis dataset list --json` or `osmosis --plain dataset list`.
     """
     warnings.filterwarnings("ignore")
     if version:
@@ -204,6 +205,7 @@ def _register_commands() -> None:
 def main(argv: list[str] | None = None) -> int:
     """Entry point for the Osmosis CLI."""
     _register_commands()
+    argv = hoist_format_selectors(argv if argv is not None else sys.argv[1:])
     try:
         result = app(argv, standalone_mode=False)
         # standalone_mode=False returns None on normal completion;
