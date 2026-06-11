@@ -220,3 +220,12 @@ def test_fuzzy_suggestions_do_not_offer_removed_commands(args, not_expected, cap
 
     assert rc != 0
     assert not_expected not in captured.err
+
+
+def test_help_command_nudges_to_help_flag(capfd):
+    rc = main(["help"])
+    captured = capfd.readouterr()
+
+    assert rc != 0
+    assert "Use 'osmosis --help'" in captured.err
+    assert "Did you mean" not in captured.err

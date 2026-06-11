@@ -565,11 +565,12 @@ def whoami() -> Any:
             raise CLIError(MSG_NOT_LOGGED_IN, code="AUTH_REQUIRED")
         if credentials.is_expired():
             raise AuthenticationExpiredError()
+        access_token = credentials.access_token
         try:
             with output.status("Verifying session..."):
                 verified = _verify_with_optional_workspace(
                     lambda *, git_identity: verify_token(
-                        credentials.access_token, git_identity=git_identity
+                        access_token, git_identity=git_identity
                     ),
                     git_identity=git_identity,
                 )

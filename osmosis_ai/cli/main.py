@@ -39,6 +39,11 @@ class OsmosisGroup(typer.core.TyperGroup):
         except click.UsageError:
             if args:
                 cmd_name = args[0]
+                if cmd_name == "help":
+                    raise click.UsageError(
+                        "No such command 'help'. Use 'osmosis --help', "
+                        "or 'osmosis <command> --help' for a specific command."
+                    ) from None
                 candidates = []
                 for name in self.list_commands(ctx):
                     command = self.get_command(ctx, name)
