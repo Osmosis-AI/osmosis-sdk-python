@@ -12,7 +12,6 @@ from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.cli.output import DetailSection, ListColumn, ListResult
 from osmosis_ai.cli.output.display import format_local_datetime
 from osmosis_ai.platform.api.models import (
-    DEPLOYMENT_STATUSES_INACTIVE,
     DEPLOYMENT_STATUSES_SUCCESS,
     EVAL_RUN_STATUSES_ERROR,
     EVAL_RUN_STATUSES_IN_PROGRESS,
@@ -138,10 +137,6 @@ _RUN_STATUS_STYLES: _StatusStyleMap = (
     (RUN_STATUSES_ERROR, "red"),
     (RUN_STATUSES_STOPPED, "dim"),
 )
-_DEPLOYMENT_STATUS_STYLES: _StatusStyleMap = (
-    (DEPLOYMENT_STATUSES_SUCCESS, "green"),
-    (DEPLOYMENT_STATUSES_INACTIVE, "dim"),
-)
 _EVAL_STATUS_STYLES: _StatusStyleMap = (
     (EVAL_RUN_STATUSES_SUCCESS, "green"),
     (EVAL_RUN_STATUSES_PENDING, "orange3"),
@@ -185,14 +180,19 @@ def format_run_status(r: Any, *, for_prompt: bool = False) -> str:
     return format_status_token(r.status, _RUN_STATUS_STYLES, for_prompt=for_prompt)
 
 
-def format_deployment_status(status: str | None) -> str:
-    """Format a LoRA model deployment status token with Rich styling.
+def format_deployment_status(status: str | None, *, plain: bool = False) -> str:
+    """Format a deployment state with the platform's vocabulary
+    ("deployed" / "not deployed").
 
-    ``None`` (never deployed) renders as an em dash.
+    Matches the platform's models table: only the deployed state gets a
+    styled token in list columns; everything else (including ``None``,
+    never deployed) renders an en dash. *plain* renders the Title Case
+    detail-row form with no markup (e.g. for ``kv_section``), where
+    non-deployed states say "Not deployed" explicitly.
     """
-    if status is None:
-        return "—"
-    return format_status_token(status, _DEPLOYMENT_STATUS_STYLES)
+    if status is not None and status in DEPLOYMENT_STATUSES_SUCCESS:
+        return "Deployed" if plain else console.format_styled("[deployed]", "green")
+    return "Not deployed" if plain else "–"
 
 
 def format_eval_status(run: Any) -> str:
@@ -201,9 +201,9 @@ def format_eval_status(run: Any) -> str:
 
 
 def format_reward(reward: float | None) -> str:
-    """Format a training reward to two decimals, em dash when unset."""
+    """Format a training reward to two decimals, en dash when unset."""
     if reward is None:
-        return "—"
+        return "–"
     return f"{reward:.2f}"
 
 
@@ -245,9 +245,9 @@ def build_run_detail_rows(r: Any) -> list[tuple[str, str]]:
         rows.append(("Submitted", format_local_datetime(r.created_at)))
     if r.creator_name:
         rows.append(("Submitted By", console.escape(r.creator_name)))
-    rows.append(("Dataset", console.escape(r.dataset_name) if r.dataset_name else "—"))
-    rows.append(("Base Model", console.escape(r.model_name) if r.model_name else "—"))
-    rows.append(("Rollout", console.escape(r.rollout_name) if r.rollout_name else "—"))
+    rows.append(("Dataset", console.escape(r.dataset_name) if r.dataset_name else "–"))
+    rows.append(("Base Model", console.escape(r.model_name) if r.model_name else "–"))
+    rows.append(("Rollout", console.escape(r.rollout_name) if r.rollout_name else "–"))
     return rows
 
 

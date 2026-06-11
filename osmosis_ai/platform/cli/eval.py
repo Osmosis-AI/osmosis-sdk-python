@@ -127,7 +127,7 @@ def _format_eval_progress(detail: Any) -> str | None:
 def _format_avg_reward(results: dict[str, Any] | None, *, precision: int) -> str:
     avg_reward = _results_number(results, "score")
     if avg_reward is None:
-        return "—"
+        return "–"
     return f"{avg_reward:.{precision}f}"
 
 
@@ -414,9 +414,9 @@ def list_eval_runs(*, limit: int, all_: bool) -> ListResult:
                 **serialize_eval_run(run),
                 "name": run.name,
                 "status": format_eval_status(run),
-                "rollout": _ref_name(run.rollout) or "—",
+                "rollout": _ref_name(run.rollout) or "–",
                 "avg_reward": _format_avg_reward(run.results, precision=2),
-                "creator_name": run.creator_name or "—",
+                "creator_name": run.creator_name or "–",
                 "created_at": format_local_date(run.created_at),
             }
             for run in eval_runs

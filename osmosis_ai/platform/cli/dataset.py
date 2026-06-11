@@ -485,7 +485,7 @@ def list_datasets(limit: int = DEFAULT_PAGE_SIZE, all_: bool = False) -> Command
                 "status": format_dataset_status(d),
                 "file_size": format_size(d.file_size),
                 "created_at": format_local_date(d.created_at),
-                "creator_name": d.creator_name or "—",
+                "creator_name": d.creator_name or "–",
             }
             for d in datasets
         ],

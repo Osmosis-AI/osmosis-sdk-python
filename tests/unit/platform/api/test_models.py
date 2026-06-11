@@ -539,6 +539,15 @@ class TestModelModels:
         assert m.deployed_at is None
         assert m.deployed_by is None
         assert m.created_at == ""
+        assert m.has_deployment_info is False
+
+    def test_lora_model_info_deployment_info_tracks_key_presence(self) -> None:
+        from osmosis_ai.platform.api.models import LoraModelInfo
+
+        with_key = LoraModelInfo.from_dict(
+            {"id": "lora_1", "model_name": "x", "deployment_status": None}
+        )
+        assert with_key.has_deployment_info is True
 
     def test_paginated_base_models_from_dict(self) -> None:
         from osmosis_ai.platform.api.models import PaginatedBaseModels
@@ -599,6 +608,7 @@ class TestModelModels:
         assert page.next_offset is None
         assert page.active_deployments == 2
         assert page.max_active_deployments == 5
+        assert page.has_deployment_info is True
 
     def test_paginated_lora_models_from_dict_empty(self) -> None:
         from osmosis_ai.platform.api.models import PaginatedLoraModels
@@ -610,6 +620,7 @@ class TestModelModels:
         assert page.next_offset is None
         assert page.active_deployments == 0
         assert page.max_active_deployments == 0
+        assert page.has_deployment_info is False
 
     def test_lora_model_summary_from_dict(self) -> None:
         from osmosis_ai.platform.api.models import LoraModelSummary

@@ -127,10 +127,23 @@ def test_serialize_lora_model_keys() -> None:
 
 
 def test_serialize_lora_model_keeps_none_deploy_metadata() -> None:
-    lora_model = LoraModelInfo.from_dict({"id": "lora_1", "model_name": "x"})
+    # ``deployment_status`` present but null = never deployed on an
+    # inference-enabled account; the null metadata stays in the payload.
+    lora_model = LoraModelInfo.from_dict(
+        {"id": "lora_1", "model_name": "x", "deployment_status": None}
+    )
     payload = serialize_lora_model(lora_model)
+    assert payload["deployment_status"] is None
     assert payload["deployed_at"] is None
     assert payload["deployed_by"] is None
+
+
+def test_serialize_lora_model_omits_deploy_keys_when_platform_omits_them() -> None:
+    lora_model = LoraModelInfo.from_dict({"id": "lora_1", "model_name": "x"})
+    payload = serialize_lora_model(lora_model)
+    assert "deployment_status" not in payload
+    assert "deployed_at" not in payload
+    assert "deployed_by" not in payload
 
 
 def test_serialize_model_keys() -> None:

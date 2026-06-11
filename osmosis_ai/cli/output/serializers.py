@@ -78,19 +78,25 @@ def serialize_checkpoint(ckpt: LoraCheckpointInfo) -> dict[str, Any]:
 
 
 def serialize_lora_model(model: LoraModelInfo) -> dict[str, Any]:
-    """Serialize a LoRA model for the public JSON contract."""
-    return {
+    """Serialize a LoRA model for the public JSON contract.
+
+    Deployment keys are omitted when the platform omitted them (inference
+    unavailable for the account), mirroring the API response shape.
+    """
+    data: dict[str, Any] = {
         "id": model.id,
         "model_name": model.model_name,
         "base_model": model.base_model,
         "training_run_name": model.training_run_name,
         "checkpoint_step": model.checkpoint_step,
         "reward": model.reward,
-        "deployment_status": model.deployment_status,
-        "deployed_at": model.deployed_at,
-        "deployed_by": model.deployed_by,
-        "created_at": model.created_at,
     }
+    if model.has_deployment_info:
+        data["deployment_status"] = model.deployment_status
+        data["deployed_at"] = model.deployed_at
+        data["deployed_by"] = model.deployed_by
+    data["created_at"] = model.created_at
+    return data
 
 
 def serialize_model(model: BaseModelInfo) -> dict[str, Any]:

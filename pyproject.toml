@@ -170,6 +170,9 @@ ignore = [
     "RUF012",  # mutable-class-default (common with Pydantic models)
 ]
 
+# En dash is used intentionally as the placeholder for empty/unset values.
+allowed-confusables = ["–"]
+
 [tool.ruff.lint.per-file-ignores]
 # B008: function-call-in-default-argument — required by Typer for typer.Option/Argument
 "**/cli/*.py" = ["B008"]

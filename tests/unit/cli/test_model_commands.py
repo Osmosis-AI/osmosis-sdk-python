@@ -173,6 +173,7 @@ def _fake_list_client(
     lora_next_offset: int | None = None,
     active_deployments: int = 0,
     max_active_deployments: int = 0,
+    has_deployment_info: bool = True,
 ):
     class FakeClient:
         def list_base_models(
@@ -203,6 +204,7 @@ def _fake_list_client(
                 next_offset=lora_next_offset,
                 active_deployments=active_deployments,
                 max_active_deployments=max_active_deployments,
+                has_deployment_info=has_deployment_info,
             )
 
     return FakeClient
@@ -283,9 +285,7 @@ class TestListModels:
         assert lora_section.display_items[0]["reward"] == "0.85"
         assert base_section.total_count == 1
         assert lora_section.total_count == 1
-        assert result.display_hints == [
-            "Deploy a LoRA model with: osmosis model deploy <name>"
-        ]
+        assert result.display_hints == ["Use osmosis model info <name> for details."]
 
     def test_list_items_carry_no_type_discriminator(
         self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
@@ -320,6 +320,31 @@ class TestListModels:
         assert [c.key for c in lora_section.columns] == _LORA_COLUMN_KEYS
         assert [c.label for c in lora_section.columns] == _LORA_COLUMN_LABELS
 
+    def test_list_hides_deployment_column_without_deployment_info(
+        self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
+    ) -> None:
+        # The platform omits all deployment fields when inference is
+        # unavailable for the account; the column and quota disappear with them.
+        monkeypatch.setattr(
+            platform_model_module,
+            "OsmosisClient",
+            _fake_list_client(
+                [],
+                [_lora_model(deployment_status=None, has_deployment_info=False)],
+                has_deployment_info=False,
+            ),
+        )
+        result = platform_model_module.list_models(limit=30, all_=False)
+
+        assert isinstance(result, SectionedListResult)
+        _, lora_section = result.sections
+        assert [c.key for c in lora_section.columns] == _LORA_COLUMN_KEYS[:-1]
+        assert "deployment_status" not in lora_section.items[0]
+        assert lora_section.display_items is not None
+        assert "deployment_status" not in lora_section.display_items[0]
+        assert "active_deployments" not in result.extra
+        assert "max_active_deployments" not in result.extra
+
     def test_list_display_items_fill_missing_fields_with_dashes(
         self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
     ) -> None:
@@ -347,12 +372,12 @@ class TestListModels:
         assert lora_section.display_items is not None
         (base_display,) = base_section.display_items
         (lora_display,) = lora_section.display_items
-        assert base_display["creator_name"] == "—"
-        assert lora_display["deployment_status"] == "—"
-        assert lora_display["base_model"] == "—"
-        assert lora_display["training_run_name"] == "—"
-        assert lora_display["checkpoint_step"] == "—"
-        assert lora_display["reward"] == "—"
+        assert base_display["creator_name"] == "–"
+        assert lora_display["deployment_status"] == "–"
+        assert lora_display["base_model"] == "–"
+        assert lora_display["training_run_name"] == "–"
+        assert lora_display["checkpoint_step"] == "–"
+        assert lora_display["reward"] == "–"
         # Raw JSON items keep nulls — display dashes must not leak into them.
         assert lora_section.items[0]["deployment_status"] is None
         assert lora_section.items[0]["checkpoint_step"] is None
@@ -493,9 +518,7 @@ class TestListModels:
         assert all("type" not in item for item in result.items)
         assert [c.key for c in result.columns] == _LORA_COLUMN_KEYS
         assert result.next_offset == 1
-        assert result.display_hints == [
-            "Deploy a LoRA model with: osmosis model deploy <name>"
-        ]
+        assert result.display_hints == ["Use osmosis model info <name> for details."]
         assert_git_context(result.extra)
 
     def test_list_rejects_invalid_type(self) -> None:
@@ -547,7 +570,7 @@ class TestListModels:
         assert isinstance(result, SectionedListResult)
         assert result.display_hints == [
             "2 of 5 inference deployments used",
-            "Deploy a LoRA model with: osmosis model deploy <name>",
+            "Use osmosis model info <name> for details.",
         ]
 
     def test_list_type_lora_shows_deployment_quota_hint(
@@ -579,9 +602,7 @@ class TestListModels:
         result = platform_model_module.list_models(limit=30, all_=False)
 
         assert isinstance(result, SectionedListResult)
-        assert result.display_hints == [
-            "Deploy a LoRA model with: osmosis model deploy <name>"
-        ]
+        assert result.display_hints == ["Use osmosis model info <name> for details."]
 
     def test_list_all_captures_quota_from_first_page(
         self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
@@ -727,10 +748,19 @@ class TestInfo:
             "Checkpoint Step",
             "Training Reward",
             "Created",
-            "HF Upload Status",
-            "Hugging Face",
-            "HF Uploaded By",
-            "Deployment Status",
+        ]
+        section_plain_lines = [section.plain_lines for section in result.sections]
+        assert section_plain_lines == [
+            [
+                "Hugging Face:",
+                "Upload Status: Uploaded",
+                "URL: https://huggingface.co/acme/qwen3-run1-step-100",
+                "Uploaded By: Ada Lovelace",
+            ],
+            [
+                "Deployment:",
+                "Status: Not deployed",
+            ],
         ]
 
     def test_info_without_deployment_info_hides_rows_and_hints(
@@ -747,10 +777,13 @@ class TestInfo:
         monkeypatch.setattr(platform_model_module, "OsmosisClient", FakeClient)
         result = platform_model_module.info("qwen3-run1-step-100")
 
-        labels = [field.label for field in result.fields]
-        assert "Deployment Status" not in labels
-        assert "Deployed By" not in labels
-        assert "HF Uploaded By" not in labels
+        section_titles = [section.plain_lines[0] for section in result.sections]
+        assert "Deployment:" not in section_titles
+        assert not any(
+            "Uploaded By" in line
+            for section in result.sections
+            for line in section.plain_lines
+        )
         assert not any("osmosis model deploy" in hint for hint in result.display_hints)
         assert not any(
             "osmosis model undeploy" in hint for hint in result.display_hints

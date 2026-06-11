@@ -447,7 +447,7 @@ def test_model_list_plain_outputs_titled_base_and_lora_sections(
     assert lines[2] == "LoRA Models:"
     assert len(lines[3].split("\t")) == 7
     assert lines[3].startswith("run-step-1\tQwen/Qwen3\treward-run\t1\t0.87\t")
-    assert lines[3].endswith("\t[active]")
+    assert lines[3].endswith("\t[deployed]")
 
 
 def test_model_list_json_returns_sectioned_list_envelope(

@@ -646,6 +646,9 @@ class LoraModelInfo:
     deployed_at: str | None = None
     deployed_by: str | None = None
     created_at: str = ""
+    # The platform omits deployment fields entirely when inference is
+    # unavailable for the account.
+    has_deployment_info: bool = True
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> LoraModelInfo:
@@ -660,6 +663,7 @@ class LoraModelInfo:
             deployed_at=data.get("deployed_at"),
             deployed_by=data.get("deployed_by"),
             created_at=data.get("created_at", ""),
+            has_deployment_info="deployment_status" in data,
         )
 
 
@@ -670,7 +674,6 @@ class LoraModelDetail(LoraModelInfo):
     hf_upload_status: str = ""
     hf_url: str | None = None
     uploaded_by: str | None = None
-    has_deployment_info: bool = True
     # Canonical `model` value for the inference API
     # ("<base_model_path>:<lora-model-name>").
     inference_model: str | None = None
@@ -692,8 +695,6 @@ class LoraModelDetail(LoraModelInfo):
             hf_upload_status=data.get("hf_upload_status", ""),
             hf_url=data.get("hf_url"),
             uploaded_by=data.get("uploaded_by"),
-            # The platform omits deployment fields entirely when inference is
-            # unavailable for the account.
             has_deployment_info="deployment_status" in data,
             inference_model=data.get("inference_model"),
             platform_url=data.get("platform_url"),
@@ -710,6 +711,9 @@ class PaginatedLoraModels:
     next_offset: int | None = None
     active_deployments: int = 0
     max_active_deployments: int = 0
+    # The platform omits the deployment quota fields when inference is
+    # unavailable for the account.
+    has_deployment_info: bool = True
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> PaginatedLoraModels:
@@ -720,6 +724,7 @@ class PaginatedLoraModels:
             next_offset=data.get("next_offset"),
             active_deployments=data.get("active_deployments", 0),
             max_active_deployments=data.get("max_active_deployments", 0),
+            has_deployment_info="active_deployments" in data,
         )
 
 

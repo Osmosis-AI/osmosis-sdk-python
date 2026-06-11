@@ -219,11 +219,11 @@ def list_training_runs(*, limit: int, all_: bool) -> ListResult:
                 **serialize_training_run(run),
                 "name": run.name or "(unnamed)",
                 "status": format_run_status(run),
-                "model_name": run.model_name or "—",
-                "rollout_name": run.rollout_name or "—",
+                "model_name": run.model_name or "–",
+                "rollout_name": run.rollout_name or "–",
                 "reward": format_reward(run.reward),
                 "created_at": format_local_date(run.created_at),
-                "creator_name": run.creator_name or "—",
+                "creator_name": run.creator_name or "–",
             }
             for run in training_runs
         ],
