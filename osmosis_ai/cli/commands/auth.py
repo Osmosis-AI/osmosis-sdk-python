@@ -132,12 +132,39 @@ def _verify_env_token(env_token: str, *, git_identity: str | None = None) -> Any
         raise
 
 
+def _is_auth_login_error(exc: Any) -> bool:
+    """True when a LoginError signals an invalid/expired/revoked session."""
+    platform_code = getattr(exc, "code", None)
+    return getattr(exc, "status_code", None) == 401 or (
+        isinstance(platform_code, str) and platform_code in _AUTH_LOGIN_ERROR_CODES
+    )
+
+
+def _verify_with_optional_workspace(verify: Any, *, git_identity: str | None) -> Any:
+    """Verify a session, enriching it with the linked workspace when possible.
+
+    ``git_identity`` only adds the linked workspace (resolved via the
+    X-Osmosis-Git header) to the result. A repo/workspace scope mismatch must
+    not stop identity resolution, so any non-auth failure retries without the
+    git identity. Genuine auth failures (revoked/expired/invalid) still
+    propagate so callers can surface them.
+    """
+    from osmosis_ai.platform.auth import LoginError
+
+    if git_identity is None:
+        return verify(git_identity=None)
+    try:
+        return verify(git_identity=git_identity)
+    except LoginError as exc:
+        if _is_auth_login_error(exc):
+            raise
+        return verify(git_identity=None)
+
+
 def _cli_error_from_login_error(exc: Any) -> CLIError:
     status_code = getattr(exc, "status_code", None)
     platform_code = getattr(exc, "code", None)
-    if status_code == 401 or (
-        isinstance(platform_code, str) and platform_code in _AUTH_LOGIN_ERROR_CODES
-    ):
+    if _is_auth_login_error(exc):
         return CLIError(str(exc), code="AUTH_REQUIRED")
 
     if status_code == 426:
@@ -523,7 +550,12 @@ def whoami() -> Any:
     if env_token:
         try:
             with output.status("Verifying token..."):
-                verified = _verify_env_token(env_token, git_identity=git_identity)
+                verified = _verify_with_optional_workspace(
+                    lambda *, git_identity: _verify_env_token(
+                        env_token, git_identity=git_identity
+                    ),
+                    git_identity=git_identity,
+                )
         except LoginError as exc:
             raise _cli_error_from_login_error(exc) from exc
         credentials = Credentials.from_verify_result(env_token, verified)
@@ -535,8 +567,11 @@ def whoami() -> Any:
             raise AuthenticationExpiredError()
         try:
             with output.status("Verifying session..."):
-                verified = verify_token(
-                    credentials.access_token, git_identity=git_identity
+                verified = _verify_with_optional_workspace(
+                    lambda *, git_identity: verify_token(
+                        credentials.access_token, git_identity=git_identity
+                    ),
+                    git_identity=git_identity,
                 )
         except LoginError as exc:
             platform_code = getattr(exc, "code", None)

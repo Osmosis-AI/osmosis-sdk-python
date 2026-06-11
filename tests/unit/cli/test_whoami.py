@@ -529,6 +529,82 @@ def test_whoami_plain_inside_workspace_repo_shows_workspace_line(
     assert "Role: member" in lines
 
 
+def test_whoami_json_falls_back_to_identity_on_workspace_scope_mismatch(
+    monkeypatch, capsys, tmp_path, fake_credentials
+) -> None:
+    from osmosis_ai.platform.auth import LoginError
+
+    workspace_directory = tmp_path / "project"
+    _create_canonical_project(workspace_directory)
+    _add_origin_remote(workspace_directory)
+    monkeypatch.chdir(workspace_directory)
+
+    verified = VerifyResult(
+        user=fake_credentials.user,
+        expires_at=fake_credentials.expires_at,
+        token_id=fake_credentials.token_id,
+        workspace=None,
+    )
+    verify_calls: list[dict[str, str | None]] = []
+
+    def _verify(token, git_identity=None):
+        verify_calls.append({"token": token, "git_identity": git_identity})
+        if git_identity is not None:
+            raise LoginError(
+                "Repository is not linked to your workspace.", status_code=403
+            )
+        return verified
+
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.load_credentials", lambda: fake_credentials
+    )
+    monkeypatch.setattr("osmosis_ai.platform.auth.verify_token", _verify)
+
+    exit_code = cli.main(["--json", "auth", "whoami"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 0
+    assert verify_calls == [
+        {"token": "token", "git_identity": "acme/rollouts"},
+        {"token": "token", "git_identity": None},
+    ]
+    data = json.loads(captured.out)["data"]
+    assert data["email"] == "brian@example.com"
+    assert data["workspace"] is None
+
+
+def test_whoami_json_auth_error_with_git_identity_still_fails(
+    monkeypatch, capsys, tmp_path, fake_credentials
+) -> None:
+    from osmosis_ai.platform.auth import LoginError
+
+    workspace_directory = tmp_path / "project"
+    _create_canonical_project(workspace_directory)
+    _add_origin_remote(workspace_directory)
+    monkeypatch.chdir(workspace_directory)
+
+    verify_calls: list[str | None] = []
+
+    def _verify(token, git_identity=None):
+        verify_calls.append(git_identity)
+        raise LoginError(
+            "Token has been revoked.", code="TOKEN_REVOKED", status_code=401
+        )
+
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.load_credentials", lambda: fake_credentials
+    )
+    monkeypatch.setattr("osmosis_ai.platform.auth.verify_token", _verify)
+
+    exit_code = cli.main(["--json", "auth", "whoami"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert verify_calls == ["acme/rollouts"]
+    envelope = json.loads(captured.err)
+    assert envelope["error"]["code"] == "AUTH_REQUIRED"
+
+
 def test_whoami_json_with_env_token_inside_workspace_repo_reports_workspace(
     monkeypatch, capsys, tmp_path
 ) -> None:

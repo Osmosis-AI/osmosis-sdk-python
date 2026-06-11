@@ -45,6 +45,31 @@ class OsmosisClient:
     be tied to the trusted workspace directory context.
     """
 
+    def _get_logs(
+        self,
+        resource_path: str,
+        *,
+        limit: int = DEFAULT_PAGE_SIZE,
+        cursor: str | None = None,
+        direction: str = "older",
+        credentials: Credentials | None = None,
+        git_identity: str,
+    ) -> LogsPage:
+        """Fetch one page of logs for ``{resource_path}/logs``.
+
+        Without ``cursor``, ``direction="older"`` returns the most recent page;
+        the returned ``next_cursor`` pages further back in time.
+        """
+        params: dict[str, Any] = {"limit": limit, "direction": direction}
+        if cursor is not None:
+            params["cursor"] = cursor
+        data = platform_request(
+            f"{resource_path}/logs?{urlencode(params)}",
+            credentials=credentials,
+            git_identity=git_identity,
+        )
+        return LogsPage.from_dict(data)
+
     # ── Datasets ─────────────────────────────────────────────────────
 
     def create_dataset(
@@ -192,16 +217,14 @@ class OsmosisClient:
         Without ``cursor``, ``direction="older"`` returns the most recent page;
         the returned ``next_cursor`` pages further back in time.
         """
-        params: dict[str, Any] = {"limit": limit, "direction": direction}
-        if cursor is not None:
-            params["cursor"] = cursor
-        qs = urlencode(params)
-        data = platform_request(
-            f"/api/cli/datasets/{_safe_path(name_or_id)}/logs?{qs}",
+        return self._get_logs(
+            f"/api/cli/datasets/{_safe_path(name_or_id)}",
+            limit=limit,
+            cursor=cursor,
+            direction=direction,
             credentials=credentials,
             git_identity=git_identity,
         )
-        return LogsPage.from_dict(data)
 
     # ── Training Runs ─────────────────────────────────────────────
 
@@ -285,7 +308,7 @@ class OsmosisClient:
         credentials: Credentials | None = None,
         git_identity: str,
     ) -> dict[str, Any]:
-        """Stop an in-progress training run."""
+        """Stop a non-terminal training run (queued, pending, or running)."""
         return platform_request(
             f"/api/cli/training-runs/{_safe_path(run_id)}/stop",
             method="POST",
@@ -324,16 +347,14 @@ class OsmosisClient:
         Without ``cursor``, ``direction="older"`` returns the most recent page;
         the returned ``next_cursor`` pages further back in time.
         """
-        params: dict[str, Any] = {"limit": limit, "direction": direction}
-        if cursor is not None:
-            params["cursor"] = cursor
-        qs = urlencode(params)
-        data = platform_request(
-            f"/api/cli/training-runs/{_safe_path(name_or_id)}/logs?{qs}",
+        return self._get_logs(
+            f"/api/cli/training-runs/{_safe_path(name_or_id)}",
+            limit=limit,
+            cursor=cursor,
+            direction=direction,
             credentials=credentials,
             git_identity=git_identity,
         )
-        return LogsPage.from_dict(data)
 
     # ── Rollouts ──────────────────────────────────────────────────
 
@@ -608,16 +629,14 @@ class OsmosisClient:
         Without ``cursor``, ``direction="older"`` returns the most recent page;
         the returned ``next_cursor`` pages further back in time.
         """
-        params: dict[str, Any] = {"limit": limit, "direction": direction}
-        if cursor is not None:
-            params["cursor"] = cursor
-        qs = urlencode(params)
-        data = platform_request(
-            f"/api/cli/eval-runs/{_safe_path(name_or_id)}/logs?{qs}",
+        return self._get_logs(
+            f"/api/cli/eval-runs/{_safe_path(name_or_id)}",
+            limit=limit,
+            cursor=cursor,
+            direction=direction,
             credentials=credentials,
             git_identity=git_identity,
         )
-        return LogsPage.from_dict(data)
 
     def stop_eval_run(
         self,
@@ -626,7 +645,7 @@ class OsmosisClient:
         credentials: Credentials | None = None,
         git_identity: str,
     ) -> dict[str, Any]:
-        """Stop an in-progress evaluation run."""
+        """Stop a non-terminal evaluation run (queued, pending, or running)."""
         return platform_request(
             f"/api/cli/eval-runs/{_safe_path(eval_run_id)}/stop",
             method="POST",
