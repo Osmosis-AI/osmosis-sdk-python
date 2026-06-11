@@ -79,6 +79,7 @@ class DatasetFile:
     created_at: str = ""
     updated_at: str = ""
     platform_url: str | None = None
+    is_internal_user: bool = False
     # Upload info — only present in create_dataset response
     upload: UploadInfo | None = None
 
@@ -102,6 +103,7 @@ class DatasetFile:
             created_at=data.get("created_at", ""),
             updated_at=data.get("updated_at", ""),
             platform_url=data.get("platform_url"),
+            is_internal_user=data.get("is_internal_user", False),
             upload=upload,
         )
 
@@ -249,6 +251,7 @@ class TrainingRunDetail(TrainingRun):
     commit_sha: str | None = None
     env_config: dict[str, Any] | None = None
     resolved_secret_scopes: dict[str, Any] | None = None
+    is_internal_user: bool = False
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> TrainingRunDetail:
@@ -297,6 +300,7 @@ class TrainingRunDetail(TrainingRun):
                 if isinstance(resolved_secret_scopes, dict)
                 else None
             ),
+            is_internal_user=data.get("is_internal_user", False),
         )
 
 
@@ -678,6 +682,7 @@ class LoraModelDetail(LoraModelInfo):
     # ("<base_model_path>:<lora-model-name>").
     inference_model: str | None = None
     platform_url: str | None = None
+    is_internal_user: bool = False
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> LoraModelDetail:
@@ -698,6 +703,7 @@ class LoraModelDetail(LoraModelInfo):
             has_deployment_info="deployment_status" in data,
             inference_model=data.get("inference_model"),
             platform_url=data.get("platform_url"),
+            is_internal_user=data.get("is_internal_user", False),
         )
 
 
@@ -984,6 +990,7 @@ class EvaluationRunDetail(EvaluationRun):
     env_config: dict[str, Any] | None = None
     resolved_secret_scopes: dict[str, Any] | None = None
     dataset_df_stats: dict[str, Any] | None = None
+    is_internal_user: bool = False
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> EvaluationRunDetail:
@@ -1025,6 +1032,7 @@ class EvaluationRunDetail(EvaluationRun):
             dataset_df_stats=(
                 dataset_df_stats if isinstance(dataset_df_stats, dict) else None
             ),
+            is_internal_user=data.get("is_internal_user", False),
         )
 
 

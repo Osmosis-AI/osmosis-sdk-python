@@ -14,10 +14,12 @@ from osmosis_ai.platform.api.models import (
     STATUSES_SUCCESS,
     STATUSES_TERMINAL,
     DatasetDownloadInfo,
+    DatasetFile,
     EnvironmentSecretInfo,
     EvalRunMetrics,
     EvaluationRun,
     EvaluationRunDetail,
+    LoraModelDetail,
     MetricDataPoint,
     MetricHistory,
     PaginatedEnvironmentSecrets,
@@ -873,3 +875,35 @@ class TestEvalRunMetrics:
         assert metrics.pass_at_k == []
         assert metrics.overview.duration_ms is None
         assert metrics.overview.total_samples is None
+
+
+class TestIsInternalUserFlag:
+    def test_training_run_detail_parses_flag(self) -> None:
+        data = {"training_run": {"id": "run_1"}, "is_internal_user": True}
+        assert TrainingRunDetail.from_dict(data).is_internal_user is True
+
+    def test_training_run_detail_defaults_to_false(self) -> None:
+        detail = TrainingRunDetail.from_dict({"training_run": {"id": "run_1"}})
+        assert detail.is_internal_user is False
+
+    def test_dataset_file_parses_flag(self) -> None:
+        data = {"id": "ds_1", "is_internal_user": True}
+        assert DatasetFile.from_dict(data).is_internal_user is True
+
+    def test_dataset_file_defaults_to_false(self) -> None:
+        assert DatasetFile.from_dict({"id": "ds_1"}).is_internal_user is False
+
+    def test_evaluation_run_detail_parses_flag(self) -> None:
+        data = {"eval_run": {"id": "eval_1"}, "is_internal_user": True}
+        assert EvaluationRunDetail.from_dict(data).is_internal_user is True
+
+    def test_evaluation_run_detail_defaults_to_false(self) -> None:
+        detail = EvaluationRunDetail.from_dict({"eval_run": {"id": "eval_1"}})
+        assert detail.is_internal_user is False
+
+    def test_lora_model_detail_parses_flag(self) -> None:
+        data = {"id": "lora_1", "is_internal_user": True}
+        assert LoraModelDetail.from_dict(data).is_internal_user is True
+
+    def test_lora_model_detail_defaults_to_false(self) -> None:
+        assert LoraModelDetail.from_dict({"id": "lora_1"}).is_internal_user is False

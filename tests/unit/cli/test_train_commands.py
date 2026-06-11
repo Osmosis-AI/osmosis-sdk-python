@@ -501,6 +501,95 @@ class TestInfo:
         assert "not yet available" in (result.data["metrics_error"] or "")
         assert all(field.label != "Note" for field in result.fields)
 
+    def test_info_internal_user_sees_id_row_before_status(
+        self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
+    ) -> None:
+        detail = TrainingRunDetail(
+            id="abcdef1234567890abcdef1234567890",
+            name="run-1",
+            status="finished",
+            model_name="gpt-2",
+            dataset_name="train.jsonl",
+            rollout_name="math-rollout",
+            current_step=25,
+            total_steps=25,
+            is_internal_user=True,
+        )
+
+        class FakeClient:
+            def get_training_run(self, run_id, *, git_identity, credentials=None):
+                assert git_identity == GIT_IDENTITY
+                return detail
+
+            def list_training_run_checkpoints(
+                self, run_id, *, git_identity, credentials=None
+            ):
+                return type("CheckpointPage", (), {"checkpoints": []})()
+
+            def get_training_run_metrics(
+                self, run_id, *, git_identity, credentials=None
+            ):
+                raise PlatformAPIError("not available")
+
+        monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(platform_train_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(shared_submit_module, "OsmosisClient", FakeClient)
+        result = train_module.info(name="run-1")
+
+        assert isinstance(result, DetailResult)
+        labels = [field.label for field in result.fields]
+        assert labels[:3] == ["Name", "ID", "Status"]
+        if "Progress" in labels:
+            assert labels.index("Progress") == labels.index("Status") + 1
+
+    def test_info_metrics_fallback_progress_inserted_after_status(
+        self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
+    ) -> None:
+        detail = TrainingRunDetail(
+            id="abcdef1234567890abcdef1234567890",
+            name="run-metrics-fallback",
+            status="running",
+            model_name="gpt-2",
+            is_internal_user=False,
+        )
+
+        metrics = TrainingRunMetrics(
+            training_run_id=detail.id,
+            status="running",
+            overview=TrainingRunMetricsOverview(
+                duration_ms=None,
+                metric_summaries=[],
+                examples_processed_count=None,
+                total_steps=100,
+                latest_step=42,
+            ),
+            metrics=[],
+        )
+
+        class FakeClient:
+            def get_training_run(self, run_id, *, git_identity, credentials=None):
+                return detail
+
+            def list_training_run_checkpoints(
+                self, run_id, *, git_identity, credentials=None
+            ):
+                return type("CheckpointPage", (), {"checkpoints": []})()
+
+            def get_training_run_metrics(
+                self, run_id, *, git_identity, credentials=None
+            ):
+                return metrics
+
+        monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(platform_train_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(shared_submit_module, "OsmosisClient", FakeClient)
+        result = train_module.info(name="run-metrics-fallback", output=None)
+
+        assert isinstance(result, DetailResult)
+        labels = [field.label for field in result.fields]
+        assert "Progress" in labels
+        assert labels.index("Progress") == labels.index("Status") + 1
+
 
 # ---------------------------------------------------------------------------
 # status
@@ -643,7 +732,6 @@ class TestStatus:
             "Checkpoint",
             "Step",
             "Status",
-            "ID",
         ]
         output = StringIO()
         rich = RichConsole(file=output, force_terminal=False, no_color=True, width=200)

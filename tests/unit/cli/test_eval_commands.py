@@ -211,7 +211,6 @@ class TestEvalInfo:
         # Main info mirrors the Platform detail page sidebar.
         assert [label for label, _value in field_rows] == [
             "Name",
-            "ID",
             "Status",
             "Progress",
             "Duration",
@@ -287,6 +286,32 @@ class TestEvalInfo:
         assert "Created" not in fields
         assert "Score" not in fields
         assert "Note" not in fields
+
+    def test_info_shows_id_for_internal_user(
+        self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
+    ) -> None:
+        detail = EvaluationRunDetail(
+            id="eval-1",
+            name="math-eval",
+            status="running",
+            created_at="2026-01-01T00:00:00Z",
+            is_internal_user=True,
+        )
+
+        class FakeClient:
+            def get_eval_run(self, name_or_id, *, git_identity, credentials=None):
+                return detail
+
+            get_eval_run_metrics = _fake_eval_metrics
+
+        monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(platform_eval_module, "OsmosisClient", FakeClient)
+
+        result = eval_module.eval_info("math-eval", output=None)
+
+        assert isinstance(result, DetailResult)
+        labels = [field.label for field in result.fields]
+        assert labels[:3] == ["Name", "ID", "Status"]
 
     def test_info_progress_and_summary_agree_when_runs_exceed_total(
         self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO

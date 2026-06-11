@@ -264,15 +264,23 @@ def info(lora_model_name: str) -> DetailResult:
     # page's cards.
     rows: list[tuple[str, str]] = [
         ("Name", model.model_name),
-        ("Base Model", model.base_model or "–"),
-        ("Training Run", model.training_run_name or "–"),
-        (
-            "Checkpoint Step",
-            str(model.checkpoint_step) if model.checkpoint_step is not None else "–",
-        ),
-        ("Training Reward", format_reward(model.reward)),
-        ("Created", format_local_datetime(model.created_at)),
     ]
+    if model.is_internal_user:
+        rows.append(("ID", model.id))
+    rows.extend(
+        [
+            ("Base Model", model.base_model or "–"),
+            ("Training Run", model.training_run_name or "–"),
+            (
+                "Checkpoint Step",
+                str(model.checkpoint_step)
+                if model.checkpoint_step is not None
+                else "–",
+            ),
+            ("Training Reward", format_reward(model.reward)),
+            ("Created", format_local_datetime(model.created_at)),
+        ]
+    )
 
     sections: list[DetailSection] = []
 
@@ -309,21 +317,36 @@ def info(lora_model_name: str) -> DetailResult:
         display_hints.append(f"View: {model.platform_url}")
     if model.has_deployment_info:
         if model.deployment_status == "active":
-            if model.inference_model:
-                display_hints.append(
-                    "Query it (OpenAI-compatible, requires a workspace API key): "
-                    f"curl -X POST {INFERENCE_URL}/v1/chat/completions "
-                    '-H "Authorization: Bearer $OSMOSIS_API_KEY" '
-                    '-H "Content-Type: application/json" '
-                    f'-d \'{{"model": "{model.inference_model}", '
-                    '"messages": [{"role": "user", "content": "Hello!"}]}\''
-                )
-                api_keys_url = _workspace_page_url(model.platform_url, "/api-keys")
-                if api_keys_url:
-                    display_hints.append(f"Create an API key: {api_keys_url}")
             display_hints.append(
                 f"Undeploy with: osmosis model undeploy {model.model_name}"
             )
+            if model.inference_model:
+                # Each list entry renders as its own line, so the curl is emitted
+                # line-by-line; the renderer collapses newlines within a single hint.
+                display_hints.append("")
+                display_hints.append(
+                    "Your model is deployed and serving live inference. "
+                    "Send requests to the OpenAI-compatible chat completions "
+                    "endpoint:"
+                )
+                display_hints.extend(
+                    [
+                        f"curl -X POST {INFERENCE_URL}/v1/chat/completions \\",
+                        '  -H "Authorization: Bearer $OSMOSIS_API_KEY" \\',
+                        '  -H "Content-Type: application/json" \\',
+                        "  -d '{",
+                        f'    "model": "{model.inference_model}",',
+                        '    "messages": [{"role": "user", "content": "Hello!"}]',
+                        "  }'",
+                    ]
+                )
+                api_keys_url = _workspace_page_url(model.platform_url, "/api-keys")
+                if api_keys_url:
+                    display_hints.append("")
+                    display_hints.append(
+                        "Set $OSMOSIS_API_KEY to an Osmosis API key — "
+                        f"create one at {api_keys_url}"
+                    )
         else:
             display_hints.append(
                 f"Deploy with: osmosis model deploy {model.model_name}"

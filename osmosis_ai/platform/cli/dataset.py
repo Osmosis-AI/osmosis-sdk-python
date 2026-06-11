@@ -418,7 +418,7 @@ def upload(
         (
             f"Processing will continue on the platform. Check status at: {dataset.platform_url}"
             if dataset.platform_url
-            else f"Processing will continue on the platform. Check status with: osmosis dataset info {dataset.id}"
+            else f"Processing will continue on the platform. Check status with: osmosis dataset info {dataset.file_name}"
         )
     ]
     next_steps_structured = (
@@ -511,7 +511,7 @@ def info(
         ),
     )
 
-    rows = build_dataset_detail_rows(ds)
+    rows = build_dataset_detail_rows(ds, include_id=ds.is_internal_user)
     data = serialize_dataset(ds)
     data.update(git_result_context(context))
     display_hints = [f"View: {ds.platform_url}"] if ds.platform_url else []

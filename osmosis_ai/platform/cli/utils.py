@@ -207,13 +207,14 @@ def format_reward(reward: float | None) -> str:
     return f"{reward:.2f}"
 
 
-def build_dataset_detail_rows(ds: Any) -> list[tuple[str, str]]:
+def build_dataset_detail_rows(ds: Any, *, include_id: bool) -> list[tuple[str, str]]:
     """Build common detail rows for a dataset."""
     rows: list[tuple[str, str]] = [
         ("File", console.escape(ds.file_name)),
-        ("ID", ds.id),
-        ("Status", ds.status.replace("_", " ").title()),
     ]
+    if include_id:
+        rows.append(("ID", ds.id))
+    rows.append(("Status", ds.status.replace("_", " ").title()))
     file_format = getattr(ds, "file_format", None)
     original_format = getattr(ds, "original_file_format", None)
     if file_format:
@@ -235,12 +236,13 @@ def build_dataset_detail_rows(ds: Any) -> list[tuple[str, str]]:
     return rows
 
 
-def build_run_detail_rows(r: Any) -> list[tuple[str, str]]:
+def build_run_detail_rows(r: Any, *, include_id: bool) -> list[tuple[str, str]]:
     rows: list[tuple[str, str]] = [
         ("Name", console.escape(r.name) if r.name else "(unnamed)"),
-        ("ID", r.id),
-        ("Status", r.status.replace("_", " ").title()),
     ]
+    if include_id:
+        rows.append(("ID", r.id))
+    rows.append(("Status", r.status.replace("_", " ").title()))
     if r.created_at:
         rows.append(("Submitted", format_local_datetime(r.created_at)))
     if r.creator_name:

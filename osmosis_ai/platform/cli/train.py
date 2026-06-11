@@ -269,14 +269,17 @@ def info(name: str, *, output: str | None) -> DetailResult:
             git_identity=context.git_identity,
         )
 
-    rows = build_run_detail_rows(run)
+    rows = build_run_detail_rows(run, include_id=run.is_internal_user)
     summary = _train_summary(run)
+    progress_index = (
+        next(i for i, (label, _value) in enumerate(rows) if label == "Status") + 1
+    )
     if run.status in RUN_STATUSES_PENDING:
-        rows.insert(3, ("Progress", "Waiting to start..."))
+        rows.insert(progress_index, ("Progress", "Waiting to start..."))
     else:
         progress = format_progress(summary.get("progress"))
         if progress:
-            rows.insert(3, ("Progress", progress))
+            rows.insert(progress_index, ("Progress", progress))
     if run.started_at:
         rows.append(("Started", format_local_datetime(run.started_at)))
     if run.completed_at:
@@ -351,7 +354,11 @@ def info(name: str, *, output: str | None) -> DetailResult:
         if "progress" not in summary and metrics_data.overview.total_steps is not None:
             latest = metrics_data.overview.latest_step or 0
             total = metrics_data.overview.total_steps
-            rows.insert(3, ("Progress", f"{latest} / {total} rollout steps"))
+            _insert_after(
+                rows,
+                ("Status",),
+                ("Progress", f"{latest} / {total} rollout steps"),
+            )
         if metrics_data.overview.duration_ms is not None:
             _insert_after(
                 rows,
@@ -379,20 +386,20 @@ def info(name: str, *, output: str | None) -> DetailResult:
         table.add_column("Checkpoint", overflow="fold")
         table.add_column("Step", no_wrap=True)
         table.add_column("Status", no_wrap=True)
-        table.add_column("ID", no_wrap=True)
+        if run.is_internal_user:
+            table.add_column("ID", no_wrap=True)
         plain_lines = []
         for cp in checkpoints:
             cp_name = cp.checkpoint_name or "(unnamed)"
-            table.add_row(
-                Text(cp_name),
-                str(cp.checkpoint_step),
-                cp.status,
-                cp.id[:8],
+            cells = [Text(cp_name), str(cp.checkpoint_step), cp.status]
+            plain_line = (
+                f"Checkpoint: {cp_name} step {cp.checkpoint_step} [{cp.status}]"
             )
-            plain_lines.append(
-                f"Checkpoint: {cp_name} step {cp.checkpoint_step} "
-                f"[{cp.status}] {cp.id[:8]}"
-            )
+            if run.is_internal_user:
+                cells.append(cp.id[:8])
+                plain_line += f" {cp.id[:8]}"
+            table.add_row(*cells)
+            plain_lines.append(plain_line)
         sections.append(DetailSection(rich=table, plain_lines=plain_lines))
         display_hints.append("Deploy with: osmosis model deploy <lora-model-name>")
 

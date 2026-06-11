@@ -838,15 +838,26 @@ class TestInfo:
             "Undeploy with: osmosis model undeploy qwen3-run1-step-100"
             in result.display_hints
         )
-        query_hint = next(
-            hint for hint in result.display_hints if hint.startswith("Query it")
-        )
-        assert '"Authorization: Bearer $OSMOSIS_API_KEY"' in query_hint
-        assert '"model": "Qwen/Qwen3-8B:qwen3-run1-step-100"' in query_hint
         assert (
-            "Create an API key: https://platform.osmosis.ai/acme/api-keys"
+            "Your model is deployed and serving live inference. "
+            "Send requests to the OpenAI-compatible chat completions "
+            "endpoint:" in result.display_hints
+        )
+        assert "curl -X POST https://inference.osmosis.ai/v1/chat/completions \\" in (
+            result.display_hints
+        )
+        assert (
+            '  -H "Authorization: Bearer $OSMOSIS_API_KEY" \\' in result.display_hints
+        )
+        assert (
+            '    "model": "Qwen/Qwen3-8B:qwen3-run1-step-100",' in result.display_hints
+        )
+        assert (
+            "Set $OSMOSIS_API_KEY to an Osmosis API key — "
+            "create one at https://platform.osmosis.ai/acme/api-keys"
             in result.display_hints
         )
+        assert "" in result.display_hints
 
     def test_info_escapes_name_in_spinner(
         self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
@@ -876,6 +887,25 @@ class TestInfo:
         assert captured["lora_model_name"] == "[red]bad[/red]"
         assert captured["message"] == 'Fetching LoRA model "\\[red]bad\\[/red]"...'
         assert isinstance(result, DetailResult)
+
+    def test_info_shows_id_for_internal_user(
+        self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
+    ) -> None:
+        class FakeClient:
+            def get_lora_model(
+                self, lora_model_name, *, git_identity, credentials=None
+            ):
+                detail = _lora_model_detail(lora_model_name)
+                detail.is_internal_user = True
+                return detail
+
+        monkeypatch.setattr(platform_model_module, "OsmosisClient", FakeClient)
+        result = platform_model_module.info("qwen3-run1-step-100")
+
+        fields = {field.label: field.value for field in result.fields}
+        assert fields["ID"] == "lora_1"
+        labels = [field.label for field in result.fields]
+        assert labels[:2] == ["Name", "ID"]
 
 
 @pytest.mark.usefixtures("mock_git_context")

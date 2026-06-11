@@ -482,9 +482,10 @@ def info(name_or_id: str, *, output: str | None) -> DetailResult:
     # what was run). Configuration and results live in their own sections below.
     rows: list[tuple[str, str]] = [
         ("Name", console.escape(detail.name or "(unnamed)")),
-        ("ID", detail.id),
-        ("Status", detail.status),
     ]
+    if detail.is_internal_user:
+        rows.append(("ID", detail.id))
+    rows.append(("Status", detail.status))
 
     progress = _format_eval_progress(detail)
     if progress:

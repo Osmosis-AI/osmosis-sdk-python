@@ -751,3 +751,62 @@ def test_dataset_download_json_includes_output_path(
     assert payload["operation"] == "dataset.download"
     assert payload["resource"]["output_path"] == str(output_path)
     assert_git_context(payload["resource"])
+
+
+def test_dataset_upload_no_platform_url_hint_uses_file_name(
+    monkeypatch,
+    tmp_path: Path,
+    capsys,
+) -> None:
+    fake_credentials = _stub_git_context(monkeypatch)
+    file_path = tmp_path / "my_dataset.jsonl"
+    row = json.dumps({"system_prompt": "s", "user_prompt": "u", "ground_truth": "g"})
+    file_path.write_text((row + "\n") * 4, encoding="utf-8")
+    monkeypatch.setattr(
+        upload_module,
+        "make_progress_bar",
+        lambda _size, **_kwargs: (nullcontext(), lambda _done, _total: None),
+    )
+    monkeypatch.setattr(
+        upload_module,
+        "upload_file_simple",
+        lambda _file_path, _upload_info, progress_callback=None: None,
+    )
+
+    class FakeClient:
+        def create_dataset(
+            self, file_name, file_size, extension, *, git_identity, credentials=None
+        ):
+            assert credentials is fake_credentials
+            return DatasetFile(
+                id="ds_42",
+                file_name=file_name,
+                file_size=file_size,
+                status="created",
+                upload=UploadInfo(
+                    method="simple",
+                    s3_key="uploads/my_dataset",
+                    presigned_url="https://example.com/upload",
+                ),
+            )
+
+        def complete_upload(
+            self,
+            file_id,
+            parts=None,
+            *,
+            file_extension=None,
+            git_identity,
+            credentials=None,
+        ):
+            assert credentials is fake_credentials
+            return _dataset(id=file_id, file_name="my_dataset.jsonl", platform_url=None)
+
+    monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+
+    exit_code = cli.main(["--plain", "dataset", "upload", str(file_path), "--yes"])
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert "osmosis dataset info my_dataset.jsonl" in captured.out
+    assert "ds_42" not in captured.out
