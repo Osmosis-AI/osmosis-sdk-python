@@ -131,6 +131,7 @@ class TestGetLoraModel:
             "created_at": "2026-04-21T00:00:00Z",
             "hf_upload_status": "uploaded",
             "hf_url": "https://huggingface.co/acme/qwen3-run1-step-100",
+            "uploaded_by": "Ada Lovelace",
             "platform_url": "https://platform.osmosis.ai/acme/models/lora_1",
         }
         client = OsmosisClient()
@@ -139,11 +140,21 @@ class TestGetLoraModel:
         assert result.model_name == "qwen3-run1-step-100"
         assert result.hf_upload_status == "uploaded"
         assert result.hf_url == "https://huggingface.co/acme/qwen3-run1-step-100"
+        assert result.uploaded_by == "Ada Lovelace"
+        assert result.has_deployment_info is True
         assert result.platform_url == "https://platform.osmosis.ai/acme/models/lora_1"
         args, kwargs = mock_req.call_args
         assert args[0] == "/api/cli/models/qwen3-run1-step-100"
         assert kwargs["git_identity"] == GIT_IDENTITY
         assert "workspace_id" not in kwargs
+
+    @patch("osmosis_ai.platform.api.client.platform_request")
+    def test_get_without_deployment_fields(self, mock_req: MagicMock) -> None:
+        mock_req.return_value = {"id": "lora_1", "model_name": "qwen3-run1-step-100"}
+        client = OsmosisClient()
+        result = client.get_lora_model("qwen3-run1-step-100", git_identity=GIT_IDENTITY)
+        assert result.has_deployment_info is False
+        assert result.deployment_status is None
 
     @patch("osmosis_ai.platform.api.client.platform_request")
     def test_get_urlencodes_path(self, mock_req: MagicMock) -> None:

@@ -52,7 +52,11 @@ def _lora_model_summary(name: str, status: str = "active") -> LoraModelSummary:
 
 
 def _lora_model_detail(
-    name: str, deployment_status: str | None = None
+    name: str,
+    deployment_status: str | None = None,
+    *,
+    uploaded_by: str | None = "Ada Lovelace",
+    has_deployment_info: bool = True,
 ) -> LoraModelDetail:
     return LoraModelDetail(
         id="lora_1",
@@ -65,6 +69,9 @@ def _lora_model_detail(
         created_at="2026-06-01T00:00:00Z",
         hf_upload_status="uploaded",
         hf_url="https://huggingface.co/acme/qwen3-run1-step-100",
+        uploaded_by=uploaded_by,
+        has_deployment_info=has_deployment_info,
+        inference_model=f"Qwen/Qwen3-8B:{name}",
         platform_url="https://platform.osmosis.ai/acme/models/lora_1",
     )
 
@@ -539,7 +546,7 @@ class TestListModels:
 
         assert isinstance(result, SectionedListResult)
         assert result.display_hints == [
-            "2 of 5 deployment slots used",
+            "2 of 5 inference deployments used",
             "Deploy a LoRA model with: osmosis model deploy <name>",
         ]
 
@@ -559,7 +566,7 @@ class TestListModels:
         result = platform_model_module.list_models(limit=30, all_=False, type_="lora")
 
         assert isinstance(result, ListResult)
-        assert result.display_hints == ["0 of 5 deployment slots used"]
+        assert result.display_hints == ["0 of 5 inference deployments used"]
 
     def test_list_omits_quota_hint_when_server_reports_no_quota(
         self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
@@ -705,6 +712,8 @@ class TestInfo:
         assert lora_model["base_model"] == "Qwen/Qwen3-8B"
         assert lora_model["hf_upload_status"] == "uploaded"
         assert lora_model["hf_url"] == "https://huggingface.co/acme/qwen3-run1-step-100"
+        assert lora_model["uploaded_by"] == "Ada Lovelace"
+        assert lora_model["deployment_status"] is None
         assert (
             result.data["platform_url"]
             == "https://platform.osmosis.ai/acme/models/lora_1"
@@ -719,9 +728,55 @@ class TestInfo:
             "Training Reward",
             "Created",
             "HF Upload Status",
-            "HF URL",
+            "Hugging Face",
+            "HF Uploaded By",
             "Deployment Status",
         ]
+
+    def test_info_without_deployment_info_hides_rows_and_hints(
+        self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
+    ) -> None:
+        class FakeClient:
+            def get_lora_model(
+                self, lora_model_name, *, git_identity, credentials=None
+            ):
+                return _lora_model_detail(
+                    lora_model_name, uploaded_by=None, has_deployment_info=False
+                )
+
+        monkeypatch.setattr(platform_model_module, "OsmosisClient", FakeClient)
+        result = platform_model_module.info("qwen3-run1-step-100")
+
+        labels = [field.label for field in result.fields]
+        assert "Deployment Status" not in labels
+        assert "Deployed By" not in labels
+        assert "HF Uploaded By" not in labels
+        assert not any("osmosis model deploy" in hint for hint in result.display_hints)
+        assert not any(
+            "osmosis model undeploy" in hint for hint in result.display_hints
+        )
+        lora_model = result.data["lora_model"]
+        assert "deployment_status" not in lora_model
+        assert "deployed_at" not in lora_model
+        assert "deployed_by" not in lora_model
+
+    def test_info_always_includes_platform_url_key(
+        self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
+    ) -> None:
+        class FakeClient:
+            def get_lora_model(
+                self, lora_model_name, *, git_identity, credentials=None
+            ):
+                detail = _lora_model_detail(lora_model_name)
+                detail.platform_url = None
+                return detail
+
+        monkeypatch.setattr(platform_model_module, "OsmosisClient", FakeClient)
+        result = platform_model_module.info("qwen3-run1-step-100")
+
+        assert "platform_url" in result.data
+        assert result.data["platform_url"] is None
+        assert not any(hint.startswith("View:") for hint in result.display_hints)
 
     def test_info_hints_follow_deployment_status(
         self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
@@ -748,6 +803,15 @@ class TestInfo:
         result = platform_model_module.info("qwen3-run1-step-100")
         assert (
             "Undeploy with: osmosis model undeploy qwen3-run1-step-100"
+            in result.display_hints
+        )
+        query_hint = next(
+            hint for hint in result.display_hints if hint.startswith("Query it")
+        )
+        assert '"Authorization: Bearer $OSMOSIS_API_KEY"' in query_hint
+        assert '"model": "Qwen/Qwen3-8B:qwen3-run1-step-100"' in query_hint
+        assert (
+            "Create an API key: https://platform.osmosis.ai/acme/api-keys"
             in result.display_hints
         )
 
@@ -814,7 +878,7 @@ class TestDeploy:
             "git": {"identity": GIT_IDENTITY, "remote_url": REPO_URL},
             "workspace_directory": "/repo",
         }
-        assert result.message == "LoRA model qwen3-run1-step-100 active"
+        assert result.message == "LoRA model deployed: qwen3-run1-step-100"
 
     def test_deploy_escapes_name_in_spinner(
         self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
@@ -881,7 +945,7 @@ class TestUndeploy:
             "git": {"identity": GIT_IDENTITY, "remote_url": REPO_URL},
             "workspace_directory": "/repo",
         }
-        assert result.message == "LoRA model qwen3-run1-step-100 inactive"
+        assert result.message == "LoRA model undeployed: qwen3-run1-step-100"
 
     def test_undeploy_escapes_name_in_spinner(
         self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO

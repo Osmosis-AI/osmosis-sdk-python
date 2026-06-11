@@ -669,6 +669,11 @@ class LoraModelDetail(LoraModelInfo):
 
     hf_upload_status: str = ""
     hf_url: str | None = None
+    uploaded_by: str | None = None
+    has_deployment_info: bool = True
+    # Canonical `model` value for the inference API
+    # ("<base_model_path>:<lora-model-name>").
+    inference_model: str | None = None
     platform_url: str | None = None
 
     @classmethod
@@ -686,6 +691,11 @@ class LoraModelDetail(LoraModelInfo):
             created_at=data.get("created_at", ""),
             hf_upload_status=data.get("hf_upload_status", ""),
             hf_url=data.get("hf_url"),
+            uploaded_by=data.get("uploaded_by"),
+            # The platform omits deployment fields entirely when inference is
+            # unavailable for the account.
+            has_deployment_info="deployment_status" in data,
+            inference_model=data.get("inference_model"),
             platform_url=data.get("platform_url"),
         )
 

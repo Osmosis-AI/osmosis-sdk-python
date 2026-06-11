@@ -51,6 +51,7 @@ PRESERVED_HELP_COMMANDS = [
     ["train", "logs", "--help"],
     ["model", "--help"],
     ["model", "list", "--help"],
+    ["model", "info", "--help"],
     ["model", "deploy", "--help"],
     ["model", "undeploy", "--help"],
     ["rollout", "--help"],

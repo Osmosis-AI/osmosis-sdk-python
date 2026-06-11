@@ -12,6 +12,7 @@ training runs. The ``cli/commands/model.py`` shell delegates here:
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import urlsplit
 
 from osmosis_ai.cli.console import console
 from osmosis_ai.cli.errors import CLIError
@@ -38,6 +39,7 @@ from osmosis_ai.platform.cli.utils import (
     validate_list_options,
 )
 from osmosis_ai.platform.cli.workspace_directory_context import git_result_context
+from osmosis_ai.platform.constants import INFERENCE_URL
 
 _VALID_LIST_TYPES = ("all", "base", "lora")
 
@@ -66,6 +68,18 @@ def _lora_model_summary_resource(result: Any) -> dict[str, Any]:
         "model_name": result.model_name,
         "status": result.status,
     }
+
+
+def _workspace_page_url(platform_url: str | None, page: str) -> str | None:
+    """Derive a workspace page URL (e.g. ``/api-keys``) from a resource's
+    ``platform_url``, whose first path segment is the workspace name."""
+    if not platform_url:
+        return None
+    parts = urlsplit(platform_url)
+    segments = [segment for segment in parts.path.split("/") if segment]
+    if not segments:
+        return None
+    return f"{parts.scheme}://{parts.netloc}/{segments[0]}{page}"
 
 
 def _base_model_display_item(model: BaseModelInfo) -> dict[str, Any]:
@@ -180,7 +194,8 @@ def list_models(
     display_hints: list[str] = []
     if max_active_deployments > 0:
         display_hints.append(
-            f"{active_deployments} of {max_active_deployments} deployment slots used"
+            f"{active_deployments} of {max_active_deployments} "
+            "inference deployments used"
         )
     if lora_models:
         display_hints.append("Deploy a LoRA model with: osmosis model deploy <name>")
@@ -234,6 +249,7 @@ def info(lora_model_name: str) -> DetailResult:
             git_identity=context.git_identity,
         )
 
+    # Rows mirror the platform's model detail sidebar (fields and order).
     rows: list[tuple[str, str]] = [
         ("Name", model.model_name),
         ("Base Model", model.base_model or "—"),
@@ -247,34 +263,57 @@ def info(lora_model_name: str) -> DetailResult:
         ("HF Upload Status", model.hf_upload_status or "—"),
     ]
     if model.hf_url:
-        rows.append(("HF URL", model.hf_url))
-    rows.append(
-        ("Deployment Status", format_deployment_status(model.deployment_status))
-    )
-    if model.deployed_at:
-        rows.append(("Deployed", format_local_datetime(model.deployed_at)))
-    if model.deployed_by:
-        rows.append(("Deployed By", model.deployed_by))
+        rows.append(("Hugging Face", model.hf_url))
+    if model.uploaded_by:
+        rows.append(("HF Uploaded By", model.uploaded_by))
+    if model.has_deployment_info:
+        rows.append(
+            ("Deployment Status", format_deployment_status(model.deployment_status))
+        )
+        if model.deployed_by:
+            rows.append(("Deployed By", model.deployed_by))
 
     display_hints: list[str] = []
     if model.platform_url:
         display_hints.append(f"View: {model.platform_url}")
-    if model.deployment_status == "active":
-        display_hints.append(
-            f"Undeploy with: osmosis model undeploy {model.model_name}"
-        )
-    else:
-        display_hints.append(f"Deploy with: osmosis model deploy {model.model_name}")
+    if model.has_deployment_info:
+        if model.deployment_status == "active":
+            if model.inference_model:
+                display_hints.append(
+                    "Query it (OpenAI-compatible, requires a workspace API key): "
+                    f"curl -X POST {INFERENCE_URL}/v1/chat/completions "
+                    '-H "Authorization: Bearer $OSMOSIS_API_KEY" '
+                    '-H "Content-Type: application/json" '
+                    f'-d \'{{"model": "{model.inference_model}", '
+                    '"messages": [{"role": "user", "content": "Hello!"}]}\''
+                )
+                api_keys_url = _workspace_page_url(model.platform_url, "/api-keys")
+                if api_keys_url:
+                    display_hints.append(f"Create an API key: {api_keys_url}")
+            display_hints.append(
+                f"Undeploy with: osmosis model undeploy {model.model_name}"
+            )
+        else:
+            display_hints.append(
+                f"Deploy with: osmosis model deploy {model.model_name}"
+            )
+
+    lora_model = {
+        **serialize_lora_model(model),
+        "hf_upload_status": model.hf_upload_status,
+        "hf_url": model.hf_url,
+        "uploaded_by": model.uploaded_by,
+        "inference_model": model.inference_model,
+    }
+    if not model.has_deployment_info:
+        for key in ("deployment_status", "deployed_at", "deployed_by"):
+            lora_model.pop(key, None)
 
     return DetailResult(
         title="LoRA Model Info",
         data={
-            "lora_model": {
-                **serialize_lora_model(model),
-                "hf_upload_status": model.hf_upload_status,
-                "hf_url": model.hf_url,
-            },
-            **({"platform_url": model.platform_url} if model.platform_url else {}),
+            "lora_model": lora_model,
+            "platform_url": model.platform_url,
             **git_result_context(context),
         },
         fields=detail_fields(rows),
@@ -301,9 +340,11 @@ def deploy(lora_model_name: str) -> OperationResult:
         operation="model.deploy",
         status="success",
         resource=resource,
-        message=f"LoRA model {result.model_name or '-'} {result.status}",
-        display_next_steps=["Check status with: osmosis model list"],
-        next_steps_structured=[{"action": "model_list"}],
+        message=f"LoRA model deployed: {result.model_name or lora_model_name}",
+        display_next_steps=[
+            f"Check status with: osmosis model info {result.model_name}",
+        ],
+        next_steps_structured=[{"action": "model_info", "name": result.model_name}],
     )
 
 
@@ -328,7 +369,9 @@ def undeploy(lora_model_name: str) -> OperationResult:
         operation="model.undeploy",
         status="success",
         resource=resource,
-        message=f"LoRA model {result.model_name or '-'} {result.status}",
-        display_next_steps=["Check status with: osmosis model list"],
-        next_steps_structured=[{"action": "model_list"}],
+        message=f"LoRA model undeployed: {result.model_name or lora_model_name}",
+        display_next_steps=[
+            f"Check status with: osmosis model info {result.model_name}",
+        ],
+        next_steps_structured=[{"action": "model_info", "name": result.model_name}],
     )
