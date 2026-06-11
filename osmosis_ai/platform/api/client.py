@@ -15,6 +15,7 @@ from .models import (
     EvalRunMetrics,
     EvaluationRunDetail,
     LogsPage,
+    LoraModelDetail,
     LoraModelSummary,
     PaginatedBaseModels,
     PaginatedDatasets,
@@ -407,6 +408,21 @@ class OsmosisClient:
             git_identity=git_identity,
         )
         return PaginatedLoraModels.from_dict(data)
+
+    def get_lora_model(
+        self,
+        lora_model_name: str,
+        *,
+        credentials: Credentials | None = None,
+        git_identity: str,
+    ) -> LoraModelDetail:
+        """Get details for a single LoRA model by name."""
+        data = platform_request(
+            f"/api/cli/models/{_safe_path(lora_model_name)}",
+            credentials=credentials,
+            git_identity=git_identity,
+        )
+        return LoraModelDetail.from_dict(data)
 
     def deploy_lora_model(
         self,

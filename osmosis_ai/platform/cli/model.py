@@ -4,6 +4,7 @@ Models cover both base (foundation) models and LoRA models produced by
 training runs. The ``cli/commands/model.py`` shell delegates here:
 
     osmosis model list                      -> list_models()
+    osmosis model info     <lora-model>     -> info()
     osmosis model deploy   <lora-model>     -> deploy()
     osmosis model undeploy <lora-model>     -> undeploy()
 """
@@ -15,16 +16,18 @@ from typing import Any
 from osmosis_ai.cli.console import console
 from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.cli.output import (
+    DetailResult,
     ListColumn,
     ListResult,
     ListSection,
     OperationResult,
     SectionedListResult,
+    detail_fields,
     get_output_context,
     serialize_lora_model,
     serialize_model,
 )
-from osmosis_ai.cli.output.display import format_local_date
+from osmosis_ai.cli.output.display import format_local_date, format_local_datetime
 from osmosis_ai.platform.api.client import OsmosisClient
 from osmosis_ai.platform.api.models import BaseModelInfo, LoraModelInfo
 from osmosis_ai.platform.cli.utils import (
@@ -214,6 +217,67 @@ def list_models(
     return SectionedListResult(
         sections=[base_section, lora_section],
         extra=lora_extra,
+        display_hints=display_hints,
+    )
+
+
+def info(lora_model_name: str) -> DetailResult:
+    """Show details for a single LoRA model."""
+    context = require_git_workspace_directory_context()
+    client = OsmosisClient()
+    output = get_output_context()
+
+    with output.status(f'Fetching LoRA model "{console.escape(lora_model_name)}"...'):
+        model = client.get_lora_model(
+            lora_model_name,
+            credentials=context.credentials,
+            git_identity=context.git_identity,
+        )
+
+    rows: list[tuple[str, str]] = [
+        ("Name", model.model_name),
+        ("Base Model", model.base_model or "—"),
+        ("Training Run", model.training_run_name or "—"),
+        (
+            "Checkpoint Step",
+            str(model.checkpoint_step) if model.checkpoint_step is not None else "—",
+        ),
+        ("Training Reward", format_reward(model.reward)),
+        ("Created", format_local_datetime(model.created_at)),
+        ("HF Upload Status", model.hf_upload_status or "—"),
+    ]
+    if model.hf_url:
+        rows.append(("HF URL", model.hf_url))
+    rows.append(
+        ("Deployment Status", format_deployment_status(model.deployment_status))
+    )
+    if model.deployed_at:
+        rows.append(("Deployed", format_local_datetime(model.deployed_at)))
+    if model.deployed_by:
+        rows.append(("Deployed By", model.deployed_by))
+
+    display_hints: list[str] = []
+    if model.platform_url:
+        display_hints.append(f"View: {model.platform_url}")
+    if model.deployment_status == "active":
+        display_hints.append(
+            f"Undeploy with: osmosis model undeploy {model.model_name}"
+        )
+    else:
+        display_hints.append(f"Deploy with: osmosis model deploy {model.model_name}")
+
+    return DetailResult(
+        title="LoRA Model Info",
+        data={
+            "lora_model": {
+                **serialize_lora_model(model),
+                "hf_upload_status": model.hf_upload_status,
+                "hf_url": model.hf_url,
+            },
+            **({"platform_url": model.platform_url} if model.platform_url else {}),
+            **git_result_context(context),
+        },
+        fields=detail_fields(rows),
         display_hints=display_hints,
     )
 

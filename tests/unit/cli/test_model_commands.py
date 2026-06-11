@@ -15,6 +15,7 @@ import osmosis_ai.platform.cli.utils as utils_module
 from osmosis_ai.cli.console import Console
 from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.cli.output import (
+    DetailResult,
     ListResult,
     OperationResult,
     OutputFormat,
@@ -23,6 +24,7 @@ from osmosis_ai.cli.output import (
 )
 from osmosis_ai.platform.api.models import (
     BaseModelInfo,
+    LoraModelDetail,
     LoraModelInfo,
     LoraModelSummary,
     PaginatedBaseModels,
@@ -47,6 +49,24 @@ def assert_git_context(data: dict[str, object]) -> None:
 
 def _lora_model_summary(name: str, status: str = "active") -> LoraModelSummary:
     return LoraModelSummary(id="lora_1", model_name=name, status=status)
+
+
+def _lora_model_detail(
+    name: str, deployment_status: str | None = None
+) -> LoraModelDetail:
+    return LoraModelDetail(
+        id="lora_1",
+        model_name=name,
+        base_model="Qwen/Qwen3-8B",
+        training_run_name="run1",
+        checkpoint_step=100,
+        reward=0.85,
+        deployment_status=deployment_status,
+        created_at="2026-06-01T00:00:00Z",
+        hf_upload_status="uploaded",
+        hf_url="https://huggingface.co/acme/qwen3-run1-step-100",
+        platform_url="https://platform.osmosis.ai/acme/models/lora_1",
+    )
 
 
 @pytest.fixture()
@@ -653,6 +673,112 @@ class TestListModelsJsonEnvelope:
         envelope = _render_to_json_envelope(result)
         assert "active_deployments" not in envelope
         assert "max_active_deployments" not in envelope
+
+
+@pytest.mark.usefixtures("mock_git_context")
+class TestInfo:
+    def test_info_accepts_lora_model_name(
+        self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
+    ) -> None:
+        captured: dict[str, object] = {}
+
+        class FakeClient:
+            def get_lora_model(
+                self, lora_model_name, *, git_identity, credentials=None
+            ):
+                captured["lora_model_name"] = lora_model_name
+                captured["credentials"] = credentials
+                captured["git_identity"] = git_identity
+                return _lora_model_detail("qwen3-run1-step-100")
+
+        monkeypatch.setattr(platform_model_module, "OsmosisClient", FakeClient)
+        result = platform_model_module.info("qwen3-run1-step-100")
+        assert captured == {
+            "lora_model_name": "qwen3-run1-step-100",
+            "credentials": AUTH_CREDENTIALS,
+            "git_identity": GIT_IDENTITY,
+        }
+        assert isinstance(result, DetailResult)
+        assert result.title == "LoRA Model Info"
+        lora_model = result.data["lora_model"]
+        assert lora_model["model_name"] == "qwen3-run1-step-100"
+        assert lora_model["base_model"] == "Qwen/Qwen3-8B"
+        assert lora_model["hf_upload_status"] == "uploaded"
+        assert lora_model["hf_url"] == "https://huggingface.co/acme/qwen3-run1-step-100"
+        assert (
+            result.data["platform_url"]
+            == "https://platform.osmosis.ai/acme/models/lora_1"
+        )
+        assert_git_context(result.data)
+        labels = [field.label for field in result.fields]
+        assert labels == [
+            "Name",
+            "Base Model",
+            "Training Run",
+            "Checkpoint Step",
+            "Training Reward",
+            "Created",
+            "HF Upload Status",
+            "HF URL",
+            "Deployment Status",
+        ]
+
+    def test_info_hints_follow_deployment_status(
+        self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
+    ) -> None:
+        details = {"status": None}
+
+        class FakeClient:
+            def get_lora_model(
+                self, lora_model_name, *, git_identity, credentials=None
+            ):
+                return _lora_model_detail(
+                    lora_model_name, deployment_status=details["status"]
+                )
+
+        monkeypatch.setattr(platform_model_module, "OsmosisClient", FakeClient)
+
+        result = platform_model_module.info("qwen3-run1-step-100")
+        assert (
+            "Deploy with: osmosis model deploy qwen3-run1-step-100"
+            in result.display_hints
+        )
+
+        details["status"] = "active"
+        result = platform_model_module.info("qwen3-run1-step-100")
+        assert (
+            "Undeploy with: osmosis model undeploy qwen3-run1-step-100"
+            in result.display_hints
+        )
+
+    def test_info_escapes_name_in_spinner(
+        self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
+    ) -> None:
+        captured: dict[str, object] = {}
+
+        @contextmanager
+        def record_spinner(message):
+            captured["message"] = message
+            yield
+
+        class FakeClient:
+            def get_lora_model(
+                self, lora_model_name, *, git_identity, credentials=None
+            ):
+                captured["lora_model_name"] = lora_model_name
+                return _lora_model_detail("qwen3-run1-step-100")
+
+        monkeypatch.setattr(platform_model_module, "OsmosisClient", FakeClient)
+
+        with override_output_context(
+            format=OutputFormat.rich, interactive=True
+        ) as output:
+            monkeypatch.setattr(output, "status", record_spinner)
+            result = platform_model_module.info("[red]bad[/red]")
+
+        assert captured["lora_model_name"] == "[red]bad[/red]"
+        assert captured["message"] == 'Fetching LoRA model "\\[red]bad\\[/red]"...'
+        assert isinstance(result, DetailResult)
 
 
 @pytest.mark.usefixtures("mock_git_context")

@@ -4,6 +4,7 @@ Models cover both base (foundation) models and LoRA models produced by
 training runs:
 
     osmosis model list                      -> GET  /api/cli/models/base + /api/cli/models/lora
+    osmosis model info     <lora-model>     -> GET  /api/cli/models/[modelName]
     osmosis model deploy   <lora-model>     -> POST /api/cli/models/[modelName]/deploy
     osmosis model undeploy <lora-model>     -> POST /api/cli/models/[modelName]/undeploy
 """
@@ -17,7 +18,7 @@ import typer
 from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
 
 app: typer.Typer = typer.Typer(
-    help="Manage models (list, deploy, undeploy).",
+    help="Manage models (list, info, deploy, undeploy).",
     no_args_is_help=True,
 )
 
@@ -42,6 +43,18 @@ def list_models(
     from osmosis_ai.platform.cli.model import list_models as _list_models
 
     return _list_models(limit=limit, all_=all_, type_=type_)
+
+
+@app.command("info")
+def info(
+    lora_model_name: str = typer.Argument(
+        ..., help="LoRA model name.", metavar="LORA_MODEL"
+    ),
+) -> Any:
+    """Show details for a single LoRA model."""
+    from osmosis_ai.platform.cli.model import info as _info
+
+    return _info(lora_model_name)
 
 
 @app.command("deploy")

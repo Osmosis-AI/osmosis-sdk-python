@@ -664,6 +664,33 @@ class LoraModelInfo:
 
 
 @dataclass
+class LoraModelDetail(LoraModelInfo):
+    """Detailed LoRA model info with Hugging Face export and platform link."""
+
+    hf_upload_status: str = ""
+    hf_url: str | None = None
+    platform_url: str | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> LoraModelDetail:
+        return cls(
+            id=data["id"],
+            model_name=data.get("model_name", ""),
+            base_model=data.get("base_model"),
+            training_run_name=data.get("training_run_name"),
+            checkpoint_step=data.get("checkpoint_step"),
+            reward=data.get("reward"),
+            deployment_status=data.get("deployment_status"),
+            deployed_at=data.get("deployed_at"),
+            deployed_by=data.get("deployed_by"),
+            created_at=data.get("created_at", ""),
+            hf_upload_status=data.get("hf_upload_status", ""),
+            hf_url=data.get("hf_url"),
+            platform_url=data.get("platform_url"),
+        )
+
+
+@dataclass
 class PaginatedLoraModels:
     """Paginated list of LoRA models."""
 

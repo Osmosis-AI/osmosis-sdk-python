@@ -1,8 +1,8 @@
 """Tests for OsmosisClient model + checkpoint methods.
 
 Covers the model-centric API:
-    list_base_models / list_lora_models / deploy_lora_model /
-    undeploy_lora_model / list_training_run_checkpoints
+    list_base_models / list_lora_models / get_lora_model /
+    deploy_lora_model / undeploy_lora_model / list_training_run_checkpoints
 """
 
 from __future__ import annotations
@@ -115,6 +115,43 @@ class TestListLoraModels:
         assert "offset=0" in args[0]
         assert kwargs["git_identity"] == GIT_IDENTITY
         assert "workspace_id" not in kwargs
+
+
+class TestGetLoraModel:
+    @patch("osmosis_ai.platform.api.client.platform_request")
+    def test_get(self, mock_req: MagicMock) -> None:
+        mock_req.return_value = {
+            "id": "lora_1",
+            "model_name": "qwen3-run1-step-100",
+            "base_model": "Qwen/Qwen3",
+            "training_run_name": "qwen3-run1",
+            "checkpoint_step": 100,
+            "reward": 0.85,
+            "deployment_status": "active",
+            "created_at": "2026-04-21T00:00:00Z",
+            "hf_upload_status": "uploaded",
+            "hf_url": "https://huggingface.co/acme/qwen3-run1-step-100",
+            "platform_url": "https://platform.osmosis.ai/acme/models/lora_1",
+        }
+        client = OsmosisClient()
+        result = client.get_lora_model("qwen3-run1-step-100", git_identity=GIT_IDENTITY)
+        assert result.id == "lora_1"
+        assert result.model_name == "qwen3-run1-step-100"
+        assert result.hf_upload_status == "uploaded"
+        assert result.hf_url == "https://huggingface.co/acme/qwen3-run1-step-100"
+        assert result.platform_url == "https://platform.osmosis.ai/acme/models/lora_1"
+        args, kwargs = mock_req.call_args
+        assert args[0] == "/api/cli/models/qwen3-run1-step-100"
+        assert kwargs["git_identity"] == GIT_IDENTITY
+        assert "workspace_id" not in kwargs
+
+    @patch("osmosis_ai.platform.api.client.platform_request")
+    def test_get_urlencodes_path(self, mock_req: MagicMock) -> None:
+        mock_req.return_value = {"id": "l", "model_name": "x"}
+        client = OsmosisClient()
+        client.get_lora_model("../bad", git_identity=GIT_IDENTITY)
+        args, _kwargs = mock_req.call_args
+        assert "../" not in args[0]
 
 
 class TestDeployLoraModel:
