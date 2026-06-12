@@ -311,7 +311,11 @@ class TestEvalInfo:
 
         assert isinstance(result, DetailResult)
         labels = [field.label for field in result.fields]
-        assert labels[:3] == ["Name", "ID", "Status"]
+        assert labels == ["Name", "ID", "Status", "Submitted"]
+        fields = {field.label: field.value for field in result.fields}
+        assert fields["Name"] == "math-eval"
+        assert fields["ID"] == "eval-1"
+        assert fields["Status"] == "running"
 
     def test_info_progress_and_summary_agree_when_runs_exceed_total(
         self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO

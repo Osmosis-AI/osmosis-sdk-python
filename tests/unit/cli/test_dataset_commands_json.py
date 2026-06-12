@@ -800,7 +800,11 @@ def test_dataset_upload_no_platform_url_hint_uses_file_name(
             credentials=None,
         ):
             assert credentials is fake_credentials
-            return _dataset(id=file_id, file_name="my_dataset.jsonl", platform_url=None)
+            # Different from the local file name to prove the hint reads the
+            # API response, not the local path.
+            return _dataset(
+                id=file_id, file_name="server_dataset.jsonl", platform_url=None
+            )
 
     monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
 
@@ -808,5 +812,6 @@ def test_dataset_upload_no_platform_url_hint_uses_file_name(
     captured = capsys.readouterr()
 
     assert exit_code == 0
-    assert "osmosis dataset info my_dataset.jsonl" in captured.out
+    assert "osmosis dataset info server_dataset.jsonl" in captured.out
+    assert "osmosis dataset info my_dataset.jsonl" not in captured.out
     assert "ds_42" not in captured.out
