@@ -34,6 +34,7 @@ from osmosis_ai.cli.output.display import (
 from osmosis_ai.cli.prompts import require_confirmation
 from osmosis_ai.platform.api.client import OsmosisClient
 from osmosis_ai.platform.api.models import (
+    RUN_STATUSES_ERROR,
     RUN_STATUSES_PENDING,
     RUN_STATUSES_TERMINAL,
     SubmitRunResult,
@@ -46,9 +47,11 @@ from osmosis_ai.platform.cli.training_config import (
     validate_train_submit_context_paths,
 )
 from osmosis_ai.platform.cli.utils import (
+    build_logs_result,
     build_run_detail_rows,
     format_env_config,
     format_progress,
+    format_reward,
     format_run_status,
     format_secret_scopes,
     jsonish,
@@ -59,12 +62,6 @@ from osmosis_ai.platform.cli.utils import (
     validate_list_options,
 )
 from osmosis_ai.platform.cli.workspace_directory_context import git_result_context
-
-
-def _format_train_reward(run: Any) -> str:
-    if run.reward is None:
-        return "—"
-    return f"{run.reward:.2f}"
 
 
 def _format_train_config(config: dict[str, Any] | None) -> str | None:
@@ -222,15 +219,39 @@ def list_training_runs(*, limit: int, all_: bool) -> ListResult:
                 **serialize_training_run(run),
                 "name": run.name or "(unnamed)",
                 "status": format_run_status(run),
-                "model_name": run.model_name or "—",
-                "rollout_name": run.rollout_name or "—",
-                "reward": _format_train_reward(run),
+                "model_name": run.model_name or "–",
+                "rollout_name": run.rollout_name or "–",
+                "reward": format_reward(run.reward),
                 "created_at": format_local_date(run.created_at),
-                "creator_name": run.creator_name or "—",
+                "creator_name": run.creator_name or "–",
             }
             for run in training_runs
         ],
         display_hints=["Use osmosis train info <name> for details."],
+    )
+
+
+def logs(name: str, *, limit: int, cursor: str | None = None) -> ListResult:
+    """Show the most recent logs for a training run, oldest-first."""
+    context = require_git_workspace_directory_context()
+    credentials = context.credentials
+
+    client = OsmosisClient()
+    output = get_output_context()
+    with output.status("Fetching logs..."):
+        page = client.get_training_run_logs(
+            name,
+            limit=limit,
+            cursor=cursor,
+            credentials=credentials,
+            git_identity=context.git_identity,
+        )
+
+    return build_logs_result(
+        title=f"Training Run Logs: {name}",
+        page=page,
+        context=context,
+        next_step_hint=f"Use osmosis train info {name} for run details.",
     )
 
 
@@ -248,14 +269,17 @@ def info(name: str, *, output: str | None) -> DetailResult:
             git_identity=context.git_identity,
         )
 
-    rows = build_run_detail_rows(run)
+    rows = build_run_detail_rows(run, include_id=run.is_internal_user)
     summary = _train_summary(run)
+    progress_index = (
+        next(i for i, (label, _value) in enumerate(rows) if label == "Status") + 1
+    )
     if run.status in RUN_STATUSES_PENDING:
-        rows.insert(3, ("Progress", "Waiting to start..."))
+        rows.insert(progress_index, ("Progress", "Waiting to start..."))
     else:
         progress = format_progress(summary.get("progress"))
         if progress:
-            rows.insert(3, ("Progress", progress))
+            rows.insert(progress_index, ("Progress", progress))
     if run.started_at:
         rows.append(("Started", format_local_datetime(run.started_at)))
     if run.completed_at:
@@ -330,7 +354,11 @@ def info(name: str, *, output: str | None) -> DetailResult:
         if "progress" not in summary and metrics_data.overview.total_steps is not None:
             latest = metrics_data.overview.latest_step or 0
             total = metrics_data.overview.total_steps
-            rows.insert(3, ("Progress", f"{latest} / {total} rollout steps"))
+            _insert_after(
+                rows,
+                ("Status",),
+                ("Progress", f"{latest} / {total} rollout steps"),
+            )
         if metrics_data.overview.duration_ms is not None:
             _insert_after(
                 rows,
@@ -348,6 +376,8 @@ def info(name: str, *, output: str | None) -> DetailResult:
     fields = detail_fields(rows)
     if run.platform_url:
         display_hints.append(f"View: {run.platform_url}")
+    if run.status in RUN_STATUSES_ERROR:
+        display_hints.append(f"See logs with: osmosis train logs {run.name or name}")
     if checkpoints:
         from rich.table import Table
         from rich.text import Text
@@ -356,22 +386,22 @@ def info(name: str, *, output: str | None) -> DetailResult:
         table.add_column("Checkpoint", overflow="fold")
         table.add_column("Step", no_wrap=True)
         table.add_column("Status", no_wrap=True)
-        table.add_column("ID", no_wrap=True)
+        if run.is_internal_user:
+            table.add_column("ID", no_wrap=True)
         plain_lines = []
         for cp in checkpoints:
             cp_name = cp.checkpoint_name or "(unnamed)"
-            table.add_row(
-                Text(cp_name),
-                str(cp.checkpoint_step),
-                cp.status,
-                cp.id[:8],
+            cells = [Text(cp_name), str(cp.checkpoint_step), cp.status]
+            plain_line = (
+                f"Checkpoint: {cp_name} step {cp.checkpoint_step} [{cp.status}]"
             )
-            plain_lines.append(
-                f"Checkpoint: {cp_name} step {cp.checkpoint_step} "
-                f"[{cp.status}] {cp.id[:8]}"
-            )
+            if run.is_internal_user:
+                cells.append(cp.id[:8])
+                plain_line += f" {cp.id[:8]}"
+            table.add_row(*cells)
+            plain_lines.append(plain_line)
         sections.append(DetailSection(rich=table, plain_lines=plain_lines))
-        display_hints.append("Deploy with: osmosis deploy <checkpoint-name>")
+        display_hints.append("Deploy with: osmosis model deploy <lora-model-name>")
 
     if metrics_data is not None and metrics_data.metrics:
         from osmosis_ai.cli.metrics_graph import (
@@ -478,4 +508,4 @@ def stop(name: str, *, yes: bool) -> OperationResult:
     )
 
 
-__all__ = ["info", "list_training_runs", "stop", "submit"]
+__all__ = ["info", "list_training_runs", "logs", "stop", "submit"]

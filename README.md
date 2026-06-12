@@ -37,17 +37,18 @@ Python SDK and CLI for [Osmosis AI](https://platform.osmosis.ai), a platform for
 
 ## Agent-friendly CLI output
 
-The `osmosis` CLI keeps Rich as the default output for humans, but every public command also speaks structured JSON and low-noise plain text for AI agents, CI/CD, and shell automation. Put these global output flags before the command:
+The `osmosis` CLI keeps Rich as the default output for humans, but every public command also speaks structured JSON and low-noise plain text for AI agents, CI/CD, and shell automation. The global output flags work at any position on the command line:
 
 ```bash
 osmosis dataset list                         # human-friendly Rich table
 osmosis --json dataset list                  # recommended for AI agents and CI/CD
+osmosis dataset list --json                  # postfix placement works too
 osmosis --plain dataset list                 # low-noise text for shell pipelines
 ```
 
-JSON is the stable machine contract: every successful response includes `schema_version: 1`; list envelopes include `items`, `total_count`, `has_more`, and `next_offset`; detail envelopes include `data`; operation envelopes include `status`, `operation`, optional `resource`, and optional `next_steps_structured`. Errors are JSON-structured on stderr with `code`, `message`, `details`, optional `request_id`, plus the command path and SDK `cli_version`.
+JSON is the stable machine contract: every successful response includes `schema_version: 1`; list envelopes include `items`, `total_count`, `has_more`, and `next_offset`; detail envelopes include `data`; operation envelopes include `status`, `operation`, optional `resource`, and optional `next_steps_structured`. Sectioned list envelopes (e.g. `osmosis model list`) compose the list shape under named section keys such as `base_models` and `lora_models`, each section carrying its own `items`, `total_count`, `has_more`, and `next_offset`. Errors are JSON-structured on stderr with `code`, `message`, `details`, optional `request_id`, plus the command path and SDK `cli_version`.
 
-Plain mode is for humans and simple shell pipelines, not a strict schema. `--json` and `--plain` are global flags parsed before subcommands; prefer `osmosis --json <command>` or `osmosis --plain <command>` over the default Rich output in non-interactive environments. Command-local `--output` always means a file path, not a format selector, so `osmosis dataset download my-dataset --output ./data.jsonl` works in every mode.
+Plain mode is for humans and simple shell pipelines, not a strict schema. `--json` and `--plain` are global flags accepted anywhere in the command line; prefer `osmosis --json <command>` or `osmosis <command> --json` over the default Rich output in non-interactive environments. Command-local `--output` always means a file path, not a format selector, so `osmosis dataset download my-dataset --output ./data.jsonl` works in every mode.
 
 In JSON or plain mode, interactive commands fail fast with `INTERACTIVE_REQUIRED` unless a non-interactive flow exists, typically by passing `--yes` or `--token`. `OSMOSIS_TOKEN` is verify-only across the CLI: it activates authentication for the current process but is never written to the on-disk credentials store, never revoked, and never deletes existing credentials.
 

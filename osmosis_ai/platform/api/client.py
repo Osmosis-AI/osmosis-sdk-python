@@ -11,16 +11,17 @@ from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE
 from .models import (
     DatasetDownloadInfo,
     DatasetFile,
-    DeploymentInfo,
-    DeploymentSummary,
     EnvironmentSecretInfo,
     EvalRunMetrics,
     EvaluationRunDetail,
+    LogsPage,
+    LoraModelDetail,
+    LoraModelSummary,
     PaginatedBaseModels,
     PaginatedDatasets,
-    PaginatedDeployments,
     PaginatedEnvironmentSecrets,
     PaginatedEvaluationRuns,
+    PaginatedLoraModels,
     PaginatedRollouts,
     PaginatedTrainingRuns,
     SubmitRunResult,
@@ -44,6 +45,31 @@ class OsmosisClient:
     Repo-scoped methods require an explicit ``git_identity`` so calls can
     be tied to the trusted workspace directory context.
     """
+
+    def _get_logs(
+        self,
+        resource_path: str,
+        *,
+        limit: int = DEFAULT_PAGE_SIZE,
+        cursor: str | None = None,
+        direction: str = "older",
+        credentials: Credentials | None = None,
+        git_identity: str,
+    ) -> LogsPage:
+        """Fetch one page of logs for ``{resource_path}/logs``.
+
+        Without ``cursor``, ``direction="older"`` returns the most recent page;
+        the returned ``next_cursor`` pages further back in time.
+        """
+        params: dict[str, Any] = {"limit": limit, "direction": direction}
+        if cursor is not None:
+            params["cursor"] = cursor
+        data = platform_request(
+            f"{resource_path}/logs?{urlencode(params)}",
+            credentials=credentials,
+            git_identity=git_identity,
+        )
+        return LogsPage.from_dict(data)
 
     # ── Datasets ─────────────────────────────────────────────────────
 
@@ -177,6 +203,30 @@ class OsmosisClient:
         )
         return DatasetDownloadInfo.from_dict(data)
 
+    def get_dataset_logs(
+        self,
+        name_or_id: str,
+        *,
+        limit: int = DEFAULT_PAGE_SIZE,
+        cursor: str | None = None,
+        direction: str = "older",
+        credentials: Credentials | None = None,
+        git_identity: str,
+    ) -> LogsPage:
+        """Fetch one page of dataset logs.
+
+        Without ``cursor``, ``direction="older"`` returns the most recent page;
+        the returned ``next_cursor`` pages further back in time.
+        """
+        return self._get_logs(
+            f"/api/cli/datasets/{_safe_path(name_or_id)}",
+            limit=limit,
+            cursor=cursor,
+            direction=direction,
+            credentials=credentials,
+            git_identity=git_identity,
+        )
+
     # ── Training Runs ─────────────────────────────────────────────
 
     def submit_training_run(
@@ -259,7 +309,7 @@ class OsmosisClient:
         credentials: Credentials | None = None,
         git_identity: str,
     ) -> dict[str, Any]:
-        """Stop a pending or running training run."""
+        """Stop a non-terminal training run (queued, pending, or running)."""
         return platform_request(
             f"/api/cli/training-runs/{_safe_path(run_id)}/stop",
             method="POST",
@@ -282,6 +332,30 @@ class OsmosisClient:
             git_identity=git_identity,
         )
         return TrainingRunMetrics.from_dict(data)
+
+    def get_training_run_logs(
+        self,
+        name_or_id: str,
+        *,
+        limit: int = DEFAULT_PAGE_SIZE,
+        cursor: str | None = None,
+        direction: str = "older",
+        credentials: Credentials | None = None,
+        git_identity: str,
+    ) -> LogsPage:
+        """Fetch one page of training run logs.
+
+        Without ``cursor``, ``direction="older"`` returns the most recent page;
+        the returned ``next_cursor`` pages further back in time.
+        """
+        return self._get_logs(
+            f"/api/cli/training-runs/{_safe_path(name_or_id)}",
+            limit=limit,
+            cursor=cursor,
+            direction=direction,
+            credentials=credentials,
+            git_identity=git_identity,
+        )
 
     # ── Rollouts ──────────────────────────────────────────────────
 
@@ -318,6 +392,75 @@ class OsmosisClient:
             git_identity=git_identity,
         )
         return PaginatedBaseModels.from_dict(data)
+
+    def list_lora_models(
+        self,
+        limit: int = DEFAULT_PAGE_SIZE,
+        offset: int = 0,
+        *,
+        credentials: Credentials | None = None,
+        git_identity: str,
+    ) -> PaginatedLoraModels:
+        qs = urlencode({"limit": limit, "offset": offset})
+        data = platform_request(
+            f"/api/cli/models/lora?{qs}",
+            credentials=credentials,
+            git_identity=git_identity,
+        )
+        return PaginatedLoraModels.from_dict(data)
+
+    def get_lora_model(
+        self,
+        lora_model_name: str,
+        *,
+        credentials: Credentials | None = None,
+        git_identity: str,
+    ) -> LoraModelDetail:
+        """Get details for a single LoRA model by name."""
+        data = platform_request(
+            f"/api/cli/models/{_safe_path(lora_model_name)}",
+            credentials=credentials,
+            git_identity=git_identity,
+        )
+        return LoraModelDetail.from_dict(data)
+
+    def deploy_lora_model(
+        self,
+        lora_model_name: str,
+        *,
+        credentials: Credentials | None = None,
+        git_identity: str,
+    ) -> LoraModelSummary:
+        """Deploy (or reactivate) a LoRA model by name.
+
+        Idempotent: deploying a LoRA model that is already active returns
+        the existing deployment.
+        """
+        data = platform_request(
+            f"/api/cli/models/{_safe_path(lora_model_name)}/deploy",
+            method="POST",
+            data={},
+            credentials=credentials,
+            git_identity=git_identity,
+        )
+        return LoraModelSummary.from_dict(data)
+
+    def undeploy_lora_model(
+        self,
+        lora_model_name: str,
+        *,
+        credentials: Credentials | None = None,
+        git_identity: str,
+    ) -> LoraModelSummary:
+        """Undeploy a LoRA model (transitions to ``inactive``); idempotent."""
+        data = platform_request(
+            f"/api/cli/models/{_safe_path(lora_model_name)}/undeploy",
+            method="POST",
+            data={},
+            credentials=credentials,
+            git_identity=git_identity,
+        )
+        return LoraModelSummary.from_dict(data)
 
     # ── Environment Secrets ───────────────────────────────────────
     # Scoped secrets. The platform never echoes secret values:
@@ -390,80 +533,6 @@ class OsmosisClient:
             credentials=credentials,
             git_identity=git_identity,
         )
-
-    # ── Deployments ───────────────────────────────────────────────
-    # All mutating endpoints key off `checkpoint` (UUID or checkpoint_name).
-    # Lifecycle: deploy → active, undeploy → inactive, failure → failed.
-
-    def list_deployments(
-        self,
-        limit: int = DEFAULT_PAGE_SIZE,
-        offset: int = 0,
-        *,
-        credentials: Credentials | None = None,
-        git_identity: str,
-    ) -> PaginatedDeployments:
-        """List LoRA deployments in the connected repository scope."""
-        qs = urlencode({"limit": limit, "offset": offset})
-        data = platform_request(
-            f"/api/cli/deployments?{qs}",
-            credentials=credentials,
-            git_identity=git_identity,
-        )
-        return PaginatedDeployments.from_dict(data)
-
-    def get_deployment(
-        self,
-        checkpoint: str,
-        *,
-        credentials: Credentials | None = None,
-        git_identity: str,
-    ) -> DeploymentInfo:
-        """Fetch a deployment by checkpoint UUID or checkpoint name."""
-        data = platform_request(
-            f"/api/cli/deployments/{_safe_path(checkpoint)}",
-            credentials=credentials,
-            git_identity=git_identity,
-        )
-        return DeploymentInfo.from_dict(data["deployment"])
-
-    def deploy_checkpoint(
-        self,
-        checkpoint: str,
-        *,
-        credentials: Credentials | None = None,
-        git_identity: str,
-    ) -> DeploymentSummary:
-        """Deploy (or reactivate) a LoRA checkpoint.
-
-        Idempotent: deploying a checkpoint that is already active returns
-        the existing deployment.
-        """
-        data = platform_request(
-            f"/api/cli/deployments/{_safe_path(checkpoint)}/deploy",
-            method="POST",
-            data={},
-            credentials=credentials,
-            git_identity=git_identity,
-        )
-        return DeploymentSummary.from_dict(data["deployment"])
-
-    def undeploy_checkpoint(
-        self,
-        checkpoint: str,
-        *,
-        credentials: Credentials | None = None,
-        git_identity: str,
-    ) -> DeploymentSummary:
-        """Undeploy a LoRA checkpoint (transitions to ``inactive``)."""
-        data = platform_request(
-            f"/api/cli/deployments/{_safe_path(checkpoint)}/undeploy",
-            method="POST",
-            data={},
-            credentials=credentials,
-            git_identity=git_identity,
-        )
-        return DeploymentSummary.from_dict(data)
 
     # ── Training-run checkpoints ──────────────────────────────────
     # Still used by `osmosis train info` to list deployable checkpoints.
@@ -561,6 +630,30 @@ class OsmosisClient:
         )
         return EvalRunMetrics.from_dict(data)
 
+    def get_eval_run_logs(
+        self,
+        name_or_id: str,
+        *,
+        limit: int = DEFAULT_PAGE_SIZE,
+        cursor: str | None = None,
+        direction: str = "older",
+        credentials: Credentials | None = None,
+        git_identity: str,
+    ) -> LogsPage:
+        """Fetch one page of evaluation run logs.
+
+        Without ``cursor``, ``direction="older"`` returns the most recent page;
+        the returned ``next_cursor`` pages further back in time.
+        """
+        return self._get_logs(
+            f"/api/cli/eval-runs/{_safe_path(name_or_id)}",
+            limit=limit,
+            cursor=cursor,
+            direction=direction,
+            credentials=credentials,
+            git_identity=git_identity,
+        )
+
     def stop_eval_run(
         self,
         eval_run_id: str,
@@ -568,7 +661,7 @@ class OsmosisClient:
         credentials: Credentials | None = None,
         git_identity: str,
     ) -> dict[str, Any]:
-        """Stop a pending or running evaluation run."""
+        """Stop a non-terminal evaluation run (queued, pending, or running)."""
         return platform_request(
             f"/api/cli/eval-runs/{_safe_path(eval_run_id)}/stop",
             method="POST",

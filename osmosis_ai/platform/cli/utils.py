@@ -9,11 +9,9 @@ from typing import TYPE_CHECKING, Any
 
 from osmosis_ai.cli.console import console
 from osmosis_ai.cli.errors import CLIError
-from osmosis_ai.cli.output import DetailSection
+from osmosis_ai.cli.output import DetailSection, ListColumn, ListResult
 from osmosis_ai.cli.output.display import format_local_datetime
 from osmosis_ai.platform.api.models import (
-    DEPLOYMENT_STATUSES_ERROR,
-    DEPLOYMENT_STATUSES_INACTIVE,
     DEPLOYMENT_STATUSES_SUCCESS,
     EVAL_RUN_STATUSES_ERROR,
     EVAL_RUN_STATUSES_IN_PROGRESS,
@@ -37,11 +35,13 @@ from osmosis_ai.platform.auth import (
 )
 from osmosis_ai.platform.cli.workspace_directory_context import (
     GitWorkspaceDirectoryContext,
+    git_result_context,
     resolve_git_workspace_directory_context,
 )
 from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE
 
 if TYPE_CHECKING:
+    from osmosis_ai.platform.api.models import LogsPage
     from osmosis_ai.platform.auth.credentials import Credentials
 
 
@@ -91,7 +91,7 @@ def platform_call[T](message: str, call: Callable[[], T]) -> T:
     """Run a platform request while showing a consistent CLI loading status.
 
     Progress renders on stderr through the active output context, matching the
-    other command domains (train/eval/deployment/...), so stdout stays clean for
+    other command domains (train/eval/model/...), so stdout stays clean for
     piping and JSON/plain modes stay silent.
     """
     from osmosis_ai.cli.output import get_output_context
@@ -137,11 +137,6 @@ _RUN_STATUS_STYLES: _StatusStyleMap = (
     (RUN_STATUSES_ERROR, "red"),
     (RUN_STATUSES_STOPPED, "dim"),
 )
-_DEPLOYMENT_STATUS_STYLES: _StatusStyleMap = (
-    (DEPLOYMENT_STATUSES_SUCCESS, "green"),
-    (DEPLOYMENT_STATUSES_INACTIVE, "dim"),
-    (DEPLOYMENT_STATUSES_ERROR, "red"),
-)
 _EVAL_STATUS_STYLES: _StatusStyleMap = (
     (EVAL_RUN_STATUSES_SUCCESS, "green"),
     (EVAL_RUN_STATUSES_PENDING, "orange3"),
@@ -185,9 +180,19 @@ def format_run_status(r: Any, *, for_prompt: bool = False) -> str:
     return format_status_token(r.status, _RUN_STATUS_STYLES, for_prompt=for_prompt)
 
 
-def format_deployment_status(d: Any) -> str:
-    """Format a deployment status token with Rich styling."""
-    return format_status_token(d.status, _DEPLOYMENT_STATUS_STYLES)
+def format_deployment_status(status: str | None, *, plain: bool = False) -> str:
+    """Format a deployment state with the platform's vocabulary
+    ("deployed" / "not deployed").
+
+    Matches the platform's models table: only the deployed state gets a
+    styled token in list columns; everything else (including ``None``,
+    never deployed) renders an en dash. *plain* renders the Title Case
+    detail-row form with no markup (e.g. for ``kv_section``), where
+    non-deployed states say "Not deployed" explicitly.
+    """
+    if status is not None and status in DEPLOYMENT_STATUSES_SUCCESS:
+        return "Deployed" if plain else console.format_styled("[deployed]", "green")
+    return "Not deployed" if plain else "–"
 
 
 def format_eval_status(run: Any) -> str:
@@ -195,20 +200,21 @@ def format_eval_status(run: Any) -> str:
     return format_status_token(run.status, _EVAL_STATUS_STYLES)
 
 
-def format_date(iso_str: str | None) -> str:
-    """Extract YYYY-MM-DD from an ISO 8601 string, or return '' if empty."""
-    if not iso_str:
-        return ""
-    return iso_str[:10]
+def format_reward(reward: float | None) -> str:
+    """Format a training reward to two decimals, en dash when unset."""
+    if reward is None:
+        return "–"
+    return f"{reward:.2f}"
 
 
-def build_dataset_detail_rows(ds: Any) -> list[tuple[str, str]]:
+def build_dataset_detail_rows(ds: Any, *, include_id: bool) -> list[tuple[str, str]]:
     """Build common detail rows for a dataset."""
     rows: list[tuple[str, str]] = [
         ("File", console.escape(ds.file_name)),
-        ("ID", ds.id),
-        ("Status", ds.status.replace("_", " ").title()),
     ]
+    if include_id:
+        rows.append(("ID", ds.id))
+    rows.append(("Status", ds.status.replace("_", " ").title()))
     file_format = getattr(ds, "file_format", None)
     original_format = getattr(ds, "original_file_format", None)
     if file_format:
@@ -230,20 +236,64 @@ def build_dataset_detail_rows(ds: Any) -> list[tuple[str, str]]:
     return rows
 
 
-def build_run_detail_rows(r: Any) -> list[tuple[str, str]]:
+def build_run_detail_rows(r: Any, *, include_id: bool) -> list[tuple[str, str]]:
     rows: list[tuple[str, str]] = [
         ("Name", console.escape(r.name) if r.name else "(unnamed)"),
-        ("ID", r.id),
-        ("Status", r.status.replace("_", " ").title()),
     ]
+    if include_id:
+        rows.append(("ID", r.id))
+    rows.append(("Status", r.status.replace("_", " ").title()))
     if r.created_at:
         rows.append(("Submitted", format_local_datetime(r.created_at)))
     if r.creator_name:
         rows.append(("Submitted By", console.escape(r.creator_name)))
-    rows.append(("Dataset", console.escape(r.dataset_name) if r.dataset_name else "—"))
-    rows.append(("Base Model", console.escape(r.model_name) if r.model_name else "—"))
-    rows.append(("Rollout", console.escape(r.rollout_name) if r.rollout_name else "—"))
+    rows.append(("Dataset", console.escape(r.dataset_name) if r.dataset_name else "–"))
+    rows.append(("Base Model", console.escape(r.model_name) if r.model_name else "–"))
+    rows.append(("Rollout", console.escape(r.rollout_name) if r.rollout_name else "–"))
     return rows
+
+
+def build_logs_result(
+    *,
+    title: str,
+    page: LogsPage,
+    context: GitWorkspaceDirectoryContext,
+    next_step_hint: str,
+) -> ListResult:
+    """Build the shared ``ListResult`` for a logs page (train/eval/dataset).
+
+    Cursor pagination: the server reports no total, so ``total_count`` is this
+    page's size and ``has_more`` means older entries exist beyond ``next_cursor``.
+    """
+    items = [
+        {
+            "timestamp": entry.timestamp,
+            "level": entry.level,
+            "step": entry.step,
+            "message": entry.message,
+            "details": entry.details,
+        }
+        for entry in page.logs
+    ]
+    return ListResult(
+        title=title,
+        items=items,
+        total_count=len(items),
+        has_more=page.next_cursor is not None,
+        next_offset=None,
+        extra={"next_cursor": page.next_cursor, **git_result_context(context)},
+        columns=[
+            ListColumn(key="timestamp", label="Time", no_wrap=True, ratio=2),
+            ListColumn(key="level", label="Level", no_wrap=True, ratio=1),
+            ListColumn(key="step", label="Step", no_wrap=True, ratio=1),
+            ListColumn(key="message", label="Message", ratio=6, overflow="fold"),
+        ],
+        display_items=[
+            {**item, "timestamp": format_local_datetime(entry.timestamp)}
+            for item, entry in zip(items, page.logs, strict=True)
+        ],
+        display_hints=[next_step_hint],
+    )
 
 
 def jsonish(value: Any) -> str:

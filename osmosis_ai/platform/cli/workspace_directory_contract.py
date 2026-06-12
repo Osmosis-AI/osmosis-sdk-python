@@ -30,7 +30,8 @@ def resolve_workspace_directory(start: Path | None = None) -> Path:
     workspace_directory = find_workspace_directory(start or Path.cwd())
     if workspace_directory is None:
         raise CLIError(
-            "Run this command from an Osmosis workspace directory created by Platform."
+            "Run this command from an Osmosis workspace directory created by Platform.",
+            code="WORKSPACE_REQUIRED",
         )
     return workspace_directory.resolve()
 

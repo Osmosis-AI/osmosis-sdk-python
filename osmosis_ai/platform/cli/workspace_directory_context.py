@@ -8,6 +8,7 @@ from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.platform.auth import AuthenticationExpiredError, load_credentials
 
 from .workspace_directory_contract import (
+    find_workspace_directory,
     resolve_workspace_directory,
     validate_workspace_directory_contract,
 )
@@ -59,6 +60,19 @@ def resolve_local_workspace_directory_context(
     )
 
 
+def resolve_optional_git_identity(cwd: Path | None = None) -> str | None:
+    """Best-effort Git identity for workspace-scoped headers.
+
+    Returns None outside a Git worktree or when `origin` cannot be
+    normalized — never raises, so auth-only commands stay usable anywhere.
+    """
+    workspace_directory = find_workspace_directory(cwd or Path.cwd())
+    if workspace_directory is None:
+        return None
+    identity, _repo_url = _optional_identity(workspace_directory)
+    return identity
+
+
 def resolve_git_workspace_directory_context(
     *, cwd: Path | None = None
 ) -> GitWorkspaceDirectoryContext:
@@ -103,4 +117,5 @@ __all__ = [
     "git_result_context",
     "resolve_git_workspace_directory_context",
     "resolve_local_workspace_directory_context",
+    "resolve_optional_git_identity",
 ]

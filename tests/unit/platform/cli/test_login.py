@@ -389,7 +389,7 @@ def test_whoami_prints_local_identity_outside_workspace_directory(monkeypatch) -
     monkeypatch.setattr("osmosis_ai.platform.auth.load_credentials", lambda: creds)
     monkeypatch.setattr(
         "osmosis_ai.platform.auth.verify_token",
-        lambda token: VerifyResult(
+        lambda token, git_identity=None: VerifyResult(
             user=creds.user,
             expires_at=creds.expires_at,
             token_id=creds.token_id,

@@ -15,6 +15,7 @@ from osmosis_ai.platform.cli.utils import (
     format_dataset_status,
     format_deployment_status,
     format_eval_status,
+    format_reward,
     format_run_status,
     format_size,
     platform_call,
@@ -177,25 +178,36 @@ def test_format_run_status_unknown(monkeypatch: pytest.MonkeyPatch) -> None:
 
 # ── format_deployment_status ─────────────────────────────────────────
 #
-# ``format_styled`` returns Rich *markup* (``[green]\\[active][/green]``), so we
-# can assert the exact style bucket each status lands in. These guard formatters
-# that previously had zero coverage.
+# Labels mirror the platform's models table: only a deployed model gets
+# a styled list token, every other state renders an en dash. Detail rows
+# (``plain=True``) get the explicit Title Case vocabulary instead.
 
 
 @pytest.mark.parametrize(
-    "status, style",
+    "status, expected",
     [
-        ("active", "green"),
-        ("inactive", "dim"),
-        ("failed", "red"),
+        ("active", "[green]\\[deployed][/green]"),
+        ("inactive", "–"),
+        ("weird", "–"),
+        (None, "–"),
     ],
 )
-def test_format_deployment_status_styles(status: str, style: str) -> None:
-    assert format_deployment_status(_run(status)) == f"[{style}]\\[{status}][/{style}]"
+def test_format_deployment_status_labels(status: str | None, expected: str) -> None:
+    assert format_deployment_status(status) == expected
 
 
-def test_format_deployment_status_unknown_uses_escape() -> None:
-    assert format_deployment_status(_run("weird")) == "\\[weird]"
+@pytest.mark.parametrize(
+    "status, expected",
+    [
+        ("active", "Deployed"),
+        ("inactive", "Not deployed"),
+        (None, "Not deployed"),
+    ],
+)
+def test_format_deployment_status_plain_skips_markup(
+    status: str | None, expected: str
+) -> None:
+    assert format_deployment_status(status, plain=True) == expected
 
 
 # ── format_eval_status ───────────────────────────────────────────────
@@ -222,6 +234,22 @@ def test_format_eval_status_finished_is_green_not_terminal_red() -> None:
 
 def test_format_eval_status_unknown_uses_escape() -> None:
     assert format_eval_status(_run("weird")) == "\\[weird]"
+
+
+# ── format_reward ────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "reward, expected",
+    [
+        (0.85, "0.85"),
+        (0.875, "0.88"),
+        (1, "1.00"),
+        (None, "–"),
+    ],
+)
+def test_format_reward(reward: float | None, expected: str) -> None:
+    assert format_reward(reward) == expected
 
 
 # ── fetch_all_pages ─────────────────────────────────────────────────

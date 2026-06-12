@@ -7,10 +7,10 @@ from typing import Any
 from osmosis_ai.platform.api.models import (
     BaseModelInfo,
     DatasetFile,
-    DeploymentInfo,
     EnvironmentSecretInfo,
     EvaluationRun,
     LoraCheckpointInfo,
+    LoraModelInfo,
     RolloutInfo,
     TrainingRun,
     wire_to_display_scope,
@@ -77,19 +77,26 @@ def serialize_checkpoint(ckpt: LoraCheckpointInfo) -> dict[str, Any]:
     }
 
 
-def serialize_deployment(dep: DeploymentInfo) -> dict[str, Any]:
-    """Serialize a deployment for the public JSON contract."""
-    return {
-        "id": dep.id,
-        "checkpoint_name": dep.checkpoint_name,
-        "status": dep.status,
-        "base_model": dep.base_model,
-        "checkpoint_step": dep.checkpoint_step,
-        "training_run_id": dep.training_run_id,
-        "training_run_name": dep.training_run_name,
-        "creator_name": dep.creator_name,
-        "created_at": dep.created_at,
+def serialize_lora_model(model: LoraModelInfo) -> dict[str, Any]:
+    """Serialize a LoRA model for the public JSON contract.
+
+    Deployment keys are omitted when the platform omitted them (inference
+    unavailable for the account), mirroring the API response shape.
+    """
+    data: dict[str, Any] = {
+        "id": model.id,
+        "model_name": model.model_name,
+        "base_model": model.base_model,
+        "training_run_name": model.training_run_name,
+        "checkpoint_step": model.checkpoint_step,
+        "reward": model.reward,
     }
+    if model.has_deployment_info:
+        data["deployment_status"] = model.deployment_status
+        data["deployed_at"] = model.deployed_at
+        data["deployed_by"] = model.deployed_by
+    data["created_at"] = model.created_at
+    return data
 
 
 def serialize_model(model: BaseModelInfo) -> dict[str, Any]:

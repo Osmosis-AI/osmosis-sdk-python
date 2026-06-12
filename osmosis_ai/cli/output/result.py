@@ -74,6 +74,34 @@ class ListResult(CommandResult):
     display_hints: list[str] = field(default_factory=list)
 
 
+@dataclass(frozen=True)
+class ListSection:
+    """One independently paginated list inside a :class:`SectionedListResult`.
+
+    ``key`` is the snake_case JSON envelope key (e.g. ``"base_models"``);
+    ``title`` is the human heading (e.g. ``"Base Models"``).
+    """
+
+    key: str
+    title: str
+    items: list[dict[str, Any]]
+    total_count: int
+    has_more: bool
+    next_offset: int | None
+    columns: list[ListColumn] = field(default_factory=list)
+    display_items: list[dict[str, Any]] | None = None
+
+
+@dataclass
+class SectionedListResult(CommandResult):
+    """Multiple separate paginated lists, each with its own columns and cursor."""
+
+    sections: list[ListSection]
+    extra: dict[str, Any] = field(default_factory=dict)
+    exit_code: int = 0
+    display_hints: list[str] = field(default_factory=list)
+
+
 @dataclass
 class OperationResult(CommandResult):
     """Mutation output."""

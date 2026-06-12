@@ -79,6 +79,7 @@ def test_resolve_workspace_directory_from_cwd_reports_missing_workspace_director
         resolve_workspace_directory_from_cwd()
 
     assert "Osmosis workspace directory created by Platform" in str(exc.value)
+    assert exc.value.code == "WORKSPACE_REQUIRED"
 
 
 def test_validate_workspace_directory_contract_does_not_require_training_brief(
@@ -129,6 +130,7 @@ def test_resolve_workspace_directory_rejects_non_git_directory(tmp_path: Path) -
         workspace_directory_contract.resolve_workspace_directory(tmp_path)
 
     assert "Osmosis workspace directory created by Platform" in str(exc.value)
+    assert exc.value.code == "WORKSPACE_REQUIRED"
 
 
 def test_ensure_context_path_accepts_canonical_config(tmp_path: Path) -> None:

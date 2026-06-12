@@ -19,6 +19,8 @@ from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.cli.output import DetailResult, ListResult, OperationResult
 from osmosis_ai.cli.output.context import OutputFormat, override_output_context
 from osmosis_ai.platform.api.models import (
+    LogEntry,
+    LogsPage,
     MetricDataPoint,
     MetricHistory,
     MetricSummary,
@@ -499,6 +501,95 @@ class TestInfo:
         assert "not yet available" in (result.data["metrics_error"] or "")
         assert all(field.label != "Note" for field in result.fields)
 
+    def test_info_internal_user_sees_id_row_before_status(
+        self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
+    ) -> None:
+        detail = TrainingRunDetail(
+            id="abcdef1234567890abcdef1234567890",
+            name="run-1",
+            status="finished",
+            model_name="gpt-2",
+            dataset_name="train.jsonl",
+            rollout_name="math-rollout",
+            current_step=25,
+            total_steps=25,
+            is_internal_user=True,
+        )
+
+        class FakeClient:
+            def get_training_run(self, run_id, *, git_identity, credentials=None):
+                assert git_identity == GIT_IDENTITY
+                return detail
+
+            def list_training_run_checkpoints(
+                self, run_id, *, git_identity, credentials=None
+            ):
+                return type("CheckpointPage", (), {"checkpoints": []})()
+
+            def get_training_run_metrics(
+                self, run_id, *, git_identity, credentials=None
+            ):
+                raise PlatformAPIError("not available")
+
+        monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(platform_train_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(shared_submit_module, "OsmosisClient", FakeClient)
+        result = train_module.info(name="run-1")
+
+        assert isinstance(result, DetailResult)
+        labels = [field.label for field in result.fields]
+        assert labels[:3] == ["Name", "ID", "Status"]
+        if "Progress" in labels:
+            assert labels.index("Progress") == labels.index("Status") + 1
+
+    def test_info_metrics_fallback_progress_inserted_after_status(
+        self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
+    ) -> None:
+        detail = TrainingRunDetail(
+            id="abcdef1234567890abcdef1234567890",
+            name="run-metrics-fallback",
+            status="running",
+            model_name="gpt-2",
+            is_internal_user=False,
+        )
+
+        metrics = TrainingRunMetrics(
+            training_run_id=detail.id,
+            status="running",
+            overview=TrainingRunMetricsOverview(
+                duration_ms=None,
+                metric_summaries=[],
+                examples_processed_count=None,
+                total_steps=100,
+                latest_step=42,
+            ),
+            metrics=[],
+        )
+
+        class FakeClient:
+            def get_training_run(self, run_id, *, git_identity, credentials=None):
+                return detail
+
+            def list_training_run_checkpoints(
+                self, run_id, *, git_identity, credentials=None
+            ):
+                return type("CheckpointPage", (), {"checkpoints": []})()
+
+            def get_training_run_metrics(
+                self, run_id, *, git_identity, credentials=None
+            ):
+                return metrics
+
+        monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(platform_train_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(shared_submit_module, "OsmosisClient", FakeClient)
+        result = train_module.info(name="run-metrics-fallback", output=None)
+
+        assert isinstance(result, DetailResult)
+        labels = [field.label for field in result.fields]
+        assert "Progress" in labels
+        assert labels.index("Progress") == labels.index("Status") + 1
+
 
 # ---------------------------------------------------------------------------
 # status
@@ -591,7 +682,7 @@ class TestStatus:
         assert result.sections
         assert result.display_hints == [
             f"View: {detail.platform_url}",
-            "Deploy with: osmosis deploy <checkpoint-name>",
+            "Deploy with: osmosis model deploy <lora-model-name>",
         ]
         assert result.data["checkpoints"][0]["checkpoint_name"] == "run-1-step-100"
 
@@ -641,7 +732,6 @@ class TestStatus:
             "Checkpoint",
             "Step",
             "Status",
-            "ID",
         ]
         output = StringIO()
         rich = RichConsole(file=output, force_terminal=False, no_color=True, width=200)
@@ -654,6 +744,39 @@ class TestStatus:
         plain_line = section.plain_lines[0]
         assert "2026-01-01" not in plain_line
         assert ":00 " not in plain_line
+
+    @pytest.mark.parametrize("status", ["failed", "crashed"])
+    def test_status_failed_run_suggests_logs_command(
+        self,
+        status: str,
+        monkeypatch: pytest.MonkeyPatch,
+        console_capture: StringIO,
+    ) -> None:
+        detail = TrainingRunDetail(
+            id="abcdef1234567890abcdef1234567890",
+            name="broken-run",
+            status=status,
+            model_name="gpt-2",
+        )
+
+        class FakeClient:
+            def get_training_run(self, run_id, *, git_identity, credentials=None):
+                assert git_identity == GIT_IDENTITY
+                return detail
+
+            def list_training_run_checkpoints(
+                self, run_id, *, git_identity, credentials=None
+            ):
+                raise PlatformAPIError("not available")
+
+            get_training_run_metrics = _raise_metrics_unavailable
+
+        monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(platform_train_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(shared_submit_module, "OsmosisClient", FakeClient)
+        result = train_module.info(name="broken-run")
+
+        assert "See logs with: osmosis train logs broken-run" in result.display_hints
 
     def test_status_uses_detailed_local_timestamps(
         self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
@@ -760,6 +883,154 @@ class TestStatus:
             "OPENAI_API_KEY (workspace)"
         )
         assert section_plain["Environment Variables"] == "PROMPT_MODE=strict"
+
+
+# ---------------------------------------------------------------------------
+# logs
+# ---------------------------------------------------------------------------
+
+
+class TestLogs:
+    LOG_ENTRIES = [
+        LogEntry(
+            timestamp="2026-06-01T00:00:00Z",
+            level="info",
+            step="init",
+            message="Run created",
+        ),
+        LogEntry(
+            timestamp="2026-06-01T00:05:00Z",
+            level="error",
+            step="train",
+            message="OOM",
+            details={"exit_code": 137},
+        ),
+    ]
+
+    @staticmethod
+    def _install_client(
+        monkeypatch: pytest.MonkeyPatch, page: LogsPage
+    ) -> dict[str, object]:
+        captured: dict[str, object] = {}
+
+        class FakeClient:
+            def get_training_run_logs(
+                self, name, *, limit, cursor=None, git_identity, credentials=None
+            ):
+                assert credentials is FAKE_CREDENTIALS
+                assert git_identity == GIT_IDENTITY
+                captured["name"] = name
+                captured["limit"] = limit
+                captured["cursor"] = cursor
+                return page
+
+        monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(platform_train_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(shared_submit_module, "OsmosisClient", FakeClient)
+        return captured
+
+    def test_logs_renders_chronological_table(
+        self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
+    ) -> None:
+        captured = self._install_client(
+            monkeypatch, LogsPage(logs=self.LOG_ENTRIES, next_cursor=None)
+        )
+
+        result = train_module.logs(name="run-1", limit=50, cursor=None)
+
+        assert captured == {"name": "run-1", "limit": 50, "cursor": None}
+        assert isinstance(result, ListResult)
+        assert result.title == "Training Run Logs: run-1"
+        assert [column.label for column in result.columns] == [
+            "Time",
+            "Level",
+            "Step",
+            "Message",
+        ]
+        # Oldest-first order is preserved from the server page.
+        assert [item["message"] for item in result.items] == ["Run created", "OOM"]
+        assert result.items[0]["timestamp"] == "2026-06-01T00:00:00Z"
+        assert result.items[1]["details"] == {"exit_code": 137}
+        assert result.total_count == 2
+        assert result.has_more is False
+        assert result.next_offset is None
+        assert result.extra == {"next_cursor": None, **_git_extra()}
+        assert result.display_items is not None
+        # Display timestamps are localized, raw ISO stays in items for JSON.
+        assert result.display_items[0]["timestamp"] != "2026-06-01T00:00:00Z"
+        assert result.display_items[0]["timestamp"].startswith("2026-")
+        assert result.display_hints == ["Use osmosis train info run-1 for run details."]
+
+    def test_logs_has_more_when_next_cursor_present(
+        self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
+    ) -> None:
+        self._install_client(
+            monkeypatch,
+            LogsPage(logs=self.LOG_ENTRIES, next_cursor="2026-06-01T00:00:00Z|log-1"),
+        )
+
+        result = train_module.logs(name="run-1", limit=2)
+
+        assert isinstance(result, ListResult)
+        assert result.has_more is True
+        assert result.extra["next_cursor"] == "2026-06-01T00:00:00Z|log-1"
+
+    def test_logs_passes_cursor_to_client(
+        self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
+    ) -> None:
+        captured = self._install_client(
+            monkeypatch, LogsPage(logs=self.LOG_ENTRIES, next_cursor=None)
+        )
+
+        train_module.logs(name="run-1", limit=50, cursor="2026-06-01T00:00:00Z|log-1")
+
+        assert captured["cursor"] == "2026-06-01T00:00:00Z|log-1"
+
+    def test_logs_empty_page(
+        self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
+    ) -> None:
+        self._install_client(monkeypatch, LogsPage(logs=[], next_cursor=None))
+
+        result = train_module.logs(name="run-1", limit=50)
+
+        assert isinstance(result, ListResult)
+        assert result.items == []
+        assert result.total_count == 0
+        assert result.has_more is False
+
+    @pytest.mark.parametrize("limit", ["0", "201"])
+    def test_logs_rejects_out_of_range_limit(self, limit: str, capsys) -> None:
+        from osmosis_ai.cli.main import main
+
+        rc = main(["train", "logs", "run-1", "--limit", limit])
+
+        assert rc == 2
+        assert "is not in the range 1<=x<=200" in capsys.readouterr().err
+
+    def test_logs_unknown_run_emits_not_found_envelope(
+        self, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+    ) -> None:
+        class FakeClient:
+            def get_training_run_logs(
+                self, name, *, limit, cursor=None, git_identity, credentials=None
+            ):
+                raise PlatformAPIError("Training run not found", 404)
+
+        monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(platform_train_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(shared_submit_module, "OsmosisClient", FakeClient)
+
+        from osmosis_ai.cli import main as cli
+
+        exit_code = cli.main(["--json", "train", "logs", "missing-run"])
+        captured = capsys.readouterr()
+
+        assert exit_code == 1
+        assert captured.out == ""
+        envelope = json.loads(captured.err)
+        assert envelope["error"]["code"] == "NOT_FOUND"
+        assert envelope["error"]["message"] == "Training run not found"
+        assert envelope["command"] == "train logs"
 
 
 # ---------------------------------------------------------------------------

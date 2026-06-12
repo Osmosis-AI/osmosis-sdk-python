@@ -79,6 +79,7 @@ class DatasetFile:
     created_at: str = ""
     updated_at: str = ""
     platform_url: str | None = None
+    is_internal_user: bool = False
     # Upload info — only present in create_dataset response
     upload: UploadInfo | None = None
 
@@ -102,6 +103,7 @@ class DatasetFile:
             created_at=data.get("created_at", ""),
             updated_at=data.get("updated_at", ""),
             platform_url=data.get("platform_url"),
+            is_internal_user=data.get("is_internal_user", False),
             upload=upload,
         )
 
@@ -249,6 +251,7 @@ class TrainingRunDetail(TrainingRun):
     commit_sha: str | None = None
     env_config: dict[str, Any] | None = None
     resolved_secret_scopes: dict[str, Any] | None = None
+    is_internal_user: bool = False
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> TrainingRunDetail:
@@ -297,6 +300,7 @@ class TrainingRunDetail(TrainingRun):
                 if isinstance(resolved_secret_scopes, dict)
                 else None
             ),
+            is_internal_user=data.get("is_internal_user", False),
         )
 
 
@@ -452,6 +456,52 @@ class TrainingRunMetrics:
         )
 
 
+# ── Logs (training runs, eval runs, datasets) ────────────────────
+# All three /logs endpoints share one wire shape.
+
+
+@dataclass
+class LogEntry:
+    """A single log line from a training run, evaluation run, or dataset."""
+
+    timestamp: str
+    level: str
+    step: str
+    message: str
+    details: dict[str, Any] | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> LogEntry:
+        details = data.get("details")
+        return cls(
+            timestamp=data.get("timestamp", ""),
+            level=data.get("level", ""),
+            step=data.get("step", ""),
+            message=data.get("message", ""),
+            details=details if isinstance(details, dict) else None,
+        )
+
+
+@dataclass
+class LogsPage:
+    """One cursor page of logs.
+
+    The server returns entries oldest-first within the page for both paging
+    directions; ``next_cursor`` pages further back in time (``None`` when no
+    more pages exist).
+    """
+
+    logs: list[LogEntry]
+    next_cursor: str | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> LogsPage:
+        return cls(
+            logs=[LogEntry.from_dict(log) for log in data.get("logs", [])],
+            next_cursor=data.get("next_cursor"),
+        )
+
+
 @dataclass
 class EvalRewardStats:
     """Distribution stats for per-sample rewards in an eval run."""
@@ -551,8 +601,6 @@ class BaseModelInfo:
     id: str
     model_name: str
     base_model: str | None = None
-    status: str = ""
-    description: str | None = None
     creator_name: str | None = None
     created_at: str = ""
     updated_at: str = ""
@@ -563,8 +611,6 @@ class BaseModelInfo:
             id=data["id"],
             model_name=data.get("model_name", ""),
             base_model=data.get("base_model"),
-            status=data.get("status", ""),
-            description=data.get("description"),
             creator_name=data.get("creator_name"),
             created_at=data.get("created_at", ""),
             updated_at=data.get("updated_at", ""),
@@ -587,6 +633,121 @@ class PaginatedBaseModels:
             total_count=data.get("total_count", 0),
             has_more=data.get("has_more", False),
             next_offset=data.get("next_offset"),
+        )
+
+
+@dataclass
+class LoraModelInfo:
+    """A LoRA model produced by a training run."""
+
+    id: str
+    model_name: str
+    base_model: str | None = None
+    training_run_name: str | None = None
+    checkpoint_step: int | None = None
+    reward: float | None = None
+    deployment_status: str | None = None
+    deployed_at: str | None = None
+    deployed_by: str | None = None
+    created_at: str = ""
+    # The platform omits deployment fields entirely when inference is
+    # unavailable for the account.
+    has_deployment_info: bool = True
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> LoraModelInfo:
+        return cls(
+            id=data["id"],
+            model_name=data.get("model_name", ""),
+            base_model=data.get("base_model"),
+            training_run_name=data.get("training_run_name"),
+            checkpoint_step=data.get("checkpoint_step"),
+            reward=data.get("reward"),
+            deployment_status=data.get("deployment_status"),
+            deployed_at=data.get("deployed_at"),
+            deployed_by=data.get("deployed_by"),
+            created_at=data.get("created_at", ""),
+            has_deployment_info="deployment_status" in data,
+        )
+
+
+@dataclass
+class LoraModelDetail(LoraModelInfo):
+    """Detailed LoRA model info with Hugging Face export and platform link."""
+
+    hf_upload_status: str = ""
+    hf_url: str | None = None
+    uploaded_by: str | None = None
+    # Canonical `model` value for the inference API
+    # ("<base_model_path>:<lora-model-name>").
+    inference_model: str | None = None
+    platform_url: str | None = None
+    is_internal_user: bool = False
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> LoraModelDetail:
+        return cls(
+            id=data["id"],
+            model_name=data.get("model_name", ""),
+            base_model=data.get("base_model"),
+            training_run_name=data.get("training_run_name"),
+            checkpoint_step=data.get("checkpoint_step"),
+            reward=data.get("reward"),
+            deployment_status=data.get("deployment_status"),
+            deployed_at=data.get("deployed_at"),
+            deployed_by=data.get("deployed_by"),
+            created_at=data.get("created_at", ""),
+            hf_upload_status=data.get("hf_upload_status", ""),
+            hf_url=data.get("hf_url"),
+            uploaded_by=data.get("uploaded_by"),
+            has_deployment_info="deployment_status" in data,
+            inference_model=data.get("inference_model"),
+            platform_url=data.get("platform_url"),
+            is_internal_user=data.get("is_internal_user", False),
+        )
+
+
+@dataclass
+class PaginatedLoraModels:
+    """Paginated list of LoRA models."""
+
+    models: list[LoraModelInfo]
+    total_count: int
+    has_more: bool
+    next_offset: int | None = None
+    active_deployments: int = 0
+    max_active_deployments: int = 0
+    # The platform omits the deployment quota fields when inference is
+    # unavailable for the account.
+    has_deployment_info: bool = True
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> PaginatedLoraModels:
+        return cls(
+            models=[LoraModelInfo.from_dict(m) for m in data.get("models", [])],
+            total_count=data.get("total_count", 0),
+            has_more=data.get("has_more", False),
+            next_offset=data.get("next_offset"),
+            active_deployments=data.get("active_deployments", 0),
+            max_active_deployments=data.get("max_active_deployments", 0),
+            has_deployment_info="active_deployments" in data,
+        )
+
+
+@dataclass
+class LoraModelSummary:
+    """Minimal LoRA model identity returned from deploy/undeploy endpoints."""
+
+    id: str
+    model_name: str
+    status: str
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> LoraModelSummary:
+        return cls(
+            id=data["id"],
+            model_name=data.get("model_name", ""),
+            status=data.get("status", ""),
         )
 
 
@@ -668,80 +829,11 @@ class PaginatedEnvironmentSecrets:
         )
 
 
-# ── Deployments ──────────────────────────────────────────────────
-# Status lifecycle: "active" / "inactive" / "failed".
-# Naming lives on the LoRA checkpoint (`checkpoint_name`), not the deployment.
+# ── Deployment status ────────────────────────────────────────────
+# Lifecycle of a LoRA model's deployment: "active" / "inactive".
 
 DEPLOYMENT_STATUSES_SUCCESS: frozenset[str] = frozenset({"active"})
 DEPLOYMENT_STATUSES_INACTIVE: frozenset[str] = frozenset({"inactive"})
-DEPLOYMENT_STATUSES_ERROR: frozenset[str] = frozenset({"failed"})
-
-
-@dataclass
-class DeploymentInfo:
-    """A LoRA deployment record (one deployment per checkpoint)."""
-
-    id: str
-    checkpoint_name: str
-    status: str
-    checkpoint_step: int
-    base_model: str
-    training_run_id: str | None = None
-    training_run_name: str | None = None
-    creator_name: str | None = None
-    created_at: str = ""
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> DeploymentInfo:
-        return cls(
-            id=data["id"],
-            checkpoint_name=data.get("checkpoint_name", ""),
-            status=data.get("status", ""),
-            checkpoint_step=data.get("checkpoint_step", 0),
-            base_model=data.get("base_model", ""),
-            training_run_id=data.get("training_run_id"),
-            training_run_name=data.get("training_run_name"),
-            creator_name=data.get("creator_name"),
-            created_at=data.get("created_at", ""),
-        )
-
-
-@dataclass
-class PaginatedDeployments:
-    """Paginated list of deployments."""
-
-    deployments: list[DeploymentInfo]
-    total_count: int
-    has_more: bool
-    next_offset: int | None = None
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> PaginatedDeployments:
-        return cls(
-            deployments=[
-                DeploymentInfo.from_dict(d) for d in data.get("deployments", [])
-            ],
-            total_count=data.get("total_count", 0),
-            has_more=data.get("has_more", False),
-            next_offset=data.get("next_offset"),
-        )
-
-
-@dataclass
-class DeploymentSummary:
-    """Minimal deployment identity returned from deploy/undeploy endpoints."""
-
-    id: str
-    checkpoint_name: str
-    status: str
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> DeploymentSummary:
-        return cls(
-            id=data["id"],
-            checkpoint_name=data.get("checkpoint_name", ""),
-            status=data.get("status", ""),
-        )
 
 
 # ── Rollouts ─────────────────────────────────────────────────────
@@ -793,7 +885,7 @@ class PaginatedRollouts:
         )
 
 
-# ── LoRA checkpoints (for `osmosis train info` + `osmosis deploy`) ───────
+# ── LoRA checkpoints (for `osmosis train info`) ──────────────────
 
 
 @dataclass
@@ -898,7 +990,7 @@ class EvaluationRunDetail(EvaluationRun):
     env_config: dict[str, Any] | None = None
     resolved_secret_scopes: dict[str, Any] | None = None
     dataset_df_stats: dict[str, Any] | None = None
-    recent_logs: list[dict[str, Any]] | None = None
+    is_internal_user: bool = False
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> EvaluationRunDetail:
@@ -909,7 +1001,6 @@ class EvaluationRunDetail(EvaluationRun):
         env_config = data.get("env_config")
         resolved_secret_scopes = data.get("resolved_secret_scopes")
         dataset_df_stats = data.get("dataset_df_stats")
-        recent_logs = data.get("recent_logs")
         return cls(
             id=run["id"],
             name=run.get("name", ""),
@@ -941,7 +1032,7 @@ class EvaluationRunDetail(EvaluationRun):
             dataset_df_stats=(
                 dataset_df_stats if isinstance(dataset_df_stats, dict) else None
             ),
-            recent_logs=recent_logs if isinstance(recent_logs, list) else None,
+            is_internal_user=data.get("is_internal_user", False),
         )
 
 

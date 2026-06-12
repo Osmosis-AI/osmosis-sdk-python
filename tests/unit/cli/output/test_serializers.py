@@ -8,7 +8,7 @@ from pathlib import Path
 from osmosis_ai.cli.output.serializers import (
     serialize_checkpoint,
     serialize_dataset,
-    serialize_deployment,
+    serialize_lora_model,
     serialize_model,
     serialize_rollout,
     serialize_training_run,
@@ -16,8 +16,8 @@ from osmosis_ai.cli.output.serializers import (
 from osmosis_ai.platform.api.models import (
     BaseModelInfo,
     DatasetFile,
-    DeploymentInfo,
     LoraCheckpointInfo,
+    LoraModelInfo,
     RolloutInfo,
     TrainingRun,
 )
@@ -105,22 +105,45 @@ def test_serialize_checkpoint_keys() -> None:
     _assert_keys_match_golden(payload, "checkpoint_serializer.json")
 
 
-def test_serialize_deployment_keys() -> None:
-    deployment = DeploymentInfo.from_dict(
+def test_serialize_lora_model_keys() -> None:
+    lora_model = LoraModelInfo.from_dict(
         {
-            "id": "dep_1",
-            "checkpoint_name": "qwen3-run1-step-100",
-            "status": "active",
-            "checkpoint_step": 100,
+            "id": "lora_1",
+            "model_name": "qwen3-run1-step-100",
             "base_model": "Qwen/Qwen3-30B-A3B-Instruct-2507-FP8",
-            "training_run_id": "run_1",
             "training_run_name": "qwen3-run1",
-            "creator_name": "brian",
+            "checkpoint_step": 100,
+            "reward": 0.85,
+            "deployment_status": "active",
+            "deployed_at": "2026-04-27T00:00:00Z",
+            "deployed_by": "brian",
             "created_at": "2026-04-26T00:00:00Z",
         }
     )
-    payload = serialize_deployment(deployment)
-    _assert_keys_match_golden(payload, "deployment_serializer.json")
+    payload = serialize_lora_model(lora_model)
+    _assert_keys_match_golden(payload, "lora_model_serializer.json")
+    assert payload["deployed_at"] == "2026-04-27T00:00:00Z"
+    assert payload["deployed_by"] == "brian"
+
+
+def test_serialize_lora_model_keeps_none_deploy_metadata() -> None:
+    # ``deployment_status`` present but null = never deployed on an
+    # inference-enabled account; the null metadata stays in the payload.
+    lora_model = LoraModelInfo.from_dict(
+        {"id": "lora_1", "model_name": "x", "deployment_status": None}
+    )
+    payload = serialize_lora_model(lora_model)
+    assert payload["deployment_status"] is None
+    assert payload["deployed_at"] is None
+    assert payload["deployed_by"] is None
+
+
+def test_serialize_lora_model_omits_deploy_keys_when_platform_omits_them() -> None:
+    lora_model = LoraModelInfo.from_dict({"id": "lora_1", "model_name": "x"})
+    payload = serialize_lora_model(lora_model)
+    assert "deployment_status" not in payload
+    assert "deployed_at" not in payload
+    assert "deployed_by" not in payload
 
 
 def test_serialize_model_keys() -> None:

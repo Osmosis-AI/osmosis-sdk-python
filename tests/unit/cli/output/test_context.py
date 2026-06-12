@@ -15,6 +15,7 @@ from osmosis_ai.cli.output.context import (
     _output_context_var,
     default_output_context,
     get_output_context,
+    hoist_format_selectors,
     install_output_context,
     override_output_context,
     resolve_format_selectors,
@@ -90,6 +91,56 @@ def test_argv_prescan_ignores_command_local_output() -> None:
 
 def test_argv_prescan_ignores_unknown_flags() -> None:
     assert _argv_format_prescan(["--bogus", "dataset", "list"]) is None
+
+
+def test_argv_prescan_finds_postfix_flags() -> None:
+    assert _argv_format_prescan(["dataset", "list", "--json"]) is OutputFormat.json
+    assert _argv_format_prescan(["dataset", "list", "--plain"]) is OutputFormat.plain
+
+
+def test_argv_prescan_stops_at_double_dash() -> None:
+    assert _argv_format_prescan(["dataset", "validate", "--", "--json"]) is None
+
+
+def test_hoist_format_selectors_moves_postfix_flags_to_front() -> None:
+    assert hoist_format_selectors(["dataset", "list", "--json"]) == [
+        "--json",
+        "dataset",
+        "list",
+    ]
+    assert hoist_format_selectors(["model", "deploy", "foo", "--plain"]) == [
+        "--plain",
+        "model",
+        "deploy",
+        "foo",
+    ]
+
+
+def test_hoist_format_selectors_keeps_prefix_argv_unchanged() -> None:
+    assert hoist_format_selectors(["--json", "dataset", "list"]) == [
+        "--json",
+        "dataset",
+        "list",
+    ]
+    assert hoist_format_selectors(["dataset", "list"]) == ["dataset", "list"]
+
+
+def test_hoist_format_selectors_preserves_tokens_after_double_dash() -> None:
+    assert hoist_format_selectors(["dataset", "validate", "--", "--json"]) == [
+        "dataset",
+        "validate",
+        "--",
+        "--json",
+    ]
+
+
+def test_hoist_format_selectors_hoists_conflicting_flags_together() -> None:
+    assert hoist_format_selectors(["dataset", "list", "--json", "--plain"]) == [
+        "--json",
+        "--plain",
+        "dataset",
+        "list",
+    ]
 
 
 def test_get_output_context_layer_2_uses_usage_error_ctx() -> None:

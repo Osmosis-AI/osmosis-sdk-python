@@ -243,7 +243,7 @@ def run_cloud_submit[ConfigT: BaseSubmitConfig](
         if scopes is None:
             # Lookup failed — show names without a confident scope rather than
             # blocking the submit or mislabeling; the server still validates.
-            secret_rows = [(name, "—") for name in sorted(config.secrets)]
+            secret_rows = [(name, "–") for name in sorted(config.secrets)]
         else:
             workspace_names, personal_names = scopes
             missing = sorted(

@@ -2,6 +2,8 @@
 
 Installing the SDK provides a lightweight CLI as `osmosis` (aliases: `osmosis_ai`, `osmosis-ai`). The CLI loads `.env` from the current working directory via `python-dotenv`.
 
+The global output flags `--json` and `--plain` are accepted anywhere on the command line: `osmosis --json dataset list` and `osmosis dataset list --json` are equivalent.
+
 ## Authentication
 
 Credentials are stored at `~/.config/osmosis/credentials.json`.
@@ -29,8 +31,12 @@ osmosis auth whoami
 ```
 
 `whoami` verifies the active credentials and reports the authenticated account.
-Manage workspaces, repositories, secrets, and account settings in the Osmosis
-Platform product.
+When run inside a workspace directory with a Platform-connected `origin`
+remote, the platform also resolves the linked workspace, reported as a
+`workspace` object (`id`, `name`, `role`) in `--json` output and as
+`Workspace` / `Role` rows otherwise. Outside a workspace repository,
+`workspace` is `null`. Manage workspaces, repositories, secrets, and account
+settings in the Osmosis Platform product.
 
 ## Workspace Directory Flow
 
@@ -42,7 +48,7 @@ git clone <repo-url>
 cd <repo>
 osmosis auth login
 osmosis doctor
-osmosis template apply multiply              # or add your rollout under rollouts/
+osmosis template apply multiply-local-openai # or add your rollout under rollouts/
 cp configs/training/default.toml configs/training/<run>.toml
 $EDITOR configs/training/<run>.toml          # set rollout, dataset, and model_path
 git add rollouts configs data
@@ -53,7 +59,9 @@ osmosis train submit configs/training/<run>.toml
 
 Platform-scoped commands derive scope from the workspace directory's `origin` remote and
 send `X-Osmosis-Git: namespace/repo_name`. The CLI does not store or send a
-workspace ID for commands scoped by the workspace directory.
+workspace ID for commands scoped by the workspace directory. Running a
+workspace-scoped command outside a workspace directory fails with the
+`WORKSPACE_REQUIRED` error code.
 
 For CI:
 
@@ -74,6 +82,14 @@ Inspect and optionally repair the scaffold in the current workspace directory. W
 `--fix`, the command reports the workspace directory, Git identity, required scaffold
 paths, and missing paths. Add `--fix` to create missing scaffold paths and
 check for official scaffold file updates without overwriting local edits.
+
+When you are logged in and the workspace directory has a Platform-connected
+`origin` remote, doctor also reports the linked workspace
+(`Linked workspace: <name>`; the `workspace` resource field in `--json`).
+The lookup is best-effort: offline or logged out, the field is `null` and
+doctor still works. Doctor exits non-zero with `status: "failed"` when
+required scaffold paths are missing (`valid: false`); run with `--fix` to
+restore them.
 
 ## Rollout
 
@@ -136,6 +152,21 @@ osmosis --json eval info <eval-run-name-or-id>
 osmosis eval info <eval-run-name-or-id> -o ./eval-metrics.json
 ```
 
+### osmosis eval logs
+
+Show the most recent lifecycle logs for an evaluation run, oldest first.
+Useful for diagnosing failed runs.
+
+```bash
+osmosis eval logs <eval-run-name-or-id>
+osmosis eval logs <eval-run-name-or-id> --limit 100
+osmosis eval logs <eval-run-name-or-id> --json
+```
+
+`--limit` accepts 1–200 entries (default: 50). When older entries exist, the
+JSON output includes a non-null `next_cursor`; pass it back with `--cursor` to
+page further back in time.
+
 ### osmosis eval rubric
 
 LLM-as-judge on a JSONL conversation file:
@@ -161,8 +192,8 @@ osmosis eval rubric -d data.jsonl \
 
 ### osmosis dataset upload
 
-Upload a local dataset file to the current workspace directory's platform
-project. The dataset name is derived from the file name without its extension.
+Upload a local dataset file to the linked platform workspace. The dataset
+name is derived from the file name without its extension.
 
 ```bash
 osmosis dataset upload data.jsonl
@@ -179,6 +210,21 @@ When `--overwrite` is used, the CLI first confirms the duplicate-name conflict
 with the platform, then creates a replacement dataset record and soft-deletes
 the old one. The platform may reject overwrites while the existing dataset is
 still uploading, still processing, or used by an active training run.
+
+### osmosis dataset logs
+
+Show the most recent lifecycle logs for a dataset, oldest first. Useful for
+diagnosing failed uploads.
+
+```bash
+osmosis dataset logs <dataset-name>
+osmosis dataset logs <dataset-name> --limit 100
+osmosis dataset logs <dataset-name> --json
+```
+
+`--limit` accepts 1–200 entries (default: 50). When older entries exist, the
+JSON output includes a non-null `next_cursor`; pass it back with `--cursor` to
+page further back in time.
 
 ## Training
 
@@ -306,53 +352,101 @@ osmosis train list --limit 50
 osmosis train list --all
 ```
 
+### osmosis train logs
+
+Show the most recent lifecycle logs for a training run, oldest first. Useful
+for diagnosing failed or crashed runs.
+
+```bash
+osmosis train logs <run-name>
+osmosis train logs <run-name> --limit 100
+osmosis train logs <run-name> --json
+```
+
+`--limit` accepts 1–200 entries (default: 50). When older entries exist, the
+JSON output includes a non-null `next_cursor`; pass it back with `--cursor` to
+page further back in time.
+
 ### osmosis train stop
 
-Stop a pending or running training run.
+Stop an in-progress training run.
 
 ```bash
 osmosis train stop <run-name>
 osmosis train stop <run-name> --yes
 ```
 
-## Deployment
+## Model
 
-Deployments expose trained checkpoint adapters for inference. Use the checkpoint
-UUID or checkpoint name anywhere `<checkpoint>` appears.
+Models cover base (foundation) models and LoRA models produced by training
+runs. Deploying a LoRA model exposes it for inference.
 
-### osmosis deployment list
+### osmosis model list
 
-List deployments for the current workspace directory.
+List base models and LoRA models for the current workspace directory as two
+separate tables (base models first, then LoRA models). The base models table
+shows Name, Created, and Created By; the LoRA models table shows Name, Base
+Model, Training Run, Checkpoint Step, Training Reward, Created, and Deployment
+Status. `--limit` and `--all` apply to each type independently, and each list
+carries its own pagination cursor (`next_offset`) straight from its endpoint.
+Filter with `--type base` or `--type lora` to show a single list.
+
+When the LoRA models list is included, a deployment-quota summary is shown
+under the LoRA table (e.g. `2 of 5 deployment slots used`), matching the
+platform web UI.
 
 ```bash
-osmosis deployment list
-osmosis deployment list --limit 50
-osmosis deployment list --all
+osmosis model list
+osmosis model list --type lora
+osmosis model list --limit 50
+osmosis model list --all
+osmosis --json model list
 ```
 
-### osmosis deployment info
+`--json` output keys each list separately, so the structure itself says which
+list is which:
 
-Show deployment details for a checkpoint.
-
-```bash
-osmosis deployment info <checkpoint>
-osmosis --json deployment info <checkpoint>
+```json
+{
+  "schema_version": 1,
+  "base_models": {
+    "items": [{"id": "...", "model_name": "Qwen/Qwen3", "...": "..."}],
+    "total_count": 1,
+    "has_more": false,
+    "next_offset": null
+  },
+  "lora_models": {
+    "items": [{"id": "...", "model_name": "run-step-1", "reward": 0.87, "deployed_at": null, "deployed_by": null, "...": "..."}],
+    "total_count": 1,
+    "has_more": false,
+    "next_offset": null
+  },
+  "git": {"identity": "...", "remote_url": "..."},
+  "workspace_directory": "...",
+  "active_deployments": 2,
+  "max_active_deployments": 5
+}
 ```
 
-### osmosis deploy
+Each LoRA item carries `deployed_at` / `deployed_by` (null when the model has
+never been deployed). The top-level `active_deployments` /
+`max_active_deployments` quota keys appear for `--type all` and `--type lora`,
+but not for `--type base`.
 
-Deploy or reactivate a checkpoint.
+### osmosis model deploy
+
+Deploy or reactivate a LoRA model by name.
 
 ```bash
-osmosis deploy <checkpoint>
+osmosis model deploy <lora-model-name>
 ```
 
-### osmosis undeploy
+### osmosis model undeploy
 
-Transition a checkpoint deployment to inactive.
+Transition a LoRA model's deployment to inactive (idempotent).
 
 ```bash
-osmosis undeploy <checkpoint>
+osmosis model undeploy <lora-model-name>
 ```
 
 ## Secrets

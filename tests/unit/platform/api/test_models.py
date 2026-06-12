@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import dataclasses
+
 import pytest
 
 from osmosis_ai.platform.api import models as api_models
@@ -12,10 +14,12 @@ from osmosis_ai.platform.api.models import (
     STATUSES_SUCCESS,
     STATUSES_TERMINAL,
     DatasetDownloadInfo,
+    DatasetFile,
     EnvironmentSecretInfo,
     EvalRunMetrics,
     EvaluationRun,
     EvaluationRunDetail,
+    LoraModelDetail,
     MetricDataPoint,
     MetricHistory,
     PaginatedEnvironmentSecrets,
@@ -35,6 +39,13 @@ REMOVED_RESPONSE_MODELS = (
     "WorkspaceDeletionStatus",
     "ProcessCount",
     "RenameDeploymentResult",
+    "DeploymentInfo",
+    "PaginatedDeployments",
+    "DeploymentSummary",
+    "ModelList",
+    # Renamed to the shared LogEntry / LogsPage models.
+    "TrainingRunLogEntry",
+    "TrainingRunLogs",
 )
 
 
@@ -438,91 +449,199 @@ class TestTrainingRunMetrics:
         assert result.metrics == []
 
 
-class TestDeploymentModels:
-    def test_deployment_info_from_dict(self) -> None:
-        from osmosis_ai.platform.api.models import DeploymentInfo
+class TestLogsPage:
+    def test_from_dict(self) -> None:
+        from osmosis_ai.platform.api.models import LogsPage
 
-        d = DeploymentInfo.from_dict(
+        data = {
+            "logs": [
+                {
+                    "timestamp": "2026-06-01T00:00:00Z",
+                    "level": "info",
+                    "step": "init",
+                    "message": "Run created",
+                    "details": None,
+                },
+                {
+                    "timestamp": "2026-06-01T00:01:00Z",
+                    "level": "error",
+                    "step": "train",
+                    "message": "OOM",
+                    "details": {"exit_code": 137},
+                },
+            ],
+            "next_cursor": "2026-06-01T00:00:00Z|log-1",
+        }
+        result = LogsPage.from_dict(data)
+        assert len(result.logs) == 2
+        assert result.logs[0].timestamp == "2026-06-01T00:00:00Z"
+        assert result.logs[0].details is None
+        assert result.logs[1].details == {"exit_code": 137}
+        assert result.next_cursor == "2026-06-01T00:00:00Z|log-1"
+
+    def test_from_dict_defaults_and_non_dict_details(self) -> None:
+        from osmosis_ai.platform.api.models import LogsPage
+
+        result = LogsPage.from_dict(
+            {"logs": [{"details": "not-a-dict"}], "next_cursor": None}
+        )
+        entry = result.logs[0]
+        assert entry.timestamp == ""
+        assert entry.level == ""
+        assert entry.step == ""
+        assert entry.message == ""
+        assert entry.details is None
+        assert result.next_cursor is None
+
+    def test_from_dict_empty(self) -> None:
+        from osmosis_ai.platform.api.models import LogsPage
+
+        result = LogsPage.from_dict({})
+        assert result.logs == []
+        assert result.next_cursor is None
+
+
+class TestModelModels:
+    def test_lora_model_info_from_dict(self) -> None:
+        from osmosis_ai.platform.api.models import LoraModelInfo
+
+        m = LoraModelInfo.from_dict(
             {
-                "id": "dep_1",
-                "checkpoint_name": "qwen3-run1-step-100",
-                "status": "active",
-                "training_run_id": "run_1",
+                "id": "lora_1",
+                "model_name": "qwen3-run1-step-100",
+                "base_model": "Qwen/Qwen3-30B-A3B-Instruct-2507-FP8",
                 "training_run_name": "qwen3-run1",
                 "checkpoint_step": 100,
-                "base_model": "Qwen/Qwen3-30B-A3B-Instruct-2507-FP8",
-                "creator_name": "brian",
+                "reward": 0.85,
+                "deployment_status": "active",
+                "deployed_at": "2026-04-22T00:00:00Z",
+                "deployed_by": "brian",
                 "created_at": "2026-04-20T00:00:00Z",
             }
         )
-        assert d.id == "dep_1"
-        assert d.checkpoint_name == "qwen3-run1-step-100"
-        assert d.status == "active"
-        assert d.checkpoint_step == 100
-        assert d.base_model == "Qwen/Qwen3-30B-A3B-Instruct-2507-FP8"
+        assert m.id == "lora_1"
+        assert m.model_name == "qwen3-run1-step-100"
+        assert m.deployment_status == "active"
+        assert m.deployed_at == "2026-04-22T00:00:00Z"
+        assert m.deployed_by == "brian"
+        assert m.checkpoint_step == 100
+        assert m.reward == 0.85
+        assert m.base_model == "Qwen/Qwen3-30B-A3B-Instruct-2507-FP8"
 
-    def test_deployment_info_minimal(self) -> None:
+    def test_lora_model_info_minimal(self) -> None:
         """Server may omit optional fields — from_dict must tolerate it."""
-        from osmosis_ai.platform.api.models import DeploymentInfo
+        from osmosis_ai.platform.api.models import LoraModelInfo
 
-        d = DeploymentInfo.from_dict(
+        m = LoraModelInfo.from_dict({"id": "lora_1", "model_name": "x"})
+        assert m.base_model is None
+        assert m.training_run_name is None
+        assert m.checkpoint_step is None
+        assert m.reward is None
+        assert m.deployment_status is None
+        assert m.deployed_at is None
+        assert m.deployed_by is None
+        assert m.created_at == ""
+        assert m.has_deployment_info is False
+
+    def test_lora_model_info_deployment_info_tracks_key_presence(self) -> None:
+        from osmosis_ai.platform.api.models import LoraModelInfo
+
+        with_key = LoraModelInfo.from_dict(
+            {"id": "lora_1", "model_name": "x", "deployment_status": None}
+        )
+        assert with_key.has_deployment_info is True
+
+    def test_paginated_base_models_from_dict(self) -> None:
+        from osmosis_ai.platform.api.models import PaginatedBaseModels
+
+        page = PaginatedBaseModels.from_dict(
             {
-                "id": "dep_1",
-                "checkpoint_name": "x",
-                "status": "active",
-                "base_model": "Qwen/Qwen3",
-                "checkpoint_step": 0,
+                "models": [
+                    {
+                        "id": "model_1",
+                        "model_name": "Qwen/Qwen3",
+                        "base_model": "Qwen/Qwen3",
+                    }
+                ],
+                "total_count": 2,
+                "has_more": True,
+                "next_offset": 1,
             }
         )
-        assert d.training_run_id is None
-        assert d.training_run_name is None
-        assert d.creator_name is None
-        assert d.created_at == ""
+        assert len(page.models) == 1
+        assert page.models[0].model_name == "Qwen/Qwen3"
+        assert page.total_count == 2
+        assert page.has_more is True
+        assert page.next_offset == 1
 
-    def test_paginated_deployments_from_dict(self) -> None:
-        from osmosis_ai.platform.api.models import PaginatedDeployments
+    def test_paginated_base_models_from_dict_empty(self) -> None:
+        from osmosis_ai.platform.api.models import PaginatedBaseModels
 
-        p = PaginatedDeployments.from_dict(
+        page = PaginatedBaseModels.from_dict({})
+        assert page.models == []
+        assert page.total_count == 0
+        assert page.has_more is False
+        assert page.next_offset is None
+
+    def test_paginated_lora_models_from_dict(self) -> None:
+        from osmosis_ai.platform.api.models import PaginatedLoraModels
+
+        page = PaginatedLoraModels.from_dict(
             {
-                "deployments": [
+                "models": [
                     {
-                        "id": "dep_1",
-                        "checkpoint_name": "a",
-                        "status": "active",
-                        "base_model": "Qwen/Qwen3",
+                        "id": "lora_1",
+                        "model_name": "a",
+                        "deployment_status": None,
                         "checkpoint_step": 1,
                     }
                 ],
                 "total_count": 1,
                 "has_more": False,
                 "next_offset": None,
+                "active_deployments": 2,
+                "max_active_deployments": 5,
             }
         )
-        assert len(p.deployments) == 1
-        assert p.total_count == 1
-        assert p.has_more is False
-        assert p.next_offset is None
+        assert len(page.models) == 1
+        assert page.models[0].deployment_status is None
+        assert page.total_count == 1
+        assert page.has_more is False
+        assert page.next_offset is None
+        assert page.active_deployments == 2
+        assert page.max_active_deployments == 5
+        assert page.has_deployment_info is True
 
-    def test_deployment_summary_from_dict(self) -> None:
-        from osmosis_ai.platform.api.models import DeploymentSummary
+    def test_paginated_lora_models_from_dict_empty(self) -> None:
+        from osmosis_ai.platform.api.models import PaginatedLoraModels
 
-        s = DeploymentSummary.from_dict(
-            {"id": "dep_1", "checkpoint_name": "x", "status": "active"}
+        page = PaginatedLoraModels.from_dict({})
+        assert page.models == []
+        assert page.total_count == 0
+        assert page.has_more is False
+        assert page.next_offset is None
+        assert page.active_deployments == 0
+        assert page.max_active_deployments == 0
+        assert page.has_deployment_info is False
+
+    def test_lora_model_summary_from_dict(self) -> None:
+        from osmosis_ai.platform.api.models import LoraModelSummary
+
+        s = LoraModelSummary.from_dict(
+            {"id": "lora_1", "model_name": "x", "status": "active"}
         )
-        assert s.id == "dep_1"
-        assert s.checkpoint_name == "x"
+        assert s.id == "lora_1"
+        assert s.model_name == "x"
         assert s.status == "active"
 
     def test_deployment_status_frozensets(self) -> None:
         from osmosis_ai.platform.api.models import (
-            DEPLOYMENT_STATUSES_ERROR,
             DEPLOYMENT_STATUSES_INACTIVE,
             DEPLOYMENT_STATUSES_SUCCESS,
         )
 
         assert "active" in DEPLOYMENT_STATUSES_SUCCESS
         assert "inactive" in DEPLOYMENT_STATUSES_INACTIVE
-        assert "failed" in DEPLOYMENT_STATUSES_ERROR
 
     def test_lora_checkpoint_info(self) -> None:
         from osmosis_ai.platform.api.models import LoraCheckpointInfo
@@ -629,14 +748,6 @@ class TestEvaluationRunModels:
                 "commit_sha": "abcdef1234567890",
                 "env_config": {"PROMPT_MODE": "strict"},
                 "resolved_secret_scopes": {"OPENAI_API_KEY": "workspace"},
-                "recent_logs": [
-                    {
-                        "step": "eval",
-                        "level": "error",
-                        "message": "Missing API key",
-                        "timestamp": "2026-01-01T00:00:00Z",
-                    }
-                ],
                 "dataset_df_stats": {"row_count": 1000},
             }
         )
@@ -656,15 +767,14 @@ class TestEvaluationRunModels:
         assert detail.commit_sha == "abcdef1234567890"
         assert detail.env_config == {"PROMPT_MODE": "strict"}
         assert detail.resolved_secret_scopes == {"OPENAI_API_KEY": "workspace"}
-        assert detail.recent_logs == [
-            {
-                "step": "eval",
-                "level": "error",
-                "message": "Missing API key",
-                "timestamp": "2026-01-01T00:00:00Z",
-            }
-        ]
         assert detail.dataset_df_stats == {"row_count": 1000}
+
+    def test_evaluation_run_detail_has_no_recent_logs_field(self) -> None:
+        # The detail endpoint stopped embedding logs; `osmosis eval logs` is
+        # the replacement.
+        assert "recent_logs" not in {
+            field.name for field in dataclasses.fields(EvaluationRunDetail)
+        }
 
     def test_paginated_evaluation_runs_uses_eval_runs_key(self) -> None:
         page = PaginatedEvaluationRuns.from_dict(
@@ -765,3 +875,35 @@ class TestEvalRunMetrics:
         assert metrics.pass_at_k == []
         assert metrics.overview.duration_ms is None
         assert metrics.overview.total_samples is None
+
+
+class TestIsInternalUserFlag:
+    def test_training_run_detail_parses_flag(self) -> None:
+        data = {"training_run": {"id": "run_1"}, "is_internal_user": True}
+        assert TrainingRunDetail.from_dict(data).is_internal_user is True
+
+    def test_training_run_detail_defaults_to_false(self) -> None:
+        detail = TrainingRunDetail.from_dict({"training_run": {"id": "run_1"}})
+        assert detail.is_internal_user is False
+
+    def test_dataset_file_parses_flag(self) -> None:
+        data = {"id": "ds_1", "is_internal_user": True}
+        assert DatasetFile.from_dict(data).is_internal_user is True
+
+    def test_dataset_file_defaults_to_false(self) -> None:
+        assert DatasetFile.from_dict({"id": "ds_1"}).is_internal_user is False
+
+    def test_evaluation_run_detail_parses_flag(self) -> None:
+        data = {"eval_run": {"id": "eval_1"}, "is_internal_user": True}
+        assert EvaluationRunDetail.from_dict(data).is_internal_user is True
+
+    def test_evaluation_run_detail_defaults_to_false(self) -> None:
+        detail = EvaluationRunDetail.from_dict({"eval_run": {"id": "eval_1"}})
+        assert detail.is_internal_user is False
+
+    def test_lora_model_detail_parses_flag(self) -> None:
+        data = {"id": "lora_1", "is_internal_user": True}
+        assert LoraModelDetail.from_dict(data).is_internal_user is True
+
+    def test_lora_model_detail_defaults_to_false(self) -> None:
+        assert LoraModelDetail.from_dict({"id": "lora_1"}).is_internal_user is False
