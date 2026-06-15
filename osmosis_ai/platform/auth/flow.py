@@ -98,6 +98,7 @@ class DeviceCodeResponse:
     verification_uri: str
     expires_in: int
     interval: int
+    verification_uri_complete: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -343,6 +344,7 @@ def request_device_code(device_name: str | None = None) -> DeviceCodeResponse:
                 verification_uri=data["verification_uri"],
                 expires_in=data["expires_in"],
                 interval=data["interval"],
+                verification_uri_complete=data.get("verification_uri_complete"),
             )
     except HTTPError as e:
         raise _login_error_from_http(e, "Failed to request device code") from e
@@ -409,7 +411,7 @@ def poll_device_token(
     raise LoginError("Device authorization timed out. Please try again.")
 
 
-def device_login(timeout: float = 600.0) -> tuple[LoginResult, Credentials]:
+def device_login(timeout: float = 900.0) -> tuple[LoginResult, Credentials]:
     """Execute the device code login flow for headless environments.
 
     Returns:
@@ -431,7 +433,11 @@ def device_login(timeout: float = 600.0) -> tuple[LoginResult, Credentials]:
     console.print(f"Code expires in {expires_minutes} minutes.", style="dim")
     console.print()
 
-    verification_url = device_code_resp.verification_uri
+    # The complete URI carries the device code so the browser lands on a
+    # pre-filled authorize page; older servers may not send it.
+    verification_url = (
+        device_code_resp.verification_uri_complete or device_code_resp.verification_uri
+    )
     console.print_url(
         "Open this URL in your browser: ", verification_url, style="yellow"
     )
