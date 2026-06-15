@@ -74,7 +74,7 @@ sequenceDiagram
     participant W as AgentWorkflow.run
     participant G as Grader.grade
     C->>S: POST /rollout (RolloutInitRequest)
-    Note over S: background task, returns RolloutInitResponse immediately
+    Note over S: returns RolloutInitResponse immediately (background task)
     S->>W: backend.execute(ExecutionRequest)
     W->>C: POST chat_completions_url (messages + tools)
     C-->>W: LLM response (tool_calls)
