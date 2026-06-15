@@ -23,7 +23,7 @@ Evaluation submit configs also support optional `[experiment].commit_sha`, `[eva
 
 | Key | Description |
 |-----|-------------|
-| `commit_sha` | Optional pinned commit. When omitted, the platform chooses source from the connected repository. |
+| `commit_sha` | Optional pinned commit. When omitted, the platform chooses source from the connected repository. Must be a hexadecimal SHA (7–40 chars); `submit` preflights it against origin and fails fast if the commit is not found on the connected repository. |
 
 **`[evaluation]`**
 

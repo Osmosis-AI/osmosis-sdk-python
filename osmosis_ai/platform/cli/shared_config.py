@@ -7,13 +7,16 @@ import tomllib
 from pathlib import Path
 from typing import Any, ClassVar
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 from pydantic_core import ErrorDetails
 
 from osmosis_ai.cli.errors import CLIError
 
 ENV_VAR_NAME_RE = re.compile(r"^[A-Z_][A-Z0-9_]*$")
 SECRET_NAME_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")
+# A pinned commit SHA is a hex string. Git's default short form is 7 chars and a
+# full SHA-1 is 40; anything outside that range is almost certainly a typo.
+COMMIT_SHA_RE = re.compile(r"^[0-9a-fA-F]{7,40}$")
 RESERVED_ENV_PREFIX = "_OSMOSIS_"
 
 _EXPECTED_TYPE_BY_ERROR: dict[str, str] = {
@@ -344,6 +347,18 @@ class ExperimentSection(BaseModel):
     model_path: str
     dataset: str
     commit_sha: str | None = None
+
+    @field_validator("commit_sha")
+    @classmethod
+    def _validate_commit_sha(cls, value: str | None) -> str | None:
+        if value is None:
+            return value
+        if not COMMIT_SHA_RE.fullmatch(value):
+            raise ValueError(
+                "must be a hexadecimal Git commit SHA (7-40 hex characters), "
+                f"e.g. a full 40-character SHA; got {value!r}"
+            )
+        return value
 
 
 _EXPERIMENT_REQUIRED_KEYS: tuple[str, ...] = (

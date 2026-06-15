@@ -254,6 +254,12 @@ evaluation run before a training run.
 | `model_path` | Supported base model path |
 | `dataset` | Platform dataset name (`osmosis dataset list`) |
 
+#### Optional `[experiment]` fields
+
+| Key | Description |
+|-----|-------------|
+| `commit_sha` | Optional pinned commit. When omitted, the platform chooses source from the connected repository. Must be a hexadecimal SHA (7–40 chars); `submit` preflights it against origin and fails fast if the commit is not found on the connected repository. |
+
 #### Optional `[training]` fields
 
 All fields are optional. Omitted fields use platform defaults.

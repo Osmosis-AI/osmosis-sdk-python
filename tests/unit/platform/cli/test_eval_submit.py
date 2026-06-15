@@ -14,6 +14,11 @@ import osmosis_ai.platform.cli.utils as utils_module
 from osmosis_ai.cli.console import Console
 from osmosis_ai.cli.output import OperationResult
 from osmosis_ai.platform.api.models import SubmitRunResult
+from tests.unit.submit_preflight_helpers import (
+    assert_submit_aborts_on_invalid_commit,
+    assert_submit_surfaces_commit_warning,
+    disable_commit_preflight,
+)
 
 GIT_IDENTITY = "acme/rollouts"
 REPO_URL = "https://github.com/acme/rollouts.git"
@@ -142,6 +147,9 @@ def _mock_workspace_repo(monkeypatch: pytest.MonkeyPatch) -> None:
             },
         )(),
     )
+    # Disable the pinned-commit preflight by default so submit tests don't make
+    # real git/GitHub calls; tests that exercise it patch this explicitly.
+    disable_commit_preflight(monkeypatch)
 
 
 def test_eval_submit_passes_new_schema_to_evaluation_run_api(
@@ -203,6 +211,62 @@ def test_eval_submit_passes_new_schema_to_evaluation_run_api(
         "dataset": "multiply",
         "commit_sha": "deadbeef",
     }
+
+
+def test_eval_submit_aborts_on_invalid_pinned_commit(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    workspace_directory = _make_workspace_directory(tmp_path / "project")
+    config_path = _write_eval_config(
+        workspace_directory / "configs" / "eval" / "default.toml",
+        commit_sha="deadbeef",
+    )
+    monkeypatch.chdir(workspace_directory)
+
+    class FakeClient:
+        def submit_evaluation_run(self, **kwargs: Any) -> SubmitRunResult:
+            raise AssertionError("submit must not run when the commit preflight fails")
+
+    monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+    monkeypatch.setattr(shared_submit_module, "OsmosisClient", FakeClient)
+
+    assert_submit_aborts_on_invalid_commit(
+        monkeypatch,
+        submit=lambda: eval_module.submit(config_path=config_path, yes=True),
+    )
+
+
+def test_eval_submit_surfaces_pinned_commit_warning(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    console_capture: StringIO,
+) -> None:
+    workspace_directory = _make_workspace_directory(tmp_path / "project")
+    config_path = _write_eval_config(
+        workspace_directory / "configs" / "eval" / "default.toml",
+        commit_sha="deadbeef",
+    )
+    monkeypatch.chdir(workspace_directory)
+
+    class FakeClient:
+        def submit_evaluation_run(self, **kwargs: Any) -> SubmitRunResult:
+            return SubmitRunResult(
+                id="eval-1",
+                name="eval-run",
+                status="pending",
+                created_at="2026-05-27T00:00:00Z",
+                platform_url=None,
+            )
+
+    monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+    monkeypatch.setattr(shared_submit_module, "OsmosisClient", FakeClient)
+
+    assert_submit_surfaces_commit_warning(
+        monkeypatch,
+        submit=lambda: eval_module.submit(config_path=config_path, yes=True),
+        console_output=console_capture.getvalue,
+    )
 
 
 def test_eval_submit_does_not_pin_local_head_without_config_commit_sha(

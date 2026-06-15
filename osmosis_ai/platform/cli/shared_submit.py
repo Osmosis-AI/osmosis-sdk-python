@@ -45,6 +45,7 @@ from osmosis_ai.platform.cli.workspace_directory_contract import (
     validate_rollout_backend,
     validate_workspace_directory_contract,
 )
+from osmosis_ai.platform.cli.workspace_repo import check_pinned_commit
 
 _MISSING_SECRET_RE = re.compile(r"Secret\(s\) not found: (.+)")
 
@@ -210,6 +211,21 @@ def run_cloud_submit[ConfigT: BaseSubmitConfig](
         command_label=spec.command_label,
     )
 
+    # Preflight a pinned commit before doing any further work: a confirmed-bad
+    # SHA would fail server-side after the platform clones the repo, so fail fast
+    # with a clear message instead. Best-effort warnings are folded into the
+    # remote-fetch notice below.
+    commit_preflight_warnings: list[str] = []
+    if config.experiment_commit_sha:
+        commit_check = check_pinned_commit(
+            workspace_directory=workspace_directory,
+            git_identity=context.git_identity,
+            commit_sha=config.experiment_commit_sha,
+        )
+        if commit_check.error:
+            raise CLIError(commit_check.error)
+        commit_preflight_warnings = list(commit_check.warnings)
+
     summary_rows = build_submit_summary_rows(
         rollout=config.experiment_rollout,
         entrypoint=config.experiment_entrypoint,
@@ -270,6 +286,7 @@ def run_cloud_submit[ConfigT: BaseSubmitConfig](
     notes, warnings = print_remote_fetch_notice(
         workspace_directory,
         pinned_commit_sha=config.experiment_commit_sha,
+        extra_warnings=commit_preflight_warnings,
     )
 
     require_confirmation(
