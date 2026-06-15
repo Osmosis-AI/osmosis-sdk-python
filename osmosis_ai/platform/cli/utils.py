@@ -479,6 +479,7 @@ def print_remote_fetch_notice(
     workspace_directory: Path,
     *,
     pinned_commit_sha: str | None,
+    extra_warnings: list[str] | None = None,
 ) -> tuple[list[str], list[str]]:
     """Remind the user that remote submissions pull *code* from the connected
     Git remote while reading *config values* from the local TOML file.
@@ -490,6 +491,10 @@ def print_remote_fetch_notice(
     values are sent verbatim in the submit payload — local edits to the
     config take effect immediately, even if they are uncommitted.
 
+    ``extra_warnings`` lets callers fold in advisories computed elsewhere (e.g.
+    the pinned-commit preflight) so they appear in the same Rich panel and in
+    the returned ``warnings`` list.
+
     Returns ``(notes, warnings)`` as plain-text lists so callers can surface
     the same context in non-rich modes (e.g. the JSON error envelope when
     ``--yes`` is missing). The Rich panel is rendered only when the output
@@ -500,7 +505,7 @@ def print_remote_fetch_notice(
 
     state = summarize_local_git_state(workspace_directory)
 
-    warnings: list[str] = []
+    warnings: list[str] = list(extra_warnings or [])
     if state is not None:
         if state.is_dirty:
             warnings.append(

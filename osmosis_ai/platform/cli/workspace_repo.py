@@ -139,7 +139,8 @@ def _resolve_via_gh(owner: str, repo: str) -> str | None:
     return result.stdout.strip() or None
 
 
-def _resolve_via_git_credentials(owner: str, repo: str) -> str | None:
+def _github_token_from_git_credentials() -> str | None:
+    """Best-effort GitHub token from the local ``git credential`` helper."""
     if shutil.which("git") is None:
         return None
     try:
@@ -157,7 +158,11 @@ def _resolve_via_git_credentials(owner: str, repo: str) -> str | None:
     if result.returncode != 0:
         return None
 
-    token = _password_from_git_credentials(result.stdout)
+    return _password_from_git_credentials(result.stdout)
+
+
+def _resolve_via_git_credentials(owner: str, repo: str) -> str | None:
+    token = _github_token_from_git_credentials()
     if token is None:
         return None
 
@@ -347,9 +352,169 @@ def summarize_local_git_state(workspace_directory: Path) -> LocalGitState | None
     )
 
 
+def _local_commit_exists(workspace_directory: Path, commit_sha: str) -> bool | None:
+    """Return whether ``commit_sha`` resolves to a commit object in the local repo.
+
+    Returns ``True``/``False`` when the check ran, or ``None`` when it could not
+    (``git`` missing, or ``workspace_directory`` is not a git working tree).
+    ``None`` is intentionally distinct from ``False`` so callers can treat
+    "can't tell" differently from "definitely absent".
+    """
+    if shutil.which("git") is None:
+        return None
+    if not (workspace_directory / ".git").exists():
+        return None
+    try:
+        result = subprocess.run(
+            [
+                "git",
+                "-C",
+                str(workspace_directory),
+                "cat-file",
+                "-e",
+                f"{commit_sha}^{{commit}}",
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+    except OSError:
+        return None
+    return result.returncode == 0
+
+
+def _commit_exists_via_gh(owner: str, repo: str, commit_sha: str) -> bool | None:
+    if shutil.which("gh") is None:
+        return None
+    try:
+        result = subprocess.run(
+            ["gh", "api", f"repos/{owner}/{repo}/commits/{commit_sha}", "--jq", ".sha"],
+            capture_output=True,
+            env=_noninteractive_git_env(),
+            text=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+    if result.returncode == 0:
+        return True
+    # GitHub returns HTTP 422 ("No commit found for SHA") for a well-formed SHA
+    # that is absent. A 404 means the repo/visibility is the problem (not the
+    # commit), so we treat only the 422 signal as authoritative absence.
+    stderr = (result.stderr or "").lower()
+    if "no commit found" in stderr or "http 422" in stderr:
+        return False
+    return None
+
+
+def _commit_exists_via_git_credentials(
+    owner: str, repo: str, commit_sha: str
+) -> bool | None:
+    token = _github_token_from_git_credentials()
+    if token is None:
+        return None
+    try:
+        response = requests.get(
+            f"https://api.github.com/repos/{owner}/{repo}/commits/{commit_sha}",
+            headers={
+                "Authorization": f"token {token}",
+                "Accept": "application/vnd.github+json",
+            },
+            allow_redirects=True,
+            timeout=10,
+        )
+    except requests.RequestException:
+        return None
+
+    if response.status_code == 200:
+        return True
+    if response.status_code == 422:
+        return False
+    return None
+
+
+def _remote_commit_exists(identity: str, commit_sha: str) -> bool | None:
+    """Return whether ``commit_sha`` exists on the GitHub repo ``identity``.
+
+    ``identity`` is a normalized ``owner/repo`` string. Tries the ``gh`` CLI
+    first, then a token from the local git credential helper. Returns
+    ``True``/``False`` only when GitHub answers authoritatively, or ``None`` when
+    the check could not run (no ``gh`` and no token, or a transport/visibility
+    error) so callers never block a submit on missing tooling.
+    """
+    if _GITHUB_REPOSITORY_IDENTITY_RE.fullmatch(identity) is None:
+        return None
+    owner, repo = identity.split("/", maxsplit=1)
+    via_gh = _commit_exists_via_gh(owner, repo, commit_sha)
+    if via_gh is not None:
+        return via_gh
+    return _commit_exists_via_git_credentials(owner, repo, commit_sha)
+
+
+@dataclass(frozen=True, slots=True)
+class PinnedCommitCheck:
+    """Outcome of a pinned ``commit_sha`` preflight.
+
+    ``error`` is set only when the commit is *confirmed* unusable (the platform
+    would fail to fetch it); raising on it fails the submit fast. ``warnings``
+    carries non-blocking advisories shown before the confirmation prompt.
+    """
+
+    error: str | None = None
+    warnings: tuple[str, ...] = ()
+
+
+def check_pinned_commit(
+    *, workspace_directory: Path, git_identity: str, commit_sha: str
+) -> PinnedCommitCheck:
+    """Preflight a pinned ``commit_sha`` before a cloud submit.
+
+    The platform fetches the pinned commit from the connected GitHub repository,
+    so a remote answer is authoritative. The local repo is only a fast,
+    offline signal — a commit may exist on origin without being fetched locally,
+    so a local miss alone is never treated as an error (only a warning when the
+    remote can't be reached).
+    """
+    local = _local_commit_exists(workspace_directory, commit_sha)
+    remote = _remote_commit_exists(git_identity, commit_sha)
+
+    if remote is False:
+        if local is True:
+            return PinnedCommitCheck(
+                error=(
+                    f"Pinned commit {commit_sha} exists locally but was not found on "
+                    f"origin ({git_identity}). Push it before submitting — the platform "
+                    "fetches the pinned commit from the connected repository."
+                )
+            )
+        return PinnedCommitCheck(
+            error=(
+                f"Pinned commit {commit_sha} was not found on the connected repository "
+                f"({git_identity}). Double-check experiment.commit_sha and make sure the "
+                "commit is pushed to origin."
+            )
+        )
+
+    if remote is True:
+        return PinnedCommitCheck()
+
+    # remote is None → GitHub could not confirm. Fall back to the local signal.
+    if local is False:
+        return PinnedCommitCheck(
+            warnings=(
+                f"Could not find pinned commit {commit_sha} in the local repository, "
+                "and could not reach GitHub to confirm it. Make sure "
+                "experiment.commit_sha is correct and pushed to origin.",
+            )
+        )
+    return PinnedCommitCheck()
+
+
 __all__ = [
     "GitRemoteIdentity",
     "LocalGitState",
+    "check_pinned_commit",
     "get_local_git_remote_url",
     "git_worktree_top_level",
     "normalize_git_identity",

@@ -32,6 +32,11 @@ from osmosis_ai.platform.api.models import (
     TrainingRunMetricsOverview,
 )
 from osmosis_ai.platform.auth import PlatformAPIError
+from tests.unit.submit_preflight_helpers import (
+    assert_submit_aborts_on_invalid_commit,
+    assert_submit_surfaces_commit_warning,
+    disable_commit_preflight,
+)
 
 GIT_IDENTITY = "acme/rollouts"
 REPO_URL = "https://github.com/acme/rollouts.git"
@@ -175,6 +180,9 @@ def _mock_workspace_repo(monkeypatch: pytest.MonkeyPatch) -> None:
         lambda *args, **kwargs: None,
         raising=False,
     )
+    # Disable the pinned-commit preflight by default so submit tests don't make
+    # real git/GitHub calls; tests that exercise it patch this explicitly.
+    disable_commit_preflight(monkeypatch)
 
 
 # ---------------------------------------------------------------------------
@@ -1219,6 +1227,72 @@ rollout_batch_size = 64
         assert isinstance(result, OperationResult)
         assert result.resource is not None
         assert result.resource["config"]["commit_sha"] == "deadbeef"
+
+    def _write_commit_sha_config(self, tmp_path: Path) -> Path:
+        workspace_directory = self._write_project(tmp_path, rollout="r")
+        path = workspace_directory / "configs" / "training" / "train.toml"
+        path.write_text(
+            """
+[experiment]
+rollout = "r"
+entrypoint = "main.py"
+model_path = "m"
+dataset = "d"
+commit_sha = "deadbeef"
+
+[training]
+n_samples_per_prompt = 8
+rollout_batch_size = 64
+""".strip(),
+            encoding="utf-8",
+        )
+        return path
+
+    def test_submit_aborts_on_invalid_pinned_commit(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        tmp_path: Path,
+    ) -> None:
+        path = self._write_commit_sha_config(tmp_path)
+        monkeypatch.chdir(path.parents[2])
+
+        class FakeClient:
+            def submit_training_run(self, **kwargs):
+                raise AssertionError(
+                    "submit must not run when the commit preflight fails"
+                )
+
+        monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(platform_train_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(shared_submit_module, "OsmosisClient", FakeClient)
+
+        assert_submit_aborts_on_invalid_commit(
+            monkeypatch,
+            submit=lambda: train_module.submit(config_path=path, yes=True),
+        )
+
+    def test_submit_surfaces_pinned_commit_warning(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        console_capture: StringIO,
+        tmp_path: Path,
+    ) -> None:
+        path = self._write_commit_sha_config(tmp_path)
+        monkeypatch.chdir(path.parents[2])
+
+        class FakeClient:
+            def submit_training_run(self, **kwargs):
+                return TestSubmit.SUBMIT_RESULT
+
+        monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(platform_train_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(shared_submit_module, "OsmosisClient", FakeClient)
+
+        assert_submit_surfaces_commit_warning(
+            monkeypatch,
+            submit=lambda: train_module.submit(config_path=path, yes=True),
+            console_output=console_capture.getvalue,
+        )
 
     def test_submit_passes_config_to_api(
         self,
