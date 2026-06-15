@@ -19,97 +19,30 @@
 
 > ⚠️ **Warning**: osmosis-ai is still in active development. APIs may change between versions.
 
-Python SDK and CLI for [Osmosis AI](https://platform.osmosis.ai), a platform for training LLMs with reinforcement learning. Implement an **AgentWorkflow** in Python, add a concrete **Grader** for evaluation runs and managed training runs, submit evaluation runs with the CLI, then submit training runs from an Osmosis workspace directory.
-
-## Quick start
-
-| Step | What you do |
-|------|-------------|
-| **Define agents** | One `AgentWorkflow` subclass (+ optional `AgentWorkflowConfig`) in your repo. The training/evaluation entrypoint must also expose a concrete `Grader` (typically with a `GraderConfig`). |
-| **Layout** | Use a rollout pack directory under `rollouts/<name>/` when loading by rollout name; the CLI adds that directory to `sys.path`. |
-| **Workspace directory** | Create or open a workspace in the Osmosis Platform, then clone the repository created there. |
-| **Check workspace** | `osmosis doctor` — run from the workspace directory so platform commands resolve the repository from the `origin` remote. Add `--fix` to restore missing scaffold paths. |
-| **Evaluate** | `osmosis eval submit configs/eval/<name>.toml` — submit an evaluation run using the same platform dataset naming as training runs. |
-
-**Example repository:** [osmosis-remote-rollout-example](https://github.com/Osmosis-AI/osmosis-remote-rollout-example) (reference server usage - align with current SDK exports when upgrading).
-
-**Documentation index:** [docs/README.md](docs/README.md)
-
-## Agent-friendly CLI output
-
-The `osmosis` CLI keeps Rich as the default output for humans, but every public command also speaks structured JSON and low-noise plain text for AI agents, CI/CD, and shell automation. The global output flags work at any position on the command line:
-
-```bash
-osmosis dataset list                         # human-friendly Rich table
-osmosis --json dataset list                  # recommended for AI agents and CI/CD
-osmosis dataset list --json                  # postfix placement works too
-osmosis --plain dataset list                 # low-noise text for shell pipelines
-```
-
-JSON is the stable machine contract: every successful response includes `schema_version: 1`; list envelopes include `items`, `total_count`, `has_more`, and `next_offset`; detail envelopes include `data`; operation envelopes include `status`, `operation`, optional `resource`, and optional `next_steps_structured`. Sectioned list envelopes (e.g. `osmosis model list`) compose the list shape under named section keys such as `base_models` and `lora_models`, each section carrying its own `items`, `total_count`, `has_more`, and `next_offset`. Errors are JSON-structured on stderr with `code`, `message`, `details`, optional `request_id`, plus the command path and SDK `cli_version`.
-
-Plain mode is for humans and simple shell pipelines, not a strict schema. `--json` and `--plain` are global flags accepted anywhere in the command line; prefer `osmosis --json <command>` or `osmosis <command> --json` over the default Rich output in non-interactive environments. Command-local `--output` always means a file path, not a format selector, so `osmosis dataset download my-dataset --output ./data.jsonl` works in every mode.
-
-In JSON or plain mode, interactive commands fail fast with `INTERACTIVE_REQUIRED` unless a non-interactive flow exists, typically by passing `--yes` or `--token`. `OSMOSIS_TOKEN` is verify-only across the CLI: it activates authentication for the current process but is never written to the on-disk credentials store, never revoked, and never deletes existing credentials.
-
-## Workspace Directory Flow
-
-Create or open a workspace in the Osmosis Platform, clone the repository created there,
-then run CLI commands from that workspace directory.
-
-```bash
-git clone <repo-url>
-cd <repo>
-osmosis auth login
-osmosis doctor
-osmosis template apply multiply              # or add your rollout under rollouts/
-cp configs/training/default.toml configs/training/<run>.toml
-$EDITOR configs/training/<run>.toml          # set rollout, dataset, and model_path
-git add rollouts configs data
-git commit -m "configure training run"
-git push
-osmosis train submit configs/training/<run>.toml
-```
-
-Platform-scoped commands derive scope from the workspace directory's `origin` remote and
-send `X-Osmosis-Git: namespace/repo_name`. The CLI does not store or send a
-workspace ID for commands scoped by the workspace directory.
-
-Before submitting training runs from CI, push the repository and authenticate with a
-token:
-
-```bash
-export OSMOSIS_TOKEN=<token>
-osmosis train submit configs/training/<run>.toml --yes
-```
+Python SDK and CLI for [Osmosis AI](https://platform.osmosis.ai), a platform for training LLMs with reinforcement learning. Implement an **AgentWorkflow** and a concrete **Grader** in Python, then use the CLI to submit evaluation and training runs from an Osmosis workspace directory.
 
 ## Installation
 
-Requires **Python 3.12+**. For development setup, see [CONTRIBUTING.md](CONTRIBUTING.md).
-
-- **An LLM API key** (e.g., OpenAI, Anthropic, Groq) — required for `osmosis eval rubric` (LLM-as-judge) when using hosted models. See [supported providers](https://docs.litellm.ai/docs/providers).
-- **Osmosis account** (optional) — needed for `osmosis auth login` and platform-backed commands such as datasets, models, and training runs. Sign up at [platform.osmosis.ai](https://platform.osmosis.ai).
-
-**pip**
+Requires **Python 3.12+**.
 
 ```bash
 pip install osmosis-ai            # Core SDK
-pip install osmosis-ai[server]    # + FastAPI rollout server (pulls in platform extra)
-pip install osmosis-ai[full]      # Same as [server] (all packaged optional features)
+pip install osmosis-ai[server]    # + FastAPI rollout server
+# or with uv:  uv add osmosis-ai
 ```
 
-**uv**
+See [Installation](https://docs.osmosis.ai/cli/installation) for the full extras matrix and [CONTRIBUTING.md](CONTRIBUTING.md) for development setup.
 
-```bash
-uv add osmosis-ai                 # Core SDK
-uv add osmosis-ai[server]         # + FastAPI rollout server (pulls in platform extra)
-uv add osmosis-ai[full]           # Same as [server] (all packaged optional features)
-```
+## Documentation
 
-## Testing and evaluation
+Guides, quickstart, and the full CLI reference live at **[docs.osmosis.ai](https://docs.osmosis.ai)**.
 
-- [Eval](docs/eval.md) — evaluation run configs and `osmosis eval submit`
-- [CLI reference](docs/cli.md)
+- [Quickstart](https://docs.osmosis.ai/platform/quickstart) — run the multiply example end to end, from onboarding to evaluation run to training run
+- [CLI command reference](https://docs.osmosis.ai/cli/command-reference) — every `osmosis` command and flag, plus the `--json` / `--plain` output contract for AI agents and CI/CD
+- [Workspace setup](https://docs.osmosis.ai/cli/workspace/overview) — repository layout, config files, and Git Sync
+- [Rollouts](https://docs.osmosis.ai/cli/rollout/overview) — AgentWorkflow, Grader, integrations, and execution backends
+
+Building on or contributing to the SDK itself? See the code-anchored developer docs in [`docs/`](docs/) (start with [`docs/architecture.md`](docs/architecture.md)) alongside [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Contributing
 
