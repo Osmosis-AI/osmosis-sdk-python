@@ -1,13 +1,13 @@
 # Osmosis SDK developer docs
 
-> Product concepts and end-user CLI usage live at **[docs.osmosis.ai](https://docs.osmosis.ai)**. This `docs/` directory is the **code-anchored** reference for developers building on the SDK and for AI agents working inside this repository. Every page points at the source it documents; when code and a doc disagree, the code wins — fix the doc in the same PR.
+> Product concepts and end-user CLI usage live at **[docs.osmosis.ai](https://docs.osmosis.ai)**. This `docs/` directory is the **code-anchored** reference for developers building on the SDK. Every page points at the source it documents; when code and a doc disagree, the code wins — fix the doc in the same PR.
 
 ## Who reads what
 
 | Audience | Home | Orientation |
 |----------|------|-------------|
 | End users / everyone | [docs.osmosis.ai](https://docs.osmosis.ai) | Platform concepts, onboarding, CLI usage, quickstart |
-| SDK developers + AI agents in this repo | this `docs/` directory | Importable APIs, contracts, architecture, behavior — anchored to source |
+| SDK developers in this repo | this `docs/` directory | Importable APIs, contracts, architecture, behavior — anchored to source |
 
 We accept small, deliberate duplication only for entry facts (e.g. a one-line install). For everything else there is one source of truth: usage and product concepts link out to the site; code contracts live here next to the code.
 

@@ -1,6 +1,6 @@
 # Architecture
 
-> Code-anchored map of the `osmosis_ai` package for developers and AI agents. For platform concepts and CLI usage see [docs.osmosis.ai](https://docs.osmosis.ai).
+> Code-anchored map of the `osmosis_ai` package for developers. For platform concepts and CLI usage see [docs.osmosis.ai](https://docs.osmosis.ai).
 
 ## Package layout
 
