@@ -41,6 +41,7 @@ Guides, quickstart, and the full CLI reference live at **[docs.osmosis.ai](https
 - [CLI command reference](https://docs.osmosis.ai/cli/command-reference) — every `osmosis` command and flag, plus the `--json` / `--plain` output contract for AI agents and CI/CD
 - [Workspace setup](https://docs.osmosis.ai/cli/workspace/overview) — repository layout, config files, and Git Sync
 - [Rollouts](https://docs.osmosis.ai/cli/rollout/overview) — AgentWorkflow, Grader, integrations, and execution backends
+- [Releases](https://github.com/Osmosis-AI/osmosis-sdk-python/releases) — version history and breaking changes between releases
 
 Building on or contributing to the SDK itself? See the code-anchored developer docs in [`docs/`](docs/) (start with [`docs/architecture.md`](docs/architecture.md)) alongside [CONTRIBUTING.md](CONTRIBUTING.md).
 
