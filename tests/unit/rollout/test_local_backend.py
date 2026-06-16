@@ -197,6 +197,108 @@ class TestLocalBackend:
         grader_result = on_grader.call_args[0][0]
         assert grader_result.status == RolloutStatus.FAILURE
 
+    async def test_grader_runs_with_metadata_only(self):
+        """A metadata-only row (no label) still triggers grading."""
+        backend = LocalBackend(
+            workflow=StubWorkflow,
+            workflow_config=AgentWorkflowConfig(name="test"),
+            grader=StubGrader,
+            grader_config=GraderConfig(name="test-grader"),
+        )
+        on_complete = AsyncMock()
+        on_grader = AsyncMock()
+
+        request = ExecutionRequest(
+            id="r1",
+            prompt=[{"role": "user", "content": "hi"}],
+            label=None,
+            metadata={"tools": ["search"]},
+        )
+        await backend.execute(
+            request,
+            on_workflow_complete=on_complete,
+            on_grader_complete=on_grader,
+        )
+
+        on_grader.assert_awaited_once()
+        grader_result = on_grader.call_args[0][0]
+        assert grader_result.status == RolloutStatus.SUCCESS
+        for sample in grader_result.samples.values():
+            assert sample.reward == 1.0
+
+    async def test_grader_runs_with_label_only(self):
+        """A label-only row (no metadata) still triggers grading."""
+        backend = LocalBackend(
+            workflow=StubWorkflow,
+            workflow_config=AgentWorkflowConfig(name="test"),
+            grader=StubGrader,
+            grader_config=GraderConfig(name="test-grader"),
+        )
+        on_complete = AsyncMock()
+        on_grader = AsyncMock()
+
+        request = ExecutionRequest(
+            id="r1",
+            prompt=[{"role": "user", "content": "hi"}],
+            label="test-label",
+            metadata=None,
+        )
+        await backend.execute(
+            request,
+            on_workflow_complete=on_complete,
+            on_grader_complete=on_grader,
+        )
+
+        on_grader.assert_awaited_once()
+        grader_result = on_grader.call_args[0][0]
+        assert grader_result.status == RolloutStatus.SUCCESS
+
+    async def test_metadata_reaches_both_contexts(self):
+        """Both the workflow ctx and grader ctx receive the request metadata."""
+        captured: dict[str, Any] = {}
+        metadata = {"tools": ["search"], "difficulty": 3}
+
+        class CapturingWorkflow(AgentWorkflow):
+            async def run(self, ctx: AgentWorkflowContext) -> Any:
+                from osmosis_ai.rollout.context import get_rollout_context
+
+                captured["workflow_metadata"] = ctx.metadata
+                rollout_ctx = get_rollout_context()
+                if rollout_ctx:
+                    rollout_ctx.register_sample_source(
+                        "sample-1",
+                        StaticSampleSource([{"role": "assistant", "content": "done"}]),
+                    )
+
+        class CapturingGrader(Grader):
+            async def grade(self, ctx: GraderContext) -> Any:
+                captured["grader_metadata"] = ctx.metadata
+                for sample_id in ctx.get_samples():
+                    ctx.set_sample_reward(sample_id, 1.0)
+
+        backend = LocalBackend(
+            workflow=CapturingWorkflow,
+            workflow_config=AgentWorkflowConfig(name="test"),
+            grader=CapturingGrader,
+            grader_config=GraderConfig(name="test-grader"),
+        )
+        on_complete = AsyncMock()
+        on_grader = AsyncMock()
+
+        request = ExecutionRequest(
+            id="r1",
+            prompt=[{"role": "user", "content": "hi"}],
+            metadata=metadata,
+        )
+        await backend.execute(
+            request,
+            on_workflow_complete=on_complete,
+            on_grader_complete=on_grader,
+        )
+
+        assert captured["workflow_metadata"] == metadata
+        assert captured["grader_metadata"] == metadata
+
     async def test_grader_failure_returns_error_result(self):
         backend = LocalBackend(
             workflow=StubWorkflow,

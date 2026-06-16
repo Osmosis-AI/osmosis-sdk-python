@@ -48,9 +48,10 @@ def main() -> None:
     args = parse_args()
     config = load_config(args.config)
     label = config.get("label")
+    metadata = config.get("metadata")
 
-    if not label:
-        print("No label in config, skipping grading")
+    if not label and metadata is None:
+        print("No label or metadata in config, skipping grading")
         write_rewards({})
         return
 
@@ -70,7 +71,7 @@ def main() -> None:
         resolve_object(config["grader_config"]) if "grader_config" in config else None
     )
 
-    ctx = GraderContext(label=label, samples=samples)
+    ctx = GraderContext(label=label, samples=samples, metadata=metadata)
     grader = grader_cls(grader_config)
     asyncio.run(grader.grade(ctx))
 
