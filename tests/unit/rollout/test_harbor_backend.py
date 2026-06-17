@@ -54,6 +54,13 @@ class MetadataCapturingGrader(Grader):
             ctx.set_sample_reward(sample_id, 1.0)
 
 
+class ArtifactGrader(Grader):
+    async def grade(self, ctx: GraderContext) -> Any:
+        for sample_id in ctx.get_samples():
+            ctx.set_sample_reward(sample_id, 1.0)
+        ctx.set_artifacts({"judge": {"explanation": "ok"}})
+
+
 def _make_backend_for_config(*, grader: bool = False) -> HarborBackend:
     """Build a HarborBackend skeleton sufficient for build_rollout_config."""
     backend = HarborBackend.__new__(HarborBackend)
@@ -73,11 +80,12 @@ def _make_backend_for_config(*, grader: bool = False) -> HarborBackend:
 
 class TestHarborBackend:
     async def test_empty_verifier_rewards_logs_and_returns_validation_failure(
-        self, caplog
+        self, caplog, tmp_path
     ):
         backend = HarborBackend.__new__(HarborBackend)
         backend.pending = {}
         backend.cleanup_successful_trials = False
+        backend.trials_dir = tmp_path
 
         on_workflow = AsyncMock()
         on_grader = AsyncMock()
@@ -202,6 +210,69 @@ class TestGraderRunnerRoundTrip:
         rewards = json.loads((verifier_dir / "reward.json").read_text())
         assert rewards == {"sample-1": 1.0}
 
+    def test_grader_writes_artifacts_file(self, tmp_path, monkeypatch):
+        """A grader that calls set_artifacts produces grader_artifacts.json."""
+        import osmosis_ai.rollout.backend.harbor.grader_runner as grader_runner
+
+        verifier_dir = tmp_path / "verifier"
+        monkeypatch.setattr(grader_runner, "VERIFIER_LOGS_DIR", verifier_dir)
+
+        backend = _make_backend_for_config(grader=True)
+        backend.grader_path = (
+            f"{ArtifactGrader.__module__}:{ArtifactGrader.__qualname__}"
+        )
+        request = ExecutionRequest(
+            id="r1",
+            prompt=[{"role": "user", "content": "hi"}],
+            label="test-label",
+        )
+        config_path = tmp_path / "rollout_config.json"
+        config_path.write_text(
+            json.dumps(backend.build_rollout_config(request), default=str)
+        )
+        samples_path = tmp_path / "samples.json"
+        self._write_samples(samples_path)
+
+        monkeypatch.setattr(
+            grader_runner,
+            "parse_args",
+            lambda: SimpleNamespace(config=config_path, samples=samples_path),
+        )
+
+        grader_runner.main()
+
+        artifacts = json.loads((verifier_dir / "grader_artifacts.json").read_text())
+        assert artifacts == {"judge": {"explanation": "ok"}}
+
+    def test_grader_without_artifacts_writes_no_file(self, tmp_path, monkeypatch):
+        import osmosis_ai.rollout.backend.harbor.grader_runner as grader_runner
+
+        verifier_dir = tmp_path / "verifier"
+        monkeypatch.setattr(grader_runner, "VERIFIER_LOGS_DIR", verifier_dir)
+
+        backend = _make_backend_for_config(grader=True)
+        request = ExecutionRequest(
+            id="r1",
+            prompt=[{"role": "user", "content": "hi"}],
+            label="test-label",
+        )
+        config_path = tmp_path / "rollout_config.json"
+        config_path.write_text(
+            json.dumps(backend.build_rollout_config(request), default=str)
+        )
+        samples_path = tmp_path / "samples.json"
+        self._write_samples(samples_path)
+
+        monkeypatch.setattr(
+            grader_runner,
+            "parse_args",
+            lambda: SimpleNamespace(config=config_path, samples=samples_path),
+        )
+
+        grader_runner.main()
+
+        assert not (verifier_dir / "grader_artifacts.json").exists()
+
     def test_metadata_only_config_still_grades(self, tmp_path, monkeypatch):
         """A config with metadata but no label still triggers grading."""
         import osmosis_ai.rollout.backend.harbor.grader_runner as grader_runner
@@ -236,3 +307,75 @@ class TestGraderRunnerRoundTrip:
         assert _GRADER_CAPTURE["metadata"] == {"tools": ["search"]}
         rewards = json.loads((verifier_dir / "reward.json").read_text())
         assert rewards == {"sample-1": 1.0}
+
+
+class TestOnTrialEndArtifacts:
+    """HarborBackend.on_trial_end reads grader_artifacts.json off the host
+    trial dir and merges it into the grader result before cleanup."""
+
+    def _make_backend(self, tmp_path) -> HarborBackend:
+        backend = HarborBackend.__new__(HarborBackend)
+        backend.pending = {}
+        backend.cleanup_successful_trials = False
+        backend.trials_dir = tmp_path
+        return backend
+
+    def _success_event(self) -> SimpleNamespace:
+        return SimpleNamespace(
+            config=SimpleNamespace(trial_name="trial-r1"),
+            result=SimpleNamespace(
+                agent_result=SimpleNamespace(
+                    metadata={
+                        "status": "success",
+                        "samples": {
+                            "sample-1": RolloutSample(
+                                id="sample-1", messages=[]
+                            ).model_dump()
+                        },
+                    }
+                ),
+                verifier_result=SimpleNamespace(rewards={"sample-1": 1.0}),
+                exception_info=None,
+            ),
+        )
+
+    async def test_merges_artifacts_when_file_present(self, tmp_path):
+        backend = self._make_backend(tmp_path)
+        verifier = tmp_path / "trial-r1" / "verifier"
+        verifier.mkdir(parents=True)
+        (verifier / "grader_artifacts.json").write_text(
+            json.dumps({"judge": {"explanation": "ok"}})
+        )
+
+        on_grader = AsyncMock()
+        pending = PendingTrial(AsyncMock(), on_grader)
+        pending.workflow_complete_called = True
+        backend.pending["r1"] = pending
+
+        await backend.on_trial_end(self._success_event())
+
+        result = on_grader.call_args.args[0]
+        assert result.status == RolloutStatus.SUCCESS
+        assert result.artifacts == {"judge": {"explanation": "ok"}}
+
+    async def test_artifacts_none_when_file_absent(self, tmp_path):
+        backend = self._make_backend(tmp_path)
+
+        on_grader = AsyncMock()
+        pending = PendingTrial(AsyncMock(), on_grader)
+        pending.workflow_complete_called = True
+        backend.pending["r1"] = pending
+
+        await backend.on_trial_end(self._success_event())
+
+        result = on_grader.call_args.args[0]
+        assert result.status == RolloutStatus.SUCCESS
+        assert result.artifacts is None
+
+    def test_read_grader_artifacts_tolerates_corrupt_file(self, tmp_path):
+        backend = self._make_backend(tmp_path)
+        verifier = tmp_path / "trial-r1" / "verifier"
+        verifier.mkdir(parents=True)
+        (verifier / "grader_artifacts.json").write_text("{not valid json")
+
+        assert backend.read_grader_artifacts("r1") is None

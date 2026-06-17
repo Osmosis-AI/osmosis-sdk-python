@@ -44,6 +44,12 @@ def write_rewards(rewards: dict[str, float | None]) -> None:
     (VERIFIER_LOGS_DIR / "reward.json").write_text(json.dumps(rewards))
 
 
+def write_artifacts(artifacts: dict[str, Any]) -> None:
+    """Write grader artifacts to the verifier dir (sibling of reward.json)."""
+    VERIFIER_LOGS_DIR.mkdir(parents=True, exist_ok=True)
+    (VERIFIER_LOGS_DIR / "grader_artifacts.json").write_text(json.dumps(artifacts))
+
+
 def main() -> None:
     args = parse_args()
     config = load_config(args.config)
@@ -82,6 +88,8 @@ def main() -> None:
 
     rewards = {sid: sample.reward for sid, sample in graded.items()}
     write_rewards(rewards)
+    if ctx.artifacts is not None:
+        write_artifacts(ctx.artifacts)
     print(f"Grading complete: {rewards}")
 
 

@@ -444,6 +444,24 @@ class HarborBackend(ExecutionBackend):
         pending.workflow_complete_called = True
         await pending.on_workflow_complete(result)
 
+    def read_grader_artifacts(self, rollout_id: str) -> dict[str, Any] | None:
+        """Read grader artifacts off the host trial dir (optional)."""
+        path = (
+            self.trials_dir
+            / f"{TRIAL_NAME_PREFIX}{rollout_id}"
+            / "verifier"
+            / "grader_artifacts.json"
+        )
+        if not path.exists():
+            return None
+        try:
+            return json.loads(path.read_text())
+        except (OSError, json.JSONDecodeError) as e:
+            logger.warning(
+                "Failed to read grader artifacts for rollout %s: %s", rollout_id, e
+            )
+            return None
+
     async def on_trial_end(self, event: TrialHookEvent) -> None:
         rollout_id = parse_rollout_id(event)
         pending = self.pending.pop(rollout_id, None)
@@ -470,6 +488,8 @@ class HarborBackend(ExecutionBackend):
         if pending.on_grader_complete:
             metadata = get_agent_metadata(event)
             samples = parse_samples(metadata.get("samples", {})) if metadata else {}
+            # Read before the trial-dir cleanup further down.
+            artifacts = self.read_grader_artifacts(rollout_id)
 
             if event.result and event.result.verifier_result:
                 rewards = event.result.verifier_result.rewards or {}
@@ -512,6 +532,7 @@ class HarborBackend(ExecutionBackend):
             else:
                 result = ExecutionResult(status=RolloutStatus.FAILURE, samples=samples)
 
+            result.artifacts = artifacts
             await pending.on_grader_complete(result)
 
         if self.cleanup_successful_trials:
