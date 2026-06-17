@@ -40,7 +40,7 @@ jobs:
           python-version: "3.12"
           enable-cache: true
       - name: Install dependencies
-        run: uv sync --frozen --extra dev
+        run: uv sync --locked --extra dev
       - name: Run pyright
         run: uv run pyright osmosis_ai/
       - name: Verify public API types
@@ -79,7 +79,7 @@ jobs:
           enable-cache: true
 
       - name: Install dependencies
-        run: uv sync --frozen --extra dev
+        run: uv sync --locked --extra dev
 
       - name: Run tests with coverage
         if: matrix.python-version == '3.12'

@@ -948,12 +948,10 @@ class EvaluationRun:
     creator_email: str | None = None
     platform_url: str | None = None
     results: dict[str, Any] | None = None
-    row_index: int | None = None
     config: dict[str, Any] | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> EvaluationRun:
-        row_index = _number_or_none(data.get("row_index"))
         config = data.get("config")
         return cls(
             id=data["id"],
@@ -969,7 +967,6 @@ class EvaluationRun:
             creator_email=data.get("creator_email"),
             platform_url=data.get("platform_url"),
             results=data.get("results"),
-            row_index=int(row_index) if row_index is not None else None,
             config=config if isinstance(config, dict) else None,
         )
 
@@ -997,7 +994,6 @@ class EvaluationRunDetail(EvaluationRun):
         run = data["eval_run"]
         config = data.get("config")
         model_path = config.get("model_path") if isinstance(config, dict) else None
-        row_index = _number_or_none(run.get("row_index"))
         env_config = data.get("env_config")
         resolved_secret_scopes = data.get("resolved_secret_scopes")
         dataset_df_stats = data.get("dataset_df_stats")
@@ -1014,7 +1010,6 @@ class EvaluationRunDetail(EvaluationRun):
             model={"name": model_path} if isinstance(model_path, str) else None,
             dataset=data.get("dataset"),
             rollout=data.get("rollout"),
-            row_index=int(row_index) if row_index is not None else None,
             config=config,
             results=data.get("results"),
             entrypoint=data.get("entrypoint")
