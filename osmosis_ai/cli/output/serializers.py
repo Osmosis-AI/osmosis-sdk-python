@@ -155,7 +155,6 @@ def serialize_eval_run(run: EvaluationRun) -> dict[str, Any]:
         "rollout": run.rollout.get("name") if run.rollout else None,
         "creator_name": run.creator_name,
         "creator_email": run.creator_email,
-        "row_index": run.row_index,
     }
     if run.results is not None:
         data["results"] = run.results
