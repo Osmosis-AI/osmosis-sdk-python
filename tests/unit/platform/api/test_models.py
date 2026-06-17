@@ -735,7 +735,6 @@ class TestEvaluationRunModels:
                 "eval_run": {
                     "id": "eval_1",
                     "status": "succeeded",
-                    "row_index": 4,
                 },
                 "config": {
                     "model_path": "openai/gpt-5-mini",
@@ -762,7 +761,6 @@ class TestEvaluationRunModels:
         assert detail.model == {"name": "openai/gpt-5-mini"}
         assert detail.dataset == {"id": "dataset_1"}
         assert detail.rollout == {"id": "rollout_1"}
-        assert detail.row_index == 4
         assert detail.entrypoint == "main.py"
         assert detail.commit_sha == "abcdef1234567890"
         assert detail.env_config == {"PROMPT_MODE": "strict"}
@@ -798,19 +796,6 @@ class TestEvaluationRunModels:
         assert page.total_count == 2
         assert page.has_more is True
         assert page.next_offset == 1
-
-    def test_evaluation_run_ignores_boolean_row_index(self) -> None:
-        run = EvaluationRun.from_dict(
-            {
-                "id": "eval_1",
-                "name": "math-eval",
-                "status": "pending",
-                "created_at": "2026-05-04T00:00:00Z",
-                "row_index": True,
-            }
-        )
-
-        assert run.row_index is None
 
 
 class TestEvalRunMetrics:
