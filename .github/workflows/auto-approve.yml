@@ -25,8 +25,7 @@ jobs:
     steps:
       - name: Approve PR if not already approved
         run: |
-          if gh pr view "$PR_URL" --json reviews \
-            --jq '.reviews[] | select(.state == "APPROVED")' | grep -q .; then
+          if [ "$(gh pr view "$PR_URL" --json reviewDecision --jq '.reviewDecision')" = "APPROVED" ]; then
             echo "PR already approved, skipping."
             exit 0
           fi
