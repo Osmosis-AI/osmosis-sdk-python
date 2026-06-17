@@ -11,6 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
+      contents: read
       pull-requests: write
     if: >-
       github.actor == 'dependabot[bot]' ||
@@ -22,4 +23,14 @@ jobs:
       github.actor == 'pandyamarut' ||
       github.actor == 'artem-osmosis'
     steps:
-      - uses: hmarr/auto-approve-action@v4
+      - name: Approve PR if not already approved
+        run: |
+          if gh pr view "$PR_URL" --json reviews \
+            --jq '.reviews[] | select(.state == "APPROVED")' | grep -q .; then
+            echo "PR already approved, skipping."
+            exit 0
+          fi
+          gh pr review --approve "$PR_URL"
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
