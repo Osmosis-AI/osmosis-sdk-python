@@ -22,8 +22,10 @@ classifiers = [
 ]
 requires-python = ">=3.12"
 dependencies = [
-    "python-dotenv>=0.1.0,<2.0.0",
-    "requests>=2.0.0,<3.0.0",
+    # Security floors (CVE remediation): patched in python-dotenv 1.2.2 and
+    # requests 2.33.0. Lower bounds only, so they can still float up.
+    "python-dotenv>=1.2.2,<2.0.0",
+    "requests>=2.33.0,<3.0.0",
     # >=1.84.0 is the security floor: it patches the proxy auth-bypass /
     # SSTI / SQLi / RCE advisories (GHSA-4xpc-pv4p-pm3w and siblings).
     "litellm>=1.84.0,<2.0.0",
@@ -53,7 +55,8 @@ dependencies = [
 [project.optional-dependencies]
 # Platform CLI (dataset upload/validate)
 platform = [
-    "pyarrow>=14.0.0",      # Parquet file validation
+    # Parquet file validation. >=23.0.1 is the CVE security floor.
+    "pyarrow>=23.0.1",
 ]
 
 # Server dependencies for rollout serving
