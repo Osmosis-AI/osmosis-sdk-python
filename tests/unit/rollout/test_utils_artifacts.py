@@ -32,6 +32,24 @@ class TestSanitizeArtifacts:
         assert result["_error"]["code"] == "artifacts_not_serializable"
         assert "detail" in result["_error"]
 
+    def test_nan_downgraded_to_error(self):
+        # NaN passes stdlib json.dumps defaults but breaks httpx's allow_nan=False
+        # wire encoding, so it must be caught here, not at the callback POST.
+        result = sanitize_artifacts({"score": float("nan")})
+        assert result is not None
+        assert result["_error"]["code"] == "artifacts_not_serializable"
+
+    def test_infinity_downgraded_to_error(self):
+        result = sanitize_artifacts({"score": float("inf")})
+        assert result is not None
+        assert result["_error"]["code"] == "artifacts_not_serializable"
+
+    def test_sanitized_output_is_wire_serializable(self):
+        # Whatever sanitize returns must survive httpx's strict encoding.
+        for payload in ({"score": float("nan")}, {"bad": {1, 2, 3}}, ["not", "dict"]):
+            result = sanitize_artifacts(payload)
+            json.dumps(result, allow_nan=False, separators=(",", ":"))
+
     def test_oversized_downgraded_to_error(self):
         artifacts = {"blob": "x" * (MAX_ARTIFACTS_BYTES + 1)}
         result = sanitize_artifacts(artifacts)

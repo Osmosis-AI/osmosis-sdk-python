@@ -33,7 +33,12 @@ def sanitize_artifacts(artifacts: Any) -> dict[str, Any] | None:
         }
 
     try:
-        encoded = json.dumps(artifacts).encode("utf-8")
+        # Mirror httpx's outbound wire encoding (see httpx._content.encode_json)
+        # so values that crash serialization later -- NaN/Infinity floats in
+        # particular -- are caught here instead of breaking the callback POST.
+        encoded = json.dumps(
+            artifacts, ensure_ascii=False, separators=(",", ":"), allow_nan=False
+        ).encode("utf-8")
     except (TypeError, ValueError) as exc:
         logger.warning("Dropping non-serializable artifacts: %s", exc)
         return {

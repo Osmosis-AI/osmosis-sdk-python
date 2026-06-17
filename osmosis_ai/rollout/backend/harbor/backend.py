@@ -456,7 +456,9 @@ class HarborBackend(ExecutionBackend):
             return None
         try:
             return json.loads(path.read_text())
-        except (OSError, json.JSONDecodeError) as e:
+        except (OSError, ValueError) as e:
+            # ValueError covers JSONDecodeError and UnicodeDecodeError (non-UTF-8
+            # bytes), so a corrupt artifacts file is tolerated, not fatal.
             logger.warning(
                 "Failed to read grader artifacts for rollout %s: %s", rollout_id, e
             )

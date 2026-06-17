@@ -61,6 +61,13 @@ class ArtifactGrader(Grader):
         ctx.set_artifacts({"judge": {"explanation": "ok"}})
 
 
+class NonSerializableArtifactGrader(Grader):
+    async def grade(self, ctx: GraderContext) -> Any:
+        for sample_id in ctx.get_samples():
+            ctx.set_sample_reward(sample_id, 1.0)
+        ctx.set_artifacts({"bad": {1, 2, 3}})  # type: ignore[dict-item]
+
+
 def _make_backend_for_config(*, grader: bool = False) -> HarborBackend:
     """Build a HarborBackend skeleton sufficient for build_rollout_config."""
     backend = HarborBackend.__new__(HarborBackend)
@@ -244,6 +251,44 @@ class TestGraderRunnerRoundTrip:
         artifacts = json.loads((verifier_dir / "grader_artifacts.json").read_text())
         assert artifacts == {"judge": {"explanation": "ok"}}
 
+    def test_nonserializable_artifacts_never_block_rewards(self, tmp_path, monkeypatch):
+        """A grader with a bad artifacts payload still persists rewards, and the
+        artifacts file degrades to an _error marker instead of crashing."""
+        import osmosis_ai.rollout.backend.harbor.grader_runner as grader_runner
+
+        verifier_dir = tmp_path / "verifier"
+        monkeypatch.setattr(grader_runner, "VERIFIER_LOGS_DIR", verifier_dir)
+
+        backend = _make_backend_for_config(grader=True)
+        backend.grader_path = (
+            f"{NonSerializableArtifactGrader.__module__}:"
+            f"{NonSerializableArtifactGrader.__qualname__}"
+        )
+        request = ExecutionRequest(
+            id="r1",
+            prompt=[{"role": "user", "content": "hi"}],
+            label="test-label",
+        )
+        config_path = tmp_path / "rollout_config.json"
+        config_path.write_text(
+            json.dumps(backend.build_rollout_config(request), default=str)
+        )
+        samples_path = tmp_path / "samples.json"
+        self._write_samples(samples_path)
+
+        monkeypatch.setattr(
+            grader_runner,
+            "parse_args",
+            lambda: SimpleNamespace(config=config_path, samples=samples_path),
+        )
+
+        grader_runner.main()
+
+        rewards = json.loads((verifier_dir / "reward.json").read_text())
+        assert rewards == {"sample-1": 1.0}
+        artifacts = json.loads((verifier_dir / "grader_artifacts.json").read_text())
+        assert artifacts["_error"]["code"] == "artifacts_not_serializable"
+
     def test_grader_without_artifacts_writes_no_file(self, tmp_path, monkeypatch):
         import osmosis_ai.rollout.backend.harbor.grader_runner as grader_runner
 
@@ -377,5 +422,15 @@ class TestOnTrialEndArtifacts:
         verifier = tmp_path / "trial-r1" / "verifier"
         verifier.mkdir(parents=True)
         (verifier / "grader_artifacts.json").write_text("{not valid json")
+
+        assert backend.read_grader_artifacts("r1") is None
+
+    def test_read_grader_artifacts_tolerates_non_utf8(self, tmp_path):
+        # Non-UTF-8 bytes raise UnicodeDecodeError (a ValueError), which must be
+        # tolerated like any other corrupt artifacts file.
+        backend = self._make_backend(tmp_path)
+        verifier = tmp_path / "trial-r1" / "verifier"
+        verifier.mkdir(parents=True)
+        (verifier / "grader_artifacts.json").write_bytes(b"\xff\xfe\x00bad")
 
         assert backend.read_grader_artifacts("r1") is None

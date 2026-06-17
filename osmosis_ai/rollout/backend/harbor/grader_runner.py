@@ -14,6 +14,7 @@ from typing import Any
 
 from osmosis_ai.rollout.context import GraderContext
 from osmosis_ai.rollout.types import RolloutSample
+from osmosis_ai.rollout.utils.artifacts import sanitize_artifacts
 from osmosis_ai.rollout.utils.imports import resolve_object
 
 VERIFIER_LOGS_DIR = Path("/logs/verifier")
@@ -45,9 +46,17 @@ def write_rewards(rewards: dict[str, float | None]) -> None:
 
 
 def write_artifacts(artifacts: dict[str, Any]) -> None:
-    """Write grader artifacts to the verifier dir (sibling of reward.json)."""
+    """Write grader artifacts to the verifier dir (sibling of reward.json).
+
+    Sanitized to mirror the server callback path, so a non-serializable or
+    oversized payload becomes an ``_error`` marker rather than crashing the
+    runner after rewards are already written.
+    """
+    sanitized = sanitize_artifacts(artifacts)
+    if sanitized is None:
+        return
     VERIFIER_LOGS_DIR.mkdir(parents=True, exist_ok=True)
-    (VERIFIER_LOGS_DIR / "grader_artifacts.json").write_text(json.dumps(artifacts))
+    (VERIFIER_LOGS_DIR / "grader_artifacts.json").write_text(json.dumps(sanitized))
 
 
 def main() -> None:
@@ -89,7 +98,12 @@ def main() -> None:
     rewards = {sid: sample.reward for sid, sample in graded.items()}
     write_rewards(rewards)
     if ctx.artifacts is not None:
-        write_artifacts(ctx.artifacts)
+        # Artifacts are best-effort and must never block reward delivery, even
+        # if the verifier dir is unwritable after reward.json is persisted.
+        try:
+            write_artifacts(ctx.artifacts)
+        except OSError as e:
+            print(f"Warning: failed to write grader artifacts: {e}")
     print(f"Grading complete: {rewards}")
 
 
