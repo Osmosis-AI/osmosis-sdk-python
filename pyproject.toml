@@ -49,7 +49,7 @@ dependencies = [
     # loaded via keyring's SecretService backend on Linux. Lower bounds only,
     # so they can still float up with their parents.
     "aiohttp>=3.14.1",
-    "cryptography>=49.0.0",
+    "cryptography>=48.0.1",
 ]
 
 [project.optional-dependencies]

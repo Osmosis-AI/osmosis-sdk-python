@@ -2004,7 +2004,7 @@ server = [
 [package.metadata]
 requires-dist = [
     { name = "aiohttp", specifier = ">=3.14.1" },
-    { name = "cryptography", specifier = ">=49.0.0" },
+    { name = "cryptography", specifier = ">=48.0.1" },
     { name = "fastapi", marker = "extra == 'server'", specifier = ">=0.100.0,<1.0.0" },
     { name = "harbor", extras = ["daytona"], specifier = "==0.6.1" },
     { name = "httpx", specifier = ">=0.25.0,<1.0.0" },
