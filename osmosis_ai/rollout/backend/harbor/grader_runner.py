@@ -56,7 +56,12 @@ def write_artifacts(artifacts: dict[str, Any]) -> None:
     if sanitized is None:
         return
     VERIFIER_LOGS_DIR.mkdir(parents=True, exist_ok=True)
-    (VERIFIER_LOGS_DIR / "grader_artifacts.json").write_text(json.dumps(sanitized))
+    # Mirror sanitize_artifacts' compact UTF-8 settings so the on-disk file stays
+    # within the size cap and matches the callback wire format.
+    (VERIFIER_LOGS_DIR / "grader_artifacts.json").write_text(
+        json.dumps(sanitized, ensure_ascii=False, separators=(",", ":")),
+        encoding="utf-8",
+    )
 
 
 def main() -> None:
