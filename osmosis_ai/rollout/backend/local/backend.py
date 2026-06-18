@@ -137,12 +137,14 @@ class LocalBackend(ExecutionBackend):
             return ExecutionResult(
                 status=RolloutStatus.SUCCESS,
                 samples=samples,
+                artifacts=grader_ctx.artifacts,
             )
         except Exception as e:
             logger.error(traceback.format_exc())
             return ExecutionResult(
                 status=RolloutStatus.FAILURE,
                 samples=result.samples,
+                artifacts=grader_ctx.artifacts,
                 err_message=str(e),
                 err_category=_categorize_exception(e),
             )

@@ -17,6 +17,7 @@ from osmosis_ai.rollout.types import (
     RolloutInitResponse,
     RolloutStatus,
 )
+from osmosis_ai.rollout.utils.artifacts import sanitize_artifacts
 from osmosis_ai.rollout.utils.http import post_json_with_retry
 
 logger: logging.Logger = logging.getLogger(__name__)
@@ -82,17 +83,23 @@ async def _handle_rollout(
             result.status,
             len(result.samples),
         )
+        artifacts = sanitize_artifacts(result.artifacts)
+        payload = GraderCompleteRequest(
+            rollout_id=request.rollout_id,
+            status=GraderStatus.SUCCESS
+            if result.status == RolloutStatus.SUCCESS
+            else GraderStatus.FAILURE,
+            samples=result.samples,
+            artifacts=artifacts,
+            err_message=result.err_message,
+            err_category=result.err_category,
+        ).model_dump()
+        # Drop the key when absent so callbacks stay byte-identical to before.
+        if artifacts is None:
+            payload.pop("artifacts", None)
         resp = await post_json_with_retry(
             url=request.grader_callback_url,
-            payload=GraderCompleteRequest(
-                rollout_id=request.rollout_id,
-                status=GraderStatus.SUCCESS
-                if result.status == RolloutStatus.SUCCESS
-                else GraderStatus.FAILURE,
-                samples=result.samples,
-                err_message=result.err_message,
-                err_category=result.err_category,
-            ).model_dump(),
+            payload=payload,
             headers=auth.as_bearer_headers(),
         )
         logger.info(

@@ -48,6 +48,20 @@ class Grader(ABC):
 - `ctx.get_samples()` returns the collected `dict[str, RolloutSample]` (**sync**).
 - Attach rewards with `ctx.set_sample_reward(sample_id, reward)` — it raises `ValueError` for an unknown `sample_id` ([context.py](../osmosis_ai/rollout/context.py)).
 - `ctx.label` carries the dataset row's label (the ground-truth string).
+- `ctx.metadata` is the read-only input-side dataset row metadata; attach optional output via `ctx.set_artifacts(dict)` — see [Artifacts](#artifacts).
+
+## Artifacts
+
+Optional output-side JSON the grader returns for the frontend (judge explanations, ids, or pointers to larger traces), sent back on the grader callback as `GraderCompleteRequest.artifacts`. Skip `set_artifacts` and nothing changes on the wire.
+
+```python
+ctx.set_artifacts({
+    "judge": {"explanation": "Missed the final constraint."},
+    "trace_ref": {"path": "rollout_traces/run_123/sample_456.jsonl", "size_bytes": 38291},
+})
+```
+
+JSON-serializable object only, capped at 64 KiB ([utils/artifacts.py](../osmosis_ai/rollout/utils/artifacts.py)); oversized/non-serializable payloads become a small `{"_error": {...}}` marker but still ship, so reward delivery is never blocked. Don't ship logs/traces/binaries here — store them elsewhere and reference with `{path|url, content_type, size_bytes}`.
 
 ## Contexts
 
@@ -55,7 +69,7 @@ class Grader(ABC):
 
 - `AgentWorkflowContext` — `prompt: list[dict]`, `config`.
 - `HarborAgentWorkflowContext` — adds `environment` (Harbor `BaseEnvironment`) for `environment.exec()`, `environment.upload_file()`, etc. under `HarborBackend`.
-- `GraderContext` — `label`, `samples`, plus `get_samples()` / `set_sample_reward()`. (It also has a `project_path` field, but no backend currently populates it — it is always `None`.)
+- `GraderContext` — `label`, `samples`, `metadata` (input-side, read-only), plus `get_samples()` / `set_sample_reward()` / `set_artifacts()` (output-side, see [Artifacts](#artifacts)).
 - `RolloutContext` — ambient per-rollout context (chat completions URL, API key, rollout id). It is a context manager; the server enters it around execution. Local backends pass connection info directly; container runners read it from `OSMOSIS_CHAT_COMPLETIONS_URL` / `OSMOSIS_API_KEY` / `OSMOSIS_ROLLOUT_ID`. Fetch the current one with `get_rollout_context()`.
 
 ### Samples
