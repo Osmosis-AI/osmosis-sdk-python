@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 
 import toml
+from harbor.models.environment_type import EnvironmentType
 from harbor.models.trial.config import (
     AgentConfig as HarborAgentConfig,
 )
@@ -18,7 +19,6 @@ from harbor.models.trial.config import (
     EnvironmentConfig as HarborEnvironmentConfig,
 )
 from harbor.models.trial.config import (
-    EnvironmentType,
     TaskConfig,
     TrialConfig,
     VerifierConfig,

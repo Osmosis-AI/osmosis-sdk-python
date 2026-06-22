@@ -43,7 +43,7 @@ dependencies = [
     # exceptions it raises bypass our top-level `click` error handling.
     "typer>=0.16.0,<0.26",
     "rich>=14.2.0",
-    "harbor[daytona]==0.6.1",
+    "harbor[daytona]>=0.15.0,<0.16.0",
     # Security floors for load-bearing transitive deps (CVE remediation):
     # aiohttp is exercised via litellm's async transport, and cryptography is
     # loaded via keyring's SecretService backend on Linux. Lower bounds only,
