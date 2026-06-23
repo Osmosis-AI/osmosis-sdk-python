@@ -3,7 +3,7 @@
 `osmosis dev serve` runs the rollout in the current directory as a local server
 and exposes it to the GPU cluster over an iroh (`dumbpipe`) tunnel. It prints the
 tunnel ticket; paste that into your training config under [advanced] as
-`local_rollout_ticket` and submit — the per-run ECS rollout slot then forwards
+`local_rollout_address` and submit — the per-run ECS rollout slot then forwards
 its rollout calls to this machine instead of cloning the rollout repo.
 """
 
@@ -23,6 +23,7 @@ from pathlib import Path
 
 import typer
 
+from osmosis_ai.cli.console import console
 from osmosis_ai.cli.errors import CLIError
 
 app: typer.Typer = typer.Typer(
@@ -176,6 +177,51 @@ def _terminate(proc: subprocess.Popen[bytes] | None) -> None:
         proc.kill()
 
 
+def _emit_ticket(port: int, ticket: str) -> None:
+    """Surface the tunnel ticket: machine-readable on stdout, styled on stderr."""
+    from osmosis_ai.cli.output.context import OutputFormat, get_output_context
+
+    ctx = get_output_context()
+
+    # The ticket is this command's machine output. Emit it raw on stdout whenever
+    # output is being consumed (piped/redirected, or a non-rich format); in an
+    # interactive rich TTY the styled block below is the interface, so skip the
+    # duplicate raw dump.
+    if ctx.format is not OutputFormat.rich or not sys.stdout.isatty():
+        sys.stdout.write(ticket + "\n")
+        sys.stdout.flush()
+
+    if ctx.format is OutputFormat.json:
+        return
+
+    if ctx.format is OutputFormat.plain or not ctx.interactive:
+        _progress("")
+        _progress("Add this to your training config under [advanced], then submit:")
+        _progress(f'    local_rollout_address = "{ticket}"')
+        _progress("")
+        _progress(f"Rollout server + tunnel running on :{port} (Ctrl-C to stop).")
+        return
+
+    from rich.console import Console as RichConsole
+
+    err = RichConsole(stderr=True, highlight=False)
+    err.print()
+    err.rule("[bold green]Local rollout ready[/]", style="green")
+    err.print()
+    err.print(
+        "Add this to your training config under [bold]\\[advanced][/], then submit:"
+    )
+    err.print()
+    # soft_wrap keeps the long ticket on one logical line so it copies cleanly.
+    err.print(
+        f'    [cyan]local_rollout_address[/] = [green]"{ticket}"[/]', soft_wrap=True
+    )
+    err.print()
+    err.print(
+        f"Rollout server + tunnel running on :{port} (Ctrl-C to stop).", style="dim"
+    )
+
+
 @app.command("serve")
 def serve(
     port: int = typer.Option(
@@ -186,14 +232,14 @@ def serve(
 ) -> None:
     """Serve the rollout in the current directory over an iroh tunnel.
 
-    Run from a rollout repo root (containing ``main.py``). Prints the tunnel
+    Run from a rollout folder (containing ``main.py``). Prints the tunnel
     ticket to stdout, then holds the server + tunnel open until interrupted.
     """
     repo = Path.cwd()
     main_file = repo / "main.py"
     if not main_file.is_file():
         raise CLIError(
-            f"No main.py in {repo}. Run `osmosis dev serve` from a rollout repo root.",
+            f"No main.py in {repo}. Run `osmosis dev serve` from a rollout folder.",
             code="INVALID_USAGE",
         )
 
@@ -209,36 +255,27 @@ def serve(
     env["_OSMOSIS_ROLLOUT_PORT"] = str(port)
 
     try:
-        _progress(f"Starting rollout server on :{port} ...")
-        with server_log.open("wb") as fh:
-            server = subprocess.Popen(
-                [sys.executable, str(main_file)],
-                cwd=str(repo),
-                env=env,
-                stdout=fh,
-                stderr=subprocess.STDOUT,
-            )
-        _wait_until_healthy(port, server, server_log)
+        with console.status(f"Starting rollout server on :{port}"):
+            with server_log.open("wb") as fh:
+                server = subprocess.Popen(
+                    [sys.executable, str(main_file)],
+                    cwd=str(repo),
+                    env=env,
+                    stdout=fh,
+                    stderr=subprocess.STDOUT,
+                )
+            _wait_until_healthy(port, server, server_log)
 
-        _progress("Rollout server healthy. Opening iroh tunnel ...")
-        with tunnel_log.open("wb") as fh:
-            tunnel = subprocess.Popen(
-                [dumbpipe, "listen-tcp", "--host", f"localhost:{port}"],
-                stdout=fh,
-                stderr=subprocess.STDOUT,
-            )
-        ticket = _capture_ticket(tunnel, tunnel_log)
+        with console.status("Opening iroh tunnel"):
+            with tunnel_log.open("wb") as fh:
+                tunnel = subprocess.Popen(
+                    [dumbpipe, "listen-tcp", "--host", f"localhost:{port}"],
+                    stdout=fh,
+                    stderr=subprocess.STDOUT,
+                )
+            ticket = _capture_ticket(tunnel, tunnel_log)
 
-        # The ticket is the command's output and must reach stdout reliably even
-        # when piped — console.print() no-ops off a TTY, so write it directly.
-        sys.stdout.write(ticket + "\n")
-        sys.stdout.flush()
-
-        _progress("")
-        _progress("Add this to your training config under [advanced], then submit:")
-        _progress(f'    local_rollout_ticket = "{ticket}"')
-        _progress("")
-        _progress(f"Rollout server + tunnel running on :{port} (Ctrl-C to stop).")
+        _emit_ticket(port, ticket)
 
         while True:
             if server.poll() is not None:
