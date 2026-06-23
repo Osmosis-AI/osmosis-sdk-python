@@ -36,6 +36,7 @@ from osmosis_ai.platform.cli.shared_config import (
 )
 from osmosis_ai.platform.cli.utils import (
     fetch_environment_secrets,
+    print_local_rollout_notice,
     print_remote_fetch_notice,
     require_git_workspace_directory_context,
 )
@@ -92,6 +93,11 @@ class CloudSubmitSpec[ConfigT: BaseSubmitConfig]:
         [SubmitRunResult, ConfigT],
         tuple[list[str], list[dict[str, Any]]],
     ]
+
+    local_rollout_advanced_key: str | None = None
+    """Advanced-config key whose presence marks a local-rollout submit (train
+    only). When set and present, the repo-fetch notice is replaced with a
+    local-rollout notice, the address is probed, and the run name is suffixed."""
 
 
 def _fetch_secret_scopes(
@@ -283,11 +289,20 @@ def run_cloud_submit[ConfigT: BaseSubmitConfig](
         )
         full_summary.extend((f"secret.{name}", scope) for name, scope in secret_rows)
 
-    notes, warnings = print_remote_fetch_notice(
-        workspace_directory,
-        pinned_commit_sha=config.experiment_commit_sha,
-        extra_warnings=commit_preflight_warnings,
-    )
+    local_rollout_address: str | None = None
+    if spec.local_rollout_advanced_key:
+        candidate = config.advanced_config.get(spec.local_rollout_advanced_key)
+        if isinstance(candidate, str) and candidate.strip():
+            local_rollout_address = candidate.strip()
+
+    if local_rollout_address is not None:
+        notes, warnings = print_local_rollout_notice()
+    else:
+        notes, warnings = print_remote_fetch_notice(
+            workspace_directory,
+            pinned_commit_sha=config.experiment_commit_sha,
+            extra_warnings=commit_preflight_warnings,
+        )
 
     require_confirmation(
         spec.confirm_prompt,
