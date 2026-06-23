@@ -13,6 +13,7 @@ import hashlib
 import os
 import platform
 import shutil
+import signal
 import subprocess
 import sys
 import tarfile
@@ -225,20 +226,39 @@ def _terminate(proc: subprocess.Popen[bytes] | None) -> None:
 
 def _emit_ticket(port: int, ticket: str) -> None:
     """Surface the tunnel ticket: machine-readable on stdout, styled on stderr."""
+    import json
+
     from osmosis_ai.cli.output.context import OutputFormat, get_output_context
 
     ctx = get_output_context()
 
+    # serve() never returns a CommandResult (it blocks until interrupted), so we
+    # emit this command's machine output here and mark it so the result callback
+    # doesn't flag the None return as "no structured output".
+    if ctx.format is OutputFormat.json:
+        sys.stdout.write(
+            json.dumps(
+                {
+                    "schema_version": ctx.schema_version,
+                    "local_rollout_address": ticket,
+                    "port": port,
+                },
+                ensure_ascii=False,
+            )
+            + "\n"
+        )
+        sys.stdout.flush()
+        ctx.output_emitted = True
+        return
+
     # The ticket is this command's machine output. Emit it raw on stdout whenever
-    # output is being consumed (piped/redirected, or a non-rich format); in an
-    # interactive rich TTY the styled block below is the interface, so skip the
-    # duplicate raw dump.
-    if ctx.format is not OutputFormat.rich or not sys.stdout.isatty():
+    # output is being consumed (piped/redirected, or the low-noise plain format);
+    # in an interactive rich TTY the styled block below is the interface, so skip
+    # the duplicate raw dump.
+    if ctx.format is OutputFormat.plain or not sys.stdout.isatty():
         sys.stdout.write(ticket + "\n")
         sys.stdout.flush()
-
-    if ctx.format is OutputFormat.json:
-        return
+    ctx.output_emitted = True
 
     if ctx.format is OutputFormat.plain or not ctx.interactive:
         _progress("")
@@ -302,6 +322,14 @@ def serve(
     env["ROLLOUT_PORT"] = str(port)
     env["_OSMOSIS_ROLLOUT_PORT"] = str(port)
 
+    # Route SIGTERM (plain `kill`, most OOM kills) into the same path as Ctrl-C so
+    # the finally below tears down the children instead of orphaning them — a
+    # leaked server holds the port and a leaked tunnel keeps forwarding stale code.
+    def _on_sigterm(*_: object) -> None:
+        raise KeyboardInterrupt
+
+    previous_sigterm = signal.signal(signal.SIGTERM, _on_sigterm)
+
     try:
         with console.status(f"Starting rollout server on :{port}"):
             with server_log.open("wb") as fh:
@@ -347,6 +375,7 @@ def serve(
     except KeyboardInterrupt:
         _progress("\nShutting down rollout server + tunnel ...")
     finally:
+        signal.signal(signal.SIGTERM, previous_sigterm)
         stop_stream.set()
         if log_thread is not None:
             log_thread.join(timeout=2)

@@ -403,7 +403,9 @@ def render_command_result(result: Any, **_: Any) -> None:
         return
 
     output = get_output_context()
-    if result is None and output.format is OutputFormat.rich:
+    # A long-running command (e.g. `dev serve`) may stream its own output and
+    # return None; output_emitted signals that, so don't flag it as missing.
+    if result is None and (output.format is OutputFormat.rich or output.output_emitted):
         return
 
     from osmosis_ai.cli.errors import CLIError
