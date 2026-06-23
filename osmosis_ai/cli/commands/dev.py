@@ -70,15 +70,23 @@ def _progress(message: str) -> None:
 
 
 def _ensure_dumbpipe() -> str:
-    """Return a path to a `dumbpipe` binary, downloading a pinned release if needed."""
-    existing = shutil.which("dumbpipe")
-    if existing:
-        return existing
+    """Return a path to the pinned `dumbpipe` binary, downloading it if needed.
 
+    dumbpipe has no version flag, so a PATH binary's ticket-protocol version can't
+    be verified. We therefore prefer the pinned, checksum-verified build and only
+    fall back to PATH on platforms without one (where compatibility isn't guaranteed).
+    """
     system = platform.system().lower()
     arch = _ARCH_ALIASES.get(platform.machine().lower())
     sha = _DUMBPIPE_SHA256.get((system, arch or ""))
     if system not in ("darwin", "linux") or arch is None or sha is None:
+        existing = shutil.which("dumbpipe")
+        if existing:
+            _progress(
+                f"No pinned dumbpipe build for {system}/{platform.machine()}; using "
+                f"{existing} (version unverified, ticket compatibility not guaranteed)."
+            )
+            return existing
         raise CLIError(
             f"No pinned dumbpipe build for {system}/{platform.machine()}. "
             "Install dumbpipe manually and put it on PATH.",
