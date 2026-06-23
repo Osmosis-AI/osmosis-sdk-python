@@ -16,7 +16,7 @@ import shutil
 import subprocess
 import sys
 import tarfile
-import tempfile
+import threading
 import time
 import urllib.request
 from pathlib import Path
@@ -32,6 +32,9 @@ app: typer.Typer = typer.Typer(
 )
 
 DEFAULT_ROLLOUT_PORT = 8000
+
+_SERVE_LOG_DIR = Path.home() / ".cache" / "osmosis" / "dev-serve"
+_SERVE_LOG_KEEP = 5
 
 # Keep DUMBPIPE_VERSION and the checksums in lockstep with the rollout-server
 # Dockerfile (iac/.../rollout-server/Dockerfile) so both ends of the tunnel
@@ -175,6 +178,41 @@ def _capture_ticket(
     raise CLIError("Could not capture an iroh ticket from dumbpipe.", code="INTERNAL")
 
 
+def _new_run_dir() -> Path:
+    """Create a per-run log dir under the stable cache, pruning all but the newest few."""
+    _SERVE_LOG_DIR.mkdir(parents=True, exist_ok=True)
+    existing = sorted(
+        (p for p in _SERVE_LOG_DIR.iterdir() if p.is_dir()),
+        key=lambda p: p.stat().st_mtime,
+    )
+    for stale in (
+        existing[: -(_SERVE_LOG_KEEP - 1)] if _SERVE_LOG_KEEP > 1 else existing
+    ):
+        shutil.rmtree(stale, ignore_errors=True)
+
+    run = _SERVE_LOG_DIR / f"{time.strftime('%Y%m%d-%H%M%S')}-{os.getpid()}"
+    run.mkdir(parents=True, exist_ok=True)
+    return run
+
+
+def _stream_log(log_path: Path, stop: threading.Event) -> None:
+    """Tail ``log_path`` (from the start) to stderr until ``stop`` is set and drained."""
+    with log_path.open("r", errors="replace") as fh:
+        while True:
+            line = fh.readline()
+            if line:
+                sys.stderr.write(line)
+                sys.stderr.flush()
+                continue
+            if stop.is_set():
+                rest = fh.read()
+                if rest:
+                    sys.stderr.write(rest)
+                    sys.stderr.flush()
+                return
+            time.sleep(0.2)
+
+
 def _terminate(proc: subprocess.Popen[bytes] | None) -> None:
     if proc is None or proc.poll() is not None:
         return
@@ -252,11 +290,13 @@ def serve(
         )
 
     dumbpipe = _ensure_dumbpipe()
-    work = Path(tempfile.mkdtemp(prefix="osmosis-dev-serve-"))
+    work = _new_run_dir()
     server_log = work / "rollout-server.log"
     tunnel_log = work / "dumbpipe.log"
     server: subprocess.Popen[bytes] | None = None
     tunnel: subprocess.Popen[bytes] | None = None
+    stop_stream = threading.Event()
+    log_thread: threading.Thread | None = None
 
     env = os.environ.copy()
     env["ROLLOUT_PORT"] = str(port)
@@ -285,6 +325,13 @@ def serve(
 
         _emit_ticket(port, ticket)
 
+        _progress("")
+        _progress(f"── rollout server logs ({server_log}) ──")
+        log_thread = threading.Thread(
+            target=_stream_log, args=(server_log, stop_stream), daemon=True
+        )
+        log_thread.start()
+
         while True:
             if server.poll() is not None:
                 raise CLIError(
@@ -300,6 +347,9 @@ def serve(
     except KeyboardInterrupt:
         _progress("\nShutting down rollout server + tunnel ...")
     finally:
+        stop_stream.set()
+        if log_thread is not None:
+            log_thread.join(timeout=2)
         _terminate(tunnel)
         _terminate(server)
-        shutil.rmtree(work, ignore_errors=True)
+        _progress(f"Logs preserved in {work} (rollout-server.log, dumbpipe.log).")
