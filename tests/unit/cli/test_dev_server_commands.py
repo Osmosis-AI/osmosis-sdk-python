@@ -10,6 +10,7 @@ import osmosis_ai.platform.api.client as api_client_module
 import osmosis_ai.platform.cli.dev_server as dev_server_module
 from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.cli.output import ListResult, OperationResult
+from osmosis_ai.cli.output.display import format_local_date
 from osmosis_ai.platform.api.models import PaginatedDevRolloutServers
 from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE
 
@@ -457,10 +458,10 @@ class TestDevServerList:
         assert result.display_items[0]["expires_at"] == "No expiration"
         assert result.display_items[0]["id"] == "r2"
 
-    def test_list_display_items_preserves_non_empty_expires_at(
+    def test_list_display_items_formats_non_empty_expires_at(
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """display_items leaves a real expires_at timestamp as-is."""
+        """display_items renders a real expires_at as a local date string."""
         monkeypatch.setattr(
             dev_server_module,
             "resolve_git_workspace_directory_context",
@@ -499,7 +500,9 @@ class TestDevServerList:
         assert isinstance(result, ListResult)
         assert result.items[0]["expires_at"] == "2026-06-25T12:00:00Z"
         assert result.display_items is not None
-        assert result.display_items[0]["expires_at"] == "2026-06-25T12:00:00Z"
+        assert result.display_items[0]["expires_at"] == format_local_date(
+            "2026-06-25T12:00:00Z"
+        )
 
     def test_list_empty(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """list_servers() returns a ListResult with zero items when API returns empty."""
