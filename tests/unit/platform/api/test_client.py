@@ -1055,3 +1055,87 @@ class TestGetEvalRunMetrics:
         assert result.reward_stats.mean == 0.72
         assert result.pass_at_k[0].k == 1
         assert mock_request.call_args[0][0] == "/api/cli/eval-runs/a%2Fb/metrics"
+
+
+class TestDevRolloutServer:
+    """Tests for OsmosisClient dev rollout server methods."""
+
+    @patch("osmosis_ai.platform.api.client.platform_request")
+    def test_provision_posts_correct_payload(self, mock_request: MagicMock) -> None:
+        mock_request.return_value = {"server_id": "srv-1", "status": "provisioning"}
+        credentials = object()
+
+        result = OsmosisClient().provision_dev_rollout_server(
+            rollout_name="my-rollout",
+            commit_sha="abc123",
+            repository_path="/repo",
+            entrypoint="rollout.py",
+            ttl_hours=4,
+            credentials=credentials,
+            git_identity="git_test",
+        )
+
+        assert result == {"server_id": "srv-1", "status": "provisioning"}
+        assert mock_request.call_args[0][0] == "/api/cli/dev-rollout-server"
+        assert mock_request.call_args.kwargs["method"] == "POST"
+        assert mock_request.call_args.kwargs["data"] == {
+            "rollout_name": "my-rollout",
+            "commit_sha": "abc123",
+            "repository_path": "/repo",
+            "entrypoint": "rollout.py",
+            "ttl_hours": 4,
+        }
+        assert mock_request.call_args.kwargs["credentials"] is credentials
+        assert mock_request.call_args.kwargs["git_identity"] == "git_test"
+
+    @patch("osmosis_ai.platform.api.client.platform_request")
+    def test_provision_accepts_none_ttl_hours(self, mock_request: MagicMock) -> None:
+        mock_request.return_value = {"server_id": "srv-2", "status": "provisioning"}
+
+        OsmosisClient().provision_dev_rollout_server(
+            rollout_name="r",
+            commit_sha="sha",
+            repository_path="/p",
+            entrypoint="e.py",
+            ttl_hours=None,
+            git_identity="git_test",
+        )
+
+        assert mock_request.call_args.kwargs["data"]["ttl_hours"] is None
+
+    @patch("osmosis_ai.platform.api.client.platform_request")
+    def test_teardown_sends_delete_and_encodes_id(
+        self, mock_request: MagicMock
+    ) -> None:
+        mock_request.return_value = {"server_id": "a/b", "status": "terminating"}
+        credentials = object()
+
+        result = OsmosisClient().teardown_dev_rollout_server(
+            "a/b",
+            credentials=credentials,
+            git_identity="git_test",
+        )
+
+        assert result == {"server_id": "a/b", "status": "terminating"}
+        assert mock_request.call_args[0][0] == "/api/cli/dev-rollout-server/a%2Fb"
+        assert mock_request.call_args.kwargs["method"] == "DELETE"
+        assert mock_request.call_args.kwargs["data"] == {}
+        assert mock_request.call_args.kwargs["credentials"] is credentials
+        assert mock_request.call_args.kwargs["git_identity"] == "git_test"
+
+    @patch("osmosis_ai.platform.api.client.platform_request")
+    def test_list_dev_rollout_servers_sends_get(self, mock_request: MagicMock) -> None:
+        mock_request.return_value = {"servers": [], "total_count": 0}
+        credentials = object()
+
+        result = OsmosisClient().list_dev_rollout_servers(
+            credentials=credentials,
+            git_identity="git_test",
+        )
+
+        assert result == {"servers": [], "total_count": 0}
+        assert mock_request.call_args[0][0] == "/api/cli/dev-rollout-server"
+        assert mock_request.call_args.kwargs["credentials"] is credentials
+        assert mock_request.call_args.kwargs["git_identity"] == "git_test"
+        assert "method" not in mock_request.call_args.kwargs
+        assert "data" not in mock_request.call_args.kwargs
