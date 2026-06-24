@@ -5,6 +5,7 @@ from typing import Any
 
 from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.cli.output import get_output_context, serialize_dev_rollout_server
+from osmosis_ai.cli.output.display import format_local_date
 from osmosis_ai.cli.output.result import ListColumn, ListResult, OperationResult
 from osmosis_ai.cli.prompts import require_confirmation
 from osmosis_ai.platform.api.client import OsmosisClient
@@ -63,7 +64,7 @@ def up(*, ttl_hours: int | None, yes: bool = False) -> OperationResult:
         operation="dev.server.up",
         status="success",
         resource=result,
-        message=f"Rollout server: {result['url']}",
+        message=f"Rollout server provisioning at {result['url']} — it may take a few minutes to become ready; check with 'osmosis dev server list'.",
     )
 
 
@@ -110,6 +111,15 @@ def list_servers(*, limit: int, all_: bool) -> ListResult:
         total_count=total_count,
         has_more=has_more,
         next_offset=next_offset,
+        display_items=[
+            {
+                **item,
+                "expires_at": format_local_date(item["expires_at"])
+                if item["expires_at"]
+                else "No expiration",
+            }
+            for item in items
+        ],
         columns=[
             ListColumn(key="id", label="ID", ratio=2, overflow="fold"),
             ListColumn(key="name", label="Rollout", ratio=2, overflow="fold"),

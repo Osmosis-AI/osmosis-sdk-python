@@ -111,6 +111,10 @@ class TestDevServerUp:
         assert captured["commit_sha"] == FAKE_HEAD_SHA
         assert captured["repository_path"] == "rollouts/multiply"
         assert captured["ttl_hours"] == 24
+        assert result.message is not None
+        assert "provisioning" in result.message
+        assert FAKE_SERVER["url"] in result.message
+        assert "osmosis dev server list" in result.message
 
     def test_up_no_ttl_passes_none(
         self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
@@ -404,6 +408,98 @@ class TestDevServerList:
         assert result.items[0]["id"] == "r1"
         assert result.items[0]["name"] == "multiply"
         assert result.items[0]["status"] == "running"
+        assert result.items[0]["expires_at"] is None
+        assert result.display_items is not None
+        assert result.display_items[0]["expires_at"] == "No expiration"
+
+    def test_list_display_items_no_expiration(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """display_items shows 'No expiration' for None expires_at; items keeps original."""
+        monkeypatch.setattr(
+            dev_server_module,
+            "resolve_git_workspace_directory_context",
+            lambda: _fake_ctx(),
+        )
+
+        fake_servers = [
+            {
+                "id": "r2",
+                "name": "my-rollout",
+                "url": "https://r2.rollout-staging.gulp.dev",
+                "expires_at": None,
+                "started_at": None,
+                "status": "running",
+            }
+        ]
+
+        class FakeClient:
+            def list_dev_rollout_servers(
+                self, limit, offset, *, credentials=None, git_identity
+            ):
+                return PaginatedDevRolloutServers.from_dict(
+                    {
+                        "dev_rollout_servers": fake_servers,
+                        "total_count": 1,
+                        "has_more": False,
+                        "next_offset": None,
+                    }
+                )
+
+        monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(dev_server_module, "OsmosisClient", FakeClient)
+
+        result = dev_server_module.list_servers(limit=DEFAULT_PAGE_SIZE, all_=False)
+
+        assert isinstance(result, ListResult)
+        assert result.items[0]["expires_at"] is None
+        assert result.display_items is not None
+        assert result.display_items[0]["expires_at"] == "No expiration"
+        assert result.display_items[0]["id"] == "r2"
+
+    def test_list_display_items_preserves_non_empty_expires_at(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """display_items leaves a real expires_at timestamp as-is."""
+        monkeypatch.setattr(
+            dev_server_module,
+            "resolve_git_workspace_directory_context",
+            lambda: _fake_ctx(),
+        )
+
+        fake_servers = [
+            {
+                "id": "r3",
+                "name": "timed-rollout",
+                "url": "https://r3.rollout-staging.gulp.dev",
+                "expires_at": "2026-06-25T12:00:00Z",
+                "started_at": None,
+                "status": "running",
+            }
+        ]
+
+        class FakeClient:
+            def list_dev_rollout_servers(
+                self, limit, offset, *, credentials=None, git_identity
+            ):
+                return PaginatedDevRolloutServers.from_dict(
+                    {
+                        "dev_rollout_servers": fake_servers,
+                        "total_count": 1,
+                        "has_more": False,
+                        "next_offset": None,
+                    }
+                )
+
+        monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(dev_server_module, "OsmosisClient", FakeClient)
+
+        result = dev_server_module.list_servers(limit=DEFAULT_PAGE_SIZE, all_=False)
+
+        assert isinstance(result, ListResult)
+        assert result.items[0]["expires_at"] == "2026-06-25T12:00:00Z"
+        assert result.display_items is not None
+        assert result.display_items[0]["expires_at"] == "2026-06-25T12:00:00Z"
 
     def test_list_empty(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """list_servers() returns a ListResult with zero items when API returns empty."""
