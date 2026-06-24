@@ -21,11 +21,15 @@ FAKE_SERVER = {
 FAKE_HEAD_SHA = "abc123def456abc123def456abc123def456abc1"
 
 
-def _fake_ctx():
+def _fake_ctx(workspace_directory: Path | None = None):
     return type(
         "FakeCtx",
         (),
-        {"credentials": FAKE_CREDENTIALS, "git_identity": GIT_IDENTITY},
+        {
+            "credentials": FAKE_CREDENTIALS,
+            "git_identity": GIT_IDENTITY,
+            "workspace_directory": workspace_directory,
+        },
     )()
 
 
@@ -57,15 +61,12 @@ class TestDevServerUp:
         monkeypatch.setattr(
             dev_server_module,
             "resolve_git_workspace_directory_context",
-            lambda: _fake_ctx(),
+            lambda: _fake_ctx(workspace_directory=tmp_path),
         )
         monkeypatch.setattr(
             dev_server_module,
             "summarize_local_git_state",
             lambda cwd: _fake_git_state(),
-        )
-        monkeypatch.setattr(
-            dev_server_module, "git_worktree_top_level", lambda cwd: tmp_path
         )
         monkeypatch.setattr(
             dev_server_module,
@@ -119,15 +120,12 @@ class TestDevServerUp:
         monkeypatch.setattr(
             dev_server_module,
             "resolve_git_workspace_directory_context",
-            lambda: _fake_ctx(),
+            lambda: _fake_ctx(workspace_directory=tmp_path),
         )
         monkeypatch.setattr(
             dev_server_module,
             "summarize_local_git_state",
             lambda cwd: _fake_git_state(),
-        )
-        monkeypatch.setattr(
-            dev_server_module, "git_worktree_top_level", lambda cwd: tmp_path
         )
         monkeypatch.setattr(
             dev_server_module,
@@ -162,15 +160,12 @@ class TestDevServerUp:
         monkeypatch.setattr(
             dev_server_module,
             "resolve_git_workspace_directory_context",
-            lambda: _fake_ctx(),
+            lambda: _fake_ctx(workspace_directory=tmp_path),
         )
         monkeypatch.setattr(
             dev_server_module,
             "summarize_local_git_state",
             lambda cwd: _fake_git_state(is_dirty=True),
-        )
-        monkeypatch.setattr(
-            dev_server_module, "git_worktree_top_level", lambda cwd: tmp_path
         )
         monkeypatch.setattr(
             dev_server_module,
@@ -208,15 +203,12 @@ class TestDevServerUp:
         monkeypatch.setattr(
             dev_server_module,
             "resolve_git_workspace_directory_context",
-            lambda: _fake_ctx(),
+            lambda: _fake_ctx(workspace_directory=tmp_path),
         )
         monkeypatch.setattr(
             dev_server_module,
             "summarize_local_git_state",
             lambda cwd: _fake_git_state(is_dirty=True),
-        )
-        monkeypatch.setattr(
-            dev_server_module, "git_worktree_top_level", lambda cwd: tmp_path
         )
         monkeypatch.setattr(
             dev_server_module,
@@ -259,15 +251,12 @@ class TestDevServerUp:
         monkeypatch.setattr(
             dev_server_module,
             "resolve_git_workspace_directory_context",
-            lambda: _fake_ctx(),
+            lambda: _fake_ctx(workspace_directory=tmp_path),
         )
         monkeypatch.setattr(
             dev_server_module,
             "summarize_local_git_state",
             lambda cwd: _fake_git_state(),
-        )
-        monkeypatch.setattr(
-            dev_server_module, "git_worktree_top_level", lambda cwd: tmp_path
         )
         monkeypatch.setattr(
             dev_server_module,
@@ -290,15 +279,12 @@ class TestDevServerUp:
         monkeypatch.setattr(
             dev_server_module,
             "resolve_git_workspace_directory_context",
-            lambda: _fake_ctx(),
+            lambda: _fake_ctx(workspace_directory=tmp_path),
         )
         monkeypatch.setattr(
             dev_server_module,
             "summarize_local_git_state",
             lambda cwd: _fake_git_state(),
-        )
-        monkeypatch.setattr(
-            dev_server_module, "git_worktree_top_level", lambda cwd: tmp_path
         )
         monkeypatch.setattr(
             dev_server_module,
@@ -320,15 +306,12 @@ class TestDevServerUp:
         monkeypatch.setattr(
             dev_server_module,
             "resolve_git_workspace_directory_context",
-            lambda: _fake_ctx(),
+            lambda: _fake_ctx(workspace_directory=tmp_path),
         )
         monkeypatch.setattr(
             dev_server_module,
             "summarize_local_git_state",
             lambda cwd: _fake_git_state(is_dirty=True),
-        )
-        monkeypatch.setattr(
-            dev_server_module, "git_worktree_top_level", lambda cwd: tmp_path
         )
         monkeypatch.setattr(
             dev_server_module,

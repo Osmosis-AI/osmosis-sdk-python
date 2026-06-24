@@ -12,7 +12,6 @@ from osmosis_ai.platform.cli.workspace_directory_context import (
 )
 from osmosis_ai.platform.cli.workspace_repo import (
     check_pinned_commit,
-    git_worktree_top_level,
     summarize_local_git_state,
 )
 
@@ -24,12 +23,12 @@ def up(*, ttl_hours: int | None, yes: bool = False) -> OperationResult:
             "Run from a rollout folder containing main.py.", code="INVALID_USAGE"
         )
     ctx = resolve_git_workspace_directory_context()
-    state = summarize_local_git_state(cwd)
+    state = summarize_local_git_state(ctx.workspace_directory)
     if state is None or not state.head_sha:
         raise CLIError("Not in a git repo with a commit.", code="VALIDATION")
 
     preflight = check_pinned_commit(
-        workspace_directory=cwd,
+        workspace_directory=ctx.workspace_directory,
         git_identity=ctx.git_identity,
         commit_sha=state.head_sha,
     )
@@ -46,8 +45,7 @@ def up(*, ttl_hours: int | None, yes: bool = False) -> OperationResult:
             ],
         )
 
-    root = git_worktree_top_level(cwd) or cwd
-    repository_path = str(cwd.relative_to(root))
+    repository_path = str(cwd.resolve().relative_to(ctx.workspace_directory))
     rollout_name = cwd.name
     client = OsmosisClient()
     result: dict[str, Any] = client.provision_dev_rollout_server(
