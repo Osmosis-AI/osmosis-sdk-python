@@ -28,6 +28,7 @@ REMOVED_ROOT_COMMANDS = [
 
 PRESERVED_ROOT_COMMANDS = [
     "auth",
+    "dev",
     "doctor",
     "dataset",
     "train",

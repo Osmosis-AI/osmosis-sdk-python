@@ -669,3 +669,45 @@ class OsmosisClient:
             credentials=credentials,
             git_identity=git_identity,
         )
+
+    # ── Dev Rollout Servers ───────────────────────────────────────
+
+    def provision_dev_rollout_server(
+        self,
+        *,
+        rollout_name: str,
+        commit_sha: str,
+        repository_path: str,
+        entrypoint: str,
+        ttl_hours: int | None,
+        credentials: Credentials | None = None,
+        git_identity: str,
+    ) -> dict[str, Any]:
+        return platform_request(
+            "/api/cli/dev-rollout-server",
+            method="POST",
+            data={
+                "rollout_name": rollout_name,
+                "commit_sha": commit_sha,
+                "repository_path": repository_path,
+                "entrypoint": entrypoint,
+                "ttl_hours": ttl_hours,
+            },
+            credentials=credentials,
+            git_identity=git_identity,
+        )
+
+    def teardown_dev_rollout_server(
+        self,
+        server_id: str,
+        *,
+        credentials: Credentials | None = None,
+        git_identity: str,
+    ) -> dict[str, Any]:
+        return platform_request(
+            f"/api/cli/dev-rollout-server/{_safe_path(server_id)}",
+            method="DELETE",
+            data={},
+            credentials=credentials,
+            git_identity=git_identity,
+        )
