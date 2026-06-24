@@ -26,6 +26,9 @@ from harbor.models.trial.config import (
     TrialConfig,
     VerifierConfig,
 )
+from harbor.models.trial.config import (
+    EnvironmentConfig as HarborEnvironmentConfig,
+)
 from harbor.models.trial.result import TrialResult
 from harbor.trial.queue import TrialQueue
 
@@ -189,6 +192,7 @@ class NativeHarborBackend(ExecutionBackend):
         collect_rollout_details: bool = False,
         training_safe: bool = True,
         task_resolver: TaskResolver | None = None,
+        environment_config: HarborEnvironmentConfig | None = None,
         max_concurrent: int = DEFAULT_MAX_CONCURRENT,
         retry_config: RetryConfig | None = None,
         cleanup_successful_trials: bool = True,
@@ -207,6 +211,9 @@ class NativeHarborBackend(ExecutionBackend):
         self.collect_rollout_details = collect_rollout_details
         self.training_safe = training_safe
         self.task_resolver: TaskResolver = task_resolver or resolve_task
+        # Trial-layer environment selects the sandbox type (docker default, or
+        # daytona/e2b/...); the task only carries resources, not the type.
+        self.environment_config = environment_config or HarborEnvironmentConfig()
         self.cleanup_successful_trials = cleanup_successful_trials
         self._max_concurrency = max_concurrent
         # Shared orchestrator: bounds concurrency via its semaphore and adds
@@ -350,6 +357,7 @@ class NativeHarborBackend(ExecutionBackend):
             trials_dir=self.trials_dir,
             agent=agent_cfg,
             verifier=verifier_cfg,
+            environment=self.environment_config,
         )
 
     def _build_agent_config(

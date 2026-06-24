@@ -494,3 +494,20 @@ class TestConcurrencyAndLifecycle:
         with _ctx():
             await backend.execute(_request(), AsyncMock(), AsyncMock())
         assert trial_dir.exists()
+
+    async def test_environment_config_threaded_into_trial(self, monkeypatch):
+        # The sandbox type is trial-layer, so a caller-supplied EnvironmentConfig
+        # (e.g. daytona) must reach TrialConfig.environment.
+        from harbor.models.environment_type import EnvironmentType
+        from harbor.models.trial.config import EnvironmentConfig
+
+        capture: dict[str, Any] = {}
+        _patch_trial(
+            monkeypatch, result=_trial_result(rewards={"reward": 1.0}), capture=capture
+        )
+        backend = NativeHarborBackend(
+            environment_config=EnvironmentConfig(type=EnvironmentType.DAYTONA)
+        )
+        with _ctx():
+            await backend.execute(_request(), AsyncMock(), AsyncMock())
+        assert capture["config"].environment.type == EnvironmentType.DAYTONA
