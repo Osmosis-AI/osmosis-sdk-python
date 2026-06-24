@@ -5,7 +5,7 @@ from typing import Any
 import typer
 
 app: typer.Typer = typer.Typer(
-    help="Manage a remote dev rollout server.", no_args_is_help=True
+    help="Manage a remote rollout server.", no_args_is_help=True
 )
 
 
