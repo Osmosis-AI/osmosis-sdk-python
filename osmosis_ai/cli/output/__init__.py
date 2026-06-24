@@ -31,6 +31,7 @@ from .result import (
 from .serializers import (
     serialize_checkpoint,
     serialize_dataset,
+    serialize_dev_rollout_server,
     serialize_environment_secret,
     serialize_eval_run,
     serialize_lora_model,
@@ -65,6 +66,7 @@ __all__ = [
     "resolve_format_selectors",
     "serialize_checkpoint",
     "serialize_dataset",
+    "serialize_dev_rollout_server",
     "serialize_environment_secret",
     "serialize_eval_run",
     "serialize_lora_model",

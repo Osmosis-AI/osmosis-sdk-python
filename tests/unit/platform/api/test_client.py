@@ -1125,7 +1125,21 @@ class TestDevRolloutServer:
 
     @patch("osmosis_ai.platform.api.client.platform_request")
     def test_list_dev_rollout_servers_sends_get(self, mock_request: MagicMock) -> None:
-        mock_request.return_value = {"servers": [], "total_count": 0}
+        mock_request.return_value = {
+            "dev_rollout_servers": [
+                {
+                    "id": "r1",
+                    "name": "multiply",
+                    "url": "https://r1.example.dev",
+                    "status": "running",
+                    "expires_at": None,
+                    "started_at": None,
+                }
+            ],
+            "total_count": 1,
+            "has_more": False,
+            "next_offset": None,
+        }
         credentials = object()
 
         result = OsmosisClient().list_dev_rollout_servers(
@@ -1133,8 +1147,16 @@ class TestDevRolloutServer:
             git_identity="git_test",
         )
 
-        assert result == {"servers": [], "total_count": 0}
-        assert mock_request.call_args[0][0] == "/api/cli/dev-rollout-server"
+        assert result.total_count == 1
+        assert result.has_more is False
+        assert result.next_offset is None
+        assert len(result.dev_rollout_servers) == 1
+        assert result.dev_rollout_servers[0].id == "r1"
+        assert result.dev_rollout_servers[0].name == "multiply"
+        assert (
+            mock_request.call_args[0][0]
+            == "/api/cli/dev-rollout-server?limit=50&offset=0"
+        )
         assert mock_request.call_args.kwargs["credentials"] is credentials
         assert mock_request.call_args.kwargs["git_identity"] == "git_test"
         assert "method" not in mock_request.call_args.kwargs

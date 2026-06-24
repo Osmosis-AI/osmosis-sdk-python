@@ -19,6 +19,7 @@ from .models import (
     LoraModelSummary,
     PaginatedBaseModels,
     PaginatedDatasets,
+    PaginatedDevRolloutServers,
     PaginatedEnvironmentSecrets,
     PaginatedEvaluationRuns,
     PaginatedLoraModels,
@@ -714,12 +715,16 @@ class OsmosisClient:
 
     def list_dev_rollout_servers(
         self,
+        limit: int = DEFAULT_PAGE_SIZE,
+        offset: int = 0,
         *,
         credentials: Credentials | None = None,
         git_identity: str,
-    ) -> dict[str, Any]:
-        return platform_request(
-            "/api/cli/dev-rollout-server",
+    ) -> PaginatedDevRolloutServers:
+        qs = urlencode({"limit": limit, "offset": offset})
+        data = platform_request(
+            f"/api/cli/dev-rollout-server?{qs}",
             credentials=credentials,
             git_identity=git_identity,
         )
+        return PaginatedDevRolloutServers.from_dict(data)

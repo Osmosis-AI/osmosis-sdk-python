@@ -4,9 +4,11 @@ from pathlib import Path
 from typing import Any
 
 from osmosis_ai.cli.errors import CLIError
+from osmosis_ai.cli.output import get_output_context, serialize_dev_rollout_server
 from osmosis_ai.cli.output.result import ListColumn, ListResult, OperationResult
 from osmosis_ai.cli.prompts import require_confirmation
 from osmosis_ai.platform.api.client import OsmosisClient
+from osmosis_ai.platform.cli.utils import paginated_fetch, validate_list_options
 from osmosis_ai.platform.cli.workspace_directory_context import (
     resolve_git_workspace_directory_context,
 )
@@ -81,23 +83,36 @@ def down(server_id: str) -> OperationResult:
     )
 
 
-def list_servers() -> ListResult:
+def list_servers(*, limit: int, all_: bool) -> ListResult:
+    effective_limit, fetch_all = validate_list_options(limit=limit, all_=all_)
+
     ctx = resolve_git_workspace_directory_context()
+    output = get_output_context()
     client = OsmosisClient()
-    result: dict[str, Any] = client.list_dev_rollout_servers(
-        credentials=ctx.credentials,
-        git_identity=ctx.git_identity,
-    )
-    servers: list[dict[str, Any]] = result.get("servers", [])
+    with output.status("Fetching rollout servers..."):
+        servers, total_count, has_more, next_offset = paginated_fetch(
+            lambda lim, off: client.list_dev_rollout_servers(
+                limit=lim,
+                offset=off,
+                credentials=ctx.credentials,
+                git_identity=ctx.git_identity,
+            ),
+            items_attr="dev_rollout_servers",
+            limit=effective_limit,
+            fetch_all=fetch_all,
+        )
+
+    items = [serialize_dev_rollout_server(server) for server in servers]
+
     return ListResult(
         title="Dev Rollout Servers",
-        items=servers,
-        total_count=len(servers),
-        has_more=False,
-        next_offset=None,
+        items=items,
+        total_count=total_count,
+        has_more=has_more,
+        next_offset=next_offset,
         columns=[
-            ListColumn(key="rollout_id", label="ID", ratio=2, overflow="fold"),
-            ListColumn(key="rollout_name", label="Rollout", ratio=2, overflow="fold"),
+            ListColumn(key="id", label="ID", ratio=2, overflow="fold"),
+            ListColumn(key="name", label="Rollout", ratio=2, overflow="fold"),
             ListColumn(key="url", label="URL", ratio=4, overflow="fold"),
             ListColumn(key="expires_at", label="Expires At", no_wrap=True, ratio=2),
             ListColumn(key="status", label="Status", no_wrap=True, ratio=1),

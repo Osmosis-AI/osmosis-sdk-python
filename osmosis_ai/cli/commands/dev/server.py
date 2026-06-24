@@ -4,6 +4,8 @@ from typing import Any
 
 import typer
 
+from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
+
 app: typer.Typer = typer.Typer(
     help="Manage a remote rollout server.", no_args_is_help=True
 )
@@ -36,8 +38,17 @@ def down(
 
 
 @app.command("list")
-def list_servers() -> Any:
+def list_servers(
+    limit: int = typer.Option(
+        DEFAULT_PAGE_SIZE,
+        "--limit",
+        min=1,
+        max=MAX_PAGE_SIZE,
+        help="Maximum number of rollout servers to show.",
+    ),
+    all_: bool = typer.Option(False, "--all", help="Show all rollout servers."),
+) -> Any:
     """List active rollout servers for the current workspace."""
     from osmosis_ai.platform.cli.dev_server import list_servers as _list
 
-    return _list()
+    return _list(limit=limit, all_=all_)

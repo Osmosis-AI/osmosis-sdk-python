@@ -7,6 +7,7 @@ from typing import Any
 from osmosis_ai.platform.api.models import (
     BaseModelInfo,
     DatasetFile,
+    DevRolloutServerInfo,
     EnvironmentSecretInfo,
     EvaluationRun,
     LoraCheckpointInfo,
@@ -120,6 +121,18 @@ def serialize_rollout(rollout: RolloutInfo) -> dict[str, Any]:
         "repo_full_name": rollout.repo_full_name,
         "last_synced_commit_sha": rollout.last_synced_commit_sha,
         "created_at": rollout.created_at,
+    }
+
+
+def serialize_dev_rollout_server(server: DevRolloutServerInfo) -> dict[str, Any]:
+    """Serialize a dev rollout server for the public JSON contract."""
+    return {
+        "id": server.id,
+        "name": server.name,
+        "url": server.url,
+        "status": server.status,
+        "expires_at": server.expires_at,
+        "started_at": server.started_at,
     }
 
 

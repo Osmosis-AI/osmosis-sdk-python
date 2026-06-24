@@ -10,6 +10,8 @@ import osmosis_ai.platform.api.client as api_client_module
 import osmosis_ai.platform.cli.dev_server as dev_server_module
 from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.cli.output import ListResult, OperationResult
+from osmosis_ai.platform.api.models import PaginatedDevRolloutServers
+from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE
 
 GIT_IDENTITY = "acme/rollouts"
 FAKE_CREDENTIALS = object()
@@ -367,30 +369,40 @@ class TestDevServerList:
 
         fake_servers = [
             {
-                "rollout_id": "r1",
-                "rollout_name": "multiply",
+                "id": "r1",
+                "name": "multiply",
                 "url": "https://r1.rollout-staging.gulp.dev",
                 "expires_at": None,
+                "started_at": None,
                 "status": "running",
             }
         ]
 
         class FakeClient:
-            def list_dev_rollout_servers(self, *, credentials=None, git_identity):
+            def list_dev_rollout_servers(
+                self, limit, offset, *, credentials=None, git_identity
+            ):
                 assert credentials is FAKE_CREDENTIALS
                 assert git_identity == GIT_IDENTITY
-                return {"servers": fake_servers}
+                return PaginatedDevRolloutServers.from_dict(
+                    {
+                        "dev_rollout_servers": fake_servers,
+                        "total_count": 1,
+                        "has_more": False,
+                        "next_offset": None,
+                    }
+                )
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
         monkeypatch.setattr(dev_server_module, "OsmosisClient", FakeClient)
 
-        result = dev_server_module.list_servers()
+        result = dev_server_module.list_servers(limit=DEFAULT_PAGE_SIZE, all_=False)
 
         assert isinstance(result, ListResult)
         assert result.total_count == 1
         assert len(result.items) == 1
-        assert result.items[0]["rollout_id"] == "r1"
-        assert result.items[0]["rollout_name"] == "multiply"
+        assert result.items[0]["id"] == "r1"
+        assert result.items[0]["name"] == "multiply"
         assert result.items[0]["status"] == "running"
 
     def test_list_empty(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -402,13 +414,22 @@ class TestDevServerList:
         )
 
         class FakeClient:
-            def list_dev_rollout_servers(self, *, credentials=None, git_identity):
-                return {"servers": []}
+            def list_dev_rollout_servers(
+                self, limit, offset, *, credentials=None, git_identity
+            ):
+                return PaginatedDevRolloutServers.from_dict(
+                    {
+                        "dev_rollout_servers": [],
+                        "total_count": 0,
+                        "has_more": False,
+                        "next_offset": None,
+                    }
+                )
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
         monkeypatch.setattr(dev_server_module, "OsmosisClient", FakeClient)
 
-        result = dev_server_module.list_servers()
+        result = dev_server_module.list_servers(limit=DEFAULT_PAGE_SIZE, all_=False)
 
         assert isinstance(result, ListResult)
         assert result.total_count == 0
