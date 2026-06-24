@@ -285,6 +285,34 @@ def load_workflow(
     return workflow_cls, workflow_config, entrypoint_module, None
 
 
+def discover_native_backend(
+    rollout: str,
+    entrypoint: str,
+    *,
+    workspace_directory: Path | None = None,
+) -> type | None:
+    """Return the ``NativeHarborBackend`` class declared by the entrypoint, else
+    ``None``. Native rollouts carry no Python Grader (reward comes from the
+    harbor task's verifier), so submit preflight uses this to skip the Grader
+    requirement. A load failure returns ``None`` (surfaced by the workflow path).
+    """
+    try:
+        from osmosis_ai.rollout.backend.native_harbor.backend import (
+            NativeHarborBackend,
+        )
+
+        mod = _load_rollout_module(
+            rollout, entrypoint, workspace_directory=workspace_directory
+        )
+    except Exception:
+        return None
+
+    for value in vars(mod).values():
+        if isinstance(value, type) and issubclass(value, NativeHarborBackend):
+            return value
+    return None
+
+
 def auto_discover_grader(module_name: str) -> tuple[type | None, Any]:
     """Discover a Grader subclass and its config from the entrypoint module.
 

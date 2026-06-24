@@ -129,7 +129,11 @@ def validate_rollout_backend(
     grader_config_ref: str | None = None,
 ) -> None:
     """Load and validate a rollout backend against the workspace directory contract."""
-    from osmosis_ai.eval.common.cli import _resolve_grader, load_workflow
+    from osmosis_ai.eval.common.cli import (
+        _resolve_grader,
+        discover_native_backend,
+        load_workflow,
+    )
     from osmosis_ai.rollout.validator import validate_backend
 
     workflow_cls, workflow_config, entrypoint_module, workflow_error = load_workflow(
@@ -140,6 +144,17 @@ def validate_rollout_backend(
         workspace_directory=workspace_directory,
     )
     if workflow_error or workflow_cls is None or entrypoint_module is None:
+        # Native rollouts declare a NativeHarborBackend and have no Python Grader
+        # (reward comes from the harbor task's verifier); skip the Grader check.
+        if (
+            discover_native_backend(
+                rollout=rollout,
+                entrypoint=entrypoint,
+                workspace_directory=workspace_directory,
+            )
+            is not None
+        ):
+            return
         raise CLIError(
             f"{command_label} preflight failed for `rollouts/{rollout}/{entrypoint}`.\n"
             f"  {workflow_error or 'Failed to load workflow.'}"
