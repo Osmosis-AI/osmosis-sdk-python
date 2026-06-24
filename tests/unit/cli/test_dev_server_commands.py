@@ -310,6 +310,41 @@ class TestDevServerUp:
         with pytest.raises(CLIError, match=r"main\.py"):
             dev_server_module.up(ttl_hours=24, yes=False)
 
+    def test_up_missing_main_py_takes_priority_over_dirty(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        """Missing main.py errors before the dirty-tree confirmation is reached."""
+        rollout_dir = tmp_path / "rollouts" / "multiply"
+        rollout_dir.mkdir(parents=True)  # no main.py
+
+        monkeypatch.setattr(
+            dev_server_module,
+            "resolve_git_workspace_directory_context",
+            lambda: _fake_ctx(),
+        )
+        monkeypatch.setattr(
+            dev_server_module,
+            "summarize_local_git_state",
+            lambda cwd: _fake_git_state(is_dirty=True),
+        )
+        monkeypatch.setattr(
+            dev_server_module, "git_worktree_top_level", lambda cwd: tmp_path
+        )
+        monkeypatch.setattr(
+            dev_server_module,
+            "check_pinned_commit",
+            lambda **kwargs: _fake_pinned_check(),
+        )
+        monkeypatch.setattr(Path, "cwd", classmethod(lambda cls: rollout_dir))
+
+        def _fail_if_called(*args, **kwargs):
+            raise AssertionError("require_confirmation should not be reached")
+
+        monkeypatch.setattr(dev_server_module, "require_confirmation", _fail_if_called)
+
+        with pytest.raises(CLIError, match=r"main\.py"):
+            dev_server_module.up(ttl_hours=24, yes=False)
+
 
 class TestDevServerDown:
     def test_down_happy_path(self, monkeypatch: pytest.MonkeyPatch) -> None:

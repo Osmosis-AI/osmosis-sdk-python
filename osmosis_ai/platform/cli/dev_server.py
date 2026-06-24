@@ -18,8 +18,12 @@ from osmosis_ai.platform.cli.workspace_repo import (
 
 
 def up(*, ttl_hours: int | None, yes: bool = False) -> OperationResult:
-    ctx = resolve_git_workspace_directory_context()
     cwd = Path.cwd()
+    if not (cwd / "main.py").is_file():
+        raise CLIError(
+            "Run from a rollout folder containing main.py.", code="INVALID_USAGE"
+        )
+    ctx = resolve_git_workspace_directory_context()
     state = summarize_local_git_state(cwd)
     if state is None or not state.head_sha:
         raise CLIError("Not in a git repo with a commit.", code="VALIDATION")
@@ -45,10 +49,6 @@ def up(*, ttl_hours: int | None, yes: bool = False) -> OperationResult:
     root = git_worktree_top_level(cwd) or cwd
     repository_path = str(cwd.relative_to(root))
     rollout_name = cwd.name
-    if not (cwd / "main.py").is_file():
-        raise CLIError(
-            "Run from a rollout folder containing main.py.", code="INVALID_USAGE"
-        )
     client = OsmosisClient()
     result: dict[str, Any] = client.provision_dev_rollout_server(
         rollout_name=rollout_name,
