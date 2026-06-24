@@ -197,7 +197,7 @@ def _register_commands() -> None:
 
     from osmosis_ai.cli.commands.dev import app as dev_app
 
-    app.add_typer(dev_app, name="dev", rich_help_panel=_WORKFLOW)
+    app.add_typer(dev_app, name="dev", hidden=True)
 
     app.add_typer(auth_app, name="auth", rich_help_panel=_PLATFORM)
     app.add_typer(secret_app, name="secret", rich_help_panel=_PLATFORM)
