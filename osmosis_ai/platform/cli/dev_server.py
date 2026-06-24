@@ -4,28 +4,44 @@ from pathlib import Path
 from typing import Any
 
 from osmosis_ai.cli.errors import CLIError
-from osmosis_ai.cli.output.result import OperationResult
+from osmosis_ai.cli.output.result import ListColumn, ListResult, OperationResult
+from osmosis_ai.cli.prompts import require_confirmation
 from osmosis_ai.platform.api.client import OsmosisClient
 from osmosis_ai.platform.cli.workspace_directory_context import (
     resolve_git_workspace_directory_context,
 )
 from osmosis_ai.platform.cli.workspace_repo import (
+    check_pinned_commit,
     git_worktree_top_level,
     summarize_local_git_state,
 )
 
 
-def up(*, ttl_hours: int | None) -> OperationResult:
+def up(*, ttl_hours: int | None, yes: bool = False) -> OperationResult:
     ctx = resolve_git_workspace_directory_context()
     cwd = Path.cwd()
     state = summarize_local_git_state(cwd)
     if state is None or not state.head_sha:
         raise CLIError("Not in a git repo with a commit.", code="VALIDATION")
+
+    preflight = check_pinned_commit(
+        workspace_directory=cwd,
+        git_identity=ctx.git_identity,
+        commit_sha=state.head_sha,
+    )
+    if preflight.error:
+        raise CLIError(preflight.error, code="VALIDATION")
+
     if state.is_dirty:
-        raise CLIError(
-            "Commit and push your changes first (working tree is dirty).",
-            code="VALIDATION",
+        require_confirmation(
+            f"The remote server will run committed HEAD ({state.head_sha[:7]}), not your uncommitted changes. Continue?",
+            yes=yes,
+            default=False,
+            warnings=[
+                f"Working tree is dirty — uncommitted edits won't be on the server (runs commit {state.head_sha[:7]})."
+            ],
         )
+
     root = git_worktree_top_level(cwd) or cwd
     repository_path = str(cwd.relative_to(root))
     rollout_name = cwd.name
@@ -64,4 +80,28 @@ def down(server_id: str) -> OperationResult:
         status="success",
         resource=result,
         message=f"Stopped {server_id}",
+    )
+
+
+def list_servers() -> ListResult:
+    ctx = resolve_git_workspace_directory_context()
+    client = OsmosisClient()
+    result: dict[str, Any] = client.list_dev_rollout_servers(
+        credentials=ctx.credentials,
+        git_identity=ctx.git_identity,
+    )
+    servers: list[dict[str, Any]] = result.get("servers", [])
+    return ListResult(
+        title="Dev Rollout Servers",
+        items=servers,
+        total_count=len(servers),
+        has_more=False,
+        next_offset=None,
+        columns=[
+            ListColumn(key="rollout_id", label="ID", ratio=2, overflow="fold"),
+            ListColumn(key="rollout_name", label="Rollout", ratio=2, overflow="fold"),
+            ListColumn(key="url", label="URL", ratio=4, overflow="fold"),
+            ListColumn(key="expires_at", label="Expires At", no_wrap=True, ratio=2),
+            ListColumn(key="status", label="Status", no_wrap=True, ratio=1),
+        ],
     )

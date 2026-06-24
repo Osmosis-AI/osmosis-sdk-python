@@ -711,3 +711,15 @@ class OsmosisClient:
             credentials=credentials,
             git_identity=git_identity,
         )
+
+    def list_dev_rollout_servers(
+        self,
+        *,
+        credentials: Credentials | None = None,
+        git_identity: str,
+    ) -> dict[str, Any]:
+        return platform_request(
+            "/api/cli/dev-rollout-server",
+            credentials=credentials,
+            git_identity=git_identity,
+        )

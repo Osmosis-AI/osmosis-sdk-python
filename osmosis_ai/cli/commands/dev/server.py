@@ -17,11 +17,12 @@ def up(
     ttl_hours: int = typer.Option(
         24, "--ttl-hours", min=1, help="Hours before auto-teardown."
     ),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
 ) -> Any:
     """Provision a remote rollout server for the current rollout folder."""
     from osmosis_ai.platform.cli.dev_server import up as _up
 
-    return _up(ttl_hours=None if no_ttl else ttl_hours)
+    return _up(ttl_hours=None if no_ttl else ttl_hours, yes=yes)
 
 
 @app.command("down")
@@ -32,3 +33,11 @@ def down(
     from osmosis_ai.platform.cli.dev_server import down as _down
 
     return _down(server_id)
+
+
+@app.command("list")
+def list_servers() -> Any:
+    """List active rollout servers for the current workspace."""
+    from osmosis_ai.platform.cli.dev_server import list_servers as _list
+
+    return _list()
