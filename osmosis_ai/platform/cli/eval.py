@@ -326,13 +326,8 @@ def _submit_eval(
 def _eval_next_steps(
     result: SubmitRunResult, _config: EvalSubmitConfig
 ) -> tuple[list[str], list[dict[str, Any]]]:
-    display = [f"Status: {result.status}"]
-    if _config.advanced_config.get("local_rollout_address"):
-        display.append(
-            "Local rollout: serving from this machine "
-            "(keep `osmosis dev serve` running)."
-        )
-    display += [
+    display = [
+        f"Status: {result.status}",
         f"Rollout: {_config.experiment_rollout}",
         f"Model: {_config.experiment_model_path}",
         f"Dataset: {_config.experiment_dataset}",
@@ -363,7 +358,6 @@ _EVAL_SUBMIT_SPEC: CloudSubmitSpec[EvalSubmitConfig] = CloudSubmitSpec(
     validate_context=validate_eval_submit_context_paths,
     submit=_submit_eval,
     build_next_steps=_eval_next_steps,
-    local_rollout_advanced_key="local_rollout_address",
 )
 
 

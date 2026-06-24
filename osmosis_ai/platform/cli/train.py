@@ -133,24 +133,17 @@ def _submit_training(
 def _train_next_steps(
     result: SubmitRunResult, config: TrainSubmitConfig
 ) -> tuple[list[str], list[dict[str, Any]]]:
-    display = [f"Status: {result.status}"]
-    if config.advanced_config.get("local_rollout_address"):
-        display.append(
-            "Local rollout: serving from this machine "
-            "(keep `osmosis dev serve` running)."
-        )
-    display.extend(
-        [
-            f"Rollout: {config.experiment_rollout}",
-            f"Model: {config.experiment_model_path}",
-            f"Dataset: {config.experiment_dataset}",
-            (
-                f"View: {result.platform_url}"
-                if result.platform_url
-                else f"Check status with: osmosis train info {result.name}"
-            ),
-        ]
-    )
+    display = [
+        f"Status: {result.status}",
+        f"Rollout: {config.experiment_rollout}",
+        f"Model: {config.experiment_model_path}",
+        f"Dataset: {config.experiment_dataset}",
+        (
+            f"View: {result.platform_url}"
+            if result.platform_url
+            else f"Check status with: osmosis train info {result.name}"
+        ),
+    ]
     structured: list[dict[str, Any]] = [
         {"action": "train_info", "name": result.name},
         {"action": "train_list"},
@@ -172,7 +165,6 @@ _TRAIN_SUBMIT_SPEC: CloudSubmitSpec[TrainSubmitConfig] = CloudSubmitSpec(
     validate_context=validate_train_submit_context_paths,
     submit=_submit_training,
     build_next_steps=_train_next_steps,
-    local_rollout_advanced_key="local_rollout_address",
 )
 
 

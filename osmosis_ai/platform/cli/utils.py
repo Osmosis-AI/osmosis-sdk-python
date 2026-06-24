@@ -475,47 +475,6 @@ def validate_list_options(
     return limit, all_
 
 
-def print_local_rollout_notice(
-    *,
-    extra_warnings: list[str] | None = None,
-) -> tuple[list[str], list[str]]:
-    """Confirmation notice for a local-rollout submit.
-
-    The rollout server runs on the developer's machine and the cluster reaches
-    it over an iroh tunnel, so the usual "commit and push your code" guidance
-    does not apply — no repo is cloned. Returns ``(notes, warnings)`` like
-    :func:`print_remote_fetch_notice` so callers surface the same context in
-    non-rich modes.
-    """
-    from osmosis_ai.cli.output import OutputFormat, get_output_context
-
-    warnings: list[str] = list(extra_warnings or [])
-    notes: list[str] = [
-        "Rollouts are served from THIS machine over an iroh tunnel.",
-        "No repo is cloned — your commit/push state does not matter.",
-        "Keep `osmosis dev serve` running until the run finishes.",
-        "Config values come from your local TOML file and are submitted as-is.",
-    ]
-
-    if get_output_context().format is OutputFormat.rich:
-        body_lines = [
-            "Rollouts are served from [bold]THIS machine[/bold] over an iroh tunnel.",
-            "No repo is cloned — your commit/push state does not matter.",
-            "Keep [bold]osmosis dev serve[/bold] running until the run finishes.",
-            "",
-            "[dim]Config values above come from your local TOML file and are "
-            "submitted as-is.[/dim]",
-        ]
-        if warnings:
-            body_lines.append("")
-            for warning in warnings:
-                body_lines.append(f"[yellow]• {console.escape(warning)}[/yellow]")
-        style = "yellow" if warnings else "blue"
-        console.panel("Local rollout", "\n".join(body_lines), style=style)
-
-    return notes, warnings
-
-
 def print_remote_fetch_notice(
     workspace_directory: Path,
     *,
