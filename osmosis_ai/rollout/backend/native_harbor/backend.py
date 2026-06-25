@@ -93,9 +93,8 @@ def resolve_task(request: ExecutionRequest) -> TaskConfig:
     name, _, ref = str(raw).partition("@")
     if "/" not in name:
         raise ValueError(
-            f"metadata[{HARBOR_TASK_KEY!r}]={raw!r} is not a local path "
-            "(start with ./, /, or ~), a git form (set git_url), or a package "
-            "'org/name[@ref]'"
+            f"metadata[{HARBOR_TASK_KEY!r}]={raw!r} must be a local path "
+            "(./, /, ~), a git form (set git_url), or a package 'org/name[@ref]'"
         )
     return TaskConfig(name=name, ref=ref or "latest")
 
