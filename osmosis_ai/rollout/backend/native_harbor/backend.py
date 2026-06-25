@@ -422,15 +422,17 @@ class NativeHarborBackend(ExecutionBackend):
                 )
             kwargs["collect_rollout_details"] = self.collect_rollout_details
             llm_kwargs: dict[str, Any] = {}
-            # TODO(DEBUG/temporary): force non-streaming agent LLM calls. Harbor's
-            # in-process LiteLLM agents (terminus-2) are non-streaming, but the
-            # osmosis controllers (eval bridge + slime training controller) default
-            # to SSE (stream=True); a non-streaming client that receives an SSE body
-            # parses it as JSON and fails -> every LLM call errors -> reward null.
-            # Sending stream=False explicitly makes both controllers serve a JSON
-            # body. REMOVE once the controllers respect the client's non-streaming
-            # intent (or terminus gains streaming support).
-            llm_kwargs["stream"] = False
+            # TODO(DEBUG/temporary): force the osmosis controllers (eval bridge +
+            # slime training controller) onto their non-streaming JSON branch. Both
+            # default to SSE when the request omits `stream` (get("stream", True)),
+            # but harbor's in-process LiteLLM agents (terminus-2) are non-streaming
+            # and parse an SSE body as JSON -> every LLM call fails -> reward null.
+            # NOTE: a plain stream=False does NOT help -- litellm/openai omit
+            # `stream` from the wire body when it is False, so the controller still
+            # sees no stream key and defaults to SSE. Inject it via extra_body so
+            # "stream": false is sent verbatim. REMOVE once the controllers default
+            # to non-streaming (or terminus gains streaming support).
+            llm_kwargs["extra_body"] = {"stream": False}
             if api_key:
                 llm_kwargs["api_key"] = api_key
             if self.inject_identity_headers:
