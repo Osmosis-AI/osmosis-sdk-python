@@ -320,10 +320,11 @@ class NativeHarborBackend(ExecutionBackend):
         # agent error).
         if result.exception_info is not None:
             err = result.exception_info
-            # Harbor logs the underlying failure only at DEBUG before swallowing
-            # it into exception_info, so surface type+message here -- otherwise a
-            # failed Trial reaches the caller as a bare null reward with no clue.
-            logger.warning(
+            # DEBUG (temporary): harbor logs the underlying failure only at DEBUG
+            # before swallowing it into exception_info; surfacing type+message here
+            # is what root-caused the streaming-bridge issue. Safe to delete once
+            # that's resolved (or keep if native trials should self-report).
+            logger.debug(
                 "Native trial %s failed inside harbor: %s: %s",
                 request.id,
                 getattr(err, "exception_type", None),
@@ -421,6 +422,15 @@ class NativeHarborBackend(ExecutionBackend):
                 )
             kwargs["collect_rollout_details"] = self.collect_rollout_details
             llm_kwargs: dict[str, Any] = {}
+            # TODO(DEBUG/temporary): force non-streaming agent LLM calls. Harbor's
+            # in-process LiteLLM agents (terminus-2) are non-streaming, but the
+            # osmosis controllers (eval bridge + slime training controller) default
+            # to SSE (stream=True); a non-streaming client that receives an SSE body
+            # parses it as JSON and fails -> every LLM call errors -> reward null.
+            # Sending stream=False explicitly makes both controllers serve a JSON
+            # body. REMOVE once the controllers respect the client's non-streaming
+            # intent (or terminus gains streaming support).
+            llm_kwargs["stream"] = False
             if api_key:
                 llm_kwargs["api_key"] = api_key
             if self.inject_identity_headers:
