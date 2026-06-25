@@ -80,7 +80,7 @@ def down(server_id: str) -> OperationResult:
         operation="dev.server.down",
         status="success",
         resource=result,
-        message=f"Stopped {server_id}",
+        message=f"Stopping rollout server {server_id}",
     )
 
 
