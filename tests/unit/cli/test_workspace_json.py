@@ -6,7 +6,15 @@ import json
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from osmosis_ai.cli import main as cli
+
+
+@pytest.fixture(autouse=True)
+def _logged_out(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep doctor's best-effort workspace lookup off the network."""
+    monkeypatch.setattr("osmosis_ai.platform.auth.load_credentials", lambda: None)
 
 
 def _workspace_directory(root: Path, *, origin: str | None = None) -> Path:
@@ -56,10 +64,10 @@ def test_project_doctor_json_returns_diagnostic_resource(tmp_path, capsys) -> No
         == "https://github.com/Acme/Rollouts.git"
     )
     assert payload["resource"]["missing"] == []
-    assert "workspace" not in payload["resource"]
+    assert payload["resource"]["workspace"] is None
 
 
-def test_project_doctor_json_reports_missing_paths_without_error(
+def test_project_doctor_json_reports_missing_paths_with_failure_exit(
     tmp_path, capsys
 ) -> None:
     subprocess.run(
@@ -71,8 +79,9 @@ def test_project_doctor_json_reports_missing_paths_without_error(
     exit_code = cli.main(["--json", "doctor", str(tmp_path)])
 
     captured = capsys.readouterr()
-    assert exit_code == 0
+    assert exit_code == 1
     payload = json.loads(captured.out)
+    assert payload["status"] == "failed"
     assert payload["resource"]["valid"] is False
     assert payload["resource"]["missing"] == [
         "rollouts/",
@@ -82,5 +91,4 @@ def test_project_doctor_json_reports_missing_paths_without_error(
         "AGENTS.md",
         "CLAUDE.md",
         "configs/AGENTS.md",
-        ".claude/settings.json",
     ]

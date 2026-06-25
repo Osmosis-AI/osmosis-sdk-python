@@ -13,13 +13,15 @@ from .result import (
     DetailResult,
     ListColumn,
     ListResult,
+    ListSection,
     MessageResult,
     OperationResult,
+    SectionedListResult,
 )
 
 _RICH_STYLE_TAG_RE = re.compile(
     r"\[/?(?:bold|dim|italic|underline|blink|reverse|strike|"
-    r"black|red|green|yellow|blue|magenta|cyan|white)"
+    r"black|red|green|yellow|blue|magenta|cyan|white|orange3)"
     r"(?: [a-zA-Z0-9_#./ -]+)?\]"
 )
 
@@ -36,18 +38,37 @@ def _merge_extra(
     return payload
 
 
+def _list_page_payload(source: ListResult | ListSection) -> dict[str, Any]:
+    return {
+        "items": source.items,
+        "total_count": source.total_count,
+        "has_more": source.has_more,
+        "next_offset": source.next_offset,
+    }
+
+
 def _envelope_list(result: ListResult, *, schema_version: int) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "schema_version": schema_version,
-        "items": result.items,
-        "total_count": result.total_count,
-        "has_more": result.has_more,
-        "next_offset": result.next_offset,
+        **_list_page_payload(result),
     }
     return _merge_extra(
         payload,
         result.extra,
         reserved={"schema_version", "items", "total_count", "has_more", "next_offset"},
+    )
+
+
+def _envelope_sectioned_list(
+    result: SectionedListResult, *, schema_version: int
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {"schema_version": schema_version}
+    for section in result.sections:
+        payload[section.key] = _list_page_payload(section)
+    return _merge_extra(
+        payload,
+        result.extra,
+        reserved={"schema_version", *(section.key for section in result.sections)},
     )
 
 
@@ -99,6 +120,8 @@ def _build_json_envelope(
 ) -> dict[str, Any]:
     if isinstance(result, ListResult):
         return _envelope_list(result, schema_version=schema_version)
+    if isinstance(result, SectionedListResult):
+        return _envelope_sectioned_list(result, schema_version=schema_version)
     if isinstance(result, DetailResult):
         return _envelope_detail(result, schema_version=schema_version)
     if isinstance(result, OperationResult):
@@ -123,7 +146,7 @@ def _normalise_plain_value(value: Any, *, rich_display: bool = False) -> str:
     return text.replace("\t", " ").replace("\n", " ").replace("\r", " ")
 
 
-def _display_items(result: ListResult) -> list[dict[str, Any]]:
+def _display_items(result: ListResult | ListSection) -> list[dict[str, Any]]:
     return result.display_items if result.display_items is not None else result.items
 
 
@@ -200,6 +223,24 @@ def _can_protect_primary_column(
     return primary_width + other_column_budget <= content_budget
 
 
+def _write_plain_list_rows(source: ListResult | ListSection) -> None:
+    cols = [column for column in source.columns if column.plain]
+    display_items = _display_items(source)
+    for idx, item in enumerate(display_items):
+        raw_item = source.items[idx] if idx < len(source.items) else {}
+        row = "\t".join(
+            _normalise_plain_value(
+                item.get(c.key),
+                rich_display=(
+                    source.display_items is not None
+                    and item.get(c.key) != raw_item.get(c.key)
+                ),
+            )
+            for c in cols
+        )
+        sys.stdout.write(row + "\n")
+
+
 def _render_plain(result: CommandResult, output: OutputContext) -> None:
     if isinstance(result, DetailResult):
         for field in result.fields:
@@ -213,21 +254,13 @@ def _render_plain(result: CommandResult, output: OutputContext) -> None:
         return
 
     if isinstance(result, ListResult):
-        cols = [column for column in result.columns if column.plain]
-        display_items = _display_items(result)
-        for idx, item in enumerate(display_items):
-            raw_item = result.items[idx] if idx < len(result.items) else {}
-            row = "\t".join(
-                _normalise_plain_value(
-                    item.get(c.key),
-                    rich_display=(
-                        result.display_items is not None
-                        and item.get(c.key) != raw_item.get(c.key)
-                    ),
-                )
-                for c in cols
-            )
-            sys.stdout.write(row + "\n")
+        _write_plain_list_rows(result)
+        return
+
+    if isinstance(result, SectionedListResult):
+        for section in result.sections:
+            sys.stdout.write(f"{_normalise_plain_value(section.title)}:\n")
+            _write_plain_list_rows(section)
         return
 
     if isinstance(result, OperationResult):
@@ -242,6 +275,61 @@ def _render_plain(result: CommandResult, output: OutputContext) -> None:
         return
 
     raise TypeError(f"Unsupported CommandResult: {type(result).__name__}")
+
+
+def _print_rich_list(
+    console: Any,
+    source: ListResult | ListSection,
+    *,
+    title: str | None = None,
+) -> None:
+    from rich.table import Table
+
+    display_items = _display_items(source)
+    protect_primary_column = _can_protect_primary_column(
+        source.columns,
+        display_items,
+        console_width=console.width,
+    )
+    table = Table(
+        title=title,
+        title_justify="left",
+        show_header=True,
+        header_style="bold",
+        expand=False,
+    )
+    for column in source.columns:
+        overflow = column.overflow if column.overflow is not None else "ellipsis"
+        no_wrap = column.no_wrap
+        if protect_primary_column and _is_primary_column(column):
+            no_wrap = True
+
+        table.add_column(
+            column.label,
+            no_wrap=no_wrap,
+            overflow=overflow,
+            ratio=column.ratio,
+            min_width=column.min_width,
+            max_width=column.max_width,
+        )
+    for idx, item in enumerate(display_items):
+        raw_item = source.items[idx] if idx < len(source.items) else {}
+        table.add_row(
+            *[
+                ("" if item.get(column.key) is None else str(item.get(column.key)))
+                if source.display_items is not None
+                and item.get(column.key) != raw_item.get(column.key)
+                else _rich_text(item.get(column.key))
+                for column in source.columns
+            ]
+        )
+    console.rich.print(table)
+    if source.has_more:
+        console.print(
+            f"\nShowing {len(source.items)} of {source.total_count}. "
+            "Use --all to show all, or --limit to adjust.",
+            style="dim",
+        )
 
 
 def _render_rich(result: CommandResult, output: OutputContext) -> None:
@@ -263,53 +351,14 @@ def _render_rich(result: CommandResult, output: OutputContext) -> None:
         return
 
     if isinstance(result, ListResult):
-        from rich.table import Table
+        _print_rich_list(console, result)
+        for hint in result.display_hints:
+            console.rich.print(_rich_text(hint, style="dim"))
+        return
 
-        display_items = _display_items(result)
-        protect_primary_column = _can_protect_primary_column(
-            result.columns,
-            display_items,
-            console_width=console.width,
-        )
-        table = Table(show_header=True, header_style="bold", expand=False)
-        for column in result.columns:
-            overflow = column.overflow if column.overflow is not None else "ellipsis"
-            no_wrap = column.no_wrap
-            if protect_primary_column:
-                if _is_primary_column(column):
-                    no_wrap = True
-                else:
-                    no_wrap = column.no_wrap
-                    overflow = (
-                        column.overflow if column.overflow is not None else "ellipsis"
-                    )
-
-            table.add_column(
-                column.label,
-                no_wrap=no_wrap,
-                overflow=overflow,
-                ratio=column.ratio,
-                min_width=column.min_width,
-                max_width=column.max_width,
-            )
-        for idx, item in enumerate(display_items):
-            raw_item = result.items[idx] if idx < len(result.items) else {}
-            table.add_row(
-                *[
-                    ("" if item.get(column.key) is None else str(item.get(column.key)))
-                    if result.display_items is not None
-                    and item.get(column.key) != raw_item.get(column.key)
-                    else _rich_text(item.get(column.key))
-                    for column in result.columns
-                ]
-            )
-        console.rich.print(table)
-        if result.has_more:
-            console.print(
-                f"\nShowing {len(result.items)} of {result.total_count}. "
-                "Use --all to show all, or --limit to adjust.",
-                style="dim",
-            )
+    if isinstance(result, SectionedListResult):
+        for section in result.sections:
+            _print_rich_list(console, section, title=section.title)
         for hint in result.display_hints:
             console.rich.print(_rich_text(hint, style="dim"))
         return

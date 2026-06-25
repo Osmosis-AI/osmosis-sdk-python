@@ -180,9 +180,9 @@ def test_apply_command_writes_directly_into_project_canonical_layout(
     )
     assert result.display_next_steps == [
         "pip install -e rollouts/multiply-local-strands",
-        "osmosis eval run configs/eval/multiply-local-strands.toml --limit 1",
         "git push",
         "Confirm Git Sync is connected in the Osmosis Platform",
+        "osmosis eval submit configs/eval/multiply-local-strands.toml",
         "osmosis train submit configs/training/multiply-local-strands.toml",
     ]
 

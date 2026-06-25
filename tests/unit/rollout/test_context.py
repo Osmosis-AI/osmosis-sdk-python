@@ -132,6 +132,47 @@ class TestGraderContext:
         with pytest.raises(ValueError, match="Sample unknown not found"):
             ctx.set_sample_reward("unknown", 1.0)
 
+    def test_metadata_defaults_none(self):
+        ctx = GraderContext(samples={})
+        assert ctx.metadata is None
+
+    def test_metadata_carried(self):
+        metadata = {"tools": ["search"], "difficulty": 3}
+        ctx = GraderContext(samples={}, metadata=metadata)
+        assert ctx.metadata == metadata
+
+    def test_artifacts_default_none(self):
+        ctx = GraderContext(samples={})
+        assert ctx.artifacts is None
+
+    def test_set_artifacts_stores_object(self):
+        ctx = GraderContext(samples={})
+        artifacts = {"judge": {"explanation": "ok"}}
+        ctx.set_artifacts(artifacts)
+        assert ctx.artifacts is artifacts
+
+    def test_set_artifacts_replaces(self):
+        ctx = GraderContext(samples={})
+        ctx.set_artifacts({"a": 1})
+        ctx.set_artifacts({"b": 2})
+        assert ctx.artifacts == {"b": 2}
+
+    def test_set_artifacts_rejects_non_dict(self):
+        ctx = GraderContext(samples={})
+        with pytest.raises(TypeError, match="artifacts must be a dict"):
+            ctx.set_artifacts(["not", "a", "dict"])  # type: ignore[arg-type]
+
+    def test_input_metadata_and_output_artifacts_are_independent(self):
+        """Reading input metadata and writing output artifacts cannot collide."""
+        metadata = {"difficulty": 3}
+        ctx = GraderContext(samples={}, metadata=metadata)
+        ctx.set_artifacts({"judge": {"explanation": "why"}})
+
+        assert ctx.metadata == {"difficulty": 3}
+        assert ctx.artifacts == {"judge": {"explanation": "why"}}
+        # The write channel never mutates the read-only input metadata.
+        assert "judge" not in ctx.metadata
+
 
 # ---------------------------------------------------------------------------
 # AgentWorkflowContext / HarborAgentWorkflowContext
@@ -152,6 +193,17 @@ class TestAgentWorkflowContext:
         )
         assert ctx.config is cfg
 
+    def test_metadata_defaults_none(self):
+        ctx = AgentWorkflowContext(prompt=[{"role": "user", "content": "hi"}])
+        assert ctx.metadata is None
+
+    def test_metadata_carried(self):
+        metadata = {"tools": ["search"]}
+        ctx = AgentWorkflowContext(
+            prompt=[{"role": "user", "content": "hi"}], metadata=metadata
+        )
+        assert ctx.metadata == metadata
+
 
 class TestHarborAgentWorkflowContext:
     def test_with_environment(self):
@@ -164,3 +216,29 @@ class TestHarborAgentWorkflowContext:
         )
         assert ctx.environment is env
         assert ctx.config is cfg
+
+    def test_positional_call_pattern_still_works(self):
+        """Existing positional call sites (prompt, config, environment) keep working."""
+        env = MagicMock()
+        cfg = AgentWorkflowConfig(name="harbor-test")
+        ctx = HarborAgentWorkflowContext(
+            [{"role": "user", "content": "hi"}],
+            cfg,
+            env,
+        )
+        assert ctx.environment is env
+        assert ctx.config is cfg
+        assert ctx.metadata is None
+
+    def test_metadata_threaded_through_super_init(self):
+        env = MagicMock()
+        cfg = AgentWorkflowConfig(name="harbor-test")
+        metadata = {"tools": ["search"], "difficulty": 3}
+        ctx = HarborAgentWorkflowContext(
+            prompt=[{"role": "user", "content": "hi"}],
+            config=cfg,
+            environment=env,
+            metadata=metadata,
+        )
+        assert ctx.metadata == metadata
+        assert ctx.environment is env

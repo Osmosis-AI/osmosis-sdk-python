@@ -15,12 +15,16 @@ import osmosis_ai.platform.api.client as api_client_module
 import osmosis_ai.platform.api.download as download_module
 import osmosis_ai.platform.api.upload as upload_module
 import osmosis_ai.platform.cli.dataset as dataset_module
+from osmosis_ai.cli.output import OperationResult
 from osmosis_ai.platform.api.models import (
     DatasetDownloadInfo,
     DatasetFile,
+    LogEntry,
+    LogsPage,
     PaginatedDatasets,
     UploadInfo,
 )
+from osmosis_ai.platform.auth import PlatformAPIError
 
 GIT_IDENTITY = "acme/rollouts"
 REPO_URL = "https://github.com/acme/rollouts.git"
@@ -62,7 +66,9 @@ def test_dataset_list_requires_linked_project(
     rc = main(["--json", "dataset", "list"])
 
     assert rc == 1
-    assert "Osmosis workspace directory" in capsys.readouterr().err
+    error = json.loads(capsys.readouterr().err)["error"]
+    assert error["code"] == "WORKSPACE_REQUIRED"
+    assert "Osmosis workspace directory" in error["message"]
 
 
 def test_dataset_validate_is_project_independent(
@@ -71,11 +77,8 @@ def test_dataset_validate_is_project_independent(
     from osmosis_ai.cli.main import main
 
     data = tmp_path / "data.jsonl"
-    data.write_text(
-        json.dumps({"system_prompt": "s", "user_prompt": "u", "ground_truth": "g"})
-        + "\n",
-        encoding="utf-8",
-    )
+    row = json.dumps({"system_prompt": "s", "user_prompt": "u", "ground_truth": "g"})
+    data.write_text((row + "\n") * 4, encoding="utf-8")
     monkeypatch.chdir(tmp_path)
 
     rc = main(["--json", "dataset", "validate", str(data)])
@@ -157,9 +160,9 @@ def test_dataset_list_plain_emits_tab_separated_rows(monkeypatch, capsys) -> Non
 
     assert exit_code == 0
     lines = captured.out.splitlines()
-    assert len(lines[0].split("\t")) == 4
+    assert len(lines[0].split("\t")) == 5
     assert lines[0].startswith("a.jsonl\t[uploaded]\t100 B\t")
-    assert len(lines[1].split("\t")) == 4
+    assert len(lines[1].split("\t")) == 5
     assert lines[1].startswith("b.jsonl\t[pending]\t100 B\t")
     assert "\tds_1" not in lines[0]
     assert "\tds_2" not in lines[1]
@@ -206,6 +209,160 @@ def test_dataset_info_places_platform_url_after_table(monkeypatch) -> None:
     assert result.display_hints == [f"View: {expected_url}"]
 
 
+def test_dataset_info_error_status_suggests_logs_command(monkeypatch) -> None:
+    _stub_git_context(monkeypatch)
+
+    class FakeClient:
+        def get_dataset(self, name, *, git_identity, credentials=None):
+            return _dataset(file_name="broken.jsonl", status="error")
+
+    monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+
+    result = dataset_module.info("broken.jsonl")
+
+    assert "See logs with: osmosis dataset logs broken.jsonl" in result.display_hints
+
+
+_LOG_ENTRIES = [
+    LogEntry(
+        timestamp="2026-06-01T00:00:00Z",
+        level="info",
+        step="upload",
+        message="Upload started",
+    ),
+    LogEntry(
+        timestamp="2026-06-01T00:05:00Z",
+        level="error",
+        step="processing",
+        message="Invalid rows",
+        details={"invalid_rows": 3},
+    ),
+]
+
+
+def _install_logs_client(
+    monkeypatch: pytest.MonkeyPatch, page: LogsPage
+) -> dict[str, object]:
+    fake_credentials = _stub_git_context(monkeypatch)
+    captured: dict[str, object] = {}
+
+    class FakeClient:
+        def get_dataset_logs(
+            self, name, *, limit, cursor=None, git_identity, credentials=None
+        ):
+            assert credentials is fake_credentials
+            assert git_identity == GIT_IDENTITY
+            captured["name"] = name
+            captured["limit"] = limit
+            captured["cursor"] = cursor
+            return page
+
+    monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+    return captured
+
+
+def test_dataset_logs_renders_chronological_list(monkeypatch) -> None:
+    captured = _install_logs_client(
+        monkeypatch, LogsPage(logs=_LOG_ENTRIES, next_cursor=None)
+    )
+
+    result = dataset_module.logs("train.jsonl", limit=50, cursor=None)
+
+    assert captured == {"name": "train.jsonl", "limit": 50, "cursor": None}
+    assert result.title == "Dataset Logs: train.jsonl"
+    assert [column.label for column in result.columns] == [
+        "Time",
+        "Level",
+        "Step",
+        "Message",
+    ]
+    # Oldest-first order is preserved from the server page.
+    assert [item["message"] for item in result.items] == [
+        "Upload started",
+        "Invalid rows",
+    ]
+    assert result.items[0]["timestamp"] == "2026-06-01T00:00:00Z"
+    assert result.items[1]["details"] == {"invalid_rows": 3}
+    assert result.total_count == 2
+    assert result.has_more is False
+    assert result.next_offset is None
+    assert result.extra["next_cursor"] is None
+    assert_git_context(dict(result.extra))
+    assert result.display_items is not None
+    # Display timestamps are localized, raw ISO stays in items for JSON.
+    assert result.display_items[0]["timestamp"] != "2026-06-01T00:00:00Z"
+    assert result.display_items[0]["timestamp"].startswith("2026-")
+    assert result.display_hints == [
+        "Use osmosis dataset info train.jsonl for dataset details."
+    ]
+
+
+def test_dataset_logs_has_more_when_next_cursor_present(monkeypatch) -> None:
+    _install_logs_client(
+        monkeypatch,
+        LogsPage(logs=_LOG_ENTRIES, next_cursor="2026-06-01T00:00:00Z|log-1"),
+    )
+
+    result = dataset_module.logs("train.jsonl", limit=2)
+
+    assert result.has_more is True
+    assert result.extra["next_cursor"] == "2026-06-01T00:00:00Z|log-1"
+
+
+def test_dataset_logs_passes_cursor_to_client(monkeypatch) -> None:
+    captured = _install_logs_client(
+        monkeypatch, LogsPage(logs=_LOG_ENTRIES, next_cursor=None)
+    )
+
+    dataset_module.logs("train.jsonl", limit=50, cursor="2026-06-01T00:00:00Z|log-1")
+
+    assert captured["cursor"] == "2026-06-01T00:00:00Z|log-1"
+
+
+def test_dataset_logs_empty_page(monkeypatch) -> None:
+    _install_logs_client(monkeypatch, LogsPage(logs=[], next_cursor=None))
+
+    result = dataset_module.logs("train.jsonl", limit=50)
+
+    assert result.items == []
+    assert result.total_count == 0
+    assert result.has_more is False
+
+
+@pytest.mark.parametrize("limit", ["0", "201"])
+def test_dataset_logs_rejects_out_of_range_limit(limit: str, capsys) -> None:
+    from osmosis_ai.cli.main import main
+
+    rc = main(["dataset", "logs", "train.jsonl", "--limit", limit])
+
+    assert rc == 2
+    assert "is not in the range 1<=x<=200" in capsys.readouterr().err
+
+
+def test_dataset_logs_unknown_dataset_emits_not_found_envelope(
+    monkeypatch, capsys
+) -> None:
+    _stub_git_context(monkeypatch)
+
+    class FakeClient:
+        def get_dataset_logs(
+            self, name, *, limit, cursor=None, git_identity, credentials=None
+        ):
+            raise PlatformAPIError("Dataset not found", 404)
+
+    monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+
+    exit_code = cli.main(["--json", "dataset", "logs", "missing.jsonl"])
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    assert captured.out == ""
+    envelope = json.loads(captured.err)
+    assert envelope["error"]["code"] == "NOT_FOUND"
+    assert envelope["error"]["message"] == "Dataset not found"
+    assert envelope["command"] == "dataset logs"
+
+
 def test_dataset_preview_json_includes_rows(monkeypatch, capsys) -> None:
     _stub_git_context(monkeypatch)
     rows = [{"system_prompt": "s", "user_prompt": "u", "ground_truth": "g"}]
@@ -229,11 +386,8 @@ def test_dataset_preview_json_includes_rows(monkeypatch, capsys) -> None:
 
 def test_dataset_validate_json_envelope(tmp_path: Path, capsys) -> None:
     file_path = tmp_path / "train.jsonl"
-    file_path.write_text(
-        json.dumps({"system_prompt": "s", "user_prompt": "u", "ground_truth": "g"})
-        + "\n",
-        encoding="utf-8",
-    )
+    row = json.dumps({"system_prompt": "s", "user_prompt": "u", "ground_truth": "g"})
+    file_path.write_text((row + "\n") * 4, encoding="utf-8")
 
     exit_code = cli.main(["--json", "dataset", "validate", str(file_path)])
     captured = capsys.readouterr()
@@ -277,11 +431,8 @@ def test_dataset_upload_json_stdout_is_one_envelope(
 ) -> None:
     fake_credentials = _stub_git_context(monkeypatch)
     file_path = tmp_path / "train.jsonl"
-    file_path.write_text(
-        json.dumps({"system_prompt": "s", "user_prompt": "u", "ground_truth": "g"})
-        + "\n",
-        encoding="utf-8",
-    )
+    row = json.dumps({"system_prompt": "s", "user_prompt": "u", "ground_truth": "g"})
+    file_path.write_text((row + "\n") * 4, encoding="utf-8")
     monkeypatch.setattr(
         upload_module,
         "make_progress_bar",
@@ -312,7 +463,13 @@ def test_dataset_upload_json_stdout_is_one_envelope(
             )
 
         def complete_upload(
-            self, file_id, parts=None, *, git_identity, credentials=None
+            self,
+            file_id,
+            parts=None,
+            *,
+            file_extension=None,
+            git_identity,
+            credentials=None,
         ):
             assert file_id == "ds_1"
             assert credentials is fake_credentials
@@ -321,13 +478,224 @@ def test_dataset_upload_json_stdout_is_one_envelope(
 
     monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
 
-    exit_code = cli.main(["--json", "dataset", "upload", str(file_path)])
+    exit_code = cli.main(["--json", "dataset", "upload", str(file_path), "--yes"])
     captured = capsys.readouterr()
 
     assert exit_code == 0
     payload = json.loads(captured.out)
     assert payload["operation"] == "dataset.upload"
     assert payload["resource"]["id"] == "ds_1"
+    assert_git_context(payload["resource"])
+    assert "Uploading" not in captured.out
+
+
+@pytest.mark.parametrize("yes_flag", ["--yes", "-y"])
+def test_dataset_upload_yes_option_is_forwarded(
+    yes_flag: str, monkeypatch, tmp_path: Path
+) -> None:
+    file_path = tmp_path / "train.jsonl"
+    file_path.write_text(
+        json.dumps({"system_prompt": "s", "user_prompt": "u", "ground_truth": "g"})
+        + "\n",
+        encoding="utf-8",
+    )
+    seen: dict[str, object] = {}
+
+    def fake_upload(*, file: str, overwrite: bool, yes: bool) -> OperationResult:
+        seen.update({"file": file, "overwrite": overwrite, "yes": yes})
+        return OperationResult(
+            operation="dataset.upload",
+            status="success",
+            message="Dataset uploaded.",
+        )
+
+    monkeypatch.setattr(dataset_module, "upload", fake_upload)
+
+    exit_code = cli.main(["dataset", "upload", str(file_path), yes_flag])
+
+    assert exit_code == 0
+    assert seen == {"file": str(file_path), "overwrite": False, "yes": True}
+
+
+def test_dataset_upload_json_without_yes_requires_confirmation(
+    monkeypatch,
+    tmp_path: Path,
+    capsys,
+) -> None:
+    """Regression: a non-interactive upload without --yes must fail with
+    INTERACTIVE_REQUIRED instead of silently uploading (the inverted-guard bug)."""
+    _stub_git_context(monkeypatch)
+    file_path = tmp_path / "train.jsonl"
+    row = json.dumps({"system_prompt": "s", "user_prompt": "u", "ground_truth": "g"})
+    file_path.write_text((row + "\n") * 4, encoding="utf-8")
+
+    class FakeClient:
+        def create_dataset(self, *args, **kwargs):
+            raise AssertionError("upload must not proceed without confirmation")
+
+    monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+
+    exit_code = cli.main(["--json", "dataset", "upload", str(file_path)])
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    assert captured.out == ""
+    payload = json.loads(captured.err)
+    assert payload["error"]["code"] == "INTERACTIVE_REQUIRED"
+    assert payload["error"]["details"]["summary"]["File"] == "train.jsonl"
+
+
+def test_dataset_upload_json_overwrite_without_yes_warns_destructive(
+    monkeypatch,
+    tmp_path: Path,
+    capsys,
+) -> None:
+    """Regression: --overwrite without --yes must also be gated, and the
+    INTERACTIVE_REQUIRED envelope must surface the destructive-overwrite warning."""
+    _stub_git_context(monkeypatch)
+    file_path = tmp_path / "train.jsonl"
+    row = json.dumps({"system_prompt": "s", "user_prompt": "u", "ground_truth": "g"})
+    file_path.write_text((row + "\n") * 4, encoding="utf-8")
+
+    class FakeClient:
+        def create_dataset(self, *args, **kwargs):
+            raise AssertionError("overwrite must not proceed without confirmation")
+
+    monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+
+    exit_code = cli.main(["--json", "dataset", "upload", str(file_path), "--overwrite"])
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    payload = json.loads(captured.err)
+    assert payload["error"]["code"] == "INTERACTIVE_REQUIRED"
+    assert "overwrite" in payload["error"]["details"]["prompt"].lower()
+    warnings = payload["error"]["details"]["warnings"]
+    assert any("--overwrite" in warning for warning in warnings)
+
+
+def test_dataset_upload_json_conflict_preserves_existing_dataset_id(
+    monkeypatch,
+    tmp_path: Path,
+    capsys,
+) -> None:
+    _stub_git_context(monkeypatch)
+    file_path = tmp_path / "train.jsonl"
+    row = json.dumps({"system_prompt": "s", "user_prompt": "u", "ground_truth": "g"})
+    file_path.write_text((row + "\n") * 4, encoding="utf-8")
+
+    from osmosis_ai.platform.auth import PlatformAPIError
+
+    class FakeClient:
+        def create_dataset(
+            self, file_name, file_size, extension, *, git_identity, credentials=None
+        ):
+            assert git_identity == GIT_IDENTITY
+            raise PlatformAPIError(
+                "A dataset with this name already exists",
+                status_code=409,
+                details={
+                    "error": "A dataset with this name already exists",
+                    "existing_dataset_id": "ds_existing",
+                },
+            )
+
+    monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+
+    exit_code = cli.main(["--json", "dataset", "upload", str(file_path), "--yes"])
+    captured = capsys.readouterr()
+
+    assert exit_code == 1
+    payload = json.loads(captured.err)
+    assert payload["error"]["code"] == "CONFLICT"
+    assert payload["error"]["details"]["existing_dataset_id"] == "ds_existing"
+    assert "--overwrite" in payload["error"]["message"]
+    assert "osmosis dataset upload" not in payload["error"]["message"]
+    assert str(file_path) not in payload["error"]["message"]
+
+
+def test_dataset_upload_json_overwrite_stdout_is_one_envelope(
+    monkeypatch,
+    tmp_path: Path,
+    capsys,
+) -> None:
+    fake_credentials = _stub_git_context(monkeypatch)
+    file_path = tmp_path / "train.jsonl"
+    row = json.dumps({"system_prompt": "s", "user_prompt": "u", "ground_truth": "g"})
+    file_path.write_text((row + "\n") * 4, encoding="utf-8")
+    monkeypatch.setattr(
+        upload_module,
+        "make_progress_bar",
+        lambda _size, **_kwargs: (nullcontext(), lambda _done, _total: None),
+    )
+    monkeypatch.setattr(
+        upload_module,
+        "upload_file_simple",
+        lambda _file_path, _upload_info, progress_callback=None: None,
+    )
+
+    from osmosis_ai.platform.auth import PlatformAPIError
+
+    class FakeClient:
+        def create_dataset(
+            self,
+            file_name,
+            file_size,
+            extension,
+            *,
+            git_identity,
+            credentials=None,
+            overwrite_dataset_id=None,
+        ):
+            assert credentials is fake_credentials
+            assert git_identity == GIT_IDENTITY
+            if overwrite_dataset_id is None:
+                raise PlatformAPIError(
+                    "A dataset with this name already exists",
+                    status_code=409,
+                    details={
+                        "error": "A dataset with this name already exists",
+                        "existing_dataset_id": "ds_existing",
+                    },
+                )
+            assert overwrite_dataset_id == "ds_existing"
+            return DatasetFile(
+                id="ds_new",
+                file_name=file_name,
+                file_size=file_size,
+                status="created",
+                upload=UploadInfo(
+                    method="simple",
+                    s3_key="uploads/train",
+                    presigned_url="https://example.com/upload",
+                ),
+            )
+
+        def complete_upload(
+            self,
+            file_id,
+            parts=None,
+            *,
+            file_extension=None,
+            git_identity,
+            credentials=None,
+        ):
+            assert file_id == "ds_new"
+            assert credentials is fake_credentials
+            assert git_identity == GIT_IDENTITY
+            return _dataset(id=file_id)
+
+    monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+
+    exit_code = cli.main(
+        ["--json", "dataset", "upload", str(file_path), "--overwrite", "--yes"]
+    )
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    payload = json.loads(captured.out)
+    assert payload["operation"] == "dataset.upload"
+    assert payload["resource"]["id"] == "ds_new"
     assert_git_context(payload["resource"])
     assert "Uploading" not in captured.out
 
@@ -383,3 +751,67 @@ def test_dataset_download_json_includes_output_path(
     assert payload["operation"] == "dataset.download"
     assert payload["resource"]["output_path"] == str(output_path)
     assert_git_context(payload["resource"])
+
+
+def test_dataset_upload_no_platform_url_hint_uses_file_name(
+    monkeypatch,
+    tmp_path: Path,
+    capsys,
+) -> None:
+    fake_credentials = _stub_git_context(monkeypatch)
+    file_path = tmp_path / "my_dataset.jsonl"
+    row = json.dumps({"system_prompt": "s", "user_prompt": "u", "ground_truth": "g"})
+    file_path.write_text((row + "\n") * 4, encoding="utf-8")
+    monkeypatch.setattr(
+        upload_module,
+        "make_progress_bar",
+        lambda _size, **_kwargs: (nullcontext(), lambda _done, _total: None),
+    )
+    monkeypatch.setattr(
+        upload_module,
+        "upload_file_simple",
+        lambda _file_path, _upload_info, progress_callback=None: None,
+    )
+
+    class FakeClient:
+        def create_dataset(
+            self, file_name, file_size, extension, *, git_identity, credentials=None
+        ):
+            assert credentials is fake_credentials
+            return DatasetFile(
+                id="ds_42",
+                file_name=file_name,
+                file_size=file_size,
+                status="created",
+                upload=UploadInfo(
+                    method="simple",
+                    s3_key="uploads/my_dataset",
+                    presigned_url="https://example.com/upload",
+                ),
+            )
+
+        def complete_upload(
+            self,
+            file_id,
+            parts=None,
+            *,
+            file_extension=None,
+            git_identity,
+            credentials=None,
+        ):
+            assert credentials is fake_credentials
+            # Different from the local file name to prove the hint reads the
+            # API response, not the local path.
+            return _dataset(
+                id=file_id, file_name="server_dataset.jsonl", platform_url=None
+            )
+
+    monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+
+    exit_code = cli.main(["--plain", "dataset", "upload", str(file_path), "--yes"])
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert "osmosis dataset info server_dataset.jsonl" in captured.out
+    assert "osmosis dataset info my_dataset.jsonl" not in captured.out
+    assert "ds_42" not in captured.out

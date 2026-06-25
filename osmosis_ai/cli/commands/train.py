@@ -1,289 +1,36 @@
-"""Training run management commands."""
+"""Training run management commands (thin shells delegating to platform/cli/train.py)."""
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
 from typing import Any
 
 import typer
 
-from osmosis_ai.cli.console import console
-from osmosis_ai.cli.errors import CLIError
-from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE
+from osmosis_ai.platform.constants import (
+    DEFAULT_PAGE_SIZE,
+    MAX_LOG_PAGE_SIZE,
+    MAX_PAGE_SIZE,
+)
 
 app: typer.Typer = typer.Typer(help="Manage training runs.", no_args_is_help=True)
-
-
-def _detail_fields(rows: list[tuple[str, str]]) -> list[Any]:
-    from osmosis_ai.cli.output import DetailField
-
-    return [DetailField(label=label, value=value) for label, value in rows]
-
-
-def _require_confirmation(
-    message: str,
-    *,
-    yes: bool,
-    summary: list[tuple[str, str]] | None = None,
-    notes: list[str] | None = None,
-    warnings: list[str] | None = None,
-) -> None:
-    """Confirm a destructive action, surfacing context in non-interactive modes.
-
-    In rich+interactive mode, falls back to the questionary prompt. In JSON
-    and plain modes (or any non-interactive shell), raises an
-    ``INTERACTIVE_REQUIRED`` error that carries the prompt question, the
-    summary of what would be acted on, and any notes/warnings — so AI
-    agents and CI scripts can see exactly what they're being asked to
-    confirm without first having to retry with ``--yes``.
-    """
-    if yes:
-        return
-
-    from osmosis_ai.cli.output import OutputFormat, get_output_context
-
-    output = get_output_context()
-    if output.format is not OutputFormat.rich or not output.interactive:
-        details: dict[str, Any] = {"prompt": message}
-        if summary:
-            details["summary"] = {label: value for label, value in summary}
-        if notes:
-            details["notes"] = list(notes)
-        if warnings:
-            details["warnings"] = list(warnings)
-
-        if output.format is OutputFormat.plain:
-            import sys
-
-            lines: list[str] = [f"Confirmation required: {message}"]
-            if summary:
-                for label, value in summary:
-                    lines.append(f"  {label}: {value}")
-            if notes:
-                lines.append("Notes:")
-                for note in notes:
-                    lines.append(f"  - {note}")
-            if warnings:
-                lines.append("Warnings:")
-                for warning in warnings:
-                    lines.append(f"  - {warning}")
-            sys.stderr.write("\n".join(lines) + "\n")
-            sys.stderr.flush()
-
-        err = CLIError(
-            "Use --yes to confirm in non-interactive mode.",
-            code="INTERACTIVE_REQUIRED",
-            details=details,
-        )
-        if output.format is OutputFormat.json:
-            from osmosis_ai.cli.output import emit_structured_error_to_stderr
-
-            emit_structured_error_to_stderr(err)
-            raise typer.Exit(1)
-        raise err
-
-    from osmosis_ai.cli.prompts import require_confirmation
-
-    require_confirmation(message, yes=yes)
-
-
-def _print_remote_fetch_notice(
-    workspace_directory: Path,
-    *,
-    pinned_commit_sha: str | None,
-) -> tuple[list[str], list[str]]:
-    """Remind the user that submit pulls *code* from the connected Git remote
-    while reading *config values* from the local TOML file.
-
-    The platform resolves training code from the Platform-connected
-    repository (or fetches a pinned commit) before training, so local
-    *code* changes that haven't been pushed will silently be ignored.
-    The config TOML passed to ``osmosis train submit``, by contrast, is
-    read from disk and its values are sent verbatim in the submit
-    payload — local edits to the config take effect immediately, even
-    if they are uncommitted.
-
-    Returns ``(notes, warnings)`` as plain-text lists so callers can
-    surface the same context in non-rich modes (e.g. the JSON error
-    envelope when ``--yes`` is missing). The Rich panel is rendered
-    only when the output format is Rich.
-    """
-    from osmosis_ai.cli.output import OutputFormat, get_output_context
-    from osmosis_ai.platform.cli.workspace_repo import summarize_local_git_state
-
-    state = summarize_local_git_state(workspace_directory)
-
-    warnings: list[str] = []
-    if state is not None:
-        if state.is_dirty:
-            warnings.append(
-                "Uncommitted changes detected — code edits won't be picked up "
-                "(only the config file above is read locally)."
-            )
-        if state.has_upstream and state.ahead > 0:
-            commits_word = "commit" if state.ahead == 1 else "commits"
-            warnings.append(
-                f"{state.ahead} unpushed {commits_word} ahead of upstream — "
-                "push code before submitting."
-            )
-        elif state.branch is not None and not state.has_upstream:
-            warnings.append(
-                f"Branch '{state.branch}' has no upstream — "
-                "push code and set tracking before submitting."
-            )
-
-    notes: list[str] = []
-    if pinned_commit_sha:
-        notes.append(
-            f"Osmosis will fetch commit {pinned_commit_sha} from the "
-            "Platform-connected repository for training code."
-        )
-        notes.append("Make sure that commit is pushed to origin.")
-    else:
-        notes.append(
-            "Osmosis will fetch training code from the Platform-connected repository."
-        )
-        if state is not None and state.branch and state.head_sha:
-            notes.append(f"Local branch: {state.branch} @ {state.head_sha[:8]}")
-        notes.append("Make sure your code changes are committed and pushed.")
-        warnings.append(
-            "Platform source selection may differ from your local branch when no "
-            "commit_sha is set."
-        )
-    notes.append(
-        "Config values come from your local TOML file and are submitted "
-        "as-is — uncommitted edits to the config still apply."
-    )
-
-    if get_output_context().format is OutputFormat.rich:
-        body_lines: list[str] = []
-        if pinned_commit_sha:
-            body_lines.append(
-                f"Osmosis will fetch commit [bold]{console.escape(pinned_commit_sha)}[/bold] "
-                "from the Platform-connected repository for training code."
-            )
-            body_lines.append("Make sure that commit is pushed to origin.")
-        else:
-            body_lines.append(
-                "Osmosis will fetch training code from the Platform-connected repository."
-            )
-            if state is not None and state.branch and state.head_sha:
-                body_lines.append(
-                    f"Local: [bold]{console.escape(state.branch)}[/bold] @ "
-                    f"[dim]{console.escape(state.head_sha[:8])}[/dim]"
-                )
-            body_lines.append("Make sure your code changes are committed and pushed.")
-
-        body_lines.append("")
-        body_lines.append(
-            "[dim]Config values above come from your local TOML file and are "
-            "submitted as-is — uncommitted edits to the config still apply.[/dim]"
-        )
-
-        if warnings:
-            body_lines.append("")
-            for warning in warnings:
-                body_lines.append(f"[yellow]• {console.escape(warning)}[/yellow]")
-
-        style = "yellow" if warnings else "blue"
-        title = "Push before submitting" if warnings else "Before you submit"
-        console.panel(title, "\n".join(body_lines), style=style)
-
-    return notes, warnings
 
 
 @app.command("list")
 def list_runs(
     limit: int = typer.Option(
-        DEFAULT_PAGE_SIZE, "--limit", help="Maximum number of runs to show."
+        DEFAULT_PAGE_SIZE,
+        "--limit",
+        min=1,
+        max=MAX_PAGE_SIZE,
+        help="Maximum number of runs to show.",
     ),
     all_: bool = typer.Option(False, "--all", help="Show all training runs."),
 ) -> Any:
     """List training runs for the current workspace directory."""
-    from osmosis_ai.cli.output import (
-        ListColumn,
-        ListResult,
-        get_output_context,
-        serialize_training_run,
-    )
-    from osmosis_ai.cli.output.display import (
-        created_column_label,
-        format_local_date,
-        format_reward,
-    )
-    from osmosis_ai.platform.cli.utils import (
-        fetch_all_pages,
-        format_run_status,
-        require_git_workspace_directory_context,
-        validate_list_options,
-    )
-    from osmosis_ai.platform.cli.workspace_directory_context import git_result_context
+    from osmosis_ai.platform.cli.train import list_training_runs as _list
 
-    effective_limit, fetch_all = validate_list_options(limit=limit, all_=all_)
-
-    context = require_git_workspace_directory_context()
-    credentials = context.credentials
-
-    from osmosis_ai.platform.api.client import OsmosisClient
-
-    output = get_output_context()
-    client = OsmosisClient()
-    with output.status("Fetching training runs..."):
-        if fetch_all:
-            training_runs, total_count = fetch_all_pages(
-                lambda lim, off: client.list_training_runs(
-                    limit=lim,
-                    offset=off,
-                    credentials=credentials,
-                    git_identity=context.git_identity,
-                ),
-                items_attr="training_runs",
-            )
-            has_more = False
-            next_offset = None
-        else:
-            page = client.list_training_runs(
-                limit=effective_limit,
-                offset=0,
-                credentials=credentials,
-                git_identity=context.git_identity,
-            )
-            training_runs = page.training_runs
-            total_count = page.total_count
-            has_more = page.has_more
-            next_offset = page.next_offset
-
-    return ListResult(
-        title="Training Runs",
-        items=[serialize_training_run(r) for r in training_runs],
-        total_count=total_count,
-        has_more=has_more,
-        next_offset=next_offset,
-        extra=git_result_context(context),
-        columns=[
-            ListColumn(key="name", label="Name", ratio=4, overflow="fold"),
-            ListColumn(key="status", label="Status", no_wrap=True, ratio=1),
-            ListColumn(key="reward", label="Reward", no_wrap=True, ratio=1),
-            ListColumn(
-                key="created_at",
-                label=created_column_label(),
-                no_wrap=True,
-                ratio=1,
-            ),
-        ],
-        display_items=[
-            {
-                **serialize_training_run(run),
-                "name": run.name or "(unnamed)",
-                "status": format_run_status(run),
-                "reward": format_reward(run.reward),
-                "created_at": format_local_date(run.created_at),
-            }
-            for run in training_runs
-        ],
-        display_hints=["Use osmosis train info <name> for details."],
-    )
+    return _list(limit=limit, all_=all_)
 
 
 @app.command("info")
@@ -301,220 +48,31 @@ def info(
     ),
 ) -> Any:
     """Show training run details, checkpoints, and metrics."""
-    import json
+    from osmosis_ai.platform.cli.train import info as _info
 
-    from osmosis_ai.cli.metrics_export import build_export_dict
-    from osmosis_ai.cli.output import (
-        DetailField,
-        DetailResult,
-        DetailSection,
-        OutputFormat,
-        get_output_context,
-        serialize_checkpoint,
-        serialize_training_run,
-    )
-    from osmosis_ai.cli.output.display import format_local_datetime
-    from osmosis_ai.platform.api.client import OsmosisClient
-    from osmosis_ai.platform.api.models import (
-        RUN_STATUSES_IN_PROGRESS,
-        RUN_STATUSES_TERMINAL,
-    )
-    from osmosis_ai.platform.auth.platform_client import PlatformAPIError
-    from osmosis_ai.platform.cli.utils import (
-        build_run_detail_rows,
-        require_git_workspace_directory_context,
-    )
-    from osmosis_ai.platform.cli.workspace_directory_context import git_result_context
+    return _info(name, output=output)
 
-    context = require_git_workspace_directory_context()
-    credentials = context.credentials
 
-    client = OsmosisClient()
-    output_ctx = get_output_context()
-    with output_ctx.status("Fetching training run..."):
-        run = client.get_training_run(
-            name,
-            credentials=credentials,
-            git_identity=context.git_identity,
-        )
+@app.command("logs")
+def logs(
+    name: str = typer.Argument(..., help="Training run name."),
+    limit: int = typer.Option(
+        DEFAULT_PAGE_SIZE,
+        "--limit",
+        min=1,
+        max=MAX_LOG_PAGE_SIZE,
+        help="Maximum number of recent log entries to show.",
+    ),
+    cursor: str | None = typer.Option(
+        None,
+        "--cursor",
+        help="Page further back using the next_cursor value from a previous page.",
+    ),
+) -> Any:
+    """Show recent logs for a training run, oldest first."""
+    from osmosis_ai.platform.cli.train import logs as _logs
 
-    rows = build_run_detail_rows(run)
-    if run.examples_processed_count is not None:
-        rows.append(("Examples", str(run.examples_processed_count)))
-    if run.notes:
-        rows.append(("Notes", console.escape(run.notes)))
-    if run.hf_status:
-        rows.append(("HF Status", run.hf_status))
-    if run.started_at:
-        rows.append(("Started", format_local_datetime(run.started_at)))
-    if run.completed_at:
-        rows.append(("Completed", format_local_datetime(run.completed_at)))
-
-    checkpoints = []
-    sections: list[DetailSection] = []
-    display_hints: list[str] = []
-
-    if run.status in RUN_STATUSES_TERMINAL:
-        try:
-            with output_ctx.status("Fetching checkpoints..."):
-                ckpts = client.list_training_run_checkpoints(
-                    name,
-                    credentials=credentials,
-                    git_identity=context.git_identity,
-                )
-        except PlatformAPIError:
-            ckpts = None
-
-        if ckpts is not None:
-            fetched_checkpoints = getattr(ckpts, "checkpoints", None)
-            if isinstance(fetched_checkpoints, list) and fetched_checkpoints:
-                checkpoints = fetched_checkpoints
-
-    metrics_data = None
-    metrics_error: str | None = None
-    is_in_progress = run.status in RUN_STATUSES_IN_PROGRESS
-    if run.status == "pending":
-        metrics_error = "Metrics are not yet available for pending training runs."
-    else:
-        try:
-            with output_ctx.status("Fetching metrics..."):
-                metrics_data = client.get_training_run_metrics(
-                    run.id,
-                    credentials=credentials,
-                    git_identity=context.git_identity,
-                )
-        except (PlatformAPIError, KeyError) as exc:
-            metrics_error = str(exc) or "Could not fetch metrics data."
-
-    export: dict[str, Any] | None = None
-    output_path: str | None = None
-    save_warning: str | None = None
-    if metrics_data is not None:
-        export = build_export_dict(run, metrics_data)
-        if metrics_data.overview.duration_formatted:
-            rows.append(("Duration", metrics_data.overview.duration_formatted))
-        if metrics_data.overview.reward is not None:
-            rows.append(("Final Reward", f"{metrics_data.overview.reward:.4f}"))
-        if metrics_data.overview.reward_delta is not None:
-            rows.append(
-                (
-                    "Metric Reward Delta",
-                    f"{metrics_data.overview.reward_delta:+.4f}",
-                )
-            )
-        total_steps = max(
-            (dp.step for m in metrics_data.metrics for dp in m.data_points),
-            default=0,
-        )
-        if total_steps:
-            rows.append(("Steps", f"{total_steps:,}"))
-
-    fields = _detail_fields(rows)
-    if run.platform_url:
-        display_hints.append(f"View: {run.platform_url}")
-    if checkpoints:
-        from rich.table import Table
-        from rich.text import Text
-
-        table = Table(show_header=True, header_style="bold", expand=True)
-        table.add_column("Checkpoint", ratio=4, overflow="fold")
-        table.add_column("Step", no_wrap=True)
-        table.add_column("Status", no_wrap=True)
-        table.add_column("ID", no_wrap=True)
-        table.add_column("Created", no_wrap=True)
-        plain_lines = []
-        for cp in checkpoints:
-            cp_name = cp.checkpoint_name or "(unnamed)"
-            created = format_local_datetime(cp.created_at)
-            table.add_row(
-                Text(cp_name),
-                str(cp.checkpoint_step),
-                cp.status,
-                cp.id[:8],
-                created,
-            )
-            plain_lines.append(
-                f"Checkpoint: {cp_name} step {cp.checkpoint_step} "
-                f"[{cp.status}] {cp.id[:8]} {created}"
-            )
-        sections.append(DetailSection(rich=table, plain_lines=plain_lines))
-        display_hints.append("Deploy with: osmosis deploy <checkpoint-name>")
-
-    if metrics_data is not None and metrics_data.metrics:
-        from osmosis_ai.cli.metrics_graph import (
-            render_metric_trends,
-            should_render_metric_trends,
-        )
-
-        if output_ctx.format is OutputFormat.rich and should_render_metric_trends(
-            is_tty=console.is_tty,
-            terminal_width=console.width,
-            metrics=metrics_data.metrics,
-        ):
-            trends = render_metric_trends(
-                metrics_data.metrics, terminal_width=console.width
-            )
-            if trends:
-                sections.append(DetailSection(rich=trends))
-    elif metrics_data is not None:
-        fields.append(DetailField(label="Metrics", value="No metric data found."))
-
-    if metrics_error is not None:
-        fields.append(DetailField(label="Metrics", value=metrics_error))
-
-    if is_in_progress and metrics_data is not None:
-        fields.append(
-            DetailField(
-                label="Note",
-                value="Training is in progress. Metrics shown are a snapshot.",
-            )
-        )
-
-    if metrics_data is not None:
-        should_write_file = output is not None or output_ctx.format is OutputFormat.rich
-        if should_write_file:
-            try:
-                out_path = (
-                    _resolve_output_path(output, run.name, run.id)
-                    if output
-                    else _resolve_default_output(
-                        run.name,
-                        run.id,
-                        workspace_directory=context.workspace_directory,
-                    )
-                )
-                out_path.write_text(
-                    json.dumps(export, indent=2, ensure_ascii=False) + "\n"
-                )
-                output_path = str(out_path)
-                display_hints.append(f"Saved metrics to {output_path}")
-            except (CLIError, OSError) as exc:
-                save_warning = f"Could not save metrics: {exc}"
-                display_hints.append(save_warning)
-
-    return DetailResult(
-        title="Training Run Info",
-        data={
-            "training_run": {
-                **serialize_training_run(run),
-                "examples_processed_count": run.examples_processed_count,
-                "notes": run.notes,
-                "hf_status": run.hf_status,
-            },
-            **({"platform_url": run.platform_url} if run.platform_url else {}),
-            "checkpoints": [serialize_checkpoint(cp) for cp in checkpoints],
-            "in_progress": is_in_progress,
-            "metrics_available": metrics_data is not None,
-            "metrics_error": metrics_error,
-            "metrics": export,
-            "output_path": output_path,
-            "save_warning": save_warning,
-            **git_result_context(context),
-        },
-        fields=fields,
-        sections=sections,
-        display_hints=display_hints,
-    )
+    return _logs(name, limit=limit, cursor=cursor)
 
 
 @app.command("submit")
@@ -531,198 +89,9 @@ def submit(
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
 ) -> Any:
     """Submit a new training run."""
-    from osmosis_ai.cli.output import OperationResult, get_output_context
-    from osmosis_ai.platform.cli.training_config import (
-        load_training_config,
-        validate_training_context_paths,
-    )
-    from osmosis_ai.platform.cli.utils import require_git_workspace_directory_context
-    from osmosis_ai.platform.cli.workspace_directory_context import git_result_context
-    from osmosis_ai.platform.cli.workspace_directory_contract import (
-        ensure_workspace_directory_config_path,
-        validate_rollout_backend,
-        validate_workspace_directory_contract,
-    )
+    from osmosis_ai.platform.cli.train import submit as _submit
 
-    command_label = "`osmosis train submit`"
-
-    context = require_git_workspace_directory_context()
-    workspace_directory = context.workspace_directory
-    validate_workspace_directory_contract(workspace_directory)
-    config_path = Path(config_path)
-    resolved_config_path = (
-        config_path if config_path.is_absolute() else workspace_directory / config_path
-    )
-    ensure_workspace_directory_config_path(
-        resolved_config_path,
-        workspace_directory,
-        config_dir="configs/training",
-        command_label=command_label,
-    )
-    config = load_training_config(resolved_config_path)
-    validate_training_context_paths(config, workspace_directory)
-    validate_rollout_backend(
-        workspace_directory=workspace_directory,
-        rollout=config.experiment_rollout,
-        entrypoint=config.experiment_entrypoint,
-        command_label=command_label,
-    )
-    credentials = context.credentials
-
-    summary_rows: list[tuple[str, str]] = [
-        ("Rollout", config.experiment_rollout),
-        ("Entrypoint", config.experiment_entrypoint),
-        ("Model", config.experiment_model_path),
-        ("Dataset", config.experiment_dataset),
-    ]
-    if config.experiment_commit_sha:
-        summary_rows.append(("Commit", config.experiment_commit_sha))
-    if config.rollout_env:
-        env_keys = ", ".join(sorted(config.rollout_env))
-        summary_rows.append((f"Rollout env ({len(config.rollout_env)})", env_keys))
-    if config.rollout_secret_refs:
-        # Show env-var name → secret-record name (no secret values, ever).
-        secret_summary = ", ".join(
-            f"{env_name}={secret_name}"
-            for env_name, secret_name in sorted(config.rollout_secret_refs.items())
-        )
-        summary_rows.append(
-            (
-                f"Rollout secrets ({len(config.rollout_secret_refs)})",
-                secret_summary,
-            )
-        )
-    console.table(
-        [(label, console.escape(value)) for label, value in summary_rows],
-        title="Training Run",
-    )
-
-    notes, warnings = _print_remote_fetch_notice(
-        workspace_directory,
-        pinned_commit_sha=config.experiment_commit_sha,
-    )
-
-    _require_confirmation(
-        "Submit this training run?",
-        yes=yes,
-        summary=summary_rows,
-        notes=notes,
-        warnings=warnings,
-    )
-
-    from osmosis_ai.platform.api.client import OsmosisClient
-
-    client = OsmosisClient()
-    output = get_output_context()
-    with output.status("Submitting training run..."):
-        result = client.submit_training_run(
-            experiment_config=config.experiment_config,
-            training_config=config.training_config or None,
-            sampling_config=config.sampling_config or None,
-            checkpoints_config=config.checkpoints_config or None,
-            advanced_config=config.advanced_config or None,
-            rollout_env=config.rollout_env or None,
-            rollout_secret_refs=config.rollout_secret_refs or None,
-            credentials=credentials,
-            git_identity=context.git_identity,
-        )
-
-    return OperationResult(
-        operation="train.submit",
-        status="success",
-        resource={
-            "id": result.id,
-            "name": result.name,
-            "status": result.status,
-            "model_id": result.model_id,
-            "model_name": result.model_name,
-            "dataset_id": result.dataset_id,
-            "dataset_name": result.dataset_name,
-            "created_at": result.created_at,
-            **({"url": result.platform_url} if result.platform_url else {}),
-            **git_result_context(context),
-            "config": {
-                "rollout": config.experiment_rollout,
-                "entrypoint": config.experiment_entrypoint,
-                "model": config.experiment_model_path,
-                "dataset": config.experiment_dataset,
-                "commit_sha": config.experiment_commit_sha,
-            },
-        },
-        message=f"Training run submitted: {result.name}",
-        display_next_steps=[
-            f"Status: {result.status}",
-            f"Model: {result.model_name}",
-            f"Dataset: {result.dataset_name}",
-            (
-                f"View: {result.platform_url}"
-                if result.platform_url
-                else f"Check status with: osmosis train info {result.name}"
-            ),
-        ],
-        next_steps_structured=[
-            {"action": "train_info", "name": result.name},
-            *(
-                [{"action": "open_url", "url": result.platform_url}]
-                if result.platform_url
-                else []
-            ),
-        ],
-    )
-
-
-def _safe_name(name: str) -> str:
-    """Sanitise a run name for use as a filename component."""
-    return re.sub(r"[^a-zA-Z0-9_-]", "_", name)
-
-
-def _default_filename(run_name: str | None, run_id: str) -> str:
-    """Build the default JSON filename from run metadata."""
-    short_id = run_id[:8]
-    safe = _safe_name(run_name) if run_name else None
-    return f"{safe}_{short_id}.json" if safe else f"{short_id}.json"
-
-
-def _resolve_output_path(output: str, run_name: str | None, run_id: str) -> Path:
-    """Resolve a user-supplied ``-o`` value into a concrete file path.
-
-    Rules:
-    * Trailing ``/`` or existing directory → directory mode (generate default
-      filename inside the directory).
-    * Has a file extension → use as-is.
-    * No extension → auto-append ``.json``.
-
-    Parent directories are created automatically.
-    """
-    from osmosis_ai.cli.paths import parse_cli_path
-
-    parsed_output = parse_cli_path(output)
-    path = parsed_output.path
-
-    try:
-        # Directory mode: trailing separator or existing directory
-        if parsed_output.has_trailing_separator or path.is_dir():
-            path.mkdir(parents=True, exist_ok=True)
-            return path / _default_filename(run_name, run_id)
-
-        # Ensure .json extension (output is always JSON)
-        if path.suffix != ".json":
-            path = path.with_suffix(".json")
-
-        path.parent.mkdir(parents=True, exist_ok=True)
-    except OSError as exc:
-        raise CLIError(f"Cannot create output path: {exc}") from exc
-
-    return path
-
-
-def _resolve_default_output(
-    run_name: str | None, run_id: str, *, workspace_directory: Path
-) -> Path:
-    """Resolve the default output path under .osmosis/metrics/."""
-    metrics_dir = workspace_directory / ".osmosis" / "metrics"
-    metrics_dir.mkdir(parents=True, exist_ok=True)
-    return metrics_dir / _default_filename(run_name, run_id)
+    return _submit(config_path, yes=yes)
 
 
 @app.command("stop")
@@ -731,33 +100,6 @@ def stop(
     yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
 ) -> Any:
     """Stop a training run."""
-    from osmosis_ai.cli.output import OperationResult, get_output_context
-    from osmosis_ai.platform.cli.utils import require_git_workspace_directory_context
-    from osmosis_ai.platform.cli.workspace_directory_context import git_result_context
+    from osmosis_ai.platform.cli.train import stop as _stop
 
-    context = require_git_workspace_directory_context()
-    credentials = context.credentials
-
-    from osmosis_ai.platform.api.client import OsmosisClient
-
-    client = OsmosisClient()
-
-    _require_confirmation(
-        f'Stop training run "{name}"?',
-        yes=yes,
-        summary=[("Name", name)],
-    )
-
-    output = get_output_context()
-    with output.status("Stopping training run..."):
-        client.stop_training_run(
-            name,
-            credentials=credentials,
-            git_identity=context.git_identity,
-        )
-    return OperationResult(
-        operation="train.stop",
-        status="success",
-        resource={"name": name, **git_result_context(context)},
-        message=f'Training run "{name}" stopped.',
-    )
+    return _stop(name, yes=yes)

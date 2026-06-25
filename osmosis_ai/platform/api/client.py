@@ -11,14 +11,21 @@ from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE
 from .models import (
     DatasetDownloadInfo,
     DatasetFile,
-    DeploymentInfo,
-    DeploymentSummary,
+    EnvironmentSecretInfo,
+    EvalRunMetrics,
+    EvaluationRunDetail,
+    LogsPage,
+    LoraModelDetail,
+    LoraModelSummary,
     PaginatedBaseModels,
     PaginatedDatasets,
-    PaginatedDeployments,
+    PaginatedDevRolloutServers,
+    PaginatedEnvironmentSecrets,
+    PaginatedEvaluationRuns,
+    PaginatedLoraModels,
     PaginatedRollouts,
     PaginatedTrainingRuns,
-    SubmitTrainingRunResult,
+    SubmitRunResult,
     TrainingRunCheckpoints,
     TrainingRunDetail,
     TrainingRunMetrics,
@@ -40,6 +47,31 @@ class OsmosisClient:
     be tied to the trusted workspace directory context.
     """
 
+    def _get_logs(
+        self,
+        resource_path: str,
+        *,
+        limit: int = DEFAULT_PAGE_SIZE,
+        cursor: str | None = None,
+        direction: str = "older",
+        credentials: Credentials | None = None,
+        git_identity: str,
+    ) -> LogsPage:
+        """Fetch one page of logs for ``{resource_path}/logs``.
+
+        Without ``cursor``, ``direction="older"`` returns the most recent page;
+        the returned ``next_cursor`` pages further back in time.
+        """
+        params: dict[str, Any] = {"limit": limit, "direction": direction}
+        if cursor is not None:
+            params["cursor"] = cursor
+        data = platform_request(
+            f"{resource_path}/logs?{urlencode(params)}",
+            credentials=credentials,
+            git_identity=git_identity,
+        )
+        return LogsPage.from_dict(data)
+
     # ── Datasets ─────────────────────────────────────────────────────
 
     def create_dataset(
@@ -48,17 +80,22 @@ class OsmosisClient:
         file_size: int,
         extension: str,
         *,
+        overwrite_dataset_id: str | None = None,
         credentials: Credentials | None = None,
         git_identity: str,
     ) -> DatasetFile:
+        payload: dict[str, Any] = {
+            "file_name": file_name,
+            "file_size": file_size,
+            "extension": extension,
+        }
+        if overwrite_dataset_id is not None:
+            payload["overwrite_dataset_id"] = overwrite_dataset_id
+
         data = platform_request(
             "/api/cli/datasets",
             method="POST",
-            data={
-                "file_name": file_name,
-                "file_size": file_size,
-                "extension": extension,
-            },
+            data=payload,
             credentials=credentials,
             git_identity=git_identity,
         )
@@ -69,6 +106,7 @@ class OsmosisClient:
         file_id: str,
         parts: list[dict[str, Any]] | None = None,
         *,
+        file_extension: str | None = None,
         credentials: Credentials | None = None,
         git_identity: str,
     ) -> DatasetFile:
@@ -79,6 +117,8 @@ class OsmosisClient:
         For simple uploads, no parts needed.
         """
         payload: dict = {}
+        if file_extension is not None:
+            payload["file_extension"] = file_extension
         if parts is not None:
             # Validate no duplicate part numbers before sending
             part_numbers = [p["PartNumber"] for p in parts]
@@ -164,6 +204,30 @@ class OsmosisClient:
         )
         return DatasetDownloadInfo.from_dict(data)
 
+    def get_dataset_logs(
+        self,
+        name_or_id: str,
+        *,
+        limit: int = DEFAULT_PAGE_SIZE,
+        cursor: str | None = None,
+        direction: str = "older",
+        credentials: Credentials | None = None,
+        git_identity: str,
+    ) -> LogsPage:
+        """Fetch one page of dataset logs.
+
+        Without ``cursor``, ``direction="older"`` returns the most recent page;
+        the returned ``next_cursor`` pages further back in time.
+        """
+        return self._get_logs(
+            f"/api/cli/datasets/{_safe_path(name_or_id)}",
+            limit=limit,
+            cursor=cursor,
+            direction=direction,
+            credentials=credentials,
+            git_identity=git_identity,
+        )
+
     # ── Training Runs ─────────────────────────────────────────────
 
     def submit_training_run(
@@ -174,17 +238,16 @@ class OsmosisClient:
         sampling_config: dict[str, Any] | None = None,
         checkpoints_config: dict[str, Any] | None = None,
         advanced_config: dict[str, Any] | None = None,
-        rollout_env: dict[str, str] | None = None,
-        rollout_secret_refs: dict[str, str] | None = None,
+        env_config: dict[str, str] | None = None,
+        secrets: list[str] | None = None,
         credentials: Credentials | None = None,
         git_identity: str,
-    ) -> SubmitTrainingRunResult:
+    ) -> SubmitRunResult:
         """Submit a new training run.
 
-        ``rollout_env`` is a literal env-var-name → value map applied to the
-        rollout container. ``rollout_secret_refs`` maps env-var names to the
-        names of workspace ``environment_secret`` records; values are resolved
-        server-side and never travel through the CLI.
+        ``env_config`` is a literal env-var-name to value map applied to the
+        rollout container. ``secrets`` is a list of ``environment_secret`` names;
+        their values are resolved server-side and never travel through the CLI.
         """
         data: dict[str, Any] = {
             "experiment_config": experiment_config,
@@ -197,10 +260,10 @@ class OsmosisClient:
             data["checkpoints_config"] = checkpoints_config
         if advanced_config:
             data["advanced_config"] = advanced_config
-        if rollout_env:
-            data["rollout_env"] = rollout_env
-        if rollout_secret_refs:
-            data["rollout_secret_refs"] = rollout_secret_refs
+        if env_config:
+            data["env_config"] = env_config
+        if secrets:
+            data["secrets"] = {"required": secrets}
         result = platform_request(
             "/api/cli/training-runs",
             method="POST",
@@ -208,7 +271,7 @@ class OsmosisClient:
             credentials=credentials,
             git_identity=git_identity,
         )
-        return SubmitTrainingRunResult.from_dict(result)
+        return SubmitRunResult.from_dict(result)
 
     def list_training_runs(
         self,
@@ -247,7 +310,7 @@ class OsmosisClient:
         credentials: Credentials | None = None,
         git_identity: str,
     ) -> dict[str, Any]:
-        """Stop a pending or running training run."""
+        """Stop a non-terminal training run (queued, pending, or running)."""
         return platform_request(
             f"/api/cli/training-runs/{_safe_path(run_id)}/stop",
             method="POST",
@@ -270,6 +333,30 @@ class OsmosisClient:
             git_identity=git_identity,
         )
         return TrainingRunMetrics.from_dict(data)
+
+    def get_training_run_logs(
+        self,
+        name_or_id: str,
+        *,
+        limit: int = DEFAULT_PAGE_SIZE,
+        cursor: str | None = None,
+        direction: str = "older",
+        credentials: Credentials | None = None,
+        git_identity: str,
+    ) -> LogsPage:
+        """Fetch one page of training run logs.
+
+        Without ``cursor``, ``direction="older"`` returns the most recent page;
+        the returned ``next_cursor`` pages further back in time.
+        """
+        return self._get_logs(
+            f"/api/cli/training-runs/{_safe_path(name_or_id)}",
+            limit=limit,
+            cursor=cursor,
+            direction=direction,
+            credentials=credentials,
+            git_identity=git_identity,
+        )
 
     # ── Rollouts ──────────────────────────────────────────────────
 
@@ -307,79 +394,146 @@ class OsmosisClient:
         )
         return PaginatedBaseModels.from_dict(data)
 
-    # ── Deployments ───────────────────────────────────────────────
-    # All mutating endpoints key off `checkpoint` (UUID or checkpoint_name).
-    # Lifecycle: deploy → active, undeploy → inactive, failure → failed.
-
-    def list_deployments(
+    def list_lora_models(
         self,
         limit: int = DEFAULT_PAGE_SIZE,
         offset: int = 0,
         *,
         credentials: Credentials | None = None,
         git_identity: str,
-    ) -> PaginatedDeployments:
-        """List LoRA deployments in the connected repository scope."""
+    ) -> PaginatedLoraModels:
         qs = urlencode({"limit": limit, "offset": offset})
         data = platform_request(
-            f"/api/cli/deployments?{qs}",
+            f"/api/cli/models/lora?{qs}",
             credentials=credentials,
             git_identity=git_identity,
         )
-        return PaginatedDeployments.from_dict(data)
+        return PaginatedLoraModels.from_dict(data)
 
-    def get_deployment(
+    def get_lora_model(
         self,
-        checkpoint: str,
+        lora_model_name: str,
         *,
         credentials: Credentials | None = None,
         git_identity: str,
-    ) -> DeploymentInfo:
-        """Fetch a deployment by checkpoint UUID or checkpoint name."""
+    ) -> LoraModelDetail:
+        """Get details for a single LoRA model by name."""
         data = platform_request(
-            f"/api/cli/deployments/{_safe_path(checkpoint)}",
+            f"/api/cli/models/{_safe_path(lora_model_name)}",
             credentials=credentials,
             git_identity=git_identity,
         )
-        return DeploymentInfo.from_dict(data["deployment"])
+        return LoraModelDetail.from_dict(data)
 
-    def deploy_checkpoint(
+    def deploy_lora_model(
         self,
-        checkpoint: str,
+        lora_model_name: str,
         *,
         credentials: Credentials | None = None,
         git_identity: str,
-    ) -> DeploymentSummary:
-        """Deploy (or reactivate) a LoRA checkpoint.
+    ) -> LoraModelSummary:
+        """Deploy (or reactivate) a LoRA model by name.
 
-        Idempotent: deploying a checkpoint that is already active returns
+        Idempotent: deploying a LoRA model that is already active returns
         the existing deployment.
         """
         data = platform_request(
-            f"/api/cli/deployments/{_safe_path(checkpoint)}/deploy",
+            f"/api/cli/models/{_safe_path(lora_model_name)}/deploy",
             method="POST",
             data={},
             credentials=credentials,
             git_identity=git_identity,
         )
-        return DeploymentSummary.from_dict(data["deployment"])
+        return LoraModelSummary.from_dict(data)
 
-    def undeploy_checkpoint(
+    def undeploy_lora_model(
         self,
-        checkpoint: str,
+        lora_model_name: str,
         *,
         credentials: Credentials | None = None,
         git_identity: str,
-    ) -> DeploymentSummary:
-        """Undeploy a LoRA checkpoint (transitions to ``inactive``)."""
+    ) -> LoraModelSummary:
+        """Undeploy a LoRA model (transitions to ``inactive``); idempotent."""
         data = platform_request(
-            f"/api/cli/deployments/{_safe_path(checkpoint)}/undeploy",
+            f"/api/cli/models/{_safe_path(lora_model_name)}/undeploy",
             method="POST",
             data={},
             credentials=credentials,
             git_identity=git_identity,
         )
-        return DeploymentSummary.from_dict(data)
+        return LoraModelSummary.from_dict(data)
+
+    # ── Environment Secrets ───────────────────────────────────────
+    # Scoped secrets. The platform never echoes secret values:
+    # list returns names + metadata only; set returns metadata only.
+
+    def list_environment_secrets(
+        self,
+        limit: int = DEFAULT_PAGE_SIZE,
+        offset: int = 0,
+        *,
+        scope: str = "all",
+        credentials: Credentials | None = None,
+        git_identity: str,
+    ) -> PaginatedEnvironmentSecrets:
+        """List environment secrets (names + metadata only).
+
+        ``scope`` is one of ``"all"`` (workspace + the caller's personal
+        secrets), ``"workspace"``, or ``"user"`` (the caller's personal
+        secrets only). The platform never returns secret values.
+        """
+        qs = urlencode({"limit": limit, "offset": offset, "scope": scope})
+        data = platform_request(
+            f"/api/cli/environment-secrets?{qs}",
+            credentials=credentials,
+            git_identity=git_identity,
+        )
+        return PaginatedEnvironmentSecrets.from_dict(data)
+
+    def set_environment_secret(
+        self,
+        name: str,
+        value: str,
+        *,
+        scope: str,
+        credentials: Credentials | None = None,
+        git_identity: str,
+    ) -> EnvironmentSecretInfo:
+        """Create or update (upsert) an environment secret.
+
+        ``scope`` is ``"workspace"`` or ``"user"``. The secret ``value`` is
+        sent once in the request body and is never returned by the platform —
+        the response carries only metadata. Callers must not log or echo
+        ``value``.
+        """
+        data = platform_request(
+            "/api/cli/environment-secrets",
+            method="POST",
+            data={"name": name, "value": value, "scope": scope},
+            credentials=credentials,
+            git_identity=git_identity,
+        )
+        return EnvironmentSecretInfo.from_dict(data)
+
+    def delete_environment_secret(
+        self,
+        name: str,
+        *,
+        scope: str,
+        credentials: Credentials | None = None,
+        git_identity: str,
+    ) -> None:
+        """Delete an environment secret by name within ``scope``.
+
+        ``scope`` is ``"workspace"`` or ``"user"``.
+        """
+        platform_request(
+            "/api/cli/environment-secrets",
+            method="DELETE",
+            data={"name": name, "scope": scope},
+            credentials=credentials,
+            git_identity=git_identity,
+        )
 
     # ── Training-run checkpoints ──────────────────────────────────
     # Still used by `osmosis train info` to list deployable checkpoints.
@@ -397,3 +551,180 @@ class OsmosisClient:
             git_identity=git_identity,
         )
         return TrainingRunCheckpoints.from_dict(data)
+
+    # ── Evaluation Runs ──────────────────────────────────────────
+
+    def submit_evaluation_run(
+        self,
+        *,
+        experiment_config: dict[str, Any],
+        evaluation_config: dict[str, Any] | None = None,
+        advanced_config: dict[str, Any] | None = None,
+        env_config: dict[str, str] | None = None,
+        secrets: list[str] | None = None,
+        credentials: Credentials | None = None,
+        git_identity: str,
+    ) -> SubmitRunResult:
+        """Submit a new evaluation run."""
+        data: dict[str, Any] = {
+            "experiment_config": experiment_config,
+        }
+        if evaluation_config:
+            data["evaluation_config"] = evaluation_config
+        if advanced_config:
+            data["advanced_config"] = advanced_config
+        if env_config:
+            data["env_config"] = env_config
+        if secrets:
+            data["secrets"] = {"required": secrets}
+        result = platform_request(
+            "/api/cli/eval-runs",
+            method="POST",
+            data=data,
+            credentials=credentials,
+            git_identity=git_identity,
+        )
+        return SubmitRunResult.from_dict(result)
+
+    def list_eval_runs(
+        self,
+        limit: int = DEFAULT_PAGE_SIZE,
+        offset: int = 0,
+        *,
+        credentials: Credentials | None = None,
+        git_identity: str,
+    ) -> PaginatedEvaluationRuns:
+        qs = urlencode({"limit": limit, "offset": offset})
+        data = platform_request(
+            f"/api/cli/eval-runs?{qs}",
+            credentials=credentials,
+            git_identity=git_identity,
+        )
+        return PaginatedEvaluationRuns.from_dict(data)
+
+    def get_eval_run(
+        self,
+        eval_run_id: str,
+        *,
+        credentials: Credentials | None = None,
+        git_identity: str,
+    ) -> EvaluationRunDetail:
+        data = platform_request(
+            f"/api/cli/eval-runs/{_safe_path(eval_run_id)}",
+            credentials=credentials,
+            git_identity=git_identity,
+        )
+        return EvaluationRunDetail.from_dict(data)
+
+    def get_eval_run_metrics(
+        self,
+        eval_run_id: str,
+        *,
+        credentials: Credentials | None = None,
+        git_identity: str,
+    ) -> EvalRunMetrics:
+        """Fetch evaluation run metrics (unavailable for pending runs)."""
+        data = platform_request(
+            f"/api/cli/eval-runs/{_safe_path(eval_run_id)}/metrics",
+            credentials=credentials,
+            git_identity=git_identity,
+        )
+        return EvalRunMetrics.from_dict(data)
+
+    def get_eval_run_logs(
+        self,
+        name_or_id: str,
+        *,
+        limit: int = DEFAULT_PAGE_SIZE,
+        cursor: str | None = None,
+        direction: str = "older",
+        credentials: Credentials | None = None,
+        git_identity: str,
+    ) -> LogsPage:
+        """Fetch one page of evaluation run logs.
+
+        Without ``cursor``, ``direction="older"`` returns the most recent page;
+        the returned ``next_cursor`` pages further back in time.
+        """
+        return self._get_logs(
+            f"/api/cli/eval-runs/{_safe_path(name_or_id)}",
+            limit=limit,
+            cursor=cursor,
+            direction=direction,
+            credentials=credentials,
+            git_identity=git_identity,
+        )
+
+    def stop_eval_run(
+        self,
+        eval_run_id: str,
+        *,
+        credentials: Credentials | None = None,
+        git_identity: str,
+    ) -> dict[str, Any]:
+        """Stop a non-terminal evaluation run (queued, pending, or running)."""
+        return platform_request(
+            f"/api/cli/eval-runs/{_safe_path(eval_run_id)}/stop",
+            method="POST",
+            data={},
+            credentials=credentials,
+            git_identity=git_identity,
+        )
+
+    # ── Dev Rollout Servers ───────────────────────────────────────
+
+    def provision_dev_rollout_server(
+        self,
+        *,
+        rollout_name: str,
+        commit_sha: str,
+        repository_path: str,
+        entrypoint: str,
+        ttl_hours: int | None,
+        credentials: Credentials | None = None,
+        git_identity: str,
+    ) -> dict[str, Any]:
+        return platform_request(
+            "/api/cli/dev-rollout-server",
+            method="POST",
+            data={
+                "rollout_name": rollout_name,
+                "commit_sha": commit_sha,
+                "repository_path": repository_path,
+                "entrypoint": entrypoint,
+                "ttl_hours": ttl_hours,
+            },
+            credentials=credentials,
+            git_identity=git_identity,
+        )
+
+    def teardown_dev_rollout_server(
+        self,
+        server_id: str,
+        *,
+        credentials: Credentials | None = None,
+        git_identity: str,
+    ) -> dict[str, Any]:
+        return platform_request(
+            f"/api/cli/dev-rollout-server/{_safe_path(server_id)}",
+            method="DELETE",
+            data={},
+            credentials=credentials,
+            git_identity=git_identity,
+        )
+
+    def list_dev_rollout_servers(
+        self,
+        limit: int = DEFAULT_PAGE_SIZE,
+        offset: int = 0,
+        *,
+        credentials: Credentials | None = None,
+        git_identity: str,
+    ) -> PaginatedDevRolloutServers:
+        qs = urlencode({"limit": limit, "offset": offset})
+        data = platform_request(
+            f"/api/cli/dev-rollout-server?{qs}",
+            credentials=credentials,
+            git_identity=git_identity,
+        )
+        return PaginatedDevRolloutServers.from_dict(data)

@@ -1,53 +1,62 @@
 [build-system]
-requires = ["setuptools>=42", "wheel"]
+# setuptools>=77 is required for PEP 639 license metadata
+# (SPDX `license = "MIT"` expression + `license-files`).
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "osmosis-ai"
 dynamic = ["version"]
-description = "A Python SDK for Osmosis LLM training workflows: reward/rubric validation, rollout, platform CLI, and evaluation tools."
+description = "A Python SDK and CLI for building agent rollouts and managing LLM post-training workflows on Osmosis."
 readme = "README.md"
 authors = [
     {name = "Osmosis AI", email = "jake@osmosis.ai"}
 ]
-license = {file = "LICENSE"}
+license = "MIT"
+license-files = ["LICENSE"]
 classifiers = [
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
-    "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
 ]
 requires-python = ">=3.12"
 dependencies = [
-    "PyYAML>=6.0,<7.0",
-    "python-dotenv>=0.1.0,<2.0.0",
-    "requests>=2.0.0,<3.0.0",
-    "litellm>=1.83.0,<2.0.0",
+    # Security floors (CVE remediation): patched in python-dotenv 1.2.2 and
+    # requests 2.33.0. Lower bounds only, so they can still float up.
+    "python-dotenv>=1.2.2,<2.0.0",
+    "requests>=2.33.0,<3.0.0",
+    # >=1.84.0 is the security floor: it patches the proxy auth-bypass /
+    # SSTI / SQLi / RCE advisories (GHSA-4xpc-pv4p-pm3w and siblings).
+    "litellm>=1.84.0,<2.0.0",
     "tqdm>=4.0.0,<5.0.0",
     # Remote rollout SDK dependencies
     "httpx>=0.25.0,<1.0.0",
     "pydantic>=2.0.0,<3.0.0",
-    # Eval cache dependencies
-    "filelock>=3.0.0,<4.0.0",
-    "xxhash>=3.0.0",
     "strands-agents[litellm]>=1.29.0",
     "openai-agents[litellm]>=0.14,<0.15",
-    "rich>=14.2.0",
     # Secure credential storage (system keychain)
     "keyring>=25.0.0",
     # Interactive CLI prompts
     "questionary>=2.1.0,<3.0.0",
-    # CLI framework
-    "typer>=0.16.0",
-    "rich>=13.0.0",
-    "harbor[daytona]==0.6.1",
+    # CLI framework. <0.26: Typer 0.26+ vendors its own Click, so the
+    # exceptions it raises bypass our top-level `click` error handling.
+    "typer>=0.16.0,<0.26",
+    "rich>=14.2.0",
+    "harbor[daytona]>=0.15.0,<0.16.0",
+    # Security floors for load-bearing transitive deps (CVE remediation):
+    # aiohttp is exercised via litellm's async transport, and cryptography is
+    # loaded via keyring's SecretService backend on Linux. Lower bounds only,
+    # so they can still float up with their parents.
+    "aiohttp>=3.14.1",
+    "cryptography>=48.0.1",
 ]
 
 [project.optional-dependencies]
 # Platform CLI (dataset upload/validate)
 platform = [
-    "pyarrow>=14.0.0",      # Parquet file validation
+    # Parquet file validation. >=23.0.1 is the CVE security floor.
+    "pyarrow>=23.0.1",
 ]
 
 # Server dependencies for rollout serving
@@ -55,22 +64,18 @@ server = [
     "osmosis-ai[platform]",
     "fastapi>=0.100.0,<1.0.0",
     "uvicorn>=0.23.0,<1.0.0",
-    "pydantic-settings>=2.0.0,<3.0.0",
 ]
 
 # Development dependencies (testing, formatting, type checking, etc.)
-# Includes server extra so pyright/mypy can resolve server-related imports.
+# Includes server extra so pyright can resolve server-related imports.
 dev = [
     "osmosis-ai[server]",
-    "pytest>=8.0.0,<10.0.0",
-    "pytest-asyncio>=0.23.0,<2.0.0",
-    "pytest-cov>=6.0.0",
-    "anyio>=4.0.0",
-    "ruff==0.15.11",  # Keep in sync with pre-commit and CI
-    "pre-commit>=4.0.0,<5.0.0",
-    "pyright[nodejs]==1.1.408",
-    "mypy==1.20.2",
-    "types-PyYAML>=6.0",
+    "pytest>=9.0.3,<10.0.0",
+    "pytest-asyncio>=1.4.0,<2.0.0",
+    "pytest-cov>=7.1.0",
+    "ruff==0.15.15",  # Keep in sync with pre-commit and CI
+    "pre-commit>=4.6.0,<5.0.0",
+    "pyright[nodejs]==1.1.410",
     "types-requests>=2.0",
 ]
 
@@ -176,6 +181,9 @@ ignore = [
     "RUF012",  # mutable-class-default (common with Pydantic models)
 ]
 
+# En dash is used intentionally as the placeholder for empty/unset values.
+allowed-confusables = ["–"]
+
 [tool.ruff.lint.per-file-ignores]
 # B008: function-call-in-default-argument — required by Typer for typer.Option/Argument
 "**/cli/*.py" = ["B008"]
@@ -196,18 +204,3 @@ exclude = [
 typeCheckingMode = "standard"
 reportMissingTypeStubs = false
 reportCallInDefaultInitializer = false
-
-[tool.mypy]
-python_version = "3.12"
-files = ["osmosis_ai"]
-exclude = [
-    "tests/",
-    "build/",
-    "dist/",
-]
-check_untyped_defs = true
-warn_return_any = true
-warn_unused_configs = true
-ignore_missing_imports = true
-warn_unused_ignores = false
-disallow_incomplete_defs = true

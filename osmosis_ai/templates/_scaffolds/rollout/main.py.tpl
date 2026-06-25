@@ -1,7 +1,7 @@
 """<your-rollout>: placeholder rollout server created by `osmosis rollout init`.
 
 Fill in two methods, then run `python main.py` to start a FastAPI rollout
-server on $ROLLOUT_PORT (default 8000):
+server on $_OSMOSIS_ROLLOUT_PORT (default 8000):
 
   - MyAgentWorkflow.run():  drive the LLM and register sample sources.
   - MyGrader.grade():       turn samples into scalar rewards.
@@ -57,7 +57,7 @@ class MyGrader(Grader):
 def main() -> None:
     backend = LocalBackend(workflow=MyAgentWorkflow, grader=MyGrader)
     app = create_rollout_server(backend=backend)
-    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("ROLLOUT_PORT", "8000")))
+    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("_OSMOSIS_ROLLOUT_PORT", "8000")))
 
 
 if __name__ == "__main__":

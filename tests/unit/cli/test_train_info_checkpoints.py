@@ -10,10 +10,10 @@ import pytest
 
 import osmosis_ai.cli.commands.train as train_module
 import osmosis_ai.platform.api.client as api_client_module
+import osmosis_ai.platform.cli.train as platform_train_module
 import osmosis_ai.platform.cli.utils as utils_module
 from osmosis_ai.cli.console import Console
 from osmosis_ai.cli.output import DetailResult
-from osmosis_ai.cli.output.display import format_local_datetime
 from osmosis_ai.platform.api.models import (
     LoraCheckpointInfo,
     TrainingRunCheckpoints,
@@ -36,21 +36,27 @@ def _raise_metrics_unavailable(self, name, *, git_identity, credentials=None):
 def console_capture(monkeypatch: pytest.MonkeyPatch) -> StringIO:
     output = StringIO()
     console = Console(file=output, force_terminal=False)
-    monkeypatch.setattr(train_module, "console", console)
+    monkeypatch.setattr(platform_train_module, "console", console)
     monkeypatch.setattr(utils_module, "console", console)
     return output
 
 
 @pytest.fixture(autouse=True)
 def _mock_git_context(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr(
-        "osmosis_ai.platform.cli.utils.require_git_workspace_directory_context",
-        lambda: SimpleNamespace(
+    def _git_context() -> SimpleNamespace:
+        return SimpleNamespace(
             workspace_directory=Path("/repo"),
             git_identity=GIT_IDENTITY,
             repo_url=REPO_URL,
             credentials=FAKE_CREDENTIALS,
-        ),
+        )
+
+    monkeypatch.setattr(
+        "osmosis_ai.platform.cli.utils.require_git_workspace_directory_context",
+        _git_context,
+    )
+    monkeypatch.setattr(
+        platform_train_module, "require_git_workspace_directory_context", _git_context
     )
 
 
@@ -119,6 +125,7 @@ class TestStatusCheckpoints:
             get_training_run_metrics = _raise_metrics_unavailable
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(platform_train_module, "OsmosisClient", FakeClient)
         result = train_module.info(name="qwen3-run1")
 
         assert isinstance(result, DetailResult)
@@ -129,18 +136,17 @@ class TestStatusCheckpoints:
         assert all(field.label != "Checkpoint" for field in result.fields)
         assert all(field.label != "Deploy" for field in result.fields)
         assert result.sections
-        assert result.sections[0].rich.expand is True
+        assert result.sections[0].rich.expand is False
         expected_url = "https://platform.osmosis.ai/ws/training/run_1"
         assert result.display_hints == [
             f"View: {expected_url}",
-            "Deploy with: osmosis deploy <checkpoint-name>",
+            "Deploy with: osmosis model deploy <lora-model-name>",
         ]
         checkpoint_line = result.sections[0].plain_lines[0]
         assert "qwen3-run1-step-100" in checkpoint_line
         assert "step 100" in checkpoint_line
         assert "[uploaded]" in checkpoint_line
-        assert "cp_1" in checkpoint_line
-        assert format_local_datetime("2026-04-20T00:00:00Z") in checkpoint_line
+        assert "cp_1" not in checkpoint_line
 
     def test_running_run_skips_checkpoints(
         self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
@@ -164,6 +170,7 @@ class TestStatusCheckpoints:
             get_training_run_metrics = _raise_metrics_unavailable
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(platform_train_module, "OsmosisClient", FakeClient)
         result = train_module.info(name="qwen3-run1")
 
         assert isinstance(result, DetailResult)
@@ -202,6 +209,7 @@ class TestStatusCheckpoints:
             get_training_run_metrics = _raise_metrics_unavailable
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(platform_train_module, "OsmosisClient", FakeClient)
         result = train_module.info(name="qwen3-run1")
 
         assert isinstance(result, DetailResult)
@@ -211,7 +219,7 @@ class TestStatusCheckpoints:
         )
         assert result.display_hints == [
             "View: https://platform.osmosis.ai/ws/training/run_1",
-            "Deploy with: osmosis deploy <checkpoint-name>",
+            "Deploy with: osmosis model deploy <lora-model-name>",
         ]
 
     def test_endpoint_error_is_non_fatal(
@@ -235,12 +243,68 @@ class TestStatusCheckpoints:
             get_training_run_metrics = _raise_metrics_unavailable
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(platform_train_module, "OsmosisClient", FakeClient)
         result = train_module.info(name="qwen3-run1")
 
         assert isinstance(result, DetailResult)
         assert result.title == "Training Run Info"
         assert result.data["checkpoints"] == []
         assert all(field.label != "Checkpoint" for field in result.fields)
+
+    def test_internal_user_sees_id_column_and_id_fragment(
+        self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
+    ) -> None:
+        internal_run = TrainingRunDetail(
+            id="run_1",
+            name="qwen3-run1",
+            status="finished",
+            model_name="Qwen/Qwen3",
+            created_at="2026-04-01T00:00:00Z",
+            platform_url="https://platform.osmosis.ai/ws/training/run_1",
+            is_internal_user=True,
+        )
+
+        class FakeClient:
+            def get_training_run(self, name, *, git_identity, credentials=None):
+                assert credentials is FAKE_CREDENTIALS
+                assert git_identity == GIT_IDENTITY
+                return internal_run
+
+            def list_training_run_checkpoints(
+                self, name, *, git_identity, credentials=None
+            ):
+                assert credentials is FAKE_CREDENTIALS
+                assert git_identity == GIT_IDENTITY
+                return TrainingRunCheckpoints(
+                    training_run_id="run_1",
+                    training_run_name="qwen3-run1",
+                    checkpoints=[
+                        LoraCheckpointInfo(
+                            id="cp_abcdef12345678",
+                            checkpoint_step=100,
+                            status="uploaded",
+                            checkpoint_name="qwen3-run1-step-100",
+                            created_at="2026-04-20T00:00:00Z",
+                        )
+                    ],
+                )
+
+            get_training_run_metrics = _raise_metrics_unavailable
+
+        monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(platform_train_module, "OsmosisClient", FakeClient)
+        result = train_module.info(name="qwen3-run1")
+
+        assert isinstance(result, DetailResult)
+        assert result.sections
+        section = result.sections[0]
+        assert [column.header for column in section.rich.columns] == [
+            "Checkpoint",
+            "Step",
+            "Status",
+            "ID",
+        ]
+        assert section.plain_lines[0].endswith("cp_abcde")
 
     def test_finished_but_no_checkpoints(
         self, monkeypatch: pytest.MonkeyPatch, console_capture: StringIO
@@ -265,6 +329,7 @@ class TestStatusCheckpoints:
             get_training_run_metrics = _raise_metrics_unavailable
 
         monkeypatch.setattr(api_client_module, "OsmosisClient", FakeClient)
+        monkeypatch.setattr(platform_train_module, "OsmosisClient", FakeClient)
         result = train_module.info(name="qwen3-run1")
 
         assert isinstance(result, DetailResult)

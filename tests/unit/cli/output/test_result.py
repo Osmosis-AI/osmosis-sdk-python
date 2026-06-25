@@ -9,8 +9,10 @@ from osmosis_ai.cli.output.result import (
     DetailResult,
     ListColumn,
     ListResult,
+    ListSection,
     MessageResult,
     OperationResult,
+    SectionedListResult,
 )
 
 
@@ -78,6 +80,44 @@ def test_list_result_next_offset_required_even_when_unsupported() -> None:
     assert result.next_offset is None
 
 
+def test_sectioned_list_result_carries_per_section_pagination_and_columns() -> None:
+    result = SectionedListResult(
+        sections=[
+            ListSection(
+                key="base_models",
+                title="Base Models",
+                items=[{"id": "m_1"}],
+                total_count=3,
+                has_more=True,
+                next_offset=1,
+                columns=[ListColumn(key="id", label="ID")],
+            ),
+            ListSection(
+                key="lora_models",
+                title="LoRA Models",
+                items=[],
+                total_count=0,
+                has_more=False,
+                next_offset=None,
+                columns=[ListColumn(key="status", label="Status")],
+            ),
+        ],
+    )
+    assert [section.key for section in result.sections] == [
+        "base_models",
+        "lora_models",
+    ]
+    assert result.sections[0].has_more is True
+    assert result.sections[0].next_offset == 1
+    assert result.sections[1].next_offset is None
+    assert [column.key for column in result.sections[0].columns] == ["id"]
+    assert [column.key for column in result.sections[1].columns] == ["status"]
+
+
+def test_sectioned_list_result_preserves_positional_exit_code() -> None:
+    assert SectionedListResult([], {}, 7).exit_code == 7
+
+
 def test_operation_result_minimal() -> None:
     result = OperationResult(
         operation="deploy",
@@ -95,13 +135,13 @@ def test_operation_result_with_structured_next_steps() -> None:
         status="success",
         message="Checkpoint deployed.",
         next_steps_structured=[
-            {"action": "deployment_info", "checkpoint_name": "run-step-40"},
+            {"action": "model_deploy", "model_name": "run-step-40"},
         ],
-        display_next_steps=["Inspect with: osmosis deployment info run-step-40"],
+        display_next_steps=["Deploy with: osmosis model deploy run-step-40"],
     )
-    assert result.next_steps_structured[0]["action"] == "deployment_info"
+    assert result.next_steps_structured[0]["action"] == "model_deploy"
     assert result.display_next_steps == [
-        "Inspect with: osmosis deployment info run-step-40"
+        "Deploy with: osmosis model deploy run-step-40"
     ]
 
 

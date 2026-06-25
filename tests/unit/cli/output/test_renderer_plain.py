@@ -14,8 +14,10 @@ from osmosis_ai.cli.output.result import (
     DetailSection,
     ListColumn,
     ListResult,
+    ListSection,
     MessageResult,
     OperationResult,
+    SectionedListResult,
 )
 
 
@@ -51,13 +53,13 @@ def test_plain_detail_prints_section_plain_lines_and_hints() -> None:
                 plain_lines=["Checkpoint: ckpt-a"],
             )
         ],
-        display_hints=["Deploy: osmosis deploy ckpt-a"],
+        display_hints=["Deploy: osmosis model deploy ckpt-a"],
     )
     stdout, _ = _render(result)
     assert stdout.splitlines() == [
         "Name: run-a",
         "Checkpoint: ckpt-a",
-        "Deploy: osmosis deploy ckpt-a",
+        "Deploy: osmosis model deploy ckpt-a",
     ]
 
 
@@ -168,6 +170,70 @@ def test_list_normalises_tabs_and_newlines_in_values() -> None:
     assert stdout.count("\n") == 1
 
 
+def test_sectioned_list_renders_title_line_then_rows_per_section() -> None:
+    result = SectionedListResult(
+        sections=[
+            ListSection(
+                key="base_models",
+                title="Base Models",
+                items=[{"name": "Qwen/Qwen3", "creator": "brian"}],
+                total_count=1,
+                has_more=False,
+                next_offset=None,
+                columns=[
+                    ListColumn(key="name", label="Name"),
+                    ListColumn(key="creator", label="Created By"),
+                ],
+            ),
+            ListSection(
+                key="lora_models",
+                title="LoRA Models",
+                items=[{"name": "run-step-1", "status": "active", "step": 1}],
+                total_count=1,
+                has_more=False,
+                next_offset=None,
+                columns=[
+                    ListColumn(key="name", label="Name"),
+                    ListColumn(key="status", label="Status"),
+                    ListColumn(key="step", label="Step"),
+                ],
+            ),
+        ],
+    )
+    stdout, stderr = _render(result)
+    assert stdout.splitlines() == [
+        "Base Models:",
+        "Qwen/Qwen3\tbrian",
+        "LoRA Models:",
+        "run-step-1\tactive\t1",
+    ]
+    assert stderr == ""
+
+
+def test_sectioned_list_uses_display_items_for_plain_human_values() -> None:
+    result = SectionedListResult(
+        sections=[
+            ListSection(
+                key="lora_models",
+                title="LoRA Models",
+                items=[{"name": "run-step-1", "status": "active"}],
+                total_count=1,
+                has_more=False,
+                next_offset=None,
+                columns=[
+                    ListColumn(key="name", label="Name"),
+                    ListColumn(key="status", label="Status"),
+                ],
+                display_items=[
+                    {"name": "run-step-1", "status": "[green][active][/green]"}
+                ],
+            ),
+        ],
+    )
+    stdout, _ = _render(result)
+    assert stdout == "LoRA Models:\nrun-step-1\t[active]\n"
+
+
 def test_detail_unescapes_rich_escaped_display_values() -> None:
     result = DetailResult(
         title="Dataset",
@@ -186,7 +252,7 @@ def test_operation_renders_concise_success_line() -> None:
         status="success",
         resource={"id": "dep_1", "checkpoint_name": "run-step-40"},
         message="Checkpoint deployed.",
-        display_next_steps=["Test it: osmosis deployment info run-step-40"],
+        display_next_steps=["Test it: osmosis model deploy run-step-40"],
     )
     stdout, _ = _render(result)
     lines = stdout.splitlines()

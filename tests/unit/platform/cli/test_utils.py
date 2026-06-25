@@ -13,7 +13,9 @@ from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.platform.cli.utils import (
     fetch_all_pages,
     format_dataset_status,
-    format_processing_step,
+    format_deployment_status,
+    format_eval_status,
+    format_reward,
     format_run_status,
     format_size,
     platform_call,
@@ -50,40 +52,20 @@ def test_format_size(size_bytes: int, expected: str) -> None:
     assert format_size(size_bytes) == expected
 
 
-# ── format_processing_step ───────────────────────────────────────────
-
-
-def test_format_processing_step_none_when_no_step() -> None:
-    obj = SimpleNamespace(processing_step=None, processing_percent=None)
-    assert format_processing_step(obj) is None
-
-
-def test_format_processing_step_with_step_only() -> None:
-    obj = SimpleNamespace(processing_step="training", processing_percent=None)
-    assert format_processing_step(obj) == "training"
-
-
-def test_format_processing_step_with_percent() -> None:
-    obj = SimpleNamespace(processing_step="training", processing_percent=42.7)
-    assert format_processing_step(obj) == "training (43%)"
-
-
 # ── format_dataset_status ────────────────────────────────────────────
 
 
-def _dataset(status: str, step: str | None = None) -> SimpleNamespace:
-    return SimpleNamespace(status=status, processing_step=step, processing_percent=None)
+def _dataset(status: str) -> SimpleNamespace:
+    return SimpleNamespace(status=status)
 
 
 def test_format_dataset_status_for_prompt() -> None:
     assert format_dataset_status(_dataset("uploaded"), for_prompt=True) == "[uploaded]"
 
 
-def test_format_dataset_status_for_prompt_with_step() -> None:
-    """processing_step is not shown in list display — only [status]."""
+def test_format_dataset_status_for_prompt_processing() -> None:
     assert (
-        format_dataset_status(_dataset("processing", "validating"), for_prompt=True)
-        == "[processing]"
+        format_dataset_status(_dataset("processing"), for_prompt=True) == "[processing]"
     )
 
 
@@ -118,6 +100,10 @@ def test_format_dataset_status_error_styled(monkeypatch: pytest.MonkeyPatch) -> 
     assert "error" in result
 
 
+def test_format_dataset_status_cancelled_is_dim() -> None:
+    assert format_dataset_status(_dataset("cancelled")) == "[dim]\\[cancelled][/dim]"
+
+
 def test_format_dataset_status_unknown_uses_escape(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -132,10 +118,8 @@ def test_format_dataset_status_unknown_uses_escape(
 # ── format_run_status ────────────────────────────────────────────────
 
 
-def _run(
-    status: str, step: str | None = None, pct: float | None = None
-) -> SimpleNamespace:
-    return SimpleNamespace(status=status, processing_step=step, processing_percent=pct)
+def _run(status: str) -> SimpleNamespace:
+    return SimpleNamespace(status=status)
 
 
 def test_format_run_status_for_prompt() -> None:
@@ -143,8 +127,8 @@ def test_format_run_status_for_prompt() -> None:
 
 
 def test_format_run_status_for_prompt_with_step_and_percent() -> None:
-    result = format_run_status(_run("running", "training", 55.3), for_prompt=True)
-    assert result == "[running: training 55%]"
+    result = format_run_status(_run("running"), for_prompt=True)
+    assert result == "[running]"
 
 
 def test_format_run_status_success(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -190,6 +174,82 @@ def test_format_run_status_unknown(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(mod, "console", c)
     result = format_run_status(_run("weird"))
     assert "[weird]" in result
+
+
+# ── format_deployment_status ─────────────────────────────────────────
+#
+# Labels mirror the platform's models table: only a deployed model gets
+# a styled list token, every other state renders an en dash. Detail rows
+# (``plain=True``) get the explicit Title Case vocabulary instead.
+
+
+@pytest.mark.parametrize(
+    "status, expected",
+    [
+        ("active", "[green]\\[deployed][/green]"),
+        ("inactive", "–"),
+        ("weird", "–"),
+        (None, "–"),
+    ],
+)
+def test_format_deployment_status_labels(status: str | None, expected: str) -> None:
+    assert format_deployment_status(status) == expected
+
+
+@pytest.mark.parametrize(
+    "status, expected",
+    [
+        ("active", "Deployed"),
+        ("inactive", "Not deployed"),
+        (None, "Not deployed"),
+    ],
+)
+def test_format_deployment_status_plain_skips_markup(
+    status: str | None, expected: str
+) -> None:
+    assert format_deployment_status(status, plain=True) == expected
+
+
+# ── format_eval_status ───────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "status, style",
+    [
+        ("pending", "orange3"),
+        ("running", "blue"),
+        ("failed", "red"),
+        ("stopped", "dim"),
+    ],
+)
+def test_format_eval_status_styles(status: str, style: str) -> None:
+    assert format_eval_status(_run(status)) == f"[{style}]\\[{status}][/{style}]"
+
+
+def test_format_eval_status_finished_is_green_not_terminal_red() -> None:
+    # ``finished`` is a member of EVAL_RUN_STATUSES_TERMINAL too; the ordered
+    # matcher must hit the success (green) bucket before the terminal (red) one.
+    assert format_eval_status(_run("finished")) == "[green]\\[finished][/green]"
+
+
+def test_format_eval_status_unknown_uses_escape() -> None:
+    assert format_eval_status(_run("weird")) == "\\[weird]"
+
+
+# ── format_reward ────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "reward, expected",
+    [
+        (0.85, "0.85"),
+        (0.875, "0.88"),
+        (1, "1.00"),
+        (None, "–"),
+    ],
+)
+def test_format_reward(reward: float | None, expected: str) -> None:
+    assert format_reward(reward) == expected
 
 
 # ── fetch_all_pages ─────────────────────────────────────────────────
@@ -290,23 +350,26 @@ def test_validate_list_options_mutual_exclusion() -> None:
 # ── platform_call ────────────────────────────────────────────────────
 
 
-def test_platform_call_uses_injected_console() -> None:
-    output = StringIO()
-    status_console = Console(file=output, force_terminal=False)
+def test_platform_call_shows_status_and_returns_result(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import osmosis_ai.cli.output as output_mod
+
     messages: list[str] = []
 
     @contextmanager
-    def record_spinner(message: str):
+    def record_status(message: str):
         messages.append(message)
         yield
 
-    status_console.spinner = record_spinner  # type: ignore[method-assign]
+    class _FakeContext:
+        def status(self, message: str):
+            return record_status(message)
 
-    result = platform_call(
-        "Fetching things...",
-        lambda: "ok",
-        output_console=status_console,
-    )
+    monkeypatch.setattr(output_mod, "get_output_context", lambda: _FakeContext())
+
+    result = platform_call("Fetching things...", lambda: "ok")
 
     assert result == "ok"
+    # Progress routes through the active output context (stderr), not a console.
     assert messages == ["Fetching things..."]

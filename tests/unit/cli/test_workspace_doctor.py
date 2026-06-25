@@ -9,6 +9,12 @@ import pytest
 from osmosis_ai.cli.main import main
 
 
+@pytest.fixture(autouse=True)
+def _logged_out(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep doctor's best-effort workspace lookup off the network."""
+    monkeypatch.setattr("osmosis_ai.platform.auth.load_credentials", lambda: None)
+
+
 def _write_workspace_template(root: Path) -> Path:
     (root / "configs").mkdir(parents=True)
     (root / ".claude").mkdir()
@@ -45,15 +51,15 @@ def test_project_doctor_dry_run_reports_missing_paths(
 
     rc = main(["--json", "doctor"])
 
-    assert rc == 0
+    assert rc == 1
     payload = json.loads(capsys.readouterr().out)
+    assert payload["status"] == "failed"
     assert "rollouts/" in payload["resource"]["missing"]
     assert "configs/training/" in payload["resource"]["missing"]
     assert ".osmosis/cache/" not in payload["resource"]["missing"]
     assert "rollouts/.gitkeep" not in payload["resource"]["missing"]
     assert "AGENTS.md" in payload["resource"]["missing"]
     assert payload["resource"]["fixed"] is False
-    assert payload["resource"]["updates_checked"] is False
     assert payload["resource"]["valid"] is False
     assert payload["resource"]["required_paths"] == [
         "rollouts/",
@@ -61,7 +67,6 @@ def test_project_doctor_dry_run_reports_missing_paths(
         "configs/eval/",
         "data/",
     ]
-    assert not (project / "research" / "program.md").exists()
 
 
 def test_project_doctor_reports_git_context(
@@ -100,7 +105,9 @@ def test_project_doctor_reports_git_context(
 
     payload = json.loads(capsys.readouterr().out)
     assert rc == 0
+    assert payload["status"] == "success"
     assert payload["resource"]["valid"] is True
+    assert payload["resource"]["workspace"] is None
     assert payload["resource"]["git"]["identity"] == "acme/rollouts"
     assert (
         payload["resource"]["git"]["remote_url"]
@@ -131,7 +138,7 @@ def test_project_doctor_reports_invalid_git_origin_warning(
     rc = main(["--json", "doctor"])
 
     payload = json.loads(capsys.readouterr().out)
-    assert rc == 0
+    assert rc == 1
     assert payload["resource"]["git"]["identity"] is None
     assert payload["resource"]["git"]["remote_url"] is None
     assert "hosted on github.com" in payload["resource"]["git"]["warning"]
@@ -146,7 +153,7 @@ def test_project_doctor_does_not_report_missing_gitkeep_for_existing_directory(
 
     rc = main(["--json", "doctor"])
 
-    assert rc == 0
+    assert rc == 1
     payload = json.loads(capsys.readouterr().out)
     assert "rollouts/" not in payload["resource"]["missing"]
     assert "rollouts/.gitkeep" not in payload["resource"]["missing"]
@@ -160,9 +167,9 @@ def test_project_doctor_plain_reports_actionable_summary(
 
     rc = main(["--plain", "doctor"])
 
-    assert rc == 0
+    assert rc == 1
     output = capsys.readouterr().out
-    assert "Workspace doctor completed." in output
+    assert "Workspace doctor found missing scaffold paths." in output
     assert f"Workspace directory: {project}" in output
     assert "Missing scaffold paths:" in output
     assert "rollouts/" in output
@@ -186,7 +193,7 @@ def test_project_doctor_dry_run_does_not_require_workspace_template(
 
     rc = main(["--json", "doctor"])
 
-    assert rc == 0
+    assert rc == 1
     payload = json.loads(capsys.readouterr().out)
     assert "AGENTS.md" in payload["resource"]["missing"]
 
@@ -215,12 +222,11 @@ def test_project_doctor_fix_creates_missing_paths(
 
     payload = json.loads(capsys.readouterr().out)
     assert rc == 0
-    assert not (project / ".osmosis" / "research" / "program.md").exists()
+    assert payload["status"] == "success"
     assert (project / "configs" / "training").is_dir()
     assert (project / "AGENTS.md").is_file()
     assert (project / "AGENTS.md").read_text(encoding="utf-8") == "template agents\n"
     assert payload["resource"]["missing"] == []
-    assert payload["resource"]["updates_checked"] is True
     assert not (project / ".osmosis" / "project.toml").exists()
 
 
@@ -235,44 +241,153 @@ def test_project_doctor_fix_outside_project_does_not_create_project(
     assert rc == 1
     assert captured.out == ""
     assert not (tmp_path / ".osmosis" / "project.toml").exists()
-    message = json.loads(captured.err)["error"]["message"]
-    assert "Osmosis workspace directory" in message
-    assert "osmosis init" not in message
+    error = json.loads(captured.err)["error"]
+    assert error["code"] == "WORKSPACE_REQUIRED"
+    assert "Osmosis workspace directory" in error["message"]
+    assert "osmosis init" not in error["message"]
 
 
-def test_project_doctor_fix_preserves_existing_research_program(
-    tmp_path: Path, monkeypatch, capsys, workspace_template: Path
-) -> None:
-    project = _make_workspace_directory(tmp_path / "project")
-    program = project / "research" / "program.md"
-    program.parent.mkdir(parents=True)
-    program.write_text("# Research Brief\n\nKeep this content.\n", encoding="utf-8")
-    monkeypatch.chdir(project)
+def _fake_credentials():
+    from datetime import UTC, datetime, timedelta
 
-    rc = main(["--json", "doctor", "--fix"])
+    from osmosis_ai.platform.auth.credentials import Credentials, UserInfo
 
-    capsys.readouterr()
-    assert rc == 0
-    assert (
-        program.read_text(encoding="utf-8")
-        == "# Research Brief\n\nKeep this content.\n"
+    return Credentials(
+        access_token="token",
+        token_type="Bearer",
+        expires_at=datetime.now(UTC) + timedelta(days=30),
+        created_at=datetime.now(UTC),
+        user=UserInfo(id="u1", email="brian@example.com", name="Brian"),
+        token_id="tok_1",
     )
 
 
-def test_project_doctor_reports_agent_updates_without_overwriting(
-    tmp_path: Path, monkeypatch, workspace_template: Path
+def _add_origin_remote(project: Path) -> None:
+    subprocess.run(
+        [
+            "git",
+            "-C",
+            str(project),
+            "remote",
+            "add",
+            "origin",
+            "git@github.com:Acme/Rollouts.git",
+        ],
+        check=True,
+        capture_output=True,
+    )
+
+
+def test_project_doctor_reports_linked_workspace(
+    tmp_path: Path, monkeypatch, capsys
 ) -> None:
-    from osmosis_ai.cli.output import OutputFormat, override_output_context
-    from osmosis_ai.platform.cli.workspace_directory import doctor_workspace_directory
+    from osmosis_ai.platform.auth.flow import VerifiedWorkspace, VerifyResult
 
     project = _make_workspace_directory(tmp_path / "project")
-    (project / "AGENTS.md").write_text("custom agents", encoding="utf-8")
+    _add_origin_remote(project)
     monkeypatch.chdir(project)
+    credentials = _fake_credentials()
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.load_credentials", lambda: credentials
+    )
+    verify_calls: list[dict[str, str | None]] = []
+    verified = VerifyResult(
+        user=credentials.user,
+        expires_at=credentials.expires_at,
+        token_id=credentials.token_id,
+        workspace=VerifiedWorkspace(id="ws_1", name="Acme Workspace", role="admin"),
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.verify_token",
+        lambda token, git_identity=None: (
+            verify_calls.append({"token": token, "git_identity": git_identity})
+            or verified
+        ),
+    )
 
-    with override_output_context(format=OutputFormat.rich, interactive=True):
-        result = doctor_workspace_directory(fix=True)
+    rc = main(["--json", "doctor"])
 
-    assert (project / "AGENTS.md").read_text(encoding="utf-8") == "custom agents"
-    assert (project / "configs" / "training").is_dir()
-    assert result.resource["updates_available"] == ["AGENTS.md"]
-    assert result.display_next_steps
+    payload = json.loads(capsys.readouterr().out)
+    assert rc == 1  # scaffold is still missing — workspace lookup is orthogonal
+    assert verify_calls == [{"token": "token", "git_identity": "acme/rollouts"}]
+    assert payload["resource"]["workspace"] == {
+        "id": "ws_1",
+        "name": "Acme Workspace",
+        "role": "admin",
+    }
+
+
+def test_project_doctor_plain_shows_linked_workspace_line(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    from osmosis_ai.platform.auth.flow import VerifiedWorkspace, VerifyResult
+
+    project = _make_workspace_directory(tmp_path / "project")
+    _add_origin_remote(project)
+    monkeypatch.chdir(project)
+    credentials = _fake_credentials()
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.load_credentials", lambda: credentials
+    )
+    verified = VerifyResult(
+        user=credentials.user,
+        expires_at=credentials.expires_at,
+        token_id=credentials.token_id,
+        workspace=VerifiedWorkspace(id="ws_1", name="Acme Workspace", role="admin"),
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.verify_token",
+        lambda token, git_identity=None: verified,
+    )
+
+    rc = main(["--plain", "doctor"])
+
+    assert rc == 1
+    assert "Linked workspace: Acme Workspace" in capsys.readouterr().out
+
+
+def test_project_doctor_degrades_when_workspace_lookup_fails(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    from osmosis_ai.platform.auth import LoginError
+
+    project = _make_workspace_directory(tmp_path / "project")
+    _add_origin_remote(project)
+    monkeypatch.chdir(project)
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.load_credentials", lambda: _fake_credentials()
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.verify_token",
+        lambda token, git_identity=None: (_ for _ in ()).throw(
+            LoginError("Could not connect to platform: offline")
+        ),
+    )
+
+    rc = main(["--json", "doctor"])
+
+    payload = json.loads(capsys.readouterr().out)
+    assert rc == 1
+    assert payload["resource"]["workspace"] is None
+
+
+def test_project_doctor_skips_workspace_lookup_without_git_identity(
+    tmp_path: Path, monkeypatch, capsys
+) -> None:
+    project = _make_workspace_directory(tmp_path / "project")
+    monkeypatch.chdir(project)
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.load_credentials", lambda: _fake_credentials()
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.verify_token",
+        lambda token, git_identity=None: pytest.fail(
+            "doctor must not call verify without a git identity"
+        ),
+    )
+
+    rc = main(["--json", "doctor"])
+
+    payload = json.loads(capsys.readouterr().out)
+    assert rc == 1
+    assert payload["resource"]["workspace"] is None

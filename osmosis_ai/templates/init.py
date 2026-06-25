@@ -155,7 +155,7 @@ def _check_force_config_targets(
 
 
 def init_command(name: str, *, force: bool = False) -> CommandResult | None:
-    """Scaffold ``rollouts/<name>/`` and matching eval/training configs."""
+    """Scaffold ``rollouts/<name>/`` and matching evaluation/training configs."""
     from osmosis_ai.platform.cli.workspace_directory_contract import (
         resolve_workspace_directory_from_cwd,
         validate_workspace_directory_contract,
@@ -188,7 +188,7 @@ def init_command(name: str, *, force: bool = False) -> CommandResult | None:
 
     next_steps = [
         f"pip install -e rollouts/{name}",
-        f"osmosis eval run configs/eval/{name}.toml --limit 1",
+        f"osmosis eval submit configs/eval/{name}.toml",
         f"osmosis train submit configs/training/{name}.toml",
     ]
     rollout_dir_rel = rollout_dir.relative_to(workspace_directory).as_posix()

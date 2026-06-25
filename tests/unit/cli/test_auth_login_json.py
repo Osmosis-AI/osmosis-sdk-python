@@ -59,7 +59,8 @@ def test_login_json_with_token_returns_operation_result(
         lambda **kwargs: None,
     )
     monkeypatch.setattr(
-        "osmosis_ai.platform.auth.verify_token", lambda token: fake_verify_result
+        "osmosis_ai.platform.auth.verify_token",
+        lambda token, git_identity=None: fake_verify_result,
     )
     monkeypatch.setattr(
         "osmosis_ai.platform.auth.credentials.save_credentials", lambda creds: "keyring"
@@ -97,7 +98,8 @@ def test_login_json_with_token_points_to_clone_and_doctor(
         lambda **kwargs: None,
     )
     monkeypatch.setattr(
-        "osmosis_ai.platform.auth.verify_token", lambda token: fake_verify_result
+        "osmosis_ai.platform.auth.verify_token",
+        lambda token, git_identity=None: fake_verify_result,
     )
     monkeypatch.setattr(
         "osmosis_ai.platform.auth.credentials.save_credentials", lambda creds: "keyring"
@@ -129,7 +131,8 @@ def test_login_plain_with_token_prints_clone_and_doctor_next_steps(
         lambda **kwargs: None,
     )
     monkeypatch.setattr(
-        "osmosis_ai.platform.auth.verify_token", lambda token: fake_verify_result
+        "osmosis_ai.platform.auth.verify_token",
+        lambda token, git_identity=None: fake_verify_result,
     )
     monkeypatch.setattr(
         "osmosis_ai.platform.auth.credentials.save_credentials", lambda creds: "keyring"
@@ -157,7 +160,8 @@ def test_login_plain_with_token_omits_workspace_lookup_fields(
         lambda **kwargs: None,
     )
     monkeypatch.setattr(
-        "osmosis_ai.platform.auth.verify_token", lambda token: fake_verify_result
+        "osmosis_ai.platform.auth.verify_token",
+        lambda token, git_identity=None: fake_verify_result,
     )
     monkeypatch.setattr(
         "osmosis_ai.platform.auth.credentials.save_credentials", lambda creds: "keyring"
@@ -185,7 +189,7 @@ def test_login_json_force_with_invalid_token_preserves_existing_session(
     monkeypatch.setattr("osmosis_ai.platform.auth.load_credentials", _credentials)
     monkeypatch.setattr(
         "osmosis_ai.platform.auth.verify_token",
-        lambda token: (_ for _ in ()).throw(
+        lambda token, git_identity=None: (_ for _ in ()).throw(
             LoginError("Authentication failed.", status_code=401)
         ),
     )
@@ -226,7 +230,7 @@ def test_login_json_with_platform_verify_error_is_platform_error(
     )
     monkeypatch.setattr(
         "osmosis_ai.platform.auth.verify_token",
-        lambda token: (_ for _ in ()).throw(
+        lambda token, git_identity=None: (_ for _ in ()).throw(
             LoginError(
                 "Osmosis platform encountered an internal error. Please try again later.",
                 status_code=500,
@@ -245,6 +249,45 @@ def test_login_json_with_platform_verify_error_is_platform_error(
     assert "internal error" in envelope["error"]["message"]
 
 
+def test_login_json_with_426_is_upgrade_required_with_structured_details(
+    monkeypatch, capsys
+) -> None:
+    monkeypatch.delenv("OSMOSIS_TOKEN", raising=False)
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.load_credentials",
+        lambda **kwargs: None,
+    )
+    monkeypatch.setattr(
+        "osmosis_ai.platform.auth.verify_token",
+        lambda token, git_identity=None: (_ for _ in ()).throw(
+            LoginError(
+                "A newer osmosis CLI is required, run osmosis upgrade",
+                code="UPGRADE_REQUIRED",
+                status_code=426,
+                details={
+                    "status": "unsupported",
+                    "message": "A newer osmosis CLI is required, run osmosis upgrade",
+                },
+            )
+        ),
+    )
+
+    exit_code = cli.main(["--json", "auth", "login", "--token", "secret"])
+
+    captured = capsys.readouterr()
+    assert exit_code == 1
+    assert captured.out == ""
+    envelope = json.loads(captured.err)
+    assert envelope["error"]["code"] == "UPGRADE_REQUIRED"
+    # The handshake 426 carries the same structured signal a regular API 426
+    # produces, so machine consumers see one consistent UPGRADE_REQUIRED shape.
+    assert envelope["error"]["details"] == {
+        "status_code": 426,
+        "status": "unsupported",
+        "message": "A newer osmosis CLI is required, run osmosis upgrade",
+    }
+
+
 def test_login_json_with_malformed_verify_response_is_platform_error(
     monkeypatch, capsys
 ) -> None:
@@ -255,7 +298,7 @@ def test_login_json_with_malformed_verify_response_is_platform_error(
     )
     monkeypatch.setattr(
         "osmosis_ai.platform.auth.verify_token",
-        lambda token: (_ for _ in ()).throw(
+        lambda token, git_identity=None: (_ for _ in ()).throw(
             LoginError("Invalid response from platform")
         ),
     )
@@ -278,7 +321,8 @@ def test_login_json_force_cleans_and_saves_before_revoking_old_token(
     calls = []
     monkeypatch.setattr("osmosis_ai.platform.auth.load_credentials", _credentials)
     monkeypatch.setattr(
-        "osmosis_ai.platform.auth.verify_token", lambda token: fake_verify_result
+        "osmosis_ai.platform.auth.verify_token",
+        lambda token, git_identity=None: fake_verify_result,
     )
     monkeypatch.setattr(
         "osmosis_ai.platform.auth.credentials.save_credentials",
@@ -309,7 +353,8 @@ def test_login_json_force_with_token_leaves_new_credentials_saved(
     calls: list[str] = []
     monkeypatch.setattr("osmosis_ai.platform.auth.load_credentials", _credentials)
     monkeypatch.setattr(
-        "osmosis_ai.platform.auth.verify_token", lambda token: fake_verify_result
+        "osmosis_ai.platform.auth.verify_token",
+        lambda token, git_identity=None: fake_verify_result,
     )
     monkeypatch.setattr(
         "osmosis_ai.platform.auth.credentials.save_credentials",
@@ -354,7 +399,8 @@ def test_login_json_force_restores_old_credentials_when_new_save_fails(
         lambda include_env=False: old_credentials,
     )
     monkeypatch.setattr(
-        "osmosis_ai.platform.auth.verify_token", lambda token: fake_verify_result
+        "osmosis_ai.platform.auth.verify_token",
+        lambda token, git_identity=None: fake_verify_result,
     )
     monkeypatch.setattr(
         "osmosis_ai.platform.auth.credentials.save_credentials", save_credentials
@@ -391,7 +437,8 @@ def test_login_json_with_token_loads_stored_credentials_when_env_is_set(
 
     monkeypatch.setattr("osmosis_ai.platform.auth.load_credentials", load_credentials)
     monkeypatch.setattr(
-        "osmosis_ai.platform.auth.verify_token", lambda token: fake_verify_result
+        "osmosis_ai.platform.auth.verify_token",
+        lambda token, git_identity=None: fake_verify_result,
     )
     monkeypatch.setattr(
         "osmosis_ai.platform.auth.credentials.save_credentials",
@@ -428,7 +475,8 @@ def test_login_json_with_env_token_is_verify_only(
     save_calls = []
     delete_calls = []
     monkeypatch.setattr(
-        "osmosis_ai.platform.auth.verify_token", lambda token: fake_verify_result
+        "osmosis_ai.platform.auth.verify_token",
+        lambda token, git_identity=None: fake_verify_result,
     )
     monkeypatch.setattr(
         "osmosis_ai.platform.auth.credentials.save_credentials",
@@ -460,7 +508,9 @@ def test_login_rich_with_env_token_is_verify_only(
     delete_calls = []
     monkeypatch.setattr(
         "osmosis_ai.platform.auth.verify_token",
-        lambda token: verify_calls.append(token) or fake_verify_result,
+        lambda token, git_identity=None: (
+            verify_calls.append(token) or fake_verify_result
+        ),
     )
     monkeypatch.setattr(
         "osmosis_ai.platform.auth.credentials.save_credentials",
@@ -497,7 +547,7 @@ def test_login_rich_with_invalid_env_token_mentions_unset(
     errors = []
     monkeypatch.setattr(
         "osmosis_ai.platform.auth.verify_token",
-        lambda token: (_ for _ in ()).throw(
+        lambda token, git_identity=None: (_ for _ in ()).throw(
             LoginError("Token is invalid.", code=error_code)
         ),
     )
@@ -525,7 +575,7 @@ def test_login_json_with_invalid_env_token_mentions_unset(
     monkeypatch.setenv("OSMOSIS_TOKEN", "bad-env-token")
     monkeypatch.setattr(
         "osmosis_ai.platform.auth.verify_token",
-        lambda token: (_ for _ in ()).throw(
+        lambda token, git_identity=None: (_ for _ in ()).throw(
             LoginError("Token is invalid.", code=error_code)
         ),
     )
@@ -546,7 +596,7 @@ def test_login_json_with_generic_401_env_token_mentions_unset(
     monkeypatch.setenv("OSMOSIS_TOKEN", "bad-env-token")
     monkeypatch.setattr(
         "osmosis_ai.platform.auth.verify_token",
-        lambda token: (_ for _ in ()).throw(
+        lambda token, git_identity=None: (_ for _ in ()).throw(
             LoginError("Authentication failed.", status_code=401)
         ),
     )

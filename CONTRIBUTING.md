@@ -38,7 +38,6 @@ The table below lists all development commands. If you installed with **pip**, d
 | Format | `uv run ruff format .` |
 | Check formatting | `uv run ruff format --check .` |
 | Type check (pyright) | `uv run pyright osmosis_ai/` |
-| Type check (mypy) | `uv run mypy osmosis_ai/` |
 | Verify public API types | `uv run --no-editable pyright --verifytypes osmosis_ai --ignoreexternal` |
 
 ## Testing
@@ -53,13 +52,12 @@ Ruff is pinned to one version across `pyproject.toml`, `.pre-commit-config.yaml`
 
 ## Type Checking
 
-[Pyright](https://microsoft.github.io/pyright/) is the primary type checker and [mypy](https://mypy-lang.org/) is a secondary checker. Both are included in the `dev` extras.
+[Pyright](https://microsoft.github.io/pyright/) is the type checker, included in the `dev` extras.
 
 - **Pyright** — must pass. All errors must be resolved before merging.
 - **Pyright `--verifytypes`** — must pass. Ensures all public API symbols have complete type annotations.
-- **mypy** — advisory (`continue-on-error` in CI). Fix warnings when practical, but they won't block a PR.
 
-Configuration for both tools lives in `pyproject.toml` under `[tool.pyright]` and `[tool.mypy]`.
+Configuration lives in `pyproject.toml` under `[tool.pyright]`.
 
 > **Note:** `--verifytypes` requires a non-editable install. The `--no-editable` flag in `uv run` handles this automatically — it temporarily installs the package from a built wheel for the duration of the command.
 
@@ -84,7 +82,7 @@ All PR titles **must** follow this format (enforced by CI):
 [mod1][mod2] type: description          # multi-module (up to 3)
 ```
 
-- **Modules**: `reward`, `rollout`, `server`, `cli`, `auth`, `eval`, `misc`, `ci`, `doc`
+- **Modules**: `rollout`, `server`, `cli`, `auth`, `eval`, `misc`, `ci`, `doc`
 - **Types**: `feat`, `fix`, `refactor`, `chore`, `test`, `doc`
 
 For breaking changes, add `[BREAKING]` before the modules:
@@ -100,7 +98,7 @@ For breaking changes, add `[BREAKING]` before the modules:
 [rollout][auth] refactor: extract LifecycleManager
 [server] fix: handle timeout in rollout init
 [cli] chore: update dependency versions
-[BREAKING][reward] refactor: rename decorator parameters
+[BREAKING][rollout] refactor: change Grader.grade signature
 ```
 
 PR titles appear directly in auto-generated GitHub Release Notes, so keep them clear and descriptive.
@@ -117,7 +115,7 @@ Add a label to your PR so it gets categorized correctly in Release Notes:
 | `documentation` | Docs update |
 | `chore` / `ci` / `refactor` / `dependencies` | Maintenance work |
 
-Module-specific labels (`reward`, `rollout`, `server`, `cli`, `auth`, `eval`) can also be added for filtering. Rollout work typically touches `osmosis_ai.rollout` and related CLI commands.
+Module-specific labels (`rollout`, `server`, `cli`, `auth`, `eval`) can also be added for filtering. Rollout work typically touches `osmosis_ai.rollout` and related CLI commands.
 
 ### Workflow
 
@@ -126,4 +124,4 @@ Module-specific labels (`reward`, `rollout`, `server`, `cli`, `auth`, `eval`) ca
 3. Run `uv run pytest` and `uv run ruff check .`
 4. Submit a pull request with a properly formatted title and label
 
-CI will run linting, type checking (pyright + mypy), tests on supported Python versions (see `requires-python` in `pyproject.toml`), PR title validation, and a build validation on every PR.
+CI will run linting, type checking (pyright), tests on supported Python versions (see `requires-python` in `pyproject.toml`), PR title validation, and a build validation on every PR.

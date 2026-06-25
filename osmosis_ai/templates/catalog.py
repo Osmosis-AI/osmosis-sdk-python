@@ -28,7 +28,6 @@ class ScaffoldEntry:
     """A file or directory marker needed for workspace directory repair."""
 
     dest: str
-    content: str = ""
     official: bool = False
 
 
@@ -49,9 +48,9 @@ TEMPLATE_RECIPES: tuple[TemplateRecipe, ...] = (
         owned_dirs=(_path("rollouts/multiply-local-strands"),),
         next_steps=(
             "pip install -e rollouts/multiply-local-strands",
-            "osmosis eval run configs/eval/multiply-local-strands.toml --limit 1",
             "git push",
             "Confirm Git Sync is connected in the Osmosis Platform",
+            "osmosis eval submit configs/eval/multiply-local-strands.toml",
             "osmosis train submit configs/training/multiply-local-strands.toml",
         ),
     ),
@@ -67,9 +66,9 @@ TEMPLATE_RECIPES: tuple[TemplateRecipe, ...] = (
         owned_dirs=(_path("rollouts/multiply-local-openai"),),
         next_steps=(
             "pip install -e rollouts/multiply-local-openai",
-            "osmosis eval run configs/eval/multiply-local-openai.toml --limit 1",
             "git push",
             "Confirm Git Sync is connected in the Osmosis Platform",
+            "osmosis eval submit configs/eval/multiply-local-openai.toml",
             "osmosis train submit configs/training/multiply-local-openai.toml",
         ),
     ),
@@ -85,9 +84,9 @@ TEMPLATE_RECIPES: tuple[TemplateRecipe, ...] = (
         owned_dirs=(_path("rollouts/multiply-harbor-strands"),),
         next_steps=(
             "pip install -e rollouts/multiply-harbor-strands",
-            "osmosis eval run configs/eval/multiply-harbor-strands.toml --limit 1",
             "git push",
             "Confirm Git Sync is connected in the Osmosis Platform",
+            "osmosis eval submit configs/eval/multiply-harbor-strands.toml",
             "osmosis train submit configs/training/multiply-harbor-strands.toml",
         ),
     ),
@@ -98,7 +97,6 @@ OFFICIAL_AGENT_SCAFFOLD_PATHS: tuple[Path, ...] = (
     _path("AGENTS.md"),
     _path("CLAUDE.md"),
     _path("configs/AGENTS.md"),
-    _path(".claude/settings.json"),
 )
 
 REQUIRED_WORKSPACE_DIRS: tuple[Path, ...] = (
@@ -130,16 +128,11 @@ def shared_template_files() -> frozenset[Path]:
     return frozenset(path for path, count in counts.items() if count > 1)
 
 
-def official_agent_scaffold_paths() -> tuple[Path, ...]:
-    return OFFICIAL_AGENT_SCAFFOLD_PATHS
-
-
 __all__ = [
     "OFFICIAL_AGENT_SCAFFOLD_PATHS",
     "REQUIRED_WORKSPACE_DIRS",
     "ScaffoldEntry",
     "TemplateRecipe",
-    "official_agent_scaffold_paths",
     "recipes_by_name",
     "required_workspace_paths",
     "shared_template_files",

@@ -7,10 +7,14 @@ from typing import Any
 from osmosis_ai.platform.api.models import (
     BaseModelInfo,
     DatasetFile,
-    DeploymentInfo,
+    DevRolloutServerInfo,
+    EnvironmentSecretInfo,
+    EvaluationRun,
     LoraCheckpointInfo,
+    LoraModelInfo,
     RolloutInfo,
     TrainingRun,
+    wire_to_display_scope,
 )
 
 
@@ -21,9 +25,11 @@ def serialize_dataset(df: DatasetFile) -> dict[str, Any]:
         "file_name": df.file_name,
         "file_size": df.file_size,
         "status": df.status,
-        "processing_step": df.processing_step,
-        "processing_percent": df.processing_percent,
-        "error": df.error,
+        "file_format": df.file_format,
+        "original_file_format": df.original_file_format,
+        "row_count": df.row_count,
+        "original_file_size": df.original_file_size,
+        "creator_name": df.creator_name,
         "created_at": df.created_at,
         "updated_at": df.updated_at,
     }
@@ -42,12 +48,8 @@ def serialize_training_run(run: TrainingRun) -> dict[str, Any]:
         "model_name": run.model_name,
         "dataset_id": run.dataset_id,
         "dataset_name": run.dataset_name,
-        "eval_accuracy": run.eval_accuracy,
-        "reward": run.reward,
-        "reward_increase_delta": run.reward_increase_delta,
-        "processing_step": run.processing_step,
-        "processing_percent": run.processing_percent,
-        "error_message": run.error_message,
+        "rollout_id": run.rollout_id,
+        "rollout_name": run.rollout_name,
         "creator_name": run.creator_name,
         "creator_email": run.creator_email,
         "created_at": run.created_at,
@@ -56,6 +58,12 @@ def serialize_training_run(run: TrainingRun) -> dict[str, Any]:
     }
     if run.platform_url:
         data["platform_url"] = run.platform_url
+    if run.current_step is not None:
+        data["current_step"] = run.current_step
+    if run.total_steps is not None:
+        data["total_steps"] = run.total_steps
+    if run.reward is not None:
+        data["reward"] = run.reward
     return data
 
 
@@ -70,19 +78,26 @@ def serialize_checkpoint(ckpt: LoraCheckpointInfo) -> dict[str, Any]:
     }
 
 
-def serialize_deployment(dep: DeploymentInfo) -> dict[str, Any]:
-    """Serialize a deployment for the public JSON contract."""
-    return {
-        "id": dep.id,
-        "checkpoint_name": dep.checkpoint_name,
-        "status": dep.status,
-        "base_model": dep.base_model,
-        "checkpoint_step": dep.checkpoint_step,
-        "training_run_id": dep.training_run_id,
-        "training_run_name": dep.training_run_name,
-        "creator_name": dep.creator_name,
-        "created_at": dep.created_at,
+def serialize_lora_model(model: LoraModelInfo) -> dict[str, Any]:
+    """Serialize a LoRA model for the public JSON contract.
+
+    Deployment keys are omitted when the platform omitted them (inference
+    unavailable for the account), mirroring the API response shape.
+    """
+    data: dict[str, Any] = {
+        "id": model.id,
+        "model_name": model.model_name,
+        "base_model": model.base_model,
+        "training_run_name": model.training_run_name,
+        "checkpoint_step": model.checkpoint_step,
+        "reward": model.reward,
     }
+    if model.has_deployment_info:
+        data["deployment_status"] = model.deployment_status
+        data["deployed_at"] = model.deployed_at
+        data["deployed_by"] = model.deployed_by
+    data["created_at"] = model.created_at
+    return data
 
 
 def serialize_model(model: BaseModelInfo) -> dict[str, Any]:
@@ -109,14 +124,55 @@ def serialize_rollout(rollout: RolloutInfo) -> dict[str, Any]:
     }
 
 
-def serialize_eval_cache_entry(entry: dict[str, Any]) -> dict[str, Any]:
-    """Serialize an eval cache entry dict."""
-    config = entry.get("config", {}) or {}
+def serialize_dev_rollout_server(server: DevRolloutServerInfo) -> dict[str, Any]:
+    """Serialize a dev rollout server for the public JSON contract."""
     return {
-        "task_id": entry.get("task_id", ""),
-        "model": config.get("llm_model") or config.get("model", ""),
-        "dataset": config.get("eval_dataset") or config.get("dataset", ""),
-        "status": entry.get("status", ""),
-        "runs_count": entry.get("runs_count", 0),
-        "created_at": entry.get("created_at", ""),
+        "id": server.id,
+        "name": server.name,
+        "url": server.url,
+        "status": server.status,
+        "expires_at": server.expires_at,
+        "started_at": server.started_at,
     }
+
+
+def serialize_environment_secret(secret: EnvironmentSecretInfo) -> dict[str, Any]:
+    """Serialize an environment secret for the public JSON contract.
+
+    Intentionally never includes the secret value — the platform does not
+    return it, and there must be no path by which a value reaches output.
+    """
+    return {
+        "id": secret.id,
+        "name": secret.name,
+        # User-facing scope vocabulary: the platform's wire "user" is "personal".
+        "scope": wire_to_display_scope(secret.scope),
+        "created_at": secret.created_at,
+        "updated_at": secret.updated_at,
+        "creator_name": secret.creator_name,
+        "updater_name": secret.updater_name,
+    }
+
+
+def serialize_eval_run(run: EvaluationRun) -> dict[str, Any]:
+    """Serialize an evaluation run for the public JSON contract."""
+    data: dict[str, Any] = {
+        "id": run.id,
+        "name": run.name,
+        "status": run.status,
+        "created_at": run.created_at,
+        "started_at": run.started_at,
+        "completed_at": run.completed_at,
+        "model": run.model.get("name") if run.model else None,
+        "dataset": run.dataset.get("name") if run.dataset else None,
+        "rollout": run.rollout.get("name") if run.rollout else None,
+        "creator_name": run.creator_name,
+        "creator_email": run.creator_email,
+    }
+    if run.results is not None:
+        data["results"] = run.results
+    if run.config is not None:
+        data["config"] = run.config
+    if run.platform_url:
+        data["platform_url"] = run.platform_url
+    return data

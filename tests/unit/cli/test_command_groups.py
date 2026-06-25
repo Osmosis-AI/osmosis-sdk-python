@@ -21,6 +21,9 @@ REMOVED_ROOT_COMMANDS = [
     "logout",
     "whoami",
     "workspace",
+    "deployment",
+    "deploy",
+    "undeploy",
 ]
 
 PRESERVED_ROOT_COMMANDS = [
@@ -29,13 +32,15 @@ PRESERVED_ROOT_COMMANDS = [
     "dataset",
     "train",
     "model",
-    "deployment",
     "rollout",
     "template",
     "eval",
-    "deploy",
-    "undeploy",
     "upgrade",
+]
+
+# Commands registered but intentionally hidden from --help output.
+HIDDEN_ROOT_COMMANDS = [
+    "dev",
 ]
 
 
@@ -46,14 +51,18 @@ PRESERVED_HELP_COMMANDS = [
     ["auth", "--help"],
     ["doctor", "--help"],
     ["dataset", "--help"],
+    ["dataset", "logs", "--help"],
     ["train", "--help"],
+    ["train", "logs", "--help"],
     ["model", "--help"],
-    ["deployment", "--help"],
-    ["deploy", "--help"],
-    ["undeploy", "--help"],
+    ["model", "list", "--help"],
+    ["model", "info", "--help"],
+    ["model", "deploy", "--help"],
+    ["model", "undeploy", "--help"],
     ["rollout", "--help"],
     ["template", "--help"],
     ["eval", "--help"],
+    ["eval", "logs", "--help"],
     ["upgrade", "--help"],
 ]
 
@@ -83,8 +92,10 @@ REMOVED_COMMANDS = [
     ["project", "info", REMOVED_COMMAND_PROBE],
     ["project", "list", REMOVED_COMMAND_PROBE],
     ["project", "validate", REMOVED_COMMAND_PROBE],
-    ["deployment", "rename", REMOVED_COMMAND_PROBE, "old", "new"],
-    ["deployment", "delete", REMOVED_COMMAND_PROBE, "checkpoint"],
+    ["deployment", REMOVED_COMMAND_PROBE],
+    ["deployment", "list", REMOVED_COMMAND_PROBE],
+    ["deploy", REMOVED_COMMAND_PROBE, "checkpoint"],
+    ["undeploy", REMOVED_COMMAND_PROBE, "checkpoint"],
     ["rollout", "validate", REMOVED_COMMAND_PROBE, "configs/eval/demo.toml"],
     ["eval", "cache", "dir", REMOVED_COMMAND_PROBE],
 ]
@@ -97,7 +108,11 @@ def _root_command_names() -> set[str]:
 
 
 def _root_help_command_names(output: str) -> set[str]:
-    expected_command_names = set(REMOVED_ROOT_COMMANDS) | set(PRESERVED_ROOT_COMMANDS)
+    expected_command_names = (
+        set(REMOVED_ROOT_COMMANDS)
+        | set(PRESERVED_ROOT_COMMANDS)
+        | set(HIDDEN_ROOT_COMMANDS)
+    )
     command_names = set()
     for line in output.splitlines():
         cleaned = ANSI_ESCAPE.sub("", line).strip()
@@ -152,8 +167,9 @@ def test_removed_commands_are_unknown(args, capfd):
         ["project", "info", "--help"],
         ["project", "list", "--help"],
         ["project", "validate", "--help"],
-        ["deployment", "rename", "--help"],
-        ["deployment", "delete", "--help"],
+        ["deployment", "--help"],
+        ["deploy", "--help"],
+        ["undeploy", "--help"],
         ["rollout", "validate", "--help"],
         ["eval", "cache", "dir", "--help"],
     ],
@@ -175,6 +191,9 @@ def test_root_command_registry_does_not_include_removed_groups_or_aliases():
     for command in PRESERVED_ROOT_COMMANDS:
         assert command in root_commands
 
+    for command in HIDDEN_ROOT_COMMANDS:
+        assert command in root_commands
+
 
 def test_root_help_surface_does_not_list_removed_groups_or_aliases(capfd):
     rc = main(["--plain", "--help"])
@@ -188,6 +207,18 @@ def test_root_help_surface_does_not_list_removed_groups_or_aliases(capfd):
     for command in PRESERVED_ROOT_COMMANDS:
         assert command in root_help_commands
 
+    for command in HIDDEN_ROOT_COMMANDS:
+        assert command not in root_help_commands
+
+
+def test_eval_help_lists_info_not_status(capfd):
+    rc = main(["--plain", "eval", "--help"])
+    captured = capfd.readouterr()
+
+    assert rc == 0
+    assert "info" in captured.out
+    assert "status" not in captured.out
+
 
 @pytest.mark.parametrize(
     ("args", "not_expected"),
@@ -196,7 +227,7 @@ def test_root_help_surface_does_not_list_removed_groups_or_aliases(capfd):
         (["projec"], "Did you mean 'project'?"),
         (["workspac"], "Did you mean 'workspace'?"),
         (["train", "tracess"], "Did you mean 'traces'?"),
-        (["deployment", "renam"], "Did you mean 'rename'?"),
+        (["deploymen"], "Did you mean 'deployment'?"),
     ],
 )
 def test_fuzzy_suggestions_do_not_offer_removed_commands(args, not_expected, capfd):
@@ -205,3 +236,12 @@ def test_fuzzy_suggestions_do_not_offer_removed_commands(args, not_expected, cap
 
     assert rc != 0
     assert not_expected not in captured.err
+
+
+def test_help_command_nudges_to_help_flag(capfd):
+    rc = main(["help"])
+    captured = capfd.readouterr()
+
+    assert rc != 0
+    assert "Use 'osmosis --help'" in captured.err
+    assert "Did you mean" not in captured.err

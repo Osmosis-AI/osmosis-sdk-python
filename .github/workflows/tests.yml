@@ -5,6 +5,10 @@ on:
     branches:
       - main
   pull_request:
+  workflow_call:
+    secrets:
+      CODECOV_TOKEN:
+        required: false
 
 permissions:
   contents: read
@@ -20,9 +24,9 @@ jobs:
     steps:
       - uses: actions/checkout@v6
 
-      - uses: astral-sh/ruff-action@v3
+      - uses: astral-sh/ruff-action@v4.0.0
 
-      - uses: astral-sh/ruff-action@v3
+      - uses: astral-sh/ruff-action@v4.0.0
         with:
           args: "format --check"
 
@@ -36,7 +40,7 @@ jobs:
           python-version: "3.12"
           enable-cache: true
       - name: Install dependencies
-        run: uv sync --frozen --extra dev
+        run: uv sync --locked --extra dev
       - name: Run pyright
         run: uv run pyright osmosis_ai/
       - name: Verify public API types
@@ -75,7 +79,7 @@ jobs:
           enable-cache: true
 
       - name: Install dependencies
-        run: uv sync --frozen --extra dev
+        run: uv sync --locked --extra dev
 
       - name: Run tests with coverage
         if: matrix.python-version == '3.12'
@@ -94,12 +98,13 @@ jobs:
 
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v6
 
       - uses: astral-sh/setup-uv@v7
         with:
+          python-version: "3.12"
           enable-cache: true
 
       - name: Build package
@@ -107,3 +112,50 @@ jobs:
 
       - name: Check package
         run: uvx twine check --strict dist/*
+
+      - name: Verify artifact filenames match package version
+        run: |
+          VERSION=$(uv run --no-project --python 3.12 python -c 'import re, pathlib; text = pathlib.Path("osmosis_ai/consts.py").read_text(); print(re.search(r"^PACKAGE_VERSION\s*=\s*\"([^\"]+)\"", text, re.MULTILINE).group(1))')
+          uv run --no-project --python 3.12 python - "$VERSION" <<'PY'
+          import pathlib
+          import re
+          import sys
+
+          version = sys.argv[1]
+          artifacts = {
+              path.name
+              for path in pathlib.Path("dist").iterdir()
+              if path.suffix == ".whl" or path.name.endswith(".tar.gz")
+          }
+          expected_sdist = f"osmosis_ai-{version}.tar.gz"
+          matching_wheels = [
+              name
+              for name in artifacts
+              if re.fullmatch(rf"osmosis_ai-{re.escape(version)}-.+\.whl", name)
+          ]
+
+          if expected_sdist not in artifacts:
+              print(f"::error::Missing source distribution for version {version}: {expected_sdist}")
+              sys.exit(1)
+          if not matching_wheels:
+              print(f"::error::Missing wheel artifact for version {version}")
+              sys.exit(1)
+
+          mismatched = sorted(name for name in artifacts if version not in name)
+          if mismatched:
+              print(f"::error::Artifacts do not match PACKAGE_VERSION {version}: {', '.join(mismatched)}")
+              sys.exit(1)
+          PY
+
+      - name: Smoke-test the built wheel
+        run: |
+          uv venv --python 3.12 /tmp/osmosis-wheel-smoke
+          uv pip install --python /tmp/osmosis-wheel-smoke/bin/python dist/*.whl
+          /tmp/osmosis-wheel-smoke/bin/python -c "import osmosis_ai; print(osmosis_ai.__version__)"
+          /tmp/osmosis-wheel-smoke/bin/osmosis --version
+
+      - name: Upload dist artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: dist
+          path: dist/

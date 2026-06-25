@@ -102,25 +102,36 @@ class GraderContext:
     label: str | None = None
     sample: RolloutSample | None = None
     project_path: str | None = None
+    metadata: dict[str, Any] | None = None
+    artifacts: dict[str, Any] | None = None
 
     def set_reward(self, reward: float) -> None:
         if self.sample is None:
             raise ValueError("GraderContext has no sample to reward")
         self.sample.reward = reward
 
+    def set_artifacts(self, artifacts: dict[str, Any]) -> None:
+        """Set the rollout-level artifacts object (replaces any prior value)."""
+        if not isinstance(artifacts, dict):
+            raise TypeError("artifacts must be a dict")
+        self.artifacts = artifacts
+
 
 @dataclass
 class AgentWorkflowContext[TConfig: AgentWorkflowConfig]:
     prompt: list[dict[str, Any]]
     config: TConfig | None = None
+    metadata: dict[str, Any] | None = None
 
     def __init__(
         self,
         prompt: list[dict[str, Any]],
         config: TConfig | None = None,
+        metadata: dict[str, Any] | None = None,
     ):
         self.prompt = prompt
         self.config = config
+        self.metadata = metadata
 
 
 @dataclass
@@ -141,6 +152,7 @@ class HarborAgentWorkflowContext[TConfig: AgentWorkflowConfig](
         prompt: list[dict[str, Any]],
         config: TConfig,
         environment: Any = None,
+        metadata: dict[str, Any] | None = None,
     ):
-        super().__init__(prompt=prompt, config=config)
+        super().__init__(prompt=prompt, config=config, metadata=metadata)
         self.environment = environment

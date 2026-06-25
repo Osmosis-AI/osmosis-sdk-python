@@ -1,11 +1,11 @@
 <!--
 PR Title Format: [module] type: description
-  modules: reward, rollout, server, cli, auth, eval, misc, ci, doc
+  modules: rollout, server, cli, auth, eval, misc, ci, doc
   types:   feat, fix, refactor, chore, test, doc
 
 Examples:
   [rollout] feat: add streaming support for chat completions
-  [BREAKING][reward] refactor: rename decorator parameters
+  [BREAKING][rollout] refactor: change Grader.grade signature
   [ci] chore: update GitHub Actions versions
 -->
 

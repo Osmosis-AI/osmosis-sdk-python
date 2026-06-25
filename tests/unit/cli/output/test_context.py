@@ -15,6 +15,7 @@ from osmosis_ai.cli.output.context import (
     _output_context_var,
     default_output_context,
     get_output_context,
+    hoist_format_selectors,
     install_output_context,
     override_output_context,
     resolve_format_selectors,
@@ -92,6 +93,56 @@ def test_argv_prescan_ignores_unknown_flags() -> None:
     assert _argv_format_prescan(["--bogus", "dataset", "list"]) is None
 
 
+def test_argv_prescan_finds_postfix_flags() -> None:
+    assert _argv_format_prescan(["dataset", "list", "--json"]) is OutputFormat.json
+    assert _argv_format_prescan(["dataset", "list", "--plain"]) is OutputFormat.plain
+
+
+def test_argv_prescan_stops_at_double_dash() -> None:
+    assert _argv_format_prescan(["dataset", "validate", "--", "--json"]) is None
+
+
+def test_hoist_format_selectors_moves_postfix_flags_to_front() -> None:
+    assert hoist_format_selectors(["dataset", "list", "--json"]) == [
+        "--json",
+        "dataset",
+        "list",
+    ]
+    assert hoist_format_selectors(["model", "deploy", "foo", "--plain"]) == [
+        "--plain",
+        "model",
+        "deploy",
+        "foo",
+    ]
+
+
+def test_hoist_format_selectors_keeps_prefix_argv_unchanged() -> None:
+    assert hoist_format_selectors(["--json", "dataset", "list"]) == [
+        "--json",
+        "dataset",
+        "list",
+    ]
+    assert hoist_format_selectors(["dataset", "list"]) == ["dataset", "list"]
+
+
+def test_hoist_format_selectors_preserves_tokens_after_double_dash() -> None:
+    assert hoist_format_selectors(["dataset", "validate", "--", "--json"]) == [
+        "dataset",
+        "validate",
+        "--",
+        "--json",
+    ]
+
+
+def test_hoist_format_selectors_hoists_conflicting_flags_together() -> None:
+    assert hoist_format_selectors(["dataset", "list", "--json", "--plain"]) == [
+        "--json",
+        "--plain",
+        "dataset",
+        "list",
+    ]
+
+
 def test_get_output_context_layer_2_uses_usage_error_ctx() -> None:
     output = OutputContext(format=OutputFormat.json, interactive=False)
     root_cmd = click.Command("root", callback=lambda: None)
@@ -135,3 +186,29 @@ def test_override_output_context_helper_round_trip() -> None:
         assert output.format is OutputFormat.json
         assert _output_context_var.get() is output
     assert _output_context_var.get() is None
+
+
+def test_rich_status_registers_active_spinner_on_shared_console() -> None:
+    """The dominant `output.status(...)` path must register on the console.
+
+    A warning emitted mid-spin (the upgrade nudge) pauses/resumes whatever
+    `console._active_status` points at; if this spinner path failed to register,
+    the spinner line would glue onto the warning and linger on screen — the
+    exact regression this wiring prevents. Covers train/eval/secret/etc.
+    """
+    from osmosis_ai.cli.console import console
+
+    ctx = OutputContext(format=OutputFormat.rich, interactive=True)
+    assert console._active_status is None
+    with ctx.status("Fetching training runs..."):
+        assert console._active_status is not None
+    assert console._active_status is None
+
+
+def test_rich_status_skips_registration_in_non_interactive_mode() -> None:
+    """Non-interactive rich falls back to a plain line, so nothing to pause."""
+    from osmosis_ai.cli.console import console
+
+    ctx = OutputContext(format=OutputFormat.rich, interactive=False)
+    with ctx.status("Fetching training runs..."):
+        assert console._active_status is None

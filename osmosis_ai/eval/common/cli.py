@@ -1,4 +1,11 @@
-"""Shared helpers for local-execution CLI commands (`test` and `eval`)."""
+"""Workflow + grader resolution helpers shared by remote submit preflight.
+
+Historically these utilities also powered the local `osmosis eval run` and
+`osmosis test` flows; with eval moving to remote execution the only
+remaining caller is `platform.cli.workspace_directory_contract.validate_rollout_backend`,
+which uses them to load and inspect a workspace rollout before submitting a
+remote training run or evaluation run.
+"""
 
 from __future__ import annotations
 
@@ -8,40 +15,10 @@ import importlib.util
 import sys
 import types
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from osmosis_ai.cli.console import Console
 from osmosis_ai.cli.errors import CLIError
-from osmosis_ai.eval.common.dataset import DatasetReader
-from osmosis_ai.eval.common.errors import (
-    DatasetParseError,
-    DatasetValidationError,
-)
-
-if TYPE_CHECKING:
-    from osmosis_ai.eval.common.dataset import DatasetRow
-
-
-def format_duration(ms: float) -> str:
-    """Format duration in human-readable format."""
-    if ms < 1000:
-        return f"{ms:.0f}ms"
-    if ms < 60000:
-        return f"{ms / 1000:.1f}s"
-    minutes = int(ms // 60000)
-    seconds = (ms % 60000) / 1000
-    return f"{minutes}m{seconds:.1f}s"
-
-
-def format_tokens(tokens: int) -> str:
-    """Format token count with comma separators."""
-    return f"{tokens:,}"
-
-
-def truncate_error(text: str, max_len: int = 50) -> str:
-    """Truncate a single-line error string with ellipsis if too long."""
-    flat = text.replace("\n", " ")
-    return flat[: max_len - 3] + "..." if len(flat) > max_len else flat
 
 
 def _resolve_rollout_entrypoint(
@@ -207,8 +184,7 @@ def _format_ambiguous_binding_names(pairs: list[tuple[str, Any]]) -> str:
 
 def _pick_representative(pairs_for_one_object: list[tuple[str, Any]]) -> Any:
     """Deterministic pick: object referred to by the lexicographically smallest name."""
-    _name, obj = min(pairs_for_one_object, key=lambda x: x[0])
-    return obj
+    return min(pairs_for_one_object, key=lambda x: x[0])[1]
 
 
 def _resolve_workflow(
@@ -309,11 +285,7 @@ def load_workflow(
     return workflow_cls, workflow_config, entrypoint_module, None
 
 
-def auto_discover_grader(
-    module_name: str,
-    *,
-    entrypoint_label: str | None = None,
-) -> tuple[type | None, Any]:
+def auto_discover_grader(module_name: str) -> tuple[type | None, Any]:
     """Discover a Grader subclass and its config from the entrypoint module.
 
     The entrypoint file (e.g., ``local_rollout_server_example.py``) typically
@@ -326,54 +298,7 @@ def auto_discover_grader(
     if mod is None:
         return None, None
 
-    return _discover_grader_from_module(mod, entrypoint_label or module_name)
-
-
-def load_dataset_rows(
-    dataset_path: str,
-    limit: int | None,
-    offset: int,
-    quiet: bool,
-    console: Console,
-    empty_error: str,
-    action_label: str,
-) -> tuple[list[DatasetRow] | None, str | None]:
-    """Load rows from dataset and provide command-specific messaging."""
-    if not quiet:
-        console.print(f"Loading dataset: {dataset_path}")
-
-    try:
-        reader = DatasetReader(dataset_path)
-        total_rows = len(reader)
-        rows = reader.read(limit=limit, offset=offset)
-    except FileNotFoundError as e:
-        return None, str(e)
-    except (DatasetParseError, DatasetValidationError) as e:
-        return None, str(e)
-
-    if not rows:
-        return None, empty_error
-
-    if not quiet:
-        if limit:
-            console.print(f"  Total rows: {total_rows} ({action_label} {len(rows)})")
-        else:
-            console.print(f"  Total rows: {len(rows)}")
-
-    return rows, None
-
-
-def build_completion_params(
-    temperature: float | None,
-    max_tokens: int | None,
-) -> dict[str, Any]:
-    """Build completion params dict from CLI options."""
-    params: dict[str, Any] = {}
-    if temperature is not None:
-        params["temperature"] = temperature
-    if max_tokens is not None:
-        params["max_tokens"] = max_tokens
-    return params
+    return _discover_grader_from_module(mod, module_name)
 
 
 def _discover_grader_from_module(
@@ -427,8 +352,6 @@ def _resolve_grader(
     Only called when [grader] is present in TOML. Returns (None, None) when
     no grader is found.
     """
-    import sys
-
     from osmosis_ai.rollout.utils.imports import resolve_object
 
     if explicit_grader:
@@ -454,20 +377,11 @@ def _resolve_grader(
             )
         return grader_cls, grader_config
 
-    mod = sys.modules.get(module_name)
-    if mod is None:
-        return None, None
-
-    return _discover_grader_from_module(mod, module_name)
+    return auto_discover_grader(module_name)
 
 
 __all__ = [
     "_resolve_grader",
     "auto_discover_grader",
-    "build_completion_params",
-    "format_duration",
-    "format_tokens",
-    "load_dataset_rows",
     "load_workflow",
-    "truncate_error",
 ]

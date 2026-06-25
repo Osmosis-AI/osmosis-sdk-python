@@ -7,7 +7,6 @@ not create workspace directories, initialize git repositories, or make initial c
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 from osmosis_ai.cli.errors import CLIError
@@ -17,35 +16,6 @@ from osmosis_ai.templates.catalog import (
     ScaffoldEntry,
 )
 from osmosis_ai.templates.source import workspace_template_root
-
-_PLUGIN_REPO_DEFAULT = "Osmosis-AI/osmosis-plugins"
-_PLUGIN_MARKETPLACE_DEFAULT = "osmosis"
-
-
-def _plugin_repo() -> str:
-    """GitHub repo (`owner/name`) hosting the Osmosis plugin marketplace."""
-    return os.environ.get("OSMOSIS_PLUGIN_REPO") or _PLUGIN_REPO_DEFAULT
-
-
-def _plugin_marketplace() -> str:
-    """Marketplace name as declared in the plugin repo's `marketplace.json`."""
-    return os.environ.get("OSMOSIS_PLUGIN_MARKETPLACE") or _PLUGIN_MARKETPLACE_DEFAULT
-
-
-def _render_official_scaffold(text: str) -> str:
-    """Apply environment-driven plugin substitutions to official scaffold files."""
-    plugin_repo = _plugin_repo()
-    plugin_marketplace = _plugin_marketplace()
-    return (
-        text.replace(_PLUGIN_REPO_DEFAULT, plugin_repo)
-        .replace(
-            f"osmosis@{_PLUGIN_MARKETPLACE_DEFAULT}", f"osmosis@{plugin_marketplace}"
-        )
-        .replace(f'"{_PLUGIN_MARKETPLACE_DEFAULT}"', f'"{plugin_marketplace}"')
-        .replace(
-            f"install {_PLUGIN_MARKETPLACE_DEFAULT}", f"install {plugin_marketplace}"
-        )
-    )
 
 
 def _read_agent_scaffold_files(*, refresh_template: bool) -> dict[str, str]:
@@ -61,9 +31,7 @@ def _read_agent_scaffold_files(*, refresh_template: bool) -> dict[str, str]:
                 f"{rel_path_text}",
                 code="NOT_FOUND",
             )
-        contents[rel_path_text] = _render_official_scaffold(
-            source_path.read_text(encoding="utf-8")
-        )
+        contents[rel_path_text] = source_path.read_text(encoding="utf-8")
     return contents
 
 
@@ -110,38 +78,11 @@ def load_scaffold_entries() -> tuple[list[ScaffoldEntry], set[str]]:
     return entries, official_paths
 
 
-def official_scaffold_updates(
-    workspace_directory: Path, *, refresh_template: bool = True
-) -> list[str]:
-    """Return official scaffold files whose local content differs from the template."""
-    official_contents = _read_agent_scaffold_files(refresh_template=refresh_template)
-    updates: list[str] = []
-    blocked_paths: list[str] = []
-    for rel_path, official in official_contents.items():
-        path = workspace_directory / rel_path
-        symlink_path = _first_symlinked_path(workspace_directory, rel_path)
-        if symlink_path is not None:
-            _append_unique(blocked_paths, symlink_path)
-            continue
-        if not path.exists():
-            continue
-        if not path.is_file():
-            _append_unique(blocked_paths, rel_path)
-            continue
-        if path.read_text(encoding="utf-8") != official:
-            updates.append(rel_path)
-    if blocked_paths:
-        _raise_blocked_scaffold_paths(blocked_paths)
-    return updates
-
-
 def write_scaffold(target: Path, project_name: str, *, update: bool = False) -> None:
     """Write missing scaffold paths into *target*.
 
     The SDK controls the allowed paths; agent scaffold content comes from the
     latest template source. Existing files are never overwritten here.
-    Official file updates are reported by ``official_scaffold_updates`` and can
-    be applied with ``refresh_agent_scaffold``.
     """
     del project_name, update
     entries, _official_paths = load_scaffold_entries()
@@ -164,66 +105,13 @@ def write_scaffold(target: Path, project_name: str, *, update: bool = False) -> 
         dest = target / entry.dest
         if dest.exists():
             continue
-        content = official_contents[entry.dest] if entry.official else entry.content
+        content = official_contents[entry.dest] if entry.official else ""
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_text(content, encoding="utf-8")
-
-
-def refresh_agent_scaffold(
-    workspace_directory: Path, *, force: bool = False
-) -> dict[str, list[str]]:
-    """Refresh official agent scaffold files, protecting local edits by default."""
-    official = _read_agent_scaffold_files(refresh_template=True)
-    added: list[str] = []
-    refreshed: list[str] = []
-    conflicts: list[str] = []
-    blocked_paths: list[str] = []
-    pending_adds: list[tuple[str, Path, str]] = []
-    pending_refreshes: list[tuple[str, Path, str]] = []
-
-    for rel_path, content in official.items():
-        path = workspace_directory / rel_path
-        symlink_path = _first_symlinked_path(workspace_directory, rel_path)
-        if symlink_path is not None:
-            _append_unique(blocked_paths, symlink_path)
-            continue
-        if not path.exists():
-            pending_adds.append((rel_path, path, content))
-            continue
-        if not path.is_file():
-            _append_unique(blocked_paths, rel_path)
-            continue
-        if path.read_text(encoding="utf-8") == content:
-            continue
-        if not force:
-            conflicts.append(rel_path)
-            continue
-        pending_refreshes.append((rel_path, path, content))
-
-    if blocked_paths:
-        _raise_blocked_scaffold_paths(blocked_paths)
-    if conflicts:
-        listing = "\n  ".join(conflicts)
-        raise CLIError(
-            "Refusing to overwrite local edits in official scaffold files:\n"
-            f"  {listing}\n"
-            "\nReview your local changes before replacing official scaffold files.",
-            code="CONFLICT",
-        )
-    for rel_path, path, content in pending_adds:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(content, encoding="utf-8")
-        added.append(rel_path)
-    for rel_path, path, content in pending_refreshes:
-        path.write_text(content, encoding="utf-8")
-        refreshed.append(rel_path)
-    return {"added": added, "refreshed": refreshed}
 
 
 __all__ = [
     "ScaffoldEntry",
     "load_scaffold_entries",
-    "official_scaffold_updates",
-    "refresh_agent_scaffold",
     "write_scaffold",
 ]

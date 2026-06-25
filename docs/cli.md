@@ -1,320 +1,65 @@
-# CLI reference
+# CLI internals (for contributors)
 
-Installing the SDK provides a lightweight CLI as `osmosis` (aliases: `osmosis_ai`, `osmosis-ai`). The CLI loads `.env` from the current working directory via `python-dotenv`.
+> The user-facing command + flag reference lives at [docs.osmosis.ai/cli/command-reference](https://docs.osmosis.ai/cli/command-reference). This page explains how the CLI is wired so you can add or change commands correctly.
 
-## Authentication
+## Entry point and registration
 
-Credentials are stored at `~/.config/osmosis/credentials.json`.
+The console script is `osmosis_ai.cli.main:main` (aliases: `osmosis`, `osmosis-ai`, `osmosis_ai`). [../osmosis_ai/cli/main.py](../osmosis_ai/cli/main.py):
 
-### osmosis auth login
+- `main()` calls `_register_commands()` once, then runs the Typer `app` with `standalone_mode=False` so it can map exceptions to exit codes itself.
+- `_register_commands()` imports each command group **lazily inside the function**. Groups attach via `app.add_typer(...)`; the standalone `doctor` / `upgrade` commands attach via `app.command(...)`. Two `rich_help_panel`s split the help: `Workflow Commands` (`dataset`, `train`, `model`, `eval`, `rollout`, `template`, `doctor`) and `Platform Commands` (`auth`, `secret`, `upgrade`).
+- The root `_callback` resolves `--json` / `--plain`, builds an `OutputContext`, installs it on the Typer context, registers `verify_output_emitted` on close, and loads `.env` via `python-dotenv`. `hoist_format_selectors` lets the format flags appear anywhere on the line.
 
-Device code flow:
+## Command shells delegate; they don't do work
 
-```bash
-osmosis auth login
-osmosis auth login --force
-```
+Files in [../osmosis_ai/cli/commands/](../osmosis_ai/cli/commands/) are thin Typer shells. Each command parses options and delegates to business logic:
 
-### osmosis auth logout
+- platform-facing logic lives in [../osmosis_ai/platform/cli/](../osmosis_ai/platform/cli/) (e.g. `dataset.py`, `train.py`, `eval.py`, `secret.py`);
+- eval/rubric logic lives in [../osmosis_ai/eval/](../osmosis_ai/eval/).
 
-```bash
-osmosis auth logout
-osmosis auth logout -y
-```
+Module-level imports in `commands/` are kept light: `typer`, `cli.console`, `cli.errors`, the lightweight `osmosis_ai.platform.constants` (pagination limits), and stdlib. Everything heavy (`rollout.*`, `platform.api.*`, `platform.cli.*`, `eval.*`) must be imported **inside the function** to keep CLI startup fast — see the lazy-loading section of [architecture.md](./architecture.md).
 
-### osmosis auth whoami
+## Commands return results; they don't print
 
-```bash
-osmosis auth whoami
-```
+The Typer app is created with `result_callback=render_command_result` ([../osmosis_ai/cli/main.py](../osmosis_ai/cli/main.py)). A command function **returns** a `CommandResult`; the callback renders it in the active format. Do not `print()` from a command — return a typed result instead.
 
-`whoami` verifies the active credentials and reports the authenticated account.
-Manage workspaces, repositories, secrets, and account settings in the Osmosis
-Platform product.
+Result types ([../osmosis_ai/cli/output/result.py](../osmosis_ai/cli/output/result.py)):
 
-## Workspace Directory Flow
+| Type | Use |
+|------|-----|
+| `ListResult` | A single list/table |
+| `SectionedListResult` | Multiple named lists (e.g. base + LoRA models) |
+| `DetailResult` | One resource's fields/sections |
+| `OperationResult` | A mutation's outcome |
+| `MessageResult` | A plain message |
 
-Create or open a workspace in the Osmosis Platform, clone the repository created there,
-then run CLI commands from that workspace directory.
+Serializers that turn API models into these shapes live in [../osmosis_ai/cli/output/serializers.py](../osmosis_ai/cli/output/serializers.py).
 
-```bash
-git clone <repo-url>
-cd <repo>
-osmosis auth login
-osmosis doctor
-osmosis template apply multiply              # or add your rollout under rollouts/
-cp configs/training/default.toml configs/training/<run>.toml
-$EDITOR configs/training/<run>.toml          # set rollout, dataset, and model_path
-git add rollouts configs data research
-git commit -m "configure training run"
-git push
-osmosis train submit configs/training/<run>.toml
-```
+## Output envelopes
 
-Platform-scoped commands derive scope from the workspace directory's `origin` remote and
-send `X-Osmosis-Git: namespace/repo_name`. The CLI does not store or send a
-workspace ID for commands scoped by the workspace directory.
+[../osmosis_ai/cli/output/renderer.py](../osmosis_ai/cli/output/renderer.py) builds the machine contract. Every JSON success envelope carries `schema_version: 1` and a shape matching the result type (`_envelope_list`, `_envelope_sectioned_list`, `_envelope_detail`, `_envelope_operation`, `_envelope_message`). Rich is the default for humans; `--plain` is intentionally low-noise text (not a strict schema).
 
-For CI:
+The output context, format enum, and selector resolution live in [../osmosis_ai/cli/output/context.py](../osmosis_ai/cli/output/context.py); the full output surface is re-exported from [../osmosis_ai/cli/output/__init__.py](../osmosis_ai/cli/output/__init__.py).
 
-```bash
-export OSMOSIS_TOKEN=<token>
-osmosis train submit configs/training/<run>.toml --yes
-```
+## Errors
 
-### osmosis doctor
+Raise `CLIError` ([../osmosis_ai/cli/errors.py](../osmosis_ai/cli/errors.py)) — the single error type shared by every domain. `main()` funnels all exceptions through `_handle_cli_error`:
 
-```bash
-osmosis doctor
-osmosis doctor ./path/to/workspace-directory
-osmosis doctor --fix
-```
+- in JSON mode, `classify_error()` + `emit_structured_error_to_stderr()` write a structured error envelope (with a CLI error `code`, command path, and SDK version) to **stderr** ([../osmosis_ai/cli/output/error.py](../osmosis_ai/cli/output/error.py));
+- otherwise a plain `Error: …` line is printed.
 
-Inspect and optionally repair the scaffold in the current workspace directory. Without
-`--fix`, the command reports the workspace directory, Git identity, required scaffold
-paths, and missing paths. Add `--fix` to create missing scaffold paths and
-check for official scaffold file updates without overwriting local edits.
+`KeyboardInterrupt` / `click.Abort` exit `130`; `typer.Exit` / `SystemExit` preserve their code.
 
-## Rollout
-
-### osmosis rollout list
+## Conventions when adding a command
 
-List rollouts for the current workspace directory.
-
-```bash
-osmosis rollout list
-osmosis rollout list --limit 50
-osmosis rollout list --all
-```
-
-## Evaluation
-
-### osmosis eval run
-
-Evaluate using a TOML config. Controller-backed eval starts the configured
-rollout entrypoint as a local HTTP server with `uv run python <entrypoint>` from
-`rollouts/<rollout>/`, sends `POST /rollout`, provides model calls through the
-controller's `/chat/completions` endpoint, and waits for rollout and grader
-callback URLs.
-
-`osmosis eval run` expects the config file to live under `configs/eval/` inside a
-structured Osmosis workspace directory. Eval configs use `[eval]`, `[llm]`, `[runs]`,
-`[timeouts]`, and `[output]`; `[grader]` and `[baseline]` are no longer
-supported.
-
-```bash
-osmosis eval run configs/eval/my-rollout.toml --limit 1
-osmosis eval run configs/eval/my-rollout.toml
-osmosis eval run configs/eval/my-rollout.toml --fresh
-osmosis eval run configs/eval/my-rollout.toml --retry-failed
-osmosis eval run configs/eval/my-rollout.toml --limit 20 --batch-size 4
-osmosis eval run configs/eval/my-rollout.toml -o ./results --log-samples
-```
-
-See [Eval](./eval.md) for the full `[eval]`, `[llm]`, `[runs]`, `[timeouts]`,
-and `[output]` sections.
-
-### osmosis eval cache
-
-```bash
-osmosis eval cache ls
-osmosis eval cache ls --model gpt-4 --status completed
-osmosis eval cache rm <task_id>
-osmosis eval cache rm --all --yes
-```
-
-| Subcommand / option | Description |
-|---------------------|-------------|
-| `ls` | List caches (`--model`, `--dataset`, `--status`) |
-| `rm` | Delete by `task_id`, `--all`, or filters (`-y` skips prompt) |
-
-### osmosis eval rubric
-
-LLM-as-judge on a JSONL conversation file:
-
-```bash
-osmosis eval rubric -d data.jsonl \
-  --rubric "Evaluate the assistant's helpfulness..." \
-  --model openai/gpt-5.4
-```
-
-| Flag | Description |
-|------|-------------|
-| `-d` / `--data` | JSONL path (required) |
-| `-r` / `--rubric` | Inline rubric or `@file.txt` (required) |
-| `--model` | Judge model, LiteLLM form (required) |
-| `-n` / `--number` | Runs per record |
-| `-o` / `--output` | JSON results path |
-| `--api-key` | Judge API key |
-| `--timeout` | Seconds |
-| `--score-min` / `--score-max` | Score range |
-
-## Training
-
-### osmosis train submit
-
-Submit a training run from a TOML config.
-
-```bash
-osmosis train submit configs/training/my-run.toml
-osmosis train submit configs/training/my-run.toml --yes   # skip confirmation
-```
-
-The config file must live under `configs/training/` inside a structured Osmosis
-workspace directory. The CLI reads the config locally and sends it to the platform, which
-clones the repository identified by the workspace directory's `origin` remote for the
-actual rollout code.
-`osmosis train submit` includes the training preflight checks before launch; run
-`osmosis eval run configs/eval/<name>.toml --limit 1` first when you want an
-end-to-end local smoke test of the rollout server and grader.
-
-#### Required `[experiment]` fields
-
-| Key | Description |
-|-----|-------------|
-| `rollout` | Directory name under `rollouts/` |
-| `entrypoint` | Python file relative to the rollout directory |
-| `model_path` | Supported base model path |
-| `dataset` | Platform dataset name (`osmosis dataset list`) |
-
-#### Optional `[training]` fields
-
-All fields are optional. Omitted fields use platform defaults.
-
-| Key | Type | Description |
-|-----|------|-------------|
-| `total_epochs` | int | Number of passes over the dataset |
-| `n_samples_per_prompt` | int | Rollout samples generated per prompt (GRPO group size) |
-| `rollout_batch_size` | int | Prompts rolled out per training step. **Controls how many rollouts run concurrently on the rollout server** — set this to avoid overwhelming the LLM inference engine. Default: 64. For a 32-row dataset with a remote rollout server, `8` or `32` is a safe starting point. |
-| `max_prompt_length` | int | Token limit for prompt inputs |
-| `max_response_length` | int | Token limit for model responses |
-| `lr` | float | Learning rate |
-| `agent_workflow_timeout_s` | float | Seconds osmosis waits for the rollout server to complete one rollout before marking it failed (default: 450 s). Increase for long-horizon agent tasks where each rollout can take several minutes. |
-| `grader_timeout_s` | float | Seconds osmosis waits for the grader callback after rollout completes (default: 150 s). Increase if your grader runs expensive verification. |
-
-> **Sizing `rollout_batch_size`**: the rollout server processes `rollout_batch_size × n_samples_per_prompt` concurrent LLM calls per step. Too high a value overwhelms the inference engine and causes all rollouts to timeout. A good rule of thumb: `rollout_batch_size ≤ 32` when using a remote MCP-based rollout server with a 35B+ model.
-
-#### Optional `[sampling]` fields
-
-| Key | Type | Description |
-|-----|------|-------------|
-| `rollout_temperature` | float | Sampling temperature (default: 1.0) |
-| `rollout_top_p` | float | Top-p nucleus sampling (default: 1.0) |
-
-#### Optional `[checkpoints]` fields
-
-| Key | Type | Description |
-|-----|------|-------------|
-| `checkpoint_save_freq` | int | Save a checkpoint every N rollout steps |
-| `eval_interval` | int | Run evaluation every N rollout steps |
-
-#### Environment variables — `[rollout.env]`
-
-Literal key/value pairs injected verbatim into the rollout container. Values
-are visible in the config file and in CLI output — do **not** use this section
-for secrets.
-
-```toml
-[rollout.env]
-LOG_LEVEL = "INFO"
-DEFAULT_REGION = "us-west-2"
-```
-
-#### Secrets — `[rollout.secrets]`
-
-Maps env-var names to Platform `environment_secret` **record names**. The
-platform resolves the actual secret value server-side from encrypted secret
-storage and injects it into the container. Secret values never
-appear in the config file, in the API payload, or in CLI output.
-
-Pre-register secrets at `/:orgName/secrets` in the platform UI before
-submitting a run that references them.
-
-```toml
-[rollout.secrets]
-OPENAI_API_KEY = "openai-api-key"   # "openai-api-key" is the record name
-```
-
-#### Rules for both sections
-
-- Keys must match `^[A-Z_][A-Z0-9_]*$`.
-- A key cannot appear in both `[rollout.env]` and `[rollout.secrets]`.
-- Reserved names that cannot be used (managed by the platform):
-  `GITHUB_CLONE_URL`, `GITHUB_TOKEN`, `ENTRYPOINT_SCRIPT`, `REPOSITORY_PATH`,
-  `TRAINING_RUN_ID`, `ROLLOUT_NAME`, `ROLLOUT_PORT`.
-- Both sections are optional.
-
-### osmosis train info
-
-Show details, checkpoints, and metrics for a training run.
-
-```bash
-osmosis train info <run-name>
-osmosis --json train info <run-name>
-osmosis train info <run-name> -o ./my-metrics.json
-```
-
-### osmosis train list
-
-List training runs for the current workspace directory.
-
-```bash
-osmosis train list
-osmosis train list --limit 50
-osmosis train list --all
-```
-
-### osmosis train stop
-
-Stop a pending or running training run.
-
-```bash
-osmosis train stop <run-name>
-osmosis train stop <run-name> --yes
-```
-
-## Deployment
-
-Deployments expose trained checkpoint adapters for inference. Use the checkpoint
-UUID or checkpoint name anywhere `<checkpoint>` appears.
-
-### osmosis deployment list
-
-List deployments for the current workspace directory.
-
-```bash
-osmosis deployment list
-osmosis deployment list --limit 50
-osmosis deployment list --all
-```
-
-### osmosis deployment info
-
-Show deployment details for a checkpoint.
-
-```bash
-osmosis deployment info <checkpoint>
-osmosis --json deployment info <checkpoint>
-```
-
-### osmosis deploy
-
-Deploy or reactivate a checkpoint.
-
-```bash
-osmosis deploy <checkpoint>
-```
-
-### osmosis undeploy
-
-Transition a checkpoint deployment to inactive.
-
-```bash
-osmosis undeploy <checkpoint>
-```
+1. Put the Typer shell in `cli/commands/`; put the logic in `platform/cli/` or `eval/`.
+2. Keep module-level imports minimal; lazy-import heavy deps inside the function.
+3. Return a `CommandResult`; never print directly.
+4. Raise `CLIError` for user-facing failures.
+5. Support non-interactive flows (`--yes`, `--token`, `--env`) so `--json` / `--plain` don't dead-end on a prompt (`INTERACTIVE_REQUIRED`).
 
 ## See also
 
-- [Eval](./eval.md)
-- [Dataset format](./datasets.md)
-- [Troubleshooting](./troubleshooting.md)
+- [architecture.md](./architecture.md) — package layout + lazy loading
+- [CONTRIBUTING.md](../CONTRIBUTING.md) — dev workflow, tests, lint
+- [docs.osmosis.ai/cli/command-reference](https://docs.osmosis.ai/cli/command-reference) — user-facing reference
