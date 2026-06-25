@@ -320,6 +320,15 @@ class NativeHarborBackend(ExecutionBackend):
         # agent error).
         if result.exception_info is not None:
             err = result.exception_info
+            # Harbor logs the underlying failure only at DEBUG before swallowing
+            # it into exception_info, so surface type+message here -- otherwise a
+            # failed Trial reaches the caller as a bare null reward with no clue.
+            logger.warning(
+                "Native trial %s failed inside harbor: %s: %s",
+                request.id,
+                getattr(err, "exception_type", None),
+                getattr(err, "exception_message", None),
+            )
             return (
                 ExecutionResult(
                     status=RolloutStatus.FAILURE,
