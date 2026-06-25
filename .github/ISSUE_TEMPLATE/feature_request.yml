@@ -38,7 +38,7 @@ body:
       label: SDK Component
       description: Which part of the SDK does this relate to?
       options:
-        - Reward / Rubric decorators
+        - Graders & rewards
         - Remote rollout (`osmosis_ai.rollout`)
         - Rollout server (`create_rollout_server`)
         - CLI (`osmosis` command)

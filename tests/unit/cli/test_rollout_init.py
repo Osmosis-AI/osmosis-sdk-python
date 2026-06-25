@@ -103,7 +103,7 @@ def test_rollout_init_plain_next_steps_use_existing_commands(
     captured = capsys.readouterr()
 
     assert rc == 0
-    assert "osmosis eval run configs/eval/my-agent.toml --limit 1" in captured.out
+    assert "osmosis eval submit configs/eval/my-agent.toml" in captured.out
     assert "osmosis train submit configs/training/my-agent.toml" in captured.out
     assert "osmosis rollout validate" not in captured.out
 
@@ -145,7 +145,19 @@ def test_rollout_init_substitutes_rollout_name_in_configs(
     )
     assert 'rollout = "my-agent"' in eval_toml
     # Dataset placeholder must remain (user must pick a dataset themselves).
-    assert "<your-dataset>" in eval_toml
+    assert "<your-dataset-name>" in eval_toml
+    assert 'model_path = "openai/gpt-5-mini"' in eval_toml
+    assert "[llm]" not in eval_toml
+    assert "base_url" not in eval_toml
+    # Evaluation tuning and env are optional; the default OpenAI eval model
+    # still needs an explicit secret ref.
+    assert "# limit = 200" in eval_toml
+    assert "# n = 1" in eval_toml
+    assert "# [env]" in eval_toml
+    assert "[secrets]" in eval_toml
+    assert 'required = ["OPENAI_API_KEY"]' in eval_toml
+    assert "\nlimit = 200" not in eval_toml
+    assert "\nLOG_LEVEL =" not in eval_toml
 
     training_toml = (
         workspace_directory / "configs" / "training" / "my-agent.toml"
@@ -159,12 +171,15 @@ def test_rollout_init_substitutes_rollout_name_in_configs(
     assert "<your-dataset-name>" in training_toml
     assert "Qwen/Qwen3.6-35B-A3B" in training_toml
     assert "Qwen/Qwen3.5-122B-A10B" in training_toml
+    assert "# [env]" in training_toml
+    assert "# [secrets]" in training_toml
+    assert '#   required = ["OPENAI_API_KEY"]' in training_toml
 
 
 def test_rollout_init_training_config_omits_platform_defaults(
     monkeypatch, tmp_path
 ) -> None:
-    from osmosis_ai.platform.cli.training_config import load_training_config
+    from osmosis_ai.platform.cli.training_config import load_train_submit_config
 
     workspace_directory = _make_workspace_directory(tmp_path / "proj")
     monkeypatch.chdir(workspace_directory)
@@ -173,10 +188,10 @@ def test_rollout_init_training_config_omits_platform_defaults(
     assert rc == 0
 
     training_toml = workspace_directory / "configs" / "training" / "my-agent.toml"
-    config = load_training_config(training_toml)
+    config = load_train_submit_config(training_toml)
 
-    assert config.training_n_samples_per_prompt is None
-    assert config.training_rollout_batch_size is None
+    assert config.training.n_samples_per_prompt is None
+    assert config.training.rollout_batch_size is None
     assert config.training_config == {}
     assert config.sampling_config == {}
     assert config.checkpoints_config == {}

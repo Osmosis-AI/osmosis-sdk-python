@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "keys": ["schema_version", "base_models", "lora_models"],
+  "section_keys": [
+    "items",
+    "total_count",
+    "has_more",
+    "next_offset"
+  ]
+}

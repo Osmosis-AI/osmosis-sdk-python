@@ -9,13 +9,13 @@ import typer
 import typer.core
 from dotenv import find_dotenv, load_dotenv
 
-from osmosis_ai.cli.errors import CLIError
 from osmosis_ai.cli.output.context import (
     OutputContext,
     OutputFormat,
     _argv_format_prescan,
     _output_context_var,
     get_output_context,
+    hoist_format_selectors,
     install_output_context,
     resolve_format_selectors,
 )
@@ -26,10 +26,6 @@ from osmosis_ai.cli.output.error import (
 )
 from osmosis_ai.cli.output.renderer import render_command_result, verify_output_emitted
 from osmosis_ai.consts import PACKAGE_VERSION, package_name
-from osmosis_ai.platform.auth.platform_client import (
-    AuthenticationExpiredError,
-    PlatformAPIError,
-)
 
 
 class OsmosisGroup(typer.core.TyperGroup):
@@ -43,6 +39,11 @@ class OsmosisGroup(typer.core.TyperGroup):
         except click.UsageError:
             if args:
                 cmd_name = args[0]
+                if cmd_name == "help":
+                    raise click.UsageError(
+                        "No such command 'help'. Use 'osmosis --help', "
+                        "or 'osmosis <command> --help' for a specific command."
+                    ) from None
                 candidates = []
                 for name in self.list_commands(ctx):
                     command = self.get_command(ctx, name)
@@ -92,7 +93,7 @@ def _callback(
 ) -> None:
     """Osmosis AI CLI.
 
-    Rich output is the default for humans. For AI agents, CI/CD, and scripts, put a global output flag before the command, for example: `osmosis --json dataset list` or `osmosis --plain dataset list`.
+    Rich output is the default for humans. For AI agents, CI/CD, and scripts, pass `--json` or `--plain` anywhere on the command line, for example: `osmosis dataset list --json` or `osmosis --plain dataset list`.
     """
     warnings.filterwarnings("ignore")
     if version:
@@ -157,10 +158,7 @@ def _handle_cli_error(
             command=command_path_for_error(ctx, argv=command_argv),
         )
     else:
-        if isinstance(exc, AuthenticationExpiredError):
-            _print_error(str(exc))
-        else:
-            _print_error(str(exc))
+        _print_error(str(exc))
     return exit_code
 
 
@@ -180,10 +178,10 @@ def _register_commands() -> None:
     # -- Command groups --
     from osmosis_ai.cli.commands.auth import app as auth_app
     from osmosis_ai.cli.commands.dataset import app as dataset_app
-    from osmosis_ai.cli.commands.deployment import app as deployment_app
     from osmosis_ai.cli.commands.eval import app as eval_app
     from osmosis_ai.cli.commands.model import app as model_app
     from osmosis_ai.cli.commands.rollout import app as rollout_app
+    from osmosis_ai.cli.commands.secret import app as secret_app
     from osmosis_ai.cli.commands.template import app as template_app
     from osmosis_ai.cli.commands.train import app as train_app
 
@@ -193,21 +191,20 @@ def _register_commands() -> None:
     app.add_typer(dataset_app, name="dataset", rich_help_panel=_WORKFLOW)
     app.add_typer(train_app, name="train", rich_help_panel=_WORKFLOW)
     app.add_typer(model_app, name="model", rich_help_panel=_WORKFLOW)
-    app.add_typer(deployment_app, name="deployment", rich_help_panel=_WORKFLOW)
     app.add_typer(eval_app, name="eval", rich_help_panel=_WORKFLOW)
     app.add_typer(rollout_app, name="rollout", rich_help_panel=_WORKFLOW)
     app.add_typer(template_app, name="template", rich_help_panel=_WORKFLOW)
 
-    app.add_typer(auth_app, name="auth", rich_help_panel=_PLATFORM)
+    from osmosis_ai.cli.commands.dev import app as dev_app
 
-    # `deploy` and `undeploy` are verbs, not CRUD on the deployment resource,
-    # so they are promoted to top-level to avoid `osmosis deployment deploy`.
-    from osmosis_ai.cli.commands.deployment import deploy, undeploy
+    app.add_typer(dev_app, name="dev", hidden=True)
+
+    app.add_typer(auth_app, name="auth", rich_help_panel=_PLATFORM)
+    app.add_typer(secret_app, name="secret", rich_help_panel=_PLATFORM)
+
     from osmosis_ai.cli.commands.workspace import doctor
 
-    app.command("deploy", rich_help_panel=_WORKFLOW)(deploy)
     app.command("doctor", rich_help_panel=_WORKFLOW)(doctor)
-    app.command("undeploy", rich_help_panel=_WORKFLOW)(undeploy)
 
     from osmosis_ai.cli.upgrade import upgrade
 
@@ -215,8 +212,9 @@ def _register_commands() -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Entry point for the osmosis CLI."""
+    """Entry point for the Osmosis CLI."""
     _register_commands()
+    argv = hoist_format_selectors(argv if argv is not None else sys.argv[1:])
     try:
         result = app(argv, standalone_mode=False)
         # standalone_mode=False returns None on normal completion;
@@ -234,15 +232,11 @@ def main(argv: list[str] | None = None) -> int:
         if not str(exc):
             return 0
         return _handle_cli_error(exc, argv=argv, exit_code=exc.exit_code)
-    except AuthenticationExpiredError as exc:
-        return _handle_cli_error(exc, argv=argv)
-    except PlatformAPIError as exc:
-        return _handle_cli_error(exc, argv=argv)
-    except CLIError as exc:
-        return _handle_cli_error(exc, argv=argv)
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, click.Abort):
         return 130
     except Exception as exc:
+        # CLIError, PlatformAPIError, AuthenticationExpiredError and anything
+        # else funnel through classify_error() into the structured envelope.
         return _handle_cli_error(exc, argv=argv)
 
 

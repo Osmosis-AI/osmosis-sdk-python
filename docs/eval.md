@@ -1,218 +1,95 @@
 # Eval
 
-Run **`osmosis eval run`** with a TOML file to evaluate a rollout against a
-dataset using the same controller protocol used by training. Results are cached
-on disk so long runs can resume after interruption.
+> Product/end-user eval-run usage (results UI, metrics, config field reference) lives at [docs.osmosis.ai](https://docs.osmosis.ai/platform/evaluation-runs). This page is the **code-anchored** contract for `osmosis eval submit`: the TOML the SDK validates locally, the SDK-vs-backend validation split, and the submit flow. `osmosis eval rubric` (offline LLM-as-judge) is covered briefly at the end.
 
-Eval configs must live under `configs/eval/` inside a structured Osmosis
-workspace directory.
+## `osmosis eval submit` (cloud eval runs)
 
-## TOML configuration
+Reads an evaluation config TOML, validates its **structure** locally, and POSTs it to the platform over the same git-sync flow as `osmosis train submit`. The two commands share one implementation — only the literal strings, the config loader, and the API call differ.
 
-### Required
+- Command shell: [../osmosis_ai/cli/commands/eval.py](../osmosis_ai/cli/commands/eval.py) (`eval_submit`)
+- Handler + submit spec: [../osmosis_ai/platform/cli/eval.py](../osmosis_ai/platform/cli/eval.py) (`submit`, `_EVAL_SUBMIT_SPEC`)
+- Config loader: [../osmosis_ai/platform/cli/eval_config.py](../osmosis_ai/platform/cli/eval_config.py)
+- Shared submit flow: [../osmosis_ai/platform/cli/shared_submit.py](../osmosis_ai/platform/cli/shared_submit.py) (`run_cloud_submit`)
+- Shared config primitives: [../osmosis_ai/platform/cli/shared_config.py](../osmosis_ai/platform/cli/shared_config.py)
 
-**`[eval]`**
+```bash
+osmosis eval submit configs/eval/<name>.toml        # interactive confirmation
+osmosis eval submit configs/eval/<name>.toml --yes  # skip the prompt
+```
 
-| Key | Description |
-|-----|-------------|
-| `rollout` | Rollout pack name; eval runs the entrypoint from `rollouts/<rollout>/`. |
-| `entrypoint` | Python file started with `uv run python <entrypoint>` from the rollout directory. |
-| `dataset` | Dataset file path, relative to the workspace directory. |
+The config path must resolve under `configs/eval/` inside the current git workspace directory.
 
-**`[llm]`**
-
-| Key | Description |
-|-----|-------------|
-| `model` | Model id in LiteLLM provider/model form, such as `openai/gpt-5-mini` or `hosted_vllm/Qwen/Qwen2.5-7B-Instruct`. |
-| `base_url` | Optional OpenAI-compatible API base for the selected LiteLLM provider. |
-| `api_key_env` | Optional environment variable name holding the API key; omit only for LiteLLM providers/endpoints that do not require credentials. |
-
-### Optional sections
-
-Eval configs use `[eval]`, `[llm]`, and optional `[runs]`, `[timeouts]`, and
-`[output]` settings. Legacy `[grader]` and `[baseline]` sections are rejected:
-grading is reported by the rollout server callback, and model comparisons should
-use separate eval configs.
-
-**`[runs]`**
-
-| Key | Default | Description |
-|-----|---------|-------------|
-| `n` | `1` | Runs per row (pass@k). |
-| `batch_size` | `1` | Concurrent runs. |
-| `pass_threshold` | `1.0` | Score >= threshold counts as pass. |
-
-**`[timeouts]`**
-
-| Key | Default | Description |
-|-----|---------|-------------|
-| `agent_workflow_timeout_s` | `450` | Max seconds to wait for the rollout completion callback. |
-| `grader_timeout_s` | `150` | Max seconds to wait for the grader completion callback. |
-
-**`[output]`**
-
-| Key | Default | Description |
-|-----|---------|-------------|
-| `log_samples` | `false` | Persist full message logs to JSONL alongside the cache. |
-| `output_path` | - | Structured results directory (CLI `-o` overrides). |
-| `quiet` | `false` | Less console output. |
-| `debug` | `false` | Debug logging / traces. |
-
-**`[eval]` extras**
-
-| Key | Default | Description |
-|-----|---------|-------------|
-| `limit` | - | Max rows (CLI `--limit` overrides when set). |
-| `offset` | `0` | Skip first N rows. |
-| `fresh` | `false` | Start fresh (same as CLI `--fresh`). |
-| `retry_failed` | `false` | Only failed runs (same as CLI `--retry-failed`). |
-
-### Example `configs/eval/my-rollout.toml`
+### Config contract (what the SDK validates)
 
 ```toml
-[eval]
-rollout = "my_rollout"
-entrypoint = "main.py"
-dataset = "data/my-eval.jsonl"
+[experiment]                      # required
+rollout = "my_rollout"            # single-segment logical name -> rollouts/my_rollout/
+entrypoint = "agent.py"           # resolves under rollouts/my_rollout/
+model_path = "Qwen/Qwen3-8B"
+dataset = "my-dataset"
+# commit_sha = "abc1234"          # optional, 7-40 hex chars
 
-[llm]
-model = "openai/gpt-5-mini"
-api_key_env = "OPENAI_API_KEY"
+[evaluation]                      # optional; structure-only, values owned by backend
+n = 4
+limit = 100
 
-[runs]
-n = 1
-batch_size = 1
-pass_threshold = 1.0
+[env]                             # optional
+LOG_LEVEL = "info"
 
-[timeouts]
-agent_workflow_timeout_s = 450
-grader_timeout_s = 150
-
-[output]
-log_samples = false
+[secrets]                         # required for eval (use required = [] when none)
+required = ["OPENAI_API_KEY"]
 ```
 
-## Quick start
+| Section | Required | SDK enforces locally |
+|---------|----------|----------------------|
+| `[experiment]` | yes | `rollout`, `entrypoint`, `model_path`, `dataset` present; `commit_sha` (if set) is 7-40 hex chars; `rollout` is a single-segment name resolving under `rollouts/`; unknown keys rejected (`ExperimentSection`). |
+| `[evaluation]` | no | Structure only — known keys are `limit`, `n`, `batch_size`, `pass_threshold`, `agent_workflow_timeout_s`, `grader_timeout_s`; unknown keys rejected, **values forwarded unvalidated** (`_EvaluationSection`). |
+| `[advanced]` | no | Passthrough — extra keys allowed and forwarded for server-side validation (`AdvancedPassthroughSection`). |
+| `[env]` | no | Names match `ENV_VAR_NAME_RE` = `^[A-Z_][A-Z0-9_]*$`, must not start with `_OSMOSIS_` (reserved), values must be strings. |
+| `[secrets]` | yes (eval) | Only the `required` key (a list of strings); names match `SECRET_NAME_RE` = `^[A-Z][A-Z0-9_]*$`; unknown keys rejected. Training configs may omit the section; **eval configs must include it** — use `required = []` when no secrets are needed. |
 
-```bash
-osmosis eval run configs/eval/my-rollout.toml
-osmosis eval run configs/eval/my-rollout.toml --fresh
-osmosis eval run configs/eval/my-rollout.toml --limit 50 --batch-size 4 -o ./results
+A name cannot appear in both `[env]` and `[secrets]`.
+
+### SDK vs backend validation
+
+The SDK validates **structure only**; the backend owns value-level semantics. So the SDK does **not** check provider/model validity, dataset existence and naming, or evaluation parameter ranges (`n`, `limit`, `pass_threshold`, timeouts) — those errors surface from the platform at submit time, not from the SDK. This is deliberate: the SDK does not track backend schema evolution.
+
+### Submit flow (what happens locally before the POST)
+
+`run_cloud_submit` ([shared_submit.py](../osmosis_ai/platform/cli/shared_submit.py)) runs in order:
+
+1. Resolve the git/workspace-directory context and validate the workspace contract.
+2. Resolve the config path and ensure it lives under `configs/eval/`.
+3. Load + validate the TOML (`load_eval_submit_config`).
+4. Validate `rollout`/`entrypoint` resolve under `rollouts/<rollout>/`, then validate the rollout backend.
+5. Preflight a pinned `commit_sha` (fail fast on a confirmed-bad SHA before the platform clones the repo).
+6. Render the confirmation summary; if `[secrets]` are referenced, fetch workspace + personal scopes and **fail fast** on missing names with an `osmosis secret set <name>` hint.
+7. Confirm (skipped with `--yes`), then POST via `client.submit_evaluation_run`. A missing-secret `404` is enriched with the same add-secret hint.
+
+The result is an `OperationResult` whose next-steps point at `osmosis eval info <name>`, `osmosis eval list`, and the platform URL.
+
+### Companion commands
+
+All operate on the current git workspace directory ([../osmosis_ai/platform/cli/eval.py](../osmosis_ai/platform/cli/eval.py)):
+
+- `osmosis eval list [--all] [--limit N]` — list runs for the workspace.
+- `osmosis eval info <name|id> [-o path]` — run detail, results, and metrics (writes a metrics JSON in rich mode).
+- `osmosis eval logs <name|id> [--cursor …]` — recent run logs, oldest first.
+- `osmosis eval stop <name|id> [--yes]` — stop a run.
+
+See [docs.osmosis.ai/cli/config-files](https://docs.osmosis.ai/cli/config-files) for the full config field reference.
+
+## `osmosis eval rubric` (offline LLM-as-judge)
+
+Standalone, no-workspace scoring of a candidate output against a rubric via a hosted LLM judge (LiteLLM). It needs no platform auth and runs no rollout. The CLI command is `osmosis eval rubric`; the same logic is importable as `evaluate_rubric`:
+
+```python
+from osmosis_ai import evaluate_rubric, RubricResult  # lazy-loaded top-level exports
 ```
 
-## Local eval setup
-
-### Controller-Backed Local Eval
-
-`osmosis eval run` starts your rollout as a local HTTP server and drives it through the same controller protocol used by training. Eval runs `uv run python <entrypoint>` from `rollouts/<rollout>`, expects the server to bind `127.0.0.1:8000` or `0.0.0.0:8000`, requires `GET /health`, sends `POST /rollout`, serves model calls from the controller at `POST /chat/completions`, and waits for the rollout to call `POST /v1/rollout/completed` plus `POST /v1/grader/completed` callback URLs.
-
-Eval configs no longer contain `[grader]` or `[baseline]`. Grading is part of the rollout server. To compare two models, run two eval configs separately.
-
-Use `osmosis eval run configs/eval/<name>.toml --limit 1` for the end-to-end smoke test that covers server startup, `/health`, `/rollout`, `/chat/completions`, callbacks, provider credentials, and grading.
-
-## Rollout server contract
-
-The rollout entrypoint must start a server built with `create_rollout_server(...)`.
-For local eval, the CLI provides `ROLLOUT_PORT=8000` and runs the entrypoint from
-the rollout directory.
-
-The rollout server must expose:
-
-| Endpoint | Purpose |
-|----------|---------|
-| `GET /health` | Server readiness check. |
-| `POST /rollout` | Controller request that starts one sample run. |
-
-The `/rollout` payload includes these controller URLs:
-
-| Payload field | Purpose |
-|---------------|---------|
-| `chat_completions_url` | Base URL for the controller-hosted OpenAI-compatible model endpoint. Clients call `<chat_completions_url>/chat/completions`. |
-| `completion_callback_url` | Full callback URL the rollout calls when agent work finishes. |
-| `grader_callback_url` | Full callback URL the rollout calls with grader rewards. |
-
-The controller endpoints are not implemented by the rollout server; they are
-hosted by the local eval process and passed to the rollout in the `/rollout`
-request.
-
-Each rollout directory must contain `pyproject.toml` so `uv run python
-<entrypoint>` can start from `rollouts/<rollout>`.
-
-## Connecting to model endpoints
-
-Use `[llm].base_url` for OpenAI-compatible servers. The `model` still uses
-LiteLLM provider/model form; for no-auth local servers, omit `api_key_env`.
-
-| Serving | Example `model` | Example `base_url` |
-|---------|-----------------|--------------------|
-| vLLM | `hosted_vllm/Qwen/Qwen2.5-7B-Instruct` | `http://localhost:8001/v1` |
-| SGLang | `hosted_vllm/Qwen/Qwen2.5-7B-Instruct` | `http://localhost:30000/v1` |
-| Ollama | `ollama_chat/llama3.1` | `http://localhost:11434` |
-| Osmosis inference | Provider/model id for your deployment | URL provided for your deployment |
-
-## pass@k
-
-When `[runs].n` > 1, each row is executed multiple times. Summary output
-includes estimated pass@k values derived from pass/fail counts vs
-`pass_threshold`.
-
-## Result caching and resume
-
-1. A **task id** is derived from the effective configuration, dataset
-   fingerprint, rollout filesystem fingerprint, entrypoint path, and controller
-   protocol version.
-2. Cache files live under workspace-directory local `.osmosis/cache/eval/`.
-3. Re-running the **same** command resumes an in-progress cache; use `--fresh`
-   to discard.
-
-**Environment:**
-
-| Variable | Description |
-|----------|-------------|
-| `OSMOSIS_EVAL_LOCK_TIMEOUT` | Lock acquisition timeout seconds (default `30`). |
-
-Cache invalidation includes TOML and CLI overrides that affect result semantics,
-dataset content, controller protocol version, and rollout files with these
-suffixes: `.py`, `.toml`, `.json`, `.jsonl`, `.yaml`, and `.yml`. Changes in
-other rollout assets or external dependencies may not invalidate the cache; use
-`--fresh` after changing them or upgrading libraries.
-
-### Cache CLI
-
-```bash
-osmosis eval cache ls
-osmosis eval cache rm <task_id>
-osmosis eval cache rm --all --yes
-```
-
-## CLI overrides
-
-Flags on `osmosis eval run` override TOML when provided:
-
-| Flag | Effect |
-|------|--------|
-| `--fresh` | Discard cached results for this config |
-| `--retry-failed` | Re-run failures only (mutually exclusive with `--fresh`) |
-| `--limit` / `--offset` | Row window |
-| `--batch-size` | Concurrency |
-| `-o` / `--output-path` | Results directory |
-| `--log-samples` | Save transcripts |
-| `-q` / `--quiet` | Quiet |
-| `--debug` | Debug |
-
-## Exceptions
-
-| Kind | Typical cause |
-|------|----------------|
-| CLI / `CLIError` | Bad TOML, missing API key env, rollout server startup errors, callback or grading failures |
-| Failed eval run | Rollout or grader callback did not arrive before its configured timeout |
-| `TimeoutError` | Cache lock held by another process or server startup health wait timed out |
-| `RuntimeError` | Cache version mismatch, hash collision, dataset changed mid-run |
-
-Dataset and provider errors are shared with [Troubleshooting](./troubleshooting.md).
+`evaluate_rubric` is an async function returning a `RubricResult` (`score: float`, `explanation: str`) with the score clamped to `[score_min, score_max]`. For the full signature, provider inference, API-key resolution, and error types, see the engine and types directly: [../osmosis_ai/eval/rubric/engine.py](../osmosis_ai/eval/rubric/engine.py), [../osmosis_ai/eval/rubric/types.py](../osmosis_ai/eval/rubric/types.py). For the CLI flag list, see the [command reference](https://docs.osmosis.ai/cli/command-reference).
 
 ## See also
 
-- [Dataset format](./datasets.md)
-- [CLI reference](./cli.md)
-- [Troubleshooting](./troubleshooting.md)
+- [datasets.md](./datasets.md) — dataset row contract
+- [rollout-sdk.md](./rollout-sdk.md) — the workflow + grader API graded during eval runs

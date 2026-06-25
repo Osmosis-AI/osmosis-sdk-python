@@ -77,6 +77,34 @@ def test_safe_extract_uses_data_filter(tmp_path: Path, monkeypatch) -> None:
     assert calls == ["data"]
 
 
+def test_safe_extract_lets_data_filter_validate_links(
+    tmp_path: Path, monkeypatch
+) -> None:
+    archive_path = tmp_path / "template.tar"
+    with tarfile.open(archive_path, "w") as archive:
+        member = tarfile.TarInfo(
+            "workspace-template-main/.claude/skills/create-rollouts"
+        )
+        member.type = tarfile.SYMTYPE
+        member.linkname = "../../.agents/skills/create-rollouts"
+        archive.addfile(member)
+
+    calls: list[object] = []
+
+    def fake_extractall(
+        self, path=".", members=None, *, numeric_owner=False, filter=None
+    ):
+        del self, path, members, numeric_owner
+        calls.append(filter)
+
+    monkeypatch.setattr(tarfile.TarFile, "extractall", fake_extractall)
+
+    with tarfile.open(archive_path, "r") as archive:
+        source._safe_extract(archive, tmp_path / "extract")
+
+    assert calls == ["data"]
+
+
 def test_missing_override_path_uses_user_facing_template_terms(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

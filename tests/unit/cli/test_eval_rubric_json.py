@@ -28,9 +28,7 @@ def test_eval_rubric_json_returns_operation_result(
         + "\n",
         encoding="utf-8",
     )
-    mock_eval = AsyncMock(
-        return_value=RubricResult(score=0.8, explanation="good", raw={})
-    )
+    mock_eval = AsyncMock(return_value=RubricResult(score=0.8, explanation="good"))
     monkeypatch.setattr("osmosis_ai.eval.rubric.cli.evaluate_rubric", mock_eval)
 
     exit_code = cli.main(
@@ -71,7 +69,7 @@ def test_eval_rubric_json_output_file_omits_records(
     output_path = tmp_path / "result.json"
     monkeypatch.setattr(
         "osmosis_ai.eval.rubric.cli.evaluate_rubric",
-        AsyncMock(return_value=RubricResult(score=1.0, explanation="ok", raw={})),
+        AsyncMock(return_value=RubricResult(score=1.0, explanation="ok")),
     )
 
     exit_code = cli.main(
@@ -111,7 +109,7 @@ def test_eval_rubric_json_suppresses_tty_progress(
     monkeypatch.setattr(sys.stderr, "isatty", lambda: True)
     monkeypatch.setattr(
         "osmosis_ai.eval.rubric.cli.evaluate_rubric",
-        AsyncMock(return_value=RubricResult(score=1.0, explanation="ok", raw={})),
+        AsyncMock(return_value=RubricResult(score=1.0, explanation="ok")),
     )
 
     exit_code = cli.main(
@@ -150,7 +148,7 @@ def test_eval_rubric_plain_allows_tty_progress(
     monkeypatch.setattr(sys.stderr, "isatty", lambda: True)
     monkeypatch.setattr(
         "osmosis_ai.eval.rubric.cli.evaluate_rubric",
-        AsyncMock(return_value=RubricResult(score=1.0, explanation="ok", raw={})),
+        AsyncMock(return_value=RubricResult(score=1.0, explanation="ok")),
     )
 
     exit_code = cli.main(

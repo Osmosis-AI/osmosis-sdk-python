@@ -57,6 +57,7 @@ async def run_workflow(
     ctx = AgentWorkflowContext(
         prompt=prompt,
         config=workflow_config,
+        metadata=config.get("metadata"),
     )
 
     meta: dict[str, Any] = {"id": config.get("id", "")}

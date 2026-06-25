@@ -1,45 +1,53 @@
-# Dataset format
+# Dataset contract
 
-Datasets supply prompts and reference answers for **`osmosis eval run`**. Each row becomes a short message list (system + user) plus optional extra fields carried on the row dict.
+> The dataset shape the SDK validates locally before upload. Uploading and managing datasets (`osmosis dataset upload`, overwrite/processing semantics) is covered at [docs.osmosis.ai](https://docs.osmosis.ai/platform/datasets).
 
-## Supported formats
+Datasets supply prompts (and optional reference answers) for cloud `osmosis eval submit` and `osmosis train submit` runs. The contract below is enforced by the local validator before any bytes hit the platform.
 
-- **Parquet** (recommended) — compact and fast for large tables
-- **JSONL** — one JSON object per line
-- **CSV** — header row required
+## What the SDK checks
+
+Constants: [../osmosis_ai/platform/cli/constants.py](../osmosis_ai/platform/cli/constants.py). Validation: [../osmosis_ai/platform/cli/dataset.py](../osmosis_ai/platform/cli/dataset.py) (`_validate_file`, `_check_required_columns`).
+
+| Rule | Value | Source |
+|------|-------|--------|
+| Allowed extensions | `csv`, `jsonl`, `parquet` | `VALID_EXTENSIONS` |
+| Required columns | `system_prompt`, `user_prompt` | `REQUIRED_COLUMNS` |
+| Minimum rows | `4` | `MIN_ROW_COUNT` |
+| Max file size | 5 GB | `MAX_FILE_SIZE` |
 
 ## Required columns
 
-Each row must include (case-insensitive column names):
+Each row must include exactly these column names — `_check_required_columns` does a **case-sensitive** set match (`REQUIRED_COLUMNS - set(columns)`), so `User_Prompt` or `USER_PROMPT` will not satisfy it:
 
 | Column | Type | Description |
 |--------|------|-------------|
-| `ground_truth` | `str` | Reference answer (used by graders and some tooling) |
-| `user_prompt` | `str` | User turn |
 | `system_prompt` | `str` | System instruction |
+| `user_prompt` | `str` | User turn |
 
-## Example (Parquet)
+`ground_truth` is **not** required by the validator. It is a conventional optional column that graders and tooling read for reference answers — include it when your `Grader` needs it.
+
+## Additional columns
+
+The validator only checks that the required columns are *present*; it never rejects extra columns. Any other columns ride along on the row and are available to downstream code (workflows, graders, platform metadata).
+
+## Examples
 
 ```python
 import pyarrow as pa
 import pyarrow.parquet as pq
 
 table = pa.table({
-    "system_prompt": ["You are a helpful calculator.", "You are a helpful calculator."],
-    "user_prompt": ["What is 2 + 2?", "What is 10 * 5?"],
-    "ground_truth": ["4", "50"],
+    "system_prompt": ["You are a helpful calculator."] * 4,
+    "user_prompt": ["What is 2 + 2?", "What is 10 * 5?", "What is 9 - 3?", "What is 8 / 2?"],
+    "ground_truth": ["4", "50", "6", "4"],   # optional
 })
 pq.write_table(table, "data.parquet")
 ```
-
-## Example (JSONL)
 
 ```jsonl
 {"system_prompt": "You are a helpful calculator.", "user_prompt": "What is 2 + 2?", "ground_truth": "4"}
 {"system_prompt": "You are a helpful calculator.", "user_prompt": "What is 10 * 5?", "ground_truth": "50"}
 ```
-
-## Example (CSV)
 
 ```csv
 system_prompt,user_prompt,ground_truth
@@ -47,12 +55,13 @@ You are a helpful calculator.,What is 2 + 2?,4
 You are a helpful calculator.,What is 10 * 5?,50
 ```
 
-> Fields with commas or newlines must be quoted per [RFC 4180](https://tools.ietf.org/html/rfc4180). Prefer Parquet or JSONL for rich text.
+> At least `MIN_ROW_COUNT` (4) rows are required. Quote CSV fields containing commas or newlines per [RFC 4180](https://tools.ietf.org/html/rfc4180); prefer Parquet or JSONL for rich text.
 
-## Additional columns
+## Note: rubric eval input is different
 
-Any other columns are kept on the normalized row dict. Downstream code (workflows, graders, or platform metadata) can read them from that structure.
+`osmosis eval rubric` does **not** use this columnar contract. It reads a messages-based JSONL file ([../osmosis_ai/eval/rubric/dataset.py](../osmosis_ai/eval/rubric/dataset.py)); see [eval.md](./eval.md).
 
 ## See also
 
-- [Eval](./eval.md)
+- [eval.md](./eval.md) — `evaluate_rubric` API and config validation
+- [docs.osmosis.ai/platform/datasets](https://docs.osmosis.ai/platform/datasets) — upload + management

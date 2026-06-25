@@ -26,7 +26,6 @@ class OutputContext:
 
     format: OutputFormat
     interactive: bool
-    quiet: bool = False
     schema_version: int = 1
     output_emitted: bool = False
 
@@ -46,8 +45,14 @@ class OutputContext:
         from rich.console import Console as RichConsole
         from rich.status import Status
 
+        from osmosis_ai.cli.console import console
+
         rich_stderr = RichConsole(stderr=True)
-        with Status(message, console=rich_stderr, spinner="dots"):
+        status = Status(message, console=rich_stderr, spinner="dots")
+        # Register on the shared console so a warning emitted mid-spin (e.g. the
+        # upgrade nudge) can pause/resume this spinner instead of gluing onto or
+        # stranding its line. This is the dominant spinner path for the CLI.
+        with console.track_spinner(status), status:
             yield
 
 
@@ -66,18 +71,40 @@ def default_output_context() -> OutputContext:
 
 
 def _argv_format_prescan(argv: list[str]) -> OutputFormat | None:
-    """Tolerantly scan root-level argv for output format selectors."""
-    i = 0
-    while i < len(argv):
-        token = argv[i]
+    """Tolerantly scan argv for output format selectors at any position.
+
+    Tokens after a literal ``--`` are arguments, never format selectors.
+    """
+    for token in argv:
+        if token == "--":
+            return None
         if token == "--json":
             return OutputFormat.json
         if token == "--plain":
             return OutputFormat.plain
-        if not token.startswith("-"):
-            return None
-        i += 1
     return None
+
+
+def hoist_format_selectors(argv: list[str]) -> list[str]:
+    """Move ``--json``/``--plain`` to the front of argv.
+
+    The selectors are root-level Typer options, so a postfix spelling like
+    ``osmosis dataset list --json`` would otherwise be rejected by the
+    subcommand. Tokens after a literal ``--`` are left in place. No command
+    has an option whose value can start with ``-``, so a bare ``--json``/
+    ``--plain`` token is always a format selector.
+    """
+    selectors: list[str] = []
+    rest: list[str] = []
+    for index, token in enumerate(argv):
+        if token == "--":
+            rest.extend(argv[index:])
+            break
+        if token in ("--json", "--plain"):
+            selectors.append(token)
+        else:
+            rest.append(token)
+    return selectors + rest
 
 
 def get_output_context() -> OutputContext:

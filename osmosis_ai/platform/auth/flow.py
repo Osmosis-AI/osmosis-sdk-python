@@ -21,10 +21,14 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from osmosis_ai.cli.console import console
-from osmosis_ai.consts import PACKAGE_VERSION
 
-from .config import PLATFORM_URL
+from .config import get_platform_url
 from .credentials import Credentials, UserInfo
+from .platform_client import (
+    cli_request_headers,
+    surface_response_version_signal,
+    upgrade_required_message,
+)
 
 
 class LoginError(Exception):
@@ -36,10 +40,29 @@ class LoginError(Exception):
         *,
         code: str | None = None,
         status_code: int | None = None,
+        details: dict[str, Any] | None = None,
     ):
         super().__init__(message)
         self.code = code
         self.status_code = status_code
+        self.details = details
+
+
+@dataclass
+class VerifiedWorkspace:
+    """Workspace identity resolved server-side from the X-Osmosis-Git header."""
+
+    id: str | None
+    name: str
+    role: str | None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> VerifiedWorkspace:
+        return cls(
+            id=data.get("id"),
+            name=data.get("name", ""),
+            role=data.get("role"),
+        )
 
 
 @dataclass
@@ -49,6 +72,7 @@ class VerifyResult:
     user: UserInfo
     expires_at: datetime
     token_id: str | None
+    workspace: VerifiedWorkspace | None = None
 
 
 @dataclass
@@ -74,11 +98,16 @@ class DeviceCodeResponse:
     verification_uri: str
     expires_in: int
     interval: int
+    verification_uri_complete: str | None = None
 
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+def _platform_url() -> str:
+    return get_platform_url()
 
 
 def _parse_expires_at(raw: str | None) -> datetime:
@@ -177,6 +206,20 @@ def _login_error_from_http(
     Uses the platform's error detail when it adds meaningful context,
     otherwise falls back to a status-code-specific message or a generic one.
     """
+    if e.code == 426:
+        body = _read_error_body(e)
+        message, version_signal = upgrade_required_message(body)
+        # Carry the parsed version signal so the command layer can attach the
+        # same structured ``details`` (status/message) a 426 on a regular API
+        # call produces, keeping the UPGRADE_REQUIRED JSON contract consistent
+        # across the login handshake and the rest of the CLI.
+        return LoginError(
+            message,
+            code="UPGRADE_REQUIRED",
+            status_code=426,
+            details=version_signal,
+        )
+
     detail = _read_error_detail(e)
     friendly = _HTTP_ERROR_MESSAGES.get(e.code)
 
@@ -196,31 +239,32 @@ def _login_error_from_http(
 # ---------------------------------------------------------------------------
 
 
-def verify_token(token: str) -> VerifyResult:
+def verify_token(token: str, *, git_identity: str | None = None) -> VerifyResult:
     """Verify token and get user info from the platform.
 
     Args:
         token: The access token to verify.
+        git_identity: Optional Git repository identity sent as the
+            X-Osmosis-Git header so the platform resolves the linked
+            workspace. When omitted the result's workspace is None.
 
     Returns:
-        VerifyResult with user, expiration, and token_id.
+        VerifyResult with user, expiration, token_id, and workspace.
 
     Raises:
         LoginError: If verification fails.
     """
-    verify_url = f"{PLATFORM_URL}/api/cli/verify"
+    verify_url = f"{_platform_url()}/api/cli/verify"
 
-    request = Request(
-        verify_url,
-        headers={
-            "Authorization": f"Bearer {token}",
-            "Content-Type": "application/json",
-            "User-Agent": f"osmosis-cli/{PACKAGE_VERSION}",
-        },
-    )
+    req_headers = cli_request_headers(token=token)
+    if git_identity:
+        req_headers["X-Osmosis-Git"] = git_identity
+
+    request = Request(verify_url, headers=req_headers)
 
     try:
         with urlopen(request, timeout=30) as response:
+            surface_response_version_signal(response)
             data = json.loads(response.read().decode())
 
             token_id = data.get("token_id")
@@ -237,10 +281,18 @@ def verify_token(token: str) -> VerifyResult:
 
             expires_at = _parse_expires_at(data.get("expires_at"))
 
+            workspace_data = data.get("workspace")
+            workspace = (
+                VerifiedWorkspace.from_dict(workspace_data)
+                if isinstance(workspace_data, dict)
+                else None
+            )
+
             return VerifyResult(
                 user=user_info,
                 expires_at=expires_at,
                 token_id=token_id,
+                workspace=workspace,
             )
 
     except HTTPError as e:
@@ -268,7 +320,7 @@ def verify_token(token: str) -> VerifyResult:
 
 def request_device_code(device_name: str | None = None) -> DeviceCodeResponse:
     """Request a device code from the platform."""
-    url = f"{PLATFORM_URL}/api/cli/device/authorize"
+    url = f"{_platform_url()}/api/cli/device/authorize"
     body = json.dumps(
         {
             "deviceName": device_name or _get_device_name(),
@@ -278,15 +330,13 @@ def request_device_code(device_name: str | None = None) -> DeviceCodeResponse:
     request = Request(
         url,
         data=body,
-        headers={
-            "Content-Type": "application/json",
-            "User-Agent": f"osmosis-cli/{PACKAGE_VERSION}",
-        },
+        headers=cli_request_headers(),
         method="POST",
     )
 
     try:
         with urlopen(request, timeout=30) as response:
+            surface_response_version_signal(response)
             data = json.loads(response.read().decode())
             return DeviceCodeResponse(
                 device_code=data["device_code"],
@@ -294,6 +344,7 @@ def request_device_code(device_name: str | None = None) -> DeviceCodeResponse:
                 verification_uri=data["verification_uri"],
                 expires_in=data["expires_in"],
                 interval=data["interval"],
+                verification_uri_complete=data.get("verification_uri_complete"),
             )
     except HTTPError as e:
         raise _login_error_from_http(e, "Failed to request device code") from e
@@ -310,12 +361,9 @@ def poll_device_token(
     on_poll: Callable[[], None] | None = None,
 ) -> dict[str, Any]:
     """Poll for device authorization completion. Returns token response dict."""
-    url = f"{PLATFORM_URL}/api/cli/device/token"
+    url = f"{_platform_url()}/api/cli/device/token"
     body = json.dumps({"device_code": device_code}).encode()
-    req_headers = {
-        "Content-Type": "application/json",
-        "User-Agent": f"osmosis-cli/{PACKAGE_VERSION}",
-    }
+    req_headers = cli_request_headers()
     deadline = time.monotonic() + timeout
     current_interval = interval
 
@@ -324,10 +372,11 @@ def poll_device_token(
 
         try:
             with urlopen(request, timeout=30) as response:
+                surface_response_version_signal(response)
                 data = json.loads(response.read().decode())
                 return data
         except HTTPError as e:
-            if e.code in (429, 500, 502, 503, 504):
+            if e.code in (426, 429, 500, 502, 503, 504):
                 raise _login_error_from_http(e, "Polling failed") from e
             try:
                 error_data = json.loads(e.read().decode())
@@ -362,7 +411,7 @@ def poll_device_token(
     raise LoginError("Device authorization timed out. Please try again.")
 
 
-def device_login(timeout: float = 600.0) -> tuple[LoginResult, Credentials]:
+def device_login(timeout: float = 900.0) -> tuple[LoginResult, Credentials]:
     """Execute the device code login flow for headless environments.
 
     Returns:
@@ -384,7 +433,11 @@ def device_login(timeout: float = 600.0) -> tuple[LoginResult, Credentials]:
     console.print(f"Code expires in {expires_minutes} minutes.", style="dim")
     console.print()
 
-    verification_url = device_code_resp.verification_uri
+    # The complete URI carries the device code so the browser lands on a
+    # pre-filled authorize page; older servers may not send it.
+    verification_url = (
+        device_code_resp.verification_uri_complete or device_code_resp.verification_uri
+    )
     console.print_url(
         "Open this URL in your browser: ", verification_url, style="yellow"
     )

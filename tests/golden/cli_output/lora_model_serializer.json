@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "keys": [
+    "id",
+    "model_name",
+    "base_model",
+    "training_run_name",
+    "checkpoint_step",
+    "reward",
+    "deployment_status",
+    "deployed_at",
+    "deployed_by",
+    "created_at"
+  ]
+}

@@ -5,9 +5,11 @@
     "file_name",
     "file_size",
     "status",
-    "processing_step",
-    "processing_percent",
-    "error",
+    "file_format",
+    "original_file_format",
+    "row_count",
+    "original_file_size",
+    "creator_name",
     "created_at",
     "updated_at"
   ]

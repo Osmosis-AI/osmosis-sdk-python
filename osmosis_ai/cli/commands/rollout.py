@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 import typer
 
-from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE
+from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
 
 if TYPE_CHECKING:
     from osmosis_ai.cli.output import CommandResult
@@ -49,106 +49,15 @@ def init(
 @app.command("list")
 def list_rollouts(
     limit: int = typer.Option(
-        DEFAULT_PAGE_SIZE, "--limit", help="Maximum number of rollouts to show."
+        DEFAULT_PAGE_SIZE,
+        "--limit",
+        min=1,
+        max=MAX_PAGE_SIZE,
+        help="Maximum number of rollouts to show.",
     ),
     all_: bool = typer.Option(False, "--all", help="Show all rollouts."),
 ) -> Any:
     """List rollouts for the current workspace directory."""
-    from osmosis_ai.cli.output import (
-        ListColumn,
-        ListResult,
-        get_output_context,
-        serialize_rollout,
-    )
-    from osmosis_ai.cli.output.display import format_local_date
-    from osmosis_ai.platform.cli.utils import (
-        fetch_all_pages,
-        require_git_workspace_directory_context,
-        validate_list_options,
-    )
-    from osmosis_ai.platform.cli.workspace_directory_context import git_result_context
+    from osmosis_ai.platform.cli.rollout import list_rollouts as _list_rollouts
 
-    effective_limit, fetch_all = validate_list_options(limit=limit, all_=all_)
-
-    context = require_git_workspace_directory_context()
-    credentials = context.credentials
-    git_identity = context.git_identity
-
-    from osmosis_ai.platform.api.client import OsmosisClient
-
-    output = get_output_context()
-    client = OsmosisClient()
-    with output.status("Fetching rollouts..."):
-        if fetch_all:
-            rollouts, total_count = fetch_all_pages(
-                lambda lim, off: client.list_rollouts(
-                    limit=lim,
-                    offset=off,
-                    credentials=credentials,
-                    git_identity=git_identity,
-                ),
-                items_attr="rollouts",
-            )
-            has_more = False
-            next_offset = None
-        else:
-            page = client.list_rollouts(
-                limit=effective_limit,
-                offset=0,
-                credentials=credentials,
-                git_identity=git_identity,
-            )
-            rollouts = page.rollouts
-            total_count = page.total_count
-            has_more = page.has_more
-            next_offset = page.next_offset
-
-    items = [serialize_rollout(rollout) for rollout in rollouts]
-
-    return ListResult(
-        title="Rollouts",
-        items=items,
-        total_count=total_count,
-        has_more=has_more,
-        next_offset=next_offset,
-        extra=git_result_context(context),
-        columns=[
-            ListColumn(
-                key="name",
-                label="Name",
-                ratio=6,
-                overflow="fold",
-                min_width=20,
-            ),
-            ListColumn(
-                key="is_active",
-                label="Active",
-                no_wrap=True,
-                min_width=6,
-                max_width=6,
-            ),
-            ListColumn(
-                key="last_synced_commit_sha",
-                label="Commit",
-                no_wrap=True,
-                min_width=8,
-                max_width=8,
-            ),
-            ListColumn(
-                key="created_at",
-                label="Created",
-                no_wrap=True,
-                min_width=10,
-                max_width=10,
-            ),
-        ],
-        display_items=[
-            {
-                **item,
-                "is_active": "yes" if item["is_active"] else "no",
-                "last_synced_commit_sha": (item["last_synced_commit_sha"] or "")[:8],
-                "created_at": format_local_date(item["created_at"]).split(" ", 1)[0],
-            }
-            for item in items
-        ],
-    )
+    return _list_rollouts(limit=limit, all_=all_)

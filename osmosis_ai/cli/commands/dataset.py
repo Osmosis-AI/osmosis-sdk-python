@@ -6,7 +6,11 @@ from typing import Any
 
 import typer
 
-from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE
+from osmosis_ai.platform.constants import (
+    DEFAULT_PAGE_SIZE,
+    MAX_LOG_PAGE_SIZE,
+    MAX_PAGE_SIZE,
+)
 
 app: typer.Typer = typer.Typer(
     help="Manage datasets (upload, download, list, info, preview, validate).",
@@ -17,11 +21,17 @@ app: typer.Typer = typer.Typer(
 @app.command("upload")
 def upload(
     file: str = typer.Argument(..., help="Path to the file to upload."),
+    overwrite: bool = typer.Option(
+        False,
+        "--overwrite",
+        help="Replace an existing dataset with the same name.",
+    ),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip confirmation prompt."),
 ) -> Any:
     """Upload a dataset file."""
     from osmosis_ai.platform.cli.dataset import upload as _upload
 
-    return _upload(file=file)
+    return _upload(file=file, overwrite=overwrite, yes=yes)
 
 
 @app.command("download")
@@ -48,7 +58,11 @@ def download(
 @app.command("list")
 def list_datasets(
     limit: int = typer.Option(
-        DEFAULT_PAGE_SIZE, "--limit", help="Maximum number of datasets to show."
+        DEFAULT_PAGE_SIZE,
+        "--limit",
+        min=1,
+        max=MAX_PAGE_SIZE,
+        help="Maximum number of datasets to show.",
     ),
     all_: bool = typer.Option(False, "--all", help="Show all datasets."),
 ) -> Any:
@@ -66,6 +80,28 @@ def info(
     from osmosis_ai.platform.cli.dataset import info as _info
 
     return _info(name=name)
+
+
+@app.command("logs")
+def logs(
+    name: str = typer.Argument(..., help="Dataset name or ID."),
+    limit: int = typer.Option(
+        DEFAULT_PAGE_SIZE,
+        "--limit",
+        min=1,
+        max=MAX_LOG_PAGE_SIZE,
+        help="Maximum number of recent log entries to show.",
+    ),
+    cursor: str | None = typer.Option(
+        None,
+        "--cursor",
+        help="Page further back using the next_cursor value from a previous page.",
+    ),
+) -> Any:
+    """Show recent logs for a dataset, oldest first."""
+    from osmosis_ai.platform.cli.dataset import logs as _logs
+
+    return _logs(name, limit=limit, cursor=cursor)
 
 
 @app.command("preview")

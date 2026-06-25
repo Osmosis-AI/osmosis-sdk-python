@@ -81,7 +81,7 @@ class LocalBackend(ExecutionBackend):
 
             if (
                 self.grader_cls
-                and request.label is not None
+                and (request.label is not None or request.metadata is not None)
                 and result.status == RolloutStatus.SUCCESS
             ):
                 graded = await self.run_grader(request, result)
@@ -94,6 +94,7 @@ class LocalBackend(ExecutionBackend):
         ctx = AgentWorkflowContext(
             prompt=request.prompt,
             config=config,
+            metadata=request.metadata,
         )
 
         rollout_ctx = get_rollout_context()
@@ -123,7 +124,11 @@ class LocalBackend(ExecutionBackend):
         if not self.grader_cls:
             return result
 
-        grader_ctx = GraderContext(label=request.label, sample=result.sample)
+        grader_ctx = GraderContext(
+            label=request.label,
+            sample=result.sample,
+            metadata=request.metadata,
+        )
         try:
             grader = self.grader_cls(self.grader_config)
             await grader.grade(grader_ctx)
@@ -131,12 +136,14 @@ class LocalBackend(ExecutionBackend):
             return ExecutionResult(
                 status=RolloutStatus.SUCCESS,
                 sample=grader_ctx.sample,
+                artifacts=grader_ctx.artifacts,
             )
         except Exception as e:
             logger.error(traceback.format_exc())
             return ExecutionResult(
                 status=RolloutStatus.FAILURE,
                 sample=result.sample,
+                artifacts=grader_ctx.artifacts,
                 err_message=str(e),
                 err_category=_categorize_exception(e),
             )

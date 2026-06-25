@@ -2,16 +2,20 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import math
+from dataclasses import dataclass
 from typing import Any, Literal
 
 # ── Dataset status constants ─────────────────────────────────────
 # Single source of truth for status classification.
 
 STATUSES_SUCCESS: frozenset[str] = frozenset({"uploaded"})
-STATUSES_IN_PROGRESS: frozenset[str] = frozenset({"pending", "uploading", "processing"})
+# "pending" waits (amber); "uploading"/"processing" are active work (blue).
+STATUSES_PENDING: frozenset[str] = frozenset({"pending"})
+STATUSES_ACTIVE: frozenset[str] = frozenset({"uploading", "processing"})
+STATUSES_IN_PROGRESS: frozenset[str] = STATUSES_PENDING | STATUSES_ACTIVE
 STATUSES_ERROR: frozenset[str] = frozenset({"error"})
-STATUSES_INACTIVE: frozenset[str] = frozenset({"cancelled", "deleted"})
+STATUSES_INACTIVE: frozenset[str] = frozenset({"cancelled"})
 STATUSES_TERMINAL: frozenset[str] = (
     STATUSES_SUCCESS | STATUSES_ERROR | STATUSES_INACTIVE
 )
@@ -64,15 +68,18 @@ class DatasetFile:
     file_name: str
     file_size: int
     status: str
-    processing_step: str | None = None
-    processing_percent: float | None = None
-    error: str | None = None
     data_preview: Any = None
     df_stats: Any = None
+    file_format: str | None = None
+    original_file_format: str | None = None
+    row_count: int | None = None
+    original_file_size: int | None = None
+    creator_name: str | None = None
     organization_id: str | None = None
     created_at: str = ""
     updated_at: str = ""
     platform_url: str | None = None
+    is_internal_user: bool = False
     # Upload info — only present in create_dataset response
     upload: UploadInfo | None = None
 
@@ -85,22 +92,20 @@ class DatasetFile:
             file_name=data.get("file_name", ""),
             file_size=data.get("file_size", 0),
             status=data.get("status", ""),
-            processing_step=data.get("processing_step"),
-            processing_percent=data.get("processing_percent"),
-            error=data.get("error"),
             data_preview=data.get("data_preview"),
             df_stats=data.get("df_stats"),
+            file_format=data.get("file_format"),
+            original_file_format=data.get("original_file_format"),
+            row_count=data.get("row_count"),
+            original_file_size=data.get("original_file_size"),
+            creator_name=data.get("creator_name"),
             organization_id=data.get("organization_id"),
             created_at=data.get("created_at", ""),
             updated_at=data.get("updated_at", ""),
             platform_url=data.get("platform_url"),
+            is_internal_user=data.get("is_internal_user", False),
             upload=upload,
         )
-
-    @property
-    def is_terminal(self) -> bool:
-        """Whether the file is in a terminal processing state."""
-        return self.status in STATUSES_TERMINAL
 
 
 @dataclass
@@ -151,12 +156,35 @@ class PaginatedDatasets:
 # ── Training run status constants ────────────────────────────────
 
 RUN_STATUSES_SUCCESS: frozenset[str] = frozenset({"finished"})
-RUN_STATUSES_IN_PROGRESS: frozenset[str] = frozenset({"pending", "running"})
+# "pending"/"queued" wait (amber); "running" is in-progress work (blue).
+RUN_STATUSES_PENDING: frozenset[str] = frozenset({"pending", "queued"})
+RUN_STATUSES_IN_PROGRESS: frozenset[str] = frozenset({"running"})
 RUN_STATUSES_ERROR: frozenset[str] = frozenset({"failed", "crashed"})
-RUN_STATUSES_STOPPED: frozenset[str] = frozenset({"stopped", "killed"})
+# "unknown" is a terminal, greyed-out state alongside stopped/killed.
+RUN_STATUSES_STOPPED: frozenset[str] = frozenset({"stopped", "killed", "unknown"})
 RUN_STATUSES_TERMINAL: frozenset[str] = (
     RUN_STATUSES_SUCCESS | RUN_STATUSES_ERROR | RUN_STATUSES_STOPPED
 )
+
+# ── Evaluation run status constants ──────────────────────────────
+
+EVAL_RUN_STATUSES_SUCCESS: frozenset[str] = frozenset({"finished"})
+# "pending" waits (amber); "running" is in-progress work (blue).
+EVAL_RUN_STATUSES_PENDING: frozenset[str] = frozenset({"pending"})
+EVAL_RUN_STATUSES_IN_PROGRESS: frozenset[str] = frozenset({"running"})
+EVAL_RUN_STATUSES_ERROR: frozenset[str] = frozenset({"failed"})
+EVAL_RUN_STATUSES_STOPPED: frozenset[str] = frozenset({"stopped"})
+EVAL_RUN_STATUSES_TERMINAL: frozenset[str] = (
+    EVAL_RUN_STATUSES_SUCCESS | EVAL_RUN_STATUSES_ERROR | EVAL_RUN_STATUSES_STOPPED
+)
+
+
+def _number_or_none(value: Any) -> int | float | None:
+    if isinstance(value, bool):
+        return None
+    if not isinstance(value, int | float) or not math.isfinite(value):
+        return None
+    return value
 
 
 @dataclass
@@ -171,22 +199,25 @@ class TrainingRun:
     created_at: str = ""
     started_at: str | None = None
     completed_at: str | None = None
-    eval_accuracy: float | None = None
-    reward_increase_delta: float | None = None
-    processing_step: str | None = None
-    processing_percent: float | None = None
-    error_message: str | None = None
     creator_name: str | None = None
     creator_email: str | None = None
     platform_url: str | None = None
     dataset_id: str | None = None
     dataset_name: str | None = None
-    reward: float | None = field(default=None, kw_only=True)
+    rollout_id: str | None = None
+    rollout_name: str | None = None
+    current_step: int | None = None
+    total_steps: int | None = None
+    reward: float | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> TrainingRun:
         model = data.get("model") or {}
         dataset = data.get("dataset") or {}
+        rollout = data.get("rollout") or {}
+        current_step = _number_or_none(data.get("current_step"))
+        total_steps = _number_or_none(data.get("total_steps"))
+        reward = _number_or_none(data.get("reward"))
         return cls(
             id=data["id"],
             name=data.get("name"),
@@ -196,23 +227,17 @@ class TrainingRun:
             created_at=data.get("created_at", ""),
             started_at=data.get("started_at"),
             completed_at=data.get("completed_at"),
-            eval_accuracy=data.get("eval_accuracy"),
-            reward=data.get("reward"),
-            reward_increase_delta=data.get("reward_increase_delta"),
-            processing_step=data.get("processing_step"),
-            processing_percent=data.get("processing_percent"),
-            error_message=data.get("error_message"),
             creator_name=data.get("creator_name"),
             creator_email=data.get("creator_email"),
             platform_url=data.get("platform_url"),
             dataset_id=dataset.get("id"),
             dataset_name=dataset.get("file_name"),
+            rollout_id=rollout.get("id"),
+            rollout_name=rollout.get("name"),
+            current_step=int(current_step) if current_step is not None else None,
+            total_steps=int(total_steps) if total_steps is not None else None,
+            reward=float(reward) if reward is not None else None,
         )
-
-    @property
-    def is_terminal(self) -> bool:
-        """Whether the run is in a terminal state."""
-        return self.status in RUN_STATUSES_TERMINAL
 
 
 @dataclass
@@ -221,37 +246,61 @@ class TrainingRunDetail(TrainingRun):
 
     examples_processed_count: int | None = None
     notes: str | None = None
-    hf_status: str | None = None
+    config: dict[str, Any] | None = None
+    entrypoint: str | None = None
+    commit_sha: str | None = None
+    env_config: dict[str, Any] | None = None
+    resolved_secret_scopes: dict[str, Any] | None = None
+    is_internal_user: bool = False
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> TrainingRunDetail:
-        # Detail API returns { training_run: {..., enhanced_status}, model: {...} }
+        # Detail API returns unified entity refs for model, dataset, and rollout.
         run = data["training_run"]
         model = data.get("model") or {}
         dataset = data.get("dataset") or {}
+        rollout = data.get("rollout") or {}
+        current_step = _number_or_none(run.get("current_step"))
+        total_steps = _number_or_none(run.get("total_steps"))
+        reward = _number_or_none(run.get("reward"))
+        config = data.get("config")
+        env_config = data.get("env_config")
+        resolved_secret_scopes = data.get("resolved_secret_scopes")
         return cls(
             id=run["id"],
             name=run.get("name"),
-            status=run.get("enhanced_status") or run.get("status", ""),
+            status=run.get("status", ""),
             model_id=model.get("id"),
-            model_name=model.get("model_name"),
+            model_name=model.get("name"),
             created_at=run.get("created_at", ""),
             started_at=run.get("started_at"),
             completed_at=run.get("completed_at"),
-            eval_accuracy=run.get("eval_accuracy"),
-            reward=run.get("reward"),
-            reward_increase_delta=run.get("reward_increase_delta"),
-            processing_step=run.get("processing_step"),
-            processing_percent=run.get("processing_percent"),
-            error_message=run.get("error_message"),
             creator_name=run.get("creator_name"),
             creator_email=run.get("creator_email"),
             platform_url=run.get("platform_url"),
             dataset_id=dataset.get("id"),
-            dataset_name=dataset.get("file_name"),
+            dataset_name=dataset.get("name"),
+            rollout_id=rollout.get("id"),
+            rollout_name=rollout.get("name"),
+            current_step=int(current_step) if current_step is not None else None,
+            total_steps=int(total_steps) if total_steps is not None else None,
+            reward=float(reward) if reward is not None else None,
             examples_processed_count=run.get("examples_processed_count"),
             notes=run.get("notes"),
-            hf_status=run.get("hf_status"),
+            config=config if isinstance(config, dict) else None,
+            entrypoint=data.get("entrypoint")
+            if isinstance(data.get("entrypoint"), str)
+            else None,
+            commit_sha=data.get("commit_sha")
+            if isinstance(data.get("commit_sha"), str)
+            else None,
+            env_config=env_config if isinstance(env_config, dict) else None,
+            resolved_secret_scopes=(
+                resolved_secret_scopes
+                if isinstance(resolved_secret_scopes, dict)
+                else None
+            ),
+            is_internal_user=data.get("is_internal_user", False),
         )
 
 
@@ -277,37 +326,56 @@ class PaginatedTrainingRuns:
 
 
 @dataclass
-class SubmitTrainingRunResult:
-    """Result of submitting a new training run."""
+class SubmitRunResult:
+    """Result of submitting a training run or evaluation run.
+
+    Both `POST /api/cli/training-runs` and `POST /api/cli/eval-runs` return the
+    same shape; this is the single response model for either submit path.
+    """
 
     id: str
     name: str
     status: str
-    model_id: str | None
-    model_name: str
-    dataset_id: str | None
-    dataset_name: str
     created_at: str
     platform_url: str | None = None
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> SubmitTrainingRunResult:
-        model = data["model"]
-        dataset = data["dataset"]
+    def from_dict(cls, data: dict[str, Any]) -> SubmitRunResult:
         return cls(
             id=data["id"],
             name=data["name"],
             status=data["status"],
-            model_id=model["id"],
-            model_name=model["model_name"],
-            dataset_id=dataset["id"],
-            dataset_name=dataset["file_name"],
             created_at=data["created_at"],
             platform_url=data.get("platform_url"),
         )
 
 
 # ── Training run metrics ─────────────────────────────────────────
+
+
+@dataclass
+class MetricSummary:
+    """Initial, latest, and delta for a single metric."""
+
+    key: str
+    title: str
+    initial: float | None
+    latest: float | None
+    delta: float | None
+    min: float | None
+    max: float | None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> MetricSummary:
+        return cls(
+            key=data["key"],
+            title=data["title"],
+            initial=data.get("initial"),
+            latest=data.get("latest"),
+            delta=data.get("delta"),
+            min=data.get("min"),
+            max=data.get("max"),
+        )
 
 
 @dataclass
@@ -350,24 +418,22 @@ class MetricHistory:
 class TrainingRunMetricsOverview:
     """Summary metrics for a training run."""
 
-    mlflow_run_id: str
-    mlflow_status: str
     duration_ms: int | None
-    duration_formatted: str | None
-    reward: float | None
-    reward_delta: float | None
+    metric_summaries: list[MetricSummary]
     examples_processed_count: int | None
+    latest_step: int | None = None
+    total_steps: int | None = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> TrainingRunMetricsOverview:
         return cls(
-            mlflow_run_id=data["mlflow_run_id"],
-            mlflow_status=data["mlflow_status"],
             duration_ms=data.get("duration_ms"),
-            duration_formatted=data.get("duration_formatted"),
-            reward=data.get("reward"),
-            reward_delta=data.get("reward_increase_delta"),
+            metric_summaries=[
+                MetricSummary.from_dict(s) for s in data.get("metric_summaries", [])
+            ],
             examples_processed_count=data.get("examples_processed_count"),
+            latest_step=data.get("latest_step"),
+            total_steps=data.get("total_steps"),
         )
 
 
@@ -390,6 +456,144 @@ class TrainingRunMetrics:
         )
 
 
+# ── Logs (training runs, eval runs, datasets) ────────────────────
+# All three /logs endpoints share one wire shape.
+
+
+@dataclass
+class LogEntry:
+    """A single log line from a training run, evaluation run, or dataset."""
+
+    timestamp: str
+    level: str
+    step: str
+    message: str
+    details: dict[str, Any] | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> LogEntry:
+        details = data.get("details")
+        return cls(
+            timestamp=data.get("timestamp", ""),
+            level=data.get("level", ""),
+            step=data.get("step", ""),
+            message=data.get("message", ""),
+            details=details if isinstance(details, dict) else None,
+        )
+
+
+@dataclass
+class LogsPage:
+    """One cursor page of logs.
+
+    The server returns entries oldest-first within the page for both paging
+    directions; ``next_cursor`` pages further back in time (``None`` when no
+    more pages exist).
+    """
+
+    logs: list[LogEntry]
+    next_cursor: str | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> LogsPage:
+        return cls(
+            logs=[LogEntry.from_dict(log) for log in data.get("logs", [])],
+            next_cursor=data.get("next_cursor"),
+        )
+
+
+@dataclass
+class EvalRewardStats:
+    """Distribution stats for per-sample rewards in an eval run."""
+
+    mean: float | None
+    median: float | None
+    std: float | None
+    min: float | None
+    max: float | None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> EvalRewardStats:
+        return cls(
+            mean=data.get("mean"),
+            median=data.get("median"),
+            std=data.get("std"),
+            min=data.get("min"),
+            max=data.get("max"),
+        )
+
+
+@dataclass
+class EvalPassAtKPoint:
+    """A single pass@k point (probability of a pass within k attempts)."""
+
+    k: int
+    value: float
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> EvalPassAtKPoint:
+        return cls(k=data["k"], value=data["value"])
+
+
+@dataclass
+class EvalRunMetricsOverview:
+    """Summary metrics for an evaluation run."""
+
+    duration_ms: int | None
+    total_samples: int | None
+    completed_samples: int | None
+    graded: int | None
+    passed: int | None
+    failed: int | None
+    skipped: int | None
+    pass_rate: float | None
+    pass_threshold: float | None
+    tokens_used: int | None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> EvalRunMetricsOverview:
+        return cls(
+            duration_ms=data.get("duration_ms"),
+            total_samples=data.get("total_samples"),
+            completed_samples=data.get("completed_samples"),
+            graded=data.get("graded"),
+            passed=data.get("passed"),
+            failed=data.get("failed"),
+            skipped=data.get("skipped"),
+            pass_rate=data.get("pass_rate"),
+            pass_threshold=data.get("pass_threshold"),
+            tokens_used=data.get("tokens_used"),
+        )
+
+
+@dataclass
+class EvalRunMetrics:
+    """Complete metrics response for an evaluation run."""
+
+    eval_run_id: str
+    status: str
+    overview: EvalRunMetricsOverview
+    reward_stats: EvalRewardStats | None
+    pass_at_k: list[EvalPassAtKPoint]
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> EvalRunMetrics:
+        reward_stats = data.get("reward_stats")
+        return cls(
+            eval_run_id=data["eval_run_id"],
+            status=data["status"],
+            overview=EvalRunMetricsOverview.from_dict(data["overview"]),
+            reward_stats=(
+                EvalRewardStats.from_dict(reward_stats)
+                if reward_stats is not None
+                else None
+            ),
+            pass_at_k=[
+                EvalPassAtKPoint.from_dict(p) for p in data.get("pass_at_k", [])
+            ],
+        )
+
+
 @dataclass
 class BaseModelInfo:
     """A base (foundation) model record."""
@@ -397,8 +601,6 @@ class BaseModelInfo:
     id: str
     model_name: str
     base_model: str | None = None
-    status: str = ""
-    description: str | None = None
     creator_name: str | None = None
     created_at: str = ""
     updated_at: str = ""
@@ -409,8 +611,6 @@ class BaseModelInfo:
             id=data["id"],
             model_name=data.get("model_name", ""),
             base_model=data.get("base_model"),
-            status=data.get("status", ""),
-            description=data.get("description"),
             creator_name=data.get("creator_name"),
             created_at=data.get("created_at", ""),
             updated_at=data.get("updated_at", ""),
@@ -436,80 +636,204 @@ class PaginatedBaseModels:
         )
 
 
-# ── Deployments ──────────────────────────────────────────────────
-# Status lifecycle: "active" / "inactive" / "failed".
-# Naming lives on the LoRA checkpoint (`checkpoint_name`), not the deployment.
-
-DEPLOYMENT_STATUSES_SUCCESS: frozenset[str] = frozenset({"active"})
-DEPLOYMENT_STATUSES_INACTIVE: frozenset[str] = frozenset({"inactive"})
-DEPLOYMENT_STATUSES_ERROR: frozenset[str] = frozenset({"failed"})
-
-
 @dataclass
-class DeploymentInfo:
-    """A LoRA deployment record (one deployment per checkpoint)."""
+class LoraModelInfo:
+    """A LoRA model produced by a training run."""
 
     id: str
-    checkpoint_name: str
-    status: str
-    checkpoint_step: int
-    base_model: str
-    training_run_id: str | None = None
+    model_name: str
+    base_model: str | None = None
     training_run_name: str | None = None
-    creator_name: str | None = None
+    checkpoint_step: int | None = None
+    reward: float | None = None
+    deployment_status: str | None = None
+    deployed_at: str | None = None
+    deployed_by: str | None = None
     created_at: str = ""
+    # The platform omits deployment fields entirely when inference is
+    # unavailable for the account.
+    has_deployment_info: bool = True
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> DeploymentInfo:
+    def from_dict(cls, data: dict[str, Any]) -> LoraModelInfo:
         return cls(
             id=data["id"],
-            checkpoint_name=data.get("checkpoint_name", ""),
-            status=data.get("status", ""),
-            checkpoint_step=data.get("checkpoint_step", 0),
-            base_model=data.get("base_model", ""),
-            training_run_id=data.get("training_run_id"),
+            model_name=data.get("model_name", ""),
+            base_model=data.get("base_model"),
             training_run_name=data.get("training_run_name"),
-            creator_name=data.get("creator_name"),
+            checkpoint_step=data.get("checkpoint_step"),
+            reward=data.get("reward"),
+            deployment_status=data.get("deployment_status"),
+            deployed_at=data.get("deployed_at"),
+            deployed_by=data.get("deployed_by"),
             created_at=data.get("created_at", ""),
+            has_deployment_info="deployment_status" in data,
         )
 
 
 @dataclass
-class PaginatedDeployments:
-    """Paginated list of deployments."""
+class LoraModelDetail(LoraModelInfo):
+    """Detailed LoRA model info with Hugging Face export and platform link."""
 
-    deployments: list[DeploymentInfo]
+    hf_upload_status: str = ""
+    hf_url: str | None = None
+    uploaded_by: str | None = None
+    # Canonical `model` value for the inference API
+    # ("<base_model_path>:<lora-model-name>").
+    inference_model: str | None = None
+    platform_url: str | None = None
+    is_internal_user: bool = False
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> LoraModelDetail:
+        return cls(
+            id=data["id"],
+            model_name=data.get("model_name", ""),
+            base_model=data.get("base_model"),
+            training_run_name=data.get("training_run_name"),
+            checkpoint_step=data.get("checkpoint_step"),
+            reward=data.get("reward"),
+            deployment_status=data.get("deployment_status"),
+            deployed_at=data.get("deployed_at"),
+            deployed_by=data.get("deployed_by"),
+            created_at=data.get("created_at", ""),
+            hf_upload_status=data.get("hf_upload_status", ""),
+            hf_url=data.get("hf_url"),
+            uploaded_by=data.get("uploaded_by"),
+            has_deployment_info="deployment_status" in data,
+            inference_model=data.get("inference_model"),
+            platform_url=data.get("platform_url"),
+            is_internal_user=data.get("is_internal_user", False),
+        )
+
+
+@dataclass
+class PaginatedLoraModels:
+    """Paginated list of LoRA models."""
+
+    models: list[LoraModelInfo]
     total_count: int
     has_more: bool
     next_offset: int | None = None
+    active_deployments: int = 0
+    max_active_deployments: int = 0
+    # The platform omits the deployment quota fields when inference is
+    # unavailable for the account.
+    has_deployment_info: bool = True
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> PaginatedDeployments:
+    def from_dict(cls, data: dict[str, Any]) -> PaginatedLoraModels:
         return cls(
-            deployments=[
-                DeploymentInfo.from_dict(d) for d in data.get("deployments", [])
+            models=[LoraModelInfo.from_dict(m) for m in data.get("models", [])],
+            total_count=data.get("total_count", 0),
+            has_more=data.get("has_more", False),
+            next_offset=data.get("next_offset"),
+            active_deployments=data.get("active_deployments", 0),
+            max_active_deployments=data.get("max_active_deployments", 0),
+            has_deployment_info="active_deployments" in data,
+        )
+
+
+@dataclass
+class LoraModelSummary:
+    """Minimal LoRA model identity returned from deploy/undeploy endpoints."""
+
+    id: str
+    model_name: str
+    status: str
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> LoraModelSummary:
+        return cls(
+            id=data["id"],
+            model_name=data.get("model_name", ""),
+            status=data.get("status", ""),
+        )
+
+
+# ── Environment Secrets ──────────────────────────────────────────
+# Workspace-scoped secrets. The platform never returns the secret *value*:
+# list responses carry names + metadata only, and create responses carry
+# only metadata. These models therefore have no field for the value — there
+# is intentionally nowhere for a value to land if one were ever returned.
+
+# The platform wire value for a personal secret's scope is "user"; the
+# user-facing vocabulary calls it "personal". Both the wire value and the
+# display value are part of the stable JSON/API contract — keep them exact.
+WIRE_SCOPE_PERSONAL = "user"
+DISPLAY_SCOPE_PERSONAL = "personal"
+
+
+def wire_to_display_scope(scope: str | None) -> str | None:
+    """Map a wire scope value to its user-facing display value.
+
+    Only the personal scope differs ("user" → "personal"); every other value
+    (including ``"workspace"`` and ``None``) passes through unchanged.
+    """
+    return DISPLAY_SCOPE_PERSONAL if scope == WIRE_SCOPE_PERSONAL else scope
+
+
+@dataclass
+class EnvironmentSecretInfo:
+    """A workspace environment secret record (metadata only — never the value)."""
+
+    id: str
+    name: str
+    created_at: str = ""
+    updated_at: str = ""
+    creator_name: str | None = None
+    updater_name: str | None = None
+    # "workspace" or "user". None when the platform did not report it
+    # (older responses / endpoints that don't distinguish scope).
+    scope: str | None = None
+    # Page/operation-level link to the secrets console page. Populated by the
+    # platform on create (and exposed at the list level via
+    # ``PaginatedEnvironmentSecrets.platform_url``); ``None`` for list items.
+    platform_url: str | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> EnvironmentSecretInfo:
+        return cls(
+            id=data["id"],
+            name=data.get("name", ""),
+            created_at=data.get("created_at", ""),
+            updated_at=data.get("updated_at", ""),
+            creator_name=data.get("creator_name"),
+            updater_name=data.get("updater_name"),
+            scope=data.get("scope"),
+            platform_url=data.get("platform_url"),
+        )
+
+
+@dataclass
+class PaginatedEnvironmentSecrets:
+    """Paginated list of environment secrets (names + metadata only)."""
+
+    environment_secrets: list[EnvironmentSecretInfo]
+    total_count: int
+    has_more: bool
+    next_offset: int | None = None
+    platform_url: str | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> PaginatedEnvironmentSecrets:
+        return cls(
+            environment_secrets=[
+                EnvironmentSecretInfo.from_dict(s)
+                for s in data.get("environment_secrets", [])
             ],
             total_count=data.get("total_count", 0),
             has_more=data.get("has_more", False),
             next_offset=data.get("next_offset"),
+            platform_url=data.get("platform_url"),
         )
 
 
-@dataclass
-class DeploymentSummary:
-    """Minimal deployment identity returned from deploy/undeploy endpoints."""
+# ── Deployment status ────────────────────────────────────────────
+# Lifecycle of a LoRA model's deployment: "active" / "inactive".
 
-    id: str
-    checkpoint_name: str
-    status: str
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> DeploymentSummary:
-        return cls(
-            id=data["id"],
-            checkpoint_name=data.get("checkpoint_name", ""),
-            status=data.get("status", ""),
-        )
+DEPLOYMENT_STATUSES_SUCCESS: frozenset[str] = frozenset({"active"})
+DEPLOYMENT_STATUSES_INACTIVE: frozenset[str] = frozenset({"inactive"})
 
 
 # ── Rollouts ─────────────────────────────────────────────────────
@@ -561,7 +885,52 @@ class PaginatedRollouts:
         )
 
 
-# ── LoRA checkpoints (for `osmosis train info` + `osmosis deploy`) ───────
+@dataclass
+class DevRolloutServerInfo:
+    """A dev rollout server record."""
+
+    id: str
+    name: str
+    url: str
+    status: str
+    expires_at: str | None = None
+    started_at: str | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> DevRolloutServerInfo:
+        return cls(
+            id=data["id"],
+            name=data.get("name", ""),
+            url=data.get("url", ""),
+            status=data.get("status", ""),
+            expires_at=data.get("expires_at"),
+            started_at=data.get("started_at"),
+        )
+
+
+@dataclass
+class PaginatedDevRolloutServers:
+    """Paginated list of dev rollout servers."""
+
+    dev_rollout_servers: list[DevRolloutServerInfo]
+    total_count: int
+    has_more: bool
+    next_offset: int | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> PaginatedDevRolloutServers:
+        return cls(
+            dev_rollout_servers=[
+                DevRolloutServerInfo.from_dict(s)
+                for s in data.get("dev_rollout_servers", [])
+            ],
+            total_count=data.get("total_count", 0),
+            has_more=data.get("has_more", False),
+            next_offset=data.get("next_offset"),
+        )
+
+
+# ── LoRA checkpoints (for `osmosis train info`) ──────────────────
 
 
 @dataclass
@@ -601,4 +970,126 @@ class TrainingRunCheckpoints:
             checkpoints=[
                 LoraCheckpointInfo.from_dict(c) for c in data.get("checkpoints", [])
             ],
+        )
+
+
+# ── Evaluation Runs ──────────────────────────────────────────────
+
+
+@dataclass
+class EvaluationRun:
+    """An evaluation run record."""
+
+    id: str
+    name: str
+    status: str
+    created_at: str
+    started_at: str | None = None
+    completed_at: str | None = None
+    model: dict[str, Any] | None = None
+    dataset: dict[str, Any] | None = None
+    rollout: dict[str, Any] | None = None
+    creator_name: str | None = None
+    creator_email: str | None = None
+    platform_url: str | None = None
+    results: dict[str, Any] | None = None
+    config: dict[str, Any] | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> EvaluationRun:
+        config = data.get("config")
+        return cls(
+            id=data["id"],
+            name=data["name"],
+            status=data["status"],
+            created_at=data["created_at"],
+            started_at=data.get("started_at"),
+            completed_at=data.get("completed_at"),
+            model=data.get("model"),
+            dataset=data.get("dataset"),
+            rollout=data.get("rollout"),
+            creator_name=data.get("creator_name"),
+            creator_email=data.get("creator_email"),
+            platform_url=data.get("platform_url"),
+            results=data.get("results"),
+            config=config if isinstance(config, dict) else None,
+        )
+
+
+@dataclass
+class EvaluationRunDetail(EvaluationRun):
+    """Detailed evaluation run info.
+
+    Mirrors :class:`TrainingRunDetail`: a typed subclass of the list row so
+    callers read ``detail.status`` / ``detail.name`` with static safety instead
+    of stringly-typed ``eval_run.get(...)`` lookups.
+    """
+
+    config: dict[str, Any] | None = None
+    results: dict[str, Any] | None = None
+    entrypoint: str | None = None
+    commit_sha: str | None = None
+    env_config: dict[str, Any] | None = None
+    resolved_secret_scopes: dict[str, Any] | None = None
+    dataset_df_stats: dict[str, Any] | None = None
+    is_internal_user: bool = False
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> EvaluationRunDetail:
+        run = data["eval_run"]
+        config = data.get("config")
+        model_path = config.get("model_path") if isinstance(config, dict) else None
+        env_config = data.get("env_config")
+        resolved_secret_scopes = data.get("resolved_secret_scopes")
+        dataset_df_stats = data.get("dataset_df_stats")
+        return cls(
+            id=run["id"],
+            name=run.get("name", ""),
+            status=run.get("status", ""),
+            created_at=run.get("created_at", ""),
+            started_at=run.get("started_at"),
+            completed_at=run.get("completed_at"),
+            creator_name=run.get("creator_name"),
+            creator_email=run.get("creator_email"),
+            platform_url=run.get("platform_url"),
+            model={"name": model_path} if isinstance(model_path, str) else None,
+            dataset=data.get("dataset"),
+            rollout=data.get("rollout"),
+            config=config,
+            results=data.get("results"),
+            entrypoint=data.get("entrypoint")
+            if isinstance(data.get("entrypoint"), str)
+            else None,
+            commit_sha=data.get("commit_sha")
+            if isinstance(data.get("commit_sha"), str)
+            else None,
+            env_config=env_config if isinstance(env_config, dict) else None,
+            resolved_secret_scopes=(
+                resolved_secret_scopes
+                if isinstance(resolved_secret_scopes, dict)
+                else None
+            ),
+            dataset_df_stats=(
+                dataset_df_stats if isinstance(dataset_df_stats, dict) else None
+            ),
+            is_internal_user=data.get("is_internal_user", False),
+        )
+
+
+@dataclass
+class PaginatedEvaluationRuns:
+    """Paginated list of evaluation runs."""
+
+    eval_runs: list[EvaluationRun]
+    total_count: int
+    has_more: bool
+    next_offset: int | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> PaginatedEvaluationRuns:
+        return cls(
+            eval_runs=[EvaluationRun.from_dict(r) for r in data.get("eval_runs", [])],
+            total_count=data.get("total_count", 0),
+            has_more=data.get("has_more", False),
+            next_offset=data.get("next_offset"),
         )

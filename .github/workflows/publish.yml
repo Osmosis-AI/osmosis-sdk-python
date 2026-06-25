@@ -1,55 +1,48 @@
 name: Publish
 
 on:
-  push:
-    branches:
-      - release
-  workflow_dispatch:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
 
 jobs:
-  build-and-publish:
-    environment: Release-secret
+  tests:
+    uses: ./.github/workflows/tests.yml
+    secrets:
+      CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
+  check-version:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v6
+      - uses: actions/checkout@v6
 
-      - name: Set up uv
-        uses: astral-sh/setup-uv@v7
+      - uses: astral-sh/setup-uv@v7
         with:
           python-version: "3.12"
 
-      - name: Build distribution artifacts
+      - name: Verify consts.py version matches the release tag
         run: |
-          rm -rf dist/ build/ *.egg-info/
-          uv build
-          uvx twine check --strict dist/*
+          VERSION=$(uv run --no-project --python 3.12 python -c 'import re, pathlib; text = pathlib.Path("osmosis_ai/consts.py").read_text(); print(re.search(r"^PACKAGE_VERSION\s*=\s*\"([^\"]+)\"", text, re.MULTILINE).group(1))')
+          TAG="${{ github.event.release.tag_name }}"
+          if [ "v$VERSION" != "$TAG" ]; then
+            echo "::error::consts.py PACKAGE_VERSION ($VERSION) does not match release tag ($TAG)"
+            exit 1
+          fi
+
+  publish:
+    needs: [tests, check-version]
+    runs-on: ubuntu-latest
+    environment: PyPI
+    permissions:
+      id-token: write
+    steps:
+      - name: Download dist artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist/
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          user: __token__
-          password: ${{ secrets.PYPI_API_TOKEN }}
-
-      - name: Extract version from consts.py
-        id: version
-        run: |
-          VERSION=$(python -c "exec(open('osmosis_ai/consts.py').read()); print(PACKAGE_VERSION)")
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          echo "tag=v$VERSION" >> "$GITHUB_OUTPUT"
-
-      - name: Create Git tag
-        run: |
-          git tag ${{ steps.version.outputs.tag }}
-          git push origin ${{ steps.version.outputs.tag }}
-
-      - name: Create GitHub Release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh release create ${{ steps.version.outputs.tag }} \
-            --title "${{ steps.version.outputs.tag }}" \
-            --generate-notes

@@ -12,7 +12,9 @@ import pytest
 
 from osmosis_ai.platform.cli.dataset import (
     PARQUET_VALIDATION_SKIPPED_WARNING,
+    _check_metadata_value,
     _check_required_columns,
+    _metadata_is_absent,
     _read_tail_lines,
     _validate_csv,
     _validate_file_with_warnings,
@@ -37,14 +39,13 @@ class TestCheckRequiredColumns:
         assert _check_required_columns(cols) == []
 
     def test_missing_one(self):
-        errors = _check_required_columns(["system_prompt", "user_prompt"])
+        errors = _check_required_columns(["system_prompt"])
         assert len(errors) == 1
-        assert "ground_truth" in errors[0]
+        assert "user_prompt" in errors[0]
 
     def test_missing_all(self):
         errors = _check_required_columns(["foo", "bar"])
         assert len(errors) == 1
-        assert "ground_truth" in errors[0]
         assert "system_prompt" in errors[0]
         assert "user_prompt" in errors[0]
 
@@ -158,8 +159,18 @@ class TestValidateJsonl:
     def test_blank_lines_skipped(self, tmp_path: Path):
         f = tmp_path / "blanks.jsonl"
         good = '{"system_prompt":"s","user_prompt":"u","ground_truth":"g"}'
-        f.write_text(f"\n{good}\n\n{good}\n")
+        f.write_text(f"\n{good}\n\n{good}\n{good}\n\n{good}\n")
         assert _validate_jsonl(f) == []
+
+    def test_sparse_large_file_enforces_min_rows(self, tmp_path: Path):
+        """Large files with mostly blank lines must still meet MIN_ROW_COUNT."""
+        f = tmp_path / "sparse.jsonl"
+        good = '{"system_prompt":"s","user_prompt":"u","ground_truth":"g"}'
+        blank_lines = [""] * 101
+        data_lines = [good] * 2
+        f.write_text("\n".join(blank_lines + data_lines) + "\n")
+        errors = _validate_jsonl(f)
+        assert any("Dataset too small" in e for e in errors)
 
     def test_columns_checked_from_tail_when_head_blank(self, tmp_path: Path):
         """If head is all blank lines, columns are still checked via tail."""
@@ -179,12 +190,14 @@ class TestValidateJsonl:
 class TestValidateCsv:
     def test_valid_file(self, tmp_path: Path):
         f = tmp_path / "ok.csv"
-        f.write_text("system_prompt,user_prompt,ground_truth\ns,u,g\ns2,u2,g2\n")
+        rows = "s,u,g\n" * 5
+        f.write_text(f"system_prompt,user_prompt,ground_truth\n{rows}")
         assert _validate_csv(f) == []
 
     def test_extra_columns_ok(self, tmp_path: Path):
         f = tmp_path / "extra.csv"
-        f.write_text("system_prompt,user_prompt,ground_truth,extra\ns,u,g,e\n")
+        rows = "s,u,g,e\n" * 5
+        f.write_text(f"system_prompt,user_prompt,ground_truth,extra\n{rows}")
         assert _validate_csv(f) == []
 
     def test_missing_required_columns(self, tmp_path: Path):
@@ -323,9 +336,9 @@ class TestValidateParquet:
 
         table = pa.table(
             {
-                "system_prompt": ["s"],
-                "user_prompt": ["u"],
-                "ground_truth": ["g"],
+                "system_prompt": ["s"] * 5,
+                "user_prompt": ["u"] * 5,
+                "ground_truth": ["g"] * 5,
             }
         )
         f = tmp_path / "ok.parquet"
@@ -350,10 +363,10 @@ class TestValidateParquet:
 
         table = pa.table(
             {
-                "system_prompt": ["s"],
-                "user_prompt": ["u"],
-                "ground_truth": ["g"],
-                "extra": ["e"],
+                "system_prompt": ["s"] * 5,
+                "user_prompt": ["u"] * 5,
+                "ground_truth": ["g"] * 5,
+                "extra": ["e"] * 5,
             }
         )
         f = tmp_path / "extra.parquet"
@@ -366,3 +379,480 @@ class TestValidateParquet:
         f.write_bytes(b"not a parquet file")
         errors = _validate_parquet(f)
         assert any("Invalid parquet file" in e for e in errors)
+
+
+# ---------------------------------------------------------------------------
+# Optional "metadata" column helpers
+# ---------------------------------------------------------------------------
+
+
+class TestMetadataHelpers:
+    def test_absent_none(self):
+        assert _metadata_is_absent(None) is True
+
+    def test_absent_empty_string(self):
+        assert _metadata_is_absent("") is True
+
+    def test_absent_whitespace_string(self):
+        assert _metadata_is_absent("   ") is True
+
+    def test_not_absent_dict(self):
+        assert _metadata_is_absent({"a": 1}) is False
+
+    def test_not_absent_nonempty_string(self):
+        assert _metadata_is_absent('{"a": 1}') is False
+
+    def test_dict_passes(self):
+        assert _check_metadata_value({"tools": ["x"]}, location="Line 1") == []
+
+    def test_object_string_passes(self):
+        assert _check_metadata_value('{"tools": ["x"]}', location="Line 1") == []
+
+    def test_absent_passes(self):
+        assert _check_metadata_value(None, location="Line 1") == []
+        assert _check_metadata_value("", location="Line 1") == []
+
+    def test_number_rejected(self):
+        errors = _check_metadata_value(3, location="Line 1")
+        assert len(errors) == 1
+        assert "invalid metadata" in errors[0]
+
+    def test_array_rejected(self):
+        errors = _check_metadata_value([1, 2], location="Line 1")
+        assert len(errors) == 1
+        assert "invalid metadata" in errors[0]
+
+    def test_json_array_string_rejected(self):
+        errors = _check_metadata_value("[1, 2]", location="Line 1")
+        assert len(errors) == 1
+        assert "JSON object" in errors[0]
+
+    def test_garbage_string_rejected(self):
+        errors = _check_metadata_value("not json{{", location="Line 1")
+        assert len(errors) == 1
+        assert "not valid JSON" in errors[0]
+
+    def test_root_empty_object_passes_per_cell(self):
+        # {} mixed with keyed objects is valid; only an all-empty column is
+        # rejected, which is a cross-row check (see TestMetadataCrossRow).
+        assert _check_metadata_value({}, location="Line 1") == []
+        assert _check_metadata_value("{}", location="Line 1") == []
+
+    def test_nested_empty_object_rejected(self):
+        errors = _check_metadata_value({"a": {}}, location="Line 1")
+        assert len(errors) == 1
+        assert "empty nested object" in errors[0]
+
+    def test_nested_empty_object_string_rejected(self):
+        errors = _check_metadata_value('{"a": {}}', location="Line 1")
+        assert len(errors) == 1
+        assert "empty nested object" in errors[0]
+
+    def test_nested_empty_object_in_list_rejected(self):
+        errors = _check_metadata_value({"items": [{}]}, location="Line 1")
+        assert len(errors) == 1
+        assert "empty nested object" in errors[0]
+
+    def test_oversized_int_rejected(self):
+        # Valid JSON, but Arrow cannot store an int beyond 64 bits.
+        errors = _check_metadata_value({"big": 2**100}, location="Line 1")
+        assert len(errors) == 1
+        assert "too large" in errors[0]
+
+    def test_oversized_int_in_string_rejected(self):
+        errors = _check_metadata_value(
+            '{"big": 99999999999999999999999999999999}', location="Line 1"
+        )
+        assert len(errors) == 1
+        assert "too large" in errors[0]
+
+    def test_int64_boundary_accepted(self):
+        value = {"max": 2**63 - 1, "min": -(2**63)}
+        assert _check_metadata_value(value, location="Line 1") == []
+
+
+# ---------------------------------------------------------------------------
+# Metadata validation: JSONL
+# ---------------------------------------------------------------------------
+
+
+def _base_row() -> dict:
+    return {"system_prompt": "s", "user_prompt": "u", "ground_truth": "g"}
+
+
+class TestMetadataJsonl:
+    def test_object_metadata_accepted(self, tmp_path: Path):
+        rows = [{**_base_row(), "metadata": {"k": "v"}} for _ in range(5)]
+        f = _make_jsonl(tmp_path / "obj.jsonl", rows)
+        assert _validate_jsonl(f) == []
+
+    def test_object_string_metadata_accepted(self, tmp_path: Path):
+        rows = [{**_base_row(), "metadata": '{"k": "v"}'} for _ in range(5)]
+        f = _make_jsonl(tmp_path / "str.jsonl", rows)
+        assert _validate_jsonl(f) == []
+
+    def test_absent_metadata_accepted(self, tmp_path: Path):
+        rows = [{**_base_row(), "metadata": None} for _ in range(5)]
+        rows.extend(_base_row() for _ in range(5))  # column missing entirely
+        f = _make_jsonl(tmp_path / "absent.jsonl", rows)
+        assert _validate_jsonl(f) == []
+
+    def test_number_metadata_rejected(self, tmp_path: Path):
+        rows = [{**_base_row(), "metadata": 3} for _ in range(5)]
+        f = _make_jsonl(tmp_path / "num.jsonl", rows)
+        errors = _validate_jsonl(f)
+        assert any("invalid metadata" in e for e in errors)
+
+    def test_array_metadata_rejected(self, tmp_path: Path):
+        rows = [{**_base_row(), "metadata": [1, 2]} for _ in range(5)]
+        f = _make_jsonl(tmp_path / "arr.jsonl", rows)
+        errors = _validate_jsonl(f)
+        assert any("invalid metadata" in e for e in errors)
+
+    def test_json_array_string_metadata_rejected(self, tmp_path: Path):
+        rows = [{**_base_row(), "metadata": "[1, 2]"} for _ in range(5)]
+        f = _make_jsonl(tmp_path / "arr_str.jsonl", rows)
+        errors = _validate_jsonl(f)
+        assert any("JSON object" in e for e in errors)
+
+    def test_garbage_string_metadata_rejected(self, tmp_path: Path):
+        rows = [{**_base_row(), "metadata": "garbage{{"} for _ in range(5)]
+        f = _make_jsonl(tmp_path / "garbage.jsonl", rows)
+        errors = _validate_jsonl(f)
+        assert any("not valid JSON" in e for e in errors)
+
+    def test_metadata_tail_validation(self, tmp_path: Path):
+        f = tmp_path / "tail.jsonl"
+        good = json.dumps({**_base_row(), "metadata": {"k": "v"}})
+        lines = [good] * 200
+        lines[-1] = json.dumps({**_base_row(), "metadata": 3})
+        f.write_text("\n".join(lines) + "\n")
+        errors = _validate_jsonl(f)
+        assert any("invalid metadata" in e for e in errors)
+
+
+# ---------------------------------------------------------------------------
+# Metadata validation: cross-row rules (mirror the platform normalizer)
+# ---------------------------------------------------------------------------
+
+
+class TestMetadataCrossRow:
+    def test_jsonl_all_empty_objects_rejected(self, tmp_path: Path):
+        rows = [{**_base_row(), "metadata": {}} for _ in range(5)]
+        f = _make_jsonl(tmp_path / "all_empty.jsonl", rows)
+        errors = _validate_jsonl(f)
+        assert any("all sampled metadata objects are empty" in e for e in errors)
+
+    def test_jsonl_all_empty_object_strings_rejected(self, tmp_path: Path):
+        rows = [{**_base_row(), "metadata": "{}"} for _ in range(5)]
+        f = _make_jsonl(tmp_path / "all_empty_str.jsonl", rows)
+        errors = _validate_jsonl(f)
+        assert any("all sampled metadata objects are empty" in e for e in errors)
+
+    def test_jsonl_empty_mixed_with_keyed_accepted(self, tmp_path: Path):
+        # The platform only rejects a column whose non-null cells are ALL empty.
+        rows = [{**_base_row(), "metadata": {}} for _ in range(3)]
+        rows.extend({**_base_row(), "metadata": {"k": "v"}} for _ in range(3))
+        f = _make_jsonl(tmp_path / "mixed_empty.jsonl", rows)
+        assert _validate_jsonl(f) == []
+
+    def test_jsonl_nested_empty_object_rejected(self, tmp_path: Path):
+        rows = [{**_base_row(), "metadata": {"a": {}}} for _ in range(5)]
+        f = _make_jsonl(tmp_path / "nested_empty.jsonl", rows)
+        errors = _validate_jsonl(f)
+        assert any("empty nested object" in e for e in errors)
+
+    def test_jsonl_inconsistent_value_types_rejected(self, tmp_path: Path):
+        rows = [
+            {**_base_row(), "metadata": {"k": 1}},
+            {**_base_row(), "metadata": {"k": "x"}},
+        ]
+        rows.extend({**_base_row(), "metadata": {"k": 2}} for _ in range(3))
+        f = _make_jsonl(tmp_path / "mixed_types.jsonl", rows)
+        errors = _validate_jsonl(f)
+        assert any("inconsistent across rows" in e and "$.k" in e for e in errors)
+
+    def test_jsonl_int_and_float_are_consistent(self, tmp_path: Path):
+        # JSON has one "number" type; the platform promotes int+float to double.
+        rows = [
+            {**_base_row(), "metadata": {"k": 1}},
+            {**_base_row(), "metadata": {"k": 1.5}},
+        ]
+        rows.extend({**_base_row(), "metadata": {"k": 2}} for _ in range(3))
+        f = _make_jsonl(tmp_path / "num_mix.jsonl", rows)
+        assert _validate_jsonl(f) == []
+
+    def test_jsonl_bool_vs_number_rejected(self, tmp_path: Path):
+        rows = [
+            {**_base_row(), "metadata": {"k": True}},
+            {**_base_row(), "metadata": {"k": 1}},
+        ]
+        f = _make_jsonl(tmp_path / "bool_num.jsonl", rows)
+        errors = _validate_jsonl(f)
+        assert any("inconsistent across rows" in e for e in errors)
+
+    def test_jsonl_nested_type_mismatch_rejected(self, tmp_path: Path):
+        rows = [
+            {**_base_row(), "metadata": {"outer": {"k": 1}}},
+            {**_base_row(), "metadata": {"outer": {"k": [1]}}},
+        ]
+        f = _make_jsonl(tmp_path / "nested_types.jsonl", rows)
+        errors = _validate_jsonl(f)
+        assert any("$.outer.k" in e for e in errors)
+
+    def test_jsonl_type_mismatch_across_head_and_tail(self, tmp_path: Path):
+        # The tracker spans head and tail samples of large files.
+        f = tmp_path / "head_tail_types.jsonl"
+        head = json.dumps({**_base_row(), "metadata": {"k": 1}})
+        tail = json.dumps({**_base_row(), "metadata": {"k": "x"}})
+        f.write_text("\n".join([head] * 150 + [tail]) + "\n")
+        errors = _validate_jsonl(f)
+        assert any("inconsistent across rows" in e for e in errors)
+
+    def test_csv_all_empty_object_strings_rejected(self, tmp_path: Path):
+        f = tmp_path / "all_empty.csv"
+        header = "system_prompt,user_prompt,ground_truth,metadata"
+        row = "s,u,g,{}"
+        f.write_text("\n".join([header] + [row] * 5) + "\n")
+        errors = _validate_csv(f)
+        assert any("all sampled metadata objects are empty" in e for e in errors)
+
+    def test_csv_inconsistent_value_types_rejected(self, tmp_path: Path):
+        f = tmp_path / "mixed_types.csv"
+        header = "system_prompt,user_prompt,ground_truth,metadata"
+        rows = ['s,u,g,"{""k"": 1}"', 's,u,g,"{""k"": ""x""}"']
+        f.write_text("\n".join([header, *rows]) + "\n")
+        errors = _validate_csv(f)
+        assert any("inconsistent across rows" in e for e in errors)
+
+    def test_csv_nested_empty_object_rejected(self, tmp_path: Path):
+        f = tmp_path / "nested_empty.csv"
+        header = "system_prompt,user_prompt,ground_truth,metadata"
+        row = 's,u,g,"{""a"": {}}"'
+        f.write_text("\n".join([header] + [row] * 5) + "\n")
+        errors = _validate_csv(f)
+        assert any("empty nested object" in e for e in errors)
+
+
+# ---------------------------------------------------------------------------
+# Metadata validation: CSV
+# ---------------------------------------------------------------------------
+
+
+class TestMetadataCsv:
+    def _header(self) -> str:
+        return "system_prompt,user_prompt,ground_truth,metadata"
+
+    def test_object_string_metadata_accepted(self, tmp_path: Path):
+        f = tmp_path / "ok.csv"
+        row = 's,u,g,"{""k"": ""v""}"'
+        f.write_text("\n".join([self._header()] + [row] * 5) + "\n")
+        assert _validate_csv(f) == []
+
+    def test_absent_metadata_accepted(self, tmp_path: Path):
+        f = tmp_path / "absent.csv"
+        row = "s,u,g,"
+        f.write_text("\n".join([self._header()] + [row] * 5) + "\n")
+        assert _validate_csv(f) == []
+
+    def test_json_array_string_metadata_rejected(self, tmp_path: Path):
+        f = tmp_path / "arr.csv"
+        row = 's,u,g,"[1, 2]"'
+        f.write_text("\n".join([self._header()] + [row] * 5) + "\n")
+        errors = _validate_csv(f)
+        assert any("JSON object" in e for e in errors)
+
+    def test_garbage_string_metadata_rejected(self, tmp_path: Path):
+        f = tmp_path / "garbage.csv"
+        row = "s,u,g,garbage{{"
+        f.write_text("\n".join([self._header()] + [row] * 5) + "\n")
+        errors = _validate_csv(f)
+        assert any("not valid JSON" in e for e in errors)
+
+    def test_metadata_tail_validation(self, tmp_path: Path):
+        f = tmp_path / "tail.csv"
+        good = 's,u,g,"{""k"": ""v""}"'
+        bad = "s,u,g,garbage{{"
+        lines = [self._header()] + [good] * 200
+        lines[-1] = bad
+        f.write_text("\n".join(lines) + "\n")
+        errors = _validate_csv(f)
+        assert any("Near end of file" in e and "metadata" in e for e in errors)
+
+    def test_no_metadata_column_ok(self, tmp_path: Path):
+        f = tmp_path / "no_meta.csv"
+        header = "system_prompt,user_prompt,ground_truth"
+        f.write_text("\n".join([header] + ["s,u,g"] * 5) + "\n")
+        assert _validate_csv(f) == []
+
+
+# ---------------------------------------------------------------------------
+# Metadata validation: Parquet
+# ---------------------------------------------------------------------------
+
+
+class TestMetadataParquet:
+    @pytest.fixture()
+    def _has_pyarrow(self):
+        pytest.importorskip("pyarrow")
+
+    @pytest.mark.usefixtures("_has_pyarrow")
+    def test_struct_dtype_accepted(self, tmp_path: Path):
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+
+        table = pa.table(
+            {
+                "system_prompt": ["s"] * 5,
+                "user_prompt": ["u"] * 5,
+                "ground_truth": ["g"] * 5,
+                "metadata": [{"k": "v"}] * 5,
+            }
+        )
+        f = tmp_path / "struct.parquet"
+        pq.write_table(table, f)
+        assert _validate_parquet(f) == []
+
+    @pytest.mark.usefixtures("_has_pyarrow")
+    def test_object_string_dtype_accepted(self, tmp_path: Path):
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+
+        table = pa.table(
+            {
+                "system_prompt": ["s"] * 5,
+                "user_prompt": ["u"] * 5,
+                "ground_truth": ["g"] * 5,
+                "metadata": ['{"k": "v"}'] * 5,
+            }
+        )
+        f = tmp_path / "str.parquet"
+        pq.write_table(table, f)
+        assert _validate_parquet(f) == []
+
+    @pytest.mark.usefixtures("_has_pyarrow")
+    def test_absent_string_metadata_accepted(self, tmp_path: Path):
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+
+        # String-typed column with absent (null) cells: parseability check
+        # skips absent cells, so the column passes.
+        table = pa.table(
+            {
+                "system_prompt": ["s"] * 5,
+                "user_prompt": ["u"] * 5,
+                "ground_truth": ["g"] * 5,
+                "metadata": pa.array([None] * 5, type=pa.string()),
+            }
+        )
+        f = tmp_path / "absent.parquet"
+        pq.write_table(table, f)
+        assert _validate_parquet(f) == []
+
+    @pytest.mark.usefixtures("_has_pyarrow")
+    def test_null_dtype_metadata_accepted(self, tmp_path: Path):
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+
+        # An all-null metadata column (null dtype) means every cell is absent.
+        table = pa.table(
+            {
+                "system_prompt": ["s"] * 5,
+                "user_prompt": ["u"] * 5,
+                "ground_truth": ["g"] * 5,
+                "metadata": pa.array([None] * 5, type=pa.null()),
+            }
+        )
+        f = tmp_path / "null.parquet"
+        pq.write_table(table, f)
+        assert _validate_parquet(f) == []
+
+    @pytest.mark.usefixtures("_has_pyarrow")
+    def test_int_dtype_rejected(self, tmp_path: Path):
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+
+        table = pa.table(
+            {
+                "system_prompt": ["s"] * 5,
+                "user_prompt": ["u"] * 5,
+                "ground_truth": ["g"] * 5,
+                "metadata": [1, 2, 3, 4, 5],
+            }
+        )
+        f = tmp_path / "int.parquet"
+        pq.write_table(table, f)
+        errors = _validate_parquet(f)
+        assert any("Invalid metadata column" in e for e in errors)
+
+    @pytest.mark.usefixtures("_has_pyarrow")
+    def test_json_array_string_dtype_rejected(self, tmp_path: Path):
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+
+        table = pa.table(
+            {
+                "system_prompt": ["s"] * 5,
+                "user_prompt": ["u"] * 5,
+                "ground_truth": ["g"] * 5,
+                "metadata": ["[1, 2]"] * 5,
+            }
+        )
+        f = tmp_path / "arr_str.parquet"
+        pq.write_table(table, f)
+        errors = _validate_parquet(f)
+        assert any("JSON object" in e for e in errors)
+
+    @pytest.mark.usefixtures("_has_pyarrow")
+    def test_all_empty_object_strings_rejected(self, tmp_path: Path):
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+
+        table = pa.table(
+            {
+                "system_prompt": ["s"] * 5,
+                "user_prompt": ["u"] * 5,
+                "ground_truth": ["g"] * 5,
+                "metadata": ["{}"] * 5,
+            }
+        )
+        f = tmp_path / "all_empty.parquet"
+        pq.write_table(table, f)
+        errors = _validate_parquet(f)
+        assert any("all sampled metadata objects are empty" in e for e in errors)
+
+    @pytest.mark.usefixtures("_has_pyarrow")
+    def test_inconsistent_value_types_rejected(self, tmp_path: Path):
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+
+        table = pa.table(
+            {
+                "system_prompt": ["s"] * 2,
+                "user_prompt": ["u"] * 2,
+                "ground_truth": ["g"] * 2,
+                "metadata": ['{"k": 1}', '{"k": "x"}'],
+            }
+        )
+        f = tmp_path / "mixed_types.parquet"
+        pq.write_table(table, f)
+        errors = _validate_parquet(f)
+        assert any("inconsistent across rows" in e for e in errors)
+
+    @pytest.mark.usefixtures("_has_pyarrow")
+    def test_nested_empty_object_string_rejected(self, tmp_path: Path):
+        import pyarrow as pa
+        import pyarrow.parquet as pq
+
+        table = pa.table(
+            {
+                "system_prompt": ["s"] * 5,
+                "user_prompt": ["u"] * 5,
+                "ground_truth": ["g"] * 5,
+                "metadata": ['{"a": {}}'] * 5,
+            }
+        )
+        f = tmp_path / "nested_empty.parquet"
+        pq.write_table(table, f)
+        errors = _validate_parquet(f)
+        assert any("empty nested object" in e for e in errors)

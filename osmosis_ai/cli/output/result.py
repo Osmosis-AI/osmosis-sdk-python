@@ -14,6 +14,12 @@ class DetailField:
     value: Any
 
 
+def detail_fields(rows: list[tuple[str, str]]) -> list[DetailField]:
+    """Convert (label, value) rows into a mutable list of DetailField."""
+
+    return [DetailField(label=label, value=value) for label, value in rows]
+
+
 @dataclass(frozen=True)
 class ListColumn:
     """A column in a list result."""
@@ -22,7 +28,6 @@ class ListColumn:
     label: str
     plain: bool = True
     no_wrap: bool = False
-    align: str | None = None
     overflow: Literal["fold", "crop", "ellipsis", "ignore"] | None = None
     ratio: int | None = None
     min_width: int | None = None
@@ -69,6 +74,34 @@ class ListResult(CommandResult):
     display_hints: list[str] = field(default_factory=list)
 
 
+@dataclass(frozen=True)
+class ListSection:
+    """One independently paginated list inside a :class:`SectionedListResult`.
+
+    ``key`` is the snake_case JSON envelope key (e.g. ``"base_models"``);
+    ``title`` is the human heading (e.g. ``"Base Models"``).
+    """
+
+    key: str
+    title: str
+    items: list[dict[str, Any]]
+    total_count: int
+    has_more: bool
+    next_offset: int | None
+    columns: list[ListColumn] = field(default_factory=list)
+    display_items: list[dict[str, Any]] | None = None
+
+
+@dataclass
+class SectionedListResult(CommandResult):
+    """Multiple separate paginated lists, each with its own columns and cursor."""
+
+    sections: list[ListSection]
+    extra: dict[str, Any] = field(default_factory=dict)
+    exit_code: int = 0
+    display_hints: list[str] = field(default_factory=list)
+
+
 @dataclass
 class OperationResult(CommandResult):
     """Mutation output."""
@@ -85,7 +118,13 @@ class OperationResult(CommandResult):
 
 @dataclass
 class MessageResult(CommandResult):
-    """Free-form message that does not map cleanly to a resource."""
+    """Free-form message that does not map cleanly to a resource.
+
+    Reserved member of the result family: the renderer fully supports it across
+    rich/plain/JSON, but no command currently produces one (commands prefer
+    ``OperationResult`` so a structured ``resource`` rides along). Kept as the
+    sanctioned shape for any future command that emits only a human message.
+    """
 
     message: str
     extra: dict[str, Any] = field(default_factory=dict)

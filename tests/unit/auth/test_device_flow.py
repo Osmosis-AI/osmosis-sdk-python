@@ -18,15 +18,18 @@ from osmosis_ai.platform.auth.flow import (
 )
 
 
-def _make_device_code_response() -> bytes:
+def _make_device_code_response(include_complete_uri: bool = True) -> bytes:
     data = {
         "device_code": "device_abc123",
         "user_code": "ABCD-1234",
         "verification_uri": "https://platform.osmosis.ai/device",
-        "verification_uri_complete": "https://platform.osmosis.ai/device?code=ABCD-1234",
         "expires_in": 600,
         "interval": 5,
     }
+    if include_complete_uri:
+        data["verification_uri_complete"] = (
+            "https://platform.osmosis.ai/device?code=ABCD-1234"
+        )
     return json.dumps(data).encode()
 
 
@@ -57,6 +60,22 @@ class TestRequestDeviceCode:
         assert isinstance(result, DeviceCodeResponse)
         assert result.device_code == "device_abc123"
         assert result.user_code == "ABCD-1234"
+        assert (
+            result.verification_uri_complete
+            == "https://platform.osmosis.ai/device?code=ABCD-1234"
+        )
+
+    def test_missing_complete_uri_defaults_to_none(self) -> None:
+        body = _make_device_code_response(include_complete_uri=False)
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = body
+        mock_resp.__enter__ = MagicMock(return_value=mock_resp)
+        mock_resp.__exit__ = MagicMock(return_value=False)
+
+        with patch("osmosis_ai.platform.auth.flow.urlopen", return_value=mock_resp):
+            result = request_device_code()
+
+        assert result.verification_uri_complete is None
 
     def test_http_error_raises_login_error(self) -> None:
         error = HTTPError(
@@ -202,12 +221,42 @@ class TestDeviceLogin:
             patch("osmosis_ai.platform.auth.flow.time.sleep"),
             patch("sys.stdin") as mock_stdin,
             patch("builtins.input", return_value=""),
-            patch("webbrowser.open", return_value=True),
+            patch("webbrowser.open", return_value=True) as mock_open,
         ):
             mock_stdin.isatty.return_value = True
             result, creds = device_login(timeout=10.0)
 
+        mock_open.assert_called_once_with(
+            "https://platform.osmosis.ai/device?code=ABCD-1234"
+        )
         assert result.user.email == "u@test.com"
         assert creds.access_token == "jwt-user-token"
         assert creds.token_id == "tok_123"
         assert creds.expires_at.tzinfo is not None
+
+    def test_browser_falls_back_to_plain_uri_without_complete(self) -> None:
+        device_resp_body = _make_device_code_response(include_complete_uri=False)
+        device_resp = MagicMock()
+        device_resp.read.return_value = device_resp_body
+        device_resp.__enter__ = MagicMock(return_value=device_resp)
+        device_resp.__exit__ = MagicMock(return_value=False)
+
+        token_resp = MagicMock()
+        token_resp.read.return_value = _make_token_response()
+        token_resp.__enter__ = MagicMock(return_value=token_resp)
+        token_resp.__exit__ = MagicMock(return_value=False)
+
+        with (
+            patch(
+                "osmosis_ai.platform.auth.flow.urlopen",
+                side_effect=[device_resp, token_resp],
+            ),
+            patch("osmosis_ai.platform.auth.flow.time.sleep"),
+            patch("sys.stdin") as mock_stdin,
+            patch("builtins.input", return_value=""),
+            patch("webbrowser.open", return_value=True) as mock_open,
+        ):
+            mock_stdin.isatty.return_value = True
+            device_login(timeout=10.0)
+
+        mock_open.assert_called_once_with("https://platform.osmosis.ai/device")

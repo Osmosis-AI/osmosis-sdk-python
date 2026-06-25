@@ -26,8 +26,8 @@ def _make_rich_console() -> tuple[Console, StringIO]:
     return console, output
 
 
-@pytest.mark.parametrize("status", ["cancelled", "deleted"])
-def test_list_datasets_preserves_uncategorized_status_brackets(
+@pytest.mark.parametrize("status", ["cancelled"])
+def test_list_datasets_renders_inactive_statuses_dim(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
     status: str,
@@ -77,11 +77,11 @@ def test_list_datasets_preserves_uncategorized_status_brackets(
     result = dataset_module.list_datasets()
 
     assert result.display_items is not None
-    assert f"\\[{status}]" == result.display_items[0]["status"]
+    assert f"[dim]\\[{status}][/dim]" == result.display_items[0]["status"]
 
 
-@pytest.mark.parametrize("status", ["cancelled", "deleted"])
-def test_dataset_status_format_preserves_uncategorized_status_brackets(
+@pytest.mark.parametrize("status", ["cancelled"])
+def test_dataset_status_format_renders_inactive_statuses_dim(
     monkeypatch: pytest.MonkeyPatch,
     status: str,
 ) -> None:
@@ -99,10 +99,10 @@ def test_dataset_status_format_preserves_uncategorized_status_brackets(
     assert f"[{status}]" in strip_ansi(output.getvalue())
 
 
-def test_dataset_status_format_preserves_plain_text_brackets() -> None:
+def test_dataset_status_format_returns_dim_markup_for_inactive_status() -> None:
     console = Console(file=StringIO(), force_terminal=False)
     dataset = SimpleNamespace(
-        status="deleted",
+        status="cancelled",
         processing_step=None,
         processing_percent=None,
     )
@@ -110,6 +110,6 @@ def test_dataset_status_format_preserves_plain_text_brackets() -> None:
     original_console = utils_module.console
     utils_module.console = console
     try:
-        assert utils_module.format_dataset_status(dataset) == "\\[deleted]"
+        assert utils_module.format_dataset_status(dataset) == "[dim]\\[cancelled][/dim]"
     finally:
         utils_module.console = original_console

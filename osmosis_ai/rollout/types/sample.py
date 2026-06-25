@@ -45,6 +45,7 @@ class ExecutionRequest(BaseModel):
     id: str
     prompt: list[MessageDict]
     label: str | None = None
+    metadata: dict[str, Any] | None = None
     agent_timeout_sec: float | None = None
     grader_timeout_sec: float | None = None
 
@@ -52,5 +53,6 @@ class ExecutionRequest(BaseModel):
 class ExecutionResult(BaseModel):
     status: RolloutStatus
     sample: RolloutSample | None = None
+    artifacts: dict[str, Any] | None = None
     err_message: str | None = None
     err_category: RolloutErrorCategory | None = None
