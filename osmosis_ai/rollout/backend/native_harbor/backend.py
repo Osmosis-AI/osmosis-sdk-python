@@ -1,8 +1,9 @@
 """Native Harbor execution backend.
 
 Drives each rollout as a harbor ``Trial``: resolve the task from
-``metadata["harbor_task"]``, wire the controller endpoint/identity into the
-agent, run it, and map the task verifier's reward onto a ``RolloutSample``.
+``metadata["harbor_task"]``, wire the controller endpoint into the agent
+(rollout identity rides in the chat-completions URL), run it, and map the
+task verifier's reward onto the rollout's single ``RolloutSample``.
 """
 
 import importlib
@@ -10,7 +11,6 @@ import inspect
 import logging
 import shutil
 import traceback
-import uuid
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
@@ -41,7 +41,7 @@ from osmosis_ai.rollout.types import (
     RolloutSample,
     RolloutStatus,
 )
-from osmosis_ai.rollout.utils.rewards import validate_samples_have_rewards
+from osmosis_ai.rollout.utils.rewards import validate_sample_has_reward
 
 logger: logging.Logger = logging.getLogger(__name__)
 
@@ -188,7 +188,6 @@ class NativeHarborBackend(ExecutionBackend):
         model_name: str = DEFAULT_MODEL_NAME,
         reward_key: str = DEFAULT_REWARD_KEY,
         trials_dir: Path | str = Path("native_trials"),
-        inject_identity_headers: bool = True,
         collect_rollout_details: bool = False,
         training_safe: bool = True,
         task_resolver: TaskResolver | None = None,
@@ -207,7 +206,6 @@ class NativeHarborBackend(ExecutionBackend):
         self.model_name = model_name
         self.reward_key = reward_key
         self.trials_dir = Path(trials_dir)
-        self.inject_identity_headers = inject_identity_headers
         self.collect_rollout_details = collect_rollout_details
         self.training_safe = training_safe
         self.task_resolver: TaskResolver = task_resolver or resolve_task
@@ -239,9 +237,7 @@ class NativeHarborBackend(ExecutionBackend):
         on_grader_complete: ResultCallback | None = None,
     ) -> None:
         ctx = get_rollout_context() or RolloutContext()
-        sample_id = uuid.uuid4().hex
-
-        workflow_result, trial_result = await self._run_trial(request, ctx, sample_id)
+        workflow_result, trial_result = await self._run_trial(request, ctx)
         await self._safe_callback(
             on_workflow_complete, workflow_result, request.id, "workflow"
         )
@@ -249,18 +245,9 @@ class NativeHarborBackend(ExecutionBackend):
         if on_grader_complete is None:
             return
 
-        if trial_result is not None:
-            grader_result = self._build_grader_result(
-                trial_result, workflow_result.samples, sample_id
-            )
-        else:
-            # Setup failed before any result; fire FAILURE so the grader wait resolves.
-            grader_result = ExecutionResult(
-                status=RolloutStatus.FAILURE,
-                samples=workflow_result.samples,
-                err_message=workflow_result.err_message,
-                err_category=workflow_result.err_category,
-            )
+        grader_result = self._build_grader_result(
+            request, workflow_result, trial_result
+        )
         await self._safe_callback(
             on_grader_complete, grader_result, request.id, "grader"
         )
@@ -283,17 +270,18 @@ class NativeHarborBackend(ExecutionBackend):
             )
 
     async def _run_trial(
-        self, request: ExecutionRequest, ctx: RolloutContext, sample_id: str
+        self, request: ExecutionRequest, ctx: RolloutContext
     ) -> tuple[ExecutionResult, TrialResult | None]:
-        """Build + run the trial. Never raises; returns a FAILURE result (with
-        ``None`` trial when creation/setup failed)."""
-        samples = {sample_id: RolloutSample(id=sample_id, label=request.label)}
-        # sample_id makes the trial dir unique, so a reused/retried rollout_id
-        # cannot collide on a shared dir.
-        trial_name = f"{TRIAL_NAME_PREFIX}{request.id}-{sample_id}"
+        """Build + run the trial. Never raises; returns a workflow result
+        (status/error only -- the sample is a grading concern) and the harbor
+        ``TrialResult`` (``None`` when creation/setup failed before any result).
+        """
+        # The rollout id is unique per rollout, so it alone names the trial dir
+        # (mirrors HarborBackend, which also keys its trial dir on request.id).
+        trial_name = f"{TRIAL_NAME_PREFIX}{request.id}"
         try:
             task_cfg = self.task_resolver(request)
-            agent_cfg = self._build_agent_config(request, ctx, sample_id)
+            agent_cfg = self._build_agent_config(request, ctx)
             trial_cfg = self._build_trial_config(
                 request, task_cfg, agent_cfg, trial_name
             )
@@ -308,7 +296,6 @@ class NativeHarborBackend(ExecutionBackend):
             return (
                 ExecutionResult(
                     status=RolloutStatus.FAILURE,
-                    samples=samples,
                     err_message=str(e),
                     err_category=_categorize_exception(e),
                 ),
@@ -333,7 +320,6 @@ class NativeHarborBackend(ExecutionBackend):
             return (
                 ExecutionResult(
                     status=RolloutStatus.FAILURE,
-                    samples=samples,
                     err_message=getattr(err, "exception_message", None)
                     or "Trial failed before completion",
                     err_category=_categorize_exception_type(
@@ -345,7 +331,7 @@ class NativeHarborBackend(ExecutionBackend):
 
         # Reward came from the in-memory result, so the trial dir is disposable.
         self._cleanup_trial(trial_name)
-        return ExecutionResult(status=RolloutStatus.SUCCESS, samples=samples), result
+        return ExecutionResult(status=RolloutStatus.SUCCESS), result
 
     def _cleanup_trial(self, trial_name: str) -> None:
         if self.cleanup_successful_trials:
@@ -371,7 +357,7 @@ class NativeHarborBackend(ExecutionBackend):
         )
 
     def _build_agent_config(
-        self, request: ExecutionRequest, ctx: RolloutContext, sample_id: str
+        self, request: ExecutionRequest, ctx: RolloutContext
     ) -> AgentConfig:
         md = request.metadata or {}
         # harbor's factory ignores import_path when name is also set; reject both.
@@ -394,23 +380,24 @@ class NativeHarborBackend(ExecutionBackend):
         env: dict[str, str] = {}
 
         if _is_installed_agent(agent_cls):
-            # Installed CLIs can't forward per-rollout identity headers; if the
-            # controller requires them, fail loud instead of 400-ing every call.
-            if self.inject_identity_headers:
-                cls_name = agent_cls.__name__ if agent_cls is not None else name
-                raise ValueError(
-                    f"Installed harbor agent {cls_name!r} is not yet supported by "
-                    "the native harbor backend: it cannot send the per-rollout "
-                    "identity headers the policy controller requires. Use an "
-                    "in-process agent, or set inject_identity_headers=False if "
-                    "your controller routes identity another way."
-                )
+            # Installed CLIs are wired purely via env vars. The rollout id is
+            # baked into the chat-completions URL path, so OPENAI_BASE_URL alone
+            # carries the routing identity -- no per-rollout headers needed, which
+            # is what lets installed agents run under the native backend at all.
             if endpoint:
                 env["OPENAI_BASE_URL"] = endpoint
+            else:
+                logger.warning(
+                    "No chat_completions_url in RolloutContext for rollout %s; "
+                    "the installed agent's LLM calls will not reach the policy "
+                    "server.",
+                    request.id,
+                )
             if api_key:
                 env["OPENAI_API_KEY"] = api_key
         else:
-            # In-process agent: endpoint/key/identity go via kwargs.
+            # In-process agent: endpoint/key go via kwargs. Rollout identity
+            # rides in the endpoint URL path, so no per-call headers are set.
             if endpoint:
                 kwargs["api_base"] = endpoint
             else:
@@ -435,17 +422,6 @@ class NativeHarborBackend(ExecutionBackend):
             llm_kwargs["extra_body"] = {"stream": False}
             if api_key:
                 llm_kwargs["api_key"] = api_key
-            if self.inject_identity_headers:
-                if not ctx.rollout_id:
-                    logger.warning(
-                        "Injecting an empty x-rollout-id for rollout %s; the "
-                        "policy controller will reject the call.",
-                        request.id,
-                    )
-                llm_kwargs["extra_headers"] = {
-                    "x-rollout-id": ctx.rollout_id,
-                    "x-sample-id": sample_id,
-                }
             if llm_kwargs:
                 kwargs["llm_kwargs"] = llm_kwargs
             if self.training_safe and _accepts_summarization_knobs(agent_cls):
@@ -474,29 +450,48 @@ class NativeHarborBackend(ExecutionBackend):
 
     def _build_grader_result(
         self,
-        trial_result: TrialResult,
-        samples: dict[str, RolloutSample],
-        sample_id: str,
+        request: ExecutionRequest,
+        workflow_result: ExecutionResult,
+        trial_result: TrialResult | None,
     ) -> ExecutionResult:
-        reward_value = self._pick_reward(self._extract_rewards(trial_result))
-        if reward_value is not None:
-            samples[sample_id].reward = float(reward_value)
-
-        try:
-            validate_samples_have_rewards(samples)
-        except ValueError as e:
-            logger.warning("Native grading incomplete for %s: %s", sample_id, e)
+        """Grade the rollout's single sample. The reward comes from the harbor
+        verifier's in-memory result; on a setup failure (no trial result) the
+        workflow error is propagated so the grader wait resolves."""
+        sample = RolloutSample(label=request.label)
+        if trial_result is None:
             return ExecutionResult(
                 status=RolloutStatus.FAILURE,
-                samples=samples,
+                sample=sample,
+                err_message=workflow_result.err_message,
+                err_category=workflow_result.err_category,
+            )
+
+        reward_value = self._pick_reward(self._extract_rewards(trial_result))
+        if reward_value is not None:
+            sample.reward = float(reward_value)
+
+        try:
+            validate_sample_has_reward(sample)
+        except ValueError as e:
+            logger.warning("Native grading incomplete: %s", e)
+            return ExecutionResult(
+                status=RolloutStatus.FAILURE,
+                sample=sample,
                 err_message=str(e),
                 err_category=RolloutErrorCategory.VALIDATION_ERROR,
             )
-        return ExecutionResult(status=RolloutStatus.SUCCESS, samples=samples)
+        return ExecutionResult(status=RolloutStatus.SUCCESS, sample=sample)
 
     @staticmethod
     def _extract_rewards(trial_result: TrialResult) -> dict[str, float | int] | None:
-        """Read verifier rewards, tolerating single- vs multi-step trials."""
+        """Read verifier rewards, tolerating single- vs multi-step trials.
+
+        Harbor rewards are a *named-channel dict* (``dict[str, float | int]``),
+        not a scalar, and a multi-step task carries one such dict per step. We
+        take the trial-level verifier dict if present, else the first step that
+        produced one. (Reducing that dict to the single float RL needs is
+        ``_pick_reward``'s job.)
+        """
         top = trial_result.verifier_result
         if top is not None and top.rewards:
             return top.rewards
@@ -509,7 +504,12 @@ class NativeHarborBackend(ExecutionBackend):
     def _pick_reward(
         self, rewards: dict[str, float | int] | None
     ) -> float | int | None:
-        # Pick the configured reward channel, else the sole value when unambiguous.
+        # Collapse harbor's named-channel rewards into the single float RL needs.
+        # Honor harbor's "1D convention" (the 'reward' key is the primary scalar;
+        # the default verifier emits exactly {"reward": <float>}); fall back to the
+        # sole value when a verifier used a different single key. Refuse to guess
+        # among genuinely multiple channels -- picking one by dict order could feed
+        # the wrong gradient silently -- and warn instead.
         if not rewards:
             return None
         if self.reward_key in rewards:

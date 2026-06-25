@@ -1,10 +1,10 @@
 """Unit tests for the NativeHarborBackend.
 
 The harbor ``Trial`` is monkeypatched so these run without Docker/harbor task
-resolution. The load-bearing assertion is the sample_id round-trip: the value
-injected as the ``x-sample-id`` header must equal the key of the returned
-``ExecutionResult.samples`` dict (which is the reward key the policy controller
-reconciles against).
+resolution. A rollout produces a single, URL-routed sample: identity is baked
+into ``chat_completions_url`` (and the callback URLs), so the backend no longer
+stamps per-call ``x-rollout-id``/``x-sample-id`` headers, and the verifier
+reward lands on the one ``ExecutionResult.sample``.
 """
 
 from pathlib import Path
@@ -130,30 +130,26 @@ class TestResolveTask:
 
 
 class TestAgentConfig:
-    def test_in_process_terminus2_nesting(self):
+    def test_in_process_url_and_endpoint_wiring(self):
+        # The in-process default agent gets the endpoint/key wired via kwargs.
+        # Identity rides in the URL path, so no per-call routing headers are set.
+        # (Kept independent of harbor's agent registry: the summarization-knob
+        # forcing depends on class resolution and is covered separately.)
         backend = NativeHarborBackend()
-        ac = backend._build_agent_config(_request(), _ctx(), "SID")
+        ac = backend._build_agent_config(_request(), _ctx())
         assert ac.name == "terminus-2"
-        # api_base is top-level; api_key/extra_headers ride inside llm_kwargs.
+        # api_base is top-level; api_key rides inside llm_kwargs.
         assert ac.kwargs["api_base"] == "http://ctrl:8080"
         assert ac.kwargs["collect_rollout_details"] is False
         assert ac.kwargs["llm_kwargs"]["api_key"] == "sk-test"
-        assert ac.kwargs["llm_kwargs"]["extra_headers"] == {
-            "x-rollout-id": "ROLL",
-            "x-sample-id": "SID",
-        }
-        # training-safety knobs forced for Terminus2.
-        assert ac.kwargs["enable_summarize"] is False
-        assert ac.kwargs["proactive_summarization_threshold"] == 0
-
-    def test_inject_identity_headers_off(self):
-        backend = NativeHarborBackend(inject_identity_headers=False)
-        ac = backend._build_agent_config(_request(), _ctx(), "SID")
-        assert "extra_headers" not in ac.kwargs.get("llm_kwargs", {})
+        # Rollout identity rides in the URL path now -- no per-call routing headers.
+        assert "extra_headers" not in ac.kwargs["llm_kwargs"]
+        # The non-streaming hack is unrelated to URL routing and stays forced.
+        assert ac.kwargs["llm_kwargs"]["extra_body"] == {"stream": False}
 
     def test_training_safe_off_omits_summarize_knobs(self):
         backend = NativeHarborBackend(training_safe=False)
-        ac = backend._build_agent_config(_request(), _ctx(), "SID")
+        ac = backend._build_agent_config(_request(), _ctx())
         assert "enable_summarize" not in ac.kwargs
 
     def test_summarize_knobs_follow_resolved_class_not_name(self):
@@ -166,7 +162,7 @@ class TestAgentConfig:
             "harbor_task": "/tmp/task",
             "harbor_agent_import_path": "harbor.agents.terminus_2:Terminus2",
         }
-        ac = backend._build_agent_config(_request(md), _ctx(), "SID")
+        ac = backend._build_agent_config(_request(md), _ctx())
         assert ac.name is None
         assert ac.kwargs["enable_summarize"] is False
         assert ac.kwargs["proactive_summarization_threshold"] == 0
@@ -180,7 +176,7 @@ class TestAgentConfig:
             "harbor_task": "/tmp/task",
             "harbor_agent_import_path": "harbor.agents.nop:NopAgent",
         }
-        ac = backend._build_agent_config(_request(md), _ctx(), "SID")
+        ac = backend._build_agent_config(_request(md), _ctx())
         assert "enable_summarize" not in ac.kwargs
 
     def test_in_process_agent_missing_wiring_contract_raises(
@@ -197,29 +193,20 @@ class TestAgentConfig:
         backend = NativeHarborBackend()
         md = {"harbor_task": "/tmp/task", "harbor_agent_import_path": "x:y"}
         with pytest.raises(ValueError, match="cannot receive the native-harbor"):
-            backend._build_agent_config(_request(md), _ctx(), "SID")
+            backend._build_agent_config(_request(md), _ctx())
 
-    def test_installed_agent_rejected_when_identity_headers_required(self):
-        # Installed CLIs cannot forward x-rollout-id/x-sample-id. With the
-        # default inject_identity_headers=True the controller requires them, so
-        # the backend must fail loud instead of silently 400-ing every call.
+    def test_installed_agent_wired_via_env_url(self, monkeypatch: pytest.MonkeyPatch):
+        # Installed CLIs (codex, claude-code, ...) are now supported: the rollout
+        # id is baked into the chat-completions URL path, so OPENAI_BASE_URL alone
+        # carries routing identity -- no per-call headers, which installed CLIs
+        # cannot send. The endpoint goes through harbor's standard env channel.
+        # Force the installed-agent branch so the test does not depend on which
+        # harbor version's agent registry happens to be installed.
+        monkeypatch.setattr(bmod, "_is_installed_agent", lambda cls: True)
         backend = NativeHarborBackend()
-        with pytest.raises(ValueError, match="not yet supported"):
-            backend._build_agent_config(
-                _request({"harbor_task": "/tmp/task", "harbor_agent": "codex"}),
-                _ctx(),
-                "SID",
-            )
-
-    def test_installed_agent_uses_env_transport_when_headers_off(self):
-        # With inject_identity_headers=False the controller routes identity
-        # another way, so installed agents are wired via env vars only -- the
-        # endpoint goes through harbor's standard env channel, not llm_kwargs.
-        backend = NativeHarborBackend(inject_identity_headers=False)
         ac = backend._build_agent_config(
             _request({"harbor_task": "/tmp/task", "harbor_agent": "codex"}),
             _ctx(),
-            "SID",
         )
         assert ac.env == {
             "OPENAI_BASE_URL": "http://ctrl:8080",
@@ -234,7 +221,7 @@ class TestAgentConfig:
             "harbor_agent_import_path": "my.pkg:MyAgent",
             "harbor_model": "openai/custom",
         }
-        ac = backend._build_agent_config(_request(md), _ctx(), "SID")
+        ac = backend._build_agent_config(_request(md), _ctx())
         assert ac.name is None
         assert ac.import_path == "my.pkg:MyAgent"
         assert ac.model_name == "openai/custom"
@@ -244,9 +231,7 @@ class TestAgentConfig:
 
     def test_agent_timeout_forwarded(self):
         backend = NativeHarborBackend()
-        ac = backend._build_agent_config(
-            _request(agent_timeout_sec=42.0), _ctx(), "SID"
-        )
+        ac = backend._build_agent_config(_request(agent_timeout_sec=42.0), _ctx())
         assert ac.override_timeout_sec == 42.0
 
     def test_both_agent_selectors_raise(self):
@@ -257,14 +242,14 @@ class TestAgentConfig:
             "harbor_agent_import_path": "my.pkg:MyAgent",
         }
         with pytest.raises(ValueError, match="choose one"):
-            backend._build_agent_config(_request(md), _ctx(), "SID")
+            backend._build_agent_config(_request(md), _ctx())
 
     def test_blank_agent_falls_back_to_default(self):
         # A blank dataset cell deserializes to "" and must fall back to the
         # default agent, not build AgentConfig(name="") and fail the trial.
         backend = NativeHarborBackend()
         ac = backend._build_agent_config(
-            _request({"harbor_task": "/tmp/task", "harbor_agent": ""}), _ctx(), "SID"
+            _request({"harbor_task": "/tmp/task", "harbor_agent": ""}), _ctx()
         )
         assert ac.name == "terminus-2"
 
@@ -299,7 +284,7 @@ class TestExecute:
     def test_is_execution_backend(self):
         assert isinstance(NativeHarborBackend(), ExecutionBackend)
 
-    async def test_success_sample_id_round_trip(self, monkeypatch):
+    async def test_success_single_sample_rewarded(self, monkeypatch):
         capture: dict[str, Any] = {}
         _patch_trial(
             monkeypatch, result=_trial_result(rewards={"reward": 1.0}), capture=capture
@@ -317,18 +302,10 @@ class TestExecute:
         assert wf_result.status == RolloutStatus.SUCCESS
         assert gr_result.status == RolloutStatus.SUCCESS
 
-        injected_sid = capture["config"].agent.kwargs["llm_kwargs"]["extra_headers"][
-            "x-sample-id"
-        ]
-        # THE invariant: injected x-sample-id == samples dict key == reward sample.
-        assert list(gr_result.samples.keys()) == [injected_sid]
-        assert gr_result.samples[injected_sid].reward == 1.0
-        assert (
-            capture["config"].agent.kwargs["llm_kwargs"]["extra_headers"][
-                "x-rollout-id"
-            ]
-            == "ROLL"
-        )
+        # Single-sample contract: the verifier reward lands on the one sample.
+        assert gr_result.sample.reward == 1.0
+        # Identity rides in the URL path -- no per-call routing headers injected.
+        assert "extra_headers" not in capture["config"].agent.kwargs["llm_kwargs"]
         # verifier must be enabled so it produces a reward.
         assert capture["config"].verifier.disable is False
 
@@ -338,7 +315,7 @@ class TestExecute:
         on_wf, on_gr = AsyncMock(), AsyncMock()
         with _ctx():
             await backend.execute(_request(), on_wf, on_gr)
-        sample = next(iter(on_gr.call_args.args[0].samples.values()))
+        sample = on_gr.call_args.args[0].sample
         assert sample.reward == 1.0
         assert isinstance(sample.reward, float)
 
@@ -355,7 +332,7 @@ class TestExecute:
         assert wf_result.err_category == RolloutErrorCategory.AGENT_ERROR
         # grader fires FAILURE with the still-unrewarded sample (training fast-fails).
         assert gr_result.status == RolloutStatus.FAILURE
-        assert next(iter(gr_result.samples.values())).reward is None
+        assert gr_result.sample.reward is None
 
     async def test_trial_create_raises(self, monkeypatch):
         _patch_trial(monkeypatch, create_error=RuntimeError("docker down"))
@@ -432,7 +409,7 @@ class TestExecute:
         # ...but grading salvages the real reward.
         gr_result = on_gr.call_args.args[0]
         assert gr_result.status == RolloutStatus.SUCCESS
-        assert next(iter(gr_result.samples.values())).reward == 0.7
+        assert gr_result.sample.reward == 0.7
 
     async def test_exception_type_drives_err_category(self, monkeypatch):
         # A verifier timeout swallowed into exception_info must be reported as
@@ -474,12 +451,12 @@ class TestConcurrencyAndLifecycle:
 
     async def test_successful_trial_dir_cleaned_up(self, monkeypatch, tmp_path):
         # On success the (disposable) trial dir is removed; the reward is read
-        # from the in-memory TrialResult, not the files.
+        # from the in-memory TrialResult, not the files. The dir is named by the
+        # rollout id alone (no per-execution token).
         _patch_trial(monkeypatch, result=_trial_result(rewards={"reward": 1.0}))
         backend = NativeHarborBackend(trials_dir=tmp_path)
-        trial_dir = tmp_path / "native-ROLL-SID"
+        trial_dir = tmp_path / "native-ROLL"
         trial_dir.mkdir()
-        monkeypatch.setattr(bmod.uuid, "uuid4", lambda: SimpleNamespace(hex="SID"))
         with _ctx():
             await backend.execute(_request(), AsyncMock(), AsyncMock())
         assert not trial_dir.exists()
@@ -488,9 +465,8 @@ class TestConcurrencyAndLifecycle:
         # Failed trials are kept for debugging.
         _patch_trial(monkeypatch, result=_trial_result(exc_message="boom"))
         backend = NativeHarborBackend(trials_dir=tmp_path)
-        trial_dir = tmp_path / "native-ROLL-SID"
+        trial_dir = tmp_path / "native-ROLL"
         trial_dir.mkdir()
-        monkeypatch.setattr(bmod.uuid, "uuid4", lambda: SimpleNamespace(hex="SID"))
         with _ctx():
             await backend.execute(_request(), AsyncMock(), AsyncMock())
         assert trial_dir.exists()
