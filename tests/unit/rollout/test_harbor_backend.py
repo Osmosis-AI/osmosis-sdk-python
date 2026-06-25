@@ -29,8 +29,8 @@ class _StaticSampleSource(SampleSource):
     def __init__(self, messages: list[dict[str, Any]]) -> None:
         self.messages = messages
 
-    async def get_sample(self, name: str) -> RolloutSample:
-        return RolloutSample(id=name, messages=self.messages)
+    async def get_sample(self) -> RolloutSample:
+        return RolloutSample(messages=self.messages)
 
 
 class MetadataCapturingWorkflow(AgentWorkflow):
@@ -40,8 +40,7 @@ class MetadataCapturingWorkflow(AgentWorkflow):
         _AGENT_CAPTURE["metadata"] = ctx.metadata
         rollout_ctx = get_rollout_context()
         if rollout_ctx:
-            rollout_ctx.register_sample_source(
-                "sample-1",
+            rollout_ctx.set_sample_source(
                 _StaticSampleSource([{"role": "assistant", "content": "done"}]),
             )
 
@@ -50,21 +49,18 @@ class MetadataCapturingGrader(Grader):
     async def grade(self, ctx: GraderContext) -> Any:
         _GRADER_CAPTURE["metadata"] = ctx.metadata
         _GRADER_CAPTURE["label"] = ctx.label
-        for sample_id in ctx.get_samples():
-            ctx.set_sample_reward(sample_id, 1.0)
+        ctx.set_reward(1.0)
 
 
 class ArtifactGrader(Grader):
     async def grade(self, ctx: GraderContext) -> Any:
-        for sample_id in ctx.get_samples():
-            ctx.set_sample_reward(sample_id, 1.0)
+        ctx.set_reward(1.0)
         ctx.set_artifacts({"judge": {"explanation": "ok"}})
 
 
 class NonSerializableArtifactGrader(Grader):
     async def grade(self, ctx: GraderContext) -> Any:
-        for sample_id in ctx.get_samples():
-            ctx.set_sample_reward(sample_id, 1.0)
+        ctx.set_reward(1.0)
         ctx.set_artifacts({"bad": {1, 2, 3}})  # type: ignore[dict-item]
 
 
@@ -106,11 +102,7 @@ class TestHarborBackend:
                 agent_result=SimpleNamespace(
                     metadata={
                         "status": "success",
-                        "samples": {
-                            "sample-1": RolloutSample(
-                                id="sample-1", messages=[]
-                            ).model_dump()
-                        },
+                        "sample": RolloutSample(messages=[]).model_dump(),
                     }
                 ),
                 verifier_result=SimpleNamespace(rewards={}),
@@ -179,9 +171,9 @@ class TestAgentRunnerRoundTrip:
 
 
 class TestGraderRunnerRoundTrip:
-    def _write_samples(self, path):
-        sample = RolloutSample(id="sample-1", messages=[])
-        path.write_text(json.dumps({"sample-1": sample.model_dump()}, default=str))
+    def _write_sample(self, path):
+        sample = RolloutSample(messages=[])
+        path.write_text(json.dumps(sample.model_dump(), default=str))
 
     def test_grader_ctx_receives_metadata(self, tmp_path, monkeypatch):
         import osmosis_ai.rollout.backend.harbor.grader_runner as grader_runner
@@ -202,20 +194,20 @@ class TestGraderRunnerRoundTrip:
         config_path.write_text(
             json.dumps(backend.build_rollout_config(request), default=str)
         )
-        samples_path = tmp_path / "samples.json"
-        self._write_samples(samples_path)
+        sample_path = tmp_path / "sample.json"
+        self._write_sample(sample_path)
 
         monkeypatch.setattr(
             grader_runner,
             "parse_args",
-            lambda: SimpleNamespace(config=config_path, samples=samples_path),
+            lambda: SimpleNamespace(config=config_path, sample=sample_path),
         )
 
         grader_runner.main()
 
         assert _GRADER_CAPTURE["metadata"] == metadata
-        rewards = json.loads((verifier_dir / "reward.json").read_text())
-        assert rewards == {"sample-1": 1.0}
+        reward = json.loads((verifier_dir / "reward.json").read_text())
+        assert reward == {"reward": 1.0}
 
     def test_grader_writes_artifacts_file(self, tmp_path, monkeypatch):
         """A grader that calls set_artifacts produces grader_artifacts.json."""
@@ -237,13 +229,13 @@ class TestGraderRunnerRoundTrip:
         config_path.write_text(
             json.dumps(backend.build_rollout_config(request), default=str)
         )
-        samples_path = tmp_path / "samples.json"
-        self._write_samples(samples_path)
+        sample_path = tmp_path / "sample.json"
+        self._write_sample(sample_path)
 
         monkeypatch.setattr(
             grader_runner,
             "parse_args",
-            lambda: SimpleNamespace(config=config_path, samples=samples_path),
+            lambda: SimpleNamespace(config=config_path, sample=sample_path),
         )
 
         grader_runner.main()
@@ -273,19 +265,19 @@ class TestGraderRunnerRoundTrip:
         config_path.write_text(
             json.dumps(backend.build_rollout_config(request), default=str)
         )
-        samples_path = tmp_path / "samples.json"
-        self._write_samples(samples_path)
+        sample_path = tmp_path / "sample.json"
+        self._write_sample(sample_path)
 
         monkeypatch.setattr(
             grader_runner,
             "parse_args",
-            lambda: SimpleNamespace(config=config_path, samples=samples_path),
+            lambda: SimpleNamespace(config=config_path, sample=sample_path),
         )
 
         grader_runner.main()
 
-        rewards = json.loads((verifier_dir / "reward.json").read_text())
-        assert rewards == {"sample-1": 1.0}
+        reward = json.loads((verifier_dir / "reward.json").read_text())
+        assert reward == {"reward": 1.0}
         artifacts = json.loads((verifier_dir / "grader_artifacts.json").read_text())
         assert artifacts["_error"]["code"] == "artifacts_not_serializable"
 
@@ -305,13 +297,13 @@ class TestGraderRunnerRoundTrip:
         config_path.write_text(
             json.dumps(backend.build_rollout_config(request), default=str)
         )
-        samples_path = tmp_path / "samples.json"
-        self._write_samples(samples_path)
+        sample_path = tmp_path / "sample.json"
+        self._write_sample(sample_path)
 
         monkeypatch.setattr(
             grader_runner,
             "parse_args",
-            lambda: SimpleNamespace(config=config_path, samples=samples_path),
+            lambda: SimpleNamespace(config=config_path, sample=sample_path),
         )
 
         grader_runner.main()
@@ -337,21 +329,21 @@ class TestGraderRunnerRoundTrip:
         config_path.write_text(
             json.dumps(backend.build_rollout_config(request), default=str)
         )
-        samples_path = tmp_path / "samples.json"
-        self._write_samples(samples_path)
+        sample_path = tmp_path / "sample.json"
+        self._write_sample(sample_path)
 
         monkeypatch.setattr(
             grader_runner,
             "parse_args",
-            lambda: SimpleNamespace(config=config_path, samples=samples_path),
+            lambda: SimpleNamespace(config=config_path, sample=sample_path),
         )
 
         grader_runner.main()
 
         assert _GRADER_CAPTURE["label"] is None
         assert _GRADER_CAPTURE["metadata"] == {"tools": ["search"]}
-        rewards = json.loads((verifier_dir / "reward.json").read_text())
-        assert rewards == {"sample-1": 1.0}
+        reward = json.loads((verifier_dir / "reward.json").read_text())
+        assert reward == {"reward": 1.0}
 
 
 class TestOnTrialEndArtifacts:
@@ -372,11 +364,7 @@ class TestOnTrialEndArtifacts:
                 agent_result=SimpleNamespace(
                     metadata={
                         "status": "success",
-                        "samples": {
-                            "sample-1": RolloutSample(
-                                id="sample-1", messages=[]
-                            ).model_dump()
-                        },
+                        "sample": RolloutSample(messages=[]).model_dump(),
                     }
                 ),
                 verifier_result=SimpleNamespace(rewards={"sample-1": 1.0}),

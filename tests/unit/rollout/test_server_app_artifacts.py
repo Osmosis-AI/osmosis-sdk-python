@@ -85,7 +85,7 @@ class TestGraderCallbackArtifacts:
         assert payload == {
             "rollout_id": "r1",
             "status": "success",
-            "samples": {},
+            "sample": None,
             "err_message": None,
             "err_category": None,
         }

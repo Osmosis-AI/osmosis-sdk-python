@@ -885,6 +885,51 @@ class PaginatedRollouts:
         )
 
 
+@dataclass
+class DevRolloutServerInfo:
+    """A dev rollout server record."""
+
+    id: str
+    name: str
+    url: str
+    status: str
+    expires_at: str | None = None
+    started_at: str | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> DevRolloutServerInfo:
+        return cls(
+            id=data["id"],
+            name=data.get("name", ""),
+            url=data.get("url", ""),
+            status=data.get("status", ""),
+            expires_at=data.get("expires_at"),
+            started_at=data.get("started_at"),
+        )
+
+
+@dataclass
+class PaginatedDevRolloutServers:
+    """Paginated list of dev rollout servers."""
+
+    dev_rollout_servers: list[DevRolloutServerInfo]
+    total_count: int
+    has_more: bool
+    next_offset: int | None = None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> PaginatedDevRolloutServers:
+        return cls(
+            dev_rollout_servers=[
+                DevRolloutServerInfo.from_dict(s)
+                for s in data.get("dev_rollout_servers", [])
+            ],
+            total_count=data.get("total_count", 0),
+            has_more=data.get("has_more", False),
+            next_offset=data.get("next_offset"),
+        )
+
+
 # ── LoRA checkpoints (for `osmosis train info`) ──────────────────
 
 

@@ -32,8 +32,8 @@ class StaticSampleSource(SampleSource):
     def __init__(self, messages: list[dict[str, Any]]) -> None:
         self.messages = messages
 
-    async def get_sample(self, name: str) -> RolloutSample:
-        return RolloutSample(id=name, messages=self.messages)
+    async def get_sample(self) -> RolloutSample:
+        return RolloutSample(messages=self.messages)
 
 
 class StubWorkflow(AgentWorkflow):
@@ -42,8 +42,7 @@ class StubWorkflow(AgentWorkflow):
 
         rollout_ctx = get_rollout_context()
         if rollout_ctx:
-            rollout_ctx.register_sample_source(
-                "sample-1",
+            rollout_ctx.set_sample_source(
                 StaticSampleSource([{"role": "assistant", "content": "done"}]),
             )
 
@@ -55,8 +54,7 @@ class FailingWorkflow(AgentWorkflow):
 
 class StubGrader(Grader):
     async def grade(self, ctx: GraderContext) -> Any:
-        for sample_id in ctx.get_samples():
-            ctx.set_sample_reward(sample_id, 1.0)
+        ctx.set_reward(1.0)
 
 
 class FailingGrader(Grader):
@@ -66,8 +64,7 @@ class FailingGrader(Grader):
 
 class ArtifactGrader(Grader):
     async def grade(self, ctx: GraderContext) -> Any:
-        for sample_id in ctx.get_samples():
-            ctx.set_sample_reward(sample_id, 1.0)
+        ctx.set_reward(1.0)
         ctx.set_artifacts({"judge": {"explanation": "looks good"}})
 
 
@@ -184,8 +181,8 @@ class TestLocalBackend:
         grader_result = on_grader.call_args[0][0]
         assert grader_result.status == RolloutStatus.SUCCESS
         # Grader should have assigned reward=1.0
-        for sample in grader_result.samples.values():
-            assert sample.reward == 1.0
+        assert grader_result.sample is not None
+        assert grader_result.sample.reward == 1.0
 
     async def test_grader_callback_reports_failure_without_label(self):
         backend = LocalBackend(
@@ -236,8 +233,8 @@ class TestLocalBackend:
         on_grader.assert_awaited_once()
         grader_result = on_grader.call_args[0][0]
         assert grader_result.status == RolloutStatus.SUCCESS
-        for sample in grader_result.samples.values():
-            assert sample.reward == 1.0
+        assert grader_result.sample is not None
+        assert grader_result.sample.reward == 1.0
 
     async def test_grader_runs_with_label_only(self):
         """A label-only row (no metadata) still triggers grading."""
@@ -278,16 +275,14 @@ class TestLocalBackend:
                 captured["workflow_metadata"] = ctx.metadata
                 rollout_ctx = get_rollout_context()
                 if rollout_ctx:
-                    rollout_ctx.register_sample_source(
-                        "sample-1",
+                    rollout_ctx.set_sample_source(
                         StaticSampleSource([{"role": "assistant", "content": "done"}]),
                     )
 
         class CapturingGrader(Grader):
             async def grade(self, ctx: GraderContext) -> Any:
                 captured["grader_metadata"] = ctx.metadata
-                for sample_id in ctx.get_samples():
-                    ctx.set_sample_reward(sample_id, 1.0)
+                ctx.set_reward(1.0)
 
         backend = LocalBackend(
             workflow=CapturingWorkflow,

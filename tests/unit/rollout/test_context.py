@@ -20,8 +20,8 @@ class StaticSampleSource(SampleSource):
     def __init__(self, messages):
         self.messages = messages
 
-    async def get_sample(self, name: str) -> RolloutSample:
-        return RolloutSample(id=name, messages=self.messages)
+    async def get_sample(self) -> RolloutSample:
+        return RolloutSample(messages=self.messages)
 
 
 # ---------------------------------------------------------------------------
@@ -79,35 +79,24 @@ class TestRolloutContext:
 
         assert get_rollout_context() is None
 
-    async def test_register_sample_source_and_get_samples(self):
+    async def test_set_sample_source_and_get_sample(self):
         ctx = RolloutContext(chat_completions_url="http://llm", rollout_id="r1")
         messages = [{"role": "user", "content": "hi"}]
 
-        ctx.register_sample_source("s1", StaticSampleSource(messages))
-        samples = await ctx.get_samples()
-        assert "s1" in samples
-        assert isinstance(samples["s1"], RolloutSample)
-        assert samples["s1"].id == "s1"
-        assert samples["s1"].messages == messages
+        ctx.set_sample_source(StaticSampleSource(messages))
+        sample = await ctx.get_sample()
+        assert isinstance(sample, RolloutSample)
+        assert sample.messages == messages
 
-    async def test_get_samples_merges_sample_sources(self):
+    async def test_get_sample_returns_none_without_source(self):
         ctx = RolloutContext(chat_completions_url="http://llm", rollout_id="r1")
-        first_messages = [{"role": "user", "content": [{"text": "hi"}]}]
-        second_messages = [{"role": "assistant", "content": "done"}]
+        assert await ctx.get_sample() is None
 
-        ctx.register_sample_source("strands-sample", StaticSampleSource(first_messages))
-        ctx.register_sample_source("openai-sample", StaticSampleSource(second_messages))
-
-        samples = await ctx.get_samples()
-        assert set(samples) == {"strands-sample", "openai-sample"}
-        assert samples["strands-sample"].messages == first_messages
-        assert samples["openai-sample"].messages == second_messages
-
-    def test_register_sample_source_raises_on_duplicate(self):
+    def test_set_sample_source_raises_on_duplicate(self):
         ctx = RolloutContext(chat_completions_url="http://llm", rollout_id="r1")
-        ctx.register_sample_source("s1", StaticSampleSource([]))
-        with pytest.raises(ValueError, match="already exists"):
-            ctx.register_sample_source("s1", StaticSampleSource([]))
+        ctx.set_sample_source(StaticSampleSource([]))
+        with pytest.raises(ValueError, match="already has a sample source"):
+            ctx.set_sample_source(StaticSampleSource([]))
 
 
 # ---------------------------------------------------------------------------
@@ -116,56 +105,56 @@ class TestRolloutContext:
 
 
 class TestGraderContext:
-    def test_get_samples(self):
-        sample = RolloutSample(id="s1", messages=[])
-        ctx = GraderContext(samples={"s1": sample})
-        assert ctx.get_samples() == {"s1": sample}
+    def test_sample_carried(self):
+        sample = RolloutSample(messages=[])
+        ctx = GraderContext(sample=sample)
+        assert ctx.sample is sample
 
-    def test_set_sample_reward(self):
-        sample = RolloutSample(id="s1", messages=[])
-        ctx = GraderContext(samples={"s1": sample})
-        ctx.set_sample_reward("s1", 0.8)
-        assert ctx.samples["s1"].reward == 0.8
+    def test_set_reward(self):
+        sample = RolloutSample(messages=[])
+        ctx = GraderContext(sample=sample)
+        ctx.set_reward(0.8)
+        assert ctx.sample.reward == 0.8
 
     def test_set_reward_missing_sample_raises(self):
-        ctx = GraderContext(samples={})
-        with pytest.raises(ValueError, match="Sample unknown not found"):
-            ctx.set_sample_reward("unknown", 1.0)
+        ctx = GraderContext(sample=None)
+        with pytest.raises(ValueError, match="no sample to reward"):
+            ctx.set_reward(1.0)
 
     def test_metadata_defaults_none(self):
-        ctx = GraderContext(samples={})
+        ctx = GraderContext()
         assert ctx.metadata is None
 
     def test_metadata_carried(self):
         metadata = {"tools": ["search"], "difficulty": 3}
-        ctx = GraderContext(samples={}, metadata=metadata)
+        ctx = GraderContext(metadata=metadata)
         assert ctx.metadata == metadata
 
     def test_artifacts_default_none(self):
-        ctx = GraderContext(samples={})
+        ctx = GraderContext()
         assert ctx.artifacts is None
 
     def test_set_artifacts_stores_object(self):
-        ctx = GraderContext(samples={})
+        ctx = GraderContext()
         artifacts = {"judge": {"explanation": "ok"}}
         ctx.set_artifacts(artifacts)
         assert ctx.artifacts is artifacts
 
     def test_set_artifacts_replaces(self):
-        ctx = GraderContext(samples={})
+        ctx = GraderContext()
         ctx.set_artifacts({"a": 1})
         ctx.set_artifacts({"b": 2})
         assert ctx.artifacts == {"b": 2}
 
     def test_set_artifacts_rejects_non_dict(self):
-        ctx = GraderContext(samples={})
+        ctx = GraderContext()
         with pytest.raises(TypeError, match="artifacts must be a dict"):
             ctx.set_artifacts(["not", "a", "dict"])  # type: ignore[arg-type]
 
     def test_input_metadata_and_output_artifacts_are_independent(self):
         """Reading input metadata and writing output artifacts cannot collide."""
         metadata = {"difficulty": 3}
-        ctx = GraderContext(samples={}, metadata=metadata)
+        ctx = GraderContext(metadata=metadata)
         ctx.set_artifacts({"judge": {"explanation": "why"}})
 
         assert ctx.metadata == {"difficulty": 3}

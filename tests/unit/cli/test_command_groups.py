@@ -38,6 +38,11 @@ PRESERVED_ROOT_COMMANDS = [
     "upgrade",
 ]
 
+# Commands registered but intentionally hidden from --help output.
+HIDDEN_ROOT_COMMANDS = [
+    "dev",
+]
+
 
 PRESERVED_HELP_COMMANDS = [
     [],
@@ -103,7 +108,11 @@ def _root_command_names() -> set[str]:
 
 
 def _root_help_command_names(output: str) -> set[str]:
-    expected_command_names = set(REMOVED_ROOT_COMMANDS) | set(PRESERVED_ROOT_COMMANDS)
+    expected_command_names = (
+        set(REMOVED_ROOT_COMMANDS)
+        | set(PRESERVED_ROOT_COMMANDS)
+        | set(HIDDEN_ROOT_COMMANDS)
+    )
     command_names = set()
     for line in output.splitlines():
         cleaned = ANSI_ESCAPE.sub("", line).strip()
@@ -182,6 +191,9 @@ def test_root_command_registry_does_not_include_removed_groups_or_aliases():
     for command in PRESERVED_ROOT_COMMANDS:
         assert command in root_commands
 
+    for command in HIDDEN_ROOT_COMMANDS:
+        assert command in root_commands
+
 
 def test_root_help_surface_does_not_list_removed_groups_or_aliases(capfd):
     rc = main(["--plain", "--help"])
@@ -194,6 +206,9 @@ def test_root_help_surface_does_not_list_removed_groups_or_aliases(capfd):
 
     for command in PRESERVED_ROOT_COMMANDS:
         assert command in root_help_commands
+
+    for command in HIDDEN_ROOT_COMMANDS:
+        assert command not in root_help_commands
 
 
 def test_eval_help_lists_info_not_status(capfd):
