@@ -533,3 +533,202 @@ class TestDevServerList:
         assert isinstance(result, ListResult)
         assert result.total_count == 0
         assert result.items == []
+
+
+class TestDevServerLogs:
+    """Tests for osmosis_ai.platform.cli.dev_server.logs."""
+
+    @staticmethod
+    def _page(messages, next_cursor=None):
+        from osmosis_ai.platform.api.models import LogsPage
+
+        return LogsPage.from_dict(
+            {
+                "logs": [
+                    {"timestamp": f"t{i}", "message": m} for i, m in enumerate(messages)
+                ],
+                "next_cursor": next_cursor,
+            }
+        )
+
+    def _install(self, monkeypatch, fake_client):
+        monkeypatch.setattr(
+            dev_server_module,
+            "resolve_git_workspace_directory_context",
+            lambda: _fake_ctx(),
+        )
+        monkeypatch.setattr(api_client_module, "OsmosisClient", fake_client)
+        monkeypatch.setattr(dev_server_module, "OsmosisClient", fake_client)
+
+    def test_json_oneshot_emits_ndjson(self, monkeypatch, capsys) -> None:
+        import json
+
+        import typer
+
+        from osmosis_ai.cli.output.context import OutputFormat, override_output_context
+
+        outer = self
+
+        class FakeClient:
+            def get_dev_rollout_server_logs(
+                self,
+                server_id,
+                *,
+                limit,
+                cursor=None,
+                direction="older",
+                credentials=None,
+                git_identity,
+            ):
+                assert direction == "older"
+                assert limit == 100
+                return outer._page(["a", "b"], next_cursor="c1")
+
+        self._install(monkeypatch, FakeClient)
+
+        with override_output_context(format=OutputFormat.json) as out:
+            with pytest.raises(typer.Exit) as exc:
+                dev_server_module.logs("srv-1", follow=None, tail=100)
+            assert exc.value.exit_code == 0
+            assert out.output_emitted is True
+
+        captured = capsys.readouterr().out
+        lines = [ln for ln in captured.splitlines() if ln.strip()]
+        assert json.loads(lines[0]) == {"timestamp": "t0", "message": "a"}
+        assert json.loads(lines[1]) == {"timestamp": "t1", "message": "b"}
+        assert "schema_version" not in captured
+
+    def test_plain_oneshot_emits_tab_lines(self, monkeypatch, capsys) -> None:
+        import typer
+
+        from osmosis_ai.cli.output.context import OutputFormat, override_output_context
+
+        outer = self
+
+        class FakeClient:
+            def get_dev_rollout_server_logs(
+                self, server_id, *, direction="older", **kw
+            ):
+                assert direction == "older"
+                return outer._page(["hello"], next_cursor=None)
+
+        self._install(monkeypatch, FakeClient)
+
+        with override_output_context(format=OutputFormat.plain):
+            with pytest.raises(typer.Exit):
+                dev_server_module.logs("srv-1", follow=None, tail=100)
+
+        captured = capsys.readouterr().out
+        assert captured.splitlines()[0] == "t0\thello"
+
+    def test_oneshot_does_not_follow(self, monkeypatch) -> None:
+        """json/plain with follow unset makes exactly one (older) fetch."""
+        import typer
+
+        from osmosis_ai.cli.output.context import OutputFormat, override_output_context
+
+        outer = self
+        calls = []
+
+        class FakeClient:
+            def get_dev_rollout_server_logs(
+                self, server_id, *, direction="older", cursor=None, **kw
+            ):
+                calls.append((direction, cursor))
+                return outer._page(["a"], next_cursor="c1")
+
+        self._install(monkeypatch, FakeClient)
+
+        with override_output_context(format=OutputFormat.json):
+            with pytest.raises(typer.Exit):
+                dev_server_module.logs("srv-1", follow=None, tail=100)
+
+        assert calls == [("older", None)]
+
+    @staticmethod
+    def _entries(messages):
+        from osmosis_ai.platform.api.models import LogEntry
+
+        return [
+            LogEntry.from_dict({"timestamp": f"t{i}", "message": m})
+            for i, m in enumerate(messages)
+        ]
+
+    def _stream_client(self, messages, *, raise_ki=False, calls=None):
+        outer = self
+
+        class FakeClient:
+            def stream_dev_rollout_server_logs(
+                self, server_id, *, tail, credentials=None, git_identity
+            ):
+                if calls is not None:
+                    calls.append(("stream", tail))
+                yield from outer._entries(messages)
+                if raise_ki:
+                    raise KeyboardInterrupt
+
+            def get_dev_rollout_server_logs(self, *a, **kw):
+                raise AssertionError("follow must not use the paged GET")
+
+        return FakeClient
+
+    def test_plain_follow_streams_lines(self, monkeypatch, capsys) -> None:
+        import typer
+
+        from osmosis_ai.cli.output.context import OutputFormat, override_output_context
+
+        self._install(monkeypatch, self._stream_client(["a1", "b1"]))
+
+        with override_output_context(format=OutputFormat.plain):
+            with pytest.raises(typer.Exit) as exc:
+                dev_server_module.logs("srv-1", follow=True, tail=100)
+            assert exc.value.exit_code == 0
+
+        captured = capsys.readouterr().out
+        messages = [ln.split("\t", 1)[1] for ln in captured.splitlines() if "\t" in ln]
+        assert messages == ["a1", "b1"]
+
+    def test_json_follow_streams_ndjson(self, monkeypatch, capsys) -> None:
+        import json
+
+        import typer
+
+        from osmosis_ai.cli.output.context import OutputFormat, override_output_context
+
+        self._install(monkeypatch, self._stream_client(["a1"]))
+
+        with override_output_context(format=OutputFormat.json):
+            with pytest.raises(typer.Exit):
+                dev_server_module.logs("srv-1", follow=True, tail=100)
+
+        captured = capsys.readouterr().out
+        lines = [ln for ln in captured.splitlines() if ln.strip()]
+        assert json.loads(lines[0]) == {"timestamp": "t0", "message": "a1"}
+        assert "schema_version" not in captured
+
+    def test_rich_follows_by_default(self, monkeypatch) -> None:
+        """rich with follow unset streams (uses the SSE stream, not the paged GET)."""
+        import typer
+
+        from osmosis_ai.cli.output.context import OutputFormat, override_output_context
+
+        calls = []
+        self._install(monkeypatch, self._stream_client(["a1"], calls=calls))
+
+        with override_output_context(format=OutputFormat.rich, interactive=False):
+            with pytest.raises(typer.Exit):
+                dev_server_module.logs("srv-1", follow=None, tail=100)
+
+        assert calls == [("stream", 100)]
+
+    def test_follow_keyboardinterrupt_detaches_cleanly(self, monkeypatch) -> None:
+        import typer
+
+        from osmosis_ai.cli.output.context import OutputFormat, override_output_context
+
+        self._install(monkeypatch, self._stream_client(["a1"], raise_ki=True))
+
+        with override_output_context(format=OutputFormat.plain):
+            with pytest.raises(typer.Exit) as exc:
+                dev_server_module.logs("srv-1", follow=True, tail=100)
+            assert exc.value.exit_code == 0

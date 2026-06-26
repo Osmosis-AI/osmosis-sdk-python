@@ -4,7 +4,11 @@ from typing import Any
 
 import typer
 
-from osmosis_ai.platform.constants import DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE
+from osmosis_ai.platform.constants import (
+    DEFAULT_PAGE_SIZE,
+    MAX_LOG_PAGE_SIZE,
+    MAX_PAGE_SIZE,
+)
 
 app: typer.Typer = typer.Typer(
     help="Manage a remote rollout server.", no_args_is_help=True
@@ -35,6 +39,30 @@ def down(
     from osmosis_ai.platform.cli.dev_server import down as _down
 
     return _down(server_id)
+
+
+@app.command("logs")
+def logs(
+    server_id: str = typer.Argument(..., help="The rollout server id from `up`."),
+    follow: bool = typer.Option(
+        None,
+        "-f",
+        "--follow",
+        help="Stream new logs as they arrive (default in rich mode).",
+    ),
+    tail: int = typer.Option(
+        100,
+        "--tail",
+        "-n",
+        min=1,
+        max=MAX_LOG_PAGE_SIZE,
+        help="Number of recent log lines to show.",
+    ),
+) -> Any:
+    """Show logs for a remote rollout server."""
+    from osmosis_ai.platform.cli.dev_server import logs as _logs
+
+    return _logs(server_id, follow=follow, tail=tail)
 
 
 @app.command("list")
