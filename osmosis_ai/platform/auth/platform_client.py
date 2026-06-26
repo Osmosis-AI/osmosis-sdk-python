@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+from collections.abc import Iterable, Iterator
 from typing import TYPE_CHECKING, Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -578,3 +579,98 @@ def platform_request(
         raise PlatformAPIError(f"Connection error: {e.reason}") from e
     except json.JSONDecodeError as e:
         raise PlatformAPIError("Invalid JSON response from platform") from e
+
+
+def iter_sse_data(lines: Iterable[str]) -> Iterator[dict[str, Any]]:
+    """Parse a Server-Sent Events stream into JSON ``data`` payloads.
+
+    Yields one dict per event (terminated by a blank line). Comment lines
+    (``:`` heartbeats) and non-``data`` fields are ignored; a ``data`` payload
+    that is not valid JSON is skipped. A trailing event without a closing blank
+    line is flushed when the stream ends.
+    """
+    buffer: list[str] = []
+
+    def _flush() -> Iterator[dict[str, Any]]:
+        if not buffer:
+            return
+        payload = "\n".join(buffer)
+        buffer.clear()
+        with contextlib.suppress(json.JSONDecodeError, ValueError):
+            parsed = json.loads(payload)
+            if isinstance(parsed, dict):
+                yield parsed
+
+    for raw in lines:
+        line = raw.rstrip("\n").rstrip("\r")
+        if line == "":
+            yield from _flush()
+            continue
+        if line.startswith(":"):
+            continue
+        if line.startswith("data:"):
+            buffer.append(line[len("data:") :].lstrip())
+    yield from _flush()
+
+
+def platform_stream(
+    endpoint: str,
+    *,
+    timeout: float = 65.0,
+    credentials: Credentials | None = None,
+    git_identity: str | None = None,
+    require_git_repo: bool = True,
+) -> Iterator[dict[str, Any]]:
+    """Open an authenticated Server-Sent Events stream and yield its events.
+
+    Mirrors :func:`platform_request`'s auth/header handling but keeps the
+    connection open, yielding each event's parsed JSON payload as it arrives.
+    ``timeout`` is the per-read socket timeout; it must exceed the server's
+    heartbeat interval so an idle-but-alive stream is not torn down.
+    """
+    if credentials is None:
+        credentials = load_credentials()
+    if credentials is None:
+        raise CLIError(MSG_NOT_LOGGED_IN)
+    using_env_token = _credentials_match_env_token(credentials)
+
+    url = f"{_platform_url()}{endpoint}"
+    req_headers = cli_request_headers(token=credentials.access_token)
+    req_headers["Accept"] = "text/event-stream"
+    if require_git_repo:
+        if not git_identity:
+            raise PlatformAPIError(
+                "Git-scoped platform requests require an explicit git_identity.",
+                error_code="GIT_SCOPE_HEADER_REQUIRED",
+            )
+        req_headers["X-Osmosis-Git"] = git_identity
+
+    request = Request(url, headers=req_headers, method="GET")
+
+    try:
+        response = urlopen(request, timeout=timeout)
+    except HTTPError as e:
+        if e.code == 401:
+            error_code = _read_error_body(e).get("code")
+            if not isinstance(error_code, str):
+                error_code = None
+            if not using_env_token:
+                reset_session()
+            raise AuthenticationExpiredError(
+                _auth_error_message(error_code, using_env_token=using_env_token),
+                code=error_code,
+            ) from e
+        if e.code == 426:
+            message, version_signal = upgrade_required_message(_read_error_body(e))
+            raise UpgradeRequiredError(
+                message, e.code, error_code="UPGRADE_REQUIRED", details=version_signal
+            ) from e
+        raise PlatformAPIError(f"API error: HTTP {e.code}.", e.code) from e
+    except URLError as e:
+        raise PlatformAPIError(f"Connection error: {e.reason}") from e
+
+    with response:
+        surface_response_version_signal(response)
+        yield from iter_sse_data(
+            line.decode("utf-8", errors="replace") for line in response
+        )
