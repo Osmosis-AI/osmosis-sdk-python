@@ -1,9 +1,9 @@
 """Native Harbor execution backend.
 
-Drives each rollout as a harbor ``Trial``: resolve the task from
-``metadata["harbor_task"]``, wire the controller endpoint into the agent
+Drives each rollout as a harbor Trial: resolve the task from
+metadata["harbor_task"], wire the controller endpoint into the agent
 (rollout identity rides in the chat-completions URL), run it, and map the
-task verifier's reward onto the rollout's single ``RolloutSample``.
+task verifier's reward onto the rollout's single RolloutSample.
 """
 
 import importlib
@@ -73,8 +73,8 @@ TaskResolver = Callable[[ExecutionRequest], TaskConfig]
 
 
 def resolve_task(request: ExecutionRequest) -> TaskConfig:
-    """Map ``metadata["harbor_task"]`` to a ``TaskConfig`` selector
-    (local path | package ``org/name@ref`` | git)."""
+    """Map metadata["harbor_task"] to a TaskConfig selector: a local path, a
+    package "org/name@ref", or git."""
     md = request.metadata or {}
     raw = md.get(HARBOR_TASK_KEY)
     if not raw:
@@ -111,8 +111,8 @@ def _categorize_exception(exc: Exception) -> RolloutErrorCategory:
 
 
 def _categorize_exception_type(exc_type: str | None) -> RolloutErrorCategory:
-    """Categorize a harbor ``ExceptionInfo.exception_type`` name -- the only
-    signal, since ``Trial.run()`` swallows failures into ``exception_info``."""
+    """Categorize a harbor ExceptionInfo.exception_type name -- the only failure
+    signal, since Trial.run() records exceptions instead of raising."""
     if not exc_type:
         return RolloutErrorCategory.AGENT_ERROR
     if exc_type.endswith("TimeoutError"):
@@ -129,8 +129,8 @@ def _categorize_exception_type(exc_type: str | None) -> RolloutErrorCategory:
 def _resolve_agent_class(
     name: str | None, import_path: str | None
 ) -> type[BaseAgent] | None:
-    """Resolve the harbor agent *class* (wiring decisions ask the class, not the
-    name), or ``None`` to defer the canonical error to ``Trial.create``."""
+    """Resolve the harbor agent class -- downstream wiring inspects the class,
+    not the name. Returns None to let Trial.create raise the canonical error."""
     if import_path:
         if ":" not in import_path:
             return None
@@ -153,16 +153,16 @@ def _is_installed_agent(cls: type[BaseAgent] | None) -> bool:
 
 
 def _is_custom_agent(import_path: str | None) -> bool:
-    """User-supplied (import_path outside ``harbor.*``) vs a harbor built-in.
-    String check, so it also covers classes not importable here."""
+    """Whether the agent is user-supplied (import_path outside harbor.*). A
+    string check, so it covers classes that cannot be imported here."""
     return import_path is not None and not import_path.startswith("harbor.")
 
 
 def _training_safe_kwargs_for_builtin(
     name: str | None, cls: type[BaseAgent] | None
 ) -> dict[str, Any] | None:
-    """Training-safe kwargs for a whitelisted built-in, else ``None``. Matches by
-    name, or by ``issubclass`` for ``harbor.*`` import-path addressing."""
+    """Training-safe kwargs for a whitelisted built-in, else None. Matches by
+    name, or by issubclass for harbor.* import-path addressing."""
     for agent_name, entry in _TRAINING_SAFE_BUILTIN_AGENTS.items():
         if name == agent_name:
             return dict(entry["kwargs"])
@@ -176,8 +176,8 @@ def _training_safe_kwargs_for_builtin(
 def _unaccepted_kwargs(
     cls: type[BaseAgent] | None, kwargs: dict[str, Any]
 ) -> list[str]:
-    """Names in ``kwargs`` the constructor cannot receive (empty if unresolved
-    or it declares ``**kwargs``)."""
+    """Names in kwargs the constructor cannot receive (empty if the class is
+    unresolved or declares **kwargs)."""
     if cls is None:
         return []
     try:
@@ -190,7 +190,7 @@ def _unaccepted_kwargs(
 
 
 class NativeHarborBackend(ExecutionBackend):
-    """Drive a harbor ``Trial`` per rollout and map its verifier reward."""
+    """Drive a harbor Trial per rollout and map its verifier reward."""
 
     def __init__(
         self,
@@ -267,9 +267,8 @@ class NativeHarborBackend(ExecutionBackend):
     async def _safe_callback(
         callback: ResultCallback, result: ExecutionResult, rollout_id: str, label: str
     ) -> None:
-        """Invoke a callback without letting it escape ``execute()``: a
-        propagating error would trip app.py into re-firing both callbacks,
-        breaking fire-exactly-once."""
+        """Run a callback without letting it escape: a propagating error would
+        trip app.py into re-firing both callbacks, breaking fire-exactly-once."""
         try:
             await callback(result)
         except Exception:
@@ -283,12 +282,11 @@ class NativeHarborBackend(ExecutionBackend):
     async def _run_trial(
         self, request: ExecutionRequest, ctx: RolloutContext
     ) -> tuple[ExecutionResult, TrialResult | None]:
-        """Build + run the trial. Never raises; returns a workflow result
+        """Build and run the trial. Never raises; returns a workflow result
         (status/error only -- the sample is a grading concern) and the harbor
-        ``TrialResult`` (``None`` when creation/setup failed before any result).
+        TrialResult (None when creation/setup failed before any result).
         """
-        # The rollout id is unique per rollout, so it alone names the trial dir
-        # (mirrors HarborBackend, which also keys its trial dir on request.id).
+        # The rollout id alone names the trial dir (mirrors HarborBackend).
         trial_name = f"{TRIAL_NAME_PREFIX}{request.id}"
         try:
             task_cfg = self.task_resolver(request)
@@ -318,10 +316,8 @@ class NativeHarborBackend(ExecutionBackend):
         # agent error).
         if result.exception_info is not None:
             err = result.exception_info
-            # DEBUG (temporary): harbor logs the underlying failure only at DEBUG
-            # before swallowing it into exception_info; surfacing type+message here
-            # is what root-caused the streaming-bridge issue. Safe to delete once
-            # that's resolved (or keep if native trials should self-report).
+            # DEBUG (temporary): harbor only logs the underlying failure at DEBUG
+            # before swallowing it; surface type+message. Safe to delete later.
             logger.debug(
                 "Native trial %s failed inside harbor: %s: %s",
                 request.id,
@@ -405,10 +401,9 @@ class NativeHarborBackend(ExecutionBackend):
         env: dict[str, str] = {}
 
         if _is_installed_agent(agent_cls):
-            # Installed CLIs are wired purely via env vars. The rollout id is
-            # baked into the chat-completions URL path, so OPENAI_BASE_URL alone
-            # carries the routing identity -- no per-rollout headers needed, which
-            # is what lets installed agents run under the native backend at all.
+            # Installed CLIs are wired purely via env vars. The rollout id is in
+            # the URL path, so OPENAI_BASE_URL alone carries routing identity --
+            # no per-rollout headers, which is what lets installed agents run here.
             if endpoint:
                 env["OPENAI_BASE_URL"] = endpoint
             else:
@@ -434,16 +429,11 @@ class NativeHarborBackend(ExecutionBackend):
                 )
             kwargs["collect_rollout_details"] = self.collect_rollout_details
             llm_kwargs: dict[str, Any] = {}
-            # TODO(DEBUG/temporary): force the osmosis controllers (eval bridge +
-            # slime training controller) onto their non-streaming JSON branch. Both
-            # default to SSE when the request omits `stream` (get("stream", True)),
-            # but harbor's in-process LiteLLM agents (terminus-2) are non-streaming
-            # and parse an SSE body as JSON -> every LLM call fails -> reward null.
-            # NOTE: a plain stream=False does NOT help -- litellm/openai omit
-            # `stream` from the wire body when it is False, so the controller still
-            # sees no stream key and defaults to SSE. Inject it via extra_body so
-            # "stream": false is sent verbatim. REMOVE once the controllers default
-            # to non-streaming (or terminus gains streaming support).
+            # TODO(temporary): osmosis controllers default to SSE when `stream`
+            # is absent, but harbor's in-process agents (terminus-2) parse the
+            # body as JSON -> every LLM call fails. A plain stream=False is
+            # dropped from the wire body, so inject it via extra_body to send
+            # "stream": false verbatim. REMOVE once controllers default to JSON.
             llm_kwargs["extra_body"] = {"stream": False}
             if api_key:
                 llm_kwargs["api_key"] = api_key
@@ -508,14 +498,10 @@ class NativeHarborBackend(ExecutionBackend):
 
     @staticmethod
     def _extract_rewards(trial_result: TrialResult) -> dict[str, float | int] | None:
-        """Read verifier rewards, tolerating single- vs multi-step trials.
-
-        Harbor rewards are a *named-channel dict* (``dict[str, float | int]``),
-        not a scalar, and a multi-step task carries one such dict per step. We
-        take the trial-level verifier dict if present, else the first step that
-        produced one. (Reducing that dict to the single float RL needs is
-        ``_pick_reward``'s job.)
-        """
+        """Read verifier rewards, or None. Harbor rewards are a named-channel
+        dict (dict[str, float | int]), not a scalar, and a multi-step task
+        carries one per step; take the trial-level dict if present, else the
+        first step's. _pick_reward reduces it to a scalar."""
         top = trial_result.verifier_result
         if top is not None and top.rewards:
             return top.rewards
@@ -528,12 +514,10 @@ class NativeHarborBackend(ExecutionBackend):
     def _pick_reward(
         self, rewards: dict[str, float | int] | None
     ) -> float | int | None:
-        # Collapse harbor's named-channel rewards into the single float RL needs.
-        # Honor harbor's "1D convention" (the 'reward' key is the primary scalar;
-        # the default verifier emits exactly {"reward": <float>}); fall back to the
-        # sole value when a verifier used a different single key. Refuse to guess
-        # among genuinely multiple channels -- picking one by dict order could feed
-        # the wrong gradient silently -- and warn instead.
+        # Collapse harbor's named-channel rewards to one float: prefer the
+        # 'reward' key (harbor's 1D convention), else the sole value. Refuse to
+        # guess among multiple channels -- a wrong pick feeds the wrong gradient
+        # silently -- and warn instead.
         if not rewards:
             return None
         if self.reward_key in rewards:
