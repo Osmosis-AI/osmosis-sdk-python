@@ -152,65 +152,56 @@ class TestAgentConfig:
         ac = backend._build_agent_config(_request(), _ctx())
         assert "enable_summarize" not in ac.kwargs
 
-    def test_summarize_knobs_follow_resolved_class_not_name(self):
-        # A customer wiring Terminus2 (or a subclass) via import_path has
-        # name=None, yet the knobs must still be forced: the capability is read
-        # from the resolved class, not the literal "terminus-2" string. The old
-        # name-gate silently missed this -> training-unsafe rollouts.
-        backend = NativeHarborBackend()
-        md = {
-            "harbor_task": "/tmp/task",
-            "harbor_agent_import_path": "harbor.agents.terminus_2:Terminus2",
-        }
-        ac = backend._build_agent_config(_request(md), _ctx())
-        assert ac.name is None
-        assert ac.kwargs["enable_summarize"] is False
-        assert ac.kwargs["proactive_summarization_threshold"] == 0
-
     def test_unwhitelisted_builtin_agent_raises_under_training_safe(self):
         # A harbor built-in that is not on the training-safe whitelist (here nop)
         # is rejected, not silently run: harbor 0.15 cannot guarantee its
         # trajectory stays linear, and a silent pass would corrupt training data.
-        backend = NativeHarborBackend()  # training_safe=True by default
-        md = {
-            "harbor_task": "/tmp/task",
-            "harbor_agent_import_path": "harbor.agents.nop:NopAgent",
-        }
+        backend = NativeHarborBackend(agent_name="nop")  # training_safe=True default
         with pytest.raises(ValueError, match="training-safe whitelist"):
-            backend._build_agent_config(_request(md), _ctx())
+            backend._build_agent_config(_request(), _ctx())
 
     def test_unwhitelisted_builtin_agent_runs_in_eval_mode(self):
         # With training_safe=False (eval) the same built-in is left alone: no
         # summarize knobs forced, no rejection -- reward-only runs do not need a
         # linear token trajectory.
-        backend = NativeHarborBackend(training_safe=False)
-        md = {
-            "harbor_task": "/tmp/task",
-            "harbor_agent_import_path": "harbor.agents.nop:NopAgent",
-        }
-        ac = backend._build_agent_config(_request(md), _ctx())
+        backend = NativeHarborBackend(agent_name="nop", training_safe=False)
+        ac = backend._build_agent_config(_request(), _ctx())
         assert "enable_summarize" not in ac.kwargs
+
+    def test_summarize_knobs_follow_resolved_class_not_name(self):
+        # import_path into harbor.* resolves to the class, so knobs are forced by
+        # issubclass even though name is None.
+        backend = NativeHarborBackend(
+            agent_import_path="harbor.agents.terminus_2:Terminus2"
+        )
+        ac = backend._build_agent_config(_request(), _ctx())
+        assert ac.name is None
+        assert ac.import_path == "harbor.agents.terminus_2:Terminus2"
+        assert ac.kwargs["enable_summarize"] is False
+        assert ac.kwargs["proactive_summarization_threshold"] == 0
 
     def test_custom_agent_not_gated_and_not_injected(
         self, monkeypatch: pytest.MonkeyPatch
     ):
-        # A user-supplied custom agent (import_path outside harbor.*) is trusted:
-        # under training_safe the backend neither rejects it nor injects summarize
-        # knobs -- even if its constructor happens to declare them. Training safety
-        # is the agent author's responsibility, by design.
+        # A user agent (import_path outside harbor.*) is trusted: not rejected by
+        # the gate, knobs not injected -- training safety is the author's job.
         class _CustomAgent:
             def __init__(self, logs_dir=None, enable_summarize=True, **kwargs):
                 pass
 
         monkeypatch.setattr(bmod, "_resolve_agent_class", lambda name, ip: _CustomAgent)
-        backend = NativeHarborBackend()  # training_safe=True
-        md = {
-            "harbor_task": "/tmp/task",
-            "harbor_agent_import_path": "my.custom.pkg:CustomAgent",
-        }
-        ac = backend._build_agent_config(_request(md), _ctx())
+        backend = NativeHarborBackend(agent_import_path="my.custom.pkg:CustomAgent")
+        ac = backend._build_agent_config(_request(), _ctx())
+        assert ac.import_path == "my.custom.pkg:CustomAgent"
+        assert ac.name is None
         assert ac.kwargs["api_base"] == "http://ctrl:8080"  # wired, not rejected
-        assert "enable_summarize" not in ac.kwargs  # not injected -- author's job
+        assert "enable_summarize" not in ac.kwargs  # not injected
+
+    def test_agent_name_and_import_path_mutually_exclusive(self):
+        with pytest.raises(ValueError, match="not both"):
+            NativeHarborBackend(
+                agent_name="terminus-2", agent_import_path="my.pkg:MyAgent"
+            )
 
     def test_in_process_agent_missing_wiring_contract_raises(
         self, monkeypatch: pytest.MonkeyPatch
@@ -223,10 +214,9 @@ class TestAgentConfig:
                 pass
 
         monkeypatch.setattr(bmod, "_resolve_agent_class", lambda name, ip: _StrictAgent)
-        backend = NativeHarborBackend()
-        md = {"harbor_task": "/tmp/task", "harbor_agent_import_path": "x:y"}
+        backend = NativeHarborBackend(training_safe=False)
         with pytest.raises(ValueError, match="cannot receive the native-harbor"):
-            backend._build_agent_config(_request(md), _ctx())
+            backend._build_agent_config(_request(), _ctx())
 
     def test_installed_agent_wired_via_env_url(self, monkeypatch: pytest.MonkeyPatch):
         # Installed CLIs (codex, claude-code, ...) are wired via env in eval mode:
@@ -237,11 +227,8 @@ class TestAgentConfig:
         # eval-mode wiring. Force the installed-agent branch so the test does not
         # depend on which harbor version's agent registry happens to be installed.
         monkeypatch.setattr(bmod, "_is_installed_agent", lambda cls: True)
-        backend = NativeHarborBackend(training_safe=False)
-        ac = backend._build_agent_config(
-            _request({"harbor_task": "/tmp/task", "harbor_agent": "codex"}),
-            _ctx(),
-        )
+        backend = NativeHarborBackend(agent_name="codex", training_safe=False)
+        ac = backend._build_agent_config(_request(), _ctx())
         assert ac.env == {
             "OPENAI_BASE_URL": "http://ctrl:8080",
             "OPENAI_API_KEY": "sk-test",
@@ -253,49 +240,23 @@ class TestAgentConfig:
         # external process -- not training-safe and not on the whitelist, so
         # training_safe rejects it up front, before the env-wiring branch
         # (independent of whether the agent class is importable here).
-        backend = NativeHarborBackend()
-        md = {"harbor_task": "/tmp/task", "harbor_agent": "codex"}
+        backend = NativeHarborBackend(agent_name="codex")
         with pytest.raises(ValueError, match="training-safe whitelist"):
-            backend._build_agent_config(_request(md), _ctx())
+            backend._build_agent_config(_request(), _ctx())
 
-    def test_metadata_overrides_agent_and_model(self):
+    def test_metadata_overrides_model(self):
+        # The agent is fixed per backend, but the model name can still be
+        # overridden per rollout via metadata.
         backend = NativeHarborBackend()
-        md = {
-            "harbor_task": "/tmp/task",
-            "harbor_agent_import_path": "my.pkg:MyAgent",
-            "harbor_model": "openai/custom",
-        }
+        md = {"harbor_task": "/tmp/task", "harbor_model": "openai/custom"}
         ac = backend._build_agent_config(_request(md), _ctx())
-        assert ac.name is None
-        assert ac.import_path == "my.pkg:MyAgent"
+        assert ac.name == "terminus-2"
         assert ac.model_name == "openai/custom"
-        # Unresolvable import_path -> class is None -> no knobs forced; the
-        # canonical "unknown agent" error is left to Trial.create.
-        assert "enable_summarize" not in ac.kwargs
 
     def test_agent_timeout_forwarded(self):
         backend = NativeHarborBackend()
         ac = backend._build_agent_config(_request(agent_timeout_sec=42.0), _ctx())
         assert ac.override_timeout_sec == 42.0
-
-    def test_both_agent_selectors_raise(self):
-        backend = NativeHarborBackend()
-        md = {
-            "harbor_task": "/tmp/task",
-            "harbor_agent": "terminus-2",
-            "harbor_agent_import_path": "my.pkg:MyAgent",
-        }
-        with pytest.raises(ValueError, match="choose one"):
-            backend._build_agent_config(_request(md), _ctx())
-
-    def test_blank_agent_falls_back_to_default(self):
-        # A blank dataset cell deserializes to "" and must fall back to the
-        # default agent, not build AgentConfig(name="") and fail the trial.
-        backend = NativeHarborBackend()
-        ac = backend._build_agent_config(
-            _request({"harbor_task": "/tmp/task", "harbor_agent": ""}), _ctx()
-        )
-        assert ac.name == "terminus-2"
 
 
 class TestRewardPicking:
@@ -418,22 +379,6 @@ class TestExecute:
         gr_result = on_gr.call_args.args[0]
         assert gr_result.status == RolloutStatus.FAILURE
         assert gr_result.err_category == RolloutErrorCategory.VALIDATION_ERROR
-
-    async def test_both_agent_selectors_is_validation_error(self, monkeypatch):
-        _patch_trial(monkeypatch)
-        backend = NativeHarborBackend()
-        on_wf, on_gr = AsyncMock(), AsyncMock()
-        md = {
-            "harbor_task": "/tmp/task",
-            "harbor_agent": "terminus-2",
-            "harbor_agent_import_path": "my.pkg:MyAgent",
-        }
-        with _ctx():
-            await backend.execute(_request(md), on_wf, on_gr)
-        assert (
-            on_wf.call_args.args[0].err_category
-            == RolloutErrorCategory.VALIDATION_ERROR
-        )
 
     async def test_reward_salvaged_when_exception_after_verify(self, monkeypatch):
         # exception_info set AND a reward present: the verifier already computed a

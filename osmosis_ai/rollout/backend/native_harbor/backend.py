@@ -4,6 +4,9 @@ Drives each rollout as a harbor Trial: resolve the task from
 metadata["harbor_task"], wire the controller endpoint into the agent
 (rollout identity rides in the chat-completions URL), run it, and map the
 task verifier's reward onto the rollout's single RolloutSample.
+
+The agent is fixed per backend (a built-in by name or a user agent by import
+path); only the task and optional model name vary per rollout via metadata.
 """
 
 import importlib
@@ -46,8 +49,6 @@ from osmosis_ai.rollout.utils.rewards import validate_sample_has_reward
 logger: logging.Logger = logging.getLogger(__name__)
 
 HARBOR_TASK_KEY = "harbor_task"
-HARBOR_AGENT_KEY = "harbor_agent"
-HARBOR_AGENT_IMPORT_PATH_KEY = "harbor_agent_import_path"
 HARBOR_MODEL_KEY = "harbor_model"
 GIT_URL_KEY = "git_url"
 GIT_TASK_PATH_KEY = "task_path"
@@ -153,7 +154,7 @@ def _is_installed_agent(cls: type[BaseAgent] | None) -> bool:
 
 
 def _is_custom_agent(import_path: str | None) -> bool:
-    """Whether the agent is user-supplied (import_path outside harbor.*). A
+    """Whether the agent is user-implemented (import_path outside harbor.*). A
     string check, so it covers classes that cannot be imported here."""
     return import_path is not None and not import_path.startswith("harbor.")
 
@@ -195,7 +196,8 @@ class NativeHarborBackend(ExecutionBackend):
     def __init__(
         self,
         *,
-        default_agent_name: str = DEFAULT_AGENT_NAME,
+        agent_name: str | None = None,
+        agent_import_path: str | None = None,
         model_name: str = DEFAULT_MODEL_NAME,
         reward_key: str = DEFAULT_REWARD_KEY,
         trials_dir: Path | str = Path("native_trials"),
@@ -213,7 +215,14 @@ class NativeHarborBackend(ExecutionBackend):
                 "harbor Trial (often a container) per rollout, so unbounded "
                 "concurrency would exhaust the host."
             )
-        self.default_agent_name = default_agent_name
+        # Agent fixed per backend: a built-in by name or a user agent by import
+        # path ("module:Class"), not both; defaults to the built-in.
+        if agent_name is not None and agent_import_path is not None:
+            raise ValueError("set agent_name or agent_import_path, not both")
+        if agent_name is None and agent_import_path is None:
+            agent_name = DEFAULT_AGENT_NAME
+        self.agent_name = agent_name
+        self.agent_import_path = agent_import_path
         self.model_name = model_name
         self.reward_key = reward_key
         self.trials_dir = Path(trials_dir)
@@ -237,7 +246,7 @@ class NativeHarborBackend(ExecutionBackend):
         return {
             "status": "ok",
             "backend": "native_harbor",
-            "agent": self.default_agent_name,
+            "agent": self.agent_name or self.agent_import_path,
             "max_concurrency": self._max_concurrency,
         }
 
@@ -367,22 +376,14 @@ class NativeHarborBackend(ExecutionBackend):
         self, request: ExecutionRequest, ctx: RolloutContext
     ) -> AgentConfig:
         md = request.metadata or {}
-        # harbor's factory ignores import_path when name is also set; reject both.
-        name = md.get(HARBOR_AGENT_KEY) or None
-        import_path = md.get(HARBOR_AGENT_IMPORT_PATH_KEY) or None
-        if name is not None and import_path is not None:
-            raise ValueError(
-                f"metadata sets both {HARBOR_AGENT_KEY!r} and "
-                f"{HARBOR_AGENT_IMPORT_PATH_KEY!r}; choose one"
-            )
-        if name is None and import_path is None:
-            name = self.default_agent_name
+        name = self.agent_name
+        import_path = self.agent_import_path
         model_name = md.get(HARBOR_MODEL_KEY) or self.model_name
 
         agent_cls = _resolve_agent_class(name, import_path)
 
         # Training-safe gate: built-ins must be whitelisted (kwargs applied
-        # below) or fail closed; custom agents are trusted, not gated.
+        # below) or fail closed; user-implemented agents are trusted, not gated.
         safe_kwargs: dict[str, Any] = {}
         if self.training_safe and not _is_custom_agent(import_path):
             resolved = _training_safe_kwargs_for_builtin(name, agent_cls)
@@ -391,7 +392,8 @@ class NativeHarborBackend(ExecutionBackend):
                 raise ValueError(
                     f"agent {label!r} is not on the training-safe whitelist "
                     f"{sorted(_TRAINING_SAFE_BUILTIN_AGENTS)}; use one of those, set "
-                    f"training_safe=False, or use a custom agent (outside 'harbor.*')."
+                    f"training_safe=False, or supply a user-implemented agent via "
+                    f"agent_import_path."
                 )
             safe_kwargs = resolved
 
