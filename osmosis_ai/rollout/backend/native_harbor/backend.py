@@ -36,7 +36,11 @@ from harbor.models.trial.result import TrialResult
 from harbor.trial.queue import TrialQueue
 
 from osmosis_ai.rollout.backend.base import ExecutionBackend, ResultCallback
-from osmosis_ai.rollout.context import RolloutContext, get_rollout_context
+from osmosis_ai.rollout.context import (
+    CHAT_COMPLETIONS_URL_ENV,
+    RolloutContext,
+    get_rollout_context,
+)
 from osmosis_ai.rollout.types import (
     ExecutionRequest,
     ExecutionResult,
@@ -376,48 +380,36 @@ class NativeHarborBackend(ExecutionBackend):
                 )
             safe_kwargs = resolved
 
+        # Fail closed: without an endpoint both agent kinds silently fall back
+        # to api.openai.com instead of the policy server.
         endpoint = ctx.chat_completions_url
+        if not endpoint:
+            raise ValueError(
+                f"rollout {request.id!r} has no chat_completions_url; set it or "
+                f"the {CHAT_COMPLETIONS_URL_ENV} env var."
+            )
         api_key = ctx.api_key
         kwargs: dict[str, Any] = {}
         env: dict[str, str] = {}
 
         if _is_installed_agent(agent_cls):
-            # Installed CLIs are wired purely via env vars. The rollout id is in
-            # the URL path, so OPENAI_BASE_URL alone carries routing identity --
-            # no per-rollout headers, which is what lets installed agents run here.
-            if endpoint:
-                env["OPENAI_BASE_URL"] = endpoint
-            else:
-                logger.warning(
-                    "No chat_completions_url in RolloutContext for rollout %s; "
-                    "the installed agent's LLM calls will not reach the policy "
-                    "server.",
-                    request.id,
-                )
+            # Installed CLIs are wired purely via env vars.
+            env["OPENAI_BASE_URL"] = endpoint
             if api_key:
                 env["OPENAI_API_KEY"] = api_key
         else:
-            # In-process agent: endpoint/key go via kwargs. Rollout identity
-            # rides in the endpoint URL path, so no per-call headers are set.
-            if endpoint:
-                kwargs["api_base"] = endpoint
-            else:
-                # Without api_base, litellm routes "openai/..." to api.openai.com.
-                logger.warning(
-                    "No chat_completions_url in RolloutContext for rollout %s; "
-                    "the agent's LLM calls will not reach the policy server.",
-                    request.id,
-                )
-            kwargs["collect_rollout_details"] = self.collect_rollout_details
+            # In-process agent: endpoint/key go via kwargs.
+            kwargs["api_base"] = endpoint
             llm_kwargs: dict[str, Any] = {}
+            if api_key:
+                llm_kwargs["api_key"] = api_key
+            kwargs["collect_rollout_details"] = self.collect_rollout_details
             # TODO(temporary): osmosis controllers default to SSE when `stream`
             # is absent, but harbor's in-process agents (terminus-2) parse the
             # body as JSON -> every LLM call fails. A plain stream=False is
             # dropped from the wire body, so inject it via extra_body to send
             # "stream": false verbatim. REMOVE once controllers default to JSON.
             llm_kwargs["extra_body"] = {"stream": False}
-            if api_key:
-                llm_kwargs["api_key"] = api_key
             if llm_kwargs:
                 kwargs["llm_kwargs"] = llm_kwargs
             kwargs.update(safe_kwargs)

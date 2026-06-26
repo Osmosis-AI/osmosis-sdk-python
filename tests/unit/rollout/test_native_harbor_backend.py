@@ -235,6 +235,15 @@ class TestAgentConfig:
         }
         assert ac.kwargs == {}  # no in-process knobs for installed agents
 
+    def test_missing_endpoint_raises(self, monkeypatch: pytest.MonkeyPatch):
+        # No endpoint -> fail closed instead of silently hitting api.openai.com.
+        # delenv so __post_init__ cannot backfill the url from the env.
+        monkeypatch.delenv("OSMOSIS_CHAT_COMPLETIONS_URL", raising=False)
+        ctx = RolloutContext(chat_completions_url="", api_key="sk-test")
+        backend = NativeHarborBackend(training_safe=False)
+        with pytest.raises(ValueError, match="no chat_completions_url"):
+            backend._build_agent_config(_request(), ctx)
+
     def test_installed_builtin_agent_raises_under_training_safe(self):
         # An installed CLI built-in (codex) manages context inside an opaque
         # external process -- not training-safe and not on the whitelist, so
