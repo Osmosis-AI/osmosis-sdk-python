@@ -140,7 +140,9 @@ class TestAgentConfig:
         assert ac.name == "terminus-2"
         # api_base is top-level; api_key rides inside llm_kwargs.
         assert ac.kwargs["api_base"] == "http://ctrl:8080"
-        assert ac.kwargs["collect_rollout_details"] is False
+        # collect_rollout_details is not SDK-wired: token capture happens at the
+        # session server, so a user wanting it passes it via agent_kwargs.
+        assert "collect_rollout_details" not in ac.kwargs
         assert ac.kwargs["llm_kwargs"]["api_key"] == "sk-test"
         # Rollout identity rides in the URL path now -- no per-call routing headers.
         assert "extra_headers" not in ac.kwargs["llm_kwargs"]
@@ -153,11 +155,11 @@ class TestAgentConfig:
         assert "enable_summarize" not in ac.kwargs
 
     def test_unwhitelisted_builtin_agent_raises_under_training_safe(self):
-        # A harbor built-in that is not on the training-safe whitelist (here nop)
-        # is rejected, not silently run: harbor 0.15 cannot guarantee its
-        # trajectory stays linear, and a silent pass would corrupt training data.
+        # A builtin we cannot hold append-only (here nop) is rejected up front,
+        # not silently run: its trajectory may drift and training would drop every
+        # such rollout.
         backend = NativeHarborBackend(agent_name="nop")  # training_safe=True default
-        with pytest.raises(ValueError, match="training-safe whitelist"):
+        with pytest.raises(ValueError, match="append-only"):
             backend._build_agent_config(_request(), _ctx())
 
     def test_unwhitelisted_builtin_agent_runs_in_eval_mode(self):
@@ -168,17 +170,62 @@ class TestAgentConfig:
         ac = backend._build_agent_config(_request(), _ctx())
         assert "enable_summarize" not in ac.kwargs
 
-    def test_summarize_knobs_follow_resolved_class_not_name(self):
-        # import_path into harbor.* resolves to the class, so knobs are forced by
-        # issubclass even though name is None.
+    def test_harbor_builtin_by_import_path_rejected_under_training_safe(self):
+        # Append-safety matches by agent_name only; a harbor.* import path is not
+        # "custom", so addressing a builtin this way is rejected under training_safe.
         backend = NativeHarborBackend(
             agent_import_path="harbor.agents.terminus_2:Terminus2"
         )
+        with pytest.raises(ValueError, match="append-only"):
+            backend._build_agent_config(_request(), _ctx())
+
+    def test_agent_kwargs_override_terminus_default(self):
+        # The append-only kwargs are overridable defaults: agent_kwargs wins.
+        backend = NativeHarborBackend(
+            agent_kwargs={"proactive_summarization_threshold": 4000}
+        )
         ac = backend._build_agent_config(_request(), _ctx())
-        assert ac.name is None
-        assert ac.import_path == "harbor.agents.terminus_2:Terminus2"
-        assert ac.kwargs["enable_summarize"] is False
-        assert ac.kwargs["proactive_summarization_threshold"] == 0
+        assert ac.kwargs["proactive_summarization_threshold"] == 4000
+        assert ac.kwargs["enable_summarize"] is False  # default left in place
+
+    def test_agent_kwargs_cannot_override_sdk_wiring(self):
+        # SDK wiring overlays user kwargs: api_base cannot be redirected.
+        backend = NativeHarborBackend(agent_kwargs={"api_base": "http://evil"})
+        ac = backend._build_agent_config(_request(), _ctx())
+        assert ac.kwargs["api_base"] == "http://ctrl:8080"
+
+    def test_agent_kwargs_llm_kwargs_deep_merged(self):
+        # Deep merge (not whole-dict replace): user llm_kwargs/extra_body keys
+        # survive alongside the SDK-forced api_key and defaulted stream.
+        backend = NativeHarborBackend(
+            agent_kwargs={"llm_kwargs": {"timeout": 30, "extra_body": {"foo": 1}}}
+        )
+        ac = backend._build_agent_config(_request(), _ctx())
+        llm = ac.kwargs["llm_kwargs"]
+        assert llm["timeout"] == 30
+        assert llm["api_key"] == "sk-test"
+        assert llm["extra_body"] == {"foo": 1, "stream": False}
+
+    def test_agent_kwargs_stream_not_overridden(self):
+        # stream is a defaulted-not-forced knob: only api_base/api_key are
+        # SDK-forced, so a user-supplied stream survives.
+        backend = NativeHarborBackend(
+            agent_kwargs={"llm_kwargs": {"extra_body": {"stream": True}}}
+        )
+        ac = backend._build_agent_config(_request(), _ctx())
+        assert ac.kwargs["llm_kwargs"]["extra_body"]["stream"] is True
+
+    def test_agent_env_passthrough_for_installed(self, monkeypatch: pytest.MonkeyPatch):
+        # agent_env flows to installed CLIs; the SDK endpoint env wins on collision.
+        monkeypatch.setattr(bmod, "_is_installed_agent", lambda cls: True)
+        backend = NativeHarborBackend(
+            agent_name="codex",
+            training_safe=False,
+            agent_env={"FOO": "bar", "OPENAI_BASE_URL": "http://evil"},
+        )
+        ac = backend._build_agent_config(_request(), _ctx())
+        assert ac.env["FOO"] == "bar"
+        assert ac.env["OPENAI_BASE_URL"] == "http://ctrl:8080"  # SDK wins
 
     def test_custom_agent_not_gated_and_not_injected(
         self, monkeypatch: pytest.MonkeyPatch
@@ -215,7 +262,7 @@ class TestAgentConfig:
 
         monkeypatch.setattr(bmod, "_resolve_agent_class", lambda name, ip: _StrictAgent)
         backend = NativeHarborBackend(training_safe=False)
-        with pytest.raises(ValueError, match="cannot receive the native-harbor"):
+        with pytest.raises(ValueError, match="cannot receive kwargs"):
             backend._build_agent_config(_request(), _ctx())
 
     def test_installed_agent_wired_via_env_url(self, monkeypatch: pytest.MonkeyPatch):
@@ -245,12 +292,11 @@ class TestAgentConfig:
             backend._build_agent_config(_request(), ctx)
 
     def test_installed_builtin_agent_raises_under_training_safe(self):
-        # An installed CLI built-in (codex) manages context inside an opaque
-        # external process -- not training-safe and not on the whitelist, so
-        # training_safe rejects it up front, before the env-wiring branch
-        # (independent of whether the agent class is importable here).
+        # An installed CLI builtin (codex) manages context in an opaque external
+        # process with no append-only switch, so training_safe rejects it up front,
+        # before the env-wiring branch.
         backend = NativeHarborBackend(agent_name="codex")
-        with pytest.raises(ValueError, match="training-safe whitelist"):
+        with pytest.raises(ValueError, match="append-only"):
             backend._build_agent_config(_request(), _ctx())
 
     def test_metadata_overrides_model(self):

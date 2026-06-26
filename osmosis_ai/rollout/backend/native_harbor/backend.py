@@ -1,13 +1,6 @@
-"""Native Harbor execution backend.
-
-Drives each rollout as a harbor Trial: resolve the task from
-metadata["harbor_task"], wire the controller endpoint into the agent
-(rollout identity rides in the chat-completions URL), run it, and map the
-task verifier's reward onto the rollout's single RolloutSample.
-
-The agent is fixed per backend (a built-in by name or a user agent by import
-path); only the task and optional model name vary per rollout via metadata.
-"""
+"""Native Harbor execution backend: drive one harbor Trial per rollout and map
+its verifier reward onto the rollout's single sample. The agent is fixed per
+backend; only the task and model vary per rollout via metadata."""
 
 import importlib
 import inspect
@@ -61,25 +54,19 @@ GIT_COMMIT_KEY = "git_commit_id"
 DEFAULT_AGENT_NAME = "terminus-2"
 DEFAULT_MODEL_NAME = "openai/osmosis-rollout"
 DEFAULT_REWARD_KEY = "reward"
-# Each rollout spawns a harbor Trial (often a container); bound concurrency.
 DEFAULT_MAX_CONCURRENT = 8
 TRIAL_NAME_PREFIX = "native-"
 
-# Built-ins whose default summarization breaks a linear append-only
-# trajectory -> kwargs forcing it off, applied up front to fail fast.
-_TRAINING_SAFE_BUILTIN_AGENTS: dict[str, dict[str, Any]] = {
-    "terminus-2": {
-        "import_path": "harbor.agents.terminus_2:Terminus2",
-        "kwargs": {"enable_summarize": False, "proactive_summarization_threshold": 0},
-    },
+# terminus-2 summarizes mid-run, breaking training's linear trajectory; force it off.
+_APPEND_SAFE_BUILTIN_DEFAULTS: dict[str, dict[str, Any]] = {
+    "terminus-2": {"enable_summarize": False, "proactive_summarization_threshold": 0},
 }
 
 TaskResolver = Callable[[ExecutionRequest], TaskConfig]
 
 
 def resolve_task(request: ExecutionRequest) -> TaskConfig:
-    """Map metadata["harbor_task"] to a TaskConfig selector: a local path, a
-    package "org/name@ref", or git."""
+    """Resolve metadata["harbor_task"] to a TaskConfig: local path, package, or git."""
     md = request.metadata or {}
     raw = md.get(HARBOR_TASK_KEY)
     if not raw:
@@ -118,8 +105,7 @@ def _categorize_exception(exc: Exception) -> RolloutErrorCategory:
 def _resolve_agent_class(
     name: str | None, import_path: str | None
 ) -> type[BaseAgent] | None:
-    """Resolve the harbor agent class -- downstream wiring inspects the class,
-    not the name. Returns None to let Trial.create raise the canonical error."""
+    """Resolve the harbor agent class, or None to let Trial.create raise the canonical error."""
     if import_path:
         if ":" not in import_path:
             return None
@@ -129,8 +115,7 @@ def _resolve_agent_class(
         except (ImportError, AttributeError):
             return None
     try:
-        # 0.15.0 _AGENT_MAP holds import-path strings; get_agent_class imports
-        # the class (indexing the map would yield a str and break issubclass()).
+        # get_agent_class imports the class; _AGENT_MAP holds path strings, not classes.
         return AgentFactory.get_agent_class(AgentName(name))
     except (KeyError, ValueError, ImportError, AttributeError):
         return None
@@ -142,31 +127,14 @@ def _is_installed_agent(cls: type[BaseAgent] | None) -> bool:
 
 
 def _is_custom_agent(import_path: str | None) -> bool:
-    """Whether the agent is user-implemented (import_path outside harbor.*). A
-    string check, so it covers classes that cannot be imported here."""
+    """Whether the agent is user-implemented: import_path outside harbor.* (string check)."""
     return import_path is not None and not import_path.startswith("harbor.")
-
-
-def _training_safe_kwargs_for_builtin(
-    name: str | None, cls: type[BaseAgent] | None
-) -> dict[str, Any] | None:
-    """Training-safe kwargs for a whitelisted built-in, else None. Matches by
-    name, or by issubclass for harbor.* import-path addressing."""
-    for agent_name, entry in _TRAINING_SAFE_BUILTIN_AGENTS.items():
-        if name == agent_name:
-            return dict(entry["kwargs"])
-        if cls is not None:
-            ref = _resolve_agent_class(None, entry["import_path"])
-            if ref is not None and issubclass(cls, ref):
-                return dict(entry["kwargs"])
-    return None
 
 
 def _unaccepted_kwargs(
     cls: type[BaseAgent] | None, kwargs: dict[str, Any]
 ) -> list[str]:
-    """Names in kwargs the constructor cannot receive (empty if the class is
-    unresolved or declares **kwargs)."""
+    """kwargs names the constructor cannot receive (empty if unresolved or has **kwargs)."""
     if cls is None:
         return []
     try:
@@ -186,10 +154,11 @@ class NativeHarborBackend(ExecutionBackend):
         *,
         agent_name: str | None = None,
         agent_import_path: str | None = None,
+        agent_kwargs: dict[str, Any] | None = None,
+        agent_env: dict[str, str] | None = None,
         model_name: str = DEFAULT_MODEL_NAME,
         reward_key: str = DEFAULT_REWARD_KEY,
         trials_dir: Path | str = Path("native_trials"),
-        collect_rollout_details: bool = False,
         training_safe: bool = True,
         task_resolver: TaskResolver | None = None,
         environment_config: HarborEnvironmentConfig | None = None,
@@ -203,27 +172,22 @@ class NativeHarborBackend(ExecutionBackend):
                 "harbor Trial (often a container) per rollout, so unbounded "
                 "concurrency would exhaust the host."
             )
-        # Agent fixed per backend: a built-in by name or a user agent by import
-        # path ("module:Class"), not both; defaults to the built-in.
         if agent_name is not None and agent_import_path is not None:
             raise ValueError("set agent_name or agent_import_path, not both")
         if agent_name is None and agent_import_path is None:
             agent_name = DEFAULT_AGENT_NAME
         self.agent_name = agent_name
         self.agent_import_path = agent_import_path
+        self.agent_kwargs = agent_kwargs
+        self.agent_env = agent_env
         self.model_name = model_name
         self.reward_key = reward_key
         self.trials_dir = Path(trials_dir)
-        self.collect_rollout_details = collect_rollout_details
         self.training_safe = training_safe
         self.task_resolver: TaskResolver = task_resolver or resolve_task
-        # Trial-layer environment selects the sandbox type (docker default, or
-        # daytona/e2b/...); the task only carries resources, not the type.
         self.environment_config = environment_config or HarborEnvironmentConfig()
         self.cleanup_successful_trials = cleanup_successful_trials
         self._max_concurrency = max_concurrent
-        # Shared orchestrator: bounds concurrency via its semaphore and adds
-        # retry. Native uses submit()'s return value, so registers no hooks.
         self._queue = TrialQueue(n_concurrent=max_concurrent, retry_config=retry_config)
 
     @property
@@ -264,8 +228,8 @@ class NativeHarborBackend(ExecutionBackend):
     async def _safe_callback(
         callback: ResultCallback, result: ExecutionResult, rollout_id: str, label: str
     ) -> None:
-        """Run a callback without letting it escape: a propagating error would
-        trip app.py into re-firing both callbacks, breaking fire-exactly-once."""
+        """Swallow callback errors: a propagating one re-fires both callbacks in
+        app.py, breaking fire-exactly-once."""
         try:
             await callback(result)
         except Exception:
@@ -279,11 +243,8 @@ class NativeHarborBackend(ExecutionBackend):
     async def _run_trial(
         self, request: ExecutionRequest, ctx: RolloutContext
     ) -> tuple[ExecutionResult, TrialResult | None]:
-        """Build and run the trial. Never raises; returns a workflow result
-        (status/error only -- the sample is a grading concern) and the harbor
-        TrialResult (None when creation/setup failed before any result).
-        """
-        # The rollout id alone names the trial dir (mirrors HarborBackend).
+        """Build and run the trial. Never raises; returns (workflow result, harbor
+        TrialResult or None when setup failed before any result)."""
         trial_name = f"{TRIAL_NAME_PREFIX}{request.id}"
         try:
             task_cfg = self.task_resolver(request)
@@ -308,8 +269,7 @@ class NativeHarborBackend(ExecutionBackend):
                 None,
             )
 
-        # Harbor records in-trial failures in exception_info instead of raising;
-        # report AGENT_ERROR like HarborBackend and keep the dir for debugging.
+        # Harbor reports in-trial failures via exception_info, not by raising; keep the dir.
         if result.exception_info is not None:
             err = result.exception_info
             logger.debug(
@@ -365,23 +325,23 @@ class NativeHarborBackend(ExecutionBackend):
 
         agent_cls = _resolve_agent_class(name, import_path)
 
-        # Training-safe gate: built-ins must be whitelisted (kwargs applied
-        # below) or fail closed; user-implemented agents are trusted, not gated.
-        safe_kwargs: dict[str, Any] = {}
+        # Training-safe gate: builtins must be append-safe; custom agents pass untouched.
+        append_safe_defaults: dict[str, Any] = {}
         if self.training_safe and not _is_custom_agent(import_path):
-            resolved = _training_safe_kwargs_for_builtin(name, agent_cls)
-            if resolved is None:
+            matched = (
+                _APPEND_SAFE_BUILTIN_DEFAULTS.get(name) if name is not None else None
+            )
+            if matched is None:
                 label = import_path or name
                 raise ValueError(
-                    f"agent {label!r} is not on the training-safe whitelist "
-                    f"{sorted(_TRAINING_SAFE_BUILTIN_AGENTS)}; use one of those, set "
-                    f"training_safe=False, or supply a user-implemented agent via "
+                    f"agent {label!r} cannot be guaranteed append-only under "
+                    f"training_safe; use one of "
+                    f"{sorted(_APPEND_SAFE_BUILTIN_DEFAULTS)} by agent_name, set "
+                    f"training_safe=False, or pass a user-implemented agent via "
                     f"agent_import_path."
                 )
-            safe_kwargs = resolved
+            append_safe_defaults = matched
 
-        # Fail closed: without an endpoint both agent kinds silently fall back
-        # to api.openai.com instead of the policy server.
         endpoint = ctx.chat_completions_url
         if not endpoint:
             raise ValueError(
@@ -389,39 +349,37 @@ class NativeHarborBackend(ExecutionBackend):
                 f"the {CHAT_COMPLETIONS_URL_ENV} env var."
             )
         api_key = ctx.api_key
-        kwargs: dict[str, Any] = {}
-        env: dict[str, str] = {}
+        # User passthrough is the base layer; SDK-wired values below overlay it.
+        kwargs: dict[str, Any] = dict(self.agent_kwargs or {})
+        env: dict[str, str] = dict(self.agent_env or {})
 
         if _is_installed_agent(agent_cls):
-            # Installed CLIs are wired purely via env vars.
+            # Env-wired; SDK endpoint/key overwrite agent_env so identity can't be redirected.
             env["OPENAI_BASE_URL"] = endpoint
             if api_key:
                 env["OPENAI_API_KEY"] = api_key
         else:
-            # In-process agent: endpoint/key go via kwargs.
+            # Precedence low -> high: append-safe defaults, user kwargs, SDK wiring.
+            kwargs = {**append_safe_defaults, **kwargs}
+            # Identity: api_base as a kwarg, api_key in llm_kwargs (deep-merged to keep user keys).
             kwargs["api_base"] = endpoint
-            llm_kwargs: dict[str, Any] = {}
+            llm_kwargs: dict[str, Any] = dict(kwargs.get("llm_kwargs") or {})
             if api_key:
                 llm_kwargs["api_key"] = api_key
-            kwargs["collect_rollout_details"] = self.collect_rollout_details
-            # TODO(temporary): osmosis controllers default to SSE when `stream`
-            # is absent, but harbor's in-process agents (terminus-2) parse the
-            # body as JSON -> every LLM call fails. A plain stream=False is
-            # dropped from the wire body, so inject it via extra_body to send
-            # "stream": false verbatim. REMOVE once controllers default to JSON.
-            llm_kwargs["extra_body"] = {"stream": False}
-            if llm_kwargs:
-                kwargs["llm_kwargs"] = llm_kwargs
-            kwargs.update(safe_kwargs)
+            # TODO(temporary): controllers default to SSE without `stream`, but in-process
+            # agents need JSON; a bare stream=False is dropped from the wire, so pin it in
+            # extra_body (setdefault, so a user stream wins). REMOVE when controllers send JSON.
+            extra_body: dict[str, Any] = dict(llm_kwargs.get("extra_body") or {})
+            extra_body.setdefault("stream", False)
+            llm_kwargs["extra_body"] = extra_body
+            kwargs["llm_kwargs"] = llm_kwargs
 
             # Preflight: a clear error instead of a cryptic TypeError from harbor.
             unaccepted = _unaccepted_kwargs(agent_cls, kwargs)
-            if agent_cls is not None and unaccepted:
+            if unaccepted:
                 raise ValueError(
-                    f"In-process agent {agent_cls.__name__!r} cannot receive the "
-                    f"native-harbor wiring kwargs {sorted(unaccepted)}: add them "
-                    f"(or **kwargs) to its __init__, or expose it as an installed "
-                    f"agent wired via OPENAI_BASE_URL/OPENAI_API_KEY env vars."
+                    f"in-process agent {name or import_path!r} cannot receive "
+                    f"kwargs {sorted(unaccepted)}; add them (or **kwargs) to __init__."
                 )
 
         agent_cfg = AgentConfig(
@@ -441,9 +399,8 @@ class NativeHarborBackend(ExecutionBackend):
         workflow_result: ExecutionResult,
         trial_result: TrialResult | None,
     ) -> ExecutionResult:
-        """Grade the rollout's single sample. The reward comes from the harbor
-        verifier's in-memory result; on a setup failure (no trial result) the
-        workflow error is propagated so the grader wait resolves."""
+        """Grade the rollout's single sample from the harbor verifier's in-memory
+        result. On setup failure (no trial result) the workflow error is propagated."""
         sample = RolloutSample(label=request.label)
         if trial_result is None:
             return ExecutionResult(
@@ -471,10 +428,8 @@ class NativeHarborBackend(ExecutionBackend):
 
     @staticmethod
     def _extract_rewards(trial_result: TrialResult) -> dict[str, float | int] | None:
-        """Read verifier rewards, or None. Harbor rewards are a named-channel
-        dict (dict[str, float | int]), not a scalar, and a multi-step task
-        carries one per step; take the trial-level dict if present, else the
-        first step's. _pick_reward reduces it to a scalar."""
+        """Verifier rewards, or None. Harbor rewards are a named-channel dict (not a
+        scalar); take the trial-level one if present, else the first step's."""
         top = trial_result.verifier_result
         if top is not None and top.rewards:
             return top.rewards
@@ -487,10 +442,7 @@ class NativeHarborBackend(ExecutionBackend):
     def _pick_reward(
         self, rewards: dict[str, float | int] | None
     ) -> float | int | None:
-        # Collapse harbor's named-channel rewards to one float: prefer the
-        # 'reward' key (harbor's 1D convention), else the sole value. Refuse to
-        # guess among multiple channels -- a wrong pick feeds the wrong gradient
-        # silently -- and warn instead.
+        # Collapse named-channel rewards to one float: the 'reward' key, else the sole value.
         if not rewards:
             return None
         if self.reward_key in rewards:
