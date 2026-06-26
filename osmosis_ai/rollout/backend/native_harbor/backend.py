@@ -111,22 +111,6 @@ def _categorize_exception(exc: Exception) -> RolloutErrorCategory:
     return RolloutErrorCategory.AGENT_ERROR
 
 
-def _categorize_exception_type(exc_type: str | None) -> RolloutErrorCategory:
-    """Categorize a harbor ExceptionInfo.exception_type name -- the only failure
-    signal, since Trial.run() records exceptions instead of raising."""
-    if not exc_type:
-        return RolloutErrorCategory.AGENT_ERROR
-    if exc_type.endswith("TimeoutError"):
-        return RolloutErrorCategory.TIMEOUT
-    if (
-        "Verifier" in exc_type
-        or "RewardFile" in exc_type
-        or exc_type.endswith("ParseError")
-    ):
-        return RolloutErrorCategory.VALIDATION_ERROR
-    return RolloutErrorCategory.AGENT_ERROR
-
-
 def _resolve_agent_class(
     name: str | None, import_path: str | None
 ) -> type[BaseAgent] | None:
@@ -320,13 +304,10 @@ class NativeHarborBackend(ExecutionBackend):
                 None,
             )
 
-        # Harbor swallows failures into exception_info; keep the dir for
-        # debugging and categorize by the recorded type (a timeout is not an
-        # agent error).
+        # Harbor records in-trial failures in exception_info instead of raising;
+        # report AGENT_ERROR like HarborBackend and keep the dir for debugging.
         if result.exception_info is not None:
             err = result.exception_info
-            # DEBUG (temporary): harbor only logs the underlying failure at DEBUG
-            # before swallowing it; surface type+message. Safe to delete later.
             logger.debug(
                 "Native trial %s failed inside harbor: %s: %s",
                 request.id,
@@ -338,9 +319,7 @@ class NativeHarborBackend(ExecutionBackend):
                     status=RolloutStatus.FAILURE,
                     err_message=getattr(err, "exception_message", None)
                     or "Trial failed before completion",
-                    err_category=_categorize_exception_type(
-                        getattr(err, "exception_type", None)
-                    ),
+                    err_category=RolloutErrorCategory.AGENT_ERROR,
                 ),
                 result,
             )

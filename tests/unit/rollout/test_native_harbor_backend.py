@@ -400,9 +400,10 @@ class TestExecute:
         assert gr_result.status == RolloutStatus.SUCCESS
         assert gr_result.sample.reward == 0.7
 
-    async def test_exception_type_drives_err_category(self, monkeypatch):
-        # A verifier timeout swallowed into exception_info must be reported as
-        # TIMEOUT, not the old hard-coded AGENT_ERROR.
+    async def test_swallowed_exception_is_agent_error(self, monkeypatch):
+        # Harbor swallows in-trial failures into exception_info; we report them
+        # as AGENT_ERROR regardless of the recorded type, matching HarborBackend
+        # (the type is only a class-name string -- not worth string-guessing).
         _patch_trial(
             monkeypatch,
             result=_trial_result(
@@ -413,7 +414,7 @@ class TestExecute:
         on_wf, on_gr = AsyncMock(), AsyncMock()
         with _ctx():
             await backend.execute(_request(), on_wf, on_gr)
-        assert on_wf.call_args.args[0].err_category == RolloutErrorCategory.TIMEOUT
+        assert on_wf.call_args.args[0].err_category == RolloutErrorCategory.AGENT_ERROR
 
     async def test_grader_callback_failure_does_not_propagate(self, monkeypatch):
         # A failing grader callback must NOT escape execute(): app.py's fallback
