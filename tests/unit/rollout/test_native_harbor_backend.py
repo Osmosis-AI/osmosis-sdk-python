@@ -250,21 +250,6 @@ class TestAgentConfig:
                 agent_name="terminus-2", agent_import_path="my.pkg:MyAgent"
             )
 
-    def test_in_process_agent_missing_wiring_contract_raises(
-        self, monkeypatch: pytest.MonkeyPatch
-    ):
-        # A custom in-process agent whose constructor neither declares the
-        # endpoint/identity kwargs nor accepts **kwargs is rejected at build time
-        # with an actionable error, not a cryptic TypeError from harbor's factory.
-        class _StrictAgent:
-            def __init__(self, logs_dir, model_name=None):  # no wiring params
-                pass
-
-        monkeypatch.setattr(bmod, "_resolve_agent_class", lambda name, ip: _StrictAgent)
-        backend = NativeHarborBackend(training_safe=False)
-        with pytest.raises(ValueError, match="cannot receive kwargs"):
-            backend._build_agent_config(_request(), _ctx())
-
     def test_installed_agent_wired_via_env_url(self, monkeypatch: pytest.MonkeyPatch):
         # Installed CLIs (codex, claude-code, ...) are wired via env in eval mode:
         # the rollout id is baked into the chat-completions URL path, so

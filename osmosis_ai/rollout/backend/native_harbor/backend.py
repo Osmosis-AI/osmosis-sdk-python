@@ -3,7 +3,6 @@ its verifier reward onto the rollout's single sample. The agent is fixed per
 backend; only the task and model vary per rollout via metadata."""
 
 import importlib
-import inspect
 import logging
 import shutil
 import traceback
@@ -30,7 +29,6 @@ from harbor.trial.queue import TrialQueue
 
 from osmosis_ai.rollout.backend.base import ExecutionBackend, ResultCallback
 from osmosis_ai.rollout.context import (
-    CHAT_COMPLETIONS_URL_ENV,
     RolloutContext,
     get_rollout_context,
 )
@@ -129,21 +127,6 @@ def _is_installed_agent(cls: type[BaseAgent] | None) -> bool:
 def _is_custom_agent(import_path: str | None) -> bool:
     """Whether the agent is user-implemented: import_path outside harbor.* (string check)."""
     return import_path is not None and not import_path.startswith("harbor.")
-
-
-def _unaccepted_kwargs(
-    cls: type[BaseAgent] | None, kwargs: dict[str, Any]
-) -> list[str]:
-    """kwargs names the constructor cannot receive (empty if unresolved or has **kwargs)."""
-    if cls is None:
-        return []
-    try:
-        params = inspect.signature(cls.__init__).parameters
-    except (TypeError, ValueError):
-        return []
-    if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()):
-        return []
-    return [name for name in kwargs if name not in params]
 
 
 class NativeHarborBackend(ExecutionBackend):
@@ -344,10 +327,7 @@ class NativeHarborBackend(ExecutionBackend):
 
         endpoint = ctx.chat_completions_url
         if not endpoint:
-            raise ValueError(
-                f"rollout {request.id!r} has no chat_completions_url; set it or "
-                f"the {CHAT_COMPLETIONS_URL_ENV} env var."
-            )
+            raise ValueError(f"rollout {request.id!r} has no chat_completions_url")
         api_key = ctx.api_key
         # User passthrough is the base layer; SDK-wired values below overlay it.
         kwargs: dict[str, Any] = dict(self.agent_kwargs or {})
@@ -373,14 +353,6 @@ class NativeHarborBackend(ExecutionBackend):
             extra_body.setdefault("stream", False)
             llm_kwargs["extra_body"] = extra_body
             kwargs["llm_kwargs"] = llm_kwargs
-
-            # Preflight: a clear error instead of a cryptic TypeError from harbor.
-            unaccepted = _unaccepted_kwargs(agent_cls, kwargs)
-            if unaccepted:
-                raise ValueError(
-                    f"in-process agent {name or import_path!r} cannot receive "
-                    f"kwargs {sorted(unaccepted)}; add them (or **kwargs) to __init__."
-                )
 
         agent_cfg = AgentConfig(
             name=name,

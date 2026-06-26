@@ -54,6 +54,23 @@ if __name__ == "__main__":
 
 The model endpoint and key are **not** configured here — they arrive per rollout from the ambient `RolloutContext` (see [Model endpoint injection](#model-endpoint-injection)). To exercise the server locally, set the same env vars a training controller would: `OSMOSIS_CHAT_COMPLETIONS_URL`, `OSMOSIS_API_KEY`, `OSMOSIS_ROLLOUT_ID` ([context.py](../osmosis_ai/rollout/context.py)).
 
+### Selecting the environment (Docker / Daytona)
+
+The Quickstart leaves `environment_config` at its default. Harbor decides where each Trial runs — local Docker, a remote Daytona sandbox, etc. — through `EnvironmentConfig`; pass it explicitly to pick one:
+
+```python
+from harbor.models.environment_type import EnvironmentType
+from harbor.models.trial.config import EnvironmentConfig as HarborEnvironmentConfig
+
+backend = NativeHarborBackend(
+    agent_name="terminus-2",                                              # constructor arg is agent_name
+    environment_config=HarborEnvironmentConfig(type=EnvironmentType.DAYTONA),
+    max_concurrent=8,
+)
+```
+
+Each Trial is one environment instance, so keep `max_concurrent` aligned with the host/remote capacity (see [Concurrency and trial directories](#concurrency-and-trial-directories)).
+
 ## Dataset contract
 
 Each row points at a Harbor task through a first-class `metadata` key. The dataset schema and validator are unchanged ([datasets.md](./datasets.md)); `system_prompt` / `user_prompt` stay required by the validator but are ignored at execution time. `resolve_task` ([backend.py](../osmosis_ai/rollout/backend/native_harbor/backend.py)) accepts three forms of `metadata["harbor_task"]`:
