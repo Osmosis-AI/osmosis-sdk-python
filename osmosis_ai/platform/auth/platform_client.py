@@ -6,7 +6,7 @@ import contextlib
 import json
 import os
 from collections.abc import Iterable, Iterator
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NoReturn
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
@@ -406,6 +406,114 @@ def revoke_cli_token(credentials: Credentials) -> bool:
         return False
 
 
+def _raise_for_http_error(
+    e: HTTPError,
+    *,
+    using_env_token: bool,
+    git_identity: str | None,
+    cleanup_on_401: bool = True,
+) -> NoReturn:
+    """Translate a platform ``HTTPError`` into the appropriate SDK exception.
+
+    Centralizes auth (401), upgrade (426), repo-scope, and subscription/billing
+    mappings, plus the structured ``code``/``field``/``details`` extraction, so
+    streaming and non-streaming requests surface platform error codes
+    identically. Always raises.
+    """
+    if e.code == 401:
+        error_body = _read_error_body(e)
+        error_code = error_body.get("code")
+        if not isinstance(error_code, str):
+            error_code = None
+        if cleanup_on_401 and not using_env_token:
+            reset_session()
+        raise AuthenticationExpiredError(
+            _auth_error_message(error_code, using_env_token=using_env_token),
+            code=error_code,
+        ) from e
+
+    if e.code == 426:
+        error_body = _read_error_body(e)
+        message, version_signal = upgrade_required_message(error_body)
+        raise UpgradeRequiredError(
+            message,
+            e.code,
+            error_code="UPGRADE_REQUIRED",
+            details=version_signal or error_body or None,
+        ) from e
+
+    # Best-effort capture of structured error message from response body
+    detail = ""
+    error_body: dict[str, Any] = {}
+    error_code: str | None = None
+    field: str | None = None
+    platform_message: str | None = None
+    try:
+        raw = e.read()
+        text = raw.decode("utf-8", errors="replace").strip() if raw else ""
+        if text:
+            with contextlib.suppress(json.JSONDecodeError, ValueError):
+                parsed = json.loads(text)
+                # Only treat as error_body if it's actually a dict
+                if isinstance(parsed, dict):
+                    error_body = parsed
+                    if isinstance(error_body.get("code"), str):
+                        error_code = error_body["code"]
+                    if isinstance(error_body.get("field"), str):
+                        field = error_body["field"]
+            # Prefer structured error/message field over raw body
+            error_msg = error_body.get("error") or error_body.get("message")
+            if error_msg and isinstance(error_msg, str):
+                issues_detail = _format_response_issues(error_body)
+                platform_message = f"{error_msg}{issues_detail or ''}"
+            elif text:
+                if len(text) > 200:
+                    text = text[:200] + "...(truncated)"
+                detail = f" Response: {text}"
+    except Exception:
+        pass
+
+    if error_code in _REPO_SCOPE_ERROR_MESSAGES:
+        raise PlatformAPIError(
+            _repo_scope_error_message(error_code, git_identity),
+            e.code,
+            error_code=error_code,
+            field=field,
+            details=error_body or None,
+        ) from e
+
+    if e.code == 403 and error_code in {
+        "SUBSCRIPTION_REQUIRED",
+        "BILLING_REQUIRED",
+    }:
+        error_msg = error_body.get("error") or error_body.get("message")
+        raise SubscriptionRequiredError(
+            error_msg if isinstance(error_msg, str) else None,
+            error_code=error_code,
+            field=field,
+            details=error_body or None,
+        ) from e
+
+    # Detect subscription-required responses (403 with subscription message)
+    if e.code == 403 and isinstance(error_body, dict):
+        error_msg = error_body.get("error", "")
+        if isinstance(error_msg, str) and "subscription" in error_msg.lower():
+            raise SubscriptionRequiredError(
+                error_msg,
+                error_code=error_code,
+                field=field,
+                details=error_body or None,
+            ) from e
+
+    raise PlatformAPIError(
+        platform_message or f"API error: HTTP {e.code}.{detail}",
+        e.code,
+        error_code=error_code,
+        field=field,
+        details=error_body or None,
+    ) from e
+
+
 def platform_request(
     endpoint: str,
     method: str = "GET",
@@ -483,98 +591,12 @@ def platform_request(
             result: dict[str, Any] = json.loads(raw.decode())
             return result
     except HTTPError as e:
-        if e.code == 401:
-            error_body = _read_error_body(e)
-            error_code = error_body.get("code")
-            if not isinstance(error_code, str):
-                error_code = None
-            if cleanup_on_401 and not using_env_token:
-                reset_session()
-            raise AuthenticationExpiredError(
-                _auth_error_message(error_code, using_env_token=using_env_token),
-                code=error_code,
-            ) from e
-
-        if e.code == 426:
-            error_body = _read_error_body(e)
-            message, version_signal = upgrade_required_message(error_body)
-            raise UpgradeRequiredError(
-                message,
-                e.code,
-                error_code="UPGRADE_REQUIRED",
-                details=version_signal or error_body or None,
-            ) from e
-
-        # Best-effort capture of structured error message from response body
-        detail = ""
-        error_body: dict[str, Any] = {}
-        error_code: str | None = None
-        field: str | None = None
-        platform_message: str | None = None
-        try:
-            raw = e.read()
-            text = raw.decode("utf-8", errors="replace").strip() if raw else ""
-            if text:
-                with contextlib.suppress(json.JSONDecodeError, ValueError):
-                    parsed = json.loads(text)
-                    # Only treat as error_body if it's actually a dict
-                    if isinstance(parsed, dict):
-                        error_body = parsed
-                        if isinstance(error_body.get("code"), str):
-                            error_code = error_body["code"]
-                        if isinstance(error_body.get("field"), str):
-                            field = error_body["field"]
-                # Prefer structured error/message field over raw body
-                error_msg = error_body.get("error") or error_body.get("message")
-                if error_msg and isinstance(error_msg, str):
-                    issues_detail = _format_response_issues(error_body)
-                    platform_message = f"{error_msg}{issues_detail or ''}"
-                elif text:
-                    if len(text) > 200:
-                        text = text[:200] + "...(truncated)"
-                    detail = f" Response: {text}"
-        except Exception:
-            pass
-
-        if error_code in _REPO_SCOPE_ERROR_MESSAGES:
-            raise PlatformAPIError(
-                _repo_scope_error_message(error_code, git_identity),
-                e.code,
-                error_code=error_code,
-                field=field,
-                details=error_body or None,
-            ) from e
-
-        if e.code == 403 and error_code in {
-            "SUBSCRIPTION_REQUIRED",
-            "BILLING_REQUIRED",
-        }:
-            error_msg = error_body.get("error") or error_body.get("message")
-            raise SubscriptionRequiredError(
-                error_msg if isinstance(error_msg, str) else None,
-                error_code=error_code,
-                field=field,
-                details=error_body or None,
-            ) from e
-
-        # Detect subscription-required responses (403 with subscription message)
-        if e.code == 403 and isinstance(error_body, dict):
-            error_msg = error_body.get("error", "")
-            if isinstance(error_msg, str) and "subscription" in error_msg.lower():
-                raise SubscriptionRequiredError(
-                    error_msg,
-                    error_code=error_code,
-                    field=field,
-                    details=error_body or None,
-                ) from e
-
-        raise PlatformAPIError(
-            platform_message or f"API error: HTTP {e.code}.{detail}",
-            e.code,
-            error_code=error_code,
-            field=field,
-            details=error_body or None,
-        ) from e
+        _raise_for_http_error(
+            e,
+            using_env_token=using_env_token,
+            git_identity=git_identity,
+            cleanup_on_401=cleanup_on_401,
+        )
     except URLError as e:
         raise PlatformAPIError(f"Connection error: {e.reason}") from e
     except json.JSONDecodeError as e:
@@ -650,22 +672,11 @@ def platform_stream(
     try:
         response = urlopen(request, timeout=timeout)
     except HTTPError as e:
-        if e.code == 401:
-            error_code = _read_error_body(e).get("code")
-            if not isinstance(error_code, str):
-                error_code = None
-            if not using_env_token:
-                reset_session()
-            raise AuthenticationExpiredError(
-                _auth_error_message(error_code, using_env_token=using_env_token),
-                code=error_code,
-            ) from e
-        if e.code == 426:
-            message, version_signal = upgrade_required_message(_read_error_body(e))
-            raise UpgradeRequiredError(
-                message, e.code, error_code="UPGRADE_REQUIRED", details=version_signal
-            ) from e
-        raise PlatformAPIError(f"API error: HTTP {e.code}.", e.code) from e
+        _raise_for_http_error(
+            e,
+            using_env_token=using_env_token,
+            git_identity=git_identity,
+        )
     except URLError as e:
         raise PlatformAPIError(f"Connection error: {e.reason}") from e
 
