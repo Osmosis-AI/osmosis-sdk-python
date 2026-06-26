@@ -167,17 +167,50 @@ class TestAgentConfig:
         assert ac.kwargs["enable_summarize"] is False
         assert ac.kwargs["proactive_summarization_threshold"] == 0
 
-    def test_in_process_agent_without_summarize_knobs(self):
-        # An in-process custom agent whose constructor does not declare the knobs
-        # is left alone -- forcing undeclared kwargs would raise inside harbor's
-        # factory, so a drop-in agent without summarization stays runnable.
-        backend = NativeHarborBackend()
+    def test_unwhitelisted_builtin_agent_raises_under_training_safe(self):
+        # A harbor built-in that is not on the training-safe whitelist (here nop)
+        # is rejected, not silently run: harbor 0.15 cannot guarantee its
+        # trajectory stays linear, and a silent pass would corrupt training data.
+        backend = NativeHarborBackend()  # training_safe=True by default
+        md = {
+            "harbor_task": "/tmp/task",
+            "harbor_agent_import_path": "harbor.agents.nop:NopAgent",
+        }
+        with pytest.raises(ValueError, match="training-safe whitelist"):
+            backend._build_agent_config(_request(md), _ctx())
+
+    def test_unwhitelisted_builtin_agent_runs_in_eval_mode(self):
+        # With training_safe=False (eval) the same built-in is left alone: no
+        # summarize knobs forced, no rejection -- reward-only runs do not need a
+        # linear token trajectory.
+        backend = NativeHarborBackend(training_safe=False)
         md = {
             "harbor_task": "/tmp/task",
             "harbor_agent_import_path": "harbor.agents.nop:NopAgent",
         }
         ac = backend._build_agent_config(_request(md), _ctx())
         assert "enable_summarize" not in ac.kwargs
+
+    def test_custom_agent_not_gated_and_not_injected(
+        self, monkeypatch: pytest.MonkeyPatch
+    ):
+        # A user-supplied custom agent (import_path outside harbor.*) is trusted:
+        # under training_safe the backend neither rejects it nor injects summarize
+        # knobs -- even if its constructor happens to declare them. Training safety
+        # is the agent author's responsibility, by design.
+        class _CustomAgent:
+            def __init__(self, logs_dir=None, enable_summarize=True, **kwargs):
+                pass
+
+        monkeypatch.setattr(bmod, "_resolve_agent_class", lambda name, ip: _CustomAgent)
+        backend = NativeHarborBackend()  # training_safe=True
+        md = {
+            "harbor_task": "/tmp/task",
+            "harbor_agent_import_path": "my.custom.pkg:CustomAgent",
+        }
+        ac = backend._build_agent_config(_request(md), _ctx())
+        assert ac.kwargs["api_base"] == "http://ctrl:8080"  # wired, not rejected
+        assert "enable_summarize" not in ac.kwargs  # not injected -- author's job
 
     def test_in_process_agent_missing_wiring_contract_raises(
         self, monkeypatch: pytest.MonkeyPatch
@@ -196,14 +229,15 @@ class TestAgentConfig:
             backend._build_agent_config(_request(md), _ctx())
 
     def test_installed_agent_wired_via_env_url(self, monkeypatch: pytest.MonkeyPatch):
-        # Installed CLIs (codex, claude-code, ...) are now supported: the rollout
-        # id is baked into the chat-completions URL path, so OPENAI_BASE_URL alone
-        # carries routing identity -- no per-call headers, which installed CLIs
-        # cannot send. The endpoint goes through harbor's standard env channel.
-        # Force the installed-agent branch so the test does not depend on which
-        # harbor version's agent registry happens to be installed.
+        # Installed CLIs (codex, claude-code, ...) are wired via env in eval mode:
+        # the rollout id is baked into the chat-completions URL path, so
+        # OPENAI_BASE_URL alone carries routing identity -- no per-call headers,
+        # which installed CLIs cannot send. training_safe=False because a CLI
+        # agent is not training-safe (covered by the next test); this asserts the
+        # eval-mode wiring. Force the installed-agent branch so the test does not
+        # depend on which harbor version's agent registry happens to be installed.
         monkeypatch.setattr(bmod, "_is_installed_agent", lambda cls: True)
-        backend = NativeHarborBackend()
+        backend = NativeHarborBackend(training_safe=False)
         ac = backend._build_agent_config(
             _request({"harbor_task": "/tmp/task", "harbor_agent": "codex"}),
             _ctx(),
@@ -213,6 +247,16 @@ class TestAgentConfig:
             "OPENAI_API_KEY": "sk-test",
         }
         assert ac.kwargs == {}  # no in-process knobs for installed agents
+
+    def test_installed_builtin_agent_raises_under_training_safe(self):
+        # An installed CLI built-in (codex) manages context inside an opaque
+        # external process -- not training-safe and not on the whitelist, so
+        # training_safe rejects it up front, before the env-wiring branch
+        # (independent of whether the agent class is importable here).
+        backend = NativeHarborBackend()
+        md = {"harbor_task": "/tmp/task", "harbor_agent": "codex"}
+        with pytest.raises(ValueError, match="training-safe whitelist"):
+            backend._build_agent_config(_request(md), _ctx())
 
     def test_metadata_overrides_agent_and_model(self):
         backend = NativeHarborBackend()

@@ -60,10 +60,13 @@ DEFAULT_REWARD_KEY = "reward"
 DEFAULT_MAX_CONCURRENT = 8
 TRIAL_NAME_PREFIX = "native-"
 
-# Summarization knobs forced (to the safe value) on agents that declare them.
-_TRAINING_SAFE_SUMMARIZATION_KWARGS: dict[str, Any] = {
-    "enable_summarize": False,
-    "proactive_summarization_threshold": 0,
+# Built-ins whose default summarization breaks a linear append-only
+# trajectory -> kwargs forcing it off, applied up front to fail fast.
+_TRAINING_SAFE_BUILTIN_AGENTS: dict[str, dict[str, Any]] = {
+    "terminus-2": {
+        "import_path": "harbor.agents.terminus_2:Terminus2",
+        "kwargs": {"enable_summarize": False, "proactive_summarization_threshold": 0},
+    },
 }
 
 TaskResolver = Callable[[ExecutionRequest], TaskConfig]
@@ -149,16 +152,25 @@ def _is_installed_agent(cls: type[BaseAgent] | None) -> bool:
     return cls is not None and issubclass(cls, BaseInstalledAgent)
 
 
-def _accepts_summarization_knobs(cls: type[BaseAgent] | None) -> bool:
-    """Whether the constructor declares the summarization knobs (``**kwargs``
-    does not count)."""
-    if cls is None:
-        return False
-    try:
-        params = inspect.signature(cls.__init__).parameters
-    except (TypeError, ValueError):
-        return False
-    return all(knob in params for knob in _TRAINING_SAFE_SUMMARIZATION_KWARGS)
+def _is_custom_agent(import_path: str | None) -> bool:
+    """User-supplied (import_path outside ``harbor.*``) vs a harbor built-in.
+    String check, so it also covers classes not importable here."""
+    return import_path is not None and not import_path.startswith("harbor.")
+
+
+def _training_safe_kwargs_for_builtin(
+    name: str | None, cls: type[BaseAgent] | None
+) -> dict[str, Any] | None:
+    """Training-safe kwargs for a whitelisted built-in, else ``None``. Matches by
+    name, or by ``issubclass`` for ``harbor.*`` import-path addressing."""
+    for agent_name, entry in _TRAINING_SAFE_BUILTIN_AGENTS.items():
+        if name == agent_name:
+            return dict(entry["kwargs"])
+        if cls is not None:
+            ref = _resolve_agent_class(None, entry["import_path"])
+            if ref is not None and issubclass(cls, ref):
+                return dict(entry["kwargs"])
+    return None
 
 
 def _unaccepted_kwargs(
@@ -373,6 +385,20 @@ class NativeHarborBackend(ExecutionBackend):
 
         agent_cls = _resolve_agent_class(name, import_path)
 
+        # Training-safe gate: built-ins must be whitelisted (kwargs applied
+        # below) or fail closed; custom agents are trusted, not gated.
+        safe_kwargs: dict[str, Any] = {}
+        if self.training_safe and not _is_custom_agent(import_path):
+            resolved = _training_safe_kwargs_for_builtin(name, agent_cls)
+            if resolved is None:
+                label = import_path or name
+                raise ValueError(
+                    f"agent {label!r} is not on the training-safe whitelist "
+                    f"{sorted(_TRAINING_SAFE_BUILTIN_AGENTS)}; use one of those, set "
+                    f"training_safe=False, or use a custom agent (outside 'harbor.*')."
+                )
+            safe_kwargs = resolved
+
         endpoint = ctx.chat_completions_url
         api_key = ctx.api_key
         kwargs: dict[str, Any] = {}
@@ -423,8 +449,7 @@ class NativeHarborBackend(ExecutionBackend):
                 llm_kwargs["api_key"] = api_key
             if llm_kwargs:
                 kwargs["llm_kwargs"] = llm_kwargs
-            if self.training_safe and _accepts_summarization_knobs(agent_cls):
-                kwargs.update(_TRAINING_SAFE_SUMMARIZATION_KWARGS)
+            kwargs.update(safe_kwargs)
 
             # Preflight: a clear error instead of a cryptic TypeError from harbor.
             unaccepted = _unaccepted_kwargs(agent_cls, kwargs)
