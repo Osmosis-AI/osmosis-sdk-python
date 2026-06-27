@@ -55,9 +55,11 @@ DEFAULT_REWARD_KEY = "reward"
 DEFAULT_MAX_CONCURRENT = 8
 TRIAL_NAME_PREFIX = "native-"
 
-# terminus-2 summarizes mid-run, breaking training's linear trajectory; force it off.
-_APPEND_SAFE_BUILTIN_DEFAULTS: dict[str, dict[str, Any]] = {
-    "terminus-2": {"enable_summarize": False, "proactive_summarization_threshold": 0},
+# terminus-2 summarizes mid-run, breaking training's append-only trajectory; default
+# it off (agent_kwargs override). Default agent only -- other agents are the caller's job.
+_TERMINUS_2_DEFAULT_KWARGS: dict[str, Any] = {
+    "enable_summarize": False,
+    "proactive_summarization_threshold": 0,
 }
 
 TaskResolver = Callable[[ExecutionRequest], TaskConfig]
@@ -124,11 +126,6 @@ def _is_installed_agent(cls: type[BaseAgent] | None) -> bool:
     return cls is not None and issubclass(cls, BaseInstalledAgent)
 
 
-def _is_custom_agent(import_path: str | None) -> bool:
-    """Whether the agent is user-implemented: import_path outside harbor.* (string check)."""
-    return import_path is not None and not import_path.startswith("harbor.")
-
-
 class NativeHarborBackend(ExecutionBackend):
     """Drive a harbor Trial per rollout and map its verifier reward."""
 
@@ -142,7 +139,6 @@ class NativeHarborBackend(ExecutionBackend):
         model_name: str = DEFAULT_MODEL_NAME,
         reward_key: str = DEFAULT_REWARD_KEY,
         trials_dir: Path | str = Path("native_trials"),
-        training_safe: bool = True,
         task_resolver: TaskResolver | None = None,
         environment_config: HarborEnvironmentConfig | None = None,
         max_concurrent: int = DEFAULT_MAX_CONCURRENT,
@@ -166,7 +162,6 @@ class NativeHarborBackend(ExecutionBackend):
         self.model_name = model_name
         self.reward_key = reward_key
         self.trials_dir = Path(trials_dir)
-        self.training_safe = training_safe
         self.task_resolver: TaskResolver = task_resolver or resolve_task
         self.environment_config = environment_config or HarborEnvironmentConfig()
         self.cleanup_successful_trials = cleanup_successful_trials
@@ -308,23 +303,6 @@ class NativeHarborBackend(ExecutionBackend):
 
         agent_cls = _resolve_agent_class(name, import_path)
 
-        # Training-safe gate: builtins must be append-safe; custom agents pass untouched.
-        append_safe_defaults: dict[str, Any] = {}
-        if self.training_safe and not _is_custom_agent(import_path):
-            matched = (
-                _APPEND_SAFE_BUILTIN_DEFAULTS.get(name) if name is not None else None
-            )
-            if matched is None:
-                label = import_path or name
-                raise ValueError(
-                    f"agent {label!r} cannot be guaranteed append-only under "
-                    f"training_safe; use one of "
-                    f"{sorted(_APPEND_SAFE_BUILTIN_DEFAULTS)} by agent_name, set "
-                    f"training_safe=False, or pass a user-implemented agent via "
-                    f"agent_import_path."
-                )
-            append_safe_defaults = matched
-
         endpoint = ctx.chat_completions_url
         if not endpoint:
             raise ValueError(f"rollout {request.id!r} has no chat_completions_url")
@@ -339,16 +317,16 @@ class NativeHarborBackend(ExecutionBackend):
             if api_key:
                 env["OPENAI_API_KEY"] = api_key
         else:
-            # Precedence low -> high: append-safe defaults, user kwargs, SDK wiring.
-            kwargs = {**append_safe_defaults, **kwargs}
-            # Identity: api_base as a kwarg, api_key in llm_kwargs (deep-merged to keep user keys).
+            # Precedence low -> high: default-agent kwargs, user kwargs, SDK wiring.
+            defaults = _TERMINUS_2_DEFAULT_KWARGS if name == DEFAULT_AGENT_NAME else {}
+            kwargs = {**defaults, **kwargs}
+            # Identity: api_base kwarg + api_key in llm_kwargs (deep-merged).
             kwargs["api_base"] = endpoint
             llm_kwargs: dict[str, Any] = dict(kwargs.get("llm_kwargs") or {})
             if api_key:
                 llm_kwargs["api_key"] = api_key
-            # TODO(temporary): controllers default to SSE without `stream`, but in-process
-            # agents need JSON; a bare stream=False is dropped from the wire, so pin it in
-            # extra_body (setdefault, so a user stream wins). REMOVE when controllers send JSON.
+            # TODO(temporary): in-process agents need JSON; pin stream=False in extra_body
+            # (setdefault, so a user stream wins). REMOVE when controllers send JSON.
             extra_body: dict[str, Any] = dict(llm_kwargs.get("extra_body") or {})
             extra_body.setdefault("stream", False)
             llm_kwargs["extra_body"] = extra_body

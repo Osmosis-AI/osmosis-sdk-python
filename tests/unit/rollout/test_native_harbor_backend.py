@@ -131,10 +131,8 @@ class TestResolveTask:
 
 class TestAgentConfig:
     def test_in_process_url_and_endpoint_wiring(self):
-        # The in-process default agent gets the endpoint/key wired via kwargs.
-        # Identity rides in the URL path, so no per-call routing headers are set.
-        # (Kept independent of harbor's agent registry: the summarization-knob
-        # forcing depends on class resolution and is covered separately.)
+        # In-process default agent: endpoint/key wired via kwargs, identity in the
+        # URL path, so no per-call routing headers.
         backend = NativeHarborBackend()
         ac = backend._build_agent_config(_request(), _ctx())
         assert ac.name == "terminus-2"
@@ -149,35 +147,11 @@ class TestAgentConfig:
         # The non-streaming hack is unrelated to URL routing and stays forced.
         assert ac.kwargs["llm_kwargs"]["extra_body"] == {"stream": False}
 
-    def test_training_safe_off_omits_summarize_knobs(self):
-        backend = NativeHarborBackend(training_safe=False)
+    def test_non_default_builtin_gets_no_summarize_knobs(self):
+        # Summarize-off is a terminus-2-specific default; other built-ins are untouched.
+        backend = NativeHarborBackend(agent_name="nop")
         ac = backend._build_agent_config(_request(), _ctx())
         assert "enable_summarize" not in ac.kwargs
-
-    def test_unwhitelisted_builtin_agent_raises_under_training_safe(self):
-        # A builtin we cannot hold append-only (here nop) is rejected up front,
-        # not silently run: its trajectory may drift and training would drop every
-        # such rollout.
-        backend = NativeHarborBackend(agent_name="nop")  # training_safe=True default
-        with pytest.raises(ValueError, match="append-only"):
-            backend._build_agent_config(_request(), _ctx())
-
-    def test_unwhitelisted_builtin_agent_runs_in_eval_mode(self):
-        # With training_safe=False (eval) the same built-in is left alone: no
-        # summarize knobs forced, no rejection -- reward-only runs do not need a
-        # linear token trajectory.
-        backend = NativeHarborBackend(agent_name="nop", training_safe=False)
-        ac = backend._build_agent_config(_request(), _ctx())
-        assert "enable_summarize" not in ac.kwargs
-
-    def test_harbor_builtin_by_import_path_rejected_under_training_safe(self):
-        # Append-safety matches by agent_name only; a harbor.* import path is not
-        # "custom", so addressing a builtin this way is rejected under training_safe.
-        backend = NativeHarborBackend(
-            agent_import_path="harbor.agents.terminus_2:Terminus2"
-        )
-        with pytest.raises(ValueError, match="append-only"):
-            backend._build_agent_config(_request(), _ctx())
 
     def test_agent_kwargs_override_terminus_default(self):
         # The append-only kwargs are overridable defaults: agent_kwargs wins.
@@ -220,18 +194,14 @@ class TestAgentConfig:
         monkeypatch.setattr(bmod, "_is_installed_agent", lambda cls: True)
         backend = NativeHarborBackend(
             agent_name="codex",
-            training_safe=False,
             agent_env={"FOO": "bar", "OPENAI_BASE_URL": "http://evil"},
         )
         ac = backend._build_agent_config(_request(), _ctx())
         assert ac.env["FOO"] == "bar"
         assert ac.env["OPENAI_BASE_URL"] == "http://ctrl:8080"  # SDK wins
 
-    def test_custom_agent_not_gated_and_not_injected(
-        self, monkeypatch: pytest.MonkeyPatch
-    ):
-        # A user agent (import_path outside harbor.*) is trusted: not rejected by
-        # the gate, knobs not injected -- training safety is the author's job.
+    def test_custom_agent_not_injected(self, monkeypatch: pytest.MonkeyPatch):
+        # An import_path agent (name=None) gets identity wiring only -- no defaults.
         class _CustomAgent:
             def __init__(self, logs_dir=None, enable_summarize=True, **kwargs):
                 pass
@@ -251,15 +221,10 @@ class TestAgentConfig:
             )
 
     def test_installed_agent_wired_via_env_url(self, monkeypatch: pytest.MonkeyPatch):
-        # Installed CLIs (codex, claude-code, ...) are wired via env in eval mode:
-        # the rollout id is baked into the chat-completions URL path, so
-        # OPENAI_BASE_URL alone carries routing identity -- no per-call headers,
-        # which installed CLIs cannot send. training_safe=False because a CLI
-        # agent is not training-safe (covered by the next test); this asserts the
-        # eval-mode wiring. Force the installed-agent branch so the test does not
-        # depend on which harbor version's agent registry happens to be installed.
+        # Installed CLIs are wired via env (identity in the URL path, no per-call
+        # headers). Force the installed branch to avoid depending on harbor's registry.
         monkeypatch.setattr(bmod, "_is_installed_agent", lambda cls: True)
-        backend = NativeHarborBackend(agent_name="codex", training_safe=False)
+        backend = NativeHarborBackend(agent_name="codex")
         ac = backend._build_agent_config(_request(), _ctx())
         assert ac.env == {
             "OPENAI_BASE_URL": "http://ctrl:8080",
@@ -272,17 +237,9 @@ class TestAgentConfig:
         # delenv so __post_init__ cannot backfill the url from the env.
         monkeypatch.delenv("OSMOSIS_CHAT_COMPLETIONS_URL", raising=False)
         ctx = RolloutContext(chat_completions_url="", api_key="sk-test")
-        backend = NativeHarborBackend(training_safe=False)
+        backend = NativeHarborBackend()
         with pytest.raises(ValueError, match="no chat_completions_url"):
             backend._build_agent_config(_request(), ctx)
-
-    def test_installed_builtin_agent_raises_under_training_safe(self):
-        # An installed CLI builtin (codex) manages context in an opaque external
-        # process with no append-only switch, so training_safe rejects it up front,
-        # before the env-wiring branch.
-        backend = NativeHarborBackend(agent_name="codex")
-        with pytest.raises(ValueError, match="append-only"):
-            backend._build_agent_config(_request(), _ctx())
 
     def test_metadata_overrides_model(self):
         # The agent is fixed per backend, but the model name can still be

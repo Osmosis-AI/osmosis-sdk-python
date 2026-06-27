@@ -107,7 +107,6 @@ All arguments are keyword-only ([backend.py](../osmosis_ai/rollout/backend/nativ
 | `model_name` | `"openai/osmosis-rollout"` | Model id passed to Harbor. Overridable per row via `metadata["harbor_model"]`. |
 | `reward_key` | `"reward"` | Which named verifier channel becomes the scalar reward (see [Reward mapping](#reward-mapping)). |
 | `trials_dir` | `Path("native_trials")` | Where Harbor writes trial directories. |
-| `training_safe` | `True` | Enforce append-only built-ins (see [training_safe](#training-safe)). |
 | `task_resolver` | `resolve_task` | Override `ExecutionRequest -> TaskConfig` resolution. |
 | `environment_config` | Harbor `EnvironmentConfig()` | Harbor environment selector (Docker/Daytona). |
 | `max_concurrent` | `8` | In-flight Trial cap (`>= 1`). Each Trial is often a container, so this bounds host load. |
@@ -123,24 +122,23 @@ Two agent kinds are wired differently, both **at the config layer** — the agen
 | In-process (e.g. `terminus-2`, or a custom `BaseAgent` via `agent_import_path`) | name or import path | `AgentConfig.kwargs["api_base"]` + `kwargs["llm_kwargs"]["api_key"]` |
 | Installed / CLI (e.g. `codex`, `claude-code`) | built-in name | `AgentConfig.env["OPENAI_BASE_URL"]` + `env["OPENAI_API_KEY"]` |
 
-A **custom agent** is any `agent_import_path` whose module is outside `harbor.*`. Custom agents are passed through untouched (your `agent_kwargs` / `agent_env` are the base, SDK identity wiring overlays on top). For an in-process agent the backend also runs a preflight: kwargs the constructor cannot accept raise a clear `ValueError` instead of a cryptic `TypeError` from Harbor.
+Any agent addressed by `agent_import_path` (a **custom agent**) is passed through untouched — only the SDK identity wiring is overlaid on top of your `agent_kwargs` / `agent_env`. The terminus-2 summarize defaults ([Append-only trajectories](#append-only-trajectories-training-caveat)) apply to the built-in default agent only.
 
 ### Model endpoint injection
 
 Endpoint and key come from the ambient `RolloutContext` ([context.py](../osmosis_ai/rollout/context.py)) — `chat_completions_url` and `api_key` — which the training controller supplies per rollout (read from `OSMOSIS_CHAT_COMPLETIONS_URL` / `OSMOSIS_API_KEY` on a container host). The backend overwrites the corresponding agent-config slot so the model identity can never be redirected by user-supplied `agent_kwargs` / `agent_env`. The same `execute()` path serves eval: point `chat_completions_url` at the model under test instead of a training session proxy.
 
-## training_safe
+## Append-only trajectories (training caveat)
 
-RL training needs a single, linear, append-only token trajectory. Mid-run context summarization or subagents fork that trajectory and corrupt the training signal, so `training_safe=True` (the default) gates which agents are allowed and pins their append-safe knobs ([backend.py](../osmosis_ai/rollout/backend/native_harbor/backend.py)):
+RL training needs a single, linear, **append-only** token trajectory. Anything that rewrites the running context mid-run — summarization, compaction, subagents — forks that trajectory and corrupts the training signal. The backend does **not** gate or police this; it only sets a safe default for the built-in default agent and otherwise stays out of the way ([backend.py](../osmosis_ai/rollout/backend/native_harbor/backend.py)):
 
-- **Built-in agents** must be known-append-safe. Currently only `terminus-2` qualifies, and the backend forces `enable_summarize=False` + `proactive_summarization_threshold=0` on it. Selecting any other built-in (e.g. `codex`) under `training_safe=True` raises `ValueError`.
-- **Custom agents** (`agent_import_path` outside `harbor.*`) are trusted and pass untouched — you own the append-only invariant.
-- Set `training_safe=False` for **eval / benchmarking**, where only the reward matters and any CLI agent (with summarization, subagents, etc.) is fine.
+- **`terminus-2` (the default agent)** summarizes mid-run, so the backend defaults `enable_summarize=False` + `proactive_summarization_threshold=0` on it. These are *overridable defaults* — your `agent_kwargs` win — so pass `agent_kwargs={"enable_summarize": True}` to get summarization back (e.g. for long-context eval).
+- **Any other agent** — another built-in (`codex`, `claude-code`, …) or a custom `BaseAgent` via `agent_import_path` — passes through untouched. **Keeping its trajectory append-only is your responsibility.** Installed/CLI agents manage context in an opaque external process and are generally **not** training-safe, though they work fine for **eval / benchmarking**, where only the reward matters.
 
-| | Run (eval — reward only) | Train (needs a linear token trajectory) |
+| Agent | Run (eval — reward only) | Train (needs a linear token trajectory) |
 |---|---|---|
-| in-process `terminus-2` (summarize off) or custom `BaseAgent` | ✓ | ✓ |
-| installed/CLI (`codex`, `claude-code`, …) | ✓ (`training_safe=False`) | generally ✗ |
+| in-process `terminus-2` (summarize off by default) or custom `BaseAgent` | ✓ | ✓ (you keep it append-only) |
+| installed/CLI (`codex`, `claude-code`, …) | ✓ | generally ✗ |
 
 ## Reward mapping
 
